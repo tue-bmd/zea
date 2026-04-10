@@ -2,7 +2,7 @@
 
 import enum
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import TYPE_CHECKING, List, Tuple, Union
 
 import h5py
 import numpy as np
@@ -20,6 +20,59 @@ from zea.internal.core import DataTypes
 from zea.internal.utils import reduce_to_signature
 from zea.probes import Probe
 from zea.scan import Scan
+
+if TYPE_CHECKING:
+    from zea.data.spec import FileSpec, Metadata, Metrics
+
+
+class GroupProxy:
+    """Lazy proxy for an h5py.Group that exposes children as attributes.
+
+    Datasets are returned as-is (h5py.Dataset supports slicing without
+    loading everything into RAM).  Sub-groups are wrapped in another
+    ``GroupProxy`` so the dot-access pattern works recursively::
+
+        with File(path) as f:
+            # returns h5py.Dataset – no data loaded yet
+            f.data.raw_data
+            # slicing triggers the actual read, just like plain h5py
+            f.data.raw_data[:, :n_tx]
+            # nested groups work too
+            f.data.image.pixels[0]
+    """
+
+    __slots__ = ("_group",)
+
+    def __init__(self, group: h5py.Group):
+        self._group = group
+
+    def __getattr__(self, name: str):
+        try:
+            child = self._group[name]
+        except KeyError:
+            raise AttributeError(
+                f"No key '{name}' in group '{self._group.name}'. "
+                f"Available keys: {list(self._group.keys())}"
+            )
+        if isinstance(child, h5py.Group):
+            return GroupProxy(child)
+        return child  # h5py.Dataset – supports slicing natively
+
+    def __dir__(self):
+        return list(self._group.keys())
+
+    def __repr__(self):
+        return f"<GroupProxy '{self._group.name}' keys={list(self._group.keys())}>"
+
+    def keys(self):
+        """Return the keys of the underlying group."""
+        return self._group.keys()
+
+    def __contains__(self, key):
+        return key in self._group
+
+    def __iter__(self):
+        return iter(self._group)
 
 
 def assert_key(file: h5py.File, key: str):
@@ -60,6 +113,93 @@ class File(h5py.File):
     def path(self):
         """Return the path of the file."""
         return Path(self.filename)
+
+    @classmethod
+    def create(
+        cls,
+        path,
+        data: dict,
+        scan: dict,
+        metadata: dict | None = None,
+        metrics: dict | None = None,
+        probe_name: str | None = None,
+        us_machine: str | None = None,
+        description: str | None = None,
+        compression: str = "gzip",
+        overwrite: bool = False,
+    ) -> "File":
+        """Create a new zea HDF5 file from data, scan, and optional metadata.
+
+        All inputs are validated against the :class:`~zea.data.spec.FileSpec`
+        schema (dtypes, shapes, dimension consistency) **before** anything is
+        written to disk.
+
+        Args:
+            path: Destination file path.
+            data: Data dict accepted by :class:`~zea.data.spec.Data`.
+            scan: Scan-parameter dict accepted by :class:`~zea.data.spec.Scan`.
+            metadata: Optional metadata dict accepted by
+                :class:`~zea.data.spec.Metadata`.
+            metrics: Optional metrics dict accepted by
+                :class:`~zea.data.spec.Metrics`.
+            probe_name: Name of the probe.
+            us_machine: Name of the ultrasound machine.
+            description: Free-text description of the acquisition.
+            compression: HDF5 compression filter (default ``"gzip"``).
+            overwrite: If *False* (default), raise if the file exists.
+
+        Returns:
+            File: The closed :class:`File` handle (re-open with
+            ``File(path)`` to read).
+
+        Example::
+
+            File.create(
+                "my_acquisition.hdf5",
+                data={"raw_data": raw},
+                scan={"probe_geometry": geom, ...},
+                probe_name="L11-4v",
+            )
+        """
+        from zea.data.spec import FileSpec
+
+        path = Path(path)
+
+        if path.exists() and not overwrite:
+            raise FileExistsError(f"File already exists: {path}")
+
+        kwargs: dict = {"data": data, "scan": scan}
+        if metadata is not None:
+            kwargs["metadata"] = metadata
+        if metrics is not None:
+            kwargs["metrics"] = metrics
+        if probe_name is not None:
+            kwargs["probe_name"] = probe_name
+        if us_machine is not None:
+            kwargs["us_machine"] = us_machine
+        if description is not None:
+            kwargs["description"] = description
+
+        # Validate everything before touching the filesystem
+        spec = FileSpec(**kwargs)
+        spec.save(str(path), compression=compression)
+
+        return cls(str(path), mode="r")
+
+    @property
+    def data(self) -> GroupProxy:
+        """Lazy proxy for the ``data`` group.
+
+        Returns a :class:`GroupProxy` so individual datasets can be accessed
+        as attributes without loading everything into RAM::
+
+            with File(path) as f:
+                f.data.raw_data[:, :n_tx]  # read a slice
+                f.data.image.pixels[0]  # nested group access
+        """
+        if "data" not in self:
+            raise KeyError("No 'data' group in this file.")
+        return GroupProxy(self["data"])
 
     @property
     def name(self):
@@ -229,13 +369,15 @@ class File(h5py.File):
     @property
     def probe_name(self):
         """Reads the probe name from the data file and returns it."""
-        assert "probe_name" in self.attrs, (
+        # Support both 'probe_name' (new spec) and 'probe' (legacy generate_zea_dataset)
+        for attr_key in ("probe_name", "probe"):
+            if attr_key in self.attrs:
+                return self.attrs[attr_key]
+        raise AttributeError(
             "Probe name not found in file attributes. "
             "Make sure you are using a zea file. "
             f"Found attributes: {list(self.attrs)}"
         )
-        probe_name = self.attrs["probe_name"]
-        return probe_name
 
     @property
     def us_machine(self):
@@ -367,11 +509,23 @@ class File(h5py.File):
         from zea.data.spec import Scan as ScanSpec
 
         scan_dict = self.get_scan_parameters(event)
-        scan_spec = ScanSpec(**scan_dict)  # will validate
-        scan_dict = scan_spec.to_dict()
-        scan_dict["n_el"] = scan_spec.n_el
-        scan_dict["n_ax"] = self.n_ax
-        scan_dict["n_tx"] = scan_spec.n_tx
+
+        # Try spec-based validation; fall back gracefully for legacy files
+        # that may be missing fields the spec now requires.
+        scan_spec_keys = set(ScanSpec.SCHEMA.keys())
+        filtered = {k: v for k, v in scan_dict.items() if k in scan_spec_keys}
+
+        try:
+            scan_spec = ScanSpec(**filtered)
+            scan_dict = scan_spec.to_dict()
+            scan_dict["n_el"] = scan_spec.n_el
+            scan_dict["n_ax"] = self.n_ax
+            scan_dict["n_tx"] = scan_spec.n_tx
+        except (TypeError, ValueError) as exc:
+            log.debug(
+                f"ScanSpec validation skipped for '{self.path}': {exc}. "
+                "Using raw scan parameters from file."
+            )
 
         return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
 
@@ -406,6 +560,38 @@ class File(h5py.File):
         probe_parameters_file = self.get_probe_parameters(event)
         return Probe.from_parameters(self.probe_name, probe_parameters_file)
 
+    def metadata(self) -> "Metadata":
+        """Return a validated :class:`~zea.data.spec.Metadata` object from the file.
+
+        Returns:
+            Metadata: The validated metadata spec.
+
+        Raises:
+            KeyError: If the file has no ``metadata`` group.
+        """
+        from zea.data.spec import Metadata as MetadataSpec
+
+        if "metadata" not in self:
+            raise KeyError("No 'metadata' group in this file.")
+        raw = self.recursively_load_dict_contents_from_group("metadata")
+        return MetadataSpec(**raw)
+
+    def metrics(self) -> "Metrics":
+        """Return a validated :class:`~zea.data.spec.Metrics` object from the file.
+
+        Returns:
+            Metrics: The validated metrics spec.
+
+        Raises:
+            KeyError: If the file has no ``metrics`` group.
+        """
+        from zea.data.spec import Metrics as MetricsSpec
+
+        if "metrics" not in self:
+            raise KeyError("No 'metrics' group in this file.")
+        raw = self.recursively_load_dict_contents_from_group("metrics")
+        return MetricsSpec(**raw)
+
     def recursively_load_dict_contents_from_group(self, path: str) -> dict:
         """Load dict from contents of group
 
@@ -421,7 +607,12 @@ class File(h5py.File):
         for key, item in self[path].items():
             if isinstance(item, h5py.Dataset):
                 if h5py.check_string_dtype(item.dtype) is not None:
-                    ans[key] = item.asstr()[()]
+                    val = item.asstr()[()]
+                    # h5py returns object-dtype arrays for strings;
+                    # convert back to np.str_ so spec dtype checks pass.
+                    if isinstance(val, np.ndarray) and val.dtype == object:
+                        val = val.astype(np.str_)
+                    ans[key] = val
                 else:
                     ans[key] = item[()]
             elif isinstance(item, h5py.Group):
@@ -468,6 +659,23 @@ class File(h5py.File):
         except Exception as e:
             log.error(f"File {self.path} is not a valid zea file.\n{e}\n")
             raise
+
+    def validate_spec(self) -> "FileSpec":
+        """Validate the file against the full :class:`FileSpec` schema.
+
+        Loads all data into RAM and runs dtype, shape, and cross-dimension
+        consistency checks.  Use :meth:`validate` for lightweight structural
+        checks that do not require loading data.
+
+        Returns:
+            FileSpec: The validated spec object.
+
+        Raises:
+            TypeError, ValueError: If the file does not conform to the spec.
+        """
+        from zea.data.spec import FileSpec
+
+        return FileSpec.from_hdf5(self)
 
     def __repr__(self):
         return (

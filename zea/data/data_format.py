@@ -13,7 +13,7 @@ from keras.utils import pad_sequences
 from zea import log
 from zea.data.file import File, validate_file
 from zea.internal.checks import _DATA_TYPES
-from zea.internal.utils import first_not_none_item
+from zea.internal.utils import deprecated, first_not_none_item
 
 
 @dataclass
@@ -462,6 +462,7 @@ def _write_datasets(
             )
 
 
+@deprecated(replacement="File.create")
 def generate_zea_dataset(
     path,
     raw_data=None,

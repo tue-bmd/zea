@@ -5,7 +5,7 @@ import pytest
 
 from zea.data import spec as spec_module
 from zea.data.file import File
-from zea.data.spec import Data, FileSpec, Map, Scan, Segmentation, SignalND, Spec
+from zea.data.spec import Data, FileSpec, Image, Map, Scan, Segmentation, SignalND, Spec
 
 
 def test_segmentation_spec():
@@ -402,6 +402,153 @@ def test_schema_keys_match_dataclass_fields_for_all_specs():
 
 
 def test_subject_id_warning_for_missing_id():
+    n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
+
+    with pytest.warns(
+        match="Subject ID is not provided; please consider adding an ID for better traceability"
+    ):
+        FileSpec(
+            data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            metadata={
+                "subject": {
+                    "type": "human",
+                    "age": np.uint8(42),
+                    "sex": "f",
+                    "fat_percentage": np.float32(17.5),
+                }
+            },
+            metrics={
+                "common_midpoint_phase_error": np.zeros((n_frames,), dtype=np.float32),
+                "coherence_factor": np.ones((n_frames,), dtype=np.float32),
+            },
+        )
+
+
+class TestScanValidationErrors:
+    """TypeError / ValueError raised by Scan spec validation."""
+
+    def test_probe_geometry_wrong_dtype_raises(self):
+        scan = _scan_minimal()
+        scan["probe_geometry"] = np.zeros((4, 3), dtype=np.int32)
+        with pytest.raises(TypeError, match="probe_geometry"):
+            Scan(**scan)
+
+    def test_probe_geometry_wrong_shape_raises(self):
+        """probe_geometry must be (n_el, 3) — literal 3 is enforced."""
+        scan = _scan_minimal(n_el=4)
+        scan["probe_geometry"] = np.zeros((4, 2), dtype=np.float32)
+        with pytest.raises(ValueError, match="probe_geometry"):
+            Scan(**scan)
+
+    def test_t0_delays_dimension_mismatch_raises(self):
+        """n_el in t0_delays doesn't match probe_geometry n_el."""
+        scan = _scan_minimal(n_tx=3, n_el=4)
+        scan["t0_delays"] = np.zeros((3, 6), dtype=np.float32)  # 6 ≠ n_el=4
+        with pytest.raises(ValueError, match="n_el"):
+            Scan(**scan)
+
+    def test_unknown_keyword_raises(self):
+        scan = _scan_minimal()
+        with pytest.raises(TypeError):
+            Scan(**scan, this_key_does_not_exist=42)
+
+
+class TestDataValidationErrors:
+    """TypeError / ValueError raised by Data spec validation."""
+
+    def test_raw_data_wrong_dtype_raises(self):
+        with pytest.raises(TypeError, match="raw_data"):
+            Data(raw_data=np.zeros((2, 3, 8, 4, 1), dtype=np.int8))
+
+    def test_raw_data_wrong_ndim_raises(self):
+        """raw_data must be 5-D (n_frames, n_tx, n_ax, n_el, n_ch)."""
+        with pytest.raises(ValueError, match="raw_data"):
+            Data(raw_data=np.zeros((2, 3, 8), dtype=np.float32))
+
+    def test_empty_data_raises(self):
+        """Data() with no fields set must raise."""
+        with pytest.raises(ValueError, match="At least one data field must be provided"):
+            Data()
+
+    def test_map_wrong_pixel_dtype_raises(self):
+        """SosMap inherits FloatMap – pixels must be float32, not uint8."""
+        from zea.data.spec import SosMap
+
+        with pytest.raises(TypeError, match="pixels"):
+            SosMap(
+                pixels=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                extent=np.zeros(6, dtype=np.float32),
+            )
+
+    def test_image_wrong_pixel_dtype_raises(self):
+        """Image is UnsignedIntMap – pixels must be uint8, not float32."""
+        with pytest.raises(TypeError, match="pixels"):
+            Image(
+                pixels=np.zeros((2, 16, 12, 1), dtype=np.float32),
+                extent=np.zeros(6, dtype=np.float32),
+            )
+
+    def test_segmentation_wrong_pixel_dtype_raises(self):
+        """Segmentation is BooleanMap – pixels must be bool_, not float32."""
+        with pytest.raises(TypeError, match="pixels"):
+            Segmentation(
+                pixels=np.zeros((2, 16, 12, 1, 2), dtype=np.float32),
+                labels=np.array(["a", "b"], dtype=np.str_),
+                extent=np.zeros(6, dtype=np.float32),
+            )
+
+    def test_map_extent_wrong_shape_raises(self):
+        """extent must be (6,) or (n_frames, 6) — (3,) should fail."""
+        with pytest.raises(ValueError, match="extent"):
+            Image(
+                pixels=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                extent=np.zeros(3, dtype=np.float32),
+            )
+
+
+class TestMetadataAndMetricsValidationErrors:
+    """TypeError / ValueError raised by Metadata / Metrics / Subject validation."""
+
+    def test_subject_age_wrong_dtype_raises(self):
+        """age must be uint8, not str."""
+        from zea.data.spec import Subject
+
+        with pytest.raises(TypeError, match="age"):
+            Subject(age="forty two")
+
+    def test_signal_missing_required_field_raises(self):
+        """Signal1D requires both offset and sampling_frequency."""
+        from zea.data.spec import Signal1D
+
+        with pytest.raises(TypeError, match="sampling_frequency"):
+            Signal1D(samples=np.zeros(100, dtype=np.float32), offset=np.float32(0.0))
+
+    def test_metrics_wrong_shape_raises(self):
+        """coherence_factor must be 1-D (n_frames,), not 2-D."""
+        from zea.data.spec import Metrics
+
+        with pytest.raises(ValueError, match="coherence_factor"):
+            Metrics(coherence_factor=np.ones((3, 2), dtype=np.float32))
+
+    def test_annotations_n_frames_mismatch_raises(self):
+        """view n_frames in Annotations must match Data n_frames across FileSpec."""
+        n_frames_data, n_frames_ann = 3, 5
+        n_tx, n_el, n_ax, n_ch = 2, 4, 8, 1
+
+        with pytest.raises(ValueError, match="n_frames"):
+            FileSpec(
+                data={
+                    "raw_data": np.zeros((n_frames_data, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+                },
+                scan=_scan_minimal(n_frames=n_frames_data, n_tx=n_tx, n_el=n_el),
+                metadata={
+                    "annotations": {
+                        "view": np.array(["a4c"] * n_frames_ann, dtype=np.str_),
+                    }
+                },
+            )
+
     n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
 
     with pytest.warns(

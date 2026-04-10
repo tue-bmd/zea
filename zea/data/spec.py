@@ -1,6 +1,7 @@
 import warnings
 from collections import defaultdict
 from dataclasses import MISSING, dataclass, field, fields
+from pathlib import Path
 from typing import Any, List
 
 import h5py
@@ -21,6 +22,12 @@ UNITS = {
     "#": "count",
     "%": "percent",
 }
+
+
+# Default unit/description for every SCHEMA leaf field.  Subclasses may
+# override by defining their own FIELD_METADATA dict.
+_DEFAULT_FIELD_UNIT = "-"
+_DEFAULT_FIELD_DESCRIPTION = ""
 
 
 def check_dtype(value: Any, expected_dtype: List[type]) -> None:
@@ -396,6 +403,8 @@ class Spec:
 
         assert isinstance(group, h5py.Group), "group must be an h5py Group"
 
+        field_metadata = getattr(self, "FIELD_METADATA", {})
+
         for field_name, field_info in self.SCHEMA.items():
             value = getattr(self, field_name)
             if value is None:
@@ -406,8 +415,12 @@ class Spec:
                 subgroup = group.create_group(field_name)
                 value.store_in_group(subgroup)
             else:
-                # TODO: store description and unit as h5 attrs (like zea does)
                 self.create_dataset(group, field_name, value, compression=compression)
+                meta = field_metadata.get(field_name, {})
+                group[field_name].attrs["unit"] = meta.get("unit", _DEFAULT_FIELD_UNIT)
+                group[field_name].attrs["description"] = meta.get(
+                    "description", _DEFAULT_FIELD_DESCRIPTION
+                )
 
     def to_dict(self) -> dict[str, Any]:
         """Return this spec as a nested dictionary based on ``SCHEMA`` fields.
@@ -742,6 +755,14 @@ class Data(Spec):
         "color_doppler": {"spec": ColorDopplerMap},
     }
 
+    FIELD_METADATA = {
+        "raw_data": {"unit": "-", "description": "Raw channel data."},
+        "aligned_data": {"unit": "-", "description": "Time-of-flight corrected data."},
+        "beamformed_data": {"unit": "-", "description": "Beamformed (beamsummed) data."},
+        "envelope_data": {"unit": "-", "description": "Envelope-detected data."},
+        "image_sc": {"unit": "dB", "description": "Scan-converted image data."},
+    }
+
     def __init__(
         self,
         raw_data: np.ndarray | None = None,
@@ -914,6 +935,29 @@ class Scan(Spec):
             "dtype": np.float32,
             "shape": ("n_tx", "n_samples_two_way"),
         },
+    }
+
+    FIELD_METADATA = {
+        "probe_geometry": {"unit": "m", "description": "Probe geometry (x, y, z) per element."},
+        "sampling_frequency": {"unit": "Hz", "description": "Sampling frequency."},
+        "center_frequency": {
+            "unit": "Hz",
+            "description": "Center frequency of the transmit pulse.",
+        },
+        "demodulation_frequency": {"unit": "Hz", "description": "Demodulation frequency."},
+        "initial_times": {"unit": "s", "description": "A/D converter start times per transmit."},
+        "t0_delays": {"unit": "s", "description": "Transmit delays per element."},
+        "tx_apodizations": {"unit": "-", "description": "Transmit apodization per element."},
+        "focus_distances": {"unit": "m", "description": "Transmit focus distances."},
+        "transmit_origins": {"unit": "m", "description": "Transmit beam origins (x, y, z)."},
+        "polar_angles": {"unit": "rad", "description": "Polar angles of transmit beams."},
+        "time_to_next_transmit": {"unit": "s", "description": "Time between transmit events."},
+        "azimuth_angles": {"unit": "rad", "description": "Azimuthal angles of transmit beams."},
+        "sound_speed": {"unit": "m/s", "description": "Speed of sound."},
+        "tgc_gain_curve": {"unit": "-", "description": "Time-gain-compensation curve."},
+        "element_width": {"unit": "m", "description": "Element width of the probe."},
+        "waveforms_one_way": {"unit": "V", "description": "One-way transmit waveforms."},
+        "waveforms_two_way": {"unit": "V", "description": "Two-way transmit waveforms."},
     }
 
     @property
@@ -1302,7 +1346,10 @@ class FileSpec(Spec):
         """Save the dataset to the specified path."""
         from zea import File
 
-        with File(path, "w") as f:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with File(str(path), "w") as f:
             for group_name, schema in self.SCHEMA.items():
                 if "spec" in schema:
                     group = f.create_group(group_name)
@@ -1313,3 +1360,89 @@ class FileSpec(Spec):
                     if value is not None:
                         f.attrs[group_name] = value
         log.info(f"File saved to {log.yellow(path)}")
+
+    @classmethod
+    def from_hdf5(cls, file: h5py.File) -> "FileSpec":
+        """Load and validate a :class:`FileSpec` from an open HDF5 file.
+
+        This reads all groups into memory and runs the full spec validation
+        (dtype, shape, dimension consistency).  Legacy files produced by
+        :func:`generate_zea_dataset` are handled transparently: extra scalar
+        fields in the scan group (``n_frames``, ``n_tx``, etc.) are ignored,
+        flat ``data/image`` datasets are loaded as ``image_sc`` when
+        ``image_sc`` is absent, and the ``probe`` root attribute is mapped to
+        ``probe_name``.
+
+        Args:
+            file: An open ``h5py.File`` (or :class:`zea.File`).
+
+        Returns:
+            FileSpec: A fully validated spec object.
+        """
+
+        def _load_group_as_dict(group: h5py.Group) -> dict:
+            result = {}
+            for key in group.keys():
+                item = group[key]
+                if isinstance(item, h5py.Group):
+                    result[key] = _load_group_as_dict(item)
+                elif isinstance(item, h5py.Dataset):
+                    if h5py.check_string_dtype(item.dtype) is not None:
+                        val = item.asstr()[()]
+                        # h5py returns object-dtype arrays for strings;
+                        # convert back to np.str_ so spec dtype checks pass.
+                        if isinstance(val, np.ndarray) and val.dtype == object:
+                            val = val.astype(np.str_)
+                        result[key] = val
+                    else:
+                        result[key] = item[()]
+            return result
+
+        kwargs: dict[str, Any] = {}
+
+        # Load spec groups (data, scan, metadata, metrics)
+        for group_name, schema in cls.SCHEMA.items():
+            if "spec" in schema:
+                if group_name in file:
+                    kwargs[group_name] = _load_group_as_dict(file[group_name])
+                # else: leave missing, will use default or raise if required
+            else:
+                # Scalar attrs (probe_name, us_machine, description)
+                if group_name in file.attrs:
+                    kwargs[group_name] = file.attrs[group_name]
+
+        # ------------------------------------------------------------------
+        # Legacy compatibility
+        # ------------------------------------------------------------------
+
+        # 1. Map legacy root attribute 'probe' → 'probe_name'
+        if "probe_name" not in kwargs and "probe" in file.attrs:
+            kwargs["probe_name"] = file.attrs["probe"]
+
+        # 2. Filter scan dict to only keys recognised by Scan.SCHEMA so
+        #    that legacy scalar fields (n_frames, n_ax, n_el, n_tx, n_ch,
+        #    bandwidth_percent, …) don't cause unexpected-keyword errors.
+        if "scan" in kwargs and isinstance(kwargs["scan"], dict):
+            scan_schema_keys = set(Scan.SCHEMA.keys())
+            kwargs["scan"] = {k: v for k, v in kwargs["scan"].items() if k in scan_schema_keys}
+
+        # 3. Handle legacy flat `data/image` datasets.  In old files
+        #    `data/image` is a plain array (n_frames, z, x) rather than an
+        #    Image group with pixels + extent.  If that is the case we
+        #    remove it from the data dict so it does not fail validation as
+        #    an Image spec.
+        if "data" in kwargs and isinstance(kwargs["data"], dict):
+            data_dict = kwargs["data"]
+            for key in list(data_dict.keys()):
+                schema_entry = Data.SCHEMA.get(key)
+                if schema_entry is not None and "spec" in schema_entry:
+                    # The spec expects a nested group (dict), but we got a
+                    # plain array from a legacy flat dataset.
+                    if isinstance(data_dict[key], np.ndarray):
+                        log.debug(
+                            f"Skipping legacy flat dataset 'data/{key}' "
+                            "that cannot be validated as a nested spec."
+                        )
+                        del data_dict[key]
+
+        return cls(**kwargs)

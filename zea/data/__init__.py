@@ -47,4 +47,5 @@ from .data_format import (
     validate_input_data,
 )
 from .datasets import Dataset, Folder
-from .file import File, load_file
+from .file import File, GroupProxy, load_file
+from .spec import FileSpec
