@@ -78,13 +78,19 @@ class EchoNetDynamic(BaseModel):
 
     def build(self, input_shape):
         """Builds the network."""
-        self.maybe_convert_to_jax(input_shape)
+        self.maybe_convert_to_jax()
 
-    def maybe_convert_to_jax(self, input_shape):
-        """Converts the network to Jax if backend is Jax."""
+    def maybe_convert_to_jax(self):
+        """Converts the network to JAX if backend is JAX.
+
+        The network always receives inputs of shape ``(1, INFERENCE_SIZE, INFERENCE_SIZE, 3)``
+        because ``call()`` resizes and tiles the user input before passing it to
+        ``self.network``.
+        """
         if backend.backend() == "jax":
-            inputs = ops.zeros(input_shape)
             from zea.backend import tf2jax
+
+            inputs = ops.zeros([1, INFERENCE_SIZE, INFERENCE_SIZE, 3])
 
             jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
 
