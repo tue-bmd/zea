@@ -383,6 +383,7 @@ def run_pipeline_mach_example(data_frame, scan, probe):
 
 def run_mach_api_example(data_frame, scan, tx_wave_arrivals_s):
     import mach
+    import mach.experimental
 
     try:
         import cupy as cp
@@ -423,11 +424,8 @@ def run_mach_api_example(data_frame, scan, tx_wave_arrivals_s):
         "tukey_alpha": 0.0,
     }
 
-    _flush_vram()
-    _vram_checkpoint("Mach API (before)")
     one_pass = mach.experimental.beamform(**beamform_kwargs)
     _block_until_ready(one_pass)
-    _vram_checkpoint("Mach API (after)")
 
     result, per_iter_s = _time_call(
         "Mach API",
