@@ -35,16 +35,22 @@ Let's take a quick look at how to use ``zea`` to load and process ultrasound dat
    # running the pipeline!
    image = pipeline(data=data, **parameters)["data"]
 
+   # saving the image
+   image = zea.display.to_8bit(image)
+   image.save("image.png")
+
 Similarly, we can easily load one of the pretrained models from the :mod:`zea.models` module and use it for inference.
 
 .. code-block:: python
+
+   import keras
 
    import zea
    from zea.models.echonet import EchoNetDynamic
 
    zea.init_device()
 
-   # presets can also paths to local checkpoints of the model
+   # presets can also be paths to local checkpoints of the model
    model = EchoNetDynamic.from_preset("echonet-dynamic")
 
    # we'll load a single file from the dataset
@@ -52,9 +58,18 @@ Similarly, we can easily load one of the pretrained models from the :mod:`zea.mo
       file = dataset[0]
       image = file.load_data("image_sc", indices=0)
 
-   image = zea.func.translate(image, config.data.dynamic_range, (-1, 1))
-   masks = model(image[None, ..., None])
+   image_input = zea.func.translate(image, (-60, 0), (-1, 1))
+   masks = model(image_input[None, ..., None])
+   masks = keras.ops.squeeze(masks)
 
+   image = zea.display.to_8bit(image)
+
+   masks_clipped = keras.ops.where(masks > 0.5, 255, 0)
+
+   masks_clipped = zea.display.to_8bit(masks_clipped, dynamic_range=(0, 255))
+
+   result = zea.display.overlay_masks(image, [masks_clipped], alpha=0.5)
+   result.save("result.png")
 
 ``zea`` also provides a simple command line interface (CLI) to quickly visualize a ``zea`` data file.
 
