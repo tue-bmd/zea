@@ -239,8 +239,12 @@ class MachBeamform(Operation):
         self.tukey_alpha = float(tukey_alpha)
         if keras.backend.backend() == "jax":
             self._calculate_delays = backend_jit(calculate_delays, static_argnums=(7, 8, 14))
+            # JIT compile channels_to_complex for jax backend to ensure all jax calls
+            # inside MachBeamform are jitted (especially conversion of IQ channels).
+            self._channels_to_complex = backend_jit(channels_to_complex)
         else:
             self._calculate_delays = backend_jit(calculate_delays)
+            self._channels_to_complex = channels_to_complex
 
     def call(
         self,
@@ -301,7 +305,9 @@ class MachBeamform(Operation):
             data = ops.squeeze(data, axis=-1)
             is_iq = False
         elif data.shape[-1] == 2:
-            data = channels_to_complex(data)
+            # Use the possibly jitted wrapper created in __init__ so the conversion
+            # runs under jax.jit when using the jax backend.
+            data = self._channels_to_complex(data)
             is_iq = True
         else:
             is_iq = np.issubdtype(data.dtype, np.complexfloating)
