@@ -289,7 +289,7 @@ MAP_DESCRIPTIONS = {
     "segmentation": "Semantic segmentation mask. Pixels are ``bool`` in (n_frames, x, z, y, n_labels); ``labels`` names each channel.",  # noqa: E501
     "sos_map": "Speed-of-sound map in m/s. Pixels are ``float32``.",
     "strain_percentage_map": "Strain map in %. Pixels are ``float32``.",
-    "shear_wave_elastograhy_map": "Shear-wave elastography map in m/s. Pixels are ``float32``.",
+    "shear_wave_elastography_map": "Shear-wave elastography map in m/s. Pixels are ``float32``.",
     "tissue_doppler": "Tissue Doppler velocity map in m/s. Pixels are ``float32``.",
     "color_doppler": "Color Doppler velocity map in m/s. Positive = towards probe. Pixels are ``float32``.",  # noqa: E501
 }
@@ -368,7 +368,7 @@ def generate() -> str:
         ("segmentation", Segmentation),
         ("sos_map", SosMap),
         ("strain_percentage_map", StrainPercentageMap),
-        ("shear_wave_elastograhy_map", ShearWaveElastographyMap),
+        ("shear_wave_elastography_map", ShearWaveElastographyMap),
         ("tissue_doppler", TissueDopplerMap),
         ("color_doppler", ColorDopplerMap),
     ]

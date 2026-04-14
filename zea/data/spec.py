@@ -699,7 +699,7 @@ class Data(Spec):
         segmentation: Segmentation data and extent metadata.
         sos_map: Speed-of-sound map data and extent metadata.
         strain_percentage_map: Strain map data and extent metadata.
-        shear_wave_elastograhy_map: Shear-wave elastography data and extent metadata.
+        shear_wave_elastography_map: Shear-wave elastography data and extent metadata.
         tissue_doppler: Tissue Doppler data and extent metadata.
         color_doppler: Color Doppler velocity data and extent metadata.
         \\*\\*kwargs: Any other spatially aligned map data and extent metadata.
@@ -718,7 +718,7 @@ class Data(Spec):
     segmentation: Segmentation | dict | None = None
     sos_map: SosMap | dict | None = None
     strain_percentage_map: StrainPercentageMap | dict | None = None
-    shear_wave_elastograhy_map: ShearWaveElastographyMap | dict | None = None
+    shear_wave_elastography_map: ShearWaveElastographyMap | dict | None = None
     tissue_doppler: TissueDopplerMap | dict | None = None
     color_doppler: ColorDopplerMap | dict | None = None
 
@@ -752,7 +752,7 @@ class Data(Spec):
         "segmentation": {"spec": Segmentation},
         "sos_map": {"spec": SosMap},
         "strain_percentage_map": {"spec": StrainPercentageMap},
-        "shear_wave_elastograhy_map": {"spec": ShearWaveElastographyMap},
+        "shear_wave_elastography_map": {"spec": ShearWaveElastographyMap},
         "tissue_doppler": {"spec": TissueDopplerMap},
         "color_doppler": {"spec": ColorDopplerMap},
     }
@@ -776,7 +776,7 @@ class Data(Spec):
         segmentation: Segmentation | dict | None = None,
         sos_map: SosMap | dict | None = None,
         strain_percentage_map: StrainPercentageMap | dict | None = None,
-        shear_wave_elastograhy_map: ShearWaveElastographyMap | dict | None = None,
+        shear_wave_elastography_map: ShearWaveElastographyMap | dict | None = None,
         tissue_doppler: TissueDopplerMap | dict | None = None,
         color_doppler: ColorDopplerMap | dict | None = None,
         **extra_maps,
@@ -790,7 +790,7 @@ class Data(Spec):
         self.segmentation = segmentation
         self.sos_map = sos_map
         self.strain_percentage_map = strain_percentage_map
-        self.shear_wave_elastograhy_map = shear_wave_elastograhy_map
+        self.shear_wave_elastography_map = shear_wave_elastography_map
         self.tissue_doppler = tissue_doppler
         self.color_doppler = color_doppler
 
