@@ -219,7 +219,7 @@ class Interface:
                 )
 
         # get data from dataset
-        data = self.file.load_data(self.dtype, self.frame_no)
+        data = self.file[self.file.format_key(self.dtype)][self.frame_no]
 
         return data
 

@@ -282,12 +282,12 @@ class H5DataSource:
         file = file_handle_cache.get_file(file_name)
 
         try:
-            images = file.load_data(key, indices)
+            images = file[key][indices]
         except (OSError, IOError):
             # Invalidate cache entry and retry once
             file_handle_cache.pop(file_name)
             file = file_handle_cache.get_file(file_name)
-            images = file.load_data(key, indices)
+            images = file[key][indices]
 
         if self.insert_frame_axis:
             initial = self.initial_frame_axis

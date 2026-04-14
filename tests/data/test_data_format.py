@@ -67,7 +67,7 @@ def test_example_dataset(example_dataset_path):
 
     # Check if the dataset can be loaded correctly
     with File(example_dataset_path) as dataset:
-        raw_data = dataset.load_data("raw_data", 0)
+        raw_data = dataset.data.raw_data[0]
         assert raw_data is not None, "Dataset not loaded correctly"
 
 

@@ -704,7 +704,7 @@ def verify_converted_cetus_test_data(dst):
     sample = dst / "train" / "patient01" / "patient01_ED.hdf5"
     with File(sample, "r") as f:
         assert "data" in f, "Missing 'data' group"
-        img = f.load_data("image_sc")
+        img = f.data.image_sc[:]
         assert img.ndim == 4, f"Expected 4-D image_sc, got {img.ndim}"
         f.validate()
         assert "non_standard_elements/segmentation" in f

@@ -307,8 +307,9 @@ class File(h5py.File):
 
     def to_iterator(self, key):
         """Convert the data to an iterator over all frames."""
+        key = self.format_key(key)
         for frame_idx in range(self.n_frames):
-            yield self.load_data(key, frame_idx)
+            yield self[key][frame_idx]
 
     @staticmethod
     def key_to_data_type(key):
@@ -329,7 +330,7 @@ class File(h5py.File):
         )
         # First axis: all frames, second axis: selected transmits
         indices = (slice(None), np.array(selected_transmits))
-        return self.load_data(key, indices)
+        return self[key][indices]
 
     @deprecated(replacement="File.data.<key> with h5py slice indexing")
     def load_data(
@@ -828,7 +829,9 @@ def load_file_all_data_types(
                 continue
 
             # Load the desired frames from the file
-            data_dict[data_type.value] = file.load_data(data_type.value, indices=indices)
+            _key = file.format_key(data_type.value)
+            _indices = indices if indices is not None else slice(None)
+            data_dict[data_type.value] = file[_key][_indices]
 
         # extract transmits from indices
         # we only have to do this when the data has a n_tx dimension
@@ -882,7 +885,9 @@ def load_file(
         probe = file.probe()
 
         # Load the desired frames from the file
-        data = file.load_data(data_type, indices=indices)
+        _key = file.format_key(data_type)
+        _indices = indices if indices is not None else slice(None)
+        data = file[_key][_indices]
 
         # extract transmits from indices
         # we only have to do this when the data has a n_tx dimension
