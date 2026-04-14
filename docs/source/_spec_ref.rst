@@ -159,7 +159,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - –
            - 
            - |badge-opt|
-         * - ``shear_wave_elastograhy_map``
+         * - ``shear_wave_elastography_map``
            - :class:`~zea.data.spec.ShearWaveElastographyMap`
            - group
            - –
@@ -345,7 +345,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - –
               - |badge-opt|
 
-      .. dropdown:: ``shear_wave_elastograhy_map``
+      .. dropdown:: ``shear_wave_elastography_map``
 
          Shear-wave elastography map in m/s. Pixels are ``float32``.
 
