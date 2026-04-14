@@ -800,7 +800,7 @@ class Data(Spec):
                 raise TypeError(f"Invalid custom data key '{key}': reserved name")
             setattr(self, key, value)
 
-        # Add custom extra maps to the schema as generic Map specs, so they get validated as nested specs with pixels and extent.
+        # Add custom extra maps to the schema as generic Map specs, so they get validated.
         self._extra_map_keys = tuple(extra_maps.keys())
         if getattr(self, "_extra_map_keys", ()):
             self.SCHEMA = {
