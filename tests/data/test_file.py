@@ -323,6 +323,36 @@ class TestValidateSpec:
             with pytest.raises(TypeError, match="missing.*required"):
                 f.validate_spec()
 
+    def test_validate_spec_passes_for_custom_map_key(self, tmp_path):
+        """A file saved with a custom map key in 'data' should pass validate_spec()."""
+        import warnings
+
+        from zea.data.spec import FileSpec
+
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            fspec = FileSpec(
+                data={
+                    "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+                    "custom_map": {
+                        "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+                        "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+                    },
+                },
+                scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            )
+
+        path = tmp_path / "custom_map.hdf5"
+        fspec.save(str(path))
+
+        with File(path) as f:
+            loaded = f.validate_spec()
+
+        assert loaded.data.custom_map is not None
+        np.testing.assert_array_equal(loaded.data.custom_map.pixels, fspec.data.custom_map.pixels)
+
 
 class TestFieldMetadataAttrs:
     def test_unit_and_description_written(self, spec_file):

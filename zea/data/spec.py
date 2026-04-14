@@ -800,6 +800,7 @@ class Data(Spec):
                 raise TypeError(f"Invalid custom data key '{key}': reserved name")
             setattr(self, key, value)
 
+        # Add custom extra maps to the schema as generic Map specs, so they get validated as nested specs with pixels and extent.
         self._extra_map_keys = tuple(extra_maps.keys())
         if getattr(self, "_extra_map_keys", ()):
             self.SCHEMA = {
@@ -1240,6 +1241,7 @@ class MetadataSpec(Spec):
                 raise TypeError(f"Invalid custom metadata key '{key}': reserved name")
             setattr(self, key, value)
 
+        # Add custom extra signals to the schema as generic SignalND specs, so they get validated.
         self._extra_signal_keys = tuple(extra_signals.keys())
         if getattr(self, "_extra_signal_keys", ()):
             self.SCHEMA = {
