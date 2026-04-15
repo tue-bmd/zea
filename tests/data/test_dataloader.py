@@ -1,6 +1,8 @@
 """Test H5 dataloader functions"""
 
 import hashlib
+import multiprocessing
+import os
 import pickle
 
 import h5py
@@ -596,6 +598,40 @@ def test_dataset_property(dummy_hdf5):
         validate=False,
     )
     assert loader.dataset is not None
+
+
+def test_h5_data_source_with_disabled_cache(multi_shape_dataset):
+    """H5DataSource must survive multiprocessing.Pool when caching is disabled.
+
+    Regression test for a bug where tempfile.TemporaryDirectory was used as the
+    ZEA_CACHE_DIR. On Linux (fork-based multiprocessing), forked Pool workers
+    inherit the TemporaryDirectory object and its weakref.finalize cleanup
+    callback. If the finalizer fires in any worker, it deletes the shared temp
+    dir from under the parent process, causing a FileNotFoundError.
+
+    The fix replaces TemporaryDirectory with tempfile.mkdtemp so there is no
+    weakref.finalize for forked children to inherit.
+    """
+
+    if multiprocessing.get_start_method() != "fork":
+        pytest.skip("Bug only affects fork-based multiprocessing (Linux)")
+
+    env_backup = os.environ.get("ZEA_DISABLE_CACHE")
+    os.environ["ZEA_DISABLE_CACHE"] = "1"
+
+    try:
+        source = H5DataSource(
+            file_paths=multi_shape_dataset,
+            key="data",
+            n_frames=1,
+            validate=False,
+        )
+        assert len(source) > 0
+    finally:
+        if env_backup is None:
+            os.environ.pop("ZEA_DISABLE_CACHE", None)
+        else:
+            os.environ["ZEA_DISABLE_CACHE"] = env_backup
 
 
 def test_dataloader_repr(dummy_hdf5):
