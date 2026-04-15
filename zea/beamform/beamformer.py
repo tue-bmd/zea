@@ -496,7 +496,7 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
 
 
 def complex_rotate(iq, theta):
-    """Phase-rotate IQ data by angle *theta*.
+    r"""Phase-rotate IQ data by angle *theta*.
 
     When delaying IQ-demodulated data it is not sufficient to interpolate the
     I and Q channels independently — the carrier phase shift must be
