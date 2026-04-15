@@ -326,3 +326,45 @@ def test_overlay_masks(image_mode, num_masks, alpha, use_colors):
             result_arr[: h // 2, : w // 2], base_rgb[: h // 2, : w // 2]
         )
         assert masked_region_changed, "Masked region should differ from base image when alpha > 0"
+
+
+def test_overlay_masks_ndarray_inputs():
+    """Test overlay_masks accepts ndarray image and ndarray masks (non-PIL inputs)."""
+    from zea.display import overlay_masks
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    h, w = 64, 64
+
+    # Pass raw ndarrays instead of PIL Images to exercise the conversion branches
+    image_arr = rng.integers(0, 255, (h, w, 3), dtype=np.uint8)
+    mask_arr = np.zeros((h, w), dtype=np.uint8)
+    mask_arr[: h // 2, : w // 2] = 255
+
+    result = overlay_masks(image_arr, [mask_arr], alpha=0.5)
+
+    assert isinstance(result, __import__("PIL").Image.Image), "Result should be a PIL Image"
+    assert result.mode == "RGB"
+    assert result.size == (w, h)
+
+
+def test_overlay_masks_non_L_mask():
+    """Test overlay_masks converts non-'L' mode PIL masks to 'L' mode."""
+    from PIL import Image
+
+    from zea.display import overlay_masks
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    h, w = 64, 64
+
+    image = Image.fromarray(rng.integers(0, 255, (h, w, 3), dtype=np.uint8), mode="RGB")
+
+    # Create an RGB mask (mode != "L") to trigger the mask.convert("L") branch
+    mask_arr = np.zeros((h, w, 3), dtype=np.uint8)
+    mask_arr[: h // 2, : w // 2] = 255
+    mask_rgb = Image.fromarray(mask_arr, mode="RGB")
+
+    result = overlay_masks(image, [mask_rgb], alpha=0.5)
+
+    assert isinstance(result, Image.Image)
+    assert result.mode == "RGB"
+    assert result.size == (w, h)
