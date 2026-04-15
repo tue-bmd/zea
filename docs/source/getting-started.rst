@@ -43,37 +43,32 @@ Similarly, we can easily load one of the pretrained models from the :mod:`zea.mo
 
 .. code-block:: python
 
-   import os
-   # note EchoNetDynamic model works only with the TensorFlow backend
-   # see https://zea.readthedocs.io/en/latest/_autosummary/zea.models.echonet.html
-   os.environ["KERAS_BACKEND"] = "tensorflow"
-
    import keras
 
    import zea
-   from zea.models.echonet import EchoNetDynamic
+   from zea.models.lv_segmentation import AugmentedCamusSeg
 
    zea.init_device()
 
-   # presets can also be paths to local checkpoints of the model
-   model = EchoNetDynamic.from_preset("echonet-dynamic")
+   # NOTE: for this model you need: `pip install onnxruntime`
+   model = AugmentedCamusSeg.from_preset("augmented_camus_seg")
 
-   # we'll load a single file from the dataset
    with zea.Dataset("hf://zeahub/camus-sample/") as dataset:
-      file = dataset[0]
-      image = file.load_data("image_sc", indices=0)
+      image = dataset[0].load_data("image_sc", indices=0)  # (H, W)
 
-   image_input = zea.func.translate(image, (-60, 0), (-1, 1))
-   masks = model(image_input[None, ..., None])
-   masks = keras.ops.squeeze(masks)
+   # Resize to 256x256 and normalize to [-1, 1] as expected by the model
+   image = keras.ops.image.resize(image[None, ..., None], (256, 256))[0, ..., 0]
+   image = zea.func.translate(image, range_to=[-1, 1])
 
-   image = zea.display.to_8bit(image)
+   # Run model: expects NCHW format (batch, channels, height, width)
+   image = keras.ops.convert_to_numpy(image)
+   predictions = model(image[None, None])  # (1, N, H, W)
+   masks = predictions[0, 1:]  # (N-1, H, W) — skip background (first mask)
 
-   masks_clipped = keras.ops.where(masks > 0.5, 255, 0)
+   image = zea.display.to_8bit(image, dynamic_range=(-1, 1))
+   masks = [zea.display.to_8bit(m > 0.5, dynamic_range=(0, 1)) for m in masks]
 
-   masks_clipped = zea.display.to_8bit(masks_clipped, dynamic_range=(0, 255))
-
-   result = zea.display.overlay_masks(image, [masks_clipped], alpha=0.5)
+   result = zea.display.overlay_masks(image, masks, alpha=0.5)
    result.show()
 
 ``zea`` also provides a simple command line interface (CLI) to quickly visualize a ``zea`` data file.
