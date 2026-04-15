@@ -587,16 +587,17 @@ def verify_converted_echonetlvh_test_data(dst):
         # Verify each HDF5 file has required content
         for h5_file in h5_files:
             with File(h5_file, "r") as f:
-                assert "scan" in f, f"Missing 'scan' in {h5_file}"
                 assert "data" in f, f"Missing 'data' in {h5_file}"
                 assert "image" in f["data"], f"Missing 'image' (polar) in {h5_file}"
                 assert "image_sc" in f["data"], f"Missing 'image_sc' (scan converted) in {h5_file}"
 
-                # Verify image dimensions
-                image = f["data"]["image"][:]
-                image_sc = f["data"]["image_sc"][:]
+                # image is now a Map group with pixels and extent subfields
+                image_pixels = f.data.image.pixels[:]
+                image_sc = f.data.image_sc[:]
 
-                assert image.ndim == 3, f"Polar image should be of shape (F, H, W) in {h5_file}"
+                assert image_pixels.ndim == 4, (
+                    f"Polar image should be of shape (F, H, W, 1) in {h5_file}"
+                )
                 assert image_sc.ndim == 3, (
                     f"Scan converted image should be of shape (F, H, W) in {h5_file}"
                 )

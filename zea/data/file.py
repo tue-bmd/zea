@@ -121,7 +121,7 @@ class File(h5py.File):
         cls,
         path,
         data: dict,
-        scan: dict,
+        scan: dict | None = None,
         metadata: dict | None = None,
         metrics: dict | None = None,
         probe_name: str | None = None,
@@ -191,7 +191,9 @@ class File(h5py.File):
         if path.exists() and not overwrite:
             raise FileExistsError(f"File already exists: {path}")
 
-        kwargs: dict = {"data": data, "scan": scan}
+        kwargs: dict = {"data": data}
+        if scan:
+            kwargs["scan"] = scan
         if metadata is not None:
             kwargs["metadata"] = metadata
         if metrics is not None:

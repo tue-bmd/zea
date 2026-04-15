@@ -1341,7 +1341,7 @@ class FileSpec(Spec):
     """
 
     data: Data | dict
-    scan: ScanSpec | dict
+    scan: ScanSpec | dict | None = None
     metadata: MetadataSpec | dict = field(default_factory=MetadataSpec)
     metrics: MetricsSpec | dict = field(default_factory=MetricsSpec)
     probe_name: str | None = None
@@ -1357,6 +1357,20 @@ class FileSpec(Spec):
         "us_machine": {"dtype": str, "shape": ()},
         "description": {"dtype": str, "shape": ()},
     }
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # scan is mandatory when raw channel data is present
+        data = self.data
+        has_raw = (
+            (isinstance(data, Data) and data.raw_data is not None)
+            or (isinstance(data, dict) and data.get("raw_data") is not None)
+        )
+        if has_raw and self.scan is None:
+            raise ValueError(
+                "'scan' is required when 'raw_data' is provided in the data."
+            )
 
     def save(self, path: str, compression: str = "gzip") -> None:
         """Save the dataset to the specified path."""
@@ -1376,8 +1390,10 @@ class FileSpec(Spec):
 
             for group_name, schema in self.SCHEMA.items():
                 if "spec" in schema:
-                    group = f.create_group(group_name)
                     value: Spec = getattr(self, group_name)
+                    if value is None:
+                        continue
+                    group = f.create_group(group_name)
                     value.store_in_group(group, compression=compression)
                 else:
                     value = getattr(self, group_name)
