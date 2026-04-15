@@ -76,7 +76,7 @@ class EchoNetDynamic(BaseModel):
         ]
         self.network = None
 
-    def build(self, input_shape):
+    def build(self, input_shape):  # pragma: no cover
         """Builds the network."""
         self.maybe_convert_to_jax()
 
