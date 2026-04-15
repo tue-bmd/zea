@@ -85,11 +85,19 @@ class RegisterDecorator:
 
         return _register
 
-    def get_parameter(self, cls_or_name, parameter):
+    _MISSING = object()
+
+    def get_parameter(self, cls_or_name, parameter, default=_MISSING):
         """Get parameter.
 
         Returns the value of the parameter for the class with the given
         class or name. This value can be a string or a class type.
+
+        Args:
+            cls_or_name: The class or name to get the parameter for.
+            parameter: The parameter to get.
+            default: The default value to return if the parameter is not found.
+                If not provided, a KeyError is raised when not found.
         """
         if isinstance(cls_or_name, str):
             cls_or_name = self.registry[cls_or_name.lower()]
@@ -97,7 +105,12 @@ class RegisterDecorator:
         assert isinstance(cls_or_name, type) or callable(cls_or_name), (
             "Key must be a class type or function"
         )
-        return self.additional_registries[parameter.lower()][cls_or_name]
+        try:
+            return self.additional_registries[parameter.lower()][cls_or_name]
+        except KeyError:
+            if default is not RegisterDecorator._MISSING:
+                return default
+            raise
 
     def __str__(self) -> str:
         """String representation of the registry.
@@ -200,7 +213,9 @@ tf_beamformer_registry = RegisterDecorator(items_to_register=["name", "framework
 
 torch_beamformer_registry = RegisterDecorator(items_to_register=["name", "framework"])
 
-metrics_registry = RegisterDecorator(items_to_register=["name", "paired", "jittable"])
+metrics_registry = RegisterDecorator(
+    items_to_register=["name", "paired", "jittable", "torch_vmappable"]
+)
 
 checks_registry = RegisterDecorator(items_to_register=["data_type"])
 ops_registry = RegisterDecorator(items_to_register=["name"])
