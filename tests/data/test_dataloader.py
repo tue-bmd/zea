@@ -1,8 +1,7 @@
 """Test H5 dataloader functions"""
 
 import hashlib
-import multiprocessing
-import os
+import importlib
 import pickle
 
 import h5py
@@ -600,7 +599,7 @@ def test_dataset_property(dummy_hdf5):
     assert loader.dataset is not None
 
 
-def test_h5_data_source_with_disabled_cache(multi_shape_dataset):
+def test_h5_data_source_with_disabled_cache(multi_shape_dataset, monkeypatch):
     """H5DataSource must survive multiprocessing.Pool when caching is disabled.
 
     Regression test for a bug where tempfile.TemporaryDirectory was used as the
@@ -613,14 +612,20 @@ def test_h5_data_source_with_disabled_cache(multi_shape_dataset):
     weakref.finalize for forked children to inherit.
     """
 
-    if multiprocessing.get_start_method() != "fork":
-        pytest.skip("Bug only affects fork-based multiprocessing (Linux)")
+    import zea.data.dataloader as _dataloader_mod
+    import zea.data.datasets as _datasets_mod
+    import zea.internal.cache as _cache_mod
 
-    env_backup = os.environ.get("ZEA_DISABLE_CACHE")
-    os.environ["ZEA_DISABLE_CACHE"] = "1"
+    # Set the env var *before* reloading so the import-time _disable_cache()
+    # call in zea.internal.cache exercises the mkdtemp path (not TemporaryDirectory).
+    # monkeypatch auto-restores the env var after the test.
+    monkeypatch.setenv("ZEA_DISABLE_CACHE", "1")
+    importlib.reload(_cache_mod)
+    importlib.reload(_datasets_mod)
+    importlib.reload(_dataloader_mod)
 
     try:
-        source = H5DataSource(
+        source = _dataloader_mod.H5DataSource(
             file_paths=multi_shape_dataset,
             key="data",
             n_frames=1,
@@ -628,10 +633,13 @@ def test_h5_data_source_with_disabled_cache(multi_shape_dataset):
         )
         assert len(source) > 0
     finally:
-        if env_backup is None:
-            os.environ.pop("ZEA_DISABLE_CACHE", None)
-        else:
-            os.environ["ZEA_DISABLE_CACHE"] = env_backup
+        # Restore modules to cache-enabled state for subsequent tests.
+        # Remove the env var first so the reload picks up the enabled path;
+        # monkeypatch's own teardown will then be a harmless no-op.
+        monkeypatch.delenv("ZEA_DISABLE_CACHE", raising=False)
+        importlib.reload(_cache_mod)
+        importlib.reload(_datasets_mod)
+        importlib.reload(_dataloader_mod)
 
 
 def test_dataloader_repr(dummy_hdf5):
