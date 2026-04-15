@@ -35,13 +35,18 @@ Let's take a quick look at how to use ``zea`` to load and process ultrasound dat
    # running the pipeline!
    image = pipeline(data=data, **parameters)["data"]
 
-   # saving the image
+   # show the image
    image = zea.display.to_8bit(image)
-   image.save("image.png")
+   image.show()
 
 Similarly, we can easily load one of the pretrained models from the :mod:`zea.models` module and use it for inference.
 
 .. code-block:: python
+
+   import os
+   # note EchoNetDynamic model works only with the TensorFlow backend
+   # see https://zea.readthedocs.io/en/latest/_autosummary/zea.models.echonet.html
+   os.environ["KERAS_BACKEND"] = "tensorflow"
 
    import keras
 
@@ -69,7 +74,7 @@ Similarly, we can easily load one of the pretrained models from the :mod:`zea.mo
    masks_clipped = zea.display.to_8bit(masks_clipped, dynamic_range=(0, 255))
 
    result = zea.display.overlay_masks(image, [masks_clipped], alpha=0.5)
-   result.save("result.png")
+   result.show()
 
 ``zea`` also provides a simple command line interface (CLI) to quickly visualize a ``zea`` data file.
 
