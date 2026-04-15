@@ -695,14 +695,14 @@ class Data(Spec):
             and type float32.
 
     Spatial map data products (with extent metadata):
-        image: Reconstructed image data and extent metadata.
-        segmentation: Segmentation data and extent metadata.
-        sos_map: Speed-of-sound map data and extent metadata.
-        strain_percentage_map: Strain map data and extent metadata.
-        shear_wave_elastography_map: Shear-wave elastography data and extent metadata.
-        tissue_doppler: Tissue Doppler data and extent metadata.
-        color_doppler: Color Doppler velocity data and extent metadata.
-        \\*\\*kwargs: Any other spatially aligned map data and extent metadata.
+        - image: Reconstructed image data and extent metadata.
+        - segmentation: Segmentation data and extent metadata.
+        - sos_map: Speed-of-sound map data and extent metadata.
+        - strain_percentage_map: Strain map data and extent metadata.
+        - shear_wave_elastography_map: Shear-wave elastography data and extent metadata.
+        - tissue_doppler: Tissue Doppler data and extent metadata.
+        - color_doppler: Color Doppler velocity data and extent metadata.
+        - \\*\\*kwargs: Any other spatially aligned map data and extent metadata.
 
     At least one data field (pipeline or spatial map) must be provided.
     """
