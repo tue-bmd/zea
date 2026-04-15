@@ -415,7 +415,7 @@ class Spec:
             nested_spec = field_info.get("spec")
             if nested_spec is not None:
                 subgroup = group.create_group(field_name)
-                value.store_in_group(subgroup)
+                value.store_in_group(subgroup, compression=compression)
             else:
                 self.create_dataset(group, field_name, value, compression=compression)
                 meta = field_metadata.get(field_name, {})
