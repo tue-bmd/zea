@@ -63,10 +63,16 @@ Similarly, we can easily load one of the pretrained models from the :mod:`zea.mo
    # Run model: expects NCHW format (batch, channels, height, width)
    image = keras.ops.convert_to_numpy(image)
    predictions = model(image[None, None])  # (1, N, H, W)
-   masks = predictions[0, 1:]  # (N-1, H, W) — skip background (first mask)
+
+   # Compute class assignments via argmax to get mutually exclusive masks
+   class_map = predictions[0].argmax(axis=0)  # (H, W) — each pixel assigned to one class
+   # Derive specific masks: class 1 = LV, class 2 = myocardium
+   lv_mask = (class_map == 1)
+   myo_mask = (class_map == 2)
 
    image = zea.display.to_8bit(image, dynamic_range=(-1, 1))
-   masks = [zea.display.to_8bit(m > 0.5, dynamic_range=(0, 1)) for m in masks]
+   masks = [zea.display.to_8bit(lv_mask, dynamic_range=(0, 1)),
+            zea.display.to_8bit(myo_mask, dynamic_range=(0, 1))]
 
    result = zea.display.overlay_masks(image, masks, alpha=0.5)
    result.show()

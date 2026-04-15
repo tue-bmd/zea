@@ -58,6 +58,10 @@ def overlay_masks(
     Returns:
         PIL.Image: RGB image with masks overlaid.
     """
+    # Validate alpha parameter before conversion to uint8
+    if not (0.0 <= alpha <= 1.0):
+        raise ValueError(f"alpha must be in the range [0.0, 1.0], got {alpha}")
+
     _DEFAULT_COLORS = [
         (255, 0, 0),
         (0, 255, 0),
@@ -72,6 +76,13 @@ def overlay_masks(
 
     if image.mode != "RGB":
         image = image.convert("RGB")
+
+    # Validate colors list has enough entries if provided
+    if colors is not None and len(colors) < len(masks):
+        raise ValueError(
+            f"colors must have at least as many entries as masks: "
+            f"got {len(colors)} colors for {len(masks)} masks"
+        )
 
     result = image.copy()
 
