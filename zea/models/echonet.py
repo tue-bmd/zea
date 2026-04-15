@@ -59,11 +59,15 @@ class EchoNetDynamic(BaseModel):
     def __init__(self, **kwargs):
         if backend.backend() not in ["tensorflow", "jax"]:
             raise NotImplementedError(
-                "EchoNetDynamic is only currently supported with the TensorFlow or Jax backend."
+                "EchoNetDynamic is only currently supported with the TensorFlow or JAX backend."
             )
         assert tf is not None, (
             "TensorFlow is not installed. Please install TensorFlow to use EchoNetDynamic. This is "
-            "required even if you are using the Jax backend, the model is built using TensorFlow."
+            "required even if you are using the JAX backend, the model is built using TensorFlow. "
+            "Installing JAX and TensorFlow together is tricky, regarding compatible CUDA versions. "
+            "One option is to run in our Docker container, which has been tested to work with "
+            "both backends. See https://zea.readthedocs.io/en/latest/installation.html#docker "
+            "for more details."
         )
 
         super().__init__(**kwargs)
