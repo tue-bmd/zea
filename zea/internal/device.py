@@ -58,6 +58,23 @@ def print_gpu_memory_table(memory_free_values):
         print(f"{idx:<6}{mem:>7}")
 
 
+def _iter_cuda_device_ids():
+    """Yield integer device IDs from CUDA_VISIBLE_DEVICES.
+
+    Skips empty tokens and non-integer tokens (e.g. GPU UUIDs) silently,
+    so callers never receive a ``ValueError`` from malformed entries.
+    """
+    cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    for token in cuda_visible.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            yield int(token)
+        except ValueError:
+            pass  # Non-integer tokens (e.g. GPU UUIDs) are skipped
+
+
 def _cuda_visible_devices_disables_gpus():
     """Check if CUDA_VISIBLE_DEVICES is set to a value that disables all GPUs.
 
@@ -69,16 +86,12 @@ def _cuda_visible_devices_disables_gpus():
     cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
     if cuda_visible is None:
         return False  # Not set – all GPUs visible
-    cuda_visible = cuda_visible.strip()
-    if cuda_visible == "":
+    if cuda_visible.strip() == "":
         return True  # Empty means no GPUs
-    try:
-        device_ids = [int(x.strip()) for x in cuda_visible.split(",")]
-        if all(d < 0 for d in device_ids):
-            return True
-    except ValueError:
-        pass  # Non-numeric values (e.g. GPU UUIDs) – let nvidia-smi decide
-    return False
+    device_ids = list(_iter_cuda_device_ids())
+    if not device_ids:
+        return False  # Only non-integer tokens (e.g. GPU UUIDs) – let nvidia-smi decide
+    return all(d < 0 for d in device_ids)
 
 
 def get_gpu_memory(verbose=True):
@@ -139,10 +152,9 @@ def get_gpu_memory(verbose=True):
 
     # only show enabled devices
     if os.environ.get("CUDA_VISIBLE_DEVICES", "") != "":
-        gpus = os.environ["CUDA_VISIBLE_DEVICES"]
-        gpus = [int(gpu) for gpu in gpus.split(",")]
-        # Filter out negative and out-of-range IDs
-        gpus = [g for g in gpus if 0 <= g < len(memory_free_values)]
+        # Use _iter_cuda_device_ids to safely skip empty/non-integer tokens,
+        # then filter out negative and out-of-range IDs.
+        gpus = [g for g in _iter_cuda_device_ids() if 0 <= g < len(memory_free_values)]
         if verbose:
             # Report the number of disabled GPUs out of the total
             num_gpus = len(memory_free_values)
