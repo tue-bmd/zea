@@ -80,7 +80,7 @@ class EchoNetDynamic(BaseModel):
         """Builds the network."""
         self.maybe_convert_to_jax()
 
-    def maybe_convert_to_jax(self):
+    def maybe_convert_to_jax(self):  # pragma: no cover
         """Converts the network to JAX if backend is JAX.
 
         The network always receives inputs of shape ``(1, INFERENCE_SIZE, INFERENCE_SIZE, 3)``
