@@ -53,7 +53,8 @@ def overlay_masks(
         alpha (float, optional): Opacity of the mask overlays in [0, 1].
             Defaults to 0.5.
         colors (list of tuple, optional): RGB colors for each mask. If None,
-            a default palette is used. Length must match the number of masks.
+            a default palette is used. If provided, must contain at least as
+            many entries as masks (extra entries are ignored).
 
     Returns:
         PIL.Image: RGB image with masks overlaid.
@@ -89,6 +90,9 @@ def overlay_masks(
     for i, mask in enumerate(masks):
         if not isinstance(mask, Image.Image):
             mask = Image.fromarray(np.asarray(mask))
+
+        if mask.size != image.size:
+            raise ValueError(f"Mask {i} size {mask.size} does not match image size {image.size}")
 
         if mask.mode != "L":
             mask = mask.convert("L")

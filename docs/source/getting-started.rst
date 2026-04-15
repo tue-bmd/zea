@@ -1,7 +1,7 @@
 Getting Started
 ===============
 
-``zea`` provides a framework for cognitive ultrasound imaging. At the heart of ``zea`` are :doc:`data-acquisition` (``zea.data``), :doc:`pipeline` (``zea.Pipeline``), and :doc:`models` (``zea.Models``) modules. These modules provide the necessary tools to load, process, and analyze ultrasound data.
+``zea`` provides a framework for cognitive ultrasound imaging. At the heart of ``zea`` are :doc:`data-acquisition` (``zea.File``, ``zea.Dataset``, ``zea.Dataloader``), :doc:`pipeline` (``zea.Pipeline``), and :doc:`models` (``zea.Models``) classes. These provide the necessary tools to load, process, and analyze ultrasound data.
 
 .. tip::
 
@@ -67,12 +67,14 @@ Similarly, we can easily load one of the pretrained models from the :mod:`zea.mo
    # Compute class assignments via argmax to get mutually exclusive masks
    class_map = predictions[0].argmax(axis=0)  # (H, W) — each pixel assigned to one class
    # Derive specific masks: class 1 = LV, class 2 = myocardium
-   lv_mask = (class_map == 1)
-   myo_mask = (class_map == 2)
+   lv_mask = class_map == 1
+   myo_mask = class_map == 2
 
    image = zea.display.to_8bit(image, dynamic_range=(-1, 1))
-   masks = [zea.display.to_8bit(lv_mask, dynamic_range=(0, 1)),
-            zea.display.to_8bit(myo_mask, dynamic_range=(0, 1))]
+   masks = [
+      zea.display.to_8bit(lv_mask, dynamic_range=(0, 1)),
+      zea.display.to_8bit(myo_mask, dynamic_range=(0, 1)),
+   ]
 
    result = zea.display.overlay_masks(image, masks, alpha=0.5)
    result.show()
