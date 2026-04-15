@@ -1,6 +1,7 @@
 """GPU usage testing"""
 
 from itertools import product
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -90,6 +91,11 @@ class TestCudaVisibleDevicesDisablesGpus:
         monkeypatch.setenv("CUDA_VISIBLE_DEVICES", " -1 ")
         assert _cuda_visible_devices_disables_gpus() is True
 
+    def test_uuid_style_value(self, monkeypatch):
+        """Non-numeric UUID-style values should not raise and should return False."""
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "GPU-abc123,GPU-def456")
+        assert _cuda_visible_devices_disables_gpus() is False
+
 
 class TestGetGpuMemoryRespectsEnv:
     """get_gpu_memory must return [] when CUDA_VISIBLE_DEVICES disables GPUs."""
@@ -101,6 +107,40 @@ class TestGetGpuMemoryRespectsEnv:
     def test_empty_string(self, monkeypatch):
         monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
         assert get_gpu_memory(verbose=False) == []
+
+
+_SMI_TWO_GPUS = b"1000\n2000\n"
+
+
+def _mock_smi(monkeypatch, raw_output):
+    """Patch check_nvidia_smi and sp.check_output for unit-testing get_gpu_memory."""
+    monkeypatch.setattr("zea.internal.device.check_nvidia_smi", lambda: True)
+    return patch("subprocess.check_output", return_value=raw_output)
+
+
+class TestGetGpuMemoryFiltering:
+    """Tests for GPU ID filtering and nvidia-smi output parsing in get_gpu_memory."""
+
+    def test_output_to_list_parses_smi_output(self, monkeypatch):
+        """get_gpu_memory correctly parses multi-line nvidia-smi output."""
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        with _mock_smi(monkeypatch, _SMI_TWO_GPUS):
+            result = get_gpu_memory(verbose=False)
+        assert result == [1000, 2000]
+
+    def test_out_of_range_ids_filtered(self, monkeypatch):
+        """GPU IDs beyond the number of detected GPUs are silently removed."""
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,5")
+        with _mock_smi(monkeypatch, _SMI_TWO_GPUS):
+            result = get_gpu_memory(verbose=False)
+        assert result == [1000]  # GPU 5 is out of range, only GPU 0 kept
+
+    def test_negative_in_mixed_ids_filtered(self, monkeypatch):
+        """Negative IDs mixed with valid IDs are filtered without discarding valid ones."""
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,-1")
+        with _mock_smi(monkeypatch, _SMI_TWO_GPUS):
+            result = get_gpu_memory(verbose=False)
+        assert result == [1000]  # -1 filtered out, GPU 0 kept
 
 
 @pytest.mark.parametrize("backend", ["tensorflow", "torch", "jax"])
