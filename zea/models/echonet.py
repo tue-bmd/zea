@@ -21,7 +21,7 @@ To try this model, simply load one of the available presets:
     :doc:`../notebooks/models/left_ventricle_segmentation_example`.
 
 .. note::
-    This model is only currently supported with the TensorFlow or JAX :ref:`backend-installation`
+    This model is only currently supported with the TensorFlow or JAX :ref:`backend-installation`.
     When using TensorFlow as backend, the model will work out of the box. When using JAX as backend,
     the model is built using TensorFlow and then converted to JAX. This requires both
     TensorFlow and JAX to be installed, which can be tricky regarding compatible CUDA versions.
