@@ -21,8 +21,8 @@ from pathlib import Path
 import numpy as np
 
 from zea import Probe, Scan
-from zea.data.data_format import generate_zea_dataset, load_additional_elements, load_description
-from zea.data.file import load_file_all_data_types
+from zea.data.data_format import load_additional_elements, load_description
+from zea.data.file import File, load_file_all_data_types
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.log import logger
@@ -48,8 +48,9 @@ def save_file(
     envelope_data: np.ndarray = None,
     image: np.ndarray = None,
     image_sc: np.ndarray = None,
-    additional_elements=None,
     description="",
+    custom_maps: dict | None = None,
+    metadata: dict | None = None,
     **kwargs,
 ):
     """Saves data to a zea data file (h5py file).
@@ -59,40 +60,85 @@ def save_file(
         raw_data (np.ndarray): The data to save.
         scan (Scan): The scan object containing the parameters of the acquisition.
         probe (Probe): The probe object containing the parameters of the probe.
-        additional_elements (list of DatasetElement, optional): Additional elements to save in the
-            file. Defaults to None.
+        description (str): A description for the dataset.
+        custom_maps (dict, optional): Custom spatial map entries to include in the ``data`` group.
+            Each key maps to a dict with ``"pixels"`` (np.ndarray, uint8) and ``"extent"``
+            (np.ndarray, float32, shape ``(6,)``) fields, plus optional ``"labels"``,
+            ``"description"``, and ``"unit"`` fields.  Example::
+
+                custom_maps = {
+                    "my_overlay": {
+                        "pixels": pixels_array,  # (n_frames, x, z, y[, n_ch]), uint8
+                        "extent": extent_array,  # (6,) float32
+                    }
+                }
+
+        metadata (dict, optional): Metadata to store in the ``metadata`` group, validated against
+            :class:`~zea.data.spec.MetadataSpec`.  Standard keys include ``"subject"``,
+            ``"credit"``, ``"annotations"``, ``"text_report"``, ``"ecg"``,
+            ``"probe_orientation"``, and ``"voice_narration"``.  Custom signal keys are also
+            accepted and stored as :class:`~zea.data.spec.SignalND` entries.  Example::
+
+                metadata = {
+                    "credit": "My Lab, 2024",
+                    "annotations": {"label": np.array(["healthy", "healthy"])},
+                }
     """
 
-    generate_zea_dataset(
+    data = {}
+    for key, arr in [
+        ("raw_data", raw_data),
+        ("aligned_data", aligned_data),
+        ("beamformed_data", beamformed_data),
+        ("envelope_data", envelope_data),
+        ("image_sc", image_sc),
+    ]:
+        if arr is not None:
+            data[key] = arr
+    if image is not None:
+        data["image_sc"] = image
+
+    if custom_maps:
+        for key, map_dict in custom_maps.items():
+            data[key] = map_dict
+
+    scan_dict = {
+        "probe_geometry": probe.probe_geometry,
+        "sampling_frequency": np.float32(scan.sampling_frequency),
+        "center_frequency": np.float32(scan.center_frequency),
+        "demodulation_frequency": np.float32(scan.center_frequency),
+        "initial_times": scan.initial_times,
+        "t0_delays": scan.t0_delays,
+        "sound_speed": np.float32(scan.sound_speed) if scan.sound_speed is not None else None,
+    }
+
+    optional_scan = {
+        "focus_distances": scan.focus_distances,
+        "transmit_origins": scan.transmit_origins,
+        "polar_angles": scan.polar_angles,
+        "azimuth_angles": scan.azimuth_angles,
+        "tx_apodizations": scan.tx_apodizations,
+        "time_to_next_transmit": scan.time_to_next_transmit,
+        "tgc_gain_curve": scan.tgc_gain_curve,
+        "element_width": scan.element_width,
+    }
+    for key, val in optional_scan.items():
+        if val is not None:
+            scan_dict[key] = val
+
+    # Filter out None values from scan_dict
+    scan_dict = {k: v for k, v in scan_dict.items() if v is not None}
+
+    f = File.create(
         path=path,
-        raw_data=raw_data,
-        aligned_data=aligned_data,
-        beamformed_data=beamformed_data,
-        image=image,
-        image_sc=image_sc,
-        envelope_data=envelope_data,
+        data=data,
+        scan=scan_dict if scan_dict else None,
+        metadata=metadata or None,
         probe_name="generic",
-        probe_geometry=probe.probe_geometry,
-        sampling_frequency=scan.sampling_frequency,
-        center_frequency=scan.center_frequency,
-        initial_times=scan.initial_times,
-        t0_delays=scan.t0_delays,
-        sound_speed=scan.sound_speed,
-        focus_distances=scan.focus_distances,
-        transmit_origins=scan.transmit_origins,
-        polar_angles=scan.polar_angles,
-        azimuth_angles=scan.azimuth_angles,
-        tx_apodizations=scan.tx_apodizations,
-        bandwidth_percent=scan.bandwidth_percent,
-        time_to_next_transmit=scan.time_to_next_transmit,
-        tgc_gain_curve=scan.tgc_gain_curve,
-        element_width=scan.element_width,
-        tx_waveform_indices=scan.tx_waveform_indices,
-        waveforms_one_way=scan.waveforms_one_way,
-        waveforms_two_way=scan.waveforms_two_way,
-        description=description,
-        additional_elements=additional_elements,
+        description=description or None,
+        overwrite=True,
     )
+    f.close()
 
 
 def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):

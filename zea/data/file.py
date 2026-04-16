@@ -380,7 +380,7 @@ class File(h5py.File):
     @property
     def probe_name(self):
         """Reads the probe name from the data file and returns it."""
-        # Support both 'probe_name' (new spec) and 'probe' (legacy generate_zea_dataset)
+        # Support both 'probe_name' (new spec) and 'probe' (legacy files)
         for attr_key in ("probe_name", "probe"):
             if attr_key in self.attrs:
                 return self.attrs[attr_key]
@@ -588,7 +588,7 @@ class File(h5py.File):
             >>> with File(path) as f:
             ...     probe = f.probe()
             >>> type(probe).__name__
-            'Probe'
+            'Verasonics_l11_4v'
         """
         probe_parameters_file = self.get_probe_parameters(event)
         return Probe.from_parameters(self.probe_name, probe_parameters_file)
@@ -693,10 +693,10 @@ class File(h5py.File):
         """Lightweight structural validation — no array data is loaded into RAM.
 
         Checks that the file has a ``data`` group and that all keys within it
-        are recognised zea data types.  For files written before zea 0.0.12
-        (produced by :func:`~zea.data.data_format.generate_zea_dataset`) a minimal key-name
-        check is performed.  For files created with zea 0.0.12 and later
-        the keys are checked against the :class:`~zea.data.spec.DataSpec` schema.
+        are recognised zea data types.  For legacy files (before zea 0.0.12)
+        a minimal key-name check is performed.  For files created with
+        zea 0.0.12 and later (via :meth:`File.create`) the keys are checked
+        against the :class:`~zea.data.spec.DataSpec` schema.
 
         Use :meth:`validate_spec` for a **full** validation that loads all data
         and checks dtypes, shapes, and cross-field dimension consistency.
@@ -726,9 +726,8 @@ class File(h5py.File):
 
         .. note::
             This method only works on files created with zea 0.0.12 and later.
-            Files written before zea 0.0.12 should be migrated with
-            :func:`~zea.data.data_format.generate_zea_dataset`
-            or re-saved through :meth:`File.create`.
+            Files written before zea 0.0.12 should be re-saved through
+            :meth:`File.create`.
 
         Returns:
             FileSpec: The fully validated spec object, with all data accessible
@@ -949,8 +948,7 @@ def validate_file(path: str = None, file: File = None):
 
     For files created with zea 0.0.12 and later this runs the full
     :class:`~zea.data.spec.FileSpec` schema validation (dtypes, shapes, and
-    dimension consistency).  Files written before zea 0.0.12
-    (produced by :func:`~zea.data.data_format.generate_zea_dataset`) are detected by the
+    dimension consistency).  Legacy files (before zea 0.0.12) are detected by the
     presence of scalar dataset ``scan/n_frames``; for those only a lightweight
     structural ``data`` group check is performed.
 
@@ -985,7 +983,7 @@ def _is_legacy_file(file: File) -> bool:
 
     Files created with zea 0.0.12 and later always store a
     ``zea_version`` root attribute.  Files that lack it were produced by
-    the old ``generate_zea_dataset`` path and are treated as legacy.
+    the legacy data format path and are treated as legacy.
     """
     return "zea_version" not in file.attrs
 

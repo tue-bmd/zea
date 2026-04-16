@@ -680,7 +680,7 @@ def verify_converted_camus_test_data(dst):
         # Load the hdf5 file and check for expected datasets
         for h5_file in h5_files:
             with File(h5_file, "r") as f:
-                assert "scan" in f, f"Missing 'scan' in {h5_file}"
+                assert "data" in f, f"Missing 'data' in {h5_file}"
                 f.validate()
 
 
@@ -708,8 +708,7 @@ def verify_converted_cetus_test_data(dst):
         img = f.data.image_sc[:]
         assert img.ndim == 4, f"Expected 4-D image_sc, got {img.ndim}"
         f.validate()
-        assert "non_standard_elements/segmentation" in f
-        assert "non_standard_elements/voxel_spacing" in f
+        assert "metadata" in f, "Missing 'metadata' group"
 
     # Exercise the error branch of get_split (not reachable via normal conversion)
     with pytest.raises(ValueError):

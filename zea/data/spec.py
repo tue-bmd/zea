@@ -135,6 +135,11 @@ class Spec:
             return False
         return field_def.default is not MISSING or field_def.default_factory is not MISSING
 
+    @classmethod
+    def required_fields(cls) -> tuple[str, ...]:
+        """Return the names of fields that have no default value."""
+        return tuple(f.name for f in fields(cls) if not cls._is_optional_dataclass_field(f))
+
     @staticmethod
     def _expected_shapes(shape_spec: Any) -> tuple[tuple, ...]:
         if shape_spec and isinstance(shape_spec[0], tuple):
@@ -1403,12 +1408,11 @@ class FileSpec(Spec):
         """Load and validate a :class:`FileSpec` from an open HDF5 file.
 
         This reads all groups into memory and runs the full spec validation
-        (dtype, shape, dimension consistency).  Legacy files produced by
-        :func:`generate_zea_dataset` are handled transparently: extra scalar
-        fields in the scan group (``n_frames``, ``n_tx``, etc.) are ignored,
-        flat ``data/image`` datasets are loaded as ``image_sc`` when
-        ``image_sc`` is absent, and the ``probe`` root attribute is mapped to
-        ``probe_name``.
+        (dtype, shape, dimension consistency).  Legacy files are handled
+        transparently: extra scalar fields in the scan group (``n_frames``,
+        ``n_tx``, etc.) are ignored, flat ``data/image`` datasets are loaded
+        as ``image_sc`` when ``image_sc`` is absent, and the ``probe`` root
+        attribute is mapped to ``probe_name``.
 
         Args:
             file: An open ``h5py.File`` (or :class:`zea.File`).
