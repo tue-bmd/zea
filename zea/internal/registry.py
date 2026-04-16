@@ -204,20 +204,11 @@ class RegisterDecorator:
         ]
 
 
-# The registry for the probes.
 probe_registry = RegisterDecorator()
-
-# The registry for the beamformers.
-# separate registries to avoid dupicate entries
-# as torch and tf beamformers cannot coexist in same registry
-tf_beamformer_registry = RegisterDecorator(items_to_register=["name", "framework"])
-
-torch_beamformer_registry = RegisterDecorator(items_to_register=["name", "framework"])
-
+beamformer_registry = RegisterDecorator()
 metrics_registry = RegisterDecorator(
     items_to_register=["name", "paired", "jittable", "torch_vmappable"]
 )
-
 checks_registry = RegisterDecorator(items_to_register=["data_type"])
 ops_registry = RegisterDecorator(items_to_register=["name"])
 ops_dep_registry = RegisterDecorator(items_to_register=["name"])
