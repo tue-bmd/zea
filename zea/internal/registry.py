@@ -32,6 +32,8 @@ dataset = dataset_class()
 ```
 """
 
+_MISSING = object()  # sentinel for absent default
+
 
 class RegisterDecorator:
     """Decorator class for registering classes.
@@ -85,8 +87,6 @@ class RegisterDecorator:
 
         return _register
 
-    _MISSING = object()
-
     def get_parameter(self, cls_or_name, parameter, default=_MISSING):
         """Get parameter.
 
@@ -105,12 +105,13 @@ class RegisterDecorator:
         assert isinstance(cls_or_name, type) or callable(cls_or_name), (
             "Key must be a class type or function"
         )
-        try:
-            return self.additional_registries[parameter.lower()][cls_or_name]
-        except KeyError:
-            if default is not RegisterDecorator._MISSING:
-                return default
-            raise
+        reg = self.additional_registries.get(parameter.lower())
+        value = reg.get(cls_or_name, _MISSING) if reg is not None else _MISSING
+        if value is not _MISSING:
+            return value
+        if default is not _MISSING:
+            return default
+        raise KeyError(f"Parameter '{parameter}' not found for {cls_or_name}.")
 
     def __str__(self) -> str:
         """String representation of the registry.
