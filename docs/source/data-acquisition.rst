@@ -16,7 +16,7 @@ process it (e.g. :class:`~zea.Scan` parameters), and additional metadata (e.g. a
 in a single file. This makes it easy to manage and share data, and ensures that all necessary information
 is always available when loading a file.
 
-Additionally, to support the :ref:`cognitive ultrasound framework <about>`, the zea data format is designed to
+Additionally, to support the :doc:`cognitive ultrasound framework <about>`, the zea data format is designed to
 allow for flexible and efficient access to a part of the data (e.g. a single frame or transmit) without the need
 to load the entire file into memory.
 
@@ -24,8 +24,7 @@ to load the entire file into memory.
 Working with zea data files
 -------------------------------
 
-``zea`` stores each acquisition as a single HDF5 file following the
-schema :ref:`data-spec`.  The primary API is :class:`zea.File`. It operates similarly to `h5py.File <https://docs.h5py.org/en/latest/high/file.html>`_, but with an additional interface of parsing parameters into :class:`~zea.Scan` and :class:`~zea.Probe` objects, and validating the file against the zea data spec.
+``zea`` stores each acquisition as a single HDF5 file following the :ref:`schema <data-spec>`.  The primary API is :class:`zea.File`. It operates similarly to `h5py.File <https://docs.h5py.org/en/latest/high/file.html>`_, but with an additional interface of parsing parameters into :class:`~zea.Scan` and :class:`~zea.Probe` objects, and validating the file against the zea data spec.
 
 **Open and read an existing file**
 
