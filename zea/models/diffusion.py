@@ -23,6 +23,7 @@ from typing import Literal
 import keras
 from keras import ops
 
+from zea import log
 from zea.backend import _import_tf, jit
 from zea.backend.autograd import AutoGrad
 from zea.func.tensor import L2, fori_loop, split_seed
@@ -40,7 +41,6 @@ tf = _import_tf()
 VALID_NETWORK_MODELS = [
     "unet_time_conditional",
     "dense_time_conditional",
-    "unet_temporal_time_conditional",
 ]
 
 
@@ -118,8 +118,8 @@ class DiffusionModel(DeepGenerativeModel):
             f"Invalid network name: {network_name}. Valid options are: {VALID_NETWORK_MODELS}"
         )
         self.network = model_registry[network_name](
-            # image_shape=self.input_shape,
-            # image_range=self.input_range,
+            input_shape=self.input_shape,
+            input_range=self.input_range,
             **self.network_kwargs,
         )
 
@@ -160,6 +160,40 @@ class DiffusionModel(DeepGenerativeModel):
 
     def summary(self):
         return self.network.summary()
+
+    def load_weights(self, filepath, **kwargs):
+        """Load weights with automatic fallback to legacy layer format.
+
+        Old model checkpoints were saved when ``ResidualBlock``, ``DownBlock``
+        and ``UpBlock`` were closure-based functions.  Those checkpoints have
+        flat auto-generated weight names (``conv2d``, ``conv2d_1``, etc.)
+        which do not match the nested names produced by the current
+        ``keras.layers.Layer`` subclasses.  If the initial load fails we
+        rebuild the inner UNet using the legacy closures and retry.
+        """
+        try:
+            super().load_weights(filepath, **kwargs)
+        except Exception as e:
+            log.warning(
+                "Weight loading failed (%s). Rebuilding denoiser with "
+                "legacy (functional) layers for backward compatibility...",
+                e,
+            )
+            self._rebuild_with_legacy_layers()
+            super().load_weights(filepath, **kwargs)
+            log.info("Successfully loaded legacy model weights.")
+
+    def _rebuild_with_legacy_layers(self):
+        """Rebuild ``self.network`` and ``self.ema_network`` using the legacy
+        closure-based layer implementations so that old weight names match."""
+        self.network = model_registry[self.network_name](
+            input_shape=self.input_shape,
+            input_range=self.input_range,
+            _legacy_layers=True,
+            **self.network_kwargs,
+        )
+        self.ema_network = keras.models.clone_model(self.network)
+        self.ema_network.trainable = False
 
     def _init_operator_and_guidance(self, operator, guidance):
         if operator is not None:

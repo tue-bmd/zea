@@ -127,3 +127,64 @@ class UpBlock(layers.Layer):
         config = super().get_config()
         config.update({"width": self.width, "block_depth": self.block_depth})
         return config
+
+
+# =========================================================================
+# Legacy functional layers — closure-based (no build/get_config)
+# =========================================================================
+# These replicate the *original* layer implementations that were used before
+# ResidualBlock / DownBlock / UpBlock became proper ``keras.layers.Layer``
+# subclasses.  They are needed for loading old model checkpoints whose
+# weight names follow the flat auto-generated naming scheme that Keras
+# produces when standard layers (Conv2D, BatchNormalization, etc.) appear
+# directly in a Functional graph.
+#
+# Usage:  pass ``_legacy_layers=True`` to ``get_time_conditional_unetwork``
+#         (or ``get_unetwork``) to build a graph with these closures.
+# =========================================================================
+
+
+def _legacy_residual_block(width):
+    """Legacy closure-based ResidualBlock."""
+
+    def apply(x):
+        input_width = ops.shape(x)[3]
+        if input_width == width:
+            residual = x
+        else:
+            residual = layers.Conv2D(width, kernel_size=1)(x)
+        x = layers.BatchNormalization(center=False, scale=False)(x)
+        x = layers.Conv2D(width, kernel_size=3, padding="same", activation="swish")(x)
+        x = layers.Conv2D(width, kernel_size=3, padding="same")(x)
+        x = layers.Add()([x, residual])
+        return x
+
+    return apply
+
+
+def _legacy_down_block(width, block_depth):
+    """Legacy closure-based DownBlock."""
+
+    def apply(x):
+        x, skips = x
+        for _ in range(block_depth):
+            x = _legacy_residual_block(width)(x)
+            skips.append(x)
+        x = layers.AveragePooling2D(pool_size=2)(x)
+        return x
+
+    return apply
+
+
+def _legacy_up_block(width, block_depth):
+    """Legacy closure-based UpBlock."""
+
+    def apply(x):
+        x, skips = x
+        x = layers.UpSampling2D(size=2, interpolation="bilinear")(x)
+        for _ in range(block_depth):
+            x = layers.Concatenate()([x, skips.pop()])
+            x = _legacy_residual_block(width)(x)
+        return x
+
+    return apply
