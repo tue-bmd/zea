@@ -39,7 +39,13 @@ Example usage
     >>> dataset.close()
 
     >>> # Use a dataloader for training
-    >>> dataloader = Dataloader(dataset, batch_size=4, shuffle=True)
+    >>> dataloader = Dataloader(
+    ...     "hf://zeahub/camus-sample/",
+    ...     key="data/image",
+    ...     batch_size=4,
+    ...     resize=(256, 256),
+    ...     shuffle=True,
+    ... )
     >>> for batch in dataloader:
     ...     # process batch for training
     ...     pass
@@ -49,7 +55,7 @@ Example usage
 from .convert.camus import sitk_load
 from .data_format import (
     DatasetElement,
-    generate_zea_dataset,
+    generate_zea_dataset,  # deprecated, kept for backwards compatibility
     validate_input_data,
 )
 from .dataloader import Dataloader

@@ -1018,7 +1018,9 @@ class ScanSpec(Spec):
                 f"Polar angles should be between -pi and pi radians, got values between "
                 f"{np.min(self.polar_angles)} and {np.max(self.polar_angles)}"
             )
-        if np.any(self.azimuth_angles < -np.pi) or np.any(self.azimuth_angles > np.pi):
+        if self.azimuth_angles is not None and (
+            np.any(self.azimuth_angles < -np.pi) or np.any(self.azimuth_angles > np.pi)
+        ):
             raise ValueError(
                 f"Azimuth angles should be between -pi and pi radians, got values between "
                 f"{np.min(self.azimuth_angles)} and {np.max(self.azimuth_angles)}"
@@ -1313,31 +1315,29 @@ class FileSpec(Spec):
 
     Example:
         .. doctest::
+
             >>> from zea.data.spec import FileSpec
             >>> import numpy as np
 
             >>> dataset = FileSpec(
-            ...    data={
-            ...        "raw_data": np.random.rand(100, 32, 64, 128, 1).astype(np.float32),
-            ...        "segmentation": {
-            ...            "pixels": np.random.randint(0, 4, size=(100, 64, 64, 1), dtype=np.uint8),
-            ...            "labels": np.array(["background", "tissue", "vessel", "bone"]),
-            ...            "extent": np.array([-0.1, 0.1, -0.1, 0.1, -0.1, 0.1], dtype=np.float32),
-            ...        },
-            ...    }
-            ...    scan={
-            ...        "probe_geometry": np.zeros((64, 3), dtype=np.float32),
-            ...        "sampling_frequency": np.float32(30e6),
-            ...        "center_frequency": np.linspace(5e6, 6e6, 32, dtype=np.float32),
-            ...        "demodulation_frequency": np.linspace(5e6, 6e6, 32, dtype=np.float32),
-            ...        "initial_times": np.linspace(0, 1e-6, 32, dtype=np.float32),
-            ...        "t0_delays": np.random.rand(32, 64).astype(np.float32),
-            ...        "tx_apodizations": np.random.rand(32, 64).astype(np.float32),
-            ...        "focus_distances": np.linspace(0.01, 0.1, 32, dtype=np.float32),
-            ...        "transmit_origins": np.zeros((32, 3), dtype=np.float32),
-            ...        "polar_angles": np.linspace(-0.1, 0.1, 32, dtype=np.float32),
-            ...    }
+            ...     data={
+            ...         "raw_data": np.zeros((2, 4, 64, 8, 1), dtype=np.float32),
+            ...     },
+            ...     scan={
+            ...         "probe_geometry": np.zeros((8, 3), dtype=np.float32),
+            ...         "sampling_frequency": np.float32(40e6),
+            ...         "center_frequency": np.float32(5e6),
+            ...         "demodulation_frequency": np.float32(5e6),
+            ...         "initial_times": np.zeros(4, dtype=np.float32),
+            ...         "t0_delays": np.zeros((4, 8), dtype=np.float32),
+            ...         "tx_apodizations": np.ones((4, 8), dtype=np.float32),
+            ...         "focus_distances": np.full(4, np.inf, dtype=np.float32),
+            ...         "transmit_origins": np.zeros((4, 3), dtype=np.float32),
+            ...         "polar_angles": np.zeros(4, dtype=np.float32),
+            ...     },
             ... )
+            >>> dataset.data.raw_data.shape
+            (2, 4, 64, 8, 1)
     """
 
     data: DataSpec | dict
