@@ -22,7 +22,7 @@ from scipy.interpolate import griddata
 from tqdm import tqdm
 
 from zea import log
-from zea.data import generate_zea_dataset
+from zea.data.file import File
 from zea.data.convert.utils import load_avi, unzip
 from zea.func.tensor import translate
 
@@ -395,17 +395,10 @@ class H5Processor:
         Convert a single AVI file into a zea dataset entry.
         Loads the AVI, validates and rescales pixel ranges, applies segmentation,
         assigns a data split (train/val/test/rejected), converts accepted frames
-        to polar coordinates.
-        Constructs and returns the zea dataset descriptor used by
-        generate_zea_dataset; the descriptor always includes `path`, `image_sc`,
-        `probe_name`, and `description`, and includes `image` when the file is accepted.
+        to polar coordinates and saves as a zea HDF5 file via File.create.
 
         Args:
             avi_file (pathlib.Path): Path to the source .avi file to process.
-
-        Returns:
-            dict: The value returned by generate_zea_dataset containing the dataset
-                entry for the processed file.
         """
         hdf5_file = avi_file.stem + ".hdf5"
         sequence = load_avi(avi_file)
@@ -439,15 +432,23 @@ class H5Processor:
         assert sequence.min() >= self._process_range[0], sequence.min()
         assert sequence.max() <= self._process_range[1], sequence.max()
 
-        zea_dataset = {
-            "path": out_h5,
-            "image_sc": self._translate(sequence),
-            "probe_name": "generic",
-            "description": "EchoNet dataset converted to zea format",
-        }
+        data = {"image_sc": self._translate(sequence)}
         if accepted:
-            zea_dataset["image"] = self._translate(polar_im_set)
-        return generate_zea_dataset(**zea_dataset)
+            polar_db = self._translate(polar_im_set)
+            polar_uint8 = polar_db.astype(np.uint8)
+            polar_uint8 = np.expand_dims(polar_uint8, axis=-1)  # add y dim
+            n_x, n_z = polar_uint8.shape[1], polar_uint8.shape[2]
+            extent = np.array(
+                [0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32
+            )
+            data["image"] = {"pixels": polar_uint8, "extent": extent}
+
+        File.create(
+            path=out_h5,
+            data=data,
+            probe_name="generic",
+            description="EchoNet dataset converted to zea format",
+        )
 
 
 def convert_echonet(args):
