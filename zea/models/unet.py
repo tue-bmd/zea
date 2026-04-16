@@ -29,9 +29,6 @@ from zea.models.layers import (
     DownBlock,
     ResidualBlock,
     UpBlock,
-    _legacy_down_block,
-    _legacy_residual_block,
-    _legacy_up_block,
     sinusoidal_embedding,
 )
 from zea.models.preset_utils import register_presets
@@ -82,7 +79,6 @@ def get_unetwork(
     input_shape,
     widths,
     block_depth,
-    _legacy_layers=False,
 ):
     """Get a basic UNet architecture
 
@@ -90,8 +86,6 @@ def get_unetwork(
         input_shape: tuple, (height, width, channels)
         widths: list, number of filters in each layer
         block_depth: int, number of residual blocks in each down/up block
-        _legacy_layers: bool, if True use legacy closure-based layers for
-            backward-compatible weight loading.
 
     Returns:
         keras.Model
@@ -104,20 +98,12 @@ def get_unetwork(
     x = layers.Conv2D(widths[0], kernel_size=1)(noisy_images)
 
     skips = []
-    if _legacy_layers:
-        for width in widths[:-1]:
-            x = _legacy_down_block(width, block_depth)([x, skips])
-        for _ in range(block_depth):
-            x = _legacy_residual_block(widths[-1])(x)
-        for width in reversed(widths[:-1]):
-            x = _legacy_up_block(width, block_depth)([x, skips])
-    else:
-        for width in widths[:-1]:
-            x = DownBlock(width, block_depth)([x, skips])
-        for _ in range(block_depth):
-            x = ResidualBlock(widths[-1])(x)
-        for width in reversed(widths[:-1]):
-            x = UpBlock(width, block_depth)([x, skips])
+    for width in widths[:-1]:
+        x = DownBlock(width, block_depth)([x, skips])
+    for _ in range(block_depth):
+        x = ResidualBlock(widths[-1])(x)
+    for width in reversed(widths[:-1]):
+        x = UpBlock(width, block_depth)([x, skips])
 
     x = layers.Conv2D(n_channels, kernel_size=1, kernel_initializer="zeros")(x)
 
@@ -130,13 +116,13 @@ class UNetTimeConditional(BaseModel):
 
     Optionally includes temporal self-attention at the bottleneck for video
     diffusion, where frames are packed as channels
-    (``input_shape = (H, W, T*C)``).
+    (``image_shape = (H, W, T*C)``).
 
     Args:
-        input_shape: ``(H, W, C)`` or ``(H, W, T*C)`` for video.
+        image_shape: ``(H, W, C)`` or ``(H, W, T*C)`` for video.
         widths: Filter counts per resolution level.
         block_depth: Number of residual blocks per down/up stage.
-        input_range: Value range of input images.
+        image_range: Value range of input images.
         embedding_min_frequency: Min frequency for sinusoidal time embedding.
         embedding_max_frequency: Max frequency for sinusoidal time embedding.
         embedding_dims: Dimensionality of time embedding.
@@ -151,38 +137,22 @@ class UNetTimeConditional(BaseModel):
 
     def __init__(
         self,
+        image_shape,
         widths,
         block_depth,
-        input_shape=None,
-        image_shape=None,
-        input_range=None,
-        image_range=None,
+        image_range,
         embedding_min_frequency=1.0,
         embedding_max_frequency=1000.0,
         embedding_dims=32,
         embedding_conditioning="concat",
         temporal_attention_bottleneck=False,
         temporal_attention_heads=4,
-        _legacy_layers=False,
         name="unet_time_conditional",
         **kwargs,
     ):
-        """
-        Initializes a time-conditional UNet model
-
-        Accepts both input_shape/input_range and image_shape/image_range to ensure consistency
-        with other zea models while retaining backwards compatibility with models that only specify
-        input_shape/input_range.
-        """
         super().__init__(name=name, **kwargs)
-        assert input_shape is not None or image_shape is not None, (
-            "Must provide either input_shape or image_shape"
-        )
-        assert input_range is not None or image_range is not None, (
-            "Must provide either input_range or image_range"
-        )
-        self.input_shape = input_shape or image_shape
-        self.input_range = input_range or image_range
+        self.image_shape = image_shape
+        self.image_range = image_range
         self.widths = widths
         self.block_depth = block_depth
         self.embedding_min_frequency = embedding_min_frequency
@@ -191,9 +161,8 @@ class UNetTimeConditional(BaseModel):
         self.embedding_conditioning = embedding_conditioning
         self.temporal_attention_bottleneck = temporal_attention_bottleneck
         self.temporal_attention_heads = temporal_attention_heads
-        self._legacy_layers = _legacy_layers
         self.network = get_time_conditional_unetwork(
-            self.input_shape,
+            self.image_shape,
             self.widths,
             self.block_depth,
             self.embedding_min_frequency,
@@ -202,15 +171,14 @@ class UNetTimeConditional(BaseModel):
             self.embedding_conditioning,
             self.temporal_attention_bottleneck,
             self.temporal_attention_heads,
-            _legacy_layers=self._legacy_layers,
         )
 
     def get_config(self):
         config = super().get_config()
         config.update(
             {
-                "input_shape": self.input_shape,
-                "input_range": self.input_range,
+                "image_shape": self.image_shape,
+                "image_range": self.image_range,
                 "widths": self.widths,
                 "block_depth": self.block_depth,
                 "embedding_min_frequency": self.embedding_min_frequency,
@@ -228,7 +196,7 @@ class UNetTimeConditional(BaseModel):
 
 
 def get_time_conditional_unetwork(
-    input_shape,
+    image_shape,
     widths=None,
     block_depth=None,
     embedding_min_frequency=1.0,
@@ -237,7 +205,6 @@ def get_time_conditional_unetwork(
     embedding_conditioning="concat",
     temporal_attention_bottleneck=False,
     temporal_attention_heads=4,
-    _legacy_layers=False,
 ):
     """Get a UNet architecture with time-conditional sinusoidal embeddings.
 
@@ -245,7 +212,7 @@ def get_time_conditional_unetwork(
     bottleneck for video diffusion with frames packed as channels.
 
     Args:
-        input_shape: tuple, ``(height, width, channels)``.  For video data,
+        image_shape: tuple, ``(height, width, channels)``.  For video data,
             channels = ``T * C`` where ``T`` is the number of frames.
         widths: list, number of filters in each layer.
         block_depth: int, number of residual blocks in each down/up block
@@ -263,13 +230,11 @@ def get_time_conditional_unetwork(
             self-attention at the bottleneck (useful for video diffusion).
         temporal_attention_heads: int, number of attention heads for temporal
             self-attention.
-        _legacy_layers: bool, if ``True`` use legacy closure-based layers
-            for backward-compatible weight loading of old model checkpoints.
 
     Returns:
         ``keras.Model`` with inputs ``[noisy_images, noise_variances]``.
     """
-    assert len(input_shape) == 3, "input_shape must be a tuple of (height, width, channels)"
+    assert len(image_shape) == 3, "image_shape must be a tuple of (height, width, channels)"
     assert embedding_dims % 2 == 0, "embedding_dims must be even! (sin + cos)"
 
     if widths is None:
@@ -278,7 +243,7 @@ def get_time_conditional_unetwork(
     if block_depth is None:
         block_depth = 2
 
-    image_height, image_width, n_channels = input_shape
+    image_height, image_width, n_channels = image_shape
     noisy_images = keras.Input(shape=(image_height, image_width, n_channels))
     noise_variances = keras.Input(shape=(1, 1, 1))
 
@@ -304,24 +269,14 @@ def get_time_conditional_unetwork(
         )
 
     skips = []
-    if _legacy_layers:
-        for width in widths[:-1]:
-            x = _legacy_down_block(width, block_depth)([x, skips])
-        for _ in range(block_depth):
-            x = _legacy_residual_block(widths[-1])(x)
-        if temporal_attention_bottleneck:
-            x = x + TemporalAttention(num_heads=temporal_attention_heads)(x)
-        for width in reversed(widths[:-1]):
-            x = _legacy_up_block(width, block_depth)([x, skips])
-    else:
-        for width in widths[:-1]:
-            x = DownBlock(width, block_depth)([x, skips])
-        for _ in range(block_depth):
-            x = ResidualBlock(widths[-1])(x)
-        if temporal_attention_bottleneck:
-            x = x + TemporalAttention(num_heads=temporal_attention_heads)(x)
-        for width in reversed(widths[:-1]):
-            x = UpBlock(width, block_depth)([x, skips])
+    for width in widths[:-1]:
+        x = DownBlock(width, block_depth)([x, skips])
+    for _ in range(block_depth):
+        x = ResidualBlock(widths[-1])(x)
+    if temporal_attention_bottleneck:
+        x = x + TemporalAttention(num_heads=temporal_attention_heads)(x)
+    for width in reversed(widths[:-1]):
+        x = UpBlock(width, block_depth)([x, skips])
 
     x = layers.Conv2D(n_channels, kernel_size=1, kernel_initializer="zeros")(x)
 

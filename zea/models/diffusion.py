@@ -31,17 +31,14 @@ from zea.internal.core import Object
 from zea.internal.operators import Operator
 from zea.internal.registry import diffusion_guidance_registry, model_registry, operator_registry
 from zea.internal.utils import fn_requires_argument
+from zea.models.dense import get_time_conditional_dense_network
 from zea.models.generative import DeepGenerativeModel
 from zea.models.preset_utils import register_presets
 from zea.models.presets import diffusion_model_presets
+from zea.models.unet import get_time_conditional_unetwork
 from zea.models.utils import LossTrackerWrapper
 
 tf = _import_tf()
-
-VALID_NETWORK_MODELS = [
-    "unet_time_conditional",
-    "dense_time_conditional",
-]
 
 
 @model_registry(name="diffusion")
@@ -114,14 +111,19 @@ class DiffusionModel(DeepGenerativeModel):
         self.min_t = min_t
         self.max_t = max_t
 
-        assert network_name in VALID_NETWORK_MODELS, (
-            f"Invalid network name: {network_name}. Valid options are: {VALID_NETWORK_MODELS}"
-        )
-        self.network = model_registry[network_name](
-            input_shape=self.input_shape,
-            input_range=self.input_range,
-            **self.network_kwargs,
-        )
+        if network_name == "unet_time_conditional":
+            self.network = get_time_conditional_unetwork(
+                image_shape=self.input_shape,
+                **self.network_kwargs,
+            )
+        elif network_name == "dense_time_conditional":
+            assert len(input_shape) == 1, "Dense network only supports 1D input"
+            self.network = get_time_conditional_dense_network(
+                input_dim=self.input_shape[0],
+                **self.network_kwargs,
+            )
+        else:
+            raise ValueError("Invalid network name provided.")
 
         # Also initialize the exponential moving average network
         self.ema_network = keras.models.clone_model(self.network)
@@ -160,40 +162,6 @@ class DiffusionModel(DeepGenerativeModel):
 
     def summary(self):
         return self.network.summary()
-
-    def load_weights(self, filepath, **kwargs):
-        """Load weights with automatic fallback to legacy layer format.
-
-        Old model checkpoints were saved when ``ResidualBlock``, ``DownBlock``
-        and ``UpBlock`` were closure-based functions.  Those checkpoints have
-        flat auto-generated weight names (``conv2d``, ``conv2d_1``, etc.)
-        which do not match the nested names produced by the current
-        ``keras.layers.Layer`` subclasses.  If the initial load fails we
-        rebuild the inner UNet using the legacy closures and retry.
-        """
-        try:
-            super().load_weights(filepath, **kwargs)
-        except Exception as e:
-            log.warning(
-                "Weight loading failed (%s). Rebuilding denoiser with "
-                "legacy (functional) layers for backward compatibility...",
-                e,
-            )
-            self._rebuild_with_legacy_layers()
-            super().load_weights(filepath, **kwargs)
-            log.info("Successfully loaded legacy model weights.")
-
-    def _rebuild_with_legacy_layers(self):
-        """Rebuild ``self.network`` and ``self.ema_network`` using the legacy
-        closure-based layer implementations so that old weight names match."""
-        self.network = model_registry[self.network_name](
-            input_shape=self.input_shape,
-            input_range=self.input_range,
-            _legacy_layers=True,
-            **self.network_kwargs,
-        )
-        self.ema_network = keras.models.clone_model(self.network)
-        self.ema_network.trainable = False
 
     def _init_operator_and_guidance(self, operator, guidance):
         if operator is not None:
