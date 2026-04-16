@@ -35,13 +35,12 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-import h5py
 import numpy as np
 from tqdm import tqdm
 
 from zea import log
 from zea.data.convert.utils import download_from_girder, sitk_load
-from zea.data.data_format import DatasetElement, generate_zea_dataset
+from zea.data.file import File
 
 # Citation text for inclusion in every converted file
 CETUS_CITATION = (
@@ -109,11 +108,12 @@ def process_cetus(source_path, output_path, overwrite=False):
     """Convert a single CETUS patient time-point to a zea HDF5 file.
 
     Each file stores the 3D B-mode volume as ``image_sc`` (scan-converted image).
-    If a corresponding ground truth segmentation file exists, it is stored as an
-    additional element under ``non_standard_elements/segmentation``.
+    If a corresponding ground truth segmentation file exists, it is stored as a
+    ``Segmentation`` map under ``data/segmentation`` with spatial extent derived
+    from the NIfTI voxel spacing.
 
-    The voxel spacing from the NIfTI header is stored as ``non_standard_elements/voxel_spacing``
-    (in meters). License and citation information is embedded in the file description.
+    Patient ID and citation are stored in the ``metadata`` group.
+    License information is embedded in the file description.
 
     Args:
         source_path (str or Path): Path to the source ``.nii.gz`` B-mode file.
@@ -157,84 +157,33 @@ def process_cetus(source_path, output_path, overwrite=False):
     # Check for corresponding ground truth segmentation
     gt_path = source_path.with_name(source_path.name.replace(".nii.gz", "_gt.nii.gz"))
 
-    additional_elements = []
-
-    # Store voxel spacing
-    additional_elements.append(
-        DatasetElement(
-            dataset_name="voxel_spacing",
-            data=voxel_spacing,
-            description=(
-                "Voxel spacing in meters for each dimension (x, y, z) "
-                "as provided in the NIfTI header."
-            ),
-            unit="m",
-        )
-    )
-
-    # Store citation
-    additional_elements.append(
-        DatasetElement(
-            dataset_name="citation",
-            data=np.array(CETUS_CITATION, dtype=h5py.string_dtype()),
-            description="Required citation for any use of the CETUS database.",
-            unit="unitless",
-        )
-    )
-
-    # Store license
-    additional_elements.append(
-        DatasetElement(
-            dataset_name="license",
-            data=np.array(CETUS_LICENSE, dtype=h5py.string_dtype()),
-            description="License of the CETUS dataset.",
-            unit="unitless",
-        )
-    )
-
-    # Store time point info (ED or ES)
+    # Extract patient and time-point info from filename
     stem = source_path.stem  # e.g. "patient01_ED.nii" -> stem is "patient01_ED"
     if stem.endswith(".nii"):
         stem = stem[:-4]  # remove .nii if present from double suffix
     time_point = stem.split("_")[-1]  # "ED" or "ES"
-    additional_elements.append(
-        DatasetElement(
-            dataset_name="time_point",
-            data=np.array(time_point, dtype=h5py.string_dtype()),
-            description="Cardiac time point: ED (end-diastole) or ES (end-systole).",
-            unit="unitless",
-        )
-    )
-
-    # Store patient ID
     patient_name = stem.split("_")[0]  # e.g. "patient01"
-    patient_id = int(patient_name.removeprefix("patient"))
-    additional_elements.append(
-        DatasetElement(
-            dataset_name="patient_id",
-            data=np.array(patient_id, dtype=np.int64),
-            description="Patient ID number.",
-            unit="unitless",
-        )
-    )
+
+    # Build data dict
+    data = {"image_sc": image_sc.astype(np.float32)}
 
     if gt_path.exists():
         gt_volume, _ = sitk_load(gt_path)
-        # GT is binary: 0 or 255 -> normalize to 0/1
-        gt_volume = (gt_volume > 0).astype(np.float32)
-        gt_volume = gt_volume[np.newaxis, ...]  # (1, D, H, W)
-        additional_elements.append(
-            DatasetElement(
-                dataset_name="segmentation",
-                data=gt_volume,
-                description=(
-                    "Ground truth left ventricle segmentation mask. "
-                    "Binary: 1 = endocardium, 0 = background. "
-                    "Shape: (n_frames, depth, height, width)."
-                ),
-                unit="unitless",
-            )
+        # GT is binary: 0 or 255 -> bool mask, shape (1, D, H, W, 1)
+        seg_mask = (gt_volume > 0)[np.newaxis, ..., np.newaxis]
+
+        # Compute spatial extent from voxel spacing: (xmin, xmax, ymin, ymax, zmax, zmin)
+        D, H, W = volume.shape
+        extent = np.array(
+            [0, D * voxel_spacing[0], 0, W * voxel_spacing[2], 0, H * voxel_spacing[1]],
+            dtype=np.float32,
         )
+
+        data["segmentation"] = {
+            "pixels": seg_mask,
+            "extent": extent,
+            "labels": np.array(["endocardium"]),
+        }
 
     # Build description for this file
     file_description = (
@@ -245,13 +194,16 @@ def process_cetus(source_path, output_path, overwrite=False):
         f"Citation: {CETUS_CITATION}"
     )
 
-    generate_zea_dataset(
+    File.create(
         path=output_path,
-        image_sc=image_sc,
+        data=data,
+        metadata={
+            "subject": {"id": patient_name},
+            "credit": CETUS_CITATION,
+            "annotations": {"label": np.array([time_point])},
+        },
         probe_name="generic",
         description=file_description,
-        additional_elements=additional_elements,
-        cast_to_float=True,
         overwrite=overwrite,
     )
 

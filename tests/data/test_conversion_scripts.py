@@ -707,8 +707,9 @@ def verify_converted_cetus_test_data(dst):
         img = f.data.image_sc[:]
         assert img.ndim == 4, f"Expected 4-D image_sc, got {img.ndim}"
         f.validate()
-        assert "non_standard_elements/segmentation" in f
-        assert "non_standard_elements/voxel_spacing" in f
+        assert "data/segmentation" in f
+        assert "metadata/subject" in f
+        assert "metadata/credit" in f
 
     # Exercise the error branch of get_split (not reachable via normal conversion)
     with pytest.raises(ValueError):
