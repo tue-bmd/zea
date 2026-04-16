@@ -317,9 +317,21 @@ class TestValidateSpec:
             # probe attr mapped to probe_name
             assert spec.probe_name == "legacy_probe"
 
-    def test_validate_spec_raises_on_incomplete_legacy_file(self, dummy_file):
+    def test_validate_spec_raises_on_incomplete_legacy_file(self, tmp_path):
         """validate_spec() raises on legacy files missing required scan fields."""
-        with File(dummy_file) as f:
+        import h5py
+
+        path = tmp_path / "incomplete_legacy.hdf5"
+        with h5py.File(path, "w") as f:
+            f.attrs["probe"] = "test_probe"
+            g = f.create_group("data")
+            g.create_dataset("raw_data", data=np.zeros((1, 2, 8, 4, 1), dtype=np.float32))
+            # Scan group with only a subset of required fields (incomplete)
+            s = f.create_group("scan")
+            s.create_dataset("probe_geometry", data=np.zeros((4, 3), dtype=np.float32))
+            s.create_dataset("sampling_frequency", data=np.float32(40e6))
+
+        with File(str(path)) as f:
             with pytest.raises(TypeError, match="missing.*required"):
                 f.validate_spec()
 

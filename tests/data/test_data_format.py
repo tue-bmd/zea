@@ -6,15 +6,10 @@ from typing import Generator
 import numpy as np
 import pytest
 
-from zea.data.data_format import (
-    DatasetElement,
-    generate_zea_dataset,
-    load_additional_elements,
-)
 from zea.data.file import File, validate_file
-from zea.internal.checks import _REQUIRED_SCAN_KEYS
+from zea.data.file_operations import save_file
+from zea.data.spec import ScanSpec
 
-from .. import DEFAULT_TEST_SEED
 from . import generate_example_dataset
 
 n_frames = 2
@@ -23,25 +18,28 @@ n_el = 16
 n_ax = 128
 n_ch = 1
 
-DATASET_PARAMETERS = {
+_REQUIRED_SCAN_KEYS = ScanSpec.required_fields()
+
+# Data dict for File.create
+DATA = {
     "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+}
+
+# Scan dict for File.create
+SCAN = {
     "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
-    "sampling_frequency": 30e6,
-    "center_frequency": 6e6,
+    "sampling_frequency": np.float32(30e6),
+    "center_frequency": np.float32(6e6),
+    "demodulation_frequency": np.float32(6e6),
     "initial_times": np.zeros((n_tx), dtype=np.float32),
     "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
-    "sound_speed": 1540.0,
-    "probe_name": "generic",
-    "description": "Dataset parameters for testing",
+    "sound_speed": np.float32(1540.0),
     "focus_distances": np.zeros((n_tx,), dtype=np.float32),
     "polar_angles": np.linspace(-np.pi / 2, np.pi / 2, n_tx, dtype=np.float32),
     "azimuth_angles": np.zeros((n_tx), np.float32),
     "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
     "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32),
-    "bandwidth_percent": 200.0,
-    "waveforms_one_way": [np.zeros((512), dtype=np.float32)],
-    "waveforms_two_way": [np.zeros((512,), dtype=np.float32)],
-    "tx_waveform_indices": np.zeros((n_tx,), dtype=np.int32),
+    "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
 }
 
 
@@ -71,52 +69,83 @@ def test_example_dataset(example_dataset_path):
         assert raw_data is not None, "Dataset not loaded correctly"
 
 
-@pytest.mark.parametrize(
-    "key",
-    [key for key in DATASET_PARAMETERS if key not in _REQUIRED_SCAN_KEYS],
-)
-def test_omit_key(key, tmp_hdf5_path):
-    """Tests if omitting an optional key in the dataset_parameters dictionary
-    does not raise an error.
-
-    Args:
-        key (str): The key to omit from the dataset_parameters dictionary.
-    """
-    reduced_parameters = DATASET_PARAMETERS.copy()
-    reduced_parameters.pop(key)
-    generate_zea_dataset(path=tmp_hdf5_path, **DATASET_PARAMETERS)
+def test_create_basic(tmp_hdf5_path):
+    """Tests basic File.create with data and scan dicts."""
+    f = File.create(
+        tmp_hdf5_path,
+        data=DATA,
+        scan=SCAN,
+        probe_name="generic",
+        description="Dataset parameters for testing",
+        overwrite=True,
+    )
+    f.close()
+    validate_file(tmp_hdf5_path)
 
 
 @pytest.mark.parametrize(
     "key",
-    [
-        "raw_data",
-        "probe_geometry",
-        "sampling_frequency",
-        "center_frequency",
-        "initial_times",
-        "t0_delays",
-        "sound_speed",
-        "probe_name",
-        "description",
-        "focus_distances",
-        "polar_angles",
-        "azimuth_angles",
-        "tx_apodizations",
-        "bandwidth_percent",
-        "time_to_next_transmit",
-    ],
+    list(SCAN.keys()),
 )
-def test_wrong_shape(key, tmp_hdf5_path):
-    """Tests if passing a parameter with the wrong shape raises an error.
+def test_wrong_scan_shape(key, tmp_hdf5_path):
+    """Tests if passing a scan parameter with the wrong shape raises an error.
 
     Args:
-        key (str): The key to change in the dataset_parameters dictionary.
+        key (str): The key to change in the scan dictionary.
     """
-    wrong_parameters = DATASET_PARAMETERS.copy()
-    wrong_parameters[key] = np.zeros((n_frames, n_tx + 7, n_el + 1), dtype=np.float32)
-    with pytest.raises(AssertionError):
-        generate_zea_dataset(path=tmp_hdf5_path, **wrong_parameters)
+    wrong_scan = SCAN.copy()
+    wrong_scan[key] = np.zeros((n_frames, n_tx + 7, n_el + 1), dtype=np.float32)
+    with pytest.raises((AssertionError, ValueError, TypeError)):
+        f = File.create(
+            tmp_hdf5_path,
+            data=DATA,
+            scan=wrong_scan,
+            probe_name="generic",
+            description="Dataset parameters for testing",
+            overwrite=True,
+        )
+        f.close()
+
+
+@pytest.mark.parametrize(
+    "key",
+    [k for k in SCAN.keys() if k not in _REQUIRED_SCAN_KEYS],
+)
+def test_omit_optional_scan_key(key, tmp_hdf5_path):
+    """Tests that omitting an optional scan key does not raise an error.
+
+    Args:
+        key (str): The optional key to omit from the scan dictionary.
+    """
+    reduced_scan = {k: v for k, v in SCAN.items() if k != key}
+    f = File.create(
+        tmp_hdf5_path,
+        data=DATA,
+        scan=reduced_scan,
+        overwrite=True,
+    )
+    f.close()
+    validate_file(tmp_hdf5_path)
+
+
+@pytest.mark.parametrize(
+    "key",
+    _REQUIRED_SCAN_KEYS,
+)
+def test_omit_required_scan_key(key, tmp_hdf5_path):
+    """Tests that omitting a required scan key raises a TypeError.
+
+    Args:
+        key (str): The required key to omit from the scan dictionary.
+    """
+    reduced_scan = {k: v for k, v in SCAN.items() if k != key}
+    with pytest.raises(TypeError, match="missing"):
+        File.create(
+            tmp_hdf5_path,
+            data=DATA,
+            scan=reduced_scan,
+            overwrite=True,
+        )
 
 
 def test_existing_path(tmp_hdf5_path):
@@ -125,62 +154,136 @@ def test_existing_path(tmp_hdf5_path):
     tmp_hdf5_path.touch()
 
     with pytest.raises(FileExistsError):
-        generate_zea_dataset(path=tmp_hdf5_path, **DATASET_PARAMETERS)
-
-
-def test_only_waveforms_one_way(tmp_hdf5_path):
-    """Tests if passing only waveforms_one_way works correctly."""
-    parameters = DATASET_PARAMETERS.copy()
-    parameters["waveforms_one_way"] = None
-    generate_zea_dataset(path=tmp_hdf5_path, **parameters)
-
-
-def test_only_waveforms_two_way(tmp_hdf5_path):
-    """Tests if passing only waveforms_two_way works correctly."""
-    parameters = DATASET_PARAMETERS.copy()
-    parameters["waveforms_two_way"] = None
-    generate_zea_dataset(path=tmp_hdf5_path, **parameters)
-
-
-def test_additional_dataset_element(tmp_hdf5_path):
-    """Tests the functionality of the additional_elements parameter in the
-    generate_zea_dataset function by adding additional elements to the
-    dataset."""
-
-    elements = []
-    rng = np.random.default_rng(DEFAULT_TEST_SEED)
-    elements.append(
-        DatasetElement(
-            dataset_name="lens_correction",
-            data=np.array(0.1),
-            description="The additional path length due to the lens in wavelengths.",
-            unit="wavelengths",
+        File.create(
+            tmp_hdf5_path,
+            data=DATA,
+            scan=SCAN,
+            probe_name="generic",
+            description="Dataset parameters for testing",
         )
+
+
+def test_overwrite(tmp_hdf5_path):
+    """Tests that overwrite=True allows replacing an existing file."""
+    tmp_hdf5_path.touch()
+
+    f = File.create(
+        tmp_hdf5_path,
+        data=DATA,
+        scan=SCAN,
+        probe_name="generic",
+        description="Dataset parameters for testing",
+        overwrite=True,
     )
-    elements.append(
-        DatasetElement(
-            dataset_name="sound_speed_map",
-            data=rng.standard_normal((10, 10)),
-            description="The local speed of sound in the medium.",
-            unit="m/s",
+    f.close()
+    validate_file(tmp_hdf5_path)
+
+
+def test_image_only(tmp_hdf5_path):
+    """Tests creating a file with only image_sc data (no scan)."""
+    image_sc = np.zeros((n_frames, 256, 256), dtype=np.float32)
+    f = File.create(
+        tmp_hdf5_path,
+        data={"image_sc": image_sc},
+        probe_name="generic",
+        description="Image-only dataset",
+        overwrite=True,
+    )
+    f.close()
+
+    with File(tmp_hdf5_path) as dataset:
+        assert dataset.data.image_sc.shape == (n_frames, 256, 256)
+
+
+def test_custom_map(tmp_hdf5_path):
+    """Tests creating a file with a custom map element in the data group."""
+    import warnings
+
+    custom_pixels = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)
+    custom_extent = np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        f = File.create(
+            tmp_hdf5_path,
+            data={
+                "raw_data": DATA["raw_data"],
+                "my_custom_overlay": {
+                    "pixels": custom_pixels,
+                    "extent": custom_extent,
+                    "description": "custom overlay map",
+                    "unit": "a.u.",
+                },
+            },
+            scan=SCAN,
+            overwrite=True,
         )
+    f.close()
+
+    with File(tmp_hdf5_path) as f:
+        assert "my_custom_overlay" in f["data"]
+        np.testing.assert_array_equal(f.data.my_custom_overlay.pixels[:], custom_pixels)
+        np.testing.assert_array_equal(f.data.my_custom_overlay.extent[:], custom_extent)
+
+
+@pytest.fixture
+def _scan_and_probe(tmp_path):
+    """Return a minimal Scan + Probe pair by round-tripping through generate_example_dataset."""
+    from zea.data.file import load_file
+
+    path = tmp_path / "_scan_probe_helper.hdf5"
+    generate_example_dataset(path, n_frames=n_frames, n_tx=n_tx, n_el=n_el, n_ax=n_ax)
+    data_dict, scan, probe = load_file(path)
+    return scan, probe
+
+
+def test_save_file_custom_maps(tmp_hdf5_path, _scan_and_probe):
+    """Tests that save_file correctly stores custom spatial maps in the data group."""
+    import warnings
+
+    scan, probe = _scan_and_probe
+    custom_pixels = np.zeros((n_frames, 32, 32, 1), dtype=np.uint8)
+    custom_extent = np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        save_file(
+            path=tmp_hdf5_path,
+            scan=scan,
+            probe=probe,
+            raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+            custom_maps={
+                "my_overlay": {
+                    "pixels": custom_pixels,
+                    "extent": custom_extent,
+                }
+            },
+        )
+
+    with File(tmp_hdf5_path) as f:
+        assert "my_overlay" in f["data"]
+        np.testing.assert_array_equal(f.data.my_overlay.pixels[:], custom_pixels)
+        np.testing.assert_array_equal(f.data.my_overlay.extent[:], custom_extent)
+
+
+def test_save_file_custom_metadata(tmp_hdf5_path, _scan_and_probe):
+    """Tests that save_file correctly stores metadata in the metadata group."""
+    scan, probe = _scan_and_probe
+
+    save_file(
+        path=tmp_hdf5_path,
+        scan=scan,
+        probe=probe,
+        raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+        metadata={
+            "credit": "Test Lab, 2024",
+            "text_report": "Normal acquisition.",
+            "annotations": {
+                "label": np.array(["healthy", "healthy"]),
+            },
+        },
     )
 
-    # Add elements to subgroup
-    t = np.arange(100) / DATASET_PARAMETERS["sampling_frequency"]
-    for n in range(4):
-        elements.append(
-            DatasetElement(
-                group_name="functions",
-                dataset_name=f"functions{n:02d}",
-                data=np.sin(2 * np.pi * 1e6 * n * t),
-                description="element3 description",
-                unit="m",
-            )
-        )
-
-    generate_zea_dataset(path=tmp_hdf5_path, **DATASET_PARAMETERS, additional_elements=elements)
-
-    elements = load_additional_elements(tmp_hdf5_path)
-
-    assert len(elements) == 6, "Not all additional elements were saved correctly."
+    with File(tmp_hdf5_path) as f:
+        assert "metadata" in f
+        assert f["metadata/credit"][()] == b"Test Lab, 2024"

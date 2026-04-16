@@ -98,6 +98,72 @@ Files created with zea 0.0.12 and later are fully described by the
 .. include:: _spec_ref.rst
 
 -------------------------------
+Custom fields
+-------------------------------
+
+Beyond the standard data types (``raw_data``, ``image_sc``, …), you can attach arbitrary
+**custom spatial maps** and **custom metadata** to any zea file.
+
+**Custom spatial maps** (``data`` group)
+
+A custom map is a named entry in the ``data`` group that associates a pixel array with a physical
+extent.  Pass it as a sub-dict under the key you want:
+
+.. code-block:: python
+
+    import numpy as np
+    from zea import File
+
+    n_frames = 2
+    pixels = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)   # (frames, x, z[, channels])
+    extent = np.array([x_min, x_max, y_min, y_max, z_min, z_max], dtype=np.float32)  # metres
+
+    f = File.create(
+        "my_acquisition.hdf5",
+        data={
+            "raw_data": raw,
+            "my_overlay": {          # any name not already in the spec
+                "pixels":  pixels,
+                "extent":  extent,
+                # optional: "labels", "description", "unit"
+            },
+        },
+        scan=scan,
+    )
+    f.close()
+
+    # Reading back
+    with File("my_acquisition.hdf5") as f:
+        overlay_pixels = f.data.my_overlay.pixels[:]
+        overlay_extent = f.data.my_overlay.extent[:]
+
+
+**Custom metadata** (``metadata`` group)
+
+Standard metadata fields (``credit``, ``annotations``, ``text_report``, ``subject``, ``ecg``, …)
+are validated by :class:`~zea.data.spec.MetadataSpec`.  Pass a plain dict to ``File.create`` or to
+:func:`~zea.data.file_operations.save_file`:
+
+.. code-block:: python
+
+    f = File.create(
+        "my_acquisition.hdf5",
+        data={"raw_data": raw},
+        scan=scan,
+        metadata={
+            "credit": "My Lab, 2024",
+            "text_report": "Normal acquisition, no pathology.",
+            "annotations": {
+                "label": np.array(["healthy", "healthy"]),
+            },
+        },
+    )
+
+Custom signal keys (anything beyond the standard names) are accepted and stored as
+:class:`~zea.data.spec.SignalND` entries.  See :class:`~zea.data.spec.MetadataSpec` for the full
+list of supported fields.
+
+-------------------------------
 Supported datasets & conversion
 -------------------------------
 
