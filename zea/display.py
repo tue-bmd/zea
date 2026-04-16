@@ -36,6 +36,81 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     return image
 
 
+def overlay_masks(
+    image,
+    masks,
+    alpha: float = 0.5,
+    colors=None,
+):
+    """Overlay segmentation masks on top of an image using PIL.
+
+    Args:
+        image (PIL.Image or ndarray): Base image. If grayscale, it is converted
+            to RGB. If ndarray, it is converted to a PIL Image first.
+        masks (list of PIL.Image or ndarray): Segmentation masks to overlay.
+            Each mask should be an 8-bit single-channel image where non-zero
+            pixels indicate the masked region.
+        alpha (float, optional): Opacity of the mask overlays in [0, 1].
+            Defaults to 0.5.
+        colors (list of tuple, optional): RGB colors for each mask. If None,
+            a default palette is used. If provided, must contain at least as
+            many entries as masks (extra entries are ignored).
+
+    Returns:
+        PIL.Image: RGB image with masks overlaid.
+    """
+    # Validate alpha parameter before conversion to uint8
+    if not (0.0 <= alpha <= 1.0):
+        raise ValueError(f"alpha must be in the range [0.0, 1.0], got {alpha}")
+
+    _DEFAULT_COLORS = [
+        (255, 0, 0),
+        (0, 255, 0),
+        (0, 0, 255),
+        (255, 255, 0),
+        (0, 255, 255),
+        (255, 0, 255),
+    ]
+
+    if not isinstance(image, Image.Image):
+        image = Image.fromarray(np.asarray(image))
+
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+
+    # Validate colors list has enough entries if provided
+    if colors is not None and len(colors) < len(masks):
+        raise ValueError(
+            f"colors must have at least as many entries as masks: "
+            f"got {len(colors)} colors for {len(masks)} masks"
+        )
+
+    result = image.copy()
+
+    for i, mask in enumerate(masks):
+        if not isinstance(mask, Image.Image):
+            mask = Image.fromarray(np.asarray(mask))
+
+        if mask.size != image.size:
+            raise ValueError(f"Mask {i} size {mask.size} does not match image size {image.size}")
+
+        if mask.mode != "L":
+            mask = mask.convert("L")
+
+        color = _DEFAULT_COLORS[i % len(_DEFAULT_COLORS)] if colors is None else colors[i]
+
+        # Create a solid color layer the same size as the image
+        color_layer = Image.new("RGB", image.size, color)
+
+        # Build alpha channel from the mask: scale mask values by alpha
+        mask_np = (np.asarray(mask) > 0).astype(np.uint8)
+        alpha_channel = Image.fromarray((mask_np * int(alpha * 255)).astype(np.uint8))
+
+        result.paste(color_layer, mask=alpha_channel)
+
+    return result
+
+
 def compute_scan_convert_2d_coordinates(
     image_shape,
     rho_range: Tuple[float, float],
