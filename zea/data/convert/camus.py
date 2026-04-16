@@ -30,8 +30,8 @@ from skimage.transform import resize
 from tqdm import tqdm
 
 from zea import log
+from zea.data.file import File
 from zea.data.convert.utils import download_from_girder, sitk_load, unzip
-from zea.data.data_format import generate_zea_dataset
 from zea.func.tensor import translate
 from zea.internal.utils import find_first_nonzero_index
 
@@ -162,15 +162,25 @@ def process_camus(source_path, output_path, overwrite=False):
     # Change range to [-60, 0] dB
     image_seq = translate(image_seq, (0, 255), (-60, 0))
     image_seq_polar = translate(image_seq_polar, (0, 255), (-60, 0))
+    image_seq_polar = image_seq_polar.astype(np.uint8)
 
-    generate_zea_dataset(
+    # Add y dimension (elevation) — CAMUS is 2D, so y=1
+    image_seq_polar = np.expand_dims(image_seq_polar, axis=-1)
+
+    n_x, n_z = image_seq_polar.shape[1], image_seq_polar.shape[2]
+    extent = np.array(
+        [0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32
+    )
+
+    File.create(
         path=output_path,
-        image=image_seq_polar,
-        image_sc=image_seq,
+        data={
+            "image_sc": image_seq,
+            "image": {"pixels": image_seq_polar, "extent": extent},
+        },
         probe_name="generic",
         description="camus dataset converted to zea format",
     )
-
 
 splits = {"train": [1, 401], "val": [401, 451], "test": [451, 501]}
 
