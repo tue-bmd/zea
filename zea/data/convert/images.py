@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from zea.data.data_format import generate_zea_dataset
+from zea.data.file import File
 from zea.io_lib import _SUPPORTED_IMG_TYPES, load_image
 
 
@@ -68,9 +68,15 @@ def _img_dir_to_h5_dir(
         )
 
         new_h5_file_path = new_dir_path / f"{group_id}.hdf5"
-        generate_zea_dataset(
+        pixels = frames.astype(np.uint8)
+        pixels = np.expand_dims(pixels, axis=-1)  # add y dim
+        n_x, n_z = pixels.shape[1], pixels.shape[2]
+        extent = np.array(
+            [0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32
+        )
+        File.create(
             path=new_h5_file_path,
-            image=frames,
+            data={"image": {"pixels": pixels, "extent": extent}},
             probe_name="generic",
             description=f"{dataset_name or 'image'} dataset converted to zea format",
         )
