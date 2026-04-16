@@ -316,19 +316,14 @@ class LVHProcessor(H5Processor):
         # Build a dummy extent (no physical coordinates available)
         # extent shape (6,): (xmin, xmax, ymin, ymax, zmin, zmax) in meters
         n_x, n_z = polar_np.shape[1], polar_np.shape[2]
-        extent = np.array(
-            [0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32
-        )
+        extent = np.array([0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32)
 
         return File.create(
             out_h5,
-            data = {
-                "image_sc": image_sc_np,
-                "image": {"pixels": polar_4d, "extent": extent}
-            },
-            scan = {},
+            data={"image_sc": image_sc_np, "image": {"pixels": polar_4d, "extent": extent}},
+            scan={},
             probe_name="generic",
-            description="EchoNet-LVH dataset converted to zea format"
+            description="EchoNet-LVH dataset converted to zea format",
         )
 
 
