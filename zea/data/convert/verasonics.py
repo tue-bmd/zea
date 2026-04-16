@@ -109,7 +109,9 @@ from keras import ops
 from schema import And, Optional, Or, Regex, Schema
 
 from zea import log
-from zea.data.data_format import DatasetElement, generate_zea_dataset
+from zea.data.data_format import DatasetElement
+from zea.data.file import File
+from zea.data.spec import DataSpec, ScanSpec
 from zea.func import log_compress, normalize
 from zea.internal.device import init_device
 from zea.utils import strtobool
@@ -1133,46 +1135,31 @@ class VerasonicsFile(h5py.File):
 
         additional_elements = []
 
-        # Add Verasonics lens correction to additional elements
-        el_lens_correction = DatasetElement(
-            group_name=group_name,
-            dataset_name="lens_correction",
-            data=self.lens_correction,
-            description=(
-                "The lens correction value used by Verasonics. This value is the "
-                "additional path length in wavelength that the lens introduces. "
-                "(This disregards refraction.)"
-            ),
-            unit="wavelengths",
-        )
-        additional_elements.append(el_lens_correction)
-
-        # Add Verasonics ImgDataP buffer to additional elements
-        try:
-            verasonics_image_buffer = self.read_image_data_p(event, frames=frames)
-            verasonics_image_buffer = DatasetElement(
-                dataset_name="verasonics_image_buffer",
-                data=verasonics_image_buffer,
-                description=(
-                    "The Verasonics ImgDataP buffer. "
-                    "WARNING: This buffer may skip frames compared to the raw data! "
-                    "Use only for reference."
-                ),
-                unit="unitless",
-            )
-            additional_elements.append(verasonics_image_buffer)
-        except Exception as e:
-            log.error(f"Could not read Verasonics ImgDataP buffer: {e}, skipping.")
-
         # Add additional elements from user-defined functions
         for additional_function in additional_functions:
             additional_elements.append(additional_function(self))
 
-        return {
+        result = {
             "raw_data": raw_data,
             **scan_dict,
+            "lens_correction": self.lens_correction,
             "additional_elements": additional_elements,
         }
+
+        # Add Verasonics ImgDataP buffer as image_sc if frame count matches
+        try:
+            image_sc = self.read_image_data_p(event, frames=frames)
+            if image_sc.shape[0] == raw_data.shape[0]:
+                result["image_sc"] = image_sc
+            else:
+                log.warning(
+                    f"Verasonics ImgDataP buffer has {image_sc.shape[0]} frames "
+                    f"but raw data has {raw_data.shape[0]} frames. Skipping image_sc."
+                )
+        except Exception as e:
+            log.error(f"Could not read Verasonics ImgDataP buffer: {e}, skipping.")
+
+        return result
 
     def _parse_frames_argument(self, frames, n_frames):
         value_error = ValueError(
@@ -1273,44 +1260,157 @@ class VerasonicsFile(h5py.File):
             num_events = num_events.pop()
 
             # loop over TX_Agent entries and overwrite TX each time
-            data = {}
+            all_event_data = {}
             for event in range(num_events):
-                data[event] = self.read_verasonics_file(
+                all_event_data[event] = self.read_verasonics_file(
                     event=event,
                     additional_functions=additional_functions,
                     allow_accumulate=allow_accumulate,
                 )
 
-            # convert dict of events to dict of lists
-            data = {key: [data[event][key] for event in data] for key in data[0]}
-            description = ["Verasonics data with multiple events"] * num_events
+            compression = "gzip" if enable_compression else None
 
-            # Generate the zea dataset
-            generate_zea_dataset(
-                path=output_path,
-                **data,
-                event_structure=True,
-                description=description,
-                enable_compression=enable_compression,
-            )
+            # Write event structure manually
+            output_path = Path(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with h5py.File(str(output_path), "w") as f:
+                f.attrs["probe_name"] = self.probe_name
+                f.attrs["description"] = "Verasonics data with multiple events"
+                f.attrs["event_structure"] = True
+
+                for event_idx in range(num_events):
+                    edata = all_event_data[event_idx]
+                    data_dict, scan_dict, additional_elements, lens_correction = (
+                        _split_verasonics_data(edata)
+                    )
+
+                    if lens_correction is not None:
+                        description = (
+                            f"Verasonics event {event_idx} "
+                            f"(lens correction: {lens_correction} wavelengths)"
+                        )
+                    else:
+                        description = f"Verasonics event {event_idx}"
+
+                    data_spec = DataSpec(**data_dict)
+                    scan_spec = ScanSpec(**scan_dict)
+
+                    event_group = f.create_group(f"event_{event_idx}")
+                    event_group.attrs["description"] = description
+                    data_group = event_group.create_group("data")
+                    data_spec.store_in_group(data_group, compression=compression or "gzip")
+                    scan_group = event_group.create_group("scan")
+                    scan_spec.store_in_group(scan_group, compression=compression or "gzip")
+
+                    _write_user_additional_elements(
+                        f, additional_elements, f"event_{event_idx}"
+                    )
 
         else:
-            # Here we call al the functions to read the data from the file
+            # Here we call all the functions to read the data from the file
             log.info("Reading Verasonics file...")
-            data = self.read_verasonics_file(
+            result = self.read_verasonics_file(
                 additional_functions=additional_functions,
                 frames=frames,
                 allow_accumulate=allow_accumulate,
             )
 
+            data_dict, scan_dict, additional_elements, lens_correction = (
+                _split_verasonics_data(result)
+            )
+
+            if lens_correction is not None:
+                description = (
+                    f"Verasonics data (lens correction: {lens_correction} wavelengths)"
+                )
+            else:
+                description = "Verasonics data"
+
             # Generate the zea dataset
             log.info("Generating zea dataset...")
-            generate_zea_dataset(
+            compression = "gzip" if enable_compression else None
+            File.create(
                 path=output_path,
-                **data,
-                description="Verasonics data",
-                enable_compression=enable_compression,
+                data=data_dict,
+                scan=scan_dict,
+                probe_name=self.probe_name,
+                description=description,
+                compression=compression or "gzip",
             )
+
+            if additional_elements:
+                _write_user_additional_elements_to_file(output_path, additional_elements)
+
+
+_SCAN_KEYS = set(ScanSpec.SCHEMA.keys())
+_DATA_KEYS = set(DataSpec.SCHEMA.keys())
+
+
+def _split_verasonics_data(result):
+    """Split the dict from read_verasonics_file into data, scan, and
+    additional_elements components.
+
+    Args:
+        result: Dict returned by :meth:`VerasonicsFile.read_verasonics_file`.
+
+    Returns:
+        tuple: (data_dict, scan_dict, additional_elements, lens_correction)
+    """
+    data_dict = {}
+    scan_dict = {}
+    additional_elements = result.pop("additional_elements", [])
+    lens_correction = result.pop("lens_correction", None)
+
+    for key, value in result.items():
+        if value is None:
+            continue
+        if key in _DATA_KEYS:
+            data_dict[key] = value
+        elif key in _SCAN_KEYS:
+            scan_dict[key] = value
+
+    return data_dict, scan_dict, additional_elements, lens_correction
+
+
+def _write_user_additional_elements(h5file, additional_elements, prefix=""):
+    """Write user-provided DatasetElement objects into an HDF5 file.
+
+    Args:
+        h5file: Open h5py.File in write/append mode.
+        additional_elements: List of DatasetElement objects from user-defined functions.
+        prefix: Path prefix for element group names (e.g. "event_0").
+    """
+    if not additional_elements:
+        return
+
+    nse_path = f"{prefix}/non_standard_elements" if prefix else "non_standard_elements"
+    if nse_path not in h5file:
+        nse = h5file.create_group(nse_path)
+        nse.attrs["description"] = (
+            "This group contains non-standard elements that can be added by the user."
+        )
+
+    for element in additional_elements:
+        group_path = nse_path
+        if element.group_name:
+            group_path = f"{nse_path}/{element.group_name}"
+            if group_path not in h5file:
+                h5file.create_group(group_path)
+
+        data = np.asarray(element.data)
+        is_scalar = np.isscalar(data) or data.ndim == 0
+        compression = "gzip" if not is_scalar else None
+        ds = h5file[group_path].create_dataset(
+            element.dataset_name, data=data, compression=compression
+        )
+        ds.attrs["description"] = element.description
+        ds.attrs["unit"] = element.unit
+
+
+def _write_user_additional_elements_to_file(path, additional_elements):
+    """Write user-provided additional elements into an existing HDF5 file."""
+    with h5py.File(str(path), "a") as f:
+        _write_user_additional_elements(f, additional_elements)
 
 
 def _zea_from_verasonics_workspace(input_path, output_path, **kwargs):
