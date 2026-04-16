@@ -76,20 +76,27 @@ class EchoNetDynamic(BaseModel):
         ]
         self.network = None
 
-    def build(self, input_shape):
+    def build(self, input_shape):  # pragma: no cover
         """Builds the network."""
-        self.maybe_convert_to_jax(input_shape)
+        self.maybe_convert_to_jax()
 
-    def maybe_convert_to_jax(self, input_shape):
-        """Converts the network to Jax if backend is Jax."""
+    def maybe_convert_to_jax(self):  # pragma: no cover
+        """Converts the network to JAX if backend is JAX.
+
+        JAX conversion traces the SavedModel using an example input of shape
+        ``(1, INFERENCE_SIZE, INFERENCE_SIZE, 3)``. At runtime, ``call()`` may pass
+        ``(B, INFERENCE_SIZE, INFERENCE_SIZE, 3)`` after resize/tile preprocessing.
+        """
         if backend.backend() == "jax":
-            inputs = ops.zeros(input_shape)
             from zea.backend import tf2jax
+
+            inputs = ops.zeros([1, INFERENCE_SIZE, INFERENCE_SIZE, 3])
 
             jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
 
             def call_fn(params, state, rng, inputs, training):
-                return jax_func(state, inputs)
+                with tf2jax.override_config("strict_shape_check", False):
+                    return jax_func(state, inputs)
 
             self.network = keras.layers.JaxLayer(call_fn, state=jax_params)
 
