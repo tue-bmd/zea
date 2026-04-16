@@ -10,7 +10,7 @@ from keras.utils import pad_sequences
 
 from zea import log
 from zea.data.preset_utils import HF_PREFIX, _hf_resolve_path
-from zea.data.spec import Data, FileSpec, MetadataSpec, MetricsSpec, ScanSpec
+from zea.data.spec import DataSpec, FileSpec, MetadataSpec, MetricsSpec, ScanSpec
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.utils import deprecated, reduce_to_signature
@@ -138,7 +138,7 @@ class File(h5py.File):
 
         Args:
             path: Destination file path.
-            data: Data dict accepted by :class:`~zea.data.spec.Data`.
+            data: Data dict accepted by :class:`~zea.data.spec.DataSpec`.
             scan: Scan-parameter dict accepted by :class:`~zea.data.spec.ScanSpec`.
             metadata: Optional metadata dict accepted by
                 :class:`~zea.data.spec.MetadataSpec`.
@@ -696,7 +696,7 @@ class File(h5py.File):
         are recognised zea data types.  For files written before zea 0.0.12
         (produced by :func:`~zea.data.data_format.generate_zea_dataset`) a minimal key-name
         check is performed.  For files created with zea 0.0.12 and later
-        the keys are checked against the :class:`~zea.data.spec.Data` schema.
+        the keys are checked against the :class:`~zea.data.spec.DataSpec` schema.
 
         Use :meth:`validate_spec` for a **full** validation that loads all data
         and checks dtypes, shapes, and cross-field dimension consistency.
@@ -997,7 +997,7 @@ def _validate_file_impl(file: File) -> None:
     - a ``data`` group is present and is an HDF5 Group
     - for legacy files, every key in ``data`` is a recognised zea data type
     - for files created with zea 0.0.12 and later, every key in ``data``
-    is in :class:`~zea.data.spec.Data`\'s schema
+    is in :class:`~zea.data.spec.DataSpec`\'s schema
     """
     assert_key(file, "data")
     assert isinstance(file["data"], h5py.Group), (
@@ -1012,11 +1012,11 @@ def _validate_file_impl(file: File) -> None:
         for key in file["data"].keys():
             assert key in _DATA_TYPES, f"'data/{key}' is not a recognised zea data type."
     else:
-        # For new-format files: accepted keys are Data.SCHEMA keys.
-        known = set(Data.SCHEMA.keys())
+        # For new-format files: accepted keys are DataSpec.SCHEMA keys.
+        known = set(DataSpec.SCHEMA.keys())
         for key in file["data"].keys():
             assert key in known, (
-                f"'data/{key}' is not in the Data schema. Known keys: {sorted(known)}"
+                f"'data/{key}' is not in the DataSpec schema. Known keys: {sorted(known)}"
             )
 
 

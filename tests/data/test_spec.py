@@ -6,7 +6,7 @@ import pytest
 from zea.data import spec as spec_module
 from zea.data.file import File
 from zea.data.spec import (
-    Data,
+    DataSpec,
     FileSpec,
     Image,
     Map,
@@ -354,7 +354,7 @@ def test_data_accepts_custom_map_keys_and_warns():
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
         )
 
-    assert isinstance(dataset.data, Data)
+    assert isinstance(dataset.data, DataSpec)
     assert isinstance(dataset.data.custom_map, Map)
     assert "custom_map" in dataset.to_dict()["data"]
 
@@ -470,21 +470,21 @@ class TestScanValidationErrors:
 
 
 class TestDataValidationErrors:
-    """TypeError / ValueError raised by Data spec validation."""
+    """TypeError / ValueError raised by DataSpec spec validation."""
 
     def test_raw_data_wrong_dtype_raises(self):
         with pytest.raises(TypeError, match="raw_data"):
-            Data(raw_data=np.zeros((2, 3, 8, 4, 1), dtype=np.int8))
+            DataSpec(raw_data=np.zeros((2, 3, 8, 4, 1), dtype=np.int8))
 
     def test_raw_data_wrong_ndim_raises(self):
         """raw_data must be 5-D (n_frames, n_tx, n_ax, n_el, n_ch)."""
         with pytest.raises(ValueError, match="raw_data"):
-            Data(raw_data=np.zeros((2, 3, 8), dtype=np.float32))
+            DataSpec(raw_data=np.zeros((2, 3, 8), dtype=np.float32))
 
     def test_empty_data_raises(self):
-        """Data() with no fields set must raise."""
+        """DataSpec() with no fields set must raise."""
         with pytest.raises(ValueError, match="At least one data field must be provided"):
-            Data()
+            DataSpec()
 
     def test_map_wrong_pixel_dtype_raises(self):
         """SosMap inherits FloatMap – pixels must be float32, not uint8."""
@@ -522,20 +522,20 @@ class TestDataValidationErrors:
     def test_n_ch_3_raises_for_raw_data(self):
         """raw_data n_ch must be 1 or 2, 3 channels should be rejected."""
         with pytest.raises(ValueError, match="n_ch"):
-            Data(raw_data=np.zeros((2, 3, 8, 4, 3), dtype=np.float32))
+            DataSpec(raw_data=np.zeros((2, 3, 8, 4, 3), dtype=np.float32))
 
     def test_n_ch_3_raises_for_aligned_data(self):
         with pytest.raises(ValueError, match="n_ch"):
-            Data(aligned_data=np.zeros((2, 3, 8, 4, 3), dtype=np.float32))
+            DataSpec(aligned_data=np.zeros((2, 3, 8, 4, 3), dtype=np.float32))
 
     def test_n_ch_3_raises_for_beamformed_data(self):
         with pytest.raises(ValueError, match="n_ch"):
-            Data(beamformed_data=np.zeros((2, 8, 6, 3), dtype=np.float32))
+            DataSpec(beamformed_data=np.zeros((2, 8, 6, 3), dtype=np.float32))
 
     def test_n_ch_1_and_2_are_valid(self):
         """Both n_ch=1 (RF) and n_ch=2 (IQ) must pass."""
-        Data(raw_data=np.zeros((2, 3, 8, 4, 1), dtype=np.float32))
-        Data(raw_data=np.zeros((2, 3, 8, 4, 2), dtype=np.float32))
+        DataSpec(raw_data=np.zeros((2, 3, 8, 4, 1), dtype=np.float32))
+        DataSpec(raw_data=np.zeros((2, 3, 8, 4, 2), dtype=np.float32))
 
 
 class TestMetadataAndMetricsValidationErrors:
@@ -557,7 +557,7 @@ class TestMetadataAndMetricsValidationErrors:
             MetricsSpec(coherence_factor=np.ones((3, 2), dtype=np.float32))
 
     def test_annotations_n_frames_mismatch_raises(self):
-        """view n_frames in Annotations must match Data n_frames across FileSpec."""
+        """view n_frames in Annotations must match DataSpec n_frames across FileSpec."""
         n_frames_data, n_frames_ann = 3, 5
         n_tx, n_el, n_ax, n_ch = 2, 4, 8, 1
 

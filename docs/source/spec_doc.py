@@ -1,4 +1,4 @@
-"""Auto-generate the Data Spec RST section from spec.py source of truth.
+"""Auto-generate the DataSpec RST section from spec.py source of truth.
 
 Run from the project root::
 
@@ -19,7 +19,7 @@ import numpy as np
 from zea.data.spec import (
     Annotations,
     ColorDopplerMap,
-    Data,
+    DataSpec,
     Image,
     MetadataSpec,
     MetricsSpec,
@@ -348,7 +348,7 @@ def generate() -> str:
         "",
         "      **Pipeline arrays**",
         "",
-        rst_full_table(Data, base_indent=2),
+        rst_full_table(DataSpec, base_indent=2),
         "",
         "      **Spatial map groups**",
         "",
@@ -358,7 +358,7 @@ def generate() -> str:
         "      optionally ``labels`` (channel names when ``pixels`` has an ``n_ch``",
         "      dimension).",
         "      Custom spatial maps are also accepted — any extra key passed to",
-        "      :class:`~zea.data.spec.Data` is validated as a generic",
+        "      :class:`~zea.data.spec.DataSpec` is validated as a generic",
         "      :class:`~zea.data.spec.Map` sub-group.",
         "",
     ]

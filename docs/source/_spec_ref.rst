@@ -186,7 +186,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
       optionally ``labels`` (channel names when ``pixels`` has an ``n_ch``
       dimension).
       Custom spatial maps are also accepted — any extra key passed to
-      :class:`~zea.data.spec.Data` is validated as a generic
+      :class:`~zea.data.spec.DataSpec` is validated as a generic
       :class:`~zea.data.spec.Map` sub-group.
 
       .. dropdown:: ``image``

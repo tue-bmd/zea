@@ -678,7 +678,7 @@ class ColorDopplerMap(FloatMap):
 
 
 @dataclass(init=False)
-class Data(Spec):
+class DataSpec(Spec):
     """Data group containing raw channels, derived pipeline products, and optional spatial maps.
 
     Pipeline data products (plain arrays):
@@ -1340,7 +1340,7 @@ class FileSpec(Spec):
             ... )
     """
 
-    data: Data | dict
+    data: DataSpec | dict
     scan: ScanSpec | dict | None = None
     metadata: MetadataSpec | dict = field(default_factory=MetadataSpec)
     metrics: MetricsSpec | dict = field(default_factory=MetricsSpec)
@@ -1349,7 +1349,7 @@ class FileSpec(Spec):
     description: str | None = None
 
     SCHEMA = {
-        "data": {"spec": Data},
+        "data": {"spec": DataSpec},
         "scan": {"spec": ScanSpec},
         "metadata": {"spec": MetadataSpec},
         "metrics": {"spec": MetricsSpec},
@@ -1363,14 +1363,11 @@ class FileSpec(Spec):
 
         # scan is mandatory when raw channel data is present
         data = self.data
-        has_raw = (
-            (isinstance(data, Data) and data.raw_data is not None)
-            or (isinstance(data, dict) and data.get("raw_data") is not None)
+        has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
+            isinstance(data, dict) and data.get("raw_data") is not None
         )
         if has_raw and self.scan is None:
-            raise ValueError(
-                "'scan' is required when 'raw_data' is provided in the data."
-            )
+            raise ValueError("'scan' is required when 'raw_data' is provided in the data.")
 
     def save(self, path: str, compression: str = "gzip") -> None:
         """Save the dataset to the specified path."""
@@ -1474,7 +1471,7 @@ class FileSpec(Spec):
         if "data" in kwargs and isinstance(kwargs["data"], dict):
             data_dict = kwargs["data"]
             for key in list(data_dict.keys()):
-                schema_entry = Data.SCHEMA.get(key)
+                schema_entry = DataSpec.SCHEMA.get(key)
                 if schema_entry is not None and "spec" in schema_entry:
                     # The spec expects a nested group (dict), but we got a
                     # plain array from a legacy flat dataset.
