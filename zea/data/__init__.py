@@ -43,7 +43,7 @@ Example usage
     ...     "hf://zeahub/camus-sample/",
     ...     key="data/image",
     ...     batch_size=4,
-    ...     resize=(256, 256),
+    ...     image_size=(256, 256),
     ...     shuffle=True,
     ... )
     >>> for batch in dataloader:

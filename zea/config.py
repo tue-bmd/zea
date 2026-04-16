@@ -457,6 +457,13 @@ class Config(dict):
 
         Returns:
             Config: config object.
+
+        Example:
+            .. doctest::
+
+                >>> from zea import Config
+                >>> config = Config.from_path("hf://zeahub/configs/config_camus.yaml")
+
         """
         if str(path).startswith(HF_PREFIX):
             path = _hf_resolve_path(str(path), **kwargs)
@@ -482,13 +489,6 @@ class Config(dict):
         Returns:
             Config: config object.
 
-        Example:
-            .. doctest::
-
-                >>> from zea import Config
-                >>> config = Config.from_hf(
-                ...     "zeahub/configs", "config_camus.yaml", repo_type="dataset"
-                ... )
         """
         return cls.from_path(f"{HF_PREFIX}{repo_id}/{path}", **kwargs)
 
