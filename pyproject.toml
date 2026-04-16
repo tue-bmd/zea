@@ -239,6 +239,20 @@ docstring-code-format = true
 # enabled.
 docstring-code-line-length = "dynamic"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+markers = [
+    "performance: marks tests as performance (deselect with '-m \"not performance\"')",
+    "heavy: marks tests as heavy (deselect with '-m \"not heavy\"')",
+    "notebook: mark a test as a notebook test (deselect with '-m \"not notebook\"')",
+    "gpu: marks tests that exercise real GPU hardware (most meaningful offline; in CI CUDA_VISIBLE_DEVICES=\"\" forces CPU)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:jupyter_client.*",
+    "ignore::DeprecationWarning:papermill.*",
+]
+
 [tool.coverage.report]
 omit = [
     "zea/ops/keras_ops.py",
