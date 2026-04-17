@@ -398,6 +398,8 @@ def hilbert(x, N: int = None, axis=-1):
 
     h = h + 1j * ops.zeros_like(h)
 
+    # fft expects float
+    # x = ops.cast(x, "float32")
     Xf_r, Xf_i = ops.fft((x, ops.zeros_like(x)))
 
     Xf_r = ops.cast(Xf_r, "complex64")
