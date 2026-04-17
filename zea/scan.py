@@ -277,7 +277,7 @@ class Scan(Parameters):
         "distance_to_apex",
     )
     def grid(self):
-        """The beamforming grid of shape (grid_size_z, grid_size_x, 3)."""
+        """The beamforming grid of shape (grid_size_z, grid_size_x, [grid_size_y], 3)."""
         if self.grid_type == "polar":
             if self.is_3d:
                 raise NotImplementedError("3D polar grids are not yet supported.")
@@ -368,7 +368,10 @@ class Scan(Parameters):
                 radius * np.cos(-np.pi / 2 + self.polar_limits[0]),
                 radius * np.cos(-np.pi / 2 + self.polar_limits[1]),
             )
-            xlims_plane = (min(self.probe_geometry[:, 0]), max(self.probe_geometry[:, 0]))
+            xlims_plane = (
+                min(self.probe_geometry[:, 0]),
+                max(self.probe_geometry[:, 0]),
+            )
             xlims = (
                 min(xlims_polar[0], xlims_plane[0]),
                 max(xlims_polar[1], xlims_plane[1]),
@@ -770,7 +773,12 @@ class Scan(Parameters):
         return value
 
     @cache_with_dependencies(
-        "rho_range", "theta_range", "resolution", "grid_size_z", "grid_size_x", "distance_to_apex"
+        "rho_range",
+        "theta_range",
+        "resolution",
+        "grid_size_z",
+        "grid_size_x",
+        "distance_to_apex",
     )
     def coordinates_2d(self):
         """The coordinates for scan conversion."""
