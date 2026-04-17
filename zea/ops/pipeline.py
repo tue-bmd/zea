@@ -305,6 +305,10 @@ class Pipeline:
 
     def call(self, **inputs):
         """Process input data through the pipeline."""
+        # Ensure that input data is float32 to ensure pipeline compatibility
+        if ops.dtype(inputs[self.key]) != "float32":
+            inputs[self.key] = ops.cast(inputs[self.key], "float32")
+
         for operation in self._callable_layers:
             try:
                 outputs = operation(**inputs)
