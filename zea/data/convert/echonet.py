@@ -443,9 +443,7 @@ class H5Processor:
             polar_uint8 = polar_db.astype(np.uint8)
             polar_uint8 = np.expand_dims(polar_uint8, axis=-1)  # add y dim
             n_x, n_z = polar_uint8.shape[1], polar_uint8.shape[2]
-            extent = np.array(
-                [0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32
-            )
+            extent = np.array([0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32)
             data["image"] = {"pixels": polar_uint8, "extent": extent}
 
         File.create(

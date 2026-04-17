@@ -109,7 +109,6 @@ from keras import ops
 from schema import And, Optional, Or, Regex, Schema
 
 from zea import log
-from zea.data.data_format import DatasetElement
 from zea.data.file import File
 from zea.data.spec import DataSpec, ScanSpec
 from zea.func import log_compress, normalize
@@ -1306,9 +1305,7 @@ class VerasonicsFile(h5py.File):
                     scan_group = event_group.create_group("scan")
                     scan_spec.store_in_group(scan_group, compression=compression or "gzip")
 
-                    _write_user_additional_elements(
-                        f, additional_elements, f"event_{event_idx}"
-                    )
+                    _write_user_additional_elements(f, additional_elements, f"event_{event_idx}")
 
         else:
             # Here we call all the functions to read the data from the file
@@ -1319,14 +1316,12 @@ class VerasonicsFile(h5py.File):
                 allow_accumulate=allow_accumulate,
             )
 
-            data_dict, scan_dict, additional_elements, lens_correction = (
-                _split_verasonics_data(result)
+            data_dict, scan_dict, additional_elements, lens_correction = _split_verasonics_data(
+                result
             )
 
             if lens_correction is not None:
-                description = (
-                    f"Verasonics data (lens correction: {lens_correction} wavelengths)"
-                )
+                description = f"Verasonics data (lens correction: {lens_correction} wavelengths)"
             else:
                 description = "Verasonics data"
 

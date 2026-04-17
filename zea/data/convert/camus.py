@@ -168,9 +168,7 @@ def process_camus(source_path, output_path, overwrite=False):
     image_seq_polar = np.expand_dims(image_seq_polar, axis=-1)
 
     n_x, n_z = image_seq_polar.shape[1], image_seq_polar.shape[2]
-    extent = np.array(
-        [0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32
-    )
+    extent = np.array([0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32)
 
     # Build image_sc extent from sequence dimensions
     n_x_sc, n_z_sc = image_seq.shape[1], image_seq.shape[2]
@@ -187,6 +185,7 @@ def process_camus(source_path, output_path, overwrite=False):
         probe_name="generic",
         description="camus dataset converted to zea format",
     )
+
 
 splits = {"train": [1, 401], "val": [401, 451], "test": [451, 501]}
 

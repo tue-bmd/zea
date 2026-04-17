@@ -71,9 +71,7 @@ def _img_dir_to_h5_dir(
         pixels = frames.astype(np.uint8)
         pixels = np.expand_dims(pixels, axis=-1)  # add y dim
         n_x, n_z = pixels.shape[1], pixels.shape[2]
-        extent = np.array(
-            [0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32
-        )
+        extent = np.array([0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32)
         File.create(
             path=new_h5_file_path,
             data={"image": {"pixels": pixels, "extent": extent}},
