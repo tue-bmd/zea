@@ -20,7 +20,7 @@ from zea.func.ultrasound import (
     compute_time_to_peak_stack,
     make_tgc_curve,
 )
-from zea.ops import Pipeline, Simulate
+from zea.ops import Pipeline, Simulate, beamformer_registry
 from zea.probes import Probe
 from zea.scan import Scan
 
@@ -578,39 +578,114 @@ def test_compute_time_to_peak():
     assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
 
 
-@pytest.mark.parametrize(
-    "beamformer,expected_shape",
-    [
-        ("das", (1, 7, 2)),
-        ("dmas", (1, 7, 2)),
-    ],
-)
-def test_beamformers(beamformer, expected_shape):
-    """Test all beamformer operations (DAS and DMAS stages)."""
+@pytest.mark.parametrize("beamformer_name", beamformer_registry.registered_names())
+@backend_equality_check()
+def test_beamformers(beamformer_name):
+    """All beamformer operations produce the correct output shape and agree across backends."""
+
+    import keras
+
+    from zea.ops import beamformer_registry
+
+    n_tx, n_pix, n_el, n_ch = 3, 7, 4, 2
+    operation = beamformer_registry[beamformer_name](with_batch_dim=True)
+    data = keras.ops.zeros((1, n_tx, n_pix, n_el, n_ch))
+    output = operation(data=data)["data"]
+    assert output.shape == (1, n_pix, n_ch), (
+        f"Expected shape (1, {n_pix}, {n_ch}) for '{beamformer_name}', got {output.shape}"
+    )
+    return output
+
+
+def test_dmas_requires_iq_data():
+    """DMAS should raise ValueError when given single-channel (RF) data."""
 
     import keras
 
     from zea import ops
 
-    if beamformer == "das":
-        operation = ops.DelayAndSum(with_batch_dim=True)
-    elif beamformer == "dmas":
-        operation = ops.DelayMultiplyAndSum(with_batch_dim=True)
-    else:
-        raise ValueError(f"Unknown beamformer: {beamformer}")
+    operation = ops.DelayMultiplyAndSum(with_batch_dim=True)
+    with pytest.raises(ValueError):
+        data = keras.ops.zeros((1, 3, 7, 4, 1))
+        operation(data=data)
 
-    data = keras.ops.zeros((1, 3, 7, 4, 2))
 
-    output = operation(data=data)["data"]
-    assert output.shape == expected_shape, (
-        f"Output shape should be {expected_shape} for {beamformer}, got {output.shape}"
+@backend_equality_check()
+def test_coherence_factor_coherent_signal():
+    """CF weight is 1 for a perfectly coherent signal, so output matches DAS across backends."""
+
+    import keras
+
+    from zea import ops
+
+    n_tx, n_pix, n_el, n_ch = 3, 7, 4, 2
+    data = keras.ops.ones((1, n_tx, n_pix, n_el, n_ch))
+
+    cf_out = ops.CoherenceFactor(with_batch_dim=True)(data=data)["data"]
+    das_out = ops.DelayAndSum(with_batch_dim=True)(data=data)["data"]
+
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(cf_out),
+        keras.ops.convert_to_numpy(das_out),
+        rtol=1e-5,
+    )
+    return cf_out
+
+
+@backend_equality_check()
+def test_generalized_coherence_factor_coherent_signal():
+    """GCF weight is 1 for a perfectly coherent signal, so output matches DAS across backends."""
+
+    import keras
+
+    from zea import ops
+
+    n_tx, n_pix, n_el, n_ch = 3, 7, 4, 2
+    data = keras.ops.ones((1, n_tx, n_pix, n_el, n_ch))
+
+    gcf_out = ops.GeneralizedCoherenceFactor(with_batch_dim=True)(data=data)["data"]
+    das_out = ops.DelayAndSum(with_batch_dim=True)(data=data)["data"]
+
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(gcf_out),
+        keras.ops.convert_to_numpy(das_out),
+        rtol=1e-5,
+    )
+    return gcf_out
+
+
+@backend_equality_check()
+def test_generalized_coherence_factor_m_zero_passthrough():
+    """m_zero passed via call kwargs overrides the instance default."""
+
+    import keras
+
+    from zea import ops
+
+    n_tx, n_pix, n_el, n_ch = 3, 7, 8, 2
+    rng = np.random.default_rng(42)
+    data = keras.ops.convert_to_tensor(
+        rng.standard_normal((1, n_tx, n_pix, n_el, n_ch)).astype(np.float32)
     )
 
-    # DMAS should raise ValueError with single channel
-    if beamformer == "dmas":
-        with pytest.raises(ValueError):
-            data = keras.ops.zeros((1, 3, 7, 4, 1))
-            operation(data=data)
+    # m_zero=2 at init vs. m_zero=2 at call time should give identical results
+    out_init = ops.GeneralizedCoherenceFactor(m_zero=2, with_batch_dim=True)(data=data)["data"]
+    out_call = ops.GeneralizedCoherenceFactor(with_batch_dim=True)(data=data, m_zero=2)["data"]
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(out_init),
+        keras.ops.convert_to_numpy(out_call),
+        rtol=1e-5,
+    )
+
+    # Different m_zero values should produce different results
+    out_default = ops.GeneralizedCoherenceFactor(with_batch_dim=True)(data=data)["data"]
+    out_m0 = ops.GeneralizedCoherenceFactor(with_batch_dim=True)(data=data, m_zero=0)["data"]
+    assert not np.allclose(
+        keras.ops.convert_to_numpy(out_default),
+        keras.ops.convert_to_numpy(out_m0),
+    ), "Expected different results for different m_zero values"
+
+    return out_init
 
 
 @pytest.mark.parametrize(

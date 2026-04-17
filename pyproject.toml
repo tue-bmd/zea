@@ -34,12 +34,12 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "keras >=3.12",
+    "keras >=3.12.1",
     "h5py >=3.11",
     "numpy >= 1.24",
     "matplotlib >=3.8",
     "scipy >=1.13",
-    "pillow >=10",
+    "pillow >=12.2.0",
     "schema >=0.7",
     "tqdm >=4",
     "pyyaml >=6",
@@ -56,7 +56,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     # tests
-    "pytest>=8.1",
+    "pytest>=9.0.3",
     "papermill>=2.4",
     "ipykernel>=6.29.5",
     "cloudpickle>=3.1.1",
@@ -87,7 +87,7 @@ dev = [
 ]
 
 tests = [
-    "pytest>=8.1",
+    "pytest>=9.0.3",
     "papermill>=2.4",
     "ipykernel>=6.29.5",
     "cloudpickle>=3.1.1",
@@ -130,7 +130,7 @@ models = [
 # these are just here for .readthedocs.yaml
 # please for proper install (with GPU support)
 # install manually
-backends = ["jax", "tensorflow", "torch"]
+backends = ["jax", "tensorflow>=2.12.1", "torch"]
 
 [project.urls]
 Homepage = "https://github.com/tue-bmd/zea/"
