@@ -31,6 +31,29 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
         NaN values in the input image are replaced with the minimum value of the dynamic range
         before scaling, which ensures that they are represented as black (0) in the output image.
 
+    Example:
+        .. doctest::
+
+            >>> import numpy as np
+
+            >>> import zea
+
+            >>> file_path = (
+            ...     "hf://zeahub/camus-sample/val/patient0401/patient0401_4CH_half_sequence.hdf5"
+            ... )
+
+            >>> with zea.File(file_path, mode="r") as file:
+            ...     data = file.load_data("image", indices=0)
+
+            >>> image, _ = zea.display.scan_convert(
+            ...     data,
+            ...     rho_range=(0, 1),
+            ...     theta_range=(-0.78, 0.78),
+            ...     fill_value=np.nan,
+            ... )
+            >>> image = zea.display.to_8bit(image, dynamic_range=(-60, 0))
+            >>> image.save("image.png")
+
     """
     if dynamic_range is None:
         dynamic_range = (-60, 0)
