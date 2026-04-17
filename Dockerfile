@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # example of install all backends with gpu
-# docker build -t zea/all-gpu:latest --build-arg INSTALL_JAX=gpu --build-arg INSTALL_TORCH=gpu --build-arg INSTALL_TF=gpu .
+# docker build -t zeahub/all:latest --build-arg INSTALL_JAX=gpu --build-arg INSTALL_TORCH=gpu --build-arg INSTALL_TF=gpu .
 
 ##############################
 # 0) Declare build-time args
