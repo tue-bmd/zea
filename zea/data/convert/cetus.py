@@ -165,7 +165,18 @@ def process_cetus(source_path, output_path, overwrite=False):
     patient_name = stem.split("_")[0]  # e.g. "patient01"
 
     # Build data dict
-    data = {"image_sc": image_sc.astype(np.float32)}
+    # Compute spatial extent from voxel spacing: (xmin, xmax, ymin, ymax, zmax, zmin)
+    D, H, W = volume.shape
+    image_sc_extent = np.array(
+        [0, D * voxel_spacing[0], 0, W * voxel_spacing[2], 0, H * voxel_spacing[1]],
+        dtype=np.float32,
+    )
+    data = {
+        "image_sc": {
+            "pixels": image_sc.astype(np.float32),
+            "extent": image_sc_extent,
+        }
+    }
 
     if gt_path.exists():
         gt_volume, _ = sitk_load(gt_path)
@@ -173,7 +184,6 @@ def process_cetus(source_path, output_path, overwrite=False):
         seg_mask = (gt_volume > 0)[np.newaxis, ..., np.newaxis]
 
         # Compute spatial extent from voxel spacing: (xmin, xmax, ymin, ymax, zmax, zmin)
-        D, H, W = volume.shape
         extent = np.array(
             [0, D * voxel_spacing[0], 0, W * voxel_spacing[2], 0, H * voxel_spacing[1]],
             dtype=np.float32,

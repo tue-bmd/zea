@@ -118,22 +118,22 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - Time-of-flight corrected data.
            - |badge-opt|
          * - ``beamformed_data``
-           - ``float32``
-           - (n_frames, grid_z, grid_x, n_ch)
-           - -
-           - Beamformed (beamsummed) data.
+           - :class:`~zea.data.spec.BeamformedData`
+           - group
+           - –
+           - 
            - |badge-opt|
          * - ``envelope_data``
-           - ``float32``
-           - (n_frames, grid_z, grid_x)
-           - -
-           - Envelope-detected data.
+           - :class:`~zea.data.spec.EnvelopeData`
+           - group
+           - –
+           - 
            - |badge-opt|
          * - ``image_sc``
-           - ``float32``
-           - (n_frames, grid_z_sc, grid_x_sc) or (n_frames, grid_z_sc, grid_x_sc, grid_y_sc)
-           - dB
-           - Scan-converted image data.
+           - :class:`~zea.data.spec.ImageSc`
+           - group
+           - –
+           - 
            - |badge-opt|
          * - ``image``
            - :class:`~zea.data.spec.Image`
@@ -188,6 +188,123 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
       Custom spatial maps are also accepted — any extra key passed to
       :class:`~zea.data.spec.DataSpec` is validated as a generic
       :class:`~zea.data.spec.Map` sub-group.
+
+      .. dropdown:: ``beamformed_data``
+
+         Beamformed (beamsummed) data. Pixels are ``float32`` in (n_frames, x, z, n_ch) or (n_frames, x, z, y, n_ch); ``labels`` names each channel (RF or I/Q).
+
+         .. list-table::
+            :header-rows: 1
+            :widths: 22 20 28 10 10
+         
+            * - Field
+              - Type
+              - Shape
+              - Unit
+              - 
+            * - ``pixels``
+              - ``float32``
+              - (n_frames, x, z, y, n_ch) or (n_frames, x, z, n_ch)
+              - –
+              - |badge-req|
+            * - ``extent``
+              - ``float32``
+              - (n_frames, 6) or (6)
+              - –
+              - |badge-req|
+            * - ``labels``
+              - ``str``
+              - (n_ch)
+              - –
+              - |badge-opt|
+            * - ``description``
+              - ``str``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``unit``
+              - ``str``
+              - scalar
+              - –
+              - |badge-opt|
+
+      .. dropdown:: ``envelope_data``
+
+         Envelope-detected data. Pixels are ``float32`` in (n_frames, x, z) or (n_frames, x, z, y).
+
+         .. list-table::
+            :header-rows: 1
+            :widths: 22 20 28 10 10
+         
+            * - Field
+              - Type
+              - Shape
+              - Unit
+              - 
+            * - ``pixels``
+              - ``float32``
+              - (n_frames, x, z, y) or (n_frames, x, z)
+              - –
+              - |badge-req|
+            * - ``extent``
+              - ``float32``
+              - (n_frames, 6) or (6)
+              - –
+              - |badge-req|
+            * - ``labels``
+              - ``str``
+              - (n_spatial_ch)
+              - –
+              - |badge-opt|
+            * - ``description``
+              - ``str``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``unit``
+              - ``str``
+              - scalar
+              - –
+              - |badge-opt|
+
+      .. dropdown:: ``image_sc``
+
+         Scan-converted image. Pixels are ``float32`` in (n_frames, x, z) or (n_frames, x, z, y).
+
+         .. list-table::
+            :header-rows: 1
+            :widths: 22 20 28 10 10
+         
+            * - Field
+              - Type
+              - Shape
+              - Unit
+              - 
+            * - ``pixels``
+              - ``float32``
+              - (n_frames, x, z, y) or (n_frames, x, z)
+              - –
+              - |badge-req|
+            * - ``extent``
+              - ``float32``
+              - (n_frames, 6) or (6)
+              - –
+              - |badge-req|
+            * - ``labels``
+              - ``str``
+              - (n_spatial_ch)
+              - –
+              - |badge-opt|
+            * - ``description``
+              - ``str``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``unit``
+              - ``str``
+              - scalar
+              - –
+              - |badge-opt|
 
       .. dropdown:: ``image``
 

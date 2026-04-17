@@ -820,6 +820,9 @@ def load_file_all_data_types(
 
     data_dict = {}
 
+    # Data types stored as HDF5 groups (Map-based specs with pixels/extent)
+    _GROUP_DATA_TYPES = {"beamformed_data", "envelope_data", "image_sc", "image"}
+
     with File(path, mode="r") as file:
         # Load the probe object from the file
         probe = file.probe()
@@ -832,7 +835,26 @@ def load_file_all_data_types(
             # Load the desired frames from the file
             _key = file.format_key(data_type.value)
             _indices = indices if indices is not None else slice(None)
-            data_dict[data_type.value] = file[_key][_indices]
+            item = file[_key]
+
+            if isinstance(item, h5py.Group) and data_type.value in _GROUP_DATA_TYPES:
+                # Map-based group: load all sub-datasets as a dict
+                group_dict = {}
+                for sub_key in item.keys():
+                    ds = item[sub_key]
+                    if isinstance(ds, h5py.Dataset):
+                        if sub_key == "pixels":
+                            group_dict[sub_key] = ds[_indices]
+                        elif h5py.check_string_dtype(ds.dtype) is not None:
+                            val = ds.asstr()[()]
+                            if isinstance(val, np.ndarray) and val.dtype == object:
+                                val = val.astype(np.str_)
+                            group_dict[sub_key] = val
+                        else:
+                            group_dict[sub_key] = ds[()]
+                data_dict[data_type.value] = group_dict
+            else:
+                data_dict[data_type.value] = item[_indices]
 
         # extract transmits from indices
         # we only have to do this when the data has a n_tx dimension
