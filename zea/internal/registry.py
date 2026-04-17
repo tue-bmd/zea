@@ -32,6 +32,8 @@ dataset = dataset_class()
 ```
 """
 
+_MISSING = object()  # sentinel for absent default
+
 
 class RegisterDecorator:
     """Decorator class for registering classes.
@@ -85,11 +87,17 @@ class RegisterDecorator:
 
         return _register
 
-    def get_parameter(self, cls_or_name, parameter):
+    def get_parameter(self, cls_or_name, parameter, default=_MISSING):
         """Get parameter.
 
         Returns the value of the parameter for the class with the given
         class or name. This value can be a string or a class type.
+
+        Args:
+            cls_or_name: The class or name to get the parameter for.
+            parameter: The parameter to get.
+            default: The default value to return if the parameter is not found.
+                If not provided, a KeyError is raised when not found.
         """
         if isinstance(cls_or_name, str):
             cls_or_name = self.registry[cls_or_name.lower()]
@@ -97,7 +105,13 @@ class RegisterDecorator:
         assert isinstance(cls_or_name, type) or callable(cls_or_name), (
             "Key must be a class type or function"
         )
-        return self.additional_registries[parameter.lower()][cls_or_name]
+        reg = self.additional_registries.get(parameter.lower())
+        value = reg.get(cls_or_name, _MISSING) if reg is not None else _MISSING
+        if value is not _MISSING:
+            return value
+        if default is not _MISSING:
+            return default
+        raise KeyError(f"Parameter '{parameter}' not found for {cls_or_name}.")
 
     def __str__(self) -> str:
         """String representation of the registry.
@@ -192,7 +206,9 @@ class RegisterDecorator:
 
 probe_registry = RegisterDecorator()
 beamformer_registry = RegisterDecorator()
-metrics_registry = RegisterDecorator(items_to_register=["name", "paired", "jittable"])
+metrics_registry = RegisterDecorator(
+    items_to_register=["name", "paired", "jittable", "torch_vmappable"]
+)
 checks_registry = RegisterDecorator(items_to_register=["data_type"])
 ops_registry = RegisterDecorator(items_to_register=["name"])
 ops_dep_registry = RegisterDecorator(items_to_register=["name"])
