@@ -9,23 +9,13 @@ from keras import ops
 from zea import log
 from zea.backend import jit
 from zea.config import Config
-from zea.func.tensor import (
-    vmap,
-)
+from zea.func.tensor import vmap
 from zea.func.ultrasound import channels_to_complex, complex_to_channels
-from zea.internal.core import (
-    DataTypes,
-    ZEADecoderJSON,
-    ZEAEncoderJSON,
-    dict_to_tensor,
-)
+from zea.internal.core import DataTypes, ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
 from zea.internal.core import Object as ZEAObject
-from zea.internal.registry import ops_registry
+from zea.internal.registry import beamformer_registry, ops_registry
 from zea.internal.utils import deprecated
-from zea.ops.base import (
-    Operation,
-    get_ops,
-)
+from zea.ops.base import Operation, get_ops
 from zea.ops.tensor import Normalize
 from zea.ops.ultrasound import (
     ApplyWindow,
@@ -38,9 +28,7 @@ from zea.ops.ultrasound import (
 )
 from zea.probes import Probe
 from zea.scan import Scan
-from zea.utils import (
-    FunctionTimer,
-)
+from zea.utils import FunctionTimer
 
 
 @ops_registry("pipeline")
@@ -204,8 +192,13 @@ class Pipeline:
         """Create a default pipeline.
 
         Args:
-            beamformer (str): Type of beamformer to use. Currently supporting,
-                "delay_and_sum" and "delay_multiply_and_sum". Defaults to "delay_and_sum".
+            beamformer (str): Type of beamformer to use.
+                Currently supporting:
+                - "delay_and_sum"
+                - "delay_multiply_and_sum"
+                - "coherence_factor"
+                - "generalized_coherence_factor"
+                Defaults to "delay_and_sum".
             num_patches (int): Number of patches for the PatchedGrid operation.
                 Defaults to 100. If you get an out of memory error, try to increase this number.
             baseband (bool): If True, assume the input data is baseband (I/Q) data,
@@ -991,8 +984,13 @@ class Beamform(Pipeline):
         """Initialize a Delay-and-Sum beamforming `zea.Pipeline`.
 
         Args:
-            beamformer (str): Type of beamformer to use. Currently supporting,
-                "delay_and_sum" and "delay_multiply_and_sum".
+            beamformer (str): Type of beamformer to use.
+                Currently supporting:
+                - "delay_and_sum"
+                - "delay_multiply_and_sum"
+                - "coherence_factor"
+                - "generalized_coherence_factor"
+                Defaults to "delay_and_sum".
             num_patches (int): Number of patches to split the grid into for patch-wise
                 beamforming. If 1, no patching is performed.
             enable_pfield (bool): Whether to include pressure field weighting in the beamforming.
@@ -1015,17 +1013,17 @@ class Beamform(Pipeline):
             )
             self.beamformer_type = name_mapping[beamformer]
 
-        if self.beamformer_type not in ["delay_and_sum", "delay_multiply_and_sum"]:
+        if self.beamformer_type not in beamformer_registry:
             raise ValueError(
-                f"Unsupported beamformer type: {self.beamformer_type}. "
-                "Supported types are 'delay_and_sum' and 'delay_multiply_and_sum'."
+                f"Unsupported beamformer type: '{self.beamformer_type}'. "
+                f"Supported types are: {beamformer_registry.registered_names()}."
             )
 
         # Get beamforming ops
         beamforming = [
             TOFCorrection(),
             # PfieldWeighting(),  # Inserted conditionally
-            get_ops(self.beamformer_type)(),
+            beamformer_registry[self.beamformer_type](),
         ]
 
         if self.enable_pfield:
@@ -1096,6 +1094,7 @@ class Beamform(Pipeline):
         return config
 
 
+@beamformer_registry("delay_and_sum")
 @ops_registry("delay_and_sum")
 class DelayAndSum(Operation):
     """Sums time-delayed signals along channels and transmits."""
@@ -1129,6 +1128,7 @@ class DelayAndSum(Operation):
         return {self.output_key: beamformed_data}
 
 
+@beamformer_registry("delay_multiply_and_sum")
 @ops_registry("delay_multiply_and_sum")
 class DelayMultiplyAndSum(Operation):
     """Performs the operations for the Delay-Multiply-and-Sum beamformer except the delay.
@@ -1180,9 +1180,12 @@ class DelayMultiplyAndSum(Operation):
         """Apply the DMAS multiplication step."""
         channel_products = data[:, :, :, None] * data[:, :, None, :]
 
-        data = ops.sign(channel_products) * ops.cast(
-            ops.sqrt(ops.abs(channel_products)), data.dtype
-        )
+        # Signed square root: sign(z) * sqrt(|z|) == z / sqrt(|z|).
+        # Written this way to avoid ops.sign on complex data (torch.sign
+        # does not support complex numbers; use torch.sgn instead).
+        eps = keras.backend.epsilon()
+        safe_sqrt = ops.cast(ops.sqrt(ops.abs(channel_products) + eps**2), channel_products.dtype)
+        data = channel_products / safe_sqrt
         return data
 
     def call(self, **kwargs):
@@ -1206,6 +1209,196 @@ class DelayMultiplyAndSum(Operation):
             beamformed_data = ops.map(self.process_image, data)
 
         return {self.output_key: beamformed_data}
+
+
+@beamformer_registry("coherence_factor")
+@ops_registry("coherence_factor")
+class CoherenceFactor(Operation):
+    r"""Coherence Factor (CF) Beamformer.
+
+    The Coherence Factor is a pixel-dependent weight used to quantify the focus
+    quality of the beamformed signal. It is the ratio of the coherent power to
+    the incoherent power of the signals received across the transducer aperture.
+
+    For a set of delayed signals :math:`x_i` across :math:`N` elements:
+
+    .. math::
+
+        \mathrm{CF} = \frac{\left|\sum_{i=1}^{N} x_i\right|^2}
+        {N \sum_{i=1}^{N} \left|x_i\right|^2}
+
+    The CF ranges from 0 (completely incoherent) to 1 (perfectly coherent).
+    The beamformed output is the standard DAS sum weighted by CF per transmit,
+    then compounded across transmits.
+
+    .. admonition:: Reference
+
+        Hollman, K. W., Rigby, K. W., & O'Donnell, M. (1999).
+        Coherence factor of speckle from a multi-row probe. IEEE Ultrasonics Symposium.
+
+    Args:
+        **kwargs: Additional arguments passed to the Operation base class.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
+            **kwargs,
+        )
+
+    def process_image(self, data):
+        """Applies CF weighting and compounding on tof-corrected input.
+
+        Args:
+            data (ops.Tensor): TOF-corrected input of shape
+                ``(n_tx, n_pix, n_el, n_ch)``, with optional batch dimension.
+
+        Returns:
+            ops.Tensor: Beamformed image of shape ``(n_pix, n_ch)``,
+                with optional batch dimension.
+        """
+        n_el = ops.shape(data)[-2]
+
+        # DAS per transmit: sum over elements
+        das_per_tx = ops.sum(data, axis=-2)
+
+        # Coherent power: |sum_i(x_i)|^2, works for both RF (n_ch=1) and IQ (n_ch=2)
+        coherent_power = ops.sum(ops.square(das_per_tx), axis=-1, keepdims=True)
+
+        # Incoherent power: N * sum_i(|x_i|^2)
+        incoherent_power = n_el * ops.sum(
+            ops.sum(ops.square(data), axis=-1), axis=-1, keepdims=True
+        )
+
+        # CF weight, clipped to [0, 1] by construction when incoherent_power > 0
+        cf_weight = coherent_power / (incoherent_power + keras.backend.epsilon())
+
+        # Apply weight per transmit, then compound
+        return ops.sum(das_per_tx * cf_weight, axis=-3)
+
+    def call(self, **kwargs):
+        """Performs CF beamforming on tof-corrected input.
+
+        Args:
+            tof_corrected_data (ops.Tensor): TOF-corrected input of shape
+                ``(n_tx, n_pix, n_el, n_ch)``, with optional batch dimension.
+
+        Returns:
+            dict: Dictionary containing beamformed data of shape
+                ``(n_pix, n_ch)``, with optional batch dimension.
+        """
+        data = kwargs[self.key]
+        return {self.output_key: self.process_image(data)}
+
+
+@beamformer_registry("generalized_coherence_factor")
+@ops_registry("generalized_coherence_factor")
+class GeneralizedCoherenceFactor(Operation):
+    r"""Generalized Coherence Factor (GCF) Beamformer.
+
+    The GCF is a coherence-based adaptive weighting technique used to improve
+    the quality of ultrasound images by suppressing sidelobes and clutter.
+    It is defined as the ratio of the power within a low-frequency region of the
+    spatial spectrum to the total power across the aperture.
+
+    For a given pixel, let :math:`A(k)` be the spatial Fourier transform of the
+    delayed channel data across :math:`N` elements. The GCF is:
+
+    .. math::
+
+        \mathrm{GCF} = \frac{\sum_{k \in \mathcal{M}_0} \left|A(k)\right|^2}
+        {\sum_{k=0}^{N-1} \left|A(k)\right|^2}
+
+    where :math:`\mathcal{M}_0 = \{k : k \leq m_0\} \cup \{k : k \geq N - m_0\}`
+    is the low spatial-frequency region controlled by :math:`m_0`.
+
+    .. admonition:: Reference
+
+        Li, P. C., & Li, M. L. (2003).
+        "Adaptive imaging using the generalized coherence factor."
+        IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency Control,
+        50(2), 128-141.
+
+    Args:
+        m_zero (int): Cutoff frequency index for the low-frequency spatial region.
+            Higher values increase tolerance to phase aberrations. Defaults to ``4``.
+        **kwargs: Additional arguments passed to the Operation base class.
+    """
+
+    def __init__(self, m_zero=4, **kwargs):
+        if not isinstance(m_zero, int) or m_zero < 0:
+            raise ValueError(f"m_zero must be a non-negative integer, got {m_zero!r}.")
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
+            **kwargs,
+        )
+        self.m_zero = m_zero
+
+    def process_image(self, data, m_zero=None):
+        """Applies GCF weighting and compounding on tof-corrected input.
+
+        Args:
+            data (ops.Tensor): TOF-corrected input of shape
+                ``(n_tx, n_pix, n_el, n_ch)``, with optional batch dimension.
+            m_zero (int, optional): Overrides the instance ``m_zero`` for this call.
+
+        Returns:
+            ops.Tensor: Beamformed image of shape ``(n_pix, n_ch)``,
+                with optional batch dimension.
+        """
+        if m_zero is None:
+            m_zero = self.m_zero
+
+        n_el = ops.shape(data)[-2]
+        n_ch = data.shape[-1]  # static Python int — safe for branching
+
+        # Move n_el to last axis for spatial FFT: (..., n_tx, n_pix, n_ch, n_el)
+        spatial_data = ops.moveaxis(data, -2, -1)
+
+        real_in = spatial_data[..., 0, :]
+        imag_in = spatial_data[..., 1, :] if n_ch == 2 else ops.zeros_like(real_in)
+
+        # Spatial FFT power spectrum across elements
+        real_fft, imag_fft = ops.fft((real_in, imag_in))
+        power_spectrum = ops.square(real_fft) + ops.square(imag_fft)
+
+        # Total energy and low-frequency energy
+        total_energy = ops.sum(power_spectrum, axis=-1, keepdims=True)
+        indices = ops.arange(n_el)
+        low_freq_mask = ops.logical_or(
+            ops.less_equal(indices, m_zero),
+            ops.greater_equal(indices, n_el - m_zero),
+        )
+        low_freq_energy = ops.sum(
+            ops.where(low_freq_mask, power_spectrum, 0.0),
+            axis=-1,
+            keepdims=True,
+        )
+
+        # GCF weight
+        gcf_weight = low_freq_energy / (total_energy + keras.backend.epsilon())
+
+        # DAS per transmit, apply weight, then compound
+        das_per_tx = ops.sum(data, axis=-2)
+        return ops.sum(das_per_tx * gcf_weight, axis=-3)
+
+    def call(self, m_zero=None, **kwargs):
+        """Performs GCF beamforming on tof-corrected input.
+
+        Args:
+            m_zero (int, optional): Cutoff frequency index, overrides the
+                instance default when provided via pipeline parameters.
+            tof_corrected_data (ops.Tensor): TOF-corrected input of shape
+                ``(n_tx, n_pix, n_el, n_ch)``, with optional batch dimension.
+
+        Returns:
+            dict: Dictionary containing beamformed data of shape
+                ``(n_pix, n_ch)``, with optional batch dimension.
+        """
+        data = kwargs[self.key]
+        return {self.output_key: self.process_image(data, m_zero=m_zero)}
 
 
 def make_operation_chain(
