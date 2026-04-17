@@ -193,9 +193,7 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
             data_dict["envelope_data"]["pixels"] += new_data["envelope_data"]["pixels"]
 
         if data_dict["image"] is not None:
-            _assert_shapes_equal(
-                data_dict["image"]["pixels"], new_data["image"]["pixels"], "image"
-            )
+            _assert_shapes_equal(data_dict["image"]["pixels"], new_data["image"]["pixels"], "image")
             data_dict["image"]["pixels"] = np.log(
                 np.exp(new_data["image"]["pixels"]) + np.exp(data_dict["image"]["pixels"])
             )
@@ -207,8 +205,7 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
                 "image_sc",
             )
             data_dict["image_sc"]["pixels"] = np.log(
-                np.exp(new_data["image_sc"]["pixels"])
-                + np.exp(data_dict["image_sc"]["pixels"])
+                np.exp(new_data["image_sc"]["pixels"]) + np.exp(data_dict["image_sc"]["pixels"])
             )
         assert scan == new_scan, "Scan parameters do not match."
         assert probe == new_probe, "Probe parameters do not match."
@@ -266,9 +263,7 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
                 pixels = np.mean(pixels, axis=0, keepdims=True)
             compounded_data[key] = {**data_dict[key], "pixels": pixels}
         elif key in _LOG_COMPOUND_KEYS:
-            compounded_data[key] = np.log(
-                np.mean(np.exp(data_dict[key]), axis=0, keepdims=True)
-            )
+            compounded_data[key] = np.log(np.mean(np.exp(data_dict[key]), axis=0, keepdims=True))
         else:
             compounded_data[key] = np.mean(data_dict[key], axis=0, keepdims=True)
 

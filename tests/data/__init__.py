@@ -73,9 +73,7 @@ def generate_example_dataset(
             "extent": _extent,
         }
         data["beamformed_data"] = {
-            "pixels": np.ones(
-                (n_frames, grid_size_z, grid_size_x, n_ch), dtype=np.float32
-            ),
+            "pixels": np.ones((n_frames, grid_size_z, grid_size_x, n_ch), dtype=np.float32),
             "extent": _extent,
         }
 
