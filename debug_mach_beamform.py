@@ -251,11 +251,11 @@ def _load_picmus_sample():
 def run_pipeline_zea_example(data_frame, scan, probe):
     import keras
 
-    from zea.ops import Beamform, EnvelopeDetect, LogCompress, Normalize, Pipeline
+    from zea.ops import Demodulate, Beamform, EnvelopeDetect, LogCompress, Normalize, Pipeline
 
     pipeline = Pipeline(
         [
-            Beamform(num_patches=1),
+            Beamform(num_patches=20),
             EnvelopeDetect(),
             Normalize(),
             LogCompress(),
@@ -268,11 +268,7 @@ def run_pipeline_zea_example(data_frame, scan, probe):
     inputs["data"] = data_frame
     inputs["demodulation_frequency"] = scan.demodulation_frequency
 
-    _flush_vram()
-    _vram_checkpoint("Zea pipeline (before)")
     one_pass = pipeline(**inputs)["data"]
-    _block_until_ready(one_pass)
-    _vram_checkpoint("Zea pipeline (after)")
 
     result, per_iter_s = _time_call(
         "Zea pipeline",
@@ -320,15 +316,11 @@ def run_pipeline_mach_example(data_frame, scan, probe):
 
     inputs = pipeline.prepare_parameters(probe=probe, scan=scan)
     inputs["data"] = data_frame
-    inputs["demodulation_frequency"] = scan.demodulation_frequency
 
     _nan_stats("Mach input data", data_frame)
 
-    _flush_vram()
-    _vram_checkpoint("mach+zea pipeline (before)")
     one_pass = pipeline(**inputs)["data"]
     _block_until_ready(one_pass)
-    _vram_checkpoint("mach+zea pipeline (after)")
 
     mach_beamform = MachBeamform(with_batch_dim=False)
     beamformed = mach_beamform(
@@ -347,7 +339,7 @@ def run_pipeline_mach_example(data_frame, scan, probe):
         t_peak=scan.t_peak,
         tx_waveform_indices=scan.tx_waveform_indices,
         transmit_origins=scan.transmit_origins,
-        apply_lens_correction=getattr(scan, "apply_lens_correction", False),
+        apply_lens_correction=scan.apply_lens_correction,
         lens_thickness=getattr(scan, "lens_thickness", None),
         lens_sound_speed=getattr(scan, "lens_sound_speed", None),
     )["data"]
