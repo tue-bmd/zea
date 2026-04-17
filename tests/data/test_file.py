@@ -8,6 +8,14 @@ from zea.data.spec import FileSpec, Image, Segmentation
 from zea.probes import Probe
 from zea.scan import Scan
 
+# Dummy extent for map-based data types in tests
+_TEST_EXTENT = np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32)
+
+
+def _make_map(pixels):
+    """Wrap pixels into a Map-compatible dict."""
+    return {"pixels": pixels, "extent": _TEST_EXTENT}
+
 
 @pytest.fixture
 def h5_filepath(tmp_path):
@@ -155,7 +163,7 @@ def spec_file(tmp_path):
     env = np.random.randn(n_frames, 16, 12).astype(np.float32)
 
     fspec = FileSpec(
-        data={"raw_data": raw, "envelope_data": env},
+        data={"raw_data": raw, "envelope_data": _make_map(env)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
         probe_name="test_probe",
         description="spec format test file",
@@ -250,7 +258,7 @@ class TestValidateSpec:
             loaded_spec = f.validate_spec()
 
         np.testing.assert_array_equal(loaded_spec.data.raw_data, raw)
-        np.testing.assert_array_equal(loaded_spec.data.envelope_data, env)
+        np.testing.assert_array_equal(loaded_spec.data.envelope_data.pixels, env)
         assert loaded_spec.probe_name == "test_probe"
         assert loaded_spec.description == "spec format test file"
 
@@ -428,7 +436,7 @@ class TestImageOnlyFile:
         """File with only envelope_data (no raw_data)."""
         n_frames = 4
         fspec = FileSpec(
-            data={"envelope_data": np.ones((n_frames, 32, 24), dtype=np.float32)},
+            data={"envelope_data": _make_map(np.ones((n_frames, 32, 24), dtype=np.float32))},
             scan=_scan_minimal(n_frames=n_frames),
         )
         path = tmp_path / "envelope_only.hdf5"
@@ -446,9 +454,9 @@ class TestAllPipelineDataTypes:
         data_dict = {
             "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
             "aligned_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
-            "beamformed_data": np.zeros((n_frames, 16, 12, n_ch), dtype=np.float32),
-            "envelope_data": np.zeros((n_frames, 16, 12), dtype=np.float32),
-            "image_sc": np.zeros((n_frames, 32, 24), dtype=np.float32),
+            "beamformed_data": _make_map(np.zeros((n_frames, 16, 12, n_ch), dtype=np.float32)),
+            "envelope_data": _make_map(np.zeros((n_frames, 16, 12), dtype=np.float32)),
+            "image_sc": _make_map(np.zeros((n_frames, 32, 24), dtype=np.float32)),
         }
         fspec = FileSpec(
             data=data_dict,
@@ -478,7 +486,7 @@ class TestSlicing:
         path = tmp_path / "sliceable.hdf5"
         f = File.create(
             path,
-            data={"raw_data": raw, "envelope_data": env},
+            data={"raw_data": raw, "envelope_data": _make_map(env)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             probe_name="slice_test",
         )
@@ -513,7 +521,7 @@ class TestSlicing:
     def test_envelope_slice(self, sliceable_file):
         path, _, env = sliceable_file
         with File(path) as f:
-            cropped = f.data.envelope_data[:, 8:16, 4:12]
+            cropped = f.data.envelope_data.pixels[:, 8:16, 4:12]
             np.testing.assert_array_equal(cropped, env[:, 8:16, 4:12])
 
     def test_ellipsis_slice(self, sliceable_file):
@@ -541,7 +549,7 @@ class TestSpatialData:
         f = File.create(
             path,
             data={
-                "envelope_data": np.ones((n_frames, 32, 24), dtype=np.float32),
+                "envelope_data": _make_map(np.ones((n_frames, 32, 24), dtype=np.float32)),
                 "image": {"pixels": img_pixels, "extent": img_extent},
                 "segmentation": {
                     "pixels": seg_pixels,
@@ -629,14 +637,14 @@ class TestFileCreate:
         path = tmp_path / "exists.hdf5"
         File.create(
             path,
-            data={"envelope_data": np.ones((2, 8, 6), dtype=np.float32)},
+            data={"envelope_data": _make_map(np.ones((2, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=2),
         ).close()
 
         with pytest.raises(FileExistsError):
             File.create(
                 path,
-                data={"envelope_data": np.ones((2, 8, 6), dtype=np.float32)},
+                data={"envelope_data": _make_map(np.ones((2, 8, 6), dtype=np.float32))},
                 scan=_scan_minimal(n_frames=2),
             )
 
@@ -644,18 +652,18 @@ class TestFileCreate:
         path = tmp_path / "overwrite.hdf5"
         File.create(
             path,
-            data={"envelope_data": np.ones((2, 8, 6), dtype=np.float32)},
+            data={"envelope_data": _make_map(np.ones((2, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=2),
         ).close()
 
         # Should succeed with overwrite=True
         f = File.create(
             path,
-            data={"envelope_data": np.zeros((3, 8, 6), dtype=np.float32)},
+            data={"envelope_data": _make_map(np.zeros((3, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=3),
             overwrite=True,
         )
-        assert f.data.envelope_data.shape[0] == 3
+        assert f.data.envelope_data.pixels.shape[0] == 3
         f.close()
 
     def test_create_validates_before_writing(self, tmp_path):
@@ -695,7 +703,7 @@ class TestMetadataMetricsAccessors:
 
         File.create(
             path,
-            data={"envelope_data": np.ones((n_frames, 8, 6), dtype=np.float32)},
+            data={"envelope_data": _make_map(np.ones((n_frames, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             metadata=metadata,
         ).close()
@@ -715,7 +723,7 @@ class TestMetadataMetricsAccessors:
 
         File.create(
             path,
-            data={"envelope_data": np.ones((n_frames, 8, 6), dtype=np.float32)},
+            data={"envelope_data": _make_map(np.ones((n_frames, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             metrics={"coherence_factor": cf},
         ).close()
@@ -759,7 +767,7 @@ class TestZeaVersion:
         path = tmp_path / "versioned.hdf5"
         File.create(
             path,
-            data={"envelope_data": np.ones((2, 8, 6), dtype=np.float32)},
+            data={"envelope_data": _make_map(np.ones((2, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=2),
         ).close()
 
@@ -782,7 +790,7 @@ class TestZeaVersion:
         path = tmp_path / "validate_light.hdf5"
         File.create(
             path,
-            data={"envelope_data": np.ones((2, 8, 6), dtype=np.float32)},
+            data={"envelope_data": _make_map(np.ones((2, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=2),
         ).close()
 

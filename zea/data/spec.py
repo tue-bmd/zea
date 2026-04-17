@@ -590,6 +590,97 @@ class Image(UnsignedIntMap):
 
 
 @dataclass
+class BeamformedData(FloatMap):
+    """Beamformed (beamsummed) data and spatial extent metadata.
+
+    Args:
+        pixels: The beamformed data of shape (n_frames, x, z, n_ch) or
+            (n_frames, x, z, y, n_ch) and type float32.
+            n_ch is 1 for RF data or 2 for IQ data.
+        extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+        labels: The labels for the channel dimension, e.g. ["RF"] or ["I", "Q"].
+            Auto-generated from n_ch if not provided.
+    """
+
+    SCHEMA = {
+        **FloatMap.SCHEMA,
+        "pixels": {
+            "dtype": np.float32,
+            "shape": (
+                ("n_frames", "x", "z", "y", "n_ch"),
+                ("n_frames", "x", "z", "n_ch"),
+            ),
+        },
+        "labels": {"dtype": np.str_, "shape": ("n_ch",)},
+    }
+
+    def __post_init__(self):
+        n_ch = self.pixels.shape[-1]
+        if n_ch not in (1, 2):
+            raise ValueError(
+                f"Beamformed data must have n_ch ∈ {{1, 2}} (RF or IQ), "
+                f"got n_ch={n_ch} (shape {self.pixels.shape})."
+            )
+        if self.labels is None:
+            self.labels = (
+                np.array(["RF"], dtype=np.str_)
+                if n_ch == 1
+                else np.array(["I", "Q"], dtype=np.str_)
+            )
+        super().__post_init__()
+
+
+@dataclass
+class EnvelopeData(FloatMap):
+    """Envelope-detected data and spatial extent metadata.
+
+    Args:
+        pixels: The envelope data of shape (n_frames, x, z) or
+            (n_frames, x, z, y) and type float32.
+        extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+    """
+
+    SCHEMA = {
+        **FloatMap.SCHEMA,
+        "pixels": {
+            "dtype": np.float32,
+            "shape": (
+                ("n_frames", "x", "z", "y"),
+                ("n_frames", "x", "z"),
+            ),
+        },
+    }
+
+
+@dataclass
+class ImageSc(FloatMap):
+    """Scan-converted image data and spatial extent metadata.
+
+    Args:
+        pixels: The scan-converted image of shape (n_frames, x, z) or
+            (n_frames, x, z, y) and type float32.
+        extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+    """
+
+    SCHEMA = {
+        **FloatMap.SCHEMA,
+        "pixels": {
+            "dtype": np.float32,
+            "shape": (
+                ("n_frames", "x", "z", "y"),
+                ("n_frames", "x", "z"),
+            ),
+        },
+    }
+
+
+@dataclass
 class SosMap(FloatMap):
     """Speed-of-sound map data and spatial extent metadata.
 
@@ -691,15 +782,11 @@ class DataSpec(Spec):
             and type float32 or int16.
         aligned_data: Time-of-flight corrected data of shape
             (n_frames, n_tx, n_ax, n_el, n_ch) and type float32 or int16.
-        beamformed_data: Beamformed (beamsummed) data of shape
-            (n_frames, grid_z, grid_x, n_ch) and type float32.
-        envelope_data: Envelope-detected data of shape
-            (n_frames, grid_z, grid_x) and type float32.
-        image_sc: Scan-converted image data of shape
-            (n_frames, output_z, output_x) or (n_frames, output_z, output_x, output_y)
-            and type float32.
 
     Spatial map data products (with extent metadata):
+        - beamformed_data: Beamformed (beamsummed) data and extent metadata.
+        - envelope_data: Envelope-detected data and extent metadata.
+        - image_sc: Scan-converted image data and extent metadata.
         - image: Reconstructed image data and extent metadata.
         - segmentation: Segmentation data and extent metadata.
         - sos_map: Speed-of-sound map data and extent metadata.
@@ -715,10 +802,10 @@ class DataSpec(Spec):
     # Pipeline data products (plain arrays)
     raw_data: np.ndarray | None = None
     aligned_data: np.ndarray | None = None
-    beamformed_data: np.ndarray | None = None
-    envelope_data: np.ndarray | None = None
-    image_sc: np.ndarray | None = None
     # Spatial map data products (with extent metadata)
+    beamformed_data: BeamformedData | dict | None = None
+    envelope_data: EnvelopeData | dict | None = None
+    image_sc: ImageSc | dict | None = None
     image: Image | dict | None = None
     segmentation: Segmentation | dict | None = None
     sos_map: SosMap | dict | None = None
@@ -737,22 +824,10 @@ class DataSpec(Spec):
             "dtype": (np.float32, np.int16),
             "shape": ("n_frames", "n_tx", "n_ax", "n_el", "n_ch"),
         },
-        "beamformed_data": {
-            "dtype": np.float32,
-            "shape": ("n_frames", "grid_z", "grid_x", "n_ch"),
-        },
-        "envelope_data": {
-            "dtype": np.float32,
-            "shape": ("n_frames", "grid_z", "grid_x"),
-        },
-        "image_sc": {
-            "dtype": np.float32,
-            "shape": (
-                ("n_frames", "grid_z_sc", "grid_x_sc"),
-                ("n_frames", "grid_z_sc", "grid_x_sc", "grid_y_sc"),
-            ),
-        },
         # Spatial map data products
+        "beamformed_data": {"spec": BeamformedData},
+        "envelope_data": {"spec": EnvelopeData},
+        "image_sc": {"spec": ImageSc},
         "image": {"spec": Image},
         "segmentation": {"spec": Segmentation},
         "sos_map": {"spec": SosMap},
@@ -765,18 +840,15 @@ class DataSpec(Spec):
     FIELD_METADATA = {
         "raw_data": {"unit": "-", "description": "Raw channel data."},
         "aligned_data": {"unit": "-", "description": "Time-of-flight corrected data."},
-        "beamformed_data": {"unit": "-", "description": "Beamformed (beamsummed) data."},
-        "envelope_data": {"unit": "-", "description": "Envelope-detected data."},
-        "image_sc": {"unit": "dB", "description": "Scan-converted image data."},
     }
 
     def __init__(
         self,
         raw_data: np.ndarray | None = None,
         aligned_data: np.ndarray | None = None,
-        beamformed_data: np.ndarray | None = None,
-        envelope_data: np.ndarray | None = None,
-        image_sc: np.ndarray | None = None,
+        beamformed_data: BeamformedData | dict | None = None,
+        envelope_data: EnvelopeData | dict | None = None,
+        image_sc: ImageSc | dict | None = None,
         image: Image | dict | None = None,
         segmentation: Segmentation | dict | None = None,
         sos_map: SosMap | dict | None = None,
@@ -828,7 +900,7 @@ class DataSpec(Spec):
         super().__post_init__()
 
         # n_ch must be 1 (RF) or 2 (IQ) for data types that carry a channel axis.
-        _N_CH_FIELDS = ("raw_data", "aligned_data", "beamformed_data")
+        _N_CH_FIELDS = ("raw_data", "aligned_data")
         for fname in _N_CH_FIELDS:
             arr = getattr(self, fname, None)
             if arr is not None and isinstance(arr, np.ndarray):
