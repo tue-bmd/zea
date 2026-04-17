@@ -78,7 +78,7 @@ class BaseModel(keras.models.Model):
                 initialized.
             **kwargs: Additional keyword arguments.
 
-        Examples:
+        Example:
             .. code-block:: python
 
                 # Load a Gemma backbone with pre-trained weights.

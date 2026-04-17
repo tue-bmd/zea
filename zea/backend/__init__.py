@@ -18,10 +18,10 @@ Key Features
 
   - :mod:`zea.backend.jax` -- JAX-specific utilities and device management.
   - :mod:`zea.backend.torch` -- PyTorch-specific utilities and device management.
-  - :mod:`zea.backend.tensorflow` -- TensorFlow-specific utilities, and device management, as well as data loading utilities.
+  - :mod:`zea.backend.tensorflow` -- TensorFlow-specific utilities and device management.
 
-- **Data Loading** (:func:`zea.backend.tensorflow.make_dataloader`):
-  This function is implemented using TensorFlow's efficient data pipeline utilities. It provides a convenient way to load and preprocess data for machine learning workflows, leveraging TensorFlow's ``tf.data.Dataset`` API.
+- **Data Loading** (:class:`zea.Dataloader`):
+  A high-performance HDF5 dataloader built on `Grain <https://github.com/google/grain>`_. It provides a convenient way to load and preprocess data for machine learning workflows.
 
 """
 
@@ -59,8 +59,21 @@ def _import_torch():
         return None
 
 
+def _get_backend():
+    try:
+        backend_result = keras.backend.backend()
+        if isinstance(backend_result, str):
+            return backend_result
+        else:
+            # to handle mocked backends during testing
+            return None
+    except Exception:
+        return None
+
+
 tf_mod = _import_tf()
 jax_mod = _import_jax()
+backend = _get_backend()
 
 
 def tf_function(func=None, jit_compile=False, **kwargs):
@@ -131,7 +144,7 @@ class on_device:
         .. code-block:: python
 
             with zea.backend.on_device("gpu:3"):
-                pipeline = zea.Pipeline([zea.keras_ops.Abs()])
+                pipeline = zea.Pipeline([zea.ops.Abs()])
                 output = pipeline(data=keras.random.normal((10, 10)))  # output is on "cuda:3"
     """
 
@@ -184,7 +197,7 @@ class on_device:
         self._context.__exit__(exc_type, exc_val, exc_tb)
 
 
-if keras.backend.backend() in ["tensorflow", "jax", "numpy"]:
+if backend in [None, "tensorflow", "jax", "numpy"]:
 
     def func_on_device(func, device, *args, **kwargs):
         """Moves all tensor arguments of a function to a specified device before calling it.
@@ -199,7 +212,8 @@ if keras.backend.backend() in ["tensorflow", "jax", "numpy"]:
         """
         with on_device(device):
             return func(*args, **kwargs)
-elif keras.backend.backend() == "torch":
+
+elif backend == "torch":
     from zea.backend.torch import func_on_device
 else:
-    raise ValueError(f"Unsupported backend: {keras.backend.backend()}")
+    raise ValueError(f"Unsupported backend: {backend}")

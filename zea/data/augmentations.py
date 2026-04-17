@@ -4,7 +4,7 @@ import keras
 import numpy as np
 from keras import layers, ops
 
-from zea.tensor_ops import is_jax_prng_key, split_seed
+from zea.func.tensor import is_jax_prng_key, split_seed
 
 
 class RandomCircleInclusion(layers.Layer):
@@ -30,7 +30,7 @@ class RandomCircleInclusion(layers.Layer):
 
     def __init__(
         self,
-        radius: int,
+        radius: int | tuple[int, int],
         fill_value: float = 1.0,
         circle_axes: tuple[int, int] = (1, 2),
         with_batch_dim=True,
@@ -38,25 +38,70 @@ class RandomCircleInclusion(layers.Layer):
         recovery_threshold=0.1,
         randomize_location_across_batch=True,
         seed=None,
+        width_range: tuple[int, int] = None,
+        height_range: tuple[int, int] = None,
         **kwargs,
     ):
         """
         Initialize RandomCircleInclusion.
 
         Args:
-            radius (int): Radius of the circle to include.
+            radius (int or tuple[int, int]): Radius of the circle/ellipse to include.
             fill_value (float): Value to fill inside the circle.
-            circle_axes (tuple[int, int]): Axes along which to draw the circle (height, width).
+            circle_axes (tuple[int, int]): Axes along which to draw the circle
+                (height, width).
             with_batch_dim (bool): Whether input has a batch dimension.
             return_centers (bool): Whether to return circle centers along with images.
             recovery_threshold (float): Threshold for considering a pixel as recovered.
-            randomize_location_across_batch (bool): If True, randomize circle location
-                per batch element.
+            randomize_location_across_batch (bool): If True (and with_batch_dim=True),
+                each batch element gets a different random center. If False, all batch
+                elements share the same center.
             seed (Any): Optional random seed for reproducibility.
+            width_range (tuple[int, int], optional): Range (min, max) for circle
+                center x (width axis).
+            height_range (tuple[int, int], optional): Range (min, max) for circle
+                center y (height axis).
             **kwargs: Additional keyword arguments for the parent Layer.
+
+        Example:
+            .. doctest::
+
+                >>> from zea.data.augmentations import RandomCircleInclusion
+                >>> from keras import ops
+
+                >>> layer = RandomCircleInclusion(
+                ...     radius=5,
+                ...     circle_axes=(1, 2),
+                ...     with_batch_dim=True,
+                ... )
+                >>> image = ops.zeros((1, 28, 28), dtype="float32")
+                >>> out = layer(image)  # doctest: +SKIP
+
         """
         super().__init__(**kwargs)
-        self.radius = radius
+
+        # Validate randomize_location_across_batch only makes sense with batch dim
+        if not with_batch_dim and not randomize_location_across_batch:
+            raise ValueError(
+                "randomize_location_across_batch=False is only applicable when "
+                "with_batch_dim=True. When with_batch_dim=False, there is no batch "
+                "to randomize across."
+            )
+        # Convert radius to tuple if int, else validate tuple
+        if isinstance(radius, int):
+            if radius <= 0:
+                raise ValueError(f"radius must be a positive integer, got {radius}.")
+            self.radius = (radius, radius)
+        elif isinstance(radius, tuple) and len(radius) == 2:
+            rx, ry = radius
+            if not all(isinstance(r, int) for r in (rx, ry)):
+                raise TypeError(f"radius tuple must contain two integers, got {radius!r}.")
+            if rx <= 0 or ry <= 0:
+                raise ValueError(f"radius components must be positive, got {radius!r}.")
+            self.radius = (rx, ry)
+        else:
+            raise TypeError("radius must be an int or a tuple of two ints")
+
         self.fill_value = fill_value
         self.circle_axes = circle_axes
         self.with_batch_dim = with_batch_dim
@@ -64,6 +109,8 @@ class RandomCircleInclusion(layers.Layer):
         self.recovery_threshold = recovery_threshold
         self.randomize_location_across_batch = randomize_location_across_batch
         self.seed = seed
+        self.width_range = width_range
+        self.height_range = height_range
         self._axis1 = None
         self._axis2 = None
         self._perm = None
@@ -116,6 +163,43 @@ class RandomCircleInclusion(layers.Layer):
         self._static_w = int(permuted_shape[-1])
         self._static_shape = tuple(permuted_shape)
 
+        # Validate that ellipse can fit within image bounds
+        rx, ry = self.radius
+        min_required_width = 2 * rx + 1
+        min_required_height = 2 * ry + 1
+
+        if self._static_w < min_required_width:
+            raise ValueError(
+                f"Image width ({self._static_w}) is too small for radius {rx}. "
+                f"Minimum required width: {min_required_width}"
+            )
+        if self._static_h < min_required_height:
+            raise ValueError(
+                f"Image height ({self._static_h}) is too small for radius {ry}. "
+                f"Minimum required height: {min_required_height}"
+            )
+
+        # Validate width_range and height_range if provided
+        if self.width_range is not None:
+            min_x, max_x = self.width_range
+            if min_x >= max_x:
+                raise ValueError(f"width_range must have min < max, got {self.width_range}")
+            if min_x < rx or max_x > self._static_w - rx:
+                raise ValueError(
+                    f"width_range {self.width_range} would place circle outside image bounds. "
+                    f"Valid range: [{rx}, {self._static_w - rx})"
+                )
+
+        if self.height_range is not None:
+            min_y, max_y = self.height_range
+            if min_y >= max_y:
+                raise ValueError(f"height_range must have min < max, got {self.height_range}")
+            if min_y < ry or max_y > self._static_h - ry:
+                raise ValueError(
+                    f"height_range {self.height_range} would place circle outside image bounds. "
+                    f"Valid range: [{ry}, {self._static_h - ry})"
+                )
+
         super().build(input_shape)
 
     def compute_output_shape(self, input_shape):
@@ -165,7 +249,7 @@ class RandomCircleInclusion(layers.Layer):
             centers (Tensor): Tensor of shape (batch, 2) with circle centers.
             h (int): Height of the image.
             w (int): Width of the image.
-            radius (int): Radius of the circle.
+            radius (tuple[int, int]): Radii of the ellipse (rx, ry).
             dtype (str or dtype): Data type for the mask.
 
         Returns:
@@ -176,12 +260,12 @@ class RandomCircleInclusion(layers.Layer):
         Y, X = ops.meshgrid(Y, X, indexing="ij")
         Y = ops.expand_dims(Y, 0)  # (1, h, w)
         X = ops.expand_dims(X, 0)  # (1, h, w)
-        # cx = ops.cast(centers[:, 0], "float32")[:, None, None]
-        # cy = ops.cast(centers[:, 1], "float32")[:, None, None]
         cx = centers[:, 0][:, None, None]
         cy = centers[:, 1][:, None, None]
-        dist2 = (X - cx) ** 2 + (Y - cy) ** 2
-        mask = ops.cast(dist2 <= radius**2, dtype)
+        rx, ry = radius
+        # Ellipse equation: ((X-cx)/rx)^2 + ((Y-cy)/ry)^2 <= 1
+        dist = ((X - cx) / rx) ** 2 + ((Y - cy) / ry) ** 2
+        mask = ops.cast(dist <= 1, dtype)
         return mask
 
     def call(self, x, seed=None):
@@ -197,9 +281,17 @@ class RandomCircleInclusion(layers.Layer):
                 centers if return_centers is True.
         """
         if keras.backend.backend() == "jax" and not is_jax_prng_key(seed):
-            raise NotImplementedError(
-                "jax.random.key() is not supported, please use jax.random.PRNGKey()"
-            )
+            if isinstance(seed, keras.random.SeedGenerator):
+                raise ValueError(
+                    "When using JAX backend, please provide a jax.random.PRNGKey as seed, "
+                    "instead of keras.random.SeedGenerator."
+                )
+            else:
+                raise TypeError(
+                    f"When using JAX backend, seed must be a JAX PRNG key (created with "
+                    f"jax.random.PRNGKey()), but got {type(seed)}. Note: jax.random.key() "
+                    f"keys are not currently supported."
+                )
         seed = seed if seed is not None else self.seed
 
         if self.with_batch_dim:
@@ -209,22 +301,33 @@ class RandomCircleInclusion(layers.Layer):
                     imgs, centers = ops.map(lambda arg: self._call(arg, seed), x)
                 else:
                     raise NotImplementedError(
-                        "You cannot fix circle locations across while using"
+                        "You cannot fix circle locations across batch while using "
                         + "RandomCircleInclusion as a dataset augmentation, "
                         + "since samples in a batch are handled independently."
                     )
             else:
+                batch_size = ops.shape(x)[0]
                 if self.randomize_location_across_batch:
-                    batch_size = ops.shape(x)[0]
                     seeds = split_seed(seed, batch_size)
-                    if all(seed is seeds[0] for seed in seeds):
+                    if all(s is seeds[0] for s in seeds):
                         imgs, centers = ops.map(lambda arg: self._call(arg, seeds[0]), x)
                     else:
                         imgs, centers = ops.map(
                             lambda args: self._call(args[0], args[1]), (x, seeds)
                         )
                 else:
-                    imgs, centers = ops.map(lambda arg: self._call(arg, seed), x)
+                    # Generate one random center that will be used for all batch elements
+                    img0, center0 = self._call(x[0], seed)
+
+                    # Apply the same center to all batch elements
+                    imgs_list, centers_list = [img0], [center0]
+                    for i in range(1, batch_size):
+                        img_aug, center_out = self._call_with_fixed_center(x[i], center0)
+                        imgs_list.append(img_aug)
+                        centers_list.append(center_out)
+
+                    imgs = ops.stack(imgs_list, axis=0)
+                    centers = ops.stack(centers_list, axis=0)
         else:
             imgs, centers = self._call(x, seed)
 
@@ -248,17 +351,28 @@ class RandomCircleInclusion(layers.Layer):
         flat, flat_batch_size, h, w = self._flatten_batch_and_other_dims(x)
 
         def _draw_circle_2d(img2d):
+            rx, ry = self.radius
+            # Determine allowed ranges for center
+            if self.width_range is not None:
+                min_x, max_x = self.width_range
+            else:
+                min_x, max_x = rx, w - rx
+            if self.height_range is not None:
+                min_y, max_y = self.height_range
+            else:
+                min_y, max_y = ry, h - ry
+            # Ensure the ellipse fits within the allowed region
             cx = ops.cast(
-                keras.random.uniform((), self.radius, w - self.radius, seed=seed),
+                keras.random.uniform((), min_x, max_x, seed=seed),
                 "int32",
             )
             new_seed, _ = split_seed(seed, 2)  # ensure that cx and cy are independent
             cy = ops.cast(
-                keras.random.uniform((), self.radius, h - self.radius, seed=new_seed),
+                keras.random.uniform((), min_y, max_y, seed=new_seed),
                 "int32",
             )
             mask = self._make_circle_mask(
-                ops.stack([cx, cy])[None, :], h, w, self.radius, img2d.dtype
+                ops.stack([cx, cy])[None, :], h, w, (rx, ry), img2d.dtype
             )[0]
             img_aug = img2d * (1 - mask) + self.fill_value * mask
             center = ops.stack([cx, cy])
@@ -269,6 +383,67 @@ class RandomCircleInclusion(layers.Layer):
         aug_imgs = ops.transpose(aug_imgs, axes=self._inv_perm)
         centers_shape = [2] if flat_batch_size == 1 else [flat_batch_size, 2]
         centers = ops.reshape(centers, centers_shape)
+        return (aug_imgs, centers)
+
+    def _apply_circle_mask(self, flat, center, h, w):
+        """Apply circle mask to flattened image data.
+
+        Args:
+            flat (Tensor): Flattened image data of shape (flat_batch, h, w).
+            center (Tensor): Center coordinates, either (2,) or (flat_batch, 2).
+            h (int): Height of images.
+            w (int): Width of images.
+
+        Returns:
+            Tensor: Augmented images with circle applied.
+        """
+        rx, ry = self.radius
+
+        # Ensure center has batch dimension for broadcasting
+        if len(center.shape) == 1:
+            # Single center (2,) -> broadcast to all slices
+            center_batched = ops.tile(ops.reshape(center, [1, 2]), [flat.shape[0], 1])
+        else:
+            # Already batched (flat_batch, 2)
+            center_batched = center
+
+        # Create masks for all slices using vectorized_map or broadcasting
+        masks = self._make_circle_mask(center_batched, h, w, (rx, ry), flat.dtype)
+
+        # Apply masks
+        aug_imgs = flat * (1 - masks) + self.fill_value * masks
+        return aug_imgs
+
+    def _call_with_fixed_center(self, x, fixed_center):
+        """Apply augmentation using a pre-determined center.
+
+        Args:
+            x (Tensor): Input image tensor.
+            fixed_center (Tensor): Pre-determined center coordinates, either (2,)
+                for a single center or (flat_batch, 2) for per-slice centers.
+
+        Returns:
+            tuple: (augmented image, center coordinates).
+        """
+        x = self._permute_axes_to_circle_last(x)
+        flat, flat_batch_size, h, w = self._flatten_batch_and_other_dims(x)
+
+        # Apply circle mask with fixed center (handles both single and batched centers)
+        aug_imgs = self._apply_circle_mask(flat, fixed_center, h, w)
+        aug_imgs = ops.reshape(aug_imgs, x.shape)
+        aug_imgs = ops.transpose(aug_imgs, axes=self._inv_perm)
+
+        # Return centers matching the expected shape
+        if len(fixed_center.shape) == 1:
+            # Single center (2,) -> broadcast to match flat_batch_size
+            if flat_batch_size == 1:
+                centers = fixed_center
+            else:
+                centers = ops.tile(ops.reshape(fixed_center, [1, 2]), [flat_batch_size, 1])
+        else:
+            # Already batched centers (flat_batch, 2)
+            centers = fixed_center
+
         return (aug_imgs, centers)
 
     def get_config(self):
@@ -285,6 +460,8 @@ class RandomCircleInclusion(layers.Layer):
                 "fill_value": self.fill_value,
                 "circle_axes": self.circle_axes,
                 "return_centers": self.return_centers,
+                "width_range": self.width_range,
+                "height_range": self.height_range,
             }
         )
         return cfg
@@ -293,7 +470,8 @@ class RandomCircleInclusion(layers.Layer):
         self, images, centers, recovery_threshold, fill_value=None
     ):
         """
-        Evaluate the percentage of the true circle that has been recovered in the images.
+        Evaluate the percentage of the true circle that has been recovered in the images,
+        and return a mask of the detected part of the circle.
 
         Args:
             images (Tensor): Tensor of images (any shape, with circle axes as specified).
@@ -302,8 +480,12 @@ class RandomCircleInclusion(layers.Layer):
             fill_value (float, optional): Optionally override fill_value for cases
                 where image range has changed.
 
-        Returns:
-            Tensor: Percentage recovered for each circle (shape: [num_circles]).
+         Returns:
+            Tuple[Tensor, Tensor]:
+                - percent_recovered: [batch] - average recovery percentage per batch element,
+                  averaged across all non-batch dimensions (e.g., frames, slices)
+                - recovered_masks: [batch, flat_batch, h, w] or [batch, h, w] or [flat_batch, h, w]
+                   depending on input shape - binary mask of detected circle regions
         """
         fill_value = fill_value or self.fill_value
 
@@ -318,12 +500,23 @@ class RandomCircleInclusion(layers.Layer):
             recovered_sum = ops.sum(recovered, axis=[1, 2])
             mask_sum = ops.sum(mask, axis=[1, 2])
             percent_recovered = recovered_sum / (mask_sum + 1e-8)
-            return percent_recovered
+            # recovered_mask: binary mask of detected part of the circle
+            recovered_mask = ops.cast(recovered > 0, flat_image.dtype)
+            return percent_recovered, recovered_mask
 
         if self.with_batch_dim:
-            return ops.vectorized_map(
+            results = ops.vectorized_map(
                 lambda args: _evaluate_recovered_circle_accuracy(args[0], args[1]),
                 (images, centers),
-            )[..., 0]
+            )
+            percent_recovered, recovered_masks = results
+            # If there are multiple circles per batch element (e.g., multiple frames/slices),
+            # take the mean across all non-batch dimensions to get one value per batch element
+            if len(percent_recovered.shape) > 1:
+                # Average over all axes except the batch dimension (axis 0)
+                axes_to_reduce = tuple(range(1, len(percent_recovered.shape)))
+                percent_recovered = ops.mean(percent_recovered, axis=axes_to_reduce)
+            return percent_recovered, recovered_masks
         else:
-            return _evaluate_recovered_circle_accuracy(images, centers)
+            percent_recovered, recovered_mask = _evaluate_recovered_circle_accuracy(images, centers)
+            return percent_recovered, recovered_mask

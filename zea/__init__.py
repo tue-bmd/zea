@@ -2,12 +2,16 @@
 
 import importlib.util
 import os
+from importlib.metadata import PackageNotFoundError, version
 
 from . import log
 
-# dynamically add __version__ attribute (see pyproject.toml)
-# __version__ = __import__("importlib.metadata").metadata.version(__package__)
-__version__ = "0.0.6"
+try:
+    # dynamically add __version__ attribute (see pyproject.toml)
+    __version__ = version("zea")
+except PackageNotFoundError:
+    # Package is not installed (e.g., running from source)
+    __version__ = "dev"
 
 
 def _bootstrap_backend():
@@ -80,8 +84,10 @@ def _bootstrap_backend():
     log.info(f"Using backend {keras_backend()!r}")
 
 
-# call and clean up namespace
-_bootstrap_backend()
+# Skip backend bootstrap when building on ReadTheDocs
+if os.environ.get("READTHEDOCS") != "True":
+    _bootstrap_backend()
+
 del _bootstrap_backend
 
 from . import (
@@ -89,16 +95,17 @@ from . import (
     beamform,
     data,
     display,
+    func,
     io_lib,
-    keras_ops,
     metrics,
     models,
+    ops,
     simulator,
-    tensor_ops,
     utils,
     visualize,
 )
 from .config import Config
+from .data.dataloader import Dataloader
 from .data.datasets import Dataset, Folder
 from .data.file import File, load_file
 from .datapaths import set_data_paths

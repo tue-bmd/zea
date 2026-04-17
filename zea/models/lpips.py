@@ -1,7 +1,24 @@
 """LPIPS model for perceptual similarity.
 
-See original code: https://github.com/richzhang/PerceptualSimilarity
-As well as the paper: https://arxiv.org/abs/1801.03924
+To try this model, simply load one of the available presets:
+
+.. doctest::
+
+    >>> from zea.models.lpips import LPIPS
+
+    >>> model = LPIPS.from_preset("lpips")
+
+.. important::
+    This is a ``zea`` implementation of the model.
+    For the original paper and code, see `here <https://github.com/richzhang/PerceptualSimilarity>`_.
+
+    Zhang, Richard, et al.
+    "The Unreasonable Effectiveness of Deep Features as a Perceptual Metric."
+    *https://arxiv.org/abs/1801.03924*
+
+.. seealso::
+    A tutorial notebook where this model is used:
+    :doc:`../notebooks/metrics/lpips_example`.
 
 """
 
@@ -69,6 +86,9 @@ class LPIPS(BaseModel):
             inputs (list): List of two input images of shape [B, H, W, C] or [H, W, C].
                 Images should be in the range [-1, 1].
 
+        Returns:
+            Tensor: LPIPS distance between the two images
+                of shape [B, ] or scalar if no batch dimension.
         """
         input1, input2 = inputs
 
@@ -82,7 +102,9 @@ class LPIPS(BaseModel):
                 " the [-1, 1] range."
             )
 
-        # preprocess input images
+        has_batch_dim = ops.ndim(input1) == 4
+
+        # preprocess input images (standardize and add batch dimension if needed)
         net_out1 = self.preprocess_input(input1)
         net_out2 = self.preprocess_input(input2)
 
@@ -109,6 +131,10 @@ class LPIPS(BaseModel):
         # squeeze: [N, ]
         lin_out = ops.squeeze(lin_out, axis=-1)
 
+        # remove batch dim if not present in inputs
+        if not has_batch_dim:
+            lin_out = ops.squeeze(lin_out, axis=0)
+
         return lin_out
 
     @staticmethod
@@ -124,8 +150,9 @@ class LPIPS(BaseModel):
         """Preprocess the input images
 
         Args:
-            image (Tensor): Input image tensor of shape [B, H, W, C]
+            image (Tensor): Input image tensor of shape [H, W, C] with optional batch dimension
                 and values in the range [-1, 1].
+
         Returns:
             Tensor: Preprocessed image tensor of shape [B, H, W, C]
                 and standardized values for VGG model.

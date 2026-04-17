@@ -6,6 +6,8 @@ from keras import ops
 
 from zea.agent import masks, selection
 
+from . import DEFAULT_TEST_SEED
+
 
 def test_equispaced_lines():
     """Test equispaced_lines."""
@@ -39,15 +41,19 @@ def test_unequal_spacing():
     lines = masks.initial_equispaced_lines(
         n_actions=3, n_possible_actions=10, assert_equal_spacing=False
     )
+    expected_lines = np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0])  # notice the spacing is 2, 3, 2
     assert ops.shape(lines) == (10,)
     assert ops.sum(lines) == 3
+    assert ops.all(lines == expected_lines)
 
     # Should not raise error when n_possible_actions is divisible by n_actions
     lines = masks.initial_equispaced_lines(
         n_actions=2, n_possible_actions=10, assert_equal_spacing=False
     )
+    expected_lines = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0])
     assert ops.shape(lines) == (10,)
     assert ops.sum(lines) == 2
+    assert ops.all(lines == expected_lines)
 
 
 def test_mask_action_model():
@@ -71,6 +77,7 @@ def test_lines_action_model():
 
 def test_greedy_entropy():
     """Test GreedyEntropy action selection."""
+    # Note: this test is hard-coded to work with rng seed 2, seed should not be a variable.
     np.random.seed(2)
     h, w = 8, 8
     rand_img_1 = np.random.rand(h, w, 1).astype(np.float32)
@@ -84,14 +91,16 @@ def test_greedy_entropy():
     particles = np.expand_dims(particles, axis=0)  # add batch dim
     particles = np.squeeze(particles, axis=-1)  # remove channel dim --> (batch, n_particles, h, w)
 
+    particles = ops.convert_to_tensor(particles)
+
     n_actions = 1
     agent = selection.GreedyEntropy(n_actions, w, h, w)
     selected_lines, mask = agent.sample(particles)
     assert mask.shape == (1, h, w)
     assert selected_lines.shape == (1, w)
     first_row = mask[0, 0]
-    assert np.count_nonzero(first_row) == n_actions
-    assert np.count_nonzero(selected_lines[0]) == n_actions
+    assert ops.count_nonzero(first_row) == n_actions
+    assert ops.count_nonzero(selected_lines[0]) == n_actions
 
     n_actions = 2
     agent = selection.GreedyEntropy(n_actions, w, h, w)
@@ -99,8 +108,8 @@ def test_greedy_entropy():
     assert mask.shape == (1, h, w)
     assert selected_lines.shape == (1, w)
     first_row = mask[0, 0]
-    assert np.count_nonzero(first_row) == n_actions
-    assert np.count_nonzero(selected_lines[0]) == n_actions
+    assert ops.count_nonzero(first_row) == n_actions
+    assert ops.count_nonzero(selected_lines[0]) == n_actions
 
     # Test that the algorithm hasn't changed by comparing to a correct hard-coded value
     h, w = 64, 64
@@ -114,6 +123,7 @@ def test_greedy_entropy():
     particles = np.stack([rand_img_1, rand_img_2], axis=0)
     particles = np.expand_dims(particles, axis=0)
     particles = np.squeeze(particles, axis=-1)
+    particles = ops.convert_to_tensor(particles)
 
     n_actions = 1
     agent = selection.GreedyEntropy(n_actions, w, h, w)
@@ -122,12 +132,37 @@ def test_greedy_entropy():
     correct_line_index = 17
     correct_selected_lines = [False] * 64
     correct_selected_lines[correct_line_index] = True
-    correct_selected_lines = [correct_selected_lines]
-    assert np.all(selected_lines == correct_selected_lines)
+    correct_selected_lines = ops.convert_to_tensor([correct_selected_lines])
+    assert ops.all(selected_lines == correct_selected_lines)
+
+    # test with n_possible_actions == w // 2
+    agent = selection.GreedyEntropy(n_actions, w // 2, h, w)
+    selected_lines, mask = agent.sample(particles)
+    assert mask.shape == (1, h, w)
+    assert selected_lines.shape == (1, w // 2)
+
+
+def test_greedy_entropy_average_across_batch():
+    """Test GreedyEntropy with average_entropy_across_batch=True for 3D plane selection."""
+    np.random.seed(42)
+    h, w = 8, 8
+    batch_size = 3
+    n_particles = 2
+    n_actions = 1
+
+    particles = np.random.rand(batch_size, n_particles, h, w).astype(np.float32)
+
+    # Verify it runs without error when averaging across batch
+    agent = selection.GreedyEntropy(n_actions, w, h, w, average_entropy_across_batch=True)
+    selected_lines, mask = agent.sample(particles)
+
+    assert mask.shape == (1, h, w)
+    assert selected_lines.shape == (1, w)
 
 
 def test_covariance_sampling_lines():
     """Test CovarianceSamplingLines action selection."""
+    # Note: this test is hard-coded to work with rng seed 2, seed should not be a variable.
     rng = np.random.default_rng(2)
     h, w = 16, 16
     rand_img_1 = rng.uniform(0, 1, (h, w)).astype(np.float32)
@@ -170,9 +205,9 @@ def test_covariance_sampling_lines():
 
 def test_single_action():
     """Test single action."""
-    np.random.seed(2)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
     h, w = 8, 8
-    particles = np.random.rand(1, 2, h, w).astype(np.float32)
+    particles = rng.standard_normal((1, 2, h, w)).astype(np.float32)
 
     agent = selection.GreedyEntropy(1, w, h, w)
     selected_lines, mask = agent.sample(particles)
@@ -191,9 +226,9 @@ def test_single_action():
 
 def test_maximum_actions():
     """Test maximum actions."""
-    np.random.seed(2)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
     h, w = 8, 8
-    particles = np.random.rand(1, 2, h, w).astype(np.float32)
+    particles = rng.random((1, 2, h, w)).astype(np.float32)
 
     agent = selection.GreedyEntropy(w, w, h, w)
     selected_lines, mask = agent.sample(particles)
@@ -263,7 +298,6 @@ def test_equispaced_lines_class():
 
 def test_uniform_random_lines():
     """Test UniformRandomLines action selection."""
-    np.random.seed(2)
     h, w = 8, 8
     batch_size = 3
 
@@ -312,6 +346,7 @@ def test_uniform_random_lines():
 
 def test_task_based_lines():
     """Test TaskBasedLines action selection."""
+    # Note: this test is hard-coded to work with rng seed 2, seed should not be a variable.
     np.random.seed(2)
     h, w = 8, 8
     rand_img_1 = np.random.rand(h, w, 1).astype(np.float32)

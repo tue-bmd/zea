@@ -1,6 +1,25 @@
-"""Echonet-Dynamic segmentation model for cardiac ultrasound segmentation.
-Link below does not work it seems, this is slightly different but does have some info:
-https://github.com/bryanhe/dynamic
+"""
+Echonet-Dynamic segmentation model for cardiac ultrasound segmentation.
+
+To try this model, simply load one of the available presets:
+
+.. doctest::
+
+    >>> from zea.models.echonet import EchoNetDynamic
+
+    >>> model = EchoNetDynamic.from_preset("echonet-dynamic")  # doctest: +SKIP
+
+.. important::
+    This is a ``zea`` implementation of the model.
+    For the original paper and code, see `here <https://echonet.github.io/dynamic/>`_.
+
+    Ouyang, David, et al. "Video-based AI for beat-to-beat assessment of cardiac function."
+    *Nature 580.7802 (2020): 252-256*
+
+.. seealso::
+    A tutorial notebook where this model is used:
+    :doc:`../notebooks/models/left_ventricle_segmentation_example`.
+
 """
 
 from pathlib import Path
@@ -33,11 +52,6 @@ tf = _import_tf()
 class EchoNetDynamic(BaseModel):
     """EchoNet-Dynamic segmentation model for cardiac ultrasound segmentation.
 
-    Original paper and code: https://echonet.github.io/dynamic/
-
-    This class extracts useful parts of the original code and wraps it in a
-    easy to use class.
-
     Preprocessing should normalize the input images with mean and standard deviation.
 
     """
@@ -62,20 +76,27 @@ class EchoNetDynamic(BaseModel):
         ]
         self.network = None
 
-    def build(self, input_shape):
+    def build(self, input_shape):  # pragma: no cover
         """Builds the network."""
-        self.maybe_convert_to_jax(input_shape)
+        self.maybe_convert_to_jax()
 
-    def maybe_convert_to_jax(self, input_shape):
-        """Converts the network to Jax if backend is Jax."""
+    def maybe_convert_to_jax(self):  # pragma: no cover
+        """Converts the network to JAX if backend is JAX.
+
+        JAX conversion traces the SavedModel using an example input of shape
+        ``(1, INFERENCE_SIZE, INFERENCE_SIZE, 3)``. At runtime, ``call()`` may pass
+        ``(B, INFERENCE_SIZE, INFERENCE_SIZE, 3)`` after resize/tile preprocessing.
+        """
         if backend.backend() == "jax":
-            inputs = ops.zeros(input_shape)
             from zea.backend import tf2jax
+
+            inputs = ops.zeros([1, INFERENCE_SIZE, INFERENCE_SIZE, 3])
 
             jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
 
             def call_fn(params, state, rng, inputs, training):
-                return jax_func(state, inputs)
+                with tf2jax.override_config("strict_shape_check", False):
+                    return jax_func(state, inputs)
 
             self.network = keras.layers.JaxLayer(call_fn, state=jax_params)
 

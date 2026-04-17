@@ -4,8 +4,8 @@ import keras
 import numpy as np
 from keras import ops
 
+from zea.func.tensor import linear_sum_assignment
 from zea.models.generative import GenerativeModel
-from zea.tensor_ops import linear_sum_assignment
 
 
 class GaussianMixtureModel(GenerativeModel):

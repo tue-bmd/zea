@@ -47,10 +47,12 @@ The ``zea`` toolbox uses a custom data format based on the HDF5 standard to stor
          ├── probe_geometry
          ├── sampling_frequency
          ├── center_frequency
+         ├── demodulation_frequency
          ├── initial_times
          ├── t0_delays
          ├── tx_apodizations
          ├── focus_distances
+         ├── transmit_origins
          ├── polar_angles
          ├── azimuth_angles
          ├── bandwidth_percent
@@ -100,7 +102,9 @@ The ``zea`` toolbox uses a custom data format based on the HDF5 standard to stor
    * - ``scan/sampling_frequency``
      - Sampling frequency of the data acquisition (in Hz).
    * - ``scan/center_frequency``
-     - Center frequency of the transducer (in Hz).
+     - Center frequency of the transmit waveform in Hz.
+   * - ``scan/demodulation_frequency``
+     - The demodulation frequency of the data in Hz. This is the assumed center frequency of the transmit waveform used to demodulate the rf data to iq data.
    * - ``scan/initial_times``
      - Time (in seconds) when the A/D converter starts sampling for each transmit, shape [n_tx].
    * - ``scan/t0_delays``
@@ -108,7 +112,9 @@ The ``zea`` toolbox uses a custom data format based on the HDF5 standard to stor
    * - ``scan/tx_apodizations``
      - Transmit apodization values, shape [n_tx, n_el].
    * - ``scan/focus_distances``
-     - Transmit focus distances in meters, shape [n_tx].
+     - Distance from the origin point on the transducer to where the beam comes to focus for each transmit, in meters, shape [n_tx].
+   * - ``scan/transmit_origins``
+     - 3D coordinates (in meters) of the origin point for each transmit, shape [n_tx, 3].
    * - ``scan/polar_angles``
      - Polar angles of transmit beams in radians, shape [n_tx].
    * - ``scan/azimuth_angles``
@@ -143,45 +149,51 @@ How to Generate a zea Dataset
 
 Here is a minimal example of how to generate and save a zea dataset:
 
-.. code-block:: python
+.. doctest::
 
-  import numpy as np
-  from zea.data.data_format import DatasetElement, generate_zea_dataset
+  >>> import numpy as np
+  >>> from zea.data.data_format import DatasetElement, generate_zea_dataset
 
-  # Example data (replace with your actual data)
-  raw_data = np.random.randn(2, 11, 2048, 128, 1)
-  image = np.random.randn(2, 512, 512)
-  probe_geometry = np.zeros((128, 3))
-  t0_delays = np.zeros((11, 128))
-  initial_times = np.zeros((11,))
-  sampling_frequency = 40e6
-  center_frequency = 7e6
+  >>> # Example data (replace with your actual data)
+  >>> raw_data = np.random.randn(2, 11, 2048, 128, 1)
+  >>> image = np.random.randn(2, 512, 512)
+  >>> probe_geometry = np.zeros((128, 3))
+  >>> t0_delays = np.zeros((11, 128))
+  >>> initial_times = np.zeros((11,))
+  >>> sampling_frequency = 40e6
+  >>> center_frequency = 7e6
 
-  # Optionally define a custom dataset element
-  custom_dataset_element = DatasetElement(
-      group_name="scan",
-      dataset_name="custom_element",
-      data=np.random.rand(10, 10),
-      description="custom description",
-      unit="m",
-  )
+  >>> # Optionally define a custom dataset element
+  >>> custom_dataset_element = DatasetElement(
+  ...    group_name="scan",
+  ...    dataset_name="custom_element",
+  ...    data=np.random.rand(10, 10),
+  ...    description="custom description",
+  ...    unit="m",
+  ... )
 
-  # Save the dataset to disk
-  generate_zea_dataset(
-      "output_file.hdf5",
-      raw_data=raw_data,
-      image=image,
-      probe_geometry=probe_geometry,
-      t0_delays=t0_delays,
-      initial_times=initial_times,
-      sampling_frequency=sampling_frequency,
-      center_frequency=center_frequency,
-      sound_speed=1540,
-      probe_name="generic",
-      description="Example dataset",
-      additional_elements=[custom_dataset_element],
-  )
+  >>> # Save the dataset to disk
+  >>> generate_zea_dataset(
+  ...    "output_file.hdf5",
+  ...    raw_data=raw_data,
+  ...    image=image,
+  ...    probe_geometry=probe_geometry,
+  ...    t0_delays=t0_delays,
+  ...    initial_times=initial_times,
+  ...    sampling_frequency=sampling_frequency,
+  ...    center_frequency=center_frequency,
+  ...    sound_speed=1540,
+  ...    probe_name="generic",
+  ...    description="Example dataset",
+  ...    additional_elements=[custom_dataset_element],
+  ...    overwrite=True,
+  ... )
 
+.. testcleanup::
+
+    import os
+
+    os.remove("output_file.hdf5")
 
 For more advanced usage, see :py:func:`zea.data.data_format.generate_zea_dataset`.
 
@@ -194,20 +206,21 @@ The ``zea`` toolbox supports several public and research ultrasound datasets. Fo
 **Supported Datasets:**
 
 - **EchoNet-Dynamic**: Large-scale cardiac ultrasound dataset.
+- **EchoNet-LVH**: Large-scale cardiac dataset for left ventricular hypertrophy detection.
 - **CAMUS**: Cardiac Acquisitions for Multi-structure Ultrasound Segmentation.
 - **PICMUS**: Plane-wave Imaging Challenge in Medical Ultrasound.
 - **Custom Datasets**: You can add your own datasets by following the ``zea`` format.
 
 **Conversion Scripts:**
 
-- Scripts are provided in the `zea/data/convert/ <https://github.com/your-org/zea/tree/main/zea/data/convert/>`__ directory to automate downloading and conversion.
+- Scripts are provided in the `zea/data/convert/ <https://github.com/tue-bmd/zea/tree/main/zea/data/convert/>`__ directory to automate downloading and conversion.
 - Example usage:
 
   .. code-block:: shell
 
-      python zea/data/convert/echonet.py --output-dir <your_data_dir>
-      python zea/data/convert/camus.py --output-dir <your_data_dir>
-      python zea/data/convert/picmus.py --output-dir <your_data_dir>
+      python -m zea.data.convert --dataset "echonet" --src <source_folder> --dst <destination_folder>
+      python -m zea.data.convert --dataset "camus" --src <source_folder> --dst <destination_folder>
+      python -m zea.data.convert --dataset "picmus" --src <source_folder> --dst <destination_folder>
 
 - These scripts will fetch the raw data, process it, and store it in the standardized ``zea`` format.
 
@@ -221,14 +234,13 @@ One can also acquire data using various ultrasound platforms and convert it to t
 
 - Record data using your preferred Verasonics script.
 - Save entire workspace to a `.mat` file.
-- Use ``zea/data/convert/matlab.py`` to convert the MATLAB workspace files to ``zea`` format.
+- Use the ``--dataset "verasonics"`` flag to convert the MATLAB workspace files to ``zea`` format. More info can be found in the :mod:`zea.data.convert.verasonics` module documentation.
 - Example:
 
   .. code-block:: shell
 
-      python zea/data/convert/matlab.py --input <verasonics_mat_file> --output <zea_hdf5_file>
+    python -m zea.data.convert --dataset "verasonics" --src <source_folder> --dst <destination_folder>
 
 **us4us**
 
-- See ``zea/data/convert/us4us.py`` for details.
--
+- To be added in a future release.

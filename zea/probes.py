@@ -16,14 +16,14 @@ Example usage
 
 We can initialize a generic probe with the following code:
 
-.. code-block:: python
+.. doctest::
 
-    import zea
+    >>> from zea import Probe
 
-    probe = zea.Probe.from_name("generic")
-    print(probe.get_parameters())
-
-"""
+    >>> probe = Probe.from_name("generic")
+    >>> print(probe.get_parameters())
+    {'probe_geometry': None, 'center_frequency': None, 'sampling_frequency': None, 'xlims': None, 'zlims': None, 'n_el': None}
+"""  # noqa: E501
 
 import numpy as np
 
@@ -58,6 +58,8 @@ def create_probe_geometry(n_el, pitch):
 class Probe(Object):
     """Probe base class. All probes should inherit from this class."""
 
+    # TODO: our data format doesn't store the actual probe center frequency anymore...
+    # We should decide how to handle this in the future.
     def __init__(
         self,
         probe_geometry=None,
@@ -114,6 +116,7 @@ class Probe(Object):
             "sampling_frequency": self.sampling_frequency,
             "xlims": self.xlims,
             "zlims": self.zlims,
+            "n_el": self.n_el,
         }
 
     @classmethod
@@ -231,12 +234,3 @@ class Esaote_sll1543(Probe):
             bandwidth_MHz=bandwidth_MHz,
             probe_type="linear",
         )
-
-    def get_parameters(self):
-        return {
-            "probe_geometry": self.probe_geometry,
-            "center_frequency": self.center_frequency,
-            "sampling_frequency": self.sampling_frequency,
-            "xlims": self.xlims,
-            "zlims": self.zlims,
-        }

@@ -12,7 +12,8 @@ import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 
-from zea.utils import save_to_gif, translate
+from zea.func.tensor import translate
+from zea.io_lib import save_video
 
 
 def get_args():
@@ -196,7 +197,7 @@ def main():
         # Save as GIF
         gif_path = os.path.join(args.output_dir, f"{Path(args.input_h5).stem}.gif")
         frames_as_img = translate(frames, (-60, 0), (0, 255)).astype(np.uint8)
-        save_to_gif(frames_as_img, gif_path, fps=args.fps)
+        save_video(frames_as_img, gif_path, fps=args.fps)
 
         # Find measurements
         print(f"Looking for measurements in {args.measurements_csv}")

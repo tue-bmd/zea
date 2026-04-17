@@ -51,7 +51,7 @@ PARAMETER_DESCRIPTIONS = {
         "xlims": "The limits of the x-axis in the scan in meters (null, [min, max])",
         "ylims": "The limits of the y-axis in the scan in meters (null, [min, max])",
         "zlims": "The limits of the z-axis in the scan in meters (null, [min, max])",
-        "center_frequency": "The center frequency of the transducer in Hz",
+        "center_frequency": "The center frequency of the transmit pulse in Hz",
         "sampling_frequency": "The sampling frequency of the data in Hz",
         "demodulation_frequency": (
             "The demodulation frequency of the data in Hz. This is the assumed center "

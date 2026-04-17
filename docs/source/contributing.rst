@@ -3,7 +3,7 @@
 Contributing
 =============
 
-``zea`` is an open-source project and we welcome contributions from the ultrasound community. Whether you want to report a bug, suggest a new feature, or contribute code, your input is valuable. This document outlines how you can contribute to the project.
+``zea`` is an open-source project and we welcome contributions from the ultrasound community. Whether you want to report a bug, suggest a new feature, or contribute code, your input is valuable. This document outlines how you can contribute to the project. In case you have a general question or want to discuss an idea before working on it, please feel free to open an `issue on GitHub <https://github.com/tue-bmd/zea/issues>`_ or join the discussion in the `GitHub Discussions <https://github.com/tue-bmd/zea/discussions>`_.
 
 How to contribute
 -----------------
@@ -12,7 +12,7 @@ First, take some time to read through this whole guide. Then follow the followin
 1. Make an issue
 ~~~~~~~~~~~~~~~~
 
-Take a look at the current `issues <https://github.com/tue-bmd/zea/issues>`_ on GitHub to see if there are any open issues that you can help with. If your issue is not listed, please create a new issue describing the motivation behind the problem or feature you want to work on. That way we can discuss it and make sure that your contribution is aligned with the project's goals.
+Take a look at the current `issues on GitHub <https://github.com/tue-bmd/zea/issues>`_ to see if there are any open issues that you can help with. If your issue is not listed, please create a new issue describing the motivation behind the problem or feature you want to work on. That way we can discuss it and make sure that your contribution is aligned with the project's goals.
 
 .. dropdown:: Example Issue Template
 
@@ -91,7 +91,39 @@ A few things to keep in mind when making changes:
 5. Document your changes
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-The documentation uses `Sphinx <https://www.sphinx-doc.org/>`_ and generally is written in reStructuredText format. You can find the documentation files in the `docs/source` directory. Docstrings are written in Google style, which you can see examples of in the `example_google_docstrings.py <https://github.com/tue-bmd/zea/blob/main/docs/example_google_docstrings.py>`_ file. If you add new functionality, please make sure to document it in the documentation files.
+The documentation uses `Sphinx <https://www.sphinx-doc.org/>`_ and generally is written in reStructuredText format. You can find the documentation files in the `docs/source` directory. Docstrings are written in Google style, which you can see examples of in the `example_google_docstrings.py <https://github.com/tue-bmd/zea/blob/main/docs/example_google_docstrings.py>`_ file. If you add new functionality, please make sure to document it in the documentation files. An example of a well structured docstring below:
+
+.. dropdown:: Example docstring
+
+   .. code-block:: python
+
+      def example_function(param1: int, param2: str) -> bool:
+         """This is an example function that demonstrates a well-structured docstring.
+
+         Note the spacing and indentation between the sections, which is important
+         for the automatic docs generation. Also it is recommended to add an example
+         section with doctests, which will automatically test the code snippets in
+         the docs generation.
+
+         Args:
+            param1 (int): Description of the first parameter.
+            param2 (str): Description of the second parameter.
+
+         Returns:
+            bool: Description of the return value.
+
+         Raises:
+            ValueError: If param1 is negative.
+
+         Example:
+            .. doctest::
+
+               >>> example_function(5, "test")
+               True
+         """
+         if param1 < 0:
+            raise ValueError("param1 must be non-negative")
+         return True
 
 The overall structure of the documentation is manually designed, but the API documentation is auto-generated based on the docstrings in the code. To generate the docs locally you can run:
 

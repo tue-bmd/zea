@@ -30,6 +30,13 @@ scan_args = {
     "waveforms_one_way": np.zeros((2, 64)),
     "waveforms_two_way": np.zeros((2, 64)),
     "tgc_gain_curve": np.ones((3328,)),
+    "probe_geometry": np.column_stack(
+        (
+            np.linspace(-0.019, 0.019, 10),
+            np.zeros(10),
+            np.zeros(10),
+        )
+    ),
 }
 
 
@@ -52,6 +59,97 @@ def test_scan_copy():
     assert scan == scan_copy
     scan.n_tx = 20
     assert scan != scan_copy
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        None,
+        [0, 1, 2],
+    ],
+)
+def test_scan_copy_selected_transmits(selection):
+    """Test that selected_transmits is copied correctly."""
+    scan = Scan(**scan_args)
+    scan.set_transmits(selection)
+    scan_copy = scan.copy()
+
+    assert np.array_equal(scan.selected_transmits, scan_copy.selected_transmits)
+    scan.set_transmits(scan_args["n_tx"] // 5)
+    assert not np.array_equal(scan.selected_transmits, scan_copy.selected_transmits)
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        None,
+        "all",
+        "center",
+        "focused",
+        "diverging",
+        "plane",
+        3,
+        1,
+        [0, 1, 2],
+        np.array([0, 1, 2]),
+        slice(0, 5, 2),
+    ],
+)
+def test_set_transmits(selection):
+    """Test setting transmits with various selection methods."""
+    local_scan_args = scan_args.copy()
+
+    if isinstance(selection, str):
+        if selection == "diverging":
+            local_scan_args["focus_distances"] = np.ones(scan_args["n_tx"]) * -0.02
+        elif selection == "plane":
+            local_scan_args["focus_distances"] = np.full(scan_args["n_tx"], np.inf)
+
+    scan = Scan(**local_scan_args)
+    scan.set_transmits(selection)
+
+    if selection is None:
+        assert scan.n_tx == scan_args["n_tx"]
+    elif isinstance(selection, str):
+        if selection == "all":
+            assert scan.n_tx == scan_args["n_tx"]
+        elif selection == "center":
+            assert scan.n_tx == 1
+            assert scan.selected_transmits[0] == scan_args["n_tx"] // 2
+        elif selection == "focused":
+            assert np.all(scan.focus_distances > 0)
+        elif selection == "diverging":
+            assert np.all(scan.focus_distances < 0)
+        elif selection == "plane":
+            assert np.all(np.isinf(scan.focus_distances))
+    elif isinstance(selection, int):
+        assert scan.n_tx == selection
+    elif isinstance(selection, (list, np.ndarray)):
+        expected = selection if isinstance(selection, list) else selection.tolist()
+        assert np.array_equal(scan.selected_transmits, expected)
+    elif isinstance(selection, slice):
+        expected = list(range(*selection.indices(scan_args["n_tx"])))
+        assert np.array_equal(scan.selected_transmits, expected)
+
+
+def test_scan_erroneous_set_transmits():
+    """Test erroneous inputs to set_transmits."""
+    scan = Scan(**scan_args)
+
+    with pytest.raises(ValueError):
+        scan.set_transmits(-1)
+
+    with pytest.raises(ValueError):
+        scan.set_transmits(scan_args["n_tx"] + 1)
+
+    with pytest.raises(ValueError):
+        scan.set_transmits([0, scan_args["n_tx"]])
+
+    with pytest.raises(ValueError):
+        scan.set_transmits([0, 1, 2.3])
+
+    with pytest.raises(ValueError):
+        scan.set_transmits("invalid_string")
 
 
 def test_initialization():
@@ -144,7 +242,7 @@ def test_set_attributes():
 
     scan.selected_transmits = [0]
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(ValueError):
         scan.grid = np.zeros((10, 10))
 
 
@@ -165,3 +263,109 @@ def test_scan_pickle():
 
     assert scan == scan_unpickled, "Unpickled Scan object does not match the original"
     assert scan is not scan_unpickled, "Unpickled Scan object is the same instance as the original"
+
+
+def test_valid_params_default():
+    """Test that modifying pfield_kwargs in one Scan instance does not affect another.
+
+    The origin of this test is a bug where in VALID_PARAMS, the default value for pfield_kwargs
+    was a mutable dictionary, leading to shared state across instances.
+    """
+    from zea.internal.dummy_scan import get_scan
+
+    scan1 = get_scan()
+    scan1.pfield_kwargs["norm"] = False
+
+    scan2 = get_scan()
+    assert scan2.pfield_kwargs == {}, (
+        "scan2.pfield_kwargs seems to be affected by scan1 modification"
+    )
+    assert scan1 != scan2, "scan1 and scan2 should be different after modification of scan1"
+
+
+def test_inplace_modification():
+    """Test that modifying pfield_kwargs in-place, will update the pfield."""
+    from zea.internal.dummy_scan import get_scan
+
+    def edit1(scan):
+        """edit direct dependency (dict) in-place"""
+        scan.pfield_kwargs["norm"] = False
+        return scan
+
+    def edit2(scan):
+        """edit another indirect dependency (np.ndarray) in-place"""
+        scan.probe_geometry[:, 0] += 0.001
+        return scan
+
+    def edit3(scan):
+        """edit indirect dependency (list) in-place
+        pfield -> grid -> zlims"""
+        # convert to list to allow in-place edit
+        # this will invalidate pfield
+        scan.zlims = list(scan.zlims)
+        # therefore we need to force a computation of pfield to cache it
+        _ = scan.pfield.copy()
+        # and then edit in-place
+        scan.zlims[1] += 0.01
+        return scan
+
+    for edit_fn in (edit1, edit2, edit3):
+        scan = get_scan(pfield_kwargs={"norm": True})
+        original_pfield = scan.pfield.copy()
+        assert "pfield" in scan._cache, "pfield should be cached after first access"
+
+        # Modify something in-place
+        scan = edit_fn(scan)
+
+        # Check that the grid has been updated
+        assert not np.array_equal(original_pfield, scan.pfield), (
+            f"scan.pfield seems to be unaffected by in-place modification in {edit_fn.__name__}"
+        )
+
+
+def test_inplace_modification_tensor_cache():
+    """Test that modifying pfield_kwargs in-place, will update the pfield_tensor."""
+    from zea.internal.dummy_scan import get_scan
+
+    scan = get_scan(pfield_kwargs={"norm": True})
+    tensor_dict = scan.to_tensor(include=["pfield"])
+    scan.pfield_kwargs["norm"] = False  # in-place modification
+    tensor_dict2 = scan.to_tensor(include=["pfield"])
+
+    assert not np.array_equal(tensor_dict["pfield"], tensor_dict2["pfield"]), (
+        "_tensor_cache['pfield'] seems to be unaffected by in-place modification"
+    )
+
+
+def test_update_behaviour_and_cache_invalidation():
+    """Test Parameters.update: skipping unchanged values and force invalidation."""
+    scan = Scan(**scan_args)
+
+    # Access grid to populate cache
+    _ = scan.grid
+    assert "grid" in scan._cache
+    cached_before = scan._cache.get("grid")
+
+    # Update with the same value (should be a no-op and keep cache)
+    scan.update(center_frequency=scan.center_frequency)
+    cached_after = scan._cache.get("grid")
+    assert cached_before is cached_after
+
+    # Force update with same value should invalidate cache (grid removed until next access)
+    scan.update(force=True, center_frequency=scan.center_frequency)
+    assert "grid" not in scan._cache
+
+    # Update with a different value should also invalidate cache
+    _ = scan.grid  # repopulate cache
+    scan.update(center_frequency=scan.center_frequency * 1.01)
+    assert "grid" not in scan._cache
+
+
+def test_update_ignores_unknown_keys():
+    """Ensure update ignores unknown keys."""
+
+    scan = Scan(**scan_args)
+
+    # Unknown key should be ignored without raising
+    scan.update(nonexistent_param=123)
+    assert not hasattr(scan, "nonexistent_param")

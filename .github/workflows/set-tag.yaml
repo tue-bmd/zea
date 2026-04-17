@@ -18,8 +18,6 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" || ("${{ github.event_name }}" == "push" && "${{ github.ref }}" != "refs/heads/main" && ! "${{ github.ref }}" =~ ^refs/tags/) ]]; then
             echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "tag=latest" >> $GITHUB_OUTPUT
           elif [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" =~ ^refs/tags/ ]]; then
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           elif [[ "${{ github.event_name }}" == "release" ]]; then

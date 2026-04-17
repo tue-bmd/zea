@@ -1,4 +1,21 @@
-"""Diffusion models"""
+"""
+Diffusion models for ultrasound image generation and posterior sampling.
+
+To try this model, simply load one of the available presets:
+
+.. doctest::
+
+    >>> from zea.models.diffusion import DiffusionModel
+
+    >>> model = DiffusionModel.from_preset("diffusion-echonet-dynamic")  # doctest: +SKIP
+
+.. seealso::
+    A tutorial notebook where this model is used:
+    :doc:`../notebooks/models/diffusion_model_example`.
+
+"""
+
+from __future__ import annotations
 
 import abc
 from typing import Literal
@@ -8,17 +25,17 @@ from keras import ops
 
 from zea.backend import _import_tf, jit
 from zea.backend.autograd import AutoGrad
+from zea.func.tensor import L2, fori_loop, split_seed
 from zea.internal.core import Object
 from zea.internal.operators import Operator
 from zea.internal.registry import diffusion_guidance_registry, model_registry, operator_registry
+from zea.internal.utils import fn_requires_argument
 from zea.models.dense import get_time_conditional_dense_network
 from zea.models.generative import DeepGenerativeModel
 from zea.models.preset_utils import register_presets
 from zea.models.presets import diffusion_model_presets
 from zea.models.unet import get_time_conditional_unetwork
 from zea.models.utils import LossTrackerWrapper
-from zea.tensor_ops import L2, fori_loop, split_seed
-from zea.utils import fn_requires_argument
 
 tf = _import_tf()
 
@@ -40,6 +57,9 @@ class DiffusionModel(DeepGenerativeModel):
         name="diffusion_model",
         guidance="dps",
         operator="inpainting",
+        ema_val=0.999,
+        min_t=0.0,
+        max_t=1.0,
         **kwargs,
     ):
         """Initialize a diffusion model.
@@ -47,17 +67,20 @@ class DiffusionModel(DeepGenerativeModel):
         Args:
             input_shape: Shape of the input data. Typically of the form
                 `(height, width, channels)` for images.
-            widths: List of filter widths for the UNet.
-            block_depth: Number of residual blocks in each UNet block.
-            timesteps: Number of diffusion timesteps.
-            beta_start: Initial noise schedule value.
-            beta_end: Final noise schedule value.
+            input_range: Range of the input data.
+            min_signal_rate: Minimum signal rate for the diffusion schedule.
+            max_signal_rate: Maximum signal rate for the diffusion schedule.
+            network_name: Name of the network architecture to use. Options are
+                "unet_time_conditional" or "dense_time_conditional".
+            network_kwargs: Additional keyword arguments for the network.
             name: Name of the model.
             guidance: Guidance method to use. Can be a string, or dict with
                 "name" and "params" keys. Additionally, can be a `DiffusionGuidance` object.
             operator: Operator to use. Can be a string, or dict with
                 "name" and "params" keys. Additionally, can be a `Operator` object.
-
+            ema_val: Exponential moving average value for the network weights.
+            min_t: Minimum diffusion time for sampling during training.
+            max_t: Maximum diffusion time for sampling during training.
             **kwargs: Additional arguments.
         """
         super().__init__(name=name, **kwargs)
@@ -68,10 +91,11 @@ class DiffusionModel(DeepGenerativeModel):
         self.max_signal_rate = max_signal_rate
         self.network_name = network_name
         self.network_kwargs = network_kwargs or {}
+        self.ema_val = ema_val
 
-        # reverse diffusion (i.e. sampling) goes from max_t to min_t
-        self.min_t = 0.0
-        self.max_t = 1.0
+        # reverse diffusion (i.e. sampling) goes from t = max_t to t = min_t
+        self.min_t = min_t
+        self.max_t = max_t
 
         if network_name == "unet_time_conditional":
             self.network = get_time_conditional_unetwork(
@@ -111,8 +135,11 @@ class DiffusionModel(DeepGenerativeModel):
                 "input_range": self.input_range,
                 "min_signal_rate": self.min_signal_rate,
                 "max_signal_rate": self.max_signal_rate,
+                "min_t": self.min_t,
+                "max_t": self.max_t,
                 "network_name": self.network_name,
                 "network_kwargs": self.network_kwargs,
+                "ema_val": self.ema_val,
             }
         )
         return config
@@ -305,8 +332,8 @@ class DiffusionModel(DeepGenerativeModel):
         # Sample uniform random diffusion times in [min_t, max_t]
         diffusion_times = keras.random.uniform(
             shape=[batch_size, *[1] * n_dims],
-            minval=self.min_signal_rate,
-            maxval=self.max_signal_rate,
+            minval=self.min_t,
+            maxval=self.max_t,
         )
         noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
 
@@ -322,6 +349,43 @@ class DiffusionModel(DeepGenerativeModel):
 
         gradients = tape.gradient(noise_loss, self.network.trainable_weights)
         self.optimizer.apply_gradients(zip(gradients, self.network.trainable_weights))
+
+        self.noise_loss_tracker.update_state(noise_loss)
+        self.image_loss_tracker.update_state(image_loss)
+
+        # track the exponential moving averages of weights.
+        # ema_network is used for inference / sampling
+        for weight, ema_weight in zip(self.network.weights, self.ema_network.weights):
+            ema_weight.assign(self.ema_val * ema_weight + (1 - self.ema_val) * weight)
+
+        return {m.name: m.result() for m in self.metrics}
+
+    def test_step(self, data):
+        """
+        Custom test step so we can call model.fit() on the diffusion model.
+        """
+        batch_size, *input_shape = ops.shape(data)
+        n_dims = len(input_shape)
+
+        noises = keras.random.normal(shape=ops.shape(data))
+
+        # sample uniform random diffusion times
+        diffusion_times = keras.random.uniform(
+            shape=[batch_size, *[1] * n_dims],
+            minval=self.min_t,
+            maxval=self.max_t,
+        )
+        noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
+        # mix the images with noises accordingly
+        noisy_images = signal_rates * data + noise_rates * noises
+
+        # use the network to separate noisy images to their components
+        pred_noises, pred_images = self.denoise(
+            noisy_images, noise_rates, signal_rates, training=False
+        )
+
+        noise_loss = self.loss(noises, pred_noises)
+        image_loss = self.loss(data, pred_images)
 
         self.noise_loss_tracker.update_state(noise_loss)
         self.image_loss_tracker.update_state(image_loss)
@@ -850,6 +914,9 @@ class DPS(DiffusionGuidance):
             training=False,
         )
 
+        # Note that while the DPS paper specifies a squared L2 here, we follow their
+        # implementation, which uses a standard L2:
+        # https://github.com/DPS2022/diffusion-posterior-sampling/blob/effbde7325b22ce8dc3e2c06c160c021e743a12d/guided_diffusion/condition_methods.py#L31  # noqa: E501
         measurement_error = omega * L2(measurements - self.operator.forward(pred_images, **kwargs))
 
         return measurement_error, (pred_noises, pred_images)

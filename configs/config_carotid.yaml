@@ -37,13 +37,11 @@ pipeline:
   # each dictionary contains the parameters for a single operation.
   operations:
     - name: demodulate
-    - name: "patched_grid"
+    - name: "beamform"
       params:
-        operations:
-          - name: tof_correction
-          - name: pfield_weighting
-          - name: delay_and_sum
-        num_patches: 100
+        type: das
+        pfield: false
+        num_patches: 200
     - name: envelope_detect
     - name: normalize
     - name: log_compress

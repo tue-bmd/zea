@@ -1,7 +1,7 @@
 Getting Started
 ===============
 
-``zea`` provides a framework for cognitive ultrasound imaging. At the heart of ``zea`` are :doc:`data-acquisition` (``zea.data``), :doc:`pipeline` (``zea.Pipeline``), and :doc:`models` (``zea.Models``) modules. These modules provide the necessary tools to load, process, and analyze ultrasound data.
+``zea`` provides a framework for cognitive ultrasound imaging. At the heart of ``zea`` are :doc:`data-acquisition` (``zea.File``, ``zea.Dataset``, ``zea.Dataloader``), :doc:`pipeline` (``zea.Pipeline``), and :doc:`models` (``zea.Models``) classes. These provide the necessary tools to load, process, and analyze ultrasound data.
 
 .. tip::
 
@@ -16,9 +16,7 @@ Let's take a quick look at how to use ``zea`` to load and process ultrasound dat
    zea.init_device()
 
    # loading a config file from Hugging Face, but can also load a local config file
-   config = zea.Config.from_hf(
-      "zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset",
-   )
+   config = zea.Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml")
 
    path = config.data.dataset_folder + "/" + config.data.file_path
    with zea.File(path) as file:
@@ -37,26 +35,49 @@ Let's take a quick look at how to use ``zea`` to load and process ultrasound dat
    # running the pipeline!
    image = pipeline(data=data, **parameters)["data"]
 
+   # show the image
+   image = zea.display.to_8bit(image)
+   image.show()
+
 Similarly, we can easily load one of the pretrained models from the :mod:`zea.models` module and use it for inference.
 
 .. code-block:: python
 
+   import keras
+
    import zea
-   from zea.models.echonet import EchoNetDynamic
+   from zea.models.lv_segmentation import AugmentedCamusSeg
 
    zea.init_device()
 
-   # presets can also paths to local checkpoints of the model
-   model = EchoNetDynamic.from_preset("echonet-dynamic")
+   # NOTE: for this model you need: `pip install onnxruntime`
+   model = AugmentedCamusSeg.from_preset("augmented_camus_seg")
 
-   # we'll load a single file from the dataset
-   with zea.Dataset("hf://zeahub/camus-sample/", "image_sc") as dataset:
-      file = dataset[0]
-      image = file.load_data("image_sc", indices=0)
+   with zea.Dataset("hf://zeahub/camus-sample/") as dataset:
+      image = dataset[0].load_data("image_sc", indices=0)  # (H, W)
 
-   image = zea.utils.translate(image, config.data.dynamic_range, (-1, 1))
-   masks = model(image[None, ..., None])
+   # Resize to 256x256 and normalize to [-1, 1] as expected by the model
+   image = keras.ops.image.resize(image[None, ..., None], (256, 256))[0, ..., 0]
+   image = zea.func.translate(image, range_to=[-1, 1])
 
+   # Run model: expects NCHW format (batch, channels, height, width)
+   image = keras.ops.convert_to_numpy(image)
+   predictions = model(image[None, None])  # (1, N, H, W)
+
+   # Compute class assignments via argmax to get mutually exclusive masks
+   class_map = predictions[0].argmax(axis=0)  # (H, W) — each pixel assigned to one class
+   # Derive specific masks: class 1 = LV, class 2 = myocardium
+   lv_mask = class_map == 1
+   myo_mask = class_map == 2
+
+   image = zea.display.to_8bit(image, dynamic_range=(-1, 1))
+   masks = [
+      zea.display.to_8bit(lv_mask, dynamic_range=(0, 1)),
+      zea.display.to_8bit(myo_mask, dynamic_range=(0, 1)),
+   ]
+
+   result = zea.display.overlay_masks(image, masks, alpha=0.5)
+   result.show()
 
 ``zea`` also provides a simple command line interface (CLI) to quickly visualize a ``zea`` data file.
 
@@ -203,7 +224,7 @@ After installing a backend, set the ``KERAS_BACKEND`` environment variable to on
 Citation
 --------
 
-If you use `zea` in your research, please cite using :cite:p:`started-stevens2025zea` and :cite:p:`started-van2024active`. Also, in case you use them, don't forget to ensure proper attribution to authors of specific models and datasets that are supported by `zea`.
+If you use ``zea`` in your research, please cite using :cite:p:`started-stevens2025zea` and :cite:p:`started-van2024active`. Our preprint paper can be found on `arXiv <https://arxiv.org/abs/2512.01433>`_. Also, in case you use them, don't forget to ensure proper attribution to authors of specific models and datasets that are supported by ``zea``.
 
 .. bibliography:: ../../paper/paper.bib
    :style: unsrt
@@ -217,4 +238,4 @@ Or you can use the following BibTeX entry:
 
 .. literalinclude:: ../../paper/paper.bib
    :language: bibtex
-   :lines: 1-6
+   :lines: 1-7

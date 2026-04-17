@@ -1,16 +1,17 @@
 """Configuration file for the Sphinx documentation builder."""
 
 import os
+
+os.environ["KERAS_BACKEND"] = "numpy"
+
 import sys
+from importlib.metadata import version as get_version
 
 sys.path.insert(0, os.path.abspath("../.."))
 
-import zea
-
 # -- Project information -----------------------------------------------------
 project = "zea"
-# get automatically the version from the package
-release = zea.__version__
+release = str(get_version("zea"))
 
 # -- General configuration ---------------------------------------------------
 extensions = [
@@ -27,12 +28,35 @@ extensions = [
     "nbsphinx",  # for Jupyter notebook support
     "sphinx_design",  # for fancy code block selection
     "sphinxcontrib.bibtex",  # for bibliography support
-    "sphinxarg.ext",  # for argparse support
+    "sphinx_reredirects",  # for redirecting empty toc entries
+    "sphinxcontrib.autoprogram",  # for argparse support
     "sphinx.ext.mathjax",  # for rendering math in the documentation
 ]
 
-autodoc_mock_imports = ["zea.backend.tf2jax"]
-exclude_patterns = ["_autosummary/zea.backend.tf2jax.rst"]
+autodoc_mock_imports = [
+    "tensorflow",
+    "torch",
+    "zea.backend.tf2jax",
+]
+
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "_autosummary/zea.backend.tf2jax.rst",
+    # Exclude internal implementation modules from documentation
+    "_autosummary/zea.func.tensor.rst",
+    "_autosummary/zea.func.ultrasound.rst",
+    "_autosummary/zea.ops.base.rst",
+    "_autosummary/zea.ops.tensor.rst",
+    "_autosummary/zea.ops.ultrasound.rst",
+    "_autosummary/zea.ops.pipeline.rst",
+    "_autosummary/zea.tracking.base.rst",
+    "_autosummary/zea.tracking.segmentation.rst",
+    "_autosummary/zea.tracking.lucas_kanade.rst",
+    "_autosummary/zea.models.hvae.model.rst",
+    "_autosummary/zea.models.hvae.utils.rst",
+]
 
 autodoc_default_options = {
     "members": True,
@@ -70,3 +94,13 @@ modindex_common_prefix = ["zea."]
 
 # for bibtex
 bibtex_bibfiles = ["../../paper/paper.bib"]
+
+# for redirecting empty toc items to their parent
+redirects = {
+    f"notebooks/{page}.html": f"../examples.html#{page}"
+    for page in ["data", "pipeline", "models", "metrics", "agent"]
+}
+
+# this will make sure that when an __all__ is defined in a module, the members
+# listed in __all__ are the only ones included in the autosummary documentation
+autosummary_ignore_module_all = False

@@ -16,7 +16,7 @@ def sinusoidal_embedding(x, embedding_min_frequency, embedding_max_frequency, em
             embedding_dims // 2,
         )
     )
-    angular_speeds = ops.cast(2.0 * math.pi * frequencies, "float32")
+    angular_speeds = ops.cast(2.0 * math.pi * frequencies, x.dtype)
     embeddings = ops.concatenate(
         [ops.sin(angular_speeds * x), ops.cos(angular_speeds * x)], axis=-1
     )

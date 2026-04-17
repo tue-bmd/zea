@@ -2,10 +2,11 @@
 
 import enum
 from pathlib import Path
-from typing import List
+from typing import List, Tuple, Union
 
 import h5py
 import numpy as np
+from keras.utils import pad_sequences
 
 from zea import log
 from zea.data.preset_utils import HF_PREFIX, _hf_resolve_path
@@ -15,9 +16,10 @@ from zea.internal.checks import (
     _REQUIRED_SCAN_KEYS,
     get_check,
 )
+from zea.internal.core import DataTypes
+from zea.internal.utils import reduce_to_signature
 from zea.probes import Probe
 from zea.scan import Scan
-from zea.utils import reduce_to_signature
 
 
 def assert_key(file: h5py.File, key: str):
@@ -29,7 +31,7 @@ def assert_key(file: h5py.File, key: str):
 class File(h5py.File):
     """h5py.File in zea format."""
 
-    def __init__(self, name, *args, **kwargs):
+    def __init__(self, name, mode="r", *args, **kwargs):
         """Initialize the file.
 
         Args:
@@ -37,18 +39,22 @@ class File(h5py.File):
                 Can be a string or a Path object. Additionally can be a string with
                 the prefix 'hf://', in which case it will be resolved to a
                 huggingface path.
+            mode (str, optional): The mode to open the file in. Defaults to "r".
             *args: Additional arguments to pass to h5py.File.
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
 
+        # Resolve huggingface path
         if str(name).startswith(HF_PREFIX):
             name = _hf_resolve_path(str(name))
 
-        if "locking" not in kwargs and "mode" in kwargs and kwargs["mode"] == "r":
+        # Disable locking for read mode by default
+        if "locking" not in kwargs and mode == "r":
             # If the file is opened in read mode, disable locking
             kwargs["locking"] = False
 
-        super().__init__(name, *args, **kwargs)
+        # Initialize the h5py.File
+        super().__init__(name, mode, *args, **kwargs)
 
     @property
     def path(self):
@@ -110,63 +116,9 @@ class File(h5py.File):
         else:
             raise NotImplementedError
 
-    @staticmethod
-    def _prepare_indices(indices):
-        """Prepare the indices for loading data from hdf5 files.
-        Options:
-            - str("all")
-            - int -> single frame
-            - list of ints -> indexes first axis (frames)
-            - list of list, ranges or slices -> indexes multiple axes
-
-        Returns:
-            indices (tuple): A tuple of indices / slices to use for indexing.
-        """
-        _value_error_msg = (
-            f"Invalid value for indices: {indices}. "
-            "Indices can be a 'all', int or a List[int, tuple, list, slice, range]."
-        )
-
-        # Check all options that only index the first axis
-        if isinstance(indices, str):
-            if indices == "all":
-                return slice(None)
-            else:
-                raise ValueError(_value_error_msg)
-
-        if isinstance(indices, range):
-            return list(indices)
-
-        if isinstance(indices, (int, slice, np.integer)):
-            return indices
-
-        # At this point, indices should be a list or tuple
-        assert isinstance(indices, (list, tuple, np.ndarray)), _value_error_msg
-
-        assert all(
-            isinstance(idx, (list, tuple, int, slice, range, np.ndarray, np.integer))
-            for idx in indices
-        ), _value_error_msg
-
-        # Convert ranges to lists
-        processed_indices = [list(idx) if isinstance(idx, range) else idx for idx in indices]
-
-        # Check if items are list-like and cast to tuple (needed for hdf5)
-        if any(isinstance(idx, (list, tuple, slice)) for idx in processed_indices):
-            processed_indices = tuple(processed_indices)
-
-        return processed_indices
-
     def load_scan(self, event=None):
         """Alias for get_scan_parameters."""
         return self.get_scan_parameters(event)
-
-    @staticmethod
-    def check_data(data, key):
-        """Check the data for a given key. For example, will check if the shape matches
-        the data type (such as raw_data, ...)"""
-        if key in _DATA_TYPES:
-            get_check(key)(data, with_batch_dim=None)
 
     def format_key(self, key):
         """Format the key to match the data type."""
@@ -205,7 +157,7 @@ class File(h5py.File):
     def load_transmits(self, key, selected_transmits):
         """Load raw_data or aligned_data for a given list of transmits.
         Args:
-            data_type (str): The type of data to load. Options are 'raw_data' and 'aligned_data'.
+            key (str): The type of data to load. Options are 'raw_data' and 'aligned_data'.
             selected_transmits (list, np.ndarray): The transmits to load.
         """
         key = self.format_key(key)
@@ -213,43 +165,51 @@ class File(h5py.File):
         assert data_type in ["raw_data", "aligned_data"], (
             f"Cannot load transmits for {data_type}. Only raw_data and aligned_data are supported."
         )
-        indices = [slice(None), np.array(selected_transmits)]
+        # First axis: all frames, second axis: selected transmits
+        indices = (slice(None), np.array(selected_transmits))
         return self.load_data(key, indices)
 
-    def load_data(self, data_type, indices: str | int | List[int] = "all"):
+    def load_data(
+        self,
+        data_type,
+        indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
+    ):
         """Load data from the file.
 
-        The indices parameter can be used to load a subset of the data. This can be
+        .. include:: ../common/file_indexing.rst
 
-        - 'all' to load all data
+        .. doctest::
 
-        - an int to load a single frame
+            >>> from zea import File
 
-        - a list of ints to load specific frames
+            >>> path_to_file = (
+            ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+            ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+            ... )
 
-        - a tuple of lists, ranges or slices to index frames and transmits. Note that
-          indexing with lists of indices for both axes is not supported. In that case,
-          try to define one of the axes with a slice.
-
-        .. code-block:: python
-
-            # Load frame 5
-            File.load_data("raw_data", indices=5)
-            # Load frames 0, 2 and 4
-            File.load_data("raw_data", indices=[0, 2, 4])
-            # Load frames 0-9 and transmits 0, 2 and 4
-            File.load_data("raw_data", indices=(slice(10), [0, 2, 4]))
+            >>> with File(path_to_file, mode="r") as file:
+            ...     # data has shape (n_frames, n_tx, n_el, n_ax, n_ch)
+            ...     data = file.load_data("raw_data")
+            ...     data.shape
+            ...     # load first frame only
+            ...     data = file.load_data("raw_data", indices=0)
+            ...     data.shape
+            ...     # load frame 0 and transmits 0, 2 and 4
+            ...     data = file.load_data("raw_data", indices=(0, [0, 2, 4]))
+            ...     data.shape
+            (1, 75, 832, 128, 2)
+            (75, 832, 128, 2)
+            (3, 832, 128, 2)
 
         Args:
             data_type (str): The type of data to load. Options are 'raw_data', 'aligned_data',
                 'beamformed_data', 'envelope_data', 'image' and 'image_sc'.
-            indices (str, int, list, optional): The indices to load. Defaults to "all" in
-                which case all frames are loaded. If an int is provided, it will be used
-                as a single index. If a list is provided, it will be used as a list of
-                indices.
+            indices (optional): The indices to load. Defaults to `None` in
+                which case all data is loaded.
         """
         key = self.format_key(data_type)
-        indices = self._prepare_indices(indices)
+        if indices is None or (isinstance(indices, str) and indices == "all"):
+            indices = slice(None)
 
         if self._simple_index(key):
             data = self[key]
@@ -259,7 +219,6 @@ class File(h5py.File):
                 raise ValueError(
                     f"Invalid indices {indices} for key {key}. {key} has shape {data.shape}."
                 ) from exc
-            self.check_data(data, key)
         elif self.events_have_same_shape(key):
             raise NotImplementedError
         else:
@@ -330,6 +289,33 @@ class File(h5py.File):
         else:
             log.warning("Could not find scan parameters in file.")
 
+        scan_parameters = self._check_focus_distances(scan_parameters)
+
+        return scan_parameters
+
+    def _check_focus_distances(self, scan_parameters):
+        if "focus_distances" in scan_parameters:
+            focus_distances = scan_parameters["focus_distances"]
+            # check if focus distances are in wavelengths
+            if np.any(np.logical_and(focus_distances >= 1, focus_distances != np.inf)):
+                log.warning(
+                    f"We have detected that focus distances in '{self.path}' are "
+                    "(probably) stored wavelengths. Please update your file! "
+                    "Converting to meters automatically for now, but this assumes that "
+                    "`center_frequency` is the probe center frequency which is not always "
+                    "the case!"
+                )
+                assert "sound_speed" in scan_parameters, (
+                    "Cannot convert focus distances from wavelengths to meters "
+                    "because sound_speed is not defined in the scan parameters."
+                )
+                assert "center_frequency" in scan_parameters, (
+                    "Cannot convert focus distances from wavelengths to meters "
+                    "because center_frequency is not defined in the scan parameters."
+                )
+                wavelength = scan_parameters["sound_speed"] / scan_parameters["center_frequency"]
+                focus_distances = focus_distances * wavelength
+                scan_parameters["focus_distances"] = focus_distances
         return scan_parameters
 
     def get_scan_parameters(self, event=None) -> dict:
@@ -410,6 +396,21 @@ class File(h5py.File):
                 ans[key] = self.recursively_load_dict_contents_from_group(path + "/" + key + "/")
         return ans
 
+    def has_key(self, key: str) -> bool:
+        """Check if the file has a specific key.
+
+        Args:
+            key (str): The key to check.
+
+        Returns:
+            bool: True if the key exists, False otherwise.
+        """
+        try:
+            key = self.format_key(key)
+        except AssertionError:
+            return False
+        return True
+
     @classmethod
     def get_shape(cls, path: str, key: str) -> tuple:
         """Get the shape of a key in a file.
@@ -475,10 +476,67 @@ class File(h5py.File):
         _print_hdf5_attrs(self)
 
 
+def load_file_all_data_types(
+    path,
+    indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
+    scan_kwargs: dict = None,
+):
+    """Loads a zea data files (h5py file).
+
+    Returns all data types together with a scan object containing the parameters
+    of the acquisition and a probe object containing the parameters of the probe.
+
+    Additionally, it can load a specific subset of frames / transmits.
+
+    .. include:: ../common/file_indexing.rst
+
+    Args:
+        path (str, pathlike): The path to the hdf5 file.
+        indices (optional): The indices to load. Defaults to None in
+            which case all frames are loaded.
+        scan_kwargs (Config, dict, optional): Additional keyword arguments
+            to pass to the Scan object. These will override the parameters from the file
+            if they are present in the file. Defaults to None.
+
+    Returns:
+        (dict): A dictionary with all data types as keys and the corresponding data as values.
+        (Scan): A scan object containing the parameters of the acquisition.
+        (Probe): A probe object containing the parameters of the probe.
+    """
+    # Define the additional keyword parameters from the scan object
+    if scan_kwargs is None:
+        scan_kwargs = {}
+
+    data_dict = {}
+
+    with File(path, mode="r") as file:
+        # Load the probe object from the file
+        probe = file.probe()
+
+        for data_type in DataTypes:
+            if not file.has_key(data_type.value):
+                data_dict[data_type.value] = None
+                continue
+
+            # Load the desired frames from the file
+            data_dict[data_type.value] = file.load_data(data_type.value, indices=indices)
+
+        # extract transmits from indices
+        # we only have to do this when the data has a n_tx dimension
+        # in that case we also have update scan parameters to match
+        # the number of selected transmits
+        if isinstance(indices, tuple) and len(indices) > 1:
+            scan_kwargs["selected_transmits"] = indices[1]
+
+        scan = file.scan(**scan_kwargs)
+
+        return data_dict, scan, probe
+
+
 def load_file(
     path,
     data_type="raw_data",
-    indices: str | int | List[int] = "all",
+    indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
     scan_kwargs: dict = None,
 ):
     """Loads a zea data files (h5py file).
@@ -488,17 +546,15 @@ def load_file(
 
     Additionally, it can load a specific subset of frames / transmits.
 
-    # TODO: add support for event
+    .. include:: ../common/file_indexing.rst
 
     Args:
         path (str, pathlike): The path to the hdf5 file.
         data_type (str, optional): The type of data to load. Defaults to
             'raw_data'. Other options are 'aligned_data', 'beamformed_data',
             'envelope_data', 'image' and 'image_sc'.
-        indices (str, int, list, optional): The indices to load. Defaults to "all" in
-            which case all frames are loaded. If an int is provided, it will be used
-            as a single index. If a list is provided, it will be used as a list of
-            indices.
+        indices (optional): The indices to load. Defaults to None in
+            which case all frames are loaded.
         scan_kwargs (Config, dict, optional): Additional keyword arguments
             to pass to the Scan object. These will override the parameters from the file
             if they are present in the file. Defaults to None.
@@ -524,7 +580,6 @@ def load_file(
         # in that case we also have update scan parameters to match
         # the number of selected transmits
         if data_type in ["raw_data", "aligned_data"]:
-            indices = File._prepare_indices(indices)
             if isinstance(indices, tuple) and len(indices) > 1:
                 scan_kwargs["selected_transmits"] = indices[1]
 
@@ -726,6 +781,9 @@ def _assert_scan_keys_present(file: File):
         elif key == "focus_distances":
             correct_shape = (file["scan"]["n_tx"][()],)
 
+        elif key == "transmit_origins":
+            correct_shape = (file["scan"]["n_tx"][()], 3)
+
         elif key == "polar_angles":
             correct_shape = (file["scan"]["n_tx"][()],)
 
@@ -750,6 +808,7 @@ def _assert_scan_keys_present(file: File):
         elif key in (
             "sampling_frequency",
             "center_frequency",
+            "demodulation_frequency",
             "n_frames",
             "n_tx",
             "n_el",
@@ -765,7 +824,7 @@ def _assert_scan_keys_present(file: File):
 
         else:
             correct_shape = None
-            log.warning(f"No validation has been defined for {log.orange(key)}.")
+            log.debug(f"No validation has been defined for {log.orange(key)}.")
 
         if correct_shape is not None:
             assert shape_file == correct_shape, (
@@ -831,9 +890,31 @@ def _reformat_waveforms(scan_kwargs: dict) -> dict:
 
 
 def _waveforms_dict_to_array(waveforms_dict: dict):
-    from zea.data.data_format import _stack_waveforms
+    """Convert waveforms stored as a dictionary to a padded numpy array."""
+    waveforms = dict_to_sorted_list(waveforms_dict)
+    return pad_sequences(waveforms, dtype=np.float32, padding="post")
 
-    waveforms = []
-    for key in sorted(waveforms_dict.keys()):
-        waveforms.append(waveforms_dict[key])
-    return _stack_waveforms(waveforms)
+
+def dict_to_sorted_list(dictionary: dict):
+    """Convert a dictionary with sortable keys to a sorted list of values.
+
+    .. note::
+
+        This function operates on the top level of the dictionary only.
+        If the dictionary contains nested dictionaries, those will not be sorted.
+
+    Example:
+        .. doctest::
+
+            >>> from zea.data.file import dict_to_sorted_list
+            >>> input_dict = {"number_000": 5, "number_001": 1, "number_002": 23}
+            >>> dict_to_sorted_list(input_dict)
+            [5, 1, 23]
+
+    Args:
+        dictionary (dict): The dictionary to convert. The keys must be sortable.
+
+    Returns:
+        list: The sorted list of values.
+    """
+    return [value for _, value in sorted(dictionary.items())]

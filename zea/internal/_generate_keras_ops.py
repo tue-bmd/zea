@@ -3,11 +3,10 @@ and :mod:`keras.ops.image` functions.
 
 They can be used in zea pipelines like any other :class:`zea.Operation`, for example:
 
-.. code-block:: python
+.. doctest::
 
-    from zea.keras_ops import Squeeze
-
-    op = Squeeze(axis=1)
+    >>> from zea.ops.keras_ops import Squeeze
+    >>> op = Squeeze(axis=1)
 """
 
 import inspect
@@ -77,11 +76,11 @@ and :mod:`keras.ops.image` functions.
 
 They can be used in zea pipelines like any other :class:`zea.Operation`, for example:
 
-.. code-block:: python
+.. doctest::
 
-    from zea.keras_ops import Squeeze
+    >>> from zea.ops.keras_ops import Squeeze
 
-    op = Squeeze(axis=1)
+    >>> op = Squeeze(axis=1)
 
 This file is generated automatically. Do not edit manually.
 Generated with Keras {keras.__version__}
@@ -90,7 +89,7 @@ Generated with Keras {keras.__version__}
 import keras
 
 from zea.internal.registry import ops_registry
-from zea.ops import Lambda
+from zea.ops.base import Lambda
 
 class MissingKerasOps(ValueError):
     def __init__(self, class_name: str, func: str):
@@ -110,7 +109,7 @@ class MissingKerasOps(ValueError):
         content += _generate_operation_class_code(name, keras.ops.image)
 
     # Write to a temporary file first, then move to final location
-    target_path = Path(__file__).parent.parent / "keras_ops.py"
+    target_path = Path(__file__).parent.parent / "ops/keras_ops.py"
     with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as tmp_file:
         tmp_file.write(content)
         temp_path = Path(tmp_file.name)
@@ -118,7 +117,7 @@ class MissingKerasOps(ValueError):
     # Atomic move to avoid partial writes
     shutil.move(temp_path, target_path)
 
-    print("Done generating `keras_ops.py`.")
+    print("Done generating `ops/keras_ops.py`.")
 
 
 if __name__ == "__main__":

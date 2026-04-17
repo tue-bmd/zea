@@ -49,11 +49,10 @@ pipeline:
     - name: downsample
       params:
         factor: 4
-    - name: "patched_grid"
+    - name: "beamform"
       params:
-        operations:
-          - name: tof_correction
-          - name: delay_and_sum
+        beamformer: delay_and_sum
+        enable_pfield: false
         num_patches: 200
     - name: envelope_detect
     - name: normalize

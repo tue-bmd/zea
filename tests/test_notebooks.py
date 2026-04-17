@@ -5,7 +5,14 @@ are a bit heavy, so we mark the tests with the `notebook` marker, and also run
 only on self-hosted runners. Run with:
 
 .. code-block:: bash
+
     pytest -s -m 'notebook'
+
+Or to run a specific notebook:
+
+.. code-block:: bash
+
+    pytest -s -m 'notebook' --notebook dbua_example.ipynb
 
 """
 
@@ -45,6 +52,14 @@ NOTEBOOK_PARAMETERS = {
         "n_conditional_steps": 2,
         "n_conditional_samples": 2,
     },
+    "task_based_perception_action_loop.ipynb": {
+        "n_prior_steps": 2,
+        "n_posterior_steps": 2,
+        "n_particles": 2,
+    },
+    "3d_beamforming_example.ipynb": {
+        "downscale_rate": 8,
+    },
     "zea_sequence_example.ipynb": {
         "n_frames": 15,
         "n_tx": 1,
@@ -59,6 +74,21 @@ NOTEBOOK_PARAMETERS = {
     "doppler_example.ipynb": {
         "n_frames": 3,
         "n_transmits": 2,
+    },
+    "speckle_tracking_example.ipynb": {
+        "num_frames": 5,
+        "num_points": 10,
+        "max_iterations": 2,
+    },
+    "hvae_model_example.ipynb": {
+        "inference_fractions": [0.03],
+        "n_samples": 2,
+        "batch_size": 2,
+        "load_weights": False,
+    },
+    "dbua_example.ipynb": {
+        "num_iterations": 2,
+        "step_size": 1,
     },
     # Add more notebooks and their parameters here as needed
     # "other_notebook.ipynb": {
@@ -82,7 +112,12 @@ def pytest_sessionstart(session):
 
 @pytest.mark.notebook
 @pytest.mark.parametrize("notebook", NOTEBOOKS, ids=lambda x: x.name)
-def test_notebook_runs(notebook, tmp_path):
+def test_notebook_runs(notebook, tmp_path, request):
+    # Filter by --notebook CLI option if provided
+    notebook_filter = request.config.getoption("--notebook")
+    if notebook_filter and notebook_filter not in notebook.name:
+        pytest.skip(f"Skipped (--notebook={notebook_filter})")
+
     print(f"\n📘 Starting notebook: {notebook.name}")
 
     output_path = tmp_path / notebook.name

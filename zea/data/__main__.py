@@ -26,7 +26,7 @@ def get_parser():
 def main():
     args = get_parser().parse_args()
 
-    src_folder = Folder(args.src, args.key, validate=False)
+    src_folder = Folder(args.src, validate=False)
     src_folder.copy(args.dst, args.key, mode=args.mode)
 
 

@@ -3,58 +3,27 @@ Script to precompute cone parameters for the EchoNet-LVH dataset.
 This script should be run separately before the main conversion process.
 """
 
-import argparse
 import csv
 import json
-import os
 from pathlib import Path
 
 from tqdm import tqdm
 
-# Set Keras backend to numpy for best CPU performance
-os.environ["KERAS_BACKEND"] = "numpy"
-
+from zea import log
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
 
-def get_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Precompute cone parameters for EchoNet-LVH dataset"
-    )
-    parser.add_argument(
-        "--source",
-        type=str,
-        required=True,
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        required=True,
-    )
-    parser.add_argument(
-        "--batch",
-        type=str,
-        help="Specify which BatchX directory to process, e.g. --batch=Batch2",
-    )
-    parser.add_argument(
-        "--max_files",
-        type=int,
-        default=None,
-        help="Maximum number of files to process (for testing)",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force recomputation even if parameters already exist",
-    )
-    return parser.parse_args()
-
-
 def load_splits(source_dir):
-    """Load splits from MeasurementsList.csv and return avi filenames"""
+    """
+    Load splits from MeasurementsList.csv and return avi filenames
+
+    Args:
+        source_dir: Source directory containing MeasurementsList.csv
+    Returns:
+        Dictionary with keys 'train', 'val', 'test', 'rejected' and values as lists of avi filenames
+    """
     csv_path = Path(source_dir) / "MeasurementsList.csv"
-    splits = {"train": [], "val": [], "test": []}
+    splits = {"train": [], "val": [], "test": [], "rejected": []}
     # Read CSV using built-in csv module
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
@@ -71,7 +40,17 @@ def load_splits(source_dir):
 
 
 def find_avi_file(source_dir, hashed_filename, batch=None):
-    """Find AVI file in the specified batch directory or any batch if not specified."""
+    """
+    Find AVI file in the specified batch directory or any batch if not specified.
+
+    Args:
+        source_dir: Source directory containing BatchX subdirectories
+        hashed_filename: Hashed filename (with or without .avi extension)
+        batch: Specific batch directory to search in (e.g., "Batch2"), or None to search all batches
+
+    Returns:
+        Path to the AVI file if found, else None
+    """
     # If filename already has .avi extension, strip it
     if hashed_filename.endswith(".avi"):
         hashed_filename = hashed_filename[:-4]
@@ -98,7 +77,7 @@ def load_first_frame(avi_file):
         avi_file: Path to the video file
 
     Returns:
-        First frame as numpy array
+        First frame as numpy array of shape (H, W) and dtype np.uint8 (grayscale)
     """
     try:
         import cv2
@@ -129,9 +108,20 @@ def precompute_cone_parameters(args):
     This function loads the first frame from each AVI file, applies fit_scan_cone
     to determine cropping parameters, and saves these parameters to a CSV file
     for later use during the actual data conversion.
+
+    Args:
+        args: Argument parser namespace with the following attributes:
+            src: Source directory containing EchoNet-LVH data
+            dst: Destination directory to save cone parameters
+            batch: Specific batch to process (e.g., "Batch2") or None for all
+            max_files: Maximum number of files to process (or None for all)
+            force: Whether to recompute parameters if they already exist
+    Returns:
+        Path to the CSV file containing cone parameters
     """
-    source_path = Path(args.source)
-    output_path = Path(args.output)
+
+    source_path = Path(args.src)
+    output_path = Path(args.dst)
     output_path.mkdir(parents=True, exist_ok=True)
 
     # Output file for cone parameters
@@ -140,7 +130,7 @@ def precompute_cone_parameters(args):
 
     # Check if parameters already exist
     if cone_params_csv.exists() and not args.force:
-        print(f"Parameters already exist at {cone_params_csv}. Use --force to recompute.")
+        log.warning(f"Parameters already exist at {cone_params_csv}. Use --force to recompute.")
         return cone_params_csv
 
     # Get list of files to process
@@ -151,21 +141,21 @@ def precompute_cone_parameters(args):
         for avi_filename in split_files:
             # Strip .avi if present
             base_filename = avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
-            avi_file = find_avi_file(args.source, base_filename, batch=args.batch)
+            avi_file = find_avi_file(args.src, base_filename, batch=args.batch)
             if avi_file:
                 files_to_process.append((avi_file, avi_filename))
             else:
-                print(
-                    f"Warning: Could not find AVI file for {base_filename} in batch "
+                log.warning(
+                    f"Could not find AVI file for {base_filename} in batch "
                     f"{args.batch if args.batch else 'any'}"
                 )
 
     # Limit files if max_files is specified
     if args.max_files is not None:
         files_to_process = files_to_process[: args.max_files]
-        print(f"Limited to processing {args.max_files} files due to max_files parameter")
+        log.info(f"Limited to processing {args.max_files} files due to max_files parameter")
 
-    print(f"Computing cone parameters for {len(files_to_process)} files")
+    log.info(f"Computing cone parameters for {len(files_to_process)} files")
 
     # Dictionary to store parameters for each file
     all_cone_params = {}
@@ -180,6 +170,7 @@ def precompute_cone_parameters(args):
         "apex_x",
         "new_width",
         "new_height",
+        "opening_angle",
         "status",
     ]
 
@@ -197,6 +188,16 @@ def precompute_cone_parameters(args):
                 # Detect cone parameters
                 _, full_cone_params = fit_and_crop_around_scan_cone(first_frame, return_params=True)
 
+                if (
+                    full_cone_params["crop_left"] < 0
+                    or full_cone_params["crop_right"] > first_frame.shape[1]
+                ):
+                    raise ValueError(
+                        "Computed crop exceeds frame dimensions, meaning that either cone detection"
+                        "failed, due to e.g. DICOM artifacts present in the frame, or the full scan"
+                        "cone is not visible in the frame."
+                    )
+
                 # Extract only the essential parameters
                 essential_params = {
                     "avi_filename": avi_filename,
@@ -207,6 +208,7 @@ def precompute_cone_parameters(args):
                     "apex_x": full_cone_params["apex_x"],
                     "new_width": full_cone_params["new_width"],
                     "new_height": full_cone_params["new_height"],
+                    "opening_angle": full_cone_params["opening_angle"],
                     "status": "success",
                 }
 
@@ -217,7 +219,7 @@ def precompute_cone_parameters(args):
                 all_cone_params[avi_filename] = essential_params
 
             except Exception as e:
-                print(f"Error processing {avi_file}: {str(e)}")
+                log.error(f"Error processing {avi_file}: {str(e)}")
 
                 # Write failure record
                 failure_record = {
@@ -236,16 +238,5 @@ def precompute_cone_parameters(args):
     with open(cone_params_json, "w", encoding="utf-8") as jsonfile:
         json.dump(all_cone_params, jsonfile)
 
-    print(f"Cone parameters saved to {cone_params_csv} and {cone_params_json}")
+    log.info(f"Cone parameters saved to {cone_params_csv} and {cone_params_json}")
     return cone_params_csv
-
-
-if __name__ == "__main__":
-    args = get_args()
-    print("Using Keras backend: numpy (forced for best performance)")
-
-    # Precompute cone parameters
-    cone_params_csv = precompute_cone_parameters(args)
-
-    print(f"Precomputation completed. Parameters saved to {cone_params_csv}")
-    print("You can now run the main conversion script.")

@@ -157,16 +157,7 @@ RUN apt-get update && \
       openssh-client git sudo && \
     python3 -m pip install --no-cache-dir --upgrade pip setuptools && \
     ln -s /usr/bin/python3 /usr/bin/python && \
-    apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    for i in $(seq 0 51); do \
-      USER_UID=$((1000 + i)); \
-      USERNAME="devcontainer$i"; \
-      groupadd --gid $USER_UID $USERNAME && \
-      useradd --uid $USER_UID --gid $USER_UID -m --shell /bin/bash $USERNAME && \
-      echo "$USERNAME ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \
-      chmod 0440 /etc/sudoers.d/$USERNAME && \
-      echo "export PATH=\$PATH:/home/$USERNAME/.local/bin" >> /home/$USERNAME/.bashrc; \
-    done
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /zea
 

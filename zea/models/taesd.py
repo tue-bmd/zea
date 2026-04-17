@@ -1,9 +1,19 @@
-"""Tiny Autoencoder (TAESD) model converted to Tensorflow.
+"""
+Tiny Autoencoder (TAESD) model.
 
-For the original implementation, see the `TAESD repository <https://github.com/madebyollin/taesd>`_.
+.. doctest::
 
-You can see an example of how to use this model in the example notebook:
-:doc:`../notebooks/models/taesd_autoencoder_example`.
+    >>> from zea.models.taesd import TinyAutoencoder
+
+    >>> model = TinyAutoencoder.from_preset("taesdxl")  # doctest: +SKIP
+
+.. important::
+    This is a ``zea`` implementation of the model.
+    For the original code, see `here <https://github.com/madebyollin/taesd>`_.
+
+.. seealso::
+    A tutorial notebook where this model is used:
+    :doc:`../notebooks/models/taesd_autoencoder_example`.
 
 """
 
@@ -23,7 +33,13 @@ tf = _import_tf()
 
 @model_registry(name="taesdxl")
 class TinyAutoencoder(BaseModel):
-    """[TAESD](https://github.com/madebyollin/taesd) model in TensorFlow."""
+    """Tiny Autoencoder model.
+
+    .. note::
+
+        This model currently only supports TensorFlow and Jax backends.
+
+    """
 
     def __init__(self, **kwargs):
         """

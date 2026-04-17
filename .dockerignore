@@ -166,6 +166,3 @@ dmypy.json
 /.git/
 /.gitattributes
 /.gitignore
-
-# ignore verasonics because matlab is not installed in the container
-/verasonics/

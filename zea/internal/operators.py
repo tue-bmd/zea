@@ -43,10 +43,14 @@ class Operator(abc.ABC, Object):
         raise NotImplementedError
 
 
+@operator_registry(name="identity")
 class IdentityOperator(Operator):
     """Identity operator class."""
 
     def forward(self, data):
+        return data
+
+    def transpose(self, data):
         return data
 
     def __str__(self):

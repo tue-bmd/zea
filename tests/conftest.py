@@ -30,6 +30,12 @@ def pytest_addoption(parser):
         default=False,
         help="Run tests with GPU support if CUDA is available",
     )
+    parser.addoption(
+        "--notebook",
+        action="store",
+        default=None,
+        help="Run only the notebook matching this name (e.g. --notebook dbua_example.ipynb)",
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)

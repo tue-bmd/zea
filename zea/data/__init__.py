@@ -15,31 +15,28 @@ See the data notebook for a more detailed example: :doc:`../notebooks/data/zea_d
 Examples usage
 ^^^^^^^^^^^^^^
 
-.. code-block:: python
+.. doctest::
 
-    from zea import File, Dataset
+    >>> from zea import File, Dataset
 
-    # Open a single zea data file
-    with File("path/to/file.hdf5", mode="r") as file:
-        file.summary()
-        data = file.load_data("raw_data", indices=[0])
-        scan = file.scan()
-        probe = file.probe()
+    >>> # Work with a single file
+    >>> path_to_file = (
+    ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+    ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+    ... )
 
-    # Work with a dataset (folder or list of files)
-    dataset = Dataset("path/to/folder", key="raw_data")
-    for file in dataset:
-        print(file)
-    dataset.close()
+    >>> with File(path_to_file, mode="r") as file:
+    ...     # file.summary()
+    ...     data = file.load_data("raw_data", indices=[0])
+    ...     scan = file.scan()
+    ...     probe = file.probe()
 
-Subpackage layout
------------------
-
-- ``file.py``: Implements :class:`zea.File` and related file utilities.
-- ``datasets.py``: Implements :class:`zea.Dataset` and folder management.
-- ``dataloader.py``: Data loading utilities for batching and shuffling.
-- ``data_format.py``: Data validation and example dataset generation.
-- ``convert/``: Data conversion tools (e.g., from external formats).
+    >>> # Work with a dataset (folder or list of files)
+    >>> dataset = Dataset("hf://zeahub/picmus")
+    >>> files = []
+    >>> for file in dataset:
+    ...     files.append(file)  # process each file as needed
+    >>> dataset.close()
 
 """  # noqa: E501
 
@@ -50,6 +47,5 @@ from .data_format import (
     generate_zea_dataset,
     validate_input_data,
 )
-from .dataloader import H5Generator
 from .datasets import Dataset, Folder
 from .file import File, load_file

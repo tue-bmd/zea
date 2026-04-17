@@ -7,43 +7,40 @@ Data
 ----
 
 .. toctree::
-    :maxdepth: 1
-    :glob:
+    :maxdepth: 2
 
-    notebooks/data/*
+    notebooks/data
 
 Pipeline
 --------
 
 .. toctree::
-    :maxdepth: 1
-    :glob:
+    :maxdepth: 2
 
-    notebooks/pipeline/*
+    notebooks/pipeline
 
 Models
 ------
 
 .. toctree::
-    :maxdepth: 1
-    :glob:
+    :maxdepth: 2
 
-    notebooks/models/*
+    notebooks/models
 
 Metrics
 -------
 
 .. toctree::
-    :maxdepth: 1
-    :glob:
+    :maxdepth: 2
 
-    notebooks/metrics/*
+    notebooks/metrics
 
 Agent
 -----
 
 .. toctree::
-    :maxdepth: 1
-    :glob:
+    :maxdepth: 2
 
-    notebooks/agent/*
+    notebooks/agent
+
+

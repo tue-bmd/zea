@@ -17,7 +17,6 @@ Main Classes
 Functions
 ---------
 
-- find_h5_files: Recursively finds HDF5 files and retrieves their dataset shapes.
 - split_files_by_directory: Splits files among directories according to specified ratios.
 - count_samples_per_directory: Counts the number of files per directory.
 
@@ -31,6 +30,9 @@ Features
 
 """
 
+import functools
+import multiprocessing
+import os
 from collections import OrderedDict
 from pathlib import Path
 from typing import List
@@ -39,7 +41,7 @@ import numpy as np
 import tqdm
 
 from zea import log
-from zea.data.file import File, validate_file
+from zea.data.file import File
 from zea.data.preset_utils import (
     HF_DATASETS_DIR,
     HF_PREFIX,
@@ -48,14 +50,12 @@ from zea.data.preset_utils import (
     _hf_resolve_path,
 )
 from zea.datapaths import format_data_path
+from zea.internal.cache import cache_output
+from zea.internal.core import hash_elements
+from zea.internal.utils import calculate_file_hash, reduce_to_signature
 from zea.io_lib import search_file_tree
 from zea.tools.hf import HFPath
-from zea.utils import (
-    calculate_file_hash,
-    date_string_to_readable,
-    get_date_string,
-    reduce_to_signature,
-)
+from zea.utils import date_string_to_readable, get_date_string
 
 _CHECK_MAX_DATASET_SIZE = 10000
 _VALIDATED_FLAG_FILE = "validated.flag"
@@ -104,64 +104,85 @@ class H5FileHandleCache:
 
         return self._file_handle_cache[file_path]
 
+    def pop(self, file_path):
+        """Pop a file from the cache and close it."""
+        file = self._file_handle_cache.pop(file_path, None)
+        if file is not None:
+            try:
+                file.close()
+            except Exception:
+                pass  # swallow exceptions during close
+
+    def close(self):
+        """Close all cached file handles."""
+        cache: OrderedDict = getattr(self, "_file_handle_cache", None)
+        if not cache:
+            return
+
+        # iterate over a static list to avoid mutation during iteration
+        for fh in list(cache.values()):
+            if fh is None:
+                continue
+            try:
+                # attempt to close unconditionally and swallow exceptions
+                fh.close()
+            except Exception:
+                # During interpreter shutdown or if the h5py internals are already
+                # torn down, close() can raise weird errors (e.g. TypeError).
+                # Swallow them here to avoid exceptions from __del__.
+                pass
+
+        cache.clear()  # clear the cache dict
+
     def __del__(self):
-        """Ensure cached files are closed."""
-        if hasattr(self, "_file_handle_cache"):
-            for _, file in self._file_handle_cache.items():
-                if file is not None and self._check_if_open(file):
-                    file.close()
-            self._file_handle_cache = OrderedDict()
+        self.close()
 
 
-def find_h5_files(paths: str | list, key: str = None, search_file_tree_kwargs: dict | None = None):
-    """
-    Find HDF5 files from a directory or list of directories and optionally retrieve their shapes.
+@cache_output("filepaths", "key", "_filepath_hash", verbose=True)
+def _find_h5_file_shapes(filepaths, key, _filepath_hash, verbose=True):
+    # NOTE: we cache the output of this function such that file loading over the network is
+    # faster for repeated calls with the same filepaths, key and _filepath_hash
 
-    Args:
-        paths (str or list): A single directory path, a list of directory paths,
-            or a single HDF5 file path.
-        key (str, optional): The key to get the file shapes for.
-        search_file_tree_kwargs (dict, optional): Additional keyword arguments for the
-            search_file_tree function. Defaults to None.
+    assert _filepath_hash is not None
 
-    Returns:
-        - file_paths (list): List of file paths to the HDF5 files.
-        - file_shapes (list): List of shapes of the HDF5 datasets.
-    """
+    get_shape = functools.partial(File.get_shape, key=key)
 
-    if search_file_tree_kwargs is None:
-        search_file_tree_kwargs = {}
+    if os.environ.get("ZEA_FIND_H5_SHAPES_PARALLEL", "1") in ("1", "true", "yes"):
+        # using multiprocessing to speed up reading hdf5 files
+        # make sure to call find_h5_file_shapes from within a function
+        # or use if __name__ == "__main__" to avoid freezing the main process
 
-    # Make sure paths is a list
-    if not isinstance(paths, (tuple, list)):
-        paths = [paths]
+        with multiprocessing.Pool() as pool:
+            file_shapes = list(
+                tqdm.tqdm(
+                    pool.imap(get_shape, filepaths),
+                    total=len(filepaths),
+                    desc="Getting file shapes in each h5 file",
+                    disable=not verbose,
+                )
+            )
+    else:
+        file_shapes = []
+        for file_path in tqdm.tqdm(
+            filepaths,
+            desc="Getting file shapes in each h5 file",
+            disable=not verbose,
+        ):
+            file_shapes.append(get_shape(file_path))
 
-    file_shapes = []
-    file_paths = []
-    for path in paths:
-        if isinstance(path, (str, Path, HFPath)) and str(path).startswith(HF_PREFIX):
-            # Let File handle HF path resolution
-            resolved = _hf_resolve_path(str(path))
-            path = resolved
+    return file_shapes
 
-        if Path(path).is_file():
-            path = Path(path)
-            # If the path is a file, get its shape directly
-            if key is not None:
-                file_shapes.append(File.get_shape(path, key))
-            file_paths.append(str(path))
-            continue
 
-        dataset_info = search_file_tree(
-            path,
-            filetypes=FILE_TYPES,
-            hdf5_key_for_length=key,
-            **search_file_tree_kwargs,
-        )
-        file_shapes += dataset_info["file_shapes"]
-        file_paths += [str(Path(path) / file_path) for file_path in dataset_info["file_paths"]]
-
-    return file_paths, file_shapes
+def _file_hash(filepaths):
+    """Calculate a hash for a list of file paths based on their sizes and modified times."""
+    # NOTE: this is really fast, even over network filesystemss
+    total_size = 0
+    modified_times = []
+    for fp in filepaths:
+        if os.path.isfile(fp):
+            total_size += os.path.getsize(fp)
+            modified_times.append(os.path.getmtime(fp))
+    return hash_elements([total_size, modified_times])
 
 
 class Folder:
@@ -171,38 +192,52 @@ class Folder:
 
     def __init__(
         self,
-        folder_path: list[str] | list[Path],
-        key: str = None,
-        search_file_tree_kwargs: dict | None = None,
+        folder_path: str | Path | HFPath,
         validate: bool = True,
         hf_cache_dir: str = HF_DATASETS_DIR,
-        **kwargs,
     ):
-        # Hugging Face support
-        if isinstance(folder_path, (str, Path, HFPath)):
-            folder_path_str = str(folder_path)
-            if folder_path_str.startswith(HF_PREFIX):
-                # Only resolve to local dir if it's a directory, else let File handle it
-                repo_id, subpath = _hf_parse_path(folder_path_str)
-                files = _hf_list_files(repo_id)
-                if subpath and any(f == subpath for f in files):
-                    # It's a file, let File handle it
-                    pass
-                else:
-                    folder_path = _hf_resolve_path(folder_path_str, cache_dir=hf_cache_dir)
-
-        super().__init__(**kwargs)
-
-        self.folder_path = Path(folder_path)
-        self.key = key
-        self.search_file_tree_kwargs = search_file_tree_kwargs
-        self.validate = validate
-        self.file_paths, self.file_shapes = find_h5_files(
-            folder_path, self.key, self.search_file_tree_kwargs
+        single_file_error_msg = (
+            f"Folder class requires a directory path, but got a single file: {str(folder_path)}. "
+            "Use File class instead for single files."
         )
+
+        if not isinstance(folder_path, (str, Path, HFPath)):
+            raise ValueError(
+                f"Invalid folder path: {folder_path}. Must be a string, Path, or HFPath."
+            )
+
+        # Hugging Face support
+        folder_path_str = str(folder_path)
+        if folder_path_str.startswith(HF_PREFIX):
+            repo_id, subpath = _hf_parse_path(folder_path_str)
+            files = _hf_list_files(repo_id)
+
+            # Check if it's a single file (not a directory)
+            if subpath and any(f == subpath for f in files):
+                raise ValueError(single_file_error_msg)
+
+            # It's a directory, resolve to local cache
+            folder_path = _hf_resolve_path(folder_path_str, cache_dir=hf_cache_dir)
+
+        # Check if the resolved path is a directory
+        self.folder_path = Path(folder_path)
+        if self.folder_path.is_file():
+            raise ValueError(single_file_error_msg)
+
+        # Find all hdf5 files in the folder
+        self.file_paths = self.find_h5_files()
         assert self.n_files > 0, f"No files in folder: {folder_path}"
-        if self.validate:
+
+        if validate:
             self.validate_folder()
+
+    def find_h5_files(self) -> List[str]:
+        file_paths = list(search_file_tree(self.folder_path, filetypes=FILE_TYPES))
+        return [str(fp) for fp in file_paths]  # to string
+
+    def load_file_shapes(self, key: str):
+        """Load the shapes of the datasets in each file."""
+        return _find_h5_file_shapes(self.file_paths, key, _file_hash(self.file_paths))
 
     def __len__(self):
         """Returns the number of files in the dataset."""
@@ -241,21 +276,23 @@ class Folder:
             return
 
         num_frames_per_file = []
-        validated_succesfully = True
+        validated_successfully = True
         for file_path in tqdm.tqdm(
             self.file_paths,
             total=self.n_files,
             desc="Checking dataset files on validity (zea format)",
         ):
             try:
-                validate_file(file_path)
+                with File(file_path) as file:
+                    file.validate()
+                    num_frames_per_file.append(file.n_frames)
             except Exception as e:
                 validation_error_log.append(f"File {file_path} is not a valid zea dataset.\n{e}\n")
                 # convert into warning
                 log.warning(f"Error in file {file_path}.\n{e}")
-                validated_succesfully = False
+                validated_successfully = False
 
-        if not validated_succesfully:
+        if not validated_successfully:
             log.warning(
                 "Check warnings above for details. No validation file was created. "
                 f"See {validation_error_file_path} for details."
@@ -319,35 +356,38 @@ class Folder:
         data_types = self.get_data_types(self.file_paths[0])
 
         number_of_frames = sum(num_frames_per_file)
-        with open(validation_file_path, "w", encoding="utf-8") as f:
-            f.write(f"Dataset: {path}\n")
-            f.write(f"Validated on: {get_date_string()}\n")
-            f.write(f"Number of files: {self.n_files}\n")
-            f.write(f"Number of frames: {number_of_frames}\n")
-            f.write(f"Data types: {', '.join(data_types)}\n")
-            f.write(f"{'-' * 80}\n")
-            # write all file names (not entire path) with number of frames on a new line
-            for file_path, num_frames in zip(self.file_paths, num_frames_per_file):
-                f.write(f"{file_path.name}: {num_frames}\n")
-            f.write(f"{'-' * 80}\n")
+        try:
+            with open(validation_file_path, "w", encoding="utf-8") as f:
+                f.write(f"Dataset: {path}\n")
+                f.write(f"Validated on: {get_date_string()}\n")
+                f.write(f"Number of files: {self.n_files}\n")
+                f.write(f"Number of frames: {number_of_frames}\n")
+                f.write(f"Data types: {', '.join(data_types)}\n")
+                f.write(f"{'-' * 80}\n")
+                # write all file names (not entire path) with number of frames on a new line
+                for file_path, num_frames in zip(self.file_paths, num_frames_per_file):
+                    f.write(f"{Path(file_path).name}: {num_frames}\n")
+                f.write(f"{'-' * 80}\n")
 
-        # Write the hash of the validation file
-        validation_file_hash = calculate_file_hash(validation_file_path)
-        with open(validation_file_path, "a", encoding="utf-8") as f:
-            # *** validation file hash *** (80 total line length)
-            f.write("*** validation file hash ***\n")
-            f.write(f"hash: {validation_file_hash}")
+            # Write the hash of the validation file
+            validation_file_hash = calculate_file_hash(validation_file_path)
+            with open(validation_file_path, "a", encoding="utf-8") as f:
+                # *** validation file hash *** (80 total line length)
+                f.write("*** validation file hash ***\n")
+                f.write(f"hash: {validation_file_hash}")
+        except Exception as e:
+            log.warning(f"Unable to write validation flag: {e}")
 
     def __repr__(self):
         return (
             f"<zea.data.datasets.Folder at 0x{id(self):x}: "
-            f"{self.n_files} files, key='{self.key}', folder='{self.folder_path}'>"
+            f"{self.n_files} files, folder='{self.folder_path}'>"
         )
 
     def __str__(self):
-        return f"Folder with {self.n_files} files in '{self.folder_path}' (key='{self.key}')"
+        return f"Folder with {self.n_files} files in '{self.folder_path}'"
 
-    def copy(self, to_path: str | Path, key: str = None, mode: str | None = None):
+    def copy(self, to_path: str | Path, key: str, mode: str | None = None):
         """Copy the data for all or a specific key to a new location.
 
         Has the option to copy all keys or only a specific key. By default, it only copies if the
@@ -358,20 +398,11 @@ class Folder:
         Args:
             to_path (str or Path): The destination path where files will be copied.
             key (str, optional): The key to copy from the source files.
-                If 'all' or '*', all keys will be copied. Defaults to None, which
-                uses the key set in the Folder instance.
+                If 'all' or '*', all keys will be copied.
             mode (str): The mode in which to open the destination files.
                 Defaults to 'a' (append mode), and 'w' (write mode) if key is 'all' or '*'.
                 See: https://docs.h5py.org/en/stable/high/file.html#opening-creating-files
         """
-        if key is None and self.key is None:
-            raise ValueError(
-                "No key specified. Please provide a key to copy the data for, or set the "
-                "key attribute of the Folder instance."
-            )
-        elif key is None:
-            key = self.key
-
         all_keys = key == "all" or key == "*"
 
         if mode is None:
@@ -412,8 +443,6 @@ class Dataset(H5FileHandleCache):
     def __init__(
         self,
         file_paths: List[str] | str,
-        key: str,
-        search_file_tree_kwargs: dict | None = None,
         validate: bool = True,
         directory_splits: list | None = None,
         **kwargs,
@@ -423,10 +452,6 @@ class Dataset(H5FileHandleCache):
         Args:
             file_paths (str or list): (list of) path(s) to the folder(s) containing the HDF5 file(s)
                 or list of HDF5 file paths. Can be a mixed list of folders and files.
-            key (str): The key to access the HDF5 dataset.
-            search_file_tree_kwargs (dict, optional): Additional keyword arguments for the
-                search_file_tree function. These are only used when `file_paths` are directories.
-                Defaults to None.
             validate (bool, optional): Whether to validate the dataset. Defaults to True.
             directory_splits (list, optional): List of directory split by. Is a list of floats
                 between 0 and 1, with the same length as the number of file_paths given.
@@ -434,38 +459,35 @@ class Dataset(H5FileHandleCache):
 
         """
         super().__init__(**kwargs)
-        self.key = key
-        self.search_file_tree_kwargs = search_file_tree_kwargs
         self.validate = validate
-
-        self.file_paths, self.file_shapes = self.find_files_and_shapes(file_paths)
+        self.file_paths = self.find_files(file_paths)
 
         if directory_splits is not None:
             # Split the files according to their parent directories
-            self.file_paths, self.file_shapes = split_files_by_directory(
+            self.file_paths = split_files_by_directory(
                 self.file_paths,
-                self.file_shapes,
                 directory_list=file_paths,
                 directory_splits=directory_splits,
             )
 
         assert self.n_files > 0, f"No files in file_paths: {file_paths}"
 
-    def find_files_and_shapes(self, paths):
-        """Find files and shapes in the dataset."""
+    def load_file_shapes(self, key: str):
+        """Load the shapes of the datasets in each file."""
+        return _find_h5_file_shapes(self.file_paths, key, _file_hash(self.file_paths))
+
+    def find_files(self, paths) -> List[str]:
+        """Find files and optionally validate folders and files."""
         # Initialize file paths and shapes
         file_paths = []
-        file_shapes = []
 
         if not isinstance(paths, (list, tuple)):
             paths = [paths]
 
         for file_path in paths:
             if isinstance(file_path, (list, tuple)):
-                # If the path is a list, recursively call find_files_and_shapes
-                _file_paths, _file_shapes = self.find_files_and_shapes(file_path)
-                file_paths += _file_paths
-                file_shapes += _file_shapes
+                # If the path is a list, recursively call find_files
+                file_paths += self.find_files(file_path)
                 continue
 
             file_path = str(file_path)
@@ -475,21 +497,19 @@ class Dataset(H5FileHandleCache):
                 file_path = Path(file_path)
 
             if file_path.is_dir():
-                folder = Folder(file_path, self.key, self.search_file_tree_kwargs, self.validate)
+                folder = Folder(file_path, self.validate)
                 file_paths += folder.file_paths
-                file_shapes += folder.file_shapes
                 del folder
             elif file_path.is_file():
-                file_paths.append(file_path)
+                file_paths.append(str(file_path))
                 with File(file_path) as file:
-                    file_shapes.append(file.shape(self.key))
                     if self.validate:
                         file.validate()
 
-        return file_paths, file_shapes
+        return file_paths
 
     @classmethod
-    def from_config(cls, dataset_folder, dtype, user=None, **kwargs):
+    def from_config(cls, dataset_folder, user=None, **kwargs):
         """Creates a Dataset from a config file."""
         path = format_data_path(dataset_folder, user)
 
@@ -500,7 +520,7 @@ class Dataset(H5FileHandleCache):
             )
 
         reduced_params = reduce_to_signature(cls.__init__, kwargs)
-        return cls(path, key=dtype, **reduced_params)
+        return cls(path, **reduced_params)
 
     def __len__(self):
         """Returns the number of files in the dataset."""
@@ -532,20 +552,10 @@ class Dataset(H5FileHandleCache):
         return sum(self.get_file(file_path).n_frames for file_path in self.file_paths)
 
     def __repr__(self):
-        return (
-            f"<zea.data.datasets.Dataset at 0x{id(self):x}: {self.n_files} files, key='{self.key}'>"
-        )
+        return f"<zea.data.datasets.Dataset at 0x{id(self):x}: {self.n_files} files>"
 
     def __str__(self):
-        return f"Dataset with {self.n_files} files (key='{self.key}')"
-
-    def close(self):
-        """Close all cached file handles."""
-        for file in self._file_handle_cache.values():
-            if file is not None and file.id.valid:
-                file.close()
-        self._file_handle_cache.clear()
-        log.info("Closed all cached file handles.")
+        return f"Dataset with {self.n_files} files"
 
     def __enter__(self):
         return self
@@ -554,12 +564,11 @@ class Dataset(H5FileHandleCache):
         self.close()
 
 
-def split_files_by_directory(file_names, file_shapes, directory_list, directory_splits):
+def split_files_by_directory(file_names, directory_list, directory_splits):
     """Split files according to their parent directories and given split ratios.
 
     Args:
         file_names (list): List of file paths.
-        file_shapes (list): List of shapes for each file.
         directory_list (list): List of directory paths to split by.
         directory_splits (list): List of split ratios (0-1) for each directory.
 
@@ -593,11 +602,9 @@ def split_files_by_directory(file_names, file_shapes, directory_list, directory_
 
     # split the files
     split_file_names = []
-    split_file_shapes = []
 
     for start, end in split_indices:
         split_file_names.extend(file_names[start:end])
-        split_file_shapes.extend(file_shapes[start:end])
 
     # verify the split size
     expected_size = sum((d * s) for d, s in zip(directory_sizes, directory_splits))
@@ -607,7 +614,7 @@ def split_files_by_directory(file_names, file_shapes, directory_list, directory_
         "Please check the directory splits."
     )
 
-    return split_file_names, split_file_shapes
+    return split_file_names
 
 
 def count_samples_per_directory(file_names, directories):
@@ -641,10 +648,3 @@ def count_samples_per_directory(file_names, directories):
     )
 
     return counts
-
-
-if __name__ == "__main__":
-    src_folder = Folder(
-        "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/CAMUS/val/patient0450", "image", validate=False
-    )
-    src_folder.copy("./CAMIUS", key="all")

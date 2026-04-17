@@ -6,17 +6,18 @@ import numpy as np
 import pytest
 
 from zea import log
-from zea.io_lib import matplotlib_figure_to_numpy
+from zea.io_lib import matplotlib_figure_to_numpy, save_video
 from zea.models.diffusion import DiffusionModel
 from zea.models.gmm import GaussianMixtureModel, match_means_covariances
-from zea.utils import save_to_gif
+
+from . import DEFAULT_TEST_SEED
 
 
 @pytest.fixture(params=[2, 3])
 def synthetic_2d_data(request):
     """Generate synthetic 2D data with Gaussian clusters."""
     n_centers = request.param
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
     n = 600
     means = []
     covs = []
@@ -148,7 +149,7 @@ def animate_diffusion_trajectory_2d(
         frame = matplotlib_figure_to_numpy(fig)
         frames.append(frame)
         plt.close(fig)
-    save_to_gif(frames, filename, fps=10)
+    save_video(frames, filename, fps=10)
     log.success(f"Animated diffusion trajectory saved to {filename}")
 
 
@@ -156,8 +157,8 @@ def test_diffusion_fit_and_sample_2d(synthetic_2d_data, debug=False):
     """Test diffusion model fitting and sampling on synthetic 2D data."""
     data, *_ = synthetic_2d_data
 
-    keras.utils.set_random_seed(123)
-    seed_gen = keras.random.SeedGenerator(123)
+    keras.utils.set_random_seed(DEFAULT_TEST_SEED)
+    seed_gen = keras.random.SeedGenerator(DEFAULT_TEST_SEED)
 
     n = len(data)
     model = DiffusionModel(
@@ -207,8 +208,8 @@ def test_gmm_posterior_sample():
     n_features = 2
     n_measurements = 5
     n_samples = 4
-    rng = np.random.default_rng(123)
-    seed_gen = keras.random.SeedGenerator(123)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    seed_gen = keras.random.SeedGenerator(DEFAULT_TEST_SEED)
     # Make up some GMM parameters and measurements
     gmm = GaussianMixtureModel(n_components=n_components, n_features=n_features)
     gmm.means = keras.ops.convert_to_tensor(
@@ -230,8 +231,8 @@ def test_diffusion_posterior_sample_shape():
     n_features = 2
     n_samples = 5
 
-    keras.utils.set_random_seed(123)
-    seed_gen = keras.random.SeedGenerator(123)
+    keras.utils.set_random_seed(DEFAULT_TEST_SEED)
+    seed_gen = keras.random.SeedGenerator(DEFAULT_TEST_SEED)
 
     # Use a minimal diffusion model with dense network
     model = DiffusionModel(

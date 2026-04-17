@@ -6,7 +6,7 @@ to the console and to a file with color support.
 Example usage
 ^^^^^^^^^^^^^^
 
-.. code-block:: python
+.. testsetup::
 
     from zea import log
 
@@ -323,18 +323,20 @@ def set_level(level):
 
     Also sets the log level for the file logger if it exists.
 
-    Example:
-        >>> from zea import log
-        >>> with log.set_level("WARNING"):
-        ...     log.info("This will not be shown")
-        ...     log.warning("This will be shown")
-
     Args:
         level (str or int): The log level to set temporarily
             (e.g., "DEBUG", "INFO", logging.WARNING).
 
     Yields:
         None
+
+    Example:
+        .. doctest::
+
+            >>> from zea import log
+            >>> with log.set_level("ERROR"):
+            ...     _ = log.info("Info messages will not be shown")
+            ...     _ = log.error("Error messages will be shown")
     """
     prev_level = logger.level
     prev_file_level = file_logger.level if file_logger else None

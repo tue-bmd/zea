@@ -10,14 +10,15 @@ from zea import metrics
 from zea.backend.tensorflow.losses import SMSLE
 from zea.internal.registry import metrics_registry
 
-from . import backend_equality_check
+from . import DEFAULT_TEST_SEED, backend_equality_check
 
 
 def test_smsle():
     """Test SMSLE loss function"""
     # Create random y_true and y_pred data
-    y_true = np.random.rand(1, 11, 128, 512, 2).astype(np.float32)
-    y_pred = np.random.rand(1, 11, 128, 512, 2).astype(np.float32)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    y_true = rng.standard_normal((1, 11, 128, 512, 2)).astype(np.float32)
+    y_pred = rng.standard_normal((1, 11, 128, 512, 2)).astype(np.float32)
 
     # Calculate SMSLE loss
     smsle = SMSLE()
@@ -30,16 +31,17 @@ def test_smsle():
 @pytest.mark.parametrize("metric_name", metrics_registry.registered_names())
 @backend_equality_check(decimal=3)
 def test_metrics(metric_name):
-    """Test all losses and metrics"""
+    """Test all losses and metrics.
+    Most metrics do not have a batch axis, so we test with single images."""
     if metric_name == "lpips":
         metric = metrics.get_metric(metric_name, image_range=[0, 255])
     else:
         metric = metrics.get_metric(metric_name)
     paired = metrics_registry.get_parameter(metric_name, "paired")
 
-    rng = np.random.default_rng(42)
-    y_true = rng.random((2, 16, 16, 3)).astype(np.float32) * 255.0
-    y_pred = rng.random((2, 16, 16, 3)).astype(np.float32) * 255.0
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    y_true = rng.uniform(0, 255, (16, 16, 3)).astype(np.float32)
+    y_pred = rng.uniform(0, 255, (16, 16, 3)).astype(np.float32)
     y_true = ops.convert_to_tensor(y_true)
     y_pred = ops.convert_to_tensor(y_pred)
 
@@ -47,6 +49,8 @@ def test_metrics(metric_name):
         metric_value = metric(y_true, y_pred)
     else:
         metric_value = metric(y_pred)
+
+    assert metric_value.shape == (), f"Metric {metric_name} did not return a scalar value"
 
     # Regression test against TensorFlow implementations for SSIM and PSNR
     if metric_name == "ssim":
@@ -73,35 +77,66 @@ def test_metrics(metric_name):
 
 @backend_equality_check(decimal=2)
 def test_metrics_class():
-    """Test Metrics class"""
-    rng = np.random.default_rng(42)
-    y_true = rng.random((2, 16, 16, 3)).astype(np.float32) * 255.0
-    y_pred = rng.random((2, 16, 16, 3)).astype(np.float32) * 255.0
+    """Test Metrics class, which computes multiple metrics at once on batched data."""
+    batch_size = 2
+    img_size = (16, 16, 3)
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    y_true = rng.uniform(0, 255, (batch_size, *img_size)).astype(np.float32)
+    y_pred = rng.uniform(0, 255, (batch_size, *img_size)).astype(np.float32)
     y_true = ops.convert_to_tensor(y_true)
     y_pred = ops.convert_to_tensor(y_pred)
 
     METRIC_NAMES = ["mse", "psnr", "lpips"]  # ssim does not work with torch.vmap
     metrics_instance = metrics.Metrics(METRIC_NAMES, [0, 255])
 
-    results = metrics_instance(y_true, y_pred, average_batch=True)
+    results = metrics_instance(y_true, y_pred, average_batches=True)
     assert all(name in results for name in METRIC_NAMES)
     assert all(np.isscalar(value.item()) for value in results.values())
 
-    results_no_avg = metrics_instance(y_true, y_pred, average_batch=False, batch_axes=0)
+    results_no_avg = metrics_instance(y_true, y_pred, average_batches=False)
     assert all(name in results_no_avg for name in METRIC_NAMES)
-    assert all(value.shape[0] == 2 for value in results_no_avg.values())
-
-    y_true = rng.random((2, 1, 16, 16, 4, 3)).astype(np.float32) * 255.0
-    y_pred = rng.random((2, 1, 16, 16, 4, 3)).astype(np.float32) * 255.0
-    y_true = ops.convert_to_tensor(y_true)
-    y_pred = ops.convert_to_tensor(y_pred)
-
-    results_no_avg = metrics_instance(y_true, y_pred, average_batch=False, batch_axes=(0, -2))
-    assert all(name in results_no_avg for name in METRIC_NAMES)
-    assert all(value.shape == (2, 4, 1) for value in results_no_avg.values())
+    assert all(value.shape == (batch_size,) for value in results_no_avg.values())
 
     # Compare backends for a single metric
     return results_no_avg["mse"]
+
+
+@backend_equality_check(decimal=2)
+def test_metrics_class_batch_size():
+    """Test Metrics class with batch_size parameter"""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    y_true = rng.random((4, 16, 16, 3)).astype(np.float32) * 255.0
+    y_pred = rng.random((4, 16, 16, 3)).astype(np.float32) * 255.0
+    y_true = ops.convert_to_tensor(y_true)
+    y_pred = ops.convert_to_tensor(y_pred)
+
+    METRIC_NAMES = ["mse", "psnr", "lpips"]
+    metrics_instance = metrics.Metrics(METRIC_NAMES, [0, 255])
+
+    # Compute without batch_size (baseline)
+    results_no_batch_size = metrics_instance(y_true, y_pred, average_batches=False)
+
+    # Compute with batch_size=2 (should process in chunks)
+    results_with_batch_size = metrics_instance(
+        y_true, y_pred, average_batches=False, mapped_batch_size=2
+    )
+
+    # Results should be the same regardless of batch_size
+    for name in METRIC_NAMES:
+        np.testing.assert_allclose(
+            results_no_batch_size[name],
+            results_with_batch_size[name],
+            rtol=1e-5,
+            atol=1e-5,
+            err_msg=f"Metric {name} differs with batch_size parameter",
+        )
+
+    # Verify shapes are correct
+    assert all(value.shape[0] == 4 for value in results_with_batch_size.values())
+
+    # Compare backends for a single metric
+    return results_with_batch_size["mse"]
 
 
 def test_metrics_registry():

@@ -7,13 +7,25 @@ import keras
 import numpy as np
 import pytest
 
-from zea import ops
+from zea import func, ops
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.config import Config
-from zea.internal.core import DataTypes
+from zea.internal.core import DEFAULT_DYNAMIC_RANGE, DataTypes
 from zea.internal.registry import ops_registry
+from zea.ops.keras_ops import Squeeze
+from zea.ops.pipeline import (
+    Beamform,
+    Map,
+    PatchedGrid,
+    Pipeline,
+    pipeline_from_config,
+    pipeline_from_json,
+    pipeline_to_yaml,
+)
 from zea.probes import Probe
 from zea.scan import Scan
+
+from . import DEFAULT_TEST_SEED
 
 """Some operations for testing"""
 
@@ -95,10 +107,12 @@ def test_operation():
 def pipeline_config():
     """Returns a test pipeline configuration."""
     return {
-        "operations": [
-            {"name": "multiply", "params": {}},
-            {"name": "add", "params": {}},
-        ]
+        "pipeline": {
+            "operations": [
+                {"name": "multiply", "params": {}},
+                {"name": "add", "params": {}},
+            ]
+        }
     }
 
 
@@ -106,10 +120,12 @@ def pipeline_config():
 def pipeline_config_with_params():
     """Returns a test pipeline configuration with parameters."""
     return {
-        "operations": [
-            {"name": "multiply", "params": {"useless_parameter": 10}},
-            {"name": "add"},
-        ]
+        "pipeline": {
+            "operations": [
+                {"name": "multiply", "params": {"useless_parameter": 10}},
+                {"name": "add"},
+            ]
+        }
     }
 
 
@@ -117,16 +133,19 @@ def pipeline_config_with_params():
 def default_pipeline_config():
     """Config for default pipeline"""
     return {
-        "operations": [
-            {"name": "simulate_rf"},
-            {"name": "demodulate"},
-            {"name": "tof_correction"},
-            {"name": "pfield_weighting"},
-            {"name": "delay_and_sum"},
-            {"name": "envelope_detect"},
-            {"name": "normalize"},
-            {"name": "log_compress"},
-        ]
+        "pipeline": {
+            "operations": [
+                {"name": "simulate_rf"},
+                {"name": "demodulate"},
+                {"name": "tof_correction"},
+                {"name": "pfield_weighting"},
+                {"name": "delay_and_sum"},
+                {"name": "reshape_grid"},
+                {"name": "envelope_detect"},
+                {"name": "normalize"},
+                {"name": "log_compress"},
+            ]
+        }
     }
 
 
@@ -134,74 +153,24 @@ def default_pipeline_config():
 def patched_pipeline_config():
     """Config for patch-wise default pipeline"""
     return {
-        "operations": [
-            {"name": "simulate_rf"},
-            {"name": "demodulate"},
-            {
-                "name": "patched_grid",
-                "params": {"num_patches": 15},
-                "operations": [
-                    {"name": "tof_correction"},
-                    {"name": "pfield_weighting"},
-                    {"name": "delay_and_sum"},
-                ],
-            },
-            {"name": "envelope_detect"},
-            {"name": "normalize"},
-            {"name": "log_compress"},
-        ]
-    }
-
-
-@pytest.fixture
-def branched_pipeline_config():
-    """Returns a configuration for a BranchedPipeline."""
-    return {
-        "operations": [
-            {
-                "name": "branched_pipeline",
-                "params": {"merge_strategy": "flatten"},
-                "branches": {
-                    "branch_1": [
-                        {"name": "simulate_rf"},
-                        {"name": "demodulate"},
-                        {"name": "tof_correction"},
-                        {"name": "pfield_weighting"},
-                        {"name": "delay_and_sum"},
-                    ],
-                    "branch_2": [
-                        {"name": "simulate_rf"},
-                        {"name": "demodulate"},
-                        {"name": "tof_correction"},
-                        {"name": "pfield_weighting"},
-                        {"name": "delay_and_sum"},
-                    ],
+        "pipeline": {
+            "operations": [
+                {"name": "simulate_rf"},
+                {"name": "demodulate"},
+                {
+                    "name": "beamform",
+                    "params": {
+                        "beamformer": "delay_and_sum",
+                        "num_patches": 15,
+                        "enable_pfield": True,
+                    },
                 },
-            },
-            {"name": "envelope_detect"},
-            {"name": "normalize"},
-            {"name": "log_compress"},
-        ]
+                {"name": "envelope_detect"},
+                {"name": "normalize"},
+                {"name": "log_compress"},
+            ]
+        }
     }
-
-
-def validate_branched_pipeline(pipeline):
-    """Validates the branched pipeline."""
-    assert len(pipeline.operations) == 4
-    assert hasattr(pipeline.operations[0], "branches")
-    assert isinstance(pipeline.operations[1], ops.EnvelopeDetect)
-    assert isinstance(pipeline.operations[2], ops.Normalize)
-    assert isinstance(pipeline.operations[3], ops.LogCompress)
-
-    branch_1 = pipeline.operations[0].branches["branch_1"]
-    branch_2 = pipeline.operations[0].branches["branch_2"]
-
-    for branch in [branch_1, branch_2]:
-        assert isinstance(branch[0], ops.Simulate)
-        assert isinstance(branch[1], ops.Demodulate)
-        assert isinstance(branch[2], ops.TOFCorrection)
-        assert isinstance(branch[3], ops.PfieldWeighting)
-        assert isinstance(branch[4], ops.DelayAndSum)
 
 
 @pytest.fixture
@@ -209,7 +178,7 @@ def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
     pipeline = ops.Pipeline.from_default(num_patches=1, jit_options=None)
     pipeline.prepend(ops.Simulate())
-    pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
+    pipeline.append(ops.Normalize(input_range=DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
     return pipeline
 
 
@@ -218,7 +187,7 @@ def patched_pipeline():
     """Returns a pipeline for ultrasound simulation where the beamforming happens patch-wise."""
     pipeline = ops.Pipeline.from_default(jit_options=None)
     pipeline.prepend(ops.Simulate())
-    pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
+    pipeline.append(ops.Normalize(input_range=DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
     return pipeline
 
 
@@ -448,16 +417,16 @@ def validate_default_pipeline(pipeline, patched=False):
         assert isinstance(pipeline.operations[2], ops.TOFCorrection)
         assert isinstance(pipeline.operations[3], ops.PfieldWeighting)
         assert isinstance(pipeline.operations[4], ops.DelayAndSum)
-        assert isinstance(pipeline.operations[5], ops.EnvelopeDetect)
-        assert isinstance(pipeline.operations[6], ops.Normalize)
-        assert isinstance(pipeline.operations[7], ops.LogCompress)
+        assert isinstance(pipeline.operations[5], ops.ReshapeGrid)
+        assert isinstance(pipeline.operations[6], ops.EnvelopeDetect)
+        assert isinstance(pipeline.operations[7], ops.Normalize)
+        assert isinstance(pipeline.operations[8], ops.LogCompress)
     else:
-        patched_grid = pipeline.operations[2]
-        assert hasattr(patched_grid, "operations")
-        assert isinstance(patched_grid.operations[0], ops.TOFCorrection)
-        assert isinstance(patched_grid.operations[1], ops.PfieldWeighting)
-        assert isinstance(patched_grid.operations[2], ops.DelayAndSum)
-
+        beamform = pipeline.operations[2]
+        assert hasattr(beamform, "operations")
+        assert isinstance(beamform.operations[0].operations[0], ops.TOFCorrection)
+        assert isinstance(beamform.operations[0].operations[1], ops.PfieldWeighting)
+        assert isinstance(beamform.operations[0].operations[2], ops.DelayAndSum)
         assert isinstance(pipeline.operations[3], ops.EnvelopeDetect)
         assert isinstance(pipeline.operations[4], ops.Normalize)
         assert isinstance(pipeline.operations[5], ops.LogCompress)
@@ -465,18 +434,15 @@ def validate_default_pipeline(pipeline, patched=False):
 
 @pytest.mark.parametrize(
     "config_fixture",
-    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
+    ["default_pipeline_config", "patched_pipeline_config"],
 )
 def test_default_pipeline_from_json(config_fixture, request):
     """Tests building a default pipeline from a JSON string."""
     config = request.getfixturevalue(config_fixture)
     json_string = json.dumps(config)
-    pipeline = ops.pipeline_from_json(json_string, jit_options=None)
+    pipeline = pipeline_from_json(json_string, jit_options=None)
 
-    if config_fixture == "branched_pipeline_config":
-        validate_branched_pipeline(pipeline)
-    else:
-        validate_default_pipeline(pipeline, patched=config_fixture == "patched_pipeline_config")
+    validate_default_pipeline(pipeline, patched=config_fixture == "patched_pipeline_config")
 
 
 @pytest.mark.parametrize("config_fixture", ["pipeline_config", "pipeline_config_with_params"])
@@ -484,92 +450,270 @@ def test_pipeline_from_config(config_fixture, request):
     """Tests building a dummy pipeline from a Config object."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
-    pipeline = ops.pipeline_from_config(config, jit_options=None)
+    pipeline = pipeline_from_config(config, jit_options=None)
 
     validate_basic_pipeline(pipeline, with_params=config_fixture == "pipeline_config_with_params")
 
 
 @pytest.mark.parametrize(
     "config_fixture",
-    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
+    ["default_pipeline_config", "patched_pipeline_config"],
 )
 def test_default_pipeline_from_config(config_fixture, request):
     """Tests building a default pipeline from a Config object."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
-    pipeline = ops.pipeline_from_config(config, jit_options=None)
+    pipeline = pipeline_from_config(config, jit_options=None)
 
-    if config_fixture == "branched_pipeline_config":
-        validate_branched_pipeline(pipeline)
-    else:
-        validate_default_pipeline(pipeline, patched=config_fixture == "patched_pipeline_config")
+    validate_default_pipeline(pipeline, patched=config_fixture == "patched_pipeline_config")
 
 
 @pytest.mark.parametrize(
     "config_fixture",
-    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
+    ["default_pipeline_config", "patched_pipeline_config"],
 )
 def test_pipeline_to_config(config_fixture, request):
     """Tests converting a pipeline to a Config object."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
-    pipeline = ops.pipeline_from_config(config, jit_options=None)
+    pipeline = pipeline_from_config(config, jit_options=None)
 
     # Convert the pipeline back to a Config object
     new_config = pipeline.to_config()
 
     # Create a new pipeline from the new Config object
-    new_pipeline = ops.pipeline_from_config(new_config, jit_options=None)
+    new_pipeline = pipeline_from_config(new_config, jit_options=None)
 
-    if config_fixture == "branched_pipeline_config":
-        validate_branched_pipeline(new_pipeline)
-    else:
-        validate_default_pipeline(new_pipeline, patched=config_fixture == "patched_pipeline_config")
+    validate_default_pipeline(new_pipeline, patched=config_fixture == "patched_pipeline_config")
 
 
 @pytest.mark.parametrize(
     "config_fixture",
-    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
+    ["default_pipeline_config", "patched_pipeline_config"],
 )
 def test_pipeline_to_json(config_fixture, request):
     """Tests converting a pipeline to a JSON string."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
-    pipeline = ops.pipeline_from_config(config, jit_options=None)
+    pipeline = pipeline_from_config(config, jit_options=None)
 
     # Convert the pipeline to a JSON string
     json_string = pipeline.to_json()
 
     # Create a new pipeline from the JSON string
-    new_pipeline = ops.pipeline_from_json(json_string, jit_options=None)
+    new_pipeline = pipeline_from_json(json_string, jit_options=None)
 
-    if config_fixture == "branched_pipeline_config":
-        validate_branched_pipeline(new_pipeline)
-    else:
-        validate_default_pipeline(new_pipeline, patched=config_fixture == "patched_pipeline_config")
+    validate_default_pipeline(new_pipeline, patched=config_fixture == "patched_pipeline_config")
 
 
 @pytest.mark.parametrize(
     "config_fixture",
-    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
+    ["default_pipeline_config", "patched_pipeline_config"],
 )
 def test_pipeline_to_yaml(config_fixture, request, tmp_path):
     """Tests converting a pipeline to a YAML file (in tmp directory), and then loading it back."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
-    pipeline = ops.pipeline_from_config(config, jit_options=None)
+    pipeline = pipeline_from_config(config, jit_options=None)
 
     # Write pipeline to a YAML file in the temporary directory
     path = tmp_path / "tmp_pipeline.yaml"
     pipeline.to_yaml(path)
 
     # Load the pipeline from the YAML file
-    new_pipeline = ops.pipeline_from_yaml(path, jit_options=None)
+    new_pipeline = Pipeline.from_path(path, jit_options=None)
 
-    if config_fixture == "branched_pipeline_config":
-        validate_branched_pipeline(new_pipeline)
-    else:
-        validate_default_pipeline(new_pipeline, patched=config_fixture == "patched_pipeline_config")
+    validate_default_pipeline(new_pipeline, patched=config_fixture == "patched_pipeline_config")
+
+
+# ---- Round-trip tests for config saving/loading ----
+
+BEAMFORM_CONFIG = {
+    "pipeline": {
+        "operations": [
+            {
+                "name": "beamform",
+                "params": {
+                    "beamformer": "delay_and_sum",
+                    "enable_pfield": False,
+                    "num_patches": 200,
+                },
+            },
+            {"name": "envelope_detect"},
+            {"name": "normalize"},
+            {"name": "log_compress"},
+        ]
+    }
+}
+
+
+@pytest.mark.parametrize("compact", [True, False])
+def test_beamform_config_roundtrip(compact, tmp_path):
+    """Test that a beamform pipeline round-trips through config without expanding internals."""
+    import yaml
+
+    config = Config(BEAMFORM_CONFIG)
+    pipeline = pipeline_from_config(config, jit_options=None)
+
+    # Config round-trip
+    new_config = pipeline.to_config(compact=compact)
+    new_pipeline = pipeline_from_config(new_config, jit_options=None)
+    assert isinstance(new_pipeline.operations[0], ops.Beamform)
+    assert new_pipeline.operations[0].beamformer_type == "delay_and_sum"
+    assert new_pipeline.operations[0].num_patches == 200
+    assert new_pipeline.operations[0].enable_pfield is False
+    assert len(new_pipeline.operations) == 4
+
+    # JSON round-trip
+    json_str = pipeline.to_json(compact=compact)
+    json_pipeline = pipeline_from_json(json_str, jit_options=None)
+    assert isinstance(json_pipeline.operations[0], ops.Beamform)
+    assert json_pipeline.operations[0].num_patches == 200
+
+    # YAML round-trip
+    yaml_path = tmp_path / "beamform.yaml"
+    pipeline.to_yaml(yaml_path, compact=compact)
+    yaml_pipeline = Pipeline.from_path(yaml_path, jit_options=None)
+    assert isinstance(yaml_pipeline.operations[0], ops.Beamform)
+    assert yaml_pipeline.operations[0].num_patches == 200
+
+    # Verify YAML does NOT contain expanded operations
+    with open(yaml_path) as f:
+        yaml_content = yaml.safe_load(f)
+    beamform_entry = yaml_content["pipeline"]["operations"][0]
+    assert "operations" not in beamform_entry, "Beamform should not serialize internal operations"
+
+
+@pytest.mark.parametrize("compact", [True, False])
+def test_yaml_roundtrip_via_config_from_path(compact, tmp_path):
+    """Test loading a saved YAML via Config.from_path → Pipeline.from_config."""
+    config = Config(BEAMFORM_CONFIG)
+    pipeline = pipeline_from_config(config, jit_options=None)
+
+    yaml_path = tmp_path / "pipeline.yaml"
+    pipeline_to_yaml(pipeline, str(yaml_path), compact=compact)
+
+    # Load through Config.from_path (the path that was previously broken)
+    loaded_config = Config.from_path(str(yaml_path))
+    loaded_pipeline = pipeline_from_config(loaded_config, jit_options=None)
+
+    assert len(loaded_pipeline.operations) == 4
+    assert isinstance(loaded_pipeline.operations[0], ops.Beamform)
+    assert loaded_pipeline.operations[0].num_patches == 200
+
+
+def test_compact_output_omits_defaults():
+    """Test that compact mode omits default parameters."""
+    config = Config(
+        {
+            "pipeline": {
+                "operations": [
+                    {"name": "beamform"},
+                    {"name": "envelope_detect"},
+                ]
+            }
+        }
+    )
+    pipeline = pipeline_from_config(config)
+
+    compact = pipeline.to_config()
+    beamform_dict = compact["pipeline"]["operations"][0]
+    assert beamform_dict == {"name": "beamform"}
+
+    full = pipeline.to_config(compact=False)
+    beamform_dict = full["pipeline"]["operations"][0]
+    assert "params" in beamform_dict
+    assert beamform_dict["params"]["beamformer"] == "delay_and_sum"
+    assert beamform_dict["params"]["num_patches"] == 100
+    assert beamform_dict["params"]["enable_pfield"] is False
+
+
+def test_compact_output_includes_nondefaults():
+    """Test that compact mode includes non-default parameters."""
+    config = Config(
+        {
+            "pipeline": {
+                "operations": [
+                    {
+                        "name": "beamform",
+                        "params": {"num_patches": 50, "beamformer": "delay_multiply_and_sum"},
+                    },
+                    {"name": "normalize"},
+                ]
+            }
+        }
+    )
+    pipeline = pipeline_from_config(config, jit_options=None)
+
+    compact = pipeline.to_config()
+    beamform_dict = compact["pipeline"]["operations"][0]
+    assert beamform_dict["params"]["num_patches"] == 50
+    assert beamform_dict["params"]["beamformer"] == "delay_multiply_and_sum"
+
+
+def test_operation_subclass_params_serialized():
+    """Test that subclass-specific __init__ params are included in get_dict()."""
+    from zea.ops import (
+        Demodulate,
+        Downsample,
+        EnvelopeDetect,
+        LogCompress,
+        Normalize,
+    )
+
+    # Non-default params should appear in compact mode
+    ds = Downsample(factor=4, phase=2)
+    d = ds.get_dict()
+    assert d["params"]["factor"] == 4
+    assert d["params"]["phase"] == 2
+
+    # Default params should be omitted in compact mode
+    ds_default = Downsample()
+    d_default = ds_default.get_dict()
+    assert "params" not in d_default
+
+    # Verbose mode should include all params
+    d_verbose = ds_default.get_dict(compact=False)
+    assert d_verbose["params"]["factor"] == 1
+    assert d_verbose["params"]["phase"] == 0
+    assert d_verbose["params"]["axis"] == -3
+
+    # Operations with no custom params should still work
+    ed = EnvelopeDetect()
+    assert ed.get_dict() == {"name": "envelope_detect"}
+
+    # LogCompress with non-default clip
+    lc = LogCompress(clip=-40)
+    d_lc = lc.get_dict()
+    assert d_lc["params"]["clip"] == -40
+
+    # LogCompress with default clip should omit params
+    lc_default = LogCompress()
+    assert "params" not in lc_default.get_dict()
+
+    # Round-trip: pipeline with subclass params survives save/load
+    pipeline = Pipeline(
+        operations=[
+            Demodulate(),
+            Downsample(factor=4),
+            Normalize(output_range=(0, 255)),
+            EnvelopeDetect(),
+            LogCompress(clip=-60),
+        ],
+        jit_options=None,
+    )
+
+    config = pipeline.to_config()
+    op_dicts = config["pipeline"]["operations"]
+
+    # Verify non-default params are present
+    assert op_dicts[1]["params"]["factor"] == 4
+    assert op_dicts[2]["params"]["output_range"] == [0, 255]
+    assert op_dicts[4]["params"]["clip"] == -60
+
+    # Rebuild and verify equality
+    pipeline2 = pipeline_from_config(config, jit_options=None)
+    assert str(pipeline) == str(pipeline2)
 
 
 def get_probe():
@@ -651,7 +795,8 @@ def ultrasound_scan(ultrasound_probe):
 
 
 def get_scatterers():
-    """Returns scatterer positions and magnitudes for ultrasound simulation tests."""
+    """Returns scatterer positions and magnitudes for ultrasound simulation tests.
+    Has a batch dimension of 1."""
     scat_x, scat_z = np.meshgrid(
         np.linspace(-10e-3, 10e-3, 5),
         np.linspace(10e-3, 30e-3, 5),
@@ -668,10 +813,11 @@ def get_scatterers():
         ],
         axis=1,
     )
+    scat_positions = np.expand_dims(scat_positions, axis=0)  # add batch dimension
 
     return {
         "positions": scat_positions.astype(np.float32),
-        "magnitudes": np.ones(n_scat, dtype=np.float32),
+        "magnitudes": np.ones((1, n_scat), dtype=np.float32),
         "n_scat": n_scat,
     }
 
@@ -682,24 +828,29 @@ def ultrasound_scatterers():
     return get_scatterers()
 
 
-def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
+@pytest.mark.parametrize(
+    "with_batch_dim",
+    [False, True],
+)
+def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers, with_batch_dim):
     """Tests the simulator operation."""
-    pipeline = ops.Pipeline([ops.Simulate()])
+    pipeline = ops.Pipeline([ops.Simulate()], with_batch_dim=with_batch_dim)
     parameters = pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+
+    if not with_batch_dim:
+        # remove batch_dim of scatterers for pipeline without batch dimension
+        ultrasound_scatterers["positions"] = ultrasound_scatterers["positions"][0]
+        ultrasound_scatterers["magnitudes"] = ultrasound_scatterers["magnitudes"][0]
 
     output = pipeline(
         **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
-
-    assert output["data"].shape == (
-        1,
-        ultrasound_scan.n_tx,
-        ultrasound_scan.n_ax,
-        ultrasound_scan.n_el,
-        1,
-    )
+    # assert output shape with batch dimension if with_batch_dim else without
+    expected_shape = (ultrasound_scan.n_tx, ultrasound_scan.n_ax, ultrasound_scan.n_el, 1)
+    expected_shape = (1,) + expected_shape if with_batch_dim else expected_shape
+    assert output["data"].shape == expected_shape
 
 
 @pytest.mark.heavy
@@ -714,7 +865,6 @@ def test_default_ultrasound_pipeline(
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
     parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
-
     output_default = default_pipeline(
         **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
@@ -753,7 +903,10 @@ def test_pipeline_parameter_tracing(ultrasound_scan: Scan):
     ultrasound_scan._params.pop("n_ch", None)  # remove a parameter that is not needed
     ultrasound_scan._params.pop("demodulation_frequency", None)
     params = pipeline.prepare_parameters(scan=ultrasound_scan)
-    data = np.random.randn(1, ultrasound_scan.n_tx, ultrasound_scan.n_ax, ultrasound_scan.n_el, 1)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = rng.standard_normal(
+        (1, ultrasound_scan.n_tx, ultrasound_scan.n_ax, ultrasound_scan.n_el, 1)
+    )
     output = pipeline(data=data, **params)
     assert "demodulation_frequency" in output
 
@@ -776,4 +929,420 @@ def test_registry():
     classes = inspect.getmembers(ops, inspect.isclass)
     for _, _class in classes:
         if _class.__module__.startswith("zea.ops."):
+            # Skip abstract base classes and base Operation classes
+            if inspect.isabstract(_class) or _class.__name__ in [
+                "Operation",
+                "MissingKerasOps",
+            ]:
+                continue
             ops_registry.get_name(_class)  # this raises an error if the class is not registered
+
+
+def _get_defined_names_from_submodules(parent_module, submodule_names, exclude_private=True):
+    """Get all function and class names defined in specific submodules.
+
+    This inspects the actual submodule files, not what's imported into the parent,
+    so it will catch items that should be exported but aren't imported yet.
+
+    Args:
+        parent_module: The parent module object
+        submodule_names: List of submodule names to inspect (e.g., ['tensor', 'ultrasound'])
+        exclude_private: Whether to exclude names starting with underscore
+
+    Returns:
+        set: Set of names defined in the submodules
+    """
+    import importlib
+
+    defined_names = set()
+    parent_name = parent_module.__name__
+
+    for submodule_name in submodule_names:
+        # Import the submodule directly
+        full_module_name = f"{parent_name}.{submodule_name}"
+        submodule = importlib.import_module(full_module_name)
+
+        # Get all members defined in this specific submodule
+        for name, obj in inspect.getmembers(submodule):
+            # Skip private names if requested
+            if exclude_private and name.startswith("_"):
+                continue
+
+            # Check if it's a function or class
+            if inspect.isfunction(obj) or inspect.isclass(obj):
+                # Only include if it's defined in this specific submodule
+                if hasattr(obj, "__module__") and obj.__module__ == full_module_name:
+                    defined_names.add(name)
+
+    return defined_names
+
+
+def _check_exports(module, module_name, defined_names, exported_names, file_path):
+    """Check that all defined names are both importable and exported in __all__.
+
+    Args:
+        module: The module object to check imports from
+        module_name: Name of the module for error messages
+        defined_names: Set of names that should be exported
+        exported_names: Set of names in __all__
+        file_path: Path to the __init__.py file for error messages
+    """
+    # Check if items are in __all__
+    missing_in_all = defined_names - exported_names
+
+    # Check if items are actually importable from the module
+    missing_imports = []
+    for name in defined_names:
+        if not hasattr(module, name):
+            missing_imports.append(name)
+
+    # Report errors
+    errors = []
+    if missing_in_all:
+        errors.append(f"Not in __all__: {sorted(missing_in_all)}")
+    if missing_imports:
+        errors.append(f"Not imported: {sorted(missing_imports)}")
+
+    if errors:
+        error_msg = (
+            f"The following items are not properly exported from {module_name}:\n"
+            + "\n".join(f"  - {err}" for err in errors)
+            + f"\nPlease add them to both the imports and __all__ list in {file_path}"
+        )
+        pytest.fail(error_msg)
+
+
+def test_all_operations_exported():
+    """Test that all registered Operation classes are exported in zea.ops.__all__."""
+    # Get all registered operation classes from the registry
+    registered_ops = set()
+    for name in ops_registry.registry:
+        op_class = ops_registry[name]
+        # Only check Operation subclasses that are defined in zea.ops
+        # Skip keras_ops (they're exported via the keras_ops module)
+        if (
+            inspect.isclass(op_class)
+            and issubclass(op_class, ops.Operation)
+            and op_class.__module__.startswith("zea.ops.")
+            and op_class.__module__ != "zea.ops.keras_ops"
+            and op_class.__name__ not in ["Operation", "ImageOperation", "MissingKerasOps"]
+        ):
+            registered_ops.add(op_class.__name__)
+
+    # Check that all registered operations are both imported and in __all__
+    _check_exports(
+        module=ops,
+        module_name="zea.ops",
+        defined_names=registered_ops,
+        exported_names=set(ops.__all__),
+        file_path="zea/ops/__init__.py",
+    )
+
+
+def test_all_functions_exported():
+    """Test that all functions defined in zea.func submodules are exported in zea.func.__all__."""
+    # Get all functions defined in the actual submodule files (tensor.py, ultrasound.py)
+    # This will catch functions that should be exported but aren't imported yet
+    defined_funcs = _get_defined_names_from_submodules(
+        parent_module=func, submodule_names=["tensor", "ultrasound"], exclude_private=True
+    )
+
+    # Check that all defined functions are both imported and in __all__
+    _check_exports(
+        module=func,
+        module_name="zea.func",
+        defined_names=defined_funcs,
+        exported_names=set(func.__all__),
+        file_path="zea/func/__init__.py",
+    )
+
+
+def test_pipeline_repr():
+    """Test Pipeline.__repr__ output format."""
+    pipeline = ops.Pipeline([MultiplyOperation(), AddOperation()], name="test_pipe")
+    r = repr(pipeline)
+    assert r == "<Pipeline test_pipe=(MultiplyOperation, AddOperation)>"
+
+    # Nested pipeline repr
+    inner = ops.Pipeline([AddOperation()], name="inner")
+    outer = ops.Pipeline([MultiplyOperation(), inner], name="outer")
+    r2 = repr(outer)
+    assert "Pipeline inner" in r2
+
+
+def test_pipeline_eq():
+    """Test Pipeline.__eq__ for equal and non-equal cases."""
+    p1 = ops.Pipeline([MultiplyOperation(), AddOperation()], jit_options=None)
+    p2 = ops.Pipeline([MultiplyOperation(), AddOperation()], jit_options=None)
+    assert p1 == p2
+
+    p3 = ops.Pipeline([AddOperation()], jit_options=None)
+    assert p1 != p3
+
+    # Also checks arguments to operations etc...
+    p4 = ops.Pipeline([MultiplyOperation(), AddOperation(jittable=False)], jit_options=None)
+    assert p1 != p4
+
+    # Non-Pipeline comparison
+    assert p1 != "not a pipeline"
+
+
+def test_pipeline_get_dict_verbose_and_compact():
+    """Test Pipeline.get_dict() in both verbose and compact modes."""
+    pipeline = ops.Pipeline(
+        [MultiplyOperation(), AddOperation()],
+        jit_options=None,
+        name="mypipe",
+    )
+    compact = pipeline.get_dict(compact=True)
+    assert compact["name"] == "pipeline"
+    assert "operations" in compact
+    # jit_options=None is non-default → should appear in compact
+    assert compact["params"]["jit_options"] is None
+
+    full = pipeline.get_dict(compact=False)
+    assert full["params"]["with_batch_dim"] is True
+    assert full["params"]["jit_options"] is None
+
+
+def test_pipeline_load_from_yaml(tmp_path):
+    """Test Pipeline.load() with a YAML file delegates to from_path."""
+    config = Config(
+        {
+            "pipeline": {
+                "operations": [
+                    {"name": "multiply"},
+                    {"name": "add"},
+                ]
+            }
+        }
+    )
+    path = str(tmp_path / "pipe.yaml")
+    config.to_yaml(path)
+
+    pipeline = Pipeline.load(path, jit_options=None)
+    assert isinstance(pipeline.operations[0], MultiplyOperation)
+    assert isinstance(pipeline.operations[1], AddOperation)
+
+
+def test_pipeline_load_from_json(tmp_path):
+    """Test Pipeline.load() with a JSON file."""
+
+    config_dict = {
+        "pipeline": {
+            "operations": [
+                {"name": "multiply"},
+                {"name": "add"},
+            ]
+        }
+    }
+    path = str(tmp_path / "pipe.json")
+    with open(path, "w") as f:
+        json.dump(config_dict, f)
+
+    pipeline = Pipeline.load(path, jit_options=None)
+    assert isinstance(pipeline.operations[0], MultiplyOperation)
+
+    # Bad extension
+    with pytest.raises(ValueError, match="extension"):
+        Pipeline.load(str(tmp_path / "pipe.txt"))
+
+
+def test_pipeline_call_keyerror():
+    """Test that a missing key inside pipeline.call raises a plain KeyError with a helpful msg."""
+
+    @ops_registry("needs_missing_key")
+    class NeedsMissingKey(ops.Operation):
+        def call(self, **kwargs):
+            return {"result": kwargs["nonexistent_key"]}
+
+    pipeline = ops.Pipeline([NeedsMissingKey()], jit_options=None, validate=False)
+    with pytest.raises(KeyError, match="nonexistent_key"):
+        pipeline(data=None)
+
+
+def test_pipeline_call_runtime_error():
+    """Test that a generic exception in pipeline.call is wrapped in RuntimeError."""
+
+    @ops_registry("always_crashes")
+    class AlwaysCrashes(ops.Operation):
+        def call(self, **kwargs):
+            raise ValueError("boom")
+
+    pipeline = ops.Pipeline([AlwaysCrashes()], jit_options=None, validate=False)
+    with pytest.raises(RuntimeError, match="boom"):
+        pipeline(data=None)
+
+
+def test_map_get_dict():
+    """Test Map.get_dict() serialises argnames and non-default params."""
+
+    m = Map(
+        operations=[AddOperation()],
+        argnames="x",
+        in_axes=1,
+        chunks=4,
+        jit_options=None,
+    )
+    d = m.get_dict(compact=True)
+    assert d["name"] == "map"
+    assert d["params"]["argnames"] == ["x"]
+    assert d["params"]["in_axes"] == 1
+    assert d["params"]["chunks"] == 4
+
+    d_v = m.get_dict(compact=False)
+    assert d_v["params"]["out_axes"] == 0
+    assert d_v["params"]["batch_size"] is None
+
+
+def test_patched_grid_get_dict():
+    """Test PatchedGrid.get_dict() uses num_patches and hides argnames/chunks."""
+
+    pg = PatchedGrid(
+        operations=[AddOperation()],
+        num_patches=20,
+        jit_options=None,
+    )
+    d = pg.get_dict(compact=True)
+    assert d["name"] == "patched_grid"
+    assert d["params"]["num_patches"] == 20
+    assert "argnames" not in d["params"]
+    assert "chunks" not in d["params"]
+
+
+def test_beamform_repr():
+    """Test Beamform.__repr__ returns the expected format."""
+
+    b = Beamform(num_patches=1, jit_options=None)
+    r = repr(b)
+    assert r.startswith("<Beamform")
+    assert "TOFCorrection" in r
+
+
+def test_get_dict_callable_param_raises():
+    """Generic Lambda with arbitrary callable should fail with a clear message."""
+    lam = ops.Lambda(lambda x: {"data": x + 1})
+    with pytest.raises(TypeError, match="generic 'lambda' operation"):
+        lam.get_dict()
+
+
+def test_wrapped_keras_op_get_dict_serializes_func_kwargs():
+    """Keras-wrapped Lambda ops should serialize op kwargs and skip callable internals."""
+    squeeze = Squeeze(axis=0)
+
+    d = squeeze.get_dict()
+    assert d["name"] == "keras.ops.squeeze"
+    assert d["params"]["axis"] == 0
+    assert "with_batch_dim" not in d["params"]
+
+    d_full = squeeze.get_dict(compact=False)
+    assert d_full["params"]["axis"] == 0
+
+
+def test_pipeline_with_wrapped_keras_op_roundtrip():
+    """Pipelines with wrapped keras ops should serialize and round-trip via config."""
+    pipeline = Pipeline(
+        operations=[Squeeze(axis=0)],
+        jit_options=None,
+    )
+
+    config = pipeline.to_config()
+    op_cfg = config["pipeline"]["operations"][0]
+    assert op_cfg["name"] == "keras.ops.squeeze"
+    assert op_cfg["params"]["axis"] == 0
+
+    rebuilt = Pipeline.from_config(config, jit_options=None)
+    out = rebuilt(data=np.arange(6).reshape(2, 1, 3))
+    assert out["data"].shape == (2, 3)
+
+    assert pipeline == rebuilt, "Pipeline should be equal after round-trip"
+
+
+def test_add_output_keys_class_level_behavior():
+    """ADD_OUTPUT_KEYS should be read from class and not serialized as params."""
+    norm = ops.Normalize()
+    assert norm.additional_output_keys == ["minval", "maxval"]
+    assert norm.output_keys == [norm.output_key, "minval", "maxval"]
+
+    # internal class-level output metadata should not appear in serialized params
+    d = norm.get_dict(compact=False)
+    assert "additional_output_keys" not in d.get("params", {})
+
+
+def test_pipeline_roundtrip_preserves_pipeline_kwargs(tmp_path):
+    """Pipeline YAML round-trip should preserve top-level Pipeline settings."""
+    pipeline = Pipeline(
+        operations=[ops.Identity()],
+        with_batch_dim=False,
+        jit_options=None,
+        jit_kwargs={"my_flag": 1},
+        name="my_pipeline",
+    )
+
+    path = tmp_path / "pipeline.yaml"
+    pipeline.to_yaml(path)
+    loaded = Pipeline.from_path(path)
+
+    assert pipeline == loaded
+    assert loaded.with_batch_dim is False
+    assert loaded.jit_options is None
+    assert loaded.jit_kwargs["my_flag"] == 1
+    assert loaded.name == "my_pipeline"
+
+
+def test_pipeline_from_config_rejects_with_batch_dims_typo():
+    """Only `with_batch_dim` is accepted; typo `with_batch_dims` should fail."""
+    config = Config(
+        {
+            "pipeline": {
+                "operations": ["identity"],
+                "with_batch_dims": False,
+            },
+        }
+    )
+    with pytest.raises(TypeError, match="with_batch_dims"):
+        Pipeline.from_config(config)
+
+
+def test_pipeline_from_config_requires_pipeline_key():
+    """Top-level operations without a pipeline key should be rejected."""
+    config = Config({"operations": ["identity"]})
+    with pytest.raises(ValueError, match="missing top-level 'pipeline' key"):
+        Pipeline.from_config(config)
+
+
+def test_pipeline_yaml_is_portable_no_python_tuple_tag(tmp_path):
+    """pipeline.to_yaml should not emit Python-specific YAML tags."""
+    pipeline = Pipeline(
+        operations=[ops.Normalize(output_range=(0, 255))],
+        jit_options=None,
+    )
+    path = tmp_path / "portable.yaml"
+    pipeline.to_yaml(path)
+
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    assert "!!python/tuple" not in content
+
+
+def test_pipeline_jax_jit_kwargs_merge_preserves_user_keys(monkeypatch):
+    """When backend is JAX, static_argnames should merge with existing jit_kwargs."""
+
+    @ops_registry("static_param_test_op")
+    class StaticParamTestOp(ops.Operation):
+        STATIC_PARAMS = ["my_static"]
+
+        def call(self, **kwargs):
+            return {}
+
+    monkeypatch.setattr(keras.backend, "backend", lambda: "jax")
+
+    pipeline = Pipeline(
+        operations=[StaticParamTestOp()],
+        jit_options=None,
+        jit_kwargs={"donate_argnums": (0,), "static_argnames": "user_static"},
+    )
+
+    assert pipeline.jit_kwargs["donate_argnums"] == (0,)
+    assert set(pipeline.jit_kwargs["static_argnames"]) == {"user_static", "my_static"}

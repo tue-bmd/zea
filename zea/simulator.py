@@ -14,27 +14,30 @@ Example usage
 A simple example of simulating RF data with a single scatterer at the center of the probe. For a
 more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_example`.
 
-.. code-block:: python
+.. doctest::
 
-    raw_data = simulate_rf(
-        scatterer_positions=np.array([[0, 0, 20e-3]]),
-        scatterer_magnitudes=np.array([1.0]),
-        probe_geometry=np.stack(
-            [np.linspace(-20e-3, 20e-3, 64), np.zeros(64), np.zeros(64)], axis=-1
-        ),
-        apply_lens_correction=True,
-        lens_thickness=1e-3,
-        lens_sound_speed=1000,
-        sound_speed=1540,
-        n_ax=1024,
-        center_frequency=5e6,
-        sampling_frequency=20e6,
-        t0_delays=np.zeros((1, 64)),
-        initial_times=np.zeros(1),
-        element_width=0.2e-3,
-        attenuation_coef=0.5,
-        tx_apodizations=np.ones((1, 64)),
-    )
+    >>> from zea.simulator import simulate_rf
+    >>> import numpy as np
+
+    >>> raw_data = simulate_rf(
+    ...     scatterer_positions=np.array([[0, 0, 20e-3]]),
+    ...     scatterer_magnitudes=np.array([1.0]),
+    ...     probe_geometry=np.stack(
+    ...         [np.linspace(-20e-3, 20e-3, 64), np.zeros(64), np.zeros(64)], axis=-1
+    ...     ),
+    ...     apply_lens_correction=True,
+    ...     lens_thickness=1e-3,
+    ...     lens_sound_speed=1000,
+    ...     sound_speed=1540,
+    ...     n_ax=1024,
+    ...     center_frequency=5e6,
+    ...     sampling_frequency=20e6,
+    ...     t0_delays=np.zeros((1, 64)),
+    ...     initial_times=np.zeros(1),
+    ...     element_width=0.2e-3,
+    ...     attenuation_coef=0.5,
+    ...     tx_apodizations=np.ones((1, 64)),
+    ... )
 
 """
 
@@ -73,7 +76,7 @@ def simulate_rf(
         lens_sound_speed (float): The speed of sound in the lens [m/s].
         sound_speed (float): The speed of sound in the medium [m/s].
         n_ax (int): The number of samples in the RF data.
-        center_frequency (float): The center frequency of the pulse [Hz].
+        center_frequency (float): The center frequency of the transmit pulse [Hz].
         sampling_frequency (float): The sampling frequency of the RF data [Hz].
         t0_delays (array-like): The delays of the transmitting elements [s] of shape (n_tx, n_el).
         initial_times (array-like): The initial times of the transmitting elements [s] of
@@ -84,7 +87,7 @@ def simulate_rf(
             shape (n_tx, n_el).
 
     Returns:
-        rf_data (array-like): The simulated RF data of shape (1, n_tx, n_ax, n_el, 1).
+        rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
     """
 
     n_tx = t0_delays.shape[0]
@@ -190,8 +193,8 @@ def simulate_rf(
 
     rf_data = ops.stack(parts, axis=0)
     rf_data = ops.transpose(rf_data, (0, 2, 1))
-    rf_data = rf_data[None, ..., None]
-    rf_data = rf_data[:, :, :n_ax, :, :]
+    rf_data = rf_data[..., None]
+    rf_data = rf_data[:, :n_ax, :, :]
     return rf_data
 
 
@@ -296,7 +299,7 @@ def get_pulse_spectrum_fn(center_frequency, n_period=3.0):
     """Computes the spectrum of a sine that is windowed with a Hann window.
 
     Args:
-        center_frequency (float): The center frequency of the pulse.
+        center_frequency (float): The center frequency of the transmit pulse.
         n_period (float): The number of periods to include in the pulse.
 
     Returns:
@@ -314,11 +317,11 @@ def get_pulse_spectrum_fn(center_frequency, n_period=3.0):
     return spectrum_fn
 
 
-def get_transducer_bandwidth_fn(center_frequency, bandwidth):
+def get_transducer_bandwidth_fn(probe_center_frequency, bandwidth):
     """Computes the spectrum of a probe with a center frequency and bandwidth.
 
     Args:
-        center_frequency (float): The center frequency of the probe.
+        probe_center_frequency (float): The center frequency of the probe.
         bandwidth (float): The bandwidth of the probe.
 
     Returns
@@ -327,7 +330,7 @@ def get_transducer_bandwidth_fn(center_frequency, bandwidth):
     """
 
     def bandwidth_fn(f):
-        return hann_unnormalized(ops.abs(f) - center_frequency, bandwidth)
+        return hann_unnormalized(ops.abs(f) - probe_center_frequency, bandwidth)
 
     return bandwidth_fn
 

@@ -18,6 +18,9 @@ jobs:
   image:
     needs: [tag]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     outputs:
       docker_image: ${{ steps.set-image.outputs.docker_image }}
     steps:
@@ -44,15 +47,15 @@ jobs:
 
       - name: Checkout repository
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: docker/login-action@v2
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -61,7 +64,7 @@ jobs:
       - name: Build and push CI Docker image
         id: build
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -71,7 +74,9 @@ jobs:
             INSTALL_TF=cpu
             DEV=true
           push: true
-          tags: ${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}
+          tags: |
+            ${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}
+            ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('{0}:latest', env.BASE_IMAGE) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -95,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Git
         run: git config --global safe.directory $GITHUB_WORKSPACE
@@ -105,86 +110,66 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
             -w /zea \
-            -u $(id -u):$(id -g) \
-            -e HOME=/tmp \
-            -e USER=$(id -un) \
-            -e LOGNAME=$(id -un) \
             ${{ needs.image.outputs.docker_image }} \
-            sh -c "pip install -e . && pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
+            sh -c "pip install -e .[tests] && pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
 
       - name: Upload results to Codecov
-        uses: codecov/codecov-action@v5
+        if: github.actor != 'dependabot[bot]'
+        uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ env.MAIN_REPO }}
-
-      - name: Run heavy Pytest (allowed to fail)
-        continue-on-error: true
-        run: |
-          docker run --rm \
-          -v "${{ github.workspace }}:/zea" \
-          -w /zea \
-          -u $(id -u):$(id -g) \
-          -e HOME=/tmp \
-          -e USER=$(id -un) \
-          -e LOGNAME=$(id -un) \
-          ${{ needs.image.outputs.docker_image }} \
-          sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
+          flags: unit
 
   heavy-tests:
     needs: [image]
     runs-on: self-hosted
     timeout-minutes: 100
+    concurrency:
+      group: heavy-tests-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Git
-        run: git config --global safe.directory $GITHUB_WORKSPACE
+        uses: actions/checkout@v6
 
       - name: Run heavy Pytest
         run: |
           docker run --rm \
-          -v "${{ github.workspace }}:/zea" \
-          -w /zea \
-          -u $(id -u):$(id -g) \
-          -e HOME=/tmp \
-          -e USER=$(id -un) \
-          -e LOGNAME=$(id -un) \
-          ${{ needs.image.outputs.docker_image }} \
-          sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
+            -v "${{ github.workspace }}:/zea" \
+            -w /zea \
+            ${{ needs.image.outputs.docker_image }} \
+            sh -lc "pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'heavy' ./tests"
+
+      - name: Upload heavy test results to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: ${{ env.MAIN_REPO }}
+          flags: heavy
 
       - name: Run notebook tests with Pytest
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
             -w /zea \
-            -u $(id -u):$(id -g) \
-            -e HOME=/tmp \
-            -e USER=$(id -un) \
-            -e LOGNAME=$(id -un) \
             ${{ needs.image.outputs.docker_image }} \
-            sh -c "pip install -e .[dev] && pytest -s -m 'notebook'"
+            sh -lc "pytest -p no:cacheprovider -s -m 'notebook'"
 
   test-docs-build:
     needs: [image]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Git
         run: git config --global safe.directory $GITHUB_WORKSPACE
 
-      - name: Build documentation with Sphinx (fail on warnings)
+      - name: Build documentation with Sphinx (fails on warnings)
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
             -w /zea/docs \
-            -u $(id -u):$(id -g) \
-            -e HOME=/tmp \
-            -e USER=$(id -un) \
-            -e LOGNAME=$(id -un) \
             ${{ needs.image.outputs.docker_image }} \
             sh -c "\
               sudo apt-get update && \
@@ -192,5 +177,6 @@ jobs:
               pip install -e ..[docs] && \
               export PATH=\"/tmp/.local/bin:\$PATH\" && \
               make docs-clean && \
-              make docs-build SPHINXOPTS='-W --keep-going' \
+              make docs-build SPHINXOPTS='-W --keep-going' && \
+              make docs-test \
             "

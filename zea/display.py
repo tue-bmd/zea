@@ -8,9 +8,8 @@ import scipy
 from keras import ops
 from PIL import Image
 
-from zea import log
+from zea.func.tensor import translate
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
-from zea.utils import translate
 
 
 def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True):
@@ -37,12 +36,88 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     return image
 
 
+def overlay_masks(
+    image,
+    masks,
+    alpha: float = 0.5,
+    colors=None,
+):
+    """Overlay segmentation masks on top of an image using PIL.
+
+    Args:
+        image (PIL.Image or ndarray): Base image. If grayscale, it is converted
+            to RGB. If ndarray, it is converted to a PIL Image first.
+        masks (list of PIL.Image or ndarray): Segmentation masks to overlay.
+            Each mask should be an 8-bit single-channel image where non-zero
+            pixels indicate the masked region.
+        alpha (float, optional): Opacity of the mask overlays in [0, 1].
+            Defaults to 0.5.
+        colors (list of tuple, optional): RGB colors for each mask. If None,
+            a default palette is used. If provided, must contain at least as
+            many entries as masks (extra entries are ignored).
+
+    Returns:
+        PIL.Image: RGB image with masks overlaid.
+    """
+    # Validate alpha parameter before conversion to uint8
+    if not (0.0 <= alpha <= 1.0):
+        raise ValueError(f"alpha must be in the range [0.0, 1.0], got {alpha}")
+
+    _DEFAULT_COLORS = [
+        (255, 0, 0),
+        (0, 255, 0),
+        (0, 0, 255),
+        (255, 255, 0),
+        (0, 255, 255),
+        (255, 0, 255),
+    ]
+
+    if not isinstance(image, Image.Image):
+        image = Image.fromarray(np.asarray(image))
+
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+
+    # Validate colors list has enough entries if provided
+    if colors is not None and len(colors) < len(masks):
+        raise ValueError(
+            f"colors must have at least as many entries as masks: "
+            f"got {len(colors)} colors for {len(masks)} masks"
+        )
+
+    result = image.copy()
+
+    for i, mask in enumerate(masks):
+        if not isinstance(mask, Image.Image):
+            mask = Image.fromarray(np.asarray(mask))
+
+        if mask.size != image.size:
+            raise ValueError(f"Mask {i} size {mask.size} does not match image size {image.size}")
+
+        if mask.mode != "L":
+            mask = mask.convert("L")
+
+        color = _DEFAULT_COLORS[i % len(_DEFAULT_COLORS)] if colors is None else colors[i]
+
+        # Create a solid color layer the same size as the image
+        color_layer = Image.new("RGB", image.size, color)
+
+        # Build alpha channel from the mask: scale mask values by alpha
+        mask_np = (np.asarray(mask) > 0).astype(np.uint8)
+        alpha_channel = Image.fromarray((mask_np * int(alpha * 255)).astype(np.uint8))
+
+        result.paste(color_layer, mask=alpha_channel)
+
+    return result
+
+
 def compute_scan_convert_2d_coordinates(
     image_shape,
     rho_range: Tuple[float, float],
     theta_range: Tuple[float, float],
     resolution: Union[float, None] = None,
     dtype: str = "float32",
+    distance_to_apex: float = 0.0,
 ):
     """Precompute coordinates for 2d scan conversion from polar coordinates"""
     assert len(rho_range) == 2, "rho_range should be a tuple of length 2"
@@ -69,7 +144,7 @@ def compute_scan_convert_2d_coordinates(
         resolution = ops.mean([sRT, d_rho])  # mm per pixel
 
     x_vec = ops.arange(x_lim[0], x_lim[1], resolution)
-    z_vec = ops.arange(z_lim[0], z_lim[1], resolution)
+    z_vec = ops.arange(z_lim[0] + distance_to_apex, z_lim[1], resolution)
 
     z_grid, x_grid = ops.meshgrid(z_vec, x_vec)
 
@@ -92,6 +167,7 @@ def compute_scan_convert_2d_coordinates(
         "theta_range": theta_range,
         "d_rho": d_rho,
         "d_theta": d_theta,
+        "distance_to_apex": distance_to_apex,
     }
     return coordinates, parameters
 
@@ -104,6 +180,7 @@ def scan_convert_2d(
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,
     order: int = 1,
+    distance_to_apex: float = 0.0,
     **kwargs,
 ):
     """
@@ -126,6 +203,8 @@ def scan_convert_2d(
             outside the input image ranges. Defaults to 0.0. When set to NaN,
             no interpolation at the edges will happen.
         order (int, optional): The order of the spline interpolation. Defaults to 1.
+        distance_to_apex (float, optional): Distance from the apex to the
+            start of the z-axis in Cartesian grid. Defaults to 0.0.
 
     Returns:
         ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
@@ -145,7 +224,12 @@ def scan_convert_2d(
     parameters = {}
     if coordinates is None:
         coordinates, parameters = compute_scan_convert_2d_coordinates(
-            image.shape, rho_range, theta_range, resolution, dtype=image.dtype
+            image.shape,
+            rho_range,
+            theta_range,
+            resolution,
+            dtype=image.dtype,
+            distance_to_apex=distance_to_apex,
         )
 
     images_sc = _interpolate_batch(image, coordinates, fill_value, order=order, **kwargs)
@@ -340,12 +424,14 @@ def scan_convert(
 def map_coordinates(inputs, coordinates, order, fill_mode="constant", fill_value=0):
     """map_coordinates using keras.ops or scipy.ndimage when order > 1."""
     if order > 1:
-        inputs = ops.convert_to_numpy(inputs)
-        coordinates = ops.convert_to_numpy(coordinates)
+        # Preserve original dtype before conversion
+        original_dtype = ops.dtype(inputs)
+        inputs_np = ops.convert_to_numpy(inputs).astype(np.float32)
+        coordinates_np = ops.convert_to_numpy(coordinates).astype(np.float32)
         out = scipy.ndimage.map_coordinates(
-            inputs, coordinates, order=order, mode=fill_mode, cval=fill_value
+            inputs_np, coordinates_np, order=order, mode=fill_mode, cval=fill_value
         )
-        return ops.convert_to_tensor(out)
+        return ops.convert_to_tensor(out.astype(original_dtype))
     else:
         return ops.image.map_coordinates(
             inputs,
@@ -416,7 +502,7 @@ def cartesian_to_polar_matrix(
     polar_shape=None,
     tip=None,
     r_max=None,
-    angle=np.deg2rad(45),
+    angle=None,
     interpolation_order=1,
 ):
     """
@@ -431,19 +517,19 @@ def cartesian_to_polar_matrix(
             transformation (typically the probe tip). Defaults to the center-top of the image.
         r_max (float, optional): Maximum radius to consider in the polar transform.
             Defaults to the height of the input image.
-        angle (float): Total angular field of view (in radians) centered at 0.
-            The polar grid spans from -angle to +angle.
+        angle (float, optional): Total angular field of view (in radians) centered at 0.
+            The polar grid spans from -angle to +angle. Defaults to π/4 radians (45 degrees).
         interpolation_order (int): Order of interpolation to use (0 = nearest-neighbor,
             1 = linear, 2+ = spline). Matches the convention of `scipy.ndimage.map_coordinates`.
 
     Returns:
         polar_matrix (Array): The image re-sampled in polar coordinates with shape `polar_shape`.
     """
-    if ops.dtype(cartesian_matrix) != "float32":
-        log.info(
-            f"Cartesian matrix with dtype {ops.dtype(cartesian_matrix)} has been cast to float32."
-        )
-        cartesian_matrix = ops.cast(cartesian_matrix, "float32")
+    assert "float" in ops.dtype(cartesian_matrix), "Input image must be float type"
+
+    # Default angle to π/4 radians (45 degrees)
+    if angle is None:
+        angle = np.deg2rad(45)
 
     # Assume that polar grid is same shape as cartesian grid unless specified
     cartesian_rows, cartesian_cols = ops.shape(cartesian_matrix)
@@ -454,7 +540,7 @@ def cartesian_to_polar_matrix(
 
     # assume tip is at center top unless specified
     if tip is None:
-        center_x = cartesian_cols // 2
+        center_x = cartesian_cols / 2  # center_x can be between two pixels
         tip_y = 0
         tip = (center_x, tip_y)
 
@@ -497,10 +583,11 @@ def cartesian_to_polar_matrix(
 def inverse_scan_convert_2d(
     cartesian_image,
     fill_value=0.0,
-    angle=np.deg2rad(45),
+    angle=None,
     output_size=None,
     interpolation_order=1,
     find_scan_cone=True,
+    image_range: tuple | None = None,
 ):
     """
     Convert a Cartesian-format ultrasound image to a polar representation.
@@ -510,11 +597,12 @@ def inverse_scan_convert_2d(
     Optionally, it can detect and crop around the scan cone before conversion.
 
     Args:
-        cartesian_image (tensor): 2D image array in Cartesian coordinates.
+        cartesian_image (tensor): 2D image array in Cartesian coordinates of type float.
         fill_value (float): Value used to fill regions outside the original image
             during interpolation.
-        angle (float): Angular field of view (in radians) used for the polar transformation.
-            The polar output will span from -angle to +angle.
+        angle (float, optional): Angular field of view (in radians) used for the polar
+            transformation. The polar output will span from -angle to +angle.
+            Defaults to π/4 radians (45 degrees).
         output_size (tuple, optional): Shape (rows, cols) of the resulting polar image.
             If None, the shape of the input image is used.
         interpolation_order (int): Order of interpolation used in resampling
@@ -523,12 +611,17 @@ def inverse_scan_convert_2d(
             in the Cartesian image before polar conversion, ensuring that the scan cone is
             centered without padding. Can be set to False if the image is already cropped
             and centered.
+        image_range (tuple, optional): Tuple (vmin, vmax) for display scaling
+            when detecting the scan cone.
 
     Returns:
         polar_image (Array): 2D image in polar coordinates (sector-shaped scan).
     """
+
     if find_scan_cone:
-        cartesian_image = fit_and_crop_around_scan_cone(cartesian_image)
+        assert image_range is not None, "image_range must be provided when find_scan_cone is True"
+        cartesian_image = fit_and_crop_around_scan_cone(cartesian_image, image_range)
+
     polar_image = cartesian_to_polar_matrix(
         cartesian_image,
         fill_value=fill_value,

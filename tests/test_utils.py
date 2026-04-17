@@ -1,37 +1,51 @@
-"""Tests for the zea.utils module."""
+"""Tests for the zea.utils module.
+
+Contains both tests for zea.utils and zea.internal.utils.
+"""
 
 import re
-import time
 
 import numpy as np
 import pytest
 from keras import ops
 
 from zea.backend import jit
-from zea.utils import (
-    block_until_ready,
+from zea.internal.utils import (
+    calculate_file_hash,
     find_first_nonzero_index,
     find_key,
     first_not_none_item,
+)
+from zea.utils import (
+    block_until_ready,
     get_date_string,
     strtobool,
-    translate,
     update_dictionary,
 )
 
 
-@pytest.mark.parametrize(
-    "range_from, range_to",
-    [((0, 100), (2, 5)), ((-60, 0), (0, 255))],
-)
-def test_translate(range_from, range_to):
-    """Tests the translate function by providing a test array with its range_from and
-    a range to."""
-    arr = np.random.randint(low=range_from[0] + 1, high=range_from[1] - 2, size=10)
-    right_min, right_max = range_to
-    result = translate(arr, range_from, range_to)
-    assert right_min <= np.min(result), "Minimum value is too small"
-    assert np.max(result) <= right_max, "Maximum value is too large"
+def test_calculate_file_hash_omit_line(tmp_path):
+    """Test that calculate_file_hash correctly omits lines containing a string."""
+
+    # Create a temporary file
+    file_content = [
+        "Dataset: test_folder\n",
+        "Validated on: 2025_10_14_120000\n",
+        "hash: should_be_ignored\n",
+    ]
+    file_path = tmp_path / "validation_file.txt"
+    file_path.write_text("".join(file_content), encoding="utf-8")
+
+    # Calculate hash ignoring the 'hash' line
+    hash_without_hash_line = calculate_file_hash(file_path, omit_line_str="hash")
+
+    expected_hash = "02d7d3d3f7731f715cc3c886752196c67893267b12a880455f0aeca0ad4d7da9"
+
+    assert hash_without_hash_line == expected_hash
+
+    hash_with_hash_line = calculate_file_hash(file_path, omit_line_str=None)
+
+    assert hash_with_hash_line != expected_hash
 
 
 @pytest.mark.parametrize(
@@ -185,7 +199,10 @@ def test_first_not_none_item(arr, expected):
 
 
 def test_block_until_ready_timing():
-    """Tests that block_until_ready actually waits for the computation to finish."""
+    """Tests that block_until_ready calls the correct backend-specific function."""
+    from unittest.mock import patch
+
+    import keras
 
     @jit
     def slow_computation(x):
@@ -197,24 +214,35 @@ def test_block_until_ready_timing():
         z = ops.sin(y) + ops.cos(y)
         return ops.sum(z, axis=1)
 
-    x = ops.ones(10_000)
+    x = ops.ones(1000)
 
     # Compile first
     _ = slow_computation(x)
 
-    # Measure time without block_until_ready (might return before completion)
-    y = slow_computation(x)
-    start = time.perf_counter()
-    print(y[0])  # Force a print to ensure any lazy evaluation is triggered
-    no_block_time = time.perf_counter() - start
+    backend_name = keras.backend.backend()
 
-    # Measure time with block_until_ready (ensures completion)
-    y = block_until_ready(slow_computation)(x)
-    start = time.perf_counter()
-    print(y[0])  # Force a print to ensure any lazy evaluation is triggered
-    with_block_time = time.perf_counter() - start
+    if backend_name == "jax":
+        # Test that jax.block_until_ready is called for JAX backend
+        with patch("jax.block_until_ready") as mock_jax_block:
+            # Make mock return the input unchanged
+            mock_jax_block.side_effect = lambda x: x
 
-    print(f"Without block_until_ready: {no_block_time:.4f}s")
-    print(f"With block_until_ready: {with_block_time:.4f}s")
-    print("Timing test completed!")
-    assert with_block_time <= no_block_time, "block_until_ready did not wait for completion"
+            result = block_until_ready(slow_computation)(x)
+
+            # Verify jax.block_until_ready was called
+            mock_jax_block.assert_called_once()
+            assert result is not None
+    else:
+        # Test that keras.ops.convert_to_numpy is called for other backends
+        with patch("keras.ops.convert_to_numpy") as mock_convert:
+            # Make mock return the input unchanged
+            mock_convert.side_effect = lambda x: x
+
+            result = block_until_ready(slow_computation)(x)
+
+            # Verify keras.ops.convert_to_numpy was called
+            mock_convert.assert_called_once()
+            assert result is not None
+
+    print(f"Backend: {backend_name}")
+    print("block_until_ready backend-specific function test completed!")

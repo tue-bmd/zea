@@ -4,19 +4,21 @@ Mask generation utilities.
 These masks are used as a measurement operator for focused scan-line subsampling.
 """
 
+from __future__ import annotations
+
 from typing import List
 
 import keras
 from keras import ops
 
-from zea import tensor_ops
 from zea.agent.gumbel import hard_straight_through
+from zea.func.tensor import nonzero
 
 _DEFAULT_DTYPE = "bool"
 
 
 def indices_to_k_hot(
-    indices: List[int],
+    indices,
     n_possible_actions: int,
     dtype=_DEFAULT_DTYPE,
 ):
@@ -26,17 +28,18 @@ def indices_to_k_hot(
     This is the default represenation for actions in zea.
 
     Args:
-        indices (List[int]): List of indices to set to 1.
+        indices (Tensor): Indices of selected actions to set to 1 of shape (..., n_actions).
         n_possible_actions (int): Total number of possible actions.
-        dtype (str, optional): Data type of the mask. Defaults to _DEFAULT_DTYPE.
+        dtype (str, optional): Data type of the mask. Defaults to "bool".
 
     Returns:
-        Tensor: k-hot-encoded vector of shape (n_possible_actions).
+        Tensor: k-hot-encoded vector of shape (..., n_possible_actions).
     """
-    mask = ops.zeros(n_possible_actions, dtype=dtype)
-    return ops.scatter_update(
-        mask, ops.expand_dims(indices, axis=1), ops.ones(len(indices), dtype=dtype)
-    )
+    indices = ops.moveaxis(indices, -1, 0)  # move n_actions to the front for one_hot
+    k_hot_encoded = ops.any(ops.one_hot(indices, n_possible_actions, dtype="bool"), axis=0)
+
+    # Cast to desired dtype, because ops.any will always return bool
+    return ops.cast(k_hot_encoded, dtype=dtype)
 
 
 def k_hot_to_indices(selected_lines, n_actions: int, fill_value=-1):
@@ -56,7 +59,7 @@ def k_hot_to_indices(selected_lines, n_actions: int, fill_value=-1):
 
     # Find nonzero indices for each frame
     def get_nonzero(row):
-        return tensor_ops.nonzero(row > 0, size=n_actions, fill_value=fill_value)[0]
+        return nonzero(row > 0, size=n_actions, fill_value=fill_value)[0]
 
     indices = ops.vectorized_map(get_nonzero, selected_lines)
     return indices
@@ -107,7 +110,7 @@ def initial_equispaced_lines(
     Args:
         n_actions (int): Number of actions to be selected.
         n_possible_actions (int): Number of possible actions.
-        dtype (str, optional): Data type of the mask. Defaults to _DEFAULT_DTYPE.
+        dtype (str, optional): Data type of the mask. Defaults to "bool".
         assert_equal_spacing (bool, optional): If True, asserts that
             `n_possible_actions` is divisible by `n_actions`, this means that every
             line will have the exact same spacing. Otherwise, there might be
@@ -117,11 +120,21 @@ def initial_equispaced_lines(
         Tensor: k-hot-encoded line vector of shape (n_possible_actions).
             Needs to be converted to image size.
     """
+    assert n_actions > 0, "Number of actions must be > 0."
+    assert n_possible_actions > 0, "Number of possible actions must be > 0."
+    assert n_actions <= n_possible_actions, (
+        "Number of actions must be less than or equal to number of possible actions."
+    )
+
     if assert_equal_spacing:
         _assert_equal_spacing(n_actions, n_possible_actions)
-        selected_indices = ops.arange(0, n_possible_actions, n_possible_actions // n_actions)
-    else:
-        selected_indices = ops.linspace(0, n_possible_actions - 1, n_actions, dtype="int32")
+
+    # Distribute indices as evenly as possible
+    # This approach ensures spacing differs by at most 1 when not divisible
+    step = n_possible_actions / n_actions
+    selected_indices = ops.cast(
+        ops.round(ops.arange(0, n_actions, dtype="float32") * step), "int32"
+    )
 
     return indices_to_k_hot(selected_indices, n_possible_actions, dtype=dtype)
 
@@ -174,7 +187,7 @@ def make_line_mask(
         line_indices (List[int]): A list of indices where the lines should be drawn.
         image_shape (List[int]): The shape of the image as [height, width, channels].
         line_width (int, optional): The width of each line. Defaults to 1.
-        dtype (str, optional): The data type of the mask. Defaults to "float32".
+        dtype (str, optional): The data type of the mask. Defaults to "bool".
 
     Returns:
         mask (Tensor): A tensor of the same shape as `image_shape` with lines drawn
