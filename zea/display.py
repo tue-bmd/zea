@@ -23,10 +23,19 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     Returns:
         image (ndarray): Output 8 bit image(s) [0, 255].
 
+    .. note::
+        If dynamic_range is None, it is assumed that the input image is already in the range
+        [-60, 0] dB, which is a common range for ultrasound images.
+
+    .. note::
+        NaN values in the input image are replaced with the minimum value of the dynamic range
+        before scaling, which ensures that they are represented as black (0) in the output image.
+
     """
     if dynamic_range is None:
         dynamic_range = (-60, 0)
 
+    image = ops.nan_to_num(image, nan=dynamic_range[0])
     image = ops.convert_to_numpy(image)
     image = np.clip(image, *dynamic_range)
     image = translate(image, dynamic_range, (0, 255))
