@@ -430,6 +430,7 @@ class Scan(Parameters):
 
     @cache_with_dependencies("grid_size_x", "grid_size_y", "grid_size_z")
     def is_3d(self):
+        """Whether the scan grid is 3D (True) or 2D (False)."""
         return self.grid_size_y > 1 and self.grid_size_x > 1 and self.grid_size_z > 1
 
     @property
