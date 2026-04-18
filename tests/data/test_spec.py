@@ -530,7 +530,12 @@ class TestDataValidationErrors:
 
     def test_n_ch_3_raises_for_beamformed_data(self):
         with pytest.raises(ValueError, match="n_ch"):
-            DataSpec(beamformed_data=np.zeros((2, 8, 6, 3), dtype=np.float32))
+            DataSpec(
+                beamformed_data={
+                    "pixels": np.zeros((2, 8, 6, 3), dtype=np.float32),
+                    "extent": np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32),
+                }
+            )
 
     def test_n_ch_1_and_2_are_valid(self):
         """Both n_ch=1 (RF) and n_ch=2 (IQ) must pass."""

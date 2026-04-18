@@ -270,7 +270,7 @@ def ncc(x, y):
     return num / ops.maximum(denom, keras.config.epsilon())
 
 
-@metrics_registry(name="lpips", paired=True, jittable=True)
+@metrics_registry(name="lpips", paired=True, jittable=True, torch_vmappable=False)
 def get_lpips(image_range, clip=False):
     """
     Get the Learned Perceptual Image Patch Similarity (LPIPS) metric.
@@ -361,12 +361,16 @@ class Metrics:
 
         # Initialize all metrics
         self.metrics = {}
+        self.torch_vmappable = {}
         for m in metrics:
             jittable = metrics_registry.get_parameter(m, "jittable")
             metric_fn = get_metric(m, **reduce_to_signature(metrics_registry[m], kwargs))
             if jit_compile and jittable:
                 metric_fn = jit(metric_fn)
             self.metrics[m] = metric_fn
+            self.torch_vmappable[m] = metrics_registry.get_parameter(
+                m, "torch_vmappable", default=True
+            )
 
         # Other settings
         self.quantize = quantize
@@ -374,17 +378,34 @@ class Metrics:
 
     @staticmethod
     def _call_metric_fn(
-        fun, y_true, y_pred, average_batches, return_numpy, device, mapped_batch_size=None
+        fun,
+        y_true,
+        y_pred,
+        average_batches,
+        return_numpy,
+        device,
+        mapped_batch_size=None,
+        _use_torch_vmap=True,
     ):
         num_batch_axes = max(0, ops.ndim(y_true) - 3)
 
         # Because most metric functions do not support batching, we vmap over the batch axes.
         # This does assume that the metric function can handle single images of shape (h, w, c).
+        # Some metrics (e.g. lpips) are not compatible with torch.vmap (e.g. due to Conv2D
+        # channels_last memory format checks), so we fall back to a sequential loop.
         metric_fn = fun
         for _ in range(num_batch_axes):
             # recursively vmap the leading axis
+            # disable_jit only when on the torch backend and the metric is not
+            # torch-vmappable (e.g. LPIPS), so that other backends (JAX, etc.)
+            # still benefit from their native vmap / vectorized_map paths.
+            disable_jit = not _use_torch_vmap and keras.backend.backend() == "torch"
             metric_fn = tensor.vmap(
-                metric_fn, in_axes=0, _use_torch_vmap=True, batch_size=mapped_batch_size
+                metric_fn,
+                in_axes=0,
+                _use_torch_vmap=_use_torch_vmap,
+                disable_jit=disable_jit,
+                batch_size=mapped_batch_size,
             )
 
         out = func_on_device(metric_fn, device, y_true, y_pred)
@@ -441,6 +462,7 @@ class Metrics:
                 return_numpy,
                 device,
                 mapped_batch_size=mapped_batch_size,
+                _use_torch_vmap=self.torch_vmappable[name],
             )
         return results
 

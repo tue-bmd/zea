@@ -33,7 +33,9 @@ def generate_example_dataset(
     # creating some fake raw and image data
     raw_data = np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
     # image data is in dB
-    image_sc = np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32) * -40
+    image_sc_pixels = np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32) * -40
+    # dummy extent in meters: (xmin, xmax, ymin, ymax, zmax, zmin)
+    _extent = np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32)
 
     # creating some fake scan parameters
     t0_delays = np.zeros((n_tx, n_el), dtype=np.float32)
@@ -61,15 +63,19 @@ def generate_example_dataset(
 
     data = {
         "raw_data": raw_data,
-        "image_sc": image_sc,
+        "image_sc": {"pixels": image_sc_pixels, "extent": _extent},
     }
 
     if add_optional_dtypes:
         data["aligned_data"] = np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
-        data["envelope_data"] = np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32)
-        data["beamformed_data"] = np.ones(
-            (n_frames, grid_size_z, grid_size_x, n_ch), dtype=np.float32
-        )
+        data["envelope_data"] = {
+            "pixels": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32),
+            "extent": _extent,
+        }
+        data["beamformed_data"] = {
+            "pixels": np.ones((n_frames, grid_size_z, grid_size_x, n_ch), dtype=np.float32),
+            "extent": _extent,
+        }
 
     f = File.create(
         path,

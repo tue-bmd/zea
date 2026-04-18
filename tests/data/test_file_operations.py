@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Generator
 
 import h5py
@@ -69,16 +70,16 @@ def test_file_operations_extract(tmp_hdf5_path):
         input_path, output_path, frame_indices=slice(1), transmit_indices=[0, 3]
     )
     data_dict, scan, probe = load_file_all_data_types(output_path)
+    data_dict = SimpleNamespace(**data_dict)
 
     _assert_descriptions_and_additional_elements_equal(input_path, output_path)
 
-    assert data_dict["raw_data"].shape[0] == 1
-    assert data_dict["raw_data"].shape[1] == 2
-    assert data_dict["aligned_data"].shape[0] == 1
-    assert data_dict["aligned_data"].shape[1] == 2
-    assert data_dict["beamformed_data"].shape[0] == 1
-    assert data_dict["image"].shape[0] == 1
-    assert data_dict["image_sc"].shape[0] == 1
+    assert data_dict.raw_data.shape[0] == 1
+    assert data_dict.raw_data.shape[1] == 2
+    assert data_dict.aligned_data.shape[0] == 1
+    assert data_dict.aligned_data.shape[1] == 2
+    assert data_dict.beamformed_data["pixels"].shape[0] == 1
+    assert data_dict.image_sc["pixels"].shape[0] == 1
 
     _assert_beamformed_data_still_exists(output_path)
     _assert_descriptions_and_additional_elements_equal(input_path, output_path)
@@ -117,11 +118,12 @@ def test_file_operations_compound_frames(tmp_hdf5_path):
     _assert_descriptions_and_additional_elements_equal(input_path, output_path)
 
     data_dict, scan, probe = load_file_all_data_types(output_path)
-    for key in data_dict.keys():
-        dataset = data_dict[key]
+    data_dict = SimpleNamespace(**data_dict)
+    for dataset in vars(data_dict).values():
         if dataset is None:
             continue
-        assert dataset.shape[0] == 1  # Only one frame should remain
+        arr = dataset["pixels"] if isinstance(dataset, dict) else dataset
+        assert arr.shape[0] == 1  # Only one frame should remain
 
 
 def test_file_operations_compound_transmits(tmp_hdf5_path):
@@ -196,13 +198,13 @@ def test_file_operations_cli_extract(tmp_hdf5_path):
     )
 
     data_dict, scan, probe = load_file_all_data_types(output_path)
-    assert data_dict["raw_data"].shape[0] == 2
-    assert data_dict["raw_data"].shape[1] == 3
-    assert data_dict["aligned_data"].shape[0] == 2
-    assert data_dict["aligned_data"].shape[1] == 3
-    assert data_dict["beamformed_data"].shape[0] == 2
-    assert data_dict["image"].shape[0] == 2
-    assert data_dict["image_sc"].shape[0] == 2
+    data_dict = SimpleNamespace(**data_dict)
+    assert data_dict.raw_data.shape[0] == 2
+    assert data_dict.raw_data.shape[1] == 3
+    assert data_dict.aligned_data.shape[0] == 2
+    assert data_dict.aligned_data.shape[1] == 3
+    assert data_dict.beamformed_data["pixels"].shape[0] == 2
+    assert data_dict.image_sc["pixels"].shape[0] == 2
 
 
 def test_file_operations_cli_resave(tmp_hdf5_path):
@@ -241,11 +243,11 @@ def test_file_operations_cli_compound_frames(tmp_hdf5_path):
     )
 
     data_dict, scan, probe = load_file_all_data_types(output_path)
-    assert data_dict["raw_data"].shape[0] == 1  # Only one frame should remain
-    assert data_dict["aligned_data"].shape[0] == 1
-    assert data_dict["beamformed_data"].shape[0] == 1
-    assert data_dict["image"].shape[0] == 1
-    assert data_dict["image_sc"].shape[0] == 1
+    data_dict = SimpleNamespace(**data_dict)
+    assert data_dict.raw_data.shape[0] == 1  # Only one frame should remain
+    assert data_dict.aligned_data.shape[0] == 1
+    assert data_dict.beamformed_data["pixels"].shape[0] == 1
+    assert data_dict.image_sc["pixels"].shape[0] == 1
 
 
 def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
@@ -266,8 +268,9 @@ def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
     )
 
     data_dict, scan, probe = load_file_all_data_types(output_path)
-    assert data_dict["raw_data"].shape[1] == 1  # Only one transmit should remain
-    assert data_dict["aligned_data"].shape[1] == 1
+    data_dict = SimpleNamespace(**data_dict)
+    assert data_dict.raw_data.shape[1] == 1  # Only one transmit should remain
+    assert data_dict.aligned_data.shape[1] == 1
 
 
 def _load_description_and_additional_elements(path: Path):

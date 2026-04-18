@@ -318,9 +318,18 @@ class LVHProcessor(H5Processor):
         n_x, n_z = polar_np.shape[1], polar_np.shape[2]
         extent = np.array([0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32)
 
+        # Build image_sc extent from sequence dimensions
+        n_x_sc, n_z_sc = image_sc_np.shape[1], image_sc_np.shape[2]
+        image_sc_extent = np.array(
+            [0.0, n_x_sc * 1e-4, 0.0, 1e-4, 0.0, n_z_sc * 1e-4], dtype=np.float32
+        )
+
         return File.create(
             out_h5,
-            data={"image_sc": image_sc_np, "image": {"pixels": polar_4d, "extent": extent}},
+            data={
+                "image_sc": {"pixels": image_sc_np, "extent": image_sc_extent},
+                "image": {"pixels": polar_4d, "extent": extent},
+            },
             scan={},
             probe_name="generic",
             description="EchoNet-LVH dataset converted to zea format",
