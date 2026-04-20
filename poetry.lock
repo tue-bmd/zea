@@ -4032,24 +4032,20 @@ tests = ["pytest"]
 
 [[package]]
 name = "pybtex"
-version = "0.24.0"
+version = "0.26.1"
 description = "A BibTeX-compatible bibliography processor in Python"
 optional = true
-python-versions = ">=2.7,!=3.0.*,!=3.1.*,!=3.2.*"
+python-versions = ">=3.8"
 groups = ["main"]
 markers = "extra == \"dev\" or extra == \"docs\""
 files = [
-    {file = "pybtex-0.24.0-py2.py3-none-any.whl", hash = "sha256:e1e0c8c69998452fea90e9179aa2a98ab103f3eed894405b7264e517cc2fcc0f"},
-    {file = "pybtex-0.24.0.tar.gz", hash = "sha256:818eae35b61733e5c007c3fcd2cfb75ed1bc8b4173c1f70b56cc4c0802d34755"},
+    {file = "pybtex-0.26.1-py3-none-any.whl", hash = "sha256:e26c0412cc54f5f21b2a6d9d175762a2d2af9ccf3a8f651cdb89ec035db77aa1"},
+    {file = "pybtex-0.26.1.tar.gz", hash = "sha256:2e5543bea424e60e9e42eef70bff597be48649d8f68ba061a7a092b2477d5464"},
 ]
 
 [package.dependencies]
 latexcodec = ">=1.0.4"
-PyYAML = ">=3.01"
-six = "*"
-
-[package.extras]
-test = ["pytest"]
+pyyaml = ">=3.01"
 
 [[package]]
 name = "pybtex-docutils"
@@ -5184,7 +5180,7 @@ description = "Easily download, build, install, upgrade, and uninstall Python pa
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "python_version >= \"3.12\" and (extra == \"backends\" or extra == \"dev\" or extra == \"docs\") or (platform_system == \"Linux\" and platform_machine == \"x86_64\" and extra == \"backends\" or extra == \"dev\" or extra == \"docs\" or extra == \"backends\") and python_version < \"3.12\""
+markers = "extra == \"backends\""
 files = [
     {file = "setuptools-80.9.0-py3-none-any.whl", hash = "sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922"},
     {file = "setuptools-80.9.0.tar.gz", hash = "sha256:f36b47402ecde768dbfafc46e8e4207b4360c654f1f3bb84475f0a28628fb19c"},
@@ -5504,26 +5500,25 @@ Sphinx = ">=1.2"
 
 [[package]]
 name = "sphinxcontrib-bibtex"
-version = "2.6.3"
+version = "2.6.5"
 description = "Sphinx extension for BibTeX style citations."
 optional = true
-python-versions = ">=3.7"
+python-versions = ">=3.9"
 groups = ["main"]
 markers = "extra == \"dev\" or extra == \"docs\""
 files = [
-    {file = "sphinxcontrib_bibtex-2.6.3-py3-none-any.whl", hash = "sha256:ff016b738fcc867df0f75c29e139b3b2158d26a2c802db27963cb128be3b75fb"},
-    {file = "sphinxcontrib_bibtex-2.6.3.tar.gz", hash = "sha256:7c790347ef1cb0edf30de55fc324d9782d085e89c52c2b8faafa082e08e23946"},
+    {file = "sphinxcontrib_bibtex-2.6.5-py3-none-any.whl", hash = "sha256:455ea4509642ea0b28ede3721550273626f85af65af01f161bfd8e19dc1edd7d"},
+    {file = "sphinxcontrib_bibtex-2.6.5.tar.gz", hash = "sha256:9b3224dd6fece9268ebd8c905dc0a83ff2f6c54148a9235fe70e9d1e9ff149c0"},
 ]
 
 [package.dependencies]
 docutils = ">=0.8,<0.18.dev0 || >=0.20.dev0"
-pybtex = ">=0.24"
+pybtex = ">=0.25"
 pybtex-docutils = ">=1.0.0"
-setuptools = {version = "*", markers = "python_version >= \"3.12\""}
 Sphinx = ">=3.5"
 
 [package.extras]
-test = ["pytest", "pytest-cov"]
+test = ["pytest", "pytest-cov", "sphinx-autoapi"]
 
 [[package]]
 name = "sphinxcontrib-devhelp"
@@ -6630,10 +6625,10 @@ type = ["pytest-mypy"]
 
 [extras]
 backends = ["jax", "tensorflow", "torch"]
-dev = ["IPython", "PyStemmer", "cloudpickle", "furo", "ipykernel", "ipywidgets", "myst-parser", "nbsphinx", "onnxruntime", "opencv-python-headless", "papermill", "pre-commit", "pytest", "pytest-cov", "ruff", "setuptools", "simpleitk", "sphinx", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx-reredirects", "sphinx_design", "sphinxcontrib-autoprogram", "sphinxcontrib-bibtex"]
+dev = ["IPython", "PyStemmer", "cloudpickle", "furo", "ipykernel", "ipywidgets", "myst-parser", "nbsphinx", "onnxruntime", "opencv-python-headless", "papermill", "pre-commit", "pybtex", "pytest", "pytest-cov", "ruff", "simpleitk", "sphinx", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx-reredirects", "sphinx_design", "sphinxcontrib-autoprogram", "sphinxcontrib-bibtex"]
 display = ["opencv-python"]
 display-headless = ["opencv-python-headless"]
-docs = ["IPython", "PyStemmer", "furo", "myst-parser", "nbsphinx", "setuptools", "sphinx", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx-reredirects", "sphinx_design", "sphinxcontrib-autoprogram", "sphinxcontrib-bibtex"]
+docs = ["IPython", "PyStemmer", "furo", "myst-parser", "nbsphinx", "pybtex", "sphinx", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx-reredirects", "sphinx_design", "sphinxcontrib-autoprogram", "sphinxcontrib-bibtex"]
 jax = ["jax"]
 models = ["onnxruntime"]
 tests = ["cloudpickle", "ipykernel", "ipywidgets", "papermill", "pre-commit", "pytest", "pytest-cov", "ruff", "simpleitk"]
@@ -6641,4 +6636,4 @@ tests = ["cloudpickle", "ipykernel", "ipywidgets", "papermill", "pre-commit", "p
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10"
-content-hash = "17e65bdd909a97b9d41488e360d97863b888ac073fc8134175d4628b1581fa6e"
+content-hash = "5250e65d9a7cc8d3fe48136ad308ebaade20a8f42007767c4edfd8bc88dee3b4"
