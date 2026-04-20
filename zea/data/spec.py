@@ -486,6 +486,7 @@ class Map(Spec):
             "shape": (
                 ("n_frames", "x", "z", "y", "n_spatial_ch"),
                 ("n_frames", "x", "z", "y"),
+                ("n_frames", "x", "z"),
             ),
         },
         "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
@@ -585,7 +586,7 @@ class Image(UnsignedIntMap):
         pixels: The image pixels of shape (n_frames, x, z, y) and type uint8.
         extent: The image extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+            (radius_min, radius_max, theta_min, theta_max, phi_min, phi_max) and stored as float32.
     """
 
 
@@ -657,7 +658,7 @@ class EnvelopeData(FloatMap):
 
 
 @dataclass
-class ImageSc(FloatMap):
+class ImageSc(UnsignedIntMap):
     """Scan-converted image data and spatial extent metadata.
 
     Args:
@@ -667,17 +668,6 @@ class ImageSc(FloatMap):
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
     """
-
-    SCHEMA = {
-        **FloatMap.SCHEMA,
-        "pixels": {
-            "dtype": np.float32,
-            "shape": (
-                ("n_frames", "x", "z", "y"),
-                ("n_frames", "x", "z"),
-            ),
-        },
-    }
 
 
 @dataclass

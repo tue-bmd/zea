@@ -281,8 +281,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Unit
               - 
             * - ``pixels``
-              - ``float32``
-              - (n_frames, x, z, y) or (n_frames, x, z)
+              - ``uint8``
+              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
               - |badge-req|
             * - ``extent``
@@ -321,7 +321,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``pixels``
               - ``uint8``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y)
+              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
               - |badge-req|
             * - ``extent``
@@ -360,7 +360,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``pixels``
               - ``bool``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y)
+              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
               - |badge-req|
             * - ``extent``
@@ -399,7 +399,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``pixels``
               - ``float32``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y)
+              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
               - |badge-req|
             * - ``extent``
@@ -438,7 +438,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``pixels``
               - ``float32``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y)
+              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
               - |badge-req|
             * - ``extent``
@@ -477,7 +477,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``pixels``
               - ``float32``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y)
+              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
               - |badge-req|
             * - ``extent``
@@ -516,7 +516,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``pixels``
               - ``float32``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y)
+              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
               - |badge-req|
             * - ``extent``
@@ -555,7 +555,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``pixels``
               - ``float32``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y)
+              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
               - |badge-req|
             * - ``extent``
