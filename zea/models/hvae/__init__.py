@@ -72,15 +72,19 @@ class HierarchicalVAE(DeepGenerativeModel):
         self.version = version
         self.network = None
 
-    def custom_load_weights(self, preset):
+    def custom_load_weights(self, preset, load_weights=True, **kwargs):
         """
         Load the pretrained weights of the HVAE model from a preset.
         First builds the model architecture from args.pkl,
         then loads the weights into the model.
+
+        Args:
+            preset (str): Preset identifier or path.
+            load_weights (bool): If ``False``, only the model architecture is built from
+                ``args.pkl`` without downloading or loading the (large) weights file. Useful for testing.
         """
         loader = get_preset_loader(preset)
         args_file = loader.get_file("args.pkl")
-        weights_file = loader.get_file(f"hvae_{self.version}.weights.h5")
 
         # Build the model architecture from args.pkl
         with open(args_file, "rb") as f:
@@ -90,9 +94,11 @@ class HierarchicalVAE(DeepGenerativeModel):
         vae = VAE(params)
         vae.build()
 
-        # Load and copy the weights
-        vae.load_weights(weights_file)
-        vae.trainable = False
+        if load_weights:
+            weights_file = loader.get_file(f"hvae_{self.version}.weights.h5")
+            vae.load_weights(weights_file)
+            vae.trainable = False
+
         self.network = vae
 
         # Set model parameters that are used in partial_inference

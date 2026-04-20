@@ -58,6 +58,42 @@ def print_gpu_memory_table(memory_free_values):
         print(f"{idx:<6}{mem:>7}")
 
 
+def _iter_cuda_device_ids():
+    """Yield integer device IDs from CUDA_VISIBLE_DEVICES.
+
+    Skips empty tokens and non-integer tokens (e.g. GPU UUIDs) silently,
+    so callers never receive a ``ValueError`` from malformed entries.
+    """
+    cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    for token in cuda_visible.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            yield int(token)
+        except ValueError:
+            pass  # Non-integer tokens (e.g. GPU UUIDs) are skipped
+
+
+def _cuda_visible_devices_disables_gpus():
+    """Check if CUDA_VISIBLE_DEVICES is set to a value that disables all GPUs.
+
+    Returns ``True`` when the environment variable is set to an empty string
+    or contains only negative device IDs (the common convention being "-1").
+    Returns ``False`` when the variable is unset or contains at least one
+    non-negative device ID.
+    """
+    cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if cuda_visible is None:
+        return False  # Not set – all GPUs visible
+    if cuda_visible.strip() == "":
+        return True  # Empty means no GPUs
+    device_ids = list(_iter_cuda_device_ids())
+    if not device_ids:
+        return False  # Only non-integer tokens (e.g. GPU UUIDs) – let nvidia-smi decide
+    return all(d < 0 for d in device_ids)
+
+
 def get_gpu_memory(verbose=True):
     """Retrieve memory allocation information of all gpus.
 
@@ -68,6 +104,16 @@ def get_gpu_memory(verbose=True):
         memory_free_values: list of available memory for each gpu in MiB.
         Returns empty list if nvidia-smi is not available.
     """
+    # Respect CUDA_VISIBLE_DEVICES *before* calling nvidia-smi, which
+    # always reports all physical GPUs regardless of this variable.
+    if _cuda_visible_devices_disables_gpus():
+        if verbose:
+            log.info(
+                f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r} "
+                "disables all GPUs. Falling back to CPU."
+            )
+        return []
+
     if not check_nvidia_smi():
         log.warning(
             "nvidia-smi is not available. Please install nvidia-utils. "
@@ -106,8 +152,9 @@ def get_gpu_memory(verbose=True):
 
     # only show enabled devices
     if os.environ.get("CUDA_VISIBLE_DEVICES", "") != "":
-        gpus = os.environ["CUDA_VISIBLE_DEVICES"]
-        gpus = [int(gpu) for gpu in gpus.split(",")][: len(memory_free_values)]
+        # Use _iter_cuda_device_ids to safely skip empty/non-integer tokens,
+        # then filter out negative and out-of-range IDs.
+        gpus = [g for g in _iter_cuda_device_ids() if 0 <= g < len(memory_free_values)]
         if verbose:
             # Report the number of disabled GPUs out of the total
             num_gpus = len(memory_free_values)

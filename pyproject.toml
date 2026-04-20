@@ -34,12 +34,12 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "keras >=3.12",
+    "keras >=3.12.1",
     "h5py >=3.11",
     "numpy >= 1.24",
     "matplotlib >=3.8",
     "scipy >=1.13",
-    "pillow >=10",
+    "pillow >=12.2.0",
     "schema >=0.7",
     "tqdm >=4",
     "pyyaml >=6",
@@ -56,14 +56,14 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     # tests
-    "pytest>=8.1",
+    "pytest>=9.0.3",
     "papermill>=2.4",
     "ipykernel>=6.29.5",
     "cloudpickle>=3.1.1",
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff",
+    "ruff==0.15.10",
     "pytest-cov",
     # docs
     "sphinx",
@@ -73,8 +73,8 @@ dev = [
     "sphinx_design",
     "sphinxcontrib-autoprogram",
     "sphinx-reredirects",
-    "sphinxcontrib-bibtex",
-    "setuptools<82",
+    "sphinxcontrib-bibtex>=2.6.5",
+    "pybtex>=0.26.1",
     "myst-parser",
     "nbsphinx",
     "furo",
@@ -87,14 +87,14 @@ dev = [
 ]
 
 tests = [
-    "pytest>=8.1",
+    "pytest>=9.0.3",
     "papermill>=2.4",
     "ipykernel>=6.29.5",
     "cloudpickle>=3.1.1",
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff",
+    "ruff==0.15.10",
     "pytest-cov",
 ]
 docs = [
@@ -105,8 +105,8 @@ docs = [
     "sphinx_design",
     "sphinxcontrib-autoprogram",
     "sphinx-reredirects",
-    "sphinxcontrib-bibtex",
-    "setuptools<82",
+    "sphinxcontrib-bibtex>=2.6.5",
+    "pybtex>=0.26.1",
     "myst-parser",
     "nbsphinx",
     "furo",
@@ -130,7 +130,7 @@ models = [
 # these are just here for .readthedocs.yaml
 # please for proper install (with GPU support)
 # install manually
-backends = ["jax", "tensorflow", "torch"]
+backends = ["jax", "tensorflow>=2.12.1", "torch"]
 
 [project.urls]
 Homepage = "https://github.com/tue-bmd/zea/"
@@ -238,3 +238,22 @@ docstring-code-format = true
 # This only has an effect when the `docstring-code-format` setting is
 # enabled.
 docstring-code-line-length = "dynamic"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+markers = [
+    "performance: marks tests as performance (deselect with '-m \"not performance\"')",
+    "heavy: marks tests as heavy (deselect with '-m \"not heavy\"')",
+    "notebook: mark a test as a notebook test (deselect with '-m \"not notebook\"')",
+    "gpu: marks tests that exercise real GPU hardware (most meaningful offline; in CI CUDA_VISIBLE_DEVICES=\"\" forces CPU)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:jupyter_client.*",
+    "ignore::DeprecationWarning:papermill.*",
+]
+
+[tool.coverage.report]
+omit = [
+    "zea/ops/keras_ops.py",
+]
