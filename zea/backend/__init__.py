@@ -20,7 +20,7 @@ Key Features
   - :mod:`zea.backend.torch` -- PyTorch-specific utilities and device management.
   - :mod:`zea.backend.tensorflow` -- TensorFlow-specific utilities and device management.
 
-- **Data Loading** (:class:`zea.data.dataloader.Dataloader`):
+- **Data Loading** (:class:`zea.Dataloader`):
   A high-performance HDF5 dataloader built on `Grain <https://github.com/google/grain>`_. It provides a convenient way to load and preprocess data for machine learning workflows.
 
 """

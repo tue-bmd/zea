@@ -1,8 +1,9 @@
 import random as pythonrandom
-from keras import Model, Sequential, Variable, layers, ops, random
-import numpy as np
 
-from zea.models.hvae.utils import SoftPlus, GaussianAnalyticalKL
+import numpy as np
+from keras import Model, Sequential, Variable, layers, ops, random
+
+from zea.models.hvae.utils import GaussianAnalyticalKL, SoftPlus
 
 
 class VAE(Model):
@@ -199,24 +200,17 @@ class VAE(Model):
         Prints the architecture and parameter counts of the HVAE model, split into stages.
         """
         print("------ Encoder ------")
-        print(
-            (
-                f"first 1x1 conv: [None, {
-                    (
-                        self.params.enc_input_size[0],
-                        self.params.enc_input_size[0],
-                        self.params.data_width,
-                    )
-                }]"
-                f" -> [None, {
-                    (
-                        self.params.enc_input_size[0],
-                        self.params.enc_input_size[0],
-                        self.encoder.first_conv.weights[0].shape[-1],
-                    )
-                } ]"
-            )
+        first_conv_in = (
+            self.params.enc_input_size[0],
+            self.params.enc_input_size[0],
+            self.params.data_width,
         )
+        first_conv_out = (
+            self.params.enc_input_size[0],
+            self.params.enc_input_size[0],
+            self.encoder.first_conv.weights[0].shape[-1],
+        )
+        print(f"first 1x1 conv: [None, {first_conv_in}] -> [None, {first_conv_out}]")
         for stage_num, stage in enumerate(self.encoder.stages.layers):
             kernel_size = self.params.kernelsizes[str(stage.input_size)]
             stage_params = 0

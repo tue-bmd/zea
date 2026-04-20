@@ -3,7 +3,7 @@
 Example:
     .. code-block:: python
 
-        from zea.data.dataloader import Dataloader
+        from zea import Dataloader
 
         loader = Dataloader(
             file_paths="/path/to/dataset",
@@ -32,9 +32,8 @@ import numpy as np
 
 from zea import log
 from zea.data.datasets import Dataset, H5FileHandleCache, count_samples_per_directory
-from zea.data.file import File
 from zea.data.layers import Resizer
-from zea.utils import map_negative_indices
+from zea.utils import canonicalize_axis, map_negative_indices
 
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
 
@@ -93,8 +92,10 @@ def generate_h5_indices(
                 ...,
             ]
     """
-    if not limit_n_frames:
+    if limit_n_frames is None:
         limit_n_frames = np.inf
+    else:
+        assert limit_n_frames > 0, f"limit_n_frames must be > 0, got {limit_n_frames}"
 
     assert len(file_paths) == len(file_shapes), "file_paths and file_shapes must have same length"
 
@@ -229,8 +230,6 @@ class H5DataSource:
         self.frame_index_stride = int(frame_index_stride)
         self.frame_axis = int(frame_axis)
         self.insert_frame_axis = insert_frame_axis
-        self.initial_frame_axis = int(initial_frame_axis)
-        self.additional_axes_iter = list(additional_axes_iter or [])
 
         assert self.frame_index_stride > 0, (
             f"`frame_index_stride` must be > 0, got {self.frame_index_stride}"
@@ -242,6 +241,10 @@ class H5DataSource:
         self.file_paths = _dataset.file_paths
         self.file_shapes = _dataset.load_file_shapes(key)
         _dataset.close()
+
+        num_dims = len(self.file_shapes[0])
+        self.initial_frame_axis = canonicalize_axis(int(initial_frame_axis), num_dims)
+        self.additional_axes_iter = map_negative_indices(list(additional_axes_iter or []), num_dims)
 
         # Compute per-sample index table
         self.indices = generate_h5_indices(
@@ -261,27 +264,10 @@ class H5DataSource:
             log.info(f"H5DataSource: Limiting to {limit_n_samples} / {len(self.indices)} samples.")
             self.indices = self.indices[:limit_n_samples]
 
-        # Compute output shape
-        image_shapes = np.array(self.file_shapes)
-        image_shapes = np.delete(
-            image_shapes, (self.initial_frame_axis, *self.additional_axes_iter), axis=1
-        )
-        n_dims = len(image_shapes[0])
-        equal = np.all(image_shapes == image_shapes[0])
-        self.shape = np.array(image_shapes[0] if equal else [None] * n_dims)
-
-        if insert_frame_axis:
-            _fa = map_negative_indices([frame_axis], len(self.shape) + 1)
-            self.shape = np.insert(self.shape, _fa, 1)
-        if self.shape[frame_axis]:
-            self.shape[frame_axis] = self.shape[frame_axis] * n_frames
-
         # Thread-local file handle caches (one per thread)
         self._local = threading.local()
         self._all_caches: set[H5FileHandleCache] = set()
         self._all_caches_lock = threading.Lock()
-
-    # -- grain.RandomAccessDataSource protocol ---------------------------------
 
     def __len__(self) -> int:
         return len(self.indices)
@@ -294,17 +280,32 @@ class H5DataSource:
         file_name, key, indices = self.indices[index]
         file_handle_cache = self._get_file_handle_cache()
         file = file_handle_cache.get_file(file_name)
-        image = self._load(file, key, indices)
+
+        try:
+            images = file.load_data(key, indices)
+        except (OSError, IOError):
+            # Invalidate cache entry and retry once
+            file_handle_cache.pop(file_name)
+            file = file_handle_cache.get_file(file_name)
+            images = file.load_data(key, indices)
+
+        if self.insert_frame_axis:
+            initial = self.initial_frame_axis
+            if self.additional_axes_iter:
+                initial -= sum(ax < self.initial_frame_axis for ax in self.additional_axes_iter)
+            images = np.moveaxis(images, initial, self.frame_axis)
+        else:
+            images = np.concatenate(images, axis=self.frame_axis)
 
         if self.return_filename:
             file_data = {
-                "fullpath": file.filename,
-                "filename": Path(file_name).stem,
+                "fullpath": file.filename,  # same as file.path, but str type
+                "filename": file.stem,
                 "indices": indices,
             }
-            result = (image, file_data)
+            result = (images, file_data)
         else:
-            result = image
+            result = images
 
         if self.cache:
             self._data_cache[index] = result
@@ -316,8 +317,6 @@ class H5DataSource:
             f"H5DataSource(n_samples={len(self)}, n_files={len(self.file_paths)}, key='{self.key}')"
         )
 
-    # -- internals -------------------------------------------------------------
-
     def _get_file_handle_cache(self) -> H5FileHandleCache:
         """Return the file-handle cache for the current thread."""
         if not hasattr(self._local, "cache"):
@@ -325,28 +324,6 @@ class H5DataSource:
             with self._all_caches_lock:
                 self._all_caches.add(self._local.cache)
         return self._local.cache
-
-    def _load(self, file: File, key: str, indices):
-        """Read from an open HDF5 file and handle frame-axis logic."""
-        try:
-            images = file.load_data(key, indices)
-        except (OSError, IOError):
-            # Invalidate cache entry and retry once
-            fname = file.filename
-            file_handle_cache = self._get_file_handle_cache()
-            file_handle_cache.pop(fname)
-            file = file_handle_cache.get_file(fname)
-            images = file.load_data(key, indices)
-
-        if self.insert_frame_axis:
-            initial = self.initial_frame_axis
-            if self.additional_axes_iter:
-                initial -= sum(ax < self.initial_frame_axis for ax in self.additional_axes_iter)
-            images = np.moveaxis(images, initial, self.frame_axis)
-        else:
-            images = np.concatenate(images, axis=self.frame_axis)
-
-        return images
 
     def close(self):
         """Close all file handles across all threads."""
@@ -384,43 +361,73 @@ class Dataloader:
             - augmentation
 
     Args:
-        file_paths: Path(s) to HDF5 directory(ies) or file(s).
-        key: HDF5 dataset key.
-        batch_size: Batch size. ``None`` disables batching.
-        n_frames: Consecutive frames per sample.
-        shuffle: Shuffle data each epoch.
-        return_filename: Return filename metadata with each sample.
-        seed: Random seed for shuffling.
-        limit_n_samples: Cap number of samples.
-        limit_n_frames: Cap frames per file.
-        drop_remainder: Drop last incomplete batch.
-        image_size: ``(H, W)`` target size.
-        resize_type: ``"resize"``, ``"center_crop"``, ``"random_crop"``
-            or ``"crop_or_pad"``.
-        resize_axes: Axes to resize along. Should be of length 2
-            (height, width). Only needed when data has more than (h, w, c)
-            dimensions.
-        resize_kwargs: Additional keyword arguments for the resize operation.
-        image_range: Original value range of images, e.g. ``(-60, 0)``.
+        file_paths: Path(s) to directory(ies) and/or HDF5 file(s).
+        key: HDF5 dataset key. Default is ``"data/image"``.
+        batch_size: Batch size. Set to ``None`` to disable batching.
+            Default is ``16``.
+        n_frames: Number of consecutive frames per sample. Default is ``1``.
+            When ``n_frames > 1``, frames are grouped into blocks.
+        shuffle: Shuffle dataset each epoch. Default is ``True``.
+        return_filename: Return filename metadata together with each sample.
+            Default is ``False``.
+        seed: Random seed used for shuffling. Default is ``None``.
+            If ``None`` and ``shuffle=True``, a random seed is generated.
+        limit_n_samples: Limit total number of samples (useful for debugging).
+            Default is ``None`` (no limit).
+        limit_n_frames: Limit frames loaded per file to the first N frames.
+            Default is ``None`` (no limit).
+        drop_remainder: Drop the final incomplete batch. Default is ``False``.
+        image_size: Target ``(height, width)``. Default is ``None`` (no resizing).
+        resize_type: Resize strategy. One of ``"resize"``, ``"center_crop"``,
+            ``"random_crop"`` or ``"crop_or_pad"``. Default is ``None``,
+            which resolves to ``"resize"`` when `image_size` is set.
+        resize_axes: Axes to resize along, must have length 2 (height, width).
+            Only needed when data has more than ``(h, w, c)`` dimensions.
+            Axes are interpreted after frame-axis insertion/reordering.
+            Default is ``None``.
+        resize_kwargs: Extra keyword arguments passed to ``Resizer``.
+            Default is ``None``.
+        image_range: Source value range of images, e.g. ``(-60, 0)``.
+            Used for clipping/asserting/normalization. Default is ``None``.
         normalization_range: Target value range, e.g. ``(0, 1)``.
-        clip_image_range: Clip values to ``image_range`` before normalizing.
-        assert_image_range: Assert that data is within ``image_range``.
-        dataset_repetitions: Repeat dataset N times. Default is ``None`` which means no repetition.
-        cache: Cache loaded samples to RAM.
-        additional_axes_iter: Extra axes to iterate over.
-        sort_files: Sort files numerically.
-        overlapping_blocks: Allow overlapping frame blocks.
-        augmentation: A callable applied per-batch *after* normalization.
-        initial_frame_axis: Source frame axis in the file.
-        insert_frame_axis: Insert new frame axis.
-        frame_index_stride: Stride between frames.
-        frame_axis: Axis for stacking frames.
-        validate: Validate dataset against the zea format.
-        prefetch: Prefetch the dataset.
-        shard_index: Shard index for distributed training.
-        num_shards: Total number of shards.
-        num_threads: Threads for parallel reads (0 = main thread only).
-        prefetch_buffer_size: Grain prefetch buffer per process.
+            If set, ``image_range`` must also be set. Default is ``None``.
+        clip_image_range: Clip values to ``image_range`` before normalization.
+            Default is ``False``.
+        assert_image_range: Assert values stay within ``image_range``.
+            Default is ``True``.
+        dataset_repetitions: Repeat dataset this many times. Repetition happens
+            after sharding. Default is ``None`` (no repetition).
+        cache: Cache loaded samples in RAM. Default is ``False``.
+            Note that with ``overlapping_blocks=True``, the same frame can be part of multiple
+            samples, so caching will consume more memory.
+        additional_axes_iter: Additional axes to iterate over in addition to
+            ``initial_frame_axis``. Default is ``None``.
+        sort_files: Sort files numerically before indexing. Default is ``True``.
+        overlapping_blocks: If ``True``, frame blocks overlap by ``n_frames - 1``.
+            Has no effect when ``n_frames == 1``. Default is ``False``.
+        augmentation: Callable applied to each batch after normalization.
+            Default is ``None``.
+        initial_frame_axis: Axis in file data that represents frames.
+            Default is ``0``.
+        insert_frame_axis: If ``True``, keep per-frame samples and move/insert
+            the frame dimension at ``frame_axis``. If ``False``, loaded frames
+            are concatenated along ``frame_axis``. Default is ``True``.
+        frame_index_stride: Step between selected frames in a block.
+            Default is ``1``.
+        frame_axis: Axis along which frames are stacked/placed in output.
+            Default is ``-1``.
+        validate: Validate discovered files against the zea format.
+            Default is ``True``.
+        prefetch: Enable Grain prefetching for iteration. Default is ``True``.
+        shard_index: Shard index to select when ``num_shards > 1``.
+            Must satisfy ``0 <= shard_index < num_shards``.
+        num_shards: Total number of shards for distributed loading.
+            Sharding happens before downstream transforms. Default is ``1``.
+        num_threads: Number of Grain read threads (``0`` means main thread only).
+            Default is ``16``.
+        prefetch_buffer_size: Size of the Grain buffer for reading elements per Python
+            process (not per thread). Useful when reading from a distributed file
+            system. Default is ``500``.
 
     Example:
         .. code-block:: python
@@ -631,7 +638,6 @@ class Dataloader:
             f"<Dataloader: {len(self.source)} samples, "
             f"batch_size={self.batch_size}, "
             f"key='{self.source.key}', "
-            f"shape={tuple(self.source.shape)}, "
             f"threads={self.num_threads}>"
         )
 
