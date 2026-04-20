@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from zea.internal._generate_keras_ops import (
     _get_generated_keras_version,
     _parse_version,
