@@ -153,8 +153,13 @@ def _get_generated_keras_version(target_path: Path) -> tuple[int, ...] | None:
     return None
 
 
-if __name__ == "__main__":
-    target_path = Path(__file__).parent.parent / "ops/keras_ops.py"
+def _check_version_and_generate(target_path: Path) -> None:
+    """Check Keras version and generate ops file if not downgrading.
+
+    If the installed Keras version is older than the version used to generate
+    the existing file, prints a warning and exits with code 1 to prevent
+    downgrading the file.
+    """
     current_version = _parse_version(keras.__version__)
     generated_version = _get_generated_keras_version(target_path)
 
@@ -171,3 +176,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     _generate_ops_file()
+
+
+if __name__ == "__main__":
+    _check_version_and_generate(Path(__file__).parent.parent / "ops/keras_ops.py")

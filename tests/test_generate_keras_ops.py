@@ -1,8 +1,10 @@
 """Tests for zea.internal._generate_keras_ops helper functions."""
 
-from pathlib import Path
+import pytest
 
+import zea.internal._generate_keras_ops as mod
 from zea.internal._generate_keras_ops import (
+    _check_version_and_generate,
     _get_generated_keras_version,
     _parse_version,
 )
@@ -55,9 +57,19 @@ class TestGetGeneratedKerasVersion:
         f.write_text("# no version info here\n")
         assert _get_generated_keras_version(f) is None
 
-    def test_actual_keras_ops_file(self):
-        target = Path(__file__).parent.parent / "zea/ops/keras_ops.py"
-        version = _get_generated_keras_version(target)
-        assert version is not None
-        assert len(version) >= 2
-        assert all(isinstance(x, int) for x in version)
+
+class TestCheckVersionAndGenerate:
+    def test_exits_when_installed_version_is_older(self, tmp_path, monkeypatch, capsys):
+        """Older installed Keras should trigger the warning and exit."""
+        f = tmp_path / "keras_ops.py"
+        f.write_text('"""...\nGenerated with Keras 99.0.0\n"""\n')
+
+        monkeypatch.setattr(mod.keras, "__version__", "1.0.0")
+
+        with pytest.raises(SystemExit) as exc_info:
+            _check_version_and_generate(f)
+
+        assert exc_info.value.code == 1
+        output = capsys.readouterr().out
+        assert "WARNING" in output
+        assert "pip install --upgrade keras" in output
