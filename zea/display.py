@@ -28,8 +28,9 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
         [-60, 0] dB, which is a common range for ultrasound images.
 
     .. note::
-        NaN values in the input image are replaced with the minimum value of the dynamic range
+        NaN and values in the input image are replaced with the minimum value of the dynamic range
         before scaling, which ensures that they are represented as black (0) in the output image.
+        +/- inf values are replaced with the min and max values of the dynamic range.
 
     Example:
         .. doctest::
