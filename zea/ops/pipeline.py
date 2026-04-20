@@ -211,7 +211,7 @@ class Pipeline:
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
         """
-        operations = [Cast("float32")]
+        operations = [Cast(dtype="float32")]
 
         # Add the demodulate operation
         if not baseband:
