@@ -10,7 +10,9 @@ They can be used in zea pipelines like any other :class:`zea.Operation`, for exa
 """
 
 import inspect
+import re
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -120,5 +122,52 @@ class MissingKerasOps(ValueError):
     print("Done generating `ops/keras_ops.py`.")
 
 
+def _parse_version(version_str: str) -> tuple[int, ...]:
+    """Parse a version string into a tuple of ints, ignoring pre-release suffixes."""
+    parts = []
+    for segment in version_str.split("."):
+        # Extract only the leading integer from each segment (e.g. '0rc1' -> 0)
+        m = re.match(r"(\d+)", segment)
+        if m:
+            parts.append(int(m.group(1)))
+    return tuple(parts)
+
+
+def _get_generated_keras_version(target_path: Path) -> tuple[int, ...] | None:
+    """Extract the Keras version from the header of an existing generated file.
+
+    Returns the version as a tuple of ints, or ``None`` if the file does not
+    exist or the version cannot be parsed.
+    """
+    if not target_path.exists():
+        return None
+    header_pattern = re.compile(r"Generated with Keras\s+(\S+)")
+    try:
+        with target_path.open(encoding="utf-8") as f:
+            for line in f:
+                m = header_pattern.search(line)
+                if m:
+                    return _parse_version(m.group(1))
+    except Exception:
+        pass
+    return None
+
+
 if __name__ == "__main__":
+    target_path = Path(__file__).parent.parent / "ops/keras_ops.py"
+    current_version = _parse_version(keras.__version__)
+    generated_version = _get_generated_keras_version(target_path)
+
+    if generated_version is not None and current_version < generated_version:
+        print(
+            f"WARNING: Your installed Keras version ({keras.__version__}) is older than "
+            f"the version used to generate `keras_ops.py` "
+            f"({'.'.join(str(x) for x in generated_version)}). "
+            "Regenerating would downgrade the file and remove operations that are "
+            "available in newer Keras releases.\n"
+            "Please upgrade Keras to avoid this:\n"
+            "    pip install --upgrade keras"
+        )
+        sys.exit(1)
+
     _generate_ops_file()
