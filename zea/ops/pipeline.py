@@ -16,6 +16,7 @@ from zea.internal.core import Object as ZEAObject
 from zea.internal.registry import beamformer_registry, ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Operation, get_ops
+from zea.ops.keras_ops import Cast
 from zea.ops.tensor import Normalize
 from zea.ops.ultrasound import (
     ApplyWindow,
@@ -210,7 +211,7 @@ class Pipeline:
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
         """
-        operations = []
+        operations = [Cast("float32")]
 
         # Add the demodulate operation
         if not baseband:
@@ -298,9 +299,6 @@ class Pipeline:
 
     def call(self, **inputs):
         """Process input data through the pipeline."""
-        # Ensure that input data is float32 to ensure pipeline compatibility
-        if ops.dtype(inputs[self.key]) != "float32":
-            inputs[self.key] = ops.cast(inputs[self.key], "float32")
 
         for operation in self._callable_layers:
             try:
