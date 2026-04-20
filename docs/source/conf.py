@@ -71,12 +71,20 @@ templates_path = ["_templates"]
 # -- Options for HTML output -------------------------------------------------
 html_theme = "furo"
 html_theme_options = {
-    # "announcement": """
-    #     <a style=\"text-decoration: none; color: white;\"
-    #        href=\"https://github.com/tue-bmd/zea">
-    #        <img src=\"_static/zea-logo.svg\"/> An example of an announcement!
-    #     </a>
-    # """,
+    "announcement": (
+        "<style>"
+        "@media (max-width: 600px) {"
+        "  .openh-rf-detail { display: none; }"
+        "  .openh-rf-link { font-size: 0.85em; }"
+        "}"
+        "</style>"
+        '<a class="openh-rf-link" style="text-decoration: none; color: inherit;" '
+        'href="https://github.com/open-h/OpenH-RF" target="_blank">'
+        "🧩 &nbsp; <code>zea</code> &nbsp; supports the OpenH-RF Initiative"
+        '<span class="openh-rf-detail"> &mdash; a large-scale openly licensed ultrasound'
+        " dataset by Stanford, TU/e &amp; NVIDIA</span>"
+        ". Learn more &rarr;</a>"
+    ),
     "sidebar_hide_name": True,
     "light_logo": "zea-logo.svg",
     "dark_logo": "zea-logo.svg",
