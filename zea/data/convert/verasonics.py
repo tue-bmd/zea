@@ -1127,11 +1127,6 @@ class VerasonicsFile(h5py.File):
             first_frame_idx=convert_config.get("first_frame", None),
         )
 
-        if event is None:
-            group_name = "scan"
-        else:
-            group_name = f"event_{event}/scan"
-
         additional_elements = []
 
         # Add additional elements from user-defined functions
