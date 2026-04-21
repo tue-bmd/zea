@@ -63,7 +63,7 @@ dev = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff==0.15.10",
+    "ruff==0.15.11",
     "pytest-cov",
     # docs
     "sphinx",
@@ -94,7 +94,7 @@ tests = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff==0.15.10",
+    "ruff==0.15.11",
     "pytest-cov",
 ]
 docs = [
