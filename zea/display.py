@@ -23,10 +23,43 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     Returns:
         image (ndarray): Output 8 bit image(s) [0, 255].
 
+    .. note::
+        If dynamic_range is None, it is assumed that the input image is already in the range
+        [-60, 0] dB, which is a common range for ultrasound images.
+
+    .. note::
+        NaN values in the input image are replaced with the minimum value of the dynamic range
+        before scaling, which ensures that they are represented as black (0) in the output image.
+        +/- inf values are replaced with the min and max values of the dynamic range.
+
+    Example:
+        .. doctest::
+
+            >>> import numpy as np
+
+            >>> import zea
+
+            >>> file_path = (
+            ...     "hf://zeahub/camus-sample/val/patient0401/patient0401_4CH_half_sequence.hdf5"
+            ... )
+
+            >>> with zea.File(file_path, mode="r") as file:
+            ...     data = file.load_data("image", indices=0)
+
+            >>> image, _ = zea.display.scan_convert(
+            ...     data,
+            ...     rho_range=(0, 1),
+            ...     theta_range=(-0.78, 0.78),
+            ...     fill_value=np.nan,
+            ... )
+            >>> image = zea.display.to_8bit(image, dynamic_range=(-60, 0))
+            >>> image.save("image.png")  # DOCTEST: +SKIP
+
     """
     if dynamic_range is None:
         dynamic_range = (-60, 0)
 
+    image = ops.nan_to_num(image, nan=dynamic_range[0])
     image = ops.convert_to_numpy(image)
     image = np.clip(image, *dynamic_range)
     image = translate(image, dynamic_range, (0, 255))
