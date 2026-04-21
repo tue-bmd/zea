@@ -525,7 +525,7 @@ class Map(Spec):
             if np.any(self.extent[..., 2] > self.extent[..., 3]):
                 raise ValueError("Map extent ylims must have ymin <= ymax")
             if np.any(self.extent[..., 4] > self.extent[..., 5]):
-                raise ValueError("Map extent zlims must have zmax <= zmin")
+                raise ValueError("Map extent zlims must have zmin <= zmax")
 
             # Ultrasound specific warning: if extent values are unusually large, log a warning
             if np.any(self.extent >= 1.0) or np.any(self.extent <= -1.0):
@@ -699,6 +699,8 @@ class SosMap(FloatMap):
         pixels: The speed-of-sound map pixels in m/s of shape (n_frames, z, x, y)
             and type float32.
         extent: The speed-of-sound map extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
     """
 
     def __post_init__(self):
@@ -722,6 +724,8 @@ class StrainPercentageMap(FloatMap):
     Args:
         pixels: The strain pixels in % of shape (n_frames, z, x, y) and type float32.
         extent: The strain extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
     """
 
     def __post_init__(self):
