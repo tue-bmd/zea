@@ -10,7 +10,7 @@ They can be used in zea pipelines like any other :class:`zea.Operation`, for exa
     >>> op = Squeeze(axis=1)
 
 This file is generated automatically. Do not edit manually.
-Generated with Keras 3.12.0
+Generated with Keras 3.14.0
 """
 
 import keras
@@ -207,6 +207,16 @@ class Array(Lambda):
             super().__init__(func=keras.ops.array, **kwargs)
         except AttributeError as e:
             raise MissingKerasOps("Array", "keras.ops.array") from e
+
+@ops_registry("keras.ops.array_split")
+class ArraySplit(Lambda):
+    """Operation wrapping keras.ops.array_split."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.array_split, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("ArraySplit", "keras.ops.array_split") from e
 
 @ops_registry("keras.ops.average")
 class Average(Lambda):
@@ -528,6 +538,16 @@ class Deg2rad(Lambda):
         except AttributeError as e:
             raise MissingKerasOps("Deg2rad", "keras.ops.deg2rad") from e
 
+@ops_registry("keras.ops.depth_to_space")
+class DepthToSpace(Lambda):
+    """Operation wrapping keras.ops.depth_to_space."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.depth_to_space, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("DepthToSpace", "keras.ops.depth_to_space") from e
+
 @ops_registry("keras.ops.det")
 class Det(Lambda):
     """Operation wrapping keras.ops.det."""
@@ -617,6 +637,16 @@ class Elu(Lambda):
             super().__init__(func=keras.ops.elu, **kwargs)
         except AttributeError as e:
             raise MissingKerasOps("Elu", "keras.ops.elu") from e
+
+@ops_registry("keras.ops.empty_like")
+class EmptyLike(Lambda):
+    """Operation wrapping keras.ops.empty_like."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.empty_like, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("EmptyLike", "keras.ops.empty_like") from e
 
 @ops_registry("keras.ops.erf")
 class Erf(Lambda):
@@ -718,6 +748,26 @@ class Flip(Lambda):
         except AttributeError as e:
             raise MissingKerasOps("Flip", "keras.ops.flip") from e
 
+@ops_registry("keras.ops.fliplr")
+class Fliplr(Lambda):
+    """Operation wrapping keras.ops.fliplr."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.fliplr, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Fliplr", "keras.ops.fliplr") from e
+
+@ops_registry("keras.ops.flipud")
+class Flipud(Lambda):
+    """Operation wrapping keras.ops.flipud."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.flipud, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Flipud", "keras.ops.flipud") from e
+
 @ops_registry("keras.ops.floor")
 class Floor(Lambda):
     """Operation wrapping keras.ops.floor."""
@@ -727,6 +777,16 @@ class Floor(Lambda):
             super().__init__(func=keras.ops.floor, **kwargs)
         except AttributeError as e:
             raise MissingKerasOps("Floor", "keras.ops.floor") from e
+
+@ops_registry("keras.ops.fold")
+class Fold(Lambda):
+    """Operation wrapping keras.ops.fold."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.fold, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Fold", "keras.ops.fold") from e
 
 @ops_registry("keras.ops.full_like")
 class FullLike(Lambda):
@@ -847,6 +907,26 @@ class Histogram(Lambda):
             super().__init__(func=keras.ops.histogram, **kwargs)
         except AttributeError as e:
             raise MissingKerasOps("Histogram", "keras.ops.histogram") from e
+
+@ops_registry("keras.ops.hsplit")
+class Hsplit(Lambda):
+    """Operation wrapping keras.ops.hsplit."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.hsplit, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Hsplit", "keras.ops.hsplit") from e
+
+@ops_registry("keras.ops.i0")
+class I0(Lambda):
+    """Operation wrapping keras.ops.i0."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.i0, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("I0", "keras.ops.i0") from e
 
 @ops_registry("keras.ops.ifft2")
 class Ifft2(Lambda):
@@ -1188,6 +1268,136 @@ class NanToNum(Lambda):
         except AttributeError as e:
             raise MissingKerasOps("NanToNum", "keras.ops.nan_to_num") from e
 
+@ops_registry("keras.ops.nanargmax")
+class Nanargmax(Lambda):
+    """Operation wrapping keras.ops.nanargmax."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nanargmax, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nanargmax", "keras.ops.nanargmax") from e
+
+@ops_registry("keras.ops.nanargmin")
+class Nanargmin(Lambda):
+    """Operation wrapping keras.ops.nanargmin."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nanargmin, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nanargmin", "keras.ops.nanargmin") from e
+
+@ops_registry("keras.ops.nancumprod")
+class Nancumprod(Lambda):
+    """Operation wrapping keras.ops.nancumprod."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nancumprod, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nancumprod", "keras.ops.nancumprod") from e
+
+@ops_registry("keras.ops.nancumsum")
+class Nancumsum(Lambda):
+    """Operation wrapping keras.ops.nancumsum."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nancumsum, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nancumsum", "keras.ops.nancumsum") from e
+
+@ops_registry("keras.ops.nanmax")
+class Nanmax(Lambda):
+    """Operation wrapping keras.ops.nanmax."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nanmax, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nanmax", "keras.ops.nanmax") from e
+
+@ops_registry("keras.ops.nanmean")
+class Nanmean(Lambda):
+    """Operation wrapping keras.ops.nanmean."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nanmean, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nanmean", "keras.ops.nanmean") from e
+
+@ops_registry("keras.ops.nanmedian")
+class Nanmedian(Lambda):
+    """Operation wrapping keras.ops.nanmedian."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nanmedian, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nanmedian", "keras.ops.nanmedian") from e
+
+@ops_registry("keras.ops.nanmin")
+class Nanmin(Lambda):
+    """Operation wrapping keras.ops.nanmin."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nanmin, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nanmin", "keras.ops.nanmin") from e
+
+@ops_registry("keras.ops.nanprod")
+class Nanprod(Lambda):
+    """Operation wrapping keras.ops.nanprod."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nanprod, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nanprod", "keras.ops.nanprod") from e
+
+@ops_registry("keras.ops.nanquantile")
+class Nanquantile(Lambda):
+    """Operation wrapping keras.ops.nanquantile."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nanquantile, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nanquantile", "keras.ops.nanquantile") from e
+
+@ops_registry("keras.ops.nanstd")
+class Nanstd(Lambda):
+    """Operation wrapping keras.ops.nanstd."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nanstd, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nanstd", "keras.ops.nanstd") from e
+
+@ops_registry("keras.ops.nansum")
+class Nansum(Lambda):
+    """Operation wrapping keras.ops.nansum."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nansum, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nansum", "keras.ops.nansum") from e
+
+@ops_registry("keras.ops.nanvar")
+class Nanvar(Lambda):
+    """Operation wrapping keras.ops.nanvar."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.nanvar, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Nanvar", "keras.ops.nanvar") from e
+
 @ops_registry("keras.ops.ndim")
 class Ndim(Lambda):
     """Operation wrapping keras.ops.ndim."""
@@ -1278,6 +1488,16 @@ class Prod(Lambda):
         except AttributeError as e:
             raise MissingKerasOps("Prod", "keras.ops.prod") from e
 
+@ops_registry("keras.ops.ptp")
+class Ptp(Lambda):
+    """Operation wrapping keras.ops.ptp."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.ptp, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Ptp", "keras.ops.ptp") from e
+
 @ops_registry("keras.ops.qr")
 class Qr(Lambda):
     """Operation wrapping keras.ops.qr."""
@@ -1297,6 +1517,16 @@ class Quantile(Lambda):
             super().__init__(func=keras.ops.quantile, **kwargs)
         except AttributeError as e:
             raise MissingKerasOps("Quantile", "keras.ops.quantile") from e
+
+@ops_registry("keras.ops.rad2deg")
+class Rad2deg(Lambda):
+    """Operation wrapping keras.ops.rad2deg."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.rad2deg, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Rad2deg", "keras.ops.rad2deg") from e
 
 @ops_registry("keras.ops.ravel")
 class Ravel(Lambda):
@@ -1508,6 +1738,16 @@ class Sin(Lambda):
         except AttributeError as e:
             raise MissingKerasOps("Sin", "keras.ops.sin") from e
 
+@ops_registry("keras.ops.sinc")
+class Sinc(Lambda):
+    """Operation wrapping keras.ops.sinc."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.sinc, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Sinc", "keras.ops.sinc") from e
+
 @ops_registry("keras.ops.sinh")
 class Sinh(Lambda):
     """Operation wrapping keras.ops.sinh."""
@@ -1587,6 +1827,16 @@ class Sort(Lambda):
             super().__init__(func=keras.ops.sort, **kwargs)
         except AttributeError as e:
             raise MissingKerasOps("Sort", "keras.ops.sort") from e
+
+@ops_registry("keras.ops.space_to_depth")
+class SpaceToDepth(Lambda):
+    """Operation wrapping keras.ops.space_to_depth."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.space_to_depth, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("SpaceToDepth", "keras.ops.space_to_depth") from e
 
 @ops_registry("keras.ops.sparse_plus")
 class SparsePlus(Lambda):
@@ -1888,6 +2138,16 @@ class Unstack(Lambda):
         except AttributeError as e:
             raise MissingKerasOps("Unstack", "keras.ops.unstack") from e
 
+@ops_registry("keras.ops.vander")
+class Vander(Lambda):
+    """Operation wrapping keras.ops.vander."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.vander, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Vander", "keras.ops.vander") from e
+
 @ops_registry("keras.ops.var")
 class Var(Lambda):
     """Operation wrapping keras.ops.var."""
@@ -1927,6 +2187,16 @@ class ViewAsReal(Lambda):
             super().__init__(func=keras.ops.view_as_real, **kwargs)
         except AttributeError as e:
             raise MissingKerasOps("ViewAsReal", "keras.ops.view_as_real") from e
+
+@ops_registry("keras.ops.vsplit")
+class Vsplit(Lambda):
+    """Operation wrapping keras.ops.vsplit."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.vsplit, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Vsplit", "keras.ops.vsplit") from e
 
 @ops_registry("keras.ops.zeros_like")
 class ZerosLike(Lambda):
