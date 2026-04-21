@@ -115,7 +115,7 @@ extent.  Pass it as a sub-dict under the key you want:
     from zea import File
 
     n_frames = 2
-    pixels = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)   # (frames, x, z[, channels])
+    pixels = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)   # (frames, z, x[, channels])
     extent = np.array([x_min, x_max, y_min, y_max, z_min, z_max], dtype=np.float32)  # metres
 
     f = File.create(
