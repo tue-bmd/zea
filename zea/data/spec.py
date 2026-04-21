@@ -480,7 +480,7 @@ class Map(Spec):
             and type uint8 or float32 or int16.
         extent: The map extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
         labels: The labels corresponding to the `n_ch` channels in the pixels.
             This is required when pixels have an n_ch dimension, and should be None otherwise.
             For IQ data, this would typically be ["I", "Q"].
@@ -581,7 +581,7 @@ class Segmentation(BooleanMap):
         pixels: The segmentation pixels of shape (n_frames, z, x, y, n_labels) and type bool.
         extent: The segmentation extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
         labels: The labels corresponding to the segmentation pixels, where each unique value
             in the pixels corresponds to a label in this list of shape (n_labels,) and type str.
     """
@@ -615,7 +615,7 @@ class BeamformedData(FloatMap):
             n_ch is 1 for RF data or 2 for IQ data.
         extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
         labels: The labels for the channel dimension, e.g. ["RF"] or ["I", "Q"].
             Auto-generated from n_ch if not provided.
     """
@@ -657,7 +657,7 @@ class EnvelopeData(FloatMap):
             (n_frames, z, x, y) and type float32.
         extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
     """
 
     SCHEMA = {
@@ -681,7 +681,7 @@ class ImageSc(UnsignedIntMap):
             (n_frames, z, x, y) and type float32.
         extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
     """
 
 
