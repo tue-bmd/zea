@@ -24,7 +24,7 @@ import numpy as np
 from jax import jit, vmap
 from tqdm import tqdm
 
-from zea import log, File
+from zea import File, log
 from zea.data.convert.echonet import H5Processor
 from zea.data.convert.echonetlvh.precompute_crop import precompute_cone_parameters
 from zea.data.convert.utils import load_avi, unzip
@@ -313,22 +313,11 @@ class LVHProcessor(H5Processor):
         # Image spec requires (n_frames, x, z, y) — add y=1 dimension
         polar_4d = polar_np[:, :, :, np.newaxis]
 
-        # Build a dummy extent (no physical coordinates available)
-        # extent shape (6,): (xmin, xmax, ymin, ymax, zmin, zmax) in meters
-        n_x, n_z = polar_np.shape[1], polar_np.shape[2]
-        extent = np.array([0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32)
-
-        # Build image_sc extent from sequence dimensions
-        n_x_sc, n_z_sc = image_sc_np.shape[1], image_sc_np.shape[2]
-        image_sc_extent = np.array(
-            [0.0, n_x_sc * 1e-4, 0.0, 1e-4, 0.0, n_z_sc * 1e-4], dtype=np.float32
-        )
-
         return File.create(
             out_h5,
             data={
-                "image_sc": {"pixels": image_sc_np, "extent": image_sc_extent},
-                "image": {"pixels": polar_4d, "extent": extent},
+                "image_sc": {"pixels": image_sc_np},
+                "image": {"pixels": polar_4d},
             },
             scan={},
             probe_name="generic",

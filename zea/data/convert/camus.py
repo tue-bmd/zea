@@ -167,21 +167,9 @@ def process_camus(source_path, output_path, overwrite=False):
     # Add y dimension (elevation) — CAMUS is 2D, so y=1
     image_seq_polar = np.expand_dims(image_seq_polar, axis=-1)
 
-    n_x, n_z = image_seq_polar.shape[1], image_seq_polar.shape[2]
-    extent = np.array([0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32)
-
-    # Build image_sc extent from sequence dimensions
-    n_x_sc, n_z_sc = image_seq.shape[1], image_seq.shape[2]
-    image_sc_extent = np.array(
-        [0.0, n_x_sc * 1e-4, 0.0, 1e-4, 0.0, n_z_sc * 1e-4], dtype=np.float32
-    )
-
     File.create(
         path=output_path,
-        data={
-            "image_sc": {"pixels": image_seq, "extent": image_sc_extent},
-            "image": {"pixels": image_seq_polar, "extent": extent},
-        },
+        data={"image_sc": {"pixels": image_seq}, "image": {"pixels": image_seq_polar}},
         probe_name="generic",
         description="camus dataset converted to zea format",
     )

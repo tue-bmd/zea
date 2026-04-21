@@ -490,7 +490,7 @@ class Map(Spec):
     """
 
     pixels: np.ndarray
-    extent: np.ndarray
+    extent: np.ndarray | None = None
     labels: np.ndarray | None = None
     description: str | None = None
     unit: str | None = None
@@ -518,19 +518,25 @@ class Map(Spec):
                 "labels must be provided when pixels have n_ch dimension"
             )
 
-        # Check sensible values
-        if np.any(self.extent[..., 0] > self.extent[..., 1]):
-            raise ValueError("Map extent xlims must have xmin <= xmax")
-        if np.any(self.extent[..., 2] > self.extent[..., 3]):
-            raise ValueError("Map extent ylims must have ymin <= ymax")
-        if np.any(self.extent[..., 4] > self.extent[..., 5]):
-            raise ValueError("Map extent zlims must have zmax <= zmin")
+        if self.extent is not None:
+            # Check sensible values
+            if np.any(self.extent[..., 0] > self.extent[..., 1]):
+                raise ValueError("Map extent xlims must have xmin <= xmax")
+            if np.any(self.extent[..., 2] > self.extent[..., 3]):
+                raise ValueError("Map extent ylims must have ymin <= ymax")
+            if np.any(self.extent[..., 4] > self.extent[..., 5]):
+                raise ValueError("Map extent zlims must have zmax <= zmin")
 
-        # Ultrasound specific warning: if extent values are unusually large, log a warning
-        if np.any(self.extent >= 1.0) or np.any(self.extent <= -1.0):
+            # Ultrasound specific warning: if extent values are unusually large, log a warning
+            if np.any(self.extent >= 1.0) or np.any(self.extent <= -1.0):
+                log.warning(
+                    "Map extent values are unusually large, extending beyond +/- 1.0 meters. "
+                    "Please verify that the extent values are correct and in meters."
+                )
+        else:
             log.warning(
-                "Map extent values are unusually large, extending beyond +/- 1.0 meters. "
-                "Please verify that the extent values are correct and in meters."
+                "Map extent is not provided, please consider adding an extent field to "
+                "ensure the map can be correctly displayed."
             )
 
 
