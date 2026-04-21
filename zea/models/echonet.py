@@ -20,6 +20,14 @@ To try this model, simply load one of the available presets:
     A tutorial notebook where this model is used:
     :doc:`../notebooks/models/left_ventricle_segmentation_example`.
 
+.. note::
+    This model is only currently supported with the TensorFlow or JAX :ref:`backend-installation`.
+    When using TensorFlow as backend, the model will work out of the box. When using JAX as backend,
+    the model is built using TensorFlow and then converted to JAX. This requires both
+    TensorFlow and JAX to be installed, which can be tricky regarding compatible CUDA versions.
+    One option is to run in our :ref:`docker-information` container, which has been tested
+    to work with both backends.
+
 """
 
 from pathlib import Path
@@ -59,11 +67,15 @@ class EchoNetDynamic(BaseModel):
     def __init__(self, **kwargs):
         if backend.backend() not in ["tensorflow", "jax"]:
             raise NotImplementedError(
-                "EchoNetDynamic is only currently supported with the TensorFlow or Jax backend."
+                "EchoNetDynamic is only currently supported with the TensorFlow or JAX backend."
             )
         assert tf is not None, (
             "TensorFlow is not installed. Please install TensorFlow to use EchoNetDynamic. This is "
-            "required even if you are using the Jax backend, the model is built using TensorFlow."
+            "required even if you are using the JAX backend, the model is built using TensorFlow. "
+            "Installing JAX and TensorFlow together is tricky, regarding compatible CUDA versions. "
+            "One option is to run in our Docker container, which has been tested to work with "
+            "both backends. See https://zea.readthedocs.io/en/latest/installation.html#docker "
+            "for more details."
         )
 
         super().__init__(**kwargs)
