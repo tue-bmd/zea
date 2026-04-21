@@ -70,11 +70,9 @@ def _img_dir_to_h5_dir(
         new_h5_file_path = new_dir_path / f"{group_id}.hdf5"
         pixels = frames.astype(np.uint8)
         pixels = np.expand_dims(pixels, axis=-1)  # add y dim
-        n_x, n_z = pixels.shape[1], pixels.shape[2]
-        extent = np.array([0.0, n_x * 1e-4, 0.0, 1e-4, 0.0, n_z * 1e-4], dtype=np.float32)
         File.create(
             path=new_h5_file_path,
-            data={"image": {"pixels": pixels, "extent": extent}},
+            data={"image": {"pixels": pixels}},
             probe_name="generic",
             description=f"{dataset_name or 'image'} dataset converted to zea format",
         )

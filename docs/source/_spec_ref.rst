@@ -211,7 +211,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (n_frames, 6) or (6)
               - –
-              - |badge-req|
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_ch)
@@ -250,7 +250,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (n_frames, 6) or (6)
               - –
-              - |badge-req|
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
@@ -289,7 +289,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (n_frames, 6) or (6)
               - –
-              - |badge-req|
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
@@ -328,7 +328,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (n_frames, 6) or (6)
               - –
-              - |badge-req|
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
@@ -367,7 +367,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (n_frames, 6) or (6)
               - –
-              - |badge-req|
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
@@ -406,7 +406,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (n_frames, 6) or (6)
               - –
-              - |badge-req|
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
@@ -445,7 +445,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (n_frames, 6) or (6)
               - –
-              - |badge-req|
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
@@ -484,7 +484,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (n_frames, 6) or (6)
               - –
-              - |badge-req|
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
@@ -523,7 +523,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (n_frames, 6) or (6)
               - –
-              - |badge-req|
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
@@ -562,7 +562,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (n_frames, 6) or (6)
               - –
-              - |badge-req|
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
