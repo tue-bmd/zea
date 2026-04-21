@@ -176,7 +176,3 @@ def _check_version_and_generate(target_path: Path) -> None:
         sys.exit(1)
 
     _generate_ops_file()
-
-
-if __name__ == "__main__":
-    _check_version_and_generate(Path(__file__).parent.parent / "ops/keras_ops.py")
