@@ -422,7 +422,7 @@ class Scan(Parameters):
         Args:
             imshow (bool): Whether to return extent in the format compatible with
             `plt.imshow` for 2D grids, allowing direct use via
-            `plt.imshow(x, extent=scan.extent)`. In this case, the extent
+            `plt.imshow(x, extent=scan.extent(imshow=True))`. In this case, the extent
             is returned as (xmin, xmax, zmax, zmin).
 
         Returns:
