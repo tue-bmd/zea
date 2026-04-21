@@ -4,7 +4,7 @@ from dataclasses import MISSING, dataclass, field, fields
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _get_pkg_version
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Tuple
 
 import h5py
 import numpy as np
@@ -139,6 +139,16 @@ class Spec:
     def required_fields(cls) -> tuple[str, ...]:
         """Return the names of fields that have no default value."""
         return tuple(f.name for f in fields(cls) if not cls._is_optional_dataclass_field(f))
+
+    @classmethod
+    def fields(cls) -> tuple[str, ...]:
+        """Return the names of all fields."""
+        return tuple(f.name for f in fields(cls))
+
+    @classmethod
+    def optional_fields(cls) -> tuple[str, ...]:
+        """Return the names of fields that have a default value."""
+        return tuple(f.name for f in fields(cls) if cls._is_optional_dataclass_field(f))
 
     @staticmethod
     def _expected_shapes(shape_spec: Any) -> tuple[tuple, ...]:
@@ -452,6 +462,11 @@ class Spec:
                 result[field_name] = value
 
         return result
+
+    @classmethod
+    def get_dtype(cls, field_name) -> Tuple[type, ...] | type:
+        """Get the dtype of a field."""
+        return cls.SCHEMA[field_name]["dtype"]
 
 
 @dataclass

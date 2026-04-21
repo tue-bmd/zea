@@ -182,7 +182,7 @@ def test_overwrite(tmp_hdf5_path):
 def test_image_only(tmp_hdf5_path):
     """Tests creating a file with only image_sc data (no scan)."""
     image_sc = {
-        "pixels": np.zeros((n_frames, 256, 256), dtype=np.float32),
+        "pixels": np.zeros((n_frames, 256, 256), dtype=np.uint8),
         "extent": np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32),
     }
     f = File.create(

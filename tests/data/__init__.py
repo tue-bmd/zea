@@ -1,11 +1,79 @@
 import numpy as np
 
 from zea.data.file import File
+from zea.data.spec import ScanSpec
+
+
+def _get_scan_dtype(field_name):
+    dtype = ScanSpec.get_dtype(field_name)
+    if isinstance(dtype, (tuple, list)):
+        return dtype[0]
+    return dtype
+
+
+def generate_dummy_scan(
+    n_tx=11, n_el=128, sound_speed=1540, center_frequency=7e6, sampling_frequency=40e6
+):
+    t0_delays = np.zeros((n_tx, n_el), dtype=_get_scan_dtype("t0_delays"))
+    probe_geometry = np.zeros((n_el, 3), dtype=_get_scan_dtype("probe_geometry"))
+    probe_geometry[:, 0] = np.linspace(-0.02, 0.02, n_el)
+    initial_times = np.zeros((n_tx,), dtype=_get_scan_dtype("initial_times"))
+
+    return {
+        "probe_geometry": probe_geometry,
+        "sampling_frequency": _get_scan_dtype("sampling_frequency")(sampling_frequency),
+        "center_frequency": _get_scan_dtype("center_frequency")(center_frequency),
+        "demodulation_frequency": _get_scan_dtype("demodulation_frequency")(center_frequency),
+        "initial_times": initial_times,
+        "t0_delays": t0_delays,
+        "sound_speed": _get_scan_dtype("sound_speed")(sound_speed),
+        "tx_apodizations": np.ones((n_tx, n_el), dtype=_get_scan_dtype("tx_apodizations")),
+        "focus_distances": np.full(n_tx, np.inf, dtype=_get_scan_dtype("focus_distances")),
+        "transmit_origins": np.zeros((n_tx, 3), dtype=_get_scan_dtype("transmit_origins")),
+        "polar_angles": np.zeros((n_tx,), dtype=_get_scan_dtype("polar_angles")),
+        "azimuth_angles": np.zeros((n_tx,), dtype=_get_scan_dtype("azimuth_angles")),
+    }
+
+
+def generate_dummy_data_dict(
+    n_frames=2,
+    n_ax=2048,
+    n_el=128,
+    n_tx=11,
+    n_ch=1,
+    grid_size_z=512,
+    grid_size_x=512,
+    add_optional_dtypes=False,
+):
+    data_dict = {
+        "raw_data": np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+    }
+
+    _extent = np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32)
+    if add_optional_dtypes:
+        data_dict["aligned_data"] = np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+        data_dict["envelope_data"] = {
+            "pixels": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32),
+            "extent": _extent,
+        }
+        data_dict["beamformed_data"] = {
+            "pixels": np.ones((n_frames, grid_size_z, grid_size_x, n_ch), dtype=np.float32),
+            "extent": _extent,
+        }
+        data_dict["image"] = {
+            "pixels": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.uint8),
+            "extent": _extent,
+        }
+        data_dict["image_sc"] = {
+            "pixels": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32),
+            "extent": _extent,
+        }
+
+    return data_dict
 
 
 def generate_example_dataset(
     path,
-    add_optional_fields=False,
     add_optional_dtypes=False,
     n_frames=2,
     n_ax=2048,
@@ -24,59 +92,14 @@ def generate_example_dataset(
 
     Args:
         path (str): The path to write the dataset to.
-        add_optional_fields (bool, optional): Whether to add optional fields to
-            the dataset. Defaults to False.
         add_optional_dtypes (bool, optional): Whether to add optional dtypes to
             the dataset. Defaults to False.
     """
 
-    # creating some fake raw and image data
-    raw_data = np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
-    # image data
-    pixels = np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.uint8)
-    # dummy extent in meters: (xmin, xmax, ymin, ymax, zmax, zmin)
-    _extent = np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32)
-
-    # creating some fake scan parameters
-    t0_delays = np.zeros((n_tx, n_el), dtype=np.float32)
-    probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
-    probe_geometry[:, 0] = np.linspace(-0.02, 0.02, n_el)
-    initial_times = np.zeros((n_tx,), dtype=np.float32)
-
-    scan = {
-        "probe_geometry": probe_geometry,
-        "sampling_frequency": np.float32(sampling_frequency),
-        "center_frequency": np.float32(center_frequency),
-        "demodulation_frequency": np.float32(center_frequency),
-        "initial_times": initial_times,
-        "t0_delays": t0_delays,
-        "sound_speed": np.float32(sound_speed),
-        "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
-        "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
-        "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
-        "polar_angles": np.zeros((n_tx,), dtype=np.float32),
-        "azimuth_angles": np.zeros((n_tx,), dtype=np.float32),
-    }
-
-    if add_optional_fields:
-        pass  # all required fields already provided above
-
-    data = {
-        "raw_data": raw_data,
-        "image": {"pixels": pixels, "extent": _extent},
-        "image_sc": {"pixels": pixels, "extent": _extent},
-    }
-
-    if add_optional_dtypes:
-        data["aligned_data"] = np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
-        data["envelope_data"] = {
-            "pixels": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32),
-            "extent": _extent,
-        }
-        data["beamformed_data"] = {
-            "pixels": np.ones((n_frames, grid_size_z, grid_size_x, n_ch), dtype=np.float32),
-            "extent": _extent,
-        }
+    data = generate_dummy_data_dict(
+        n_frames, n_tx, n_ax, n_el, n_ch, grid_size_z, grid_size_x, add_optional_dtypes
+    )
+    scan = generate_dummy_scan(n_tx, n_el, sound_speed, center_frequency, sampling_frequency)
 
     f = File.create(
         path,

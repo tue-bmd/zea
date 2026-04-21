@@ -456,7 +456,7 @@ class TestAllPipelineDataTypes:
             "aligned_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
             "beamformed_data": _make_map(np.zeros((n_frames, 16, 12, n_ch), dtype=np.float32)),
             "envelope_data": _make_map(np.zeros((n_frames, 16, 12), dtype=np.float32)),
-            "image_sc": _make_map(np.zeros((n_frames, 32, 24), dtype=np.float32)),
+            "image_sc": _make_map(np.zeros((n_frames, 32, 24), dtype=np.uint8)),
         }
         fspec = FileSpec(
             data=data_dict,
