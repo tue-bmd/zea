@@ -115,7 +115,7 @@ extent.  Pass it as a sub-dict under the key you want:
     from zea import File
 
     n_frames = 2
-    pixels = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)   # (frames, x, z[, channels])
+    values = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)   # (frames, x, z[, channels])
     extent = np.array([x_min, x_max, y_min, y_max, z_min, z_max], dtype=np.float32)  # metres
 
     f = File.create(
@@ -123,7 +123,7 @@ extent.  Pass it as a sub-dict under the key you want:
         data={
             "raw_data": raw,
             "my_overlay": {          # any name not already in the spec
-                "pixels":  pixels,
+                "values":  values,
                 "extent":  extent,
                 # optional: "labels", "description", "unit"
             },
@@ -134,7 +134,7 @@ extent.  Pass it as a sub-dict under the key you want:
 
     # Reading back
     with File("my_acquisition.hdf5") as f:
-        overlay_pixels = f.data.my_overlay.pixels[:]
+        overlay_values = f.data.my_overlay.values[:]
         overlay_extent = f.data.my_overlay.extent[:]
 
 

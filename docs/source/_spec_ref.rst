@@ -181,9 +181,9 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
       **Spatial map groups**
 
       Each spatial map is an HDF5 sub-group with the same three fields:
-      ``pixels`` (the data array), ``extent`` (spatial bounds in metres, shape
+      ``values`` (the data array), ``extent`` (spatial bounds in metres, shape
       ``(6,)`` ordered as ``(xmin, xmax, ymin, ymax, zmax, zmin)``), and
-      optionally ``labels`` (channel names when ``pixels`` has an ``n_ch``
+      optionally ``labels`` (channel names when ``values`` has an ``n_ch``
       dimension).
       Custom spatial maps are also accepted — any extra key passed to
       :class:`~zea.data.spec.DataSpec` is validated as a generic
@@ -191,7 +191,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``beamformed_data``
 
-         Beamformed (beamsummed) data. Pixels are ``float32`` in (n_frames, x, z, n_ch) or (n_frames, x, z, y, n_ch); ``labels`` names each channel (RF or I/Q).
+         Beamformed (beamsummed) data. Values are ``float32`` in (n_frames, x, z, n_ch) or (n_frames, x, z, y, n_ch); ``labels`` names each channel (RF or I/Q).
 
          .. list-table::
             :header-rows: 1
@@ -202,7 +202,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Shape
               - Unit
               - 
-            * - ``pixels``
+            * - ``values``
               - ``float32``
               - (n_frames, x, z, y, n_ch) or (n_frames, x, z, n_ch)
               - –
@@ -230,7 +230,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``envelope_data``
 
-         Envelope-detected data. Pixels are ``float32`` in (n_frames, x, z) or (n_frames, x, z, y).
+         Envelope-detected data. Values are ``float32`` in (n_frames, x, z) or (n_frames, x, z, y).
 
          .. list-table::
             :header-rows: 1
@@ -241,7 +241,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Shape
               - Unit
               - 
-            * - ``pixels``
+            * - ``values``
               - ``float32``
               - (n_frames, x, z, y) or (n_frames, x, z)
               - –
@@ -269,7 +269,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``image_sc``
 
-         Scan-converted image. Pixels are ``float32`` in (n_frames, x, z) or (n_frames, x, z, y).
+         Scan-converted image. Values are ``float32`` in (n_frames, x, z) or (n_frames, x, z, y).
 
          .. list-table::
             :header-rows: 1
@@ -280,7 +280,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Shape
               - Unit
               - 
-            * - ``pixels``
+            * - ``values``
               - ``uint8``
               - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
@@ -308,7 +308,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``image``
 
-         Reconstructed (log-compressed) image. Pixels are ``uint8`` in (n_frames, x, z) or (n_frames, x, z, y).
+         Reconstructed (log-compressed) image. Values are ``uint8`` in (n_frames, x, z) or (n_frames, x, z, y).
 
          .. list-table::
             :header-rows: 1
@@ -319,7 +319,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Shape
               - Unit
               - 
-            * - ``pixels``
+            * - ``values``
               - ``uint8``
               - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
@@ -347,7 +347,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``segmentation``
 
-         Semantic segmentation mask. Pixels are ``bool`` in (n_frames, x, z, y, n_labels); ``labels`` names each channel.
+         Semantic segmentation mask. Values are ``bool`` in (n_frames, x, z, y, n_labels); ``labels`` names each channel.
 
          .. list-table::
             :header-rows: 1
@@ -358,7 +358,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Shape
               - Unit
               - 
-            * - ``pixels``
+            * - ``values``
               - ``bool``
               - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
@@ -386,7 +386,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``sos_map``
 
-         Speed-of-sound map in m/s. Pixels are ``float32``.
+         Speed-of-sound map in m/s. Values are ``float32``.
 
          .. list-table::
             :header-rows: 1
@@ -397,7 +397,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Shape
               - Unit
               - 
-            * - ``pixels``
+            * - ``values``
               - ``float32``
               - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
@@ -425,7 +425,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``strain_percentage_map``
 
-         Strain map in %. Pixels are ``float32``.
+         Strain map in %. Values are ``float32``.
 
          .. list-table::
             :header-rows: 1
@@ -436,7 +436,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Shape
               - Unit
               - 
-            * - ``pixels``
+            * - ``values``
               - ``float32``
               - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
@@ -464,7 +464,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``shear_wave_elastography_map``
 
-         Shear-wave elastography map in m/s. Pixels are ``float32``.
+         Shear-wave elastography map in m/s. Values are ``float32``.
 
          .. list-table::
             :header-rows: 1
@@ -475,7 +475,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Shape
               - Unit
               - 
-            * - ``pixels``
+            * - ``values``
               - ``float32``
               - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
@@ -503,7 +503,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``tissue_doppler``
 
-         Tissue Doppler velocity map in m/s. Pixels are ``float32``.
+         Tissue Doppler velocity map in m/s. Values are ``float32``.
 
          .. list-table::
             :header-rows: 1
@@ -514,7 +514,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Shape
               - Unit
               - 
-            * - ``pixels``
+            * - ``values``
               - ``float32``
               - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –
@@ -542,7 +542,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``color_doppler``
 
-         Color Doppler velocity map in m/s. Positive = towards probe. Pixels are ``float32``.
+         Color Doppler velocity map in m/s. Positive = towards probe. Values are ``float32``.
 
          .. list-table::
             :header-rows: 1
@@ -553,7 +553,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Shape
               - Unit
               - 
-            * - ``pixels``
+            * - ``values``
               - ``float32``
               - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
               - –

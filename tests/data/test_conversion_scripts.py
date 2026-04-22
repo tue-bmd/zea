@@ -591,11 +591,11 @@ def verify_converted_echonetlvh_test_data(dst):
                 assert "image" in f["data"], f"Missing 'image' (polar) in {h5_file}"
                 assert "image_sc" in f["data"], f"Missing 'image_sc' (scan converted) in {h5_file}"
 
-                # image is now a Map group with pixels and extent subfields
-                image_pixels = f.data.image.pixels[:]
-                image_sc = f.data.image_sc.pixels[:]
+                # image is now a Map group with values and extent subfields
+                image_values = f.data.image.values[:]
+                image_sc = f.data.image_sc.values[:]
 
-                assert image_pixels.ndim == 4, (
+                assert image_values.ndim == 4, (
                     f"Polar image should be of shape (F, H, W, 1) in {h5_file}"
                 )
                 assert image_sc.ndim == 3, (
@@ -705,7 +705,7 @@ def verify_converted_cetus_test_data(dst):
     sample = dst / "train" / "patient01" / "patient01_ED.hdf5"
     with File(sample, "r") as f:
         assert "data" in f, "Missing 'data' group"
-        img = f.data.image_sc.pixels[:]
+        img = f.data.image_sc.values[:]
         assert img.ndim == 4, f"Expected 4-D image_sc, got {img.ndim}"
         f.validate()
         assert "data/segmentation" in f

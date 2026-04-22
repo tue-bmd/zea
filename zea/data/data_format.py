@@ -42,16 +42,16 @@ def validate_input_data(raw_data, aligned_data, envelope_data, beamformed_data, 
         aligned_data (np.ndarray): The aligned data of the ultrasound measurement of
             shape (n_frames, n_tx, n_ax, n_el, n_ch).
         envelope_data (dict or np.ndarray): The envelope data. If a dict, must contain
-            "pixels" and "extent" keys. If an ndarray, shape is
+            "values" and "extent" keys. If an ndarray, shape is
             (n_frames, grid_size_z, grid_size_x).
         beamformed_data (dict or np.ndarray): The beamformed data. If a dict, must
-            contain "pixels" and "extent" keys. If an ndarray, shape is
+            contain "values" and "extent" keys. If an ndarray, shape is
             (n_frames, grid_size_z, grid_size_x).
         image (dict or np.ndarray): The image data. If a dict, must contain
-            "pixels" and "extent" keys. If an ndarray, shape is
+            "values" and "extent" keys. If an ndarray, shape is
             (n_frames, grid_size_z, grid_size_x).
         image_sc (dict or np.ndarray): The scan converted images. If a dict, must
-            contain "pixels" and "extent" keys. If an ndarray, shape is
+            contain "values" and "extent" keys. If an ndarray, shape is
             (n_frames, output_size_z, output_size_x).
     """
     assert (

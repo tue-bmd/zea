@@ -169,7 +169,7 @@ def process_camus(source_path, output_path, overwrite=False):
 
     File.create(
         path=output_path,
-        data={"image_sc": {"pixels": image_seq}, "image": {"pixels": image_seq_polar}},
+        data={"image_sc": {"values": image_seq}, "image": {"values": image_seq_polar}},
         probe_name="generic",
         description="camus dataset converted to zea format",
     )

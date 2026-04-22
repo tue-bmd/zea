@@ -53,19 +53,19 @@ def generate_dummy_data_dict(
     if add_optional_dtypes:
         data_dict["aligned_data"] = np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
         data_dict["envelope_data"] = {
-            "pixels": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32),
+            "values": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32),
             "extent": _extent,
         }
         data_dict["beamformed_data"] = {
-            "pixels": np.ones((n_frames, grid_size_z, grid_size_x, n_ch), dtype=np.float32),
+            "values": np.ones((n_frames, grid_size_z, grid_size_x, n_ch), dtype=np.float32),
             "extent": _extent,
         }
         data_dict["image"] = {
-            "pixels": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.uint8),
+            "values": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.uint8),
             "extent": _extent,
         }
         data_dict["image_sc"] = {
-            "pixels": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32),
+            "values": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32),
             "extent": _extent,
         }
 

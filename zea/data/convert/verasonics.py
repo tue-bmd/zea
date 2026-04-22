@@ -1148,7 +1148,7 @@ class VerasonicsFile(h5py.File):
                 image_sc_extent = np.array(
                     [0.0, n_x_sc * 1e-4, 0.0, 1e-4, 0.0, n_z_sc * 1e-4], dtype=np.float32
                 )
-                result["image_sc"] = {"pixels": image_sc, "extent": image_sc_extent}
+                result["image_sc"] = {"values": image_sc, "extent": image_sc_extent}
             else:
                 log.warning(
                     f"Verasonics ImgDataP buffer has {image_sc.shape[0]} frames "

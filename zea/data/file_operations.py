@@ -61,22 +61,22 @@ def save_file(
         scan (Scan): The scan object containing the parameters of the acquisition.
         probe (Probe): The probe object containing the parameters of the probe.
         description (str): A description for the dataset.
-        beamformed_data (dict, optional): Beamformed data as a dict with ``"pixels"`` and
+        beamformed_data (dict, optional): Beamformed data as a dict with ``"values"`` and
             ``"extent"`` keys (validated as :class:`~zea.data.spec.BeamformedData`).
-        envelope_data (dict, optional): Envelope-detected data as a dict with ``"pixels"``
+        envelope_data (dict, optional): Envelope-detected data as a dict with ``"values"``
             and ``"extent"`` keys (validated as :class:`~zea.data.spec.EnvelopeData`).
-        image_sc (dict, optional): Scan-converted image data as a dict with ``"pixels"``
+        image_sc (dict, optional): Scan-converted image data as a dict with ``"values"``
             and ``"extent"`` keys (validated as :class:`~zea.data.spec.ImageSc`).
         image (dict, optional): Reconstructed (log-compressed) image data as a dict with
-            ``"pixels"`` and ``"extent"`` keys (validated as :class:`~zea.data.spec.Image`).
+            ``"values"`` and ``"extent"`` keys (validated as :class:`~zea.data.spec.Image`).
         custom_maps (dict, optional): Custom spatial map entries to include in the ``data`` group.
-            Each key maps to a dict with ``"pixels"`` (np.ndarray, uint8) and ``"extent"``
+            Each key maps to a dict with ``"values"`` (np.ndarray, uint8) and ``"extent"``
             (np.ndarray, float32, shape ``(6,)``) fields, plus optional ``"labels"``,
             ``"description"``, and ``"unit"`` fields.  Example::
 
                 custom_maps = {
                     "my_overlay": {
-                        "pixels": pixels_array,  # (n_frames, x, z, y[, n_ch]), uint8
+                        "values": values_array,  # (n_frames, x, z, y[, n_ch]), uint8
                         "extent": extent_array,  # (6,) float32
                     }
                 }
@@ -178,34 +178,34 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
 
         if data_dict["beamformed_data"] is not None:
             _assert_shapes_equal(
-                data_dict["beamformed_data"]["pixels"],
-                new_data["beamformed_data"]["pixels"],
+                data_dict["beamformed_data"]["values"],
+                new_data["beamformed_data"]["values"],
                 "beamformed_data",
             )
-            data_dict["beamformed_data"]["pixels"] += new_data["beamformed_data"]["pixels"]
+            data_dict["beamformed_data"]["values"] += new_data["beamformed_data"]["values"]
 
         if data_dict["envelope_data"] is not None:
             _assert_shapes_equal(
-                data_dict["envelope_data"]["pixels"],
-                new_data["envelope_data"]["pixels"],
+                data_dict["envelope_data"]["values"],
+                new_data["envelope_data"]["values"],
                 "envelope_data",
             )
-            data_dict["envelope_data"]["pixels"] += new_data["envelope_data"]["pixels"]
+            data_dict["envelope_data"]["values"] += new_data["envelope_data"]["values"]
 
         if data_dict["image"] is not None:
-            _assert_shapes_equal(data_dict["image"]["pixels"], new_data["image"]["pixels"], "image")
-            data_dict["image"]["pixels"] = np.log(
-                np.exp(new_data["image"]["pixels"]) + np.exp(data_dict["image"]["pixels"])
+            _assert_shapes_equal(data_dict["image"]["values"], new_data["image"]["values"], "image")
+            data_dict["image"]["values"] = np.log(
+                np.exp(new_data["image"]["values"]) + np.exp(data_dict["image"]["values"])
             )
 
         if data_dict["image_sc"] is not None:
             _assert_shapes_equal(
-                data_dict["image_sc"]["pixels"],
-                new_data["image_sc"]["pixels"],
+                data_dict["image_sc"]["values"],
+                new_data["image_sc"]["values"],
                 "image_sc",
             )
-            data_dict["image_sc"]["pixels"] = np.log(
-                np.exp(new_data["image_sc"]["pixels"]) + np.exp(data_dict["image_sc"]["pixels"])
+            data_dict["image_sc"]["values"] = np.log(
+                np.exp(new_data["image_sc"]["values"]) + np.exp(data_dict["image_sc"]["values"])
             )
         assert scan == new_scan, "Scan parameters do not match."
         assert probe == new_probe, "Probe parameters do not match."
@@ -245,7 +245,7 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
 
     # Assuming the first dimension is the frame dimension
 
-    # Map-based data types store pixels in a dict; these need special handling
+    # Map-based data types store values in a dict; these need special handling
     _MAP_KEYS = {"beamformed_data", "envelope_data", "image_sc", "image"}
     _LOG_COMPOUND_KEYS = {"image", "image_sc"}
 
@@ -256,12 +256,12 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
             compounded_data[key] = None
             continue
         if key in _MAP_KEYS:
-            pixels = data_dict[key]["pixels"]
+            values = data_dict[key]["values"]
             if key in _LOG_COMPOUND_KEYS:
-                pixels = np.log(np.mean(np.exp(pixels), axis=0, keepdims=True))
+                values = np.log(np.mean(np.exp(values), axis=0, keepdims=True))
             else:
-                pixels = np.mean(pixels, axis=0, keepdims=True)
-            compounded_data[key] = {**data_dict[key], "pixels": pixels}
+                values = np.mean(values, axis=0, keepdims=True)
+            compounded_data[key] = {**data_dict[key], "values": values}
         elif key in _LOG_COMPOUND_KEYS:
             compounded_data[key] = np.log(np.mean(np.exp(data_dict[key]), axis=0, keepdims=True))
         else:

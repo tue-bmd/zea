@@ -173,7 +173,7 @@ def process_cetus(source_path, output_path, overwrite=False):
     )
     data = {
         "image_sc": {
-            "pixels": image_sc.astype(np.float32),
+            "values": image_sc.astype(np.float32),
             "extent": image_sc_extent,
         }
     }
@@ -190,7 +190,7 @@ def process_cetus(source_path, output_path, overwrite=False):
         )
 
         data["segmentation"] = {
-            "pixels": seg_mask,
+            "values": seg_mask,
             "extent": extent,
             "labels": np.array(["endocardium"]),
         }
