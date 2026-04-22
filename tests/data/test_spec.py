@@ -495,10 +495,10 @@ class TestDataValidationErrors:
             )
 
     def test_image_wrong_pixel_dtype_raises(self):
-        """Image is UnsignedIntMap – values must be uint8, not float32."""
+        """Image is UnsignedIntMap – values must be float32 or uint8, not complex128."""
         with pytest.raises(TypeError, match="values"):
             Image(
-                values=np.zeros((2, 16, 12, 1), dtype=np.float32),
+                values=np.zeros((2, 16, 12, 1), dtype=np.complex128),
                 extent=np.zeros(6, dtype=np.float32),
             )
 

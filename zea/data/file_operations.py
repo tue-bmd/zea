@@ -152,6 +152,10 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     """
     Sums multiple raw data files and saves the result to a new file.
 
+    For images, this will actually average the images. If the images are uint8, it will average
+    directly. If the images are float32, we assume they are in the log-domain and we will do the
+    averaging in the linear domain.
+
     Args:
         input_paths (list[Path]): List of paths to the input raw data files.
         output_path (Path): Path to the output file where the summed data will be saved.
@@ -162,6 +166,17 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     data_dict, scan, probe = load_file_all_data_types(input_paths[0])
     description = load_description(input_paths[0])
     additional_elements = load_additional_elements(input_paths[0])
+
+    image_is_uint8 = data_dict["image"]["values"].dtype == np.uint8
+    image_sc_is_uint8 = data_dict["image_sc"]["values"].dtype == np.uint8
+    image_is_float32 = data_dict["image"]["values"].dtype == np.float32
+    image_sc_is_float32 = data_dict["image_sc"]["values"].dtype == np.float32
+
+    # Cast to float32 to avoid overflow
+    if image_is_uint8:
+        data_dict["image"]["values"] = data_dict["image"]["values"].astype(np.float32)
+    if image_sc_is_uint8:
+        data_dict["image_sc"]["values"] = data_dict["image_sc"]["values"].astype(np.float32)
 
     for file in input_paths[1:]:
         new_data, new_scan, new_probe = load_file_all_data_types(file)
@@ -194,9 +209,16 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
 
         if data_dict["image"] is not None:
             _assert_shapes_equal(data_dict["image"]["values"], new_data["image"]["values"], "image")
-            data_dict["image"]["values"] = np.log(
-                np.exp(new_data["image"]["values"]) + np.exp(data_dict["image"]["values"])
-            )
+            if image_is_float32:
+                data_dict["image"]["values"] = np.log(
+                    np.exp(new_data["image"]["values"]) + np.exp(data_dict["image"]["values"])
+                )
+            elif image_is_uint8:
+                data_dict["image"]["values"] = (
+                    new_data["image"]["values"] + data_dict["image"]["values"]
+                )
+            else:
+                raise ValueError("image values must be uint8 or float32")
 
         if data_dict["image_sc"] is not None:
             _assert_shapes_equal(
@@ -204,11 +226,33 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
                 new_data["image_sc"]["values"],
                 "image_sc",
             )
-            data_dict["image_sc"]["values"] = np.log(
-                np.exp(new_data["image_sc"]["values"]) + np.exp(data_dict["image_sc"]["values"])
-            )
+            if image_sc_is_float32:
+                data_dict["image_sc"]["values"] = np.log(
+                    np.exp(new_data["image_sc"]["values"]) + np.exp(data_dict["image_sc"]["values"])
+                )
+            elif image_sc_is_uint8:
+                data_dict["image_sc"]["values"] = (
+                    new_data["image_sc"]["values"] + data_dict["image_sc"]["values"]
+                )
+            else:
+                raise ValueError("image_sc values must be uint8 or float32")
+
         assert scan == new_scan, "Scan parameters do not match."
         assert probe == new_probe, "Probe parameters do not match."
+
+    # Cast back to uint8
+    if image_is_uint8:
+        data_dict["image"]["values"] = data_dict["image"]["values"].astype(np.uint8) / len(
+            input_paths
+        )
+    if image_is_float32:
+        data_dict["image"]["values"] = data_dict["image"]["values"] - np.log(len(input_paths))
+    if image_sc_is_uint8:
+        data_dict["image_sc"]["values"] = data_dict["image_sc"]["values"].astype(np.uint8) / len(
+            input_paths
+        )
+    if image_sc_is_float32:
+        data_dict["image_sc"]["values"] = data_dict["image_sc"]["values"] - np.log(len(input_paths))
 
     if overwrite:
         _delete_file_if_exists(output_path)
@@ -262,7 +306,7 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
             else:
                 values = np.mean(values, axis=0, keepdims=True)
             compounded_data[key] = {**data_dict[key], "values": values}
-        elif key in _LOG_COMPOUND_KEYS:
+        elif key in _LOG_COMPOUND_KEYS and data_dict[key]["values"].dtype == np.float32:
             compounded_data[key] = np.log(np.mean(np.exp(data_dict[key]), axis=0, keepdims=True))
         else:
             compounded_data[key] = np.mean(data_dict[key], axis=0, keepdims=True)

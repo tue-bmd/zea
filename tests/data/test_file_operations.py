@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Generator
 
 import h5py
+import numpy as np
 import pytest
 
 from zea.data.data_format import (
@@ -37,8 +38,8 @@ def test_file_operations_sum(tmp_hdf5_path):
     # Create two example datasets
     input_path1 = tmp_hdf5_path.parent / "test_case_dataset1.hdf5"
     input_path2 = tmp_hdf5_path.parent / "test_case_dataset2.hdf5"
-    generate_example_dataset(input_path1, add_optional_dtypes=True)
-    generate_example_dataset(input_path2, add_optional_dtypes=True)
+    generate_example_dataset(input_path1, add_optional_dtypes=True, image_dtype=np.float32)
+    generate_example_dataset(input_path2, add_optional_dtypes=True, image_dtype=np.float32)
 
     data1, scan1, probe1 = load_file(input_path1)
     data2, scan2, probe2 = load_file(input_path2)
@@ -64,7 +65,7 @@ def test_file_operations_extract(tmp_hdf5_path):
     output_path = tmp_hdf5_path.parent / "extracted_dataset.hdf5"
 
     # Create an example dataset
-    generate_example_dataset(input_path, add_optional_dtypes=True)
+    generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
     extract_frames_transmits(
         input_path, output_path, frame_indices=slice(1), transmit_indices=[0, 3]
@@ -93,7 +94,7 @@ def test_file_operations_resave(tmp_hdf5_path):
     output_path = tmp_hdf5_path.parent / "resaved_dataset.hdf5"
 
     # Create an example dataset
-    generate_example_dataset(input_path, add_optional_dtypes=True)
+    generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
     resave(input_path, output_path)
 
@@ -111,7 +112,7 @@ def test_file_operations_compound_frames(tmp_hdf5_path):
     output_path = tmp_hdf5_path.parent / "compounded_frames_dataset.hdf5"
 
     # Create an example dataset
-    generate_example_dataset(input_path, add_optional_dtypes=True)
+    generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
     compound_frames(input_path, output_path)
 
@@ -134,7 +135,7 @@ def test_file_operations_compound_transmits(tmp_hdf5_path):
     output_path = tmp_hdf5_path.parent / "compounded_transmits_dataset.hdf5"
 
     # Create an example dataset
-    generate_example_dataset(input_path, add_optional_dtypes=True)
+    generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
     compound_transmits(input_path, output_path)
 
@@ -155,8 +156,8 @@ def test_file_operations_cli_sum(tmp_hdf5_path):
     # Create two example datasets
     path1 = tmp_hdf5_path.parent / "test_case_dataset1.hdf5"
     path2 = tmp_hdf5_path.parent / "test_case_dataset2.hdf5"
-    generate_example_dataset(path1, add_optional_dtypes=True)
-    generate_example_dataset(path2, add_optional_dtypes=True)
+    generate_example_dataset(path1, add_optional_dtypes=True, image_dtype=np.float32)
+    generate_example_dataset(path2, add_optional_dtypes=True, image_dtype=np.float32)
 
     data1, scan1, probe1 = load_file(path1)
     data2, scan2, probe2 = load_file(path2)
@@ -187,7 +188,7 @@ def test_file_operations_cli_extract(tmp_hdf5_path):
     output_path = tmp_hdf5_path.parent / "extracted_dataset.hdf5"
 
     # Create an example dataset
-    generate_example_dataset(input_path, add_optional_dtypes=True)
+    generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
     os.system(
         "python -m zea.data.file_operations extract "
@@ -215,7 +216,7 @@ def test_file_operations_cli_resave(tmp_hdf5_path):
     output_path = tmp_hdf5_path.parent / "resaved_dataset.hdf5"
 
     # Create an example dataset
-    generate_example_dataset(input_path, add_optional_dtypes=True)
+    generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
     os.system(
         "python -m zea.data.file_operations resave " + str(input_path) + " " + str(output_path)
@@ -233,7 +234,7 @@ def test_file_operations_cli_compound_frames(tmp_hdf5_path):
     output_path = tmp_hdf5_path.parent / "compounded_frames_dataset.hdf5"
 
     # Create an example dataset
-    generate_example_dataset(input_path, add_optional_dtypes=True)
+    generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
     os.system(
         "python -m zea.data.file_operations compound_frames "
@@ -258,7 +259,7 @@ def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
     output_path = tmp_hdf5_path.parent / "compounded_transmits_dataset.hdf5"
 
     # Create an example dataset
-    generate_example_dataset(input_path, add_optional_dtypes=True)
+    generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
     os.system(
         "python -m zea.data.file_operations compound_transmits "
