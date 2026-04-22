@@ -578,25 +578,3 @@ class TestMetadataAndMetricsValidationErrors:
                     }
                 },
             )
-
-    n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
-
-    with pytest.warns(
-        match="Subject ID is not provided; please consider adding an ID for better traceability"
-    ):
-        FileSpec(
-            data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
-            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            metadata={
-                "subject": {
-                    "type": "human",
-                    "age": np.uint8(42),
-                    "sex": "f",
-                    "fat_percentage": np.float32(17.5),
-                }
-            },
-            metrics={
-                "common_midpoint_phase_error": np.zeros((n_frames,), dtype=np.float32),
-                "coherence_factor": np.ones((n_frames,), dtype=np.float32),
-            },
-        )
