@@ -173,7 +173,7 @@ class Scan(Parameters):
         grid_type (str, optional): Type of grid to use for beamforming.
             Can be "cartesian" or "polar". Defaults to "cartesian".
         dynamic_range (tuple, optional): Dynamic range for image display.
-            Defined in dB as (min_dB, max_dB). Defaults to (-60, 0).
+            Defined in dB as (min_dB, max_dB).
         distance_to_apex (float, optional): Distance from the transducer to the apex of the
             pixel grid. This property is used for polar grids. Will be computed automatically
             if not provided.

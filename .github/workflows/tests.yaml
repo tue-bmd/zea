@@ -114,7 +114,6 @@ jobs:
             sh -c "pip install -e .[tests] && pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
 
       - name: Upload results to Codecov
-        if: github.actor != 'dependabot[bot]'
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

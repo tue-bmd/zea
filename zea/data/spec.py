@@ -476,27 +476,31 @@ class Map(Spec):
     The most flexible map spec, which can be used for any spatially aligned data product.
 
     Args:
-        pixels: The map pixels of shape (n_frames, z, x, y, n_ch) or (n_frames, z, x, y)
+        values: The map values of shape (n_frames, z, x, y, n_ch) or (n_frames, z, x, y)
             or (n_frames, z, x, n_ch) or (n_frames, z, x) and type uint8 or float32 or int16.
         extent: The map extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
-        labels: The labels corresponding to the `n_ch` channels in the pixels.
-            This is required when pixels have an n_ch dimension, and should be None otherwise.
+        labels: The labels corresponding to the `n_ch` channels in the values.
+            This is required when values have an n_ch dimension, and should be None otherwise.
             For IQ data, this would typically be ["I", "Q"].
         description: An optional free-text description of the map.
         unit: An optional string specifying the physical unit of the map values,
             e.g. "m/s", "%", etc.
+        min: The minimum value of the map.
+        max: The maximum value of the map.
     """
 
-    pixels: np.ndarray
+    values: np.ndarray
     extent: np.ndarray | None = None
     labels: np.ndarray | None = None
     description: str | None = None
     unit: str | None = None
+    min: float | None = None
+    max: float | None = None
 
     SCHEMA = {
-        "pixels": {
+        "values": {
             "dtype": (np.uint8, np.float32, np.int16, np.complex64),
             "shape": (
                 ("n_frames", "z", "x", "y", "n_spatial_ch"),
@@ -508,14 +512,16 @@ class Map(Spec):
         "labels": {"dtype": np.str_, "shape": ("n_spatial_ch",)},
         "description": {"dtype": str, "shape": ()},
         "unit": {"dtype": str, "shape": ()},
+        "min": {"dtype": np.float32, "shape": ()},
+        "max": {"dtype": np.float32, "shape": ()},
     }
 
     def __post_init__(self):
         super().__post_init__()
 
-        if self.pixels.ndim == 5:
+        if self.values.ndim == 5:
             assert self.labels is not None, (
-                "labels must be provided when pixels have n_ch dimension"
+                "labels must be provided when values have n_ch dimension"
             )
 
         if self.extent is not None:
@@ -546,8 +552,8 @@ class FloatMap(Map):
 
     SCHEMA = {
         **Map.SCHEMA,
-        "pixels": {
-            **Map.SCHEMA["pixels"],
+        "values": {
+            **Map.SCHEMA["values"],
             "dtype": np.float32,
         },
     }
@@ -559,8 +565,8 @@ class BooleanMap(Map):
 
     SCHEMA = {
         **Map.SCHEMA,
-        "pixels": {
-            **Map.SCHEMA["pixels"],
+        "values": {
+            **Map.SCHEMA["values"],
             "dtype": np.bool_,
         },
     }
@@ -572,8 +578,8 @@ class UnsignedIntMap(Map):
 
     SCHEMA = {
         **Map.SCHEMA,
-        "pixels": {
-            **Map.SCHEMA["pixels"],
+        "values": {
+            **Map.SCHEMA["values"],
             "dtype": np.uint8,
         },
     }
@@ -584,17 +590,17 @@ class Segmentation(BooleanMap):
     """Segmentation data and spatial extent metadata.
 
     Args:
-        pixels: The segmentation pixels of shape (n_frames, z, x, y, n_labels) and type bool.
+        values: The segmentation values of shape (n_frames, z, x, y, n_labels) and type bool.
         extent: The segmentation extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
-        labels: The labels corresponding to the segmentation pixels, where each unique value
-            in the pixels corresponds to a label in this list of shape (n_labels,) and type str.
+            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+        labels: The labels corresponding to the segmentation values, where each unique value
+            in the values corresponds to a label in this list of shape (n_labels,) and type str.
     """
 
     def __post_init__(self):
-        assert self.pixels.ndim == 5, (
-            "Segmentation pixels must have 5 dimensions (n_frames, z, x, y, n_labels)"
+        assert self.values.ndim == 5, (
+            "Segmentation values must have 5 dimensions (n_frames, z, x, y, n_labels)"
         )
         super().__post_init__()
 
@@ -604,7 +610,7 @@ class Image(UnsignedIntMap):
     """Reconstructed (log-compressed) image data and spatial extent metadata.
 
     Args:
-        pixels: The image pixels of shape (n_frames, z, x, y) and type uint8.
+        values: The image values of shape (n_frames, z, x, y) and type uint8.
         extent: The image extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (radius_min, radius_max, theta_min, theta_max, phi_min, phi_max) and stored as float32.
@@ -616,7 +622,7 @@ class BeamformedData(FloatMap):
     """Beamformed (beamsummed) data and spatial extent metadata.
 
     Args:
-        pixels: The beamformed data of shape (n_frames, z, x, n_ch) or
+        values: The beamformed data of shape (n_frames, z, x, n_ch) or
             (n_frames, z, x, y, n_ch) and type float32.
             n_ch is 1 for RF data or 2 for IQ data.
         extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
@@ -628,7 +634,7 @@ class BeamformedData(FloatMap):
 
     SCHEMA = {
         **FloatMap.SCHEMA,
-        "pixels": {
+        "values": {
             "dtype": np.float32,
             "shape": (
                 ("n_frames", "z", "x", "y", "n_ch"),
@@ -639,11 +645,11 @@ class BeamformedData(FloatMap):
     }
 
     def __post_init__(self):
-        n_ch = self.pixels.shape[-1]
+        n_ch = self.values.shape[-1]
         if n_ch not in (1, 2):
             raise ValueError(
                 f"Beamformed data must have n_ch ∈ {{1, 2}} (RF or IQ), "
-                f"got n_ch={n_ch} (shape {self.pixels.shape})."
+                f"got n_ch={n_ch} (shape {self.values.shape})."
             )
         if self.labels is None:
             self.labels = (
@@ -659,7 +665,7 @@ class EnvelopeData(FloatMap):
     """Envelope-detected data and spatial extent metadata.
 
     Args:
-        pixels: The envelope data of shape (n_frames, z, x) or
+        values: The envelope data of shape (n_frames, x, z) or
             (n_frames, z, x, y) and type float32.
         extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
@@ -668,7 +674,7 @@ class EnvelopeData(FloatMap):
 
     SCHEMA = {
         **FloatMap.SCHEMA,
-        "pixels": {
+        "values": {
             "dtype": np.float32,
             "shape": (
                 ("n_frames", "z", "x", "y"),
@@ -683,7 +689,7 @@ class ImageSc(UnsignedIntMap):
     """Scan-converted image data and spatial extent metadata.
 
     Args:
-        pixels: The scan-converted image of shape (n_frames, z, x) or
+        values: The scan-converted image of shape (n_frames, x, z) or
             (n_frames, z, x, y) and type float32.
         extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
@@ -696,7 +702,7 @@ class SosMap(FloatMap):
     """Speed-of-sound map data and spatial extent metadata.
 
     Args:
-        pixels: The speed-of-sound map pixels in m/s of shape (n_frames, z, x, y)
+        values: The speed-of-sound map values in m/s of shape (n_frames, z, x, y)
             and type float32.
         extent: The speed-of-sound map extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
@@ -710,7 +716,7 @@ class SosMap(FloatMap):
             raise ValueError(f"Speed-of-sound map unit should be 'm/s', got '{self.unit}'")
 
         # Check sensible values for speed of sound
-        if np.any(self.pixels < 300):
+        if np.any(self.values < 300):
             log.warning(
                 "Speed-of-sound map contains values below 300 m/s, which is unusually low. "
                 "Please verify that the speed-of-sound values are correct and in m/s."
@@ -722,7 +728,7 @@ class StrainPercentageMap(FloatMap):
     """Strain map data and spatial extent metadata.
 
     Args:
-        pixels: The strain pixels in % of shape (n_frames, z, x, y) and type float32.
+        values: The strain values in % of shape (n_frames, z, x, y) and type float32.
         extent: The strain extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
@@ -740,7 +746,7 @@ class ShearWaveElastographyMap(FloatMap):
     """Shear-wave elastography data and spatial extent metadata.
 
     Args:
-        pixels: The shear-wave elastography pixels in m/s of shape
+        values: The shear-wave elastography values in m/s of shape
             (n_frames, z, x, y) and type float32.
         extent: The SWE extent in meters of shape (n_frames, 6) or (6,).
     """
@@ -757,7 +763,7 @@ class TissueDopplerMap(FloatMap):
     """Tissue Doppler data and spatial extent metadata.
 
     Args:
-        pixels: The tissue Doppler pixels in m/s of shape (n_frames, z, x, y)
+        values: The tissue Doppler values in m/s of shape (n_frames, z, x, y)
             and type float32.
         extent: The tissue Doppler extent in meters of shape (n_frames, 6) or (6,).
     """
@@ -774,7 +780,7 @@ class ColorDopplerMap(FloatMap):
     """Color Doppler (velocity) data and spatial extent metadata.
 
     Args:
-        pixels: The color Doppler velocity pixels in m/s of shape
+        values: The color Doppler velocity values in m/s of shape
             (n_frames, z, x, y) and type float32. Positive values
             indicate flow towards the transducer, negative values
             indicate flow away from the transducer.
@@ -1556,7 +1562,7 @@ class FileSpec(Spec):
 
         # 3. Handle legacy flat `data/image` datasets.  In old files
         #    `data/image` is a plain array (n_frames, z, x) rather than an
-        #    Image group with pixels + extent.  If that is the case we
+        #    Image group with values + extent.  If that is the case we
         #    remove it from the data dict so it does not fail validation as
         #    an Image spec.
         if "data" in kwargs and isinstance(kwargs["data"], dict):

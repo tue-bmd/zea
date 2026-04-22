@@ -12,9 +12,9 @@ from zea.scan import Scan
 _TEST_EXTENT = np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32)
 
 
-def _make_map(pixels):
-    """Wrap pixels into a Map-compatible dict."""
-    return {"pixels": pixels, "extent": _TEST_EXTENT}
+def _make_map(values):
+    """Wrap values into a Map-compatible dict."""
+    return {"values": values, "extent": _TEST_EXTENT}
 
 
 @pytest.fixture
@@ -197,7 +197,7 @@ class TestGroupProxy:
             data={
                 "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                 "image": {
-                    "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+                    "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
                     "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
                 },
             },
@@ -209,7 +209,7 @@ class TestGroupProxy:
         with File(path) as f:
             proxy = f.data.image
             assert isinstance(proxy, GroupProxy)
-            assert proxy.pixels.shape == (n_frames, 16, 12, 1)
+            assert proxy.values.shape == (n_frames, 16, 12, 1)
 
     def test_missing_key_raises_attribute_error(self, spec_file):
         path, *_ = spec_file
@@ -258,7 +258,7 @@ class TestValidateSpec:
             loaded_spec = f.validate_spec()
 
         np.testing.assert_array_equal(loaded_spec.data.raw_data, raw)
-        np.testing.assert_array_equal(loaded_spec.data.envelope_data.pixels, env)
+        np.testing.assert_array_equal(loaded_spec.data.envelope_data.values, env)
         assert loaded_spec.probe_name == "test_probe"
         assert loaded_spec.description == "spec format test file"
 
@@ -357,7 +357,7 @@ class TestValidateSpec:
                 data={
                     "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                     "custom_map": {
-                        "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+                        "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
                         "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
                     },
                 },
@@ -371,7 +371,7 @@ class TestValidateSpec:
             loaded = f.validate_spec()
 
         assert loaded.data.custom_map is not None
-        np.testing.assert_array_equal(loaded.data.custom_map.pixels, fspec.data.custom_map.pixels)
+        np.testing.assert_array_equal(loaded.data.custom_map.values, fspec.data.custom_map.values)
 
 
 class TestFieldMetadataAttrs:
@@ -417,7 +417,7 @@ class TestImageOnlyFile:
         fspec = FileSpec(
             data={
                 "image": {
-                    "pixels": np.zeros((n_frames, 32, 24, 1), dtype=np.uint8),
+                    "values": np.zeros((n_frames, 32, 24, 1), dtype=np.uint8),
                     "extent": np.array([0, 0.05, 0, 0.04, -0.04, -0.01], dtype=np.float32),
                 },
             },
@@ -430,7 +430,7 @@ class TestImageOnlyFile:
             assert "image" in f.data
             proxy = f.data.image
             assert isinstance(proxy, GroupProxy)
-            assert proxy.pixels.shape[0] == n_frames
+            assert proxy.values.shape[0] == n_frames
 
     def test_envelope_only_spec_file(self, tmp_path):
         """File with only envelope_data (no raw_data)."""
@@ -521,7 +521,7 @@ class TestSlicing:
     def test_envelope_slice(self, sliceable_file):
         path, _, env = sliceable_file
         with File(path) as f:
-            cropped = f.data.envelope_data.pixels[:, 8:16, 4:12]
+            cropped = f.data.envelope_data.values[:, 8:16, 4:12]
             np.testing.assert_array_equal(cropped, env[:, 8:16, 4:12])
 
     def test_ellipsis_slice(self, sliceable_file):
@@ -532,17 +532,17 @@ class TestSlicing:
 
 
 class TestSpatialData:
-    """Test saving + reading spatial maps that include pixels + extent."""
+    """Test saving + reading spatial maps that include values + extent."""
 
     @pytest.fixture
     def spatial_file(self, tmp_path):
         n_frames = 3
-        img_pixels = np.random.randint(0, 255, (n_frames, 64, 48, 1), dtype=np.uint8)
+        img_values = np.random.randint(0, 255, (n_frames, 64, 48, 1), dtype=np.uint8)
         img_extent = np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32)
-        seg_pixels = np.random.choice([True, False], (n_frames, 64, 48, 1, 2)).astype(np.bool_)
+        seg_values = np.random.choice([True, False], (n_frames, 64, 48, 1, 2)).astype(np.bool_)
         seg_labels = np.array(["background", "lumen"], dtype=np.str_)
         seg_extent = np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32)
-        sos_pixels = np.full((n_frames, 64, 48, 1), 1540.0, dtype=np.float32)
+        sos_values = np.full((n_frames, 64, 48, 1), 1540.0, dtype=np.float32)
         sos_extent = np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32)
 
         path = tmp_path / "spatial.hdf5"
@@ -550,13 +550,13 @@ class TestSpatialData:
             path,
             data={
                 "envelope_data": _make_map(np.ones((n_frames, 32, 24), dtype=np.float32)),
-                "image": {"pixels": img_pixels, "extent": img_extent},
+                "image": {"values": img_values, "extent": img_extent},
                 "segmentation": {
-                    "pixels": seg_pixels,
+                    "values": seg_values,
                     "labels": seg_labels,
                     "extent": seg_extent,
                 },
-                "sos_map": {"pixels": sos_pixels, "extent": sos_extent},
+                "sos_map": {"values": sos_values, "extent": sos_extent},
             },
             scan=_scan_minimal(n_frames=n_frames),
             probe_name="spatial_test",
@@ -564,54 +564,54 @@ class TestSpatialData:
         f.close()
         return (
             str(path),
-            img_pixels,
+            img_values,
             img_extent,
-            seg_pixels,
+            seg_values,
             seg_labels,
-            sos_pixels,
+            sos_values,
         )
 
     def test_image_group_structure(self, spatial_file):
-        path, img_pixels, img_extent, *_ = spatial_file
+        path, img_values, img_extent, *_ = spatial_file
         with File(path) as f:
             proxy = f.data.image
             assert isinstance(proxy, GroupProxy)
-            assert "pixels" in proxy
+            assert "values" in proxy
             assert "extent" in proxy
 
-    def test_image_pixels_read(self, spatial_file):
-        path, img_pixels, *_ = spatial_file
+    def test_image_values_read(self, spatial_file):
+        path, img_values, *_ = spatial_file
         with File(path) as f:
-            np.testing.assert_array_equal(f.data.image.pixels[()], img_pixels)
+            np.testing.assert_array_equal(f.data.image.values[()], img_values)
 
-    def test_image_pixels_slice(self, spatial_file):
-        path, img_pixels, *_ = spatial_file
+    def test_image_values_slice(self, spatial_file):
+        path, img_values, *_ = spatial_file
         with File(path) as f:
-            frame0 = f.data.image.pixels[0]
-            np.testing.assert_array_equal(frame0, img_pixels[0])
+            frame0 = f.data.image.values[0]
+            np.testing.assert_array_equal(frame0, img_values[0])
 
-    def test_segmentation_pixels_and_labels(self, spatial_file):
-        path, _, _, seg_pixels, seg_labels, _ = spatial_file
+    def test_segmentation_values_and_labels(self, spatial_file):
+        path, _, _, seg_values, seg_labels, _ = spatial_file
         with File(path) as f:
-            np.testing.assert_array_equal(f.data.segmentation.pixels[()], seg_pixels)
+            np.testing.assert_array_equal(f.data.segmentation.values[()], seg_values)
             loaded_labels = f.data.segmentation.labels.asstr()[()]
             np.testing.assert_array_equal(loaded_labels, seg_labels)
 
     def test_sos_map_values(self, spatial_file):
-        path, *_, sos_pixels = spatial_file
+        path, *_, sos_values = spatial_file
         with File(path) as f:
-            np.testing.assert_allclose(f.data.sos_map.pixels[()], sos_pixels, atol=1e-6)
+            np.testing.assert_allclose(f.data.sos_map.values[()], sos_values, atol=1e-6)
 
     def test_spatial_round_trip_via_validate_spec(self, spatial_file):
-        path, img_pixels, img_extent, seg_pixels, seg_labels, sos_pixels = spatial_file
+        path, img_values, img_extent, seg_values, seg_labels, sos_values = spatial_file
         with File(path) as f:
             spec = f.validate_spec()
 
         assert isinstance(spec.data.image, Image)
-        np.testing.assert_array_equal(spec.data.image.pixels, img_pixels)
+        np.testing.assert_array_equal(spec.data.image.values, img_values)
         np.testing.assert_array_equal(spec.data.image.extent, img_extent)
         assert isinstance(spec.data.segmentation, Segmentation)
-        np.testing.assert_array_equal(spec.data.segmentation.pixels, seg_pixels)
+        np.testing.assert_array_equal(spec.data.segmentation.values, seg_values)
         np.testing.assert_array_equal(spec.data.segmentation.labels, seg_labels)
 
 
@@ -663,7 +663,7 @@ class TestFileCreate:
             scan=_scan_minimal(n_frames=3),
             overwrite=True,
         )
-        assert f.data.envelope_data.pixels.shape[0] == 3
+        assert f.data.envelope_data.values.shape[0] == 3
         f.close()
 
     def test_create_validates_before_writing(self, tmp_path):

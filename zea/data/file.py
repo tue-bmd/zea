@@ -31,7 +31,7 @@ class GroupProxy:
             # slicing triggers the actual read, just like plain h5py
             f.data.raw_data[:, :n_tx]
             # nested groups work too
-            f.data.image.pixels[0]
+            f.data.image.values[0]
     """
 
     __slots__ = ("_group",)
@@ -219,7 +219,7 @@ class File(h5py.File):
 
             with File(path) as f:
                 f.data.raw_data[:, :n_tx]  # read a slice
-                f.data.image.pixels[0]  # nested group access
+                f.data.image.values[0]  # nested group access
         """
         if "data" not in self:
             raise KeyError("No 'data' group in this file.")
@@ -820,7 +820,7 @@ def load_file_all_data_types(
 
     data_dict = {}
 
-    # Data types stored as HDF5 groups (Map-based specs with pixels/extent)
+    # Data types stored as HDF5 groups (Map-based specs with values/extent)
     _GROUP_DATA_TYPES = {"beamformed_data", "envelope_data", "image_sc", "image"}
 
     with File(path, mode="r") as file:
@@ -843,7 +843,7 @@ def load_file_all_data_types(
                 for sub_key in item.keys():
                     ds = item[sub_key]
                     if isinstance(ds, h5py.Dataset):
-                        if sub_key == "pixels":
+                        if sub_key == "values":
                             group_dict[sub_key] = ds[_indices]
                         elif h5py.check_string_dtype(ds.dtype) is not None:
                             val = ds.asstr()[()]

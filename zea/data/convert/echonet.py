@@ -432,13 +432,13 @@ class H5Processor:
         assert sequence.min() >= self._process_range[0], sequence.min()
         assert sequence.max() <= self._process_range[1], sequence.max()
 
-        image_sc_pixels = self._translate(sequence)
-        data = {"image_sc": {"pixels": image_sc_pixels}}
+        image_sc_values = self._translate(sequence)
+        data = {"image_sc": {"values": image_sc_values}}
         if accepted:
             polar_db = self._translate(polar_im_set)
             polar_uint8 = polar_db.astype(np.uint8)
             polar_uint8 = np.expand_dims(polar_uint8, axis=-1)  # add y dim
-            data["image"] = {"pixels": polar_uint8}
+            data["image"] = {"values": polar_uint8}
 
         File.create(
             path=out_h5,

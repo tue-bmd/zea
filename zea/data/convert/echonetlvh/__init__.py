@@ -316,8 +316,8 @@ class LVHProcessor(H5Processor):
         return File.create(
             out_h5,
             data={
-                "image_sc": {"pixels": image_sc_np},
-                "image": {"pixels": polar_4d},
+                "image_sc": {"values": image_sc_np},
+                "image": {"values": polar_4d},
             },
             scan={},
             probe_name="generic",

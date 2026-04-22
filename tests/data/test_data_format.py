@@ -182,7 +182,7 @@ def test_overwrite(tmp_hdf5_path):
 def test_image_only(tmp_hdf5_path):
     """Tests creating a file with only image_sc data (no scan)."""
     image_sc = {
-        "pixels": np.zeros((n_frames, 256, 256), dtype=np.uint8),
+        "values": np.zeros((n_frames, 256, 256), dtype=np.uint8),
         "extent": np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32),
     }
     f = File.create(
@@ -195,14 +195,14 @@ def test_image_only(tmp_hdf5_path):
     f.close()
 
     with File(tmp_hdf5_path) as dataset:
-        assert dataset.data.image_sc.pixels.shape == (n_frames, 256, 256)
+        assert dataset.data.image_sc.values.shape == (n_frames, 256, 256)
 
 
 def test_custom_map(tmp_hdf5_path):
     """Tests creating a file with a custom map element in the data group."""
     import warnings
 
-    custom_pixels = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)
+    custom_values = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)
     custom_extent = np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32)
 
     with warnings.catch_warnings():
@@ -212,7 +212,7 @@ def test_custom_map(tmp_hdf5_path):
             data={
                 "raw_data": DATA["raw_data"],
                 "my_custom_overlay": {
-                    "pixels": custom_pixels,
+                    "values": custom_values,
                     "extent": custom_extent,
                     "description": "custom overlay map",
                     "unit": "a.u.",
@@ -225,7 +225,7 @@ def test_custom_map(tmp_hdf5_path):
 
     with File(tmp_hdf5_path) as f:
         assert "my_custom_overlay" in f["data"]
-        np.testing.assert_array_equal(f.data.my_custom_overlay.pixels[:], custom_pixels)
+        np.testing.assert_array_equal(f.data.my_custom_overlay.values[:], custom_values)
         np.testing.assert_array_equal(f.data.my_custom_overlay.extent[:], custom_extent)
 
 
@@ -245,7 +245,7 @@ def test_save_file_custom_maps(tmp_hdf5_path, _scan_and_probe):
     import warnings
 
     scan, probe = _scan_and_probe
-    custom_pixels = np.zeros((n_frames, 32, 32, 1), dtype=np.uint8)
+    custom_values = np.zeros((n_frames, 32, 32, 1), dtype=np.uint8)
     custom_extent = np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32)
 
     with warnings.catch_warnings():
@@ -257,7 +257,7 @@ def test_save_file_custom_maps(tmp_hdf5_path, _scan_and_probe):
             raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
             custom_maps={
                 "my_overlay": {
-                    "pixels": custom_pixels,
+                    "values": custom_values,
                     "extent": custom_extent,
                 }
             },
@@ -265,7 +265,7 @@ def test_save_file_custom_maps(tmp_hdf5_path, _scan_and_probe):
 
     with File(tmp_hdf5_path) as f:
         assert "my_overlay" in f["data"]
-        np.testing.assert_array_equal(f.data.my_overlay.pixels[:], custom_pixels)
+        np.testing.assert_array_equal(f.data.my_overlay.values[:], custom_values)
         np.testing.assert_array_equal(f.data.my_overlay.extent[:], custom_extent)
 
 

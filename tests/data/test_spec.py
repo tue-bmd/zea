@@ -23,18 +23,18 @@ from zea.data.spec import (
 
 def test_segmentation_spec():
     # Correct usage
-    pixels = np.zeros((10, 256, 256, 1, 4), dtype=np.bool_)
+    values = np.zeros((10, 256, 256, 1, 4), dtype=np.bool_)
     labels = np.array(["background", "label1", "label2", "label3"], dtype=np.str_)
     extent = np.array([0.0, 1.0, 0.0, 1.0, -1.0, 0.0], dtype=np.float32)
-    segmentation = Segmentation(pixels=pixels, labels=labels, extent=extent)
-    assert segmentation.pixels.shape == (10, 256, 256, 1, 4)
+    segmentation = Segmentation(values=values, labels=labels, extent=extent)
+    assert segmentation.values.shape == (10, 256, 256, 1, 4)
     assert segmentation.labels.shape == (4,)
     assert segmentation.extent.shape == (6,)
 
     # Incorrect usage: labels shape mismatch
     with pytest.raises(ValueError):
         Segmentation(
-            pixels=pixels, labels=np.array(["background", "label1"], dtype=np.str_), extent=extent
+            values=values, labels=np.array(["background", "label1"], dtype=np.str_), extent=extent
         )
 
 
@@ -93,28 +93,28 @@ def _example_data(n_frames, n_tx, n_el, n_ax, n_ch):
     return {
         "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
         "image": {
-            "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+            "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
             "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
         },
         "segmentation": {
-            "pixels": np.zeros((n_frames, 16, 12, 1, 2), dtype=np.bool_),
+            "values": np.zeros((n_frames, 16, 12, 1, 2), dtype=np.bool_),
             "labels": np.array(["background", "tissue"], dtype=np.str_),
             "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
         },
         "sos_map": {
-            "pixels": np.full((n_frames, 16, 12, 1), 1540.0, dtype=np.float32),
+            "values": np.full((n_frames, 16, 12, 1), 1540.0, dtype=np.float32),
             "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
         },
         "strain": {
-            "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.float32),
+            "values": np.zeros((n_frames, 16, 12, 1), dtype=np.float32),
             "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
         },
         "swe": {
-            "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.float32),
+            "values": np.zeros((n_frames, 16, 12, 1), dtype=np.float32),
             "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
         },
         "tissue_doppler": {
-            "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.float32),
+            "values": np.zeros((n_frames, 16, 12, 1), dtype=np.float32),
             "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
         },
     }
@@ -345,7 +345,7 @@ def test_data_accepts_custom_map_keys_and_warns():
             data={
                 "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                 "custom_map": {
-                    "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+                    "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
                     "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
                     "description": "This is a custom map",
                     "unit": "mm",
@@ -380,7 +380,7 @@ def test_data_custom_map_dtype_error_includes_map_key_context():
             data={
                 "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                 "custom_map": {
-                    "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.bool_),
+                    "values": np.zeros((n_frames, 16, 12, 1), dtype=np.bool_),
                     "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
                 },
             },
@@ -487,26 +487,26 @@ class TestDataValidationErrors:
             DataSpec()
 
     def test_map_wrong_pixel_dtype_raises(self):
-        """SosMap inherits FloatMap – pixels must be float32, not uint8."""
-        with pytest.raises(TypeError, match="pixels"):
+        """SosMap inherits FloatMap – values must be float32, not uint8."""
+        with pytest.raises(TypeError, match="values"):
             SosMap(
-                pixels=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
                 extent=np.zeros(6, dtype=np.float32),
             )
 
     def test_image_wrong_pixel_dtype_raises(self):
-        """Image is UnsignedIntMap – pixels must be uint8, not float32."""
-        with pytest.raises(TypeError, match="pixels"):
+        """Image is UnsignedIntMap – values must be uint8, not float32."""
+        with pytest.raises(TypeError, match="values"):
             Image(
-                pixels=np.zeros((2, 16, 12, 1), dtype=np.float32),
+                values=np.zeros((2, 16, 12, 1), dtype=np.float32),
                 extent=np.zeros(6, dtype=np.float32),
             )
 
     def test_segmentation_wrong_pixel_dtype_raises(self):
-        """Segmentation is BooleanMap – pixels must be bool_, not float32."""
-        with pytest.raises(TypeError, match="pixels"):
+        """Segmentation is BooleanMap – values must be bool_, not float32."""
+        with pytest.raises(TypeError, match="values"):
             Segmentation(
-                pixels=np.zeros((2, 16, 12, 1, 2), dtype=np.float32),
+                values=np.zeros((2, 16, 12, 1, 2), dtype=np.float32),
                 labels=np.array(["a", "b"], dtype=np.str_),
                 extent=np.zeros(6, dtype=np.float32),
             )
@@ -515,7 +515,7 @@ class TestDataValidationErrors:
         """extent must be (6,) or (n_frames, 6) — (3,) should fail."""
         with pytest.raises(ValueError, match="extent"):
             Image(
-                pixels=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
                 extent=np.zeros(3, dtype=np.float32),
             )
 
@@ -532,7 +532,7 @@ class TestDataValidationErrors:
         with pytest.raises(ValueError, match="n_ch"):
             DataSpec(
                 beamformed_data={
-                    "pixels": np.zeros((2, 8, 6, 3), dtype=np.float32),
+                    "values": np.zeros((2, 8, 6, 3), dtype=np.float32),
                     "extent": np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32),
                 }
             )
@@ -578,25 +578,3 @@ class TestMetadataAndMetricsValidationErrors:
                     }
                 },
             )
-
-    n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
-
-    with pytest.warns(
-        match="Subject ID is not provided; please consider adding an ID for better traceability"
-    ):
-        FileSpec(
-            data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
-            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            metadata={
-                "subject": {
-                    "type": "human",
-                    "age": np.uint8(42),
-                    "sex": "f",
-                    "fat_percentage": np.float32(17.5),
-                }
-            },
-            metrics={
-                "common_midpoint_phase_error": np.zeros((n_frames,), dtype=np.float32),
-                "coherence_factor": np.ones((n_frames,), dtype=np.float32),
-            },
-        )

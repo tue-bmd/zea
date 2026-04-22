@@ -67,7 +67,7 @@ def test_dataset_indexing(file_idx, idx, expected_shape, dummy_dataset_path):
     dataset = Dataset.from_config(**config.data)
 
     file = dataset[file_idx]
-    data = file[file.format_key(config.data.dtype)]["pixels"][idx]
+    data = file[file.format_key(config.data.dtype)]["values"][idx]
 
     assert data.shape == expected_shape, (
         f"Data shape {data.shape} does not match expected shape {expected_shape}"
