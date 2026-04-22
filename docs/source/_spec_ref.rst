@@ -191,7 +191,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``beamformed_data``
 
-         Beamformed (beamsummed) data. Values are ``float32`` in (n_frames, x, z, n_ch) or (n_frames, x, z, y, n_ch); ``labels`` names each channel (RF or I/Q).
+         Beamformed (beamsummed) data. Values are ``float32`` in (n_frames, z, x, n_ch) or (n_frames, z, x, y, n_ch); ``labels`` names each channel (RF or I/Q).
 
          .. list-table::
             :header-rows: 1
@@ -204,7 +204,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32``
-              - (n_frames, x, z, y, n_ch) or (n_frames, x, z, n_ch)
+              - (n_frames, z, x, y, n_ch) or (n_frames, z, x, n_ch)
               - –
               - |badge-req|
             * - ``extent``
@@ -240,7 +240,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``envelope_data``
 
-         Envelope-detected data. Values are ``float32`` in (n_frames, x, z) or (n_frames, x, z, y).
+         Envelope-detected data. Values are ``float32`` in (n_frames, z, x) or (n_frames, z, x, y).
 
          .. list-table::
             :header-rows: 1
@@ -253,7 +253,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32``
-              - (n_frames, x, z, y) or (n_frames, x, z)
+              - (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``extent``
@@ -289,7 +289,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``image_sc``
 
-         Scan-converted image. Values are ``float32`` in (n_frames, x, z) or (n_frames, x, z, y).
+         Scan-converted image. Values are ``float32`` in (n_frames, z, x) or (n_frames, z, x, y).
 
          .. list-table::
             :header-rows: 1
@@ -338,7 +338,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``image``
 
-         Reconstructed (log-compressed) image. Values are ``uint8`` in (n_frames, x, z) or (n_frames, x, z, y).
+         Reconstructed (log-compressed) image. Values are ``uint8`` in (n_frames, z, x) or (n_frames, z, x, y).
 
          .. list-table::
             :header-rows: 1
@@ -387,7 +387,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``segmentation``
 
-         Semantic segmentation mask. Values are ``bool`` in (n_frames, x, z, y, n_labels); ``labels`` names each channel.
+         Semantic segmentation mask. Values are ``bool`` in (n_frames, z, x, y, n_labels); ``labels`` names each channel.
 
          .. list-table::
             :header-rows: 1
@@ -400,7 +400,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``bool``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``extent``
@@ -449,7 +449,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``extent``
@@ -498,7 +498,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``extent``
@@ -547,7 +547,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``extent``
@@ -596,7 +596,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``extent``
@@ -645,7 +645,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32``
-              - (n_frames, x, z, y, n_spatial_ch) or (n_frames, x, z, y) or (n_frames, x, z)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``extent``

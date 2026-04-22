@@ -288,11 +288,11 @@ ROOT_ATTRS_TABLE = """\
 
 # Short descriptions for each spatial map type
 MAP_DESCRIPTIONS = {
-    "beamformed_data": "Beamformed (beamsummed) data. Values are ``float32`` in (n_frames, x, z, n_ch) or (n_frames, x, z, y, n_ch); ``labels`` names each channel (RF or I/Q).",  # noqa: E501
-    "envelope_data": "Envelope-detected data. Values are ``float32`` in (n_frames, x, z) or (n_frames, x, z, y).",  # noqa: E501
-    "image_sc": "Scan-converted image. Values are ``float32`` in (n_frames, x, z) or (n_frames, x, z, y).",  # noqa: E501
-    "image": "Reconstructed (log-compressed) image. Values are ``uint8`` in (n_frames, x, z) or (n_frames, x, z, y).",  # noqa: E501
-    "segmentation": "Semantic segmentation mask. Values are ``bool`` in (n_frames, x, z, y, n_labels); ``labels`` names each channel.",  # noqa: E501
+    "beamformed_data": "Beamformed (beamsummed) data. Values are ``float32`` in (n_frames, z, x, n_ch) or (n_frames, z, x, y, n_ch); ``labels`` names each channel (RF or I/Q).",  # noqa: E501
+    "envelope_data": "Envelope-detected data. Values are ``float32`` in (n_frames, z, x) or (n_frames, z, x, y).",  # noqa: E501
+    "image_sc": "Scan-converted image. Values are ``float32`` in (n_frames, z, x) or (n_frames, z, x, y).",  # noqa: E501
+    "image": "Reconstructed (log-compressed) image. Values are ``uint8`` in (n_frames, z, x) or (n_frames, z, x, y).",  # noqa: E501
+    "segmentation": "Semantic segmentation mask. Values are ``bool`` in (n_frames, z, x, y, n_labels); ``labels`` names each channel.",  # noqa: E501
     "sos_map": "Speed-of-sound map in m/s. Values are ``float32``.",
     "strain_percentage_map": "Strain map in %. Values are ``float32``.",
     "shear_wave_elastography_map": "Shear-wave elastography map in m/s. Values are ``float32``.",

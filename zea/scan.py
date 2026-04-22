@@ -414,17 +414,40 @@ class Scan(Parameters):
 
     @cache_with_dependencies("grid", "grid_type", "distance_to_apex")
     def extent(self):
-        """The extent of the beamforming grid in the format (xmin, xmax, zmax, zmin).
-        Can be directly used with `plt.imshow(x, extent=scan.extent)` for visualization.
         """
-        xlims = (self.grid[:, :, 0].min(), self.grid[:, :, 0].max())
-        zlims = (self.grid[:, :, 2].min(), self.grid[:, :, 2].max())
+        The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
+        """
+        xlims = (self.grid[..., 0].min(), self.grid[..., 0].max())
+        ylims = (self.grid[..., 1].min(), self.grid[..., 1].max())
+        zlims = (self.grid[..., 2].min(), self.grid[..., 2].max())
 
         # For polar grids, adjust zlims to account for distance to apex
         if self.grid_type == "polar":
             zlims = (zlims[0] + self.distance_to_apex, zlims[1])
 
-        return np.array([xlims[0], xlims[1], zlims[1], zlims[0]])
+        return np.array(
+            [
+                xlims[0],
+                xlims[1],
+                ylims[0],
+                ylims[1],
+                zlims[0],
+                zlims[1],
+            ]
+        )
+
+    @cache_with_dependencies("extent")
+    def extent_imshow(self):
+        """The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
+
+        Returns:
+            np.ndarray: The extent of the beamforming grid in the format (xmin, xmax, zmax, zmin).
+                This format can be used directly in matplotlib's ``plt.imshow``.
+        """
+        xlims_0, xlims_1, ylims_0, ylims_1, zlims_0, zlims_1 = self.extent
+        if ylims_0 != ylims_1:
+            log.warning("Are you sure you want to use 2D imshow extent for a 3D grid?")
+        return np.array([xlims_0, xlims_1, zlims_1, zlims_0])
 
     @cache_with_dependencies("grid")
     def flatgrid(self):

@@ -476,11 +476,11 @@ class Map(Spec):
     The most flexible map spec, which can be used for any spatially aligned data product.
 
     Args:
-        values: The map values of shape (n_frames, x, z, y, n_ch) or (n_frames, x, z, y)
-            and type uint8 or float32 or int16.
+        values: The map values of shape (n_frames, z, x, y, n_ch) or (n_frames, z, x, y)
+            or (n_frames, z, x, n_ch) or (n_frames, z, x) and type uint8 or float32 or int16.
         extent: The map extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
         labels: The labels corresponding to the `n_ch` channels in the values.
             This is required when values have an n_ch dimension, and should be None otherwise.
             For IQ data, this would typically be ["I", "Q"].
@@ -503,9 +503,9 @@ class Map(Spec):
         "values": {
             "dtype": (np.uint8, np.float32, np.int16, np.complex64),
             "shape": (
-                ("n_frames", "x", "z", "y", "n_spatial_ch"),
-                ("n_frames", "x", "z", "y"),
-                ("n_frames", "x", "z"),
+                ("n_frames", "z", "x", "y", "n_spatial_ch"),
+                ("n_frames", "z", "x", "y"),
+                ("n_frames", "z", "x"),
             ),
         },
         "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
@@ -531,7 +531,7 @@ class Map(Spec):
             if np.any(self.extent[..., 2] > self.extent[..., 3]):
                 raise ValueError("Map extent ylims must have ymin <= ymax")
             if np.any(self.extent[..., 4] > self.extent[..., 5]):
-                raise ValueError("Map extent zlims must have zmax <= zmin")
+                raise ValueError("Map extent zlims must have zmin <= zmax")
 
             # Ultrasound specific warning: if extent values are unusually large, log a warning
             if np.any(self.extent >= 1.0) or np.any(self.extent <= -1.0):
@@ -590,17 +590,17 @@ class Segmentation(BooleanMap):
     """Segmentation data and spatial extent metadata.
 
     Args:
-        values: The segmentation values of shape (n_frames, x, z, y, n_labels) and type bool.
+        values: The segmentation values of shape (n_frames, z, x, y, n_labels) and type bool.
         extent: The segmentation extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
         labels: The labels corresponding to the segmentation values, where each unique value
             in the values corresponds to a label in this list of shape (n_labels,) and type str.
     """
 
     def __post_init__(self):
         assert self.values.ndim == 5, (
-            "Segmentation values must have 5 dimensions (n_frames, x, z, y, n_labels)"
+            "Segmentation values must have 5 dimensions (n_frames, z, x, y, n_labels)"
         )
         super().__post_init__()
 
@@ -610,7 +610,7 @@ class Image(Map):
     """Reconstructed (log-compressed) image data and spatial extent metadata.
 
     Args:
-        values: The image values of shape (n_frames, x, z, y) or (n_frames, x, z)
+        values: The image values of shape (n_frames, z, x, y) or (n_frames, z, x)
             and type uint8 or float32. For float32 values, the values should be in dB
             (between -inf and 0).
         extent: The image extent in meters of shape (n_frames, 6) or (6,).
@@ -645,12 +645,12 @@ class ImageSc(Image):
     """Scan-converted image data and spatial extent metadata.
 
     Args:
-        values: The scan-converted values of shape (n_frames, x, z, y) or (n_frames, x, z)
+        values: The scan-converted values of shape (n_frames, z, x, y) or (n_frames, z, x)
             and type uint8 or float32. For float32 values, the values should be in dB
             (between -inf and 0).
         extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
     """
 
 
@@ -659,12 +659,12 @@ class BeamformedData(FloatMap):
     """Beamformed (beamsummed) data and spatial extent metadata.
 
     Args:
-        values: The beamformed data of shape (n_frames, x, z, n_ch) or
-            (n_frames, x, z, y, n_ch) and type float32.
+        values: The beamformed data of shape (n_frames, z, x, n_ch) or
+            (n_frames, z, x, y, n_ch) and type float32.
             n_ch is 1 for RF data or 2 for IQ data.
         extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
         labels: The labels for the channel dimension, e.g. ["RF"] or ["I", "Q"].
             Auto-generated from n_ch if not provided.
     """
@@ -674,8 +674,8 @@ class BeamformedData(FloatMap):
         "values": {
             "dtype": np.float32,
             "shape": (
-                ("n_frames", "x", "z", "y", "n_ch"),
-                ("n_frames", "x", "z", "n_ch"),
+                ("n_frames", "z", "x", "y", "n_ch"),
+                ("n_frames", "z", "x", "n_ch"),
             ),
         },
         "labels": {"dtype": np.str_, "shape": ("n_ch",)},
@@ -703,10 +703,10 @@ class EnvelopeData(FloatMap):
 
     Args:
         values: The envelope data of shape (n_frames, x, z) or
-            (n_frames, x, z, y) and type float32.
+            (n_frames, z, x, y) and type float32.
         extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
     """
 
     SCHEMA = {
@@ -714,8 +714,8 @@ class EnvelopeData(FloatMap):
         "values": {
             "dtype": np.float32,
             "shape": (
-                ("n_frames", "x", "z", "y"),
-                ("n_frames", "x", "z"),
+                ("n_frames", "z", "x", "y"),
+                ("n_frames", "z", "x"),
             ),
         },
     }
@@ -726,9 +726,11 @@ class SosMap(FloatMap):
     """Speed-of-sound map data and spatial extent metadata.
 
     Args:
-        values: The speed-of-sound map values in m/s of shape (n_frames, x, z, y)
+        values: The speed-of-sound map values in m/s of shape (n_frames, z, x, y)
             and type float32.
         extent: The speed-of-sound map extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
     """
 
     def __post_init__(self):
@@ -750,8 +752,10 @@ class StrainPercentageMap(FloatMap):
     """Strain map data and spatial extent metadata.
 
     Args:
-        values: The strain values in % of shape (n_frames, x, z, y) and type float32.
+        values: The strain values in % of shape (n_frames, z, x, y) and type float32.
         extent: The strain extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
     """
 
     def __post_init__(self):
@@ -767,7 +771,7 @@ class ShearWaveElastographyMap(FloatMap):
 
     Args:
         values: The shear-wave elastography values in m/s of shape
-            (n_frames, x, z, y) and type float32.
+            (n_frames, z, x, y) and type float32.
         extent: The SWE extent in meters of shape (n_frames, 6) or (6,).
     """
 
@@ -783,7 +787,7 @@ class TissueDopplerMap(FloatMap):
     """Tissue Doppler data and spatial extent metadata.
 
     Args:
-        values: The tissue Doppler values in m/s of shape (n_frames, x, z, y)
+        values: The tissue Doppler values in m/s of shape (n_frames, z, x, y)
             and type float32.
         extent: The tissue Doppler extent in meters of shape (n_frames, 6) or (6,).
     """
@@ -801,7 +805,7 @@ class ColorDopplerMap(FloatMap):
 
     Args:
         values: The color Doppler velocity values in m/s of shape
-            (n_frames, x, z, y) and type float32. Positive values
+            (n_frames, z, x, y) and type float32. Positive values
             indicate flow towards the transducer, negative values
             indicate flow away from the transducer.
         extent: The color Doppler extent in meters of shape (n_frames, 6) or (6,).
