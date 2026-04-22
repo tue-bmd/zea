@@ -65,7 +65,7 @@ def generate_dummy_data_dict(
             "extent": _extent,
         }
         data_dict["image_sc"] = {
-            "pixels": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32),
+            "pixels": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.uint8),
             "extent": _extent,
         }
 
@@ -97,7 +97,7 @@ def generate_example_dataset(
     """
 
     data = generate_dummy_data_dict(
-        n_frames, n_tx, n_ax, n_el, n_ch, grid_size_z, grid_size_x, add_optional_dtypes
+        n_frames, n_ax, n_el, n_tx, n_ch, grid_size_z, grid_size_x, add_optional_dtypes
     )
     scan = generate_dummy_scan(n_tx, n_el, sound_speed, center_frequency, sampling_frequency)
 
