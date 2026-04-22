@@ -163,7 +163,7 @@ def test_transmit_schemes(
     # Check if the scatterer is in the right location in the image
     _test_location(
         image.T,
-        extent=scan.extent(imshow=True),
+        extent=scan.extent_imshow,
         true_position=ultrasound_scatterers["positions"][0, target_scatterer_index],
     )
     # Check that the pipeline produced the expected outputs
@@ -228,7 +228,7 @@ def test_polar_grid(default_pipeline: ops.Pipeline, ultrasound_scatterers):
     # Check if the scatterer is in the right location in the image
     _test_location(
         image.T,
-        extent=scan.extent(imshow=True),
+        extent=scan.extent_imshow,
         true_position=ultrasound_scatterers["positions"][0, target_scatterer_index],
     )
 
