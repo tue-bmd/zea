@@ -112,8 +112,8 @@ class DiffusionModel(DeepGenerativeModel):
         self.max_t = max_t
 
         if network_name == "unet_time_conditional":
+            self.network_kwargs |= {"image_shape": self.input_shape}
             self.network = get_time_conditional_unetwork(
-                image_shape=self.input_shape,
                 **self.network_kwargs,
             )
         elif network_name == "dense_time_conditional":
