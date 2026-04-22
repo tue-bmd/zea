@@ -416,14 +416,10 @@ class Scan(Parameters):
     def extent(self, imshow=False):
         """The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
 
-        An optional bool parameter "imshow" can be passed to return an extent
-        (xmin, xmax, zmax, zmin) compatible with `plt.imshow` for 2D grids.
-
         Args:
-            imshow (bool): Whether to return extent in the format compatible with
-            `plt.imshow` for 2D grids, allowing direct use via
-            `plt.imshow(x, extent=scan.extent(imshow=True))`. In this case, the extent
-            is returned as (xmin, xmax, zmax, zmin).
+            imshow (bool): Whether to return extent in the format compatible with ``plt.imshow``
+                for 2D grids, allowing direct use via ``extent=scan.extent(imshow=True)`` .
+                In this case, the extent is returned as (xmin, xmax, zmax, zmin).
 
         Returns:
             np.ndarray: The extent of the beamforming grid in the format
