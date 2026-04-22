@@ -38,34 +38,6 @@ By default the zea dataformat saves all the data to an hdf5 file with the follow
           └── center_frequency: 1MHz
 
 The data is stored in the ``data`` group and the scan parameters are stored in the ``scan``.
-However, when we do an adaptive acquisition, some scanning parameters might change. These
-blocks of data with consistent scanning parameters we call events. In the case we have multiple
-events, we store the data in the following structure:
-
-.. code-block:: text
-
-    zea_dataset.hdf5
-    ├── event_0
-    │   ├── data
-    │   └── scan
-    │       └── center_frequency: 1MHz
-    ├── event_1
-    │   ├── data
-    │   └── scan
-    │       └── center_frequency: 2MHz
-    ├── event_2
-    │   ├── data
-    │   └── scan
-    └── event_3
-        ├── data
-        └── scan
-
-This structure is supported by the zea toolbox. The way we can save the data in this structure
-from the Verasonics, is by changing the setup script to keep track of the TX struct at each event.
-
-The way this is done is still in development, an example of such an acquisition script that is
-compatible with saving event structures is found here:
-`setup_agent.m <https://github.com/tue-bmd/needle-tracking/blob/ius2024-demo-nc/verasonics/setup_agent.m>`_
 
 Adding additional elements
 --------------------------
@@ -1245,95 +1217,35 @@ class VerasonicsFile(h5py.File):
             enable_compression (bool, optional): Whether to enable compression when saving
                 the zea file. Defaults to True.
         """
-        if "TX_Agent" in self:
-            active_keys = self["TX_Agent"].keys()
-            log.info(
-                f"Found active imaging data with {len(active_keys)} events. "
-                "Will convert and save all parameters for each event separately."
-            )
-            num_events = set(self["TX_Agent"][key].shape[-1] for key in active_keys)
-            assert len(num_events) == 1, (
-                "All TX_Agent entries should have the same number of events."
-            )
-            num_events = num_events.pop()
+        # Here we call all the functions to read the data from the file
+        log.info("Reading Verasonics file...")
+        result = self.read_verasonics_file(
+            additional_functions=additional_functions,
+            frames=frames,
+            allow_accumulate=allow_accumulate,
+        )
 
-            # loop over TX_Agent entries and overwrite TX each time
-            all_event_data = {}
-            for event in range(num_events):
-                all_event_data[event] = self.read_verasonics_file(
-                    event=event,
-                    additional_functions=additional_functions,
-                    allow_accumulate=allow_accumulate,
-                )
+        data_dict, scan_dict, additional_elements, lens_correction = _split_verasonics_data(result)
 
-            compression = "gzip" if enable_compression else None
-
-            # Write event structure manually
-            output_path = Path(output_path)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            with h5py.File(str(output_path), "w") as f:
-                f.attrs["probe_name"] = self.probe_name
-                f.attrs["description"] = "Verasonics data with multiple events"
-                f.attrs["event_structure"] = True
-
-                for event_idx in range(num_events):
-                    edata = all_event_data[event_idx]
-                    data_dict, scan_dict, additional_elements, lens_correction = (
-                        _split_verasonics_data(edata)
-                    )
-
-                    if lens_correction is not None:
-                        description = (
-                            f"Verasonics event {event_idx} "
-                            f"(lens correction: {lens_correction} wavelengths)"
-                        )
-                    else:
-                        description = f"Verasonics event {event_idx}"
-
-                    data_spec = DataSpec(**data_dict)
-                    scan_spec = ScanSpec(**scan_dict)
-
-                    event_group = f.create_group(f"event_{event_idx}")
-                    event_group.attrs["description"] = description
-                    data_group = event_group.create_group("data")
-                    data_spec.store_in_group(data_group, compression=compression or "gzip")
-                    scan_group = event_group.create_group("scan")
-                    scan_spec.store_in_group(scan_group, compression=compression or "gzip")
-
-                    _write_user_additional_elements(f, additional_elements, f"event_{event_idx}")
-
+        if lens_correction is not None:
+            description = f"Verasonics data (lens correction: {lens_correction} wavelengths)"
         else:
-            # Here we call all the functions to read the data from the file
-            log.info("Reading Verasonics file...")
-            result = self.read_verasonics_file(
-                additional_functions=additional_functions,
-                frames=frames,
-                allow_accumulate=allow_accumulate,
-            )
+            description = "Verasonics data"
 
-            data_dict, scan_dict, additional_elements, lens_correction = _split_verasonics_data(
-                result
-            )
+        # Generate the zea dataset
+        log.info("Generating zea dataset...")
+        compression = "gzip" if enable_compression else None
+        File.create(
+            path=output_path,
+            data=data_dict,
+            scan=scan_dict,
+            probe_name=self.probe_name,
+            description=description,
+            compression=compression or "gzip",
+        )
 
-            if lens_correction is not None:
-                description = f"Verasonics data (lens correction: {lens_correction} wavelengths)"
-            else:
-                description = "Verasonics data"
-
-            # Generate the zea dataset
-            log.info("Generating zea dataset...")
-            compression = "gzip" if enable_compression else None
-            File.create(
-                path=output_path,
-                data=data_dict,
-                scan=scan_dict,
-                probe_name=self.probe_name,
-                description=description,
-                compression=compression or "gzip",
-            )
-
-            if additional_elements:
-                _write_user_additional_elements_to_file(output_path, additional_elements)
+        if additional_elements:
+            _write_user_additional_elements_to_file(output_path, additional_elements)
 
 
 _SCAN_KEYS = set(ScanSpec.SCHEMA.keys())
@@ -1372,7 +1284,7 @@ def _write_user_additional_elements(h5file, additional_elements, prefix=""):
     Args:
         h5file: Open h5py.File in write/append mode.
         additional_elements: List of DatasetElement objects from user-defined functions.
-        prefix: Path prefix for element group names (e.g. "event_0").
+        prefix: Path prefix for element group names.
     """
     if not additional_elements:
         return

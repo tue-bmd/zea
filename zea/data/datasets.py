@@ -342,10 +342,7 @@ class Folder:
     def get_data_types(file_path):
         """Get data types from file."""
         with File(file_path) as file:
-            if "data" in file:
-                data_types = list(file["data"].keys())
-            else:
-                data_types = list(file["event_0"]["data"].keys())
+            data_types = list(file["data"].keys())
         return data_types
 
     def _write_validation_file(self, path, num_frames_per_file):

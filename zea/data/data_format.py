@@ -497,7 +497,6 @@ def generate_zea_dataset(
     waveforms_one_way=None,
     waveforms_two_way=None,
     additional_elements=None,
-    event_structure=False,
     cast_to_float=True,
     overwrite=False,
     enable_compression=True,
@@ -556,10 +555,6 @@ def generate_zea_dataset(
         additional_elements (List[DatasetElement]): A list of additional dataset
             elements to be added to the dataset. Each element should be a DatasetElement
             object. The additional elements are added under the scan group.
-        event_structure (bool): Whether to write the dataset with an event structure.
-            In that case all data should be lists with the same length (number of events).
-            The data will be stored under event_i/data and event_i/scan for each event i.
-            Instead of just a single data and scan group.
         cast_to_float (bool): Whether to store data as float32. You may want to set this
             to False if storing images.
         overwrite (bool): Whether to overwrite the file if it already exists. Defaults to False.
@@ -605,41 +600,16 @@ def generate_zea_dataset(
     }
 
     # make sure input arguments of func is same length as data_and_parameters
-    # except `path` and `event_structure` arguments and ofcourse `data_and_parameters` itself
+    # except `path`, `cast_to_float`, `overwrite`, and `enable_compression` arguments
     assert (
-        len(data_and_parameters) == len(inspect.signature(generate_zea_dataset).parameters) - 5
+        len(data_and_parameters) == len(inspect.signature(generate_zea_dataset).parameters) - 4
     ), (
         "All arguments should be put in data_and_parameters except "
-        "`path`, `event_structure`, `cast_to_float`, `overwrite`, and `enable_compression` "
-        "arguments."
+        "`path`, `cast_to_float`, `overwrite`, and `enable_compression` arguments."
     )
-
-    if event_structure:
-        for argument, argument_value in data_and_parameters.items():
-            _num_events = None
-            if argument_value is not None:
-                assert isinstance(argument_value, list), (
-                    f"{argument} should be a list when event_structure is set to True."
-                )
-                num_events = len(argument_value)
-                if _num_events is not None:
-                    assert num_events == _num_events, (
-                        "All arguments should have the same number of events."
-                    )
-                _num_events = num_events
-
-        assert len(set(probe_name)) == 1, "Probe names for all events should be the same"
-        log.info(
-            f"Event structure is set to True. Writing dataset with event "
-            f"structure (found {len(probe_name)} events)."
-        )
-        num_events = len(probe_name)
-        probe_name = probe_name[0]
-        description = description[0]
 
     assert isinstance(probe_name, str), "The probe name must be a string."
     assert isinstance(description, str), "The description must be a string."
-    assert isinstance(event_structure, bool), "The event_structure must be a boolean."
 
     validate_input_data(
         raw_data=raw_data,
@@ -662,34 +632,18 @@ def generate_zea_dataset(
     with File(path, "w") as dataset:
         dataset.attrs["probe"] = probe_name
         dataset.attrs["description"] = description
-        dataset.attrs["event_structure"] = event_structure
         # remove probe and description from data_and_parameters
         data_and_parameters.pop("probe_name")
         data_and_parameters.pop("description")
 
-        if event_structure:
-            for i in range(num_events):
-                _data_and_parameters = {
-                    k: v[i] for k, v in data_and_parameters.items() if v is not None
-                }
-                _write_datasets(
-                    dataset,
-                    data_group_name=f"event_{i}/data",
-                    scan_group_name=f"event_{i}/scan",
-                    cast_to_float=cast_to_float,
-                    enable_compression=enable_compression,
-                    **_data_and_parameters,
-                )
-
-        else:
-            _write_datasets(
-                dataset,
-                data_group_name="data",
-                scan_group_name="scan",
-                cast_to_float=cast_to_float,
-                enable_compression=enable_compression,
-                **data_and_parameters,
-            )
+        _write_datasets(
+            dataset,
+            data_group_name="data",
+            scan_group_name="scan",
+            cast_to_float=cast_to_float,
+            enable_compression=enable_compression,
+            **data_and_parameters,
+        )
 
     validate_file(path)
     log.info(f"zea dataset written to {log.yellow(path)}")
