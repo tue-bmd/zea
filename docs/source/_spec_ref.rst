@@ -227,6 +227,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - –
               - |badge-opt|
+            * - ``min``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``max``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
 
       .. dropdown:: ``envelope_data``
 
@@ -263,6 +273,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - |badge-opt|
             * - ``unit``
               - ``str``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``min``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``max``
+              - ``float32``
               - scalar
               - –
               - |badge-opt|
@@ -305,6 +325,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - –
               - |badge-opt|
+            * - ``min``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``max``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
 
       .. dropdown:: ``image``
 
@@ -341,6 +371,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - |badge-opt|
             * - ``unit``
               - ``str``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``min``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``max``
+              - ``float32``
               - scalar
               - –
               - |badge-opt|
@@ -383,6 +423,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - –
               - |badge-opt|
+            * - ``min``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``max``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
 
       .. dropdown:: ``sos_map``
 
@@ -419,6 +469,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - |badge-opt|
             * - ``unit``
               - ``str``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``min``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``max``
+              - ``float32``
               - scalar
               - –
               - |badge-opt|
@@ -461,6 +521,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - –
               - |badge-opt|
+            * - ``min``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``max``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
 
       .. dropdown:: ``shear_wave_elastography_map``
 
@@ -497,6 +567,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - |badge-opt|
             * - ``unit``
               - ``str``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``min``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``max``
+              - ``float32``
               - scalar
               - –
               - |badge-opt|
@@ -539,6 +619,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - –
               - |badge-opt|
+            * - ``min``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``max``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
 
       .. dropdown:: ``color_doppler``
 
@@ -575,6 +665,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - |badge-opt|
             * - ``unit``
               - ``str``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``min``
+              - ``float32``
+              - scalar
+              - –
+              - |badge-opt|
+            * - ``max``
+              - ``float32``
               - scalar
               - –
               - |badge-opt|

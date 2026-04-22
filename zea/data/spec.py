@@ -487,6 +487,8 @@ class Map(Spec):
         description: An optional free-text description of the map.
         unit: An optional string specifying the physical unit of the map values,
             e.g. "m/s", "%", etc.
+        min: The minimum value of the map.
+        max: The maximum value of the map.
     """
 
     pixels: np.ndarray
@@ -494,6 +496,8 @@ class Map(Spec):
     labels: np.ndarray | None = None
     description: str | None = None
     unit: str | None = None
+    min: float | None = None
+    max: float | None = None
 
     SCHEMA = {
         "pixels": {
@@ -508,6 +512,8 @@ class Map(Spec):
         "labels": {"dtype": np.str_, "shape": ("n_spatial_ch",)},
         "description": {"dtype": str, "shape": ()},
         "unit": {"dtype": str, "shape": ()},
+        "min": {"dtype": np.float32, "shape": ()},
+        "max": {"dtype": np.float32, "shape": ()},
     }
 
     def __post_init__(self):
