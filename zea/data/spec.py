@@ -477,7 +477,7 @@ class Map(Spec):
 
     Args:
         pixels: The map pixels of shape (n_frames, z, x, y, n_ch) or (n_frames, z, x, y)
-            and type uint8 or float32 or int16.
+            or (n_frames, z, x, n_ch) or (n_frames, z, x) and type uint8 or float32 or int16.
         extent: The map extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
