@@ -417,9 +417,9 @@ class Scan(Parameters):
         """
         The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
         """
-        xlims = (self.grid[:, :, 0].min(), self.grid[:, :, 0].max())
-        ylims = (self.grid[:, :, 1].min(), self.grid[:, :, 1].max())
-        zlims = (self.grid[:, :, 2].min(), self.grid[:, :, 2].max())
+        xlims = (self.grid[..., 0].min(), self.grid[..., 0].max())
+        ylims = (self.grid[..., 1].min(), self.grid[..., 1].max())
+        zlims = (self.grid[..., 2].min(), self.grid[..., 2].max())
 
         # For polar grids, adjust zlims to account for distance to apex
         if self.grid_type == "polar":
