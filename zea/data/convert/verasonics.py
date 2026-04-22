@@ -25,7 +25,6 @@ Or alternatively, use the script below to convert all .mat files in a directory:
 or without the directory argument, the script will prompt you to select a directory
 using a file dialog.
 
-Event structure
 ---------------
 
 By default the zea dataformat saves all the data to an hdf5 file with the following structure:
@@ -38,35 +37,6 @@ By default the zea dataformat saves all the data to an hdf5 file with the follow
           └── center_frequency: 1MHz
 
 The data is stored in the ``data`` group and the scan parameters are stored in the ``scan``.
-
-Adding additional elements
---------------------------
-
-You can add additional elements to the dataset by defining a function that reads the
-data from the file and returns a ``DatasetElement``. Then pass the function to the
-``to_zea`` method as a list.
-
-.. code-block:: python
-
-    def read_max_high_voltage(file):
-        lens_correction = file["Trans"]["lensCorrection"][:].item()
-        return lens_correction
-
-
-    def read_high_voltage_func(file):
-        return DatasetElement(
-            group_name="scan",
-            dataset_name="max_high_voltage",
-            data=read_max_high_voltage(file),
-            description="The maximum high voltage used by the Verasonics system.",
-            unit="V",
-        )
-
-
-    VerasonicsFile("C:/path/to/raw_data.mat").to_zea(
-        "C:/path/to/output.hdf5",
-        [read_high_voltage_func],
-    )
 """  # noqa: E501
 
 import os
