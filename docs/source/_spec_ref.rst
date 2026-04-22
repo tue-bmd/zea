@@ -301,8 +301,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Unit
               - 
             * - ``values``
-              - ``uint8``
-              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
+              - ``float32`` | ``uint8``
+              - (n_frames, x, z, y) or (n_frames, x, z)
               - –
               - |badge-req|
             * - ``extent``
@@ -350,8 +350,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Unit
               - 
             * - ``values``
-              - ``uint8``
-              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
+              - ``float32`` | ``uint8``
+              - (n_frames, x, z, y) or (n_frames, x, z)
               - –
               - |badge-req|
             * - ``extent``

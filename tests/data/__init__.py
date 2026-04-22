@@ -44,6 +44,7 @@ def generate_dummy_data_dict(
     grid_size_z=512,
     grid_size_x=512,
     add_optional_dtypes=False,
+    image_dtype=np.uint8,
 ):
     data_dict = {
         "raw_data": np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
@@ -61,11 +62,11 @@ def generate_dummy_data_dict(
             "extent": _extent,
         }
         data_dict["image"] = {
-            "values": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.uint8),
+            "values": np.zeros((n_frames, grid_size_z, grid_size_x), dtype=image_dtype),
             "extent": _extent,
         }
         data_dict["image_sc"] = {
-            "values": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32),
+            "values": np.zeros((n_frames, grid_size_z, grid_size_x), dtype=image_dtype),
             "extent": _extent,
         }
 
@@ -85,6 +86,7 @@ def generate_example_dataset(
     sampling_frequency=40e6,
     grid_size_z=512,
     grid_size_x=512,
+    image_dtype=np.uint8,
 ):
     """Generates an example dataset that contains all the necessary fields.
     Note: This dataset does not contain actual data, but is filled with random
@@ -97,7 +99,7 @@ def generate_example_dataset(
     """
 
     data = generate_dummy_data_dict(
-        n_frames, n_ax, n_el, n_tx, n_ch, grid_size_z, grid_size_x, add_optional_dtypes
+        n_frames, n_ax, n_el, n_tx, n_ch, grid_size_z, grid_size_x, add_optional_dtypes, image_dtype
     )
     scan = generate_dummy_scan(n_tx, n_el, sound_speed, center_frequency, sampling_frequency)
 

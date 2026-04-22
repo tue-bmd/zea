@@ -593,7 +593,7 @@ class Segmentation(BooleanMap):
         values: The segmentation values of shape (n_frames, z, x, y, n_labels) and type bool.
         extent: The segmentation extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
         labels: The labels corresponding to the segmentation values, where each unique value
             in the values corresponds to a label in this list of shape (n_labels,) and type str.
     """
@@ -606,14 +606,51 @@ class Segmentation(BooleanMap):
 
 
 @dataclass
-class Image(UnsignedIntMap):
+class Image(Map):
     """Reconstructed (log-compressed) image data and spatial extent metadata.
 
     Args:
-        values: The image values of shape (n_frames, z, x, y) and type uint8.
+        values: The image values of shape (n_frames, z, x, y) or (n_frames, z, x)
+            and type uint8 or float32. For float32 values, the values should be in dB
+            (between -inf and 0).
         extent: The image extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (radius_min, radius_max, theta_min, theta_max, phi_min, phi_max) and stored as float32.
+    """
+
+    SCHEMA = {
+        **Map.SCHEMA,
+        "values": {
+            "dtype": (np.float32, np.uint8),
+            "shape": (
+                ("n_frames", "x", "z", "y"),
+                ("n_frames", "x", "z"),
+            ),
+        },
+    }
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Check that image values are <= 0 and finite
+        if self.values.dtype == np.float32:
+            if not np.all(np.isfinite(self.values)):
+                raise ValueError("Image values must be finite.")
+            if not np.all(self.values <= 1e-5):
+                raise ValueError("Image values must be in dB scale <= 0 when using float32 dtype.")
+
+
+@dataclass
+class ImageSc(Image):
+    """Scan-converted image data and spatial extent metadata.
+
+    Args:
+        values: The scan-converted values of shape (n_frames, z, x, y) or (n_frames, z, x)
+            and type uint8 or float32. For float32 values, the values should be in dB
+            (between -inf and 0).
+        extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
     """
 
 
@@ -682,19 +719,6 @@ class EnvelopeData(FloatMap):
             ),
         },
     }
-
-
-@dataclass
-class ImageSc(UnsignedIntMap):
-    """Scan-converted image data and spatial extent metadata.
-
-    Args:
-        values: The scan-converted image of shape (n_frames, x, z) or
-            (n_frames, z, x, y) and type float32.
-        extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
-            A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
-    """
 
 
 @dataclass

@@ -97,13 +97,11 @@ def test_file_attributes():
 
     FILE_NAME = "contrast_speckle_simu_dataset_iq.hdf5"
     FILE_PATH = DATASET_PATH + "/" + FILE_NAME
-    FILE_HAS_EVENTS = False
     FILE_N_FRAMES = 1
     FILE_PROBE_NAME = "verasonics_l11_4v"
 
     with File(FILE_PATH) as file:
         assert file.name == FILE_NAME, "File name should match expected value"
-        assert file.has_events == FILE_HAS_EVENTS, "File should not have events"
         assert file.n_frames == FILE_N_FRAMES, "Number of frames should match expected value"
         assert file.probe_name == FILE_PROBE_NAME, "Probe name should match expected value"
         assert isinstance(file.probe(), Probe), "Probe should be an instance of Probe class"
@@ -275,7 +273,6 @@ class TestValidateSpec:
             # Legacy root attrs
             f.attrs["probe"] = "legacy_probe"
             f.attrs["description"] = "legacy file"
-            f.attrs["event_structure"] = False
 
             # Data group with flat image (legacy format)
             g = f.create_group("data")

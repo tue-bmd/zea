@@ -236,58 +236,21 @@ class File(h5py.File):
         return self.path.stem
 
     @property
-    def event_keys(self):
-        """Return all events in the file."""
-        return [key for key in self.keys() if "event" in key]
-
-    @property
-    def has_events(self):
-        """Check if the file has events."""
-        return any("event" in key for key in self.keys())
-        # return self.attrs.get("event_structure", False)
-
-    @property
     def n_frames(self):
         """Return number of frames in a file."""
-
-        if "scan" in self.file:
-            return int(self.file["scan"]["n_frames"][()])
-        else:
-            return sum(int(event["scan"]["n_frames"][()]) for event in self.file.values())
-
-    def get_event_shapes(self, key):
-        """Get the shapes of a key for all events."""
-        for event_key in self.event_keys:
-            yield self[event_key][key].shape
-
-    def events_have_same_shape(self, key):
-        """Check if all events have the same shape for a given key."""
-        if not self.has_events:
-            return True
-
-        shapes = list(self.get_event_shapes(key))
-        return len(np.unique(shapes)) == 1
-
-    def _simple_index(self, key):
-        return not self.has_events or "event" in key
+        return int(self.file["scan"]["n_frames"][()])
 
     def shape(self, key) -> tuple:
-        """Return shape of some key, or all events."""
+        """Return shape of some key."""
         key = self.format_key(key)
+        return self[key].shape
 
-        if self._simple_index(key):
-            return self[key].shape
-        else:
-            raise NotImplementedError
-
-    def load_scan(self, event=None):
+    def load_scan(self):
         """Alias for get_scan_parameters."""
-        return self.get_scan_parameters(event)
+        return self.get_scan_parameters()
 
     def format_key(self, key):
         """Format the key to match the data type."""
-        # TODO: support events
-
         if isinstance(key, enum.Enum):
             key = key.value
 
@@ -362,18 +325,13 @@ class File(h5py.File):
         if indices is None or (isinstance(indices, str) and indices == "all"):
             indices = slice(None)
 
-        if self._simple_index(key):
-            data = self[key]
-            try:
-                data = data[indices]
-            except (OSError, IndexError) as exc:
-                raise ValueError(
-                    f"Invalid indices {indices} for key {key}. {key} has shape {data.shape}."
-                ) from exc
-        elif self.events_have_same_shape(key):
-            raise NotImplementedError
-        else:
-            raise NotImplementedError
+        data = self[key]
+        try:
+            data = data[indices]
+        except (OSError, IndexError) as exc:
+            raise ValueError(
+                f"Invalid indices {indices} for key {key}. {key} has shape {data.shape}."
+            ) from exc
 
         return data
 
@@ -412,47 +370,21 @@ class File(h5py.File):
         description = self.attrs["description"]
         return description
 
-    def get_parameters(self, event=None):
+    def get_parameters(self):
         """Returns a dictionary of parameters to initialize a scan
         object that comes with the file (stored inside datafile).
 
         If there are no scan parameters in the hdf5 file, returns
         an empty dictionary.
 
-        Args:
-            event (int, optional): Event number. When specified, an event structure
-                is expected as follows::
-
-                    event_0 / scan
-                    event_1 / scan
-                    ...
-
-                Defaults to None. In that case no event structure is expected.
-
         Returns:
             dict: The scan parameters.
         """
-        scan_parameters = {}
-        if "scan" in self:
-            scan_parameters = self.recursively_load_dict_contents_from_group("scan")
-        elif "event" in list(self.keys())[0]:
-            if event is None:
-                raise ValueError(
-                    log.error(
-                        "Please specify an event number to read scan parameters "
-                        "from a file with an event structure."
-                    )
-                )
-
-            assert f"event_{event}/scan" in self, (
-                f"Could not find scan parameters for event {event} in file. "
-                f"Found number of events: {len(self.keys())}."
-            )
-
-            scan_parameters = self.recursively_load_dict_contents_from_group(f"event_{event}/scan")
-        else:
+        if "scan" not in self:
             log.warning("Could not find scan parameters in file.")
+            return {}
 
+        scan_parameters = self.recursively_load_dict_contents_from_group("scan")
         scan_parameters = self._check_focus_distances(scan_parameters)
 
         return scan_parameters
@@ -482,9 +414,9 @@ class File(h5py.File):
                 scan_parameters["focus_distances"] = focus_distances
         return scan_parameters
 
-    def get_scan_parameters(self, event=None) -> dict:
+    def get_scan_parameters(self) -> dict:
         """Returns a dictionary of scan parameters stored in the file."""
-        return self.get_parameters(event)
+        return self.get_parameters()
 
     @property
     def n_ax(self) -> int:
@@ -495,18 +427,10 @@ class File(h5py.File):
         )
         return self["data"]["raw_data"].shape[2]
 
-    def scan(self, event=None, safe=True, **kwargs) -> Scan:
+    def scan(self, safe=True, **kwargs) -> Scan:
         """Returns a Scan object initialized with the parameters from the file.
 
         Args:
-            event (int, optional): Event number. When specified, an event structure
-                is expected as follows::
-
-                    event_0 / scan
-                    event_1 / scan
-                    ...
-
-                Defaults to None. In that case no event structure is expected.
             safe (bool, optional): If True, will only use parameters that are
                 defined in the Scan class. If False, will use all parameters
                 from the file. Defaults to True.
@@ -529,7 +453,7 @@ class File(h5py.File):
             >>> type(scan).__name__
             'Scan'
         """
-        scan_dict = self.get_scan_parameters(event)
+        scan_dict = self.get_scan_parameters()
 
         # Try spec-based validation; fall back gracefully for legacy files
         # that may be missing fields the spec now requires.
@@ -550,30 +474,20 @@ class File(h5py.File):
 
         return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
 
-    def get_probe_parameters(self, event=None) -> dict:
+    def get_probe_parameters(self) -> dict:
         """Returns a dictionary of probe parameters to initialize a probe
         object that comes with the file (stored inside datafile).
 
         Returns:
             dict: The probe parameters.
         """
-        file_scan_parameters = self.get_parameters(event)
+        file_scan_parameters = self.get_parameters()
 
         probe_parameters = reduce_to_signature(Probe.__init__, file_scan_parameters)
         return probe_parameters
 
-    def probe(self, event=None) -> Probe:
+    def probe(self) -> Probe:
         """Returns a Probe object initialized with the parameters from the file.
-
-        Args:
-            event (int, optional): Event number. When specified, an event structure
-                is expected as follows::
-
-                    event_0 / scan
-                    event_1 / scan
-                    ...
-
-                Defaults to None. In that case, no event structure is expected.
 
         Returns:
             Probe: The probe object.
@@ -590,7 +504,7 @@ class File(h5py.File):
             >>> type(probe).__name__
             'Verasonics_l11_4v'
         """
-        probe_parameters_file = self.get_probe_parameters(event)
+        probe_parameters_file = self.get_probe_parameters()
         return Probe.from_parameters(self.probe_name, probe_parameters_file)
 
     def metadata(self) -> MetadataSpec:
