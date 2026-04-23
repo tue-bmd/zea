@@ -855,14 +855,25 @@ def dehaze_nuclear_diffusion(
         window_batch = ops.expand_dims(window, axis=0)  # Add batch dimension
 
         # Call the internal posterior sampling for Nuclear Diffusion
-        tissue_images, haze_images = _nuclear_diffusion_posterior_sample(
-            diffusion_model,
-            measurements=window_batch,
-            n_steps=n_steps,
-            seed=seed,
-            verbose=False,  # Disable per-window progress
-            **guidance_kwargs,
-        )
+        # Allow the model to override via an instance attribute (useful for testing)
+        _sample_fn = getattr(diffusion_model, "_nuclear_diffusion_posterior_sample", None)
+        if _sample_fn is not None:
+            tissue_images, haze_images = _sample_fn(
+                measurements=window_batch,
+                n_steps=n_steps,
+                seed=seed,
+                verbose=False,  # Disable per-window progress
+                **guidance_kwargs,
+            )
+        else:
+            tissue_images, haze_images = _nuclear_diffusion_posterior_sample(
+                diffusion_model,
+                measurements=window_batch,
+                n_steps=n_steps,
+                seed=seed,
+                verbose=False,  # Disable per-window progress
+                **guidance_kwargs,
+            )
 
         # Remove batch dimension
         tissue_frames_window = ops.squeeze(tissue_images, axis=0)

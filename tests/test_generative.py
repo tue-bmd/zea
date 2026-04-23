@@ -10,7 +10,7 @@ import pytest
 from zea import log
 from zea.func.ultrasound import dehaze_nuclear_diffusion
 from zea.io_lib import matplotlib_figure_to_numpy, save_video
-from zea.models.diffusion import DPS, DiffusionModel, NuclearDiffusion
+from zea.models.diffusion import DPS, DiffusionModel
 from zea.models.gmm import GaussianMixtureModel, match_means_covariances
 
 from . import DEFAULT_TEST_SEED
@@ -267,9 +267,11 @@ def test_dehaze_nuclear_diffusion_shape_logic(monkeypatch):
     height, width, channels = 32, 32, 1
     hazy_video = keras.random.uniform((n_frames, height, width, channels), minval=-1, maxval=1)
 
-    # Create a mock diffusion model
-    mock_model = MagicMock()
-    mock_model.guidance_fn = MagicMock(spec=NuclearDiffusion)
+    model = DiffusionModel(
+        input_shape=(height, width, channels),
+        guidance="nuclear-dps",
+        operator="haze",
+    )
 
     # Mock the _nuclear_diffusion_posterior_sample method to return known shapes
     def mock_posterior_sample(measurements, n_steps, seed, verbose, **kwargs):
@@ -284,12 +286,17 @@ def test_dehaze_nuclear_diffusion_shape_logic(monkeypatch):
         )
         return tissue, haze
 
-    mock_model._nuclear_diffusion_posterior_sample = mock_posterior_sample
+    monkeypatch.setattr(
+        model,
+        "_nuclear_diffusion_posterior_sample",
+        mock_posterior_sample,
+        raising=False,
+    )
 
     # Test with non-overlapping windows
     tissue_frames, haze_frames = dehaze_nuclear_diffusion(
         hazy_video,
-        mock_model,
+        model,
         n_steps=2,
         window_size=3,
         window_stride=3,  # Non-overlapping
@@ -307,7 +314,7 @@ def test_dehaze_nuclear_diffusion_shape_logic(monkeypatch):
     # Test with overlapping windows
     tissue_frames_overlap, haze_frames_overlap = dehaze_nuclear_diffusion(
         hazy_video,
-        mock_model,
+        model,
         n_steps=2,
         window_size=4,
         window_stride=2,  # Overlapping
@@ -331,21 +338,28 @@ def test_dehaze_nuclear_diffusion_hard_projection(monkeypatch):
     height, width, channels = 16, 16, 1
     hazy_video = keras.random.uniform((n_frames, height, width, channels), minval=-1, maxval=1)
 
-    # Create a mock diffusion model
-    mock_model = MagicMock()
-    mock_model.guidance_fn = MagicMock(spec=NuclearDiffusion)
+    model = DiffusionModel(
+        input_shape=(height, width, channels),
+        guidance="nuclear-dps",
+        operator="haze",
+    )
 
     def mock_posterior_sample(measurements, n_steps, seed, verbose, **kwargs):
         tissue = measurements * 0.8
         haze = measurements * 0.2
         return tissue, haze
 
-    mock_model._nuclear_diffusion_posterior_sample = mock_posterior_sample
+    monkeypatch.setattr(
+        model,
+        "_nuclear_diffusion_posterior_sample",
+        mock_posterior_sample,
+        raising=False,
+    )
 
     # Test with hard projection
     tissue_frames, haze_frames = dehaze_nuclear_diffusion(
         hazy_video,
-        mock_model,
+        model,
         n_steps=2,
         window_size=3,
         window_stride=None,
