@@ -2,10 +2,10 @@
 # By default no backend is installed. Explicitly pass build-args to enable each one.
 # INSTALL_{BACKEND} accepts: cpu | gpu | false (default: false = not installed)
 # Example – all backends with GPU:
-# docker build -t zea/all-gpu:latest \
+# docker build -t zeahub/all:latest \
 #   --build-arg INSTALL_JAX=gpu --build-arg INSTALL_TORCH=gpu --build-arg INSTALL_TF=gpu .
 # Example – JAX only (GPU):
-# docker build -t zea/jax-gpu:latest --build-arg INSTALL_JAX=gpu .
+# docker build -t zeahub/jax:latest --build-arg INSTALL_JAX=gpu .
 
 ##############################
 # 0) Declare build-time args
