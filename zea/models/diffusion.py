@@ -1083,3 +1083,315 @@ class DDS(DiffusionGuidance):
             verbose,
             **op_kwargs,
         )
+
+
+@diffusion_guidance_registry(name="nuclear-dps")
+class NuclearDiffusion(DPS):
+    """Nuclear Diffusion posterior sampling guidance.
+
+    A hybrid framework that combines diffusion posterior sampling (DPS) with low-rank
+    temporal modeling for video restoration. This method replaces the sparsity assumption
+    in Robust Principal Component Analysis (RPCA) with a learned diffusion prior while
+    maintaining a nuclear norm penalty on the background component to encourage low-rank
+    temporal structure.
+
+    **Mathematical Formulation:**
+
+    Given observations :math:`\\mathbf{Y} \\in \\mathbb{R}^{n \\times p}` (video frames),
+    Nuclear Diffusion jointly samples the signal :math:`\\mathbf{X}` and low-rank background
+    :math:`\\mathbf{L}` from the posterior:
+
+    .. math::
+
+        \\mathbf{X}, \\mathbf{L} \\sim p_\\theta(\\mathbf{X}, \\mathbf{L} \\mid \\mathbf{Y})
+
+    The posterior is factorized as:
+
+    .. math::
+
+        p(\\mathbf{Y}, \\mathbf{L}, \\mathbf{X}) = p(\\mathbf{Y} \\mid \\mathbf{L}, \\mathbf{X}) \\, p(\\mathbf{L}) \\, p_\\theta(\\mathbf{X})
+
+    where:
+
+    - :math:`p(\\mathbf{Y} \\mid \\mathbf{L}, \\mathbf{X}) = \\mathcal{N}(\\mathbf{Y}; \\mathbf{L}+\\mathbf{X}, \\mu^{-1} \\mathbf{I})`
+      is the likelihood (measurement model)
+    - :math:`p(\\mathbf{L}) \\propto \\exp(-\\gamma \\|\\mathbf{L}\\|_*)` enforces low-rank structure
+      via the nuclear norm :math:`\\|\\mathbf{L}\\|_* = \\sum_i \\sigma_i(\\mathbf{L})`
+    - :math:`p_\\theta(\\mathbf{X})` is a learned diffusion prior capturing complex signal structure
+
+    The diffusion prior operates on individual frames :math:`\\mathbf{x}^t \\in \\mathbb{R}^n`,
+    while temporal dependencies are enforced through the nuclear norm on :math:`\\mathbf{L}`.
+
+    **Implementation:**
+
+    This guidance method alternates between reverse diffusion and measurement-guided updates,
+    computing gradients from both the measurement error and the nuclear norm penalty:
+
+    .. math::
+
+        \\mathcal{L} = \\omega \\|\\mathbf{Y} - (\\mathbf{X} + \\mathbf{L})\\|_2^2 + \\gamma \\|\\mathbf{L}\\|_*
+
+    Args:
+        diffusion_model: The diffusion model for the signal component.
+        operator: Forward operator defining the measurement model.
+        disable_jit: Whether to disable JIT compilation.
+
+    References:
+        T. Stevens, M. Wijkstra, M. Mischi, and R. J. G. van Sloun,
+        "Nuclear Diffusion Models for Low-Rank Background Suppression in Videos,"
+        *IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)*, 2026.
+        https://arxiv.org/abs/2509.20886
+
+    .. seealso::
+
+        - :class:`DPS`: Base diffusion posterior sampling guidance
+        - :doc:`../notebooks/models/nuclear_dehazing_example`: Example notebook demonstrating
+          the method on cardiac ultrasound dehazing
+
+    """  # noqa: E501
+
+    @staticmethod
+    def nuclear_norm_penalty(haze_images):
+        r"""Compute nuclear norm penalty for low-rank enforcement.
+
+        The nuclear norm (sum of singular values) encourages low-rank structure in
+        the background component across time. For a matrix :math:`\mathbf{L}`, it is
+        defined as:
+
+        .. math::
+
+            \|\mathbf{L}\|_* = \sum_{i=1}^{r} \sigma_i(\mathbf{L})
+
+        where :math:`\sigma_i` are the singular values and :math:`r` is the rank.
+
+        Args:
+            haze_images: Background/haze images of shape
+                ``(batch, frames, height, width, channels)``.
+                Each sequence is reshaped to a matrix of shape ``(frames, height x width)``
+                before computing the nuclear norm.
+
+        Returns:
+            Nuclear norm penalty summed across the batch and normalized by number of frames.
+
+        Note:
+            The input is reshaped from ``(batch, frames, H, W, C)`` to ``(batch, frames, HxW)``
+            before computing the singular values.
+        """
+        n_batch, n_frames, height, width, _ = ops.shape(haze_images)
+        haze_images_flattened = ops.reshape(haze_images, (n_batch, n_frames, height * width))
+        haze_nuclear_penalty = ops.norm(haze_images_flattened, axis=(1, 2), ord="nuc")
+
+        # normalize nuclear penalty
+        haze_nuclear_penalty /= n_frames
+
+        # sum across batches
+        return ops.sum(haze_nuclear_penalty)
+
+    @staticmethod
+    def weighted_nuclear_norm_penalty(haze_images, weight_factor: float = 2.0):
+        r"""Compute weighted nuclear norm penalty with enhanced rank control.
+
+        This variant penalizes larger singular values more heavily than the standard
+        nuclear norm, providing stronger low-rank enforcement. The weighted penalty is:
+
+        .. math::
+
+            \|\mathbf{L}\|_{w,*} = \sum_{i=1}^{r} w_i \cdot \sigma_i(\mathbf{L})
+
+        where :math:`w_i = 1 + \alpha \cdot \frac{i}{r}` increases linearly with the
+        index :math:`i`, and :math:`\alpha` is the ``weight_factor``.
+
+        Args:
+            haze_images: Background/haze images of shape ``(batch, frames, height, width, channels)``.
+            weight_factor: Scaling factor :math:`\alpha` controlling how much more to penalize
+                higher-indexed singular values. Default is 2.0.
+
+        Returns:
+            Weighted nuclear norm penalty summed across the batch and normalized by number of frames.
+
+        Note:
+            This is a drop-in replacement for :meth:`nuclear_norm_penalty` that provides
+            better rank control by more aggressively penalizing large singular values.
+        """  # noqa: E501
+        n_batch, n_frames, height, width, _ = ops.shape(haze_images)
+        haze_images_flattened = ops.reshape(haze_images, (n_batch, n_frames, height * width))
+
+        def weighted_svd_penalty(matrix):
+            """Compute weighted SVD penalty for a matrix"""
+            _, s_vals, _ = ops.svd(matrix, full_matrices=False)
+            n_sv = ops.shape(s_vals)[0]
+            weights = 1.0 + weight_factor * ops.arange(n_sv, dtype="float32") / ops.cast(
+                n_sv, "float32"
+            )
+            return ops.sum(weights * s_vals)
+
+        # Apply weighted penalty to each batch element
+        weighted_penalties = ops.vectorized_map(weighted_svd_penalty, haze_images_flattened)
+
+        # normalize by number of frames
+        weighted_penalties /= n_frames
+
+        # sum across batches (same as original)
+        return ops.sum(weighted_penalties)
+
+    def compute_error(
+        self,
+        combined_images,
+        measurements,
+        noise_rates,
+        signal_rates,
+        omega: float,
+        gamma: float = 0.1,
+        haze_level: float = 0.5,
+        rank_weight_factor: float | None = None,
+        step: int | None = None,
+        total_steps: int | None = None,
+        initial_step: int = 100,
+        max_alpha: float = 0.5,
+        **kwargs,
+    ):
+        """Compute measurement error for joint diffusion posterior sampling.
+
+        This method computes the combined loss function for Nuclear Diffusion:
+
+        .. math::
+
+            \\mathcal{L} = \\omega \\|\\mathbf{Y} - \\hat{\\mathbf{Y}}\\|_2^2 + \\gamma \\|\\mathbf{L}\\|_*
+
+        where :math:`\\hat{\\mathbf{Y}} = (1-\\alpha)\\mathbf{X} + \\alpha\\mathbf{L}` is the
+        predicted measurement with progressive blending controlled by :math:`\\alpha(t)`.
+
+        Args:
+            combined_images: Concatenated noisy images from tissue and haze models,
+                shape ``(batch, frames, H, W, 2C)``.
+            measurements: Target measurements :math:`\\mathbf{Y}`, shape ``(batch, frames, H, W, C)``.
+            noise_rates: Current noise rates from the diffusion schedule, shape ``(batch, frames, 1, 1, 1)``.
+            signal_rates: Current signal rates from the diffusion schedule, shape ``(batch, frames, 1, 1, 1)``.
+            omega: Weight :math:`\\omega` for the measurement error term (L2 reconstruction loss).
+            gamma: Weight :math:`\\gamma` for the nuclear norm penalty term.
+            haze_level: Haze level parameter (currently unused, kept for compatibility).
+            rank_weight_factor: Optional weight factor for :meth:`weighted_nuclear_norm_penalty`.
+                If ``None``, uses standard :meth:`nuclear_norm_penalty`.
+            step: Current diffusion step for progressive blending. Used to compute :math:`\\alpha(t)`.
+            total_steps: Total number of diffusion steps.
+            initial_step: Step at which to start progressive blending.
+            max_alpha: Maximum value for :math:`\\alpha` at the final step.
+            **kwargs: Additional arguments (unused).
+
+        Returns:
+            A tuple containing:
+
+            - **measurement_error** (float): Combined loss :math:`\\mathcal{L}`.
+            - **aux** (tuple): Auxiliary outputs:
+              ``(pred_noises_tissue, pred_images_tissue, noisy_haze_images, l2_error, nuclear_penalty)``
+
+        .. note::
+            The progressive blending factor :math:`\\alpha(t)` linearly increases from 0
+            at ``initial_step`` to ``max_alpha`` at ``total_steps``, allowing the haze
+            component to gradually influence the reconstruction.
+        """  # noqa: E501
+        channels = ops.shape(combined_images)[-1] // 2
+        noisy_tissue_images = combined_images[..., :channels]
+        noisy_haze_images = combined_images[..., channels:]
+
+        # Transpose for ops.map
+        noisy_tissue_seq = ops.swapaxes(noisy_tissue_images, 0, 1)  # [S, B, H, W, C]
+        # Signal and noise rates are the same throughout the sequence, so can just
+        # grab the first batch and reuse that
+        noise_rates_s = noise_rates[:, 0, ...]
+        signal_rates_s = signal_rates[:, 0, ...]
+
+        def denoise_step(x_s):
+            pred_noises, pred_images = self.diffusion_model.denoise(
+                x_s, noise_rates_s, signal_rates_s, training=False
+            )
+            return {"pred_noises": pred_noises, "pred_images": pred_images}
+
+        denoised = ops.map(denoise_step, noisy_tissue_seq)
+        pred_noises_tissue = ops.swapaxes(denoised["pred_noises"], 0, 1)  # [B, S, H, W, C]
+        pred_images_tissue = ops.swapaxes(denoised["pred_images"], 0, 1)  # [B, S, H, W, C]
+
+        # pred_measurements = self.operator.forward(
+        #     pred_images_tissue, noisy_haze_images, haze_level
+        # )
+        alpha = ops.clip(
+            (step - initial_step) / (total_steps - initial_step), 0.0, max_alpha
+        )  # linear after 100
+        pred_measurements = (1 - alpha) * pred_images_tissue + (alpha) * noisy_haze_images
+
+        l2_error = L2(measurements - pred_measurements)
+
+        # Choose penalty function for nuclear norm
+        if rank_weight_factor is not None:
+            haze_nuclear_penalty = self.weighted_nuclear_norm_penalty(
+                noisy_haze_images, rank_weight_factor
+            )
+        else:
+            haze_nuclear_penalty = self.nuclear_norm_penalty(noisy_haze_images)
+
+        # NOTE: we sum across batches for the nuclear norm here. I think this is okay since
+        # the gradient of sums = sum of gradients
+        nuclear_penalty = ops.sum(haze_nuclear_penalty)
+
+        # Combine all penalty terms
+        measurement_error = omega * l2_error + gamma * nuclear_penalty
+
+        return measurement_error, (
+            pred_noises_tissue,
+            pred_images_tissue,
+            noisy_haze_images,
+            l2_error,
+            nuclear_penalty,
+        )
+
+    def __call__(
+        self,
+        noisy_images1,
+        noisy_images2,
+        measurements,
+        noise_rates,
+        signal_rates,
+        omega: float = 10.0,
+        **kwargs,
+    ):
+        """Compute guidance gradients for posterior sampling.
+
+        This method concatenates the noisy tissue and haze images, computes the
+        combined loss via :meth:`compute_error`, and returns separate gradients
+        for each component.
+
+        Args:
+            noisy_images1: Noisy tissue images :math:`\\mathbf{x}_t` from the diffusion model,
+                shape ``(batch, frames, H, W, C)``.
+            noisy_images2: Noisy haze/background images :math:`\\mathbf{L}_t`,
+                shape ``(batch, frames, H, W, C)``.
+            measurements: Target measurements :math:`\\mathbf{Y}`, shape ``(batch, frames, H, W, C)``.
+            noise_rates: Current noise rates from diffusion schedule.
+            signal_rates: Current signal rates from diffusion schedule.
+            omega: Weight for the measurement error term. Default is 10.0.
+            **kwargs: Additional arguments passed to :meth:`compute_error` (e.g., ``gamma``,
+                ``rank_weight_factor``, ``step``, ``total_steps``).
+
+        Returns:
+            A tuple containing:
+
+            - **gradients** (tuple): ``(grad_tissue, grad_haze)`` - gradients for tissue and haze.
+            - **loss_info** (tuple): ``(loss, aux)`` where:
+
+              - **loss** (float): Combined loss value.
+              - **aux** (tuple): Auxiliary outputs from :meth:`compute_error`.
+        """  # noqa: E501
+
+        combined_input = ops.concatenate([noisy_images1, noisy_images2], axis=-1)
+        gradients, (loss, aux) = self.gradient_fn(
+            combined_input,
+            measurements=measurements,
+            noise_rates=noise_rates,
+            signal_rates=signal_rates,
+            omega=omega,
+            **kwargs,
+        )
+        channels = ops.shape(gradients)[-1] // 2
+        grad1 = gradients[..., :channels]
+        grad2 = gradients[..., channels:]
+        return (grad1, grad2), (loss, aux)

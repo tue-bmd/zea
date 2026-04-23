@@ -1,13 +1,16 @@
 """Tests for generative models in zea."""
 
+from unittest.mock import MagicMock
+
 import keras
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
 from zea import log
+from zea.func.ultrasound import dehaze_nuclear_diffusion
 from zea.io_lib import matplotlib_figure_to_numpy, save_video
-from zea.models.diffusion import DiffusionModel
+from zea.models.diffusion import DPS, DiffusionModel, NuclearDiffusion
 from zea.models.gmm import GaussianMixtureModel, match_means_covariances
 
 from . import DEFAULT_TEST_SEED
@@ -254,3 +257,148 @@ def test_diffusion_posterior_sample_shape():
         verbose=False,
     )
     assert out.shape == (n_measurements, n_samples, n_features)
+
+
+def test_dehaze_nuclear_diffusion_shape_logic(monkeypatch):
+    """Test dehaze_nuclear_diffusion shape logic with mocked inference."""
+
+    # Create test video data
+    n_frames = 10
+    height, width, channels = 32, 32, 1
+    hazy_video = keras.random.uniform((n_frames, height, width, channels), minval=-1, maxval=1)
+
+    # Create a mock diffusion model
+    mock_model = MagicMock()
+    mock_model.guidance_fn = MagicMock(spec=NuclearDiffusion)
+
+    # Mock the _nuclear_diffusion_posterior_sample method to return known shapes
+    def mock_posterior_sample(measurements, n_steps, seed, verbose, **kwargs):
+        batch_size = keras.ops.shape(measurements)[0]
+        n_frames_window = keras.ops.shape(measurements)[1]
+        # Return fake tissue and haze predictions with correct shapes
+        tissue = keras.random.uniform(
+            (batch_size, n_frames_window, height, width, channels), minval=-1, maxval=1
+        )
+        haze = keras.random.uniform(
+            (batch_size, n_frames_window, height, width, channels), minval=-1, maxval=1
+        )
+        return tissue, haze
+
+    mock_model._nuclear_diffusion_posterior_sample = mock_posterior_sample
+
+    # Test with non-overlapping windows
+    tissue_frames, haze_frames = dehaze_nuclear_diffusion(
+        hazy_video,
+        mock_model,
+        n_steps=2,
+        window_size=3,
+        window_stride=3,  # Non-overlapping
+        hard_project=False,
+        seed=DEFAULT_TEST_SEED,
+        verbose=False,
+        omega=1.0,
+        gamma=1.0,
+    )
+
+    # Check output shapes
+    assert tissue_frames.shape == (n_frames, height, width, channels)
+    assert haze_frames.shape == (n_frames, height, width, channels)
+
+    # Test with overlapping windows
+    tissue_frames_overlap, haze_frames_overlap = dehaze_nuclear_diffusion(
+        hazy_video,
+        mock_model,
+        n_steps=2,
+        window_size=4,
+        window_stride=2,  # Overlapping
+        hard_project=False,
+        seed=DEFAULT_TEST_SEED,
+        verbose=False,
+        omega=1.0,
+        gamma=1.0,
+    )
+
+    # Check output shapes with overlap
+    assert tissue_frames_overlap.shape == (n_frames, height, width, channels)
+    assert haze_frames_overlap.shape == (n_frames, height, width, channels)
+
+
+def test_dehaze_nuclear_diffusion_hard_projection(monkeypatch):
+    """Test dehaze_nuclear_diffusion with hard projection enabled."""
+
+    # Create test video data with some bright values
+    n_frames = 5
+    height, width, channels = 16, 16, 1
+    hazy_video = keras.random.uniform((n_frames, height, width, channels), minval=-1, maxval=1)
+
+    # Create a mock diffusion model
+    mock_model = MagicMock()
+    mock_model.guidance_fn = MagicMock(spec=NuclearDiffusion)
+
+    def mock_posterior_sample(measurements, n_steps, seed, verbose, **kwargs):
+        tissue = measurements * 0.8
+        haze = measurements * 0.2
+        return tissue, haze
+
+    mock_model._nuclear_diffusion_posterior_sample = mock_posterior_sample
+
+    # Test with hard projection
+    tissue_frames, haze_frames = dehaze_nuclear_diffusion(
+        hazy_video,
+        mock_model,
+        n_steps=2,
+        window_size=3,
+        window_stride=None,
+        hard_project=True,
+        seed=DEFAULT_TEST_SEED,
+        verbose=False,
+        omega=1.0,
+        gamma=1.0,
+    )
+
+    # Check that shapes are correct
+    assert tissue_frames.shape == (n_frames, height, width, channels)
+    assert haze_frames.shape == (n_frames, height, width, channels)
+
+    # With hard projection, positive values in tissue should come from hazy input
+    hazy_np = keras.ops.convert_to_numpy(hazy_video)
+    positive_mask = tissue_frames > 0
+    if positive_mask.any():
+        # Where tissue is positive, it should match hazy input
+        np.testing.assert_array_almost_equal(
+            tissue_frames[positive_mask], hazy_np[positive_mask], decimal=5
+        )
+
+
+def test_dehaze_nuclear_diffusion_validation():
+    """Test dehaze_nuclear_diffusion raises errors for invalid configurations."""
+
+    # Create test video data
+    n_frames = 5
+    height, width, channels = 16, 16, 1
+    hazy_video = keras.random.uniform((n_frames, height, width, channels), minval=-1, maxval=1)
+
+    # Test with model without guidance function
+    mock_model = MagicMock()
+    mock_model.guidance_fn = None
+
+    with pytest.raises(ValueError, match="guidance function"):
+        dehaze_nuclear_diffusion(
+            hazy_video,
+            mock_model,
+            n_steps=2,
+            window_size=3,
+            verbose=False,
+        )
+
+    # Test with wrong guidance type
+    mock_model.guidance_fn = MagicMock(spec=DPS)
+
+    with pytest.raises(ValueError, match="Nuclear Diffusion"):
+        dehaze_nuclear_diffusion(
+            hazy_video,
+            mock_model,
+            n_steps=2,
+            window_size=3,
+            verbose=False,
+        )

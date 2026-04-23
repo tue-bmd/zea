@@ -1,10 +1,13 @@
+import keras
 import numpy as np
 import scipy.signal
 from keras import ops
 
 from zea import log
+from zea.func import split_seed
 from zea.func.tensor import (
     resample,
+    split_into_windows,
 )
 
 
@@ -594,3 +597,318 @@ def make_tgc_curve(n_ax, attenuation_coef, sampling_frequency, center_frequency,
     tgc_gain_curve = 10 ** (attenuation_db / 20)
 
     return tgc_gain_curve.astype(np.float32)
+
+
+def dehaze_nuclear_diffusion(
+    hazy_video,
+    diffusion_model,
+    n_steps: int = 200,
+    window_size: int = 15,
+    window_stride: int | None = None,
+    hard_project: bool = True,
+    seed=None,
+    verbose: bool = True,
+    **guidance_kwargs,
+):
+    r"""Dehaze ultrasound videos using Nuclear Diffusion posterior sampling.
+
+    This function performs video dehazing by combining diffusion posterior sampling
+    with low-rank temporal modeling. It processes long video sequences by splitting
+    them into overlapping windows, applying Nuclear Diffusion to each window, and
+    averaging predictions across windows for smooth results.
+
+    The method performs posterior sampling to separate the video into:
+
+    - **Tissue component** (:math:`\mathbf{X}`): Dynamic foreground signal with complex structure
+    - **Haze component** (:math:`\mathbf{L}`): Low-rank background artifacts
+
+    The optimization objective at each diffusion step is:
+
+    .. math::
+
+        \mathcal{L} = \omega \|\mathbf{Y} - (\mathbf{X} + \mathbf{L})\|_2^2 + \gamma \|\mathbf{L}\|_*
+
+    where :math:`\|\mathbf{L}\|_*` is the nuclear norm (sum of singular values) encouraging
+    low-rank structure in the background.
+
+    Args:
+        hazy_video: Input hazy video as a tensor of shape ``(frames, height, width, channels)``.
+        diffusion_model: Pre-trained diffusion model configured with Nuclear Diffusion guidance
+            (``guidance="nuclear-dps"``) and haze operator (``operator="haze"``).
+        n_steps: Number of diffusion steps for posterior sampling. More steps generally
+            produce better quality but take longer. Default is 200.
+        window_size: Number of frames to process together in each window. Larger windows
+            capture more temporal context but require more memory. Default is 15.
+        window_stride: Stride between consecutive windows. If ``None``, uses non-overlapping
+            windows (stride = window_size). Smaller strides create more overlap and smoother
+            results but increase computation time.
+        hard_project: Whether to preserve bright speckle values from the input by projecting
+            positive values from the hazy input. This helps preserve fine tissue texture.
+            Default is ``True``.
+        seed: Random seed for reproducibility. If ``None``, uses default random state.
+        verbose: Whether to display progress information. Default is ``True``.
+        **guidance_kwargs: Additional keyword arguments for Nuclear Diffusion guidance:
+
+            - **omega** (float): Weight for measurement error term. Default is 1.0.
+            - **gamma** (float): Weight for nuclear norm penalty. Default is 1.0.
+            - **rank_weight_factor** (float, optional): Enhanced weighting for larger singular values.
+            - **initial_step** (int): Starting step for progressive blending. Default is 4500.
+
+    Returns:
+        tuple: A tuple ``(tissue_frames, haze_frames)`` containing:
+
+        - **tissue_frames**: Dehazed tissue component as a numpy array.
+        - **haze_frames**: Estimated low-rank haze component as a numpy array.
+
+    Raises:
+        ValueError: If the model is not configured with Nuclear Diffusion guidance.
+        AssertionError: If the guidance function is not an instance of ``NuclearDiffusion``.
+
+    .. note::
+        This function requires a diffusion model with Nuclear Diffusion guidance.
+        Initialize your model with ``guidance="nuclear-dps"`` and ``operator="haze"``.
+
+    .. seealso::
+
+        - :class:`~zea.models.diffusion.NuclearDiffusion`: The guidance method used for dehazing
+        - :func:`~zea.func.tensor.split_into_windows`: Window splitting utility
+        - :doc:`../../notebooks/models/nuclear_dehazing_example`: Detailed tutorial notebook
+
+    References:
+        T. S. W. Stevens, O. Nolan, J.-L. Robert, and R. J. G. van Sloun,
+        "Nuclear Diffusion Models for Low-Rank Background Suppression in Videos,"
+        *IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)*, 2026.
+        https://arxiv.org/abs/2509.20886
+    """  # noqa: E501
+
+    def _nuclear_diffusion_posterior_sample(
+        diffusion_model,
+        measurements,
+        n_steps: int,
+        seed=None,
+        verbose: bool = True,
+        initial_step: int = 100,
+        **guidance_kwargs,
+    ):
+        """Internal method for Nuclear Diffusion posterior sampling.
+
+        This method performs posterior sampling for a single batch/window of frames.
+        It alternates between reverse diffusion on the tissue component and gradient updates
+        that enforce measurement consistency and low-rank structure on the haze component.
+
+        Args:
+            diffusion_model: The diffusion model with Nuclear Diffusion guidance.
+            measurements: Measurements of shape ``(batch, frames, H, W, C)``.
+            n_steps: Number of diffusion steps.
+            seed: Random seed.
+            verbose: Whether to show progress.
+            initial_step: Starting diffusion step.
+            **guidance_kwargs: Guidance parameters (omega, gamma, etc.).
+
+        Returns:
+            tuple: ``(tissue_images, haze_images)`` as tensors.
+        """
+
+        measurements = ops.convert_to_tensor(measurements)
+        image_shape = ops.shape(measurements)
+
+        # Ensure 5D input: (batch, frames, height, width, channels)
+        if len(image_shape) != 5:
+            raise ValueError(f"Expected 5D input (batch, frames, H, W, C), got shape {image_shape}")
+
+        n_batches, n_frames, image_height, image_width, n_channels = image_shape
+
+        # Generate initial noise
+        if seed is not None:
+            init_seed, _ = split_seed(seed, 2)
+            seed_tissue, _ = split_seed(init_seed, 2)
+            initial_noise_tissue = keras.random.normal(
+                shape=(n_batches, n_frames, image_height, image_width, n_channels),
+                seed=seed_tissue,
+            )
+        else:
+            initial_noise_tissue = keras.random.normal(
+                shape=(n_batches, n_frames, image_height, image_width, n_channels)
+            )
+
+        # Initialize haze to zeros (will evolve through gradient updates)
+        initial_noise_haze = ops.zeros((n_batches, n_frames, image_height, image_width, n_channels))
+
+        # Initialize progress tracking
+        diffusion_model.start_track_progress(n_steps, initial_step)
+
+        # Create progress bar
+        prog_bar = keras.utils.Progbar(n_steps, verbose=verbose)
+
+        # Step size for diffusion schedule
+        step_size = 1.0 / n_steps
+
+        # Initialize noisy samples
+        diffusion_times = ops.ones((n_batches, n_frames, 1, 1, 1)) * (
+            diffusion_model.max_t - initial_step * step_size
+        )
+        noise_rates, signal_rates = diffusion_model.diffusion_schedule(diffusion_times)
+        next_noisy_tissue = signal_rates * measurements + noise_rates * initial_noise_tissue
+        next_noisy_haze = initial_noise_haze
+
+        # Reverse diffusion loop
+        for step in range(initial_step, n_steps):
+            # Compute diffusion schedule
+            diffusion_times = ops.ones((n_batches, n_frames, 1, 1, 1)) * (
+                diffusion_model.max_t - step * step_size
+            )
+            noise_rates, signal_rates = diffusion_model.diffusion_schedule(diffusion_times)
+
+            # Calculate next rates
+            next_diffusion_times = diffusion_times - step_size
+            next_noise_rates, next_signal_rates = diffusion_model.diffusion_schedule(
+                next_diffusion_times
+            )
+
+            noisy_tissue = next_noisy_tissue
+            noisy_haze = next_noisy_haze
+
+            # Add step info to guidance kwargs
+            guidance_kwargs_with_step = guidance_kwargs.copy()
+            guidance_kwargs_with_step.update({"step": step, "total_steps": n_steps})
+
+            # Compute gradients from guidance function
+            (
+                (gradients_tissue, gradients_haze),
+                (
+                    measurement_error,
+                    (pred_noises_tissue, pred_tissue, pred_haze, l2_error, nuclear_penalty),
+                ),
+            ) = diffusion_model.guidance_fn(
+                noisy_tissue,
+                noisy_haze,
+                measurements=measurements,
+                noise_rates=noise_rates,
+                signal_rates=signal_rates,
+                initial_step=initial_step,
+                **guidance_kwargs_with_step,
+            )
+
+            # DDIM sampling step (deterministic)
+            next_noisy_tissue = (
+                next_signal_rates * pred_tissue + next_noise_rates * pred_noises_tissue
+            )
+            next_noisy_haze = pred_haze
+
+            # Apply guidance updates
+            next_noisy_tissue = next_noisy_tissue - gradients_tissue
+            next_noisy_haze = next_noisy_haze - gradients_haze
+
+            # Update progress
+            prog_bar.update(
+                step + 1,
+                [
+                    ("total_error", measurement_error),
+                    ("l2_error", l2_error),
+                    ("nuclear_penalty", nuclear_penalty),
+                ],
+            )
+
+        return pred_tissue, pred_haze
+
+    # Validate configuration
+    if diffusion_model.guidance_fn is None:
+        raise ValueError(
+            "Model must have guidance function set. Initialize with guidance='nuclear-dps'."
+        )
+
+    # Import here to avoid circular dependency
+    from zea.models.diffusion import NuclearDiffusion
+
+    if not isinstance(diffusion_model.guidance_fn, NuclearDiffusion):
+        raise ValueError(
+            f"dehaze_nuclear_diffusion() requires Nuclear Diffusion guidance, "
+            f"but model has {type(diffusion_model.guidance_fn).__name__}. "
+            "Initialize with guidance='nuclear-dps'."
+        )
+
+    # Get sequence length
+    seq_len = ops.shape(hazy_video)[0]
+
+    if verbose:
+        log.info(f"[Nuclear Diffusion] Processing {seq_len} frames.")
+
+    # Split video into windows
+    windows, window_indices = split_into_windows(
+        hazy_video, window_size=window_size, stride=window_stride
+    )
+
+    if verbose:
+        log.info(
+            f"[Nuclear Diffusion] Split into {len(windows)} windows with sizes:"
+            f" {[len(w) for w in windows]}"
+        )
+
+    # Accumulate predictions for each frame
+    frame_tissue_preds = [[] for _ in range(int(seq_len))]
+    frame_haze_preds = [[] for _ in range(int(seq_len))]
+
+    progbar = keras.utils.Progbar(len(windows), verbose=verbose, unit_name="window")
+
+    # Process each window
+    for window_idx, (window, frame_indices) in enumerate(zip(windows, window_indices)):
+        window_batch = ops.expand_dims(window, axis=0)  # Add batch dimension
+
+        # Call the internal posterior sampling for Nuclear Diffusion
+        tissue_images, haze_images = _nuclear_diffusion_posterior_sample(
+            diffusion_model,
+            measurements=window_batch,
+            n_steps=n_steps,
+            seed=seed,
+            verbose=False,  # Disable per-window progress
+            **guidance_kwargs,
+        )
+
+        # Remove batch dimension
+        tissue_frames_window = ops.squeeze(tissue_images, axis=0)
+        haze_frames_window = ops.squeeze(haze_images, axis=0)
+
+        # Accumulate predictions for overlapping frames
+        for i, frame_idx in enumerate(frame_indices):
+            frame_tissue_preds[frame_idx].append(tissue_frames_window[i])
+            frame_haze_preds[frame_idx].append(haze_frames_window[i])
+
+        progbar.add(1)
+
+    # Average predictions across overlapping windows
+    tissue_frames = []
+    haze_frames = []
+
+    for i in range(int(seq_len)):
+        # Stack and average tissue predictions
+        stacked_tissue = ops.stack(frame_tissue_preds[i], axis=0)
+        tissue_frames.append(ops.mean(stacked_tissue, axis=0))
+
+        # Stack and average haze predictions
+        stacked_haze = ops.stack(frame_haze_preds[i], axis=0)
+        haze_frames.append(ops.mean(stacked_haze, axis=0))
+
+    # Stack frames into sequences
+    tissue_frames = ops.stack(tissue_frames, axis=0)
+    haze_frames = ops.stack(haze_frames, axis=0)
+
+    # Apply hard projection if requested
+    if hard_project:
+        tissue_np = ops.convert_to_numpy(tissue_frames)
+        hazy_np = ops.convert_to_numpy(hazy_video)
+
+        # Preserve bright speckle values from hazy input
+        proj = tissue_np.copy()
+        proj[proj > 0] = hazy_np[proj > 0]
+        tissue_frames = proj
+
+        # Recompute haze from preserved tissue
+        haze_frames = hazy_np - tissue_frames - 1
+    else:
+        # Convert to numpy
+        tissue_frames = ops.convert_to_numpy(tissue_frames)
+        haze_frames = ops.convert_to_numpy(haze_frames)
+        hazy_np = ops.convert_to_numpy(hazy_video)
+        haze_frames = hazy_np - haze_frames - 1
+
+    return tissue_frames, haze_frames
