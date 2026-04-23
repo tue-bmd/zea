@@ -165,6 +165,10 @@ WORKDIR /zea
 COPY --from=builder-backends /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder-backends /usr/local/bin /usr/local/bin
 
+# Suppress harmless CUDA factory-registration messages (emitted by ABSL before
+# InitializeLog() is called, so TF_CPP_MIN_LOG_LEVEL cannot filter them).
+COPY sitecustomize.py /usr/local/lib/python3.12/site-packages/sitecustomize.py
+
 # Copy over Jupyter configuration and kernelspecs
 COPY --from=builder-backends /usr/local/share/jupyter /usr/local/share/jupyter
 
@@ -192,8 +196,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_CREATE=0 \
     POETRY_VIRTUALENVS_IN_PROJECT=0 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache \
-    TF_CPP_MIN_LOG_LEVEL=3
+    POETRY_CACHE_DIR=/tmp/poetry_cache
 
 # Install zea
 
