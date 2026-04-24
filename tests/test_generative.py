@@ -400,3 +400,75 @@ def test_dehaze_nuclear_diffusion_validation():
             window_size=3,
             verbose=False,
         )
+
+
+@pytest.mark.parametrize("guidance_name", ["dps", "dds"])
+def test_guidance_call_returns_correct_structure(guidance_name):
+    """Test that DPS and DDS guidance functions return (gradients, (error, (noises, images)))."""
+    n_features = 4
+    batch_size = 2
+
+    model = DiffusionModel(
+        input_shape=(n_features,),
+        network_name="dense_time_conditional",
+        network_kwargs={"widths": [8], "output_dim": n_features},
+        guidance=guidance_name,
+        operator="inpainting",
+    )
+
+    noisy = keras.random.uniform((batch_size, n_features))
+    measurements = keras.random.uniform((batch_size, n_features))
+    mask = keras.ops.ones((batch_size, n_features))
+    noise_rates = keras.ops.ones((batch_size, 1)) * 0.5
+    signal_rates = keras.ops.ones((batch_size, 1)) * 0.5
+
+    gradients, (error, (pred_noises, pred_images)) = model.guidance_fn(
+        noisy,
+        measurements=measurements,
+        noise_rates=noise_rates,
+        signal_rates=signal_rates,
+        omega=1.0,
+        mask=mask,
+    )
+
+    assert gradients.shape == noisy.shape
+    assert pred_noises.shape == noisy.shape
+    assert pred_images.shape == noisy.shape
+    assert np.isfinite(float(error))
+
+
+def test_nuclear_diffusion_guidance_call_returns_correct_structure():
+    """Test NuclearDiffusion guidance returns ((grad1, grad2), (error, aux))."""
+    batch, frames, h, w, c = 1, 3, 8, 8, 1
+
+    # input_shape is per-frame (h, w, c); NuclearDiffusion handles the frames axis via ops.map
+    model = DiffusionModel(
+        input_shape=(h, w, c),
+        guidance="nuclear-dps",
+        operator="linear_interp",
+    )
+
+    noisy_tissue = keras.random.uniform((batch, frames, h, w, c))
+    noisy_haze = keras.random.uniform((batch, frames, h, w, c))
+    measurements = keras.random.uniform((batch, frames, h, w, c))
+    noise_rates = keras.ops.ones((batch, frames, 1, 1, 1)) * 0.5
+    signal_rates = keras.ops.ones((batch, frames, 1, 1, 1)) * 0.5
+
+    (grad_tissue, grad_haze), (error, aux) = model.guidance_fn(
+        noisy_tissue,
+        noisy_haze,
+        measurements=measurements,
+        noise_rates=noise_rates,
+        signal_rates=signal_rates,
+        omega=1.0,
+        gamma=1.0,
+        step=50,
+        total_steps=100,
+        initial_step=keras.ops.convert_to_tensor(0, dtype="float32"),
+    )
+
+    assert grad_tissue.shape == noisy_tissue.shape
+    assert grad_haze.shape == noisy_haze.shape
+    assert np.isfinite(float(error))
+    # aux = (pred_noises_tissue, pred_tissue, pred_haze, l2_error, nuclear_penalty)
+    assert len(aux) == 5

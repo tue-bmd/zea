@@ -897,7 +897,7 @@ def test_split_into_windows_multidim(shape, window_size):
         (4, 5, "stride must satisfy"),  # stride > window_size
     ],
 )
-@backend_equality_check()
+@backend_equality_check(allow_none=True)
 def test_split_into_windows_invalid_inputs(window_size, stride, match):
     """Test that split_into_windows raises ValueError for invalid window_size/stride."""
     from zea.func.tensor import split_into_windows
