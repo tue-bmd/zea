@@ -1191,27 +1191,31 @@ class NuclearDiffusion(DPS):
     def weighted_nuclear_norm_penalty(background_images, weight_factor: float = 2.0):
         r"""Compute weighted nuclear norm penalty with enhanced rank control.
 
-        This variant penalizes larger singular values more heavily than the standard
-        nuclear norm, providing stronger low-rank enforcement. The weighted penalty is:
+        This implements a WNNM-style (Weighted Nuclear Norm Minimization) penalty that
+        penalizes smaller singular values more heavily than larger ones, suppressing the
+        spectrum tail to enforce low-rank structure. The weighted penalty is:
 
         .. math::
 
             \|\mathbf{L}\|_{w,*} = \sum_{i=1}^{r} w_i \cdot \sigma_i(\mathbf{L})
 
         where :math:`w_i = 1 + \alpha \cdot \frac{i}{r}` increases linearly with the
-        index :math:`i`, and :math:`\alpha` is the ``weight_factor``.
+        index :math:`i`, and :math:`\alpha` is the ``weight_factor``. Since ``ops.svd``
+        returns singular values in descending order (:math:`\sigma_1 \geq \sigma_2 \geq \cdots`),
+        higher indices correspond to smaller singular values, which receive larger weights.
 
         Args:
             background_images: Background images of shape ``(batch, frames, height, width, channels)``.
             weight_factor: Scaling factor :math:`\alpha` controlling how much more to penalize
-                higher-indexed singular values. Default is 2.0.
+                smaller singular values (the spectrum tail). Default is 2.0.
 
         Returns:
             Weighted nuclear norm penalty summed across the batch and normalized by number of frames.
 
         Note:
             This is a drop-in replacement for :meth:`nuclear_norm_penalty` that provides
-            better rank control by more aggressively penalizing large singular values.
+            better rank control by more aggressively penalizing the tail of the singular value
+            spectrum (smaller singular values) rather than the leading ones.
         """  # noqa: E501
         n_batch, n_frames, height, width, channels = ops.shape(background_images)
         background_images_flattened = ops.reshape(

@@ -659,9 +659,12 @@ def dehaze_nuclear_diffusion(
         diffusion_model: Pre-trained diffusion model configured with Nuclear Diffusion guidance
             (``guidance="nuclear-dps"``) and haze operator (``operator="linear_interp"``).
         n_steps: Number of diffusion steps for posterior sampling. More steps generally
-            produce better quality but take longer. Default is 200.
+            produce better quality but take longer. Default is 5000.
+        initial_step: Starting step for progressive blending in the diffusion process.
+            Must be less than ``n_steps`` and non-negative. Passed to the NuclearDiffusion
+            guidance function's ``compute_error`` method. Default is 4500.
         window_size: Number of frames to process together in each window. Larger windows
-            capture more temporal context but require more memory. Default is 15.
+            capture more temporal context but require more memory. Default is 7.
         window_stride: Stride between consecutive windows. If ``None``, uses non-overlapping
             windows (stride = window_size). Smaller strides create more overlap and smoother
             results but increase computation time.
@@ -675,7 +678,6 @@ def dehaze_nuclear_diffusion(
             - **omega** (float): Weight for measurement error term. Default is 1.0.
             - **gamma** (float): Weight for nuclear norm penalty. Default is 1.0.
             - **rank_weight_factor** (float, optional): Enhanced weighting for larger singular values.
-            - **initial_step** (int): Starting step for progressive blending. Default is 4500.
 
     Returns:
         tuple: A tuple ``(tissue_frames, haze_frames)`` containing:
@@ -684,8 +686,8 @@ def dehaze_nuclear_diffusion(
         - **haze_frames**: Estimated low-rank haze component as a numpy array.
 
     Raises:
-        ValueError: If the model is not configured with Nuclear Diffusion guidance.
-        AssertionError: If the guidance function is not an instance of ``NuclearDiffusion``.
+        ValueError: If the model is not configured with Nuclear Diffusion guidance, or if
+            the guidance function is not an instance of ``NuclearDiffusion``.
 
     .. note::
         This function requires a diffusion model with Nuclear Diffusion guidance.
