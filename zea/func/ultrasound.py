@@ -602,8 +602,9 @@ def make_tgc_curve(n_ax, attenuation_coef, sampling_frequency, center_frequency,
 def dehaze_nuclear_diffusion(
     hazy_video,
     diffusion_model,
-    n_steps: int = 200,
-    window_size: int = 15,
+    n_steps: int = 5000,
+    initial_step: int = 4500,
+    window_size: int = 7,
     window_stride: int | None = None,
     hard_project: bool = True,
     seed=None,
@@ -697,6 +698,9 @@ def dehaze_nuclear_diffusion(
         https://arxiv.org/abs/2509.20886
     """  # noqa: E501
 
+    assert initial_step < n_steps, "initial_step must be less than n_steps."
+    assert initial_step >= 0, "initial_step must be non-negative."
+
     def _nuclear_diffusion_posterior_sample(
         diffusion_model,
         measurements,
@@ -788,6 +792,8 @@ def dehaze_nuclear_diffusion(
             guidance_kwargs_with_step = guidance_kwargs.copy()
             guidance_kwargs_with_step.update({"step": step, "total_steps": n_steps})
 
+            initial_step = keras.ops.convert_to_tensor(initial_step, dtype=measurements.dtype)
+
             # Compute gradients from guidance function
             (
                 (gradients_tissue, gradients_haze),
@@ -870,26 +876,15 @@ def dehaze_nuclear_diffusion(
     for window_idx, (window, frame_indices) in enumerate(zip(windows, window_indices)):
         window_batch = ops.expand_dims(window, axis=0)  # Add batch dimension
 
-        # Call the internal posterior sampling for Nuclear Diffusion
-        # Allow the model to override via an instance attribute (useful for testing)
-        _sample_fn = getattr(diffusion_model, "_nuclear_diffusion_posterior_sample", None)
-        if _sample_fn is not None:
-            tissue_images, haze_images = _sample_fn(
-                measurements=window_batch,
-                n_steps=n_steps,
-                seed=seed,
-                verbose=False,  # Disable per-window progress
-                **guidance_kwargs,
-            )
-        else:
-            tissue_images, haze_images = _nuclear_diffusion_posterior_sample(
-                diffusion_model,
-                measurements=window_batch,
-                n_steps=n_steps,
-                seed=seed,
-                verbose=False,  # Disable per-window progress
-                **guidance_kwargs,
-            )
+        tissue_images, haze_images = _nuclear_diffusion_posterior_sample(
+            diffusion_model,
+            measurements=window_batch,
+            n_steps=n_steps,
+            initial_step=initial_step,
+            seed=seed,
+            verbose=False,  # Disable per-window progress
+            **guidance_kwargs,
+        )
 
         # Remove batch dimension
         tissue_frames_window = ops.squeeze(tissue_images, axis=0)

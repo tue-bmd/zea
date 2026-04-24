@@ -1238,7 +1238,6 @@ class NuclearDiffusion(DPS):
         signal_rates,
         omega: float,
         gamma: float = 0.1,
-        haze_level: float = 0.5,
         rank_weight_factor: float | None = None,
         step: int | None = None,
         total_steps: int | None = None,
@@ -1256,7 +1255,6 @@ class NuclearDiffusion(DPS):
             signal_rates: Current signal rates from the diffusion schedule, shape ``(batch, frames, 1, 1, 1)``.
             omega: Weight :math:`\omega` for the measurement error term (L2 reconstruction loss).
             gamma: Weight :math:`\gamma` for the nuclear norm penalty term.
-            haze_level: Haze level parameter (currently unused, kept for compatibility).
             rank_weight_factor: Optional weight factor for :meth:`weighted_nuclear_norm_penalty`.
                 If ``None``, uses standard :meth:`nuclear_norm_penalty`.
             step: Current diffusion step for progressive blending. Used to compute :math:`\alpha(t)`.

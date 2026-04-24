@@ -259,13 +259,21 @@ def test_diffusion_posterior_sample_shape():
     assert out.shape == (n_measurements, n_samples, n_features)
 
 
-def test_dehaze_nuclear_diffusion_shape_logic(monkeypatch):
-    """Test dehaze_nuclear_diffusion shape logic with mocked inference."""
+def test_dehaze_nuclear_diffusion_shape_logic():
+    """Test dehaze_nuclear_diffusion shape logic."""
+
+    keras.utils.set_random_seed(DEFAULT_TEST_SEED)
+    seed_gen = keras.random.SeedGenerator(DEFAULT_TEST_SEED)
 
     # Create test video data
     n_frames = 10
     height, width, channels = 32, 32, 1
-    hazy_video = keras.random.uniform((n_frames, height, width, channels), minval=-1, maxval=1)
+    hazy_video = keras.random.uniform(
+        (n_frames, height, width, channels),
+        minval=-1,
+        maxval=1,
+        seed=seed_gen,
+    )
 
     model = DiffusionModel(
         input_shape=(height, width, channels),
@@ -273,35 +281,16 @@ def test_dehaze_nuclear_diffusion_shape_logic(monkeypatch):
         operator="haze",
     )
 
-    # Mock the _nuclear_diffusion_posterior_sample method to return known shapes
-    def mock_posterior_sample(measurements, n_steps, seed, verbose, **kwargs):
-        batch_size = keras.ops.shape(measurements)[0]
-        n_frames_window = keras.ops.shape(measurements)[1]
-        # Return fake tissue and haze predictions with correct shapes
-        tissue = keras.random.uniform(
-            (batch_size, n_frames_window, height, width, channels), minval=-1, maxval=1
-        )
-        haze = keras.random.uniform(
-            (batch_size, n_frames_window, height, width, channels), minval=-1, maxval=1
-        )
-        return tissue, haze
-
-    monkeypatch.setattr(
-        model,
-        "_nuclear_diffusion_posterior_sample",
-        mock_posterior_sample,
-        raising=False,
-    )
-
     # Test with non-overlapping windows
     tissue_frames, haze_frames = dehaze_nuclear_diffusion(
         hazy_video,
         model,
         n_steps=2,
+        initial_step=0,
         window_size=3,
         window_stride=3,  # Non-overlapping
         hard_project=False,
-        seed=DEFAULT_TEST_SEED,
+        seed=seed_gen,
         verbose=False,
         omega=1.0,
         gamma=1.0,
@@ -316,10 +305,11 @@ def test_dehaze_nuclear_diffusion_shape_logic(monkeypatch):
         hazy_video,
         model,
         n_steps=2,
+        initial_step=0,
         window_size=4,
         window_stride=2,  # Overlapping
         hard_project=False,
-        seed=DEFAULT_TEST_SEED,
+        seed=seed_gen,
         verbose=False,
         omega=1.0,
         gamma=1.0,
@@ -330,8 +320,11 @@ def test_dehaze_nuclear_diffusion_shape_logic(monkeypatch):
     assert haze_frames_overlap.shape == (n_frames, height, width, channels)
 
 
-def test_dehaze_nuclear_diffusion_hard_projection(monkeypatch):
+def test_dehaze_nuclear_diffusion_hard_projection():
     """Test dehaze_nuclear_diffusion with hard projection enabled."""
+
+    keras.utils.set_random_seed(DEFAULT_TEST_SEED)
+    seed_gen = keras.random.SeedGenerator(DEFAULT_TEST_SEED)
 
     # Create test video data with some bright values
     n_frames = 5
@@ -344,27 +337,16 @@ def test_dehaze_nuclear_diffusion_hard_projection(monkeypatch):
         operator="haze",
     )
 
-    def mock_posterior_sample(measurements, n_steps, seed, verbose, **kwargs):
-        tissue = measurements * 0.8
-        haze = measurements * 0.2
-        return tissue, haze
-
-    monkeypatch.setattr(
-        model,
-        "_nuclear_diffusion_posterior_sample",
-        mock_posterior_sample,
-        raising=False,
-    )
-
     # Test with hard projection
     tissue_frames, haze_frames = dehaze_nuclear_diffusion(
         hazy_video,
         model,
         n_steps=2,
+        initial_step=0,
         window_size=3,
         window_stride=None,
         hard_project=True,
-        seed=DEFAULT_TEST_SEED,
+        seed=seed_gen,
         verbose=False,
         omega=1.0,
         gamma=1.0,

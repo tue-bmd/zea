@@ -102,7 +102,7 @@ NOTEBOOK_PARAMETERS = {
         "gamma": 1.0,
         "haze_level": 0.5,
         "rank_weight_factor": 20,
-        "initial_step": 5,
+        "initial_step": 0,
     },
     # Add more notebooks and their parameters here as needed
     # "other_notebook.ipynb": {
