@@ -1,5 +1,5 @@
 import json
-from typing import Dict, List, Union
+from typing import Any, Dict, List, Union
 
 import keras
 import numpy as np
@@ -296,7 +296,7 @@ class Pipeline:
         self.timer = FunctionTimer()
         return [self.timer(op, name=op.__class__.__name__) for op in self._pipeline_layers]
 
-    def call(self, **inputs):
+    def call(self, **inputs) -> Dict[str, Any]:
         """Process input data through the pipeline."""
         for operation in self._callable_layers:
             try:
@@ -318,7 +318,7 @@ class Pipeline:
             inputs = outputs
         return outputs
 
-    def __call__(self, return_numpy=False, **inputs):
+    def __call__(self, return_numpy=False, **inputs) -> Dict[str, Any]:
         """Process input data through the pipeline."""
 
         if any(key in inputs for key in ["probe", "scan", "config"]) or any(
