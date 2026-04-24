@@ -320,7 +320,7 @@ class File(h5py.File):
 
     def get_scan_parameters(self, event=None) -> dict:
         """Returns a dictionary of scan parameters stored in the file."""
-        return self.get_parameters(event)
+        return _reformat_waveforms(self.get_parameters(event))
 
     def scan(self, event=None, safe=True, **kwargs) -> Scan:
         """Returns a Scan object initialized with the parameters from the file.
@@ -344,7 +344,7 @@ class File(h5py.File):
         Returns:
             Scan: The scan object.
         """
-        return Scan.merge(_reformat_waveforms(self.get_scan_parameters(event)), kwargs, safe=safe)
+        return Scan.merge(self.get_scan_parameters(event), kwargs, safe=safe)
 
     def get_probe_parameters(self, event=None) -> dict:
         """Returns a dictionary of probe parameters to initialize a probe

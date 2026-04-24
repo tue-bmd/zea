@@ -49,6 +49,7 @@ def generate_h5_indices(
     sort_files: bool = True,
     overlapping_blocks: bool = False,
     limit_n_frames: int | None = None,
+    axis_selections: dict | None = None,
 ):
     """Generate indices for h5 files.
 
@@ -70,6 +71,10 @@ def generate_h5_indices(
         limit_n_frames (int, optional): Limit the number of frames to load from each file. This
             means n_frames per data file will be used. These will be the first frames in the file.
             Defaults to None.
+        axis_selections (dict, optional): Mapping from axis index to indices (list of ints,
+            must be strictly increasing) or a ``slice`` used to pre-filter that axis at read
+            time. Avoids reading unused elements from disk. Cannot target ``initial_frame_axis``
+            or any axis in ``additional_axes_iter``. Defaults to None.
 
     Returns:
         list: List of tuples with indices to extract images from hdf5 files.
@@ -98,6 +103,36 @@ def generate_h5_indices(
         assert limit_n_frames > 0, f"limit_n_frames must be > 0, got {limit_n_frames}"
 
     assert len(file_paths) == len(file_shapes), "file_paths and file_shapes must have same length"
+
+    num_dims = len(file_shapes[0]) if file_shapes else 0
+    normalized_axis_selections: dict[int, object] = {}
+    if axis_selections:
+        reserved_axes = {canonicalize_axis(int(initial_frame_axis), num_dims)}
+        if additional_axes_iter:
+            reserved_axes.update(
+                canonicalize_axis(int(ax), num_dims) for ax in additional_axes_iter
+            )
+        for raw_axis, sel in axis_selections.items():
+            axis = canonicalize_axis(int(raw_axis), num_dims)
+            if axis in reserved_axes:
+                raise ValueError(
+                    f"axis_selections axis {raw_axis} conflicts with initial_frame_axis "
+                    "or additional_axes_iter"
+                )
+            if isinstance(sel, slice):
+                normalized_axis_selections[axis] = sel
+            else:
+                arr = np.asarray(sel)
+                if arr.ndim != 1 or arr.size == 0:
+                    raise ValueError(
+                        f"axis_selections[{raw_axis}] must be a 1-D non-empty list of ints"
+                    )
+                if np.any(np.diff(arr) <= 0):
+                    raise ValueError(
+                        f"axis_selections[{raw_axis}] must be strictly increasing "
+                        "(h5py requires sorted, unique indices)"
+                    )
+                normalized_axis_selections[axis] = arr.tolist()
 
     if additional_axes_iter:
         # cannot contain initial_frame_axis
@@ -159,6 +194,8 @@ def generate_h5_indices(
             full_indices = [slice(size) for size in shape]
             for i, axis in enumerate([initial_frame_axis] + list(additional_axes_iter)):
                 full_indices[axis] = axis_index[i]
+            for axis, sel in normalized_axis_selections.items():
+                full_indices[axis] = sel
             indices.append((file, key, tuple(full_indices)))
 
     if skipped_files > 0:
@@ -200,6 +237,10 @@ class H5DataSource:
         return_filename: Return filename metadata with each sample.
         cache: Cache loaded samples to RAM.
         validate: Validate dataset against the zea format.
+        axis_selections: Mapping from axis index to a list of ints (strictly increasing)
+            or a slice used to pre-filter that axis at read time, avoiding reading unused
+            elements from disk. Applied uniformly to every file, so all files must have
+            compatible extents on the selected axes.
     """
 
     def __init__(
@@ -219,6 +260,7 @@ class H5DataSource:
         return_filename: bool = False,
         cache: bool = False,
         validate: bool = True,
+        axis_selections: dict | None = None,
         **kwargs,
     ):
         self.return_filename = return_filename
@@ -258,6 +300,7 @@ class H5DataSource:
             sort_files=sort_files,
             overlapping_blocks=overlapping_blocks,
             limit_n_frames=limit_n_frames,
+            axis_selections=axis_selections,
         )
 
         if limit_n_samples is not None:
@@ -428,6 +471,10 @@ class Dataloader:
         prefetch_buffer_size: Size of the Grain buffer for reading elements per Python
             process (not per thread). Useful when reading from a distributed file
             system. Default is ``500``.
+        axis_selections: Mapping from axis index to a list of ints (strictly increasing)
+            or a slice used to pre-filter that axis at read time, avoiding reading
+            unused elements from disk. Applied uniformly across all files.
+            Default is ``None``.
 
     Example:
         .. code-block:: python
@@ -608,6 +655,13 @@ class Dataloader:
     def dataset(self):
         """The underlying ``grain.MapDataset``."""
         return self._map_dataset
+
+    @property
+    def shape(self):
+        """Output shape of one batch (or sample if unbatched). Cached after first access."""
+        if not hasattr(self, "_shape"):
+            self._shape = next(iter(self)).shape
+        return self._shape
 
     def to_iter_dataset(self):
         """Convert to a ``grain.IterDataset`` with prefetching.
