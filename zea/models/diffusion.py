@@ -248,10 +248,12 @@ class DiffusionModel(DeepGenerativeModel):
                 closer to n_steps, will result in a shorter diffusion process
                 (i.e. less noise added to the initial image). A value of 0
                 means that the diffusion process starts from pure noise.
-            initial_samples: Optional initial samples to start from.
-                If provided, these samples will be used as the starting point
-                for the diffusion process. Only used if `initial_step` is
-                greater than 0. Must be of shape `(batch_size, n_samples, *input_shape)`.
+            initial_samples: Optional initial samples to warm-start the
+                diffusion process. If provided, the diffusion process starts
+                from a noised version of these samples at the noise level
+                corresponding to `initial_step`, not from the samples
+                directly. Only has an effect when `initial_step` is greater
+                than 0. Must be of shape `(batch_size, n_samples, *input_shape)`.
             seed: Random seed generator.
             **kwargs: Additional arguments.
 
@@ -517,7 +519,11 @@ class DiffusionModel(DeepGenerativeModel):
         Args:
             initial_noise: Initial noise tensor.
             diffusion_steps: Number of diffusion steps.
-            initial_samples: Optional initial samples to start from.
+            initial_samples: Optional initial samples to warm-start the
+                diffusion process. If provided, the diffusion process starts
+                from a noised version of these samples at the noise level
+                corresponding to `initial_step`, not from the samples directly.
+                Only has an effect when `initial_step` is greater than 0.
             initial_step: Initial step to start from.
             stochastic_sampling: Whether to use stochastic sampling (DDPM).
             seed: Random seed generator.
@@ -633,7 +639,11 @@ class DiffusionModel(DeepGenerativeModel):
             measurements: Conditioning data.
             initial_noise: Initial noise tensor.
             diffusion_steps: Number of diffusion steps.
-            initial_samples: Optional initial samples to start from.
+            initial_samples: Optional initial samples to warm-start the
+                diffusion process. If provided, the diffusion process starts
+                from a noised version of these samples at the noise level
+                corresponding to `initial_step`, not from the samples directly.
+                Only has an effect when `initial_step` is greater than 0.
             initial_step: Initial step to start from.
             stochastic_sampling: Whether to use stochastic sampling (DDPM).
             seed: Random seed generator.
@@ -765,7 +775,10 @@ class DiffusionModel(DeepGenerativeModel):
         Args:
             base_diffusion_times: Base diffusion times.
             initial_noise: Initial noise tensor.
-            initial_samples: Optional initial samples to start from.
+            initial_samples: Optional initial samples. If provided, a noised
+                version of these samples at the noise level corresponding to
+                `initial_step` is used as the starting point for the diffusion
+                process.
             initial_step: Initial step to start from.
             step_size: Step size for the diffusion process.
 
