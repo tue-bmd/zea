@@ -120,7 +120,7 @@ diffusion_model_presets = {
     "diffusion-echonet-dynamic": {
         "metadata": {
             "description": ("Diffusion model trained on EchoNet-Dynamic dataset."),
-            "params": 0,
+            "params": 3_906_754,
             "path": "diffusion",
         },
         "hf_handle": "hf://zeahub/diffusion-echonet-dynamic",
@@ -128,10 +128,21 @@ diffusion_model_presets = {
     "diffusion-echonetlvh-3-frame": {
         "metadata": {
             "description": ("3-frame diffusion model trained on EchoNetLVH dataset."),
-            "params": 0,
+            "params": 3_907_014,
             "path": "diffusion",
         },
         "hf_handle": "hf://zeahub/diffusion-echonetlvh",
+    },
+    "diffusion-dehazingecho2025": {
+        "metadata": {
+            "description": (
+                "Diffusion model trained on dehazingEcho2025 dataset for ultrasound dehazing. "
+                "Trained on 256x256 resolution images."
+            ),
+            "params": 7_807_750,
+            "path": "diffusion",
+        },
+        "hf_handle": "hf://tristan-deep/semantic-diffusion-echo-dehazing",
     },
 }
 

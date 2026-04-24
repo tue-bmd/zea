@@ -1087,7 +1087,7 @@ class DDS(DiffusionGuidance):
 
 @diffusion_guidance_registry(name="nuclear-dps")
 class NuclearDiffusion(DPS):
-    """Nuclear Diffusion posterior sampling guidance.
+    r"""Nuclear Diffusion posterior sampling guidance.
 
     A hybrid framework that combines diffusion posterior sampling (DPS) with low-rank
     temporal modeling for video restoration. This method replaces the sparsity assumption
@@ -1095,41 +1095,43 @@ class NuclearDiffusion(DPS):
     maintaining a nuclear norm penalty on the background component to encourage low-rank
     temporal structure.
 
+
+    .. seealso::
+
+        - :func:`~zea.func.dehaze_nuclear_diffusion`: The dehazing application of this method
+        - :doc:`../notebooks/models/nuclear_dehazing_example`: Example notebook demonstrating
+          the method on cardiac ultrasound dehazing
+        - :class:`DPS`: Base diffusion posterior sampling guidance
+
     **Mathematical Formulation:**
 
-    Given observations :math:`\\mathbf{Y} \\in \\mathbb{R}^{n \\times p}` (video frames),
-    Nuclear Diffusion jointly samples the signal :math:`\\mathbf{X}` and low-rank background
-    :math:`\\mathbf{L}` from the posterior:
+    Given observations :math:`\mathbf{Y} \in \mathbb{R}^{n \times p}` (video frames),
+    Nuclear Diffusion jointly samples the signal :math:`\mathbf{X}` and low-rank background
+    :math:`\mathbf{L}` from the posterior:
 
     .. math::
 
-        \\mathbf{X}, \\mathbf{L} \\sim p_\\theta(\\mathbf{X}, \\mathbf{L} \\mid \\mathbf{Y})
+        \mathbf{X}, \mathbf{L} \sim p_\theta(\mathbf{X}, \mathbf{L} \mid \mathbf{Y})
 
     The posterior is factorized as:
 
     .. math::
 
-        p(\\mathbf{Y}, \\mathbf{L}, \\mathbf{X}) = p(\\mathbf{Y} \\mid \\mathbf{L}, \\mathbf{X}) \\, p(\\mathbf{L}) \\, p_\\theta(\\mathbf{X})
+        p(\mathbf{Y}, \mathbf{L}, \mathbf{X}) = p(\mathbf{Y} \mid \mathbf{L}, \mathbf{X}) \, p(\mathbf{L}) \, p_\theta(\mathbf{X})
 
     where:
 
-    - :math:`p(\\mathbf{Y} \\mid \\mathbf{L}, \\mathbf{X}) = \\mathcal{N}(\\mathbf{Y}; \\mathbf{L}+\\mathbf{X}, \\mu^{-1} \\mathbf{I})`
+    - :math:`p(\mathbf{Y} \mid \mathbf{L}, \mathbf{X}) = \mathcal{N}(\mathbf{Y}; \mathbf{L}+\mathbf{X}, \mu^{-1} \mathbf{I})`
       is the likelihood (measurement model)
-    - :math:`p(\\mathbf{L}) \\propto \\exp(-\\gamma \\|\\mathbf{L}\\|_*)` enforces low-rank structure
-      via the nuclear norm :math:`\\|\\mathbf{L}\\|_* = \\sum_i \\sigma_i(\\mathbf{L})`
-    - :math:`p_\\theta(\\mathbf{X})` is a learned diffusion prior capturing complex signal structure
+    - :math:`p(\mathbf{L}) \propto \exp(-\gamma \|\mathbf{L}\|_*)` enforces low-rank structure
+      via the nuclear norm :math:`\|\mathbf{L}\|_* = \sum_i \sigma_i(\mathbf{L})`
+    - :math:`p_\theta(\mathbf{X})` is a learned diffusion prior capturing complex signal structure
 
-    The diffusion prior operates on individual frames :math:`\\mathbf{x}^t \\in \\mathbb{R}^n`,
-    while temporal dependencies are enforced through the nuclear norm on :math:`\\mathbf{L}`.
-
-    **Implementation:**
+    The diffusion prior operates on individual frames :math:`\mathbf{x}^t \in \mathbb{R}^n`,
+    while temporal dependencies are enforced through the nuclear norm on :math:`\mathbf{L}`.
 
     This guidance method alternates between reverse diffusion and measurement-guided updates,
     computing gradients from both the measurement error and the nuclear norm penalty:
-
-    .. math::
-
-        \\mathcal{L} = \\omega \\|\\mathbf{Y} - (\\mathbf{X} + \\mathbf{L})\\|_2^2 + \\gamma \\|\\mathbf{L}\\|_*
 
     Args:
         diffusion_model: The diffusion model for the signal component.
@@ -1141,12 +1143,6 @@ class NuclearDiffusion(DPS):
         "Nuclear Diffusion Models for Low-Rank Background Suppression in Videos,"
         *IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)*, 2026.
         https://arxiv.org/abs/2509.20886
-
-    .. seealso::
-
-        - :class:`DPS`: Base diffusion posterior sampling guidance
-        - :doc:`../notebooks/models/nuclear_dehazing_example`: Example notebook demonstrating
-          the method on cardiac ultrasound dehazing
 
     """  # noqa: E501
 
@@ -1250,45 +1246,37 @@ class NuclearDiffusion(DPS):
         max_alpha: float = 0.5,
         **kwargs,
     ):
-        """Compute measurement error for joint diffusion posterior sampling.
-
-        This method computes the combined loss function for Nuclear Diffusion:
-
-        .. math::
-
-            \\mathcal{L} = \\omega \\|\\mathbf{Y} - \\hat{\\mathbf{Y}}\\|_2^2 + \\gamma \\|\\mathbf{L}\\|_*
-
-        where :math:`\\hat{\\mathbf{Y}} = (1-\\alpha)\\mathbf{X} + \\alpha\\mathbf{L}` is the
-        predicted measurement with progressive blending controlled by :math:`\\alpha(t)`.
+        r"""Compute measurement error for joint diffusion posterior sampling.
 
         Args:
             combined_images: Concatenated noisy images from tissue and haze models,
                 shape ``(batch, frames, H, W, 2C)``.
-            measurements: Target measurements :math:`\\mathbf{Y}`, shape ``(batch, frames, H, W, C)``.
+            measurements: Target measurements :math:`\mathbf{Y}`, shape ``(batch, frames, H, W, C)``.
             noise_rates: Current noise rates from the diffusion schedule, shape ``(batch, frames, 1, 1, 1)``.
             signal_rates: Current signal rates from the diffusion schedule, shape ``(batch, frames, 1, 1, 1)``.
-            omega: Weight :math:`\\omega` for the measurement error term (L2 reconstruction loss).
-            gamma: Weight :math:`\\gamma` for the nuclear norm penalty term.
+            omega: Weight :math:`\omega` for the measurement error term (L2 reconstruction loss).
+            gamma: Weight :math:`\gamma` for the nuclear norm penalty term.
             haze_level: Haze level parameter (currently unused, kept for compatibility).
             rank_weight_factor: Optional weight factor for :meth:`weighted_nuclear_norm_penalty`.
                 If ``None``, uses standard :meth:`nuclear_norm_penalty`.
-            step: Current diffusion step for progressive blending. Used to compute :math:`\\alpha(t)`.
+            step: Current diffusion step for progressive blending. Used to compute :math:`\alpha(t)`.
             total_steps: Total number of diffusion steps.
             initial_step: Step at which to start progressive blending.
-            max_alpha: Maximum value for :math:`\\alpha` at the final step.
+            max_alpha: Maximum value for :math:`\alpha` at the final step.
             **kwargs: Additional arguments (unused).
 
         Returns:
             A tuple containing:
 
-            - **measurement_error** (float): Combined loss :math:`\\mathcal{L}`.
+            - **measurement_error** (float): Combined loss :math:`\mathcal{L}`.
             - **aux** (tuple): Auxiliary outputs:
               ``(pred_noises_tissue, pred_images_tissue, noisy_haze_images, l2_error, nuclear_penalty)``
 
         .. note::
-            The progressive blending factor :math:`\\alpha(t)` linearly increases from 0
+            The progressive blending factor :math:`\alpha(t)` linearly increases from 0
             at ``initial_step`` to ``max_alpha`` at ``total_steps``, allowing the haze
             component to gradually influence the reconstruction.
+
         """  # noqa: E501
         channels = ops.shape(combined_images)[-1] // 2
         noisy_tissue_images = combined_images[..., :channels]
@@ -1311,9 +1299,6 @@ class NuclearDiffusion(DPS):
         pred_noises_tissue = ops.swapaxes(denoised["pred_noises"], 0, 1)  # [B, S, H, W, C]
         pred_images_tissue = ops.swapaxes(denoised["pred_images"], 0, 1)  # [B, S, H, W, C]
 
-        # pred_measurements = self.operator.forward(
-        #     pred_images_tissue, noisy_haze_images, haze_level
-        # )
         alpha = ops.clip(
             (step - initial_step) / (total_steps - initial_step), 0.0, max_alpha
         )  # linear after 100
@@ -1329,7 +1314,7 @@ class NuclearDiffusion(DPS):
         else:
             haze_nuclear_penalty = self.nuclear_norm_penalty(noisy_haze_images)
 
-        # NOTE: we sum across batches for the nuclear norm here. I think this is okay since
+        # NOTE: we sum across batches for the nuclear norm here.
         # the gradient of sums = sum of gradients
         nuclear_penalty = ops.sum(haze_nuclear_penalty)
 
@@ -1354,18 +1339,18 @@ class NuclearDiffusion(DPS):
         omega: float = 10.0,
         **kwargs,
     ):
-        """Compute guidance gradients for posterior sampling.
+        r"""Compute guidance gradients for posterior sampling.
 
         This method concatenates the noisy tissue and haze images, computes the
         combined loss via :meth:`compute_error`, and returns separate gradients
         for each component.
 
         Args:
-            noisy_images1: Noisy tissue images :math:`\\mathbf{x}_t` from the diffusion model,
+            noisy_images1: Noisy tissue images :math:`\mathbf{x}_t` from the diffusion model,
                 shape ``(batch, frames, H, W, C)``.
-            noisy_images2: Noisy haze/background images :math:`\\mathbf{L}_t`,
+            noisy_images2: Noisy haze/background images :math:`\mathbf{L}_t`,
                 shape ``(batch, frames, H, W, C)``.
-            measurements: Target measurements :math:`\\mathbf{Y}`, shape ``(batch, frames, H, W, C)``.
+            measurements: Target measurements :math:`\mathbf{Y}`, shape ``(batch, frames, H, W, C)``.
             noise_rates: Current noise rates from diffusion schedule.
             signal_rates: Current signal rates from diffusion schedule.
             omega: Weight for the measurement error term. Default is 10.0.

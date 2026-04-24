@@ -614,22 +614,44 @@ def dehaze_nuclear_diffusion(
 
     This function performs video dehazing by combining diffusion posterior sampling
     with low-rank temporal modeling. It processes long video sequences by splitting
-    them into overlapping windows, applying Nuclear Diffusion to each window, and
-    averaging predictions across windows for smooth results.
+    them into overlapping windows, applying `Nuclear Diffusion <https://tue-bmd.github.io/nuclear-diffusion/>`_
+    to each window, and averaging predictions across windows for smooth results.
+
+    .. seealso::
+
+        - :doc:`../../notebooks/models/nuclear_dehazing_example`: Detailed tutorial notebook
+        - :class:`~zea.models.diffusion.NuclearDiffusion`: The guidance method used for dehazing
+        - :func:`~zea.func.split_into_windows`: Window splitting utility
 
     The method performs posterior sampling to separate the video into:
 
     - **Tissue component** (:math:`\mathbf{X}`): Dynamic foreground signal with complex structure
     - **Haze component** (:math:`\mathbf{L}`): Low-rank background artifacts
 
-    The optimization objective at each diffusion step is:
+    Nuclear Diffusion replaces the sparsity prior in RPCA with a learned diffusion prior
+    while maintaining a nuclear norm penalty on the background component.
+    Given video observations :math:`\mathbf{Y} \in \mathbb{R}^{n \times p}`,
+    the method jointly samples:
 
     .. math::
 
-        \mathcal{L} = \omega \|\mathbf{Y} - (\mathbf{X} + \mathbf{L})\|_2^2 + \gamma \|\mathbf{L}\|_*
+        \mathbf{X}, \mathbf{L} \sim p_\theta(\mathbf{X}, \mathbf{L} \mid \mathbf{Y})
 
-    where :math:`\|\mathbf{L}\|_*` is the nuclear norm (sum of singular values) encouraging
-    low-rank structure in the background.
+    where :math:`\mathbf{X}` is the dynamic foreground (tissue) and :math:`\mathbf{L}` is the
+    low-rank background (haze). The posterior factorizes as:
+
+    .. math::
+
+        p(\mathbf{Y}, \mathbf{L}, \mathbf{X}) = p(\mathbf{Y} \mid \mathbf{L}, \mathbf{X}) \, p(\mathbf{L}) \, p_\theta(\mathbf{X})
+
+    - **Likelihood**: :math:`p(\mathbf{Y} \mid \mathbf{L}, \mathbf{X}) = \mathcal{N}(\mathbf{Y}; \mathbf{L}+\mathbf{X}, \mu^{-1} \mathbf{I})`
+    - **Low-rank prior**: :math:`p(\mathbf{L}) \propto \exp(-\gamma \|\mathbf{L}\|_*)` where :math:`\|\mathbf{L}\|_* = \sum_i \sigma_i(\mathbf{L})` is the nuclear norm
+    - **Diffusion prior**: :math:`p_\theta(\mathbf{X})` learned from data, capturing complex signal structure
+
+    The method operates by alternating between reverse diffusion and measurement-guided updates,
+    minimizing both the data fidelity and the low-rank penalty. This allows it to effectively
+    separate structured foreground dynamics from the low-rank haze,
+    even when the foreground is not sparse.
 
     Args:
         hazy_video: Input hazy video as a tensor of shape ``(frames, height, width, channels)``.
@@ -667,12 +689,6 @@ def dehaze_nuclear_diffusion(
     .. note::
         This function requires a diffusion model with Nuclear Diffusion guidance.
         Initialize your model with ``guidance="nuclear-dps"`` and ``operator="haze"``.
-
-    .. seealso::
-
-        - :class:`~zea.models.diffusion.NuclearDiffusion`: The guidance method used for dehazing
-        - :func:`~zea.func.tensor.split_into_windows`: Window splitting utility
-        - :doc:`../../notebooks/models/nuclear_dehazing_example`: Detailed tutorial notebook
 
     References:
         T. S. W. Stevens, O. Nolan, J.-L. Robert, and R. J. G. van Sloun,
