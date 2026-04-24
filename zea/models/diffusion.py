@@ -1140,7 +1140,8 @@ class NuclearDiffusion(DPS):
         operator: Forward operator defining the measurement model.
         disable_jit: Whether to disable JIT compilation.
 
-    References:
+    .. admonition:: Reference
+
         T. Stevens, M. Wijkstra, M. Mischi, and R. J. G. van Sloun,
         "Nuclear Diffusion Models for Low-Rank Background Suppression in Videos,"
         *IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)*, 2026.
@@ -1242,8 +1243,8 @@ class NuclearDiffusion(DPS):
         measurements,
         noise_rates,
         signal_rates,
-        omega: float,
-        gamma: float = 0.1,
+        omega: float = 1.0,
+        gamma: float = 1.0,
         rank_weight_factor: float | None = None,
         step: int | None = None,
         total_steps: int | None = None,
@@ -1283,8 +1284,9 @@ class NuclearDiffusion(DPS):
 
         .. note::
             The progressive blending factor :math:`\alpha(t)` linearly increases from 0
-            at ``initial_step`` to ``max_alpha`` at ``total_steps``, allowing the background
-            component to gradually influence the reconstruction.
+            at ``initial_step`` and plateaus at ``max_alpha`` once normalized progress
+            reaches ``max_alpha``, allowing the background component to gradually influence
+            the reconstruction and then saturate for the remainder of sampling.
 
         """  # noqa: E501
         channels = ops.shape(combined_images)[-1] // 2
@@ -1345,7 +1347,8 @@ class NuclearDiffusion(DPS):
         measurements,
         noise_rates,
         signal_rates,
-        omega: float = 10.0,
+        omega: float = 1.0,
+        gamma: float = 1.0,
         **kwargs,
     ):
         r"""Compute guidance gradients for posterior sampling.
@@ -1362,7 +1365,8 @@ class NuclearDiffusion(DPS):
             measurements: Target measurements :math:`\mathbf{Y}`, shape ``(batch, frames, H, W, C)``.
             noise_rates: Current noise rates from diffusion schedule.
             signal_rates: Current signal rates from diffusion schedule.
-            omega: Weight for the measurement error term. Default is 10.0.
+            omega: Weight for the measurement error term. Default is 1.0.
+            gamma: Weight for the nuclear norm penalty term. Default is 1.0.
             **kwargs: Additional arguments passed to :meth:`compute_error` (e.g., ``gamma``,
                 ``rank_weight_factor``, ``step``, ``total_steps``).
 
@@ -1383,6 +1387,7 @@ class NuclearDiffusion(DPS):
             noise_rates=noise_rates,
             signal_rates=signal_rates,
             omega=omega,
+            gamma=gamma,
             **kwargs,
         )
         channels = ops.shape(gradients)[-1] // 2

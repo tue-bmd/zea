@@ -691,11 +691,13 @@ def dehaze_nuclear_diffusion(
         This function requires a diffusion model with Nuclear Diffusion guidance.
         Initialize your model with ``guidance="nuclear-dps"`` and ``operator="linear_interp"``.
 
-    References:
+    .. admonition:: Reference
+
         T. S. W. Stevens, O. Nolan, J.-L. Robert, and R. J. G. van Sloun,
         "Nuclear Diffusion Models for Low-Rank Background Suppression in Videos,"
         *IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)*, 2026.
         https://arxiv.org/abs/2509.20886
+
     """  # noqa: E501
 
     assert initial_step < n_steps, "initial_step must be less than n_steps."
