@@ -16,7 +16,8 @@ from zea.utils import FunctionTimer
 def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Convert a zea dataset to processed videos using a zea pipeline "
-        + "defined in a config.yaml file.",
+        + "defined in a config.yaml file. Will process the frames sequentially to allow "
+        + "for temporal processing techniques.",
     )
     parser.add_argument(
         "dataset",
