@@ -383,6 +383,7 @@ def test_dehaze_nuclear_diffusion_validation():
             hazy_video,
             mock_model,
             n_steps=2,
+            initial_step=0,
             window_size=3,
             verbose=False,
         )
@@ -395,6 +396,7 @@ def test_dehaze_nuclear_diffusion_validation():
             hazy_video,
             mock_model,
             n_steps=2,
+            initial_step=0,
             window_size=3,
             verbose=False,
         )
