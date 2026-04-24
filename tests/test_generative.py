@@ -9,8 +9,9 @@ import pytest
 
 from zea import log
 from zea.func.ultrasound import dehaze_nuclear_diffusion
+from zea.internal.operators import InpaintingOperator, LinearInterpOperator
 from zea.io_lib import matplotlib_figure_to_numpy, save_video
-from zea.models.diffusion import DPS, DiffusionModel
+from zea.models.diffusion import DDS, DPS, DiffusionModel, NuclearDiffusion
 from zea.models.gmm import GaussianMixtureModel, match_means_covariances
 
 from . import DEFAULT_TEST_SEED
@@ -402,19 +403,26 @@ def test_dehaze_nuclear_diffusion_validation():
         )
 
 
-@pytest.mark.parametrize("guidance_name", ["dps", "dds"])
-def test_guidance_call_returns_correct_structure(guidance_name):
-    """Test that DPS and DDS guidance functions return (gradients, (error, (noises, images)))."""
-    n_features = 4
-    batch_size = 2
-
-    model = DiffusionModel(
-        input_shape=(n_features,),
+def _make_minimal_diffusion_model(input_shape):
+    """Create a minimal DiffusionModel with no guidance for direct guidance testing."""
+    return DiffusionModel(
+        input_shape=input_shape,
         network_name="dense_time_conditional",
-        network_kwargs={"widths": [8], "output_dim": n_features},
-        guidance=guidance_name,
-        operator="inpainting",
+        network_kwargs={"widths": [8], "output_dim": input_shape[0]},
+        guidance=None,
+        operator=None,
     )
+
+
+def test_dps_guidance_call():
+    """Test DPS guidance returns (gradients, (error, (pred_noises, pred_images))).
+
+    JIT is disabled for easier testing, but also to trigger coverage of the executed code paths.
+    """
+    n_features, batch_size = 4, 2
+
+    model = _make_minimal_diffusion_model((n_features,))
+    guidance = DPS(diffusion_model=model, operator=InpaintingOperator(), disable_jit=True)
 
     noisy = keras.random.uniform((batch_size, n_features))
     measurements = keras.random.uniform((batch_size, n_features))
@@ -422,19 +430,12 @@ def test_guidance_call_returns_correct_structure(guidance_name):
     noise_rates = keras.ops.ones((batch_size, 1)) * 0.5
     signal_rates = keras.ops.ones((batch_size, 1)) * 0.5
 
-    if guidance_name == "dps":
-        guidance_kwargs = {"omega": 1.0}
-    elif guidance_name == "dds":
-        guidance_kwargs = {"n_inner": 5, "eps": 1e-2}
-    else:
-        raise ValueError(f"Unknown guidance name: {guidance_name}")
-
-    gradients, (error, (pred_noises, pred_images)) = model.guidance_fn(
+    gradients, (error, (pred_noises, pred_images)) = guidance(
         noisy,
         measurements=measurements,
         noise_rates=noise_rates,
         signal_rates=signal_rates,
-        **guidance_kwargs,
+        omega=1.0,
         mask=mask,
     )
 
@@ -444,15 +445,53 @@ def test_guidance_call_returns_correct_structure(guidance_name):
     assert np.isfinite(float(error))
 
 
-def test_nuclear_diffusion_guidance_call_returns_correct_structure():
-    """Test NuclearDiffusion guidance returns ((grad1, grad2), (error, aux))."""
+def test_dds_guidance_call():
+    """Test DDS guidance returns (gradients, (error, (pred_noises, pred_images))).
+
+    JIT is disabled for easier testing, but also to trigger coverage of the executed code paths.
+    """
+    n_features, batch_size = 4, 2
+
+    model = _make_minimal_diffusion_model((n_features,))
+    guidance = DDS(diffusion_model=model, operator=InpaintingOperator(), disable_jit=True)
+
+    noisy = keras.random.uniform((batch_size, n_features))
+    measurements = keras.random.uniform((batch_size, n_features))
+    mask = keras.ops.ones((batch_size, n_features))
+    noise_rates = keras.ops.ones((batch_size, 1)) * 0.5
+    signal_rates = keras.ops.ones((batch_size, 1)) * 0.5
+
+    gradients, (error, (pred_noises, pred_images)) = guidance(
+        noisy,
+        measurements=measurements,
+        noise_rates=noise_rates,
+        signal_rates=signal_rates,
+        n_inner=3,
+        eps=1e-2,
+        mask=mask,
+    )
+
+    assert gradients.shape == noisy.shape
+    assert pred_noises.shape == noisy.shape
+    assert pred_images.shape == noisy.shape
+    assert np.isfinite(float(error))
+
+
+def test_nuclear_diffusion_guidance_call():
+    """Test NuclearDiffusion guidance returns ((grad_tissue, grad_haze), (error, aux)).
+
+    JIT is disabled for easier testing, but also to trigger coverage of the executed code paths.
+    """
     batch, frames, h, w, c = 1, 3, 8, 8, 1
 
-    # input_shape is per-frame (h, w, c); NuclearDiffusion handles the frames axis via ops.map
+    # DiffusionModel input_shape is per-frame (h, w, c)
     model = DiffusionModel(
         input_shape=(h, w, c),
-        guidance="nuclear-dps",
-        operator="linear_interp",
+        guidance=None,
+        operator=None,
+    )
+    guidance = NuclearDiffusion(
+        diffusion_model=model, operator=LinearInterpOperator(), disable_jit=True
     )
 
     noisy_tissue = keras.random.uniform((batch, frames, h, w, c))
@@ -461,7 +500,7 @@ def test_nuclear_diffusion_guidance_call_returns_correct_structure():
     noise_rates = keras.ops.ones((batch, frames, 1, 1, 1)) * 0.5
     signal_rates = keras.ops.ones((batch, frames, 1, 1, 1)) * 0.5
 
-    (grad_tissue, grad_haze), (error, aux) = model.guidance_fn(
+    (grad_tissue, grad_haze), (error, aux) = guidance(
         noisy_tissue,
         noisy_haze,
         measurements=measurements,
