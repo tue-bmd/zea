@@ -885,3 +885,23 @@ def test_split_into_windows_multidim(shape, window_size):
 
     # Return a simple scalar to avoid shape mismatch issues in backend_equality_check
     return ops.array(len(windows), dtype="int32")
+
+
+@pytest.mark.parametrize(
+    "window_size, stride, match",
+    [
+        (0, None, "window_size must be > 0"),
+        (-1, None, "window_size must be > 0"),
+        (4, 0, "stride must satisfy"),
+        (4, -1, "stride must satisfy"),
+        (4, 5, "stride must satisfy"),  # stride > window_size
+    ],
+)
+@backend_equality_check()
+def test_split_into_windows_invalid_inputs(window_size, stride, match):
+    """Test that split_into_windows raises ValueError for invalid window_size/stride."""
+    from zea.func.tensor import split_into_windows
+
+    sequence = ops.arange(10, dtype="float32")
+    with pytest.raises(ValueError, match=match):
+        split_into_windows(sequence, window_size=window_size, stride=stride)

@@ -1772,8 +1772,14 @@ def split_into_windows(
             [[0, 1, 2, 3], [2, 3, 4, 5], [4, 5, 6, 7], [6, 7, 8, 9]]
 
     """
+    if window_size <= 0:
+        raise ValueError("window_size must be > 0.")
+
     if stride is None:
         stride = window_size
+
+    if stride <= 0 or stride > window_size:
+        raise ValueError("stride must satisfy 0 < stride <= window_size.")
 
     seq_len = ops.shape(sequence)[0]
     windows = []
