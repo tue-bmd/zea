@@ -278,7 +278,7 @@ def test_dehaze_nuclear_diffusion_shape_logic():
     model = DiffusionModel(
         input_shape=(height, width, channels),
         guidance="nuclear-dps",
-        operator="haze",
+        operator="linear_interp",
     )
 
     # Test with non-overlapping windows
@@ -334,7 +334,7 @@ def test_dehaze_nuclear_diffusion_hard_projection():
     model = DiffusionModel(
         input_shape=(height, width, channels),
         guidance="nuclear-dps",
-        operator="haze",
+        operator="linear_interp",
     )
 
     # Test with hard projection

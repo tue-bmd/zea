@@ -657,7 +657,7 @@ def dehaze_nuclear_diffusion(
     Args:
         hazy_video: Input hazy video as a tensor of shape ``(frames, height, width, channels)``.
         diffusion_model: Pre-trained diffusion model configured with Nuclear Diffusion guidance
-            (``guidance="nuclear-dps"``) and haze operator (``operator="haze"``).
+            (``guidance="nuclear-dps"``) and haze operator (``operator="linear_interp"``).
         n_steps: Number of diffusion steps for posterior sampling. More steps generally
             produce better quality but take longer. Default is 200.
         window_size: Number of frames to process together in each window. Larger windows
@@ -689,7 +689,7 @@ def dehaze_nuclear_diffusion(
 
     .. note::
         This function requires a diffusion model with Nuclear Diffusion guidance.
-        Initialize your model with ``guidance="nuclear-dps"`` and ``operator="haze"``.
+        Initialize your model with ``guidance="nuclear-dps"`` and ``operator="linear_interp"``.
 
     References:
         T. S. W. Stevens, O. Nolan, J.-L. Robert, and R. J. G. van Sloun,

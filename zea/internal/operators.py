@@ -198,30 +198,28 @@ class FourierBlurOperator(Operator):
         return f"y = F^(-1)(M * F(x)) filter at {self.cutoff_freq}"
 
 
-@operator_registry(name="haze")
-class HazeOperator(Operator):
-    r"""Haze operator for ultrasound image degradation modeling.
+@operator_registry(name="linear_interp")
+class LinearInterpOperator(Operator):
+    r"""Linear interpolation operator for ultrasound image degradation modeling.
 
-    The haze operator models the forward process of haze corruption in ultrasound imaging,
-    where a measurement is formed by blending clean tissue images with a haze component:
+    The linear interpolation operator models the forward process of blending
+    two components (e.g., clean tissue and haze) to simulate the observed measurement that
+    contains contributions from both.
 
     .. math::
 
-        \\mathbf{y} = (1 - \\alpha) \\mathbf{x} + \\alpha \\mathbf{h}
+        \mathbf{y} = (1 - \alpha) \mathbf{x} + \alpha \mathbf{h}
 
     where:
 
-    - :math:`\mathbf{x}` is the clean tissue/signal image
-    - :math:`\mathbf{h}` is the haze/background component
-    - :math:`\alpha \in [0, 1]` is the haze level controlling the mixing ratio
-    - :math:`\mathbf{y}` is the observed (hazy) measurement
-
-    This operator is particularly used in the Nuclear Diffusion framework for cardiac
-    ultrasound dehazing, where structured background artifacts obscure dynamic content.
+    - :math:`\mathbf{x}` is the first component
+    - :math:`\mathbf{h}` is the second component
+    - :math:`\alpha \in [0, 1]` is the blending factor controlling the mixing ratio
+    - :math:`\mathbf{y}` is the observed (blended) measurement
 
     Note:
-        The haze component must be provided as an additional argument to both
-        :meth:`forward` and :meth:`transpose` methods.
+        Compared to other operators, a second component must be provided as an
+        additional argument to both :meth:`forward` and :meth:`transpose` methods.
 
     See Also:
         - :class:`~zea.models.diffusion.NuclearDiffusion`: Uses this operator for posterior sampling
@@ -230,10 +228,10 @@ class HazeOperator(Operator):
     Example:
         .. doctest::
 
-            from zea.internal.operators import HazeOperator
+            from zea.internal.operators import LinearInterpOperator
             import numpy as np
 
-            operator = HazeOperator()
+            operator = LinearInterpOperator()
             tissue = np.random.randn(64, 64, 1)
             haze = np.random.randn(64, 64, 1)
 
@@ -241,37 +239,24 @@ class HazeOperator(Operator):
             measurement = operator.forward(tissue, haze, haze_level=0.5)
     """
 
-    def corrupt(self, data, haze, haze_level: float = 0.5):
-        r"""Apply haze corruption to clean data.
+    def forward(self, data1, data2, blend_level: float = 0.5):
+        r"""Apply linear interpolation to blend two components.
 
         Args:
-            data: Clean tissue/signal images.
-            haze: Haze/background component.
-            haze_level: Mixing coefficient :math:`\alpha \in [0, 1]`. Higher values
-                mean more haze. Default is 0.5.
+            data1: First component.
+            data2: Second component.
+            blend_level: Blending factor :math:`\alpha \in [0, 1]`. Higher values
+                mean more contribution from the second component. Default is 0.5.
 
         Returns:
-            Corrupted (hazy) measurement.
+            Blended measurement.
         """
-        out = (1 - haze_level) * data + haze_level * haze
+        out = (1 - blend_level) * data1 + blend_level * data2
         return out
 
-    def forward(self, data, haze, haze_level: float = 0.5):
-        r"""Forward operator: apply haze corruption.
-
-        Args:
-            data: Clean tissue/signal images.
-            haze: Haze/background component.
-            haze_level: Mixing coefficient :math:`\alpha \in [0, 1]`. Default is 0.5.
-
-        Returns:
-            Corrupted (hazy) measurement.
-        """
-        return self.corrupt(data, haze, haze_level)
-
-    def transpose(self, data, haze, haze_level: float = 0.5):
-        """Transpose operator (identity for haze)."""
-        return (1 - haze_level) * data
+    def transpose(self, data, blend_level: float = 0.5):
+        """Transpose operator."""
+        return (1 - blend_level) * data
 
     def __str__(self):
         return "y = (1-α)x + αh"
