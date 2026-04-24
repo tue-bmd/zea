@@ -3,9 +3,9 @@
 Example:
     .. code-block:: python
 
-        from zea import Dataloader
+        import zea
 
-        loader = Dataloader(
+        loader = zea.Dataloader(
             file_paths="/path/to/dataset",
             key="data/image",
             batch_size=16,

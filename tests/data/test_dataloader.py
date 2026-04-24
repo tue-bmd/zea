@@ -1,6 +1,7 @@
 """Test H5 dataloader functions"""
 
 import hashlib
+import importlib
 import pickle
 
 import h5py
@@ -596,6 +597,49 @@ def test_dataset_property(dummy_hdf5):
         validate=False,
     )
     assert loader.dataset is not None
+
+
+def test_h5_data_source_with_disabled_cache(multi_shape_dataset, monkeypatch):
+    """H5DataSource must survive multiprocessing.Pool when caching is disabled.
+
+    Regression test for a bug where tempfile.TemporaryDirectory was used as the
+    ZEA_CACHE_DIR. On Linux (fork-based multiprocessing), forked Pool workers
+    inherit the TemporaryDirectory object and its weakref.finalize cleanup
+    callback. If the finalizer fires in any worker, it deletes the shared temp
+    dir from under the parent process, causing a FileNotFoundError.
+
+    The fix replaces TemporaryDirectory with tempfile.mkdtemp so there is no
+    weakref.finalize for forked children to inherit.
+    """
+
+    import zea.data.dataloader as _dataloader_mod
+    import zea.data.datasets as _datasets_mod
+    import zea.internal.cache as _cache_mod
+
+    # Set the env var *before* reloading so the import-time _disable_cache()
+    # call in zea.internal.cache exercises the mkdtemp path (not TemporaryDirectory).
+    # monkeypatch auto-restores the env var after the test.
+    monkeypatch.setenv("ZEA_DISABLE_CACHE", "1")
+    importlib.reload(_cache_mod)
+    importlib.reload(_datasets_mod)
+    importlib.reload(_dataloader_mod)
+
+    try:
+        source = _dataloader_mod.H5DataSource(
+            file_paths=multi_shape_dataset,
+            key="data",
+            n_frames=1,
+            validate=False,
+        )
+        assert len(source) > 0
+    finally:
+        # Restore modules to cache-enabled state for subsequent tests.
+        # Remove the env var first so the reload picks up the enabled path;
+        # monkeypatch's own teardown will then be a harmless no-op.
+        monkeypatch.delenv("ZEA_DISABLE_CACHE", raising=False)
+        importlib.reload(_cache_mod)
+        importlib.reload(_datasets_mod)
+        importlib.reload(_dataloader_mod)
 
 
 def test_dataloader_repr(dummy_hdf5):

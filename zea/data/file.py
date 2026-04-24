@@ -173,7 +173,7 @@ class File(h5py.File):
         self,
         data_type,
         indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
-    ):
+    ) -> np.ndarray:
         """Load data from the file.
 
         .. include:: ../common/file_indexing.rst
@@ -538,7 +538,7 @@ def load_file(
     data_type="raw_data",
     indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
     scan_kwargs: dict = None,
-):
+) -> Tuple[np.ndarray, Scan, Probe]:
     """Loads a zea data files (h5py file).
 
     Returns the data together with a scan object containing the parameters
