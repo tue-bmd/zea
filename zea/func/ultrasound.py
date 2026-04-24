@@ -868,13 +868,14 @@ def dehaze_nuclear_diffusion(
     # Process each window
     for window_idx, (window, frame_indices) in enumerate(zip(windows, window_indices)):
         window_batch = ops.expand_dims(window, axis=0)  # Add batch dimension
+        seed, window_seed = split_seed(seed, 2)
 
         tissue_images, haze_images = _nuclear_diffusion_posterior_sample(
             diffusion_model,
             measurements=window_batch,
             n_steps=n_steps,
             initial_step=initial_step,
-            seed=seed,
+            seed=window_seed,
             verbose=False,  # Disable per-window progress
             **guidance_kwargs,
         )
