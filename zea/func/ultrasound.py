@@ -686,8 +686,7 @@ def dehaze_nuclear_diffusion(
         - **haze_frames**: Estimated low-rank haze component as a numpy array.
 
     Raises:
-        ValueError: If the model is not configured with Nuclear Diffusion guidance, or if
-            the guidance function is not an instance of ``NuclearDiffusion``.
+        ValueError: If the model is not configured with Nuclear Diffusion guidance.
 
     .. note::
         This function requires a diffusion model with Nuclear Diffusion guidance.
