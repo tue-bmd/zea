@@ -737,62 +737,40 @@ def dehaze_nuclear_diffusion(
             raise ValueError(f"Expected 5D input (batch, frames, H, W, C), got shape {image_shape}")
 
         n_batches, n_frames, image_height, image_width, n_channels = image_shape
+        frame_shape = (n_batches, n_frames, image_height, image_width, n_channels)
 
-        # Generate initial noise
-        if seed is not None:
-            init_seed, _ = split_seed(seed, 2)
-            seed_tissue, _ = split_seed(init_seed, 2)
-            initial_noise_tissue = keras.random.normal(
-                shape=(n_batches, n_frames, image_height, image_width, n_channels),
-                seed=seed_tissue,
-            )
-        else:
-            initial_noise_tissue = keras.random.normal(
-                shape=(n_batches, n_frames, image_height, image_width, n_channels)
-            )
+        # Prepare diffusion: validates params, computes step size, sets up progress tracking
+        step_size, progbar = diffusion_model.prepare_diffusion(n_steps, initial_step, verbose)
 
-        # Initialize haze to zeros (will evolve through gradient updates)
-        initial_noise_haze = ops.zeros((n_batches, n_frames, image_height, image_width, n_channels))
+        # Seed splitting handles None gracefully across all backends
+        seed, seed1 = split_seed(seed, 2)
+        initial_noise_tissue = keras.random.normal(shape=frame_shape, seed=seed1)
+        initial_noise_haze = ops.zeros(frame_shape)
 
-        # Initialize progress tracking
-        diffusion_model.start_track_progress(n_steps, initial_step)
+        # Base diffusion times (same pattern as reverse_diffusion / reverse_conditional_diffusion)
+        base_diffusion_times = ops.ones((n_batches, n_frames, 1, 1, 1)) * diffusion_model.max_t
 
-        # Create progress bar
-        prog_bar = keras.utils.Progbar(n_steps, verbose=verbose)
-
-        # Step size for diffusion schedule
-        step_size = 1.0 / n_steps
-
-        # Initialize noisy samples
-        diffusion_times = ops.ones((n_batches, n_frames, 1, 1, 1)) * (
-            diffusion_model.max_t - initial_step * step_size
-        )
-        noise_rates, signal_rates = diffusion_model.diffusion_schedule(diffusion_times)
+        # Initialize noisy samples at the starting diffusion time
+        start_diffusion_times = base_diffusion_times - initial_step * step_size
+        noise_rates, signal_rates = diffusion_model.diffusion_schedule(start_diffusion_times)
         next_noisy_tissue = signal_rates * measurements + noise_rates * initial_noise_tissue
         next_noisy_haze = initial_noise_haze
 
+        initial_step_t = ops.convert_to_tensor(initial_step, dtype=initial_noise_tissue.dtype)
+
         # Reverse diffusion loop
         for step in range(initial_step, n_steps):
-            # Compute diffusion schedule
-            diffusion_times = ops.ones((n_batches, n_frames, 1, 1, 1)) * (
-                diffusion_model.max_t - step * step_size
-            )
+            noisy_tissue = next_noisy_tissue
+            noisy_haze = next_noisy_haze
+
+            # Compute diffusion schedule for current and next step
+            diffusion_times = base_diffusion_times - step * step_size
             noise_rates, signal_rates = diffusion_model.diffusion_schedule(diffusion_times)
 
-            # Calculate next rates
             next_diffusion_times = diffusion_times - step_size
             next_noise_rates, next_signal_rates = diffusion_model.diffusion_schedule(
                 next_diffusion_times
             )
-
-            noisy_tissue = next_noisy_tissue
-            noisy_haze = next_noisy_haze
-
-            # Add step info to guidance kwargs
-            guidance_kwargs_with_step = guidance_kwargs.copy()
-            guidance_kwargs_with_step.update({"step": step, "total_steps": n_steps})
-
-            initial_step = keras.ops.convert_to_tensor(initial_step, dtype=measurements.dtype)
 
             # Compute gradients from guidance function
             (
@@ -807,13 +785,20 @@ def dehaze_nuclear_diffusion(
                 measurements=measurements,
                 noise_rates=noise_rates,
                 signal_rates=signal_rates,
-                initial_step=initial_step,
-                **guidance_kwargs_with_step,
+                initial_step=initial_step_t,
+                step=step,
+                total_steps=n_steps,
+                **guidance_kwargs,
             )
 
-            # DDIM sampling step (deterministic)
-            next_noisy_tissue = (
-                next_signal_rates * pred_tissue + next_noise_rates * pred_noises_tissue
+            # DDIM step for tissue component (deterministic)
+            next_noisy_tissue = diffusion_model.reverse_diffusion_step(
+                shape=frame_shape,
+                pred_images=pred_tissue,
+                pred_noises=pred_noises_tissue,
+                signal_rates=signal_rates,
+                next_signal_rates=next_signal_rates,
+                next_noise_rates=next_noise_rates,
             )
             next_noisy_haze = pred_haze
 
@@ -821,15 +806,15 @@ def dehaze_nuclear_diffusion(
             next_noisy_tissue = next_noisy_tissue - gradients_tissue
             next_noisy_haze = next_noisy_haze - gradients_haze
 
-            # Update progress
-            prog_bar.update(
-                step + 1,
-                [
-                    ("total_error", measurement_error),
-                    ("l2_error", l2_error),
-                    ("nuclear_penalty", nuclear_penalty),
-                ],
-            )
+            if progbar is not None:
+                progbar.update(
+                    step + 1,
+                    [
+                        ("total_error", measurement_error),
+                        ("l2_error", l2_error),
+                        ("nuclear_penalty", nuclear_penalty),
+                    ],
+                )
 
         return pred_tissue, pred_haze
 
