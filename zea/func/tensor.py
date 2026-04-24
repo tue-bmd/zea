@@ -1726,3 +1726,109 @@ def normalize(data, output_range, input_range=None):
     data = ops.clip(data, minval, maxval)
     normalized_data = translate(data, (minval, maxval), output_range)
     return normalized_data
+
+
+def h_matrix(delays, f_vec, apod):
+    """Compute the H model matrix for a vector of normalised frequencies.
+
+    Args:
+        delays: ``(n_tx, n_el)`` transmit delays in samples.
+        f_vec: ``(n_freq,)`` normalised frequencies.
+        apod: ``(n_tx, n_el)`` apodization weights.
+
+    Returns:
+        H: ``(n_freq, n_tx, n_el)`` complex model matrix.
+    """
+    f_c = ops.cast(f_vec[:, None, None], "complex64")  # (n_freq, 1, 1)
+    d_c = ops.cast(delays[None], "complex64")  # (1, n_tx, n_el)
+    a_c = ops.cast(apod[None], "complex64")  # (1, n_tx, n_el)
+    return a_c * ops.exp(-1j * 2 * np.pi * f_c * d_c)
+
+
+def hinv_adjoint(delays, f_vec, apod, param=None):
+    """Adjoint (matched-filter) pseudo-inverse with optional ramp filter.
+
+    Args:
+        delays: ``(n_tx, n_el)`` delays in samples.
+        f_vec: ``(n_freq,)`` normalised frequencies.
+        apod: ``(n_tx, n_el)`` apodization.
+        param: Ramp scale (``None`` → multiply by *f*; ``0`` → no ramp).
+
+    Returns:
+        Hinv: ``(n_freq, n_el, n_tx)`` inverse model matrices.
+    """
+    H = h_matrix(delays, f_vec, apod)
+    Hinv = ops.conj(ops.transpose(H, (0, 2, 1)))
+    ramp_vals = f_vec if param is None else ops.ones_like(f_vec) * param
+    ramp = ops.cast(ramp_vals, "complex64")[:, None, None]  # (n_freq, 1, 1)
+    return ramp * Hinv
+
+
+def hinv_tikhonov(delays, f_vec, apod, param=None):
+    """Tikhonov-regularized inverse via SVD.
+
+    Computes :math:`V \\cdot \\text{diag}(s_i / (s_i^2 + \\lambda^2)) \\cdot U^H`
+    where :math:`\\lambda = \\text{param} \\cdot s_\\max`.  This is the closed-form
+    analytical solution to the normal-equations system
+    :math:`(H^H H + \\lambda^2 I)^{-1} H^H`, but avoids squaring the condition
+    number by working directly from the SVD.
+
+    Args:
+        delays: ``(n_tx, n_el)`` delays in samples.
+        f_vec: ``(n_freq,)`` normalised frequencies.
+        apod: ``(n_tx, n_el)`` apodization.
+        param: Regularization parameter (relative to max singular value).
+            Defaults to ``1e-2``.
+
+    Returns:
+        Hinv: ``(n_freq, n_el, n_tx)`` inverse model matrices.
+    """
+    if param is None:
+        param = 1e-2
+    H = h_matrix(delays, f_vec, apod)
+    U, s, VH = ops.svd(H, full_matrices=False)
+    sinv = s / (s**2 + (param * s[:, 0:1]) ** 2)  # (n_freq, k)
+    VHT = ops.conj(ops.transpose(VH, (0, 2, 1)))  # (n_freq, n_el, k)
+    UT = ops.conj(ops.transpose(U, (0, 2, 1)))  # (n_freq, k, n_tx)
+    return ops.matmul(VHT * sinv[:, None, :], UT)
+
+
+def hinv_tsvd(delays, f_vec, apod, param=None):
+    """Truncated SVD-based inverse.
+
+    Args:
+        delays: ``(n_tx, n_el)`` delays in samples.
+        f_vec: ``(n_freq,)`` normalised frequencies.
+        apod: ``(n_tx, n_el)`` apodization.
+        param: Truncation threshold (relative to largest singular value).
+            Defaults to ``1e-2``.
+
+    Returns:
+        Hinv: ``(n_freq, n_el, n_tx)`` inverse model matrices.
+    """
+    if param is None:
+        param = 1e-2
+    H = h_matrix(delays, f_vec, apod)
+    U, s, VH = ops.svd(H, full_matrices=False)
+    threshold = param * s[:, 0:1]  # (n_freq, 1)
+    # Safe reciprocal: avoid inf where singular values are below threshold.
+    safe_s = ops.where(s >= threshold, s, ops.ones_like(s))
+    sinv = ops.where(s >= threshold, 1.0 / safe_s, ops.zeros_like(s))  # (n_freq, k)
+    VHT = ops.conj(ops.transpose(VH, (0, 2, 1)))  # (n_freq, n_el, k)
+    UT = ops.conj(ops.transpose(U, (0, 2, 1)))  # (n_freq, k, n_tx)
+    return ops.matmul(VHT * sinv[:, None, :], UT)
+
+
+def hinv_rsvd(delays, f_vec, apod, param=None):
+    """Regularized SVD-based inverse (identical formulation to Tikhonov).
+
+    Args:
+        delays: ``(n_tx, n_el)`` delays in samples.
+        f_vec: ``(n_freq,)`` normalised frequencies.
+        apod: ``(n_tx, n_el)`` apodization.
+        param: Regularization parameter. Defaults to ``1e-2``.
+
+    Returns:
+        Hinv: ``(n_freq, n_el, n_tx)`` inverse model matrices.
+    """
+    return hinv_tikhonov(delays, f_vec, apod, param=param)
