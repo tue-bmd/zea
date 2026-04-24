@@ -422,12 +422,19 @@ def test_guidance_call_returns_correct_structure(guidance_name):
     noise_rates = keras.ops.ones((batch_size, 1)) * 0.5
     signal_rates = keras.ops.ones((batch_size, 1)) * 0.5
 
+    if guidance_name == "dps":
+        guidance_kwargs = {"omega": 1.0}
+    elif guidance_name == "dds":
+        guidance_kwargs = {"n_inner": 5, "eps": 1e-2}
+    else:
+        raise ValueError(f"Unknown guidance name: {guidance_name}")
+
     gradients, (error, (pred_noises, pred_images)) = model.guidance_fn(
         noisy,
         measurements=measurements,
         noise_rates=noise_rates,
         signal_rates=signal_rates,
-        omega=1.0,
+        **guidance_kwargs,
         mask=mask,
     )
 

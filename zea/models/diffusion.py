@@ -1012,6 +1012,7 @@ class DDS(DiffusionGuidance):
             noise_rates: Current noise rates.
             signal_rates: Current signal rates.
             n_inner: Number of conjugate gradient steps.
+            eps: Convergence threshold for conjugate gradient.
             verbose: Whether to calculate error.
 
         Returns:
@@ -1067,6 +1068,7 @@ class DDS(DiffusionGuidance):
             noise_rates: Current noise rates.
             signal_rates: Current signal rates.
             n_inner: Number of conjugate gradient steps.
+            eps: Convergence threshold for conjugate gradient.
             verbose: Whether to calculate error.
             **kwargs: Additional arguments for the operator.
 
