@@ -1163,18 +1163,20 @@ class NuclearDiffusion(DPS):
         Args:
             haze_images: Background/haze images of shape
                 ``(batch, frames, height, width, channels)``.
-                Each sequence is reshaped to a matrix of shape ``(frames, height x width)``
+                Each sequence is reshaped to a matrix of shape ``(frames, height x width x channels)``
                 before computing the nuclear norm.
 
         Returns:
             Nuclear norm penalty summed across the batch and normalized by number of frames.
 
         Note:
-            The input is reshaped from ``(batch, frames, H, W, C)`` to ``(batch, frames, HxW)``
+            The input is reshaped from ``(batch, frames, H, W, C)`` to ``(batch, frames, HxWxC)``
             before computing the singular values.
-        """
-        n_batch, n_frames, height, width, _ = ops.shape(haze_images)
-        haze_images_flattened = ops.reshape(haze_images, (n_batch, n_frames, height * width))
+        """  # noqa: E501
+        n_batch, n_frames, height, width, channels = ops.shape(haze_images)
+        haze_images_flattened = ops.reshape(
+            haze_images, (n_batch, n_frames, height * width * channels)
+        )
         haze_nuclear_penalty = ops.norm(haze_images_flattened, axis=(1, 2), ord="nuc")
 
         # normalize nuclear penalty
@@ -1260,7 +1262,10 @@ class NuclearDiffusion(DPS):
             step: Current diffusion step for progressive blending. Used to compute :math:`\alpha(t)`.
             total_steps: Total number of diffusion steps.
             initial_step: Step at which to start progressive blending.
-            max_alpha: Maximum value for :math:`\alpha` at the final step.
+            max_alpha: Maximum value for :math:`\alpha` at the final step. The alpha parameter mixes
+                foreground and background predictions, but only after the initial_step to allow the
+                diffusion model to first focus on generating the foreground signal before blending
+                in the background component.
             **kwargs: Additional arguments (unused).
 
         Returns:
@@ -1299,7 +1304,7 @@ class NuclearDiffusion(DPS):
 
         alpha = ops.clip(
             (step - initial_step) / (total_steps - initial_step), 0.0, max_alpha
-        )  # linear after 100
+        )  # linear after initial_step
         pred_measurements = (1 - alpha) * pred_images_tissue + (alpha) * noisy_haze_images
 
         l2_error = L2(measurements - pred_measurements)

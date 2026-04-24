@@ -200,7 +200,7 @@ class FourierBlurOperator(Operator):
 
 @operator_registry(name="haze")
 class HazeOperator(Operator):
-    """Haze operator for ultrasound image degradation modeling.
+    r"""Haze operator for ultrasound image degradation modeling.
 
     The haze operator models the forward process of haze corruption in ultrasound imaging,
     where a measurement is formed by blending clean tissue images with a haze component:
@@ -211,10 +211,10 @@ class HazeOperator(Operator):
 
     where:
 
-    - :math:`\\mathbf{x}` is the clean tissue/signal image
-    - :math:`\\mathbf{h}` is the haze/background component
-    - :math:`\\alpha \\in [0, 1]` is the haze level controlling the mixing ratio
-    - :math:`\\mathbf{y}` is the observed (hazy) measurement
+    - :math:`\mathbf{x}` is the clean tissue/signal image
+    - :math:`\mathbf{h}` is the haze/background component
+    - :math:`\alpha \in [0, 1]` is the haze level controlling the mixing ratio
+    - :math:`\mathbf{y}` is the observed (hazy) measurement
 
     This operator is particularly used in the Nuclear Diffusion framework for cardiac
     ultrasound dehazing, where structured background artifacts obscure dynamic content.
@@ -228,7 +228,7 @@ class HazeOperator(Operator):
         - :doc:`../notebooks/models/nuclear_dehazing_example`: Example notebook
 
     Example:
-        .. code-block:: python
+        .. doctest::
 
             from zea.internal.operators import HazeOperator
             import numpy as np
@@ -242,12 +242,12 @@ class HazeOperator(Operator):
     """
 
     def corrupt(self, data, haze, haze_level: float = 0.5):
-        """Apply haze corruption to clean data.
+        r"""Apply haze corruption to clean data.
 
         Args:
             data: Clean tissue/signal images.
             haze: Haze/background component.
-            haze_level: Mixing coefficient :math:`\\alpha \\in [0, 1]`. Higher values
+            haze_level: Mixing coefficient :math:`\alpha \in [0, 1]`. Higher values
                 mean more haze. Default is 0.5.
 
         Returns:
@@ -257,29 +257,21 @@ class HazeOperator(Operator):
         return out
 
     def forward(self, data, haze, haze_level: float = 0.5):
-        """Forward operator: apply haze corruption.
+        r"""Forward operator: apply haze corruption.
 
         Args:
             data: Clean tissue/signal images.
             haze: Haze/background component.
-            haze_level: Mixing coefficient :math:`\\alpha \\in [0, 1]`. Default is 0.5.
+            haze_level: Mixing coefficient :math:`\alpha \in [0, 1]`. Default is 0.5.
 
         Returns:
             Corrupted (hazy) measurement.
         """
         return self.corrupt(data, haze, haze_level)
 
-    def transpose(self, data, haze):
-        """Transpose operator (identity for haze).
-
-        Args:
-            data: Input data.
-            haze: Haze component (unused).
-
-        Returns:
-            Input data unchanged.
-        """
-        return data
+    def transpose(self, data, haze, haze_level: float = 0.5):
+        """Transpose operator (identity for haze)."""
+        return (1 - haze_level) * data
 
     def __str__(self):
         return "y = (1-α)x + αh"
