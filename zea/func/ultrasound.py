@@ -700,6 +700,11 @@ def dehaze_nuclear_diffusion(
 
     assert initial_step < n_steps, "initial_step must be less than n_steps."
     assert initial_step >= 0, "initial_step must be non-negative."
+    assert diffusion_model is not None, (
+        "You must pass a diffusion model to `dehaze_nuclear_diffusion`. To see which models are "
+        "available on zeahub, visit https://huggingface.co/zeahub/models or"
+        "see the available presets: https://github.com/tue-bmd/zea/blob/main/zea/models/presets.py"
+    )
 
     def _nuclear_diffusion_posterior_sample(
         diffusion_model,
