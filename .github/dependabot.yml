@@ -1,0 +1,32 @@
+## Dependabot configuration file
+# Please see the documentation for all configuration options:
+# https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
+
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python-packages:
+        patterns:
+          - "*"
+    assignees:
+       - "tristan-deep"
+    labels:
+       - "dev"
+    open-pull-requests-limit: 3
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    assignees:
+       - "tristan-deep"
+    labels:
+       - "dev"
+    open-pull-requests-limit: 3

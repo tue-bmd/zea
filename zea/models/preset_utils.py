@@ -2,6 +2,7 @@
 
 import collections
 import datetime
+import inspect
 import json
 import os
 from pathlib import Path
@@ -277,15 +278,22 @@ class KerasPresetLoader(PresetLoader):
         """Load a model from a serialized Keras config."""
         model = load_serialized_object(self.config, cls=cls, **kwargs)
 
+        if hasattr(model, "custom_load_weights"):
+            jax_memory_cleanup(model)
+            # Only pass load_weights if the method explicitly declares it as a parameter.
+            # Other models may have **kwargs that forward to Keras APIs which reject it.
+            sig = inspect.signature(model.custom_load_weights)
+            if "load_weights" in sig.parameters:
+                model.custom_load_weights(self.preset, load_weights=load_weights)
+            else:
+                if load_weights:
+                    model.custom_load_weights(self.preset)
+            return model
+
         if not load_weights:
             return model
 
         jax_memory_cleanup(model)
-
-        # if model has a custom load_weights method, call it
-        if hasattr(model, "custom_load_weights"):
-            model.custom_load_weights(self.preset)
-            return model
 
         # try to build with image_shape or input_shape if not built yet ->
         # but preferred way to build is to have a build_config in the json!

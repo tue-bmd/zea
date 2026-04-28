@@ -23,10 +23,43 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     Returns:
         image (ndarray): Output 8 bit image(s) [0, 255].
 
+    .. note::
+        If dynamic_range is None, it is assumed that the input image is already in the range
+        [-60, 0] dB, which is a common range for ultrasound images.
+
+    .. note::
+        NaN values in the input image are replaced with the minimum value of the dynamic range
+        before scaling, which ensures that they are represented as black (0) in the output image.
+        +/- inf values are replaced with the min and max values of the dynamic range.
+
+    Example:
+        .. doctest::
+
+            >>> import numpy as np
+
+            >>> import zea
+
+            >>> file_path = (
+            ...     "hf://zeahub/camus-sample/val/patient0401/patient0401_4CH_half_sequence.hdf5"
+            ... )
+
+            >>> with zea.File(file_path, mode="r") as file:
+            ...     data = file.load_data("image", indices=0)
+
+            >>> image, _ = zea.display.scan_convert(
+            ...     data,
+            ...     rho_range=(0, 1),
+            ...     theta_range=(-0.78, 0.78),
+            ...     fill_value=np.nan,
+            ... )
+            >>> image = zea.display.to_8bit(image, dynamic_range=(-60, 0))
+            >>> image.save("image.png")  # DOCTEST: +SKIP
+
     """
     if dynamic_range is None:
         dynamic_range = (-60, 0)
 
+    image = ops.nan_to_num(image, nan=dynamic_range[0])
     image = ops.convert_to_numpy(image)
     image = np.clip(image, *dynamic_range)
     image = translate(image, dynamic_range, (0, 255))
@@ -34,6 +67,81 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     if pillow:
         image = Image.fromarray(image)
     return image
+
+
+def overlay_masks(
+    image,
+    masks,
+    alpha: float = 0.5,
+    colors=None,
+):
+    """Overlay segmentation masks on top of an image using PIL.
+
+    Args:
+        image (PIL.Image or ndarray): Base image. If grayscale, it is converted
+            to RGB. If ndarray, it is converted to a PIL Image first.
+        masks (list of PIL.Image or ndarray): Segmentation masks to overlay.
+            Each mask should be an 8-bit single-channel image where non-zero
+            pixels indicate the masked region.
+        alpha (float, optional): Opacity of the mask overlays in [0, 1].
+            Defaults to 0.5.
+        colors (list of tuple, optional): RGB colors for each mask. If None,
+            a default palette is used. If provided, must contain at least as
+            many entries as masks (extra entries are ignored).
+
+    Returns:
+        PIL.Image: RGB image with masks overlaid.
+    """
+    # Validate alpha parameter before conversion to uint8
+    if not (0.0 <= alpha <= 1.0):
+        raise ValueError(f"alpha must be in the range [0.0, 1.0], got {alpha}")
+
+    _DEFAULT_COLORS = [
+        (255, 0, 0),
+        (0, 255, 0),
+        (0, 0, 255),
+        (255, 255, 0),
+        (0, 255, 255),
+        (255, 0, 255),
+    ]
+
+    if not isinstance(image, Image.Image):
+        image = Image.fromarray(np.asarray(image))
+
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+
+    # Validate colors list has enough entries if provided
+    if colors is not None and len(colors) < len(masks):
+        raise ValueError(
+            f"colors must have at least as many entries as masks: "
+            f"got {len(colors)} colors for {len(masks)} masks"
+        )
+
+    result = image.copy()
+
+    for i, mask in enumerate(masks):
+        if not isinstance(mask, Image.Image):
+            mask = Image.fromarray(np.asarray(mask))
+
+        if mask.size != image.size:
+            raise ValueError(f"Mask {i} size {mask.size} does not match image size {image.size}")
+
+        if mask.mode != "L":
+            mask = mask.convert("L")
+
+        color = _DEFAULT_COLORS[i % len(_DEFAULT_COLORS)] if colors is None else colors[i]
+
+        # Create a solid color layer the same size as the image
+        color_layer = Image.new("RGB", image.size, color)
+
+        # Build alpha channel from the mask: scale mask values by alpha
+        mask_np = (np.asarray(mask) > 0).astype(np.uint8)
+        alpha_channel = Image.fromarray((mask_np * int(alpha * 255)).astype(np.uint8))
+
+        result.paste(color_layer, mask=alpha_channel)
+
+    return result
 
 
 def compute_scan_convert_2d_coordinates(

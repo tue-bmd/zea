@@ -794,3 +794,114 @@ def test_get_band_pass_filter_invalid_inputs(num_taps, f1, f2, sampling_frequenc
 
     with pytest.raises(ValueError):
         zea.func.get_band_pass_filter(num_taps, sampling_frequency, f1, f2)
+
+
+@pytest.mark.parametrize(
+    "seq_len, window_size, stride, expected_num_windows",
+    [
+        (10, 4, None, 3),  # Non-overlapping: [0:4], [4:8], [8:10]
+        (10, 4, 2, 4),  # Overlapping: [0:4], [2:6], [4:8], [6:10]
+        (15, 5, 5, 3),  # Non-overlapping: [0:5], [5:10], [10:15]
+        (7, 3, 1, 5),  # Heavy overlap: [0:3], [1:4], [2:5], [3:6], [4:7]
+        (5, 10, None, 1),  # Window larger than sequence
+    ],
+)
+@backend_equality_check()
+def test_split_into_windows(seq_len, window_size, stride, expected_num_windows):
+    """Test split_into_windows for correct windowing and shape logic."""
+    from zea.func.tensor import split_into_windows
+
+    # Create a simple sequence with known values
+    sequence = ops.arange(seq_len, dtype="float32")
+
+    # Split into windows
+    windows, window_indices = split_into_windows(sequence, window_size, stride)
+
+    # Check number of windows
+    assert len(windows) == expected_num_windows, (
+        f"Expected {expected_num_windows} windows, got {len(windows)}"
+    )
+    assert len(window_indices) == expected_num_windows
+
+    # Verify each window has correct indices
+    for window, indices in zip(windows, window_indices):
+        # Window should match the indexed elements
+        expected_window = sequence[indices[0] : indices[-1] + 1]
+        window_np = ops.convert_to_numpy(window)
+        expected_np = ops.convert_to_numpy(expected_window)
+        np.testing.assert_array_equal(
+            window_np,
+            expected_np,
+            err_msg=f"Window content mismatch for indices {indices}",
+        )
+
+        # Check window size (all but possibly last window should be window_size)
+        if window is not windows[-1]:
+            assert len(window_np) <= window_size
+
+    # Verify stride behavior
+    if stride is not None and len(window_indices) > 1:
+        # Check that windows are offset by stride
+        for i in range(len(window_indices) - 1):
+            if window_indices[i + 1][0] < seq_len - window_size:
+                # Not the last window
+                actual_stride = window_indices[i + 1][0] - window_indices[i][0]
+                assert actual_stride == stride, f"Expected stride {stride}, got {actual_stride}"
+
+    # Return a simple scalar to avoid shape mismatch issues in backend_equality_check
+    return ops.array(len(windows), dtype="int32")
+
+
+@pytest.mark.parametrize(
+    "shape, window_size",
+    [
+        ((20, 64, 64, 1), 5),  # Video-like tensor
+        ((10, 32, 32), 3),  # 3D tensor without channel dim
+        ((15,), 4),  # 1D sequence
+    ],
+)
+@backend_equality_check()
+def test_split_into_windows_multidim(shape, window_size):
+    """Test split_into_windows with multi-dimensional tensors (e.g., video frames)."""
+    from zea.func.tensor import split_into_windows
+
+    # Create a tensor where first dimension is the sequence
+    sequence = ops.arange(np.prod(shape), dtype="float32")
+    sequence = ops.reshape(sequence, shape)
+
+    # Split into windows
+    windows, window_indices = split_into_windows(sequence, window_size)
+
+    # Check that each window preserves spatial dimensions
+    for window, indices in zip(windows, window_indices):
+        window_shape = ops.shape(window)
+        # First dim should be window length, rest should match input
+        assert tuple(window_shape[1:]) == shape[1:], (
+            f"Spatial dimensions changed: expected {shape[1:]}, got {window_shape[1:]}"
+        )
+
+        # Verify window length
+        assert window_shape[0] == len(indices)
+
+    # Return a simple scalar to avoid shape mismatch issues in backend_equality_check
+    return ops.array(len(windows), dtype="int32")
+
+
+@pytest.mark.parametrize(
+    "window_size, stride, match",
+    [
+        (0, None, "window_size must be > 0"),
+        (-1, None, "window_size must be > 0"),
+        (4, 0, "stride must satisfy"),
+        (4, -1, "stride must satisfy"),
+        (4, 5, "stride must satisfy"),  # stride > window_size
+    ],
+)
+@backend_equality_check(allow_none=True)
+def test_split_into_windows_invalid_inputs(window_size, stride, match):
+    """Test that split_into_windows raises ValueError for invalid window_size/stride."""
+    from zea.func.tensor import split_into_windows
+
+    sequence = ops.arange(10, dtype="float32")
+    with pytest.raises(ValueError, match=match):
+        split_into_windows(sequence, window_size=window_size, stride=stride)
