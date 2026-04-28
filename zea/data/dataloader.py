@@ -413,8 +413,8 @@ class Dataloader:
         shuffle: Shuffle dataset each epoch. Default is ``True``.
         return_filename: Return filename metadata together with each sample.
             Default is ``False``.
-        seed: Random seed used for shuffling. Default is ``None``.
-            If ``None`` and ``shuffle=True``, a random seed is generated.
+        seed: Random seed used for dataloader (e.g. shuffling). Default is ``None``.
+            If ``None`` a random seed is generated.
         limit_n_samples: Limit total number of samples (useful for debugging).
             Default is ``None`` (no limit).
         limit_n_frames: Limit frames loaded per file to the first N frames.
@@ -549,10 +549,9 @@ class Dataloader:
         self.shuffle = shuffle
 
         # Grain requires a concrete seed for shuffle — generate one if needed
-        if seed is None and shuffle:
+        if seed is None:
             seed = int(np.random.default_rng().integers(0, 2**31))
         self.seed = seed
-        self._rng = np.random.default_rng(seed)
 
         # ── Data source ───────────────────────────────────────────────
         self.source = H5DataSource(
@@ -600,14 +599,15 @@ class Dataloader:
                 image_size=image_size,
                 resize_type=resize_type,
                 resize_axes=resize_axes,
-                seed=seed,
+                seed=self.seed,
                 **resize_kwargs,
             )
 
-        self._map_dataset = self._build_pipeline(seed)
+        self._map_dataset = self._build_pipeline(self.seed)
+        self._shape = self._map_dataset[0].shape
 
     def _build_pipeline(self, seed: int):
-        """Build the Grain MapDataset pipeline with the given shuffle seed."""
+        """Build the Grain MapDataset pipeline with the given seed."""
         cfg = self._pipeline_cfg
 
         def _ds_map(ds, fn):
@@ -617,8 +617,11 @@ class Dataloader:
 
         ds = grain.MapDataset.source(self.source)
 
+        # Set the seed for the whole pipeline
+        ds.seed(seed)
+
         if self.shuffle:
-            ds = ds.shuffle(seed=seed)
+            ds = ds.shuffle()
 
         if cfg["num_shards"] > 1:
             ds = ds[cfg["shard_index"] :: cfg["num_shards"]]
@@ -658,12 +661,10 @@ class Dataloader:
 
     @property
     def shape(self):
-        """Output shape of one batch (or sample if unbatched). Cached after first access."""
-        if not hasattr(self, "_shape"):
-            self._shape = next(iter(self)).shape
+        """Output shape of one batch (or sample if unbatched)."""
         return self._shape
 
-    def to_iter_dataset(self):
+    def to_iter_dataset(self) -> grain.IterDataset:
         """Convert to a ``grain.IterDataset`` with prefetching.
 
         This is called automatically when you iterate, but you can call
@@ -678,9 +679,6 @@ class Dataloader:
         )
 
     def __iter__(self):
-        # Rebuild the pipeline with a fresh seed so each epoch sees a different order
-        if self.shuffle:
-            self._map_dataset = self._build_pipeline(seed=int(self._rng.integers(0, 2**31)))
         return iter(self.to_iter_dataset())
 
     def __len__(self):

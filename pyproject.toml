@@ -49,6 +49,7 @@ dependencies = [
     "wget >=3.2",
     "imageio[ffmpeg] >=2.0",
     "grain >= 0.2",
+    "protobuf >=3.20, <6.0.0",
     # can we make these optional or remove?
     "scikit-image >=0.23",
     "scikit-learn >=1.4",
