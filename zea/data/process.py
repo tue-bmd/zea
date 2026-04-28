@@ -6,10 +6,17 @@ import keras
 import numpy as np
 from keras import ops
 
-import zea
+from zea import display, io_lib, log
 from zea.backend import jit
+from zea.config import Config
 from zea.data.data_format import generate_zea_dataset
+from zea.data.dataloader import Dataloader
+from zea.data.datasets import Dataset
+from zea.data.file import File
 from zea.internal.core import reduce_to_signature
+from zea.internal.device import init_device
+from zea.ops.pipeline import Pipeline
+from zea.scan import Scan
 from zea.utils import FunctionTimer
 
 
@@ -94,12 +101,12 @@ def run_processing(
     def to_8bit(data, dynamic_range):
         # data = ops.convert_to_numpy(data)
         data = ops.nan_to_num(data, nan=dynamic_range[0])
-        data = zea.display.to_8bit(data, dynamic_range, to_numpy=False)
+        data = display.to_8bit(data, dynamic_range, to_numpy=False)
         return data
 
     # Load config and pipeline
-    config = zea.Config.from_path(config_path)
-    pipeline = zea.Pipeline.from_path(config_path, with_batch_dim=False)
+    config = Config.from_path(config_path)
+    pipeline = Pipeline.from_path(config_path, with_batch_dim=False)
 
     # Create save directory if it doesn't exist
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -107,10 +114,10 @@ def run_processing(
     # Peek at the first file to determine which transmits the scan will select.
     # Passing these to the dataloader lets h5py read only those transmits from disk,
     # avoiding a large CPU-side slice on every frame.
-    dataset_files = zea.Dataset(dataset_path, validate=False)
+    dataset_files = Dataset(dataset_path, validate=False)
     first_file_path = dataset_files.file_paths[0]
     dataset_files.close()
-    with zea.File(first_file_path) as first_file:
+    with File(first_file_path) as first_file:
         first_scan = first_file.scan(**config.scan.as_dict())
     selected_transmits = [int(i) for i in first_scan.selected_transmits]
     # h5py requires strictly increasing indices. The scan also uses this list to index
@@ -123,7 +130,7 @@ def run_processing(
 
     # Set up dataloader. axis_selections pre-filters the transmits axis (axis 1 of
     # raw_data: frames, transmits, ...) at read time.
-    dataloader = zea.Dataloader(
+    dataloader = Dataloader(
         dataset_path,
         key=data_type,
         batch_size=None,
@@ -161,10 +168,13 @@ def run_processing(
 
     def save_video_worker(video: np.ndarray, save_path: Path, fps: int, scan_dict: dict):
         if save_path.exists() and not overwrite:
-            raise FileExistsError(f"The file {save_path} already exists.")
+            log.warning(
+                f"The file {save_path} already exists. "
+                "If you wish to overwrite, add the flag --overwrite."
+            )
 
         if save_as in ["mp4", "gif"]:
-            zea.io_lib.save_video(video, save_path, fps=fps)
+            io_lib.save_video(video, save_path, fps=fps)
         elif save_as == "hdf5":
             kwargs = reduce_to_signature(generate_zea_dataset, scan_dict)
             kwargs.pop("probe_name", None)  # TODO: handle more gracefully
@@ -207,11 +217,11 @@ def run_processing(
                 prev_file_path = file_path
 
                 # TODO: add prefetching for scan etc...
-                with zea.File(file_path) as file:
+                with File(file_path) as file:
                     # Get original frame-rate before scan transmits are subsampled.
                     filestem = file.stem
                     scan_dict = file.get_scan_parameters()
-                    scan: zea.Scan = file.scan(**config.scan.as_dict())
+                    scan: Scan = file.scan(**config.scan.as_dict())
                     fps = scan.frames_per_second or _DEFAULT_FPS
 
                     # The dataloader is pre-filtering transmits based on the first
@@ -252,7 +262,7 @@ def run_processing(
 
 def main() -> None:
     args = get_parser().parse_args()
-    zea.init_device()
+    init_device()
 
     config_path = args.config or f"{args.dataset}/config.yaml"
     run_processing(
