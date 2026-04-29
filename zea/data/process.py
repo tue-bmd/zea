@@ -19,6 +19,15 @@ from zea.ops.pipeline import Pipeline
 from zea.scan import Scan
 from zea.utils import FunctionTimer
 
+SUPPORTED_FORMATS = ["gif", "mp4", "hdf5"]
+
+try:
+    import SimpleITK as sitk
+
+    SUPPORTED_FORMATS += ["nii.gz"]
+except ImportError:
+    sitk = None
+
 
 def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -97,6 +106,12 @@ def run_processing(
     num_threads=8,
     overwrite=False,
 ) -> None:
+    if save_as == "nii.gz" and sitk is None:
+        raise ValueError("SimpleITK is not installed, cannot save as nii.gz")
+
+    if save_as not in SUPPORTED_FORMATS:
+        raise ValueError(f"save_as must be one of {SUPPORTED_FORMATS}, got {save_as}")
+
     @jit
     def to_8bit(data, dynamic_range):
         # data = ops.convert_to_numpy(data)
@@ -186,6 +201,9 @@ def run_processing(
                 overwrite=overwrite,
                 **kwargs,
             )
+        elif save_as == "nii.gz":
+            sitk.WriteImage(sitk.GetImageFromArray(video), save_path)
+            log.info(f"sitk dataset written to {log.yellow(save_path)}")
 
     # Start iterating through all frames in dataset
     pbar = keras.utils.Progbar(total_batches)
