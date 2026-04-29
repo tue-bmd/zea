@@ -67,7 +67,7 @@ def get_parser() -> argparse.ArgumentParser:
         "--save_as",
         type=str,
         default="gif",
-        help="Format to save output videos (e.g. 'gif' or 'mp4').",
+        help=f"Format to save output videos {', '.join(SUPPORTED_FORMATS)}.",
     )
     parser.add_argument(
         "--keep_keys",
@@ -91,6 +91,11 @@ def get_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Whether to overwrite existing files in `save_dir` on conflict. Default is False.",
     )
+    parser.add_argument(
+        "--keep_dynamic_range",
+        action="store_true",
+        help="Disables casting to uint8, only for hdf5 files.",
+    )
     return parser
 
 
@@ -105,7 +110,11 @@ def run_processing(
     timings=False,
     num_threads=8,
     overwrite=False,
+    keep_dynamic_range=False,
 ) -> None:
+    if keep_dynamic_range and save_as != "hdf5":
+        raise ValueError("Cannot keep dynamic range for non-hdf5 files.")
+
     if save_as == "nii.gz" and sitk is None:
         raise ValueError("SimpleITK is not installed, cannot save as nii.gz")
 
@@ -262,7 +271,8 @@ def run_processing(
             # Run the pipeline, store output frame, and forward keys to the next iteration
             output = pipeline_call(data=frame, **params)
             processed_frame = output["data"]
-            processed_frame = to_8bit(processed_frame, scan.dynamic_range)
+            if not keep_dynamic_range:
+                processed_frame = to_8bit(processed_frame, scan.dynamic_range)
             data_output.append(processed_frame)
             pbar.add(1)
             for key in keep_keys:
@@ -294,6 +304,7 @@ def main() -> None:
         args.timings,
         args.num_threads,
         args.overwrite,
+        args.keep_dynamic_range,
     )
 
 
