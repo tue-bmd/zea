@@ -552,6 +552,7 @@ class Dataloader:
         if seed is None:
             seed = int(np.random.default_rng().integers(0, 2**31))
         self.seed = seed
+        self._rng = np.random.default_rng(seed)
 
         # ── Data source ───────────────────────────────────────────────
         self.source = H5DataSource(
@@ -599,12 +600,16 @@ class Dataloader:
                 image_size=image_size,
                 resize_type=resize_type,
                 resize_axes=resize_axes,
-                seed=self.seed,
+                seed=seed,
                 **resize_kwargs,
             )
 
-        self._map_dataset = self._build_pipeline(self.seed)
-        self._shape = self._map_dataset[0].shape
+        self._map_dataset = self._build_pipeline(seed)
+
+        if return_filename:
+            self._shape = self._map_dataset[0][0].shape
+        else:
+            self._shape = self._map_dataset[0].shape
 
     def _build_pipeline(self, seed: int):
         """Build the Grain MapDataset pipeline with the given seed."""
@@ -618,7 +623,7 @@ class Dataloader:
         ds = grain.MapDataset.source(self.source)
 
         # Set the seed for the whole pipeline
-        ds.seed(seed)
+        ds = ds.seed(seed)
 
         if self.shuffle:
             ds = ds.shuffle()
