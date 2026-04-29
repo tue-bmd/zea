@@ -49,7 +49,7 @@ dependencies = [
     "wget >=3.2",
     "imageio[ffmpeg] >=2.0",
     "grain >= 0.2",
-    "protobuf >=3.20, <6.0.0",
+    "protobuf >=3.20, <8.0.0",
     # can we make these optional or remove?
     "scikit-image >=0.23",
     "scikit-learn >=1.4",
@@ -64,7 +64,7 @@ dev = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff==0.15.11",
+    "ruff==0.15.12",
     "pytest-cov",
     # docs
     "sphinx",
@@ -95,7 +95,7 @@ tests = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff==0.15.11",
+    "ruff==0.15.12",
     "pytest-cov",
 ]
 docs = [
