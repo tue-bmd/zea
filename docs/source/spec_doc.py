@@ -26,7 +26,7 @@ from zea.data.spec import (
     ImageSc,
     MetadataSpec,
     MetricsSpec,
-    ProbeOrientation,
+    ProbePose,
     ScanSpec,
     Segmentation,
     ShearWaveElastographyMap,
@@ -422,14 +422,19 @@ def generate() -> str:
         "",
     ]
     meta_subs = [
-        ("subject", Subject),
-        ("annotations", Annotations),
-        ("probe_orientation", ProbeOrientation),
-        ("ecg / voice_narration", Signal1D),
+        ("subject", Subject, True),
+        ("annotations", Annotations, True),
+        ("probe_pose", ProbePose, False),
+        ("ecg / voice_narration", Signal1D, False),
     ]
-    for label, cls in meta_subs:
+    for label, cls, compact in meta_subs:
         lines += [
-            rst_dropdown(cls, f"``{label}`` \u2014 {cls.__name__}", base_indent=2, compact=True),
+            rst_dropdown(
+                cls,
+                f"``{label}`` \u2014 {cls.__name__}",
+                base_indent=2,
+                compact=compact,
+            ),
             "",
         ]
 

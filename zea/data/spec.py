@@ -1218,19 +1218,35 @@ class Subject(Spec):
 
 @dataclass
 class Signal(Spec):
-    """Base class for additional signals with timing offset and sampling frequency metadata.
+    """Base class for additional signals with timing and sampling-frequency metadata.
 
     Args:
-        offset: Time offset in seconds relative to frame timing.
+        start_time_offset: Time offset in seconds between the first transmit event
+            of the ultrasound acquisition and sample 0 of this data. Negative
+            means this data starts before the first transmit event; positive
+            means it starts after.
         sampling_frequency: Sampling frequency in Hz for the additional signal samples.
     """
 
-    offset: np.ndarray | float
+    start_time_offset: np.ndarray | float
     sampling_frequency: np.ndarray | float
 
     SCHEMA = {
-        "offset": {"dtype": np.float32, "shape": ()},
+        "start_time_offset": {"dtype": np.float32, "shape": ()},
         "sampling_frequency": {"dtype": np.float32, "shape": ()},
+    }
+
+    FIELD_METADATA = {
+        "start_time_offset": {
+            "unit": "s",
+            "description": (
+                "Time offset between the first transmit event of the ultrasound "
+                "acquisition and sample 0 of this data. Negative means this data "
+                "starts before the first transmit event; positive means it starts "
+                "after."
+            ),
+        },
+        "sampling_frequency": {"unit": "Hz", "description": "Sampling frequency."},
     }
 
     def __post_init__(self):
@@ -1241,21 +1257,88 @@ class Signal(Spec):
 
 
 @dataclass
-class ProbeOrientation(Signal):
-    """Probe pose and timing metadata.
+class ProbePose(Signal):
+    """Sampled probe pose metadata at the tip of the transducer.
+
+    The pose uses the coordinate convention x = lateral along the transducer,
+    y = elevation (out of plane), and z = axial (depth).
 
     Args:
-        pose: Probe pose in meters of shape (T, 6), ordered as (x, y, z, az, el, roll).
-        offset: Time offset in seconds relative to frame timing.
-        sampling_frequency: Sampling frequency in Hz for probe orientation samples.
+        translation: Position of the transducer tip in meters of shape (T, 3),
+            ordered as (x, y, z).
+        rotation: Orientation of the transducer tip of shape (T, 3) or (T, 4),
+            interpreted according to ``rotation_representation``.
+        rotation_representation: Rotation parameterization. Supported values are
+            ``"euler_xyz"``, ``"quaternion_wxyz"``, and ``"quaternion_xyzw"``.
+        start_time_offset: Time offset in seconds between the first transmit event
+            of the ultrasound acquisition and sample 0 of this data.
+        sampling_frequency: Sampling frequency in Hz for probe pose samples.
     """
 
-    pose: np.ndarray
+    translation: np.ndarray
+    rotation: np.ndarray
+    rotation_representation: str
 
     SCHEMA = {
-        "pose": {"dtype": np.float32, "shape": ("T", 6)},
+        "translation": {"dtype": np.float32, "shape": ("T", 3)},
+        "rotation": {"dtype": np.float32, "shape": (("T", 3), ("T", 4))},
+        "rotation_representation": {"dtype": str, "shape": ()},
         **Signal.SCHEMA,
     }
+
+    FIELD_METADATA = {
+        "translation": {
+            "unit": "m",
+            "description": (
+                "Position of the transducer tip, ordered as (x, y, z), where x is "
+                "lateral along the transducer, y is elevation (out of plane), and "
+                "z is axial (depth)."
+            ),
+        },
+        "rotation": {
+            "unit": "-",
+            "description": (
+                "Orientation associated with the transducer-tip pose in the "
+                "x-lateral, y-elevation, z-axial coordinate convention, interpreted "
+                "according to rotation_representation."
+            ),
+        },
+        "rotation_representation": {
+            "unit": "-",
+            "description": (
+                "Rotation parameterization: one of euler_xyz, quaternion_wxyz, "
+                "or quaternion_xyzw."
+            ),
+        },
+        **Signal.FIELD_METADATA,
+    }
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        valid_representations = {
+            "euler_xyz": 3,
+            "quaternion_wxyz": 4,
+            "quaternion_xyzw": 4,
+        }
+        if self.translation.shape[0] != self.rotation.shape[0]:
+            raise ValueError(
+                "translation and rotation must have the same number of time samples, "
+                f"got {self.translation.shape[0]} and {self.rotation.shape[0]}"
+            )
+        if self.rotation_representation not in valid_representations:
+            valid = ", ".join(sorted(valid_representations))
+            raise ValueError(
+                f"rotation_representation must be one of {{{valid}}}, "
+                f"got {self.rotation_representation!r}"
+            )
+
+        expected_width = valid_representations[self.rotation_representation]
+        if self.rotation.shape[1] != expected_width:
+            raise ValueError(
+                "rotation shape does not match rotation_representation: "
+                f"got {self.rotation.shape} for {self.rotation_representation!r}"
+            )
 
 
 @dataclass
@@ -1264,7 +1347,8 @@ class Signal1D(Signal):
 
     Args:
         samples: Signal samples of shape (T) and type uint8 or float32 or int16 or complex64.
-        offset: Time offset in seconds relative to frame timing.
+        start_time_offset: Time offset in seconds between the first transmit event
+            of the ultrasound acquisition and sample 0 of this data.
         sampling_frequency: Sampling frequency in Hz for signal samples.
     """
 
@@ -1275,6 +1359,11 @@ class Signal1D(Signal):
         **Signal.SCHEMA,
     }
 
+    FIELD_METADATA = {
+        "samples": {"unit": "-", "description": "Signal samples."},
+        **Signal.FIELD_METADATA,
+    }
+
 
 @dataclass
 class SignalND(Signal):
@@ -1282,7 +1371,8 @@ class SignalND(Signal):
 
     Args:
         samples: Signal samples of shape (T, ...) and type uint8 or float32 or int16 or complex64.
-        offset: Time offset in seconds relative to frame timing.
+        start_time_offset: Time offset in seconds between the first transmit event
+            of the ultrasound acquisition and sample 0 of this data.
         sampling_frequency: Sampling frequency in Hz for signal samples.
     """
 
@@ -1291,6 +1381,11 @@ class SignalND(Signal):
     SCHEMA = {
         "samples": {"dtype": (np.uint8, np.float32, np.int16, np.complex64), "shape": ("T", "...")},
         **Signal.SCHEMA,
+    }
+
+    FIELD_METADATA = {
+        "samples": {"unit": "-", "description": "Signal samples."},
+        **Signal.FIELD_METADATA,
     }
 
 
@@ -1324,7 +1419,7 @@ class MetadataSpec(Spec):
 
     subject: Subject | dict = field(default_factory=Subject)
     credit: str | None = None
-    probe_orientation: ProbeOrientation | dict | None = None
+    probe_pose: ProbePose | dict | None = None
     voice_narration: Signal1D | dict | None = None
     ecg: Signal1D | dict | None = None
     text_report: str | None = None
@@ -1333,18 +1428,27 @@ class MetadataSpec(Spec):
     SCHEMA = {
         "subject": {"spec": Subject},
         "credit": {"dtype": str, "shape": ()},
-        "probe_orientation": {"spec": ProbeOrientation},
+        "probe_pose": {"spec": ProbePose},
         "voice_narration": {"spec": Signal1D},
         "ecg": {"spec": Signal1D},
         "text_report": {"dtype": str, "shape": ()},
         "annotations": {"spec": Annotations},
     }
 
+    FIELD_METADATA = {
+        "credit": {"unit": "-", "description": "Credit or attribution for the dataset."},
+        "probe_pose": {"unit": "-", "description": "Sampled probe pose at the transducer tip."},
+        "voice_narration": {"unit": "-", "description": "Voice narration signal."},
+        "ecg": {"unit": "-", "description": "Electrocardiogram signal."},
+        "text_report": {"unit": "-", "description": "Free-text report associated with the study."},
+        "annotations": {"unit": "-", "description": "Frame-level annotations."},
+    }
+
     def __init__(
         self,
         subject: Subject | dict | None = None,
         credit: str | None = None,
-        probe_orientation: ProbeOrientation | dict | None = None,
+        probe_pose: ProbePose | dict | None = None,
         voice_narration: Signal1D | dict | None = None,
         ecg: Signal1D | dict | None = None,
         text_report: str | None = None,
@@ -1353,7 +1457,7 @@ class MetadataSpec(Spec):
     ):
         self.subject = subject
         self.credit = credit
-        self.probe_orientation = probe_orientation
+        self.probe_pose = probe_pose
         self.voice_narration = voice_narration
         self.ecg = ecg
         self.text_report = text_report

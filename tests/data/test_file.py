@@ -687,9 +687,16 @@ class TestMetadataMetricsAccessors:
         metadata = {
             "subject": {"id": "patient_01", "type": "human", "age": np.uint8(30), "sex": "f"},
             "credit": "Test Lab",
+            "probe_pose": {
+                "translation": np.zeros((25, 3), dtype=np.float32),
+                "rotation": np.zeros((25, 4), dtype=np.float32),
+                "rotation_representation": "quaternion_wxyz",
+                "start_time_offset": np.float32(-0.1),
+                "sampling_frequency": np.float32(50.0),
+            },
             "ecg": {
                 "samples": rng.standard_normal(100).astype(np.float32),
-                "offset": np.float32(0.0),
+                "start_time_offset": np.float32(0.0),
                 "sampling_frequency": np.float32(500.0),
             },
             "annotations": {
@@ -710,7 +717,12 @@ class TestMetadataMetricsAccessors:
             assert meta.subject.id == "patient_01"
             assert meta.subject.age == 30
             assert meta.credit == "Test Lab"
+            assert meta.probe_pose.translation.shape == (25, 3)
+            assert meta.probe_pose.rotation.shape == (25, 4)
+            assert meta.probe_pose.rotation_representation == "quaternion_wxyz"
+            assert meta.probe_pose.start_time_offset == np.float32(-0.1)
             assert meta.ecg.samples.shape == (100,)
+            assert meta.ecg.start_time_offset == np.float32(0.0)
             np.testing.assert_array_equal(meta.annotations.view, ["a4c"] * n_frames)
 
     def test_metrics_round_trip(self, tmp_path):
