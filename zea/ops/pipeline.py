@@ -1582,6 +1582,7 @@ class Refocus(Operation):
         t0_delays,
         sampling_frequency,
         probe_geometry,
+        initial_times,
         tx_apodizations=None,
         **kwargs,
     ):
@@ -1619,7 +1620,9 @@ class Refocus(Operation):
         """
         data = kwargs[self.key]
 
-        delays_samples = t0_delays * ops.cast(sampling_frequency, t0_delays.dtype)
+        delays_samples = (t0_delays - initial_times[..., None]) * ops.cast(
+            sampling_frequency, t0_delays.dtype
+        )
 
         if tx_apodizations is None:
             apod = ops.ones_like(delays_samples)
