@@ -465,11 +465,13 @@ class Scan(Parameters):
             The current instance for method chaining.
         """
         idx = self.find_transmits(selection)
+        if len(idx) == 0:
+            log.warning(f"No transmits found for selection '{selection}'.")
         self._params["selected_transmits"] = idx
         self._invalidate("selected_transmits")
         return self
 
-    def find_transmits(self, selection):
+    def find_transmits(self, selection) -> list:
         """Find transmit events based on a selection.
 
         This method provides flexible ways to select transmit events:
@@ -518,28 +520,19 @@ class Scan(Parameters):
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select focused transmits")
-            idx = np.where(value > 0)[0].tolist()
-            if len(idx) == 0:
-                raise ValueError("No focused transmits found.")
-            return idx
+            return np.where(value > 0)[0].tolist()
 
         if selection == "diverging":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select diverging transmits")
-            idx = np.where(value < 0)[0].tolist()
-            if len(idx) == 0:
-                raise ValueError("No diverging transmits found.")
-            return idx
+            return np.where(value < 0)[0].tolist()
 
         if selection == "plane":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select plane wave transmits")
-            idx = np.concatenate([np.where(value == 0)[0], np.where(np.isinf(value))[0]]).tolist()
-            if len(idx) == 0:
-                raise ValueError("No plane wave transmits found.")
-            return idx
+            return np.concatenate([np.where(value == 0)[0], np.where(np.isinf(value))[0]]).tolist()
 
         # Handle integer - select evenly spaced transmits
         if isinstance(selection, (int, np.integer)):
