@@ -1474,6 +1474,14 @@ class Refocus(Operation):
     def __init__(self, method="adjoint", param=None, **kwargs):
         if method not in self._VALID_METHODS:
             raise ValueError(f"method must be one of {self._VALID_METHODS}, got '{method}'")
+        # SVD is not supported by TF XLA; disable JIT for SVD-based methods.
+        if method != "adjoint":
+            if kwargs.get("jit_compile", True):
+                log.warning(
+                    f"Refocus method='{method}' uses SVD, which is not supported by the XLA "
+                    "JIT compiler. Setting jit_compile=False."
+                )
+            kwargs.setdefault("jit_compile", False)
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
@@ -1519,8 +1527,9 @@ class Refocus(Operation):
             sinv = ops.where(s >= threshold, 1.0 / safe_s, ops.zeros_like(s))
 
         VHT = ops.conj(ops.transpose(VH, (0, 2, 1)))  # (n_freq, n_el, k)
-        UT = ops.conj(ops.transpose(U, (0, 2, 1)))    # (n_freq, k, n_tx)
-        return ops.matmul(VHT * sinv[:, None, :], UT)
+        UT = ops.conj(ops.transpose(U, (0, 2, 1)))  # (n_freq, k, n_tx)
+        sinv_c = ops.cast(sinv, "complex64")
+        return ops.matmul(VHT * sinv_c[:, None, :], UT)
 
     def _decode(self, data, delays_samples, apod):
         """REFoCUS decoding for a single (unbatched) volume.
