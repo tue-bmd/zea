@@ -90,6 +90,20 @@ NOTEBOOK_PARAMETERS = {
         "num_iterations": 2,
         "step_size": 1,
     },
+    "nuclear_dehazing_example.ipynb": {
+        "n_unconditional_samples": 1,
+        "n_unconditional_steps": 2,
+        "n_conditional_samples": 1,
+        "n_conditional_steps": 2,
+        "diffusion_steps": 2,
+        "window_size": 2,
+        "hard_project": True,
+        "omega": 1.0,
+        "gamma": 1.0,
+        "haze_level": 0.5,
+        "rank_weight_factor": 20,
+        "initial_step": 0,
+    },
     # Add more notebooks and their parameters here as needed
     # "other_notebook.ipynb": {
     #     "param1": value1,
