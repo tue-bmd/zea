@@ -7,26 +7,26 @@ from zea import log
 eps = 1e-10
 
 
-def check_for_aliasing(scan):
+def check_for_aliasing(xlims, zlims, wavelength, grid_size_x, grid_size_z):
     """Checks if the scan class parameters will cause spatial aliasing due to a too low pixel
     density. If so, a warning is printed with a suggestion to increase the pixel density by either
     increasing the number of pixels, or decreasing the pixel spacing, depending on which parameter
     was set by the user."""
-    width = scan.xlims[1] - scan.xlims[0]
-    depth = scan.zlims[1] - scan.zlims[0]
-    wvln = scan.wavelength
+    width = xlims[1] - xlims[0]
+    depth = zlims[1] - zlims[0]
+    wvln = wavelength
 
-    if width / scan.grid_size_x > wvln / 2:
+    if width / grid_size_x > wvln / 2:
         log.warning(
-            f"width/grid_size_x = {width / scan.grid_size_x:.7f} < wavelength/2 = {wvln / 2}. "
-            f"Consider either increasing scan.grid_size_x to {int(np.ceil(width / (wvln / 2)))} "
-            "or more, or increasing scan.pixels_per_wavelength to 2 or more."
+            f"width/grid_size_x = {width / grid_size_x:.7f} < wavelength/2 = {wvln / 2}. "
+            f"Consider either increasing grid_size_x to {int(np.ceil(width / (wvln / 2)))} "
+            "or more, or increasing pixels_per_wavelength to 2 or more."
         )
-    if depth / scan.grid_size_z > wvln / 2:
+    if depth / grid_size_z > wvln / 2:
         log.warning(
-            f"depth/grid_size_z = {depth / scan.grid_size_z:.7f} < wavelength/2 = {wvln / 2:.7f}. "
-            f"Consider either increasing scan.grid_size_z to {int(np.ceil(depth / (wvln / 2)))} "
-            "or more, or increasing scan.pixels_per_wavelength to 2 or more."
+            f"depth/grid_size_z = {depth / grid_size_z:.7f} < wavelength/2 = {wvln / 2:.7f}. "
+            f"Consider either increasing grid_size_z to {int(np.ceil(depth / (wvln / 2)))} "
+            "or more, or increasing pixels_per_wavelength to 2 or more."
         )
 
 

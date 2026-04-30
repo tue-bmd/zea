@@ -281,7 +281,7 @@ class Scan(Parameters):
         if self.grid_type == "polar":
             if self.is_3d:
                 raise NotImplementedError("3D polar grids are not yet supported.")
-            return polar_pixel_grid(
+            grid = polar_pixel_grid(
                 self.polar_limits,
                 self.zlims,
                 self.grid_size_z,
@@ -289,7 +289,7 @@ class Scan(Parameters):
                 self.distance_to_apex,
             )
         elif self.grid_type == "cartesian":
-            return cartesian_pixel_grid(
+            grid = cartesian_pixel_grid(
                 self.xlims,
                 self.zlims,
                 self.ylims,
@@ -302,6 +302,10 @@ class Scan(Parameters):
                 f"Unsupported grid type: {self.grid_type}. Supported types are "
                 "'cartesian' and 'polar'."
             )
+        check_for_aliasing(
+            self.xlims, self.zlims, self.wavelength, self.grid_size_x, self.grid_size_z
+        )
+        return grid
 
     @cache_with_dependencies("xlims", "wavelength", "pixels_per_wavelength")
     def grid_size_x(self):
@@ -463,7 +467,6 @@ class Scan(Parameters):
         idx = self.find_transmits(selection)
         self._params["selected_transmits"] = idx
         self._invalidate("selected_transmits")
-        check_for_aliasing(self)
         return self
 
     def find_transmits(self, selection):
