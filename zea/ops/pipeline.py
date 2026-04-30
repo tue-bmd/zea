@@ -1452,7 +1452,8 @@ class Refocus(Operation):
         method (str): Inversion method. One of:
 
             - ``'adjoint'``: Adjoint (matched-filter) pseudo-inverse with
-              an optional ramp filter in frequency. Default.
+              an optional ramp filter in frequency. Fast and parameter-free.
+              Default.
             - ``'tikhonov'``: Tikhonov-regularized inverse.
             - ``'rsvd'``: Regularized SVD-based inverse.
             - ``'tsvd'``: Truncated SVD-based inverse.
@@ -1473,7 +1474,6 @@ class Refocus(Operation):
     def __init__(self, method="adjoint", param=None, **kwargs):
         if method not in self._VALID_METHODS:
             raise ValueError(f"method must be one of {self._VALID_METHODS}, got '{method}'")
-        kwargs.setdefault("jittable", False)
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
@@ -1482,96 +1482,104 @@ class Refocus(Operation):
         self.method = method
         self.param = param
 
-    def _hinv_numpy(self, delays, f, apod):
-        """Compute Hinv at a single normalised frequency *f* using numpy.
-
-        Closely follows the reference implementation by N. Bottenus
-        (https://github.com/nbottenus/REFoCUS).
+    def _get_hinv(self, delays, f_vec, apod):
+        """Compute batched Hinv for all normalised frequencies at once.
 
         Args:
-            delays: ``(n_tx, n_el)`` numpy array of delays in samples.
-            f: scalar normalised frequency (cycles/sample).
-            apod: ``(n_tx, n_el)`` numpy apodization array.
+            delays: ``(n_tx, n_el)`` delays in samples.
+            f_vec: ``(n_freq,)`` normalised frequencies (cycles/sample).
+            apod: ``(n_tx, n_el)`` apodization.
 
         Returns:
-            Hinv: ``(n_el, n_tx)`` complex numpy matrix.
+            Hinv: ``(n_freq, n_el, n_tx)`` complex64 tensor.
         """
-        H = np.matrix(apod * np.exp(-1j * 2 * np.pi * f * delays))
+        # H: (n_freq, n_tx, n_el)
+        f_c = ops.cast(f_vec[:, None, None], "complex64")
+        d_c = ops.cast(delays[None], "complex64")
+        a_c = ops.cast(apod[None], "complex64")
+        H = a_c * ops.exp(ops.cast(-1j * 2 * np.pi, "complex64") * f_c * d_c)
 
         if self.method == "adjoint":
             # param=None  → ramp filter (multiply by f)
             # param=0     → no ramp (multiply by 1, plain adjoint)
-            ramp = f if self.param is None else 1.0
-            return ramp * H.H
+            Hinv = ops.conj(ops.transpose(H, (0, 2, 1)))
+            ramp_vals = f_vec if self.param is None else ops.ones_like(f_vec)
+            ramp = ops.cast(ramp_vals, "complex64")[:, None, None]
+            return ramp * Hinv
 
         # SVD-based methods
-        U, s, VH = np.linalg.svd(H)
+        U, s, VH = ops.svd(H, full_matrices=False)
         lam = self.param if self.param is not None else 1e-2
 
-        if self.method == "tikhonov" or self.method == "rsvd":
-            sinv = s / (s**2 + (lam * s[0]) ** 2)
-        elif self.method == "tsvd":
-            sinv = 1.0 / s
-            sinv[s < lam * s[0]] = 0.0
+        if self.method in ("tikhonov", "rsvd"):
+            sinv = s / (s**2 + (lam * s[:, 0:1]) ** 2)
+        else:  # tsvd
+            threshold = lam * s[:, 0:1]
+            safe_s = ops.where(s >= threshold, s, ops.ones_like(s))
+            sinv = ops.where(s >= threshold, 1.0 / safe_s, ops.zeros_like(s))
 
-        Sinv = np.matrix(np.zeros(H.T.shape, dtype="complex64"))
-        Sinv[: sinv.size, : sinv.size] = np.diag(sinv)
-        return np.matrix(VH).H * Sinv * np.matrix(U).H
+        VHT = ops.conj(ops.transpose(VH, (0, 2, 1)))  # (n_freq, n_el, k)
+        UT = ops.conj(ops.transpose(U, (0, 2, 1)))    # (n_freq, k, n_tx)
+        return ops.matmul(VHT * sinv[:, None, :], UT)
 
     def _decode(self, data, delays_samples, apod):
         """REFoCUS decoding for a single (unbatched) volume.
 
-        Closely follows the reference implementation by N. Bottenus
-        (https://github.com/nbottenus/REFoCUS). Loops over frequency bins and
-        applies the inverse encoding matrix at each frequency.
+        All channels and all frequency bins are processed in parallel via
+        batched tensor operations.
 
         Args:
-            data: ``(n_tx, n_ax, n_el, n_ch)`` float32 array.
+            data: ``(n_tx, n_ax, n_el, n_ch)`` float32 RF array.
             delays_samples: ``(n_tx, n_el)`` transmit delays in samples.
             apod: ``(n_tx, n_el)`` transmit apodization.
 
         Returns:
             decoded: ``(n_el, n_ax, n_el, n_ch)`` float32 array.
         """
-        # Convert to numpy for loop-based processing
-        data_np = np.array(ops.convert_to_numpy(data), dtype="float32")
-        delays_np = np.array(ops.convert_to_numpy(delays_samples), dtype="float32")
-        apod_np = np.array(ops.convert_to_numpy(apod), dtype="float32")
+        n_tx, n_ax, n_el, n_ch = data.shape
+        n_elements = delays_samples.shape[1]
 
-        n_tx, n_ax, n_el, n_ch = data_np.shape
-        n_elements = delays_np.shape[1]
-        n_freq = int(np.ceil(n_ax / 2)) + 1  # rfft output length
+        # --- FFT over all channels at once ---
+        # data: (n_tx, n_ax, n_el, n_ch) -> (n_ch, n_el, n_tx, n_ax)
+        rf = ops.cast(ops.transpose(data, (3, 2, 0, 1)), "float32")
+        # (n_ch, n_el_recv, n_tx, n_freq)
+        RF_enc_r, RF_enc_i = ops.rfft(rf)
+        RF_enc = ops.cast(RF_enc_r, "complex64") + 1j * ops.cast(RF_enc_i, "complex64")
+        n_freq = RF_enc.shape[-1]
 
-        # Merge receive elements and channels into a single "receive" axis so
-        # the per-frequency matrix multiply matches the reference exactly.
-        # data_np: (n_tx, n_ax, n_el, n_ch) -> (n_ax, n_el * n_ch, n_tx)
-        rf_enc = np.transpose(data_np, (1, 2, 3, 0))  # (n_ax, n_el, n_ch, n_tx)
-        rf_enc = rf_enc.reshape(n_ax, n_el * n_ch, n_tx)
+        # Rearrange to (n_freq, n_tx, n_el_recv * n_ch) for batched matmul.
+        # (n_ch, n_el_recv, n_tx, n_freq) -> (n_freq, n_tx, n_el_recv, n_ch)
+        RF_enc = ops.transpose(RF_enc, (3, 2, 1, 0))
+        # -> (n_freq, n_tx, n_el_recv * n_ch)
+        RF_enc = ops.reshape(RF_enc, (n_freq, n_tx, n_el * n_ch))
 
-        # FFT along the sample (time) axis — matches reference `axis=0`
-        RF_enc = np.fft.rfft(rf_enc, axis=0)  # (n_freq, n_el*n_ch, n_tx)
-        # Transpose to (n_tx, n_el*n_ch, n_freq) for indexing as [:,:,i]
-        RF_enc = np.transpose(RF_enc, (2, 1, 0))
+        # --- Batched inverse encoding matrices (skip DC at index 0) ---
+        frequency = ops.cast(ops.arange(n_freq), "float32") / n_ax
+        freq_noDC = frequency[1:]  # (n_freq - 1,)
+        # Hinv: (n_freq - 1, n_elements, n_tx)
+        Hinv = self._get_hinv(delays_samples, freq_noDC, apod)
 
-        frequency = np.arange(n_freq) / n_ax
+        # --- Single batched matmul over all frequencies and channels ---
+        # (n_freq-1, n_elements, n_tx) @ (n_freq-1, n_tx, n_el_recv * n_ch)
+        # -> (n_freq-1, n_elements, n_el_recv * n_ch)
+        RF_dec = ops.matmul(Hinv, RF_enc[1:])
 
-        RF_dec = np.zeros((n_freq, n_elements, n_el * n_ch), dtype="complex64")
-        for i in range(1, n_freq):
-            Hinv = self._hinv_numpy(delays_np, frequency[i], apod_np)
-            # Hinv: (n_elements, n_tx)  RF_enc[:,:,i]: (n_tx, n_el*n_ch)
-            RF_dec[i] = np.array(np.dot(Hinv, np.matrix(RF_enc[:, :, i])))
+        # Prepend zeros for the DC bin: (n_freq, n_elements, n_el_recv * n_ch)
+        dc = ops.zeros((1, n_elements, n_el * n_ch), dtype="complex64")
+        RF_decoded = ops.concatenate([dc, RF_dec], axis=0)
 
-        # Transpose back to (n_freq, n_el*n_ch, n_elements) before irfft
-        RF_dec = np.transpose(RF_dec, (0, 2, 1))
+        # --- IFFT back to time domain ---
+        # Reshape to (n_freq, n_elements, n_el_recv, n_ch)
+        RF_decoded = ops.reshape(RF_decoded, (n_freq, n_elements, n_el, n_ch))
+        # irfft acts on the last axis: move n_freq last
+        # -> (n_elements, n_el_recv, n_ch, n_freq)
+        RF_decoded = ops.transpose(RF_decoded, (1, 2, 3, 0))
+        # -> (n_elements, n_el_recv, n_ch, n_ax)
+        rf_decoded = ops.irfft((ops.real(RF_decoded), ops.imag(RF_decoded)), fft_length=n_ax)
+        # -> (n_elements, n_ax, n_el_recv, n_ch)
+        rf_decoded = ops.transpose(rf_decoded, (0, 3, 1, 2))
 
-        # IFFT along frequency axis back to time domain
-        rf_dec = np.fft.irfft(RF_dec, n=n_ax, axis=0)  # (n_ax, n_el*n_ch, n_elements)
-
-        # Restore (n_elements, n_ax, n_el, n_ch)
-        rf_dec = rf_dec.reshape(n_ax, n_el, n_ch, n_elements)
-        rf_dec = np.transpose(rf_dec, (3, 0, 1, 2))
-
-        return ops.convert_to_tensor(rf_dec.astype("float32"))
+        return ops.cast(rf_decoded, "float32")
 
     # ------------------------------------------------------------------
     # Operation interface
@@ -1630,9 +1638,7 @@ class Refocus(Operation):
             apod = tx_apodizations
 
         if self.with_batch_dim:
-            decoded = ops.stack(
-                [self._decode(data[i], delays_samples, apod) for i in range(data.shape[0])]
-            )
+            decoded = vmap(self._decode, in_axes=(0, None, None))(data, delays_samples, apod)
         else:
             decoded = self._decode(data, delays_samples, apod)
 
