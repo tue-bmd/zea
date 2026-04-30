@@ -168,9 +168,7 @@ def test_sa_parameter_outputs(probe_geometry, plane_wave_delays, rf_data):
 # ---------------------------------------------------------------------------
 
 
-def test_default_apodization_matches_explicit_ones(
-    probe_geometry, plane_wave_delays, rf_data
-):
+def test_default_apodization_matches_explicit_ones(probe_geometry, plane_wave_delays, rf_data):
     """Passing tx_apodizations=None must produce the same result as all-ones."""
     import keras
     from zea.ops import Refocus
@@ -209,9 +207,7 @@ def test_default_apodization_matches_explicit_ones(
 # ---------------------------------------------------------------------------
 
 
-def test_adjoint_ramp_filter_differs_from_no_ramp(
-    probe_geometry, plane_wave_delays, rf_data
-):
+def test_adjoint_ramp_filter_differs_from_no_ramp(probe_geometry, plane_wave_delays, rf_data):
     """param=None (ramp) and param=0 (no ramp) must produce different outputs."""
     import keras
     from zea.ops import Refocus
