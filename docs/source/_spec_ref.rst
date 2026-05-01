@@ -824,38 +824,38 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
          * - ``credit``
            - ``str``
            - scalar
-           - –
-           - 
+           - -
+           - Credit or attribution for the dataset.
            - |badge-opt|
-         * - ``probe_orientation``
-           - :class:`~zea.data.spec.ProbeOrientation`
+         * - ``probe_pose``
+           - :class:`~zea.data.spec.ProbePose`
            - group
-           - –
-           - 
+           - -
+           - Sampled probe pose at the transducer tip.
            - |badge-opt|
          * - ``voice_narration``
            - :class:`~zea.data.spec.Signal1D`
            - group
-           - –
-           - 
+           - -
+           - Voice narration signal.
            - |badge-opt|
          * - ``ecg``
            - :class:`~zea.data.spec.Signal1D`
            - group
-           - –
-           - 
+           - -
+           - Electrocardiogram signal.
            - |badge-opt|
          * - ``text_report``
            - ``str``
            - scalar
-           - –
-           - 
+           - -
+           - Free-text report associated with the study.
            - |badge-opt|
          * - ``annotations``
            - :class:`~zea.data.spec.Annotations`
            - group
-           - –
-           - 
+           - -
+           - Frame-level annotations.
            - |badge-opt|
 
       **Sub-groups**
@@ -935,33 +935,49 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - |badge-opt|
 
 
-      .. dropdown:: ``probe_orientation`` — ProbeOrientation
+      .. dropdown:: ``probe_pose`` — ProbePose
 
-         Probe pose and timing metadata.
+         Sampled probe pose metadata at the tip of the transducer.
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 18 7 27 10
          
             * - Field
               - Type
               - Shape
               - Unit
+              - Description
               - 
-            * - ``pose``
+            * - ``translation``
               - ``float32``
-              - (T, 6)
-              - –
+              - (T, 3)
+              - m
+              - Position of the transducer tip, ordered as (x, y, z), where x is lateral along the transducer, y is elevation (out of plane), and z is axial (depth).
               - |badge-req|
-            * - ``offset``
+            * - ``rotation``
+              - ``float32``
+              - (T, 3) or (T, 4)
+              - -
+              - Orientation associated with the transducer-tip pose in the x-lateral, y-elevation, z-axial coordinate convention, interpreted according to rotation_representation.
+              - |badge-req|
+            * - ``rotation_representation``
+              - ``str``
+              - scalar
+              - -
+              - Rotation parameterization: one of euler_xyz, quaternion_wxyz, or quaternion_xyzw.
+              - |badge-req|
+            * - ``start_time_offset``
               - ``float32``
               - scalar
-              - –
+              - s
+              - Time offset between the first transmit event of the ultrasound acquisition and sample 0 of this data. Negative means this data starts before the first transmit event; positive means it starts after.
               - |badge-req|
             * - ``sampling_frequency``
               - ``float32``
               - scalar
-              - –
+              - Hz
+              - Sampling frequency.
               - |badge-req|
 
 
@@ -971,27 +987,31 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 18 7 27 10
          
             * - Field
               - Type
               - Shape
               - Unit
+              - Description
               - 
             * - ``samples``
               - ``uint8`` | ``float32`` | ``int16`` | ``complex64``
               - (T)
-              - –
+              - -
+              - Signal samples.
               - |badge-req|
-            * - ``offset``
+            * - ``start_time_offset``
               - ``float32``
               - scalar
-              - –
+              - s
+              - Time offset between the first transmit event of the ultrasound acquisition and sample 0 of this data. Negative means this data starts before the first transmit event; positive means it starts after.
               - |badge-req|
             * - ``sampling_frequency``
               - ``float32``
               - scalar
-              - –
+              - Hz
+              - Sampling frequency.
               - |badge-req|
 
 

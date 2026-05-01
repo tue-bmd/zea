@@ -84,7 +84,7 @@ def save_file(
         metadata (dict, optional): Metadata to store in the ``metadata`` group, validated against
             :class:`~zea.data.spec.MetadataSpec`.  Standard keys include ``"subject"``,
             ``"credit"``, ``"annotations"``, ``"text_report"``, ``"ecg"``,
-            ``"probe_orientation"``, and ``"voice_narration"``.  Custom signal keys are also
+            ``"probe_pose"``, and ``"voice_narration"``.  Custom signal keys are also
             accepted and stored as :class:`~zea.data.spec.SignalND` entries.  Example::
 
                 metadata = {

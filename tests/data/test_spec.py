@@ -11,6 +11,7 @@ from zea.data.spec import (
     Image,
     Map,
     MetricsSpec,
+    ProbePose,
     ScanSpec,
     Segmentation,
     Signal1D,
@@ -64,19 +65,21 @@ def _example_metadata():
             "fat_percentage": np.float32(17.5),
         },
         "credit": "example-lab",
-        "probe_orientation": {
-            "pose": np.zeros((25, 6), dtype=np.float32),
-            "offset": np.float32(0.0),
+        "probe_pose": {
+            "translation": np.zeros((25, 3), dtype=np.float32),
+            "rotation": np.zeros((25, 3), dtype=np.float32),
+            "rotation_representation": "euler_xyz",
+            "start_time_offset": np.float32(0.0),
             "sampling_frequency": np.float32(50.0),
         },
         "voice_narration": {
             "samples": np.zeros((100), dtype=np.uint8),
-            "offset": np.float32(0.0),
+            "start_time_offset": np.float32(0.0),
             "sampling_frequency": np.float32(8000.0),
         },
         "ecg": {
             "samples": np.zeros((100), dtype=np.uint8),
-            "offset": np.float32(0.0),
+            "start_time_offset": np.float32(0.0),
             "sampling_frequency": np.float32(250.0),
         },
         "text_report": "normal acquisition",
@@ -216,7 +219,7 @@ def test_scan_dimension_count_consistency():
 def test_signal_nd_accepts_variable_trailing_dimensions_with_ellipsis():
     signal = SignalND(
         samples=np.zeros((10, 3, 4, 5), dtype=np.float32),
-        offset=np.float32(0.0),
+        start_time_offset=np.float32(0.0),
         sampling_frequency=np.float32(1000.0),
     )
 
@@ -227,7 +230,7 @@ def test_signal_nd_rejects_missing_time_dimension_for_ellipsis_shape():
     with pytest.raises(ValueError, match=r"samples has shape \(\), expected one of"):
         SignalND(
             samples=np.array(1.0, dtype=np.float32),
-            offset=np.float32(0.0),
+            start_time_offset=np.float32(0.0),
             sampling_frequency=np.float32(1000.0),
         )
 
@@ -314,7 +317,7 @@ def test_metadata_accepts_custom_signal_nd_keys_and_warns():
             metadata={
                 "custom_signal": {
                     "samples": np.zeros((32, 3), dtype=np.float16),
-                    "offset": np.float32(0.0),
+                    "start_time_offset": np.float32(0.0),
                     "sampling_frequency": np.float32(120.0),
                 }
             },
@@ -552,9 +555,9 @@ class TestMetadataAndMetricsValidationErrors:
             Subject(age="forty two")
 
     def test_signal_missing_required_field_raises(self):
-        """Signal1D requires both offset and sampling_frequency."""
+        """Signal1D requires both start_time_offset and sampling_frequency."""
         with pytest.raises(TypeError, match="sampling_frequency"):
-            Signal1D(samples=np.zeros(100, dtype=np.float32), offset=np.float32(0.0))
+            Signal1D(samples=np.zeros(100, dtype=np.float32), start_time_offset=np.float32(0.0))
 
     def test_metrics_wrong_shape_raises(self):
         """coherence_factor must be 1-D (n_frames,), not 2-D."""
@@ -578,3 +581,105 @@ class TestMetadataAndMetricsValidationErrors:
                     }
                 },
             )
+
+
+class TestProbePoseValidation:
+    def test_probe_pose_accepts_euler_xyz(self):
+        pose = ProbePose(
+            translation=np.zeros((25, 3), dtype=np.float32),
+            rotation=np.zeros((25, 3), dtype=np.float32),
+            rotation_representation="euler_xyz",
+            start_time_offset=np.float32(-0.1),
+            sampling_frequency=np.float32(50.0),
+        )
+
+        assert pose.translation.shape == (25, 3)
+        assert pose.rotation.shape == (25, 3)
+
+    def test_probe_pose_accepts_quaternion_wxyz(self):
+        pose = ProbePose(
+            translation=np.zeros((25, 3), dtype=np.float32),
+            rotation=np.zeros((25, 4), dtype=np.float32),
+            rotation_representation="quaternion_wxyz",
+            start_time_offset=np.float32(0.2),
+            sampling_frequency=np.float32(50.0),
+        )
+
+        assert pose.rotation.shape == (25, 4)
+
+    def test_probe_pose_accepts_quaternion_xyzw(self):
+        pose = ProbePose(
+            translation=np.zeros((25, 3), dtype=np.float32),
+            rotation=np.zeros((25, 4), dtype=np.float32),
+            rotation_representation="quaternion_xyzw",
+            start_time_offset=np.float32(0.2),
+            sampling_frequency=np.float32(50.0),
+        )
+
+        assert pose.rotation.shape == (25, 4)
+
+    def test_probe_pose_requires_rotation_representation(self):
+        with pytest.raises(TypeError, match="rotation_representation"):
+            ProbePose(
+                translation=np.zeros((25, 3), dtype=np.float32),
+                rotation=np.zeros((25, 3), dtype=np.float32),
+                start_time_offset=np.float32(0.0),
+                sampling_frequency=np.float32(50.0),
+            )
+
+    def test_probe_pose_rejects_euler_with_quaternion_width(self):
+        with pytest.raises(ValueError, match="rotation shape does not match"):
+            ProbePose(
+                translation=np.zeros((25, 3), dtype=np.float32),
+                rotation=np.zeros((25, 4), dtype=np.float32),
+                rotation_representation="euler_xyz",
+                start_time_offset=np.float32(0.0),
+                sampling_frequency=np.float32(50.0),
+            )
+
+    def test_probe_pose_rejects_quaternion_with_euler_width(self):
+        with pytest.raises(ValueError, match="rotation shape does not match"):
+            ProbePose(
+                translation=np.zeros((25, 3), dtype=np.float32),
+                rotation=np.zeros((25, 3), dtype=np.float32),
+                rotation_representation="quaternion_wxyz",
+                start_time_offset=np.float32(0.0),
+                sampling_frequency=np.float32(50.0),
+            )
+
+    def test_probe_pose_rejects_mismatched_time_dimension(self):
+        with pytest.raises(
+            ValueError, match="translation and rotation must have the same number of time samples"
+        ):
+            ProbePose(
+                translation=np.zeros((25, 3), dtype=np.float32),
+                rotation=np.zeros((24, 3), dtype=np.float32),
+                rotation_representation="euler_xyz",
+                start_time_offset=np.float32(0.0),
+                sampling_frequency=np.float32(50.0),
+            )
+
+    def test_probe_pose_rejects_non_positive_sampling_frequency(self):
+        with pytest.raises(ValueError, match="Sampling frequency must be positive"):
+            ProbePose(
+                translation=np.zeros((25, 3), dtype=np.float32),
+                rotation=np.zeros((25, 3), dtype=np.float32),
+                rotation_representation="euler_xyz",
+                start_time_offset=np.float32(0.0),
+                sampling_frequency=np.float32(0.0),
+            )
+
+    def test_signal_accepts_negative_and_positive_start_time_offset(self):
+        negative = Signal1D(
+            samples=np.zeros(10, dtype=np.float32),
+            start_time_offset=np.float32(-0.25),
+            sampling_frequency=np.float32(1000.0),
+        )
+        positive = SignalND(
+            samples=np.zeros((10, 2), dtype=np.float32),
+            start_time_offset=np.float32(0.25),
+            sampling_frequency=np.float32(1000.0),
+        )
+
+        assert negative.start_time_offset < 0
+        assert positive.start_time_offset > 0
