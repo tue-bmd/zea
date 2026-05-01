@@ -1405,7 +1405,7 @@ class GeneralizedCoherenceFactor(Operation):
 class Refocus(Operation):
     r"""REFoCUS (Retrospective Encoding For Conventional Ultrasound Sequences).
 
-    Decodes plane-wave or focused transmit data into synthetic aperture
+    Decodes any transmit data into synthetic aperture
     (multistatic / full-matrix capture) data by inverting the transmit
     encoding model in the frequency domain.
 
@@ -1425,7 +1425,7 @@ class Refocus(Operation):
 
     .. math::
 
-        \hat{S}(f) = H^{-1}(f) \, S(f)
+        \hat{U}(f) = H^{-1}(f) \, S(f)
 
     producing a synthetic aperture dataset where each decoded channel
     corresponds to a virtual single-element transmission.
@@ -1452,8 +1452,7 @@ class Refocus(Operation):
         method (str): Inversion method. One of:
 
             - ``'adjoint'``: Adjoint (matched-filter) pseudo-inverse with
-              an optional ramp filter in frequency. Fast and parameter-free.
-              Default.
+              an optional ramp filter in frequency. Default.
             - ``'tikhonov'``: Tikhonov-regularized inverse.
             - ``'rsvd'``: Regularized SVD-based inverse.
             - ``'tsvd'``: Truncated SVD-based inverse.
@@ -1461,7 +1460,7 @@ class Refocus(Operation):
         param (float or None): Regularization / filter parameter.
 
             - ``'adjoint'``: ``None`` applies a ramp filter (multiply by
-              :math:`f`). Set to ``0`` to disable the ramp filter.
+              :math:`f`). Set to ``0`` to disable the ramp filter. Defaults to ``None``.
             - ``'tikhonov'``, ``'rsvd'``, ``'tsvd'``: Relative regularization
               strength. Defaults to ``1e-2`` when ``None``.
 
