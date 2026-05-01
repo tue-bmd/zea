@@ -648,7 +648,9 @@ class TestProbePoseValidation:
             )
 
     def test_probe_pose_rejects_mismatched_time_dimension(self):
-        with pytest.raises(ValueError, match="translation and rotation must have the same number of time samples"):
+        with pytest.raises(
+            ValueError, match="translation and rotation must have the same number of time samples"
+        ):
             ProbePose(
                 translation=np.zeros((25, 3), dtype=np.float32),
                 rotation=np.zeros((24, 3), dtype=np.float32),

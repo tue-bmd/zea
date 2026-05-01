@@ -1306,8 +1306,7 @@ class ProbePose(Signal):
         "rotation_representation": {
             "unit": "-",
             "description": (
-                "Rotation parameterization: one of euler_xyz, quaternion_wxyz, "
-                "or quaternion_xyzw."
+                "Rotation parameterization: one of euler_xyz, quaternion_wxyz, or quaternion_xyzw."
             ),
         },
         **Signal.FIELD_METADATA,
