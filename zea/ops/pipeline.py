@@ -1480,7 +1480,7 @@ class Refocus(Operation):
                     f"Refocus method='{method}' uses SVD, which is not supported by the XLA "
                     "JIT compiler. Setting jit_compile=False."
                 )
-            kwargs.setdefault("jit_compile", False)
+            kwargs["jit_compile"] = False
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,

@@ -57,11 +57,6 @@ def _call_refocus(op, data_np, probe_geometry_np, plane_wave_delays_np):
     )
 
 
-# ---------------------------------------------------------------------------
-# Construction / validation
-# ---------------------------------------------------------------------------
-
-
 def test_invalid_method_raises():
     """Constructing Refocus with an unknown method must raise ValueError."""
     from zea.ops import Refocus
@@ -77,11 +72,6 @@ def test_valid_methods_construct():
     for method in ("adjoint", "tikhonov", "rsvd", "tsvd"):
         op = Refocus(method=method)
         assert op.method == method
-
-
-# ---------------------------------------------------------------------------
-# Output shape
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("method", ["adjoint", "tikhonov", "rsvd", "tsvd"])
@@ -110,11 +100,6 @@ def test_output_shape_iq(method, probe_geometry, plane_wave_delays, iq_data):
     assert decoded.shape == (N_EL, N_AX, N_EL, 2), (
         f"Expected ({N_EL}, {N_AX}, {N_EL}, 2), got {decoded.shape}"
     )
-
-
-# ---------------------------------------------------------------------------
-# SA parameter outputs
-# ---------------------------------------------------------------------------
 
 
 def test_sa_parameter_outputs(probe_geometry, plane_wave_delays, rf_data):
@@ -163,11 +148,6 @@ def test_sa_parameter_outputs(probe_geometry, plane_wave_delays, rf_data):
     assert result["flat_pfield"] is None
 
 
-# ---------------------------------------------------------------------------
-# Default apodization (tx_apodizations=None -> uniform)
-# ---------------------------------------------------------------------------
-
-
 def test_default_apodization_matches_explicit_ones(probe_geometry, plane_wave_delays, rf_data):
     """Passing tx_apodizations=None must produce the same result as all-ones."""
     import keras
@@ -202,11 +182,6 @@ def test_default_apodization_matches_explicit_ones(probe_geometry, plane_wave_de
     np.testing.assert_allclose(dec_none, dec_ones, rtol=1e-5)
 
 
-# ---------------------------------------------------------------------------
-# Ramp filter: adjoint param=None vs param=0
-# ---------------------------------------------------------------------------
-
-
 def test_adjoint_ramp_filter_differs_from_no_ramp(probe_geometry, plane_wave_delays, rf_data):
     """param=None (ramp) and param=0 (no ramp) must produce different outputs."""
     import keras
@@ -229,11 +204,6 @@ def test_adjoint_ramp_filter_differs_from_no_ramp(probe_geometry, plane_wave_del
     assert not np.allclose(dec_ramp, dec_noramp), (
         "Ramp-filtered and plain adjoint outputs should differ"
     )
-
-
-# ---------------------------------------------------------------------------
-# Batch dimension
-# ---------------------------------------------------------------------------
 
 
 def test_output_shape_with_batch_dim(probe_geometry, plane_wave_delays):
@@ -259,11 +229,6 @@ def test_output_shape_with_batch_dim(probe_geometry, plane_wave_delays):
     )
 
 
-# ---------------------------------------------------------------------------
-# Output dtype is float32
-# ---------------------------------------------------------------------------
-
-
 def test_output_dtype_is_float32(probe_geometry, plane_wave_delays, rf_data):
     """Decoded output must always be float32 regardless of method."""
     import keras
@@ -276,11 +241,6 @@ def test_output_dtype_is_float32(probe_geometry, plane_wave_delays, rf_data):
         assert decoded.dtype == np.float32, (
             f"method={method}: expected float32, got {decoded.dtype}"
         )
-
-
-# ---------------------------------------------------------------------------
-# Cross-backend consistency
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("method", ["adjoint", "tikhonov"])
