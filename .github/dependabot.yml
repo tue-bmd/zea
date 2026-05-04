@@ -17,6 +17,11 @@ updates:
     labels:
        - "dev"
     open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: "protobuf"
+        versions:
+          - ">=3.20, <6.0.0"
+        # see https://github.com/tue-bmd/zea/issues/329
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
