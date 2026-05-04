@@ -238,4 +238,4 @@ Or you can use the following BibTeX entry:
 
 .. literalinclude:: ../../paper/paper.bib
    :language: bibtex
-   :lines: 1-7
+   :lines: 1-11
