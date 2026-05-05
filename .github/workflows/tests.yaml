@@ -126,7 +126,7 @@ jobs:
     timeout-minutes: 100
     concurrency:
       group: heavy-tests-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
