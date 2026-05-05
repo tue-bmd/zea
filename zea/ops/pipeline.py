@@ -1401,6 +1401,279 @@ class GeneralizedCoherenceFactor(Operation):
         return {self.output_key: self.process_image(data, m_zero=m_zero)}
 
 
+@ops_registry("refocus")
+class Refocus(Operation):
+    r"""REFoCUS (Retrospective Encoding For Conventional Ultrasound Sequences).
+
+    Decodes any transmit data into synthetic aperture
+    (multistatic / full-matrix capture) data by inverting the transmit
+    encoding model in the frequency domain.
+
+    The transmit encoding is modelled as a matrix :math:`H` whose entry
+    :math:`H_{t,e}` describes the complex phase shift applied to element
+    :math:`e` during transmit event :math:`t`:
+
+    .. math::
+
+        H_{t,e}(f) = a_{t,e} \exp(-j 2\pi f \tau_{t,e})
+
+    where :math:`\tau_{t,e}` is the transmit delay in samples and
+    :math:`a_{t,e}` is the apodization.
+
+    At each temporal frequency the received RF spectrum is decoded by
+    multiplying with the pseudo-inverse :math:`H^{-1}`:
+
+    .. math::
+
+        \hat{U}(f) = H^{-1}(f) \, S(f)
+
+    producing a synthetic aperture dataset where each decoded channel
+    corresponds to a virtual single-element transmission.
+
+    The **input** data has shape ``(n_tx, n_ax, n_el, n_ch)`` and the
+    **output** has shape ``(n_el, n_ax, n_el, n_ch)``, where the new first
+    axis indexes the decoded virtual transmit elements.
+
+    .. admonition:: References
+
+        Bottenus, N. (2018).
+        "Recovery of the complete data set from focused transmit beams."
+        *IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency
+        Control*, 65(1), 30–38.
+
+        Ali, R., Dahl, J., & Bottenus, N. (2019).
+        "Extending Retrospective Encoding for Robust Recovery of the Multistatic Dataset."
+        *IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency
+        Control*, 67(5), 943–956.
+
+        https://github.com/nbottenus/REFoCUS
+
+    Args:
+        method (str): Inversion method. One of:
+
+            - ``'adjoint'``: Adjoint (matched-filter) pseudo-inverse with
+              an optional ramp filter in frequency. Default.
+            - ``'tikhonov'``: Tikhonov-regularized inverse.
+            - ``'rsvd'``: Regularized SVD-based inverse.
+            - ``'tsvd'``: Truncated SVD-based inverse.
+
+        param (float or None): Regularization / filter parameter.
+
+            - ``'adjoint'``: ``None`` applies a ramp filter (multiply by
+              :math:`f`). Set to ``0`` to disable the ramp filter. Defaults to ``None``.
+            - ``'tikhonov'``, ``'rsvd'``, ``'tsvd'``: Relative regularization
+              strength. Defaults to ``1e-2`` when ``None``.
+
+        **kwargs: Additional arguments forwarded to
+            :class:`~zea.ops.Operation`.
+    """
+
+    _VALID_METHODS = ("adjoint", "tikhonov", "rsvd", "tsvd")
+
+    def __init__(self, method="adjoint", param=None, **kwargs):
+        if method not in self._VALID_METHODS:
+            raise ValueError(f"method must be one of {self._VALID_METHODS}, got '{method}'")
+        # SVD is not supported by TF XLA; disable JIT for SVD-based methods.
+        if method != "adjoint":
+            if kwargs.get("jit_compile", True):
+                log.warning(
+                    f"Refocus method='{method}' uses SVD, which is not supported by the XLA "
+                    "JIT compiler. Setting jit_compile=False."
+                )
+            kwargs["jit_compile"] = False
+        super().__init__(
+            input_data_type=DataTypes.RAW_DATA,
+            output_data_type=DataTypes.RAW_DATA,
+            **kwargs,
+        )
+        self.method = method
+        self.param = param
+
+    def _get_hinv(self, delays, f_vec, apod):
+        """Compute batched Hinv for all normalised frequencies at once.
+
+        Args:
+            delays: ``(n_tx, n_el)`` delays in samples.
+            f_vec: ``(n_freq,)`` normalised frequencies (cycles/sample).
+            apod: ``(n_tx, n_el)`` apodization.
+
+        Returns:
+            Hinv: ``(n_freq, n_el, n_tx)`` complex64 tensor.
+        """
+        # H: (n_freq, n_tx, n_el)
+        f_c = ops.cast(f_vec[:, None, None], "complex64")
+        d_c = ops.cast(delays[None], "complex64")
+        a_c = ops.cast(apod[None], "complex64")
+        H = a_c * ops.exp(ops.cast(-1j * 2 * np.pi, "complex64") * f_c * d_c)
+
+        if self.method == "adjoint":
+            # param=None  → ramp filter (multiply by f)
+            # param=0     → no ramp (multiply by 1, plain adjoint)
+            Hinv = ops.conj(ops.transpose(H, (0, 2, 1)))
+            ramp_vals = f_vec if self.param is None else ops.ones_like(f_vec)
+            ramp = ops.cast(ramp_vals, "complex64")[:, None, None]
+            return ramp * Hinv
+
+        # SVD-based methods
+        U, s, VH = ops.svd(H, full_matrices=False)
+        lam = self.param if self.param is not None else 1e-2
+
+        if self.method in ("tikhonov", "rsvd"):
+            sinv = s / (s**2 + (lam * s[:, 0:1]) ** 2)
+        else:  # tsvd
+            threshold = lam * s[:, 0:1]
+            safe_s = ops.where(s >= threshold, s, ops.ones_like(s))
+            sinv = ops.where(s >= threshold, 1.0 / safe_s, ops.zeros_like(s))
+
+        VHT = ops.conj(ops.transpose(VH, (0, 2, 1)))  # (n_freq, n_el, k)
+        UT = ops.conj(ops.transpose(U, (0, 2, 1)))  # (n_freq, k, n_tx)
+        sinv_c = ops.cast(sinv, "complex64")
+        return ops.matmul(VHT * sinv_c[:, None, :], UT)
+
+    def _decode(self, data, delays_samples, apod):
+        """REFoCUS decoding for a single (unbatched) volume.
+
+        All channels and all frequency bins are processed in parallel via
+        batched tensor operations.
+
+        Args:
+            data: ``(n_tx, n_ax, n_el, n_ch)`` float32 RF array.
+            delays_samples: ``(n_tx, n_el)`` transmit delays in samples.
+            apod: ``(n_tx, n_el)`` transmit apodization.
+
+        Returns:
+            decoded: ``(n_el, n_ax, n_el, n_ch)`` float32 array.
+        """
+        n_tx, n_ax, n_el, n_ch = data.shape
+        n_elements = delays_samples.shape[1]
+
+        # --- FFT over all channels at once ---
+        # data: (n_tx, n_ax, n_el, n_ch) -> (n_ch, n_el, n_tx, n_ax)
+        rf = ops.cast(ops.transpose(data, (3, 2, 0, 1)), "float32")
+        # (n_ch, n_el_recv, n_tx, n_freq)
+        RF_enc_r, RF_enc_i = ops.rfft(rf)
+        RF_enc = ops.cast(RF_enc_r, "complex64") + 1j * ops.cast(RF_enc_i, "complex64")
+        n_freq = RF_enc.shape[-1]
+
+        # Rearrange to (n_freq, n_tx, n_el_recv * n_ch) for batched matmul.
+        # (n_ch, n_el_recv, n_tx, n_freq) -> (n_freq, n_tx, n_el_recv, n_ch)
+        RF_enc = ops.transpose(RF_enc, (3, 2, 1, 0))
+        # -> (n_freq, n_tx, n_el_recv * n_ch)
+        RF_enc = ops.reshape(RF_enc, (n_freq, n_tx, n_el * n_ch))
+
+        # --- Batched inverse encoding matrices (skip DC at index 0) ---
+        frequency = ops.cast(ops.arange(n_freq), "float32") / n_ax
+        freq_noDC = frequency[1:]  # (n_freq - 1,)
+        # Hinv: (n_freq - 1, n_elements, n_tx)
+        Hinv = self._get_hinv(delays_samples, freq_noDC, apod)
+
+        # --- Single batched matmul over all frequencies and channels ---
+        # (n_freq-1, n_elements, n_tx) @ (n_freq-1, n_tx, n_el_recv * n_ch)
+        # -> (n_freq-1, n_elements, n_el_recv * n_ch)
+        RF_dec = ops.matmul(Hinv, RF_enc[1:])
+
+        # Prepend zeros for the DC bin: (n_freq, n_elements, n_el_recv * n_ch)
+        dc = ops.zeros((1, n_elements, n_el * n_ch), dtype="complex64")
+        RF_decoded = ops.concatenate([dc, RF_dec], axis=0)
+
+        # --- IFFT back to time domain ---
+        # Reshape to (n_freq, n_elements, n_el_recv, n_ch)
+        RF_decoded = ops.reshape(RF_decoded, (n_freq, n_elements, n_el, n_ch))
+        # irfft acts on the last axis: move n_freq last
+        # -> (n_elements, n_el_recv, n_ch, n_freq)
+        RF_decoded = ops.transpose(RF_decoded, (1, 2, 3, 0))
+        # -> (n_elements, n_el_recv, n_ch, n_ax)
+        rf_decoded = ops.irfft((ops.real(RF_decoded), ops.imag(RF_decoded)), fft_length=n_ax)
+        # -> (n_elements, n_ax, n_el_recv, n_ch)
+        rf_decoded = ops.transpose(rf_decoded, (0, 3, 1, 2))
+
+        return ops.cast(rf_decoded, "float32")
+
+    # ------------------------------------------------------------------
+    # Operation interface
+    # ------------------------------------------------------------------
+
+    def call(
+        self,
+        t0_delays,
+        sampling_frequency,
+        probe_geometry,
+        initial_times,
+        tx_apodizations=None,
+        **kwargs,
+    ):
+        """Decode plane-wave / focused transmit data into multistatic data.
+
+        After decoding the output is a synthetic-aperture (SA) dataset where
+        each virtual transmit corresponds to a single element firing.  The
+        pipeline parameters that describe the transmit sequence are updated
+        accordingly so that downstream operations (TOF correction, pfield
+        weighting, etc.) remain consistent with the new data shape.
+
+        Args:
+            t0_delays: ``(n_tx, n_el)`` transmit delays in **seconds**.
+            sampling_frequency: Sampling frequency in Hz.
+            probe_geometry: ``(n_el, 3)`` element positions in metres.
+            tx_apodizations: ``(n_tx, n_el)`` transmit apodization weights.
+                Defaults to all-ones (uniform apodization).
+            **kwargs: Must contain the input data tensor under ``self.key``.
+
+        Returns:
+            dict with keys:
+
+            * ``self.output_key`` — decoded data ``(n_el, n_ax, n_el, n_ch)``
+              (or batched variant).
+            * ``"t0_delays"`` — zeros ``(n_el, n_el)`` (SA: no extra delay).
+            * ``"tx_apodizations"`` — identity ``(n_el, n_el)`` (one element
+              per virtual transmit).
+            * ``"polar_angles"`` — zeros ``(n_el,)`` (no steering).
+            * ``"focus_distances"`` — zeros ``(n_el,)`` (no focus).
+            * ``"transmit_origins"`` — element positions ``(n_el, 3)``.
+            * ``"initial_times"`` — zeros ``(n_el,)``.
+            * ``"tx_waveform_indices"`` — zeros ``(n_el,)``.
+            * ``"flat_pfield"`` — ``None`` (resets pfield so downstream
+              :class:`PfieldWeighting` becomes a no-op).
+        """
+        data = kwargs[self.key]
+
+        delays_samples = (t0_delays - initial_times[..., None]) * ops.cast(
+            sampling_frequency, t0_delays.dtype
+        )
+
+        if tx_apodizations is None:
+            apod = ops.ones_like(delays_samples)
+        else:
+            apod = tx_apodizations
+
+        if self.with_batch_dim:
+            decoded = vmap(self._decode, in_axes=(0, None, None))(data, delays_samples, apod)
+        else:
+            decoded = self._decode(data, delays_samples, apod)
+
+        # Number of virtual SA transmits = number of elements
+        n_el = ops.shape(probe_geometry)[0]
+        dtype = t0_delays.dtype
+
+        sa_t0_delays = ops.zeros((n_el, n_el), dtype=dtype)
+        sa_tx_apodizations = ops.eye(n_el, dtype=dtype)
+        sa_polar_angles = ops.zeros((n_el,), dtype=dtype)
+        sa_focus_distances = ops.zeros((n_el,), dtype=dtype)
+        sa_initial_times = ops.zeros((n_el,), dtype=dtype)
+        sa_tx_waveform_indices = ops.zeros((n_el,), dtype="int32")
+
+        return {
+            self.output_key: decoded,
+            "t0_delays": sa_t0_delays,
+            "tx_apodizations": sa_tx_apodizations,
+            "polar_angles": sa_polar_angles,
+            "focus_distances": sa_focus_distances,
+            "transmit_origins": probe_geometry,
+            "initial_times": sa_initial_times,
+            "tx_waveform_indices": sa_tx_waveform_indices,
+            "flat_pfield": None,
+        }
+
+
 def make_operation_chain(
     operation_chain: List[Union[str, Dict, Config, Operation, Pipeline]],
 ) -> List[Operation]:
