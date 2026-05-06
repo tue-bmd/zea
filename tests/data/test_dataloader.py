@@ -22,6 +22,7 @@ from .. import DEFAULT_TEST_SEED
 CAMUS_DATASET_PATH = HFPath("hf://zeahub/camus-sample")
 CAMUS_FILE = CAMUS_DATASET_PATH / "val/patient0401/patient0401_4CH_half_sequence.hdf5"
 DUMMY_IMAGE_SHAPE = (28, 28)
+DUMMY_N_FRAMES = 100
 
 
 @pytest.fixture
@@ -30,7 +31,7 @@ def dummy_hdf5(tmp_path):
     file_path = tmp_path / "dummy_data.hdf5"
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     with h5py.File(file_path, "w") as f:
-        data = rng.standard_normal((100, *DUMMY_IMAGE_SHAPE))
+        data = rng.standard_normal((DUMMY_N_FRAMES, *DUMMY_IMAGE_SHAPE))
         f.create_dataset("data", data=data)
     return file_path
 
@@ -208,7 +209,7 @@ def test_dataloader(
     shuffle_keys = []
     for _ in range(n_shuffle_iters):
         h = ""
-        for batch in iter(dataset):
+        for batch in dataset:
             key = hashlib.md5(pickle.dumps(batch)).hexdigest()
             h += key
         shuffle_keys.append(h)
@@ -691,3 +692,46 @@ def test_summary(dummy_hdf5, capsys):
     captured = capsys.readouterr()
     assert "Dataloader with" in captured.out
     assert "samples" in captured.out
+
+
+def test_shape_attribute(dummy_hdf5):
+    """Test that the shape attribute is set correctly."""
+
+    # Without returning filenames
+    loader = Dataloader(
+        dummy_hdf5,
+        key="data",
+        shuffle=False,
+        validate=False,
+        batch_size=1,
+    )
+    batch = next(iter(loader))
+    assert batch.shape == (1, *DUMMY_IMAGE_SHAPE, 1)
+    assert loader.shape == (1, *DUMMY_IMAGE_SHAPE, 1)
+
+    # With returning filenames
+    loader = Dataloader(
+        dummy_hdf5,
+        key="data",
+        shuffle=False,
+        validate=False,
+        batch_size=1,
+        return_filename=True,
+    )
+    batch = next(iter(loader))
+    assert batch[0].shape == (1, *DUMMY_IMAGE_SHAPE, 1)
+    assert loader.shape == (1, *DUMMY_IMAGE_SHAPE, 1)
+
+
+def test_len_attribute(dummy_hdf5):
+    """Test that the len attribute is set correctly."""
+
+    # Without returning filenames
+    loader = Dataloader(
+        dummy_hdf5,
+        key="data",
+        shuffle=False,
+        validate=False,
+        batch_size=1,
+    )
+    assert len(loader) == DUMMY_N_FRAMES
