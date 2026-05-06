@@ -16,7 +16,8 @@ import keras
 import numpy as np
 import pytest
 
-from zea.backend import func_on_device, on_device
+import zea
+from zea.backend import func_on_device
 from zea.internal.device import (
     _cuda_visible_devices_disables_gpus,
     get_gpu_memory,
@@ -192,36 +193,36 @@ class TestInitDevice:
 
 
 class TestOnDevice:
-    """Tests for the ``on_device`` context manager and ``func_on_device``."""
+    """Tests for the ``device`` context manager and ``func_on_device``."""
 
     def test_normalize(self):
         """``_normalize`` translates device strings to backend conventions."""
         if keras.backend.backend() == "torch":
-            assert on_device._normalize("gpu:0") == "cuda:0"
+            assert zea.device._normalize("gpu:0") == "cuda:0"
         else:
-            assert on_device._normalize("cuda:0") == "gpu:0"
-        assert on_device._normalize("cpu") == "cpu"
+            assert zea.device._normalize("cuda:0") == "gpu:0"
+        assert zea.device._normalize("cpu") == "cpu"
 
     def test_none_is_noop(self):
-        """``on_device(None)`` is a no-op context manager."""
-        with on_device(None):
+        """``zea.device(None)`` is a no-op context manager."""
+        with zea.device(None):
             assert keras.ops.ones((3,)).shape == (3,)
 
     def test_zea_namespace_export(self):
-        """``on_device`` is re-exported at ``zea.on_device``."""
+        """``device`` is re-exported at ``zea.device``."""
         import zea
 
-        with zea.on_device("cpu"):
+        with zea.device("cpu"):
             assert keras.ops.ones((2, 2)).shape == (2, 2)
 
     @backend_equality_check()
     def test_cpu_all_backends(self):
-        """``on_device('cpu')`` produces consistent results across all backends."""
+        """``zea.device('cpu')`` produces consistent results across all backends."""
         import keras
 
-        from zea.backend import on_device
+        import zea
 
-        with on_device("cpu"):
+        with zea.device("cpu"):
             return keras.ops.abs(
                 keras.ops.convert_to_tensor(np.array([-2.0, 3.0], dtype=np.float32))
             )
@@ -238,15 +239,15 @@ class TestOnDevice:
 
     @pytest.mark.gpu
     def test_gpu_tensor_placement(self):  # pragma: no cover
-        """Tensors created inside ``on_device('gpu:0')`` reside on the GPU."""
-        with on_device("gpu:0"):
+        """Tensors created inside ``device('gpu:0')`` reside on the GPU."""
+        with zea.device("gpu:0"):
             x = keras.ops.ones((4,))
         assert "cpu" not in _tensor_device_name(x)
 
     @pytest.mark.gpu
     def test_gpu_correct_result(self):  # pragma: no cover
-        """``on_device('gpu:0')`` produces numerically correct results."""
-        with on_device("gpu:0"):
+        """``zea.device('gpu:0')`` produces numerically correct results."""
+        with zea.device("gpu:0"):
             result = keras.ops.abs(
                 keras.ops.convert_to_tensor(np.array([-1.0, 2.0, -3.0], dtype=np.float32))
             )
@@ -328,11 +329,11 @@ class TestPipelineDevice:
 
     @pytest.mark.gpu
     def test_context_manager_on_gpu(self):  # pragma: no cover
-        """``on_device`` context manager + ``Pipeline`` works on GPU."""
+        """``zea.device`` context manager + ``Pipeline`` works on GPU."""
         import zea
 
         pipe = self._pipe()
         data = keras.ops.convert_to_tensor(np.array([-1.0, 2.0], dtype=np.float32))
-        with zea.on_device("gpu:0"):
+        with zea.device("gpu:0"):
             out = pipe(data=data)["data"]
         np.testing.assert_allclose(np.abs(out), np.array([1.0, 2.0], dtype=np.float32))

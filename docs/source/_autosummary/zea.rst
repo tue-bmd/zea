@@ -14,7 +14,7 @@ zea
 
    init_device
    load_file
-   on_device
+   device
    set_data_paths
    setup
    setup_config

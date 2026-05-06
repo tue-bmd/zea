@@ -104,7 +104,7 @@ from . import (
     utils,
     visualize,
 )
-from .backend import on_device
+from .backend import device
 from .config import Config
 from .data.dataloader import Dataloader
 from .data.datasets import Dataset, Folder

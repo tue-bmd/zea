@@ -12,9 +12,9 @@ Public API
     Unified JIT compilation for JAX (``jax.jit``) and TensorFlow
     (``tf.function``).  A no-op for the ``torch`` backend.
 
-:class:`on_device`
+:class:`device`
     Context manager that pins all Keras ops to a specific device.
-    Re-exported as :func:`zea.on_device`.
+    Re-exported as :func:`zea.device`.
 
 :func:`func_on_device`
     Run a callable with its tensor arguments moved to a target device.
@@ -130,7 +130,7 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
         return func
 
 
-class on_device:
+class device:
     """Context manager to run operations on a specific device, regardless of backend.
 
     Normalises device strings across JAX, TensorFlow, and PyTorch so that
@@ -152,7 +152,7 @@ class on_device:
         .. code-block:: python
 
             # All backends: tensors created by Keras ops are placed on gpu:0
-            with zea.on_device("gpu:0"):
+            with zea.device("gpu:0"):
                 output = pipeline(data=data)
 
             # Per-call device with automatic input-tensor movement (all backends)
@@ -172,9 +172,9 @@ class on_device:
         device = device.lower()
         if device.startswith("auto:"):
             raise ValueError(
-                f"on_device does not accept 'auto:N' device strings (got {device!r}). "
+                f"``zea.device`` does not accept 'auto:N' device strings (got {device!r}). "
                 "Use zea.init_device('auto:N') first to resolve a concrete device, "
-                "then pass the returned string (e.g. 'gpu:0') to on_device."
+                "then pass the returned string (e.g. 'gpu:0') to ``zea.device``."
             )
         if keras.backend.backend() == "torch":
             # PyTorch uses "cuda:N"; normalise gpu -> cuda
@@ -190,12 +190,17 @@ class on_device:
         self._context.__exit__(exc_type, exc_val, exc_tb)
 
 
+# Private alias so func_on_device can reference the class without clashing
+# with its own `device` parameter.
+_DeviceContext = device
+
+
 def func_on_device(func, device, *args, **kwargs):
     """Run ``func`` with all tensor arguments placed on ``device``.
 
     For the ``torch`` backend, every tensor argument is explicitly moved with
     ``.to(device)`` before the call.  For JAX and TensorFlow the function is
-    executed inside an :class:`on_device` context, which routes newly created
+    executed inside an :class:`zea.backend.device` context, which routes newly created
     tensors to the requested device.
 
     Args:
@@ -213,7 +218,7 @@ def func_on_device(func, device, *args, **kwargs):
     if keras.backend.backend() == "torch":
         import torch
 
-        _device = torch.device(on_device._normalize(device))
+        _device = torch.device(_DeviceContext._normalize(device))
 
         def _move(x):
             if isinstance(x, torch.Tensor):
@@ -227,5 +232,5 @@ def func_on_device(func, device, *args, **kwargs):
         args = _move(args)
         kwargs = _move(kwargs)
 
-    with on_device(device):
+    with _DeviceContext(device):
         return func(*args, **kwargs)
