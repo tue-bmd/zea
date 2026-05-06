@@ -1,4 +1,4 @@
-"""Jax utilities for zea."""
+"""JAX utilities for zea."""
 
 import jax
 

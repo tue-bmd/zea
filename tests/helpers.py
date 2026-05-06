@@ -10,7 +10,6 @@ from queue import Empty
 import cloudpickle as pickle
 import debugpy
 import decorator
-import jax
 import numpy as np
 import pytest
 
@@ -58,6 +57,7 @@ class BackendEqualityCheck:
         os.environ["KERAS_BACKEND"] = backend
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
         os.environ["JAX_PLATFORMS"] = "cpu"  # only affects jaxs
+        import jax  # must be imported after JAX_PLATFORMS is set
         import keras
 
         # start worker

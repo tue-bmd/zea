@@ -11,6 +11,10 @@ _tmp_cache_dir = tempfile.TemporaryDirectory(prefix="zea_test_cache_")
 os.environ["ZEA_CACHE_DIR"] = _tmp_cache_dir.name  # set before importing zea
 
 from zea.data.data_format import generate_example_dataset  # noqa: E402
+from zea.internal.device import backend_cuda_available  # noqa: E402
+
+# Capture GPU availability NOW, before tests/__init__.py sets CUDA_VISIBLE_DEVICES=""
+_GPU_AVAILABLE = any(backend_cuda_available(b) for b in ["torch", "tensorflow", "jax"])
 
 from . import (  # noqa: E402
     DUMMY_DATASET_GRID_SIZE_X,
@@ -25,17 +29,21 @@ plt.rcParams["backend"] = "agg"
 def pytest_addoption(parser):
     """Add custom command line options for pytest."""
     parser.addoption(
-        "--gpu",
-        action="store_true",
-        default=False,
-        help="Run tests with GPU support if CUDA is available",
-    )
-    parser.addoption(
         "--notebook",
         action="store",
         default=None,
         help="Run only the notebook matching this name (e.g. --notebook dbua_example.ipynb)",
     )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip ``@pytest.mark.gpu`` tests when no CUDA GPU is accessible."""
+    if _GPU_AVAILABLE:
+        return
+    skip_gpu = pytest.mark.skip(reason="No CUDA GPU available at runtime")
+    for item in items:
+        if "gpu" in item.keywords:
+            item.add_marker(skip_gpu)
 
 
 @pytest.fixture(scope="session", autouse=True)
