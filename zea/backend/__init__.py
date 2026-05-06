@@ -168,7 +168,12 @@ class device:
 
     @staticmethod
     def _normalize(device: str) -> str:
-        """Translate device string to the convention expected by the active backend."""
+        """Normalize device string before passing to ``keras.device``.
+
+        Converts ``cuda:N`` → ``gpu:N`` so the string is backend-agnostic;
+        ``keras.device`` itself then converts ``gpu:N`` → ``cuda:N`` when
+        running under the ``torch`` backend.
+        """
         device = device.lower()
         if device.startswith("auto:"):
             raise ValueError(
@@ -176,10 +181,7 @@ class device:
                 "Use zea.init_device('auto:N') first to resolve a concrete device, "
                 "then pass the returned string (e.g. 'gpu:0') to ``zea.device``."
             )
-        if keras.backend.backend() == "torch":
-            # PyTorch uses "cuda:N"; normalise gpu -> cuda
-            return device.replace("gpu", "cuda")
-        # TensorFlow and JAX use "gpu:N"; normalise cuda -> gpu
+        # Normalise to gpu:N; keras.device handles gpu → cuda for the torch backend.
         return device.replace("cuda", "gpu")
 
     def __enter__(self):
@@ -218,7 +220,7 @@ def func_on_device(func, device, *args, **kwargs):
     if keras.backend.backend() == "torch":
         import torch
 
-        _device = torch.device(_DeviceContext._normalize(device))
+        _device = torch.device(device.lower().replace("gpu", "cuda"))
 
         def _move(x):
             if isinstance(x, torch.Tensor):
