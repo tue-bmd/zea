@@ -104,6 +104,11 @@ NOTEBOOK_PARAMETERS = {
         "rank_weight_factor": 20,
         "initial_step": 0,
     },
+    "refocus_pipeline_example.ipynb": {
+        "num_transmits": 2,
+        "grid_size_x": 16,
+        "grid_size_z": 16,
+    },
     # Add more notebooks and their parameters here as needed
     # "other_notebook.ipynb": {
     #     "param1": value1,
