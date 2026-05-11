@@ -464,8 +464,13 @@ class File(h5py.File):
             scan_spec = ScanSpec(**filtered)
             scan_dict = scan_spec.to_dict()
             scan_dict["n_el"] = scan_spec.n_el
-            scan_dict["n_ax"] = self.n_ax
             scan_dict["n_tx"] = scan_spec.n_tx
+            # Derive n_ax from the spec when possible (avoids requiring raw_data).
+            # tgc_gain_curve has shape (n_ax,) and is the spec's authoritative source.
+            if scan_spec.tgc_gain_curve is not None:
+                scan_dict["n_ax"] = len(scan_spec.tgc_gain_curve)
+            elif "data" in self and "raw_data" in self["data"]:
+                scan_dict["n_ax"] = self.n_ax
         except (TypeError, ValueError) as exc:
             log.debug(
                 f"ScanSpec validation skipped for '{self.path}': {exc}. "
@@ -928,30 +933,56 @@ def _validate_file_impl(file: File) -> None:
     """Lightweight structural validation — no array data is loaded.
 
     Checks that:
-    - a ``data`` group is present and is an HDF5 Group
+    - a ``data`` group is present at root OR one or more ``event_*`` groups each
+      containing a ``data`` group (event-structured files)
     - for legacy files, every key in ``data`` is a recognised zea data type
     - for files created with zea v0.1.0 and later, every key in ``data``
     is in :class:`~zea.data.spec.DataSpec`\'s schema
     """
-    assert_key(file, "data")
-    assert isinstance(file["data"], h5py.Group), (
-        "'data' is not a group - this may not be a zea file."
+    # Collect all data groups to validate: either root /data or per-event /event_*/data
+    data_groups: list[tuple[str, h5py.Group]] = []
+
+    if "data" in file:
+        assert isinstance(file["data"], h5py.Group), (
+            "'data' is not a group - this may not be a zea file."
+        )
+        data_groups.append(("data", file["data"]))
+    else:
+        event_keys = [
+            k for k in file.keys() if k.startswith("event_") and k[len("event_") :].isdigit()
+        ]
+        for event_key in event_keys:
+            assert "data" in file[event_key], (
+                f"Event group '{event_key}' is missing a 'data' subgroup."
+            )
+            assert isinstance(file[event_key]["data"], h5py.Group), (
+                f"'{event_key}/data' is not a group - this may not be a zea file."
+            )
+            data_groups.append((f"{event_key}/data", file[event_key]["data"]))
+
+    assert data_groups, (
+        "'data' group not found in file. "
+        "Expected either a root 'data' group or event groups named 'event_*'."
     )
 
-    if _is_legacy_file(file):
-        # For legacy files: accepted keys are the flat _DATA_TYPES list.
-        has_raw = any(k in file["data"] for k in _NON_IMAGE_DATA_TYPES)
-        if has_raw:
-            assert "scan" in file, "Legacy file is missing the 'scan' group."
-        for key in file["data"].keys():
-            assert key in _DATA_TYPES, f"'data/{key}' is not a recognised zea data type."
-    else:
-        # For new-format files: accepted keys are DataSpec.SCHEMA keys.
-        known = set(DataSpec.SCHEMA.keys())
-        for key in file["data"].keys():
-            assert key in known, (
-                f"'data/{key}' is not in the DataSpec schema. Known keys: {sorted(known)}"
-            )
+    for group_path, data_group in data_groups:
+        if _is_legacy_file(file):
+            # For legacy files: accepted keys are the flat _DATA_TYPES list.
+            has_raw = any(k in data_group for k in _NON_IMAGE_DATA_TYPES)
+            if has_raw:
+                assert "scan" in file, "Legacy file is missing the 'scan' group."
+            for key in data_group.keys():
+                assert key in _DATA_TYPES, (
+                    f"'{group_path}/{key}' is not a recognised zea data type."
+                )
+        else:
+            # For new-format files: accepted keys are DataSpec.SCHEMA keys.
+            known = set(DataSpec.SCHEMA.keys())
+            for key in data_group.keys():
+                assert key in known, (
+                    f"'{group_path}/{key}' is not in the DataSpec schema. "
+                    f"Known keys: {sorted(known)}"
+                )
 
 
 def _reformat_waveforms(scan_kwargs: dict) -> dict:

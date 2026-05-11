@@ -979,7 +979,7 @@ class VerasonicsFile(h5py.File):
             frames = convert_config.get("frames", "all")
 
         tx_order, rcv_order, time_to_next_transmit = self.read_transmit_events(
-            frames=frames, allow_accumulate=allow_accumulate, buffer_index=buffer_index
+            event=event, frames=frames, allow_accumulate=allow_accumulate, buffer_index=buffer_index
         )
         initial_times = self.read_initial_times(rcv_order)
 

@@ -22,12 +22,15 @@ def get_project_paths():
     """Get the project paths for configs and parameters.rst based on the current working directory."""
     cwd = Path.cwd().resolve()
     # If we're in docs or docs/source, adjust accordingly
-    if "docs" in cwd.parts:
-        configs_dir = cwd.parent / "configs"
-        rst_path = cwd / "source" / "config.rst"
+    if cwd.name == "source" and cwd.parent.name == "docs":
+        project_root = cwd.parent.parent
+    elif cwd.name == "docs":
+        project_root = cwd.parent
     else:
-        configs_dir = cwd / "configs"
-        rst_path = cwd / "docs" / "source" / "config.rst"
+        project_root = cwd
+
+    configs_dir = project_root / "configs"
+    rst_path = project_root / "docs" / "source" / "config.rst"
 
     # Ensure the configs directory exists
     if not configs_dir.exists():
