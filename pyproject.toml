@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "zea"
-version = "0.0.12"
+version = "0.0.13"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
     { name = "Tristan Stevens", email = "t.s.w.stevens@tue.nl" },
@@ -49,6 +49,7 @@ dependencies = [
     "wget >=3.2",
     "imageio[ffmpeg] >=2.0",
     "grain >= 0.2",
+    "protobuf >=3.20, <6.0.0",
     # can we make these optional or remove?
     "scikit-image >=0.23",
     "scikit-learn >=1.4",
@@ -63,7 +64,7 @@ dev = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff==0.15.11",
+    "ruff==0.15.12",
     "pytest-cov",
     # docs
     "sphinx",
@@ -94,7 +95,7 @@ tests = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff==0.15.11",
+    "ruff==0.15.12",
     "pytest-cov",
 ]
 docs = [
