@@ -111,8 +111,8 @@ class File(h5py.File):
     def zea_version(self) -> str | None:
         """Return the zea version that wrote this file, or ``None`` for legacy files.
 
-        Files created with zea 0.0.12 and later store a ``zea_version``
-        root attribute.  Files written before zea 0.0.12 return ``None``.
+        Files created with zea v0.1.0 and later store a ``zea_version``
+        root attribute.  Files written before zea v0.1.0 return ``None``.
         """
         return self.attrs.get("zea_version", None)
 
@@ -607,9 +607,9 @@ class File(h5py.File):
         """Lightweight structural validation — no array data is loaded into RAM.
 
         Checks that the file has a ``data`` group and that all keys within it
-        are recognised zea data types.  For legacy files (before zea 0.0.12)
+        are recognised zea data types.  For legacy files (before zea v0.1.0)
         a minimal key-name check is performed.  For files created with
-        zea 0.0.12 and later (via :meth:`File.create`) the keys are checked
+        zea v0.1.0 and later (via :meth:`File.create`) the keys are checked
         against the :class:`~zea.data.spec.DataSpec` schema.
 
         Use :meth:`validate_spec` for a **full** validation that loads all data
@@ -639,8 +639,8 @@ class File(h5py.File):
         For a fast, zero-IO structural check use :meth:`validate` instead.
 
         .. note::
-            This method only works on files created with zea 0.0.12 and later.
-            Files written before zea 0.0.12 should be re-saved through
+            This method only works on files created with zea v0.1.0 and later.
+            Files written before zea v0.1.0 should be re-saved through
             :meth:`File.create`.
 
         Returns:
@@ -882,9 +882,9 @@ def _print_hdf5_attrs(hdf5_obj, prefix=""):
 def validate_file(path: str = None, file: File = None):
     """Validate the structure and data of a zea HDF5 file.
 
-    For files created with zea 0.0.12 and later this runs the full
+    For files created with zea v0.1.0 and later this runs the full
     :class:`~zea.data.spec.FileSpec` schema validation (dtypes, shapes, and
-    dimension consistency).  Legacy files (before zea 0.0.12) are detected by the
+    dimension consistency).  Legacy files (before zea v0.1.0) are detected by the
     presence of scalar dataset ``scan/n_frames``; for those only a lightweight
     structural ``data`` group check is performed.
 
@@ -899,7 +899,7 @@ def validate_file(path: str = None, file: File = None):
 
     Raises:
         AssertionError: If the file is missing the ``data`` group.
-        TypeError, ValueError: If spec validation fails on files created with zea 0.0.12 and later.
+        TypeError, ValueError: If spec validation fails on files created with zea v0.1.0 and later.
     """
     assert (path is not None) ^ (file is not None), (
         "Provide either the path or the file, but not both."
@@ -917,7 +917,7 @@ def validate_file(path: str = None, file: File = None):
 def _is_legacy_file(file: File) -> bool:
     """Return ``True`` when *file* pre-dates the dataspec format.
 
-    Files created with zea 0.0.12 and later always store a
+    Files created with zea v0.1.0 and later always store a
     ``zea_version`` root attribute.  Files that lack it were produced by
     the legacy data format path and are treated as legacy.
     """
@@ -930,7 +930,7 @@ def _validate_file_impl(file: File) -> None:
     Checks that:
     - a ``data`` group is present and is an HDF5 Group
     - for legacy files, every key in ``data`` is a recognised zea data type
-    - for files created with zea 0.0.12 and later, every key in ``data``
+    - for files created with zea v0.1.0 and later, every key in ``data``
     is in :class:`~zea.data.spec.DataSpec`\'s schema
     """
     assert_key(file, "data")
