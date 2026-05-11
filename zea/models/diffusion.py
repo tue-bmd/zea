@@ -1276,7 +1276,7 @@ class NuclearDiffusion(DPS):
 
     .. admonition:: Reference
 
-        T. Stevens, M. Wijkstra, M. Mischi, and R. J. G. van Sloun,
+        T. Stevens, O. Nolan, J. L. Robert, and R. J. G. van Sloun,
         "Nuclear Diffusion Models for Low-Rank Background Suppression in Videos,"
         *IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)*, 2026.
         https://arxiv.org/abs/2509.20886
