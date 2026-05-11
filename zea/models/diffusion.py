@@ -266,7 +266,7 @@ class DiffusionModel(DeepGenerativeModel):
                 are noised at the noise level corresponding to ``initial_step``.
                 These ``initial_samples`` can be initial guesses such as solutions
                 of previous frames (for sequences), see for instance
-                `SeqDiff <https://arxiv.org/abs/2409.05399>_.
+                `SeqDiff <https://arxiv.org/abs/2409.05399>`_.
                 Must be of shape ``(batch_size, n_samples, *input_shape)``.
             seed: Random seed generator.
             **kwargs: Additional arguments passed to
