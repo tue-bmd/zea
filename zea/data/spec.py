@@ -345,8 +345,11 @@ class Spec:
         dim_to_fields = defaultdict(set)
         dim_to_sizes = defaultdict(set)
         dataclass_fields = {f.name: f for f in fields(self)}
+        excluded = getattr(self, "_SCHEMA_EXCLUDED_FIELDS", frozenset())
 
         for field_name, field_info in self.SCHEMA.items():
+            if field_name in excluded:
+                continue
             field_value = getattr(self, field_name)
             field_def = dataclass_fields.get(field_name)
             is_optional = self._is_optional_dataclass_field(field_def)
@@ -1523,6 +1526,39 @@ class MetricsSpec(Spec):
 
 
 @dataclass
+class TrackSpec(Spec):
+    """A single acquisition track with its own data and scan parameters.
+
+    Used inside a multi-track :class:`FileSpec` where different transmit
+    sequences coexist in the same acquisition.  The ``track_schedule`` on
+    ``FileSpec`` specifies the global ordering of transmits across all tracks.
+
+    Args:
+        data: The data for this track.
+        scan: The scan parameters for this track. Required when raw_data is
+            present in *data*.
+    """
+
+    data: DataSpec | dict
+    scan: ScanSpec | dict | None = None
+
+    SCHEMA = {
+        "data": {"spec": DataSpec},
+        "scan": {"spec": ScanSpec},
+    }
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        data = self.data
+        has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
+            isinstance(data, dict) and data.get("raw_data") is not None
+        )
+        if has_raw and self.scan is None:
+            raise ValueError("'scan' is required when 'raw_data' is provided in track data.")
+
+
+@dataclass
 class FileSpec(Spec):
     """A dataset containing all the data, scan parameters, metadata,
     and metrics for a single acquisition.
@@ -1565,13 +1601,21 @@ class FileSpec(Spec):
             (2, 4, 64, 8, 1)
     """
 
-    data: DataSpec | dict
+    data: DataSpec | dict | None = None
     scan: ScanSpec | dict | None = None
     metadata: MetadataSpec | dict = field(default_factory=MetadataSpec)
     metrics: MetricsSpec | dict = field(default_factory=MetricsSpec)
     probe_name: str | None = None
     us_machine: str | None = None
     description: str | None = None
+    tracks: list | None = None
+    track_schedule: np.ndarray | None = None
+
+    # No type annotation: Python's @dataclass will not treat this as a field,
+    # so it won't appear in fields(FileSpec).  Used to tell the SCHEMA ↔
+    # dataclass-field consistency test that 'tracks' is intentionally absent
+    # from SCHEMA (list[TrackSpec] doesn't fit the standard SCHEMA patterns).
+    _SCHEMA_EXCLUDED_FIELDS = frozenset({"tracks"})
 
     SCHEMA = {
         "data": {"spec": DataSpec},
@@ -1581,18 +1625,49 @@ class FileSpec(Spec):
         "probe_name": {"dtype": str, "shape": ()},
         "us_machine": {"dtype": str, "shape": ()},
         "description": {"dtype": str, "shape": ()},
+        "track_schedule": {"dtype": np.int32, "shape": ("n_total_tx",)},
     }
 
     def __post_init__(self):
         super().__post_init__()
 
-        # scan is mandatory when raw channel data is present
-        data = self.data
-        has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
-            isinstance(data, dict) and data.get("raw_data") is not None
-        )
-        if has_raw and self.scan is None:
-            raise ValueError("'scan' is required when 'raw_data' is provided in the data.")
+        # At least one of data or tracks must be supplied
+        if self.data is None and not self.tracks:
+            raise ValueError("Either 'data' or 'tracks' must be provided.")
+
+        # Coerce track dicts → TrackSpec and validate types
+        if self.tracks is not None:
+            coerced = []
+            for i, t in enumerate(self.tracks):
+                if isinstance(t, dict):
+                    try:
+                        t = TrackSpec(**t)
+                    except (TypeError, ValueError) as e:
+                        raise type(e)(f"In tracks[{i}]: {e}") from e
+                elif not isinstance(t, TrackSpec):
+                    raise TypeError(f"tracks[{i}] must be a TrackSpec or dict, got {type(t)}")
+                coerced.append(t)
+            self.tracks = coerced
+
+        # Validate track_schedule
+        if self.track_schedule is not None:
+            if not self.tracks:
+                raise ValueError("'track_schedule' requires 'tracks' to be provided.")
+            n_tracks = len(self.tracks)
+            if not np.all((self.track_schedule >= 0) & (self.track_schedule < n_tracks)):
+                raise ValueError(
+                    f"All track_schedule indices must be in [0, {n_tracks - 1}], "
+                    f"got min={self.track_schedule.min()}, max={self.track_schedule.max()}"
+                )
+
+        # scan is mandatory when raw channel data is present (single-track mode)
+        if self.data is not None:
+            data = self.data
+            has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
+                isinstance(data, dict) and data.get("raw_data") is not None
+            )
+            if has_raw and self.scan is None:
+                raise ValueError("'scan' is required when 'raw_data' is provided in the data.")
 
     def save(self, path: str, compression: str = "gzip") -> None:
         """Save the dataset to the specified path."""
@@ -1620,7 +1695,18 @@ class FileSpec(Spec):
                 else:
                     value = getattr(self, group_name)
                     if value is not None:
-                        f.attrs[group_name] = value
+                        # track_schedule is a large array — store as dataset, not attr
+                        if group_name == "track_schedule":
+                            self.create_dataset(f, group_name, value, compression=compression)
+                        else:
+                            f.attrs[group_name] = value
+
+            # Write each track as its own subgroup under 'tracks/'
+            if self.tracks:
+                tracks_group = f.create_group("tracks")
+                for i, track in enumerate(self.tracks):
+                    track_group = tracks_group.create_group(f"track_{i}")
+                    track.store_in_group(track_group, compression=compression)
         log.info(f"File saved to {log.yellow(path)}")
 
     @classmethod
@@ -1668,9 +1754,26 @@ class FileSpec(Spec):
                     kwargs[group_name] = _load_group_as_dict(file[group_name])
                 # else: leave missing, will use default or raise if required
             else:
-                # Scalar attrs (probe_name, us_machine, description)
-                if group_name in file.attrs:
+                # Scalar attrs and small arrays (probe_name, us_machine, description)
+                # track_schedule is stored as a dataset, not an attr
+                if group_name == "track_schedule":
+                    if group_name in file:
+                        kwargs[group_name] = file[group_name][()].astype(np.int32)
+                elif group_name in file.attrs:
                     kwargs[group_name] = file.attrs[group_name]
+
+        # ------------------------------------------------------------------
+        # Multi-track support
+        # ------------------------------------------------------------------
+        if "tracks" in file:
+            tracks_group = file["tracks"]
+            tracks = []
+            i = 0
+            while f"track_{i}" in tracks_group:
+                track_dict = _load_group_as_dict(tracks_group[f"track_{i}"])
+                tracks.append(track_dict)
+                i += 1
+            kwargs["tracks"] = tracks
 
         # ------------------------------------------------------------------
         # Legacy compatibility

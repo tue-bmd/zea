@@ -408,8 +408,9 @@ def test_schema_keys_match_dataclass_fields_for_all_specs():
     for cls in spec_classes:
         dataclass_field_names = {field.name for field in fields(cls)}
         schema_field_names = set(cls.SCHEMA.keys())
+        excluded = getattr(cls, "_SCHEMA_EXCLUDED_FIELDS", frozenset())
 
-        missing_in_schema = dataclass_field_names - schema_field_names
+        missing_in_schema = dataclass_field_names - schema_field_names - excluded
         extra_in_schema = schema_field_names - dataclass_field_names
 
         assert not missing_in_schema and not extra_in_schema, (
