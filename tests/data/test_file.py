@@ -376,20 +376,20 @@ class TestFieldMetadataAttrs:
         path, *_ = spec_file
 
         with File(path) as f:
-            rd_ds = f["data"]["raw_data"]
+            rd_ds = f._data_h5_group["raw_data"]
             assert rd_ds.attrs["unit"] == "-"
             assert rd_ds.attrs["description"] != ""
 
             # Check scan field metadata
-            pg_ds = f["scan"]["probe_geometry"]
+            pg_ds = f._scan_h5_group["probe_geometry"]
             assert pg_ds.attrs["unit"] == "m"
 
     def test_scan_field_metadata_matches_spec(self, spec_file):
         path, *_ = spec_file
 
         with File(path) as f:
-            for key in f["scan"].keys():
-                ds = f["scan"][key]
+            for key in f._scan_h5_group.keys():
+                ds = f._scan_h5_group[key]
                 assert "unit" in ds.attrs, f"Missing 'unit' on scan/{key}"
                 assert "description" in ds.attrs, f"Missing 'description' on scan/{key}"
 

@@ -151,13 +151,14 @@ def test_spec_to_dict_is_recursive(dataset_spec: FileSpec):
     result = dataset_spec.to_dict()
 
     assert isinstance(result, dict)
-    assert isinstance(result["data"], dict)
-    assert isinstance(result["scan"], dict)
+    assert isinstance(result["tracks"], list)
+    assert isinstance(result["tracks"][0]["data"], dict)
+    assert isinstance(result["tracks"][0]["scan"], dict)
     assert isinstance(result["metadata"], dict)
     assert isinstance(result["metrics"], dict)
 
-    assert np.array_equal(result["data"]["raw_data"], dataset_spec.data.raw_data)
-    assert np.array_equal(result["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
+    assert np.array_equal(result["tracks"][0]["data"]["raw_data"], dataset_spec.data.raw_data)
+    assert np.array_equal(result["tracks"][0]["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
     assert np.array_equal(
         result["metadata"]["annotations"]["view"],
         dataset_spec.metadata.annotations.view,
@@ -186,9 +187,10 @@ def test_saving_and_loading(tmp_path, dataset_spec: FileSpec):
     dataset_spec.save(save_path)
 
     with File(save_path) as loaded_dataset:
-        # Check that the loaded data matches the original
-        assert np.array_equal(loaded_dataset["data"]["raw_data"], dataset_spec.data.raw_data)
-        assert np.array_equal(loaded_dataset["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
+        # Check that the loaded data matches the original (new tracks/ format)
+        track0 = loaded_dataset["tracks"]["track_0"]
+        assert np.array_equal(track0["data"]["raw_data"], dataset_spec.data.raw_data)
+        assert np.array_equal(track0["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
         assert np.array_equal(
             loaded_dataset["metadata"]["annotations"]["view"].asstr()[()],
             dataset_spec.metadata.annotations.view,
@@ -359,7 +361,7 @@ def test_data_accepts_custom_map_keys_and_warns():
 
     assert isinstance(dataset.data, DataSpec)
     assert isinstance(dataset.data.custom_map, Map)
-    assert "custom_map" in dataset.to_dict()["data"]
+    assert "custom_map" in dataset.to_dict()["tracks"][0]["data"]
 
 
 def test_data_custom_key_requires_map_spec():

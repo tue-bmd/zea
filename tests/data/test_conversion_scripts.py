@@ -587,9 +587,11 @@ def verify_converted_echonetlvh_test_data(dst):
         # Verify each HDF5 file has required content
         for h5_file in h5_files:
             with File(h5_file, "r") as f:
-                assert "data" in f, f"Missing 'data' in {h5_file}"
-                assert "image" in f["data"], f"Missing 'image' (polar) in {h5_file}"
-                assert "image_sc" in f["data"], f"Missing 'image_sc' (scan converted) in {h5_file}"
+                assert "data" in f or "tracks" in f, f"Missing 'data' in {h5_file}"
+                assert "image" in f._data_h5_group, f"Missing 'image' (polar) in {h5_file}"
+                assert "image_sc" in f._data_h5_group, (
+                    f"Missing 'image_sc' (scan converted) in {h5_file}"
+                )
 
                 # image is now a Map group with values and extent subfields
                 image_values = f.data.image.values[:]
@@ -680,7 +682,7 @@ def verify_converted_camus_test_data(dst):
         # Load the hdf5 file and check for expected datasets
         for h5_file in h5_files:
             with File(h5_file, "r") as f:
-                assert "data" in f, f"Missing 'data' in {h5_file}"
+                assert "data" in f or "tracks" in f, f"Missing 'data' in {h5_file}"
                 f.validate()
 
 
@@ -704,11 +706,11 @@ def verify_converted_cetus_test_data(dst):
     # Spot-check one file
     sample = dst / "train" / "patient01" / "patient01_ED.hdf5"
     with File(sample, "r") as f:
-        assert "data" in f, "Missing 'data' group"
+        assert "data" in f or "tracks" in f, "Missing 'data' group"
         img = f.data.image_sc.values[:]
         assert img.ndim == 4, f"Expected 4-D image_sc, got {img.ndim}"
         f.validate()
-        assert "data/segmentation" in f
+        assert "data/segmentation" in f or "segmentation" in f._data_h5_group
         assert "metadata/subject" in f
         assert "metadata/credit" in f
 
@@ -730,8 +732,8 @@ def verify_converted_picmus_test_data(dst):
     # Check that the files contain data
     for h5_file in h5_files:
         with File(h5_file, "r") as f:
-            assert "data" in f, f"Missing 'data' in {h5_file}"
-            assert "scan" in f, f"Missing 'scan' in {h5_file}"
+            assert "data" in f or "tracks" in f, f"Missing 'data' in {h5_file}"
+            assert "scan" in f or "tracks" in f, f"Missing 'scan' in {h5_file}"
             f.validate()
 
 
@@ -749,8 +751,8 @@ def verify_converted_verasonics_test_data(src, dst):
 
     # Check that the file contains data
     with File(h5_file, "r") as f:
-        assert "data" in f, f"Missing 'data' in {h5_file}"
-        assert "scan" in f, f"Missing 'scan' in {h5_file}"
+        assert "data" in f or "tracks" in f, f"Missing 'data' in {h5_file}"
+        assert "scan" in f or "tracks" in f, f"Missing 'scan' in {h5_file}"
         f.validate()
 
 

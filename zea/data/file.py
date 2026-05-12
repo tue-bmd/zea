@@ -211,8 +211,43 @@ class File(h5py.File):
         return cls(str(path), mode="r")
 
     @property
+    def _scan_h5_group(self) -> "h5py.Group | None":
+        """Return the HDF5 group for scan, supporting both legacy and new format.
+
+        New format: ``tracks/track_0/scan/``
+        Legacy format: ``scan/`` at root
+        Returns ``None`` when neither is present.
+        """
+        if "scan" in self:
+            return self["scan"]
+        if "tracks" in self and "track_0" in self["tracks"] and "scan" in self["tracks"]["track_0"]:
+            return self["tracks"]["track_0"]["scan"]
+        return None
+
+    @property
+    def _data_h5_group(self) -> "h5py.Group":
+        """Return the underlying h5py group for data, supporting both formats.
+
+        New format: ``tracks/track_0/data/``
+        Legacy format: ``data/`` at root
+        """
+        if "tracks" in self:
+            track_group = self["tracks"].get("track_0")
+            if track_group is not None and "data" in track_group:
+                return track_group["data"]
+        if "data" in self:
+            return self["data"]
+        raise KeyError(
+            "No 'data' group found in this file. "
+            "Checked 'tracks/track_0/data/' and 'data/' at root."
+        )
+
+    @property
     def data(self) -> GroupProxy:
         """Lazy proxy for the ``data`` group.
+
+        Supports both the new ``tracks/track_0/data/`` layout and the
+        legacy flat ``data/`` layout.
 
         Returns a :class:`GroupProxy` so individual datasets can be accessed
         as attributes without loading everything into RAM::
@@ -221,9 +256,7 @@ class File(h5py.File):
                 f.data.raw_data[:, :n_tx]  # read a slice
                 f.data.image.values[0]  # nested group access
         """
-        if "data" not in self:
-            raise KeyError("No 'data' group in this file.")
-        return GroupProxy(self["data"])
+        return GroupProxy(self._data_h5_group)
 
     @property
     def name(self):
@@ -256,11 +289,19 @@ class File(h5py.File):
 
         assert isinstance(key, str), f"Key must be a string, got {type(key)}. "
 
-        # Return the key if it is in the file
+        # Return the key if it is in the file (legacy: data/ at root)
         if key in self.keys():
             return key
 
-        # Add 'data/' prefix if not present
+        # New format: check under tracks/track_0/
+        if "tracks" in self:
+            track0 = self["tracks"].get("track_0")
+            if track0 is not None:
+                bare = key.lstrip("data/")
+                if bare in track0.get("data", {}):
+                    return f"tracks/track_0/data/{bare}"
+
+        # Add 'data/' prefix if not present (legacy path)
         if "data/" not in key:
             key = "data/" + key
 
@@ -380,11 +421,17 @@ class File(h5py.File):
         Returns:
             dict: The scan parameters.
         """
-        if "scan" not in self:
+        if self._scan_h5_group is None:
             log.warning("Could not find scan parameters in file.")
             return {}
 
-        scan_parameters = self.recursively_load_dict_contents_from_group("scan")
+        # Determine the path string for recursively_load_dict_contents_from_group
+        if "scan" in self:
+            scan_path = "scan"
+        else:
+            scan_path = "tracks/track_0/scan"
+
+        scan_parameters = self.recursively_load_dict_contents_from_group(scan_path)
         scan_parameters = self._check_focus_distances(scan_parameters)
 
         return scan_parameters
@@ -421,11 +468,14 @@ class File(h5py.File):
     @property
     def n_ax(self) -> int:
         """Number of axial samples."""
-        assert "data" in self, "Cannot determine n_ax because there is no data group in the file."
-        assert "raw_data" in self["data"], (
+        data_group = self._data_h5_group
+        assert data_group is not None, (
+            "Cannot determine n_ax because there is no data group in the file."
+        )
+        assert "raw_data" in data_group, (
             "Cannot determine n_ax because there is no raw_data in the data group."
         )
-        return self["data"]["raw_data"].shape[2]
+        return data_group["raw_data"].shape[2]
 
     def scan(self, safe=True, **kwargs) -> Scan:
         """Returns a Scan object initialized with the parameters from the file.
@@ -469,7 +519,7 @@ class File(h5py.File):
             # tgc_gain_curve has shape (n_ax,) and is the spec's authoritative source.
             if scan_spec.tgc_gain_curve is not None:
                 scan_dict["n_ax"] = len(scan_spec.tgc_gain_curve)
-            elif "data" in self and "raw_data" in self["data"]:
+            elif self._data_h5_group is not None and "raw_data" in self._data_h5_group:
                 scan_dict["n_ax"] = self.n_ax
         except (TypeError, ValueError) as exc:
             log.debug(
@@ -939,10 +989,22 @@ def _validate_file_impl(file: File) -> None:
     - for files created with zea v0.1.0 and later, every key in ``data``
     is in :class:`~zea.data.spec.DataSpec`\'s schema
     """
-    # Collect all data groups to validate: either root /data or per-event /event_*/data
+    # Collect all data groups to validate
     data_groups: list[tuple[str, h5py.Group]] = []
 
-    if "data" in file:
+    if "tracks" in file:
+        # New format: tracks/track_N/data/
+        tracks_group = file["tracks"]
+        i = 0
+        while f"track_{i}" in tracks_group:
+            track_group = tracks_group[f"track_{i}"]
+            if "data" in track_group:
+                assert isinstance(track_group["data"], h5py.Group), (
+                    f"'tracks/track_{i}/data' is not a group - this may not be a zea file."
+                )
+                data_groups.append((f"tracks/track_{i}/data", track_group["data"]))
+            i += 1
+    elif "data" in file:
         assert isinstance(file["data"], h5py.Group), (
             "'data' is not a group - this may not be a zea file."
         )
