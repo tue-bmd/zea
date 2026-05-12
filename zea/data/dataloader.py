@@ -20,6 +20,8 @@ Example:
             ...
 """
 
+# TODO: 'samples' in this file is a misnomer, maybe 'elements' is better?
+
 import re
 import threading
 from itertools import product
@@ -232,7 +234,8 @@ class H5DataSource:
         additional_axes_iter: Extra axes to iterate over.
         sort_files: Sort files numerically.
         overlapping_blocks: Allow overlapping frame blocks.
-        limit_n_samples: Cap the number of samples.
+        limit_n_samples: Cap the number of samples. Note that this is not the same as files.
+            A file can have multiple samples, i.e. multiple frames.
         limit_n_frames: Cap frames loaded per file.
         return_filename: Return filename metadata with each sample.
         cache: Cache loaded samples to RAM.
@@ -392,6 +395,8 @@ class Dataloader:
         - Load the data from each file using the specified key
         - Apply the following transformations in order (if specified):
 
+            - limit_n_frames
+            - limit_n_samples
             - shuffle
             - shard
             - add channel dim
@@ -416,7 +421,9 @@ class Dataloader:
         seed: Random seed used for dataloader (e.g. shuffling). Default is ``None``.
             If ``None`` a random seed is generated.
         limit_n_samples: Limit total number of samples (useful for debugging).
-            Default is ``None`` (no limit).
+            Default is ``None`` (no limit). Note that this is not the same as files.
+            A file can have multiple samples, i.e. multiple frames. Note that this happens
+            before shuffle!
         limit_n_frames: Limit frames loaded per file to the first N frames.
             Default is ``None`` (no limit).
         drop_remainder: Drop the final incomplete batch. Default is ``False``.
