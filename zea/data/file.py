@@ -414,7 +414,9 @@ class File(h5py.File):
         # New format: check under tracks/track_0/
         if "tracks" in self:
             track0 = self["tracks"].get("track_0")
-            if track0 is not None:
+            if (
+                track0 is not None and len(self.tracks) == 1
+            ):  # only auto-redirect if there's exactly one track
                 bare = key.removeprefix("data/")
                 if bare in track0.get("data", {}):
                     return f"tracks/track_0/data/{bare}"

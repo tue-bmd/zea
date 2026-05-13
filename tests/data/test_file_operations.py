@@ -291,4 +291,4 @@ def _assert_descriptions_and_additional_elements_equal(path, other_path: Path):
 
 def _assert_beamformed_data_still_exists(path: Path):
     with h5py.File(path, "r") as f:
-        assert "beamformed_data" in f.data
+        assert "data/beamformed_data" in f["tracks/track_0/"]

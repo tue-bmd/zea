@@ -846,13 +846,14 @@ class TestZeaVersion:
 # Helpers shared by multi-track tests
 # ---------------------------------------------------------------------------
 
+
 def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
     """Build and save a two-track FileSpec; return (path, raw_a, raw_b)."""
     from zea.data.spec import FileSpec, TrackSpec
 
-    raw_a = np.arange(
-        n_frames * n_tx * n_ax * n_el * n_ch, dtype=np.float32
-    ).reshape(n_frames, n_tx, n_ax, n_el, n_ch)
+    raw_a = np.arange(n_frames * n_tx * n_ax * n_el * n_ch, dtype=np.float32).reshape(
+        n_frames, n_tx, n_ax, n_el, n_ch
+    )
     raw_b = raw_a * 2
 
     scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
