@@ -81,11 +81,140 @@ disk::
 
 
 -------------------------------
+Multi-track files
+-------------------------------
+
+Some acquisitions interleave multiple transmit sequences in a single recording — for example,
+alternating focused and diverging-wave pulses.  Rather than splitting these into separate files
+or losing the interleaving information, ``zea`` can store them as **tracks**: self-contained
+bundles of raw data and scan parameters, all inside one HDF5 file.
+
+**Why tracks?**
+
+- A single file stays self-describing: each track carries its own :class:`~zea.data.spec.ScanSpec`
+  so it can be beamformed independently.
+- The original firing order is preserved via the optional ``track_schedule`` field.
+
+**HDF5 layout**
+
+.. code-block:: text
+
+    acquisition.hdf5
+    ├── attrs:  probe_name, us_machine, zea_version, …
+    ├── track_schedule          # optional int32[n_total_tx]
+    └── tracks/
+        ├── track_0/
+        │   ├── data/           # raw_data, image, …
+        │   └── scan/           # probe_geometry, t0_delays, …
+        └── track_1/
+            ├── data/
+            └── scan/
+
+**Write — create a file with two tracks**
+
+.. code-block:: python
+
+    import numpy as np
+    from zea.data.spec import FileSpec
+
+    n_frames, n_ax, n_el = 4, 512, 128
+    n_tx_focused, n_tx_pw = 16, 8
+
+    probe_geom = np.zeros((n_el, 3), dtype=np.float32)
+
+    spec = FileSpec(
+        tracks=[
+            # Track 1: e.g. focused B-mode
+            {
+                "data": {"raw_data": np.zeros((n_frames, n_tx_focused, n_ax, n_el, 1), dtype=np.float32)},
+                "scan": {
+                    "probe_geometry":         probe_geom,
+                    "sampling_frequency":     np.float32(40e6),
+                    "center_frequency":       np.float32(7e6),
+                    "demodulation_frequency": np.float32(7e6),
+                    "initial_times":          np.zeros(n_tx_focused, dtype=np.float32),
+                    "t0_delays":              np.zeros((n_tx_focused, n_el), dtype=np.float32),
+                    "tx_apodizations":        np.ones((n_tx_focused, n_el), dtype=np.float32),
+                    "focus_distances":        np.full(n_tx_focused, np.inf, dtype=np.float32),
+                    "transmit_origins":       np.zeros((n_tx_focused, 3), dtype=np.float32),
+                    "polar_angles":           np.zeros(n_tx_focused, dtype=np.float32),
+                },
+            },
+            # Track 2: e.g. plane-wave Doppler
+            {
+                "data": {"raw_data": np.zeros((n_frames, n_tx_pw, n_ax, n_el, 1), dtype=np.float32)},
+                "scan": {
+                    "probe_geometry":         probe_geom,
+                    "sampling_frequency":     np.float32(40e6),
+                    "center_frequency":       np.float32(7e6),
+                    "demodulation_frequency": np.float32(7e6),
+                    "initial_times":          np.zeros(n_tx_pw, dtype=np.float32),
+                    "t0_delays":              np.zeros((n_tx_pw, n_el), dtype=np.float32),
+                    "tx_apodizations":        np.ones((n_tx_pw, n_el), dtype=np.float32),
+                    "focus_distances":        np.full(n_tx_pw, np.inf, dtype=np.float32),
+                    "transmit_origins":       np.zeros((n_tx_pw, 3), dtype=np.float32),
+                    "polar_angles":           np.zeros(n_tx_pw, dtype=np.float32),
+                },
+            },
+        ],
+        probe_name="L11-4v",
+    )
+    spec.save("acquisition.hdf5")
+
+**Read — iterate over tracks**
+
+.. code-block:: python
+
+    import zea
+
+    with zea.File("acquisition.hdf5") as f:
+        probe = f.probe()              # probe hardware is shared across all tracks
+        for track in f.tracks:
+            scan = track.scan()        # returns a zea.Scan for this track
+            raw  = track.data.raw_data[:]
+            print(scan.n_tx, raw.shape)
+
+    # Accessing f.data or f.scan() on a multi-track file raises AttributeError
+    # with a hint to use f.tracks instead.
+
+**Beamform each track with its own pipeline**
+
+.. code-block:: python
+
+    import zea
+
+    # Load per-track configs (focused B-mode and diverging Doppler)
+    bmode_config   = zea.Config.from_path("hf://zeahub/zea-cardiac-2026/config.yaml")
+    doppler_config = zea.Config.from_path("configs/config_cardiac_diverging_doppler.yaml")
+
+    bmode_pipeline   = zea.Pipeline.from_config(bmode_config)
+    doppler_pipeline = zea.Pipeline.from_config(doppler_config)
+
+    with zea.File("acquisition.hdf5") as f:
+        probe = f.probe()
+        focused_track, diverging_track = f.tracks
+
+        focused_scan   = focused_track.scan(**bmode_config.scan)
+        diverging_scan = diverging_track.scan(**doppler_config.scan)
+
+        focused_raw   = focused_track.data.raw_data[:]
+        diverging_raw = diverging_track.data.raw_data[:]
+
+    bmode_params   = bmode_pipeline.prepare_parameters(probe, focused_scan, bmode_config.scan)
+    doppler_params = doppler_pipeline.prepare_parameters(probe, diverging_scan, doppler_config.scan)
+
+    bmode_image = bmode_pipeline(data=focused_raw, **bmode_params)["data"]
+    iq_data     = doppler_pipeline(data=diverging_raw, **doppler_params)["data"]
+
+See ``example-multiple-tracks.py`` in the repository root for a complete end-to-end
+example that saves a two-track cardiac file and exports a side-by-side B-mode / Color
+Doppler animated GIF.
+
+-------------------------------
 ``zea`` data format reference
 -------------------------------
 
-Files created with zea 0.0.12 and later are fully described by the
-:class:`~zea.data.spec.FileSpec` class.
+
 
 .. note::
 
