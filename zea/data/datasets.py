@@ -42,7 +42,7 @@ import tqdm
 
 from zea import log
 from zea.data.file import File
-from zea.data.preset_utils import (
+from zea.internal.preset_utils import (
     HF_DATASETS_DIR,
     HF_PREFIX,
     _hf_list_files,

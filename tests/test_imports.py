@@ -103,6 +103,7 @@ def _subprocess_import_zea_with_only_backend(backend):  # pragma: no cover
     This function is run in a subprocess to test zea import with only one backend available.
     """
     import builtins
+    import importlib.util
     import os
     import sys
     import traceback
@@ -125,6 +126,22 @@ def _subprocess_import_zea_with_only_backend(backend):  # pragma: no cover
         return import_orig(name, *args, **kwargs)
 
     builtins.__import__ = mocked_import
+
+    # Also patch ``importlib.util.find_spec`` so that the simulated
+    # "unavailable backend" state is detected by zea's bootstrap check, which
+    # uses ``find_spec`` (and would otherwise see the on-disk packages).
+    find_spec_orig = importlib.util.find_spec
+
+    def mocked_find_spec(name, *args, **kwargs):
+        if name in all_backends and (backend is None or name != backend):
+            return None
+        if any(name.startswith(b + ".") for b in all_backends) and (
+            backend is None or not name.startswith(backend + ".")
+        ):
+            return None
+        return find_spec_orig(name, *args, **kwargs)
+
+    importlib.util.find_spec = mocked_find_spec
 
     # Remove all backends from sys.modules except the allowed one
     for b in all_backends:
