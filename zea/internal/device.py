@@ -5,8 +5,6 @@ import shutil
 import subprocess as sp
 from typing import Union
 
-import keras
-
 from zea import log
 
 
@@ -285,7 +283,7 @@ def select_gpus(available_gpu_ids, memory_free, device=None, verbose=True, hide_
     return gpu_ids
 
 
-def get_device(device="auto:1", verbose=True, hide_others=True):
+def get_device(device="auto:1", verbose=True, hide_others=True, backend=None):
     """Sets the GPU usage by searching for available GPUs and
     selecting one or more GPUs based on the device argument.
     If CUDA is unavailable, fallback to CPU.
@@ -311,6 +309,9 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
         verbose (bool): prints output if True.
         hide_others (bool): if True, hide other GPUs from the system by setting
             the CUDA_VISIBLE_DEVICES environment variable.
+        backend (str, optional): active Keras backend. When ``None`` it is
+            derived from the ``KERAS_BACKEND`` env var (defaulting to
+            ``"tensorflow"``), which avoids importing keras here.
 
     Returns:
         gpu_ids: list of selected GPU ids. If no GPU is selected, returns an
@@ -318,7 +319,8 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
     """
 
     def _cpu_case():
-        if keras.backend.backend() == "jax":
+        active_backend = backend or os.environ.get("KERAS_BACKEND", "tensorflow")
+        if active_backend == "jax":
             import jax
 
             jax.config.update("jax_platforms", "cpu")
@@ -469,7 +471,7 @@ def init_device(
         backend = os.environ.get("KERAS_BACKEND")
 
     if backend in ["jax", "tensorflow", "torch"]:
-        selected_gpu_ids = get_device(device, verbose=verbose)
+        selected_gpu_ids = get_device(device, verbose=verbose, backend=backend)
         device = selected_gpu_ids_to_device(selected_gpu_ids, backend)
     elif backend in ["numpy", "cpu"]:
         device = "cpu"
