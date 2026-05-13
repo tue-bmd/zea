@@ -155,9 +155,7 @@ class TrackProxy:
         return f"<TrackProxy index={self._index} file='{self._file.path.name}'>"
 
 
-def _compute_track_timestamps(
-    file: "File", track_index: int
-) -> "np.ndarray | None":
+def _compute_track_timestamps(file: "File", track_index: int) -> "np.ndarray | None":
     """Return global transmit timestamps for *track_index*, shape ``(n_frames, n_tx)``.
 
     Walk the ``track_schedule`` in order, accumulate ``time_to_next_transmit``
@@ -227,6 +225,20 @@ class File(h5py.File):
 
         # Initialize the h5py.File
         super().__init__(name, mode, *args, **kwargs)
+
+    def __contains__(self, key):
+        """Check whether *key* exists in the file.
+
+        Extends the h5py default to also match legacy short-form keys
+        (``"scan"``, ``"data"``) against the tracks layout
+        (``tracks/track_0/scan``, ``tracks/track_0/data``).
+        """
+        if super().__contains__(key):
+            return True
+        # Transparently handle short-form keys for the new tracks layout
+        if key in ("scan", "data"):
+            return super().__contains__(f"tracks/track_0/{key}")
+        return False
 
     @property
     def path(self):
@@ -403,25 +415,47 @@ class File(h5py.File):
 
     @property
     def _scan_h5_group(self) -> "h5py.Group | None":
-        """Return the HDF5 group for scan, supporting both legacy and new format.
+        """Return the HDF5 group for scan for single-track / legacy files only.
 
-        New format: ``tracks/track_0/scan/``
+        New format (single track): ``tracks/track_0/scan/``
         Legacy format: ``scan/`` at root
         Returns ``None`` when neither is present.
+
+        Raises:
+            AttributeError: For multi-track files — use ``file.tracks[i]`` instead.
         """
+        n = self._n_tracks
+        if n > 1:
+            raise AttributeError(
+                f"This file has {n} tracks. "
+                "Use file.tracks[i].scan() to access a specific track's scan group."
+            )
+        # New format: tracks layout (check first to avoid ambiguity)
+        if "tracks" in self:
+            track0 = self["tracks"].get("track_0")
+            if track0 is not None and "scan" in track0:
+                return track0["scan"]
+        # Legacy format: root-level scan group
         if "scan" in self:
             return self["scan"]
-        if "tracks" in self and "track_0" in self["tracks"] and "scan" in self["tracks"]["track_0"]:
-            return self["tracks"]["track_0"]["scan"]
         return None
 
     @property
     def _data_h5_group(self) -> "h5py.Group":
-        """Return the underlying h5py group for data, supporting both formats.
+        """Return the underlying h5py group for data for single-track / legacy files only.
 
-        New format: ``tracks/track_0/data/``
+        New format (single track): ``tracks/track_0/data/``
         Legacy format: ``data/`` at root
+
+        Raises:
+            AttributeError: For multi-track files — use ``file.tracks[i]`` instead.
         """
+        n = self._n_tracks
+        if n > 1:
+            raise AttributeError(
+                f"This file has {n} tracks. "
+                "Use file.tracks[i].data to access a specific track's data group."
+            )
         if "tracks" in self:
             track_group = self["tracks"].get("track_0")
             if track_group is not None and "data" in track_group:
@@ -672,6 +706,12 @@ class File(h5py.File):
     @property
     def n_ax(self) -> int:
         """Number of axial samples."""
+        n = self._n_tracks
+        if n > 1:
+            raise AttributeError(
+                f"This file has {n} tracks. "
+                "Use file.tracks[i].data.raw_data.shape[2] to get n_ax for a specific track."
+            )
         data_group = self._data_h5_group
         assert data_group is not None, (
             "Cannot determine n_ax because there is no data group in the file."
@@ -775,13 +815,25 @@ class File(h5py.File):
         """Returns a dictionary of probe parameters to initialize a probe
         object that comes with the file (stored inside datafile).
 
+        Probe hardware parameters (geometry, center frequency, etc.) are
+        identical across all tracks and are always read from
+        ``tracks/track_0/scan`` (or the legacy root ``scan`` group).
+
         Returns:
             dict: The probe parameters.
         """
-        file_scan_parameters = self.get_parameters()
-
-        probe_parameters = reduce_to_signature(Probe.__init__, file_scan_parameters)
-        return probe_parameters
+        # Probe params are shared across tracks — read from track_0/scan explicitly.
+        if "tracks" in self:
+            track0 = self["tracks"].get("track_0")
+            if track0 is not None and "scan" in track0:
+                scan_path = track0["scan"].name.lstrip("/")
+                raw = self.recursively_load_dict_contents_from_group(scan_path)
+                return reduce_to_signature(Probe.__init__, raw)
+        # legacy
+        if "scan" in self:
+            raw = self.recursively_load_dict_contents_from_group("scan")
+            return reduce_to_signature(Probe.__init__, raw)
+        return {}
 
     def probe(self) -> Probe:
         """Returns a Probe object initialized with the parameters from the file.
@@ -988,10 +1040,15 @@ class File(h5py.File):
         for attr_key, attr_value in self.attrs.items():
             dst[key].attrs[attr_key] = attr_value
 
-        # Copy scan data if requested
-        if "scan" in self and "scan" not in dst:
-            # Copy the scan data if it exists
-            self.copy("scan", dst)
+        # For single-track / legacy files: also copy the scan group alongside the data key.
+        # For multi-track files the scan lives inside tracks/track_N/scan and is part
+        # of the track group, so it must be copied explicitly by the caller.
+        if self._n_tracks <= 1:
+            scan_group = self._scan_h5_group
+            if scan_group is not None:
+                scan_path = scan_group.name.lstrip("/")
+                if scan_path not in dst:
+                    self.copy(scan_path, dst, name=scan_path)
 
     def summary(self):
         """Print the contents of the file."""
