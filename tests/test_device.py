@@ -15,6 +15,7 @@ from unittest.mock import patch
 import keras
 import numpy as np
 import pytest
+from keras.ops import convert_to_numpy
 
 import zea
 from zea.backend import func_on_device
@@ -251,7 +252,9 @@ class TestOnDevice:
             result = keras.ops.abs(
                 keras.ops.convert_to_tensor(np.array([-1.0, 2.0, -3.0], dtype=np.float32))
             )
-        np.testing.assert_allclose(result, np.array([1.0, 2.0, 3.0], dtype=np.float32))
+        np.testing.assert_allclose(
+            convert_to_numpy(result), np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        )
 
 
 class TestPipelineDevice:
@@ -325,7 +328,9 @@ class TestPipelineDevice:
         out = pipe(data=keras.ops.convert_to_tensor(np.array([-1.0, 2.0, -3.0], dtype=np.float32)))[
             "data"
         ]
-        np.testing.assert_allclose(out, np.array([1.0, 2.0, 3.0], dtype=np.float32))
+        np.testing.assert_allclose(
+            convert_to_numpy(out), np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        )
 
     @pytest.mark.gpu
     def test_context_manager_on_gpu(self):  # pragma: no cover
@@ -336,4 +341,6 @@ class TestPipelineDevice:
         data = keras.ops.convert_to_tensor(np.array([-1.0, 2.0], dtype=np.float32))
         with zea.device("gpu:0"):
             out = pipe(data=data)["data"]
-        np.testing.assert_allclose(np.abs(out), np.array([1.0, 2.0], dtype=np.float32))
+        np.testing.assert_allclose(
+            np.abs(convert_to_numpy(out)), np.array([1.0, 2.0], dtype=np.float32)
+        )
