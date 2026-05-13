@@ -53,7 +53,6 @@ from typing import Union
 import yaml
 
 from zea import log
-from zea.data.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.config.validation import config_schema
 from zea.internal.core import dict_to_tensor
 from zea.internal.utils import deprecated
@@ -458,6 +457,8 @@ class Config(dict):
         Returns:
             Config: config object.
         """
+        from zea.data.preset_utils import HF_PREFIX, _hf_resolve_path
+
         if str(path).startswith(HF_PREFIX):
             path = _hf_resolve_path(str(path), **kwargs)
         if isinstance(path, str):
@@ -490,6 +491,8 @@ class Config(dict):
                 ...     "zeahub/configs", "config_camus.yaml", repo_type="dataset"
                 ... )
         """
+        from zea.data.preset_utils import HF_PREFIX
+
         return cls.from_path(f"{HF_PREFIX}{repo_id}/{path}", **kwargs)
 
     @classmethod
