@@ -88,8 +88,8 @@ def test_is_file_and_is_dir(file, folder, fake_files, monkeypatch):
         assert repo_type == "dataset"
         return fake_files
 
-    monkeypatch.setattr("zea.internal.preset_utils._hf_parse_path", fake_parse_path)
-    monkeypatch.setattr("zea.internal.preset_utils._hf_list_files", fake_list_files)
+    monkeypatch.setattr("zea.tools.hf._hf_parse_path", fake_parse_path)
+    monkeypatch.setattr("zea.tools.hf._hf_list_files", fake_list_files)
 
     # file is a file
     assert file.is_file() is True
