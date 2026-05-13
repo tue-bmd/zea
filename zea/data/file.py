@@ -129,8 +129,75 @@ class TrackProxy:
             scan_dict, data_group=data_group, safe=safe, **kwargs
         )
 
+    @property
+    def timestamps(self) -> "np.ndarray | None":
+        """Global transmit timestamps for this track, shape ``(n_frames, n_tx)``.
+
+        Timestamps are computed by walking the :attr:`~File.track_schedule` in
+        order and accumulating each event's ``time_to_next_transmit`` across all
+        tracks.  The result is the absolute time (in seconds, relative to the
+        start of the sequence) at which each transmit of *this* track fired.
+
+        Returns ``None`` if either:
+
+        * the file has no ``track_schedule``, or
+        * any track is missing ``time_to_next_transmit`` scan data.
+
+        Example::
+
+            with File("multi_track.hdf5") as f:
+                for track in f.tracks:
+                    ts = track.timestamps  # (n_frames, n_tx) or None
+        """
+        return _compute_track_timestamps(self._file, self._index)
+
     def __repr__(self) -> str:
         return f"<TrackProxy index={self._index} file='{self._file.path.name}'>"
+
+
+def _compute_track_timestamps(
+    file: "File", track_index: int
+) -> "np.ndarray | None":
+    """Return global transmit timestamps for *track_index*, shape ``(n_frames, n_tx)``.
+
+    Walk the ``track_schedule`` in order, accumulate ``time_to_next_transmit``
+    from each firing track, and slice out the timestamps that belong to
+    *track_index*.  Returns ``None`` if the schedule or any track's
+    ``time_to_next_transmit`` is unavailable.
+    """
+    schedule = file.track_schedule
+    if schedule is None:
+        return None
+
+    n_tracks = file._n_tracks
+    all_track_proxies = file.tracks
+
+    # Load time_to_next_transmit for every track (shape (n_frames, n_tx_t)).
+    t2nts: list[np.ndarray] = []
+    for proxy in all_track_proxies:
+        scan = proxy.scan()
+        t2nt = scan.time_to_next_transmit
+        if t2nt is None:
+            return None
+        t2nts.append(np.asarray(t2nt, dtype=np.float64))
+
+    n_frames = t2nts[0].shape[0]
+    n_total = len(schedule)
+
+    cumtime = np.zeros(n_frames, dtype=np.float64)
+    global_timestamps = np.empty((n_frames, n_total), dtype=np.float64)
+    track_counters = [0] * n_tracks
+
+    for g in range(n_total):
+        t_idx = int(schedule[g])
+        global_timestamps[:, g] = cumtime
+        k = track_counters[t_idx]
+        if g < n_total - 1:
+            cumtime = cumtime + t2nts[t_idx][:, k]
+        track_counters[t_idx] = k + 1
+
+    track_positions = np.where(schedule == track_index)[0]
+    return global_timestamps[:, track_positions]  # (n_frames, n_tx_track_index)
 
 
 class File(h5py.File):
@@ -316,6 +383,23 @@ class File(h5py.File):
             result.append(TrackProxy(self, i, tracks_group[f"track_{i}"]))
             i += 1
         return result
+
+    @property
+    def track_schedule(self) -> "np.ndarray | None":
+        """Track index for each global transmit event, shape ``(n_total_tx,)``.
+
+        Returns an ``int32`` array that maps every transmit event (in
+        acquisition order) to the track it belongs to, or ``None`` if no
+        ``track_schedule`` dataset was stored in this file.
+
+        Example::
+
+            with File("multi_track.hdf5") as f:
+                sched = f.track_schedule  # e.g. array([0, 1, 0, 1, ...])
+        """
+        if "track_schedule" not in self:
+            return None
+        return self["track_schedule"][()].astype(np.int32)
 
     @property
     def _scan_h5_group(self) -> "h5py.Group | None":
