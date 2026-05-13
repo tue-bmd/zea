@@ -188,11 +188,21 @@ class DiffusionModel(DeepGenerativeModel):
                     f"DiffusionGuidance object, got {guidance}"
                 )
 
-    def call(self, inputs, training=False, network=None, **kwargs):
-        """Calls the score network.
+    def call(self, inputs, training: bool = False, network=None, **kwargs):
+        """Call the score network.
 
-        If network is not provided, will use the exponential moving
-        average network if training is False, otherwise the regular network.
+        Args:
+            inputs: A list ``[noisy_images, noise_rates_squared]`` as
+                expected by the underlying time-conditional network.
+            training: Whether to run in training mode.  When ``False`` and
+                ``network`` is ``None``, the EMA network is used.
+            network: Explicit network to call.  If ``None``, the EMA network
+                is used during inference and the online network during
+                training.
+            **kwargs: Extra keyword arguments forwarded to the network.
+
+        Returns:
+            Predicted noise tensor of the same shape as the input images.
         """
         if network is None:
             network = self.network if training else self.ema_network
@@ -226,9 +236,9 @@ class DiffusionModel(DeepGenerativeModel):
     def posterior_sample(
         self,
         measurements,
-        n_samples=1,
-        n_steps=20,
-        initial_step=0,
+        n_samples: int = 1,
+        n_steps: int = 20,
+        initial_step: int = 0,
         initial_samples=None,
         seed=None,
         **kwargs,
@@ -237,27 +247,34 @@ class DiffusionModel(DeepGenerativeModel):
 
         Args:
             measurements: Input measurements. Typically of shape
-                `(batch_size, *input_shape)`.
+                ``(batch_size, *input_shape)``.
             n_samples: Number of posterior samples to generate.
-                Will generate `n_samples` samples for each measurement
-                in the `measurements` batch.
+                Will generate ``n_samples`` samples for each measurement
+                in the ``measurements`` batch.
             n_steps: Number of diffusion steps.
-            initial_step: Initial step to start from. Can warm start the
-                diffusion process with a partially noised image, thereby
-                skipping part of the diffusion process. Initial step
-                closer to n_steps, will result in a shorter diffusion process
-                (i.e. less noise added to the initial image). A value of 0
-                means that the diffusion process starts from pure noise.
-            initial_samples: Optional initial samples to start from.
-                If provided, these samples will be used as the starting point
-                for the diffusion process. Only used if `initial_step` is
-                greater than 0. Must be of shape `(batch_size, n_samples, *input_shape)`.
+            initial_step: Step at which to begin the reverse diffusion loop.
+                ``0`` runs all ``diffusion_steps`` steps from maximum noise.
+                Higher values skip early (high-noise) steps and require
+                ``initial_samples`` to be provided. Number of effective steps
+                will be ``diffusion_steps - initial_step``.
+            initial_samples: Optional initial samples to warm-start the
+                diffusion process. The diffusion process now starts from a
+                *noised* version of these samples. This can be used to speed
+                up the diffusion process.
+                When ``initial_step == 0``, samples are noised at the maximum
+                noise level (``max_t``). When ``initial_step > 0``, samples
+                are noised at the noise level corresponding to ``initial_step``.
+                These ``initial_samples`` can be initial guesses such as solutions
+                of previous frames (for sequences), see for instance
+                `SeqDiff <https://arxiv.org/abs/2409.05399>`_.
+                Must be of shape ``(batch_size, n_samples, *input_shape)``.
             seed: Random seed generator.
-            **kwargs: Additional arguments.
+            **kwargs: Additional arguments passed to
+                :meth:`reverse_conditional_diffusion`.
 
         Returns:
-            Posterior samples p(x|y), of shape:
-                `(batch_size, n_samples, *input_shape)`.
+            Posterior samples ``p(x|y)`` of shape
+            ``(batch_size, n_samples, *input_shape)``.
 
         """
         batch_size = ops.shape(measurements)[0]
@@ -393,29 +410,19 @@ class DiffusionModel(DeepGenerativeModel):
         return {m.name: m.result() for m in self.metrics}
 
     def diffusion_schedule(self, diffusion_times):
-        """Cosine diffusion schedule https://arxiv.org/abs/2102.09672
+        """Cosine diffusion schedule.
+
+        Implements the cosine schedule from `Nichol & Dhariwal (2021)
+        <https://arxiv.org/abs/2102.09672>`_.
+
+        The noisy image at time ``t`` is defined as:
 
         Args:
-            diffusion_times: tensor with diffusion times in [0, 1]
+            diffusion_times: Tensor of diffusion times in ``[min_t, max_t]``.
 
         Returns:
-            noise_rates: tensor with noise rates
-            signal_rates: tensor with signal rates
-
-            according to:
-            - x_t = signal_rate * x_0 + noise_rate * noise
-            - x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t) * noise
-
-            or with stochastic sampling:
-            - x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t - sigma_t^2) * noise + sigma_t * epsilon
-
-            where:
-            - sigma_t = sqrt((1 - alpha_t) / (1 - alpha_{t+1})) * sqrt(1 - alpha_{t+1} / alpha_t)
-
-        Note:
-            t+1 = previous time step
-            t = current time step
-
+            A ``(noise_rates, signal_rates)`` tuple of tensors with the
+            same shape as ``diffusion_times``.
         """  # noqa: E501
         # diffusion times -> angles
         start_angle = ops.cast(ops.arccos(self.max_signal_rate), "float32")
@@ -446,10 +453,30 @@ class DiffusionModel(DeepGenerativeModel):
         noisy_images,
         noise_rates,
         signal_rates,
-        training,
+        training: bool,
         network=None,
     ):
-        """Predict noise component and calculate the image component using it."""
+        """Predict the noise component and derive the clean-image estimate.
+
+        Uses the score network to predict the noise ``ε`` in ``x_t``, then
+        computes the Tweedie estimate of ``x_0``.
+
+        Args:
+            noisy_images: Noisy images ``x_t`` of shape
+                ``(n_images, *input_shape)``.
+            noise_rates: Noise rates at the current diffusion time, broadcastable
+                to ``noisy_images``.
+            signal_rates: Signal rates at the current diffusion time,
+                broadcastable to ``noisy_images``.
+            training: Whether to call the network in training mode.
+            network: Explicit network to use.  If ``None``, chosen based on
+                ``training`` (see :meth:`call`).
+
+        Returns:
+            A ``(pred_noises, pred_images)`` tuple where ``pred_noises`` is
+            the predicted noise ``ε`` and ``pred_images`` is the Tweedie
+            estimate of ``x_0``.
+        """
 
         pred_noises = self([noisy_images, noise_rates**2], training=training, network=network)
         pred_images = (noisy_images - noise_rates * pred_noises) / signal_rates
@@ -515,21 +542,37 @@ class DiffusionModel(DeepGenerativeModel):
         """Reverse diffusion process to generate images from noise.
 
         Args:
-            initial_noise: Initial noise tensor.
-            diffusion_steps: Number of diffusion steps.
-            initial_samples: Optional initial samples to start from.
-            initial_step: Initial step to start from.
-            stochastic_sampling: Whether to use stochastic sampling (DDPM).
+            initial_noise: Initial noise tensor of shape
+                ``(n_images, *input_shape)``.
+            diffusion_steps: Total number of diffusion steps.
+            initial_samples: Optional initial samples to warm-start the
+                diffusion process. The diffusion process now starts from a
+                *noised* version of these samples.
+                When ``initial_step == 0``, samples are noised at the maximum
+                noise level (``max_t``). When ``initial_step > 0``, samples
+                are noised at the noise level corresponding to ``initial_step``.
+            initial_step: Step at which to begin the reverse diffusion loop.
+                ``0`` runs all ``diffusion_steps`` steps from maximum noise.
+                Higher values skip early (high-noise) steps and require
+                ``initial_samples`` to be provided. Number of effective steps
+                will be ``diffusion_steps - initial_step``.
+            stochastic_sampling: Whether to use stochastic DDPM sampling
+                instead of deterministic DDIM sampling.
             seed: Random seed generator.
-            verbose: Whether to show a progress bar.
-            track_progress_type: Type of progress tracking ("x_0" or "x_t").
+            verbose: Whether to show a Keras progress bar.
+            track_progress_type: Intermediate output to store at each step.
+                ``"x_0"`` stores the Tweedie-denoised estimate; ``"x_t"``
+                stores the noisy intermediate image; ``None`` disables
+                tracking.
             disable_jit: Whether to disable JIT compilation.
-            training: Whether to use the training mode of the network.
-            network_type: Which network to use ("main" or "ema"). If None, uses the
-                network based on the `training` argument.
+            training: Whether to call the network in training mode.
+            network_type: Which network weights to use. ``"main"`` uses the
+                online network, ``"ema"`` uses the exponential-moving-average
+                network. If ``None``, the choice is determined by the
+                ``training`` argument.
 
         Returns:
-            Generated images.
+            Generated images of shape ``(n_images, *input_shape)``.
         """
         num_images, *input_shape = ops.shape(initial_noise)
         step_size, progbar = self.prepare_diffusion(diffusion_steps, initial_step, verbose)
@@ -627,23 +670,42 @@ class DiffusionModel(DeepGenerativeModel):
     ):
         """Reverse diffusion process conditioned on some measurement.
 
-        Effectively performs diffusion posterior sampling p(x_0 | y).
+        Effectively performs diffusion posterior sampling ``p(x_0 | y)``
+        by interleaving reverse diffusion steps with gradient-based guidance
+        (e.g. DPS or DDS).
 
         Args:
-            measurements: Conditioning data.
-            initial_noise: Initial noise tensor.
-            diffusion_steps: Number of diffusion steps.
-            initial_samples: Optional initial samples to start from.
-            initial_step: Initial step to start from.
-            stochastic_sampling: Whether to use stochastic sampling (DDPM).
+            measurements: Conditioning observations of shape
+                ``(n_images, *measurement_shape)``.
+            initial_noise: Initial noise tensor of shape
+                ``(n_images, *input_shape)``.
+            diffusion_steps: Total number of diffusion steps.
+            initial_samples: Optional initial samples to warm-start the
+                diffusion process. The diffusion process now starts from a
+                *noised* version of these samples.
+                When ``initial_step == 0``, samples are noised at the maximum
+                noise level (``max_t``). When ``initial_step > 0``, samples
+                are noised at the noise level corresponding to ``initial_step``.
+            initial_step: Step at which to begin the reverse diffusion loop.
+                ``0`` runs all ``diffusion_steps`` steps from maximum noise.
+                Higher values skip early (high-noise) steps and require
+                ``initial_samples`` to be provided. Number of effective steps
+                will be ``diffusion_steps - initial_step``.
+            stochastic_sampling: Whether to use stochastic DDPM sampling
+                instead of deterministic DDIM sampling.
             seed: Random seed generator.
-            verbose: Whether to show a progress bar.
-            track_progress_type: Type of progress tracking ("x_0" or "x_t").
-            **kwargs: Additional arguments. These are passed to the guidance
-                function and the operator. Examples are omega, mask, etc.
+            verbose: Whether to show a Keras progress bar with the guidance
+                error at each step.
+            track_progress_type: Intermediate output to store at each step.
+                ``"x_0"`` stores the Tweedie-denoised estimate; ``"x_t"``
+                stores the noisy intermediate image; ``None`` disables
+                tracking.
+            disable_jit: Whether to disable JIT compilation.
+            **kwargs: Additional keyword arguments forwarded to the guidance
+                function and operator (e.g. ``omega``, ``mask``).
 
         Returns:
-            Generated images.
+            Generated images of shape ``(n_images, *input_shape)``.
 
         """
         num_images, *input_shape = ops.shape(initial_noise)
@@ -723,11 +785,30 @@ class DiffusionModel(DeepGenerativeModel):
 
         return pred_images
 
-    def prepare_diffusion(self, diffusion_steps, initial_step, verbose, disable_jit=False):
+    def prepare_diffusion(
+        self,
+        diffusion_steps: int,
+        initial_step: int,
+        verbose: bool,
+        disable_jit: bool = False,
+    ):
         """Prepare the diffusion process.
 
-        This method sets up the parameters for the diffusion process, including
-        validation of the initial step and calculation of the step size.
+        Validates ``initial_step``, computes the step size, and optionally
+        creates a Keras progress bar.
+
+        Args:
+            diffusion_steps: Total number of diffusion steps.
+            initial_step: Step index at which reverse diffusion begins.
+                Must satisfy ``0 <= initial_step < diffusion_steps``.
+            verbose: Whether to create a Keras :class:`~keras.utils.Progbar`.
+            disable_jit: When ``True``, skip the ``initial_step`` range
+                assertions (required when values are runtime tensors).
+
+        Returns:
+            A ``(step_size, progbar)`` tuple where ``step_size`` is the
+            uniform time increment per step and ``progbar`` is a
+            :class:`~keras.utils.Progbar` instance or ``None``.
         """
         # Asserts
         if not disable_jit:
@@ -752,25 +833,38 @@ class DiffusionModel(DeepGenerativeModel):
         base_diffusion_times,
         initial_noise,
         initial_samples,
-        initial_step,
-        step_size,
+        initial_step: int,
+        step_size: float,
     ):
-        """Prepare the diffusion schedule.
+        """Prepare the starting noisy images for the reverse diffusion loop.
 
-        This method sets up the initial noisy images based on the provided
-        initial noise and samples. It handles the case where the initial step
-        is greater than 0, allowing for the use of partially noised images for
-        initialization of the diffusion process.
+        Constructs the initial ``x_t`` tensor that is fed into the first
+        diffusion step.  Three cases are handled:
+
+        - ``initial_samples`` provided and ``initial_step > 0``:
+          samples are mixed with noise at the noise level that corresponds
+          to ``initial_step``, skipping the highest-noise diffusion steps.
+        - ``initial_samples`` provided and ``initial_step == 0``:
+          samples are mixed with noise at the maximum noise level
+          (``max_t``), running the full diffusion process from a noised
+          version of the samples.x
+        - ``initial_samples is None`` and ``initial_step == 0``:
+          the starting point is pure noise (``initial_noise``).
 
         Args:
-            base_diffusion_times: Base diffusion times.
-            initial_noise: Initial noise tensor.
-            initial_samples: Optional initial samples to start from.
-            initial_step: Initial step to start from.
-            step_size: Step size for the diffusion process.
+            base_diffusion_times: Tensor of shape
+                ``(n_images, *[1]*n_dims)`` filled with ``max_t``.
+            initial_noise: Pure noise tensor of shape
+                ``(n_images, *input_shape)``.
+            initial_samples: Optional samples of shape ``(n_images, *input_shape)``.
+                The diffusion process always starts from a *noised*
+                version of these samples.
+            initial_step: Step index at which reverse diffusion begins.
+            step_size: Uniform time increment per diffusion step.
 
         Returns:
-            next_noisy_images: Noisy images after the initial step.
+            Noisy images tensor of shape ``(n_images, *input_shape)`` to
+            use as the starting point ``x_t`` for the diffusion loop.
         """
         # We can optionally start with a set of samples that are partially noised
         if initial_samples is not None and initial_step > 0:
@@ -793,10 +887,17 @@ class DiffusionModel(DeepGenerativeModel):
             )
         return next_noisy_images
 
-    def start_track_progress(self, diffusion_steps, initial_step=0):
-        """Initialize the progress tracking for the diffusion process.
-        For diffusion animation we keep track of the diffusion progress.
-        For large number of steps, we do not store all the images due to memory constraints.
+    def start_track_progress(self, diffusion_steps: int, initial_step: int = 0):
+        """Initialize progress tracking for the diffusion process.
+
+        Resets :attr:`track_progress` and sets
+        :attr:`track_progress_interval` so that at most 50 frames are
+        stored during the diffusion trajectory (to keep memory usage
+        bounded for large step counts).
+
+        Args:
+            diffusion_steps: Total number of diffusion steps.
+            initial_step: Step index at which reverse diffusion begins.
         """
         self.track_progress = []
         remaining = max(1, diffusion_steps - int(initial_step))
@@ -807,22 +908,23 @@ class DiffusionModel(DeepGenerativeModel):
 
     def store_progress(
         self,
-        step,
-        track_progress_type,
+        step: int,
+        track_progress_type: Literal[None, "x_0", "x_t"],
         next_noisy_images,
         pred_images,
     ):
-        """Store the progress of the diffusion process.
+        """Store an intermediate diffusion frame in :attr:`track_progress`.
+
+        Frames are stored every :attr:`track_progress_interval` steps.
+        Does nothing when ``track_progress_type`` is ``None``.
 
         Args:
-            step: Current diffusion step.
-            track_progress_type: Type of progress tracking ("x_0" or "x_t").
-            next_noisy_images: Noisy images after the current step.
-            pred_images: Predicted images.
-
-        Notes:
-            - x_0 is considered the predicted image (aka Tweedie estimate)
-            - x_t is the noisy intermediate image
+            step: Current diffusion step index.
+            track_progress_type: Which tensor to store.  ``"x_0"`` stores
+                the Tweedie-denoised estimate (predicted clean image);
+                ``"x_t"`` stores the noisy intermediate image.
+            next_noisy_images: Noisy images ``x_t`` after the current step.
+            pred_images: Predicted clean images ``x_0`` at the current step.
         """
         if not track_progress_type:
             return
@@ -851,7 +953,10 @@ class DiffusionGuidance(abc.ABC, Object):
 
         Args:
             diffusion_model: The diffusion model to use for guidance.
-            disable_jit: Whether to disable JIT compilation.
+            operator: The forward operator :math:`A` that maps clean images
+                to the measurement space.
+            disable_jit: Whether to disable JIT compilation of the guidance
+                function.
         """
         super().__init__()
 
@@ -890,22 +995,28 @@ class DPS(DiffusionGuidance):
         measurements,
         noise_rates,
         signal_rates,
-        omega,
+        omega: float,
         **kwargs,
     ):
-        """
-        Compute measurement error for diffusion posterior sampling.
+        r"""Compute the DPS measurement error for gradient computation.
+
+        Following the DPS implementation, the
+        loss is a standard L2 norm.
 
         Args:
-            noisy_images: Noisy images.
-            measurements: Target measurement.
-            noise_rates: Current noise rates.
-            signal_rates: Current signal rates.
-            omega: Weight for the measurement error.
-            **kwargs: Additional arguments for the operator.
+            noisy_images: Noisy images ``x_t`` of shape
+                ``(n_images, *input_shape)``.
+            measurements: Target observations ``y``.
+            noise_rates: Noise rates at the current diffusion time.
+            signal_rates: Signal rates at the current diffusion time.
+            omega: Scalar step-size weight for the measurement gradient.
+            **kwargs: Additional keyword arguments forwarded to the
+                operator's ``forward`` method (e.g. ``mask``).
 
         Returns:
-            Tuple of (measurement_error, (pred_noises, pred_images))
+            A ``(measurement_error, (pred_noises, pred_images))`` tuple
+            where ``measurement_error`` is the scalar loss and
+            ``pred_noises`` / ``pred_images`` are the denoiser outputs.
         """
         pred_noises, pred_images = self.diffusion_model.denoise(
             noisy_images,
@@ -914,28 +1025,32 @@ class DPS(DiffusionGuidance):
             training=False,
         )
 
-        # Note that while the DPS paper specifies a squared L2 here, we follow their
-        # implementation, which uses a standard L2:
+        # See the original DPS implementation
         # https://github.com/DPS2022/diffusion-posterior-sampling/blob/effbde7325b22ce8dc3e2c06c160c021e743a12d/guided_diffusion/condition_methods.py#L31  # noqa: E501
+        # As well as interesting discussion on the DPS loss:
+        # https://github.com/DPS2022/diffusion-posterior-sampling/issues/20
         measurement_error = omega * L2(measurements - self.operator.forward(pred_images, **kwargs))
 
         return measurement_error, (pred_noises, pred_images)
 
     def __call__(self, noisy_images, **kwargs):
-        """
-        Call the gradient function.
+        """Compute DPS gradients and denoiser outputs.
+
+        Calls the JIT-compiled gradient function obtained from
+        :meth:`setup`.
 
         Args:
-            noisy_images: Noisy images.
-            measurement: Target measurement.
-            operator: Forward operator.
-            noise_rates: Current noise rates.
-            signal_rates: Current signal rates.
-            omega: Weight for the measurement error.
-            **kwargs: Additional arguments for the operator.
+            noisy_images: Noisy images ``x_t`` of shape
+                ``(n_images, *input_shape)``.
+            **kwargs: Keyword arguments forwarded to :meth:`compute_error`
+                (``measurements``, ``noise_rates``, ``signal_rates``,
+                ``omega``, and any operator kwargs such as ``mask``).
 
         Returns:
-            Tuple of (gradients, (measurement_error, (pred_noises, pred_images)))
+            A ``(gradients, (measurement_error, (pred_noises, pred_images)))``
+            tuple.  ``gradients`` is the gradient of the measurement error
+            w.r.t. ``noisy_images`` and can be subtracted directly from the
+            reverse-diffusion update.
         """
         return self.gradient_fn(noisy_images, **kwargs)
 
@@ -998,25 +1113,38 @@ class DDS(DiffusionGuidance):
         measurements,
         noise_rates,
         signal_rates,
-        n_inner,
-        eps,
-        verbose,
+        n_inner: int,
+        eps: float,
+        verbose: bool,
         **op_kwargs,
     ):
-        """
-        Call the DDS guidance function
+        r"""Run one DDS guidance step via conjugate gradient.
+
+        Denoises ``x_t`` to obtain an initial ``x_0`` estimate, then
+        refines it by solving the normal equations
+        :math:`A^\top A\, x = A^\top y` with ``n_inner`` conjugate
+        gradient iterations.
 
         Args:
-            noisy_images: Noisy images.
-            measurement: Target measurement.
-            noise_rates: Current noise rates.
-            signal_rates: Current signal rates.
-            n_inner: Number of conjugate gradient steps.
-            eps: Convergence threshold for conjugate gradient.
-            verbose: Whether to calculate error.
+            noisy_images: Noisy images ``x_t`` of shape
+                ``(n_images, *input_shape)``.
+            measurements: Target observations ``y``.
+            noise_rates: Noise rates at the current diffusion time.
+            signal_rates: Signal rates at the current diffusion time.
+            n_inner: Number of conjugate gradient iterations.
+            eps: Convergence tolerance; CG stops early when the residual
+                norm falls below this threshold.
+            verbose: When ``True``, compute and return the measurement
+                error ``‖y - A(x̂_0)‖``. When ``False``, the error is
+                returned as ``0.0`` to avoid extra computation.
+            **op_kwargs: Additional keyword arguments forwarded to the
+                operator (e.g. ``mask``).
 
         Returns:
-            Tuple of (gradients, (measurement_error, (pred_noises, pred_images)))
+            A ``(gradients, (measurement_error, (pred_noises, pred_images)))``
+            tuple.  ``gradients`` is a zero tensor because DDS performs
+            guidance entirely inside the CG loop; the caller subtracts it
+            as a no-op.
         """
         pred_noises, pred_images = self.diffusion_model.denoise(
             noisy_images,
@@ -1054,26 +1182,32 @@ class DDS(DiffusionGuidance):
         measurements,
         noise_rates,
         signal_rates,
-        n_inner=5,
-        eps=1e-5,
-        verbose=False,
+        n_inner: int = 5,
+        eps: float = 1e-5,
+        verbose: bool = False,
         **op_kwargs,
     ):
-        """
-        Call the DDS guidance function
+        """Run one DDS guidance step (public entry point).
+
+        Delegates to :meth:`call`, which may be JIT-compiled depending on
+        :attr:`disable_jit`.
 
         Args:
-            noisy_images: Noisy images.
-            measurement: Target measurement.
-            noise_rates: Current noise rates.
-            signal_rates: Current signal rates.
-            n_inner: Number of conjugate gradient steps.
-            eps: Convergence threshold for conjugate gradient.
-            verbose: Whether to calculate error.
-            **kwargs: Additional arguments for the operator.
+            noisy_images: Noisy images ``x_t`` of shape
+                ``(n_images, *input_shape)``.
+            measurements: Target observations ``y``.
+            noise_rates: Noise rates at the current diffusion time.
+            signal_rates: Signal rates at the current diffusion time.
+            n_inner: Number of conjugate gradient iterations. Default: ``5``.
+            eps: Convergence tolerance for the CG solver. Default: ``1e-5``.
+            verbose: When ``True``, compute and return the measurement
+                error for logging. Default: ``False``.
+            **op_kwargs: Additional keyword arguments forwarded to the
+                operator (e.g. ``mask``).
 
         Returns:
-            Tuple of (gradients, (measurement_error, (pred_noises, pred_images)))
+            A ``(gradients, (measurement_error, (pred_noises, pred_images)))``
+            tuple (see :meth:`call`).
         """
         return self.call(
             noisy_images,
@@ -1142,7 +1276,7 @@ class NuclearDiffusion(DPS):
 
     .. admonition:: Reference
 
-        T. Stevens, M. Wijkstra, M. Mischi, and R. J. G. van Sloun,
+        T. Stevens, O. Nolan, J. L. Robert, and R. J. G. van Sloun,
         "Nuclear Diffusion Models for Low-Rank Background Suppression in Videos,"
         *IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)*, 2026.
         https://arxiv.org/abs/2509.20886

@@ -387,24 +387,27 @@ def backend_key(backend):
 
 
 def selected_gpu_ids_to_device(selected_gpu_ids, backend):
-    """Convert selected GPU ids to device string."""
+    """Convert selected GPU ids to device string(s).
+
+    After ``hide_gpus`` remaps physical IDs via ``CUDA_VISIBLE_DEVICES``, the
+    selected GPUs are renumbered 0, 1, 2 … inside the process.  This function
+    converts those positional indices to the device-string format expected by
+    the active backend (``'gpu:N'`` for TensorFlow/JAX, ``'cuda:N'`` for
+    PyTorch).
+
+    Returns:
+        str: single device string when one GPU was selected.
+        list[str]: list of device strings when multiple GPUs were selected.
+        str: ``'cpu'`` when ``selected_gpu_ids`` is ``None`` or empty.
+    """
     if selected_gpu_ids is None or len(selected_gpu_ids) == 0:
         return "cpu"
 
-    if len(selected_gpu_ids) > 1:
-        log.warning(
-            (
-                "Specified multiple GPU's but this function will just return "
-                f"one GPU: {selected_gpu_ids[0]}"
-            )
-        )
-
     key = backend_key(backend)
-    if backend == "jax":
-        # Because jax hides the other gpus, we need to set the device number to 0
-        return f"{key}:0"
-    else:
-        return f"{key}:{selected_gpu_ids[0]}"
+    # After hide_gpus the N selected GPUs are renumbered 0 … N-1
+    devices = [f"{key}:{i}" for i in range(len(selected_gpu_ids))]
+
+    return devices[0] if len(devices) == 1 else devices
 
 
 def set_memory_growth_tf():
@@ -453,7 +456,10 @@ def init_device(
             Used for jax and tensorflow.
         verbose (bool, optional): print device selection. Defaults to True.
     Returns:
-        device (str/int/list): selected device(s).
+        device (str | list[str]): selected device string (e.g. ``'gpu:0'``) or
+            a list of device strings (e.g. ``['gpu:0', 'gpu:1']``) when
+            multiple GPUs were selected.  Returns ``'cpu'`` when no GPU is
+            available or ``device='cpu'`` was requested.
     """
     if hide_devices is not None:
         hide_gpus(hide_devices)
