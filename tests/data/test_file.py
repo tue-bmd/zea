@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from zea.data.file import File, GroupProxy, dict_to_sorted_list, load_file
+from zea.data.file import File, GroupProxy, TrackProxy, dict_to_sorted_list, load_file
 from zea.data.spec import FileSpec, Image, Segmentation
 from zea.probes import Probe
 from zea.scan import Scan
@@ -840,3 +840,169 @@ class TestZeaVersion:
 
         with File(path) as f:
             assert f.validate() == {"status": "success"}
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by multi-track tests
+# ---------------------------------------------------------------------------
+
+def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
+    """Build and save a two-track FileSpec; return (path, raw_a, raw_b)."""
+    from zea.data.spec import FileSpec, TrackSpec
+
+    raw_a = np.arange(
+        n_frames * n_tx * n_ax * n_el * n_ch, dtype=np.float32
+    ).reshape(n_frames, n_tx, n_ax, n_el, n_ch)
+    raw_b = raw_a * 2
+
+    scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+    tracks = [
+        TrackSpec(data={"raw_data": raw_a}, scan=scan),
+        TrackSpec(data={"raw_data": raw_b}, scan=scan),
+    ]
+    spec = FileSpec(tracks=tracks, probe_name="two_track_probe")
+    path = tmp_path / "two_tracks.hdf5"
+    spec.save(str(path))
+    return path, raw_a, raw_b
+
+
+class TestMultiTrackFile:
+    """Tests for File.tracks, TrackProxy, and single-track guards."""
+
+    # ------------------------------------------------------------------
+    # File.tracks property
+    # ------------------------------------------------------------------
+
+    def test_tracks_returns_list_of_track_proxies(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            tracks = f.tracks
+        assert len(tracks) == 2
+        assert all(isinstance(t, TrackProxy) for t in tracks)
+
+    def test_tracks_single_track_file_returns_one_proxy(self, tmp_path):
+        """A single-track new-format file exposes one TrackProxy."""
+        from zea.data.spec import FileSpec
+
+        raw = np.zeros((2, 3, 8, 4, 1), dtype=np.float32)
+        spec = FileSpec(
+            data={"raw_data": raw},
+            scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+        )
+        path = tmp_path / "single_track.hdf5"
+        spec.save(str(path))
+
+        with File(path) as f:
+            tracks = f.tracks
+        assert len(tracks) == 1
+        assert isinstance(tracks[0], TrackProxy)
+
+    def test_tracks_raises_for_legacy_flat_file(self, tmp_path):
+        """Legacy files (no tracks/ group) raise AttributeError on .tracks."""
+        import h5py
+
+        path = tmp_path / "legacy.hdf5"
+        with h5py.File(path, "w") as f:
+            g = f.create_group("data")
+            g.create_dataset("raw_data", data=np.zeros((1, 2, 8, 4, 1), dtype=np.float32))
+
+        with File(path) as f:
+            with pytest.raises(AttributeError, match="legacy"):
+                _ = f.tracks
+
+    # ------------------------------------------------------------------
+    # TrackProxy.data and TrackProxy.scan()
+    # ------------------------------------------------------------------
+
+    def test_track_data_returns_correct_array(self, tmp_path):
+        path, raw_a, raw_b = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            tracks = f.tracks
+            loaded_a = tracks[0].data.raw_data[:]
+            loaded_b = tracks[1].data.raw_data[:]
+        np.testing.assert_array_equal(loaded_a, raw_a)
+        np.testing.assert_array_equal(loaded_b, raw_b)
+
+    def test_track_data_is_group_proxy(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            assert isinstance(f.tracks[0].data, GroupProxy)
+
+    def test_track_scan_returns_scan_object(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            scan = f.tracks[0].scan()
+        assert isinstance(scan, Scan)
+
+    def test_track_scan_kwargs_override(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            scan = f.tracks[0].scan(sound_speed=np.float32(1480.0))
+        assert float(scan.sound_speed) == pytest.approx(1480.0)
+
+    def test_track_repr(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            r = repr(f.tracks[1])
+        assert "index=1" in r
+
+    # ------------------------------------------------------------------
+    # Guards on File.data and File.scan() for multi-track files
+    # ------------------------------------------------------------------
+
+    def test_file_data_raises_for_multi_track(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            with pytest.raises(AttributeError, match="2 tracks"):
+                _ = f.data
+
+    def test_file_scan_raises_for_multi_track(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            with pytest.raises(AttributeError, match="2 tracks"):
+                f.scan()
+
+    def test_error_message_mentions_tracks_property(self, tmp_path):
+        """The error on file.data tells the user to use file.tracks."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            with pytest.raises(AttributeError, match="file.tracks"):
+                _ = f.data
+        with File(path) as f:
+            with pytest.raises(AttributeError, match="file.tracks"):
+                f.scan()
+
+    # ------------------------------------------------------------------
+    # Single-track files: backwards-compatible access still works
+    # ------------------------------------------------------------------
+
+    def test_single_track_data_still_works(self, tmp_path):
+        """file.data works unchanged for single-track new-format files."""
+        raw = np.ones((2, 3, 8, 4, 1), dtype=np.float32)
+        from zea.data.spec import FileSpec
+
+        spec = FileSpec(
+            data={"raw_data": raw},
+            scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+        )
+        path = tmp_path / "single.hdf5"
+        spec.save(str(path))
+
+        with File(path) as f:
+            np.testing.assert_array_equal(f.data.raw_data[:], raw)
+
+    def test_single_track_scan_still_works(self, tmp_path):
+        """file.scan() works unchanged for single-track new-format files."""
+        from zea.data.spec import FileSpec
+
+        spec = FileSpec(
+            data={"raw_data": np.zeros((2, 3, 8, 4, 1), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+        )
+        path = tmp_path / "single_scan.hdf5"
+        spec.save(str(path))
+
+        with File(path) as f:
+            scan = f.scan()
+        assert isinstance(scan, Scan)
+        assert scan.n_tx == 3

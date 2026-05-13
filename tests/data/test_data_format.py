@@ -224,7 +224,7 @@ def test_custom_map(tmp_hdf5_path):
     f.close()
 
     with File(tmp_hdf5_path) as f:
-        assert "my_custom_overlay" in f["data"]
+        assert "my_custom_overlay" in f.data
         np.testing.assert_array_equal(f.data.my_custom_overlay.values[:], custom_values)
         np.testing.assert_array_equal(f.data.my_custom_overlay.extent[:], custom_extent)
 
@@ -264,7 +264,7 @@ def test_save_file_custom_maps(tmp_hdf5_path, _scan_and_probe):
         )
 
     with File(tmp_hdf5_path) as f:
-        assert "my_overlay" in f["data"]
+        assert "my_overlay" in f.data
         np.testing.assert_array_equal(f.data.my_overlay.values[:], custom_values)
         np.testing.assert_array_equal(f.data.my_overlay.extent[:], custom_extent)
 

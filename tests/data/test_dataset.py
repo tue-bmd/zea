@@ -91,13 +91,13 @@ def test_folder_copy_key_by_key(dummy_dataset_path, tmp_path):
         with Dataset(tmp_path / "copy", validate=False) as copied_folder:
             for file in iter(copied_folder):
                 for key in _copied_keys:
-                    assert key in file["data"], f"Copied folder does not contain {key} key"
+                    assert key in file.data, f"Copied folder does not contain {key} key"
                 assert "scan" in file, "Copied folder does not contain 'scan' key"
 
             # Check that the copied folder does not contain other keys
             for file in iter(copied_folder):
                 for other_key in _other_keys:
-                    assert other_key not in file["data"], (
+                    assert other_key not in file.data, (
                         f"Copied folder should not contain {other_key} key"
                     )
 
@@ -113,7 +113,7 @@ def test_folder_copy_all_keys(dummy_dataset_path, tmp_path):
     with Dataset(tmp_path / "copy", validate=False) as copied_folder:
         for file in iter(copied_folder):
             for key in _ALL_DATA_TYPES:
-                assert key in file["data"], f"Copied folder does not contain {key} key"
+                assert key in file.data, f"Copied folder does not contain {key} key"
             assert "scan" in file, "Copied folder does not contain 'scan' key"
 
 

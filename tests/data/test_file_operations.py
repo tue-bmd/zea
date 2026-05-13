@@ -53,7 +53,7 @@ def test_file_operations_sum(tmp_hdf5_path):
 
     # Load the summed dataset and check if the data is correct
     with File(output_path) as f:
-        raw_data = f["data/raw_data"][:]
+        raw_data = f.data.raw_data[:]
         assert raw_data[0, 0, 0, 0, 0] == data1[0, 0, 0, 0, 0] + data2[0, 0, 0, 0, 0]
 
 
@@ -176,7 +176,7 @@ def test_file_operations_cli_sum(tmp_hdf5_path):
 
     # Load the summed dataset and check if the data is correct
     with File(output_path) as f:
-        raw_data = f["data/raw_data"][:]
+        raw_data = f.data.raw_data[:]
         assert raw_data[0, 0, 0, 0, 0] == data1[0, 0, 0, 0, 0] + data2[0, 0, 0, 0, 0]
 
 
@@ -291,4 +291,4 @@ def _assert_descriptions_and_additional_elements_equal(path, other_path: Path):
 
 def _assert_beamformed_data_still_exists(path: Path):
     with h5py.File(path, "r") as f:
-        assert "data/beamformed_data" in f
+        assert "beamformed_data" in f.data
