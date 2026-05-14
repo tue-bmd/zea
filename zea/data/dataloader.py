@@ -428,6 +428,10 @@ class Dataloader:
         prefetch_buffer_size: Size of the Grain buffer for reading elements per Python
             process (not per thread). Useful when reading from a distributed file
             system. Default is ``500``.
+        reshuffle_each_epoch: Whether to reshuffle the dataset after each epoch.
+            Default is ``True``. For evaluation it might be useful to set this to
+            ``False``. Or when you want to use a persistent iterator between epochs, using
+            ``dataset_repetitions`` to specify the number of epochs.
 
     Example:
         .. code-block:: python
@@ -480,6 +484,7 @@ class Dataloader:
         num_shards: int = 1,
         num_threads: int = 16,
         prefetch_buffer_size: int = 500,
+        reshuffle_each_epoch: bool = True,
         **kwargs,
     ):
         # ── Validation ────────────────────────────────────────────────
@@ -499,7 +504,8 @@ class Dataloader:
         self.num_threads = num_threads
         self.prefetch_buffer_size = prefetch_buffer_size
         self.prefetch = prefetch
-        self.shuffle = shuffle
+        self._shuffle = shuffle
+        self.reshuffle_each_epoch = reshuffle_each_epoch
 
         # Grain requires a concrete seed for shuffle — generate one if needed
         if seed is None:
@@ -578,8 +584,8 @@ class Dataloader:
         # Set the seed for the whole pipeline
         ds = ds.seed(seed)
 
-        if self.shuffle:
-            ds = ds.shuffle(seed=seed)
+        if self._shuffle:
+            ds = ds.shuffle()
 
         if cfg["num_shards"] > 1:
             ds = ds[cfg["shard_index"] :: cfg["num_shards"]]
@@ -636,10 +642,16 @@ class Dataloader:
             )
         )
 
+    def shuffle(self, seed: int | None = None):
+        """(Re-)shuffle the dataset. Rebuilds the pipeline with a fresh seed."""
+
+        seed = seed or int(self._rng.integers(0, 2**31))
+        self._map_dataset = self._build_pipeline(seed=seed)
+
     def __iter__(self):
-        # Rebuild the pipeline with a fresh seed so each epoch sees a different order
-        if self.shuffle:
-            self._map_dataset = self._build_pipeline(seed=int(self._rng.integers(0, 2**31)))
+        if self._shuffle and self.reshuffle_each_epoch:
+            self.shuffle()
+
         return iter(self.to_iter_dataset())
 
     def __len__(self):
