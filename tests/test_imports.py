@@ -19,7 +19,7 @@ from .helpers import run_in_subprocess
 
 
 @contextlib.contextmanager
-def no_ml_lib_import(backends: list = None, allow_keras_backend=True):
+def no_ml_lib_import(backends: list = None, allow_keras_backend=False):
     """Context manager to check if any backend in backends gets imported inside of it.
     Will raise an ImportError if any of the backends are imported."""
 
@@ -87,9 +87,11 @@ def test_check_imports_errors(directory, verbose=False):
 
 
 @run_in_subprocess
-def test_package_only_imports_keras_backend():
+def test_package_does_not_import_ml_libs():
     """Test that the package does not import heavy ML libraries like torch, tensorflow,
     or jax running in a fresh environment.
+
+    This feature is useful for speed, and GPU device selection.
 
     NOTE: Only torch and tensorflow because keras with numpy backend will also import jax.
     See: /usr/local/lib/python3.10/dist-packages/keras/src/backend/numpy/image.py"""
