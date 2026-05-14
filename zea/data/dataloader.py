@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import List
 
 import grain
-import keras
 import numpy as np
 
 from zea import log
@@ -594,7 +593,7 @@ class Dataloader:
 
         if cfg["clip_image_range"] and cfg["image_range"] is not None:
             lo, hi = cfg["image_range"]
-            ds = _ds_map(ds, lambda x, _lo=lo, _hi=hi: keras.ops.clip(x, _lo, _hi))
+            ds = _ds_map(ds, lambda x, _lo=lo, _hi=hi: np.clip(x, _lo, _hi))
 
         if cfg["assert_image_range"] and cfg["image_range"] is not None:
             _ir = cfg["image_range"]
@@ -608,6 +607,9 @@ class Dataloader:
 
         if self.batch_size is not None:
             ds = ds.batch(batch_size=self.batch_size, drop_remainder=cfg["drop_remainder"])
+
+        # cast to float32 (otherwise normalize will cast to float64)
+        ds = _ds_map(ds, lambda x: x.astype(np.float32))
 
         if cfg["normalization_range"] is not None:
             _ir, _nr = cfg["image_range"], cfg["normalization_range"]
@@ -669,15 +671,15 @@ class Dataloader:
     @staticmethod
     def _ensure_channel_dim(image):
         """Ensure at least 3-D (H, W, C) so batching produces uniform shapes."""
-        if len(keras.ops.shape(image)) < 3:
-            return keras.ops.expand_dims(image, axis=-1)
+        if len(np.shape(image)) < 3:
+            return np.expand_dims(image, axis=-1)
         return image
 
     @staticmethod
     def _assert_image_range(image, image_range):
         """Assert that image values are within the specified range."""
-        minval = float(keras.ops.min(image))
-        maxval = float(keras.ops.max(image))
+        minval = float(np.min(image))
+        maxval = float(np.max(image))
         if minval < image_range[0]:
             raise ValueError(
                 f"Image min {minval} is below image_range lower bound {image_range[0]}"
@@ -695,7 +697,7 @@ class Dataloader:
         right_min, right_max = normalization_range
         scale = (right_max - right_min) / (left_max - left_min)
         offset = right_min - scale * left_min
-        return keras.ops.add(keras.ops.multiply(image, scale), offset)
+        return np.add(np.multiply(image, scale), offset)
 
     def summary(self):
         """Print dataset statistics and per-directory breakdown."""
