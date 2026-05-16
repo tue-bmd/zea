@@ -28,6 +28,7 @@ import functools
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 
 from zea import Probe, Scan
 from zea.data.data_format import generate_zea_dataset, load_additional_elements, load_description
@@ -35,6 +36,7 @@ from zea.data.datasets import Dataset
 from zea.data.file import load_file_all_data_types
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
+from zea.internal.parameters import MissingDependencyError
 from zea.log import logger
 
 ALL_DATA_TYPES_EXCEPT_RAW = set(_IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES) - {"raw_data"}
@@ -46,6 +48,14 @@ OPERATION_NAMES = [
     "resave",
     "extract",
 ]
+
+
+def _safe_getattr(obj, name):
+    """Get ``obj.name``, returning ``None`` if it is missing or has unmet dependencies."""
+    try:
+        return getattr(obj, name, None)
+    except MissingDependencyError:
+        return None
 
 
 def save_file(
@@ -90,24 +100,24 @@ def save_file(
         image_sc=image_sc,
         envelope_data=envelope_data,
         probe_name="generic",
-        probe_geometry=probe.probe_geometry,
-        sampling_frequency=scan.sampling_frequency,
-        center_frequency=scan.center_frequency,
-        initial_times=scan.initial_times,
-        t0_delays=scan.t0_delays,
-        sound_speed=scan.sound_speed,
-        focus_distances=scan.focus_distances,
-        transmit_origins=scan.transmit_origins,
-        polar_angles=scan.polar_angles,
-        azimuth_angles=scan.azimuth_angles,
-        tx_apodizations=scan.tx_apodizations,
-        bandwidth_percent=scan.bandwidth_percent,
-        time_to_next_transmit=scan.time_to_next_transmit,
-        tgc_gain_curve=scan.tgc_gain_curve,
-        element_width=scan.element_width,
-        tx_waveform_indices=scan.tx_waveform_indices,
-        waveforms_one_way=scan.waveforms_one_way,
-        waveforms_two_way=scan.waveforms_two_way,
+        probe_geometry=_safe_getattr(probe, "probe_geometry"),
+        sampling_frequency=_safe_getattr(scan, "sampling_frequency"),
+        center_frequency=_safe_getattr(scan, "center_frequency"),
+        initial_times=_safe_getattr(scan, "initial_times"),
+        t0_delays=_safe_getattr(scan, "t0_delays"),
+        sound_speed=_safe_getattr(scan, "sound_speed"),
+        focus_distances=_safe_getattr(scan, "focus_distances"),
+        transmit_origins=_safe_getattr(scan, "transmit_origins"),
+        polar_angles=_safe_getattr(scan, "polar_angles"),
+        azimuth_angles=_safe_getattr(scan, "azimuth_angles"),
+        tx_apodizations=_safe_getattr(scan, "tx_apodizations"),
+        bandwidth_percent=_safe_getattr(scan, "bandwidth_percent"),
+        time_to_next_transmit=_safe_getattr(scan, "time_to_next_transmit"),
+        tgc_gain_curve=_safe_getattr(scan, "tgc_gain_curve"),
+        element_width=_safe_getattr(scan, "element_width"),
+        tx_waveform_indices=_safe_getattr(scan, "tx_waveform_indices"),
+        waveforms_one_way=_safe_getattr(scan, "waveforms_one_way"),
+        waveforms_two_way=_safe_getattr(scan, "waveforms_two_way"),
         description=description,
         additional_elements=additional_elements,
     )
@@ -145,7 +155,7 @@ def _supports_folders(operation):
     def wrapper(input_path, output_path, *args, **kwargs):
         if not Path(input_path).is_dir():
             return operation(input_path, output_path, *args, **kwargs)
-        for in_path, out_path in _iter_folder_io(input_path, output_path):
+        for in_path, out_path in tqdm(list(_iter_folder_io(input_path, output_path))):
             operation(in_path, out_path, *args, **kwargs)
         return None
 
