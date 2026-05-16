@@ -647,7 +647,8 @@ class Dataloader:
     def shuffle(self, seed: int | None = None):
         """(Re-)shuffle the dataset. Rebuilds the pipeline with a fresh seed."""
 
-        seed = seed or int(self._rng.integers(0, 2**31))
+        if seed is None:
+            seed = int(self._rng.integers(0, 2**31))
         self._map_dataset = self._build_pipeline(seed=seed)
 
     def __iter__(self):
