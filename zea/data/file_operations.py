@@ -60,6 +60,8 @@ def save_file(
     image_sc: np.ndarray = None,
     additional_elements=None,
     description="",
+    enable_compression=True,
+    chunk_frames=False,
     **kwargs,
 ):
     """Saves data to a zea data file (h5py file).
@@ -71,10 +73,16 @@ def save_file(
         probe (Probe): The probe object containing the parameters of the probe.
         additional_elements (list of DatasetElement, optional): Additional elements to save in the
             file. Defaults to None.
+        enable_compression (bool, optional): Whether to enable gzip compression for the
+            datasets. Defaults to True.
+        chunk_frames (bool, optional): Whether to store the data datasets with HDF5
+            chunked storage, using one frame per chunk. Defaults to False.
     """
 
     generate_zea_dataset(
         path=path,
+        enable_compression=enable_compression,
+        chunk_frames=chunk_frames,
         raw_data=raw_data,
         aligned_data=aligned_data,
         beamformed_data=beamformed_data,
@@ -337,7 +345,13 @@ def _check_all_identical(array, axis=0):
 
 
 @_supports_folders
-def resave(input_path: Path, output_path: Path, overwrite=False):
+def resave(
+    input_path: Path,
+    output_path: Path,
+    overwrite=False,
+    enable_compression=True,
+    chunk_frames=False,
+):
     """
     Resaves a zea data file to a new location.
 
@@ -346,6 +360,10 @@ def resave(input_path: Path, output_path: Path, overwrite=False):
         output_path (Path): Path to the output file (or folder) where the data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists. Defaults to
             False.
+        enable_compression (bool, optional): Whether to enable gzip compression for the
+            datasets. Defaults to True.
+        chunk_frames (bool, optional): Whether to store the data datasets with HDF5
+            chunked storage, using one frame per chunk. Defaults to False.
     """
 
     data_dict, scan, probe = load_file_all_data_types(input_path)
@@ -362,6 +380,8 @@ def resave(input_path: Path, output_path: Path, overwrite=False):
         probe=probe,
         additional_elements=additional_elements,
         description=description,
+        enable_compression=enable_compression,
+        chunk_frames=chunk_frames,
     )
 
 
@@ -502,6 +522,18 @@ def _add_parser_resave(subparsers):
     resave_parser.add_argument(
         "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
     )
+    resave_parser.add_argument(
+        "--chunk-frames",
+        action="store_true",
+        default=False,
+        help="Store the data datasets with HDF5 chunked storage, one frame per chunk.",
+    )
+    resave_parser.add_argument(
+        "--disable-compression",
+        action="store_true",
+        default=False,
+        help="Disable gzip compression for the datasets.",
+    )
 
 
 def _add_parser_extract(subparsers):
@@ -548,7 +580,13 @@ if __name__ == "__main__":
             input_path=args.input_path, output_path=args.output_path, overwrite=args.overwrite
         )
     elif args.operation == "resave":
-        resave(input_path=args.input_path, output_path=args.output_path, overwrite=args.overwrite)
+        resave(
+            input_path=args.input_path,
+            output_path=args.output_path,
+            overwrite=args.overwrite,
+            enable_compression=not args.disable_compression,
+            chunk_frames=args.chunk_frames,
+        )
     elif args.operation == "extract":
         extract_frames_transmits(
             input_path=args.input_path,
