@@ -13,15 +13,25 @@ Available operations
 - `resave`: Resave a zea data file. This can be used to change the file format version.
 
 - `extract`: extract frames and transmits in a raw data file.
+
+Folders
+-------
+
+All operations also accept folders. When a folder is given as input, the operation
+is applied to every zea file in that folder (iterated with :class:`zea.Dataset`) and
+the results are written to the output folder, mirroring the input folder structure.
+A single file is still processed as before.
 """
 
 import argparse
+import functools
 from pathlib import Path
 
 import numpy as np
 
 from zea import Probe, Scan
 from zea.data.data_format import generate_zea_dataset, load_additional_elements, load_description
+from zea.data.datasets import Dataset
 from zea.data.file import load_file_all_data_types
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
@@ -95,16 +105,60 @@ def save_file(
     )
 
 
+def _iter_folder_io(input_path: Path, output_path: Path):
+    """Yields ``(input_file, output_file)`` path pairs for a folder operation.
+
+    Uses :class:`zea.Dataset` to iterate over every zea file in ``input_path``. The
+    output folder mirrors the structure of the input folder.
+
+    Args:
+        input_path (Path): Path to a folder containing zea data files.
+        output_path (Path): Path to the output folder.
+
+    Yields:
+        tuple[Path, Path]: Pairs of (input file, output file) paths.
+    """
+    input_path, output_path = Path(input_path), Path(output_path)
+    with Dataset(input_path, validate=False) as dataset:
+        for file in dataset:
+            yield file.path, output_path / file.path.relative_to(input_path)
+
+
+def _supports_folders(operation):
+    """Decorator that lets a single-file operation also accept a folder as input.
+
+    When the decorated operation is called with a folder as ``input_path``, it is
+    applied to every zea file in that folder (iterated with :class:`zea.Dataset`),
+    writing the results to ``output_path`` and mirroring the input folder structure.
+    A single file is processed as before.
+    """
+
+    @functools.wraps(operation)
+    def wrapper(input_path, output_path, *args, **kwargs):
+        if not Path(input_path).is_dir():
+            return operation(input_path, output_path, *args, **kwargs)
+        for in_path, out_path in _iter_folder_io(input_path, output_path):
+            operation(in_path, out_path, *args, **kwargs)
+        return None
+
+    return wrapper
+
+
 def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     """
     Sums multiple raw data files and saves the result to a new file.
 
     Args:
-        input_paths (list[Path]): List of paths to the input raw data files.
+        input_paths (list[Path]): List of paths to the input raw data files. Each path
+            may be a single file or a folder; folders are expanded into all zea files
+            they contain (using :class:`zea.Dataset`).
         output_path (Path): Path to the output file where the summed data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists. Defaults to
             False.
     """
+
+    with Dataset(input_paths, validate=False) as dataset:
+        input_paths = [file.path for file in dataset]
 
     data_dict, scan, probe = load_file_all_data_types(input_paths[0])
     description = load_description(input_paths[0])
@@ -165,13 +219,15 @@ def _assert_shapes_equal(array0, array1, name="array"):
     assert shape0 == shape1, f"{name} shapes do not match. Got {shape0} and {shape1}."
 
 
+@_supports_folders
 def compound_frames(input_path: Path, output_path: Path, overwrite=False):
     """
     Compounds frames in a raw data file by averaging them.
 
     Args:
-        input_path (Path): Path to the input raw data file.
-        output_path (Path): Path to the output file where the compounded data will be saved.
+        input_path (Path): Path to the input raw data file, or a folder of files.
+        output_path (Path): Path to the output file (or folder) where the compounded
+            data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists. Defaults to
             False.
     """
@@ -208,6 +264,7 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
     )
 
 
+@_supports_folders
 def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
     """
     Compounds transmits in a raw data file by averaging them.
@@ -218,8 +275,9 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
     will result in incorrect scan parameters.
 
     Args:
-        input_path (Path): Path to the input raw data file.
-        output_path (Path): Path to the output file where the compounded data will be saved.
+        input_path (Path): Path to the input raw data file, or a folder of files.
+        output_path (Path): Path to the output file (or folder) where the compounded
+            data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists. Defaults to
         False.
     """
@@ -278,13 +336,14 @@ def _check_all_identical(array, axis=0):
     return np.all(np.equal(array, first), axis=axis).all()
 
 
+@_supports_folders
 def resave(input_path: Path, output_path: Path, overwrite=False):
     """
     Resaves a zea data file to a new location.
 
     Args:
-        input_path (Path): Path to the input zea data file.
-        output_path (Path): Path to the output file where the data will be saved.
+        input_path (Path): Path to the input zea data file, or a folder of files.
+        output_path (Path): Path to the output file (or folder) where the data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists. Defaults to
             False.
     """
@@ -306,6 +365,7 @@ def resave(input_path: Path, output_path: Path, overwrite=False):
     )
 
 
+@_supports_folders
 def extract_frames_transmits(
     input_path: Path,
     output_path: Path,
@@ -321,8 +381,9 @@ def extract_frames_transmits(
     information on the supported index types.
 
     Args:
-        input_path (Path): Path to the input raw data file.
-        output_path (Path): Path to the output file where the extracted data will be saved.
+        input_path (Path): Path to the input raw data file, or a folder of files.
+        output_path (Path): Path to the output file (or folder) where the extracted
+            data will be saved.
         frame_indices (list, array-like, or slice): Indices of the frames to keep.
         transmit_indices (list, array-like, or slice): Indices of the transmits to keep.
         overwrite (bool, optional): Whether to overwrite the output file if it exists. Defaults to
@@ -404,8 +465,10 @@ def get_parser():
 
 
 def _add_parser_sum(subparsers):
-    sum_parser = subparsers.add_parser("sum", help="Sum the raw data of multiple files.")
-    sum_parser.add_argument("input_paths", type=Path, nargs="+", help="Paths to the input files.")
+    sum_parser = subparsers.add_parser("sum", help="Sum the raw data of multiple files or folders.")
+    sum_parser.add_argument(
+        "input_paths", type=Path, nargs="+", help="Paths to the input files or folders."
+    )
     sum_parser.add_argument("output_path", type=Path, help="Output HDF5 file.")
     sum_parser.add_argument(
         "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
@@ -414,8 +477,8 @@ def _add_parser_sum(subparsers):
 
 def _add_parser_compound_frames(subparsers):
     cf_parser = subparsers.add_parser("compound_frames", help="Compound frames to increase SNR.")
-    cf_parser.add_argument("input_path", type=Path, help="Input HDF5 file.")
-    cf_parser.add_argument("output_path", type=Path, help="Output HDF5 file.")
+    cf_parser.add_argument("input_path", type=Path, help="Input HDF5 file or folder.")
+    cf_parser.add_argument("output_path", type=Path, help="Output HDF5 file or folder.")
     cf_parser.add_argument(
         "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
     )
@@ -425,8 +488,8 @@ def _add_parser_compound_transmits(subparsers):
     ct_parser = subparsers.add_parser(
         "compound_transmits", help="Compound transmits to increase SNR."
     )
-    ct_parser.add_argument("input_path", type=Path, help="Input HDF5 file.")
-    ct_parser.add_argument("output_path", type=Path, help="Output HDF5 file.")
+    ct_parser.add_argument("input_path", type=Path, help="Input HDF5 file or folder.")
+    ct_parser.add_argument("output_path", type=Path, help="Output HDF5 file or folder.")
     ct_parser.add_argument(
         "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
     )
@@ -434,8 +497,8 @@ def _add_parser_compound_transmits(subparsers):
 
 def _add_parser_resave(subparsers):
     resave_parser = subparsers.add_parser("resave", help="Resave a file to change format version.")
-    resave_parser.add_argument("input_path", type=Path, help="Input HDF5 file.")
-    resave_parser.add_argument("output_path", type=Path, help="Output HDF5 file.")
+    resave_parser.add_argument("input_path", type=Path, help="Input HDF5 file or folder.")
+    resave_parser.add_argument("output_path", type=Path, help="Output HDF5 file or folder.")
     resave_parser.add_argument(
         "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
     )
@@ -443,8 +506,8 @@ def _add_parser_resave(subparsers):
 
 def _add_parser_extract(subparsers):
     extract_parser = subparsers.add_parser("extract", help="Extract subset of frames or transmits.")
-    extract_parser.add_argument("input_path", type=Path, help="Input HDF5 file.")
-    extract_parser.add_argument("output_path", type=Path, help="Output HDF5 file.")
+    extract_parser.add_argument("input_path", type=Path, help="Input HDF5 file or folder.")
+    extract_parser.add_argument("output_path", type=Path, help="Output HDF5 file or folder.")
     extract_parser.add_argument(
         "--transmits",
         type=str,
@@ -468,7 +531,9 @@ if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
 
-    if args.output_path.exists() and not args.overwrite:
+    # For folder operations the output is a directory; individual output files are
+    # still guarded per file. Only block when the output is an existing file.
+    if args.output_path.is_file() and not args.overwrite:
         logger.error(
             f"Output file {args.output_path} already exists. Use --overwrite to overwrite it."
         )
@@ -492,7 +557,9 @@ if __name__ == "__main__":
             transmit_indices=_interpret_indices(args.transmits),
             overwrite=args.overwrite,
         )
-    else:
+    elif args.operation == "sum":
         sum_data(
             input_paths=args.input_paths, output_path=args.output_path, overwrite=args.overwrite
         )
+    else:
+        raise ValueError(f"Unknown operation: {args.operation}")
