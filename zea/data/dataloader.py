@@ -27,11 +27,14 @@ from pathlib import Path
 from typing import List
 
 import grain
+import keras
 import numpy as np
+from keras import ops
 
 from zea import log
 from zea.data.datasets import Dataset, H5FileHandleCache, count_samples_per_directory
 from zea.data.layers import Resizer
+from zea.func.tensor import translate
 from zea.utils import canonicalize_axis, map_negative_indices
 
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
@@ -339,8 +342,7 @@ class Dataloader:
 
         grain threads (N) → h5py (thread-local handles) → numpy → user
 
-    The entire pipeline runs in numpy — no framework dependency until
-    you feed tensors to your model.
+    The entire pipeline runs using numpy and the selected keras backend, all on cpu.
 
     Does the following in order to load a dataset:
 
@@ -574,9 +576,13 @@ class Dataloader:
         cfg = self._pipeline_cfg
 
         def _ds_map(ds, fn):
+            def on_cpu(x, _fn=fn):
+                with keras.device("cpu"):
+                    return _fn(x)
+
             if self.return_filename:
-                return ds.map(lambda item: (fn(item[0]), item[1]))
-            return ds.map(fn)
+                return ds.map(lambda item: (on_cpu(item[0]), item[1]))
+            return ds.map(on_cpu)
 
         ds = grain.MapDataset.source(self.source)
 
@@ -599,6 +605,9 @@ class Dataloader:
             _ir = cfg["image_range"]
             ds = _ds_map(ds, lambda x, _r=_ir: Dataloader._assert_image_range(x, _r))
 
+        # Transition from ndarray to tensors (using the selected backend)
+        ds = _ds_map(ds, ops.array)
+
         if cfg["resizer"] is not None:
             ds = _ds_map(ds, cfg["resizer"])
 
@@ -608,12 +617,11 @@ class Dataloader:
         if self.batch_size is not None:
             ds = ds.batch(batch_size=self.batch_size, drop_remainder=cfg["drop_remainder"])
 
-        # cast to float32 (otherwise normalize will cast to float64)
-        ds = _ds_map(ds, lambda x: x.astype(np.float32))
+        ds = _ds_map(ds, lambda x: ops.cast(x, "float32"))
 
         if cfg["normalization_range"] is not None:
             _ir, _nr = cfg["image_range"], cfg["normalization_range"]
-            ds = _ds_map(ds, lambda x, _a=_ir, _b=_nr: Dataloader._normalize(x, _a, _b))
+            ds = _ds_map(ds, lambda x, _a=_ir, _b=_nr: translate(x, _a, _b))
 
         if cfg["augmentation"] is not None:
             ds = _ds_map(ds, cfg["augmentation"])
@@ -647,8 +655,7 @@ class Dataloader:
     def shuffle(self, seed: int | None = None):
         """(Re-)shuffle the dataset. Rebuilds the pipeline with a fresh seed."""
 
-        if seed is None:
-            seed = int(self._rng.integers(0, 2**31))
+        seed = seed or int(self._rng.integers(0, 2**31))
         self._map_dataset = self._build_pipeline(seed=seed)
 
     def __iter__(self):
@@ -690,15 +697,6 @@ class Dataloader:
                 f"Image max {maxval} is above image_range upper bound {image_range[1]}"
             )
         return image
-
-    @staticmethod
-    def _normalize(image, image_range, normalization_range):
-        """Normalize image from image_range to normalization_range."""
-        left_min, left_max = image_range
-        right_min, right_max = normalization_range
-        scale = (right_max - right_min) / (left_max - left_min)
-        offset = right_min - scale * left_min
-        return np.add(np.multiply(image, scale), offset)
 
     def summary(self):
         """Print dataset statistics and per-directory breakdown."""
