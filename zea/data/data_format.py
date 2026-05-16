@@ -265,9 +265,7 @@ def _write_datasets(
         if chunk_per_frame and not dataset_is_scalar and data.shape[0] > 0:
             chunks = (1, *data.shape[1:])
 
-        new_dataset = group.create_dataset(
-            name, data=data, compression=compression, chunks=chunks
-        )
+        new_dataset = group.create_dataset(name, data=data, compression=compression, chunks=chunks)
         new_dataset.attrs["description"] = description
         new_dataset.attrs["unit"] = unit
 
