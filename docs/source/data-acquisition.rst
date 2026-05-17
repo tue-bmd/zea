@@ -85,15 +85,41 @@ Multi-track files
 -------------------------------
 
 Some acquisitions interleave multiple transmit sequences in a single recording — for example,
-alternating focused and diverging-wave pulses.  Rather than splitting these into separate files
-or losing the interleaving information, ``zea`` can store them as **tracks**: self-contained
-bundles of raw data and scan parameters, all inside one HDF5 file.
+swapping between focused and plane-wave pulses.  Rather than splitting these into separate files, 
+``zea`` can store them as **tracks**: self-contained bundles of raw data and scan parameters
+in a single HDF5 file. Each track will contain its own `~zea.Scan` object, containing the parameters
+necessary to beamform the raw data in that track. This allows us to specify a `~zea.Pipeline`
+_per-track_, which can be applied to the frames in that track independently of the other tracks.
 
-**Why tracks?**
+.. raw:: html
 
-- A single file stays self-describing: each track carries its own :class:`~zea.data.spec.ScanSpec`
-  so it can be beamformed independently.
-- The original firing order is preserved via the optional ``track_schedule`` field.
+   <div style="display: flex; flex-direction: column; align-items: center; margin: 3em 0;">
+     <!-- Dark mode image -->
+     <img
+       src="_static/tracks-Dark.svg"
+       alt="zea data acquisition with multiple tracks"
+       style="display: none; width: 40%; padding-bottom: 1em;"
+       class="only-dark"
+     />
+     <!-- Light mode image -->
+     <img
+       src="_static/tracks-Light.svg"
+       alt="zea data acquisition with multiple tracks"
+       style="display: none; width: 40%; padding-bottom: 1em;"
+       class="only-light"
+     />
+     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
+        Illustrative example of a zea file with two tracks.
+     </div>
+   </div>
+   <style>
+     @media (prefers-color-scheme: dark) {
+       .only-dark { display: block !important; }
+     }
+     @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
+       .only-light { display: block !important; }
+     }
+   </style>
 
 **HDF5 layout**
 
@@ -168,47 +194,17 @@ bundles of raw data and scan parameters, all inside one HDF5 file.
     import zea
 
     with zea.File("acquisition.hdf5") as f:
-        probe = f.probe()              # probe hardware is shared across all tracks
-        for track in f.tracks:
-            scan = track.scan()        # returns a zea.Scan for this track
-            raw  = track.data.raw_data[:]
-            print(scan.n_tx, raw.shape)
+        probe = f.probe()              # probe is shared across all tracks
+        focused_track, planewave_track = f.tracks
 
-    # Accessing f.data or f.scan() on a multi-track file raises AttributeError
-    # with a hint to use f.tracks instead.
+        focused_scan = focused_track.scan()
+        focused_raw  = focused_track.data.raw_data[:]
+        # ... process with e.g. a focused B-mode pipeline
 
-**Beamform each track with its own pipeline**
+        planewave_scan = planewave_track.scan()
+        planewave_raw  = planewave_track.data.raw_data[:]
+        # ... process with e.g. a plane-wave Doppler pipeline
 
-.. code-block:: python
-
-    import zea
-
-    # Load per-track configs (focused B-mode and diverging Doppler)
-    bmode_config   = zea.Config.from_path("hf://zeahub/zea-cardiac-2026/config.yaml")
-    doppler_config = zea.Config.from_path("configs/config_cardiac_diverging_doppler.yaml")
-
-    bmode_pipeline   = zea.Pipeline.from_config(bmode_config)
-    doppler_pipeline = zea.Pipeline.from_config(doppler_config)
-
-    with zea.File("acquisition.hdf5") as f:
-        probe = f.probe()
-        focused_track, diverging_track = f.tracks
-
-        focused_scan   = focused_track.scan(**bmode_config.scan)
-        diverging_scan = diverging_track.scan(**doppler_config.scan)
-
-        focused_raw   = focused_track.data.raw_data[:]
-        diverging_raw = diverging_track.data.raw_data[:]
-
-    bmode_params   = bmode_pipeline.prepare_parameters(probe, focused_scan, bmode_config.scan)
-    doppler_params = doppler_pipeline.prepare_parameters(probe, diverging_scan, doppler_config.scan)
-
-    bmode_image = bmode_pipeline(data=focused_raw, **bmode_params)["data"]
-    iq_data     = doppler_pipeline(data=diverging_raw, **doppler_params)["data"]
-
-See ``example-multiple-tracks.py`` in the repository root for a complete end-to-end
-example that saves a two-track cardiac file and exports a side-by-side B-mode / Color
-Doppler animated GIF.
 
 -------------------------------
 ``zea`` data format reference

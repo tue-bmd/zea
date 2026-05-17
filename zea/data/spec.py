@@ -1731,6 +1731,25 @@ class FileSpec(Spec):
                     f"got min={self.track_schedule.min()}, max={self.track_schedule.max()}"
                 )
 
+        # ---- warn if multi-track frame counts differ without a schedule ----
+        if len(self.tracks) > 1 and self.track_schedule is None:
+            frame_counts = []
+            for track in self.tracks:
+                rd = (
+                    track.data.raw_data
+                    if isinstance(track.data, DataSpec)
+                    else (track.data.get("raw_data") if isinstance(track.data, dict) else None)
+                )
+                if rd is not None and hasattr(rd, "shape"):
+                    frame_counts.append(rd.shape[0])
+            if len(set(frame_counts)) > 1:
+                log.warning(
+                    "Tracks have different numbers of frames "
+                    f"({frame_counts}). Without a 'track_schedule' it is "
+                    "ambiguous how frames correspond across tracks. Consider "
+                    "passing 'track_schedule' to make the relationship explicit."
+                )
+
         # ---- run base SCHEMA validation (metadata, metrics, scalars) -----
         super().__post_init__()
 
