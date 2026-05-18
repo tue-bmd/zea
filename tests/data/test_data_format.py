@@ -290,3 +290,37 @@ def test_save_file_custom_metadata(tmp_hdf5_path, _scan_and_probe):
     with File(tmp_hdf5_path) as f:
         assert "metadata" in f
         assert f["metadata/credit"][()] == b"Test Lab, 2024"
+
+
+def test_validate_input_data_docstring():
+    """The docstring of validate_input_data must not mention dict as an accepted
+    type; only ndarray inputs are supported on the deprecated path."""
+    from zea.data.data_format import validate_input_data
+
+    doc = validate_input_data.__doc__
+    assert "If a dict" not in doc, "docstring must not advertise dict support"
+    assert "ndarray" in doc, "docstring must say ndarray"
+
+
+def test_bandwidth_percent_warns(tmp_path):
+    """generate_zea_dataset must emit a UserWarning when bandwidth_percent is
+    passed, so callers know the value will be dropped."""
+    from zea.data.data_format import generate_zea_dataset
+
+    n_tx, n_el = 4, 16
+    raw = np.zeros((2, n_tx, 32, n_el, 1), dtype=np.float32)
+
+    path = tmp_path / "bw.hdf5"
+    with pytest.warns(UserWarning, match="bandwidth_percent"):
+        generate_zea_dataset(
+            path=str(path),
+            raw_data=raw,
+            probe_geometry=np.zeros((n_el, 3), dtype=np.float32),
+            sampling_frequency=40e6,
+            center_frequency=7e6,
+            demodulation_frequency=7e6,
+            initial_times=np.zeros(n_tx, dtype=np.float32),
+            t0_delays=np.zeros((n_tx, n_el), dtype=np.float32),
+            probe_name="generic",
+            bandwidth_percent=60.0,
+        )

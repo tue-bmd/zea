@@ -195,3 +195,23 @@ def test_color_palette(tmp_path):
     save_video(frames, gif_path_with_palette, fps=10, shared_color_palette=True)
     loaded_with_palette_gif = load_video(gif_path_with_palette, mode="L")
     assert loaded_with_palette_gif.shape == (n_frames, height, width)
+
+
+def test_animate_images_scan_without_extent(tmp_path):
+    """animate_images must not raise AttributeError when the scan object has
+    no extent_imshow attribute (e.g. a minimal or mock Scan object)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(3)]
+    path = tmp_path / "anim.gif"
+
+    class MinimalScan:
+        pass
+
+    try:
+        animate_images(images, path=str(path), scan=MinimalScan(), interval=100)
+    except AttributeError as e:
+        pytest.fail(f"animate_images raised AttributeError: {e}")

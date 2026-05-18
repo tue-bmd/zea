@@ -635,11 +635,11 @@ class Image(Map):
     def __post_init__(self):
         super().__post_init__()
 
-        # Check that image values are <= 0 and finite
+        # Check that image values are in dB scale (finite or -inf, and <= 0)
         if self.values.dtype == np.float32:
-            if not np.all(np.isfinite(self.values)):
-                raise ValueError("Image values must be finite.")
-            if not np.all(self.values <= 1e-5):
+            if not np.all(np.isfinite(self.values) | np.isneginf(self.values)):
+                raise ValueError("Image values must be finite or -inf (dB scale).")
+            if not np.all(self.values <= 0):
                 raise ValueError("Image values must be in dB scale <= 0 when using float32 dtype.")
 
 
@@ -923,6 +923,13 @@ class DataSpec(Spec):
         for key, value in extra_maps.items():
             if key in reserved_keys:
                 raise TypeError(f"Invalid custom data key '{key}': reserved name")
+            if isinstance(value, np.ndarray):
+                raise TypeError(
+                    f"Custom data key '{key}' must be a spatial map "
+                    f"(a dict with at least a 'values' key), not a flat array. "
+                    f"Only 'raw_data' and 'aligned_data' are accepted as flat arrays. "
+                    f"Wrap your data: {{'values': array, 'extent': extent_array}}."
+                )
             setattr(self, key, value)
 
         # Add custom extra maps to the schema as generic Map specs, so they get validated.
@@ -971,9 +978,10 @@ class DataSpec(Spec):
             custom_keys = ", ".join(sorted(self._extra_map_keys))
             warnings.warn(
                 log.warning(
-                    "Custom keys were added to 'data' and validated as generic Map specs: "
-                    f"{custom_keys}. If these keys match standard categories, consider using: "
-                    f"{suggested_map_keys}"
+                    f"Custom spatial map key(s) added to 'data': {custom_keys}. "
+                    "These are validated as generic Map specs. "
+                    "If your data matches an existing type, prefer one of the supported "
+                    f"spatial maps: {suggested_map_keys}."
                 )
             )
 
@@ -1469,6 +1477,14 @@ class MetadataSpec(Spec):
         for key, value in extra_signals.items():
             if key in reserved_keys:
                 raise TypeError(f"Invalid custom metadata key '{key}': reserved name")
+            if isinstance(value, np.ndarray):
+                raise TypeError(
+                    f"Custom metadata key '{key}' must be a SignalND "
+                    f"(a dict with 'samples', 'start_time_offset', and 'sampling_frequency'), "
+                    f"not a flat array. "
+                    f"Wrap your data: {{'samples': array, 'start_time_offset': 0.0, "
+                    f"'sampling_frequency': fs}}."
+                )
             setattr(self, key, value)
 
         # Add custom extra signals to the schema as generic SignalND specs, so they get validated.
@@ -1496,9 +1512,10 @@ class MetadataSpec(Spec):
             custom_keys = ", ".join(sorted(self._extra_signal_keys))
             warnings.warn(
                 log.warning(
-                    "Custom keys were added to 'metadata' and validated as SignalND specs: "
-                    f"{custom_keys}. If these keys match standard categories, consider using: "
-                    f"{suggested_signal_keys}"
+                    f"Custom signal key(s) added to 'metadata': {custom_keys}. "
+                    "These are validated as generic SignalND specs. "
+                    "If your signal matches an existing type, prefer one of the supported "
+                    f"signal fields: {suggested_signal_keys}."
                 )
             )
 
@@ -1526,39 +1543,6 @@ class MetricsSpec(Spec):
 
 
 @dataclass
-class TrackSpec(Spec):
-    """A single acquisition track with its own data and scan parameters.
-
-    Used inside a multi-track :class:`FileSpec` where different transmit
-    sequences coexist in the same acquisition.  The ``track_schedule`` on
-    ``FileSpec`` specifies the global ordering of transmits across all tracks.
-
-    Args:
-        data: The data for this track.
-        scan: The scan parameters for this track. Required when raw_data is
-            present in *data*.
-    """
-
-    data: DataSpec | dict
-    scan: ScanSpec | dict | None = None
-
-    SCHEMA = {
-        "data": {"spec": DataSpec},
-        "scan": {"spec": ScanSpec},
-    }
-
-    def __post_init__(self):
-        super().__post_init__()
-
-        data = self.data
-        has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
-            isinstance(data, dict) and data.get("raw_data") is not None
-        )
-        if has_raw and self.scan is None:
-            raise ValueError("'scan' is required when 'raw_data' is provided in track data.")
-
-
-@dataclass(init=False)
 class FileSpec(Spec):
     """A dataset containing all the data, scan parameters, metadata,
     and metrics for a single acquisition.
@@ -1829,9 +1813,9 @@ class FileSpec(Spec):
 
         Both the new ``tracks/track_N/`` format and the legacy flat
         ``data/`` + ``scan/`` format are supported.  Extra scalar fields in
-        legacy scan groups (``n_frames``, ``n_tx``, etc.) are ignored, flat
-        ``data/image`` datasets are dropped, and the ``probe`` root attribute
-        is mapped to ``probe_name``.
+        legacy scan groups (``n_frames``, ``n_tx``, etc.) are ignored, flat ``data/image``
+        datasets are loaded as ``image_sc`` when ``image_sc`` is absent,
+        and the ``probe`` root attribute is mapped to ``probe_name``.
 
         Args:
             file: An open ``h5py.File`` (or :class:`zea.File`).
@@ -1858,7 +1842,7 @@ class FileSpec(Spec):
 
         kwargs: dict[str, Any] = {}
 
-        # ---- Load SCHEMA fields (metadata, metrics, scalars) -------------
+        # Load spec groups (data, scan, metadata, metrics)
         for group_name, schema in cls.SCHEMA.items():
             if "spec" in schema:
                 if group_name in file:

@@ -559,6 +559,12 @@ class Dataloader:
 
         self._map_dataset = self._build_pipeline(seed)
 
+        if len(self._map_dataset) == 0:
+            raise ValueError(
+                "Dataloader produced no samples. Check that the dataset is non-empty "
+                "and that the filters/transforms do not discard all items."
+            )
+
         if return_filename:
             self._shape = self._map_dataset[0][0].shape
         else:

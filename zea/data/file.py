@@ -349,6 +349,26 @@ class File(h5py.File):
         return cls(str(path), mode="r")
 
     @property
+    def data(self) -> GroupProxy:
+        """Lazy proxy for the ``data`` group.
+
+        Returns a :class:`GroupProxy` so individual datasets can be accessed
+        as attributes without loading everything into RAM::
+
+            with File(path) as f:
+                f.data.raw_data[:, :n_tx]  # read a slice
+                f.data.image.values[0]  # nested group access
+        """
+        if "data" not in self:
+            raise KeyError("No 'data' group in this file.")
+        return GroupProxy(self["data"])
+
+    @property
+    def name(self):
+        """Return the name of the file."""
+        return self.path.name
+
+    @property
     def _n_tracks(self) -> int:
         """Return the number of tracks stored in this file.
 
@@ -712,14 +732,11 @@ class File(h5py.File):
                 f"This file has {n} tracks. "
                 "Use file.tracks[i].data.raw_data.shape[2] to get n_ax for a specific track."
             )
-        data_group = self._data_h5_group
-        assert data_group is not None, (
-            "Cannot determine n_ax because there is no data group in the file."
-        )
-        assert "raw_data" in data_group, (
+        assert "data" in self, "Cannot determine n_ax because there is no data group in the file."
+        assert "raw_data" in self["data"], (
             "Cannot determine n_ax because there is no raw_data in the data group."
         )
-        return data_group["raw_data"].shape[2]
+        return self["data"]["raw_data"].shape[2]
 
     def scan(self, safe=True, **kwargs) -> Scan:
         """Returns a Scan object initialized with the parameters from the file.
@@ -784,6 +801,10 @@ class File(h5py.File):
         Returns:
             Scan: Initialised scan object.
         """
+        scan_dict = self.get_scan_parameters()
+
+        # Try spec-based validation; fall back gracefully for legacy files
+        # that may be missing fields the spec now requires.
         scan_spec_keys = set(ScanSpec.SCHEMA.keys())
         filtered = {k: v for k, v in scan_dict.items() if k in scan_spec_keys}
 
@@ -796,13 +817,8 @@ class File(h5py.File):
             # tgc_gain_curve has shape (n_ax,) and is the spec's authoritative source.
             if scan_spec.tgc_gain_curve is not None:
                 scan_dict["n_ax"] = len(scan_spec.tgc_gain_curve)
-            else:
-                try:
-                    _dg = data_group if data_group is not None else self._data_h5_group
-                except KeyError:
-                    _dg = None
-                if _dg is not None and "raw_data" in _dg:
-                    scan_dict["n_ax"] = _dg["raw_data"].shape[2]
+            elif "data" in self and "raw_data" in self["data"]:
+                scan_dict["n_ax"] = self.n_ax
         except (TypeError, ValueError) as exc:
             log.debug(
                 f"ScanSpec validation skipped for '{self.path}': {exc}. "
@@ -1178,7 +1194,11 @@ def load_file(
         # Load the desired frames from the file
         _key = file.format_key(data_type)
         _indices = indices if indices is not None else slice(None)
-        data = file[_key][_indices]
+        item = file[_key]
+        if isinstance(item, h5py.Group):
+            data = item["values"][_indices]
+        else:
+            data = item[_indices]
 
         # extract transmits from indices
         # we only have to do this when the data has a n_tx dimension
@@ -1337,10 +1357,16 @@ def _validate_file_impl(file: File) -> None:
                     f"'{group_path}/{key}' is not a recognised zea data type."
                 )
         else:
-            # For new-format files: accepted keys are DataSpec.SCHEMA keys.
+            # For new-format files: flat datasets must be known DataSpec keys.
+            # HDF5 Groups are Map specs (either a named type or a custom map)
+            # and are always accepted; validate() is a structural check only.
             known = set(DataSpec.SCHEMA.keys())
+            known_flat = {k for k, v in DataSpec.SCHEMA.items() if "spec" not in v}
             for key in data_group.keys():
-                assert key in known, (
+                if isinstance(data_group[key], h5py.Group):
+                    # Named map or custom map — accepted without further checks here.
+                    continue
+                assert key in known_flat, (
                     f"'{group_path}/{key}' is not in the DataSpec schema. "
                     f"Known keys: {sorted(known)}"
                 )

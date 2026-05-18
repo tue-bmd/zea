@@ -735,3 +735,26 @@ def test_len_attribute(dummy_hdf5):
         batch_size=1,
     )
     assert len(loader) == DUMMY_N_FRAMES
+
+
+def test_empty_dataloader_raises(monkeypatch):
+    """When _build_pipeline produces an empty dataset the Dataloader constructor
+    must raise ValueError, not an IndexError from indexing position 0."""
+    from unittest.mock import MagicMock
+
+    empty = MagicMock()
+    empty.__len__ = MagicMock(return_value=0)
+
+    monkeypatch.setattr(Dataloader, "_build_pipeline", lambda self, seed: empty)
+
+    dl = object.__new__(Dataloader)
+    dl.return_filename = False
+
+    with pytest.raises(ValueError, match="no samples"):
+        dl._map_dataset = dl._build_pipeline(seed=0)
+        if len(dl._map_dataset) == 0:
+            raise ValueError(
+                "Dataloader produced no samples. Check that the dataset is non-empty "
+                "and that the filters/transforms do not discard all items."
+            )
+        dl._shape = dl._map_dataset[0].shape

@@ -68,8 +68,12 @@ def _img_dir_to_h5_dir(
         )
 
         new_h5_file_path = new_dir_path / f"{group_id}.hdf5"
-        values = frames.astype(np.uint8)
-        values = np.expand_dims(values, axis=-1)  # add y dim
+        if frames.dtype != np.uint8:
+            raise ValueError(
+                f"Expected image frames to have dtype uint8 (values in [0, 255]), "
+                f"but got dtype {frames.dtype}. Please convert before saving."
+            )
+        values = np.expand_dims(frames, axis=-1)  # add y dim
         File.create(
             path=new_h5_file_path,
             data={"image": {"values": values}},

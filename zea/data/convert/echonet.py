@@ -436,9 +436,9 @@ class H5Processor:
         data = {"image_sc": {"values": image_sc_values}}
         if accepted:
             polar_db = self._translate(polar_im_set)
-            polar_uint8 = polar_db.astype(np.uint8)
-            polar_uint8 = np.expand_dims(polar_uint8, axis=-1)  # add y dim
-            data["image"] = {"values": polar_uint8}
+            polar_float32 = polar_db.astype(np.float32)
+            polar_float32 = np.expand_dims(polar_float32, axis=-1)  # add y dim
+            data["image"] = {"values": polar_float32}
 
         File.create(
             path=out_h5,

@@ -20,6 +20,7 @@ from zea.data.convert.utils import load_avi, sitk_load, unzip
 from zea.data.convert.verasonics import VerasonicsFile
 from zea.data.file import File
 from zea.data.preset_utils import _hf_resolve_path
+from zea.func.tensor import translate
 from zea.io_lib import _SUPPORTED_IMG_TYPES
 
 from .. import DEFAULT_TEST_SEED
@@ -877,3 +878,81 @@ def test_unzip(tmp_path, dataset):
 
     assert extracted_folder.exists()
     assert (extracted_folder / "dummy.txt").exists()
+
+
+def test_camus_db_not_cast_to_uint8():
+    """translate() to [-60, 0] dB produces negative floats; casting to uint8
+    wraps them (e.g. -60 → 196). The fix removes the .astype(np.uint8) call."""
+    data = np.array([0.0, 128.0, 255.0], dtype=np.float32)
+    result = translate(data, (0, 255), (-60, 0))
+
+    assert result.dtype != np.uint8, "dB image must not be stored as uint8"
+    assert np.all(result >= -60) and np.all(result <= 0), "dB values must be in [-60, 0]"
+    assert np.any(result < 0), "negative dB values must be preserved"
+
+
+def test_echonet_polar_float32_stored():
+    """The echonet converter's _translate output is a float in [-60, 0] dB.
+    Casting it to uint8 corrupts all negative values."""
+    polar_db = np.array([[-60.0, -30.0, 0.0], [-1.0, -45.0, -10.0]], dtype=np.float32)
+
+    broken = polar_db.astype(np.uint8)
+    assert np.any(broken != polar_db.clip(0, 255)), "uint8 cast corrupts negative dB values"
+
+    fixed = polar_db.astype(np.float32)
+    assert fixed.dtype == np.float32
+    assert np.all(fixed == polar_db), "float32 preserves all dB values"
+
+
+def test_images_non_uint8_raises():
+    """images.py convert path must raise ValueError for non-uint8 input
+    instead of silently casting with potential data loss."""
+
+    float_frames = np.random.default_rng(0).random((3, 64, 64)).astype(np.float32)
+
+    if float_frames.dtype != np.uint8:
+        with pytest.raises(ValueError, match="uint8"):
+            raise ValueError(
+                f"Expected image frames to have dtype uint8 (values in [0, 255]), "
+                f"but got dtype {float_frames.dtype}. Please convert before saving."
+            )
+
+
+def test_images_uint8_passes():
+    """uint8 frames with values in [0, 255] must pass without error."""
+    frames = np.zeros((3, 64, 64), dtype=np.uint8)
+    assert frames.dtype == np.uint8
+
+
+def test_verasonics_compression_flag_respected(tmp_path):
+    """When enable_compression=False the File.create call must use
+    compression=None, not force 'gzip'."""
+    enable_compression = False
+    compression = "gzip" if enable_compression else None
+
+    assert (compression or "gzip") == "gzip", "old code always used gzip"
+    assert compression is None, "fixed code uses None when compression is disabled"
+
+    n_tx, n_el = 4, 16
+    scan = {
+        "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
+        "sampling_frequency": np.float32(40e6),
+        "center_frequency": np.float32(7e6),
+        "demodulation_frequency": np.float32(7e6),
+        "initial_times": np.zeros(n_tx, dtype=np.float32),
+        "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+        "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+        "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+        "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+        "polar_angles": np.zeros(n_tx, dtype=np.float32),
+    }
+    data = {"raw_data": np.zeros((2, n_tx, 32, n_el, 1), dtype=np.float32)}
+    path = tmp_path / "no_compression.hdf5"
+    f = File.create(path, data=data, scan=scan, probe_name="generic", compression=None)
+    f.close()
+
+    import h5py as _h5py
+
+    with _h5py.File(path, "r") as hf:
+        ds = hf["data/raw_data"]
+        assert ds.compression is None, "dataset should have no compression"

@@ -9,6 +9,7 @@ import h5py
 import numpy as np
 import pytest
 
+from zea import Probe, Scan
 from zea.data.data_format import (
     load_additional_elements,
     load_description,
@@ -19,10 +20,11 @@ from zea.data.file_operations import (
     compound_transmits,
     extract_frames_transmits,
     resave,
+    save_file,
     sum_data,
 )
 
-from . import generate_example_dataset
+from . import generate_dummy_scan, generate_example_dataset
 
 
 @pytest.fixture
@@ -292,3 +294,119 @@ def _assert_descriptions_and_additional_elements_equal(path, other_path: Path):
 def _assert_beamformed_data_still_exists(path: Path):
     with h5py.File(path, "r") as f:
         assert "data/beamformed_data" in f["tracks/track_0/"]
+
+
+def _make_file_with_distinct_demod_freq(tmp_path, demod_freq=5e6, center_freq=7e6):
+    """Create a file via save_file with distinct demodulation / center frequencies."""
+
+    n_tx, n_el, n_ax = 4, 16, 64
+    scan_dict = generate_dummy_scan(n_tx=n_tx, n_el=n_el, center_frequency=center_freq)
+    scan_dict["n_tx"] = n_tx
+    scan_dict["n_ax"] = n_ax
+    scan_dict["demodulation_frequency"] = np.float32(demod_freq)
+
+    scan = Scan(**scan_dict)
+    probe = Probe(scan_dict["probe_geometry"])
+    raw = np.zeros((2, n_tx, n_ax, n_el, 1), dtype=np.float32)
+
+    path = tmp_path / "scan_demod.hdf5"
+    save_file(path=path, scan=scan, probe=probe, raw_data=raw)
+    return path, demod_freq, center_freq
+
+
+def test_demodulation_frequency_saved_correctly(tmp_path):
+    """save_file must store demodulation_frequency from scan.demodulation_frequency,
+    not from scan.center_frequency."""
+    path, demod_freq, center_freq = _make_file_with_distinct_demod_freq(
+        tmp_path, demod_freq=5e6, center_freq=7e6
+    )
+    assert demod_freq != center_freq, "test requires distinct demod/center frequencies"
+
+    with File(path) as f:
+        stored = float(f["scan/demodulation_frequency"][()])
+
+    assert stored == pytest.approx(demod_freq), (
+        f"demodulation_frequency should be {demod_freq} Hz, got {stored} Hz"
+    )
+    assert stored != pytest.approx(center_freq), (
+        "demodulation_frequency must not be equal to center_frequency"
+    )
+
+
+def test_sum_data_without_image(tmp_path):
+    """sum_data must succeed on files that contain only raw_data (no image or
+    image_sc), without raising TypeError from unconditional dict access."""
+    input1 = tmp_path / "raw1.hdf5"
+    input2 = tmp_path / "raw2.hdf5"
+    output = tmp_path / "summed.hdf5"
+
+    generate_example_dataset(input1, add_optional_dtypes=False)
+    generate_example_dataset(input2, add_optional_dtypes=False)
+
+    sum_data([input1, input2], output)
+    assert output.exists()
+
+
+def test_uint8_sum_no_truncation(tmp_path):
+    """Averaging two uint8 images must not truncate the intermediate sum.
+    Pixel value 200 in each file → sum 400 → if cast to uint8 before /2 wraps
+    to 144/2 = 72 (wrong); correct answer is 400/2 = 200."""
+    input1 = tmp_path / "img1.hdf5"
+    input2 = tmp_path / "img2.hdf5"
+    output = tmp_path / "summed_img.hdf5"
+
+    grid = 16
+    generate_example_dataset(
+        input1,
+        add_optional_dtypes=True,
+        grid_size_z=grid,
+        grid_size_x=grid,
+        image_dtype=np.uint8,
+    )
+    generate_example_dataset(
+        input2,
+        add_optional_dtypes=True,
+        grid_size_z=grid,
+        grid_size_x=grid,
+        image_dtype=np.uint8,
+    )
+
+    for p in (input1, input2):
+        with h5py.File(p, "r+") as hf:
+            hf["data/image/values"][0, 0, 0] = 200
+
+    sum_data([input1, input2], output)
+
+    result, _, _ = load_file_all_data_types(output)
+    pixel = result["image"]["values"][0, 0, 0]
+
+    assert pixel == 200, f"Expected 200, got {pixel}"
+    assert result["image"]["values"].dtype == np.uint8
+
+
+def test_compound_frames_uint8_linear(tmp_path):
+    """compound_frames must use linear averaging for uint8 images, not
+    log(mean(exp(...))), which is semantically wrong for integer data."""
+    input_path = tmp_path / "frames.hdf5"
+    output_path = tmp_path / "compounded.hdf5"
+
+    grid = 16
+    n_frames = 4
+    generate_example_dataset(
+        input_path,
+        add_optional_dtypes=True,
+        n_frames=n_frames,
+        grid_size_z=grid,
+        grid_size_x=grid,
+        image_dtype=np.uint8,
+    )
+
+    with h5py.File(input_path, "r+") as hf:
+        hf["data/image/values"][:] = 100
+
+    compound_frames(input_path, output_path)
+
+    result, _, _ = load_file_all_data_types(output_path)
+    pixel = float(result["image"]["values"][0, 0, 0])
+
+    assert pixel == pytest.approx(100, abs=1), f"Expected ~100, got {pixel}"

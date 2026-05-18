@@ -51,6 +51,7 @@ from keras import ops
 from schema import And, Optional, Or, Regex, Schema
 
 from zea import log
+from zea.data.data_format import DatasetElement
 from zea.data.file import File
 from zea.data.spec import DataSpec, ScanSpec
 from zea.func import log_compress, normalize
@@ -840,7 +841,10 @@ class VerasonicsFile(h5py.File):
     def lens_correction(self):
         """The lens correction: 1 way delay in wavelengths thru lens"""
 
-        return self["Trans"]["lensCorrection"][:].item()
+        try:
+            return self["Trans"]["lensCorrection"][:].item()
+        except KeyError:
+            return None
 
     @property
     def tgc_gain_curve(self):
@@ -1034,6 +1038,77 @@ class VerasonicsFile(h5py.File):
         Args:
             event (int, optional): The event index. Defaults to None in this case we assume
                 the data file is stored without event structure.
+            frames (str or list of int, optional): The frames to add to the file. This can be
+                a list of integers, a range of integers (e.g. 4-8), or 'all'. Defaults to
+                None, which means all frames, unless specified in a `convert.yaml` file.
+            allow_accumulate (bool, optional): Sometimes, some transmits are already accumulated
+                on the Verasonics system (e.g. harmonic imaging through pulse inversion).
+                In this case, the mode in the Receive structure is set to 1 (accumulate).
+                If this flag is set to False, an error is raised when such a mode is detected.
+            buffer_index (int, optional): The buffer index to read from. Defaults to 0.
+        """
+
+        convert_config = self.load_convert_config()
+
+        if frames is None:
+            frames = convert_config.get("frames", "all")
+
+        tx_order, rcv_order, time_to_next_transmit = self.read_transmit_events(
+            event=event, frames=frames, allow_accumulate=allow_accumulate, buffer_index=buffer_index
+        )
+        initial_times = self.read_initial_times(rcv_order)
+
+        polar_angles = self.read_polar_angles(tx_order, event)
+        azimuth_angles = self.read_azimuth_angles(tx_order, event)
+        t0_delays, tx_apodizations = self.read_t0_delays_apod(tx_order, event)
+        focus_distances = self.read_focus_distances(tx_order, event)
+        transmit_origins = self.read_transmit_origins(tx_order, event)
+
+        waveforms_one_way_list, waveforms_two_way_list = self.read_waveforms()
+        tx_waveform_indices = self.read_tx_waveform_indices(tx_order, event)
+
+        # stack waveforms to (n_tx, n_samples) using the tx_waveform_indices
+        waveforms_one_way = np.stack([waveforms_one_way_list[i] for i in tx_waveform_indices])
+        waveforms_two_way = np.stack([waveforms_two_way_list[i] for i in tx_waveform_indices])
+
+        center_frequency = self.read_center_frequencies(tx_waveform_indices)
+        focus_distances = self.planewave_focal_distance_to_inf(
+            focus_distances, t0_delays, tx_apodizations
+        )
+
+        return {
+            "probe_geometry": self.probe_geometry,
+            "time_to_next_transmit": time_to_next_transmit,
+            "t0_delays": t0_delays,
+            "tx_apodizations": tx_apodizations,
+            "sampling_frequency": self.sampling_frequency,
+            "polar_angles": polar_angles,
+            "azimuth_angles": azimuth_angles,
+            "center_frequency": center_frequency,
+            "demodulation_frequency": self.demodulation_frequency,
+            "sound_speed": self.sound_speed,
+            "initial_times": initial_times,
+            "focus_distances": focus_distances,
+            "transmit_origins": transmit_origins,
+            "waveforms_one_way": waveforms_one_way,
+            "waveforms_two_way": waveforms_two_way,
+            "tgc_gain_curve": self.tgc_gain_curve,
+            "element_width": self.element_width,
+        }
+
+    def read_verasonics_file(
+        self,
+        event=None,
+        additional_functions=None,
+        frames=None,
+        allow_accumulate=False,
+        buffer_index=0,
+    ):
+        """Reads data from a .mat Verasonics output file.
+
+        Args:
+            event (int, optional): The event index. Defaults to None in this case we assume
+                the data file is stored without event structure.
             additional_functions (list, optional): A list of functions that read additional
                 data from the file. Each function should take the file as input and return a
                 `DatasetElement`. Defaults to None.
@@ -1071,35 +1146,41 @@ class VerasonicsFile(h5py.File):
 
         additional_elements = []
 
+        if self.lens_correction is not None:
+            el_lens_correction = DatasetElement(
+                dataset_name="lens_correction",
+                data=self.lens_correction,
+                description=(
+                    "The lens correction value used by Verasonics. This value is the "
+                    "additional path length in wavelength that the lens introduces. "
+                    "(This disregards refraction.)"
+                ),
+                unit="wavelengths",
+            )
+            additional_elements.append(el_lens_correction)
+
         # Add additional elements from user-defined functions
         for additional_function in additional_functions:
             additional_elements.append(additional_function(self))
 
-        result = {
-            "raw_data": raw_data,
-            **scan_dict,
-            "lens_correction": self.lens_correction,
-            "additional_elements": additional_elements,
-        }
-
-        # Add Verasonics ImgDataP buffer as image_sc if frame count matches
+        # Add Verasonics ImgDataP buffer to additional elements
         try:
-            image_sc = self.read_image_data_p(event, frames=frames)
-            if image_sc.shape[0] == raw_data.shape[0]:
-                n_z_sc, n_x_sc = image_sc.shape[1], image_sc.shape[2]
-                image_sc_extent = np.array(
-                    [0.0, n_x_sc * 1e-4, 0.0, 1e-4, 0.0, n_z_sc * 1e-4], dtype=np.float32
-                )
-                result["image_sc"] = {"values": image_sc, "extent": image_sc_extent}
-            else:
-                log.warning(
-                    f"Verasonics ImgDataP buffer has {image_sc.shape[0]} frames "
-                    f"but raw data has {raw_data.shape[0]} frames. Skipping image_sc."
-                )
+            verasonics_image_buffer = self.read_image_data_p(event, frames=frames)
+            verasonics_image_buffer = DatasetElement(
+                dataset_name="verasonics_image_buffer",
+                data=verasonics_image_buffer,
+                description=(
+                    "The Verasonics ImgDataP buffer. "
+                    "WARNING: This buffer may skip frames compared to the raw data! "
+                    "Use only for reference."
+                ),
+                unit="unitless",
+            )
+            additional_elements.append(verasonics_image_buffer)
         except Exception as e:
             log.error(f"Could not read Verasonics ImgDataP buffer: {e}, skipping.")
 
-        return result
+        return {"raw_data": raw_data}, scan_dict, additional_elements
 
     def _parse_frames_argument(self, frames, n_frames):
         value_error = ValueError(
@@ -1189,18 +1270,11 @@ class VerasonicsFile(h5py.File):
         """
         # Here we call all the functions to read the data from the file
         log.info("Reading Verasonics file...")
-        result = self.read_verasonics_file(
+        data_dict, scan_dict, additional_elements = self.read_verasonics_file(
             additional_functions=additional_functions,
             frames=frames,
             allow_accumulate=allow_accumulate,
         )
-
-        data_dict, scan_dict, additional_elements, lens_correction = _split_verasonics_data(result)
-
-        if lens_correction is not None:
-            description = f"Verasonics data (lens correction: {lens_correction} wavelengths)"
-        else:
-            description = "Verasonics data"
 
         # Generate the zea dataset
         log.info("Generating zea dataset...")
@@ -1210,42 +1284,12 @@ class VerasonicsFile(h5py.File):
             data=data_dict,
             scan=scan_dict,
             probe_name=self.probe_name,
-            description=description,
-            compression=compression or "gzip",
+            description="Verasonics data",
+            compression=compression,
         )
 
         if additional_elements:
             _write_user_additional_elements_to_file(output_path, additional_elements)
-
-
-_SCAN_KEYS = set(ScanSpec.SCHEMA.keys())
-_DATA_KEYS = set(DataSpec.SCHEMA.keys())
-
-
-def _split_verasonics_data(result):
-    """Split the dict from read_verasonics_file into data, scan, and
-    additional_elements components.
-
-    Args:
-        result: Dict returned by :meth:`VerasonicsFile.read_verasonics_file`.
-
-    Returns:
-        tuple: (data_dict, scan_dict, additional_elements, lens_correction)
-    """
-    data_dict = {}
-    scan_dict = {}
-    additional_elements = result.pop("additional_elements", [])
-    lens_correction = result.pop("lens_correction", None)
-
-    for key, value in result.items():
-        if value is None:
-            continue
-        if key in _DATA_KEYS:
-            data_dict[key] = value
-        elif key in _SCAN_KEYS:
-            scan_dict[key] = value
-
-    return data_dict, scan_dict, additional_elements, lens_correction
 
 
 def _write_user_additional_elements(h5file, additional_elements, prefix=""):
