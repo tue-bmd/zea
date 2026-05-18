@@ -86,13 +86,14 @@ class Normalize(Operation):
     def __init__(self, output_range=None, input_range=None, percentile=None, **kwargs):
         """
         Args:
-            output_range (tuple): Range to which data should be mapped. Defaults to (0, 1).
-            input_range (tuple): Range of input data. If `None`, the range
-                of the input data will be computed (also see ``percentile``).
-                The tuple may contain `None` values to infer the min and / or max value from
-                the input data. Defaults to `None`.
-            percentile: Percentile to derive max value from. Defaults to None, which
-                will use the max value of the input data.
+            output_range (tuple): ``(min, max)`` range the data is mapped to.
+                Defaults to ``(0, 1)``.
+            input_range (tuple): ``(min, max)`` range of the input data; the data is
+                clipped to this range before mapping. Either element may be ``None``
+                to infer that bound from the data. If ``input_range`` itself is
+                ``None``, both bounds are inferred. Defaults to ``None``.
+            percentile (float): When the max bound is inferred, use this percentile
+                of the data instead of its maximum. Defaults to ``None`` (use the max).
         """
         super().__init__(**kwargs)
         if output_range is None:
@@ -152,7 +153,9 @@ class Normalize(Operation):
         if minval is None:
             minval = ops.min(data)
         if maxval is None:
-            maxval = ops.quantile(data, self.quantile) if self.quantile else ops.max(data)
+            maxval = (
+                ops.quantile(data, self.quantile) if self.quantile is not None else ops.max(data)
+            )
 
         normalized_data = normalize(
             data, output_range=self.output_range, input_range=(minval, maxval)
