@@ -299,6 +299,7 @@ def _assert_beamformed_data_still_exists(path: Path):
 # Bug #8 – save_file stores demodulation_frequency from center_frequency
 # ---------------------------------------------------------------------------
 
+
 def _make_file_with_distinct_demod_freq(tmp_path, demod_freq=5e6, center_freq=7e6):
     """Create a file via save_file with distinct demodulation / center frequencies."""
     from zea import Probe, Scan
@@ -341,6 +342,7 @@ def test_demodulation_frequency_saved_correctly(tmp_path):
 # Bug #9 – sum_data crashes when image / image_sc absent
 # ---------------------------------------------------------------------------
 
+
 def test_sum_data_without_image(tmp_path):
     """sum_data must succeed on files that contain only raw_data (no image or
     image_sc), without raising TypeError from unconditional dict access."""
@@ -359,6 +361,7 @@ def test_sum_data_without_image(tmp_path):
 # Bug #10 – sum_data: uint8 averaging truncates before dividing
 # ---------------------------------------------------------------------------
 
+
 def test_uint8_sum_no_truncation(tmp_path):
     """Averaging two uint8 images must not truncate the intermediate sum.
     Pixel value 200 in each file → sum 400 → if cast to uint8 before /2 wraps
@@ -369,11 +372,17 @@ def test_uint8_sum_no_truncation(tmp_path):
 
     grid = 16
     generate_example_dataset(
-        input1, add_optional_dtypes=True, grid_size_z=grid, grid_size_x=grid,
+        input1,
+        add_optional_dtypes=True,
+        grid_size_z=grid,
+        grid_size_x=grid,
         image_dtype=np.uint8,
     )
     generate_example_dataset(
-        input2, add_optional_dtypes=True, grid_size_z=grid, grid_size_x=grid,
+        input2,
+        add_optional_dtypes=True,
+        grid_size_z=grid,
+        grid_size_x=grid,
         image_dtype=np.uint8,
     )
 
@@ -394,6 +403,7 @@ def test_uint8_sum_no_truncation(tmp_path):
 # Bug #11 – compound_frames: log-compound must not apply to uint8 images
 # ---------------------------------------------------------------------------
 
+
 def test_compound_frames_uint8_linear(tmp_path):
     """compound_frames must use linear averaging for uint8 images, not
     log(mean(exp(...))), which is semantically wrong for integer data."""
@@ -403,8 +413,11 @@ def test_compound_frames_uint8_linear(tmp_path):
     grid = 16
     n_frames = 4
     generate_example_dataset(
-        input_path, add_optional_dtypes=True,
-        n_frames=n_frames, grid_size_z=grid, grid_size_x=grid,
+        input_path,
+        add_optional_dtypes=True,
+        n_frames=n_frames,
+        grid_size_z=grid,
+        grid_size_x=grid,
         image_dtype=np.uint8,
     )
 

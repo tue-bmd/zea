@@ -201,10 +201,12 @@ def test_color_palette(tmp_path):
 # Bug #15 – notebooks.py: getattr without default raises AttributeError
 # ---------------------------------------------------------------------------
 
+
 def test_animate_images_scan_without_extent(tmp_path):
     """animate_images must not raise AttributeError when the scan object has
     no extent_imshow attribute (e.g. a minimal or mock Scan object)."""
     import matplotlib
+
     matplotlib.use("Agg")
     from zea.internal.notebooks import animate_images
 

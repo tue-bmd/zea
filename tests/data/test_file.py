@@ -848,13 +848,18 @@ class TestZeaVersion:
 # Bug #12 – load_file fails for grouped (map-backed) data types
 # ---------------------------------------------------------------------------
 
+
 def test_load_file_image_type(tmp_path):
     """load_file with data_type='image' must return the values array, not crash
     trying to slice an h5py.Group directly."""
     path = tmp_path / "with_image.hdf5"
     generate_example_dataset(
-        path, add_optional_dtypes=True, n_frames=2,
-        grid_size_z=8, grid_size_x=8, image_dtype=np.uint8,
+        path,
+        add_optional_dtypes=True,
+        n_frames=2,
+        grid_size_z=8,
+        grid_size_x=8,
+        image_dtype=np.uint8,
     )
 
     data, scan, probe = load_file(path, data_type="image")

@@ -296,6 +296,7 @@ def test_save_file_custom_metadata(tmp_hdf5_path, _scan_and_probe):
 # Bug #5 – data_format.py: docstring must not claim dict inputs are valid
 # ---------------------------------------------------------------------------
 
+
 def test_validate_input_data_docstring():
     """The docstring of validate_input_data must not mention dict as an accepted
     type; only ndarray inputs are supported on the deprecated path."""
@@ -310,10 +311,10 @@ def test_validate_input_data_docstring():
 # Bug #6 – data_format.py: bandwidth_percent silently dropped → warn instead
 # ---------------------------------------------------------------------------
 
+
 def test_bandwidth_percent_warns(tmp_path):
     """generate_zea_dataset must emit a UserWarning when bandwidth_percent is
     passed, so callers know the value will be dropped."""
-    import warnings
     from zea.data.data_format import generate_zea_dataset
 
     n_tx, n_el = 4, 16

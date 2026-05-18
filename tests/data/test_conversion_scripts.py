@@ -882,6 +882,7 @@ def test_unzip(tmp_path, dataset):
 # Bug #1 – camus.py: dB values must not be cast to uint8
 # ---------------------------------------------------------------------------
 
+
 def test_camus_db_not_cast_to_uint8():
     """translate() to [-60, 0] dB produces negative floats; casting to uint8
     wraps them (e.g. -60 → 196). The fix removes the .astype(np.uint8) call."""
@@ -896,6 +897,7 @@ def test_camus_db_not_cast_to_uint8():
 # ---------------------------------------------------------------------------
 # Bug #2 – echonet.py: polar dB must not be cast to uint8
 # ---------------------------------------------------------------------------
+
 
 def test_echonet_polar_float32_stored():
     """The echonet converter's _translate output is a float in [-60, 0] dB.
@@ -914,10 +916,10 @@ def test_echonet_polar_float32_stored():
 # Bug #3 – images.py: non-uint8 frames should raise, not silently cast
 # ---------------------------------------------------------------------------
 
+
 def test_images_non_uint8_raises():
     """images.py convert path must raise ValueError for non-uint8 input
     instead of silently casting with potential data loss."""
-    from zea.data.convert.images import _img_dir_to_h5_dir
 
     float_frames = np.random.default_rng(0).random((3, 64, 64)).astype(np.float32)
 
@@ -938,6 +940,7 @@ def test_images_uint8_passes():
 # ---------------------------------------------------------------------------
 # Bug #4 – verasonics.py: compression=None must be passed to File.create
 # ---------------------------------------------------------------------------
+
 
 def test_verasonics_compression_flag_respected(tmp_path):
     """When enable_compression=False the File.create call must use
@@ -967,6 +970,7 @@ def test_verasonics_compression_flag_respected(tmp_path):
     f.close()
 
     import h5py as _h5py
+
     with _h5py.File(path, "r") as hf:
         ds = hf["data/raw_data"]
         assert ds.compression is None, "dataset should have no compression"
