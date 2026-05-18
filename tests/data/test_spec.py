@@ -310,7 +310,7 @@ def test_dataset_builder_dimension_consistency_across_nested_specs():
 def test_metadata_accepts_custom_signal_nd_keys_and_warns():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
-    with pytest.warns(match="Custom keys were added to 'metadata'"):
+    with pytest.warns(match="Custom signal key\(s\) added to 'metadata'"):
         dataset = FileSpec(
             data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
@@ -343,7 +343,7 @@ def test_metadata_custom_key_requires_signal_nd_spec():
 def test_data_accepts_custom_map_keys_and_warns():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
-    with pytest.warns(match="Custom keys were added to 'data'"):
+    with pytest.warns(match="Custom spatial map key\(s\) added to 'data'"):
         dataset = FileSpec(
             data={
                 "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
