@@ -255,6 +255,7 @@ class Pipeline:
             name=self.name,
             validate=self._validate_flag,
             timed=self._timed,
+            device=self.device,
         )
 
     def reinitialize(self):
@@ -267,6 +268,7 @@ class Pipeline:
             name=self.name,
             validate=self._validate_flag,
             timed=self._timed,
+            device=self.device,
         )
 
     def prepend(self, operation: Operation):
@@ -1102,7 +1104,8 @@ class Beamform(Pipeline):
         operations list, since Beamform auto-generates its operations
         from ``beamformer``, ``num_patches``, and ``enable_pfield``.
         """
-        config = {"name": "beamform"}
+        config = super().get_dict(compact=compact)
+        config.pop("operations", None)
 
         params = {}
         if not compact or self.beamformer_type != "delay_and_sum":
@@ -1112,21 +1115,13 @@ class Beamform(Pipeline):
         if not compact or self.enable_pfield:
             params["enable_pfield"] = self.enable_pfield
 
-        # Pipeline-level params
-        if compact:
-            if not self.with_batch_dim:
-                params["with_batch_dim"] = self.with_batch_dim
-            if self.jit_options != "ops":
-                params["jit_options"] = self.jit_options
-            if self._user_jit_kwargs:
-                params["jit_kwargs"] = self._user_jit_kwargs
-        else:
-            params["with_batch_dim"] = self.with_batch_dim
-            params["jit_options"] = self.jit_options
-            params["jit_kwargs"] = self._user_jit_kwargs
+        # Merge in the pipeline-level params from super().
+        params.update(config.get("params", {}))
 
         if params:
             config["params"] = params
+        else:
+            config.pop("params", None)
 
         return config
 
