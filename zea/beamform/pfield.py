@@ -104,6 +104,7 @@ def compute_pfield(
     tx_apodizations = ops.where(ops.isnan(tx_apodizations), 0, tx_apodizations)
 
     # probe params
+    fc_original = center_frequency
     center_frequency = center_frequency / downmix  # downmixing the frequency
 
     # pulse params
@@ -159,6 +160,11 @@ def compute_pfield(
     epsilon = keras.config.epsilon()
     theta = ops.arcsin(ops.clip(delta_x / distance, -1.0, 1.0)) - element_theta
     sin_theta = ops.sin(theta)
+
+    # Clamp distance from below at λ/2; the 1/sqrt(r) Green's function is singular
+    # below this scale and the far-field approximation breaks down there.
+    min_distance = sound_speed / (2 * fc_original)  # λ/2 at the original (non-downmixed) fc
+    distance = ops.maximum(distance, min_distance)
 
     pulse_width = num_waveforms / center_frequency  # temporal pulse width
     center_angular_freq = 2 * np.pi * center_frequency
@@ -232,7 +238,7 @@ def compute_pfield(
     )
 
     exp_arr = exp_arr / ops.sqrt(distance_complex)
-    exp_arr = exp_arr * ops.cast(ops.min(ops.sqrt(distance)), "complex64")  # normalize the field
+    exp_arr = exp_arr * ops.cast(ops.sqrt(min_distance), "complex64")
 
     center_wavenumber = 2 * np.pi * center_frequency / sound_speed
     directivity = _abs_sinc(center_wavenumber * seg_length / 2 * sin_theta)
