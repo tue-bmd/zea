@@ -23,7 +23,7 @@ import keras
 import numpy as np
 from keras import ops
 
-from zea.func.tensor import sinc, vmap
+from zea.func.tensor import sinc
 from zea.internal.cache import cache_output
 
 
@@ -238,25 +238,21 @@ def compute_pfield(
     directivity = _abs_sinc(center_wavenumber * seg_length / 2 * sin_theta)
     exp_arr = exp_arr * ops.cast(directivity, "complex64")
 
-    def _compute_pfield_single_tx(delays_tx, tx_apodization):
-        # Render pressure field for all relevant frequencies and sum them up
-        pressure_squared = _pfield_freq_loop(
-            freq, delays_tx, tx_apodization, exp_arr, exp_freq_step, pulse_spect, probe_spect
-        )
+    pressure_squared = _pfield_freq_loop(
+        freq, t0_delays, tx_apodizations, exp_arr, exp_freq_step, pulse_spect, probe_spect
+    )  # shape (num_points, n_tx)
 
-        # Zero out pressure behind the transducer (z < 0)
-        pressure_squared = ops.where(grid_z < 0, 0, pressure_squared)
+    # Zero out pressure behind the transducer (z < 0)
+    pressure_squared = ops.where(grid_z[:, None] < 0, 0, pressure_squared)
 
-        # RMS acoustic pressure
-        pressure = ops.reshape(ops.sqrt(pressure_squared), size_downsampled)
+    # RMS acoustic pressure, reshaped to (n_tx, grid_size_z, grid_size_x)
+    pressure = ops.transpose(ops.sqrt(pressure_squared), (1, 0))
+    pressure = ops.reshape(pressure, (-1, *size_downsampled))
 
-        # resize pressure to exactly the original grid size
-        pressure = ops.squeeze(
-            ops.image.resize(pressure[..., None], size_orig, interpolation="nearest"), axis=-1
-        )
-        return pressure
-
-    p_arr = vmap(_compute_pfield_single_tx)(t0_delays, tx_apodizations)
+    # resize pressure to exactly the original grid size
+    p_arr = ops.squeeze(
+        ops.image.resize(pressure[..., None], size_orig, interpolation="nearest"), axis=-1
+    )
 
     if norm:
         normalized_pfield = normalize_pressure_field(p_arr, alpha=alpha, percentile=percentile)
@@ -307,8 +303,8 @@ def _pfield_freq_step(
 
     Args:
         freq: (float): Frequency of the current step.
-        delays_tx (Tensor): List of transmit delays of shape (n_el,).
-        tx_apodization (Tensor): List of transmit apodization values (complex64) of shape (n_el,).
+        delays_tx (Tensor): Transmit delays of shape (n_tx, n_el).
+        tx_apodization (Tensor): Transmit apodization values (complex64) of shape (n_tx, n_el).
         monochromatic_pressure: (Tensor): Per-element, per-field-point complex pressure response
             (including directivity and propagation effects) at the current frequency sample
             of shape (num_points, n_el).
@@ -318,13 +314,20 @@ def _pfield_freq_step(
             at the current frequency sample.
 
     Returns:
-        pressure_squared_k (Tensor): Pressure field for this frequency of shape (num_points,).
+        pressure_squared_k (Tensor): Pressure field for this frequency
+            of shape (num_points, n_tx).
     """
     angular_frequency = 2 * np.pi * freq
+    # Per-transmit complex phasor of shape (n_tx, n_el)
     delay_apodization = (
         ops.exp(1j * ops.cast(angular_frequency * delays_tx, "complex64")) * tx_apodization
     )
-    pressure_k = ops.matmul(monochromatic_pressure, delay_apodization) * pulse_spect * probe_spect
+    # (num_points, n_el) @ (n_el, n_tx) -> (num_points, n_tx): all transmits batched
+    pressure_k = (
+        ops.matmul(monochromatic_pressure, ops.transpose(delay_apodization, (1, 0)))
+        * pulse_spect
+        * probe_spect
+    )
     return ops.abs(pressure_k) ** 2
 
 
@@ -339,23 +342,27 @@ def _pfield_freq_loop(
 ):
     """Calculates the pressure field using frequency loop method.
 
+    All transmits are rendered together; the transmit dimension is batched
+    inside the matmul of :func:`_pfield_freq_step`.
+
     Args:
         freq (Tensor): List of frequencies.
-        delays_tx (list): List of transmit delays of shape (n_el,).
-        tx_apodization (list): List of transmit apodization values of shape (n_el,).
+        delays_tx (Tensor): Transmit delays of shape (n_tx, n_el).
+        tx_apodization (Tensor): Transmit apodization values of shape (n_tx, n_el).
         exp_arr (list): List of complex exponentials.
         exp_freq_step (list): List of complex exponential frequency shifts.
         pulse_spect (Tensor): List of pulse spectra at the frequency samples.
         probe_spect (Tensor): List of probe spectra at the frequency samples.
 
     Returns:
-        (Tensor): Pressure field.
+        (Tensor): Pressure field of shape (num_points, n_tx).
     """
 
     tx_apodization = ops.cast(tx_apodization, "complex64")
     probe_spect = ops.cast(probe_spect, "complex64")
     monochromatic_pressure = exp_arr / exp_freq_step
     num_points, _, _ = ops.shape(monochromatic_pressure)
+    n_tx = ops.shape(tx_apodization)[0]
 
     def scan_fn(carry, k):
         monochromatic_pressure, total_pressure_squared = carry
@@ -373,7 +380,7 @@ def _pfield_freq_loop(
 
     (_, total_pressure_squared), _ = ops.scan(
         scan_fn,
-        (monochromatic_pressure, ops.zeros((num_points,), dtype="float32")),
+        (monochromatic_pressure, ops.zeros((num_points, n_tx), dtype="float32")),
         ops.arange(len(freq)),
     )
 
