@@ -9,6 +9,7 @@ import h5py
 import numpy as np
 import pytest
 
+from zea import Probe, Scan
 from zea.data.data_format import (
     load_additional_elements,
     load_description,
@@ -297,7 +298,6 @@ def _assert_beamformed_data_still_exists(path: Path):
 
 def _make_file_with_distinct_demod_freq(tmp_path, demod_freq=5e6, center_freq=7e6):
     """Create a file via save_file with distinct demodulation / center frequencies."""
-    from zea import Probe, Scan
 
     n_tx, n_el, n_ax = 4, 16, 64
     scan_dict = generate_dummy_scan(n_tx=n_tx, n_el=n_el, center_frequency=center_freq)
