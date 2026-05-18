@@ -162,7 +162,6 @@ def process_camus(source_path, output_path, overwrite=False):
     # Change range to [-60, 0] dB — keep as float32, not uint8
     image_seq = translate(image_seq, (0, 255), (-60, 0))
     image_seq_polar = translate(image_seq_polar, (0, 255), (-60, 0))
-    image_seq_polar = image_seq_polar.astype(np.uint8)
 
     # Add y dimension (elevation) — CAMUS is 2D, so y=1
     image_seq_polar = np.expand_dims(image_seq_polar, axis=-1)
