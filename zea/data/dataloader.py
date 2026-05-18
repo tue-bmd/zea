@@ -342,7 +342,8 @@ class Dataloader:
 
         grain threads (N) → h5py (thread-local handles) → numpy → user
 
-    The entire pipeline runs using numpy and the selected keras backend, all on cpu.
+    The entire pipeline runs using numpy, and the resizing is done on the selected
+    backend, all on cpu.
 
     Does the following in order to load a dataset:
 
@@ -353,13 +354,16 @@ class Dataloader:
             - shuffle
             - shard
             - add channel dim
-            - clip_image_range
-            - assert_image_range
+            - clip image range
+            - assert image range
             - resize
             - repeat
             - batch
+            - cast to float32
             - normalize
             - augmentation
+            - convert_to_tensor
+
 
     Args:
         file_paths: Path(s) to directory(ies) and/or HDF5 file(s).
@@ -433,6 +437,7 @@ class Dataloader:
             Default is ``True``. For evaluation it might be useful to set this to
             ``False``. Or when you want to use a persistent iterator between epochs, using
             ``dataset_repetitions`` to specify the number of epochs.
+        convert_to_tensor: Whether to convert the data to a tensor. Default is ``False``.
 
     Example:
         .. code-block:: python
@@ -486,6 +491,7 @@ class Dataloader:
         num_threads: int = 16,
         prefetch_buffer_size: int = 500,
         reshuffle_each_epoch: bool = True,
+        convert_to_tensor: bool = False,
         **kwargs,
     ):
         # ── Validation ────────────────────────────────────────────────
@@ -545,7 +551,8 @@ class Dataloader:
             dataset_repetitions=dataset_repetitions,
             drop_remainder=drop_remainder,
             augmentation=augmentation,
-            resizer=None,
+            resizer=None,  # set later
+            convert_to_tensor=convert_to_tensor,
         )
 
         # Pre-build the resizer (stateless, reusable across epochs)
@@ -605,11 +612,9 @@ class Dataloader:
             _ir = cfg["image_range"]
             ds = _ds_map(ds, lambda x, _r=_ir: Dataloader._assert_image_range(x, _r))
 
-        # Transition from ndarray to tensors (using the selected backend)
-        ds = _ds_map(ds, ops.array)
-
         if cfg["resizer"] is not None:
             ds = _ds_map(ds, cfg["resizer"])
+            ds = _ds_map(ds, ops.convert_to_numpy)
 
         if cfg["dataset_repetitions"] is not None:
             ds = ds.repeat(num_epochs=cfg["dataset_repetitions"])
@@ -617,7 +622,7 @@ class Dataloader:
         if self.batch_size is not None:
             ds = ds.batch(batch_size=self.batch_size, drop_remainder=cfg["drop_remainder"])
 
-        ds = _ds_map(ds, lambda x: ops.cast(x, "float32"))
+        ds = _ds_map(ds, lambda x: x.astype(np.float32))
 
         if cfg["normalization_range"] is not None:
             _ir, _nr = cfg["image_range"], cfg["normalization_range"]
@@ -625,6 +630,9 @@ class Dataloader:
 
         if cfg["augmentation"] is not None:
             ds = _ds_map(ds, cfg["augmentation"])
+
+        if cfg["convert_to_tensor"]:
+            ds = _ds_map(ds, ops.convert_to_tensor)
 
         return ds
 
