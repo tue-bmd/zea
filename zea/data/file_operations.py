@@ -171,8 +171,8 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
             may be a single file or a folder; folders are expanded into all zea files
             they contain (using :class:`zea.Dataset`).
         output_path (Path): Path to the output file where the summed data will be saved.
-        overwrite (bool, optional): Whether to overwrite the output file if it exists. Defaults to
-            False.
+        overwrite (bool, optional): Whether to overwrite the output file if it exists.
+            Defaults to False.
     """
 
     with Dataset(input_paths, validate=False) as dataset:
@@ -246,8 +246,8 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
         input_path (Path): Path to the input raw data file, or a folder of files.
         output_path (Path): Path to the output file (or folder) where the compounded
             data will be saved.
-        overwrite (bool, optional): Whether to overwrite the output file if it exists. Defaults to
-            False.
+        overwrite (bool, optional): Whether to overwrite the output file if it exists.
+            Defaults to False.
     """
 
     data_dict, scan, probe = load_file_all_data_types(input_path)
@@ -287,17 +287,16 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
     """
     Compounds transmits in a raw data file by averaging them.
 
-    Note
-    ----
-    This function assumes that all transmits are identical. If this is not the case the function
-    will result in incorrect scan parameters.
+    Note:
+        This function assumes that all transmits are identical. If this is not the case the
+        function will result in incorrect scan parameters.
 
     Args:
         input_path (Path): Path to the input raw data file, or a folder of files.
         output_path (Path): Path to the output file (or folder) where the compounded
             data will be saved.
-        overwrite (bool, optional): Whether to overwrite the output file if it exists. Defaults to
-        False.
+        overwrite (bool, optional): Whether to overwrite the output file if it exists.
+            Defaults to False.
     """
 
     data_dict, scan, probe = load_file_all_data_types(input_path)
@@ -368,8 +367,8 @@ def resave(
     Args:
         input_path (Path): Path to the input zea data file, or a folder of files.
         output_path (Path): Path to the output file (or folder) where the data will be saved.
-        overwrite (bool, optional): Whether to overwrite the output file if it exists. Defaults to
-            False.
+        overwrite (bool, optional): Whether to overwrite the output file if it exists.
+            Defaults to False.
         enable_compression (bool, optional): Whether to enable gzip compression for the
             datasets. Defaults to True.
         chunk_frames (bool, optional): Whether to store the data datasets with HDF5
@@ -416,8 +415,8 @@ def extract_frames_transmits(
             data will be saved.
         frame_indices (list, array-like, or slice): Indices of the frames to keep.
         transmit_indices (list, array-like, or slice): Indices of the transmits to keep.
-        overwrite (bool, optional): Whether to overwrite the output file if it exists. Defaults to
-            False.
+        overwrite (bool, optional): Whether to overwrite the output file if it exists.
+            Defaults to False.
     """
     indices = (frame_indices, transmit_indices)
     data_dict, scan, probe = load_file_all_data_types(input_path, indices=indices)
