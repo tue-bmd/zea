@@ -113,7 +113,7 @@ def save_file(
         "probe_geometry": probe.probe_geometry,
         "sampling_frequency": np.float32(scan.sampling_frequency),
         "center_frequency": np.float32(scan.center_frequency),
-        "demodulation_frequency": np.float32(scan.center_frequency),
+        "demodulation_frequency": np.float32(scan.demodulation_frequency),
         "initial_times": scan.initial_times,
         "t0_delays": scan.t0_delays,
         "sound_speed": np.float32(scan.sound_speed) if scan.sound_speed is not None else None,
@@ -167,10 +167,26 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     description = load_description(input_paths[0])
     additional_elements = load_additional_elements(input_paths[0])
 
-    image_is_uint8 = data_dict["image"]["values"].dtype == np.uint8
-    image_sc_is_uint8 = data_dict["image_sc"]["values"].dtype == np.uint8
-    image_is_float32 = data_dict["image"]["values"].dtype == np.float32
-    image_sc_is_float32 = data_dict["image_sc"]["values"].dtype == np.float32
+    image_is_uint8 = (
+        data_dict["image"] is not None
+        and isinstance(data_dict["image"], dict)
+        and data_dict["image"]["values"].dtype == np.uint8
+    )
+    image_sc_is_uint8 = (
+        data_dict["image_sc"] is not None
+        and isinstance(data_dict["image_sc"], dict)
+        and data_dict["image_sc"]["values"].dtype == np.uint8
+    )
+    image_is_float32 = (
+        data_dict["image"] is not None
+        and isinstance(data_dict["image"], dict)
+        and data_dict["image"]["values"].dtype == np.float32
+    )
+    image_sc_is_float32 = (
+        data_dict["image_sc"] is not None
+        and isinstance(data_dict["image_sc"], dict)
+        and data_dict["image_sc"]["values"].dtype == np.float32
+    )
 
     # Cast to float32 to avoid overflow
     if image_is_uint8:
@@ -240,19 +256,23 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
         assert scan == new_scan, "Scan parameters do not match."
         assert probe == new_probe, "Probe parameters do not match."
 
-    # Cast back to uint8
+    # Divide to get the mean; for uint8, keep float precision then clip and cast back
     if image_is_uint8:
-        data_dict["image"]["values"] = data_dict["image"]["values"].astype(np.uint8) / len(
-            input_paths
-        )
+        data_dict["image"]["values"] = np.clip(
+            data_dict["image"]["values"] / len(input_paths), 0, 255
+        ).astype(np.uint8)
     if image_is_float32:
-        data_dict["image"]["values"] = data_dict["image"]["values"] - np.log(len(input_paths))
-    if image_sc_is_uint8:
-        data_dict["image_sc"]["values"] = data_dict["image_sc"]["values"].astype(np.uint8) / len(
-            input_paths
+        data_dict["image"]["values"] = np.minimum(
+            data_dict["image"]["values"] - np.log(len(input_paths)), 0.0
         )
+    if image_sc_is_uint8:
+        data_dict["image_sc"]["values"] = np.clip(
+            data_dict["image_sc"]["values"] / len(input_paths), 0, 255
+        ).astype(np.uint8)
     if image_sc_is_float32:
-        data_dict["image_sc"]["values"] = data_dict["image_sc"]["values"] - np.log(len(input_paths))
+        data_dict["image_sc"]["values"] = np.minimum(
+            data_dict["image_sc"]["values"] - np.log(len(input_paths)), 0.0
+        )
 
     if overwrite:
         _delete_file_if_exists(output_path)
@@ -301,8 +321,12 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
             continue
         if key in _MAP_KEYS:
             values = data_dict[key]["values"]
-            if key in _LOG_COMPOUND_KEYS:
+            if key in _LOG_COMPOUND_KEYS and values.dtype == np.float32:
                 values = np.log(np.mean(np.exp(values), axis=0, keepdims=True))
+            elif values.dtype == np.uint8:
+                values = np.clip(
+                    np.mean(values.astype(np.float32), axis=0, keepdims=True), 0, 255
+                ).astype(np.uint8)
             else:
                 values = np.mean(values, axis=0, keepdims=True)
             compounded_data[key] = {**data_dict[key], "values": values}

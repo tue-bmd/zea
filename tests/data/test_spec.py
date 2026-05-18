@@ -683,3 +683,28 @@ class TestProbePoseValidation:
 
         assert negative.start_time_offset < 0
         assert positive.start_time_offset > 0
+
+
+# ---------------------------------------------------------------------------
+# Bug #13 – Image spec must accept -inf (silence = -inf dB)
+# ---------------------------------------------------------------------------
+
+def test_image_spec_accepts_neginf():
+    """Image spec validation must allow -inf in float32 arrays (represents
+    complete silence in dB domain) but still reject +inf and values above 0."""
+    extent = np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32)
+
+    values_with_neginf = np.full((2, 8, 8), -30.0, dtype=np.float32)
+    values_with_neginf[0, 0, 0] = -np.inf
+
+    img = Image(values=values_with_neginf, extent=extent)
+    assert img is not None
+
+    values_with_posinf = np.full((2, 8, 8), -30.0, dtype=np.float32)
+    values_with_posinf[0, 0, 0] = np.inf
+    with pytest.raises(ValueError, match="finite or -inf"):
+        Image(values=values_with_posinf, extent=extent)
+
+    values_positive = np.full((2, 8, 8), 0.1, dtype=np.float32)
+    with pytest.raises(ValueError, match="dB scale"):
+        Image(values=values_positive, extent=extent)

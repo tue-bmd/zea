@@ -1211,7 +1211,7 @@ class VerasonicsFile(h5py.File):
             scan=scan_dict,
             probe_name=self.probe_name,
             description=description,
-            compression=compression or "gzip",
+            compression=compression,
         )
 
         if additional_elements:

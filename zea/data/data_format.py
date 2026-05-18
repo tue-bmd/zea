@@ -3,6 +3,7 @@ Functions to write and validate datasets in the zea format.
 """
 
 import inspect
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,18 +42,14 @@ def validate_input_data(raw_data, aligned_data, envelope_data, beamformed_data, 
             shape (n_frames, n_tx, n_ax, n_el, n_ch).
         aligned_data (np.ndarray): The aligned data of the ultrasound measurement of
             shape (n_frames, n_tx, n_ax, n_el, n_ch).
-        envelope_data (dict or np.ndarray): The envelope data. If a dict, must contain
-            "values" and "extent" keys. If an ndarray, shape is
-            (n_frames, grid_size_z, grid_size_x).
-        beamformed_data (dict or np.ndarray): The beamformed data. If a dict, must
-            contain "values" and "extent" keys. If an ndarray, shape is
-            (n_frames, grid_size_z, grid_size_x).
-        image (dict or np.ndarray): The image data. If a dict, must contain
-            "values" and "extent" keys. If an ndarray, shape is
-            (n_frames, grid_size_z, grid_size_x).
-        image_sc (dict or np.ndarray): The scan converted images. If a dict, must
-            contain "values" and "extent" keys. If an ndarray, shape is
-            (n_frames, output_size_z, output_size_x).
+        envelope_data (np.ndarray): The envelope data of the ultrasound measurement of
+            shape (n_frames, grid_size_z, grid_size_x). Must be an ndarray.
+        beamformed_data (np.ndarray): The beamformed data of the ultrasound measurement of
+            shape (n_frames, grid_size_z, grid_size_x). Must be an ndarray.
+        image (np.ndarray): The image data of shape (n_frames, grid_size_z, grid_size_x).
+            Must be an ndarray.
+        image_sc (np.ndarray): The scan converted images of shape
+            (n_frames, output_size_z, output_size_x). Must be an ndarray.
     """
     assert (
         raw_data is not None
@@ -619,6 +616,15 @@ def generate_zea_dataset(
         image=image,
         image_sc=image_sc,
     )
+
+    if bandwidth_percent is not None:
+        warnings.warn(
+            "bandwidth_percent is not supported by generate_zea_dataset and will be "
+            "dropped before calling _write_datasets. Remove the argument or migrate "
+            "to File.create().",
+            UserWarning,
+            stacklevel=2,
+        )
 
     # Convert path to Path object
     path = Path(path)

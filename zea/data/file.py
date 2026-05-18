@@ -829,7 +829,11 @@ def load_file(
         # Load the desired frames from the file
         _key = file.format_key(data_type)
         _indices = indices if indices is not None else slice(None)
-        data = file[_key][_indices]
+        item = file[_key]
+        if isinstance(item, h5py.Group):
+            data = item["values"][_indices]
+        else:
+            data = item[_indices]
 
         # extract transmits from indices
         # we only have to do this when the data has a n_tx dimension

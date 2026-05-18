@@ -8,6 +8,8 @@ from zea.data.spec import FileSpec, Image, Segmentation
 from zea.probes import Probe
 from zea.scan import Scan
 
+from . import generate_example_dataset
+
 # Dummy extent for map-based data types in tests
 _TEST_EXTENT = np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32)
 
@@ -840,3 +842,21 @@ class TestZeaVersion:
 
         with File(path) as f:
             assert f.validate() == {"status": "success"}
+
+
+# ---------------------------------------------------------------------------
+# Bug #12 – load_file fails for grouped (map-backed) data types
+# ---------------------------------------------------------------------------
+
+def test_load_file_image_type(tmp_path):
+    """load_file with data_type='image' must return the values array, not crash
+    trying to slice an h5py.Group directly."""
+    path = tmp_path / "with_image.hdf5"
+    generate_example_dataset(
+        path, add_optional_dtypes=True, n_frames=2,
+        grid_size_z=8, grid_size_x=8, image_dtype=np.uint8,
+    )
+
+    data, scan, probe = load_file(path, data_type="image")
+    assert isinstance(data, np.ndarray), "load_file should return ndarray for image type"
+    assert data.shape[0] == 2, "should load all 2 frames"

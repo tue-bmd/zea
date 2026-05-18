@@ -632,11 +632,11 @@ class Image(Map):
     def __post_init__(self):
         super().__post_init__()
 
-        # Check that image values are <= 0 and finite
+        # Check that image values are in dB scale (finite or -inf, and <= 0)
         if self.values.dtype == np.float32:
-            if not np.all(np.isfinite(self.values)):
-                raise ValueError("Image values must be finite.")
-            if not np.all(self.values <= 1e-5):
+            if not np.all(np.isfinite(self.values) | np.isneginf(self.values)):
+                raise ValueError("Image values must be finite or -inf (dB scale).")
+            if not np.all(self.values <= 0):
                 raise ValueError("Image values must be in dB scale <= 0 when using float32 dtype.")
 
 
@@ -1621,6 +1621,7 @@ class FileSpec(Spec):
                     value = getattr(self, group_name)
                     if value is not None:
                         f.attrs[group_name] = value
+
         log.info(f"File saved to {log.yellow(path)}")
 
     @classmethod
