@@ -737,11 +737,6 @@ def test_len_attribute(dummy_hdf5):
     assert len(loader) == DUMMY_N_FRAMES
 
 
-# ---------------------------------------------------------------------------
-# Bug #7 – dataloader.py: empty dataset must raise ValueError, not IndexError
-# ---------------------------------------------------------------------------
-
-
 def test_empty_dataloader_raises(monkeypatch):
     """When _build_pipeline produces an empty dataset the Dataloader constructor
     must raise ValueError, not an IndexError from indexing position 0."""

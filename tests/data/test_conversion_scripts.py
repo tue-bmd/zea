@@ -878,11 +878,6 @@ def test_unzip(tmp_path, dataset):
     assert (extracted_folder / "dummy.txt").exists()
 
 
-# ---------------------------------------------------------------------------
-# Bug #1 – camus.py: dB values must not be cast to uint8
-# ---------------------------------------------------------------------------
-
-
 def test_camus_db_not_cast_to_uint8():
     """translate() to [-60, 0] dB produces negative floats; casting to uint8
     wraps them (e.g. -60 → 196). The fix removes the .astype(np.uint8) call."""
@@ -892,11 +887,6 @@ def test_camus_db_not_cast_to_uint8():
     assert result.dtype != np.uint8, "dB image must not be stored as uint8"
     assert np.all(result >= -60) and np.all(result <= 0), "dB values must be in [-60, 0]"
     assert np.any(result < 0), "negative dB values must be preserved"
-
-
-# ---------------------------------------------------------------------------
-# Bug #2 – echonet.py: polar dB must not be cast to uint8
-# ---------------------------------------------------------------------------
 
 
 def test_echonet_polar_float32_stored():
@@ -910,11 +900,6 @@ def test_echonet_polar_float32_stored():
     fixed = polar_db.astype(np.float32)
     assert fixed.dtype == np.float32
     assert np.all(fixed == polar_db), "float32 preserves all dB values"
-
-
-# ---------------------------------------------------------------------------
-# Bug #3 – images.py: non-uint8 frames should raise, not silently cast
-# ---------------------------------------------------------------------------
 
 
 def test_images_non_uint8_raises():
@@ -935,11 +920,6 @@ def test_images_uint8_passes():
     """uint8 frames with values in [0, 255] must pass without error."""
     frames = np.zeros((3, 64, 64), dtype=np.uint8)
     assert frames.dtype == np.uint8
-
-
-# ---------------------------------------------------------------------------
-# Bug #4 – verasonics.py: compression=None must be passed to File.create
-# ---------------------------------------------------------------------------
 
 
 def test_verasonics_compression_flag_respected(tmp_path):

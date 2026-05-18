@@ -685,11 +685,6 @@ class TestProbePoseValidation:
         assert positive.start_time_offset > 0
 
 
-# ---------------------------------------------------------------------------
-# Bug #13 – Image spec must accept -inf (silence = -inf dB)
-# ---------------------------------------------------------------------------
-
-
 def test_image_spec_accepts_neginf():
     """Image spec validation must allow -inf in float32 arrays (represents
     complete silence in dB domain) but still reject +inf and values above 0."""

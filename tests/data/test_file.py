@@ -844,11 +844,6 @@ class TestZeaVersion:
             assert f.validate() == {"status": "success"}
 
 
-# ---------------------------------------------------------------------------
-# Bug #12 – load_file fails for grouped (map-backed) data types
-# ---------------------------------------------------------------------------
-
-
 def test_load_file_image_type(tmp_path):
     """load_file with data_type='image' must return the values array, not crash
     trying to slice an h5py.Group directly."""

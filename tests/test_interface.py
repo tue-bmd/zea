@@ -28,11 +28,6 @@ def test_interface_initialization():
     assert len(data.shape) == 2, "Data must be 2d (grid_size_z, grid_size_x)"
 
 
-# ---------------------------------------------------------------------------
-# Bug #14 – Interface.get_data must read 'values' sub-key for map-backed types
-# ---------------------------------------------------------------------------
-
-
 def test_interface_reads_map_backed_dataset(tmp_path):
     """For map-backed types (image, image_sc) the read must descend into the
     'values' sub-dataset rather than indexing the group directly."""

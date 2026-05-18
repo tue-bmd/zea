@@ -292,11 +292,6 @@ def test_save_file_custom_metadata(tmp_hdf5_path, _scan_and_probe):
         assert f["metadata/credit"][()] == b"Test Lab, 2024"
 
 
-# ---------------------------------------------------------------------------
-# Bug #5 – data_format.py: docstring must not claim dict inputs are valid
-# ---------------------------------------------------------------------------
-
-
 def test_validate_input_data_docstring():
     """The docstring of validate_input_data must not mention dict as an accepted
     type; only ndarray inputs are supported on the deprecated path."""
@@ -305,11 +300,6 @@ def test_validate_input_data_docstring():
     doc = validate_input_data.__doc__
     assert "If a dict" not in doc, "docstring must not advertise dict support"
     assert "ndarray" in doc, "docstring must say ndarray"
-
-
-# ---------------------------------------------------------------------------
-# Bug #6 – data_format.py: bandwidth_percent silently dropped → warn instead
-# ---------------------------------------------------------------------------
 
 
 def test_bandwidth_percent_warns(tmp_path):
