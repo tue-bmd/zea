@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from zea.data.preset_utils import (
+from zea.internal.preset_utils import (
     _download_files_in_path,
     _get_snapshot_dir_from_downloaded_file,
     _hf_parse_path,
@@ -88,8 +88,8 @@ def test_is_file_and_is_dir(file, folder, fake_files, monkeypatch):
         assert repo_type == "dataset"
         return fake_files
 
-    monkeypatch.setattr("zea.data.preset_utils._hf_parse_path", fake_parse_path)
-    monkeypatch.setattr("zea.data.preset_utils._hf_list_files", fake_list_files)
+    monkeypatch.setattr("zea.tools.hf._hf_parse_path", fake_parse_path)
+    monkeypatch.setattr("zea.tools.hf._hf_list_files", fake_list_files)
 
     # file is a file
     assert file.is_file() is True
@@ -136,9 +136,9 @@ def test_hf_resolve_path(folder, fake_files, monkeypatch):
         )
         return str(mock_path)
 
-    monkeypatch.setattr("zea.data.preset_utils._hf_parse_path", fake_parse_path)
-    monkeypatch.setattr("zea.data.preset_utils._hf_list_files", fake_list_files)
-    monkeypatch.setattr("zea.data.preset_utils._hf_download", fake_download)
+    monkeypatch.setattr("zea.internal.preset_utils._hf_parse_path", fake_parse_path)
+    monkeypatch.setattr("zea.internal.preset_utils._hf_list_files", fake_list_files)
+    monkeypatch.setattr("zea.internal.preset_utils._hf_download", fake_download)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         cache_dir = Path(tmp_dir)
@@ -183,7 +183,7 @@ def test_download_files_in_path(fake_files, monkeypatch):
         downloaded_files.append(filename)
         return f"/mock/path/{filename}"
 
-    monkeypatch.setattr("zea.data.preset_utils._hf_download", fake_download)
+    monkeypatch.setattr("zea.internal.preset_utils._hf_download", fake_download)
 
     # Test downloading files with path filter
     result = _download_files_in_path(REPO_ID, fake_files, "val/patient0401/", "/tmp")

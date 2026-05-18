@@ -9,7 +9,7 @@ import numpy as np
 from keras.utils import pad_sequences
 
 from zea import log
-from zea.data.preset_utils import HF_PREFIX, _hf_resolve_path
+from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.checks import (
     _DATA_TYPES,
     _NON_IMAGE_DATA_TYPES,

@@ -20,12 +20,13 @@ from pathlib import Path
 
 import numpy as np
 
-from zea import Probe, Scan
 from zea.data.data_format import generate_zea_dataset, load_additional_elements, load_description
 from zea.data.file import load_file_all_data_types
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.log import logger
+from zea.probes import Probe
+from zea.scan import Scan
 
 ALL_DATA_TYPES_EXCEPT_RAW = set(_IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES) - {"raw_data"}
 

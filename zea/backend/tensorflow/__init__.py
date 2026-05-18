@@ -1,7 +1,4 @@
-"""Tensorflow Ultrasound Beamforming Library.
-
-Initialize modules for registries.
-"""
+"""TensorFlow utilities for zea."""
 
 import sys
 from pathlib import PosixPath
