@@ -340,7 +340,7 @@ class Dataloader:
 
     .. code-block:: text
 
-        grain threads (N) → h5py (thread-local handles) → numpy → user
+        grain threads (N) → h5py (thread-local handles) → numpy -> cpu tensor → user
 
     The entire pipeline runs using numpy, and the resizing is done on the selected
     backend, all on cpu.
@@ -437,7 +437,7 @@ class Dataloader:
             Default is ``True``. For evaluation it might be useful to set this to
             ``False``. Or when you want to use a persistent iterator between epochs, using
             ``dataset_repetitions`` to specify the number of epochs.
-        convert_to_tensor: Whether to convert the data to a tensor. Default is ``False``.
+        convert_to_tensor: Whether to convert the data to a tensor (on cpu). Default is ``True``.
 
     Example:
         .. code-block:: python
@@ -491,7 +491,7 @@ class Dataloader:
         num_threads: int = 16,
         prefetch_buffer_size: int = 500,
         reshuffle_each_epoch: bool = True,
-        convert_to_tensor: bool = False,
+        convert_to_tensor: bool = True,
         **kwargs,
     ):
         # ── Validation ────────────────────────────────────────────────
