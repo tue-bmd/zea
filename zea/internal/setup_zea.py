@@ -58,8 +58,8 @@ from typing import Union
 import keras
 import yaml
 
-from zea import Config, log
-from zea.config import check_config
+from zea import log
+from zea.config import Config, check_config
 from zea.datapaths import create_new_user, set_data_paths
 from zea.internal.device import init_device
 from zea.internal.git_info import get_git_summary
