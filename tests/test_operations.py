@@ -728,7 +728,7 @@ def test_apply_window(axis, size, start, end, window_type):
 
 @backend_equality_check(decimal=4)
 def test_band_pass_filter():
-    """Test BandPassFilter behavior for passband and frequency/bandwidth inputs."""
+    """Test BandPassFilter operation."""
 
     import keras
 
