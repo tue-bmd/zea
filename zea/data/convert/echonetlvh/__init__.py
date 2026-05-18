@@ -302,7 +302,7 @@ class LVHProcessor(H5Processor):
         polar_im_set_uint8 = jnp.asarray(jnp.floor(polar_im_set + 0.5), dtype=jnp.uint8)
         del polar_im_set
 
-        if jnp.all(sequence_processed_db == 0):
+        if jnp.all(sequence_processed_uint8 == 0):
             raise ValueError(f"Processed sequence is all zeros for file {avi_file}")
 
         if jnp.all(polar_im_set_uint8 == 0):
