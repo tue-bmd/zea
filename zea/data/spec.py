@@ -1543,6 +1543,39 @@ class MetricsSpec(Spec):
 
 
 @dataclass
+class TrackSpec(Spec):
+    """A single acquisition track with its own data and scan parameters.
+
+    Used inside a multi-track :class:`FileSpec` where different transmit
+    sequences coexist in the same acquisition.  The ``track_schedule`` on
+    ``FileSpec`` specifies the global ordering of transmits across all tracks.
+
+    Args:
+        data: The data for this track.
+        scan: The scan parameters for this track. Required when raw_data is
+            present in *data*.
+    """
+
+    data: DataSpec | dict
+    scan: ScanSpec | dict | None = None
+
+    SCHEMA = {
+        "data": {"spec": DataSpec},
+        "scan": {"spec": ScanSpec},
+    }
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        data = self.data
+        has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
+            isinstance(data, dict) and data.get("raw_data") is not None
+        )
+        if has_raw and self.scan is None:
+            raise ValueError("'scan' is required when 'raw_data' is provided in track data.")
+
+
+@dataclass
 class FileSpec(Spec):
     """A dataset containing all the data, scan parameters, metadata,
     and metrics for a single acquisition.
