@@ -494,9 +494,9 @@ class LowPassFilterIQ(FirFilter):
     def call(self, bandwidth, sampling_frequency, center_frequency, **kwargs):
         lpf = get_low_pass_iq_filter(
             self.num_taps,
-            ops.convert_to_numpy(sampling_frequency).item(),
-            ops.convert_to_numpy(center_frequency).item(),
-            ops.convert_to_numpy(bandwidth).item(),
+            sampling_frequency,
+            center_frequency,
+            bandwidth,
         )
         kwargs[self.filter_key] = lpf
         return super().call(**kwargs)
@@ -506,10 +506,15 @@ class LowPassFilterIQ(FirFilter):
 class BandPassFilter(FirFilter):
     """Apply a band-pass FIR filter to the real input signal using convolution.
 
-    The bandwidth parameter in the call method defines the passband centered around
-    ``demodulation_frequency``, with edges at ``demodulation_frequency - bandwidth/2``
-    and ``demodulation_frequency + bandwidth/2``. So, make sure this is used before demodulation
-    to baseband.
+    By default, the call-time ``bandwidth`` defines the passband centered around
+    ``demodulation_frequency``, with edges at
+    ``demodulation_frequency - bandwidth/2`` and
+    ``demodulation_frequency + bandwidth/2``.
+
+    Optionally, a fixed ``passband=(f1, f2)`` can be provided at initialization, or a
+    call-time ``passband`` can be provided to override both the fixed passband and the
+    ``demodulation_frequency``/``bandwidth``-based computation. Make sure this is used
+    before demodulation to baseband.
 
     This operation is provided for convenience and will recompute the filter weights every
     time it is called. Alternatively, you can use :class:`FirFilter` with pre-computed
@@ -517,7 +522,12 @@ class BandPassFilter(FirFilter):
     """
 
     def __init__(
-        self, axis: int = -3, num_taps: int = 127, filter_key: str = "band_pass_filter", **kwargs
+        self,
+        axis: int = -3,
+        num_taps: int = 127,
+        filter_key: str = "band_pass_filter",
+        passband=None,
+        **kwargs,
     ):
         """Initialize the BandPassFilter operation.
 
@@ -539,22 +549,46 @@ class BandPassFilter(FirFilter):
             **kwargs,
         )
         self.num_taps = num_taps
+        self.passband = passband
 
-    def call(self, sampling_frequency, demodulation_frequency, bandwidth, **kwargs):
+    def call(
+        self,
+        sampling_frequency,
+        demodulation_frequency=None,
+        bandwidth=None,
+        passband=None,
+        **kwargs,
+    ):
         """Apply band-pass filter with specified bandwidth.
 
         Args:
             sampling_frequency (float): Sampling frequency in Hz.
-            demodulation_frequency (float): Center frequency in Hz.
-            bandwidth (float): Bandwidth in Hz. The filter will pass frequencies from
+            demodulation_frequency (float): Center frequency in Hz. Used only when no
+                passband override is provided.
+            bandwidth (float): Bandwidth in Hz. Used only when no passband override is
+                provided. The filter will pass frequencies from
                 ``demodulation_frequency - bandwidth/2`` to
                 ``demodulation_frequency + bandwidth/2``.
+            passband (tuple): Optional tuple containing the lower and upper frequencies in
+                Hz. This overrides both init-time passband and the
+                ``demodulation_frequency``/``bandwidth``-based passband.
 
         Returns:
             dict: Dictionary containing filtered signal.
         """
-        f1 = demodulation_frequency - bandwidth / 2
-        f2 = demodulation_frequency + bandwidth / 2
+        selected_passband = passband if passband is not None else self.passband
+
+        if selected_passband is not None:
+            f1 = selected_passband[0]
+            f2 = selected_passband[1]
+        else:
+            if demodulation_frequency is None or bandwidth is None:
+                raise ValueError(
+                    "BandPassFilter requires either passband=(f1, f2) or both "
+                    "demodulation_frequency and bandwidth."
+                )
+            f1 = demodulation_frequency - bandwidth / 2
+            f2 = demodulation_frequency + bandwidth / 2
 
         bpf = get_band_pass_filter(
             self.num_taps, sampling_frequency, f1, f2, validate=not self._jit_compile
