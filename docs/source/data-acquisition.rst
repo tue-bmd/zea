@@ -101,7 +101,7 @@ Files created with zea 0.0.12 and later are fully described by the
 Custom fields
 -------------------------------
 
-Beyond the standard data types (``raw_data``, ``image_sc``, …), you can attach arbitrary
+Beyond the standard data types (``raw_data``, ``beamformed_data``, …), you can attach arbitrary
 **custom spatial maps** and **custom metadata** to any zea file.
 
 **Custom spatial maps** (``data`` group)
@@ -122,7 +122,7 @@ extent.  Pass it as a sub-dict under the key you want:
         "my_acquisition.hdf5",
         data={
             "raw_data": raw,
-            "my_overlay": {          # any name not already in the spec
+            "my_overlay": {          # <-- Example of a custom field not in the zea spec
                 "values":  values,
                 "extent":  extent,
                 # optional: "labels", "description", "unit"
@@ -141,8 +141,8 @@ extent.  Pass it as a sub-dict under the key you want:
 **Custom metadata** (``metadata`` group)
 
 Standard metadata fields (``credit``, ``annotations``, ``text_report``, ``subject``, ``ecg``, …)
-are validated by :class:`~zea.data.spec.MetadataSpec`.  Pass a plain dict to ``File.create`` or to
-:func:`~zea.data.file_operations.save_file`:
+are validated by :class:`~zea.data.spec.MetadataSpec`.  Pass a plain dict to ``File.create``
+metadata argument.
 
 .. code-block:: python
 
@@ -160,8 +160,39 @@ are validated by :class:`~zea.data.spec.MetadataSpec`.  Pass a plain dict to ``F
     )
 
 Custom signal keys (anything beyond the standard names) are accepted and stored as
-:class:`~zea.data.spec.SignalND` entries.  See :class:`~zea.data.spec.MetadataSpec` for the full
-list of supported fields.
+:class:`~zea.data.spec.SignalND` entries: a dict with ``samples``, ``start_time_offset``, and
+``sampling_frequency``:
+
+.. code-block:: python
+
+    import numpy as np
+    from zea import File
+
+    n_samples = 500
+    respiratory_signal = {
+        "samples":            np.sin(np.linspace(0, 2 * np.pi, n_samples)).astype(np.float32),
+        "start_time_offset":  np.float32(-0.5),   # seconds before first transmit
+        "sampling_frequency": np.float32(10.0),   # Hz
+    }
+
+    f = File.create(
+        "my_acquisition.hdf5",
+        data={"raw_data": raw},
+        scan=scan,
+        metadata={
+            "credit": "My Lab, 2024",
+            "respiratory_signal": respiratory_signal,   # <-- custom SignalND field
+        },
+    )
+    f.close()
+
+    # Reading back
+    with File("my_acquisition.hdf5") as f:
+        meta = f.metadata()
+        samples = meta.respiratory_signal.samples        # numpy array
+        fs      = meta.respiratory_signal.sampling_frequency
+
+See :class:`~zea.data.spec.MetadataSpec` for the full list of supported standard fields.
 
 -------------------------------
 Supported datasets & conversion

@@ -920,6 +920,13 @@ class DataSpec(Spec):
         for key, value in extra_maps.items():
             if key in reserved_keys:
                 raise TypeError(f"Invalid custom data key '{key}': reserved name")
+            if isinstance(value, np.ndarray):
+                raise TypeError(
+                    f"Custom data key '{key}' must be a spatial map "
+                    f"(a dict with at least a 'values' key), not a flat array. "
+                    f"Only 'raw_data' and 'aligned_data' are accepted as flat arrays. "
+                    f"Wrap your data: {{'values': array, 'extent': extent_array}}."
+                )
             setattr(self, key, value)
 
         # Add custom extra maps to the schema as generic Map specs, so they get validated.
@@ -968,9 +975,10 @@ class DataSpec(Spec):
             custom_keys = ", ".join(sorted(self._extra_map_keys))
             warnings.warn(
                 log.warning(
-                    "Custom keys were added to 'data' and validated as generic Map specs: "
-                    f"{custom_keys}. If these keys match standard categories, consider using: "
-                    f"{suggested_map_keys}"
+                    f"Custom spatial map key(s) added to 'data': {custom_keys}. "
+                    "These are validated as generic Map specs. "
+                    "If your data matches an existing type, prefer one of the supported "
+                    f"spatial maps: {suggested_map_keys}."
                 )
             )
 
@@ -1466,6 +1474,14 @@ class MetadataSpec(Spec):
         for key, value in extra_signals.items():
             if key in reserved_keys:
                 raise TypeError(f"Invalid custom metadata key '{key}': reserved name")
+            if isinstance(value, np.ndarray):
+                raise TypeError(
+                    f"Custom metadata key '{key}' must be a SignalND "
+                    f"(a dict with 'samples', 'start_time_offset', and 'sampling_frequency'), "
+                    f"not a flat array. "
+                    f"Wrap your data: {{'samples': array, 'start_time_offset': 0.0, "
+                    f"'sampling_frequency': fs}}."
+                )
             setattr(self, key, value)
 
         # Add custom extra signals to the schema as generic SignalND specs, so they get validated.
@@ -1493,9 +1509,10 @@ class MetadataSpec(Spec):
             custom_keys = ", ".join(sorted(self._extra_signal_keys))
             warnings.warn(
                 log.warning(
-                    "Custom keys were added to 'metadata' and validated as SignalND specs: "
-                    f"{custom_keys}. If these keys match standard categories, consider using: "
-                    f"{suggested_signal_keys}"
+                    f"Custom signal key(s) added to 'metadata': {custom_keys}. "
+                    "These are validated as generic SignalND specs. "
+                    "If your signal matches an existing type, prefer one of the supported "
+                    f"signal fields: {suggested_signal_keys}."
                 )
             )
 

@@ -980,10 +980,16 @@ def _validate_file_impl(file: File) -> None:
                     f"'{group_path}/{key}' is not a recognised zea data type."
                 )
         else:
-            # For new-format files: accepted keys are DataSpec.SCHEMA keys.
+            # For new-format files: flat datasets must be known DataSpec keys.
+            # HDF5 Groups are Map specs (either a named type or a custom map)
+            # and are always accepted; validate() is a structural check only.
             known = set(DataSpec.SCHEMA.keys())
+            known_flat = {k for k, v in DataSpec.SCHEMA.items() if "spec" not in v}
             for key in data_group.keys():
-                assert key in known, (
+                if isinstance(data_group[key], h5py.Group):
+                    # Named map or custom map — accepted without further checks here.
+                    continue
+                assert key in known_flat, (
                     f"'{group_path}/{key}' is not in the DataSpec schema. "
                     f"Known keys: {sorted(known)}"
                 )
