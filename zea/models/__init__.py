@@ -83,6 +83,7 @@ The following steps are recommended when adding a new model:
 """
 
 from . import (
+    able,
     carotid_segmenter,
     deeplabv3,
     dense,
