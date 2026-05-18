@@ -6,6 +6,7 @@ Original implementation of paper:
     - Author: Ben Luijten
 """
 
+import keras
 from keras import ops
 from keras.layers import Conv2D
 
@@ -33,6 +34,11 @@ class ABLE(BaseModel):
           - int -> every convolution uses (k, k)
           - tuple (h, w) -> every convolution uses (h, w)
           - list of ints/tuples -> layer-wise kernels (length must match layers)
+
+        !! WARNING: Currently only 1x1 kernels are supported in order to be compatible with
+        the PatchedGrid implementation that assumes independent processing of each pixel.
+        #TODO: Remove this restriction
+
         Default is 1.
     n_latent_layers : int, optional
         Number of inner layers to construct when `latent_layers` is not provided.
@@ -84,12 +90,9 @@ class ABLE(BaseModel):
         self.axis = axis
         self.latent_dim = latent_dim
 
-        # Placeholder for dynamically set layer dimensions and network
+        # Initialized in build()
         self.layer_dims = None
         self.kernel_sizes = None
-        self.network = self._get_network(self.layer_dims, self.kernel_sizes, axis=self.axis)
-
-        # Track layers belonging to ABLE
         self._able_layers = []
 
     def _init_kernels(self, kernel_size, n_layers):
@@ -109,10 +112,38 @@ class ABLE(BaseModel):
             ValueError: If `kernel_size` is invalid or its length does not match `n_layers`.
         """
 
+        def _allowed_kernel_size(k):
+            # TODO: Remove this restriction once PatchedGrid supports larger kernels
+            # only allow 1x1 kernels for now
+            if isinstance(k, int):
+                if k != 1:
+                    raise ValueError(
+                        "Only kernel_size=1 is currently supported due to "
+                        "PatchedGrid limitations."
+                    )
+                return True
+            if (
+                isinstance(k, tuple)
+                and len(k) == 2
+                and all(isinstance(x, int) for x in k)
+            ):
+                if k != (1, 1):
+                    raise ValueError(
+                        "Only kernel_size=(1,1) is currently supported due to "
+                        "PatchedGrid limitations."
+                    )
+                return True
+            raise ValueError("kernel_size entries must be int or tuple(int,int)")
+
         def _normalize_entry(k):
+            _allowed_kernel_size(k) # TODO: Remove this check once larger kernels are supported
             if isinstance(k, int):
                 return (k, k)
-            if isinstance(k, tuple) and len(k) == 2 and all(isinstance(x, int) for x in k):
+            if (
+                isinstance(k, tuple)
+                and len(k) == 2
+                and all(isinstance(x, int) for x in k)
+            ):
                 return k
             raise ValueError("kernel entries must be int or tuple(int,int)")
 
@@ -148,148 +179,90 @@ class ABLE(BaseModel):
 
         if latent_layers is not None:
             if not isinstance(latent_layers, (list, tuple)):
-                raise ValueError("`latent_layers` must be a list/tuple of integers when provided.")
+                raise ValueError(
+                    "`latent_layers` must be a list/tuple of integers when provided."
+                )
             layer_dims = list(latent_layers)
             if len(layer_dims) != n_latent_layers:
                 raise ValueError(
                     "`latent_layers` must contain exactly `n_latent_layers` entries for the inner layers."
                 )
             if not all(isinstance(d, int) and d > 0 for d in layer_dims):
-                raise ValueError("All `latent_layers` entries must be positive integers.")
+                raise ValueError(
+                    "All `latent_layers` entries must be positive integers."
+                )
             return [input_dim] + layer_dims + [input_dim]
 
         # Default behavior: create symmetric layers
         middle = [latent_dim] * n_latent_layers
         return [input_dim] + middle + [input_dim]
 
-    def _get_network(self, layer_dims, kernel_sizes, axis=3):
-        """Create a callable network function based on layer dimensions and kernel sizes.
-
-        Args:
-            layer_dims (list of int): Channel sizes for each layer.
-            kernel_sizes (list of tuple): List of (h, w) kernel tuples for each layer
-                (same length as `layer_dims`).
-            axis (int): Axis index in the input tensor that corresponds to the transducer elements.
-
-        Returns:
-            function: A callable function that applies the network to an input tensor.
-        """
-
-        def forward_pass(x):
-            """Apply the network to input tensor `x`.
-
-            Supports inputs with shapes like:
-              - (batch, H, W, elements) -- standard
-              - (batch, H, W, elements, n_ch) -- extra channel dim (n_ch==1 or 2)
-              - or any permutation where ``axis`` points to the elements axis.
-            """
-
-            # Infer input shape and dynamically initialize layers on first pass
-            if not self._able_layers:
-                # Stack final channel dim into element axis when needed.
-                # We assume supported input formats:
-                #   - (batch, H, W, elements)
-                #   - (batch, H, W, elements, n_ch)
-                # After stack_channels the last axis is the channel axis.
-                x_reshaped, meta = self.stack_channels(x, None)
-                stacked_input_dim = ops.shape(x_reshaped)[-1]
-
-                # Dynamically initialize layer dimensions and kernel sizes
-                self.layer_dims = self._init_layers(
-                    self.latent_layers, self.n_latent_layers, stacked_input_dim, self.latent_dim
-                )
-                self.kernel_sizes = self._init_kernels(self.kernel_size, len(self.layer_dims))
-
-                # Build conv layers and track them in _able_layers
-                for idx, (dim, kernel) in enumerate(zip(self.layer_dims, self.kernel_sizes)):
-                    activation = None if idx == (len(self.layer_dims) - 1) else self.antirectifier
-                    self._able_layers.append(
-                        Conv2D(dim, kernel, activation=activation, padding="same")
-                    )
-
-            # Use the reshaped input for the forward pass
-            x_reshaped, meta = self.stack_channels(x, None)
-
-            out = x_reshaped
-            for conv in self._able_layers:
-                out = conv(out)
-
-            # Multiply input with output (apply adaptive weighting)
-            # Ensure shapes match: broadcast if needed
-            out = ops.multiply(x_reshaped, out)
-
-            # Unstack channel dim back to original layout when necessary
-            out = self.unstack_channels(out, meta)
-
-            return out
-
-        return forward_pass
-
     def stack_channels(self, x, axis):
-        """Stack the final channel dimension into the element axis.
+        """Reshape input into 4D for use with Conv2D.
 
-        SIMPLIFIED:
-        - Assumes element axis is the second-last axis and optional per-element channel
-          axis is the last axis.
-        - If input rank == 4: (batch, H, W, elements) -> no change.
-        - If input rank == 5: (batch, H, W, elements, n_ch) -> merge elements and n_ch
-          into a single channel axis (last axis) only when n_ch > 1.
-        - Caller should ensure input layout meets the assumption or transpose beforehand.
+        PatchedGrid passes per-pixel data with the spatial dims collapsed:
+        - Rank 2: (pixels, elements)        -> (pixels, 1, 1, elements)
+        - Rank 3: (pixels, elements, n_ch)  -> (pixels, 1, 1, elements*n_ch)
+          (elements and n_ch are merged into a single channel axis, with n_ch
+          varying fastest so that unstack_channels can restore the original layout).
         """
         rank = len(x.shape)
-        meta = {"stacked": False}
+        shape = ops.shape(x)
+        meta = {"rank": rank, "stacked": False}
 
-        # supported shapes: rank == 4 or rank == 5
-        if rank == 4:
-            # (batch, H, W, elements) -> elements already the channel axis
-            return x, meta
+        if rank == 2:
+            # (pixels, elements) -> (pixels, 1, 1, elements)
+            return ops.reshape(x, (shape[0], 1, 1, shape[1])), meta
 
-        if rank == 5:
-            # (batch, H, W, elements, n_ch)
-            shape = ops.shape(x)
-            elem = shape[-2]
-            ch = shape[-1]
-            # nothing to do if n_ch == 1 (single channel per element)
+        if rank == 3:
+            # (pixels, elements, n_ch)
+            elem = shape[1]
+            ch = shape[2]
+            meta.update({"elem": elem, "ch": ch})
+
             if ch == 1:
-                return x, meta
+                # (pixels, elements, 1) -> (pixels, 1, 1, elements)
+                return ops.reshape(x, (shape[0], 1, 1, elem)), meta
 
-            # merge elements and per-element channels into single channel axis using reshape
-            # This preserves row-major ordering so unstack_channels can restore shape with a reshape.
-            new_last = elem * ch
-            new_shape = shape[:-2] + (new_last,)
-            x_swapped = ops.transpose(x, axes=list(range(rank - 2)) + [rank - 1, rank - 2])
-            x_reshaped = ops.reshape(x_swapped, new_shape)
+            # (pixels, elements, n_ch) -> transpose to (pixels, n_ch, elements)
+            # -> reshape to (pixels, 1, 1, n_ch*elements)
+            x_swapped = ops.transpose(x, axes=[0, 2, 1])
+            meta["stacked"] = True
+            return ops.reshape(x_swapped, (shape[0], 1, 1, elem * ch)), meta
 
-            meta.update({"stacked": True, "elem": elem, "ch": ch})
-            return x_reshaped, meta
-
-        # unsupported rank: leave unchanged (caller must provide expected formats)
+        # unsupported rank: leave unchanged
         return x, meta
 
     def unstack_channels(self, x, meta):
-        """Inverse of stack_channels.
+        """Inverse of stack_channels. Restores the original shape from Conv2D output.
 
-        Expects x with shape (..., ch*elem) and meta containing:
-        - "stacked": True
-        - "elem": original element count
-        - "ch": per-element channels (can be any int)
-        Restores (..., elem, ch).
+        Expects x with shape (pixels, 1, 1, C) and restores:
+        - rank 2 input: (pixels, 1, 1, elements)       -> (pixels, elements)
+        - rank 3, ch==1: (pixels, 1, 1, elements)      -> (pixels, elements, 1)
+        - rank 3, ch>1:  (pixels, 1, 1, n_ch*elements) -> (pixels, elements, n_ch)
         """
-        if not meta.get("stacked", False):
-            return x
+        rank = meta.get("rank", None)
+        shape = ops.shape(x)  # (pixels, 1, 1, C)
+        pixels = shape[0]
+        C = shape[-1]
 
-        elem = meta["elem"]
-        ch = meta["ch"]
+        if rank == 2:
+            # (pixels, 1, 1, elements) -> (pixels, elements)
+            return ops.reshape(x, (pixels, C))
 
-        # (..., ch*elem) -> (..., ch, elem)
-        shape = ops.shape(x)  # tuple of ints
-        new_shape = shape[:-1] + (ch, elem)  # tuple math, no ops.concatenate
-        x_reshaped = ops.reshape(x, new_shape)
+        if rank == 3:
+            elem = meta["elem"]
+            ch = meta["ch"]
+            if meta.get("stacked", False):
+                # (pixels, 1, 1, n_ch*elements) -> (pixels, n_ch, elements) -> (pixels, elements, n_ch)
+                x_r = ops.reshape(x, (pixels, ch, elem))
+                return ops.transpose(x_r, axes=[0, 2, 1])
+            else:
+                # ch == 1: (pixels, 1, 1, elements) -> (pixels, elements, 1)
+                return ops.reshape(x, (pixels, elem, 1))
 
-        # swap back (..., ch, elem) -> (..., elem, ch)
-        rank = len(x_reshaped.shape)
-        perm = list(range(rank - 2)) + [rank - 1, rank - 2]
-        return ops.transpose(x_reshaped, axes=perm)
+        # unsupported rank: return as-is
+        return x
 
     def antirectifier(self, x):
         """Apply the anti-rectifier activation function.
@@ -309,7 +282,8 @@ class ABLE(BaseModel):
         neg = ops.nn.relu(-x_centered)
         output = ops.concatenate([pos, neg], axis=-1)
         norm = ops.sqrt(
-            ops.mean(ops.square(output), axis=-1, keepdims=True) + keras.backend.epsilon()
+            ops.mean(ops.square(output), axis=-1, keepdims=True)
+            + keras.backend.epsilon()  # noqa: E501
         )
         return output / norm
 
@@ -320,19 +294,19 @@ class ABLE(BaseModel):
             input_shape (tuple): Shape of the input tensor.
         """
         # Check that input_shape is one of the supported formats:
-        #   - (batch, H, W, elements)       -> rank == 4
-        #   - (batch, H, W, elements, n_ch) -> rank == 5
-        if len(input_shape) not in (5, 6):
+        #   - (batch, pixels, elements)        -> rank == 3
+        #   - (batch, pixels, elements, n_ch)  -> rank == 4
+        if len(input_shape) not in (3, 4):
             raise ValueError(
-                "Input shape must be 4D or 5D tensor. Supported shapes:\n"
-                "- (batch, H, W, elements)\n"
-                "- (batch, H, W, elements, n_ch)"
+                "Input shape must be 3D or 4D tensor. Supported shapes:\n"
+                "- (batch, pixels, elements)\n"
+                "- (batch, pixels, elements, n_ch)"
             )
 
         # Compute stacked input channels: last axis after stack_channels is channel axis.
-        if len(input_shape) == 5:
+        if len(input_shape) == 3:
             stacked_input_dim = input_shape[-1]
-        else:  # len == 6
+        else:  # len == 4
             stacked_input_dim = input_shape[-2] * input_shape[-1]
 
         # Dynamically initialize layer dimensions and kernel sizes
@@ -343,8 +317,22 @@ class ABLE(BaseModel):
 
         # Build conv layers and track them in _able_layers
         for idx, (dim, kernel) in enumerate(zip(self.layer_dims, self.kernel_sizes)):
-            activation = None if idx == (len(self.layer_dims) - 1) else self.antirectifier
-            self._able_layers.append(Conv2D(dim, kernel, activation=activation, padding="same"))
+            activation = (
+                None if idx == (len(self.layer_dims) - 1) else self.antirectifier
+            )
+            layer = Conv2D(dim, kernel, activation=activation, padding="same")
+            self._able_layers.append(layer)
+            # Register as a named attribute so Keras tracks the weights.
+            setattr(self, f"_able_conv_{idx}", layer)
+
+        # Eagerly build every Conv2D layer with a concrete dummy input so that
+        # their kernels are fully initialised before any JAX tracing occurs.
+        # This prevents lazy-build (and random weight initialisation) from being
+        # triggered inside jax.value_and_grad / stateless_call, which would
+        # cause DynamicJaxprTracers to escape into variable._value.
+        dummy = ops.zeros((1, 1, 1, stacked_input_dim))
+        for layer in self._able_layers:
+            dummy = layer(dummy)
 
         # Mark the model as built
         super().build(input_shape)
@@ -383,13 +371,10 @@ class ABLE(BaseModel):
 
         # Multiply input with computed weights (apply adaptive weighting).
         out = ops.multiply(x_reshaped, weights)
-        out = x_reshaped
 
         # Unstack channel dim back to original layout when necessary
         out = self.unstack_channels(out, meta)
 
-        check = ops.all(ops.equal(inputs, out))
-        assert check, "Output not equal to input! Something went wrong in ABLE weighting."
         return out
 
 
@@ -412,7 +397,9 @@ if __name__ == "__main__":
     height = 64
     width = 64
     elements = 128
-    x = np.random.randn(batch_size, transmits, height, width, elements).astype(np.float32)
+    x = np.random.randn(batch_size, transmits, height, width, elements).astype(
+        np.float32
+    )
 
     y = model(x)
     print("Input shape:", x.shape)
@@ -421,7 +408,9 @@ if __name__ == "__main__":
     # test with extra channel dim
     model = ABLE(latent_dim=32, n_latent_layers=2, kernel_size=(1, 3))
     n_ch = 2
-    x2 = np.random.randn(batch_size, transmits, height, width, elements, n_ch).astype(np.float32)
+    x2 = np.random.randn(batch_size, transmits, height, width, elements, n_ch).astype(
+        np.float32
+    )
     y2 = model(x2)
 
     print("Input with channel dim shape:", x2.shape)
@@ -433,7 +422,9 @@ if __name__ == "__main__":
     model = ABLE(latent_dim=32, n_latent_layers=1, kernel_size=(3, 3))
     model.compile(jit_compile=True)
     batch_size = 1
-    x_large = np.random.randn(batch_size, transmits, 256, 256, 128, 2).astype(np.float32)
+    x_large = np.random.randn(batch_size, transmits, 256, 256, 128, 2).astype(
+        np.float32
+    )
     # move to device
     x_large = keras.ops.convert_to_tensor(x_large)
 
@@ -455,4 +446,6 @@ if __name__ == "__main__":
     end = perf_counter()
 
     avg_time = (end - start) / N
-    print(f"Average time per iteration over {N} runs: {avg_time:.6f} s (total {end - start:.6f} s)")
+    print(
+        f"Average time per iteration over {N} runs: {avg_time:.6f} s (total {end - start:.6f} s)"
+    )
