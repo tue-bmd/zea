@@ -151,13 +151,15 @@ def test_spec_to_dict_is_recursive(dataset_spec: FileSpec):
     result = dataset_spec.to_dict()
 
     assert isinstance(result, dict)
-    assert isinstance(result["data"], dict)
-    assert isinstance(result["scan"], dict)
+    assert isinstance(result["tracks"], list)
+    assert len(result["tracks"]) == 1
+    assert isinstance(result["tracks"][0]["data"], dict)
+    assert isinstance(result["tracks"][0]["scan"], dict)
     assert isinstance(result["metadata"], dict)
     assert isinstance(result["metrics"], dict)
 
-    assert np.array_equal(result["data"]["raw_data"], dataset_spec.data.raw_data)
-    assert np.array_equal(result["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
+    assert np.array_equal(result["tracks"][0]["data"]["raw_data"], dataset_spec.data.raw_data)
+    assert np.array_equal(result["tracks"][0]["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
     assert np.array_equal(
         result["metadata"]["annotations"]["view"],
         dataset_spec.metadata.annotations.view,
@@ -186,9 +188,15 @@ def test_saving_and_loading(tmp_path, dataset_spec: FileSpec):
     dataset_spec.save(save_path)
 
     with File(save_path) as loaded_dataset:
-        # Check that the loaded data matches the original
-        assert np.array_equal(loaded_dataset["data"]["raw_data"], dataset_spec.data.raw_data)
-        assert np.array_equal(loaded_dataset["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
+        # New format stores data and scan inside tracks/track_0/
+        assert np.array_equal(
+            loaded_dataset["tracks"]["track_0"]["data"]["raw_data"],
+            dataset_spec.data.raw_data,
+        )
+        assert np.array_equal(
+            loaded_dataset["tracks"]["track_0"]["scan"]["t0_delays"],
+            dataset_spec.scan.t0_delays,
+        )
         assert np.array_equal(
             loaded_dataset["metadata"]["annotations"]["view"].asstr()[()],
             dataset_spec.metadata.annotations.view,
@@ -359,7 +367,7 @@ def test_data_accepts_custom_map_keys_and_warns():
 
     assert isinstance(dataset.data, DataSpec)
     assert isinstance(dataset.data.custom_map, Map)
-    assert "custom_map" in dataset.to_dict()["data"]
+    assert "custom_map" in dataset.to_dict()["tracks"][0]["data"]
 
 
 def test_data_custom_key_requires_map_spec():
@@ -408,6 +416,11 @@ def test_schema_keys_match_dataclass_fields_for_all_specs():
     for cls in spec_classes:
         dataclass_field_names = {field.name for field in fields(cls)}
         schema_field_names = set(cls.SCHEMA.keys())
+
+        # Some Spec subclasses declare fields that are intentionally excluded from SCHEMA
+        # (e.g. FileSpec.tracks is managed manually in save/from_hdf5).
+        excluded = getattr(cls, "_SCHEMA_EXCLUDED_FIELDS", frozenset())
+        dataclass_field_names -= excluded
 
         missing_in_schema = dataclass_field_names - schema_field_names
         extra_in_schema = schema_field_names - dataclass_field_names

@@ -952,5 +952,5 @@ def test_verasonics_compression_flag_respected(tmp_path):
     import h5py as _h5py
 
     with _h5py.File(path, "r") as hf:
-        ds = hf["data/raw_data"]
+        ds = hf["tracks/track_0/data/raw_data"]
         assert ds.compression is None, "dataset should have no compression"

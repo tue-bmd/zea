@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from zea.data.file import File, GroupProxy, dict_to_sorted_list, load_file
-from zea.data.spec import FileSpec, Image, Segmentation
+from zea.data.file import File, GroupProxy, TrackProxy, dict_to_sorted_list, load_file
+from zea.data.spec import FileSpec, Image, Segmentation, TrackSpec
 from zea.probes import Probe
 from zea.scan import Scan
 
@@ -378,20 +378,20 @@ class TestFieldMetadataAttrs:
         path, *_ = spec_file
 
         with File(path) as f:
-            rd_ds = f["data"]["raw_data"]
+            rd_ds = f.data.raw_data
             assert rd_ds.attrs["unit"] == "-"
             assert rd_ds.attrs["description"] != ""
 
             # Check scan field metadata
-            pg_ds = f["scan"]["probe_geometry"]
+            pg_ds = f._scan_h5_group["probe_geometry"]
             assert pg_ds.attrs["unit"] == "m"
 
     def test_scan_field_metadata_matches_spec(self, spec_file):
         path, *_ = spec_file
 
         with File(path) as f:
-            for key in f["scan"].keys():
-                ds = f["scan"][key]
+            for key in f._scan_h5_group.keys():
+                ds = f._scan_h5_group[key]
                 assert "unit" in ds.attrs, f"Missing 'unit' on scan/{key}"
                 assert "description" in ds.attrs, f"Missing 'description' on scan/{key}"
 
@@ -860,3 +860,350 @@ def test_load_file_image_type(tmp_path):
     data, scan, probe = load_file(path, data_type="image")
     assert isinstance(data, np.ndarray), "load_file should return ndarray for image type"
     assert data.shape[0] == 2, "should load all 2 frames"
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by multi-track tests
+# ---------------------------------------------------------------------------
+
+
+def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
+    """Build and save a two-track FileSpec; return (path, raw_a, raw_b)."""
+    raw_a = np.arange(n_frames * n_tx * n_ax * n_el * n_ch, dtype=np.float32).reshape(
+        n_frames, n_tx, n_ax, n_el, n_ch
+    )
+    raw_b = raw_a * 2
+
+    scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+    tracks = [
+        TrackSpec(data={"raw_data": raw_a}, scan=scan),
+        TrackSpec(data={"raw_data": raw_b}, scan=scan),
+    ]
+    spec = FileSpec(tracks=tracks, probe_name="two_track_probe")
+    path = tmp_path / "two_tracks.hdf5"
+    spec.save(str(path))
+    return path, raw_a, raw_b
+
+
+class TestMultiTrackFile:
+    """Tests for File.tracks, TrackProxy, and single-track guards."""
+
+    # ------------------------------------------------------------------
+    # File.tracks property
+    # ------------------------------------------------------------------
+
+    def test_tracks_returns_list_of_track_proxies(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            tracks = f.tracks
+        assert len(tracks) == 2
+        assert all(isinstance(t, TrackProxy) for t in tracks)
+
+    def test_tracks_single_track_file_returns_one_proxy(self, tmp_path):
+        """A single-track new-format file exposes one TrackProxy."""
+        raw = np.zeros((2, 3, 8, 4, 1), dtype=np.float32)
+        spec = FileSpec(
+            data={"raw_data": raw},
+            scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+        )
+        path = tmp_path / "single_track.hdf5"
+        spec.save(str(path))
+
+        with File(path) as f:
+            tracks = f.tracks
+        assert len(tracks) == 1
+        assert isinstance(tracks[0], TrackProxy)
+
+    def test_tracks_raises_for_legacy_flat_file(self, tmp_path):
+        """Legacy files (no tracks/ group) raise AttributeError on .tracks."""
+        import h5py
+
+        path = tmp_path / "legacy.hdf5"
+        with h5py.File(path, "w") as f:
+            g = f.create_group("data")
+            g.create_dataset("raw_data", data=np.zeros((1, 2, 8, 4, 1), dtype=np.float32))
+
+        with File(path) as f:
+            with pytest.raises(AttributeError, match="legacy"):
+                _ = f.tracks
+
+    # ------------------------------------------------------------------
+    # TrackProxy.data and TrackProxy.scan()
+    # ------------------------------------------------------------------
+
+    def test_track_data_returns_correct_array(self, tmp_path):
+        path, raw_a, raw_b = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            tracks = f.tracks
+            loaded_a = tracks[0].data.raw_data[:]
+            loaded_b = tracks[1].data.raw_data[:]
+        np.testing.assert_array_equal(loaded_a, raw_a)
+        np.testing.assert_array_equal(loaded_b, raw_b)
+
+    def test_track_data_is_group_proxy(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            assert isinstance(f.tracks[0].data, GroupProxy)
+
+    def test_track_scan_returns_scan_object(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            scan = f.tracks[0].scan()
+        assert isinstance(scan, Scan)
+
+    def test_track_scan_kwargs_override(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            scan = f.tracks[0].scan(sound_speed=np.float32(1480.0))
+        assert float(scan.sound_speed) == pytest.approx(1480.0)
+
+    def test_track_repr(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            r = repr(f.tracks[1])
+        assert "index=1" in r
+
+    # ------------------------------------------------------------------
+    # Guards on File.data and File.scan() for multi-track files
+    # ------------------------------------------------------------------
+
+    def test_file_data_raises_for_multi_track(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            with pytest.raises(AttributeError, match="2 tracks"):
+                _ = f.data
+
+    def test_file_scan_raises_for_multi_track(self, tmp_path):
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            with pytest.raises(AttributeError, match="2 tracks"):
+                f.scan()
+
+    def test_error_message_mentions_tracks_property(self, tmp_path):
+        """The error on file.data tells the user to use file.tracks."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            with pytest.raises(AttributeError, match="file.tracks"):
+                _ = f.data
+        with File(path) as f:
+            with pytest.raises(AttributeError, match="file.tracks"):
+                f.scan()
+
+    # ------------------------------------------------------------------
+    # Single-track files: backwards-compatible access still works
+    # ------------------------------------------------------------------
+
+    def test_single_track_data_still_works(self, tmp_path):
+        """file.data works unchanged for single-track new-format files."""
+        raw = np.ones((2, 3, 8, 4, 1), dtype=np.float32)
+        spec = FileSpec(
+            data={"raw_data": raw},
+            scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+        )
+        path = tmp_path / "single.hdf5"
+        spec.save(str(path))
+
+        with File(path) as f:
+            np.testing.assert_array_equal(f.data.raw_data[:], raw)
+
+    def test_single_track_scan_still_works(self, tmp_path):
+        """file.scan() works unchanged for single-track new-format files."""
+        spec = FileSpec(
+            data={"raw_data": np.zeros((2, 3, 8, 4, 1), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+        )
+        path = tmp_path / "single_scan.hdf5"
+        spec.save(str(path))
+
+        with File(path) as f:
+            scan = f.scan()
+        assert isinstance(scan, Scan)
+        assert scan.n_tx == 3
+
+    # ------------------------------------------------------------------
+    # Dict-format track inputs
+    # ------------------------------------------------------------------
+
+    def test_multi_track_from_dicts(self, tmp_path):
+        """FileSpec accepts plain dicts instead of TrackSpec objects."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 3, 4, 8, 1
+        raw_a = np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+        raw_b = np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+        scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+
+        # Tracks supplied as plain dicts — FileSpec should coerce them to TrackSpec.
+        spec = FileSpec(
+            tracks=[
+                {"data": {"raw_data": raw_a}, "scan": scan},
+                {"data": {"raw_data": raw_b}, "scan": scan},
+            ]
+        )
+        path = tmp_path / "dict_tracks.hdf5"
+        spec.save(str(path))
+
+        with File(path) as f:
+            tracks = f.tracks
+            assert len(tracks) == 2
+            np.testing.assert_array_equal(tracks[0].data.raw_data[:], raw_a)
+            np.testing.assert_array_equal(tracks[1].data.raw_data[:], raw_b)
+
+    # ------------------------------------------------------------------
+    # track_schedule: storage and retrieval
+    # ------------------------------------------------------------------
+
+    def _make_scheduled_file(self, tmp_path, n_frames=2, n_tx_a=3, n_tx_b=2, n_el=4, n_ax=8):
+        """Two-track file with an interleaved track_schedule and distinct t2nt values."""
+        n_ch = 1
+        raw_a = np.zeros((n_frames, n_tx_a, n_ax, n_el, n_ch), dtype=np.float32)
+        raw_b = np.ones((n_frames, n_tx_b, n_ax, n_el, n_ch), dtype=np.float32)
+
+        dt_a = np.full((n_frames, n_tx_a), 0.1, dtype=np.float32)
+        dt_b = np.full((n_frames, n_tx_b), 0.05, dtype=np.float32)
+
+        scan_a = _scan_minimal(n_frames=n_frames, n_tx=n_tx_a, n_el=n_el)
+        scan_a["time_to_next_transmit"] = dt_a
+        scan_b = _scan_minimal(n_frames=n_frames, n_tx=n_tx_b, n_el=n_el)
+        scan_b["time_to_next_transmit"] = dt_b
+
+        # Schedule: interleaved a0 b0 a1 b1 a2 → [0,1,0,1,0]
+        schedule = np.array([0, 1, 0, 1, 0], dtype=np.int32)
+
+        spec = FileSpec(
+            tracks=[
+                {"data": {"raw_data": raw_a}, "scan": scan_a},
+                {"data": {"raw_data": raw_b}, "scan": scan_b},
+            ],
+            track_schedule=schedule,
+        )
+        path = tmp_path / "scheduled.hdf5"
+        spec.save(str(path))
+        return path, schedule, dt_a, dt_b
+
+    def test_track_schedule_stored_and_loaded(self, tmp_path):
+        """File.track_schedule returns the stored int32 array."""
+        path, schedule, *_ = self._make_scheduled_file(tmp_path)
+        with File(path) as f:
+            loaded = f.track_schedule
+        assert loaded is not None
+        np.testing.assert_array_equal(loaded, schedule)
+        assert loaded.dtype == np.int32
+
+    def test_track_schedule_none_when_absent(self, tmp_path):
+        """File.track_schedule returns None for files without a schedule."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            assert f.track_schedule is None
+
+    def test_track_schedule_invalid_indices_raises(self, tmp_path):
+        """FileSpec raises ValueError when schedule indices exceed track count."""
+        raw = np.zeros((1, 2, 8, 4, 1), dtype=np.float32)
+        scan = _scan_minimal(n_frames=1, n_tx=2, n_el=4)
+        schedule_bad = np.array([0, 1, 2], dtype=np.int32)  # index 2 out of range for 2 tracks
+
+        with pytest.raises(ValueError, match="track_schedule"):
+            FileSpec(
+                tracks=[
+                    {"data": {"raw_data": raw}, "scan": scan},
+                    {"data": {"raw_data": raw}, "scan": scan},
+                ],
+                track_schedule=schedule_bad,
+            )
+
+    def test_track_schedule_valid_does_not_raise(self, tmp_path):
+        """FileSpec accepts a schedule whose indices are all in range."""
+        raw = np.zeros((1, 2, 8, 4, 1), dtype=np.float32)
+        scan = _scan_minimal(n_frames=1, n_tx=2, n_el=4)
+        schedule = np.array([0, 1, 0, 1], dtype=np.int32)
+
+        spec = FileSpec(
+            tracks=[
+                {"data": {"raw_data": raw}, "scan": scan},
+                {"data": {"raw_data": raw}, "scan": scan},
+            ],
+            track_schedule=schedule,
+        )
+        path = tmp_path / "valid_schedule.hdf5"
+        spec.save(str(path))  # should not raise
+
+    # ------------------------------------------------------------------
+    # TrackProxy.timestamps
+    # ------------------------------------------------------------------
+
+    def test_track_timestamps_none_without_schedule(self, tmp_path):
+        """timestamps is None when the file has no track_schedule."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            assert f.tracks[0].timestamps is None
+
+    def test_track_timestamps_none_without_time_to_next_transmit(self, tmp_path):
+        """timestamps is None when a track's scan has no time_to_next_transmit."""
+        n_frames, n_tx, n_el, n_ax = 1, 2, 4, 8
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+
+        # Build a scan dict without time_to_next_transmit
+        scan_no_t2nt = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+        del scan_no_t2nt["time_to_next_transmit"]
+
+        spec = FileSpec(
+            tracks=[
+                {"data": {"raw_data": raw}, "scan": scan_no_t2nt},
+                {"data": {"raw_data": raw}, "scan": scan_no_t2nt},
+            ],
+            track_schedule=np.array([0, 1, 0, 1], dtype=np.int32),
+        )
+        path = tmp_path / "no_t2nt.hdf5"
+        spec.save(str(path))
+
+        with File(path) as f:
+            assert f.tracks[0].timestamps is None
+
+    def test_track_timestamps_shape(self, tmp_path):
+        """timestamps has shape (n_frames, n_tx_for_that_track)."""
+        path, schedule, *_ = self._make_scheduled_file(tmp_path, n_frames=2, n_tx_a=3, n_tx_b=2)
+        with File(path) as f:
+            ts_a = f.tracks[0].timestamps
+            ts_b = f.tracks[1].timestamps
+
+        # schedule = [0,1,0,1,0] → 3 events for track 0, 2 events for track 1
+        assert ts_a.shape == (2, 3)
+        assert ts_b.shape == (2, 2)
+
+    def test_track_timestamps_values_correct(self, tmp_path):
+        """Timestamps equal cumulative sums of time_to_next_transmit across all tracks.
+
+        Schedule [0,1,0,1,0] with dt_a=0.1, dt_b=0.05:
+          global events:  0      1      2      3      4
+          track index:    0      1      0      1      0
+          cumtime:        0   +0.1  +0.05  +0.1  +0.05   → [0, 0.1, 0.15, 0.25, 0.30]
+
+          track 0 fires at positions 0, 2, 4 → timestamps [0, 0.15, 0.30]
+          track 1 fires at positions 1, 3   → timestamps [0.1, 0.25]
+        """
+        path, _, dt_a, dt_b = self._make_scheduled_file(tmp_path, n_frames=1, n_tx_a=3, n_tx_b=2)
+        with File(path) as f:
+            ts_a = f.tracks[0].timestamps  # (1, 3)
+            ts_b = f.tracks[1].timestamps  # (1, 2)
+
+        expected_a = np.array([[0.0, 0.15, 0.30]])
+        expected_b = np.array([[0.1, 0.25]])
+
+        np.testing.assert_allclose(ts_a, expected_a, atol=1e-9)
+        np.testing.assert_allclose(ts_b, expected_b, atol=1e-9)
+
+    def test_track_timestamps_monotonically_increasing(self, tmp_path):
+        """Each track's timestamps are strictly increasing across frames."""
+        path, *_ = self._make_scheduled_file(tmp_path, n_frames=3, n_tx_a=3, n_tx_b=2)
+        with File(path) as f:
+            for track in f.tracks:
+                ts = track.timestamps
+                assert ts is not None
+                assert np.all(np.diff(ts, axis=1) > 0), f"Non-monotonic timestamps: {ts}"
+
+    def test_track_timestamps_frame_invariant(self, tmp_path):
+        """When t2nt is identical across frames, timestamps are frame-invariant."""
+        path, *_ = self._make_scheduled_file(tmp_path, n_frames=4, n_tx_a=3, n_tx_b=2)
+        with File(path) as f:
+            ts = f.tracks[0].timestamps  # (4, 3)
+        # All rows should be equal since dt_a and dt_b are constant across frames
+        np.testing.assert_array_equal(ts[0], ts[1])
+        np.testing.assert_array_equal(ts[0], ts[2])

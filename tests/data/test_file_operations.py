@@ -293,7 +293,9 @@ def _assert_descriptions_and_additional_elements_equal(path, other_path: Path):
 
 def _assert_beamformed_data_still_exists(path: Path):
     with h5py.File(path, "r") as f:
-        assert "data/beamformed_data" in f
+        # New-format files store data under tracks/track_0/data/
+        key = "tracks/track_0/data/beamformed_data" if "tracks" in f else "data/beamformed_data"
+        assert key in f
 
 
 def _make_file_with_distinct_demod_freq(tmp_path, demod_freq=5e6, center_freq=7e6):
@@ -373,7 +375,8 @@ def test_uint8_sum_no_truncation(tmp_path):
 
     for p in (input1, input2):
         with h5py.File(p, "r+") as hf:
-            hf["data/image/values"][0, 0, 0] = 200
+            key = "tracks/track_0/data/image/values" if "tracks" in hf else "data/image/values"
+            hf[key][0, 0, 0] = 200
 
     sum_data([input1, input2], output)
 
@@ -402,7 +405,8 @@ def test_compound_frames_uint8_linear(tmp_path):
     )
 
     with h5py.File(input_path, "r+") as hf:
-        hf["data/image/values"][:] = 100
+        key = "tracks/track_0/data/image/values" if "tracks" in hf else "data/image/values"
+        hf[key][:] = 100
 
     compound_frames(input_path, output_path)
 
