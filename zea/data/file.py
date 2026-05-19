@@ -358,8 +358,10 @@ class File(h5py.File):
     def create(
         cls,
         path,
-        data: dict,
+        data: dict | None = None,
         scan: dict | None = None,
+        tracks: list | None = None,
+        track_schedule: "np.ndarray | None" = None,
         metadata: dict | None = None,
         metrics: dict | None = None,
         probe_name: str | None = None,
@@ -374,10 +376,23 @@ class File(h5py.File):
         schema (dtypes, shapes, dimension consistency) **before** anything is
         written to disk.
 
+        For single-track files, supply ``data`` and ``scan``.  For multi-track
+        files, supply ``tracks`` (a list of dicts with ``"data"`` and ``"scan"``
+        keys, or :class:`~zea.data.spec.TrackSpec` objects) and optionally
+        ``track_schedule``.
+
         Args:
             path: Destination file path.
             data: Data dict accepted by :class:`~zea.data.spec.DataSpec`.
+                Mutually exclusive with ``tracks``.
             scan: Scan-parameter dict accepted by :class:`~zea.data.spec.ScanSpec`.
+                Mutually exclusive with ``tracks``.
+            tracks: List of track dicts (each with ``"data"`` and ``"scan"``
+                keys) or :class:`~zea.data.spec.TrackSpec` objects.
+                Mutually exclusive with ``data``/``scan``.
+            track_schedule: Optional int32 array of length ``n_total_tx``
+                indicating which track each global transmit belongs to.
+                Only used with ``tracks``.
             metadata: Optional metadata dict accepted by
                 :class:`~zea.data.spec.MetadataSpec`.
             metrics: Optional metrics dict accepted by
@@ -389,8 +404,9 @@ class File(h5py.File):
             overwrite: If *False* (default), raise if the file exists.
 
         Returns:
-            File: The closed :class:`File` handle (re-open with
-            ``File(path)`` to read).
+            File: An open read-only :class:`File` handle.
+
+        Single-track example:
 
         .. doctest::
 
@@ -424,14 +440,26 @@ class File(h5py.File):
             >>> f.close()
             >>> os.unlink(path)
         """
+        if tracks is not None and data is not None:
+            raise ValueError("Provide either 'tracks' or 'data'/'scan', not both.")
+
         path = Path(path)
 
         if path.exists() and not overwrite:
             raise FileExistsError(f"File already exists: {path}")
 
-        kwargs: dict = {"data": data}
-        if scan:
-            kwargs["scan"] = scan
+        kwargs: dict = {}
+        if tracks is not None:
+            kwargs["tracks"] = tracks
+            if track_schedule is not None:
+                kwargs["track_schedule"] = track_schedule
+        else:
+            if data is None:
+                raise ValueError("Either 'data' or 'tracks' must be provided.")
+            kwargs["data"] = data
+            if scan:
+                kwargs["scan"] = scan
+
         if metadata is not None:
             kwargs["metadata"] = metadata
         if metrics is not None:

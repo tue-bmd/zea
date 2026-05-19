@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from zea.data.file import File, GroupProxy, TrackProxy, dict_to_sorted_list, load_file
-from zea.data.spec import FileSpec, Image, Segmentation, TrackSpec
+from zea.data.spec import FileSpec, Image, Segmentation
 from zea.probes import Probe
 from zea.scan import Scan
 
@@ -868,20 +868,23 @@ def test_load_file_image_type(tmp_path):
 
 
 def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
-    """Build and save a two-track FileSpec; return (path, raw_a, raw_b)."""
+    """Build and save a two-track file via File.create; return (path, raw_a, raw_b)."""
     raw_a = np.arange(n_frames * n_tx * n_ax * n_el * n_ch, dtype=np.float32).reshape(
         n_frames, n_tx, n_ax, n_el, n_ch
     )
     raw_b = raw_a * 2
 
     scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
-    tracks = [
-        TrackSpec(data={"raw_data": raw_a}, scan=scan),
-        TrackSpec(data={"raw_data": raw_b}, scan=scan),
-    ]
-    spec = FileSpec(tracks=tracks, probe_name="two_track_probe")
     path = tmp_path / "two_tracks.hdf5"
-    spec.save(str(path))
+    f = File.create(
+        path,
+        tracks=[
+            {"data": {"raw_data": raw_a}, "scan": scan},
+            {"data": {"raw_data": raw_b}, "scan": scan},
+        ],
+        probe_name="two_track_probe",
+    )
+    f.close()
     return path, raw_a, raw_b
 
 
@@ -902,12 +905,13 @@ class TestMultiTrackFile:
     def test_tracks_single_track_file_returns_one_proxy(self, tmp_path):
         """A single-track new-format file exposes one TrackProxy."""
         raw = np.zeros((2, 3, 8, 4, 1), dtype=np.float32)
-        spec = FileSpec(
+        path = tmp_path / "single_track.hdf5"
+        f = File.create(
+            path,
             data={"raw_data": raw},
             scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
         )
-        path = tmp_path / "single_track.hdf5"
-        spec.save(str(path))
+        f.close()
 
         with File(path) as f:
             tracks = f.tracks
@@ -996,24 +1000,24 @@ class TestMultiTrackFile:
     def test_single_track_data_still_works(self, tmp_path):
         """file.data works unchanged for single-track new-format files."""
         raw = np.ones((2, 3, 8, 4, 1), dtype=np.float32)
-        spec = FileSpec(
+        path = tmp_path / "single.hdf5"
+        File.create(
+            path,
             data={"raw_data": raw},
             scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
-        )
-        path = tmp_path / "single.hdf5"
-        spec.save(str(path))
+        ).close()
 
         with File(path) as f:
             np.testing.assert_array_equal(f.data.raw_data[:], raw)
 
     def test_single_track_scan_still_works(self, tmp_path):
         """file.scan() works unchanged for single-track new-format files."""
-        spec = FileSpec(
+        path = tmp_path / "single_scan.hdf5"
+        File.create(
+            path,
             data={"raw_data": np.zeros((2, 3, 8, 4, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
-        )
-        path = tmp_path / "single_scan.hdf5"
-        spec.save(str(path))
+        ).close()
 
         with File(path) as f:
             scan = f.scan()
@@ -1025,21 +1029,20 @@ class TestMultiTrackFile:
     # ------------------------------------------------------------------
 
     def test_multi_track_from_dicts(self, tmp_path):
-        """FileSpec accepts plain dicts instead of TrackSpec objects."""
+        """File.create accepts plain dicts for tracks."""
         n_frames, n_tx, n_el, n_ax, n_ch = 2, 3, 4, 8, 1
         raw_a = np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
         raw_b = np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
         scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
 
-        # Tracks supplied as plain dicts — FileSpec should coerce them to TrackSpec.
-        spec = FileSpec(
+        path = tmp_path / "dict_tracks.hdf5"
+        File.create(
+            path,
             tracks=[
                 {"data": {"raw_data": raw_a}, "scan": scan},
                 {"data": {"raw_data": raw_b}, "scan": scan},
-            ]
-        )
-        path = tmp_path / "dict_tracks.hdf5"
-        spec.save(str(path))
+            ],
+        ).close()
 
         with File(path) as f:
             tracks = f.tracks
@@ -1068,15 +1071,15 @@ class TestMultiTrackFile:
         # Schedule: interleaved a0 b0 a1 b1 a2 → [0,1,0,1,0]
         schedule = np.array([0, 1, 0, 1, 0], dtype=np.int32)
 
-        spec = FileSpec(
+        path = tmp_path / "scheduled.hdf5"
+        File.create(
+            path,
             tracks=[
                 {"data": {"raw_data": raw_a}, "scan": scan_a},
                 {"data": {"raw_data": raw_b}, "scan": scan_b},
             ],
             track_schedule=schedule,
-        )
-        path = tmp_path / "scheduled.hdf5"
-        spec.save(str(path))
+        ).close()
         return path, schedule, dt_a, dt_b
 
     def test_track_schedule_stored_and_loaded(self, tmp_path):

@@ -140,16 +140,17 @@ _per-track_, which can be applied independently to each track's data.
 .. code-block:: python
 
     import numpy as np
-    from zea.data.spec import FileSpec
+    from zea import File
 
     n_frames, n_ax, n_el = 4, 512, 128
     n_tx_focused, n_tx_pw = 16, 8
 
     probe_geom = np.zeros((n_el, 3), dtype=np.float32)
 
-    spec = FileSpec(
+    f = File.create(
+        "acquisition.hdf5",
         tracks=[
-            # Track 1: e.g. focused B-mode
+            # Track 0: focused B-mode
             {
                 "data": {"raw_data": np.zeros((n_frames, n_tx_focused, n_ax, n_el, 1), dtype=np.float32)},
                 "scan": {
@@ -165,7 +166,7 @@ _per-track_, which can be applied independently to each track's data.
                     "polar_angles":           np.zeros(n_tx_focused, dtype=np.float32),
                 },
             },
-            # Track 2: e.g. plane-wave Doppler
+            # Track 1: plane-wave Doppler
             {
                 "data": {"raw_data": np.zeros((n_frames, n_tx_pw, n_ax, n_el, 1), dtype=np.float32)},
                 "scan": {
@@ -184,7 +185,7 @@ _per-track_, which can be applied independently to each track's data.
         ],
         probe_name="L11-4v",
     )
-    spec.save("acquisition.hdf5")
+    f.close()
 
 **Read — unpack multiple tracks from a file**
 
