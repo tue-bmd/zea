@@ -23,7 +23,6 @@ from zea.data.spec import (
     DataSpec,
     EnvelopeData,
     Image,
-    ImageSc,
     MetadataSpec,
     MetricsSpec,
     ProbePose,
@@ -372,7 +371,6 @@ def generate() -> str:
     map_classes = [
         ("beamformed_data", BeamformedData),
         ("envelope_data", EnvelopeData),
-        ("image_sc", ImageSc),
         ("image", Image),
         ("segmentation", Segmentation),
         ("sos_map", SosMap),

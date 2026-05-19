@@ -26,7 +26,8 @@ def test_segmentation_spec():
     # Correct usage
     values = np.zeros((10, 256, 256, 1, 4), dtype=np.bool_)
     labels = np.array(["background", "label1", "label2", "label3"], dtype=np.str_)
-    # values shape (10, 256, 256, 1, 4): spatial dims = (10, 256, 256, 1), n_labels treated as channel
+    # values shape (10, 256, 256, 1, 4): spatial dims = (10, 256, 256, 1),
+    # n_labels treated as channel
     coordinates = np.zeros((10, 256, 256, 1, 3), dtype=np.float32)
     segmentation = Segmentation(values=values, labels=labels, coordinates=coordinates)
     assert segmentation.values.shape == (10, 256, 256, 1, 4)

@@ -129,12 +129,6 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - –
            - 
            - |badge-opt|
-         * - ``image_sc``
-           - :class:`~zea.data.spec.ImageSc`
-           - group
-           - –
-           - 
-           - |badge-opt|
          * - ``image``
            - :class:`~zea.data.spec.Image`
            - group
@@ -207,9 +201,9 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (n_frames, z, x, y, n_ch) or (n_frames, z, x, n_ch)
               - –
               - |badge-req|
-            * - ``extent``
+            * - ``coordinates``
               - ``float32``
-              - (n_frames, 6) or (6)
+              - (..., 3)
               - –
               - |badge-opt|
             * - ``labels``
@@ -256,58 +250,9 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
-            * - ``extent``
+            * - ``coordinates``
               - ``float32``
-              - (n_frames, 6) or (6)
-              - –
-              - |badge-opt|
-            * - ``labels``
-              - ``str``
-              - (n_spatial_ch)
-              - –
-              - |badge-opt|
-            * - ``description``
-              - ``str``
-              - scalar
-              - –
-              - |badge-opt|
-            * - ``unit``
-              - ``str``
-              - scalar
-              - –
-              - |badge-opt|
-            * - ``min``
-              - ``float32``
-              - scalar
-              - –
-              - |badge-opt|
-            * - ``max``
-              - ``float32``
-              - scalar
-              - –
-              - |badge-opt|
-
-      .. dropdown:: ``image_sc``
-
-         Scan-converted image. Values are ``float32`` in (n_frames, z, x) or (n_frames, z, x, y).
-
-         .. list-table::
-            :header-rows: 1
-            :widths: 22 20 28 10 10
-         
-            * - Field
-              - Type
-              - Shape
-              - Unit
-              - 
-            * - ``values``
-              - ``float32`` | ``uint8``
-              - (n_frames, x, z, y) or (n_frames, x, z)
-              - –
-              - |badge-req|
-            * - ``extent``
-              - ``float32``
-              - (n_frames, 6) or (6)
+              - (..., 3)
               - –
               - |badge-opt|
             * - ``labels``
@@ -354,9 +299,9 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (n_frames, x, z, y) or (n_frames, x, z)
               - –
               - |badge-req|
-            * - ``extent``
+            * - ``coordinates``
               - ``float32``
-              - (n_frames, 6) or (6)
+              - (..., 3)
               - –
               - |badge-opt|
             * - ``labels``
@@ -403,9 +348,9 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
-            * - ``extent``
+            * - ``coordinates``
               - ``float32``
-              - (n_frames, 6) or (6)
+              - (..., 3)
               - –
               - |badge-opt|
             * - ``labels``
@@ -452,9 +397,9 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
-            * - ``extent``
+            * - ``coordinates``
               - ``float32``
-              - (n_frames, 6) or (6)
+              - (..., 3)
               - –
               - |badge-opt|
             * - ``labels``
@@ -501,9 +446,9 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
-            * - ``extent``
+            * - ``coordinates``
               - ``float32``
-              - (n_frames, 6) or (6)
+              - (..., 3)
               - –
               - |badge-opt|
             * - ``labels``
@@ -550,9 +495,9 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
-            * - ``extent``
+            * - ``coordinates``
               - ``float32``
-              - (n_frames, 6) or (6)
+              - (..., 3)
               - –
               - |badge-opt|
             * - ``labels``
@@ -599,9 +544,9 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
-            * - ``extent``
+            * - ``coordinates``
               - ``float32``
-              - (n_frames, 6) or (6)
+              - (..., 3)
               - –
               - |badge-opt|
             * - ``labels``
@@ -648,9 +593,9 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
-            * - ``extent``
+            * - ``coordinates``
               - ``float32``
-              - (n_frames, 6) or (6)
+              - (..., 3)
               - –
               - |badge-opt|
             * - ``labels``
