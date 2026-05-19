@@ -1185,7 +1185,7 @@ class ScanSpec(Spec):
             "waveforms_two_way": "two-way transmit waveforms (n_tx, n_samples)",
         }
         for s_field, description in _optional_scan_fields.items():
-            if getattr(self, field) is None:
+            if getattr(self, s_field) is None:
                 log.warning(
                     f"Optional ScanSpec field '{s_field}' is not set."
                     f"Description: {description}. "
@@ -1223,11 +1223,21 @@ class Subject(Spec):
 
         if self.id is not None and not self.id.strip():
             raise ValueError("Subject ID cannot be an empty string")
-        if self.id is None:
-            log.warning(
-                "Subject ID is not provided; please consider adding an ID for "
-                "better traceability and to enable subject-wise splits."
-            )
+
+        _optional_subject_fields = {
+            "id": "subject identifier for traceability and subject-wise splits",
+            "type": "subject type (e.g. 'human', 'phantom', 'animal')",
+            "age": "subject age in years",
+            "sex": "subject sex",
+            "fat_percentage": "subject fat percentage",
+        }
+        for s_field, description in _optional_subject_fields.items():
+            if getattr(self, s_field) is None:
+                log.warning(
+                    f"Optional Subject field '{s_field}' is not set. "
+                    f"Description: {description}. "
+                    "Defaulted to None."
+                )
 
         if self.fat_percentage is not None and (
             self.fat_percentage < 0 or self.fat_percentage > 100
@@ -1526,6 +1536,22 @@ class MetadataSpec(Spec):
                 "If your signal matches an existing type, prefer one of the supported "
                 f"signal fields: {suggested_signal_keys}."
             )
+
+        _optional_metadata_fields = {
+            "credit": "credit or attribution for the dataset",
+            "probe_pose": "sampled probe pose at the transducer tip",
+            "voice_narration": "voice narration signal",
+            "ecg": "electrocardiogram signal",
+            "text_report": "free-text report associated with the study",
+            "annotations": "frame-level annotations",
+        }
+        for s_field, description in _optional_metadata_fields.items():
+            if getattr(self, s_field) is None:
+                log.warning(
+                    f"Optional MetadataSpec field '{s_field}' is not set. "
+                    f"Description: {description}. "
+                    "Defaulted to None."
+                )
 
 
 @dataclass

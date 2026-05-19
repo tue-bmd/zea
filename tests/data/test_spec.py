@@ -12,6 +12,7 @@ from zea.data.spec import (
     FileSpec,
     Image,
     Map,
+    MetadataSpec,
     MetricsSpec,
     ProbePose,
     ScanSpec,
@@ -444,7 +445,7 @@ def test_subject_id_warning_for_missing_id():
             },
         )
     messages = [str(c.args[0]) for c in mock_warn.call_args_list]
-    assert any("Subject ID is not provided" in m for m in messages)
+    assert any("Optional Subject field 'id' is not set" in m for m in messages)
 
 
 class TestScanValidationErrors:
@@ -837,7 +838,53 @@ class TestScanSpecSaveWarnings:
                 metadata={"subject": {"type": "human"}},
             )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
-        assert any("Subject ID is not provided" in m for m in messages)
+        assert any("Optional Subject field 'id' is not set" in m for m in messages)
+
+
+class TestSubjectFieldWarnings:
+    """log.warning calls emitted when Subject optional fields are None."""
+
+    @pytest.mark.parametrize(
+        "field",
+        ["id", "type", "age", "sex", "fat_percentage"],
+    )
+    def test_optional_subject_field_missing_warns(self, field):
+        with patch("zea.log.warning") as mock_warn:
+            Subject()
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any(f"Optional Subject field '{field}' is not set" in m for m in messages)
+
+    def test_no_warning_when_all_fields_provided(self):
+        with patch("zea.log.warning") as mock_warn:
+            Subject(
+                id="patient-001",
+                type="human",
+                age=np.uint8(42),
+                sex="f",
+                fat_percentage=np.float32(17.5),
+            )
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any("Optional Subject field" in m for m in messages)
+
+
+class TestMetadataSpecFieldWarnings:
+    """log.warning calls emitted when MetadataSpec optional fields are None."""
+
+    @pytest.mark.parametrize(
+        "field",
+        ["credit", "probe_pose", "voice_narration", "ecg", "text_report", "annotations"],
+    )
+    def test_optional_metadata_field_missing_warns(self, field):
+        with patch("zea.log.warning") as mock_warn:
+            MetadataSpec()
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any(f"Optional MetadataSpec field '{field}' is not set" in m for m in messages)
+
+    def test_no_warning_when_field_is_provided(self):
+        with patch("zea.log.warning") as mock_warn:
+            MetadataSpec(credit="Doe et al.")
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any("Optional MetadataSpec field 'credit'" in m for m in messages)
 
 
 class TestLoadingWarnings:
