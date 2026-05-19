@@ -83,12 +83,24 @@ class Normalize(Operation):
 
     ADD_OUTPUT_KEYS = ["minval", "maxval"]
 
-    def __init__(self, output_range=None, input_range=None, **kwargs):
+    def __init__(self, output_range=None, input_range=None, percentile=None, **kwargs):
+        """
+        Args:
+            output_range (tuple): ``(min, max)`` range the data is mapped to.
+                Defaults to ``(0, 1)``.
+            input_range (tuple): ``(min, max)`` range of the input data; the data is
+                clipped to this range before mapping. Either element may be ``None``
+                to infer that bound from the data. If ``input_range`` itself is
+                ``None``, both bounds are inferred. Defaults to ``None``.
+            percentile (float): When the max bound is inferred, use this percentile
+                of the data instead of its maximum. Defaults to ``None`` (use the max).
+        """
         super().__init__(**kwargs)
         if output_range is None:
             output_range = (0, 1)
         self.output_range = self.to_float32(output_range)
         self.input_range = self.to_float32(input_range)
+        self.quantile = percentile / 100 if percentile else None
 
         if len(self.output_range) != 2:
             raise ValueError(
@@ -141,7 +153,9 @@ class Normalize(Operation):
         if minval is None:
             minval = ops.min(data)
         if maxval is None:
-            maxval = ops.max(data)
+            maxval = (
+                ops.quantile(data, self.quantile) if self.quantile is not None else ops.max(data)
+            )
 
         normalized_data = normalize(
             data, output_range=self.output_range, input_range=(minval, maxval)
