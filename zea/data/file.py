@@ -388,7 +388,7 @@ class File(h5py.File):
             scan: Scan-parameter dict accepted by :class:`~zea.data.spec.ScanSpec`.
                 Mutually exclusive with ``tracks``.
             tracks: List of track dicts (each with ``"data"`` and ``"scan"``
-                keys) or :class:`~zea.data.spec.TrackSpec` objects.
+                keys) accepted by :class:`~zea.data.spec.TrackSpec` objects.
                 Mutually exclusive with ``data``/``scan``.
             track_schedule: Optional int32 array of length ``n_total_tx``
                 indicating which track each global transmit belongs to.
