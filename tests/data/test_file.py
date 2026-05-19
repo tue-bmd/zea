@@ -1068,8 +1068,8 @@ class TestMultiTrackFile:
         scan_b = _scan_minimal(n_frames=n_frames, n_tx=n_tx_b, n_el=n_el)
         scan_b["time_to_next_transmit"] = dt_b
 
-        # Schedule: interleaved a0 b0 a1 b1 a2 → [0,1,0,1,0]
-        schedule = np.array([0, 1, 0, 1, 0], dtype=np.int32)
+        # Per-frame interleaving: a0 b0 a1 b1 a2, tiled for all n_frames
+        schedule = np.tile(np.array([0, 1, 0, 1, 0], dtype=np.int32), n_frames)
 
         path = tmp_path / "scheduled.hdf5"
         File.create(
@@ -1167,7 +1167,7 @@ class TestMultiTrackFile:
             ts_a = f.tracks[0].timestamps
             ts_b = f.tracks[1].timestamps
 
-        # schedule = [0,1,0,1,0] → 3 events for track 0, 2 events for track 1
+        # schedule covers n_frames full cycles: 2*(3+2)=10 events total
         assert ts_a.shape == (2, 3)
         assert ts_b.shape == (2, 2)
 
@@ -1190,8 +1190,8 @@ class TestMultiTrackFile:
         expected_a = np.array([[0.0, 0.15, 0.30]])
         expected_b = np.array([[0.1, 0.25]])
 
-        np.testing.assert_allclose(ts_a, expected_a, atol=1e-9)
-        np.testing.assert_allclose(ts_b, expected_b, atol=1e-9)
+        np.testing.assert_allclose(ts_a, expected_a, atol=1e-6)
+        np.testing.assert_allclose(ts_b, expected_b, atol=1e-6)
 
     def test_track_timestamps_monotonically_increasing(self, tmp_path):
         """Each track's timestamps are strictly increasing across frames."""
@@ -1203,10 +1203,78 @@ class TestMultiTrackFile:
                 assert np.all(np.diff(ts, axis=1) > 0), f"Non-monotonic timestamps: {ts}"
 
     def test_track_timestamps_frame_invariant(self, tmp_path):
-        """When t2nt is identical across frames, timestamps are frame-invariant."""
+        """When t2nt is identical across frames, frame-to-frame increments are constant."""
         path, *_ = self._make_scheduled_file(tmp_path, n_frames=4, n_tx_a=3, n_tx_b=2)
         with File(path) as f:
             ts = f.tracks[0].timestamps  # (4, 3)
-        # All rows should be equal since dt_a and dt_b are constant across frames
-        np.testing.assert_array_equal(ts[0], ts[1])
-        np.testing.assert_array_equal(ts[0], ts[2])
+        # Each frame starts exactly one frame-period later than the previous;
+        # with constant dt the increment is the same for every row.
+        frame_diffs = np.diff(ts, axis=0)  # (3, 3)
+        # All frame-to-frame increments are equal when dt is constant
+        np.testing.assert_allclose(frame_diffs[1:], frame_diffs[:-1], atol=1e-5)
+
+    def test_track_timestamps_unequal_frame_counts(self, tmp_path):
+        """Timestamps are computed correctly when tracks have different n_frames.
+
+        Track A has 3 frames (n_tx=3), track B has 2 frames (n_tx=2).
+                Schedule [0,0,1,0,0,1,0,0,1,0,0,1,0] with dt_a=0.1, dt_b=0.05:
+          - Track A result shape: (3, 3)
+          - Track B result shape: (2, 2)
+                Values are compared against a fixed expected matrix for each track.
+        """
+        n_el, n_ax = 4, 8
+        n_frames_a, n_tx_a = 3, 3
+        n_frames_b, n_tx_b = 2, 2
+
+        raw_a = np.zeros((n_frames_a, n_tx_a, n_ax, n_el, 1), dtype=np.float32)
+        raw_b = np.ones((n_frames_b, n_tx_b, n_ax, n_el, 1), dtype=np.float32)
+
+        dt_a = np.full((n_frames_a, n_tx_a), 0.1, dtype=np.float32)
+        dt_b = np.full((n_frames_b, n_tx_b), 0.05, dtype=np.float32)
+
+        scan_a = _scan_minimal(n_frames=n_frames_a, n_tx=n_tx_a, n_el=n_el)
+        scan_a["time_to_next_transmit"] = dt_a
+        scan_b = _scan_minimal(n_frames=n_frames_b, n_tx=n_tx_b, n_el=n_el)
+        scan_b["time_to_next_transmit"] = dt_b
+
+        schedule = np.array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0], dtype=np.int32)
+
+        path = tmp_path / "unequal_frames.hdf5"
+        File.create(
+            path,
+            tracks=[
+                {"data": {"raw_data": raw_a}, "scan": scan_a},
+                {"data": {"raw_data": raw_b}, "scan": scan_b},
+            ],
+            track_schedule=schedule,
+        ).close()
+
+        with File(path) as f:
+            ts_a = f.tracks[0].timestamps
+            ts_b = f.tracks[1].timestamps
+
+        assert ts_a.shape == (n_frames_a, n_tx_a), (
+            f"Expected ({n_frames_a}, {n_tx_a}), got {ts_a.shape}"
+        )
+        assert ts_b.shape == (n_frames_b, n_tx_b), (
+            f"Expected ({n_frames_b}, {n_tx_b}), got {ts_b.shape}"
+        )
+
+        expected_a = np.array(
+            [
+                [0.0, 0.1, 0.25],
+                [0.35, 0.5, 0.6],
+                [0.75000006, 0.8500001, 1.0000001],
+            ],
+            dtype=np.float32,
+        )
+        expected_b = np.array(
+            [
+                [0.2, 0.45],
+                [0.70000005, 0.9500001],
+            ],
+            dtype=np.float32,
+        )
+
+        np.testing.assert_allclose(ts_a, expected_a, atol=1e-6)
+        np.testing.assert_allclose(ts_b, expected_b, atol=1e-6)

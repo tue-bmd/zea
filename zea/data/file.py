@@ -250,12 +250,10 @@ def _compute_all_track_timestamps(
 ) -> "list[np.ndarray | None]":
     """Compute and return timestamps for every track given a track schedule.
 
-    Tracks may have different numbers of frames.  The accumulation uses up to
-    ``max(n_frames_per_track)`` rows; when a track has fewer frames than the
-    maximum, its last available frame's ``time_to_next_transmit`` is repeated
-    (clamped) for the remaining rows.  The result for each track is then sliced
-    to its own frame count, so the output shape is ``(n_frames_t, n_tx_t)``
-    per track.
+    Walks the schedule once, keeping a single scalar cumulative timestamp and
+    a per-track ``[frame_idx, tx_idx]`` counter to index into each track's
+    ``time_to_next_transmit`` array.  The schedule must cover exactly
+    ``sum(n_frames_t * n_tx_t)`` events across all tracks.
 
     Args:
         schedule: ``int32`` array mapping each global transmit event to a track
@@ -266,47 +264,54 @@ def _compute_all_track_timestamps(
         list: One ``np.ndarray`` of shape ``(n_frames_t, n_tx_t)`` per track,
         or a list of ``None`` values if timestamps cannot be computed.
     """
-    n_frames_per_track = [track.scan().time_to_next_transmit.shape[0] for track in tracks]
-    # create empty matrices of size `n_frames, n_tx` for each track
-    track_matrices = [
-        np.zeros_like(track.scan().time_to_next_transmit, dtype=np.float32) for track in tracks
-    ]
-    # track the current frame index for each track as we iterate through the schedule
-    track_counters = [[0, 0] for _ in tracks]  # list of [frame_idx, tx_idx] per track
+    n_tracks = len(tracks)
+    t2nts: list[np.ndarray] = []
+
+    # pre-load time_to_next_transmit for each track,
+    # validating that it's present and has the right shape
+    for track in tracks:
+        t2nt = track.scan().time_to_next_transmit
+        if t2nt is None:
+            log.warning(
+                f"Track {track._index} has no 'time_to_next_transmit';"
+                " cannot compute track timestamps."
+            )
+            return [None] * n_tracks
+        t2nts.append(np.asarray(t2nt, dtype=np.float32))
+
+    n_frames_per_track = [t2nt.shape[0] for t2nt in t2nts]
+    n_tx_per_frame_per_track = [t2nt.shape[1] for t2nt in t2nts]
+
+    # results will be stored here as we walk the schedule
+    timestamp_matrices_per_track = [np.zeros_like(t2nt) for t2nt in t2nts]
+    # counters to keep track of where we are in each track's
+    # timestamp matrix.
+    track_counters = [[0, 0] for _ in tracks]  # [frame_idx, tx_idx] per track
 
     cumulative_timestamp = 0.0
 
+    # walk through the schedule, filling in the timestamp matrices as we go
     for track_idx in schedule:
-        current_frame_in_track, current_tx_in_track = track_counters[track_idx]
-        # set cumulative timestamp as value of current global transmit
-        track_matrices[track_idx][current_frame_in_track, current_tx_in_track] = (
-            cumulative_timestamp
-        )
+        frame_idx, tx_idx = track_counters[track_idx]
+        timestamp_matrices_per_track[track_idx][frame_idx, tx_idx] = cumulative_timestamp
+        cumulative_timestamp += float(t2nts[track_idx][frame_idx, tx_idx])
 
-        cumulative_timestamp += (
-            tracks[track_idx]
-            .scan()
-            .time_to_next_transmit[current_frame_in_track, current_tx_in_track]
-        )
+        # update the counters keeping track of where we are in this track's timestamp matrix
+        tx_idx += 1
+        if tx_idx >= n_tx_per_frame_per_track[track_idx]:
+            tx_idx = 0
+            frame_idx += 1
+        track_counters[track_idx] = [frame_idx, tx_idx]
 
-        # update frame and tx indices for the current track
-        current_tx_in_track += 1
-        if current_tx_in_track >= (n_frames_per_track[track_idx]):
-            current_tx_in_track = 0
-            current_frame_in_track += 1
-        track_counters[track_idx] = [current_frame_in_track, current_tx_in_track]
-
-    # Assertion to validate that the track_schedule has the correct number of entries
-    for i, track_counter in enumerate(track_counters):
-        frame_idx, _ = track_counter
+    for i, (frame_idx, _) in enumerate(track_counters):
         assert frame_idx == n_frames_per_track[i], (
-            f"There was a mistmatch between the track_schedule and the number of frames and "
+            f"There was a mismatch between the track_schedule and the number of frames and "
             f"transmits in track {i}. "
             f"Please ensure that the track_schedule correctly maps to the global number of "
             f"transmit events."
         )
 
-    return track_matrices
+    return timestamp_matrices_per_track
 
 
 class File(h5py.File):
