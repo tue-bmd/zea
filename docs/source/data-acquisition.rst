@@ -88,7 +88,7 @@ swapping between focused and plane-wave pulses.  Rather than splitting these int
 ``zea`` can store them as **tracks**: self-contained bundles of raw data and scan parameters
 in a single HDF5 file. Each track will contain its own `~zea.Scan` object, containing the parameters
 necessary to beamform the raw data in that track. This allows us to specify a `~zea.Pipeline`
-_per-track_, which can be applied independently to each track's data.
+*per-track*, which can be applied independently to each frame in that track.
 
 .. raw:: html
 
