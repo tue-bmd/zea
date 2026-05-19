@@ -88,7 +88,7 @@ swapping between focused and plane-wave pulses.  Rather than splitting these int
 ``zea`` can store them as **tracks**: self-contained bundles of raw data and scan parameters
 in a single HDF5 file. Each track will contain its own `~zea.Scan` object, containing the parameters
 necessary to beamform the raw data in that track. This allows us to specify a `~zea.Pipeline`
-_per-track_, which can be applied to the frames in that track independently of the other tracks.
+_per-track_, which can be applied independently to each track's data.
 
 .. raw:: html
 
@@ -135,7 +135,7 @@ _per-track_, which can be applied to the frames in that track independently of t
             ├── data/
             └── scan/
 
-**Write — create a file with two tracks**
+**Write — create a file with multiple tracks**
 
 .. code-block:: python
 
@@ -186,7 +186,7 @@ _per-track_, which can be applied to the frames in that track independently of t
     )
     spec.save("acquisition.hdf5")
 
-**Read — iterate over tracks**
+**Read — unpack multiple tracks from a file**
 
 .. code-block:: python
 
