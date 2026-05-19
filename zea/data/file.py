@@ -89,12 +89,17 @@ class TrackProxy:
                 scan = track.scan()
     """
 
-    __slots__ = ("_file", "_index", "_group")
+    __slots__ = ("_index", "_group", "_timestamps")
 
-    def __init__(self, file: "File", index: int, group: "h5py.Group"):
-        object.__setattr__(self, "_file", file)
+    def __init__(
+        self,
+        index: int,
+        group: "h5py.Group",
+        timestamps: "np.ndarray | None" = None,
+    ):
         object.__setattr__(self, "_index", index)
         object.__setattr__(self, "_group", group)
+        object.__setattr__(self, "_timestamps", timestamps)
 
     @property
     def data(self) -> GroupProxy:
@@ -121,56 +126,150 @@ class TrackProxy:
                 f"Track {self._index} has no 'scan' group. "
                 f"Available keys: {list(self._group.keys())}"
             )
-        scan_path = f"tracks/track_{self._index}/scan"
-        scan_dict = self._file.recursively_load_dict_contents_from_group(scan_path)
-        scan_dict = self._file._check_focus_distances(scan_dict)
+        scan_dict = load_dict_from_hdf5_group(self._group["scan"])
+        scan_dict = check_focus_distances(scan_dict)
         data_group = self._group["data"] if "data" in self._group else None
-        return self._file._build_scan_from_dict(
-            scan_dict, data_group=data_group, safe=safe, **kwargs
-        )
+        return build_scan_from_dict(scan_dict, data_group=data_group, safe=safe, **kwargs)
 
     @property
     def timestamps(self) -> "np.ndarray | None":
         """Global transmit timestamps for this track, shape ``(n_frames, n_tx)``.
 
-        Timestamps are computed by walking the :attr:`~File.track_schedule` in
-        order and accumulating each event's ``time_to_next_transmit`` across all
-        tracks.  Returns ``None`` if the file has no ``track_schedule`` or any
-        track is missing ``time_to_next_transmit``.
+        Timestamps are pre-computed when the :class:`TrackProxy` is created via
+        :attr:`File.tracks`.  Returns ``None`` if the file has no
+        ``track_schedule`` or any track is missing ``time_to_next_transmit``.
         """
-        return _compute_track_timestamps(self._file, self._index)
+        return self._timestamps
 
     def __repr__(self) -> str:
-        return f"<TrackProxy index={self._index} file='{self._file.path.name}'>"
+        return f"<TrackProxy index={self._index}>"
 
 
-def _compute_track_timestamps(file: "File", track_index: int) -> "np.ndarray | None":
-    """Return global transmit timestamps for *track_index*, shape ``(n_frames, n_tx)``.
+def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
+    """Recursively load the contents of an HDF5 group into a plain dict.
 
-    Walk the ``track_schedule`` in order, accumulate ``time_to_next_transmit``
-    from each firing track, and slice out the timestamps that belong to
-    *track_index*.  Returns ``None`` if the schedule or any track's
-    ``time_to_next_transmit`` is unavailable.
+    Datasets are returned as numpy arrays or scalars; nested groups are
+    converted recursively.  String datasets are decoded to ``np.str_``.
+
+    Args:
+        group: An open :class:`h5py.Group` (or :class:`h5py.File`).
+
+    Returns:
+        dict: Nested dictionary mirroring the group structure.
     """
-    schedule = file.track_schedule
-    if schedule is None:
-        log.warning("`track_schedule` was not found in the file; cannot compute track timestamps.")
-        return None
+    ans = {}
+    for key, item in group.items():
+        if isinstance(item, h5py.Dataset):
+            if h5py.check_string_dtype(item.dtype) is not None:
+                val = item.asstr()[()]
+                if isinstance(val, np.ndarray) and val.dtype == object:
+                    val = val.astype(np.str_)
+                ans[key] = val
+            else:
+                ans[key] = item[()]
+        elif isinstance(item, h5py.Group):
+            ans[key] = load_dict_from_hdf5_group(item)
+    return ans
 
-    n_tracks = file._n_tracks
-    all_track_proxies = file.tracks
 
-    # Load time_to_next_transmit for every track (shape (n_frames, n_tx_t))
+def check_focus_distances(scan_parameters: dict) -> dict:
+    """Warn and auto-convert focus distances stored in wavelengths to metres.
+
+    Some older files store ``focus_distances`` in wavelengths rather than
+    metres.  This helper detects the pattern (values ≥ 1 and ≠ ``inf``) and
+    converts them using ``sound_speed / center_frequency``.
+
+    Args:
+        scan_parameters: Raw scan parameter dict loaded from HDF5.
+
+    Returns:
+        dict: The same dict, with ``focus_distances`` converted when needed.
+    """
+    if "focus_distances" in scan_parameters:
+        focus_distances = scan_parameters["focus_distances"]
+        if np.any(np.logical_and(focus_distances >= 1, focus_distances != np.inf)):
+            log.warning(
+                "We have detected that focus distances are (probably) stored in "
+                "wavelengths. Please update your file! "
+                "Converting to metres automatically for now, but this assumes that "
+                "`center_frequency` is the probe centre frequency which is not always "
+                "the case!"
+            )
+            assert "sound_speed" in scan_parameters, (
+                "Cannot convert focus distances from wavelengths to metres "
+                "because sound_speed is not defined in the scan parameters."
+            )
+            assert "center_frequency" in scan_parameters, (
+                "Cannot convert focus distances from wavelengths to metres "
+                "because center_frequency is not defined in the scan parameters."
+            )
+            wavelength = scan_parameters["sound_speed"] / scan_parameters["center_frequency"]
+            scan_parameters["focus_distances"] = focus_distances * wavelength
+    return scan_parameters
+
+
+def build_scan_from_dict(
+    scan_dict: dict,
+    data_group: "h5py.Group | None" = None,
+    safe: bool = True,
+    **kwargs,
+) -> "Scan":
+    """Build a :class:`~zea.scan.Scan` from a raw parameter dictionary.
+
+    Args:
+        scan_dict: Raw scan parameters loaded from HDF5.
+        data_group: Optional HDF5 data group used to derive ``n_ax`` from
+            ``raw_data`` when it cannot be inferred from the scan spec.
+        safe: Forwarded to :meth:`~zea.scan.Scan.merge`.
+        **kwargs: Override any scan parameter.
+
+    Returns:
+        Scan: Initialised scan object.
+    """
+    scan_spec_keys = set(ScanSpec.SCHEMA.keys())
+    filtered = {k: v for k, v in scan_dict.items() if k in scan_spec_keys}
+
+    try:
+        scan_spec = ScanSpec(**filtered)
+        scan_dict = scan_spec.to_dict()
+        scan_dict["n_el"] = scan_spec.n_el
+        scan_dict["n_tx"] = scan_spec.n_tx
+        if scan_spec.tgc_gain_curve is not None:
+            scan_dict["n_ax"] = len(scan_spec.tgc_gain_curve)
+        elif data_group is not None and "raw_data" in data_group:
+            scan_dict["n_ax"] = data_group["raw_data"].shape[2]
+    except (TypeError, ValueError) as exc:
+        log.debug(f"ScanSpec validation skipped: {exc}. Using raw scan parameters from file.")
+
+    return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
+
+
+def _compute_all_track_timestamps(
+    schedule: "np.ndarray",
+    proxies: "list[TrackProxy]",
+) -> "list[np.ndarray | None]":
+    """Compute and return timestamps for every track given a track schedule.
+
+    Args:
+        schedule: ``int32`` array mapping each global transmit event to a track
+            index, shape ``(n_total_tx,)``.
+        proxies: :class:`TrackProxy` list (without timestamps yet assigned).
+
+    Returns:
+        list: One ``np.ndarray`` of shape ``(n_frames, n_tx_t)`` per track, or
+        a list of ``None`` values if timestamps cannot be computed.
+    """
+    n_tracks = len(proxies)
     t2nts: list[np.ndarray] = []
-    for proxy in all_track_proxies:
+    for proxy in proxies:
         scan = proxy.scan()
         t2nt = scan.time_to_next_transmit
         if t2nt is None:
             log.warning(
                 f"Track {proxy._index} has no 'time_to_next_transmit';"
-                f" cannot compute track timestamps."
+                " cannot compute track timestamps."
             )
-            return None
+            return [None] * n_tracks
         t2nts.append(np.asarray(t2nt, dtype=np.float64))
 
     n_frames = t2nts[0].shape[0]
@@ -188,8 +287,11 @@ def _compute_track_timestamps(file: "File", track_index: int) -> "np.ndarray | N
             cumtime = cumtime + t2nts[t_idx][:, k]
         track_counters[t_idx] = k + 1
 
-    track_positions = np.where(schedule == track_index)[0]
-    return global_timestamps[:, track_positions]  # (n_frames, n_tx_track_index)
+    result = []
+    for i in range(n_tracks):
+        positions = np.where(schedule == i)[0]
+        result.append(global_timestamps[:, positions])
+    return result
 
 
 class File(h5py.File):
@@ -310,12 +412,23 @@ class File(h5py.File):
                 "Access data and scan parameters directly with file.data and file.scan()."
             )
         tracks_group = self["tracks"]
-        result: list[TrackProxy] = []
+        proxies: list[TrackProxy] = []
         i = 0
         while f"track_{i}" in tracks_group:
-            result.append(TrackProxy(self, i, tracks_group[f"track_{i}"]))
+            proxies.append(TrackProxy(i, tracks_group[f"track_{i}"]))
             i += 1
-        return result
+
+        schedule = self.track_schedule
+        if schedule is not None:
+            all_timestamps = _compute_all_track_timestamps(schedule, proxies)
+            for proxy, ts in zip(proxies, all_timestamps):
+                object.__setattr__(proxy, "_timestamps", ts)
+        else:
+            log.warning(
+                "`track_schedule` was not found in the file; cannot compute track timestamps."
+            )
+
+        return proxies
 
     @property
     def track_schedule(self) -> "np.ndarray | None":
@@ -685,36 +798,9 @@ class File(h5py.File):
             log.warning("Could not find scan parameters in file.")
             return {}
 
-        # Use the group's HDF5 path to load via recursively_load_dict_contents_from_group
-        scan_path = scan_group.name.lstrip("/")
-        scan_parameters = self.recursively_load_dict_contents_from_group(scan_path)
-        scan_parameters = self._check_focus_distances(scan_parameters)
+        scan_parameters = load_dict_from_hdf5_group(scan_group)
+        scan_parameters = check_focus_distances(scan_parameters)
 
-        return scan_parameters
-
-    def _check_focus_distances(self, scan_parameters):
-        if "focus_distances" in scan_parameters:
-            focus_distances = scan_parameters["focus_distances"]
-            # check if focus distances are in wavelengths
-            if np.any(np.logical_and(focus_distances >= 1, focus_distances != np.inf)):
-                log.warning(
-                    f"We have detected that focus distances in '{self.path}' are "
-                    "(probably) stored wavelengths. Please update your file! "
-                    "Converting to meters automatically for now, but this assumes that "
-                    "`center_frequency` is the probe center frequency which is not always "
-                    "the case!"
-                )
-                assert "sound_speed" in scan_parameters, (
-                    "Cannot convert focus distances from wavelengths to meters "
-                    "because sound_speed is not defined in the scan parameters."
-                )
-                assert "center_frequency" in scan_parameters, (
-                    "Cannot convert focus distances from wavelengths to meters "
-                    "because center_frequency is not defined in the scan parameters."
-                )
-                wavelength = scan_parameters["sound_speed"] / scan_parameters["center_frequency"]
-                focus_distances = focus_distances * wavelength
-                scan_parameters["focus_distances"] = focus_distances
         return scan_parameters
 
     def get_scan_parameters(self) -> dict:
@@ -780,50 +866,7 @@ class File(h5py.File):
             data_group = self.data._group
         except (KeyError, AttributeError):
             pass
-        return self._build_scan_from_dict(scan_dict, data_group=data_group, safe=safe, **kwargs)
-
-    def _build_scan_from_dict(
-        self,
-        scan_dict: dict,
-        data_group: "h5py.Group | None" = None,
-        safe: bool = True,
-        **kwargs,
-    ) -> Scan:
-        """Build a :class:`~zea.scan.Scan` from a raw parameter dictionary.
-
-        Shared by :meth:`scan` (single-track / legacy) and
-        :class:`TrackProxy`.scan() (per-track).
-
-        Args:
-            scan_dict: Raw scan parameters loaded from HDF5.
-            data_group: The HDF5 data group for this track, used to derive
-                ``n_ax`` from ``raw_data`` when not inferrable from the scan
-                spec.
-            safe: Forwarded to :meth:`~zea.scan.Scan.merge`.
-            **kwargs: Override any scan parameter.
-
-        Returns:
-            Scan: Initialised scan object.
-        """
-        scan_spec_keys = set(ScanSpec.SCHEMA.keys())
-        filtered = {k: v for k, v in scan_dict.items() if k in scan_spec_keys}
-
-        try:
-            scan_spec = ScanSpec(**filtered)
-            scan_dict = scan_spec.to_dict()
-            scan_dict["n_el"] = scan_spec.n_el
-            scan_dict["n_tx"] = scan_spec.n_tx
-            if scan_spec.tgc_gain_curve is not None:
-                scan_dict["n_ax"] = len(scan_spec.tgc_gain_curve)
-            elif data_group is not None and "raw_data" in data_group:
-                scan_dict["n_ax"] = data_group["raw_data"].shape[2]
-        except (TypeError, ValueError) as exc:
-            log.debug(
-                f"ScanSpec validation skipped for '{self.path}': {exc}. "
-                "Using raw scan parameters from file."
-            )
-
-        return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
+        return build_scan_from_dict(scan_dict, data_group=data_group, safe=safe, **kwargs)
 
     def get_probe_parameters(self) -> dict:
         """Returns a dictionary of probe parameters to initialize a probe
@@ -877,7 +920,7 @@ class File(h5py.File):
         """
         if "metadata" not in self:
             raise KeyError("No 'metadata' group in this file.")
-        raw = self.recursively_load_dict_contents_from_group("metadata")
+        raw = load_dict_from_hdf5_group(self["metadata"])
         return MetadataSpec(**raw)
 
     def metrics(self) -> MetricsSpec:
@@ -897,35 +940,22 @@ class File(h5py.File):
         """
         if "metrics" not in self:
             raise KeyError("No 'metrics' group in this file.")
-        raw = self.recursively_load_dict_contents_from_group("metrics")
+        raw = load_dict_from_hdf5_group(self["metrics"])
         return MetricsSpec(**raw)
 
     def recursively_load_dict_contents_from_group(self, path: str) -> dict:
-        """Load dict from contents of group
+        """Load dict from contents of group.
 
-        Values inside the group are converted to numpy arrays
-        or primitive types (int, float, str).
+        .. deprecated::
+            Use the module-level :func:`load_dict_from_hdf5_group` function instead,
+            passing an :class:`h5py.Group` directly.
 
         Args:
             path (str): path to group
         Returns:
             dict: dictionary with contents of group
         """
-        ans = {}
-        for key, item in self[path].items():
-            if isinstance(item, h5py.Dataset):
-                if h5py.check_string_dtype(item.dtype) is not None:
-                    val = item.asstr()[()]
-                    # h5py returns object-dtype arrays for strings;
-                    # convert back to np.str_ so spec dtype checks pass.
-                    if isinstance(val, np.ndarray) and val.dtype == object:
-                        val = val.astype(np.str_)
-                    ans[key] = val
-                else:
-                    ans[key] = item[()]
-            elif isinstance(item, h5py.Group):
-                ans[key] = self.recursively_load_dict_contents_from_group(path + "/" + key + "/")
-        return ans
+        return load_dict_from_hdf5_group(self[path])
 
     def has_key(self, key: str) -> bool:
         """Check if the file has a specific key.
