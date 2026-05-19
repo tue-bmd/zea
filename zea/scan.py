@@ -796,10 +796,9 @@ class Scan(Parameters):
         """The coordinates for scan conversion."""
         raise NotImplementedError
 
-    @cache_with_dependencies("phi_range", "coordinates_2d", "coordinates_3d")
+    @cache_with_dependencies("is_3d", "coordinates_2d", "coordinates_3d")
     def coordinates(self):
-        """Get the coordinates for scan conversion, will be 3D if phi_range is set,
-        otherwise 2D."""
+        """Get the coordinates for scan conversion."""
         return self.coordinates_3d if self.is_3d else self.coordinates_2d
 
     @cache_with_dependencies("time_to_next_transmit")

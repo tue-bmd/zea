@@ -153,7 +153,7 @@ def compute_pfield(
         + seg_length / 2
         + ops.arange(0, num_sub_elements, dtype=seg_length.dtype) * seg_length
     )
-    sub_element_z = ops.zeros((int(num_sub_elements),))
+    sub_element_z = ops.zeros_like(sub_element_x)
 
     # Distances between the points and the transducer elements
     delta_x = grid_x[:, None, None] - sub_element_x[None, :, None] - element_x[None, None, :]
@@ -279,7 +279,7 @@ def compute_pfield(
         (_, total_pressure_squared), _ = ops.scan(
             scan_fn,
             (monochromatic_pressure, ops.zeros((num_points, n_tx), dtype="float32")),
-            ops.arange(len(freq)),
+            ops.arange(ops.shape(freq)[0]),
         )
 
         return total_pressure_squared
