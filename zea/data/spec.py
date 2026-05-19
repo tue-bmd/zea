@@ -641,20 +641,6 @@ class Image(Map):
 
 
 @dataclass
-class ImageSc(Image):
-    """Scan-converted image data and spatial extent metadata.
-
-    Args:
-        values: The scan-converted values of shape (n_frames, z, x, y) or (n_frames, z, x)
-            and type uint8 or float32. For float32 values, the values should be in dB
-            (between -inf and 0).
-        extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
-            A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
-    """
-
-
-@dataclass
 class BeamformedData(FloatMap):
     """Beamformed (beamsummed) data and spatial extent metadata.
 
