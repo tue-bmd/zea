@@ -827,7 +827,6 @@ class DataSpec(Spec):
     Spatial map data products (values + per-pixel coordinates):
         - beamformed_data: Beamformed (beamsummed) data and per-pixel coordinates.
         - envelope_data: Envelope-detected data and per-pixel coordinates.
-        - image_sc: Scan-converted image data and per-pixel coordinates.
         - image: Reconstructed image data and per-pixel coordinates.
         - segmentation: Segmentation data and per-pixel coordinates.
         - sos_map: Speed-of-sound map data and per-pixel coordinates.
@@ -1640,8 +1639,7 @@ class FileSpec(Spec):
         This reads all groups into memory and runs the full spec validation
         (dtype, shape, dimension consistency).  Legacy files are handled
         transparently: extra scalar fields in the scan group (``n_frames``,
-        ``n_tx``, etc.) are ignored, flat ``data/image`` datasets are loaded
-        as ``image_sc`` when ``image_sc`` is absent, and the ``probe`` root
+        ``n_tx``, etc.) are ignored, and the ``probe`` root
         attribute is mapped to ``probe_name``.
 
         Args:

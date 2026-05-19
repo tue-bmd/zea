@@ -107,7 +107,7 @@ Beyond the standard data types (``raw_data``, ``beamformed_data``, …), you can
 **Custom spatial maps** (``data`` group)
 
 A custom map is a named entry in the ``data`` group that associates a pixel array with a
-per-pixel Cartesian coordinate grid.  Each map is a then function from Cartesian space to
+per-pixel Cartesian coordinate grid.  Each map is then a function from Cartesian space to
 some real values.  Pass it as a sub-dict under the key you want:
 
 .. code-block:: python

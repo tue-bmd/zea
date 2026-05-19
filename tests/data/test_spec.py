@@ -36,7 +36,11 @@ def test_segmentation_spec():
 
     # Incorrect usage: labels shape mismatch
     with pytest.raises(ValueError):
-        Segmentation(values=values, labels=np.array(["background", "label1"], dtype=np.str_))
+        Segmentation(
+            values=values,
+            labels=np.array(["background", "label1"], dtype=np.str_),
+            coordinates=coordinates,
+        )
 
 
 def _scan_minimal(n_frames: int = 3, n_tx: int = 2, n_el: int = 4):
@@ -506,6 +510,7 @@ class TestDataValidationErrors:
         with pytest.raises(TypeError, match="SosMap: field 'values'"):
             SosMap(
                 values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
             )
 
     def test_image_wrong_pixel_dtype_raises(self):
@@ -513,6 +518,7 @@ class TestDataValidationErrors:
         with pytest.raises(TypeError, match="Image: field 'values'"):
             Image(
                 values=np.zeros((2, 16, 12, 1), dtype=np.complex128),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
             )
 
     def test_segmentation_wrong_pixel_dtype_raises(self):
@@ -521,6 +527,7 @@ class TestDataValidationErrors:
             Segmentation(
                 values=np.zeros((2, 16, 12, 1, 2), dtype=np.float32),
                 labels=np.array(["a", "b"], dtype=np.str_),
+                coordinates=np.zeros((2, 16, 12, 1, 3), dtype=np.float32),
             )
 
     def test_map_coordinates_wrong_shape_raises(self):
