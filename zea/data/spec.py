@@ -1,4 +1,3 @@
-import warnings
 from collections import defaultdict
 from dataclasses import MISSING, dataclass, field, fields
 from importlib.metadata import PackageNotFoundError
@@ -973,13 +972,11 @@ class DataSpec(Spec):
 
         if getattr(self, "_extra_map_keys", ()):
             custom_keys = ", ".join(sorted(self._extra_map_keys))
-            warnings.warn(
-                log.warning(
-                    f"Custom spatial map key(s) added to 'data': {custom_keys}. "
-                    "These are validated as generic Map specs. "
-                    "If your data matches an existing type, prefer one of the supported "
-                    f"spatial maps: {suggested_map_keys}."
-                )
+            log.warning(
+                f"Custom spatial map key(s) added to 'data': {custom_keys}. "
+                "These are validated as generic Map specs. "
+                "If your data matches an existing type, prefer one of the supported "
+                f"spatial maps: {suggested_map_keys}."
             )
 
 
@@ -1177,6 +1174,24 @@ class ScanSpec(Spec):
             if np.all(self.demodulation_frequency == self.demodulation_frequency[0]):
                 self.demodulation_frequency = self.demodulation_frequency[0]
 
+        # Warn about optional fields that were not provided
+        _optional_scan_fields = {
+            "time_to_next_transmit": "time between transmit events (n_frames, n_tx)",
+            "azimuth_angles": "azimuthal angles of transmit beams (n_tx,) in radians",
+            "sound_speed": "speed of sound in m/s",
+            "tgc_gain_curve": "time-gain-compensation curve (n_ax,)",
+            "element_width": "element width of the probe in meters",
+            "waveforms_one_way": "one-way transmit waveforms (n_tx, n_samples)",
+            "waveforms_two_way": "two-way transmit waveforms (n_tx, n_samples)",
+        }
+        for s_field, description in _optional_scan_fields.items():
+            if getattr(self, field) is None:
+                log.warning(
+                    f"Optional ScanSpec field '{s_field}' is not set."
+                    f"Description: {description}. "
+                    f"Defaulted to None."
+                )
+
 
 @dataclass
 class Subject(Spec):
@@ -1209,11 +1224,9 @@ class Subject(Spec):
         if self.id is not None and not self.id.strip():
             raise ValueError("Subject ID cannot be an empty string")
         if self.id is None:
-            warnings.warn(
-                log.warning(
-                    "Subject ID is not provided; please consider adding an ID for "
-                    "better traceability and to enable subject-wise splits."
-                )
+            log.warning(
+                "Subject ID is not provided; please consider adding an ID for "
+                "better traceability and to enable subject-wise splits."
             )
 
         if self.fat_percentage is not None and (
@@ -1507,13 +1520,11 @@ class MetadataSpec(Spec):
 
         if getattr(self, "_extra_signal_keys", ()):
             custom_keys = ", ".join(sorted(self._extra_signal_keys))
-            warnings.warn(
-                log.warning(
-                    f"Custom signal key(s) added to 'metadata': {custom_keys}. "
-                    "These are validated as generic SignalND specs. "
-                    "If your signal matches an existing type, prefer one of the supported "
-                    f"signal fields: {suggested_signal_keys}."
-                )
+            log.warning(
+                f"Custom signal key(s) added to 'metadata': {custom_keys}. "
+                "These are validated as generic SignalND specs. "
+                "If your signal matches an existing type, prefer one of the supported "
+                f"signal fields: {suggested_signal_keys}."
             )
 
 

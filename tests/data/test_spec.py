@@ -1,5 +1,7 @@
 from dataclasses import fields, is_dataclass
+from unittest.mock import patch
 
+import h5py
 import numpy as np
 import pytest
 
@@ -310,7 +312,7 @@ def test_dataset_builder_dimension_consistency_across_nested_specs():
 def test_metadata_accepts_custom_signal_nd_keys_and_warns():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
-    with pytest.warns(match="Custom signal key\(s\) added to 'metadata'"):
+    with patch("zea.log.warning") as mock_warn:
         dataset = FileSpec(
             data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
@@ -323,7 +325,8 @@ def test_metadata_accepts_custom_signal_nd_keys_and_warns():
             },
             metrics={},
         )
-
+    messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+    assert any("Custom signal key(s) added to 'metadata'" in m for m in messages)
     assert isinstance(dataset.metadata.custom_signal, SignalND)
     assert "custom_signal" in dataset.to_dict()["metadata"]
 
@@ -343,7 +346,7 @@ def test_metadata_custom_key_requires_signal_nd_spec():
 def test_data_accepts_custom_map_keys_and_warns():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
-    with pytest.warns(match="Custom spatial map key\(s\) added to 'data'"):
+    with patch("zea.log.warning") as mock_warn:
         dataset = FileSpec(
             data={
                 "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
@@ -356,7 +359,8 @@ def test_data_accepts_custom_map_keys_and_warns():
             },
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
         )
-
+    messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+    assert any("Custom spatial map key(s) added to 'data'" in m for m in messages)
     assert isinstance(dataset.data, DataSpec)
     assert isinstance(dataset.data.custom_map, Map)
     assert "custom_map" in dataset.to_dict()["data"]
@@ -422,9 +426,7 @@ def test_schema_keys_match_dataclass_fields_for_all_specs():
 def test_subject_id_warning_for_missing_id():
     n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
 
-    with pytest.warns(
-        match="Subject ID is not provided; please consider adding an ID for better traceability"
-    ):
+    with patch("zea.log.warning") as mock_warn:
         FileSpec(
             data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
@@ -441,6 +443,8 @@ def test_subject_id_warning_for_missing_id():
                 "coherence_factor": np.ones((n_frames,), dtype=np.float32),
             },
         )
+    messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+    assert any("Subject ID is not provided" in m for m in messages)
 
 
 class TestScanValidationErrors:
@@ -704,3 +708,182 @@ def test_image_spec_accepts_neginf():
     values_positive = np.full((2, 8, 8), 0.1, dtype=np.float32)
     with pytest.raises(ValueError, match="dB scale"):
         Image(values=values_positive, extent=extent)
+
+
+def _scan_bare(n_tx: int = 2, n_el: int = 4):
+    """Minimal ScanSpec dict with only required fields (all optionals left as None)."""
+    return {
+        "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
+        "sampling_frequency": np.float32(30e6),
+        "center_frequency": np.float32(5e6),
+        "demodulation_frequency": np.float32(5e6),
+        "initial_times": np.zeros((n_tx,), dtype=np.float32),
+        "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+        "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+        "focus_distances": np.zeros((n_tx,), dtype=np.float32),
+        "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+        "polar_angles": np.zeros((n_tx,), dtype=np.float32),
+    }
+
+
+class TestScanSpecSaveWarnings:
+    """log.warning calls emitted during ScanSpec / FileSpec construction."""
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "time_to_next_transmit",
+            "azimuth_angles",
+            "sound_speed",
+            "tgc_gain_curve",
+            "element_width",
+            "waveforms_one_way",
+            "waveforms_two_way",
+        ],
+    )
+    def test_optional_scan_field_missing_warns(self, field):
+        with patch("zea.log.warning") as mock_warn:
+            ScanSpec(**_scan_bare())
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any(f"ScanSpec field '{field}' is not set" in m for m in messages)
+
+    def test_probe_geometry_out_of_range_warns(self):
+        scan = _scan_bare()
+        scan["probe_geometry"] = np.full((4, 3), 2.0, dtype=np.float32)
+        with patch("zea.log.warning") as mock_warn:
+            ScanSpec(**scan)
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any("Probe geometry values are unusually large" in m for m in messages)
+
+    def test_focus_distances_large_warns(self):
+        scan = _scan_bare()
+        scan["focus_distances"] = np.full((2,), 1.5, dtype=np.float32)
+        with patch("zea.log.warning") as mock_warn:
+            ScanSpec(**scan)
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any("Focus distances greater than or equal to 1 meter" in m for m in messages)
+
+    def test_transmit_origins_out_of_range_warns(self):
+        scan = _scan_bare()
+        scan["transmit_origins"] = np.full((2, 3), 2.0, dtype=np.float32)
+        with patch("zea.log.warning") as mock_warn:
+            ScanSpec(**scan)
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any("Transmit origin values are unusually large" in m for m in messages)
+
+    def test_map_extent_not_provided_warns(self):
+        with patch("zea.log.warning") as mock_warn:
+            Image(values=np.zeros((2, 8, 8, 1), dtype=np.uint8))
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any("Map extent is not provided" in m for m in messages)
+
+    def test_map_extent_out_of_range_warns(self):
+        with patch("zea.log.warning") as mock_warn:
+            Image(
+                values=np.zeros((2, 8, 8, 1), dtype=np.uint8),
+                extent=np.array([0.0, 2.0, 0.0, 1.0, -1.0, 0.0], dtype=np.float32),
+            )
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any("Map extent values are unusually large" in m for m in messages)
+
+    def test_sos_map_low_values_warns(self):
+        with patch("zea.log.warning") as mock_warn:
+            SosMap(
+                values=np.full((2, 8, 8, 1), 100.0, dtype=np.float32),
+                extent=np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+            )
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any("Speed-of-sound map contains values below 300 m/s" in m for m in messages)
+
+    def test_custom_data_map_key_warns(self):
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+        with patch("zea.log.warning") as mock_warn:
+            FileSpec(
+                data={
+                    "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+                    "custom_map": {
+                        "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+                        "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+                    },
+                },
+                scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            )
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any("Custom spatial map key(s) added to 'data'" in m for m in messages)
+
+    def test_custom_metadata_signal_key_warns(self):
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+        with patch("zea.log.warning") as mock_warn:
+            FileSpec(
+                data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                metadata={
+                    "custom_signal": {
+                        "samples": np.zeros((32, 3), dtype=np.float16),
+                        "start_time_offset": np.float32(0.0),
+                        "sampling_frequency": np.float32(120.0),
+                    }
+                },
+            )
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any("Custom signal key(s) added to 'metadata'" in m for m in messages)
+
+    def test_subject_id_missing_warns(self):
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+        with patch("zea.log.warning") as mock_warn:
+            FileSpec(
+                data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                metadata={"subject": {"type": "human"}},
+            )
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any("Subject ID is not provided" in m for m in messages)
+
+
+class TestLoadingWarnings:
+    """log.warning calls emitted when reading a zea File."""
+
+    def test_no_scan_group_warns(self, tmp_path):
+        path = tmp_path / "no_scan.hdf5"
+        with h5py.File(path, "w") as f:
+            g = f.create_group("data")
+            g.create_dataset("raw_data", data=np.zeros((2, 2, 8, 4, 1), dtype=np.float32))
+
+        with patch("zea.log.warning") as mock_warn:
+            with File(path) as f:
+                f.get_parameters()
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any("Could not find scan parameters in file" in m for m in messages)
+
+    def test_focus_distances_in_wavelengths_warns(self, tmp_path):
+        """focus_distances stored as wavelengths (>= 1, not inf) triggers a warning on load."""
+        path = tmp_path / "wavelength_focus.hdf5"
+        with h5py.File(path, "w") as f:
+            s = f.create_group("scan")
+            s.create_dataset("focus_distances", data=np.full((2,), 10.0, dtype=np.float32))
+            s.create_dataset("sound_speed", data=np.float32(1540.0))
+            s.create_dataset("center_frequency", data=np.float32(5e6))
+
+        with patch("zea.log.warning") as mock_warn:
+            with File(path) as f:
+                f.get_parameters()
+        messages = [str(c.args[0]).lower() for c in mock_warn.call_args_list]
+        assert any("focus distances" in m and "wavelength" in m for m in messages)
+
+    def test_waveforms_stored_as_dict_warns(self, tmp_path):
+        """Legacy waveforms stored as an HDF5 group (dict-like) trigger a warning on load."""
+        path = tmp_path / "waveforms_dict.hdf5"
+        with h5py.File(path, "w") as f:
+            s = f.create_group("scan")
+            wv = s.create_group("waveforms_one_way")
+            wv.create_dataset("0", data=np.zeros(10, dtype=np.float32))
+            wv.create_dataset("1", data=np.zeros(10, dtype=np.float32))
+
+        with patch("zea.log.warning") as mock_warn:
+            with File(path) as f:
+                try:
+                    f.scan()
+                except Exception:
+                    pass
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert any("waveforms_one_way" in m and "stored as a dictionary" in m for m in messages)
