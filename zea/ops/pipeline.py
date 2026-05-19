@@ -6,7 +6,7 @@ import numpy as np
 import yaml
 from keras import ops
 
-from zea import log
+from zea import backend, log
 from zea.backend import func_on_device, jit
 from zea.config import Config
 from zea.func.tensor import vmap
@@ -255,6 +255,7 @@ class Pipeline:
             name=self.name,
             validate=self._validate_flag,
             timed=self._timed,
+            device=self.device,
         )
 
     def reinitialize(self):
@@ -267,6 +268,7 @@ class Pipeline:
             name=self.name,
             validate=self._validate_flag,
             timed=self._timed,
+            device=self.device,
         )
 
     def prepend(self, operation: Operation):
@@ -706,6 +708,7 @@ class Pipeline:
         probe: Probe = None,
         scan: Scan = None,
         config: Config = None,
+        device: Union[str, None] = None,
         **kwargs,
     ):
         """Prepare Probe, Scan and Config objects for the pipeline.
@@ -722,6 +725,8 @@ class Pipeline:
         Returns:
             dict: Dictionary of inputs with all values as tensors.
         """
+        _device = device if device is not None else self.device
+
         # Initialize dictionaries for probe, scan, and config
         probe_dict, scan_dict, config_dict = {}, {}, {}
 
@@ -735,23 +740,27 @@ class Pipeline:
             assert isinstance(probe, Probe), (
                 f"Expected an instance of `zea.probes.Probe`, got {type(probe)}"
             )
-            probe_dict = probe.to_tensor(keep_as_is=self.static_params)
+            with backend.device(_device):
+                probe_dict = probe.to_tensor(keep_as_is=self.static_params)
 
         if scan is not None:
             assert isinstance(scan, Scan), (
                 f"Expected an instance of `zea.scan.Scan`, got {type(scan)}"
             )
             needs_keys = self.needs_keys - config_keys - kwargs_keys
-            scan_dict = scan.to_tensor(include=needs_keys, keep_as_is=self.static_params)
+            with backend.device(_device):
+                scan_dict = scan.to_tensor(include=needs_keys, keep_as_is=self.static_params)
 
         if config is not None:
             assert isinstance(config, Config), (
                 f"Expected an instance of `zea.config.Config`, got {type(config)}"
             )
-            config_dict.update(config.to_tensor(keep_as_is=self.static_params))
+            with backend.device(_device):
+                config_dict.update(config.to_tensor(keep_as_is=self.static_params))
 
         # Convert all kwargs to tensors
-        tensor_kwargs = dict_to_tensor(kwargs, keep_as_is=self.static_params)
+        with backend.device(_device):
+            tensor_kwargs = dict_to_tensor(kwargs, keep_as_is=self.static_params)
 
         # combine probe, scan, config and kwargs
         # explicitly so we know which keys overwrite which
@@ -1095,7 +1104,8 @@ class Beamform(Pipeline):
         operations list, since Beamform auto-generates its operations
         from ``beamformer``, ``num_patches``, and ``enable_pfield``.
         """
-        config = {"name": "beamform"}
+        config = super().get_dict(compact=compact)
+        config.pop("operations", None)
 
         params = {}
         if not compact or self.beamformer_type != "delay_and_sum":
@@ -1105,21 +1115,13 @@ class Beamform(Pipeline):
         if not compact or self.enable_pfield:
             params["enable_pfield"] = self.enable_pfield
 
-        # Pipeline-level params
-        if compact:
-            if not self.with_batch_dim:
-                params["with_batch_dim"] = self.with_batch_dim
-            if self.jit_options != "ops":
-                params["jit_options"] = self.jit_options
-            if self._user_jit_kwargs:
-                params["jit_kwargs"] = self._user_jit_kwargs
-        else:
-            params["with_batch_dim"] = self.with_batch_dim
-            params["jit_options"] = self.jit_options
-            params["jit_kwargs"] = self._user_jit_kwargs
+        # Merge in the pipeline-level params from super().
+        params.update(config.get("params", {}))
 
         if params:
             config["params"] = params
+        else:
+            config.pop("params", None)
 
         return config
 

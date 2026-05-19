@@ -15,7 +15,7 @@ Run ``python -m zea.data.convert --help`` for all options.
 
 import argparse
 
-from zea import init_device
+from zea.internal.device import init_device
 
 
 def _add_parser_args_echonet(subparsers):
