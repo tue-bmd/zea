@@ -1175,21 +1175,13 @@ class ScanSpec(Spec):
                 self.demodulation_frequency = self.demodulation_frequency[0]
 
         # Warn about optional fields that were not provided
-        _optional_scan_fields = {
-            "time_to_next_transmit": "time between transmit events (n_frames, n_tx)",
-            "azimuth_angles": "azimuthal angles of transmit beams (n_tx,) in radians",
-            "sound_speed": "speed of sound in m/s",
-            "tgc_gain_curve": "time-gain-compensation curve (n_ax,)",
-            "element_width": "element width of the probe in meters",
-            "waveforms_one_way": "one-way transmit waveforms (n_tx, n_samples)",
-            "waveforms_two_way": "two-way transmit waveforms (n_tx, n_samples)",
-        }
-        for s_field, description in _optional_scan_fields.items():
-            if getattr(self, s_field) is None:
+        _optional_names = {f.name for f in fields(self) if f.default is None}
+        for field_name, meta in self.FIELD_METADATA.items():
+            if field_name in _optional_names and getattr(self, field_name) is None:
                 log.warning(
-                    f"Optional ScanSpec field '{s_field}' is not set."
-                    f"Description: {description}. "
-                    f"Defaulted to None."
+                    f"Optional ScanSpec field '{field_name}' is not set. "
+                    f"Description: {meta['description']} "
+                    "Defaulted to None."
                 )
 
 
@@ -1224,20 +1216,9 @@ class Subject(Spec):
         if self.id is not None and not self.id.strip():
             raise ValueError("Subject ID cannot be an empty string")
 
-        _optional_subject_fields = {
-            "id": "subject identifier for traceability and subject-wise splits",
-            "type": "subject type (e.g. 'human', 'phantom', 'animal')",
-            "age": "subject age in years",
-            "sex": "subject sex",
-            "fat_percentage": "subject fat percentage",
-        }
-        for s_field, description in _optional_subject_fields.items():
-            if getattr(self, s_field) is None:
-                log.warning(
-                    f"Optional Subject field '{s_field}' is not set. "
-                    f"Description: {description}. "
-                    "Defaulted to None."
-                )
+        for field_name in self.SCHEMA:
+            if getattr(self, field_name) is None:
+                log.warning(f"Optional Subject field '{field_name}' is not set. Defaulted to None.")
 
         if self.fat_percentage is not None and (
             self.fat_percentage < 0 or self.fat_percentage > 100
@@ -1537,19 +1518,12 @@ class MetadataSpec(Spec):
                 f"signal fields: {suggested_signal_keys}."
             )
 
-        _optional_metadata_fields = {
-            "credit": "credit or attribution for the dataset",
-            "probe_pose": "sampled probe pose at the transducer tip",
-            "voice_narration": "voice narration signal",
-            "ecg": "electrocardiogram signal",
-            "text_report": "free-text report associated with the study",
-            "annotations": "frame-level annotations",
-        }
-        for s_field, description in _optional_metadata_fields.items():
-            if getattr(self, s_field) is None:
+        _optional_names = {f.name for f in fields(type(self)) if f.default is None}
+        for field_name, meta in type(self).FIELD_METADATA.items():
+            if field_name in _optional_names and getattr(self, field_name, None) is None:
                 log.warning(
-                    f"Optional MetadataSpec field '{s_field}' is not set. "
-                    f"Description: {description}. "
+                    f"Optional MetadataSpec field '{field_name}' is not set. "
+                    f"Description: {meta['description']} "
                     "Defaulted to None."
                 )
 

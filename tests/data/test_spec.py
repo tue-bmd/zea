@@ -733,13 +733,9 @@ class TestScanSpecSaveWarnings:
     @pytest.mark.parametrize(
         "field",
         [
-            "time_to_next_transmit",
-            "azimuth_angles",
-            "sound_speed",
-            "tgc_gain_curve",
-            "element_width",
-            "waveforms_one_way",
-            "waveforms_two_way",
+            f.name
+            for f in fields(ScanSpec)
+            if f.default is None and f.name in ScanSpec.FIELD_METADATA
         ],
     )
     def test_optional_scan_field_missing_warns(self, field):
@@ -844,10 +840,7 @@ class TestScanSpecSaveWarnings:
 class TestSubjectFieldWarnings:
     """log.warning calls emitted when Subject optional fields are None."""
 
-    @pytest.mark.parametrize(
-        "field",
-        ["id", "type", "age", "sex", "fat_percentage"],
-    )
+    @pytest.mark.parametrize("field", list(Subject.SCHEMA))
     def test_optional_subject_field_missing_warns(self, field):
         with patch("zea.log.warning") as mock_warn:
             Subject()
@@ -872,7 +865,7 @@ class TestMetadataSpecFieldWarnings:
 
     @pytest.mark.parametrize(
         "field",
-        ["credit", "probe_pose", "voice_narration", "ecg", "text_report", "annotations"],
+        [f.name for f in fields(MetadataSpec) if f.default is None],
     )
     def test_optional_metadata_field_missing_warns(self, field):
         with patch("zea.log.warning") as mock_warn:
