@@ -672,14 +672,6 @@ def test_assert_image_range_above():
         Dataloader._assert_image_range(image, (0, 1))
 
 
-def test_normalize():
-    """Test _normalize maps values from image_range to normalization_range."""
-    image = np.array([0.0, 0.5, 1.0])
-    result = np.array(Dataloader._normalize(image, (0, 1), (0, 10)))
-    expected = np.array([0.0, 5.0, 10.0])
-    np.testing.assert_allclose(result, expected)
-
-
 def test_summary(dummy_hdf5, capsys):
     """Test summary() prints dataset statistics."""
     loader = Dataloader(

@@ -25,7 +25,7 @@ class Resizer(DataLayer):
     Resize layer for resizing images. Can deal with N-dimensional images.
     Can do resize, center_crop, random_crop and crop_or_pad.
 
-    Can be used in `tf.data` pipelines.
+    Can be used in `tf.data` and `grain` pipelines.
     """
 
     def __init__(
