@@ -1718,8 +1718,8 @@ class FileSpec(Spec):
         if not self.tracks:
             raise ValueError("A FileSpec must contain at least one track.")
 
-        # Coerce track dicts → TrackSpec
-        coerced = []
+        # Create TrackSpecs from dictionaries in the tracks list, if needed, and validate all tracks
+        track_specs = []
         for i, t in enumerate(self.tracks):
             if isinstance(t, dict):
                 try:
@@ -1728,8 +1728,8 @@ class FileSpec(Spec):
                     raise type(e)(f"In tracks[{i}]: {e}") from e
             elif not isinstance(t, TrackSpec):
                 raise TypeError(f"tracks[{i}] must be a TrackSpec or dict, got {type(t)}")
-            coerced.append(t)
-        self.tracks = coerced
+            track_specs.append(t)
+        self.tracks = track_specs
 
         # Validate track_schedule indices are in range
         if self.track_schedule is not None:
