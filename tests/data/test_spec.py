@@ -557,6 +557,25 @@ class TestDataValidationErrors:
             )
             assert m2.coordinates.shape == (2, 16, 12, 3)
 
+    def test_map_coordinates_millimetre_range_warns(self):
+        """Coordinates with |value| > 1 m should trigger a units warning."""
+        # Values of 50 mm look fine in mm but are 0.05 m — no warning expected.
+        coords_metres = np.zeros((2, 8, 8, 3), dtype=np.float32)
+        coords_metres[..., 2] = 0.05  # 5 cm depth — valid
+        Map(
+            values=np.zeros((2, 8, 8), dtype=np.uint8),
+            coordinates=coords_metres,
+        )  # should not warn
+
+        # Coordinates in millimetres: max absolute value = 50 mm > 1 m threshold.
+        coords_mm = np.zeros((2, 8, 8, 3), dtype=np.float32)
+        coords_mm[..., 2] = 50.0  # 50 mm — looks like mm, not metres
+        with pytest.warns(match="metres"):
+            Map(
+                values=np.zeros((2, 8, 8), dtype=np.uint8),
+                coordinates=coords_mm,
+            )
+
     def test_n_ch_3_raises_for_raw_data(self):
         """raw_data n_ch must be 1 or 2, 3 channels should be rejected."""
         with pytest.raises(ValueError, match="n_ch"):

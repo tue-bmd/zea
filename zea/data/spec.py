@@ -546,6 +546,18 @@ class Map(Spec):
                     f"({self.values.shape}) for non-channeled data, or "
                     f"values.shape[:-1] ({self.values.shape[:-1]}) for channeled data."
                 )
+            # Sanity-check units: clinical ultrasound scan regions are at most a few tens of
+            # centimetres across, so any finite coordinate magnitude above 1 m almost certainly
+            # indicates the array was supplied in millimetres rather than metres.
+            max_abs = np.max(np.abs(self.coordinates[np.isfinite(self.coordinates)]), initial=0.0)
+            if max_abs > 1.0:
+                warnings.warn(
+                    log.warning(
+                        f"Map coordinates have a maximum absolute value of {max_abs:.4g}, which "
+                        "exceeds 1 m.  Ultrasound scan regions are typically a few centimetres "
+                        "across.  Please verify that coordinates are in metres, not millimetres."
+                    )
+                )
         else:
             log.warning(
                 "Map coordinates are not provided, please consider adding a coordinates field "
