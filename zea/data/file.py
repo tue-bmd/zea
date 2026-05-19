@@ -246,52 +246,67 @@ def build_scan_from_dict(
 
 def _compute_all_track_timestamps(
     schedule: "np.ndarray",
-    proxies: "list[TrackProxy]",
+    tracks: "list[TrackProxy]",
 ) -> "list[np.ndarray | None]":
     """Compute and return timestamps for every track given a track schedule.
+
+    Tracks may have different numbers of frames.  The accumulation uses up to
+    ``max(n_frames_per_track)`` rows; when a track has fewer frames than the
+    maximum, its last available frame's ``time_to_next_transmit`` is repeated
+    (clamped) for the remaining rows.  The result for each track is then sliced
+    to its own frame count, so the output shape is ``(n_frames_t, n_tx_t)``
+    per track.
 
     Args:
         schedule: ``int32`` array mapping each global transmit event to a track
             index, shape ``(n_total_tx,)``.
-        proxies: :class:`TrackProxy` list (without timestamps yet assigned).
+        tracks: :class:`TrackProxy` list (without timestamps yet assigned).
 
     Returns:
-        list: One ``np.ndarray`` of shape ``(n_frames, n_tx_t)`` per track, or
-        a list of ``None`` values if timestamps cannot be computed.
+        list: One ``np.ndarray`` of shape ``(n_frames_t, n_tx_t)`` per track,
+        or a list of ``None`` values if timestamps cannot be computed.
     """
-    n_tracks = len(proxies)
-    t2nts: list[np.ndarray] = []
-    for proxy in proxies:
-        scan = proxy.scan()
-        t2nt = scan.time_to_next_transmit
-        if t2nt is None:
-            log.warning(
-                f"Track {proxy._index} has no 'time_to_next_transmit';"
-                " cannot compute track timestamps."
-            )
-            return [None] * n_tracks
-        t2nts.append(np.asarray(t2nt, dtype=np.float64))
+    n_frames_per_track = [track.scan().time_to_next_transmit.shape[0] for track in tracks]
+    # create empty matrices of size `n_frames, n_tx` for each track
+    track_matrices = [
+        np.zeros_like(track.scan().time_to_next_transmit, dtype=np.float32) for track in tracks
+    ]
+    # track the current frame index for each track as we iterate through the schedule
+    track_counters = [[0, 0] for _ in tracks]  # list of [frame_idx, tx_idx] per track
 
-    n_frames = t2nts[0].shape[0]
-    n_total = len(schedule)
+    cumulative_timestamp = 0.0
 
-    cumtime = np.zeros(n_frames, dtype=np.float64)
-    global_timestamps = np.empty((n_frames, n_total), dtype=np.float64)
-    track_counters = [0] * n_tracks
+    for track_idx in schedule:
+        current_frame_in_track, current_tx_in_track = track_counters[track_idx]
+        # set cumulative timestamp as value of current global transmit
+        track_matrices[track_idx][current_frame_in_track, current_tx_in_track] = (
+            cumulative_timestamp
+        )
 
-    for g in range(n_total):
-        t_idx = int(schedule[g])
-        global_timestamps[:, g] = cumtime
-        k = track_counters[t_idx]
-        if g < n_total - 1:
-            cumtime = cumtime + t2nts[t_idx][:, k]
-        track_counters[t_idx] = k + 1
+        cumulative_timestamp += (
+            tracks[track_idx]
+            .scan()
+            .time_to_next_transmit[current_frame_in_track, current_tx_in_track]
+        )
 
-    result = []
-    for i in range(n_tracks):
-        positions = np.where(schedule == i)[0]
-        result.append(global_timestamps[:, positions])
-    return result
+        # update frame and tx indices for the current track
+        current_tx_in_track += 1
+        if current_tx_in_track >= (n_frames_per_track[track_idx]):
+            current_tx_in_track = 0
+            current_frame_in_track += 1
+        track_counters[track_idx] = [current_frame_in_track, current_tx_in_track]
+
+    # Assertion to validate that the track_schedule has the correct number of entries
+    for i, track_counter in enumerate(track_counters):
+        frame_idx, _ = track_counter
+        assert frame_idx == n_frames_per_track[i], (
+            f"There was a mistmatch between the track_schedule and the number of frames and "
+            f"transmits in track {i}. "
+            f"Please ensure that the track_schedule correctly maps to the global number of "
+            f"transmit events."
+        )
+
+    return track_matrices
 
 
 class File(h5py.File):
