@@ -1762,7 +1762,8 @@ class FileSpec(Spec):
         # Run base SCHEMA validation (metadata, metrics, scalars, track_schedule)
         super().__post_init__()
 
-        # Cross-track / metadata dimension consistency check
+        # Validate that dimensions which are present in both metadata and tracks
+        # are consistent across all tracks.
         if isinstance(self.metadata, MetadataSpec):
             _, meta_dim_sizes = self.metadata._collect_dimension_info("metadata.")
             for i, track in enumerate(self.tracks):
