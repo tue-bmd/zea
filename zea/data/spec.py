@@ -272,7 +272,7 @@ class Spec:
         try:
             check_dtype(field_value, expected_dtype)
         except TypeError as e:
-            raise TypeError(f"Field '{field_name}' has invalid dtype: {e}")
+            raise TypeError(f"{type(self).__name__}: field '{field_name}' has invalid dtype: {e}")
 
         matched_shape = find_matched_shape(field_value, expected_shapes)
         if matched_shape is None:

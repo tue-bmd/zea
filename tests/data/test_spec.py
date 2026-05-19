@@ -503,21 +503,21 @@ class TestDataValidationErrors:
 
     def test_map_wrong_pixel_dtype_raises(self):
         """SosMap inherits FloatMap – values must be float32, not uint8."""
-        with pytest.raises(TypeError, match="values"):
+        with pytest.raises(TypeError, match="SosMap: field 'values'"):
             SosMap(
                 values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
             )
 
     def test_image_wrong_pixel_dtype_raises(self):
         """Image is UnsignedIntMap – values must be float32 or uint8, not complex128."""
-        with pytest.raises(TypeError, match="values"):
+        with pytest.raises(TypeError, match="Image: field 'values'"):
             Image(
                 values=np.zeros((2, 16, 12, 1), dtype=np.complex128),
             )
 
     def test_segmentation_wrong_pixel_dtype_raises(self):
         """Segmentation is BooleanMap – values must be bool_, not float32."""
-        with pytest.raises(TypeError, match="values"):
+        with pytest.raises(TypeError, match="Segmentation: field 'values'"):
             Segmentation(
                 values=np.zeros((2, 16, 12, 1, 2), dtype=np.float32),
                 labels=np.array(["a", "b"], dtype=np.str_),
@@ -525,14 +525,14 @@ class TestDataValidationErrors:
 
     def test_map_coordinates_wrong_shape_raises(self):
         """coordinates must have final dim 3 and spatial dims matching values."""
-        # Final dim is not 3
+        # Final dim is not 3 — caught by SCHEMA shape check
         with pytest.raises(ValueError, match="coordinates"):
             Image(
                 values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
                 coordinates=np.zeros((2, 16, 12, 4), dtype=np.float32),
             )
-        # Spatial dims don't match values (wrong z size)
-        with pytest.raises(ValueError, match="coordinates"):
+        # Spatial dims don't match values — caught by Map.__post_init__
+        with pytest.raises(ValueError, match="Image: coordinates shape"):
             Image(
                 values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
                 coordinates=np.zeros((2, 99, 12, 3), dtype=np.float32),
