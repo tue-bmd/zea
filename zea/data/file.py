@@ -154,6 +154,7 @@ def _compute_track_timestamps(file: "File", track_index: int) -> "np.ndarray | N
     """
     schedule = file.track_schedule
     if schedule is None:
+        log.warning("`track_schedule` was not found in the file; cannot compute track timestamps.")
         return None
 
     n_tracks = file._n_tracks
@@ -165,6 +166,10 @@ def _compute_track_timestamps(file: "File", track_index: int) -> "np.ndarray | N
         scan = proxy.scan()
         t2nt = scan.time_to_next_transmit
         if t2nt is None:
+            log.warning(
+                f"Track {proxy._index} has no 'time_to_next_transmit';"
+                f" cannot compute track timestamps."
+            )
             return None
         t2nts.append(np.asarray(t2nt, dtype=np.float64))
 
