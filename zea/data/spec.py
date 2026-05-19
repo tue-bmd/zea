@@ -471,28 +471,37 @@ class Spec:
 
 @dataclass
 class Map(Spec):
-    """Map data and spatial extent metadata.
+    """Map data with per-pixel Cartesian coordinates.
+
+    A map is a function from Cartesian space to some real values: every pixel at
+    spatial index ``[f, i, j, ...]`` is assigned a 3-D position ``coordinates[f, i, j, ..., :]``
+    = ``[x, y, z]`` in metres.
 
     The most flexible map spec, which can be used for any spatially aligned data product.
+    See, for example, :func:`~zea.beamform.pixelgrid.cartesian_pixel_grid` or
+    :func:`~zea.beamform.pixelgrid.polar_pixel_grid` to create a suitable coordinate array
+    from your scan geometry.
 
     Args:
-        values: The map values of shape (n_frames, z, x, y, n_ch) or (n_frames, z, x, y)
-            or (n_frames, z, x, n_ch) or (n_frames, z, x) and type uint8 or float32 or int16.
-        extent: The map extent in meters of shape (n_frames, 6) or (6,).
-            A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
-        labels: The labels corresponding to the `n_ch` channels in the values.
+        values: The map values of shape ``(n_frames, z, x, y, n_ch)`` or ``(n_frames, z, x, y)``
+            or ``(n_frames, z, x, n_ch)`` or ``(n_frames, z, x)`` and type uint8, float32,
+            int16, or complex64.
+        coordinates: Per-pixel Cartesian positions in metres, shape ``(*spatial_dims, 3)``
+            where ``spatial_dims`` matches the spatial (non-channel) dimensions of ``values``.
+            For non-channeled values the shape is ``(*values.shape, 3)``; for channeled values
+            the shape is ``(*values.shape[:-1], 3)``.  The last axis holds ``[x, y, z]``.
+        labels: The labels corresponding to the ``n_ch`` channels in the values.
             This is required when values have an n_ch dimension, and should be None otherwise.
-            For IQ data, this would typically be ["I", "Q"].
+            For IQ data, this would typically be ``["I", "Q"]``.
         description: An optional free-text description of the map.
         unit: An optional string specifying the physical unit of the map values,
-            e.g. "m/s", "%", etc.
+            e.g. ``"m/s"``, ``"%"``, etc.
         min: The minimum value of the map.
         max: The maximum value of the map.
     """
 
     values: np.ndarray
-    extent: np.ndarray | None = None
+    coordinates: np.ndarray | None = None
     labels: np.ndarray | None = None
     description: str | None = None
     unit: str | None = None
@@ -508,7 +517,7 @@ class Map(Spec):
                 ("n_frames", "z", "x"),
             ),
         },
-        "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
+        "coordinates": {"dtype": np.float32, "shape": ("...", 3)},
         "labels": {"dtype": np.str_, "shape": ("n_spatial_ch",)},
         "description": {"dtype": str, "shape": ()},
         "unit": {"dtype": str, "shape": ()},
@@ -524,31 +533,29 @@ class Map(Spec):
                 "labels must be provided when values have n_ch dimension"
             )
 
-        if self.extent is not None:
-            # Check sensible values
-            if np.any(self.extent[..., 0] > self.extent[..., 1]):
-                raise ValueError("Map extent xlims must have xmin <= xmax")
-            if np.any(self.extent[..., 2] > self.extent[..., 3]):
-                raise ValueError("Map extent ylims must have ymin <= ymax")
-            if np.any(self.extent[..., 4] > self.extent[..., 5]):
-                raise ValueError("Map extent zlims must have zmin <= zmax")
-
-            # Ultrasound specific warning: if extent values are unusually large, log a warning
-            if np.any(self.extent >= 1.0) or np.any(self.extent <= -1.0):
-                log.warning(
-                    "Map extent values are unusually large, extending beyond +/- 1.0 meters. "
-                    "Please verify that the extent values are correct and in meters."
+        if self.coordinates is not None:
+            # coordinates.shape[-1] is guaranteed == 3 by the SCHEMA check above.
+            # Validate that the spatial axes match values (with or without a trailing channel axis).
+            coords_spatial = self.coordinates.shape[:-1]
+            valid_spatial_shapes = {self.values.shape, self.values.shape[:-1]}
+            if coords_spatial not in valid_spatial_shapes:
+                raise ValueError(
+                    f"coordinates shape {self.coordinates.shape} is incompatible with "
+                    f"values shape {self.values.shape}. "
+                    f"coordinates.shape[:-1] must equal values.shape "
+                    f"({self.values.shape}) for non-channeled data, or "
+                    f"values.shape[:-1] ({self.values.shape[:-1]}) for channeled data."
                 )
         else:
             log.warning(
-                "Map extent is not provided, please consider adding an extent field to "
-                "ensure the map can be correctly displayed."
+                "Map coordinates are not provided, please consider adding a coordinates field "
+                "to ensure the map can be correctly displayed."
             )
 
 
 @dataclass
 class FloatMap(Map):
-    """Map data with float32 pixel values and spatial extent metadata."""
+    """Map data with float32 pixel values and per-pixel Cartesian coordinates."""
 
     SCHEMA = {
         **Map.SCHEMA,
@@ -561,7 +568,7 @@ class FloatMap(Map):
 
 @dataclass
 class BooleanMap(Map):
-    """Map data with bool pixel values and spatial extent metadata."""
+    """Map data with bool pixel values and per-pixel Cartesian coordinates."""
 
     SCHEMA = {
         **Map.SCHEMA,
@@ -574,7 +581,7 @@ class BooleanMap(Map):
 
 @dataclass
 class UnsignedIntMap(Map):
-    """Map data with uint8 pixel values and spatial extent metadata."""
+    """Map data with uint8 pixel values and per-pixel Cartesian coordinates."""
 
     SCHEMA = {
         **Map.SCHEMA,
@@ -587,15 +594,13 @@ class UnsignedIntMap(Map):
 
 @dataclass
 class Segmentation(BooleanMap):
-    """Segmentation data and spatial extent metadata.
+    """Segmentation data with per-pixel Cartesian coordinates.
 
     Args:
-        values: The segmentation values of shape (n_frames, z, x, y, n_labels) and type bool.
-        extent: The segmentation extent in meters of shape (n_frames, 6) or (6,).
-            A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
+        values: The segmentation values of shape ``(n_frames, z, x, y, n_labels)`` and type bool.
+        coordinates: Per-pixel Cartesian positions in metres, shape ``(n_frames, z, x, y, 3)``.
         labels: The labels corresponding to the segmentation values, where each unique value
-            in the values corresponds to a label in this list of shape (n_labels,) and type str.
+            in the values corresponds to a label in this list of shape ``(n_labels,)`` and type str.
     """
 
     def __post_init__(self):
@@ -607,15 +612,13 @@ class Segmentation(BooleanMap):
 
 @dataclass
 class Image(Map):
-    """Reconstructed (log-compressed) image data and spatial extent metadata.
+    """Reconstructed (log-compressed) image data with per-pixel Cartesian coordinates.
 
     Args:
-        values: The image values of shape (n_frames, z, x, y) or (n_frames, z, x)
+        values: The image values of shape ``(n_frames, z, x, y)`` or ``(n_frames, z, x)``
             and type uint8 or float32. For float32 values, the values should be in dB
             (between -inf and 0).
-        extent: The image extent in meters of shape (n_frames, 6) or (6,).
-            A shape of (6,) is broadcast to all frames. Values are ordered as
-            (radius_min, radius_max, theta_min, theta_max, phi_min, phi_max) and stored as float32.
+        coordinates: Per-pixel Cartesian positions in metres, shape ``(*values.shape, 3)``.
     """
 
     SCHEMA = {
@@ -642,16 +645,15 @@ class Image(Map):
 
 @dataclass
 class BeamformedData(FloatMap):
-    """Beamformed (beamsummed) data and spatial extent metadata.
+    """Beamformed (beamsummed) data with per-pixel Cartesian coordinates.
 
     Args:
-        values: The beamformed data of shape (n_frames, z, x, n_ch) or
-            (n_frames, z, x, y, n_ch) and type float32.
+        values: The beamformed data of shape ``(n_frames, z, x, n_ch)`` or
+            ``(n_frames, z, x, y, n_ch)`` and type float32.
             n_ch is 1 for RF data or 2 for IQ data.
-        extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
-            A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
-        labels: The labels for the channel dimension, e.g. ["RF"] or ["I", "Q"].
+        coordinates: Per-pixel Cartesian positions in metres, shape
+            ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
+        labels: The labels for the channel dimension, e.g. ``["RF"]`` or ``["I", "Q"]``.
             Auto-generated from n_ch if not provided.
     """
 
@@ -685,14 +687,12 @@ class BeamformedData(FloatMap):
 
 @dataclass
 class EnvelopeData(FloatMap):
-    """Envelope-detected data and spatial extent metadata.
+    """Envelope-detected data with per-pixel Cartesian coordinates.
 
     Args:
-        values: The envelope data of shape (n_frames, x, z) or
-            (n_frames, z, x, y) and type float32.
-        extent: Spatial extent in meters of shape (n_frames, 6) or (6,).
-            A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
+        values: The envelope data of shape ``(n_frames, x, z)`` or
+            ``(n_frames, z, x, y)`` and type float32.
+        coordinates: Per-pixel Cartesian positions in metres, shape ``(*values.shape, 3)``.
     """
 
     SCHEMA = {
@@ -709,14 +709,13 @@ class EnvelopeData(FloatMap):
 
 @dataclass
 class SosMap(FloatMap):
-    """Speed-of-sound map data and spatial extent metadata.
+    """Speed-of-sound map data with per-pixel Cartesian coordinates.
 
     Args:
-        values: The speed-of-sound map values in m/s of shape (n_frames, z, x, y)
+        values: The speed-of-sound map values in m/s of shape ``(n_frames, z, x, y)``
             and type float32.
-        extent: The speed-of-sound map extent in meters of shape (n_frames, 6) or (6,).
-            A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
+        coordinates: Per-pixel Cartesian positions in metres, shape
+            ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
     """
 
     def __post_init__(self):
@@ -735,13 +734,11 @@ class SosMap(FloatMap):
 
 @dataclass
 class StrainPercentageMap(FloatMap):
-    """Strain map data and spatial extent metadata.
+    """Strain map data with per-pixel Cartesian coordinates.
 
     Args:
-        values: The strain values in % of shape (n_frames, z, x, y) and type float32.
-        extent: The strain extent in meters of shape (n_frames, 6) or (6,).
-            A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmin, zmax) and stored as float32.
+        values: The strain values in % of shape ``(n_frames, z, x, y)`` and type float32.
+        coordinates: Per-pixel Cartesian positions in metres.
     """
 
     def __post_init__(self):
@@ -753,12 +750,12 @@ class StrainPercentageMap(FloatMap):
 
 @dataclass
 class ShearWaveElastographyMap(FloatMap):
-    """Shear-wave elastography data and spatial extent metadata.
+    """Shear-wave elastography data with per-pixel Cartesian coordinates.
 
     Args:
         values: The shear-wave elastography values in m/s of shape
-            (n_frames, z, x, y) and type float32.
-        extent: The SWE extent in meters of shape (n_frames, 6) or (6,).
+            ``(n_frames, z, x, y)`` and type float32.
+        coordinates: Per-pixel Cartesian positions in metres.
     """
 
     def __post_init__(self):
@@ -770,12 +767,12 @@ class ShearWaveElastographyMap(FloatMap):
 
 @dataclass
 class TissueDopplerMap(FloatMap):
-    """Tissue Doppler data and spatial extent metadata.
+    """Tissue Doppler data with per-pixel Cartesian coordinates.
 
     Args:
-        values: The tissue Doppler values in m/s of shape (n_frames, z, x, y)
+        values: The tissue Doppler values in m/s of shape ``(n_frames, z, x, y)``
             and type float32.
-        extent: The tissue Doppler extent in meters of shape (n_frames, 6) or (6,).
+        coordinates: Per-pixel Cartesian positions in metres.
     """
 
     def __post_init__(self):
@@ -787,14 +784,14 @@ class TissueDopplerMap(FloatMap):
 
 @dataclass
 class ColorDopplerMap(FloatMap):
-    """Color Doppler (velocity) data and spatial extent metadata.
+    """Color Doppler (velocity) data with per-pixel Cartesian coordinates.
 
     Args:
         values: The color Doppler velocity values in m/s of shape
-            (n_frames, z, x, y) and type float32. Positive values
+            ``(n_frames, z, x, y)`` and type float32. Positive values
             indicate flow towards the transducer, negative values
             indicate flow away from the transducer.
-        extent: The color Doppler extent in meters of shape (n_frames, 6) or (6,).
+        coordinates: Per-pixel Cartesian positions in metres.
     """
 
     def __post_init__(self):
@@ -814,18 +811,18 @@ class DataSpec(Spec):
         aligned_data: Time-of-flight corrected data of shape
             (n_frames, n_tx, n_ax, n_el, n_ch) and type float32 or int16.
 
-    Spatial map data products (with extent metadata):
-        - beamformed_data: Beamformed (beamsummed) data and extent metadata.
-        - envelope_data: Envelope-detected data and extent metadata.
-        - image_sc: Scan-converted image data and extent metadata.
-        - image: Reconstructed image data and extent metadata.
-        - segmentation: Segmentation data and extent metadata.
-        - sos_map: Speed-of-sound map data and extent metadata.
-        - strain_percentage_map: Strain map data and extent metadata.
-        - shear_wave_elastography_map: Shear-wave elastography data and extent metadata.
-        - tissue_doppler: Tissue Doppler data and extent metadata.
-        - color_doppler: Color Doppler velocity data and extent metadata.
-        - \\*\\*kwargs: Any other spatially aligned map data and extent metadata.
+    Spatial map data products (values + per-pixel coordinates):
+        - beamformed_data: Beamformed (beamsummed) data and per-pixel coordinates.
+        - envelope_data: Envelope-detected data and per-pixel coordinates.
+        - image_sc: Scan-converted image data and per-pixel coordinates.
+        - image: Reconstructed image data and per-pixel coordinates.
+        - segmentation: Segmentation data and per-pixel coordinates.
+        - sos_map: Speed-of-sound map data and per-pixel coordinates.
+        - strain_percentage_map: Strain map data and per-pixel coordinates.
+        - shear_wave_elastography_map: Shear-wave elastography data and per-pixel coordinates.
+        - tissue_doppler: Tissue Doppler data and per-pixel coordinates.
+        - color_doppler: Color Doppler velocity data and per-pixel coordinates.
+        - \\*\\*kwargs: Any other spatially aligned map data and per-pixel coordinates.
 
     At least one data field (pipeline or spatial map) must be provided.
     """
