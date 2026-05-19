@@ -458,7 +458,6 @@ class Config(dict):
         Returns:
             Config: config object.
         """
-        from zea.data.preset_utils import HF_PREFIX, _hf_resolve_path
 
         if str(path).startswith(HF_PREFIX):
             path = _hf_resolve_path(str(path), **kwargs)
@@ -492,7 +491,6 @@ class Config(dict):
                 ...     "zeahub/configs", "config_camus.yaml", repo_type="dataset"
                 ... )
         """
-        from zea.data.preset_utils import HF_PREFIX
 
         return cls.from_path(f"{HF_PREFIX}{repo_id}/{path}", **kwargs)
 
