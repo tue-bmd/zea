@@ -836,7 +836,6 @@ class DataSpec(Spec):
     # Spatial map data products (with extent metadata)
     beamformed_data: BeamformedData | dict | None = None
     envelope_data: EnvelopeData | dict | None = None
-    image_sc: ImageSc | dict | None = None
     image: Image | dict | None = None
     segmentation: Segmentation | dict | None = None
     sos_map: SosMap | dict | None = None
@@ -858,7 +857,6 @@ class DataSpec(Spec):
         # Spatial map data products
         "beamformed_data": {"spec": BeamformedData},
         "envelope_data": {"spec": EnvelopeData},
-        "image_sc": {"spec": ImageSc},
         "image": {"spec": Image},
         "segmentation": {"spec": Segmentation},
         "sos_map": {"spec": SosMap},
@@ -879,7 +877,6 @@ class DataSpec(Spec):
         aligned_data: np.ndarray | None = None,
         beamformed_data: BeamformedData | dict | None = None,
         envelope_data: EnvelopeData | dict | None = None,
-        image_sc: ImageSc | dict | None = None,
         image: Image | dict | None = None,
         segmentation: Segmentation | dict | None = None,
         sos_map: SosMap | dict | None = None,
@@ -893,7 +890,6 @@ class DataSpec(Spec):
         self.aligned_data = aligned_data
         self.beamformed_data = beamformed_data
         self.envelope_data = envelope_data
-        self.image_sc = image_sc
         self.image = image
         self.segmentation = segmentation
         self.sos_map = sos_map
