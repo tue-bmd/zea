@@ -50,24 +50,19 @@ def generate_dummy_data_dict(
         "raw_data": np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
     }
 
-    _coordinates_3d = np.zeros((n_frames, grid_size_z, grid_size_x, 3), dtype=np.float32)
     if add_optional_dtypes:
         data_dict["aligned_data"] = np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
         data_dict["envelope_data"] = {
             "values": np.ones((n_frames, grid_size_z, grid_size_x), dtype=np.float32),
-            "coordinates": _coordinates_3d,
         }
         data_dict["beamformed_data"] = {
             "values": np.ones((n_frames, grid_size_z, grid_size_x, n_ch), dtype=np.float32),
-            "coordinates": _coordinates_3d,
         }
         data_dict["image"] = {
             "values": np.zeros((n_frames, grid_size_z, grid_size_x), dtype=image_dtype),
-            "coordinates": _coordinates_3d,
         }
         data_dict["image_sc"] = {
             "values": np.zeros((n_frames, grid_size_z, grid_size_x), dtype=image_dtype),
-            "coordinates": _coordinates_3d,
         }
 
     return data_dict

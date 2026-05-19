@@ -289,7 +289,6 @@ ROOT_ATTRS_TABLE = """\
 MAP_DESCRIPTIONS = {
     "beamformed_data": "Beamformed (beamsummed) data. Values are ``float32`` in (n_frames, z, x, n_ch) or (n_frames, z, x, y, n_ch); ``labels`` names each channel (RF or I/Q).",  # noqa: E501
     "envelope_data": "Envelope-detected data. Values are ``float32`` in (n_frames, z, x) or (n_frames, z, x, y).",  # noqa: E501
-    "image_sc": "Scan-converted image. Values are ``float32`` in (n_frames, z, x) or (n_frames, z, x, y).",  # noqa: E501
     "image": "Reconstructed (log-compressed) image. Values are ``uint8`` in (n_frames, z, x) or (n_frames, z, x, y).",  # noqa: E501
     "segmentation": "Semantic segmentation mask. Values are ``bool`` in (n_frames, z, x, y, n_labels); ``labels`` names each channel.",  # noqa: E501
     "sos_map": "Speed-of-sound map in m/s. Values are ``float32``.",
