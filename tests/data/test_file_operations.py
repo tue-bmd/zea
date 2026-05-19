@@ -293,7 +293,6 @@ def _assert_descriptions_and_additional_elements_equal(path, other_path: Path):
 
 def _assert_beamformed_data_still_exists(path: Path):
     with h5py.File(path, "r") as f:
-        # New-format files store data under tracks/track_0/data/
         key = "tracks/track_0/data/beamformed_data" if "tracks" in f else "data/beamformed_data"
         assert key in f
 

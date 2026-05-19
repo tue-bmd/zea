@@ -333,7 +333,7 @@ class File(h5py.File):
     def _scan_h5_group(self) -> "h5py.Group | None":
         """Return the HDF5 scan group for single-track / legacy files.
 
-        New format (single track): ``tracks/track_0/scan/``
+        Track format (single track): ``tracks/track_0/scan/``
         Legacy format: ``scan/`` at root
         Returns ``None`` when neither is present.
 
@@ -1253,7 +1253,7 @@ def _validate_file_impl(file: File) -> None:
     """Lightweight structural validation — no array data is loaded.
 
     Checks that:
-    - a ``data`` group is present — either at ``tracks/track_N/data`` (new format),
+    - a ``data`` group is present — either at ``tracks/track_N/data``,
       at the root ``data`` group (legacy), or inside ``event_*`` sub-groups
     - for legacy files, every key in ``data`` is a recognised zea data type
     - for files created with zea v0.1.0 and later, every key in ``data``
@@ -1267,9 +1267,7 @@ def _validate_file_impl(file: File) -> None:
         tracks_group = file["tracks"]
         for track_key in tracks_group.keys():
             track_grp = tracks_group[track_key]
-            assert "data" in track_grp, (
-                f"Track group '{track_key}' is missing a 'data' subgroup."
-            )
+            assert "data" in track_grp, f"Track group '{track_key}' is missing a 'data' subgroup."
             assert isinstance(track_grp["data"], h5py.Group), (
                 f"'{track_key}/data' is not a group - this may not be a zea file."
             )

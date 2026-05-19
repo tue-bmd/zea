@@ -188,7 +188,6 @@ def test_saving_and_loading(tmp_path, dataset_spec: FileSpec):
     dataset_spec.save(save_path)
 
     with File(save_path) as loaded_dataset:
-        # New format stores data and scan inside tracks/track_0/
         assert np.array_equal(
             loaded_dataset["tracks"]["track_0"]["data"]["raw_data"],
             dataset_spec.data.raw_data,
