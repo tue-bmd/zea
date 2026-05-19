@@ -540,8 +540,8 @@ class Map(Spec):
             valid_spatial_shapes = {self.values.shape, self.values.shape[:-1]}
             if coords_spatial not in valid_spatial_shapes:
                 raise ValueError(
-                    f"coordinates shape {self.coordinates.shape} is incompatible with "
-                    f"values shape {self.values.shape}. "
+                    f"{type(self).__name__}: coordinates shape {self.coordinates.shape} is "
+                    f"incompatible with values shape {self.values.shape}. "
                     f"coordinates.shape[:-1] must equal values.shape "
                     f"({self.values.shape}) for non-channeled data, or "
                     f"values.shape[:-1] ({self.values.shape[:-1]}) for channeled data."
@@ -553,15 +553,16 @@ class Map(Spec):
             if max_abs > 1.0:
                 warnings.warn(
                     log.warning(
-                        f"Map coordinates have a maximum absolute value of {max_abs:.4g}, which "
-                        "exceeds 1 m.  Ultrasound scan regions are typically a few centimetres "
-                        "across.  Please verify that coordinates are in metres, not millimetres."
+                        f"{type(self).__name__}: coordinates have a maximum absolute value of "
+                        f"{max_abs:.4g}, which exceeds 1 m.  Ultrasound scan regions are "
+                        "typically a few centimetres across.  Please verify that coordinates "
+                        "are in metres, not millimetres."
                     )
                 )
         else:
             log.warning(
-                "Map coordinates are not provided, please consider adding a coordinates field "
-                "to ensure the map can be correctly displayed."
+                f"{type(self).__name__}: coordinates are not provided, please consider adding "
+                "a coordinates field to ensure the map can be correctly displayed."
             )
 
 
