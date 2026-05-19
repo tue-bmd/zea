@@ -109,8 +109,9 @@ def process_cetus(source_path, output_path, overwrite=False):
 
     Each file stores the 3D B-mode volume as ``image_sc`` (scan-converted image).
     If a corresponding ground truth segmentation file exists, it is stored as a
-    ``Segmentation`` map under ``data/segmentation`` with spatial extent derived
-    from the NIfTI voxel spacing.
+    ``Segmentation`` map under ``data/segmentation``. Both maps include a
+    per-voxel coordinate grid (shape ``(1, D, H, W, 3)``) derived from the NIfTI
+    voxel spacing.
 
     Patient ID and citation are stored in the ``metadata`` group.
     License information is embedded in the file description.
@@ -165,16 +166,20 @@ def process_cetus(source_path, output_path, overwrite=False):
     patient_name = stem.split("_")[0]  # e.g. "patient01"
 
     # Build data dict
-    # Compute spatial extent from voxel spacing: (xmin, xmax, ymin, ymax, zmax, zmin)
     D, H, W = volume.shape
-    image_sc_extent = np.array(
-        [0, D * voxel_spacing[0], 0, W * voxel_spacing[2], 0, H * voxel_spacing[1]],
-        dtype=np.float32,
-    )
+
+    # Build per-voxel coordinate grid from voxel spacing.
+    # Shape: (1, D, H, W, 3) — valid for both image_sc (1,D,H,W) and segmentation (1,D,H,W,1).
+    d_range = np.arange(D, dtype=np.float32) * voxel_spacing[0]
+    h_range = np.arange(H, dtype=np.float32) * voxel_spacing[1]
+    w_range = np.arange(W, dtype=np.float32) * voxel_spacing[2]
+    d_grid, h_grid, w_grid = np.meshgrid(d_range, h_range, w_range, indexing="ij")
+    coordinates = np.stack([d_grid, h_grid, w_grid], axis=-1)[np.newaxis]  # (1, D, H, W, 3)
+
     data = {
         "image_sc": {
             "values": image_sc.astype(np.float32),
-            "extent": image_sc_extent,
+            "coordinates": coordinates,
         }
     }
 
@@ -183,15 +188,9 @@ def process_cetus(source_path, output_path, overwrite=False):
         # GT is binary: 0 or 255 -> bool mask, shape (1, D, H, W, 1)
         seg_mask = (gt_volume > 0)[np.newaxis, ..., np.newaxis]
 
-        # Compute spatial extent from voxel spacing: (xmin, xmax, ymin, ymax, zmax, zmin)
-        extent = np.array(
-            [0, D * voxel_spacing[0], 0, W * voxel_spacing[2], 0, H * voxel_spacing[1]],
-            dtype=np.float32,
-        )
-
         data["segmentation"] = {
             "values": seg_mask,
-            "extent": extent,
+            "coordinates": coordinates,
             "labels": np.array(["endocardium"]),
         }
 
