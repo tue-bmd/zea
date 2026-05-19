@@ -74,8 +74,8 @@ def assert_key(file: h5py.File, key: str):
         raise KeyError(f"{key} not found in file")
 
 
-class TrackProxy:
-    """Proxy for a single acquisition track within a multi-track :class:`File`.
+class Track:
+    """A single acquisition track within a :class:`File`.
 
     Provides the same ``.data`` and ``.scan()`` interface as :class:`File`
     but scoped to one ``tracks/track_N`` group.  Obtain instances through
@@ -135,14 +135,14 @@ class TrackProxy:
     def timestamps(self) -> "np.ndarray | None":
         """Global transmit timestamps for this track, shape ``(n_frames, n_tx)``.
 
-        Timestamps are pre-computed when the :class:`TrackProxy` is created via
+        Timestamps are pre-computed when the :class:`Track` is created via
         :attr:`File.tracks`.  Returns ``None`` if the file has no
         ``track_schedule`` or any track is missing ``time_to_next_transmit``.
         """
         return self._timestamps
 
     def __repr__(self) -> str:
-        return f"<TrackProxy index={self._index}>"
+        return f"<Track index={self._index}>"
 
 
 def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
@@ -246,7 +246,7 @@ def build_scan_from_dict(
 
 def _compute_all_track_timestamps(
     schedule: "np.ndarray",
-    tracks: "list[TrackProxy]",
+    tracks: "list[Track]",
 ) -> "list[np.ndarray | None]":
     """Compute and return timestamps for every track given a track schedule.
 
@@ -258,7 +258,7 @@ def _compute_all_track_timestamps(
     Args:
         schedule: ``int32`` array mapping each global transmit event to a track
             index, shape ``(n_total_tx,)``.
-        tracks: :class:`TrackProxy` list (without timestamps yet assigned).
+        tracks: :class:`Track` list (without timestamps yet assigned).
 
     Returns:
         list: One ``np.ndarray`` of shape ``(n_frames_t, n_tx_t)`` per track,
@@ -408,10 +408,10 @@ class File(h5py.File):
         return count
 
     @property
-    def tracks(self) -> "list[TrackProxy]":
-        """Return a list of :class:`TrackProxy` objects, one per track.
+    def tracks(self) -> "list[Track]":
+        """Return a list of :class:`Track` objects, one per track.
 
-        Each proxy exposes ``.data`` (a :class:`GroupProxy`) and ``.scan()``
+        Each track exposes ``.data`` (a :class:`GroupProxy`) and ``.scan()``
         (a :class:`~zea.scan.Scan` factory method) for that specific track.
 
         Raises:
@@ -432,23 +432,23 @@ class File(h5py.File):
                 "Access data and scan parameters directly with file.data and file.scan()."
             )
         tracks_group = self["tracks"]
-        proxies: list[TrackProxy] = []
+        tracks: list[Track] = []
         i = 0
         while f"track_{i}" in tracks_group:
-            proxies.append(TrackProxy(i, tracks_group[f"track_{i}"]))
+            tracks.append(Track(i, tracks_group[f"track_{i}"]))
             i += 1
 
         schedule = self.track_schedule
         if schedule is not None:
-            all_timestamps = _compute_all_track_timestamps(schedule, proxies)
-            for proxy, ts in zip(proxies, all_timestamps):
-                object.__setattr__(proxy, "_timestamps", ts)
+            all_timestamps = _compute_all_track_timestamps(schedule, tracks)
+            for track, ts in zip(tracks, all_timestamps):
+                object.__setattr__(track, "_timestamps", ts)
         else:
             log.warning(
                 "`track_schedule` was not found in the file; cannot compute track timestamps."
             )
 
-        return proxies
+        return tracks
 
     @property
     def track_schedule(self) -> "np.ndarray | None":

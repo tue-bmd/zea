@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from zea.data.file import File, GroupProxy, TrackProxy, dict_to_sorted_list, load_file
+from zea.data.file import File, GroupProxy, Track, dict_to_sorted_list, load_file
 from zea.data.spec import FileSpec, Image, Segmentation
 from zea.probes import Probe
 from zea.scan import Scan
@@ -889,7 +889,7 @@ def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
 
 
 class TestMultiTrackFile:
-    """Tests for File.tracks, TrackProxy, and single-track guards."""
+    """Tests for File.tracks, Track, and single-track guards."""
 
     # ------------------------------------------------------------------
     # File.tracks property
@@ -900,10 +900,10 @@ class TestMultiTrackFile:
         with File(path) as f:
             tracks = f.tracks
         assert len(tracks) == 2
-        assert all(isinstance(t, TrackProxy) for t in tracks)
+        assert all(isinstance(t, Track) for t in tracks)
 
     def test_tracks_single_track_file_returns_one_proxy(self, tmp_path):
-        """A single-track new-format file exposes one TrackProxy."""
+        """A single-track new-format file exposes one Track."""
         raw = np.zeros((2, 3, 8, 4, 1), dtype=np.float32)
         path = tmp_path / "single_track.hdf5"
         f = File.create(
@@ -916,7 +916,7 @@ class TestMultiTrackFile:
         with File(path) as f:
             tracks = f.tracks
         assert len(tracks) == 1
-        assert isinstance(tracks[0], TrackProxy)
+        assert isinstance(tracks[0], Track)
 
     def test_tracks_raises_for_legacy_flat_file(self, tmp_path):
         """Legacy files (no tracks/ group) raise AttributeError on .tracks."""
@@ -932,7 +932,7 @@ class TestMultiTrackFile:
                 _ = f.tracks
 
     # ------------------------------------------------------------------
-    # TrackProxy.data and TrackProxy.scan()
+    # Track.data and Track.scan()
     # ------------------------------------------------------------------
 
     def test_track_data_returns_correct_array(self, tmp_path):
@@ -1129,7 +1129,7 @@ class TestMultiTrackFile:
         spec.save(str(path))  # should not raise
 
     # ------------------------------------------------------------------
-    # TrackProxy.timestamps
+    # Track.timestamps
     # ------------------------------------------------------------------
 
     def test_track_timestamps_none_without_schedule(self, tmp_path):
