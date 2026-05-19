@@ -23,7 +23,8 @@ import keras
 import numpy as np
 from keras import ops
 
-from zea.func.tensor import sinc
+from zea.backend import jit
+from zea.func.tensor import sinc, vmap
 from zea.internal.cache import cache_output
 
 
@@ -48,6 +49,7 @@ def compute_pfield(
     alpha=1,
     percentile=10,
     norm=True,
+    point_batch_size=2048,
 ):
     """Compute the pressure field for ultrasound imaging.
 
@@ -74,6 +76,8 @@ def compute_pfield(
         percentile (int, optional): minimum percentile threshold to keep in the weighting.
             Only works when norm is True. Higher is more aggressive. Default is 10.
         norm (bool, optional): per pixel normalization (True) or unnormalized (False)
+        point_batch_size (int, optional): Batch size for the pressure field computation.
+            Higher is slightly faster, but requires more memory. Default is 2048.
 
     Returns:
         ops.array: The (normalized) pressure field (across tx events)
@@ -102,6 +106,7 @@ def compute_pfield(
     # formatting
     t0_delays = ops.where(ops.isnan(t0_delays), 0, t0_delays)
     tx_apodizations = ops.where(ops.isnan(tx_apodizations), 0, tx_apodizations)
+    tx_apodizations = ops.cast(tx_apodizations, "complex64")
 
     # probe params
     fc_original = center_frequency
@@ -109,6 +114,7 @@ def compute_pfield(
 
     # pulse params
     num_waveforms = 1  # number of waveforms in the pulse
+    center_wavenumber = 2 * np.pi * center_frequency / sound_speed
 
     # array params
     pitch = ops.abs(probe_geometry[1, 0] - probe_geometry[0, 0])  # element pitch
@@ -187,7 +193,7 @@ def compute_pfield(
         # Raise the normalized difference to the power of p_shape
         exponent = (freq_diff / denom) ** p_shape
         # Apply the negative sign and exponential
-        return ops.exp(-exponent)
+        return ops.cast(ops.exp(-exponent), "complex64")
 
     # The frequency response is a pulse-echo (transmit + receive) response.
     # The spectrum of the pulse (pulse_spectrum) will be then multiplied
@@ -221,11 +227,7 @@ def compute_pfield(
     # Exponential arrays of size [numel(x) n_el num_sub_elements]
     wavenumber = 2 * np.pi * freq[0] / sound_speed
     attenuation_wavenumber = attenuation_coef * freq[0]
-
-    distance_complex = ops.cast(distance, dtype="complex64")
     attenuation_wavenumber = ops.cast(attenuation_wavenumber, dtype="complex64")
-    mod_out = ops.cast(ops.mod(wavenumber * distance, 2 * np.pi), dtype="complex64")
-    exp_arr = ops.exp(-attenuation_wavenumber * distance_complex + 1j * mod_out)
 
     # Exponential array for the increment wavenumber dk
     wavenumber_step = 2 * np.pi * freq_step / sound_speed
@@ -233,20 +235,62 @@ def compute_pfield(
     wavenumber_step = ops.cast(wavenumber_step, dtype="complex64")
     attenuation_wavenumber_step = ops.cast(attenuation_wavenumber_step, dtype="complex64")
 
-    exp_freq_step = ops.exp(
-        (-attenuation_wavenumber_step + 1j * wavenumber_step) * distance_complex
+    @jit
+    def _pfield_freq_loop(distance, sin_theta):
+        """Calculates the pressure field using frequency loop method.
+
+        Returns:
+            (Tensor): Pressure field of shape (num_points, n_tx).
+        """
+
+        distance_complex = ops.cast(distance, dtype="complex64")
+
+        mod_out = ops.cast(ops.mod(wavenumber * distance, 2 * np.pi), dtype="complex64")
+        exp_arr = ops.exp(-attenuation_wavenumber * distance_complex + 1j * mod_out)
+
+        exp_freq_step = ops.exp(
+            (-attenuation_wavenumber_step + 1j * wavenumber_step) * distance_complex
+        )
+
+        exp_arr = exp_arr / ops.sqrt(distance_complex)
+        exp_arr = exp_arr * ops.cast(ops.sqrt(min_distance), "complex64")
+
+        directivity = _abs_sinc(center_wavenumber * seg_length / 2 * sin_theta)
+        exp_arr = exp_arr * ops.cast(directivity, "complex64")
+
+        monochromatic_pressure = exp_arr / exp_freq_step
+
+        def scan_fn(carry, k):
+            monochromatic_pressure, total_pressure_squared = carry
+            monochromatic_pressure *= exp_freq_step
+            pressure_squared_k = _pfield_freq_step(
+                freq[k],
+                t0_delays,
+                tx_apodizations,
+                ops.mean(monochromatic_pressure, axis=1),  # avg over sub-elements
+                pulse_spect[k],
+                probe_spect[k],
+            )
+            total_pressure_squared += pressure_squared_k
+            return (monochromatic_pressure, total_pressure_squared), None
+
+        num_points, _, _ = ops.shape(monochromatic_pressure)
+        n_tx, _ = ops.shape(tx_apodizations)
+        (_, total_pressure_squared), _ = ops.scan(
+            scan_fn,
+            (monochromatic_pressure, ops.zeros((num_points, n_tx), dtype="float32")),
+            ops.arange(len(freq)),
+        )
+
+        return total_pressure_squared
+
+    _pfield_freq_loop_mapped = vmap(
+        _pfield_freq_loop,
+        fn_supports_batch=True,
+        batch_size=point_batch_size,
     )
 
-    exp_arr = exp_arr / ops.sqrt(distance_complex)
-    exp_arr = exp_arr * ops.cast(ops.sqrt(min_distance), "complex64")
-
-    center_wavenumber = 2 * np.pi * center_frequency / sound_speed
-    directivity = _abs_sinc(center_wavenumber * seg_length / 2 * sin_theta)
-    exp_arr = exp_arr * ops.cast(directivity, "complex64")
-
-    pressure_squared = _pfield_freq_loop(
-        freq, t0_delays, tx_apodizations, exp_arr, exp_freq_step, pulse_spect, probe_spect
-    )  # shape (num_points, n_tx)
+    pressure_squared = _pfield_freq_loop_mapped(distance, sin_theta)  # shape (num_points, n_tx)
 
     # Zero out pressure behind the transducer (z < 0)
     pressure_squared = ops.where(grid_z[:, None] < 0, 0, pressure_squared)
@@ -335,59 +379,3 @@ def _pfield_freq_step(
         * probe_spect
     )
     return ops.abs(pressure_k) ** 2
-
-
-def _pfield_freq_loop(
-    freq,
-    delays_tx,
-    tx_apodization,
-    exp_arr,
-    exp_freq_step,
-    pulse_spect,
-    probe_spect,
-):
-    """Calculates the pressure field using frequency loop method.
-
-    All transmits are rendered together; the transmit dimension is batched
-    inside the matmul of :func:`_pfield_freq_step`.
-
-    Args:
-        freq (Tensor): List of frequencies.
-        delays_tx (Tensor): Transmit delays of shape (n_tx, n_el).
-        tx_apodization (Tensor): Transmit apodization values of shape (n_tx, n_el).
-        exp_arr (list): List of complex exponentials.
-        exp_freq_step (list): List of complex exponential frequency shifts.
-        pulse_spect (Tensor): List of pulse spectra at the frequency samples.
-        probe_spect (Tensor): List of probe spectra at the frequency samples.
-
-    Returns:
-        (Tensor): Pressure field of shape (num_points, n_tx).
-    """
-
-    tx_apodization = ops.cast(tx_apodization, "complex64")
-    probe_spect = ops.cast(probe_spect, "complex64")
-    monochromatic_pressure = exp_arr / exp_freq_step
-    num_points, _, _ = ops.shape(monochromatic_pressure)
-    n_tx = ops.shape(tx_apodization)[0]
-
-    def scan_fn(carry, k):
-        monochromatic_pressure, total_pressure_squared = carry
-        monochromatic_pressure *= exp_freq_step
-        pressure_squared_k = _pfield_freq_step(
-            freq[k],
-            delays_tx,
-            tx_apodization,
-            ops.mean(monochromatic_pressure, axis=1),  # avg over sub-elements
-            pulse_spect[k],
-            probe_spect[k],
-        )
-        total_pressure_squared += pressure_squared_k
-        return (monochromatic_pressure, total_pressure_squared), None
-
-    (_, total_pressure_squared), _ = ops.scan(
-        scan_fn,
-        (monochromatic_pressure, ops.zeros((num_points, n_tx), dtype="float32")),
-        ops.arange(len(freq)),
-    )
-
-    return total_pressure_squared
