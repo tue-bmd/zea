@@ -89,6 +89,10 @@ swapping between focused and plane-wave pulses.  Rather than splitting these int
 in a single HDF5 file. Each track will contain its own `~zea.Scan` object, containing the parameters
 necessary to beamform the raw data in that track. This allows us to specify a `~zea.Pipeline`
 *per-track*, which can be applied independently to each frame in that track.
+Global timing information can be stored in the optional ``track_schedule`` parameter, which 
+indicates which track each transmit event belongs to. Provided the 
+`~zea.Scan.time_to_next_transmit` for each transmit event, this allows us to reconstruct 
+the full timing of the acquisition.
 
 .. raw:: html
 
