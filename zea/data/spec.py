@@ -149,6 +149,22 @@ class Spec:
         """Return the names of fields that have a default value."""
         return tuple(f.name for f in fields(cls) if cls._is_optional_dataclass_field(f))
 
+    def warn_missing_optional_fields(self):
+        """Warn about optional fields that were not provided."""
+        _optional_fields = self.optional_fields()
+        for field_name in self.SCHEMA.keys():
+            if field_name in _optional_fields and getattr(self, field_name) is None:
+                if hasattr(self, "FIELD_METADATA"):
+                    meta = self.FIELD_METADATA.get(field_name, {})
+                    description = meta.get("description", _DEFAULT_FIELD_DESCRIPTION)
+                else:
+                    description = _DEFAULT_FIELD_DESCRIPTION
+                log.warning(
+                    f"Optional {self.__class__.__name__} field '{field_name}' is not set. "
+                    f"Description: {description} "
+                    "Defaulted to None."
+                )
+
     @staticmethod
     def _expected_shapes(shape_spec: Any) -> tuple[tuple, ...]:
         if shape_spec and isinstance(shape_spec[0], tuple):
@@ -1174,15 +1190,7 @@ class ScanSpec(Spec):
             if np.all(self.demodulation_frequency == self.demodulation_frequency[0]):
                 self.demodulation_frequency = self.demodulation_frequency[0]
 
-        # Warn about optional fields that were not provided
-        _optional_names = {f.name for f in fields(self) if f.default is None}
-        for field_name, meta in self.FIELD_METADATA.items():
-            if field_name in _optional_names and getattr(self, field_name) is None:
-                log.warning(
-                    f"Optional ScanSpec field '{field_name}' is not set. "
-                    f"Description: {meta['description']} "
-                    "Defaulted to None."
-                )
+        self.warn_missing_optional_fields()
 
 
 @dataclass
@@ -1190,6 +1198,7 @@ class Subject(Spec):
     """Subject metadata associated with the study.
 
     Args:
+        id: Subject ID.
         type: Subject type, e.g. human, phantom, animal.
         age: Subject age in years.
         sex: Subject sex.
@@ -1216,9 +1225,7 @@ class Subject(Spec):
         if self.id is not None and not self.id.strip():
             raise ValueError("Subject ID cannot be an empty string")
 
-        for field_name in self.SCHEMA:
-            if getattr(self, field_name) is None:
-                log.warning(f"Optional Subject field '{field_name}' is not set. Defaulted to None.")
+        self.warn_missing_optional_fields()
 
         if self.fat_percentage is not None and (
             self.fat_percentage < 0 or self.fat_percentage > 100
@@ -1518,14 +1525,7 @@ class MetadataSpec(Spec):
                 f"signal fields: {suggested_signal_keys}."
             )
 
-        _optional_names = {f.name for f in fields(type(self)) if f.default is None}
-        for field_name, meta in type(self).FIELD_METADATA.items():
-            if field_name in _optional_names and getattr(self, field_name, None) is None:
-                log.warning(
-                    f"Optional MetadataSpec field '{field_name}' is not set. "
-                    f"Description: {meta['description']} "
-                    "Defaulted to None."
-                )
+        self.warn_missing_optional_fields()
 
 
 @dataclass
