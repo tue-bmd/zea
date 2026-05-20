@@ -10,13 +10,10 @@ from zea.scan import Scan
 
 from . import generate_example_dataset
 
-# Dummy extent for map-based data types in tests
-_TEST_EXTENT = np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32)
-
 
 def _make_map(values):
     """Wrap values into a Map-compatible dict."""
-    return {"values": values, "extent": _TEST_EXTENT}
+    return {"values": values, "coordinates": np.zeros((*values.shape, 3), dtype=np.float32)}
 
 
 @pytest.fixture
@@ -198,7 +195,7 @@ class TestGroupProxy:
                 "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                 "image": {
                     "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
-                    "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+                    "coordinates": np.zeros((n_frames, 16, 12, 3), dtype=np.float32),
                 },
             },
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
@@ -357,7 +354,7 @@ class TestValidateSpec:
                     "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                     "custom_map": {
                         "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
-                        "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+                        "coordinates": np.zeros((n_frames, 16, 12, 3), dtype=np.float32),
                     },
                 },
                 scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
@@ -417,7 +414,7 @@ class TestImageOnlyFile:
             data={
                 "image": {
                     "values": np.zeros((n_frames, 32, 24, 1), dtype=np.uint8),
-                    "extent": np.array([0, 0.05, 0, 0.04, -0.04, -0.01], dtype=np.float32),
+                    "coordinates": np.zeros((n_frames, 32, 24, 3), dtype=np.float32),
                 },
             },
             scan=_scan_minimal(n_frames=n_frames),
@@ -531,31 +528,31 @@ class TestSlicing:
 
 
 class TestSpatialData:
-    """Test saving + reading spatial maps that include values + extent."""
+    """Test saving + reading spatial maps that include values + coordinates."""
 
     @pytest.fixture
     def spatial_file(self, tmp_path):
         n_frames = 3
         img_values = np.random.randint(0, 255, (n_frames, 64, 48, 1), dtype=np.uint8)
-        img_extent = np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32)
+        img_coordinates = np.zeros((n_frames, 64, 48, 3), dtype=np.float32)
         seg_values = np.random.choice([True, False], (n_frames, 64, 48, 1, 2)).astype(np.bool_)
         seg_labels = np.array(["background", "lumen"], dtype=np.str_)
-        seg_extent = np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32)
+        seg_coordinates = np.zeros((n_frames, 64, 48, 1, 3), dtype=np.float32)
         sos_values = np.full((n_frames, 64, 48, 1), 1540.0, dtype=np.float32)
-        sos_extent = np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32)
+        sos_coordinates = np.zeros((n_frames, 64, 48, 3), dtype=np.float32)
 
         path = tmp_path / "spatial.hdf5"
         f = File.create(
             path,
             data={
                 "envelope_data": _make_map(np.ones((n_frames, 32, 24), dtype=np.float32)),
-                "image": {"values": img_values, "extent": img_extent},
+                "image": {"values": img_values, "coordinates": img_coordinates},
                 "segmentation": {
                     "values": seg_values,
                     "labels": seg_labels,
-                    "extent": seg_extent,
+                    "coordinates": seg_coordinates,
                 },
-                "sos_map": {"values": sos_values, "extent": sos_extent},
+                "sos_map": {"values": sos_values, "coordinates": sos_coordinates},
             },
             scan=_scan_minimal(n_frames=n_frames),
             probe_name="spatial_test",
@@ -564,19 +561,19 @@ class TestSpatialData:
         return (
             str(path),
             img_values,
-            img_extent,
+            img_coordinates,
             seg_values,
             seg_labels,
             sos_values,
         )
 
     def test_image_group_structure(self, spatial_file):
-        path, img_values, img_extent, *_ = spatial_file
+        path, img_values, img_coordinates, *_ = spatial_file
         with File(path) as f:
             proxy = f.data.image
             assert isinstance(proxy, GroupProxy)
             assert "values" in proxy
-            assert "extent" in proxy
+            assert "coordinates" in proxy
 
     def test_image_values_read(self, spatial_file):
         path, img_values, *_ = spatial_file
@@ -602,13 +599,13 @@ class TestSpatialData:
             np.testing.assert_allclose(f.data.sos_map.values[()], sos_values, atol=1e-6)
 
     def test_spatial_round_trip_via_validate_spec(self, spatial_file):
-        path, img_values, img_extent, seg_values, seg_labels, sos_values = spatial_file
+        path, img_values, img_coordinates, seg_values, seg_labels, sos_values = spatial_file
         with File(path) as f:
             spec = f.validate_spec()
 
         assert isinstance(spec.data.image, Image)
         np.testing.assert_array_equal(spec.data.image.values, img_values)
-        np.testing.assert_array_equal(spec.data.image.extent, img_extent)
+        np.testing.assert_array_equal(spec.data.image.coordinates, img_coordinates)
         assert isinstance(spec.data.segmentation, Segmentation)
         np.testing.assert_array_equal(spec.data.segmentation.values, seg_values)
         np.testing.assert_array_equal(spec.data.segmentation.labels, seg_labels)

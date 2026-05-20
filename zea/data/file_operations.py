@@ -65,8 +65,6 @@ def save_file(
             ``"extent"`` keys (validated as :class:`~zea.data.spec.BeamformedData`).
         envelope_data (dict, optional): Envelope-detected data as a dict with ``"values"``
             and ``"extent"`` keys (validated as :class:`~zea.data.spec.EnvelopeData`).
-        image_sc (dict, optional): Scan-converted image data as a dict with ``"values"``
-            and ``"extent"`` keys (validated as :class:`~zea.data.spec.ImageSc`).
         image (dict, optional): Reconstructed (log-compressed) image data as a dict with
             ``"values"`` and ``"extent"`` keys (validated as :class:`~zea.data.spec.Image`).
         custom_maps (dict, optional): Custom spatial map entries to include in the ``data`` group.
