@@ -193,3 +193,47 @@ def test_import_zea_with_backend_subprocess(backend, should_succeed):
     else:
         if result.returncode == 0:
             assert False, "zea should not import if all backends are missing"
+
+
+def test_zea_init_all_exported_and_documented():
+    """Test that all items in zea.__all__ are importable and have RST stubs.
+
+    This ensures that every public class/function in the top-level ``zea`` namespace
+    (e.g. ``zea.Scan``, ``zea.File``) is:
+
+    1. Listed in ``zea.__all__``
+    2. Actually importable as ``zea.<name>``
+    3. Documented via a stub in ``docs/source/_autosummary/zea.<name>.rst``
+       so that Sphinx cross-references like ``:class:`zea.Scan``` resolve correctly.
+    """
+    import zea
+
+    autosummary_dir = Path(__file__).parent.parent / "docs" / "source" / "_autosummary"
+
+    assert hasattr(zea, "__all__"), "zea.__all__ is not defined"
+
+    missing_from_zea = []
+    missing_stubs = []
+
+    for name in zea.__all__:
+        # Check the name is actually importable from zea
+        if not hasattr(zea, name):
+            missing_from_zea.append(name)
+
+        # Check a corresponding RST stub exists
+        stub_path = autosummary_dir / f"zea.{name}.rst"
+        if not stub_path.exists():
+            missing_stubs.append(name)
+
+    errors = []
+    if missing_from_zea:
+        errors.append(f"In zea.__all__ but not importable from zea: {sorted(missing_from_zea)}")
+    if missing_stubs:
+        errors.append(
+            "Missing RST stubs in docs/source/_autosummary/: "
+            + ", ".join(f"zea.{n}.rst" for n in sorted(missing_stubs))
+            + "\nPlease create stub files so that :class:`zea.X` cross-references work in Sphinx."
+        )
+
+    if errors:
+        pytest.fail("\n".join(errors))

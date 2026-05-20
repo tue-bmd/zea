@@ -466,7 +466,7 @@ class Interface:
         """Save image to disk.
 
         Args:
-            fig (fig object): figure.
+            fig (matplotlib.figure.Figure): figure.
             path (str, optional): path to save image to. Defaults to None.
 
         """

@@ -22,8 +22,8 @@ def set_mpl_style(style: str = None) -> None:
 
     Args:
         style (str, optional): Path to the matplotlib style file.
-        Defaults to "zea_darkmode.mplstyle", which is the default
-        darkmode style used throughout the zea toolbox.
+            Defaults to "zea_darkmode.mplstyle", which is the default
+            darkmode style used throughout the zea toolbox.
 
     """
     if style is None:
@@ -66,8 +66,8 @@ def plot_image_grid(
         suptitle (str, optional): Title for the plot. Defaults to None.
         aspect (optional): Aspect ratio for imshow.
         figsize (tuple, optional): Figure size. Defaults to None.
-        fig (figure, optional): Matplotlib figure object. Defaults to None. Can
-            be used to plot on an existing figure.
+        fig (matplotlib.figure.Figure, optional): Matplotlib figure object. Defaults to None.
+            Can be used to plot on an existing figure.
         fig_contents (list, optional): List of matplotlib image objects. Defaults to None.
         remove_axis (bool, optional): Whether to remove axis. Defaults to True. If False, axes r
             emain but spines are colored to background and ticks/labels are hidden,
@@ -78,7 +78,7 @@ def plot_image_grid(
         **kwargs: arguments for plt.Figure.
 
     Returns:
-        fig (figure): Matplotlib figure object
+        fig (matplotlib.figure.Figure): Matplotlib figure object
         fig_contents (list): List of matplotlib image objects.
 
     Example:

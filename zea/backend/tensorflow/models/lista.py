@@ -2,8 +2,7 @@
 
 import keras
 from keras import Input, ops
-from keras.layers import Add, Conv2D, UpSampling2D
-from tensorflow.python.keras.layers import Layer
+from keras.layers import Add, Conv2D, Layer, UpSampling2D
 
 from zea.backend.tensorflow.layers.utils import get_activation
 
@@ -30,7 +29,7 @@ def UnfoldingModel(
             Defaults to [1, 5].
 
     Returns:
-        tf model: unfolded LISTA model
+        keras.Model: unfolded LISTA model
     """
     if P0_dim is None:
         P0_dim = [1, 5]

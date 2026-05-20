@@ -143,7 +143,7 @@ def deserialize_zea_object(config, cls=None):
     Args:
         config (dict): The configuration dictionary
     Returns:
-        obj (Object): The deserialized object
+        obj (object): The deserialized object
     """
     class_name = config["class_name"]
     inner_config = config["config"] or {}

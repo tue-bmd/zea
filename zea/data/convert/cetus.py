@@ -74,7 +74,7 @@ def get_split(patient_id: int) -> str:
         patient_id: Integer ID of the patient (1-45).
 
     Returns:
-        The split name: ``"train"``, ``"val"``, or ``"test"``.
+        str: The split name (``"train"``, ``"val"``, or ``"test"``).
 
     Raises:
         ValueError: If the patient_id does not fall into any defined split range.

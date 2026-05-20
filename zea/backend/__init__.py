@@ -11,7 +11,7 @@ Key Features
 - **JIT Compilation** (:func:`zea.backend.jit`):
   Provides a unified interface for just-in-time (JIT) compilation of functions, dispatching to the appropriate backend (JAX or TensorFlow) as needed. This enables accelerated execution of computationally intensive routines. Note that jit compilation is not yet supported when using the `torch` backend.
 
-- **Automatic Differentiation** (:class:`zea.backend.AutoGrad`):
+- **Automatic Differentiation** (:class:`zea.backend.autograd.AutoGrad`):
   Offers a backend-agnostic wrapper for automatic differentiation, allowing gradient computation regardless of the underlying ML library.
 
 - **Backend Submodules:**

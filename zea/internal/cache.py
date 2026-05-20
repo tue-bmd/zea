@@ -21,6 +21,7 @@
 
 import ast
 import atexit
+import functools
 import inspect
 import os
 import shutil
@@ -154,6 +155,7 @@ def cache_output(*arg_names, verbose=False):
     )
 
     def decorator(func):
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
             if is_cache_disabled():
                 if verbose:

@@ -1,12 +1,11 @@
 """Operations and Pipelines for ultrasound data processing.
 
-This module contains two important classes, :class:`Operation` and :class:`Pipeline`,
+This module contains two important classes, :class:`Operation` and :class:`zea.Pipeline`,
 which are used to process ultrasound data. A pipeline is a sequence of operations
 that are applied to the data in a specific order.
 
 We implement a range of common
-operations for ultrasound data processing (:mod:`zea.ops.ultrasound`), but also support
-a variety of basic tensor operations (:mod:`zea.ops.tensor`). Lastly, all existing Keras
+operations for ultrasound data processing and basic tensor operations. Lastly, all existing Keras
 operations (see `Keras Ops API <https://keras.io/api/ops/>`_) are available as `zea`
 operations as well (see :mod:`zea.ops.keras_ops`).
 
@@ -85,7 +84,7 @@ Example of a yaml file:
         - name: demodulate
         - name: beamform
           params:
-            type: das
+            type: delay_and_sum
             pfield: false
             num_patches: 100
         - name: envelope_detect

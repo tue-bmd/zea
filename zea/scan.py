@@ -23,20 +23,20 @@ Features
   a predefined schema, reducing errors and improving robustness.
 
 - **Selection of transmits:** The scan supports flexible selection of transmit events,
-  using the :meth:`set_transmits` method. You can select all, a specific number,
+  using the :meth:`Scan.set_transmits` method. You can select all, a specific number,
   or specific transmit indices. The selection is stored and can be accessed via
-  the :attr:`selected_transmits` property.
+  the ``selected_transmits`` property.
 
 Comparison to ``zea.Config`` and ``zea.Probe``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-- :class:`zea.config.Config`: A general-purpose parameter dictionary for experiment and pipeline
+- :class:`zea.Config`: A general-purpose parameter dictionary for experiment and pipeline
   configuration. It is not specific to ultrasound acquisition and does not compute
   derived parameters.
 
-- :class:`zea.probes.Probe`: Contains only probe-specific parameters (e.g., geometry, frequency).
+- :class:`zea.Probe`: Contains only probe-specific parameters (e.g., geometry, frequency).
 
-- :class:`zea.scan.Scan`: Combines all parameters relevant to an ultrasound acquisition,
+- :class:`zea.Scan`: Combines all parameters relevant to an ultrasound acquisition,
   including probe, acquisition, and scan region. It also provides automatic computation
   of derived properties and dependency management.
 

@@ -6,6 +6,25 @@ zea
 ====
 
 .. automodule:: zea
+   :no-members:
+   :no-undoc-members:
+   :no-special-members:
+   :no-inherited-members:
+
+.. rubric:: Classes
+
+.. autosummary::
+   :toctree:
+
+   Config
+   Dataloader
+   Dataset
+   File
+   Folder
+   Interface
+   Pipeline
+   Probe
+   Scan
 
 .. rubric:: Functions
 

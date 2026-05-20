@@ -459,7 +459,7 @@ class LowPassFilterIQ(FirFilter):
     operations. The :class:`LowPassFilterIQ` operation itself is not jittable and is provided
     for convenience only.
 
-    Uses :func:`get_low_pass_iq_filter` to compute the filter taps.
+    Uses :func:`zea.func.get_low_pass_iq_filter` to compute the filter taps.
     """
 
     def __init__(

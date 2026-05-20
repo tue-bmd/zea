@@ -115,3 +115,22 @@ from .internal.setup_zea import setup, setup_config
 from .ops import Pipeline
 from .probes import Probe
 from .scan import Scan
+
+__all__ = [
+    # Classes
+    "Config",
+    "Dataloader",
+    "Dataset",
+    "File",
+    "Folder",
+    "Interface",
+    "Pipeline",
+    "Probe",
+    "Scan",
+    # Functions
+    "init_device",
+    "load_file",
+    "set_data_paths",
+    "setup",
+    "setup_config",
+]

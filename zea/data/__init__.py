@@ -7,8 +7,8 @@ including file and dataset access, validation, and data loading. For more inform
 Main classes
 ------------
 
-- :class:`zea.data.File` -- Open and access a single zea HDF5 data file.
-- :class:`zea.data.Dataset` -- Manage and iterate over a collection of zea data files.
+- :class:`zea.File` -- Open and access a single zea HDF5 data file.
+- :class:`zea.Dataset` -- Manage and iterate over a collection of zea data files.
 
 See the data notebook for a more detailed example: :doc:`../notebooks/data/zea_data_example`
 
