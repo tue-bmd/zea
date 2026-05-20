@@ -464,6 +464,26 @@ def test_subject_id_warning_for_missing_id():
     assert any("Optional Subject field 'id' is not set" in m for m in messages)
 
 
+def test_subject_id_warning_includes_field_metadata_description():
+    n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
+
+    with patch("zea.log.warning") as mock_warn:
+        FileSpec(
+            data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            metadata={
+                "subject": {
+                    "type": "human",
+                    "age": np.uint8(42),
+                    "sex": "f",
+                    "fat_percentage": np.float32(17.5),
+                }
+            },
+        )
+    messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+    assert any("subject-wise splits" in m for m in messages)
+
+
 class TestScanValidationErrors:
     """TypeError / ValueError raised by Scan spec validation."""
 

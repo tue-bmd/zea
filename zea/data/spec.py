@@ -1219,6 +1219,10 @@ class Subject(Spec):
         "fat_percentage": {"dtype": np.float32, "shape": ()},
     }
 
+    FIELD_METADATA = {
+        "id": {"description": "Subject ID. Needed for subject-wise splits."},
+    }
+
     def __post_init__(self):
         super().__post_init__()
 
