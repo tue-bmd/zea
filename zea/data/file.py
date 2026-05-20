@@ -578,7 +578,7 @@ class File(h5py.File):
             >>> f.close()
             >>> os.unlink(path)
         """
-        if tracks is not None and data is not None:
+        if tracks is not None and (data is not None or scan is not None):
             raise ValueError("Provide either 'tracks' or 'data'/'scan', not both.")
 
         path = Path(path)
