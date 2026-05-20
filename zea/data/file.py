@@ -906,7 +906,8 @@ class File(h5py.File):
             dict: The probe parameters.
         """
         # For multi-track files, probe parameters are read from the first
-        # track's scan group if it exists; for single-track files, the root-level scan group is used.
+        # track's scan group if it exists;
+        # for single-track files, the root-level scan group is used.
         # If no scan group is found, an empty dict is returned.
         if self._n_tracks > 1:
             track0 = self["tracks"].get("track_0")
