@@ -352,11 +352,18 @@ class File(h5py.File):
         """
         if super().__contains__(key):
             return True
-        # Handle both "data" and "data/..." paths
+        # Handle both "data" and "data/..." paths — only remap for single-track files.
         parts = key.split("/", 1)
         if parts[0] in ("scan", "data"):
-            remapped = f"tracks/track_0/{key}"
-            return super().__contains__(remapped)
+            if super().__contains__("tracks"):
+                if len(self["tracks"]) == 1:
+                    remapped = f"tracks/track_0/{key}"
+                    return super().__contains__(remapped)
+                else:
+                    log.warning(
+                        f"Multiple tracks found; Try accessing '{key}' on a specific track instead."
+                    )
+            return False
         return False
 
     def __getitem__(self, key):
