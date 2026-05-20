@@ -25,11 +25,18 @@ docs-parameters:
 # Generate autosummary .rst files for API documentation
 # force means that it will overwrite existing files
 # separate means that it will create a separate file for each module
-# we will first backup existing zea.rst as we don't want to overwrite it
+# we will first backup existing manually maintained stubs before overwriting them
 docs-autosummary:
 	@if [ -f $(SOURCEDIR)/_autosummary/zea.rst ]; then cp $(SOURCEDIR)/_autosummary/zea.rst $(SOURCEDIR)/_autosummary/zea.rst.bak; fi
+	@if [ -f $(SOURCEDIR)/_autosummary/zea.ops.rst ]; then cp $(SOURCEDIR)/_autosummary/zea.ops.rst $(SOURCEDIR)/_autosummary/zea.ops.rst.bak; fi
+	@if [ -f $(SOURCEDIR)/_autosummary/zea.models.rst ]; then cp $(SOURCEDIR)/_autosummary/zea.models.rst $(SOURCEDIR)/_autosummary/zea.models.rst.bak; fi
+	@if [ -f $(SOURCEDIR)/_autosummary/zea.models.hvae.rst ]; then cp $(SOURCEDIR)/_autosummary/zea.models.hvae.rst $(SOURCEDIR)/_autosummary/zea.models.hvae.rst.bak; fi
 	sphinx-apidoc -o $(SOURCEDIR)/_autosummary ../zea --force --separate
+	@find $(SOURCEDIR)/_autosummary -name "*.rst" -exec sed -i 's/:maxdepth: 4/:maxdepth: 2/g' {} \;
 	@if [ -f $(SOURCEDIR)/_autosummary/zea.rst.bak ]; then mv $(SOURCEDIR)/_autosummary/zea.rst.bak $(SOURCEDIR)/_autosummary/zea.rst; fi
+	@if [ -f $(SOURCEDIR)/_autosummary/zea.ops.rst.bak ]; then mv $(SOURCEDIR)/_autosummary/zea.ops.rst.bak $(SOURCEDIR)/_autosummary/zea.ops.rst; fi
+	@if [ -f $(SOURCEDIR)/_autosummary/zea.models.rst.bak ]; then mv $(SOURCEDIR)/_autosummary/zea.models.rst.bak $(SOURCEDIR)/_autosummary/zea.models.rst; fi
+	@if [ -f $(SOURCEDIR)/_autosummary/zea.models.hvae.rst.bak ]; then mv $(SOURCEDIR)/_autosummary/zea.models.hvae.rst.bak $(SOURCEDIR)/_autosummary/zea.models.hvae.rst; fi
 	@rm -f $(SOURCEDIR)/_autosummary/modules.rst
 
 # Build docs cleanly (parameters.rst and autosummary must be up to date)
@@ -49,5 +56,5 @@ docs-test: docs-parameters docs-autosummary
 docs-clean:
 	rm -rf "$(BUILDDIR)"
 	echo "Cleaned build directory: $(BUILDDIR)"
-	find "$(SOURCEDIR)/_autosummary" -type f ! -name 'zea.rst' -name '*.rst' -delete
-	echo "Cleaned autosummary files in: $(SOURCEDIR)/_autosummary (except zea.rst)"
+	find "$(SOURCEDIR)/_autosummary" -type f ! -name 'zea.rst' ! -name 'zea.ops.rst' ! -name 'zea.models.rst' ! -name 'zea.models.hvae.rst' -name '*.rst' -delete
+	echo "Cleaned autosummary files in: $(SOURCEDIR)/_autosummary (except manually maintained stubs)"
