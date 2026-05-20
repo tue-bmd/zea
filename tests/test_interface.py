@@ -29,7 +29,7 @@ def test_interface_initialization():
 
 
 def test_interface_reads_map_backed_dataset(tmp_path):
-    """For map-backed types (image, image_sc) the read must descend into the
+    """For map-backed types (e.g. image) the read must descend into the
     'values' sub-dataset rather than indexing the group directly."""
     path = tmp_path / "with_image.hdf5"
     generate_example_dataset(

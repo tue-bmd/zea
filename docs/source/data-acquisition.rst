@@ -106,25 +106,35 @@ Beyond the standard data types (``raw_data``, ``beamformed_data``, …), you can
 
 **Custom spatial maps** (``data`` group)
 
-A custom map is a named entry in the ``data`` group that associates a pixel array with a physical
-extent.  Pass it as a sub-dict under the key you want:
+A custom map is a named entry in the ``data`` group that associates a pixel array with a
+per-pixel Cartesian coordinate grid.  Each map is then a function from Cartesian space to
+some real values.  Pass it as a sub-dict under the key you want:
 
 .. code-block:: python
 
     import numpy as np
     from zea import File
+    from zea.beamform.pixelgrid import cartesian_pixel_grid
 
     n_frames = 2
     values = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)   # (frames, z, x[, channels])
-    extent = np.array([x_min, x_max, y_min, y_max, z_min, z_max], dtype=np.float32)  # metres
+
+    # Build a coordinate grid matching the values spatial shape.
+    # cartesian_pixel_grid returns shape (nz, nx, 3); broadcast to add the frame dimension.
+    coords_2d = cartesian_pixel_grid(
+        xlims=(-0.02, 0.02), zlims=(-0.03, 0.0), grid_size_x=64, grid_size_z=64
+    )  # shape (64, 64, 3), last axis = [x, y, z] in metres
+    coordinates = np.broadcast_to(coords_2d, (n_frames, 64, 64, 3)).copy()
+    # For a simple placeholder without a real grid:
+    # coordinates = np.zeros((n_frames, 64, 64, 3), dtype=np.float32)
 
     f = File.create(
         "my_acquisition.hdf5",
         data={
             "raw_data": raw,
             "my_overlay": {          # <-- Example of a custom field not in the zea spec
-                "values":  values,
-                "extent":  extent,
+                "values":      values,
+                "coordinates": coordinates,  # shape (*spatial_dims, 3)
                 # optional: "labels", "description", "unit"
             },
         },
@@ -134,8 +144,15 @@ extent.  Pass it as a sub-dict under the key you want:
 
     # Reading back
     with File("my_acquisition.hdf5") as f:
-        overlay_values = f.data.my_overlay.values[:]
-        overlay_extent = f.data.my_overlay.extent[:]
+        overlay_values      = f.data.my_overlay.values[:]
+        overlay_coordinates = f.data.my_overlay.coordinates[:]
+
+.. note::
+
+   :func:`~zea.beamform.pixelgrid.cartesian_pixel_grid` and
+   :func:`~zea.beamform.pixelgrid.polar_pixel_grid` are convenient helpers for
+   constructing coordinate grids that match typical beamformed images.  See their
+   docstrings for full details.
 
 
 **Custom metadata** (``metadata`` group)

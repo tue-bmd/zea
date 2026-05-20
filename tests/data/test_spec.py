@@ -26,16 +26,20 @@ def test_segmentation_spec():
     # Correct usage
     values = np.zeros((10, 256, 256, 1, 4), dtype=np.bool_)
     labels = np.array(["background", "label1", "label2", "label3"], dtype=np.str_)
-    extent = np.array([0.0, 1.0, 0.0, 1.0, -1.0, 0.0], dtype=np.float32)
-    segmentation = Segmentation(values=values, labels=labels, extent=extent)
+    # values shape (10, 256, 256, 1, 4): spatial dims = (10, 256, 256, 1),
+    # n_labels treated as channel
+    coordinates = np.zeros((10, 256, 256, 1, 3), dtype=np.float32)
+    segmentation = Segmentation(values=values, labels=labels, coordinates=coordinates)
     assert segmentation.values.shape == (10, 256, 256, 1, 4)
     assert segmentation.labels.shape == (4,)
-    assert segmentation.extent.shape == (6,)
+    assert segmentation.coordinates.shape == (10, 256, 256, 1, 3)
 
     # Incorrect usage: labels shape mismatch
     with pytest.raises(ValueError):
         Segmentation(
-            values=values, labels=np.array(["background", "label1"], dtype=np.str_), extent=extent
+            values=values,
+            labels=np.array(["background", "label1"], dtype=np.str_),
+            coordinates=coordinates,
         )
 
 
@@ -92,33 +96,46 @@ def _example_metadata():
     }
 
 
+def _make_coordinates(values_shape):
+    """Build a zero-filled coordinates array compatible with the given values shape.
+
+    For unchanneled values (values_shape has no trailing channel dim) the
+    coordinates shape is ``(*values_shape, 3)``; callers that know their values
+    are channeled should pass ``values_shape[:-1]`` as *values_shape* explicitly.
+    """
+    return np.zeros((*values_shape, 3), dtype=np.float32)
+
+
 def _example_data(n_frames, n_tx, n_el, n_ax, n_ch):
+    # For channeled values (last dim = channel), coordinates use values.shape[:-1].
+    coords_3d = _make_coordinates((n_frames, 16, 12))  # spatial grid, no channel
+    coords_segm = _make_coordinates((n_frames, 16, 12, 1))  # spatial grid for seg (y dim = 1)
     return {
         "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
         "image": {
             "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
-            "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+            "coordinates": coords_3d,
         },
         "segmentation": {
             "values": np.zeros((n_frames, 16, 12, 1, 2), dtype=np.bool_),
             "labels": np.array(["background", "tissue"], dtype=np.str_),
-            "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+            "coordinates": coords_segm,
         },
         "sos_map": {
             "values": np.full((n_frames, 16, 12, 1), 1540.0, dtype=np.float32),
-            "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+            "coordinates": coords_3d,
         },
         "strain": {
             "values": np.zeros((n_frames, 16, 12, 1), dtype=np.float32),
-            "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+            "coordinates": coords_3d,
         },
         "swe": {
             "values": np.zeros((n_frames, 16, 12, 1), dtype=np.float32),
-            "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+            "coordinates": coords_3d,
         },
         "tissue_doppler": {
             "values": np.zeros((n_frames, 16, 12, 1), dtype=np.float32),
-            "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+            "coordinates": coords_3d,
         },
     }
 
@@ -349,7 +366,7 @@ def test_data_accepts_custom_map_keys_and_warns():
                 "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                 "custom_map": {
                     "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
-                    "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+                    "coordinates": np.zeros((n_frames, 16, 12, 3), dtype=np.float32),
                     "description": "This is a custom map",
                     "unit": "mm",
                 },
@@ -384,7 +401,6 @@ def test_data_custom_map_dtype_error_includes_map_key_context():
                 "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                 "custom_map": {
                     "values": np.zeros((n_frames, 16, 12, 1), dtype=np.bool_),
-                    "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
                 },
             },
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
@@ -491,35 +507,81 @@ class TestDataValidationErrors:
 
     def test_map_wrong_pixel_dtype_raises(self):
         """SosMap inherits FloatMap – values must be float32, not uint8."""
-        with pytest.raises(TypeError, match="values"):
+        with pytest.raises(TypeError, match="SosMap: field 'values'"):
             SosMap(
                 values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
-                extent=np.zeros(6, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
             )
 
     def test_image_wrong_pixel_dtype_raises(self):
         """Image is UnsignedIntMap – values must be float32 or uint8, not complex128."""
-        with pytest.raises(TypeError, match="values"):
+        with pytest.raises(TypeError, match="Image: field 'values'"):
             Image(
                 values=np.zeros((2, 16, 12, 1), dtype=np.complex128),
-                extent=np.zeros(6, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
             )
 
     def test_segmentation_wrong_pixel_dtype_raises(self):
         """Segmentation is BooleanMap – values must be bool_, not float32."""
-        with pytest.raises(TypeError, match="values"):
+        with pytest.raises(TypeError, match="Segmentation: field 'values'"):
             Segmentation(
                 values=np.zeros((2, 16, 12, 1, 2), dtype=np.float32),
                 labels=np.array(["a", "b"], dtype=np.str_),
-                extent=np.zeros(6, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 1, 3), dtype=np.float32),
             )
 
-    def test_map_extent_wrong_shape_raises(self):
-        """extent must be (6,) or (n_frames, 6) — (3,) should fail."""
-        with pytest.raises(ValueError, match="extent"):
+    def test_map_coordinates_wrong_shape_raises(self):
+        """coordinates must have final dim 3 and spatial dims matching values."""
+        # Final dim is not 3 — caught by SCHEMA shape check
+        with pytest.raises(ValueError, match="coordinates"):
             Image(
                 values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
-                extent=np.zeros(3, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 4), dtype=np.float32),
+            )
+        # Spatial dims don't match values — caught by Map.__post_init__
+        with pytest.raises(ValueError, match="Image: coordinates shape"):
+            Image(
+                values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                coordinates=np.zeros((2, 99, 12, 3), dtype=np.float32),
+            )
+
+    def test_map_coordinates_valid_channeled_and_unchanneled(self):
+        """Valid coordinates shapes for channeled and unchanneled values."""
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # Unchanneled: coordinates.shape == (*values.shape, 3)
+            m1 = Map(
+                values=np.zeros((2, 16, 12), dtype=np.uint8),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            )
+            assert m1.coordinates.shape == (2, 16, 12, 3)
+
+            # Channeled: coordinates.shape == (*values.shape[:-1], 3)
+            m2 = Map(
+                values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            )
+            assert m2.coordinates.shape == (2, 16, 12, 3)
+
+    def test_map_coordinates_millimetre_range_warns(self):
+        """Coordinates with |value| > 1 m should trigger a units warning."""
+        # Values of 50 mm look fine in mm but are 0.05 m — no warning expected.
+        coords_metres = np.zeros((2, 8, 8, 3), dtype=np.float32)
+        coords_metres[..., 2] = 0.05  # 5 cm depth — valid
+        Map(
+            values=np.zeros((2, 8, 8), dtype=np.uint8),
+            coordinates=coords_metres,
+        )  # should not warn
+
+        # Coordinates in millimetres: max absolute value = 50 mm > 1 m threshold.
+        coords_mm = np.zeros((2, 8, 8, 3), dtype=np.float32)
+        coords_mm[..., 2] = 50.0  # 50 mm — looks like mm, not metres
+        with pytest.warns(match="metres"):
+            Map(
+                values=np.zeros((2, 8, 8), dtype=np.uint8),
+                coordinates=coords_mm,
             )
 
     def test_n_ch_3_raises_for_raw_data(self):
@@ -536,7 +598,6 @@ class TestDataValidationErrors:
             DataSpec(
                 beamformed_data={
                     "values": np.zeros((2, 8, 6, 3), dtype=np.float32),
-                    "extent": np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32),
                 }
             )
 
@@ -688,19 +749,19 @@ class TestProbePoseValidation:
 def test_image_spec_accepts_neginf():
     """Image spec validation must allow -inf in float32 arrays (represents
     complete silence in dB domain) but still reject +inf and values above 0."""
-    extent = np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32)
+    coordinates = np.zeros((2, 8, 8, 3), dtype=np.float32)
 
     values_with_neginf = np.full((2, 8, 8), -30.0, dtype=np.float32)
     values_with_neginf[0, 0, 0] = -np.inf
 
-    img = Image(values=values_with_neginf, extent=extent)
+    img = Image(values=values_with_neginf, coordinates=coordinates)
     assert img is not None
 
     values_with_posinf = np.full((2, 8, 8), -30.0, dtype=np.float32)
     values_with_posinf[0, 0, 0] = np.inf
     with pytest.raises(ValueError, match="finite or -inf"):
-        Image(values=values_with_posinf, extent=extent)
+        Image(values=values_with_posinf, coordinates=coordinates)
 
     values_positive = np.full((2, 8, 8), 0.1, dtype=np.float32)
     with pytest.raises(ValueError, match="dB scale"):
-        Image(values=values_positive, extent=extent)
+        Image(values=values_positive, coordinates=coordinates)

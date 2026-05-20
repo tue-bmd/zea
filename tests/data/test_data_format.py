@@ -183,7 +183,7 @@ def test_image_only(tmp_hdf5_path):
     """Tests creating a file with only image_sc data (no scan)."""
     image_sc = {
         "values": np.zeros((n_frames, 256, 256), dtype=np.uint8),
-        "extent": np.array([-0.02, 0.02, 0, 0, -0.03, 0], dtype=np.float32),
+        "coordinates": np.zeros((n_frames, 256, 256, 3), dtype=np.float32),
     }
     f = File.create(
         tmp_hdf5_path,
@@ -203,7 +203,7 @@ def test_custom_map(tmp_hdf5_path):
     import warnings
 
     custom_values = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)
-    custom_extent = np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32)
+    custom_coordinates = np.zeros((n_frames, 64, 64, 3), dtype=np.float32)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -213,7 +213,7 @@ def test_custom_map(tmp_hdf5_path):
                 "raw_data": DATA["raw_data"],
                 "my_custom_overlay": {
                     "values": custom_values,
-                    "extent": custom_extent,
+                    "coordinates": custom_coordinates,
                     "description": "custom overlay map",
                     "unit": "a.u.",
                 },
@@ -226,7 +226,7 @@ def test_custom_map(tmp_hdf5_path):
     with File(tmp_hdf5_path) as f:
         assert "my_custom_overlay" in f["data"]
         np.testing.assert_array_equal(f.data.my_custom_overlay.values[:], custom_values)
-        np.testing.assert_array_equal(f.data.my_custom_overlay.extent[:], custom_extent)
+        np.testing.assert_array_equal(f.data.my_custom_overlay.coordinates[:], custom_coordinates)
 
 
 @pytest.fixture
@@ -246,7 +246,7 @@ def test_save_file_custom_maps(tmp_hdf5_path, _scan_and_probe):
 
     scan, probe = _scan_and_probe
     custom_values = np.zeros((n_frames, 32, 32, 1), dtype=np.uint8)
-    custom_extent = np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32)
+    custom_coordinates = np.zeros((n_frames, 32, 32, 3), dtype=np.float32)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -258,7 +258,7 @@ def test_save_file_custom_maps(tmp_hdf5_path, _scan_and_probe):
             custom_maps={
                 "my_overlay": {
                     "values": custom_values,
-                    "extent": custom_extent,
+                    "coordinates": custom_coordinates,
                 }
             },
         )
@@ -266,7 +266,7 @@ def test_save_file_custom_maps(tmp_hdf5_path, _scan_and_probe):
     with File(tmp_hdf5_path) as f:
         assert "my_overlay" in f["data"]
         np.testing.assert_array_equal(f.data.my_overlay.values[:], custom_values)
-        np.testing.assert_array_equal(f.data.my_overlay.extent[:], custom_extent)
+        np.testing.assert_array_equal(f.data.my_overlay.coordinates[:], custom_coordinates)
 
 
 def test_save_file_custom_metadata(tmp_hdf5_path, _scan_and_probe):
