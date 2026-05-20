@@ -898,7 +898,20 @@ class File(h5py.File):
         Returns:
             dict: The probe parameters.
         """
-        file_scan_parameters = self.get_parameters()
+        # For multi-track files, probe parameters are read from the first
+        # track's scan group if it exists; for single-track files, the root-level scan group is used.
+        # If no scan group is found, an empty dict is returned.
+        if self._n_tracks > 1:
+            track0 = self["tracks"].get("track_0")
+            scan_group = track0["scan"] if (track0 is not None and "scan" in track0) else None
+        else:
+            scan_group = self._scan_h5_group
+
+        if scan_group is None:
+            return {}
+
+        file_scan_parameters = load_dict_from_hdf5_group(scan_group)
+        file_scan_parameters = check_focus_distances(file_scan_parameters)
         probe_parameters = reduce_to_signature(Probe.__init__, file_scan_parameters)
         return probe_parameters
 

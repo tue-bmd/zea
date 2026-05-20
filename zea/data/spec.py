@@ -1740,6 +1740,35 @@ class FileSpec(Spec):
                     f"got min={self.track_schedule.min()}, max={self.track_schedule.max()}"
                 )
 
+        # Validate that probe-defining scan parameters agree across all tracks.
+        # This guarantees that probe() can safely return parameters from track_0.
+        if len(self.tracks) > 1:
+            _PROBE_FIELDS = ("probe_geometry", "element_width")
+            ref_idx, ref_scan = next(
+                ((i, t.scan) for i, t in enumerate(self.tracks) if t.scan is not None),
+                (None, None),
+            )
+            if ref_scan is not None:
+                for cur_idx, track in enumerate(self.tracks):
+                    if cur_idx == ref_idx or track.scan is None:
+                        continue
+                    for field_name in _PROBE_FIELDS:
+                        ref_val = getattr(ref_scan, field_name, None)
+                        cur_val = getattr(track.scan, field_name, None)
+                        if ref_val is None or cur_val is None:
+                            continue
+                        equal = (
+                            np.array_equal(ref_val, cur_val)
+                            if isinstance(ref_val, np.ndarray)
+                            else ref_val == cur_val
+                        )
+                        if not equal:
+                            raise ValueError(
+                                f"Tracks {ref_idx} and {cur_idx} have different "
+                                f"'{field_name}' values. All tracks in a multi-track "
+                                "file must use the same physical probe."
+                            )
+
         # Warn if multi-track frame counts differ without a schedule
         if len(self.tracks) > 1 and self.track_schedule is None:
             frame_counts = []
