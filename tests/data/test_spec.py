@@ -424,6 +424,22 @@ def test_schema_keys_match_dataclass_fields_for_all_specs():
         )
 
 
+def test_field_metadata_keys_are_subset_of_schema_for_all_specs():
+    """FIELD_METADATA keys must be a subset of SCHEMA keys."""
+    for obj in vars(spec_module).values():
+        if (
+            isinstance(obj, type)
+            and issubclass(obj, Spec)
+            and obj is not Spec
+            and is_dataclass(obj)
+            and hasattr(obj, "FIELD_METADATA")
+        ):
+            extra = set(obj.FIELD_METADATA.keys()) - set(obj.SCHEMA.keys())
+            assert not extra, (
+                f"{obj.__name__} FIELD_METADATA has keys not in SCHEMA: {sorted(extra)}"
+            )
+
+
 def test_subject_id_warning_for_missing_id():
     n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
 
