@@ -4,7 +4,6 @@ import warnings
 from unittest.mock import patch
 
 import h5py
-import h5py as _h5py
 import numpy as np
 import pytest
 import zea
@@ -185,7 +184,7 @@ class TestGroupProxy:
         path, _, raw, _ = spec_file
         with File(path) as f:
             ds = f.data.raw_data
-            assert isinstance(ds, _h5py.Dataset)
+            assert isinstance(ds, h5py.Dataset)
             assert ds.shape == raw.shape
 
     def test_slicing_loads_subset(self, spec_file):
