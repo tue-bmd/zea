@@ -1200,7 +1200,7 @@ class TestMultiTrackFile:
             for track in f.tracks:
                 ts = track.timestamps
                 assert ts is not None
-                assert np.all(np.diff(ts, axis=1) > 0), f"Non-monotonic timestamps: {ts}"
+                assert np.all(np.diff(ts.ravel()) > 0), f"Non-monotonic timestamps: {ts}"
 
     def test_track_timestamps_frame_invariant(self, tmp_path):
         """When t2nt is identical across frames, frame-to-frame increments are constant."""
