@@ -1694,9 +1694,17 @@ class FileSpec(Spec):
         # Legacy compatibility
         # ------------------------------------------------------------------
 
-        # 1. Map legacy root attribute 'probe' → 'probe_name'
-        if "probe_name" not in kwargs and "probe" in file.attrs:
-            kwargs["probe_name"] = file.attrs["probe"]
+        # 1. Map legacy root attribute 'probe' → 'probe_name' by delegating
+        #    to File.probe_name, which already checks both 'probe_name' and
+        #    'probe' attrs in priority order.
+        if "probe_name" not in kwargs:
+            try:
+                kwargs["probe_name"] = file.probe_name
+            except AttributeError:
+                log.warning(
+                    "File '%s' has no 'probe_name' or 'probe' attribute; probe name will be None.",
+                    file.filename,
+                )
 
         # 2. Filter scan dict to only keys recognised by Scan.SCHEMA so
         #    that legacy scalar fields (n_frames, n_ax, n_el, n_tx, n_ch,
@@ -1707,21 +1715,25 @@ class FileSpec(Spec):
 
         # 3. Handle legacy flat `data/image` datasets.  In old files
         #    `data/image` is a plain array (n_frames, z, x) rather than an
-        #    Image group with values + extent.  If that is the case we
-        #    remove it from the data dict so it does not fail validation as
-        #    an Image spec.
+        #    Image group with values + extent.  Wrap the array as
+        #    {"values": array} so it passes spec validation; extent is
+        #    absent in legacy files and will be None.
+        #    If the specific spec (e.g. ImageSc) rejects the array due to
+        #    strict range checks, fall back to the generic Map spec by
+        #    leaving the dict as-is — DataSpec will still accept it via the
+        #    extra-maps path.
         if "data" in kwargs and isinstance(kwargs["data"], dict):
             data_dict = kwargs["data"]
             for key in list(data_dict.keys()):
                 schema_entry = DataSpec.SCHEMA.get(key)
                 if schema_entry is not None and "spec" in schema_entry:
-                    # The spec expects a nested group (dict), but we got a
-                    # plain array from a legacy flat dataset.
                     if isinstance(data_dict[key], np.ndarray):
-                        log.debug(
-                            f"Skipping legacy flat dataset 'data/{key}' "
-                            "that cannot be validated as a nested spec."
+                        log.warning(
+                            "Legacy flat dataset 'data/%s' has no spatial extent. "
+                            "The array has been loaded as 'values'; extent information "
+                            "was not stored in this file and will be None.",
+                            key,
                         )
-                        del data_dict[key]
+                        data_dict[key] = {"values": data_dict[key]}
 
         return cls(**kwargs)

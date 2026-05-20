@@ -1,8 +1,15 @@
 """Tests for the File module."""
 
+import warnings
+from unittest.mock import patch
+
+import h5py
+import h5py as _h5py
 import numpy as np
 import pytest
+import zea
 
+from zea.data.data_format import generate_zea_dataset
 from zea.data.file import File, GroupProxy, dict_to_sorted_list, load_file
 from zea.data.spec import FileSpec, Image, Segmentation
 from zea.probes import Probe
@@ -176,8 +183,6 @@ def spec_file(tmp_path):
 class TestGroupProxy:
     def test_attribute_access_returns_dataset(self, spec_file):
         path, _, raw, _ = spec_file
-        import h5py as _h5py
-
         with File(path) as f:
             ds = f.data.raw_data
             assert isinstance(ds, _h5py.Dataset)
@@ -265,8 +270,6 @@ class TestValidateSpec:
     def test_validate_spec_on_complete_legacy_file(self, tmp_path):
         """validate_spec() succeeds on legacy files that have all required scan
         fields plus the extra scalar datasets (n_frames, n_tx, etc.)."""
-        import h5py
-
         path = tmp_path / "complete_legacy.hdf5"
         n_frames, n_tx, n_el, n_ax, n_ch = 2, 3, 4, 8, 1
         raw = np.random.randn(n_frames, n_tx, n_ax, n_el, n_ch).astype(np.float32)
@@ -319,15 +322,15 @@ class TestValidateSpec:
             spec = f.validate_spec()
             assert isinstance(spec, FileSpec)
             np.testing.assert_array_equal(spec.data.raw_data, raw)
-            # Legacy flat image should be skipped, not cause a crash
-            assert spec.data.image is None
+            # Legacy flat image is now wrapped as Map with values; extent is None
+            assert spec.data.image is not None
+            np.testing.assert_array_equal(spec.data.image.values, img)
+            assert spec.data.image.extent is None
             # probe attr mapped to probe_name
             assert spec.probe_name == "legacy_probe"
 
     def test_validate_spec_raises_on_incomplete_legacy_file(self, tmp_path):
         """validate_spec() raises on legacy files missing required scan fields."""
-        import h5py
-
         path = tmp_path / "incomplete_legacy.hdf5"
         with h5py.File(path, "w") as f:
             f.attrs["probe"] = "test_probe"
@@ -344,10 +347,6 @@ class TestValidateSpec:
 
     def test_validate_spec_passes_for_custom_map_key(self, tmp_path):
         """A file saved with a custom map key in 'data' should pass validate_spec()."""
-        import warnings
-
-        from zea.data.spec import FileSpec
-
         n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
         with warnings.catch_warnings():
@@ -746,8 +745,6 @@ class TestMetadataMetricsAccessors:
     def test_metadata_raises_when_missing(self, tmp_path):
         """File without a metadata group raises KeyError."""
         path = tmp_path / "no_meta.hdf5"
-        import h5py
-
         with h5py.File(path, "w") as f:
             f.create_dataset("dummy", data=[1])
 
@@ -758,8 +755,6 @@ class TestMetadataMetricsAccessors:
     def test_metrics_raises_when_missing(self, tmp_path):
         """File without a metrics group raises KeyError."""
         path = tmp_path / "no_metrics.hdf5"
-        import h5py
-
         with h5py.File(path, "w") as f:
             f.create_dataset("dummy", data=[1])
 
@@ -773,8 +768,6 @@ class TestZeaVersion:
 
     def test_version_written_on_create(self, tmp_path):
         """File.create() stores a non-empty zea_version root attribute."""
-        import zea
-
         path = tmp_path / "versioned.hdf5"
         File.create(
             path,
@@ -787,14 +780,47 @@ class TestZeaVersion:
 
     def test_legacy_file_has_no_version(self, tmp_path):
         """A hand-crafted file without the zea_version attr is treated as legacy."""
-        import h5py
-
         path = tmp_path / "no_version.hdf5"
         with h5py.File(path, "w") as f:
             f.create_group("data")
 
         with File(path) as f:
             assert f.zea_version is None
+
+    def test_legacy_warning_no_version(self, tmp_path):
+        """Opening a file with no zea_version emits a legacy warning."""
+        path = tmp_path / "no_version.hdf5"
+        with h5py.File(path, "w") as f:
+            f.create_group("data")
+
+        with patch("zea.data.file.log.warning") as mock_warn:
+            with File(path):
+                pass
+        mock_warn.assert_called_once()
+        assert "legacy" in mock_warn.call_args.args[0].lower()
+
+    def test_legacy_warning_old_version(self, tmp_path):
+        """Opening a file with zea_version < 0.1.0 emits a legacy warning."""
+        path = tmp_path / "old_version.hdf5"
+        with h5py.File(path, "w") as f:
+            f.attrs["zea_version"] = "0.0.13"
+
+        with patch("zea.data.file.log.warning") as mock_warn:
+            with File(path):
+                pass
+        mock_warn.assert_called_once()
+        assert "legacy" in mock_warn.call_args.args[0].lower()
+
+    def test_no_legacy_warning_current_version(self, tmp_path):
+        """Opening a file with zea_version >= 0.1.0 does not emit a legacy warning."""
+        path = tmp_path / "current.hdf5"
+        with h5py.File(path, "w") as f:
+            f.attrs["zea_version"] = "0.1.0"
+
+        with patch("zea.data.file.log.warning") as mock_warn:
+            with File(path):
+                pass
+        mock_warn.assert_not_called()
 
     def test_validate_does_not_load_data(self, tmp_path):
         """validate() succeeds without loading array data (lightweight path)."""
@@ -831,8 +857,6 @@ class TestZeaVersion:
     def test_legacy_file_validate_passes(self, tmp_path):
         """validate() works on a legacy file (no zea_version) that has image-only data
         (no scan group required for image-only legacy files)."""
-        import h5py
-
         path = tmp_path / "legacy.hdf5"
         with h5py.File(path, "w") as f:
             f.attrs["probe"] = "legacy_probe"
@@ -860,3 +884,83 @@ def test_load_file_image_type(tmp_path):
     data, scan, probe = load_file(path, data_type="image")
     assert isinstance(data, np.ndarray), "load_file should return ndarray for image type"
     assert data.shape[0] == 2, "should load all 2 frames"
+
+
+class TestLegacyFileLoading:
+    """Integration tests: legacy files written with generate_zea_dataset load correctly."""
+
+    @pytest.fixture()
+    def legacy_file(self, tmp_path):
+        """Create a minimal legacy file using the deprecated writer."""
+        n_frames, n_tx, n_el, n_ax = 2, 4, 16, 64
+        raw = np.random.randn(n_frames, n_tx, n_ax, n_el, 1).astype(np.float32)
+        # uint8 is the typical legacy scan-converted image format
+        image_sc = np.random.randint(0, 256, (n_frames, 128, 96), dtype=np.uint8)
+        path = tmp_path / "legacy.hdf5"
+        generate_zea_dataset(
+            path=str(path),
+            raw_data=raw,
+            image_sc=image_sc,
+            probe_geometry=np.zeros((n_el, 3), dtype=np.float32),
+            sampling_frequency=np.float32(40e6),
+            center_frequency=np.float32(7e6),
+            demodulation_frequency=np.float32(7e6),
+            initial_times=np.zeros(n_tx, dtype=np.float32),
+            t0_delays=np.zeros((n_tx, n_el), dtype=np.float32),
+            tx_apodizations=np.ones((n_tx, n_el), dtype=np.float32),
+            focus_distances=np.zeros(n_tx, dtype=np.float32),
+            transmit_origins=np.zeros((n_tx, 3), dtype=np.float32),
+            polar_angles=np.zeros(n_tx, dtype=np.float32),
+            probe_name="legacy_probe",
+            cast_to_float=False,
+        )
+        return path, raw, image_sc
+
+    def test_legacy_warning_fires(self, legacy_file):
+        """Opening a legacy file emits the version warning."""
+        path, *_ = legacy_file
+        with patch("zea.data.file.log.warning") as mock_warn:
+            with File(path):
+                pass
+        mock_warn.assert_called_once()
+        assert "legacy" in mock_warn.call_args.args[0].lower()
+
+    def test_probe_name_mapped(self, legacy_file):
+        """probe_name is resolved from the legacy 'probe' root attribute."""
+        path, *_ = legacy_file
+        with File(path) as f:
+            assert f.probe_name == "legacy_probe"
+            spec = f.validate_spec()
+        assert spec.probe_name == "legacy_probe"
+
+    def test_raw_data_loaded(self, legacy_file):
+        """raw_data array is loaded with the correct shape."""
+        path, raw, _ = legacy_file
+        with File(path) as f:
+            spec = f.validate_spec()
+        assert spec.data.raw_data.shape == raw.shape
+
+    def test_flat_image_sc_wrapped_as_values(self, legacy_file):
+        """Flat legacy image_sc array is wrapped as Map.values; extent is None."""
+        path, _, image_sc = legacy_file
+        with File(path) as f:
+            spec = f.validate_spec()
+        assert spec.data.image_sc is not None
+        np.testing.assert_array_equal(spec.data.image_sc.values, image_sc)
+        assert spec.data.image_sc.extent is None
+
+    def test_flat_image_sc_wrap_warns(self, legacy_file):
+        """Wrapping a legacy flat image_sc array emits an extent-lost warning."""
+        path, *_ = legacy_file
+        with patch("zea.data.spec.log.warning") as mock_warn:
+            with File(path) as f:
+                f.validate_spec()
+        messages = [call.args[0] for call in mock_warn.call_args_list]
+        assert any("extent" in m.lower() for m in messages)
+
+    def test_scalar_scan_fields_ignored(self, legacy_file):
+        """Redundant scalar scan fields (n_frames, n_tx, etc.) are silently filtered."""
+        path, *_ = legacy_file
+        with File(path) as f:
+            spec = f.validate_spec()  # would raise if scalars caused unexpected-kwarg errors
+        assert spec.scan is not None

@@ -74,6 +74,22 @@ def assert_key(file: h5py.File, key: str):
         raise KeyError(f"{key} not found in file")
 
 
+def _parse_version(v: str) -> tuple[int, ...]:
+    return tuple(int(p) for p in v.split(".")[:3] if p.isdigit())
+
+
+def _warn_if_legacy_file(file: "File") -> None:
+    """Warn if *file* has no zea_version or was written before v0.1.0."""
+    v = file.attrs.get("zea_version", None)
+    if v is None or _parse_version(v) < (0, 1, 0):
+        log.warning(
+            "File '%s' was created with a legacy version of zea (%s). "
+            "It may behave in unexpected ways. Use zea<=0.0.13 for full compatibility.",
+            file.filename,
+            v if v is not None else "unknown",
+        )
+
+
 class File(h5py.File):
     """h5py.File in zea format."""
 
@@ -101,6 +117,10 @@ class File(h5py.File):
 
         # Initialize the h5py.File
         super().__init__(name, mode, *args, **kwargs)
+
+        # Warn when opening an existing file that pre-dates zea v0.1.0
+        if mode in ("r", "r+"):
+            _warn_if_legacy_file(self)
 
     @property
     def path(self):
