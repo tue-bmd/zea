@@ -53,9 +53,9 @@ from typing import Union
 import yaml
 
 from zea import log
-from zea.data.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.config.validation import config_schema
 from zea.internal.core import dict_to_tensor
+from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.utils import deprecated
 
 

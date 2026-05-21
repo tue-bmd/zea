@@ -6,8 +6,8 @@ import numpy as np
 import yaml
 from keras import ops
 
-from zea import log
-from zea.backend import jit
+from zea import backend, log
+from zea.backend import func_on_device, jit
 from zea.config import Config
 from zea.func.tensor import vmap
 from zea.func.ultrasound import channels_to_complex, complex_to_channels
@@ -44,6 +44,7 @@ class Pipeline:
         name="pipeline",
         validate=True,
         timed: bool = False,
+        device: Union[str, None] = None,
     ):
         """
         Initialize a pipeline.
@@ -69,6 +70,13 @@ class Pipeline:
             name (str, optional): The name of the pipeline. Defaults to "pipeline".
             validate (bool, optional): Whether to validate the pipeline. Defaults to True.
             timed (bool, optional): Whether to time each operation. Defaults to False.
+            device (str, optional): Default device for all pipeline calls, e.g.
+                ``'cpu'``, ``'gpu:0'``, ``'cuda:1'``.  Can be overridden per-call
+                by passing ``device=`` to ``__call__``.  Uses
+                :func:`zea.backend.func_on_device` under the hood, which moves
+                input tensors to the device for the ``torch`` backend and wraps
+                the call in a device context for JAX / TensorFlow.  Defaults to
+                ``None`` (no device placement).
 
         """
         self._call_pipeline = self.call
@@ -121,6 +129,7 @@ class Pipeline:
 
         self.jit_kwargs = jit_kwargs
         self.jit_options = jit_options  # will handle the jit compilation
+        self.device = device
 
         self._logged_difference_keys = False
 
@@ -246,6 +255,7 @@ class Pipeline:
             name=self.name,
             validate=self._validate_flag,
             timed=self._timed,
+            device=self.device,
         )
 
     def reinitialize(self):
@@ -258,6 +268,7 @@ class Pipeline:
             name=self.name,
             validate=self._validate_flag,
             timed=self._timed,
+            device=self.device,
         )
 
     def prepend(self, operation: Operation):
@@ -318,8 +329,22 @@ class Pipeline:
             inputs = outputs
         return outputs
 
-    def __call__(self, return_numpy=False, **inputs) -> Dict[str, Any]:
-        """Process input data through the pipeline."""
+    def __call__(
+        self, return_numpy=False, device: Union[str, None] = None, **inputs
+    ) -> Dict[str, Any]:
+        """Process input data through the pipeline.
+
+        Args:
+            return_numpy (bool): If ``True``, convert output tensors to NumPy
+                arrays before returning.
+            device (str, optional): Device to run this call on, e.g.
+                ``'cpu'``, ``'gpu:0'``, or ``'cuda:1'``.  Overrides the
+                pipeline-level ``device`` set at construction time for this
+                single invocation.  When ``None`` (default), the pipeline-level
+                ``device`` attribute is used (which is also ``None`` by
+                default, meaning no explicit device placement).
+            **inputs: Tensor inputs forwarded to the operations.
+        """
 
         if any(key in inputs for key in ["probe", "scan", "config"]) or any(
             isinstance(arg, ZEAObject) for arg in inputs.values()
@@ -347,7 +372,11 @@ class Pipeline:
                 self._logged_difference_keys = True
 
         ## PROCESSING
-        outputs = self._call_pipeline(**inputs)
+        _device = device if device is not None else self.device
+        if _device is not None:
+            outputs = func_on_device(self._call_pipeline, _device, **inputs)
+        else:
+            outputs = self._call_pipeline(**inputs)
 
         ## PREPARE OUTPUT
         if return_numpy:
@@ -518,6 +547,8 @@ class Pipeline:
                 params["jit_options"] = self.jit_options
             if self._user_jit_kwargs:
                 params["jit_kwargs"] = self._user_jit_kwargs
+            if self.device is not None:
+                params["device"] = self.device
             if params:
                 config["params"] = params
         else:
@@ -525,6 +556,7 @@ class Pipeline:
                 "with_batch_dim": self.with_batch_dim,
                 "jit_options": self.jit_options,
                 "jit_kwargs": self._user_jit_kwargs,
+                "device": self.device,
             }
 
         return config
@@ -676,6 +708,7 @@ class Pipeline:
         probe: Probe = None,
         scan: Scan = None,
         config: Config = None,
+        device: Union[str, None] = None,
         **kwargs,
     ):
         """Prepare Probe, Scan and Config objects for the pipeline.
@@ -692,6 +725,8 @@ class Pipeline:
         Returns:
             dict: Dictionary of inputs with all values as tensors.
         """
+        _device = device if device is not None else self.device
+
         # Initialize dictionaries for probe, scan, and config
         probe_dict, scan_dict, config_dict = {}, {}, {}
 
@@ -705,23 +740,27 @@ class Pipeline:
             assert isinstance(probe, Probe), (
                 f"Expected an instance of `zea.probes.Probe`, got {type(probe)}"
             )
-            probe_dict = probe.to_tensor(keep_as_is=self.static_params)
+            with backend.device(_device):
+                probe_dict = probe.to_tensor(keep_as_is=self.static_params)
 
         if scan is not None:
             assert isinstance(scan, Scan), (
                 f"Expected an instance of `zea.scan.Scan`, got {type(scan)}"
             )
             needs_keys = self.needs_keys - config_keys - kwargs_keys
-            scan_dict = scan.to_tensor(include=needs_keys, keep_as_is=self.static_params)
+            with backend.device(_device):
+                scan_dict = scan.to_tensor(include=needs_keys, keep_as_is=self.static_params)
 
         if config is not None:
             assert isinstance(config, Config), (
                 f"Expected an instance of `zea.config.Config`, got {type(config)}"
             )
-            config_dict.update(config.to_tensor(keep_as_is=self.static_params))
+            with backend.device(_device):
+                config_dict.update(config.to_tensor(keep_as_is=self.static_params))
 
         # Convert all kwargs to tensors
-        tensor_kwargs = dict_to_tensor(kwargs, keep_as_is=self.static_params)
+        with backend.device(_device):
+            tensor_kwargs = dict_to_tensor(kwargs, keep_as_is=self.static_params)
 
         # combine probe, scan, config and kwargs
         # explicitly so we know which keys overwrite which
@@ -1065,7 +1104,8 @@ class Beamform(Pipeline):
         operations list, since Beamform auto-generates its operations
         from ``beamformer``, ``num_patches``, and ``enable_pfield``.
         """
-        config = {"name": "beamform"}
+        config = super().get_dict(compact=compact)
+        config.pop("operations", None)
 
         params = {}
         if not compact or self.beamformer_type != "delay_and_sum":
@@ -1075,21 +1115,13 @@ class Beamform(Pipeline):
         if not compact or self.enable_pfield:
             params["enable_pfield"] = self.enable_pfield
 
-        # Pipeline-level params
-        if compact:
-            if not self.with_batch_dim:
-                params["with_batch_dim"] = self.with_batch_dim
-            if self.jit_options != "ops":
-                params["jit_options"] = self.jit_options
-            if self._user_jit_kwargs:
-                params["jit_kwargs"] = self._user_jit_kwargs
-        else:
-            params["with_batch_dim"] = self.with_batch_dim
-            params["jit_options"] = self.jit_options
-            params["jit_kwargs"] = self._user_jit_kwargs
+        # Merge in the pipeline-level params from super().
+        params.update(config.get("params", {}))
 
         if params:
             config["params"] = params
+        else:
+            config.pop("params", None)
 
         return config
 

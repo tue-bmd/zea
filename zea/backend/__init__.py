@@ -1,28 +1,27 @@
-"""Backend-specific utilities.
-
-This subpackage provides backend-specific utilities for the ``zea`` library. Most backend logic is handled by Keras 3, but a few features require custom wrappers to ensure compatibility and performance across JAX, TensorFlow, and PyTorch.
+"""Backend utilities for ``zea``.
 
 .. note::
-    Most backend-specific logic is handled by Keras 3, so this subpackage is intentionally minimal. Only features not natively supported by Keras (such as JIT and autograd) are implemented here.
+    Most tensor operations are handled by Keras 3. This module only wraps the
+    features that Keras does not expose directly: JIT compilation, automatic
+    differentiation, and device placement.
 
-Key Features
-------------
+Public API
+----------
 
-- **JIT Compilation** (:func:`zea.backend.jit`):
-  Provides a unified interface for just-in-time (JIT) compilation of functions, dispatching to the appropriate backend (JAX or TensorFlow) as needed. This enables accelerated execution of computationally intensive routines. Note that jit compilation is not yet supported when using the `torch` backend.
+:func:`jit`
+    Unified JIT compilation for JAX (``jax.jit``) and TensorFlow
+    (``tf.function``).  A no-op for the ``torch`` backend.
 
-- **Automatic Differentiation** (:class:`zea.backend.AutoGrad`):
-  Offers a backend-agnostic wrapper for automatic differentiation, allowing gradient computation regardless of the underlying ML library.
+:class:`device`
+    Context manager that pins all Keras ops to a specific device.
+    Re-exported as :func:`zea.device`.
 
-- **Backend Submodules:**
+:func:`func_on_device`
+    Run a callable with its tensor arguments moved to a target device.
+    For ``torch`` this also calls ``.to(device)`` on every input tensor.
 
-  - :mod:`zea.backend.jax` -- JAX-specific utilities and device management.
-  - :mod:`zea.backend.torch` -- PyTorch-specific utilities and device management.
-  - :mod:`zea.backend.tensorflow` -- TensorFlow-specific utilities and device management.
-
-- **Data Loading** (:class:`zea.Dataloader`):
-  A high-performance HDF5 dataloader built on `Grain <https://github.com/google/grain>`_. It provides a convenient way to load and preprocess data for machine learning workflows.
-
+:class:`AutoGrad`
+    Backend-agnostic automatic differentiation wrapper.
 """
 
 from contextlib import nullcontext
@@ -131,89 +130,109 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
         return func
 
 
-class on_device:
-    """Context manager to set the device regardless of backend.
+class device:
+    """Context manager to run operations on a specific device, regardless of backend.
 
-    For the `torch` backend, you need to manually move the model and data to the device before
-    using this context manager.
+    Normalises device strings across JAX, TensorFlow, and PyTorch so that
+    ``'gpu:0'``, ``'cuda:0'`` and ``'cpu'`` all work with every backend, then
+    delegates to :func:`keras.device` which handles the per-backend dispatch.
+
+    For the ``torch`` backend, :func:`keras.device` sets Keras's internal
+    device-tracking state so that tensors created by Keras ops land on the
+    correct device.  Existing input tensors are **not** moved automatically —
+    use ``pipeline(device=..., **inputs)`` or
+    :func:`zea.backend.func_on_device` when you also need to relocate
+    pre-existing tensors.
 
     Args:
-        device (str): Device string, e.g. ``'cuda'``, ``'gpu'``, or ``'cpu'``.
+        device (str): Device string, e.g. ``'cuda:0'``, ``'gpu:0'``, or
+            ``'cpu'``.
 
     Example:
         .. code-block:: python
 
-            with zea.backend.on_device("gpu:3"):
-                pipeline = zea.Pipeline([zea.ops.Abs()])
-                output = pipeline(data=keras.random.normal((10, 10)))  # output is on "cuda:3"
+            # All backends: tensors created by Keras ops are placed on gpu:0
+            with zea.device("gpu:0"):
+                output = pipeline(data=data)
+
+            # Per-call device with automatic input-tensor movement (all backends)
+            output = pipeline(device="gpu:0", data=data)
     """
 
     def __init__(self, device: str):
-        self.device = self.get_device(device)
-        self._context = self.get_context(self.device)
-
-    def get_context(self, device):
         if device is None:
-            return nullcontext()
+            self._context = nullcontext()
+        else:
+            normalized = self._normalize(device)
+            self._context = keras.device(normalized)
 
-        if keras.backend.backend() == "tensorflow":
-            import tensorflow as tf
+    @staticmethod
+    def _normalize(device: str) -> str:
+        """Normalize device string before passing to ``keras.device``.
 
-            return tf.device(device)
-
-        if keras.backend.backend() == "jax":
-            import jax
-
-            return jax.default_device(device)
-        if keras.backend.backend() == "torch":
-            import torch
-
-            return torch.device(device)
-
-        return nullcontext()
-
-    def get_device(self, device: str):
-        if device is None:
-            return None
-
+        Converts ``cuda:N`` → ``gpu:N`` so the string is backend-agnostic;
+        ``keras.device`` itself then converts ``gpu:N`` → ``cuda:N`` when
+        running under the ``torch`` backend.
+        """
         device = device.lower()
-
-        if keras.backend.backend() == "tensorflow":
-            return device.replace("cuda", "gpu")
-
-        if keras.backend.backend() == "jax":
-            from zea.backend.jax import str_to_jax_device
-
-            device = device.replace("cuda", "gpu")
-            return str_to_jax_device(device)
-
-        if keras.backend.backend() == "torch":
-            return device.replace("gpu", "cuda")
+        if device.startswith("auto:"):
+            raise ValueError(
+                f"``zea.device`` does not accept 'auto:N' device strings (got {device!r}). "
+                "Use zea.init_device('auto:N') first to resolve a concrete device, "
+                "then pass the returned string (e.g. 'gpu:0') to ``zea.device``."
+            )
+        # Normalise to gpu:N; keras.device handles gpu → cuda for the torch backend.
+        return device.replace("cuda", "gpu")
 
     def __enter__(self):
         self._context.__enter__()
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._context.__exit__(exc_type, exc_val, exc_tb)
 
 
-if backend in [None, "tensorflow", "jax", "numpy"]:
+# Private alias so func_on_device can reference the class without clashing
+# with its own `device` parameter.
+_DeviceContext = device
 
-    def func_on_device(func, device, *args, **kwargs):
-        """Moves all tensor arguments of a function to a specified device before calling it.
 
-        Args:
-            func (callable): Function to be called.
-            device (str): Device to move tensors to.
-            *args: Positional arguments to be passed to the function.
-            **kwargs: Keyword arguments to be passed to the function.
-        Returns:
-            The output of the function.
-        """
-        with on_device(device):
-            return func(*args, **kwargs)
+def func_on_device(func, device, *args, **kwargs):
+    """Run ``func`` with all tensor arguments placed on ``device``.
 
-elif backend == "torch":
-    from zea.backend.torch import func_on_device
-else:
-    raise ValueError(f"Unsupported backend: {backend}")
+    For the ``torch`` backend, every tensor argument is explicitly moved with
+    ``.to(device)`` before the call.  For JAX and TensorFlow the function is
+    executed inside an :class:`zea.backend.device` context, which routes newly created
+    tensors to the requested device.
+
+    Args:
+        func (callable): Function to call.
+        device (str): Target device, e.g. ``'cpu'``, ``'gpu:0'``, ``'cuda:1'``.
+        *args: Positional arguments forwarded to ``func``.
+        **kwargs: Keyword arguments forwarded to ``func``.
+
+    Returns:
+        Output of ``func(*args, **kwargs)``.
+    """
+    if device is None:
+        return func(*args, **kwargs)
+
+    if keras.backend.backend() == "torch":
+        import torch
+
+        _device = torch.device(device.lower().replace("gpu", "cuda"))
+
+        def _move(x):
+            if isinstance(x, torch.Tensor):
+                return x.to(_device)
+            if isinstance(x, (list, tuple)):
+                return type(x)(_move(i) for i in x)
+            if isinstance(x, dict):
+                return {k: _move(v) for k, v in x.items()}
+            return x
+
+        args = _move(args)
+        kwargs = _move(kwargs)
+
+    with _DeviceContext(device):
+        return func(*args, **kwargs)

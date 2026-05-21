@@ -2,8 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import animation
 
-from zea import Scan
 from zea.io_lib import save_to_gif
+from zea.scan import Scan
 
 
 def animate_images(
