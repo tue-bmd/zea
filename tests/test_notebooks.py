@@ -109,6 +109,9 @@ NOTEBOOK_PARAMETERS = {
         "grid_size_x": 16,
         "grid_size_z": 16,
     },
+    "zea_simulation_example.ipynb": {
+        "n_repeats": 2,
+    },
     # Add more notebooks and their parameters here as needed
     # "other_notebook.ipynb": {
     #     "param1": value1,
