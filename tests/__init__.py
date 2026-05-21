@@ -2,9 +2,11 @@
 
 import os
 
+from .backend_utils import get_test_backend
+
 # Set default backend for tests
-DEFAULT_TEST_BACKEND = "tensorflow"
-os.environ["KERAS_BACKEND"] = DEFAULT_TEST_BACKEND
+TEST_BACKEND = get_test_backend()
+os.environ["KERAS_BACKEND"] = TEST_BACKEND
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 os.environ["ZEA_FIND_H5_SHAPES_PARALLEL"] = "0"
 

@@ -13,7 +13,22 @@ import decorator
 import numpy as np
 import pytest
 
+from .backend_utils import format_backend_skip_reason, missing_required_backends
+
 debugging = sys.gettrace() or debugpy.is_client_connected() is not None
+
+
+def _decorate_with_required_backends(decorator_func, required_backends):
+    """Attach backend requirements to a decorated test function."""
+
+    required_backends = tuple(dict.fromkeys(required_backends))
+
+    def apply(test_func):
+        decorated = decorator_func(test_func)
+        decorated._required_backends = required_backends
+        return decorated
+
+    return apply
 
 
 def run_func(func):
@@ -210,6 +225,10 @@ class BackendEqualityCheck:
             print(f"Running tests with backends: {backends}")
 
         def wrapper(test_func, *args, **kwargs):
+            missing_backends = missing_required_backends(all_backends)
+            if missing_backends:
+                pytest.skip(format_backend_skip_reason(missing_backends))
+
             # Extract function name from test function
             func_name = test_func.__name__.split("test_", 1)[-1]
 
@@ -248,7 +267,7 @@ class BackendEqualityCheck:
             if errors:
                 raise AssertionError("Errors occurred in backends:\n" + "\n".join(errors))
 
-        return decorator.decorator(wrapper)
+        return _decorate_with_required_backends(decorator.decorator(wrapper), all_backends)
 
     def run_in_backend(self, backend):
         """
@@ -261,11 +280,16 @@ class BackendEqualityCheck:
         def decorator(test_func):
             @functools.wraps(test_func)
             def wrapper(*args, **kwargs):
+                missing_backends = missing_required_backends([backend])
+                if missing_backends:
+                    pytest.skip(format_backend_skip_reason(missing_backends))
+
                 job_id = self.get_job_id(test_func.__name__)
                 self.start_func_in_backend(test_func, args, kwargs, backend, job_id)
                 result_queue = {backend: self.result_queues[backend]}
                 return self.collect_results(result_queue)[backend]
 
+            wrapper._required_backends = (backend,)
             return wrapper
 
         return decorator

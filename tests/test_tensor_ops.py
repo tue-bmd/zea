@@ -2,9 +2,10 @@
 Tests for the `tensor_ops` module.
 """
 
+import os
+
 import numpy as np
 import pytest
-import torch
 from keras import ops
 from numpy.random import default_rng
 from scipy.ndimage import gaussian_filter
@@ -26,6 +27,11 @@ from . import DEFAULT_TEST_SEED, backend_equality_check
 @backend_equality_check()
 def test_flatten(array, start_dim, end_dim):
     """Test the `flatten` function to `torch.flatten`."""
+    if os.environ.get("ZEA_SKIP_UNAVAILABLE_BACKENDS") == "1":
+        pytest.importorskip("torch")
+
+    import torch
+
     import zea
 
     out = zea.func.flatten(array, start_dim, end_dim)
