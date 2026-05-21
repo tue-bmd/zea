@@ -322,6 +322,7 @@ def get_device(device="auto:1", verbose=True, hide_others=True, backend=None):
         active_backend = backend or os.environ.get("KERAS_BACKEND", "tensorflow")
         if active_backend == "jax":
             import jax
+
             try:
                 _jax_has_gpu = bool(jax.devices("gpu"))
             except Exception:
