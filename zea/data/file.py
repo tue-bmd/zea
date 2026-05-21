@@ -759,7 +759,7 @@ def load_file_all_data_types(
 
     data_dict = {}
 
-    # Data types stored as HDF5 groups (Map-based specs with values/extent)
+    # Data types stored as HDF5 groups (Map-based specs with values/coordinates)
     _GROUP_DATA_TYPES = {"beamformed_data", "envelope_data", "image_sc", "image"}
 
     with File(path, mode="r") as file:

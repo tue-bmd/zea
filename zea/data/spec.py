@@ -842,7 +842,7 @@ class DataSpec(Spec):
     # Pipeline data products (plain arrays)
     raw_data: np.ndarray | None = None
     aligned_data: np.ndarray | None = None
-    # Spatial map data products (with extent metadata)
+    # Spatial map data products (with coordinates metadata)
     beamformed_data: BeamformedData | dict | None = None
     envelope_data: EnvelopeData | dict | None = None
     image: Image | dict | None = None
@@ -916,7 +916,7 @@ class DataSpec(Spec):
                     f"Custom data key '{key}' must be a spatial map "
                     f"(a dict with at least a 'values' key), not a flat array. "
                     f"Only 'raw_data' and 'aligned_data' are accepted as flat arrays. "
-                    f"Wrap your data: {{'values': array, 'extent': extent_array}}."
+                    f"Wrap your data: {{'values': array, 'coordinates': coordinates_array}}."
                 )
             setattr(self, key, value)
 
