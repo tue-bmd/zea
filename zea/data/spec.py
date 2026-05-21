@@ -964,13 +964,11 @@ class DataSpec(Spec):
 
         if getattr(self, "_extra_map_keys", ()):
             custom_keys = ", ".join(sorted(self._extra_map_keys))
-            warnings.warn(
-                log.warning(
-                    f"Custom spatial map key(s) added to 'data': {custom_keys}. "
-                    "These are validated as generic Map specs. "
-                    "If your data matches an existing type, prefer one of the supported "
-                    f"spatial maps: {suggested_map_keys}."
-                )
+            log.warning(
+                f"Custom spatial map key(s) added to 'data': {custom_keys}. "
+                "These are validated as generic Map specs. "
+                "If your data matches an existing type, prefer one of the supported "
+                f"spatial maps: {suggested_map_keys}."
             )
 
 
