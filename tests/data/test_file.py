@@ -318,10 +318,10 @@ class TestValidateSpec:
             spec = f.validate_spec()
             assert isinstance(spec, FileSpec)
             np.testing.assert_array_equal(spec.data.raw_data, raw)
-            # Legacy flat image is now wrapped as Map with values; extent is None
+            # Legacy flat image is now wrapped as Map with values; coordinates is None
             assert spec.data.image is not None
             np.testing.assert_array_equal(spec.data.image.values, img)
-            assert spec.data.image.extent is None
+            assert spec.data.image.coordinates is None
             # probe attr mapped to probe_name
             assert spec.probe_name == "legacy_probe"
 
@@ -937,22 +937,22 @@ class TestLegacyFileLoading:
         assert spec.data.raw_data.shape == raw.shape
 
     def test_flat_image_sc_wrapped_as_values(self, legacy_file):
-        """Flat legacy image_sc array is wrapped as Map.values; extent is None."""
+        """Flat legacy image_sc array is wrapped as Map.values; coordinates is None."""
         path, _, image_sc = legacy_file
         with File(path) as f:
             spec = f.validate_spec()
         assert spec.data.image_sc is not None
         np.testing.assert_array_equal(spec.data.image_sc.values, image_sc)
-        assert spec.data.image_sc.extent is None
+        assert spec.data.image_sc.coordinates is None
 
     def test_flat_image_sc_wrap_warns(self, legacy_file):
-        """Wrapping a legacy flat image_sc array emits an extent-lost warning."""
+        """Wrapping a legacy flat image_sc array emits a coordinates-lost warning."""
         path, *_ = legacy_file
         with patch("zea.data.spec.log.warning") as mock_warn:
             with File(path) as f:
                 f.validate_spec()
         messages = [call.args[0] for call in mock_warn.call_args_list]
-        assert any("extent" in m.lower() for m in messages)
+        assert any("coordinates" in m.lower() for m in messages)
 
     def test_scalar_scan_fields_ignored(self, legacy_file):
         """Redundant scalar scan fields (n_frames, n_tx, etc.) are silently filtered."""
