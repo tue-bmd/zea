@@ -87,6 +87,25 @@ def _warn_if_legacy_file(file: "File") -> None:
             "It may behave in unexpected ways. Use zea<=0.0.13 for full compatibility.",
             file.filename,
             v if v is not None else "unknown",
+def _warn_custom_keys(data: dict, metadata: dict):
+    """Warn about custom keys in data/metadata dicts when saving."""
+    custom_maps = [k for k in data if k not in DataSpec.SCHEMA]
+    if custom_maps:
+        supported = ", ".join(k for k, v in DataSpec.SCHEMA.items() if "spec" in v)
+        log.warning(
+            f"Custom spatial map key(s) added to 'data': {', '.join(sorted(custom_maps))}. "
+            "These are validated as generic Map specs. "
+            "If your data matches an existing type, prefer one of the supported "
+            f"spatial maps: {supported}."
+        )
+    custom_signals = [k for k in metadata if k not in MetadataSpec.SCHEMA]
+    if custom_signals:
+        supported = ", ".join(k for k, v in MetadataSpec.SCHEMA.items() if "spec" in v)
+        log.warning(
+            f"Custom signal key(s) added to 'metadata': {', '.join(sorted(custom_signals))}. "
+            "These are validated as generic SignalND specs. "
+            "If your signal matches an existing type, prefer one of the supported "
+            f"signal fields: {supported}."
         )
 
 
@@ -225,6 +244,7 @@ class File(h5py.File):
         if description is not None:
             kwargs["description"] = description
 
+        _warn_custom_keys(kwargs.get("data", {}), kwargs.get("metadata", {}))
         spec = FileSpec(**kwargs)
         spec.save(str(path), compression=compression)
 
