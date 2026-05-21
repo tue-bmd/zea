@@ -1496,13 +1496,11 @@ class MetadataSpec(Spec):
 
         if getattr(self, "_extra_signal_keys", ()):
             custom_keys = ", ".join(sorted(self._extra_signal_keys))
-            warnings.warn(
-                log.warning(
-                    f"Custom signal key(s) added to 'metadata': {custom_keys}. "
-                    "These are validated as generic SignalND specs. "
-                    "If your signal matches an existing type, prefer one of the supported "
-                    f"signal fields: {suggested_signal_keys}."
-                )
+            log.warning(
+                f"Custom signal key(s) added to 'metadata': {custom_keys}. "
+                "These are validated as generic SignalND specs. "
+                "If your signal matches an existing type, prefer one of the supported "
+                f"signal fields: {suggested_signal_keys}."
             )
 
 
