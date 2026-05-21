@@ -87,6 +87,9 @@ def _warn_if_legacy_file(file: "File") -> None:
             "It may behave in unexpected ways. Use zea<=0.0.13 for full compatibility.",
             file.filename,
             v if v is not None else "unknown",
+        )
+
+
 def _warn_custom_keys(data: dict, metadata: dict):
     """Warn about custom keys in data/metadata dicts when saving."""
     custom_maps = [k for k in data if k not in DataSpec.SCHEMA]
