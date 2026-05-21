@@ -82,7 +82,8 @@ def _warn_custom_keys(data: dict, metadata: dict):
         log.warning(
             f"Custom spatial map key(s) added to 'data': {', '.join(sorted(custom_maps))}. "
             "These are validated as generic Map specs. "
-            f"If your data matches an existing type, prefer one of the supported spatial maps: {supported}."
+            "If your data matches an existing type, prefer one of the supported "
+            f"spatial maps: {supported}."
         )
     custom_signals = [k for k in metadata if k not in MetadataSpec.SCHEMA]
     if custom_signals:
@@ -90,7 +91,8 @@ def _warn_custom_keys(data: dict, metadata: dict):
         log.warning(
             f"Custom signal key(s) added to 'metadata': {', '.join(sorted(custom_signals))}. "
             "These are validated as generic SignalND specs. "
-            f"If your signal matches an existing type, prefer one of the supported signal fields: {supported}."
+            "If your signal matches an existing type, prefer one of the supported "
+            f"signal fields: {supported}."
         )
 
 
