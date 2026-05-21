@@ -104,16 +104,16 @@ def pytest_collection_modifyitems(config, items):
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     guard_skip_counts = backend_guard_skips()
-    total_guard_skips = sum(guard_skip_counts.values())
-    if not total_guard_skips:
+    guard_skips = sum(guard_skip_counts.values())
+    if not guard_skips:
         return
 
-    terminalreporter.write_sep("-", "backend-guarded blocks")
-    terminalreporter.write_line(f"Skipped {total_guard_skips} backend-guarded block(s).")
+    terminalreporter.write_sep("-", "backend-guarded assert skips")
+    terminalreporter.write_line(
+        f"Skipped {guard_skips} backend-guarded asserts{'' if guard_skips == 1 else 's'}."
+    )
     for (active_backend, required_backends), count in sorted(guard_skip_counts.items()):
-        terminalreporter.write_line(
-            f"{count} on {active_backend} requiring {', '.join(required_backends)}"
-        )
+        terminalreporter.write_line(f"{count} requiring {', '.join(required_backends)}")
 
 
 @pytest.fixture(scope="session", autouse=True)

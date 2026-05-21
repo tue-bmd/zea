@@ -6,7 +6,7 @@ import importlib.util
 from collections import Counter
 
 import keras
-import pytest
+from zea import log
 
 TEST_BACKENDS = ("tensorflow", "torch", "jax")
 DEFAULT_TEST_BACKEND = "tensorflow"
@@ -68,7 +68,7 @@ def format_backend_skip_reason(missing_backends) -> str:
 
 
 def _record_backend_guard_skip(active_backend, required_backends):
-    pytest.warn(
+    log.warning(
         f"Assert skipped. Only available on {required_backends}, "
         f"currently running on {active_backend}."
     )
@@ -77,7 +77,6 @@ def _record_backend_guard_skip(active_backend, required_backends):
 
 def runs_on(*backends) -> bool:
     """Return whether the current test backend is one of the requested backends.
-
     Misses are counted so pytest can report how many backend-guarded blocks were skipped.
     """
     active_backend = keras.backend.backend()
@@ -89,7 +88,6 @@ def runs_on(*backends) -> bool:
 
 def runs_not_on(*backends) -> bool:
     """Return whether the current test backend is not one of the excluded backends.
-
     Misses are counted so pytest can report how many backend-guarded blocks were skipped.
     """
     active_backend = keras.backend.backend()
