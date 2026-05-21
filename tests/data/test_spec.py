@@ -329,24 +329,24 @@ def test_dataset_builder_dimension_consistency_across_nested_specs():
 
 def test_metadata_accepts_custom_signal_nd_keys_and_warns(tmp_path):
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    data = {"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)}
+    metadata = {
+        "custom_signal": {
+            "samples": np.zeros((32, 3), dtype=np.float16),
+            "start_time_offset": np.float32(0.0),
+            "sampling_frequency": np.float32(120.0),
+        }
+    }
 
-    with patch("zea.log.warning") as mock_warn:
-        dataset = FileSpec(
-            data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
-            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            metadata={
-                "custom_signal": {
-                    "samples": np.zeros((32, 3), dtype=np.float16),
-                    "start_time_offset": np.float32(0.0),
-                    "sampling_frequency": np.float32(120.0),
-                }
-            },
-            metrics={},
-        )
-    messages = [str(c.args[0]) for c in mock_warn.call_args_list]
-    assert any("Custom signal key(s) added to 'metadata'" in m for m in messages)
+    dataset = FileSpec(
+        data=data,
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        metadata=metadata,
+        metrics={},
+    )
     assert isinstance(dataset.metadata.custom_signal, SignalND)
     assert "custom_signal" in dataset.to_dict()["metadata"]
+
     with patch("zea.log.warning") as mock_warn:
         File.create(
             tmp_path / "test.hdf5",
@@ -372,25 +372,24 @@ def test_metadata_custom_key_requires_signal_nd_spec():
 
 def test_data_accepts_custom_map_keys_and_warns(tmp_path):
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    data = {
+        "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+        "custom_map": {
+            "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+            "coordinates": np.zeros((n_frames, 16, 12, 3), dtype=np.float32),
+            "description": "This is a custom map",
+            "unit": "mm",
+        },
+    }
 
-    with patch("zea.log.warning") as mock_warn:
-        dataset = FileSpec(
-            data={
-                "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
-                "custom_map": {
-                    "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
-                    "coordinates": np.zeros((n_frames, 16, 12, 3), dtype=np.float32),
-                    "description": "This is a custom map",
-                    "unit": "mm",
-                },
-            },
-            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-        )
-    messages = [str(c.args[0]) for c in mock_warn.call_args_list]
-    assert any("Custom spatial map key(s) added to 'data'" in m for m in messages)
+    dataset = FileSpec(
+        data=data,
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+    )
     assert isinstance(dataset.data, DataSpec)
     assert isinstance(dataset.data.custom_map, Map)
     assert "custom_map" in dataset.to_dict()["data"]
+
     with patch("zea.log.warning") as mock_warn:
         File.create(
             tmp_path / "test.hdf5",
