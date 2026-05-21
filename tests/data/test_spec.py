@@ -1020,9 +1020,9 @@ class TestLoadingWarnings:
 
         with patch("zea.log.warning") as mock_warn:
             with File(path) as f:
-                try:
+                # scan() emits the legacy-waveforms warning, then fails because the
+                # file has no other scan parameters (n_tx is unset).
+                with pytest.raises(ValueError):
                     f.scan()
-                except Exception:
-                    pass
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any("waveforms_one_way" in m and "stored as a dictionary" in m for m in messages)
