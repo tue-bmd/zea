@@ -447,6 +447,12 @@ def init_device(
     tensorflow, jax or pytorch. The function will select a GPU based
     on available memory, or fall back to CPU if no GPU is available.
 
+    Generally, it is recommended to use ``init_device`` before importing any other library, since
+    it will hide other GPUs from the libraries. The returned device string for a single GPU is
+    'gpu:0', since the others are hidden. Alternatively, you can set ``hide_others=False``
+    and manage the device yourself. In that case the returned device will contain the original
+    physical GPU ids (e.g. ``'gpu:2'`` for physical GPU 2).
+
     Args:
         backend (str): String indicating which backend to use. Can be
             'torch', 'tensorflow', 'jax', 'numpy', `None` or "auto".
