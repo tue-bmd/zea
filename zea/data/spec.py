@@ -967,23 +967,6 @@ class DataSpec(Spec):
                         f"got n_ch={n_ch} (shape {arr.shape})."
                     )
 
-        suggested_map_keys = ", ".join(
-            sorted(
-                key
-                for key, value in type(self).SCHEMA.items()
-                if "spec" in value and issubclass(value["spec"], Map)
-            )
-        )
-
-        if getattr(self, "_extra_map_keys", ()):
-            custom_keys = ", ".join(sorted(self._extra_map_keys))
-            log.warning(
-                f"Custom spatial map key(s) added to 'data': {custom_keys}. "
-                "These are validated as generic Map specs. "
-                "If your data matches an existing type, prefer one of the supported "
-                f"spatial maps: {suggested_map_keys}."
-            )
-
 
 @dataclass
 class ScanSpec(Spec):
@@ -1500,23 +1483,6 @@ class MetadataSpec(Spec):
 
     def __post_init__(self):
         super().__post_init__()
-
-        suggested_signal_keys = ", ".join(
-            sorted(
-                key
-                for key, value in type(self).SCHEMA.items()
-                if "spec" in value and issubclass(value["spec"], Signal)
-            )
-        )
-
-        if getattr(self, "_extra_signal_keys", ()):
-            custom_keys = ", ".join(sorted(self._extra_signal_keys))
-            log.warning(
-                f"Custom signal key(s) added to 'metadata': {custom_keys}. "
-                "These are validated as generic SignalND specs. "
-                "If your signal matches an existing type, prefer one of the supported "
-                f"signal fields: {suggested_signal_keys}."
-            )
 
         self.warn_missing_optional_fields()
 
