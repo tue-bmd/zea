@@ -12,7 +12,7 @@ from zea.func.tensor import translate
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
 
-def to_8bit(image, dynamic_range: Tuple[float, float], to_numpy: bool = True):
+def to_8bit(image, dynamic_range: Tuple[float, float], output_to: str = "numpy"):
     """Convert image to 8 bit image [0, 255]. Clip between dynamic range.
 
     Has the option to return as numpy array, which will also do the translation and clipping
@@ -21,8 +21,8 @@ def to_8bit(image, dynamic_range: Tuple[float, float], to_numpy: bool = True):
     Args:
         image (ndarray): Input image(s). Should be in between dynamic range.
         dynamic_range (tuple, optional): Dynamic range of input image(s).
-        to_numpy (bool, optional): Whether to convert the output to a numpy array.
-            If False, the output will be a tensor. Defaults to True.
+        output_to (str, optional): Output format. Can be "numpy", "tensor", or "pillow".
+            Defaults to "numpy".
 
     Returns:
         image (ndarray): Output 8 bit image(s) [0, 255].
@@ -56,11 +56,11 @@ def to_8bit(image, dynamic_range: Tuple[float, float], to_numpy: bool = True):
             ...     theta_range=(-0.78, 0.78),
             ...     fill_value=np.nan,
             ... )
-            >>> image = zea.display.to_8bit(image, dynamic_range=(-60, 0))
+            >>> image = zea.display.to_8bit(image, dynamic_range=(-60, 0), output_to="pillow")
             >>> image.save("image.png")  # DOCTEST: +SKIP
 
     """
-    if to_numpy:
+    if output_to in ("numpy", "pillow"):
         backend = np
         image = ops.convert_to_numpy(image)
     else:
@@ -70,10 +70,13 @@ def to_8bit(image, dynamic_range: Tuple[float, float], to_numpy: bool = True):
     image = translate(image, dynamic_range, (0, 255))
     image = backend.clip(image, 0, 255)
 
-    if to_numpy:
+    if output_to in ("numpy", "pillow"):
         image = image.astype(np.uint8)
     else:
         image = ops.cast(image, "uint8")
+
+    if output_to == "pillow":
+        image = Image.fromarray(image)
 
     return image
 

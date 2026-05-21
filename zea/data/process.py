@@ -123,10 +123,7 @@ def run_processing(
 
     @jit
     def to_8bit(data, dynamic_range):
-        # data = ops.convert_to_numpy(data)
-        data = ops.nan_to_num(data, nan=dynamic_range[0])
-        data = display.to_8bit(data, dynamic_range, to_numpy=False)
-        return data
+        return display.to_8bit(data, dynamic_range, to_numpy=False)
 
     # Load config and pipeline
     config = Config.from_path(config_path)
