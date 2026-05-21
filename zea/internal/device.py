@@ -322,8 +322,12 @@ def get_device(device="auto:1", verbose=True, hide_others=True, backend=None):
         active_backend = backend or os.environ.get("KERAS_BACKEND", "tensorflow")
         if active_backend == "jax":
             import jax
-
-            jax.config.update("jax_platforms", "cpu")
+            try:
+                _jax_has_gpu = bool(jax.devices("gpu"))
+            except Exception:
+                _jax_has_gpu = False
+            if not _jax_has_gpu:
+                jax.config.update("jax_platforms", "cpu")
         if hide_others:
             os.environ["CUDA_VISIBLE_DEVICES"] = ""
         # returns None to indicate CPU
