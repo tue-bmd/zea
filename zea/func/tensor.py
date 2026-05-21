@@ -27,24 +27,49 @@ def split_seed(seed, n):
     Returns:
         list: List of n seeds (JAX keys, SeedGenerator, or None).
     """
+    seed = materialize_seed(seed)
+
     # If seed is None, return a list of None
     if seed is None:
         return [None for _ in range(n)]
 
-    # If seed is a JAX key, split it into n keys
-    if keras.backend.backend() == "jax":
+    # If seed is a legacy JAX PRNG key, split it into n independent keys.
+    if is_jax_prng_key(seed):
         import jax
 
         return jax.random.split(seed, n)
 
-    # For other backends, we have to use Keras SeedGenerator
-    else:
-        assert isinstance(seed, keras.random.SeedGenerator), (
-            "seed must be a SeedGenerator when not using JAX."
-        )
-
-        # Just duplicate the SeedGenerator
+    if isinstance(seed, keras.random.SeedGenerator):
+        # Reuse the same stateful generator so downstream random ops consume
+        # independent draws across repeated calls, regardless of backend.
         return [seed for _ in range(n)]
+
+    raise TypeError(
+        "seed must be None, an int, keras.random.SeedGenerator, or a legacy "
+        "jax.random.PRNGKey() key. Typed jax.random.key() keys are not currently supported."
+    )
+
+
+def materialize_seed(seed):
+    """Convert stateful seeds into backend-native explicit seeds when needed.
+
+    On JAX, `keras.random.SeedGenerator` is stateful and cannot be safely used
+    in `ops.map`. This function converts it into an explicit legacy PRNG key outside those traces.
+    """
+    if seed is None:
+        return None
+
+    if isinstance(seed, int):
+        if keras.backend.backend() == "jax":
+            import jax
+
+            return jax.random.PRNGKey(seed)
+        return keras.random.SeedGenerator(seed)
+
+    if keras.backend.backend() == "jax" and isinstance(seed, keras.random.SeedGenerator):
+        return seed.next()
+
+    return seed
 
 
 def is_jax_prng_key(x):
