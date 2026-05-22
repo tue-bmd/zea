@@ -47,7 +47,7 @@ import yaml
 
 from zea import log
 from zea.config import Config
-from zea.data.preset_utils import HF_PREFIX
+from zea.internal.preset_utils import HF_PREFIX
 from zea.tools.hf import HFPath
 from zea.utils import strtobool
 

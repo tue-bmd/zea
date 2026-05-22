@@ -5,7 +5,7 @@ from pathlib import Path, PurePosixPath
 from huggingface_hub import HfApi, login, snapshot_download
 
 from zea import log
-from zea.data.preset_utils import _hf_list_files, _hf_parse_path
+from zea.internal.preset_utils import _hf_list_files, _hf_parse_path
 
 HF_PREFIX = "hf://"
 

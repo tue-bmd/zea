@@ -4,12 +4,12 @@ import keras
 import numpy as np
 from keras import ops
 
-if keras.backend.backend() != "jax":
-    # This allows tensorflow tracing
+if keras.backend.backend() == "tensorflow":
+    # TF shapes can be dynamic tensors during tracing
     prod = ops.prod
 else:
-    # Jax does not allow shapes to be tensors
-    prod = np.prod
+    # JAX and PyTorch require plain Python ints for shape arguments
+    prod = lambda x: int(np.prod(x))
 
 
 class SubsetOperator:

@@ -5,8 +5,6 @@ import shutil
 import subprocess as sp
 from typing import Union
 
-import keras
-
 from zea import log
 
 
@@ -285,7 +283,7 @@ def select_gpus(available_gpu_ids, memory_free, device=None, verbose=True, hide_
     return gpu_ids
 
 
-def get_device(device="auto:1", verbose=True, hide_others=True):
+def get_device(device="auto:1", verbose=True, hide_others=True, backend=None):
     """Sets the GPU usage by searching for available GPUs and
     selecting one or more GPUs based on the device argument.
     If CUDA is unavailable, fallback to CPU.
@@ -311,6 +309,9 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
         verbose (bool): prints output if True.
         hide_others (bool): if True, hide other GPUs from the system by setting
             the CUDA_VISIBLE_DEVICES environment variable.
+        backend (str, optional): active Keras backend. When ``None`` it is
+            derived from the ``KERAS_BACKEND`` env var (defaulting to
+            ``"tensorflow"``), which avoids importing keras here.
 
     Returns:
         gpu_ids: list of selected GPU ids. If no GPU is selected, returns an
@@ -318,7 +319,8 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
     """
 
     def _cpu_case():
-        if keras.backend.backend() == "jax":
+        active_backend = backend or os.environ.get("KERAS_BACKEND", "tensorflow")
+        if active_backend == "jax":
             import jax
 
             jax.config.update("jax_platforms", "cpu")
@@ -386,25 +388,34 @@ def backend_key(backend):
     return "gpu"
 
 
-def selected_gpu_ids_to_device(selected_gpu_ids, backend):
-    """Convert selected GPU ids to device string."""
+def selected_gpu_ids_to_device(selected_gpu_ids, backend, hide_others=True):
+    """Convert selected GPU ids to device string(s).
+
+    When ``hide_others`` is ``True`` (the default), ``hide_gpus`` has remapped
+    physical IDs via ``CUDA_VISIBLE_DEVICES`` and the selected GPUs are
+    renumbered 0, 1, 2 … inside the process — so this function emits
+    ``'<key>:0'``, ``'<key>:1'`` … in that positional order.
+
+    When ``hide_others`` is ``False``, no remapping happens and the physical
+    GPU ids in ``selected_gpu_ids`` are used directly.
+
+    Returns:
+        str: single device string when one GPU was selected.
+        list[str]: list of device strings when multiple GPUs were selected.
+        str: ``'cpu'`` when ``selected_gpu_ids`` is ``None`` or empty.
+    """
     if selected_gpu_ids is None or len(selected_gpu_ids) == 0:
         return "cpu"
 
-    if len(selected_gpu_ids) > 1:
-        log.warning(
-            (
-                "Specified multiple GPU's but this function will just return "
-                f"one GPU: {selected_gpu_ids[0]}"
-            )
-        )
-
     key = backend_key(backend)
-    if backend == "jax":
-        # Because jax hides the other gpus, we need to set the device number to 0
-        return f"{key}:0"
+    if hide_others:
+        # After hide_gpus the N selected GPUs are renumbered 0 … N-1
+        ids = range(len(selected_gpu_ids))
     else:
-        return f"{key}:{selected_gpu_ids[0]}"
+        ids = selected_gpu_ids
+    devices = [f"{key}:{i}" for i in ids]
+
+    return devices[0] if len(devices) == 1 else devices
 
 
 def set_memory_growth_tf():
@@ -426,6 +437,7 @@ def init_device(
     device: Union[str, int, list] = "auto:1",
     backend: Union[str, None] = "auto",
     hide_devices: Union[int, list] = None,
+    hide_others: bool = True,
     allow_preallocate: bool = True,
     verbose: bool = True,
 ):
@@ -434,6 +446,12 @@ def init_device(
     Useful to call at the start of a script to set the device for
     tensorflow, jax or pytorch. The function will select a GPU based
     on available memory, or fall back to CPU if no GPU is available.
+
+    Generally, it is recommended to use ``init_device`` before importing any other library, since
+    it will hide other GPUs from the libraries. The returned device string for a single GPU is
+    'gpu:0', since the others are hidden. Alternatively, you can set ``hide_others=False``
+    and manage the device yourself. In that case the returned device will contain the original
+    physical GPU ids (e.g. ``'gpu:2'`` for physical GPU 2).
 
     Args:
         backend (str): String indicating which backend to use. Can be
@@ -444,16 +462,24 @@ def init_device(
         device (str/int/list): device(s) to select.
             Examples: 'cuda:1', 'gpu:2', 'auto:-1', 'cpu', 0, or [0,1,2,3].
             For more details see: `get_device`.
-        hide_devices (int/list): device(s) to hide from the system.
+        hide_devices (int/list): device(s) to hide from the system before selection.
             Examples: 0, or [0,1,2,3]. Can be useful when some GPUs have too
             little tensor cores to be useful for training, or when some GPUs
             are reserved for other tasks. Defaults to None, in which case no
             GPUs are hidden and all are available for use.
+        hide_others (bool, optional): if True (default), unselected GPUs are
+            hidden via ``CUDA_VISIBLE_DEVICES`` and selected GPUs are renumbered
+            0..N-1 in the returned device strings. If False, all GPUs remain
+            visible and the returned device strings use the original physical
+            GPU ids (e.g. ``'gpu:2'`` for physical GPU 2).
         allow_preallocate (bool, optional): allow preallocation of memory.
             Used for jax and tensorflow.
         verbose (bool, optional): print device selection. Defaults to True.
     Returns:
-        device (str/int/list): selected device(s).
+        device (str | list[str]): selected device string (e.g. ``'gpu:0'``) or
+            a list of device strings (e.g. ``['gpu:0', 'gpu:1']``) when
+            multiple GPUs were selected.  Returns ``'cpu'`` when no GPU is
+            available or ``device='cpu'`` was requested.
     """
     if hide_devices is not None:
         hide_gpus(hide_devices)
@@ -463,8 +489,10 @@ def init_device(
         backend = os.environ.get("KERAS_BACKEND")
 
     if backend in ["jax", "tensorflow", "torch"]:
-        selected_gpu_ids = get_device(device, verbose=verbose)
-        device = selected_gpu_ids_to_device(selected_gpu_ids, backend)
+        selected_gpu_ids = get_device(
+            device, verbose=verbose, hide_others=hide_others, backend=backend
+        )
+        device = selected_gpu_ids_to_device(selected_gpu_ids, backend, hide_others=hide_others)
     elif backend in ["numpy", "cpu"]:
         device = "cpu"
     else:

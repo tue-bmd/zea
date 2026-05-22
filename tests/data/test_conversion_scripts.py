@@ -19,7 +19,7 @@ from zea.data.convert.images import convert_image_dataset
 from zea.data.convert.utils import load_avi, sitk_load, unzip
 from zea.data.convert.verasonics import VerasonicsFile
 from zea.data.file import File
-from zea.data.preset_utils import _hf_resolve_path
+from zea.internal.preset_utils import _hf_resolve_path
 from zea.io_lib import _SUPPORTED_IMG_TYPES
 
 from .. import DEFAULT_TEST_SEED

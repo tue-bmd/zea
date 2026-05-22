@@ -1,10 +1,42 @@
 """``zea``: *A Toolbox for Cognitive Ultrasound Imaging.*"""
 
+import importlib
 import importlib.util
 import os
 from importlib.metadata import PackageNotFoundError, version
+from typing import TYPE_CHECKING
 
 from . import log
+
+if TYPE_CHECKING:
+    # Static-only imports so IDEs and type checkers can resolve the public API
+    # without actually importing keras (or any backend) at runtime.
+    from . import (
+        agent,
+        beamform,
+        data,
+        display,
+        func,
+        io_lib,
+        metrics,
+        models,
+        ops,
+        simulator,
+        utils,
+        visualize,
+    )
+    from .backend import device
+    from .config import Config
+    from .data.dataloader import Dataloader
+    from .data.datasets import Dataset, Folder
+    from .data.file import File, load_file
+    from .datapaths import set_data_paths
+    from .interface import Interface
+    from .internal.device import init_device
+    from .internal.setup_zea import setup, setup_config
+    from .ops import Pipeline
+    from .probes import Probe
+    from .scan import Scan
 
 try:
     # dynamically add __version__ attribute (see pyproject.toml)
@@ -79,9 +111,9 @@ def _bootstrap_backend():
 
     _check_backend_installed()
 
-    from keras.backend import backend as keras_backend
-
-    log.info(f"Using backend {keras_backend()!r}")
+    # Read from the env var rather than calling ``keras.backend.backend()``
+    # so that importing ``zea`` does not import ``keras``.
+    log.info(f"Using backend {os.environ.get('KERAS_BACKEND', 'tensorflow')!r}")
 
 
 # Skip backend bootstrap when building on ReadTheDocs
@@ -90,28 +122,57 @@ if os.environ.get("READTHEDOCS") != "True":
 
 del _bootstrap_backend
 
-from . import (
-    agent,
-    beamform,
-    data,
-    display,
-    func,
-    io_lib,
-    metrics,
-    models,
-    ops,
-    simulator,
-    utils,
-    visualize,
+# Public API is loaded lazily so that ``import zea`` does not pull in
+# ``keras`` (or any ML backend) transitively. In particular this lets
+# ``zea.init_device(...)`` be called *before* keras is imported, which is the
+# whole point of ``init_device``: it sets ``CUDA_VISIBLE_DEVICES`` and related
+# env vars that must be in place before the backend initialises.
+_LAZY_SUBMODULES = (
+    "agent",
+    "beamform",
+    "data",
+    "display",
+    "func",
+    "io_lib",
+    "metrics",
+    "models",
+    "ops",
+    "simulator",
+    "utils",
+    "visualize",
 )
-from .config import Config
-from .data.dataloader import Dataloader
-from .data.datasets import Dataset, Folder
-from .data.file import File, load_file
-from .datapaths import set_data_paths
-from .interface import Interface
-from .internal.device import init_device
-from .internal.setup_zea import setup, setup_config
-from .ops import Pipeline
-from .probes import Probe
-from .scan import Scan
+
+_LAZY_ATTRS = {
+    "device": ("zea.backend", "device"),
+    "Config": ("zea.config", "Config"),
+    "Dataloader": ("zea.data.dataloader", "Dataloader"),
+    "Dataset": ("zea.data.datasets", "Dataset"),
+    "Folder": ("zea.data.datasets", "Folder"),
+    "File": ("zea.data.file", "File"),
+    "load_file": ("zea.data.file", "load_file"),
+    "set_data_paths": ("zea.datapaths", "set_data_paths"),
+    "Interface": ("zea.interface", "Interface"),
+    "init_device": ("zea.internal.device", "init_device"),
+    "setup": ("zea.internal.setup_zea", "setup"),
+    "setup_config": ("zea.internal.setup_zea", "setup_config"),
+    "Pipeline": ("zea.ops", "Pipeline"),
+    "Probe": ("zea.probes", "Probe"),
+    "Scan": ("zea.scan", "Scan"),
+}
+
+
+def __getattr__(name):
+    if name in _LAZY_ATTRS:
+        module_name, attr_name = _LAZY_ATTRS[name]
+        value = getattr(importlib.import_module(module_name), attr_name)
+        globals()[name] = value
+        return value
+    if name in _LAZY_SUBMODULES:
+        value = importlib.import_module(f"{__name__}.{name}")
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY_ATTRS) | set(_LAZY_SUBMODULES))
