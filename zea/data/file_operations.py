@@ -1,26 +1,9 @@
 """
-This module provides some utilities to edit zea data files.
+This module provides some utilities to edit zea data files, either invidually or in bulk.
 
-Available operations
---------------------
-
-- `sum`: Sum multiple raw data files into one.
-
-- `compound_frames`: Compound frames in a raw data file to increase SNR.
-
-- `compound_transmits`: Compound transmits in a raw data file to increase SNR.
-
-- `resave`: Resave a zea data file. This can be used to change the file format version.
-
-- `extract`: extract frames and transmits in a raw data file.
-
-Folders
--------
-
-All operations also accept folders. When a folder is given as input, the operation
-is applied to every zea file in that folder (iterated with :class:`zea.Dataset`) and
-the results are written to the output folder, mirroring the input folder structure.
-A single file is still processed as before.
+Each operation is available both as a Python function and as a command line subcommand.
+See the :ref:`CLI documentation <cli-file-operations>` for the available operations and
+their command-line usage.
 """
 
 import argparse
@@ -481,7 +464,13 @@ def get_parser():
     """Command line argument parser with subcommands"""
 
     parser = argparse.ArgumentParser(
-        description="Manipulate zea data files or folders containing zea files.",
+        description=(
+            "Manipulate zea data files.\n\n"
+            "All operations also accept folders. When a folder is given as input, the "
+            "operation is applied to every zea file in that folder (iterated with "
+            "zea.Dataset) and the results are written to the output folder, mirroring "
+            "the input folder structure."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="operation", required=True)
