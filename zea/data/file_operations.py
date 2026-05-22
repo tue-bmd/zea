@@ -481,7 +481,7 @@ def get_parser():
     """Command line argument parser with subcommands"""
 
     parser = argparse.ArgumentParser(
-        description="Manipulate zea data files.",
+        description="Manipulate zea data files or folders containing zea files.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="operation", required=True)
