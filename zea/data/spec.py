@@ -1539,8 +1539,8 @@ class TrackSpec(Spec):
     ``FileSpec`` specifies the global ordering of transmits across all tracks.
 
     Args:
-        data: The data for this track.
-        scan: The scan parameters for this track. Required when raw_data is
+        data (DataSpec | dict): The data for this track.
+        scan (ScanSpec | dict): The scan parameters for this track. Required when raw_data is
             present in *data*.
     """
 
