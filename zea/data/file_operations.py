@@ -1,5 +1,5 @@
 """
-This module provides some utilities to edit zea data files, either invidually or in bulk.
+This module provides some utilities to edit zea data files, either individually or in bulk.
 
 Each operation is available both as a Python function and as a command line subcommand.
 See the :ref:`CLI documentation <cli-file-operations>` for the available operations and
@@ -472,10 +472,9 @@ def get_parser():
     parser = argparse.ArgumentParser(
         description=(
             "Manipulate zea data files.\n\n"
-            "All operations also accept folders. When a folder is given as input, the "
-            "operation is applied to every zea file in that folder (iterated with "
-            "zea.Dataset) and the results are written to the output folder, mirroring "
-            "the input folder structure."
+            "All operations accept files; folder inputs are also supported. For "
+            "file-to-file operations, each zea file in the input folder is processed "
+            "and written to a mirrored path in the output folder."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
