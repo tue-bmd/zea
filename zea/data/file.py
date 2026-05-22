@@ -142,7 +142,7 @@ class Track:
         return self._timestamps
 
     def __repr__(self) -> str:
-        return f"<Track index={self._index}>"
+        return f"<Track index={self._index} keys={list(self._group.keys())}>"
 
 
 def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
@@ -1083,10 +1083,7 @@ class File(h5py.File):
         return FileSpec.from_hdf5(self)
 
     def __repr__(self):
-        return (
-            f"<zea.data.file.File at 0x{id(self):x} "
-            f'("{Path(self.filename).name}" mode={self.mode})>'
-        )
+        return f'<zea.File at 0x{id(self):x} ("{Path(self.filename).name}" mode={self.mode})>'
 
     def __str__(self):
         return f"zea HDF5 File: '{self.path.name}' (mode={self.mode})"
