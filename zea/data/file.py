@@ -126,13 +126,24 @@ class File(h5py.File):
                 the prefix 'hf://', in which case it will be resolved to a
                 huggingface path.
             mode (str, optional): The mode to open the file in. Defaults to "r".
+            revision (str, optional): HuggingFace revision (branch, tag, or commit hash)
+                to download from. Only used when ``name`` starts with ``hf://``.
+                Defaults to ``"main"``. Example: ``revision="v0.1.0"``.
+            repo_type (str, optional): HuggingFace repository type. Only used when
+                ``name`` starts with ``hf://``. Defaults to ``"dataset"``.
+            cache_dir (str or Path, optional): Local cache directory for downloaded
+                HuggingFace files. Only used when ``name`` starts with ``hf://``.
             *args: Additional arguments to pass to h5py.File.
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
 
         # Resolve huggingface path
         if str(name).startswith(HF_PREFIX):
-            name = _hf_resolve_path(str(name))
+            hf_kwargs = {}
+            for key in ("revision", "repo_type", "cache_dir"):
+                if key in kwargs:
+                    hf_kwargs[key] = kwargs.pop(key)
+            name = _hf_resolve_path(str(name), **hf_kwargs)
 
         # Disable locking for read mode by default
         if "locking" not in kwargs and mode == "r":
