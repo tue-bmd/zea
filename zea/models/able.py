@@ -18,40 +18,51 @@ from zea.models.base import BaseModel
 class ABLE(BaseModel):
     """Adaptive Beamforming by Deep LEarning (ABLE) model.
 
-    This class implements a configurable convolutional encoder/decoder
-    architecture for adaptive ultrasound beamforming. The constructor
-    allows for flexible configuration of layer dimensions and kernel sizes.
-    The default configuration corresponds to the setup used in the original paper
-    "Adaptive Ultrasound Beamforming Using Deep Learning"
-    (DOI: https://doi.org/10.1109/TMI.2020.3008537).
+    Implements a configurable pixel-wise convolutional encoder/decoder that
+    computes per-element adaptive weights from time-of-flight-corrected
+    channel data.  The weighted data is then summed by a subsequent
+    :class:`~zea.ops.DelayAndSum` operation to form the final image.
+
+    .. admonition:: Reference
+
+        Luijten, B. *et al.*, "Adaptive Ultrasound Beamforming Using Deep
+        Learning," *IEEE Trans. Med. Imaging* **39** (12), 2020.
+        https://doi.org/10.1109/TMI.2020.3008537
+
+    Expected input shape when used inside a
+    :class:`~zea.ops.PatchedGrid` pipeline via :class:`~zea.ops.Lambda`:
+
+    - ``(n_tx, n_pix, n_el)``       — RF data
+    - ``(n_tx, n_pix, n_el, n_ch)`` — IQ data
+
+    The model maps over the transmit axis (``n_tx``) internally; each
+    ``(n_pix, n_el[, n_ch])`` slice is processed independently.
+
+    .. note::
+        Only 1×1 convolutions (``kernel_size=1``) are currently supported
+        because :class:`~zea.ops.PatchedGrid` processes pixels independently.
 
     Args:
-    latent_dim : int, optional
-        Channel size for the middle (latent) layers when `latent_layers` is not provided.
-        Default is 32.
-    kernel_size : int, tuple, or list, optional
-        Kernel size specification. Accepted forms:
-          - int -> every convolution uses (k, k)
-          - tuple (h, w) -> every convolution uses (h, w)
-          - list of ints/tuples -> layer-wise kernels (length must match layers)
+        latent_dim (int): Channel size for the hidden layers when
+            ``latent_layers`` is not supplied. Default is ``32``.
+        kernel_size (int, tuple, or list): Kernel size specification.
 
-        !! WARNING: Currently only 1x1 kernels are supported in order to be compatible with
-        the PatchedGrid implementation that assumes independent processing of each pixel.
-        #TODO: Remove this restriction
+            - ``int``  — every convolution uses ``(k, k)``.
+            - ``tuple (h, w)`` — every convolution uses ``(h, w)``.
+            - ``list`` of ints/tuples — per-layer kernel sizes
+              (length must equal the total number of layers).
 
-        Default is 1.
-    n_latent_layers : int, optional
-        Number of inner layers to construct when `latent_layers` is not provided.
-        Must be >= 2. Default is 2.
-    latent_layers : list or None, optional
-        Explicit list of channel sizes for inner layers. Overrides `n_latent_layers`
-        and `latent_dim` when provided. Default is None.
-    axis : int, optional
-        Axis that contains the transducer elements. Default is 3.
-    name : str, optional
-        Model name forwarded to `BaseModel`. Default is "able".
-    **kwargs : dict
-        Additional keyword arguments forwarded to `BaseModel`.
+            Default is ``1``.
+        n_latent_layers (int): Number of hidden layers when ``latent_layers``
+            is not supplied. Must be ≥ 1. Default is ``2``.
+        latent_layers (list or None): Explicit list of channel sizes for the
+            hidden layers.  Overrides ``n_latent_layers`` and ``latent_dim``
+            when provided. Default is ``None``.
+        axis (int or None): Reserved for future use. Default is ``None``.
+        name (str): Model name forwarded to :class:`~zea.models.base.BaseModel`.
+            Default is ``"able"``.
+        **kwargs: Additional keyword arguments forwarded to
+            :class:`~zea.models.base.BaseModel`.
     """
 
     def __init__(
@@ -64,23 +75,6 @@ class ABLE(BaseModel):
         name="able",
         **kwargs,
     ):
-        """Initializes the ABLE model.
-
-        Kernel size handling (accepted forms):
-        - single int (e.g. 1) -> every conv uses (1,1)
-        - single tuple (h, w) (e.g. (1,3)) -> every conv uses (h,w)
-        - list of ints (e.g. [1,3,3,1]) -> converted to [(1,1),(3,3),...]
-        - list of tuples (e.g. [(1,1),(1,3),(1,3),(1,1)]) -> used as-is
-
-        Layer / dimensionality handling:
-        - If `latent_layers` is provided and is a list, that list is used as the
-          channel sizes for the inner layers (excluding the first and last layers,
-          which are dynamically set based on the input data).
-        - Else, `n_latent_layers` is used to create a list of length
-          `n_latent_layers + 2`:
-            [input_dim, latent_dim, ..., latent_dim, input_dim]
-          (first and last are dynamically set, middle layers are `latent_dim`).
-        """
         super().__init__(name=name, **kwargs)
 
         # Initialize parameters
@@ -94,6 +88,19 @@ class ABLE(BaseModel):
         self.layer_dims = None
         self.kernel_sizes = None
         self._able_layers = []
+
+    def get_config(self):
+        config = super().get_config()
+        config.update(
+            {
+                "latent_dim": self.latent_dim,
+                "kernel_size": self.kernel_size,
+                "n_latent_layers": self.n_latent_layers,
+                "latent_layers": self.latent_layers,
+                "axis": self.axis,
+            }
+        )
+        return config
 
     def _init_kernels(self, kernel_size, n_layers):
         """Normalize kernel_size into a list of (h, w) tuples.
@@ -118,15 +125,10 @@ class ABLE(BaseModel):
             if isinstance(k, int):
                 if k != 1:
                     raise ValueError(
-                        "Only kernel_size=1 is currently supported due to "
-                        "PatchedGrid limitations."
+                        "Only kernel_size=1 is currently supported due to PatchedGrid limitations."
                     )
                 return True
-            if (
-                isinstance(k, tuple)
-                and len(k) == 2
-                and all(isinstance(x, int) for x in k)
-            ):
+            if isinstance(k, tuple) and len(k) == 2 and all(isinstance(x, int) for x in k):
                 if k != (1, 1):
                     raise ValueError(
                         "Only kernel_size=(1,1) is currently supported due to "
@@ -136,14 +138,10 @@ class ABLE(BaseModel):
             raise ValueError("kernel_size entries must be int or tuple(int,int)")
 
         def _normalize_entry(k):
-            _allowed_kernel_size(k) # TODO: Remove this check once larger kernels are supported
+            _allowed_kernel_size(k)  # TODO: Remove this check once larger kernels are supported
             if isinstance(k, int):
                 return (k, k)
-            if (
-                isinstance(k, tuple)
-                and len(k) == 2
-                and all(isinstance(x, int) for x in k)
-            ):
+            if isinstance(k, tuple) and len(k) == 2 and all(isinstance(x, int) for x in k):
                 return k
             raise ValueError("kernel entries must be int or tuple(int,int)")
 
@@ -174,23 +172,21 @@ class ABLE(BaseModel):
             list of int: List of channel sizes for all layers, including input and output layers.
 
         Raises:
-            ValueError: If `latent_layers` is invalid or its length does not match `n_latent_layers`.
+            ValueError: If ``latent_layers`` is invalid or its length does not match
+                ``n_latent_layers``.
         """
 
         if latent_layers is not None:
             if not isinstance(latent_layers, (list, tuple)):
-                raise ValueError(
-                    "`latent_layers` must be a list/tuple of integers when provided."
-                )
+                raise ValueError("`latent_layers` must be a list/tuple of integers when provided.")
             layer_dims = list(latent_layers)
             if len(layer_dims) != n_latent_layers:
                 raise ValueError(
-                    "`latent_layers` must contain exactly `n_latent_layers` entries for the inner layers."
+                    "`latent_layers` must contain exactly `n_latent_layers`"
+                    " entries for the inner layers."
                 )
             if not all(isinstance(d, int) and d > 0 for d in layer_dims):
-                raise ValueError(
-                    "All `latent_layers` entries must be positive integers."
-                )
+                raise ValueError("All `latent_layers` entries must be positive integers.")
             return [input_dim] + layer_dims + [input_dim]
 
         # Default behavior: create symmetric layers
@@ -254,7 +250,8 @@ class ABLE(BaseModel):
             elem = meta["elem"]
             ch = meta["ch"]
             if meta.get("stacked", False):
-                # (pixels, 1, 1, n_ch*elements) -> (pixels, n_ch, elements) -> (pixels, elements, n_ch)
+                # (pixels, 1, 1, n_ch*elements) -> (pixels, n_ch, elements)
+                # -> (pixels, elements, n_ch)
                 x_r = ops.reshape(x, (pixels, ch, elem))
                 return ops.transpose(x_r, axes=[0, 2, 1])
             else:
@@ -282,8 +279,7 @@ class ABLE(BaseModel):
         neg = ops.nn.relu(-x_centered)
         output = ops.concatenate([pos, neg], axis=-1)
         norm = ops.sqrt(
-            ops.mean(ops.square(output), axis=-1, keepdims=True)
-            + keras.backend.epsilon()  # noqa: E501
+            ops.mean(ops.square(output), axis=-1, keepdims=True) + keras.backend.epsilon()  # noqa: E501
         )
         return output / norm
 
@@ -291,23 +287,30 @@ class ABLE(BaseModel):
         """Build the ABLE model based on the input shape.
 
         Args:
-            input_shape (tuple): Shape of the input tensor.
+            input_shape (tuple): Shape of the input tensor.  Supported
+                formats (``n_tx`` acts as the batch axis that ``call``
+                maps over):
+
+                - ``(n_tx, n_pix, n_el)``       — RF data, rank 3
+                - ``(n_tx, n_pix, n_el, n_ch)`` — IQ data, rank 4
         """
-        # Check that input_shape is one of the supported formats:
-        #   - (batch, pixels, elements)        -> rank == 3
-        #   - (batch, pixels, elements, n_ch)  -> rank == 4
+        # Supported ranks:
+        #   rank 3: (n_tx, n_pix, n_el)
+        #   rank 4: (n_tx, n_pix, n_el, n_ch)
         if len(input_shape) not in (3, 4):
             raise ValueError(
-                "Input shape must be 3D or 4D tensor. Supported shapes:\n"
-                "- (batch, pixels, elements)\n"
-                "- (batch, pixels, elements, n_ch)"
+                "Input shape must be rank-3 or rank-4. Supported shapes:\n"
+                "- (n_tx, n_pix, n_el)\n"
+                "- (n_tx, n_pix, n_el, n_ch)"
             )
 
-        # Compute stacked input channels: last axis after stack_channels is channel axis.
+        # The per-transmit slice passed to apply_model has shape
+        # (n_pix, n_el) or (n_pix, n_el, n_ch); stack_channels merges
+        # the element and channel axes so Conv2D sees (n_pix, 1, 1, n_el*n_ch).
         if len(input_shape) == 3:
-            stacked_input_dim = input_shape[-1]
+            stacked_input_dim = input_shape[-1]  # n_el
         else:  # len == 4
-            stacked_input_dim = input_shape[-2] * input_shape[-1]
+            stacked_input_dim = input_shape[-2] * input_shape[-1]  # n_el * n_ch
 
         # Dynamically initialize layer dimensions and kernel sizes
         self.layer_dims = self._init_layers(
@@ -317,47 +320,63 @@ class ABLE(BaseModel):
 
         # Build conv layers and track them in _able_layers
         for idx, (dim, kernel) in enumerate(zip(self.layer_dims, self.kernel_sizes)):
-            activation = (
-                None if idx == (len(self.layer_dims) - 1) else self.antirectifier
-            )
+            activation = None if idx == (len(self.layer_dims) - 1) else self.antirectifier
             layer = Conv2D(dim, kernel, activation=activation, padding="same")
             self._able_layers.append(layer)
             # Register as a named attribute so Keras tracks the weights.
             setattr(self, f"_able_conv_{idx}", layer)
 
-        # Eagerly build every Conv2D layer with a concrete dummy input so that
-        # their kernels are fully initialised before any JAX tracing occurs.
-        # This prevents lazy-build (and random weight initialisation) from being
-        # triggered inside jax.value_and_grad / stateless_call, which would
-        # cause DynamicJaxprTracers to escape into variable._value.
-        dummy = ops.zeros((1, 1, 1, stacked_input_dim))
-        for layer in self._able_layers:
-            dummy = layer(dummy)
+        # Build each Conv2D layer by calling layer.build() directly (no forward
+        # pass).  Calling ops.zeros() + layer(dummy) inside a lax.map/scan
+        # trace (which Pipeline triggers via ops.map with with_batch_dim=True)
+        # would run add_weight() inside the JAX trace context, producing
+        # DynamicJaxprTracers that escape the scan scope →
+        # UnexpectedTracerError.  Calling layer.build(input_shape) only creates
+        # Keras Variable objects; any JAX random ops for weight initialisation
+        # that run here produce *concrete* DeviceArrays because we are in eager
+        # mode (no active lax.map trace) when build() is called correctly.
+        #
+        # IMPORTANT: ensure able_model.build() (or an initial forward pass) is
+        # called in eager mode *before* the model is first used inside a
+        # Pipeline with with_batch_dim=True, so this code never runs inside a
+        # lax.map trace.
+        current_in_channels = stacked_input_dim
+        for idx, layer in enumerate(self._able_layers):
+            layer.build((1, 1, 1, current_in_channels))
+            is_last = idx == len(self._able_layers) - 1
+            # antirectifier activation doubles the channel count;
+            # the final layer has no activation, so channels stay at layer.filters.
+            current_in_channels = layer.filters if is_last else layer.filters * 2
 
         # Mark the model as built
         super().build(input_shape)
 
     def call(self, inputs):
-        """Apply ABLE to the input data."""
+        """Apply ABLE to the input data.
 
-        # This assumes the first dimension is batch (with_batch_dim=True)
-        weighed_data = []
-
-        for data in inputs:
-            weighed_data.append(self.apply_model(data))
-
-        weighed_data = ops.stack(weighed_data, axis=0)
-
-        return weighed_data
-
-    def apply_model(self, inputs):
-        """Apply the ABLE network to a single batch element.
+        Maps ``apply_model`` over the first axis (``n_tx``) using
+        :func:`keras.ops.map` so the forward pass is fully traceable
+        by JAX and compatible with gradient computation.
 
         Args:
-            inputs (Tensor): Input tensor (TOF corrected data)
+            inputs (Tensor): Shape ``(n_tx, n_pix, n_el[, n_ch])``.
 
         Returns:
-            Tensor: Output tensor after applying the ABLE network (weighted tof-corrected data).
+            Tensor: Adaptively weighted data with the same shape as
+            ``inputs``.
+        """
+        return ops.map(self.apply_model, inputs)
+
+    def apply_model(self, inputs):
+        """Apply the ABLE network to a single transmit slice.
+
+        Args:
+            inputs (Tensor): TOF-corrected data for one transmit event,
+                shape ``(n_pix, n_el)`` or ``(n_pix, n_el, n_ch)``.
+
+        Returns:
+            Tensor: Adaptively weighted data with the same shape as
+            ``inputs``.
         """
 
         # Stack final channel dim into element axis when needed
@@ -383,69 +402,53 @@ if __name__ == "__main__":
 
     os.environ["KERAS_BACKEND"] = "jax"
 
-    # simple test
-    model = ABLE(latent_dim=32, n_latent_layers=2, kernel_size=(1, 3))
-    print("Layer dims:", model.layer_dims)
-    print("Kernel sizes:", model.kernel_sizes)
-
-    # test with dummy input
     import keras
     import numpy as np
 
-    batch_size = 1
-    transmits = 5
-    height = 64
-    width = 64
-    elements = 128
-    x = np.random.randn(batch_size, transmits, height, width, elements).astype(
-        np.float32
-    )
+    # Expected input shape: (n_tx, n_pix, n_el) or (n_tx, n_pix, n_el, n_ch)
+    # The model maps over n_tx internally.
+    n_tx = 5
+    n_pix = 64 * 64  # flattened spatial grid
+    n_el = 128
 
-    y = model(x)
-    print("Input shape:", x.shape)
-    print("Output shape:", y.shape)
+    # --- RF data (no channel dim) ---
+    model = ABLE(latent_dim=32, n_latent_layers=2, kernel_size=1)
+    x_rf = np.random.randn(n_tx, n_pix, n_el).astype(np.float32)
+    y_rf = model(x_rf)
+    print("RF  input shape: ", x_rf.shape)
+    print("RF  output shape:", y_rf.shape)
+    assert y_rf.shape == x_rf.shape, "RF output shape mismatch"
 
-    # test with extra channel dim
-    model = ABLE(latent_dim=32, n_latent_layers=2, kernel_size=(1, 3))
+    # --- IQ data (n_ch = 2) ---
     n_ch = 2
-    x2 = np.random.randn(batch_size, transmits, height, width, elements, n_ch).astype(
-        np.float32
-    )
-    y2 = model(x2)
+    model_iq = ABLE(latent_dim=32, n_latent_layers=2, kernel_size=1)
+    x_iq = np.random.randn(n_tx, n_pix, n_el, n_ch).astype(np.float32)
+    y_iq = model_iq(x_iq)
+    print("IQ  input shape: ", x_iq.shape)
+    print("IQ  output shape:", y_iq.shape)
+    assert y_iq.shape == x_iq.shape, "IQ output shape mismatch"
 
-    print("Input with channel dim shape:", x2.shape)
-    print("Output with channel dim shape:", y2.shape)
+    print("Layer dims: ", model_iq.layer_dims)
+    print("Kernel sizes:", model_iq.kernel_sizes)
 
-    # time able with 128 elements and 512x512 grid, batch size 11. Use jit
+    # --- Timing with JIT (IQ, larger grid) ---
     from time import perf_counter
 
-    model = ABLE(latent_dim=32, n_latent_layers=1, kernel_size=(3, 3))
-    model.compile(jit_compile=True)
-    batch_size = 1
-    x_large = np.random.randn(batch_size, transmits, 256, 256, 128, 2).astype(
-        np.float32
-    )
-    # move to device
+    model_jit = ABLE(latent_dim=32, n_latent_layers=1, kernel_size=1)
+    model_jit.compile(jit_compile=True)
+    x_large = np.random.randn(n_tx, 256 * 256, 128, 2).astype(np.float32)
     x_large = keras.ops.convert_to_tensor(x_large)
 
-    # warmup run (traces/compiles the function)
     print("Warmup run (compiling/tracing)...")
     t0 = perf_counter()
-    _ = model(x_large).block_until_ready()
+    _ = model_jit(x_large).block_until_ready()
     t1 = perf_counter()
-    print(f"Warmup run time: {t1 - t0:.6f} s")
+    print(f"Warmup: {t1 - t0:.3f} s")
 
-    # timed runs
-    N = 10
-
+    N = 5
     start = perf_counter()
-    for i in range(N):
-        out = model(x_large)
-
+    for _ in range(N):
+        out = model_jit(x_large)
     out.block_until_ready()
     end = perf_counter()
-
-    avg_time = (end - start) / N
-    print(
-        f"Average time per iteration over {N} runs: {avg_time:.6f} s (total {end - start:.6f} s)"
-    )
+    print(f"Avg over {N} runs: {(end - start) / N:.3f} s")

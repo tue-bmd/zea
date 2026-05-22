@@ -688,6 +688,78 @@ def test_generalized_coherence_factor_m_zero_passthrough():
     return out_init
 
 
+@backend_equality_check()
+def test_minimum_variance_output_shape_rf():
+    """MV beamformer handles single-channel (RF) data and returns the correct shape."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el, n_ch = 2, 9, 8, 1
+    data = keras.ops.convert_to_tensor(
+        rng.standard_normal((1, n_tx, n_pix, n_el, n_ch)).astype(np.float32)
+    )
+    out = ops.MinimumVariance(with_batch_dim=True)(data=data)["data"]
+    assert out.shape == (1, n_pix, n_ch)
+    return out
+
+
+@backend_equality_check()
+def test_minimum_variance_finite_on_random_data():
+    """MV output is finite (no NaN/Inf) for random IQ input."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el, n_ch = 3, 11, 8, 2
+    data = keras.ops.convert_to_tensor(
+        rng.standard_normal((1, n_tx, n_pix, n_el, n_ch)).astype(np.float32)
+    )
+    out = ops.MinimumVariance(with_batch_dim=True)(data=data)["data"]
+    assert np.all(np.isfinite(keras.ops.convert_to_numpy(out))), "MV output contains NaN or Inf"
+    return out
+
+
+@backend_equality_check()
+def test_minimum_variance_custom_subarray_size():
+    """Custom subarray_size is respected and output shape is unchanged."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el, n_ch = 2, 7, 8, 2
+    data = keras.ops.convert_to_tensor(
+        rng.standard_normal((1, n_tx, n_pix, n_el, n_ch)).astype(np.float32)
+    )
+    out = ops.MinimumVariance(subarray_size=3, with_batch_dim=True)(data=data)["data"]
+    assert out.shape == (1, n_pix, n_ch)
+    return out
+
+
+@backend_equality_check()
+def test_minimum_variance_diagonal_loading_affects_output():
+    """Different diagonal_loading values produce different outputs for non-trivial data."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el, n_ch = 3, 7, 8, 2
+    data = keras.ops.convert_to_tensor(
+        rng.standard_normal((1, n_tx, n_pix, n_el, n_ch)).astype(np.float32)
+    )
+    out_low = ops.MinimumVariance(diagonal_loading=1e-4, with_batch_dim=True)(data=data)["data"]
+    out_high = ops.MinimumVariance(diagonal_loading=1e2, with_batch_dim=True)(data=data)["data"]
+    assert not np.allclose(
+        keras.ops.convert_to_numpy(out_low),
+        keras.ops.convert_to_numpy(out_high),
+    ), "Different diagonal_loading values should yield different outputs"
+    return out_low
+
+
 @pytest.mark.parametrize(
     "axis, size, start, end, window_type",
     [

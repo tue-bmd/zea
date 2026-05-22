@@ -10,7 +10,7 @@ from zea import log
 from zea.backend import jit
 from zea.config import Config
 from zea.func.tensor import vmap
-from zea.func.ultrasound import channels_to_complex, complex_to_channels
+from zea.func.ultrasound import complex_to_channels
 from zea.internal.core import DataTypes, ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
 from zea.internal.core import Object as ZEAObject
 from zea.internal.registry import beamformer_registry, ops_registry
@@ -1159,7 +1159,7 @@ class DelayMultiplyAndSum(Operation):
             )
 
         # Compute the correlation matrix
-        data = channels_to_complex(data)
+        data = ops.view_as_complex(data)
 
         data = self._multiply(data)
         data = self._select_lower_triangle(data)
@@ -1399,6 +1399,155 @@ class GeneralizedCoherenceFactor(Operation):
         """
         data = kwargs[self.key]
         return {self.output_key: self.process_image(data, m_zero=m_zero)}
+
+
+@beamformer_registry("minimum_variance")
+@ops_registry("minimum_variance")
+class MinimumVariance(Operation):
+    r"""Minimum Variance (MV) / Capon beamformer with spatial smoothing.
+
+    Estimates an :math:`M \times M` sample covariance matrix per pixel by
+    averaging outer products over :math:`L = n\_el - M + 1` overlapping
+    sub-apertures of length *M* (forward spatial smoothing) and over all
+    transmits.  Diagonal loading is applied for numerical stability before
+    inverting the covariance.  The Capon weight vector
+
+    .. math::
+
+        \mathbf{w}(p) = \frac{\hat{\mathbf{R}}(p)^{-1}\,\mathbf{e}}
+        {\mathbf{e}^\mathrm{H}\,\hat{\mathbf{R}}(p)^{-1}\,\mathbf{e}}
+
+    is then applied to each sub-aperture slice and the outputs are averaged
+    before coherent compounding over transmits.
+
+    .. admonition:: Reference
+
+        Vignon, F. and Burcher, M. R., "Capon beamforming in medical
+        ultrasound imaging with focused beams," *IEEE Transactions on Ultrasonics,
+        Ferroelectrics, and Frequency Control* **55** (3), 2008.
+        https://doi.org/10.1109/TUFFC.2008.686
+
+
+    Args:
+        subarray_size (int or None): Sub-aperture length *M*.  ``None``
+            (default) selects ``M = n_el // 2``.
+        diagonal_loading (float): Relative loading coefficient δ.  The
+            loading added to each pixel's covariance is
+            δ · trace(**R**) / M · **I**\ :sub:`M`.  Larger values push the
+            solution toward DAS.  Default: ``1e-2``.
+        **kwargs: Forwarded to :class:`~zea.ops.base.Operation`.
+    """
+
+    def __init__(self, subarray_size=None, diagonal_loading=1e-2, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
+            **kwargs,
+        )
+        self.subarray_size = subarray_size
+        self.diagonal_loading = diagonal_loading
+
+    def process_image(self, data):
+        """Apply MV beamforming with spatial smoothing to one image.
+
+        The covariance matrix is estimated using **real-valued arithmetic**:
+        for IQ data the outer products from both channels are summed, which
+        is equivalent to using |Re(R)| where R is the complex Hermitian
+        covariance (valid for stationary signals where var(I) ≈ var(Q)).
+        This keeps all operations in the real domain so the method works
+        with every backend including TensorFlow/XLA.
+
+        Args:
+            data (ops.Tensor): TOF-corrected channel data of shape
+                ``(n_tx, n_pix, n_el, n_ch)``.
+
+        Returns:
+            ops.Tensor: Beamformed image of shape ``(n_pix, n_ch)``.
+        """
+        n_el = data.shape[-2]  # concrete Python int — safe inside JAX traces
+        n_ch = data.shape[-1]
+        n_tx = ops.shape(data)[0]
+
+        subarray_len = self.subarray_size if self.subarray_size is not None else max(1, n_el // 2)
+        n_subarrays = n_el - subarray_len + 1  # number of overlapping sub-apertures
+
+        # ── Build sub-apertures for every channel (basic slicing, all backends) ─
+        # sub_apertures[c] has shape (n_tx, n_pix, n_subarrays, subarray_len)
+        sub_apertures = [
+            ops.stack(
+                [data[:, :, idx : idx + subarray_len, c] for idx in range(n_subarrays)],
+                axis=2,
+            )
+            for c in range(n_ch)
+        ]  # each element: (n_tx, n_pix, n_subarrays, subarray_len)  float32
+
+        # ── Real-valued covariance averaged over channels, tx, and sub-apertures ─
+        # covariance[p, i, j] = Σ_c Σ_t Σ_k sub_apertures[c][t,p,k,i] · sub_apertures[c][t,p,k,j]
+        #                      / (n_ch · n_subarrays · n_tx)
+        # This equals Re(R_complex) for stationary IQ signals.
+        cov_scale = ops.cast(n_ch * n_subarrays * n_tx, data.dtype)
+        cov_parts = [ops.einsum("tpli,tplj->pij", sub, sub) for sub in sub_apertures]
+        covariance = cov_parts[0]
+        for part in cov_parts[1:]:
+            covariance = covariance + part
+        covariance = covariance / cov_scale  # (n_pix, subarray_len, subarray_len) float32
+
+        # ── Eigenvalue-based regularization ────────────────────────────────────
+        # eigh returns eigenvalues in ascending order; λ_{-1} is the largest.
+        # Only eigenvalues below δ·λ_max are floored to prevent inverting near-zero
+        # noise eigenvalues — this avoids the cone artifact caused by naive
+        # diagonal loading which also distorts the dominant signal eigenvalue.
+        eigenvalues, eigenvectors = ops.linalg.eigh(covariance)  # (n_pix,M), (n_pix,M,M)
+        max_eigenvalue = eigenvalues[..., -1:]  # (n_pix, 1)
+        eigenvalue_floor = (
+            self.diagonal_loading * max_eigenvalue + keras.backend.epsilon()
+        )  # (n_pix, 1)
+        eigenvalues_clipped = ops.maximum(eigenvalues, eigenvalue_floor)  # (n_pix, subarray_len)
+
+        # covariance⁻¹ = V diag(1/λ) Vᵀ  (covariance is real-symmetric so eigh gives V real)
+        inv_eigenvalues = 1.0 / eigenvalues_clipped  # (n_pix, subarray_len)
+        # eigenvectors * inv_eigenvalues[..., None, :] scales each column of V by 1/λ_k
+        cov_inv = ops.matmul(
+            eigenvectors * inv_eigenvalues[..., None, :],  # (n_pix, M, M)
+            ops.swapaxes(eigenvectors, -1, -2),  # (n_pix, M, M)
+        )  # (n_pix, subarray_len, subarray_len)
+
+        # ── Capon weights: w = R⁻¹e / (eᵀ R⁻¹e),  e = ones ──────────────────
+        steering_vec = ops.ones((subarray_len,), dtype=data.dtype)  # (subarray_len,)
+        # (n_pix, M, M) @ (M, 1) → (n_pix, M, 1) → squeeze
+        cov_inv_steering = ops.matmul(cov_inv, steering_vec[:, None])[..., 0]  # (n_pix, M)
+        capon_denom = (
+            ops.sum(cov_inv_steering, axis=-1, keepdims=True) + keras.backend.epsilon()
+        )  # (n_pix, 1)
+        capon_weights = cov_inv_steering / capon_denom  # (n_pix, subarray_len)
+
+        # ── Apply weights per channel, compound over tx, average over subarrays ─
+        output_channels = []
+        for sub_ap in sub_apertures:
+            sub_compounded = ops.sum(sub_ap, axis=0)  # (n_pix, n_subarrays, subarray_len)
+            sub_beamformed = ops.einsum("pm,plm->pl", capon_weights, sub_compounded)  # (n_pix, L)
+            output_channels.append(ops.mean(sub_beamformed, axis=-1))  # (n_pix,)
+
+        return ops.stack(output_channels, axis=-1)  # (n_pix, n_ch)
+
+    def call(self, **kwargs):
+        """Apply MV beamforming to TOF-corrected data.
+
+        Args:
+            tof_corrected_data (ops.Tensor): TOF-corrected input of shape
+                ``(n_tx, n_pix, n_el, n_ch)`` with optional batch dimension.
+
+        Returns:
+            dict: Beamformed data of shape ``(n_pix, n_ch)``.
+        """
+        data = kwargs[self.key]
+
+        if not self.with_batch_dim:
+            beamformed_data = self.process_image(data)
+        else:
+            beamformed_data = ops.map(self.process_image, data)
+
+        return {self.output_key: beamformed_data}
 
 
 def make_operation_chain(

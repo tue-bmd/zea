@@ -105,6 +105,7 @@ from .pipeline import (
     DelayMultiplyAndSum,
     GeneralizedCoherenceFactor,
     Map,
+    MinimumVariance,
     PatchedGrid,
     Pipeline,
 )
@@ -147,6 +148,7 @@ __all__ = [
     "DelayMultiplyAndSum",
     "CoherenceFactor",
     "GeneralizedCoherenceFactor",
+    "MinimumVariance",
     "Beamform",
     "Map",
     "PatchedGrid",
