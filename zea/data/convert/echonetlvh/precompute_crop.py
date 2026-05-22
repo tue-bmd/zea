@@ -101,7 +101,7 @@ def load_first_frame(avi_file):
     return frame
 
 
-def precompute_cone_parameters(args):
+def precompute_cone_parameters(source_path: Path, output_path: Path, batch, max_files, force):
     """
     Precompute and save cone parameters for all AVI files.
 
@@ -110,26 +110,21 @@ def precompute_cone_parameters(args):
     for later use during the actual data conversion.
 
     Args:
-        args: Argument parser namespace with the following attributes:
-            src: Source directory containing EchoNet-LVH data
-            dst: Destination directory to save cone parameters
-            batch: Specific batch to process (e.g., "Batch2") or None for all
-            max_files: Maximum number of files to process (or None for all)
-            force: Whether to recompute parameters if they already exist
+        source_path: Source directory containing EchoNet-LVH data
+        output_path: Destination directory to save cone parameters
+        batch: Specific batch to process (e.g., "Batch2") or None for all
+        max_files: Maximum number of files to process (or None for all)
+        force: Whether to recompute parameters if they already exist
     Returns:
         Path to the CSV file containing cone parameters
     """
-
-    source_path = Path(args.src)
-    output_path = Path(args.dst)
-    output_path.mkdir(parents=True, exist_ok=True)
 
     # Output file for cone parameters
     cone_params_csv = output_path / "cone_parameters.csv"
     cone_params_json = output_path / "cone_parameters.json"
 
     # Check if parameters already exist
-    if cone_params_csv.exists() and not args.force:
+    if cone_params_csv.exists() and not force:
         log.warning(f"Parameters already exist at {cone_params_csv}. Use --force to recompute.")
         return cone_params_csv
 
@@ -141,19 +136,19 @@ def precompute_cone_parameters(args):
         for avi_filename in split_files:
             # Strip .avi if present
             base_filename = avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
-            avi_file = find_avi_file(args.src, base_filename, batch=args.batch)
+            avi_file = find_avi_file(source_path, base_filename, batch=batch)
             if avi_file:
                 files_to_process.append((avi_file, avi_filename))
             else:
                 log.warning(
                     f"Could not find AVI file for {base_filename} in batch "
-                    f"{args.batch if args.batch else 'any'}"
+                    f"{batch if batch else 'any'}"
                 )
 
     # Limit files if max_files is specified
-    if args.max_files is not None:
-        files_to_process = files_to_process[: args.max_files]
-        log.info(f"Limited to processing {args.max_files} files due to max_files parameter")
+    if max_files is not None:
+        files_to_process = files_to_process[:max_files]
+        log.info(f"Limited to processing {max_files} files due to max_files parameter")
 
     log.info(f"Computing cone parameters for {len(files_to_process)} files")
 

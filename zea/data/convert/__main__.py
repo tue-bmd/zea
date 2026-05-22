@@ -14,6 +14,7 @@ Run ``python -m zea.data.convert --help`` for all options.
 """
 
 import argparse
+from pathlib import Path
 
 from zea.internal.device import init_device
 
@@ -209,6 +210,15 @@ def main():
     """
     parser = get_parser()
     args = parser.parse_args()
+
+    args.src = Path(args.src)
+    args.dst = Path(args.dst)
+
+    assert args.src.exists(), f"Source path {args.src} does not exist."
+    assert args.dst.exists(), f"Destination path {args.dst} does not exist."
+    assert args.src.is_dir(), f"Source path {args.src} is not a directory."
+    assert args.dst.is_dir(), f"Destination path {args.dst} is not a directory."
+
     if args.dataset == "echonet":
         from zea.data.convert.echonet import convert_echonet
 
@@ -216,7 +226,17 @@ def main():
     elif args.dataset == "echonetlvh":
         from zea.data.convert.echonetlvh import convert_echonetlvh
 
-        convert_echonetlvh(args)
+        convert_echonetlvh(
+            args.src,
+            args.dst,
+            args.no_rejection,
+            args.rejection_path,
+            args.batch,
+            args.convert_measurements,
+            args.convert_images,
+            args.max_files,
+            args.force,
+        )
     elif args.dataset == "camus":
         from zea.data.convert.camus import convert_camus
 

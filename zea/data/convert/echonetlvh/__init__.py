@@ -16,11 +16,13 @@ For more information about the dataset, resort to the following links:
 
 import csv
 import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import shutil
+import tempfile
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import jax.numpy as jnp
-import numpy as np
 from jax import jit, vmap
 from tqdm import tqdm
 
@@ -28,22 +30,23 @@ from zea import log
 from zea.data import generate_zea_dataset
 from zea.data.convert.echonet import H5Processor
 from zea.data.convert.echonetlvh.precompute_crop import precompute_cone_parameters
-from zea.data.convert.utils import load_avi, unzip
+from zea.data.convert.utils import load_avi
 from zea.display import cartesian_to_polar_matrix
 from zea.func.tensor import translate
 
 
-def overwrite_splits(source_dir, rejection_path=None):
+def overwrite_splits(csv_path, rejection_path=None):
     """
-    Overwrite MeasurementsList.csv splits based on manual_rejections.txt or another
-    txt file specifying which hashes to reject.
+    Overwrite splits in a MeasurementsList.csv based on manual_rejections.txt
+    or another txt file specifying which hashes to reject.
 
     Args:
-        source_dir: Source directory containing MeasurementsList.csv and manual_rejections.txt
+        csv_path: Path to the MeasurementsList.csv to update in place
         rejection_path: Path to the rejection txt file. If None, defaults to ./manual_rejections.txt
     Returns:
         None
     """
+    csv_path = Path(csv_path)
     current_dir = os.path.dirname(os.path.abspath(__file__))
     if rejection_path is None:
         rejection_path = os.path.join(current_dir, "manual_rejections.txt")
@@ -59,9 +62,9 @@ def overwrite_splits(source_dir, rejection_path=None):
         log.warning(f"{rejection_path} not found, skipping rejections.")
         return
 
-    csv_path = Path(source_dir) / "MeasurementsList.csv"
-    temp_path = Path(source_dir) / "MeasurementsList_temp.csv"
-    try:
+    # Write to a temp dir on the same filesystem so the final replace is atomic.
+    with tempfile.TemporaryDirectory(dir=csv_path.parent) as tmp_dir:
+        temp_path = Path(tmp_dir) / "MeasurementsList_temp.csv"
         rejection_counter = 0
         with (
             csv_path.open("r", newline="", encoding="utf-8") as infile,
@@ -79,15 +82,11 @@ def overwrite_splits(source_dir, rejection_path=None):
                 assert rejection_counter == expected_num_rejections, (
                     f"Expected {expected_num_rejections} rejections, but applied only {rejection_counter}."
                 )
-    except FileNotFoundError:
-        log.warning(f"{csv_path} not found, skipping rejections.")
-        return
-    temp_path.replace(csv_path)
-    log.info(f"Overwritten {rejection_counter}/278 rejections to {csv_path}")
-    return
+        temp_path.replace(csv_path)
+    log.info(f"Applied {rejection_counter} rejections to {csv_path}")
 
 
-def load_splits(source_dir):
+def load_splits(csv_path):
     """
     Load splits from MeasurementsList.csv and return avi filenames
 
@@ -96,7 +95,6 @@ def load_splits(source_dir):
     Returns:
         Dictionary with keys 'train', 'val', 'test', 'rejected' and values as lists of avi filenames
     """
-    csv_path = Path(source_dir) / "MeasurementsList.csv"
     splits = {"train": [], "val": [], "test": [], "rejected": []}
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
@@ -380,17 +378,16 @@ def transform_measurement_coordinates_with_cone_params(row, cone_params):
     return new_row
 
 
-def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
-    """Convert measurements CSV file with updated coordinates using cone parameters.
+def transform_measurements_csv(csv_path, cone_params_csv=None):
+    """Update a measurements CSV file in place with coordinates transformed using cone parameters.
 
     Args:
-        source_csv: Path to source CSV file
-        output_csv: Path to output CSV file
+        csv_path: Path to the CSV file to transform in place
         cone_params_csv: Path to CSV file with cone parameters
     """
     try:
         # Read the CSV file
-        with open(source_csv, newline="", encoding="utf-8") as csvfile:
+        with open(csv_path, newline="", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
             rows = list(reader)
             fieldnames = reader.fieldnames
@@ -421,17 +418,17 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
                 log.error(f"Error processing row for file {row['HashedFileName']}: {str(e)}")
                 skipped_files.add(row["HashedFileName"])
 
-        # Save to new CSV file
+        # Save back to the CSV file
         if transformed_rows:
             # Use keys from first row as fieldnames
             out_fieldnames = list(transformed_rows[0].keys())
-            with open(output_csv, "w", newline="", encoding="utf-8") as csvfile:
+            with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=out_fieldnames)
                 writer.writeheader()
                 writer.writerows(transformed_rows)
         else:
             # Write header only if no rows
-            with open(output_csv, "w", newline="", encoding="utf-8") as csvfile:
+            with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
 
@@ -444,7 +441,7 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
             log.info("Skipped files:")
             for filename in sorted(skipped_files):
                 log.info(f"  - {filename}")
-        log.info(f"Converted measurements saved to {output_csv}")
+        log.info(f"Converted measurements saved to {csv_path}")
 
     except Exception as e:
         log.error(f"Error processing CSV file: {str(e)}")
@@ -474,75 +471,116 @@ def _process_file_worker(avi_file, dst, splits, cone_parameters, range_from, pro
     return proc(avi_file)
 
 
-def convert_echonetlvh(args):
+def unzip(src: Path, dst: Path) -> Path:
+    assert src.exists(), f"Source path {src} does not exist."
+
+    log.info(f"Unzipping {src} to {dst}...")
+    with zipfile.ZipFile(src, "r") as zip_ref:
+        zip_ref.extractall(dst)
+    log.info("Unzipping completed.")
+    return dst
+
+
+def convert_echonetlvh(
+    src: Path,
+    dst: Path,
+    no_rejection,
+    rejection_path,
+    batch,
+    convert_measurements,
+    convert_images,
+    max_files,
+    force,
+):
     """
     Conversion script for the EchoNet-LVH dataset.
     Unzips, overwrites splits if needed, precomputes cone parameters,
     and converts images and/or measurements to zea format and saves dataset.
     Is called with argparse arguments through zea/zea/data/convert/__main__.py
-
-    Args:
-        args (argparse.Namespace): Command-line arguments
     """
-    # Check if unzip is needed
-    src = unzip(args.src, "echonetlvh")
 
-    # Overwrite the splits if manual rejections are provided
-    if not args.no_rejection:
-        overwrite_splits(args.src, getattr(args, "rejection_path", None))
+    # Check if unzip is needed
+    if src.suffix == ".zip":
+        tmp_dir = dst / "unzipped_original_files"
+        tmp_dir.mkdir()
+        src = unzip(src, tmp_dir, "echonetlvh")
+
+    # Check the required files exist
+    for folder in ["Batch1", "Batch2", "Batch3", "Batch4"]:
+        assert (src / folder).exists(), f"Missing {folder} folder in {src}."
+    assert (src / "MeasurementsList.csv").exists(), f"Missing MeasurementsList.csv in {src}."
+    log.info(f"Found Batch1, Batch2, Batch3, Batch4 and MeasurementsList.csv in {src}.")
+
+    # Copy MeasurementsList.csv to dst
+    measurements_csv = dst / "MeasurementsList.csv"
+    shutil.copy(src / "MeasurementsList.csv", measurements_csv)
+
+    if not no_rejection:
+        overwrite_splits(measurements_csv, rejection_path)
 
     # Check that cone parameters exist
-    cone_params_csv = Path(args.dst) / "cone_parameters.csv"
+    cone_params_csv = dst / "cone_parameters.csv"
     if not cone_params_csv.exists():
-        precompute_cone_parameters(args)
+        precompute_cone_parameters(src, dst, batch, max_files, force)
 
     # If no specific conversion is requested, convert both
-    if not (args.convert_measurements or args.convert_images):
-        args.convert_measurements = True
-        args.convert_images = True
+    if not (convert_measurements or convert_images):
+        convert_measurements = True
+        convert_images = True
 
     # Convert images if requested
-    if args.convert_images:
-        source_path = Path(src)
-        splits = load_splits(source_path)
+    if convert_images:
+        splits = load_splits(measurements_csv)
 
         # Load precomputed cone parameters
         cone_parameters = load_cone_parameters(cone_params_csv)
         log.info(f"Loaded cone parameters for {len(cone_parameters)} files")
 
+        # Collect and de-extension all filenames across splits
+        base_filenames = [
+            avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
+            for split_files in splits.values()
+            for avi_filename in split_files
+        ]
+
+        # Look up the AVI files in parallel (I/O-bound filesystem checks)
         files_to_process = []
-        for split_files in splits.values():
-            for avi_filename in split_files:
-                # Strip .avi if present
-                base_filename = avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
-                avi_file = find_avi_file(src, base_filename, batch=args.batch)
+        with ThreadPoolExecutor() as executor:
+            results = executor.map(
+                lambda name: (name, find_avi_file(src, name, batch=batch)),
+                base_filenames,
+            )
+            for base_filename, avi_file in tqdm(
+                results, total=len(base_filenames), desc="Finding AVI files"
+            ):
                 if avi_file:
                     files_to_process.append(avi_file)
                 else:
                     log.warning(
                         f"Warning: Could not find AVI file for {base_filename} in batch "
-                        f"{args.batch if args.batch else 'any'}"
+                        f"{batch if batch else 'any'}"
                     )
 
-        # List files that have already been processed
-        files_done = []
-        for _, _, filenames in os.walk(args.dst):
-            for filename in filenames:
-                if filename.endswith(".hdf5"):
-                    files_done.append(filename.replace(".hdf5", ""))
+        # List files that have already been processed (set for O(1) membership)
+        files_done = {
+            filename.removesuffix(".hdf5")
+            for _, _, filenames in os.walk(dst)
+            for filename in filenames
+            if filename.endswith(".hdf5")
+        }
 
         # Filter out already processed files
         files_to_process = [f for f in files_to_process if f.stem not in files_done]
 
         # Limit files if max_files is specified
-        if args.max_files is not None:
-            files_to_process = files_to_process[: args.max_files]
-            log.info(f"Limited to processing {args.max_files} files due to max_files parameter")
+        if max_files is not None:
+            files_to_process = files_to_process[:max_files]
+            log.info(f"Limited to processing {max_files} files due to max_files parameter")
 
         log.info(f"Files left to process: {len(files_to_process)}")
 
         # Initialize processor with splits and cone parameters
-        processor = LVHProcessor(path_out_h5=args.dst, splits=splits, cone_params=cone_parameters)
+        processor = LVHProcessor(path_out_h5=dst, splits=splits, cone_params=cone_parameters)
 
         log.info("Starting the conversion process.")
 
@@ -555,13 +593,11 @@ def convert_echonetlvh(args):
         log.info("All image conversion tasks are completed.")
 
     # Convert measurements if requested
-    if args.convert_measurements:
-        source_path = Path(src)
-        measurements_csv = source_path / "MeasurementsList.csv"
+    if convert_measurements:
+        measurements_csv = dst / "MeasurementsList.csv"
         if measurements_csv.exists():
-            output_csv = Path(args.dst) / "MeasurementsList.csv"
-            convert_measurements_csv(measurements_csv, output_csv, cone_params_csv)
+            transform_measurements_csv(measurements_csv, cone_params_csv)
         else:
-            log.warning("MeasurementsList.csv not found in source directory")
+            log.warning("MeasurementsList.csv not found in destination directory")
 
     log.info("All tasks are completed.")
