@@ -204,15 +204,12 @@ class FlowMatchingModel(DiffusionModel):
             ``pred_noises_est`` is :math:`\\hat{\\varepsilon}` and
             ``pred_images`` is :math:`\\hat{x}_0`.
         """
-        pred_velocities = self(
-            [noisy_images, noise_rates**2], training=training, network=network
-        )
+        pred_velocities = self([noisy_images, noise_rates**2], training=training, network=network)
         # x̂₀ = x_t - t · v
         pred_images = noisy_images - noise_rates * pred_velocities
         # ε̂  = x̂₀ + v  (since v = ε − x₀  ⟹  ε = x₀ + v)
         pred_noises_est = pred_images + pred_velocities
         return pred_noises_est, pred_images
-
 
     def reverse_diffusion_step(
         self,
