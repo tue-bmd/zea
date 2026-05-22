@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 from keras.utils import pad_sequences
 
+import zea
 from zea import log
 from zea.data.spec import DataSpec, FileSpec, MetadataSpec, MetricsSpec, ScanSpec
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
@@ -80,13 +81,14 @@ def _parse_version(v: str) -> tuple[int, ...]:
 
 def _warn_if_legacy_file(file: "File") -> None:
     """Warn if *file* has no zea_version or was written before v0.1.0."""
-    v = file.attrs.get("zea_version", None)
-    if v is None or _parse_version(v) < (0, 1, 0):
+    version = file.attrs.get("zea_version", None)
+    if version is None or _parse_version(version) < (0, 1, 0):
+        legacy_version = version if version is not None else "<0.1.0"
         log.warning(
-            "File '%s' was created with a legacy version of zea (%s). "
-            "It may behave in unexpected ways. Use zea<=0.0.13 for full compatibility.",
-            file.filename,
-            v if v is not None else "unknown",
+            f"This ``zea.File`` '{file.filename}' was created with a legacy version of "
+            f"zea ({legacy_version}), while you are using zea v{zea.__version__}. "
+            "It may behave in unexpected ways. Install an earlier version of zea<0.1.0 for full "
+            "compatibility or re-save the file with zea v0.1.0 or later (e.g. via File.create)."
         )
 
 
