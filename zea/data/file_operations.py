@@ -139,6 +139,12 @@ def _supports_folders(operation):
     def wrapper(input_path, output_path, *args, **kwargs):
         if not Path(input_path).is_dir():
             return operation(input_path, output_path, *args, **kwargs)
+        output_path = Path(output_path)
+        if output_path.is_file():
+            raise NotADirectoryError(
+                f"Input {input_path} is a folder, so output {output_path} must be a "
+                "folder, but it is an existing file."
+            )
         for in_path, out_path in tqdm(list(_iter_folder_io(input_path, output_path))):
             operation(in_path, out_path, *args, **kwargs)
         return None
