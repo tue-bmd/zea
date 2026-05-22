@@ -39,3 +39,7 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - If set to ``1``, will use parallel processing when searching for HDF5 file shapes.
      - ``1``
      - ``0``, ``1``
+   * - ``ZEA_DOWNLOAD_TIMEOUT``
+     - Timeout in seconds for downloading files, e.g. during dataset conversion.
+     - ``60``
+     - Any positive integer.
