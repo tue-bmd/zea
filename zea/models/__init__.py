@@ -51,6 +51,7 @@ See the following dropdown for a list of available *generative* models:
 .. dropdown:: **Available models**
 
     - :class:`zea.models.diffusion.DiffusionModel`: A deep generative diffusion model for ultrasound image generation.
+    - :class:`zea.models.flow_matching.FlowMatchingModel`: A flow matching generative model for ultrasound image generation.
     - :class:`zea.models.gmm.GaussianMixtureModel`: A Gaussian Mixture Model.
     - :class:`zea.models.hvae.HierarchicalVAE`: A hierarchical variational autoencoder for ultrasound image generation.
 

@@ -146,6 +146,8 @@ diffusion_model_presets = {
     },
 }
 
+flow_matching_presets = {}
+
 carotid_segmenter_presets = {
     "carotid-segmenter": {
         "metadata": {
