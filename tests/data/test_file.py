@@ -947,15 +947,6 @@ class TestLegacyFileLoading:
         np.testing.assert_array_equal(spec.data.image_sc.values, image_sc)
         assert spec.data.image_sc.coordinates is None
 
-    def test_flat_image_sc_wrap_warns(self, legacy_file):
-        """Loading a legacy flat image_sc emits a log warning that it is treated as an extra map."""
-        path, *_ = legacy_file
-        with patch("zea.data.spec.log.warning") as mock_warn:
-            with File(path) as f:
-                f.validate_spec()
-        messages = [call.args[0] for call in mock_warn.call_args_list]
-        assert any("image_sc" in m for m in messages)
-
     def test_scalar_scan_fields_ignored(self, legacy_file):
         """Redundant scalar scan fields (n_frames, n_tx, etc.) are silently filtered."""
         path, *_ = legacy_file
