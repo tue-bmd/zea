@@ -40,9 +40,10 @@ def get_test_backend() -> str:
         return DEFAULT_TEST_BACKEND
     if FALLBACK_TEST_BACKEND in available:
         return FALLBACK_TEST_BACKEND
-    if available:
-        return available[0]
-    return "None"
+    assert available, (
+        "No supported ML back-end is available. Install at least one of tensorflow, torch, or jax."
+    )
+    return available[0]
 
 
 def missing_required_backends(required_backends) -> tuple[str, ...]:
