@@ -1538,14 +1538,24 @@ class TrackSpec(Spec):
     sequences coexist in the same acquisition.  The ``track_schedule`` on
     ``FileSpec`` specifies the global ordering of transmits across all tracks.
 
+    For multi-track files a human-readable ``label`` is required on every
+    track so that users can identify which track is which (e.g. ``"focused"``
+    vs ``"planewave"``). Further information can be provided in the ``description``
+    field of the parent :class:`FileSpec`, if necessary.
+    Single-track files may omit the label.
+
     Args:
         data (DataSpec | dict): The data for this track.
-        scan (ScanSpec | dict): The scan parameters for this track. Required when raw_data is
+        scan (ScanSpec | dict | None): The scan parameters for this track. Required when raw_data is
             present in *data*.
+        label (str | None): Short human-readable name for this track (e.g. ``"focused"``
+            or ``"planewave"``).  Required when the parent :class:`FileSpec`
+            contains more than one track.
     """
 
     data: DataSpec | dict
     scan: ScanSpec | dict | None = None
+    label: str | None = None
 
     SCHEMA = {
         "data": {"spec": DataSpec},
@@ -1561,6 +1571,17 @@ class TrackSpec(Spec):
         )
         if has_raw and self.scan is None:
             raise ValueError("'scan' is required when 'raw_data' is provided in track data.")
+
+        if self.label is not None and not isinstance(self.label, str):
+            raise TypeError(f"'label' must be a str, got {type(self.label)}")
+        if self.label is not None and not self.label.strip():
+            raise ValueError("'label' must not be an empty or whitespace-only string.")
+
+    def store_in_group(self, group: "h5py.Group", compression: str = "gzip") -> None:
+        """Store data and scan in the HDF5 group; also write label as an attribute."""
+        super().store_in_group(group, compression=compression)
+        if self.label is not None:
+            group.attrs["label"] = self.label
 
 
 @dataclass
@@ -1721,6 +1742,19 @@ class FileSpec(Spec):
                 raise TypeError(f"tracks[{i}] must be a TrackSpec or dict, got {type(t)}")
             track_specs.append(t)
         self.tracks = track_specs
+
+        # For multi-track files every track must have a label so users can
+        # identify tracks by name rather than relying on numeric indices.
+        if len(self.tracks) > 1:
+            missing = [i for i, t in enumerate(self.tracks) if not t.label]
+            if missing:
+                raise ValueError(
+                    f"All tracks in a multi-track file must have a 'label'. "
+                    f"Missing label for track(s) at index: {missing}. "
+                    f"Provide a short descriptive name for each track, e.g. "
+                    f"'focused' or 'planewave', so that "
+                    f"File.get_track(label) and File.track_names work correctly."
+                )
 
         # Validate track_schedule indices are in range
         if self.track_schedule is not None:
@@ -1905,7 +1939,13 @@ class FileSpec(Spec):
             tracks = []
             i = 0
             while f"track_{i}" in tracks_group:
-                tracks.append(_load_group_as_dict(tracks_group[f"track_{i}"]))
+                track_group = tracks_group[f"track_{i}"]
+                track_dict = _load_group_as_dict(track_group)
+                # Label is stored as an HDF5 attribute on the track group.
+                label = track_group.attrs.get("label")
+                if label is not None:
+                    track_dict["label"] = str(label)
+                tracks.append(track_dict)
                 i += 1
             kwargs["tracks"] = tracks
 
