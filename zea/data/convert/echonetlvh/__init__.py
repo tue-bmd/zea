@@ -18,17 +18,18 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import jax.numpy as jnp
-from jax import jit, vmap
+import keras
+from keras import ops
 from tqdm import tqdm
 
 from zea import log
+from zea.backend import jit
 from zea.data import generate_zea_dataset
 from zea.data.convert.echonet import H5Processor
 from zea.data.convert.utils import load_avi
 from zea.display import cartesian_to_polar_matrix
-from zea.func.tensor import translate
-from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
+from zea.func.tensor import translate, vmap
+from zea.tools.fit_scan_cone import crop_and_center_cone, fit_and_crop_around_scan_cone
 
 
 def load_splits(csv_path: str | Path):
@@ -347,53 +348,6 @@ def load_cone_parameters(csv_path):
     return cone_params
 
 
-def crop_frame_with_params(frame, cone_params):
-    """
-    Crop a single frame using predetermined cone parameters.
-
-    Args:
-        frame: Input frame as numpy array
-        cone_params: Dictionary containing cropping parameters
-
-    Returns:
-        Cropped and padded frame
-    """
-    crop_left = int(cone_params["crop_left"])
-    crop_right = int(cone_params["crop_right"])
-    crop_top = int(cone_params["crop_top"])
-    crop_bottom = int(cone_params["crop_bottom"])
-
-    # Handle negative crop_top
-    if crop_top < 0:
-        cropped = frame[0:crop_bottom, crop_left:crop_right]
-        # Add top padding
-        top_padding = -crop_top
-        top_pad = jnp.zeros((top_padding, cropped.shape[1]), dtype=cropped.dtype)
-        cropped = jnp.concatenate([top_pad, cropped], axis=0)
-    else:
-        cropped = frame[crop_top:crop_bottom, crop_left:crop_right]
-
-    # Apply horizontal centering
-    apex_x_in_crop = cone_params["apex_x"] - crop_left
-    cropped_height, cropped_width = cropped.shape
-    target_center_x = cropped_width / 2
-    left_padding_needed = target_center_x - apex_x_in_crop
-
-    left_padding = max(0, int(left_padding_needed))
-    right_padding = max(0, int(-left_padding_needed))
-
-    if left_padding > 0 or right_padding > 0:
-        if left_padding > 0:
-            left_pad = jnp.zeros((cropped_height, left_padding), dtype=cropped.dtype)
-            cropped = jnp.concatenate([left_pad, cropped], axis=1)
-
-        if right_padding > 0:
-            right_pad = jnp.zeros((cropped_height, right_padding), dtype=cropped.dtype)
-            cropped = jnp.concatenate([cropped, right_pad], axis=1)
-
-    return cropped
-
-
 def crop_sequence_with_params(sequence, cone_params):
     """
     Apply cropping to a sequence of frames using predetermined parameters.
@@ -405,7 +359,7 @@ def crop_sequence_with_params(sequence, cone_params):
     Returns:
         Cropped and padded sequence
     """
-    crop_sequence = vmap(lambda frame: crop_frame_with_params(frame, cone_params))
+    crop_sequence = vmap(lambda frame: crop_and_center_cone(frame, cone_params, backend=ops))
     return crop_sequence(sequence)
 
 
@@ -452,7 +406,7 @@ class LVHProcessor(H5Processor):
 
         avi_filename = Path(avi_file).stem + ".avi"
         sequence_np = load_avi(avi_file)
-        sequence_processed = jnp.array(sequence_np)
+        sequence_processed = ops.convert_to_numpy(sequence_np)
         sequence_processed = translate(sequence_processed, self.range_from, self._process_range)
         # Get pre-computed cone parameters for this file
         cone_params = self.cone_parameters.get(avi_filename)
@@ -468,17 +422,17 @@ class LVHProcessor(H5Processor):
         angle = cone_params["opening_angle"] / 2  # angular field spans (-angle, +angle)
         polar_im_set = self.cart2pol_batched(sequence_processed, angle)
         sequence_processed = translate(sequence_processed, self._process_range, self.range_from)
-        sequence_processed_uint8 = jnp.asarray(jnp.floor(sequence_processed + 0.5), dtype=jnp.uint8)
+        sequence_processed_uint8 = ops.cast(ops.floor(sequence_processed + 0.5), "uint8")
         del sequence_processed
 
         polar_im_set = translate(polar_im_set, self._process_range, (0, 255))
-        polar_im_set_uint8 = jnp.asarray(jnp.floor(polar_im_set + 0.5), dtype=jnp.uint8)
+        polar_im_set_uint8 = ops.cast(ops.floor(polar_im_set + 0.5), "uint8")
         del polar_im_set
 
-        if jnp.all(sequence_processed_uint8 == 0):
+        if ops.all(sequence_processed_uint8 == 0):
             raise ValueError(f"Processed sequence is all zeros for file {avi_file}")
 
-        if jnp.all(polar_im_set_uint8 == 0):
+        if ops.all(polar_im_set_uint8 == 0):
             raise ValueError(f"Polar sequence is all zeros for file {avi_file}")
 
         zea_dataset = {
@@ -651,6 +605,9 @@ def convert_echonetlvh(
     and converts images and/or measurements to zea format and saves dataset.
     Is called with argparse arguments through zea/zea/data/convert/__main__.py
     """
+
+    if keras.backend.backend() != "jax":
+        log.warning("We recommend using jax for speed in the EchoNet-LVH conversion.")
 
     # Check if unzip is needed
     if src.suffix == ".zip":

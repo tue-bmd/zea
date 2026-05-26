@@ -305,7 +305,7 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     }
 
 
-def crop_and_center_cone(image, cone_params):
+def crop_and_center_cone(image, cone_params, backend: np = np):
     """
     Crop the image to the sector bounding box and pad as needed to center the apex.
 
@@ -315,34 +315,34 @@ def crop_and_center_cone(image, cone_params):
     3. Centers the apex horizontally in the final image
 
     Args:
-        image: 2D numpy array (grayscale image)
+        image: 2D array (grayscale image)
         cone_params: Dictionary of cone parameters from detect_cone_parameters()
+        backend: Numpy backend to use for padding and cropping. Defaults to numpy.
+            Can be set to ``jax.numpy``, ``keras.ops`` or ``numpy``.
 
     Returns:
-        numpy array of the cropped and centered image with the cone apex at the top center
+        array of the cropped and centered image with the cone apex at the top center
     """
     # Get crop boundaries
-    crop_left = cone_params["crop_left"]
-    crop_right = cone_params["crop_right"]
-    crop_top = cone_params["crop_top"]
-    crop_bottom = cone_params["crop_bottom"]
+    crop_left = int(cone_params["crop_left"])
+    crop_right = int(cone_params["crop_right"])
+    crop_top = int(cone_params["crop_top"])
+    crop_bottom = int(cone_params["crop_bottom"])
 
     # Crop the image (handle negative crop_top)
     if crop_top < 0:
         cropped = image[0:crop_bottom, crop_left:crop_right]
         # Add top padding
         top_padding = -crop_top
-        cropped_width = cropped.shape[1]
-        top_pad = np.zeros((top_padding, cropped_width), dtype=cropped.dtype)
-        cropped = np.concatenate([top_pad, cropped], axis=0)
+        top_pad = backend.zeros((top_padding, cropped.shape[1]), dtype=cropped.dtype)
+        cropped = backend.concatenate([top_pad, cropped], axis=0)
     else:
         cropped = image[crop_top:crop_bottom, crop_left:crop_right]
 
     # Now handle horizontal centering
     # Calculate where the apex is in the cropped image
     apex_x_in_crop = cone_params["apex_x"] - crop_left
-    cropped_height = cropped.shape[0]
-    cropped_width = cropped.shape[1]
+    cropped_height, cropped_width = cropped.shape
 
     # Calculate the target center position
     target_center_x = cropped_width / 2
@@ -357,12 +357,12 @@ def crop_and_center_cone(image, cone_params):
     # Apply horizontal padding if needed
     if left_padding > 0 or right_padding > 0:
         if left_padding > 0:
-            left_pad = np.zeros((cropped_height, left_padding), dtype=cropped.dtype)
-            cropped = np.concatenate([left_pad, cropped], axis=1)
+            left_pad = backend.zeros((cropped_height, left_padding), dtype=cropped.dtype)
+            cropped = backend.concatenate([left_pad, cropped], axis=1)
 
         if right_padding > 0:
-            right_pad = np.zeros((cropped_height, right_padding), dtype=cropped.dtype)
-            cropped = np.concatenate([cropped, right_pad], axis=1)
+            right_pad = backend.zeros((cropped_height, right_padding), dtype=cropped.dtype)
+            cropped = backend.concatenate([cropped, right_pad], axis=1)
 
     return cropped
 
@@ -591,6 +591,9 @@ def main(avi_path):
             "'pip install opencv-python-headless'."
         ) from exc
 
+    if not Path(avi_path).exists():
+        raise FileNotFoundError(f"AVI file not found: {avi_path}")
+
     # Load first frame
     cap = cv2.VideoCapture(avi_path)
     ret, frame = cap.read()
@@ -615,7 +618,6 @@ def main(avi_path):
 
         # Create visualization
         visualize_scan_cone(frame, cone_params)
-        print("Visualization saved to output/scan_cone_visualization.png")
 
     except ValueError as e:
         print(f"Error fitting scan cone: {e}")
