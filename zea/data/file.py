@@ -180,6 +180,7 @@ class File(h5py.File):
         metadata: dict | None = None,
         metrics: dict | None = None,
         probe_name: str | None = None,
+        probe: dict | None = None,
         us_machine: str | None = None,
         description: str | None = None,
         compression: str = "gzip",
@@ -199,7 +200,9 @@ class File(h5py.File):
                 :class:`~zea.data.spec.MetadataSpec`.
             metrics: Optional metrics dict accepted by
                 :class:`~zea.data.spec.MetricsSpec`.
-            probe_name: Name of the probe.
+            probe_name: Removed — use ``probe={'name': ...}`` instead.
+            probe: Structured probe specification dict accepted by
+                :class:`~zea.data.spec.ProbeSpec`.
             us_machine: Name of the ultrasound machine.
             description: Free-text description of the acquisition.
             compression: HDF5 compression filter (default ``"gzip"``).
@@ -219,7 +222,6 @@ class File(h5py.File):
             >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
             >>> geom = np.zeros((n_el, 3), dtype=np.float32)
             >>> scan = {
-            ...     "probe_geometry": geom,
             ...     "sampling_frequency": np.float32(40e6),
             ...     "center_frequency": np.float32(5e6),
             ...     "demodulation_frequency": np.float32(5e6),
@@ -234,7 +236,11 @@ class File(h5py.File):
 
             >>> _, path = tempfile.mkstemp(suffix=".hdf5")
             >>> f = File.create(
-            ...     path, data={"raw_data": raw}, scan=scan, probe_name="L11-4v", overwrite=True
+            ...     path,
+            ...     data={"raw_data": raw},
+            ...     scan=scan,
+            ...     probe={"name": "L11-4v"},
+            ...     overwrite=True,
             ... )
             >>> f.probe_name
             'L11-4v'
@@ -246,6 +252,11 @@ class File(h5py.File):
         if path.exists() and not overwrite:
             raise FileExistsError(f"File already exists: {path}")
 
+        if probe_name is not None:
+            raise TypeError(
+                "probe_name is no longer supported. "
+                "Use probe={'name': ...} to specify the probe name."
+            )
         kwargs: dict = {"data": data}
         if scan:
             kwargs["scan"] = scan
@@ -253,8 +264,8 @@ class File(h5py.File):
             kwargs["metadata"] = metadata
         if metrics is not None:
             kwargs["metrics"] = metrics
-        if probe_name is not None:
-            kwargs["probe_name"] = probe_name
+        if probe is not None:
+            kwargs["probe"] = probe
         if us_machine is not None:
             kwargs["us_machine"] = us_machine
         if description is not None:
@@ -394,10 +405,14 @@ class File(h5py.File):
     @property
     def probe_name(self):
         """Reads the probe name from the data file and returns it."""
-        # Support both 'probe_name' (new spec) and 'probe' (legacy files)
-        for attr_key in ("probe_name", "probe"):
-            if attr_key in self.attrs:
-                return self.attrs[attr_key]
+        # Priority: 'probe_name' attr → 'probe' group name → legacy 'probe' attr
+        if "probe_name" in self.attrs:
+            return self.attrs["probe_name"]
+        # Check the structured probe group for a 'name' dataset.
+        if "probe" in self and "name" in self["probe"]:
+            return self["probe"]["name"].asstr()[()]
+        if "probe" in self.attrs:
+            return self.attrs["probe"]
         raise AttributeError(
             "Probe name not found in file attributes. "
             "Make sure you are using a zea file. "
@@ -511,6 +526,30 @@ class File(h5py.File):
         """
         scan_dict = self.get_scan_parameters()
 
+        # Collect probe-group fields that Scan uses but may not appear in ScanSpec.
+        # probe_geometry is no longer a ScanSpec field — it lives in ProbeSpec.
+        # element_width / lens_sound_speed / lens_thickness are in both specs;
+        # the probe group fills them in if absent from the scan group.
+        # backward-compat: old files stored probe_geometry in the scan group.
+        _PROBE_TO_SCAN_FIELDS = {
+            "probe_geometry",
+            "element_width",
+            "lens_sound_speed",
+            "lens_thickness",
+        }
+        # Capture these fields before the ScanSpec filter discards them.
+        _probe_supplements: dict = {}
+        if "probe" in self:
+            probe_data = self.recursively_load_dict_contents_from_group("probe")
+            for _field in _PROBE_TO_SCAN_FIELDS:
+                if _field in probe_data:
+                    _probe_supplements[_field] = probe_data[_field]
+        # Fall back to scan group for fields no longer in ScanSpec (e.g. probe_geometry
+        # in legacy files that stored it there).
+        for _field in _PROBE_TO_SCAN_FIELDS:
+            if _field not in _probe_supplements and _field in scan_dict:
+                _probe_supplements[_field] = scan_dict[_field]
+
         # Try spec-based validation; fall back gracefully for legacy files
         # that may be missing fields the spec now requires.
         scan_spec_keys = set(ScanSpec.SCHEMA.keys())
@@ -532,6 +571,11 @@ class File(h5py.File):
                 f"ScanSpec validation skipped for '{self.path}': {exc}. "
                 "Using raw scan parameters from file."
             )
+
+        # Re-inject probe supplements; scan_dict has priority over probe group.
+        for _field, _value in _probe_supplements.items():
+            if _field not in scan_dict or scan_dict.get(_field) is None:
+                scan_dict[_field] = _value
 
         return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
 

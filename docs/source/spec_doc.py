@@ -26,6 +26,7 @@ from zea.data.spec import (
     MetadataSpec,
     MetricsSpec,
     ProbePose,
+    ProbeSpec,
     ScanSpec,
     Segmentation,
     ShearWaveElastographyMap,
@@ -401,7 +402,16 @@ def generate() -> str:
         rst_full_table(ScanSpec, base_indent=2),
         "",
     ]
-
+    # ---- probe tab -----------------------------------------------------------
+    lines += [
+        "   .. tab-item:: probe",
+        "      :sync: probe",
+        "",
+        "      Probe group with probe geometry and frequency parameters.",
+        "",
+        rst_full_table(ProbeSpec, base_indent=2),
+        "",
+    ]
     # ---- metadata tab --------------------------------------------------------
     lines += [
         "   .. tab-item:: metadata",

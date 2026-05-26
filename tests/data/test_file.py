@@ -6,8 +6,8 @@ from unittest.mock import patch
 import h5py
 import numpy as np
 import pytest
-import zea
 
+import zea
 from zea.data.data_format import generate_zea_dataset
 from zea.data.file import File, GroupProxy, dict_to_sorted_list, load_file
 from zea.data.spec import FileSpec, Image, Segmentation
@@ -143,7 +143,6 @@ def test_dict_to_sorted_list():
 
 def _scan_minimal(n_frames=3, n_tx=2, n_el=4):
     return {
-        "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
         "sampling_frequency": np.float32(30e6),
         "center_frequency": np.float32(5e6),
         "demodulation_frequency": np.float32(5e6),
@@ -168,7 +167,7 @@ def spec_file(tmp_path):
     fspec = FileSpec(
         data={"raw_data": raw, "envelope_data": _make_map(env)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-        probe_name="test_probe",
+        probe={"name": "test_probe"},
         description="spec format test file",
     )
     path = tmp_path / "spec_format.hdf5"
@@ -260,7 +259,7 @@ class TestValidateSpec:
 
         np.testing.assert_array_equal(loaded_spec.data.raw_data, raw)
         np.testing.assert_array_equal(loaded_spec.data.envelope_data.values, env)
-        assert loaded_spec.probe_name == "test_probe"
+        assert loaded_spec.probe.name == "test_probe"
         assert loaded_spec.description == "spec format test file"
 
     def test_validate_spec_on_complete_legacy_file(self, tmp_path):
@@ -322,8 +321,8 @@ class TestValidateSpec:
             assert spec.data.image is not None
             np.testing.assert_array_equal(spec.data.image.values, img)
             assert spec.data.image.coordinates is None
-            # probe attr mapped to probe_name
-            assert spec.probe_name == "legacy_probe"
+            # probe attr mapped to probe.name
+            assert spec.probe.name == "legacy_probe"
 
     def test_validate_spec_raises_on_incomplete_legacy_file(self, tmp_path):
         """validate_spec() raises on legacy files missing required scan fields."""
@@ -377,9 +376,9 @@ class TestFieldMetadataAttrs:
             assert rd_ds.attrs["unit"] == "-"
             assert rd_ds.attrs["description"] != ""
 
-            # Check scan field metadata
-            pg_ds = f["scan"]["probe_geometry"]
-            assert pg_ds.attrs["unit"] == "m"
+            # Check scan field metadata (t0_delays is always present)
+            td_ds = f["scan"]["t0_delays"]
+            assert td_ds.attrs["unit"] == "s"
 
     def test_scan_field_metadata_matches_spec(self, spec_file):
         path, *_ = spec_file
@@ -455,7 +454,7 @@ class TestAllPipelineDataTypes:
         fspec = FileSpec(
             data=data_dict,
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe_name="all_pipeline",
+            probe={"name": "all_pipeline"},
         )
         path = tmp_path / "all_pipeline.hdf5"
         fspec.save(str(path))
@@ -482,7 +481,7 @@ class TestSlicing:
             path,
             data={"raw_data": raw, "envelope_data": _make_map(env)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe_name="slice_test",
+            probe={"name": "slice_test"},
         )
         f.close()
         return str(path), raw, env
@@ -553,7 +552,7 @@ class TestSpatialData:
                 "sos_map": {"values": sos_values, "coordinates": sos_coordinates},
             },
             scan=_scan_minimal(n_frames=n_frames),
-            probe_name="spatial_test",
+            probe={"name": "spatial_test"},
         )
         f.close()
         return (
@@ -619,7 +618,7 @@ class TestFileCreate:
             path,
             data={"raw_data": raw},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe_name="create_test",
+            probe={"name": "create_test"},
             description="created via File.create",
         )
         assert f.mode == "r"
@@ -839,7 +838,7 @@ class TestZeaVersion:
             path,
             data={"raw_data": np.ones((n_frames, n_tx, 8, n_el, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe_name="test_probe",
+            probe={"name": "test_probe"},
         ).close()
 
         with File(path) as f:
@@ -927,7 +926,7 @@ class TestLegacyFileLoading:
         with File(path) as f:
             assert f.probe_name == "legacy_probe"
             spec = f.validate_spec()
-        assert spec.probe_name == "legacy_probe"
+        assert spec.probe.name == "legacy_probe"
 
     def test_raw_data_loaded(self, legacy_file):
         """raw_data array is loaded with the correct shape."""

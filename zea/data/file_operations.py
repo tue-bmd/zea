@@ -139,7 +139,7 @@ def save_file(
         data=data,
         scan=scan_dict if scan_dict else None,
         metadata=metadata or None,
-        probe_name="generic",
+        probe={"name": "generic"},
         description=description or None,
         overwrite=True,
     )

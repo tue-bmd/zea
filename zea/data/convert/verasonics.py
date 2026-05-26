@@ -1211,7 +1211,7 @@ class VerasonicsFile(h5py.File):
             path=output_path,
             data=data_dict,
             scan=scan_dict,
-            probe_name=self.probe_name,
+            probe={"name": self.probe_name},
             description="Verasonics data",
             compression=compression,
         )

@@ -638,12 +638,6 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - Unit
            - Description
            - 
-         * - ``probe_geometry``
-           - ``float32``
-           - (n_el, 3)
-           - m
-           - Probe geometry (x, y, z) per element.
-           - |badge-req|
          * - ``sampling_frequency``
            - ``float32``
            - scalar
@@ -739,6 +733,88 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - (n_tx, n_samples_two_way)
            - V
            - Two-way transmit waveforms.
+           - |badge-opt|
+
+   .. tab-item:: probe
+      :sync: probe
+
+      Probe group with probe geometry and frequency parameters.
+
+      .. list-table::
+         :header-rows: 1
+         :widths: 22 16 18 7 27 10
+      
+         * - Field
+           - Type
+           - Shape
+           - Unit
+           - Description
+           - 
+         * - ``name``
+           - ``str``
+           - scalar
+           - –
+           - Probe model name/identifier.
+           - |badge-opt|
+         * - ``type``
+           - ``str``
+           - scalar
+           - –
+           - Probe geometry type (linear, phased, curved, ...).
+           - |badge-opt|
+         * - ``center_frequency``
+           - ``float32``
+           - scalar
+           - Hz
+           - Probe nominal centre frequency.
+           - |badge-opt|
+         * - ``bandwidth_percent``
+           - ``float32``
+           - scalar
+           - %
+           - Fractional bandwidth (0-100).
+           - |badge-opt|
+         * - ``probe_geometry``
+           - ``float32``
+           - (n_el, 3)
+           - m
+           - Element positions (x, y, z) per element, shape (n_el, 3).
+           - |badge-opt|
+         * - ``element_width``
+           - ``float32``
+           - scalar
+           - m
+           - Width of a single transducer element.
+           - |badge-opt|
+         * - ``element_height``
+           - ``float32``
+           - scalar
+           - m
+           - Height (elevation aperture) of a single transducer element.
+           - |badge-opt|
+         * - ``kerf``
+           - ``float32``
+           - scalar
+           - m
+           - Gap between adjacent transducer elements.
+           - |badge-opt|
+         * - ``pulse_duration``
+           - ``float32``
+           - scalar
+           - cycles
+           - Excitation pulse duration in cycles.
+           - |badge-opt|
+         * - ``lens_sound_speed``
+           - ``float32``
+           - scalar
+           - m/s
+           - Speed of sound in the acoustic lens.
+           - |badge-opt|
+         * - ``lens_thickness``
+           - ``float32``
+           - scalar
+           - m
+           - Thickness of the acoustic lens.
            - |badge-opt|
 
    .. tab-item:: metadata

@@ -57,6 +57,20 @@ def _add_parser_args_camus(subparsers):
         action="store_true",
         help="Disable hyperthreading for multiprocessing",
     )
+    camus_parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload the converted dataset to HuggingFace Hub (zeahub/camus).",
+    )
+    camus_parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help=(
+            "Revision branch to upload to on HuggingFace Hub. "
+            "Required when --upload is set. Upload to 'main' is not allowed."
+        ),
+    )
 
 
 def _add_parser_args_echonetlvh(subparsers):
@@ -107,8 +121,39 @@ def _add_parser_args_echonetlvh(subparsers):
 def _add_parser_args_picmus(subparsers):
     """Add PICMUS specific arguments to the parser."""
     picmus_parser = subparsers.add_parser("picmus", help="Convert PICMUS dataset")
-    picmus_parser.add_argument("src", type=str, help="Source folder path")
+    picmus_parser.add_argument(
+        "src",
+        type=str,
+        help=(
+            "Source folder path. Should contain either a manually downloaded and "
+            "extracted archive (archive_to_download/ or picmus.zip) or will be used "
+            "as the download target when --download is given. An 'in_vivo/' "
+            "sub-directory, if present, is automatically included."
+        ),
+    )
     picmus_parser.add_argument("dst", type=str, help="Destination folder path")
+    picmus_parser.add_argument(
+        "--download",
+        action="store_true",
+        help=(
+            "Download both the main PICMUS dataset and the in-vivo partition "
+            "from the PICMUS challenge website before converting."
+        ),
+    )
+    picmus_parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload the converted dataset to HuggingFace Hub (zeahub/picmus).",
+    )
+    picmus_parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help=(
+            "Revision branch to upload to on HuggingFace Hub. "
+            "Required when --upload is set. Upload to 'main' is not allowed."
+        ),
+    )
 
 
 def _add_parser_args_cetus(subparsers):
@@ -136,7 +181,16 @@ def _add_parser_args_cetus(subparsers):
     cetus_parser.add_argument(
         "--upload",
         action="store_true",
-        help="Upload the converted dataset to HuggingFace Hub (zeahub/cetus-miccai-2014)",
+        help="Upload the converted dataset to HuggingFace Hub (zeahub/cetus-miccai-2014).",
+    )
+    cetus_parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help=(
+            "Revision branch to upload to on HuggingFace Hub. "
+            "Required when --upload is set. Upload to 'main' is not allowed."
+        ),
     )
 
 

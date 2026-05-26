@@ -136,6 +136,48 @@ def unzip(src: str | Path, dataset: str) -> Path:
     return unzip_dir
 
 
+def download_file(url: str, destination: str | Path) -> Path:  # pragma: no cover
+    """Download a file from a URL to a local path.
+
+    Skips the download if the file already exists at *destination*.
+    Shows a :mod:`tqdm` progress bar based on the ``content-length``
+    header when available.
+
+    Uses the ``ZEA_DOWNLOAD_TIMEOUT`` environment variable (default 600 s)
+    as the socket timeout.
+
+    Args:
+        url: URL to download from.
+        destination: Full file path where the downloaded content will be saved.
+            The parent directory is created if it does not exist.
+
+    Returns:
+        Path to the (possibly pre-existing) downloaded file.
+    """
+    destination = Path(destination)
+    if destination.exists():
+        log.info("File already exists: %s. Skipping download.", destination.name)
+        return destination
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    timeout = int(os.getenv("ZEA_DOWNLOAD_TIMEOUT", "600"))
+    filename = destination.name
+
+    log.info("Downloading %s ...", filename)
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        total = int(response.headers.get("content-length", 0))
+        with (
+            open(destination, "wb") as f,
+            tqdm(total=total or None, unit="B", unit_scale=True, desc=filename) as progress,
+        ):
+            while chunk := response.read(8192):
+                f.write(chunk)
+                progress.update(len(chunk))
+
+    log.info("Downloaded %s to %s", filename, destination.parent)
+    return destination
+
+
 def download_from_girder(  # pragma: no cover
     collection_id: str,
     destination: str | Path,
@@ -231,3 +273,99 @@ def download_from_girder(  # pragma: no cover
 
     log.info(f"{dataset_name} dataset downloaded to {destination}")
     return destination
+
+
+# ---------------------------------------------------------------------------
+# HuggingFace Hub helpers
+# ---------------------------------------------------------------------------
+
+
+def write_dataset_card(folder: str | Path, card_content: str) -> Path:  # pragma: no cover
+    """Write a HuggingFace dataset card (``README.md``) into *folder*.
+
+    Args:
+        folder: Directory where ``README.md`` will be written.
+        card_content: Markdown content for the dataset card.
+
+    Returns:
+        Path to the written ``README.md`` file.
+    """
+    folder = Path(folder)
+    card_path = folder / "README.md"
+    card_path.write_text(card_content)
+    return card_path
+
+
+def upload_dataset_to_hf(  # pragma: no cover
+    folder: str | Path,
+    repo_id: str,
+    revision: str,
+    file_glob: str = "*.hdf5",
+    commit_message: str | None = None,
+) -> None:
+    """Upload a converted dataset to a HuggingFace Hub revision branch.
+
+    Upload to the ``main`` branch is intentionally blocked.  After uploading
+    to a named revision branch, verify the data manually and then merge the
+    branch into ``main`` on the Hugging Face Hub.
+
+    Args:
+        folder: Root folder containing the files to upload.
+        repo_id: Hugging Face Hub repository ID (e.g. ``"zeahub/picmus"``).
+        revision: Target branch name.  Must not be ``"main"``.
+        file_glob: Glob pattern for files to include in the size summary.
+            Defaults to ``"*.hdf5"``.
+        commit_message: Commit message.  Defaults to
+            ``"Upload <repo_id> (zea format) to <revision>"``.
+
+    Raises:
+        ValueError: If *revision* is ``"main"``.
+        FileNotFoundError: If no files matching *file_glob* are found
+            under *folder*.
+    """
+    from huggingface_hub import HfApi, login
+
+    if revision == "main":
+        raise ValueError(
+            "Upload to 'main' is intentionally blocked. "
+            "Upload to a named revision branch instead, then merge into main "
+            "manually after verifying the upload on the Hub."
+        )
+
+    folder = Path(folder)
+    files = sorted(folder.rglob(file_glob))
+    if not files:
+        raise FileNotFoundError(f"No files matching '{file_glob}' found in {folder}")
+
+    total_size_mb = sum(f.stat().st_size for f in files) / 1e6
+
+    if commit_message is None:
+        commit_message = f"Upload {repo_id} (zea format) to {revision}"
+
+    log.info("")
+    log.info("=" * 60)
+    log.info("  HuggingFace upload summary")
+    log.info("=" * 60)
+    log.info(f"  Repository : {repo_id}")
+    log.info(f"  Branch     : {revision}")
+    log.info(f"  Source     : {folder}")
+    log.info(f"  Files      : {len(files)}")
+    log.info(f"  Total size : {total_size_mb:.1f} MB")
+    log.info("=" * 60)
+    log.info("")
+
+    answer = input("Proceed with upload? [y/N] ").strip().lower()
+    if answer != "y":
+        log.info("Upload cancelled.")
+        return
+
+    login(new_session=False)
+    api = HfApi()
+    api.upload_folder(
+        folder_path=str(folder),
+        repo_id=repo_id,
+        repo_type="dataset",
+        revision=revision,
+        commit_message=commit_message,
+    )
+    log.info(f"Uploaded to https://huggingface.co/datasets/{repo_id}/tree/{revision}")

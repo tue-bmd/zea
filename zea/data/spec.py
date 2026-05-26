@@ -210,7 +210,22 @@ class Spec:
     ) -> "Spec":
         """Validate a nested spec field, recursively validating its contents."""
         if isinstance(field_value, dict):
-            field_value = nested_spec(**field_value)
+            # Try constructing the nested spec directly.  For backward compatibility,
+            # if unknown keyword arguments are present (e.g. n_elements / pitch stored
+            # in the probe group of old HDF5 files, or probe_geometry in the scan
+            # group), retry with only the fields known to this spec.  We intentionally
+            # do NOT filter unconditionally because specs such as DataSpec and
+            # MetadataSpec legitimately accept extra keys via their custom __init__.
+            try:
+                field_value = nested_spec(**field_value)
+            except TypeError as _exc:
+                if "unexpected keyword argument" in str(_exc):
+                    known_fields = {f.name for f in fields(nested_spec)}
+                    field_value = nested_spec(
+                        **{k: v for k, v in field_value.items() if k in known_fields}
+                    )
+                else:
+                    raise
             setattr(self, field_name, field_value)
 
         # Check that the nested spec field is now an instance of the expected Spec subclass
@@ -975,8 +990,6 @@ class ScanSpec(Spec):
     All fields are aligned with the data format specification.
 
     Args:
-        probe_geometry: The probe geometry in meters of shape (n_el, 3),
-            represented as (x, y, z) coordinates.
         sampling_frequency: The sampling frequency in Hz.
         center_frequency: The center frequency in Hz of the transmit pulse.
             Single scalar if all transmits share the same center frequency;
@@ -1023,7 +1036,6 @@ class ScanSpec(Spec):
             by the transducer bandwidth twice.
     """
 
-    probe_geometry: np.ndarray
     sampling_frequency: np.ndarray | float
     center_frequency: np.ndarray | float
     demodulation_frequency: np.ndarray | float
@@ -1042,7 +1054,6 @@ class ScanSpec(Spec):
     waveforms_two_way: np.ndarray | None = None
 
     SCHEMA = {
-        "probe_geometry": {"dtype": np.float32, "shape": ("n_el", 3)},
         "sampling_frequency": {"dtype": np.float32, "shape": ()},
         "center_frequency": {"dtype": np.float32, "shape": ((), ("n_tx",))},
         "demodulation_frequency": {"dtype": np.float32, "shape": ((), ("n_tx",))},
@@ -1068,7 +1079,6 @@ class ScanSpec(Spec):
     }
 
     FIELD_METADATA = {
-        "probe_geometry": {"unit": "m", "description": "Probe geometry (x, y, z) per element."},
         "sampling_frequency": {"unit": "Hz", "description": "Sampling frequency."},
         "center_frequency": {
             "unit": "Hz",
@@ -1103,11 +1113,6 @@ class ScanSpec(Spec):
     def __post_init__(self):
         super().__post_init__()
 
-        if np.any(self.probe_geometry > 1.0) or np.any(self.probe_geometry < -1.0):
-            log.warning(
-                "Probe geometry values are unusually large, extending beyond +/- 1.0 meters. "
-                "Please verify that the probe geometry values are correct and in meters."
-            )
         if self.sampling_frequency <= 0:
             raise ValueError(f"Sampling frequency must be positive, got {self.sampling_frequency}")
         if np.any(self.center_frequency < 0):
@@ -1163,6 +1168,159 @@ class ScanSpec(Spec):
                 self.demodulation_frequency = self.demodulation_frequency[0]
 
         self.warn_missing_optional_fields()
+
+
+@dataclass
+class ProbeSpec(Spec):
+    """Probe hardware specification.
+
+    Stores static, physical characteristics of the transducer that are not
+    captured by the per-acquisition :class:`ScanSpec`.  All fields are
+    optional so that partial information can be recorded.
+
+    Args:
+        name: Probe model identifier (e.g. ``"verasonics_l11_4v"``).
+        type: Probe geometry type: ``"linear"``, ``"phased"``, ``"curved"``, etc.
+        center_frequency: Probe nominal centre frequency in Hz.
+        bandwidth_percent: Fractional bandwidth as a percentage (0-100).
+        probe_geometry: Element positions in metres, shape (n_el, 3) with columns
+            (x, y, z).  :attr:`n_elements` and :attr:`pitch` are computed
+            automatically as read-only properties from this array.
+        element_width: Width of a single transducer element in metres.
+        element_height: Height (elevation aperture) of a single element in metres.
+        kerf: Gap between adjacent elements in metres.
+        pulse_duration: Excitation pulse duration in cycles.
+        lens_sound_speed: Speed of sound in the acoustic lens in m/s.
+        lens_thickness: Thickness of the acoustic lens in metres.
+    """
+
+    name: str | None = None
+    type: str | None = None
+    center_frequency: np.float32 | None = None
+    bandwidth_percent: np.float32 | None = None
+    probe_geometry: np.ndarray | None = None
+    element_width: np.float32 | None = None
+    element_height: np.float32 | None = None
+    kerf: np.float32 | None = None
+    pulse_duration: np.float32 | None = None
+    lens_sound_speed: np.float32 | None = None
+    lens_thickness: np.float32 | None = None
+
+    SCHEMA = {
+        "name": {"dtype": str, "shape": ()},
+        "type": {"dtype": str, "shape": ()},
+        "center_frequency": {"dtype": np.float32, "shape": ()},
+        "bandwidth_percent": {"dtype": np.float32, "shape": ()},
+        "probe_geometry": {"dtype": np.float32, "shape": ("n_el", 3)},
+        "element_width": {"dtype": np.float32, "shape": ()},
+        "element_height": {"dtype": np.float32, "shape": ()},
+        "kerf": {"dtype": np.float32, "shape": ()},
+        "pulse_duration": {"dtype": np.float32, "shape": ()},
+        "lens_sound_speed": {"dtype": np.float32, "shape": ()},
+        "lens_thickness": {"dtype": np.float32, "shape": ()},
+    }
+
+    FIELD_METADATA = {
+        "name": {"description": "Probe model name/identifier."},
+        "type": {"description": "Probe geometry type (linear, phased, curved, ...)."},
+        "center_frequency": {
+            "unit": "Hz",
+            "description": "Probe nominal centre frequency.",
+        },
+        "bandwidth_percent": {
+            "unit": "%",
+            "description": "Fractional bandwidth (0-100).",
+        },
+        "probe_geometry": {
+            "unit": "m",
+            "description": "Element positions (x, y, z) per element, shape (n_el, 3).",
+        },
+        "element_width": {
+            "unit": "m",
+            "description": "Width of a single transducer element.",
+        },
+        "element_height": {
+            "unit": "m",
+            "description": "Height (elevation aperture) of a single transducer element.",
+        },
+        "kerf": {
+            "unit": "m",
+            "description": "Gap between adjacent transducer elements.",
+        },
+        "pulse_duration": {
+            "unit": "cycles",
+            "description": "Excitation pulse duration in cycles.",
+        },
+        "lens_sound_speed": {
+            "unit": "m/s",
+            "description": "Speed of sound in the acoustic lens.",
+        },
+        "lens_thickness": {
+            "unit": "m",
+            "description": "Thickness of the acoustic lens.",
+        },
+    }
+
+    @property
+    def n_elements(self) -> int | None:
+        """Number of transducer elements, derived from :attr:`probe_geometry`."""
+        if self.probe_geometry is not None:
+            return int(self.probe_geometry.shape[0])
+        return None
+
+    @property
+    def pitch(self) -> float | None:
+        """Centre-to-centre element spacing in metres, derived from :attr:`probe_geometry`.
+
+        Returns ``None`` when *probe_geometry* is not set or has only one element.
+        """
+        if self.probe_geometry is not None and self.probe_geometry.shape[0] > 1:
+            x_span = float(self.probe_geometry[-1, 0] - self.probe_geometry[0, 0])
+            return x_span / (self.probe_geometry.shape[0] - 1)
+        return None
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.probe_geometry is not None:
+            if self.probe_geometry.ndim != 2 or self.probe_geometry.shape[1] != 3:
+                raise ValueError(
+                    f"ProbeSpec: probe_geometry must have shape (n_el, 3), "
+                    f"got {self.probe_geometry.shape}"
+                )
+            if np.any(self.probe_geometry > 1.0) or np.any(self.probe_geometry < -1.0):
+                log.warning(
+                    "ProbeSpec probe_geometry values extend beyond \u00b11.0 m. "
+                    "Please verify the values are in metres."
+                )
+        if self.center_frequency is not None and self.center_frequency <= 0:
+            raise ValueError(
+                f"ProbeSpec: center_frequency must be positive, got {self.center_frequency}"
+            )
+        if self.bandwidth_percent is not None and not (0 < self.bandwidth_percent <= 200):
+            raise ValueError(
+                f"ProbeSpec: bandwidth_percent must be in (0, 200], got {self.bandwidth_percent}"
+            )
+        if self.element_width is not None and self.element_width <= 0:
+            raise ValueError(f"ProbeSpec: element_width must be positive, got {self.element_width}")
+        if self.element_height is not None and self.element_height <= 0:
+            raise ValueError(
+                f"ProbeSpec: element_height must be positive, got {self.element_height}"
+            )
+        if self.kerf is not None and self.kerf < 0:
+            raise ValueError(f"ProbeSpec: kerf must be non-negative, got {self.kerf}")
+        if self.pulse_duration is not None and self.pulse_duration <= 0:
+            raise ValueError(
+                f"ProbeSpec: pulse_duration must be positive, got {self.pulse_duration}"
+            )
+        if self.lens_sound_speed is not None and self.lens_sound_speed <= 0:
+            raise ValueError(
+                f"ProbeSpec: lens_sound_speed must be positive, got {self.lens_sound_speed}"
+            )
+        if self.lens_thickness is not None and self.lens_thickness < 0:
+            raise ValueError(
+                f"ProbeSpec: lens_thickness must be non-negative, got {self.lens_thickness}"
+            )
 
 
 @dataclass
@@ -1522,7 +1680,9 @@ class FileSpec(Spec):
         scan: The scan parameters.
         metadata: Additional metadata about the acquisition.
         metrics: Metrics computed from the acquisition.
-        probe_name: The name of the probe used to acquire the data.
+        probe: Physical probe specification (see :class:`ProbeSpec`).  The probe
+            name is stored as ``probe.name``; use :attr:`zea.File.probe_name`
+            to read it back from an HDF5 file.
         us_machine: The ultrasound machine used to acquire the data.
 
     Example:
@@ -1536,7 +1696,6 @@ class FileSpec(Spec):
             ...         "raw_data": np.zeros((2, 4, 64, 8, 1), dtype=np.float32),
             ...     },
             ...     scan={
-            ...         "probe_geometry": np.zeros((8, 3), dtype=np.float32),
             ...         "sampling_frequency": np.float32(40e6),
             ...         "center_frequency": np.float32(5e6),
             ...         "demodulation_frequency": np.float32(5e6),
@@ -1556,7 +1715,7 @@ class FileSpec(Spec):
     scan: ScanSpec | dict | None = None
     metadata: MetadataSpec | dict = field(default_factory=MetadataSpec)
     metrics: MetricsSpec | dict = field(default_factory=MetricsSpec)
-    probe_name: str | None = None
+    probe: ProbeSpec | dict | None = None
     us_machine: str | None = None
     description: str | None = None
 
@@ -1565,7 +1724,7 @@ class FileSpec(Spec):
         "scan": {"spec": ScanSpec},
         "metadata": {"spec": MetadataSpec},
         "metrics": {"spec": MetricsSpec},
-        "probe_name": {"dtype": str, "shape": ()},
+        "probe": {"spec": ProbeSpec},
         "us_machine": {"dtype": str, "shape": ()},
         "description": {"dtype": str, "shape": ()},
     }
@@ -1619,7 +1778,7 @@ class FileSpec(Spec):
         (dtype, shape, dimension consistency).  Legacy files are handled
         transparently: extra scalar fields in the scan group (``n_frames``,
         ``n_tx``, etc.) are ignored, and the ``probe`` root
-        attribute is mapped to ``probe_name``.
+        attribute is mapped to ``probe.name``.
 
         Args:
             file: An open ``h5py.File`` (or :class:`zea.File`).
@@ -1655,7 +1814,7 @@ class FileSpec(Spec):
                     kwargs[group_name] = _load_group_as_dict(file[group_name])
                 # else: leave missing, will use default or raise if required
             else:
-                # Scalar attrs (probe_name, us_machine, description)
+                # Scalar attrs (us_machine, description)
                 if group_name in file.attrs:
                     kwargs[group_name] = file.attrs[group_name]
 
@@ -1663,17 +1822,15 @@ class FileSpec(Spec):
         # Legacy compatibility
         # ------------------------------------------------------------------
 
-        # 1. Map legacy root attribute 'probe' → 'probe_name' by delegating
-        #    to File.probe_name, which already checks both 'probe_name' and
-        #    'probe' attrs in priority order.
-        if "probe_name" not in kwargs:
+        # 1. Map legacy root 'probe_name' or 'probe' attr into probe.name so
+        #    that old files with a named probe but no probe group still round-trip.
+        if "probe" not in kwargs:
             try:
-                kwargs["probe_name"] = file.probe_name
+                legacy_name = file.probe_name
+                if legacy_name is not None:
+                    kwargs["probe"] = {"name": legacy_name}
             except AttributeError:
-                log.warning(
-                    "File '%s' has no 'probe_name' or 'probe' attribute; probe name will be None.",
-                    file.filename,
-                )
+                pass  # no probe info in file — leave probe as None
 
         # 2. Filter scan dict to only keys recognised by Scan.SCHEMA so
         #    that legacy scalar fields (n_frames, n_ax, n_el, n_tx, n_ch,
