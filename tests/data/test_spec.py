@@ -644,6 +644,14 @@ class TestDataValidationErrors:
                 coordinates=np.zeros((99, 12, 3), dtype=np.float32),
             )
 
+    def test_map_coordinates_spatial_axis_omission_raises(self):
+        """Dropping a non-frame spatial axis from coordinates must raise ValueError."""
+        with pytest.raises(ValueError, match="Image: coordinates shape"):
+            Image(
+                values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                coordinates=np.zeros((2, 12, 3), dtype=np.float32),
+            )
+
     def test_map_coordinates_millimetre_range_warns(self):
         """Coordinates with |value| > 1 m should trigger a units warning."""
         # Values of 50 mm look fine in mm but are 0.05 m — no warning expected.
