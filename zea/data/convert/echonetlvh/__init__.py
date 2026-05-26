@@ -4,11 +4,6 @@ Script to convert the EchoNet-LVH database to zea format.
 Each video is cropped so that the scan cone is centered
 without padding, such that it can be converted to polar domain.
 
-.. note::
-    This cropping requires first computing scan cone parameters
-    using :mod:`zea.data.convert.echonetlvh.precompute_crop`, which
-    are then passed to this script.
-
 For more information about the dataset, resort to the following links:
 
 - The original dataset can be found at `this link <https://stanfordaimi.azurewebsites.net/datasets/5b7fcc28-579c-4285-8b72-e4238eac7bd1>`_.
@@ -728,10 +723,6 @@ def convert_echonetlvh(
 
     # Convert measurements if requested
     if convert_measurements:
-        measurements_csv = dst / "MeasurementsList.csv"
-        if measurements_csv.exists():
-            transform_measurements_csv(measurements_csv, cone_params_csv)
-        else:
-            log.warning("MeasurementsList.csv not found in destination directory")
+        transform_measurements_csv(measurements_csv, cone_params_csv)
 
     log.info("All tasks are completed.")

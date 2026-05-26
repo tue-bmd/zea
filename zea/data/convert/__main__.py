@@ -68,13 +68,13 @@ def _add_parser_args_echonetlvh(subparsers):
     echonetlvh_parser.add_argument(
         "--no_rejection",
         action="store_true",
-        help="Do not reject sequences in manual_rejections.txt",
+        help="Do not reject sequences in `manual_rejections.txt`",
     )
     echonetlvh_parser.add_argument(
         "--rejection_path",
         type=str,
         default=None,
-        help="Path to custom rejection txt file (defaults to manual_rejections.txt)",
+        help="Path to custom rejection txt file (defaults to `manual_rejections.txt` from zea)",
     )
     echonetlvh_parser.add_argument(
         "--batch",
