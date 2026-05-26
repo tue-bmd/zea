@@ -1949,28 +1949,50 @@ class FileSpec(Spec):
             data_dict = _load_group_as_dict(file["data"]) if "data" in file else {}
             scan_dict = _load_group_as_dict(file["scan"]) if "scan" in file else None
 
-            # Filter scan to known keys (legacy files have extra scalar fields)
-            if scan_dict is not None:
-                scan_schema_keys = set(ScanSpec.SCHEMA.keys())
-                scan_dict = {k: v for k, v in scan_dict.items() if k in scan_schema_keys}
-
-            # Drop legacy flat data/image arrays (can't be validated as Image spec)
-            for key in list(data_dict.keys()):
-                schema_entry = DataSpec.SCHEMA.get(key)
-                if schema_entry is not None and "spec" in schema_entry:
-                    if isinstance(data_dict[key], np.ndarray):
-                        log.debug(
-                            f"Skipping legacy flat dataset 'data/{key}' "
-                            "that cannot be validated as a nested spec."
-                        )
-                        del data_dict[key]
-
             kwargs["data"] = data_dict
             if scan_dict is not None:
                 kwargs["scan"] = scan_dict
 
-        # Map legacy root attribute 'probe' → 'probe_name'
-        if "probe_name" not in kwargs and "probe" in file.attrs:
-            kwargs["probe_name"] = file.attrs["probe"]
+        # 1. Map legacy root attribute 'probe' → 'probe_name' by delegating
+        #    to File.probe_name, which already checks both 'probe_name' and
+        #    'probe' attrs in priority order.
+        if "probe_name" not in kwargs:
+            try:
+                kwargs["probe_name"] = file.probe_name
+            except AttributeError:
+                log.warning(
+                    "File '%s' has no 'probe_name' or 'probe' attribute; probe name will be None.",
+                    file.filename,
+                )
+
+        # 2. Filter scan dict to only keys recognised by ScanSpec.SCHEMA so
+        #    that legacy scalar fields (n_frames, n_ax, n_el, n_tx, n_ch, …)
+        #    are silently dropped.
+        if "scan" in kwargs:
+            scan_schema_keys = set(ScanSpec.SCHEMA.keys())
+            kwargs["scan"] = {k: v for k, v in kwargs["scan"].items() if k in scan_schema_keys}
+
+        # 3. Handle legacy flat `data/<key>` datasets.  In old files spatial
+        #    maps (image, image_sc, envelope_data, …) were stored as plain
+        #    arrays (n_frames, z, x) rather than groups with values +
+        #    coordinates.  Wrap them as {"values": array} so DataSpec accepts
+        #    them.  raw_data and aligned_data are valid as flat arrays and are
+        #    left untouched.
+        if "data" in kwargs and isinstance(kwargs["data"], dict):
+            data_dict = kwargs["data"]
+            for key in list(data_dict.keys()):
+                if not isinstance(data_dict[key], np.ndarray):
+                    continue
+                schema_entry = DataSpec.SCHEMA.get(key)
+                # raw_data / aligned_data are plain-array fields — skip them.
+                if schema_entry is not None and "spec" not in schema_entry:
+                    continue
+                log.warning(
+                    "Legacy flat dataset 'data/%s' has no spatial coordinates. "
+                    "The array has been loaded as 'values'; coordinates information "
+                    "was not stored in this file and will be None.",
+                    key,
+                )
+                data_dict[key] = {"values": data_dict[key]}
 
         return cls(**kwargs)

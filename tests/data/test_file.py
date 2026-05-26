@@ -316,8 +316,9 @@ class TestValidateSpec:
             spec = f.validate_spec()
             assert isinstance(spec, FileSpec)
             np.testing.assert_array_equal(spec.data.raw_data, raw)
-            # Legacy flat image should be skipped, not cause a crash
-            assert spec.data.image is None
+            # Legacy flat image is now wrapped as Image(values=..., coordinates=None)
+            assert spec.data.image is not None
+            np.testing.assert_array_equal(spec.data.image.values, img)
             # probe attr mapped to probe_name
             assert spec.probe_name == "legacy_probe"
 
