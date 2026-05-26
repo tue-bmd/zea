@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import pytest
 
 from .backend_utils import (
-    TEST_BACKENDS,
+    ML_BACKENDS,
     available_test_backends,
     backend_guard_skips,
     format_backend_skip_reason,
@@ -32,20 +32,20 @@ def _gpu_available():
     """Check whether any ML backend has CUDA available in this environment."""
     from zea.internal.device import backend_cuda_available
 
-    return any(backend_cuda_available(backend) for backend in TEST_BACKENDS)
+    return any(backend_cuda_available(backend) for backend in ML_BACKENDS)
 
 
 def _required_backends_for_item(item):
-    required_backends = [backend for backend in TEST_BACKENDS if backend in item.keywords]
+    required_backends = [backend for backend in ML_BACKENDS if backend in item.keywords]
     required_backends.extend(
         backend
         for backend in getattr(item.obj, "_required_backends", ())
-        if backend in TEST_BACKENDS and backend not in required_backends
+        if backend in ML_BACKENDS and backend not in required_backends
     )
     callspec = getattr(item, "callspec", None)
     if callspec is not None:
         backend = callspec.params.get("backend")
-        if backend in TEST_BACKENDS and backend not in required_backends:
+        if backend in ML_BACKENDS and backend not in required_backends:
             required_backends.append(backend)
     return tuple(required_backends)
 
@@ -68,7 +68,7 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     """Validate backend availability before importing backend-dependent test modules."""
-    for backend in TEST_BACKENDS:
+    for backend in ML_BACKENDS:
         config.addinivalue_line("markers", f"{backend}: test requires the {backend} backend")
 
     os.environ["ZEA_SKIP_UNAVAILABLE_BACKENDS"] = (
@@ -80,10 +80,10 @@ def pytest_configure(config):
             "No supported ML back-end is available. Install at least one of tensorflow, "
             "torch, or jax before running the test suite."
         )
-    if len(available) < 3 and not _skip_unavailable_backends_enabled(config):
+    if len(available) < len(ML_BACKENDS) and not _skip_unavailable_backends_enabled(config):
         raise pytest.UsageError(
             "Not all back-ends are available, meaning tests will fail.\n"
-            "To skip tests that require unavailable back-ends,"
+            "To skip tests that require unavailable back-ends, "
             "use pytest --skip-unavailable-backends.\n\n"
             f"{format_missing_backend_details()}"
         )
@@ -110,7 +110,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 
     terminalreporter.write_sep("-", "backend-guarded assert skips")
     terminalreporter.write_line(
-        f"Skipped {guard_skips} backend-guarded asserts{'' if guard_skips == 1 else 's'}."
+        f"Skipped {guard_skips} backend-guarded assert{'' if guard_skips == 1 else 's'}."
     )
     for (active_backend, required_backends), count in sorted(guard_skip_counts.items()):
         terminalreporter.write_line(f"{count} requiring {', '.join(required_backends)}")

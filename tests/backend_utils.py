@@ -8,7 +8,7 @@ from collections import Counter
 import keras
 from zea import log
 
-TEST_BACKENDS = ("tensorflow", "torch", "jax")
+ML_BACKENDS = ("tensorflow", "torch", "jax")
 DEFAULT_TEST_BACKEND = "tensorflow"
 FALLBACK_TEST_BACKEND = "jax"
 
@@ -18,14 +18,14 @@ _backend_guard_skips = Counter()
 def available_test_backends() -> tuple[str, ...]:
     """Return the installed ML backends available to the test suite."""
     return tuple(
-        backend for backend in TEST_BACKENDS if importlib.util.find_spec(backend) is not None
+        backend for backend in ML_BACKENDS if importlib.util.find_spec(backend) is not None
     )
 
 
 def unavailable_test_backends() -> tuple[str, ...]:
     """Return the ML backends missing from the current environment."""
     available = set(available_test_backends())
-    return tuple(backend for backend in TEST_BACKENDS if backend not in available)
+    return tuple(backend for backend in ML_BACKENDS if backend not in available)
 
 
 def all_test_backends_available() -> bool:
@@ -51,7 +51,7 @@ def missing_required_backends(required_backends) -> tuple[str, ...]:
     required = set(required_backends)
     available = set(available_test_backends())
     return tuple(
-        backend for backend in TEST_BACKENDS if backend in required and backend not in available
+        backend for backend in ML_BACKENDS if backend in required and backend not in available
     )
 
 
