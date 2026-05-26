@@ -47,7 +47,6 @@ Dataset splits:
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -149,9 +148,9 @@ def process_cetus(source_path, output_path, overwrite=False):
     # Check if output file already exists
     if output_path.exists():
         if overwrite:
-            os.remove(output_path)
+            output_path.unlink()
         else:
-            log.info(f"Output file {output_path} already exists. Skipping.")
+            log.info("Output file %s already exists. Skipping.", log.yellow(output_path))
             return
 
     # Load B-mode volume
@@ -257,7 +256,7 @@ def _process_task(task):
     try:
         process_cetus(source_file, output_file, overwrite=False)
     except Exception:
-        log.error("Error processing %s", source_file)
+        log.error("Error processing %s", log.yellow(source_file))
         raise
 
 
@@ -329,7 +328,8 @@ def convert_cetus(args):
         split_dir = cetus_output_folder / split
         if split_dir.exists():
             log.warning(
-                f"Output folder {split_dir} already exists. Existing files will be skipped."
+                "Output folder %s already exists. Existing files will be skipped.",
+                log.yellow(split_dir),
             )
 
     # Find all B-mode NIfTI files (exclude ground truth files ending with _gt.nii.gz)
@@ -366,8 +366,12 @@ def convert_cetus(args):
             try:
                 _process_task(t)
             except Exception as exc:
-                log.error(f"Failed to process {t[0]}: {exc}")
-        log.info(f"Processing finished for {len(tasks)} files (serial)")
+                log.error("Failed to process %s: %s", log.yellow(t[0]), exc)
+        log.info(
+            "Conversion complete. %d files written to %s",
+            len(tasks),
+            log.yellow(cetus_output_folder),
+        )
 
         write_dataset_card(cetus_output_folder, _DATASET_CARD)
 
@@ -382,8 +386,12 @@ def convert_cetus(args):
             try:
                 future.result()
             except Exception as exc:
-                log.error(f"Failed to process a file: {exc}")
-    log.info(f"Processing finished for {len(tasks)} files")
+                log.error("Failed to process a file: %s", exc)
+    log.info(
+        "Conversion complete. %d files written to %s",
+        len(tasks),
+        log.yellow(cetus_output_folder),
+    )
 
     write_dataset_card(cetus_output_folder, _DATASET_CARD)
 

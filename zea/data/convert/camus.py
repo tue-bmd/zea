@@ -47,8 +47,6 @@ Dataset splits:
 
 from __future__ import annotations
 
-import logging
-import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -205,12 +203,15 @@ def process_camus(source_path, output_path, overwrite=False):
             Defaults to False.
     """
 
+    source_path = Path(source_path)
+    output_path = Path(output_path)
+
     # Check if output file already exists and remove
-    if os.path.exists(output_path):
+    if output_path.exists():
         if overwrite:
-            os.remove(output_path)
+            output_path.unlink()
         else:
-            logging.warning("Output file already exists. Skipping conversion.")
+            log.warning("Output file %s already exists. Skipping.", log.yellow(output_path))
             return
 
     # Open the file
@@ -287,8 +288,7 @@ def _process_task(task):
     try:
         process_camus(source_file, output_file, overwrite=False)
     except Exception:
-        # Log and re-raise so the main process can handle it
-        log.error("Error processing %s", source_file)
+        log.error("Error processing %s", log.yellow(source_file))
         raise
 
 
@@ -388,7 +388,11 @@ def convert_camus(args):
                 _process_task(t)
             except Exception as e:
                 log.error("Task processing failed: %s", e)
-        log.info("Processing finished for %d files (serial)", len(tasks))
+        log.info(
+            "Conversion complete. %d files written to %s",
+            len(tasks),
+            log.yellow(camus_output_folder),
+        )
 
         write_dataset_card(camus_output_folder, _CAMUS_DATASET_CARD)
 
@@ -400,7 +404,11 @@ def convert_camus(args):
     with ProcessPoolExecutor() as exe:
         for _ in tqdm(exe.map(_process_task, tasks), total=len(tasks), desc="Processing files"):
             pass
-    log.info("Processing finished for %d files", len(tasks))
+    log.info(
+        "Conversion complete. %d files written to %s",
+        len(tasks),
+        log.yellow(camus_output_folder),
+    )
 
     write_dataset_card(camus_output_folder, _CAMUS_DATASET_CARD)
 

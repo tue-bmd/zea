@@ -361,6 +361,27 @@ def upload_dataset_to_hf(  # pragma: no cover
 
     login(new_session=False)
     api = HfApi()
+
+    # Check if the revision (branch) exists; if not, prompt to create it.
+    try:
+        refs = api.list_repo_refs(repo_id=repo_id, repo_type="dataset")
+        branch_names = {b.name for b in refs.branches}
+        if revision not in branch_names:
+            create = (
+                input(
+                    f"Revision (branch) '{revision}' does not exist on {repo_id}. Create it? [y/N] "
+                )
+                .strip()
+                .lower()
+            )
+            if create != "y":
+                log.info("Upload cancelled — revision not created.")
+                return
+            api.create_branch(repo_id=repo_id, branch=revision, repo_type="dataset")
+            log.info("Created branch '%s' on %s.", revision, repo_id)
+    except Exception as exc:
+        log.warning("Could not verify revision existence: %s", exc)
+
     api.upload_folder(
         folder_path=str(folder),
         repo_id=repo_id,

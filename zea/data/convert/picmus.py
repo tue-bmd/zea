@@ -41,8 +41,6 @@ The dataset comprises three partitions:
 
 """
 
-import logging
-import os
 import zipfile
 from pathlib import Path
 
@@ -177,7 +175,7 @@ def download_picmus(destination: str | Path) -> tuple[Path, Path]:  # pragma: no
     if not main_top.exists():
         log.info("Extracting %s ...", main_zip.name)
         main_top = _extract_zip(main_zip, destination)
-    log.info("Main PICMUS data at %s", main_top)
+    log.info("Main PICMUS data at %s", log.yellow(main_top))
 
     # ------------------------------------------------------------------
     # In-vivo dataset
@@ -203,7 +201,7 @@ def download_picmus(destination: str | Path) -> tuple[Path, Path]:  # pragma: no
             ]
             if candidates:
                 invivo_top = candidates[0]
-    log.info("In-vivo PICMUS data at %s", invivo_top)
+    log.info("In-vivo PICMUS data at %s", log.yellow(invivo_top))
 
     return main_top, invivo_top
 
@@ -221,13 +219,14 @@ def convert(source_path, output_path, overwrite=False):
             file.  Defaults to False.
     """
     source_path = Path(source_path)
+    output_path = Path(output_path)
 
     # Check if output file already exists and remove
-    if os.path.exists(output_path):
+    if output_path.exists():
         if overwrite:
-            os.remove(output_path)
+            output_path.unlink()
         else:
-            logging.warning("Output file already exists. Skipping conversion.")
+            log.warning("Output file %s already exists. Skipping.", log.yellow(output_path))
             return
 
     # Open the file
@@ -370,7 +369,7 @@ def convert_picmus(args):
         # Include in-vivo data when an 'in_vivo' sub-directory is present
         invivo_dir = base_dir / "in_vivo"
         if invivo_dir.exists():
-            log.info("Found in-vivo data at %s", invivo_dir)
+            log.info("Found in-vivo data at %s", log.yellow(invivo_dir))
             source_entries.append((invivo_dir, invivo_dir.parent))
 
     dst.mkdir(parents=True, exist_ok=True)
@@ -385,10 +384,10 @@ def convert_picmus(args):
             # Select only data files containing IQ or RF data
             is_data_file = str_file.endswith("iq.hdf5") or str_file.endswith("rf.hdf5")
             if not is_data_file or "img" in str_file:
-                log.info("Skipping %s as it does not contain IQ or RF data", file.name)
+                log.info("Skipping %s as it does not contain IQ or RF data", log.yellow(file.name))
                 continue
 
-            log.info("Converting %s", file.name)
+            log.info("Converting %s", log.yellow(file.name))
 
             # Preserve relative directory structure under dst; each file gets
             # its own sub-directory so the folder can be used as a dataset.
@@ -403,10 +402,10 @@ def convert_picmus(args):
                     output_file.parent.rmdir()
                 except OSError:
                     pass
-                log.error("Failed to convert %s", str_file)
+                log.error("Failed to convert %s", log.yellow(str_file))
                 continue
 
-    log.info(f"Finished converting PICMUS dataset. Output written to {dst}")
+    log.info(f"Finished converting PICMUS dataset. Output written to {log.yellow(dst)}")
 
     write_dataset_card(dst, _PICMUS_DATASET_CARD)
 

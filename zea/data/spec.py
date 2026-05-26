@@ -1255,28 +1255,48 @@ class ProbeSpec(Spec):
         return None
 
     @property
-    def pitch(self) -> float:
-        """Centre-to-centre element spacing in metres, derived from :attr:`probe_geometry`."""
-        if self.type is not None and self.type.lower() == "linear":
-            if self.probe_geometry is not None and self.probe_geometry.shape[0] > 1:
-                x_span = float(self.probe_geometry[-1, 0] - self.probe_geometry[0, 0])
-                return x_span / (self.probe_geometry.shape[0] - 1)
-            else:
-                raise ValueError(
-                    "Cannot calculate pitch: probe_geometry must have at least 2 elements"
-                )
-        else:
-            raise NotImplementedError(
-                f"Pitch calculation only implemented for linear probes, got type '{self.type}'"
+    def pitch(self) -> float | None:
+        """Centre-to-centre element spacing in metres, derived from :attr:`probe_geometry`.
+
+        Returns ``None`` when:
+
+        * :attr:`probe_geometry` is not set,
+        * the probe has fewer than 2 elements,
+        * the elements are not arranged along a single axis (not a 1-D / linear array), or
+        * the element positions are not uniformly spaced.
+
+        Raises :class:`ValueError` if the spacing is non-uniform (elements are present but
+        clearly not a ULA), to surface likely data errors rather than silently returning None.
+        """
+        if self.probe_geometry is None:
+            return None
+
+        n_el = self.probe_geometry.shape[0]
+        if n_el < 2:
+            return None
+
+        # Only valid for 1-D (linear) arrangements – all elements must lie on the x-axis
+        # (y == 0 and z == 0 for every element).
+        if not (
+            np.allclose(self.probe_geometry[:, 1], 0) and np.allclose(self.probe_geometry[:, 2], 0)
+        ):
+            return None
+
+        spacings = np.diff(self.probe_geometry[:, 0])
+        if not np.allclose(spacings, spacings[0], rtol=1e-3):
+            raise ValueError(
+                "Cannot compute pitch: element x-positions are not uniformly spaced. "
+                f"Min spacing: {spacings.min():.4e} m, max: {spacings.max():.4e} m."
             )
 
+        return float(spacings[0])
+
     @property
-    def kerf(self) -> float:
+    def kerf(self) -> float | None:
         """Gap between elements in metres, derived from :attr:`element_width` and :attr:`pitch`."""
         if self.element_width is not None and self.pitch is not None:
             return self.pitch - self.element_width
-        else:
-            raise ValueError("Cannot calculate kerf: element_width and pitch must be set")
+        return None
 
     def __post_init__(self):
         super().__post_init__()
