@@ -204,10 +204,10 @@ the full timing of the acquisition.
     with zea.File("acquisition.hdf5") as f:
         probe = f.probe()              # probe is shared across all tracks
 
-        # See track names in acquisition order before unpacking:
-        print(f.track_names)           # ['focused_bmode', 'planewave_doppler']
+        # See track labels:
+        print(f.track_labels)          # ['focused_bmode', 'planewave_doppler']
 
-        # Unpack in the same order as track_names — always safe:
+        # Unpack in the same order as track_labels — always safe:
         focused_track, planewave_track = f.tracks
 
         # Or fetch a specific track by name:

@@ -1753,7 +1753,7 @@ class FileSpec(Spec):
                     f"Missing label for track(s) at index: {missing}. "
                     f"Provide a short descriptive name for each track, e.g. "
                     f"'focused' or 'planewave', so that "
-                    f"File.get_track(label) and File.track_names work correctly."
+                    f"File.get_track(label) and File.track_labels work correctly."
                 )
 
         # Validate track_schedule indices are in range

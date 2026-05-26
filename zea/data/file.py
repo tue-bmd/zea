@@ -138,7 +138,7 @@ class Track:
         """Human-readable name for this track (e.g. ``'focused'`` or ``'planewave'``).
 
         Returns ``None`` for single-track files or legacy files written without a label.
-        Use :attr:`File.track_names` to print all labels in acquisition order and
+        Use :attr:`File.track_labels` to print all labels in acquisition order and
         :meth:`File.get_track` to retrieve a track by name.
         """
         return self._label
@@ -475,19 +475,19 @@ class File(h5py.File):
         return tracks
 
     @property
-    def track_names(self) -> "list[str | None]":
+    def track_labels(self) -> "list[str | None]":
         """Labels of all tracks in acquisition order.
 
         Returns a list with one entry per track.  Each entry is the label
         string stored on that track, or ``None`` for unlabelled tracks (e.g.
         single-track or legacy files).  The list order matches
         :attr:`tracks`, so unpacking ``f.tracks`` in the same order as
-        ``f.track_names`` is always safe.
+        ``f.track_labels`` is always safe.
 
         Example::
 
             with File("acquisition.hdf5") as f:
-                print(f.track_names)  # ['focused', 'planewave']
+                print(f.track_labels)  # ['focused', 'planewave']
                 focused, planewave = f.tracks  # safe — same order
         """
         return [t.label for t in self.tracks]

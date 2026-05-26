@@ -972,7 +972,7 @@ class TestMultiTrackFile:
         assert "label='track_a'" in r
 
     # ------------------------------------------------------------------
-    # Track.label, File.track_names, File.get_track
+    # Track.label, File.track_labels, File.get_track
     # ------------------------------------------------------------------
 
     def test_track_label_roundtrip(self, tmp_path):
@@ -982,11 +982,11 @@ class TestMultiTrackFile:
             assert f.tracks[0].label == "track_a"
             assert f.tracks[1].label == "track_b"
 
-    def test_track_names_property(self, tmp_path):
-        """File.track_names returns labels in acquisition order."""
+    def test_track_labels_property(self, tmp_path):
+        """File.track_labels returns labels in acquisition order."""
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
-            assert f.track_names == ["track_a", "track_b"]
+            assert f.track_labels == ["track_a", "track_b"]
 
     def test_get_track_returns_correct_track(self, tmp_path):
         """File.get_track returns the track whose label matches."""
