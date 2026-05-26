@@ -792,18 +792,6 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - m
            - Height (elevation aperture) of a single transducer element.
            - |badge-opt|
-         * - ``kerf``
-           - ``float32``
-           - scalar
-           - m
-           - Gap between adjacent transducer elements.
-           - |badge-opt|
-         * - ``pulse_duration``
-           - ``float32``
-           - scalar
-           - cycles
-           - Excitation pulse duration in cycles.
-           - |badge-opt|
          * - ``lens_sound_speed``
            - ``float32``
            - scalar

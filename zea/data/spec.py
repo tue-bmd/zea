@@ -1188,8 +1188,6 @@ class ProbeSpec(Spec):
             automatically as read-only properties from this array.
         element_width: Width of a single transducer element in metres.
         element_height: Height (elevation aperture) of a single element in metres.
-        kerf: Gap between adjacent elements in metres.
-        pulse_duration: Excitation pulse duration in cycles.
         lens_sound_speed: Speed of sound in the acoustic lens in m/s.
         lens_thickness: Thickness of the acoustic lens in metres.
     """
@@ -1201,8 +1199,6 @@ class ProbeSpec(Spec):
     probe_geometry: np.ndarray | None = None
     element_width: np.float32 | None = None
     element_height: np.float32 | None = None
-    kerf: np.float32 | None = None
-    pulse_duration: np.float32 | None = None
     lens_sound_speed: np.float32 | None = None
     lens_thickness: np.float32 | None = None
 
@@ -1214,8 +1210,6 @@ class ProbeSpec(Spec):
         "probe_geometry": {"dtype": np.float32, "shape": ("n_el", 3)},
         "element_width": {"dtype": np.float32, "shape": ()},
         "element_height": {"dtype": np.float32, "shape": ()},
-        "kerf": {"dtype": np.float32, "shape": ()},
-        "pulse_duration": {"dtype": np.float32, "shape": ()},
         "lens_sound_speed": {"dtype": np.float32, "shape": ()},
         "lens_thickness": {"dtype": np.float32, "shape": ()},
     }
@@ -1243,14 +1237,6 @@ class ProbeSpec(Spec):
             "unit": "m",
             "description": "Height (elevation aperture) of a single transducer element.",
         },
-        "kerf": {
-            "unit": "m",
-            "description": "Gap between adjacent transducer elements.",
-        },
-        "pulse_duration": {
-            "unit": "cycles",
-            "description": "Excitation pulse duration in cycles.",
-        },
         "lens_sound_speed": {
             "unit": "m/s",
             "description": "Speed of sound in the acoustic lens.",
@@ -1269,15 +1255,28 @@ class ProbeSpec(Spec):
         return None
 
     @property
-    def pitch(self) -> float | None:
-        """Centre-to-centre element spacing in metres, derived from :attr:`probe_geometry`.
+    def pitch(self) -> float:
+        """Centre-to-centre element spacing in metres, derived from :attr:`probe_geometry`."""
+        if self.type is not None and self.type.lower() == "linear":
+            if self.probe_geometry is not None and self.probe_geometry.shape[0] > 1:
+                x_span = float(self.probe_geometry[-1, 0] - self.probe_geometry[0, 0])
+                return x_span / (self.probe_geometry.shape[0] - 1)
+            else:
+                raise ValueError(
+                    "Cannot calculate pitch: probe_geometry must have at least 2 elements"
+                )
+        else:
+            raise NotImplementedError(
+                f"Pitch calculation only implemented for linear probes, got type '{self.type}'"
+            )
 
-        Returns ``None`` when *probe_geometry* is not set or has only one element.
-        """
-        if self.probe_geometry is not None and self.probe_geometry.shape[0] > 1:
-            x_span = float(self.probe_geometry[-1, 0] - self.probe_geometry[0, 0])
-            return x_span / (self.probe_geometry.shape[0] - 1)
-        return None
+    @property
+    def kerf(self) -> float:
+        """Gap between elements in metres, derived from :attr:`element_width` and :attr:`pitch`."""
+        if self.element_width is not None and self.pitch is not None:
+            return self.pitch - self.element_width
+        else:
+            raise ValueError("Cannot calculate kerf: element_width and pitch must be set")
 
     def __post_init__(self):
         super().__post_init__()
@@ -1306,12 +1305,6 @@ class ProbeSpec(Spec):
         if self.element_height is not None and self.element_height <= 0:
             raise ValueError(
                 f"ProbeSpec: element_height must be positive, got {self.element_height}"
-            )
-        if self.kerf is not None and self.kerf < 0:
-            raise ValueError(f"ProbeSpec: kerf must be non-negative, got {self.kerf}")
-        if self.pulse_duration is not None and self.pulse_duration <= 0:
-            raise ValueError(
-                f"ProbeSpec: pulse_duration must be positive, got {self.pulse_duration}"
             )
         if self.lens_sound_speed is not None and self.lens_sound_speed <= 0:
             raise ValueError(

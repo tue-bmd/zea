@@ -81,12 +81,10 @@ PICMUS_DESCRIPTION = (
 _L11_4V_PROBE = {
     "name": "verasonics_l11_4v",
     "type": "linear",
-    "center_frequency": np.float32(5.1333e6),  # Transducer center frequency f0 [Hz]
-    "bandwidth_percent": np.float32(67.0),  # Pulse bandwidth [%]
-    "kerf": np.float32(0.030e-3),  # Gap between elements [m]
-    "element_width": np.float32(0.270e-3),  # pitch - kerf [m]
-    "element_height": np.float32(5e-3),  # Elevation aperture [m]
-    "pulse_duration": np.float32(2.5),  # Excitation pulse duration [cycles]
+    "center_frequency": np.float32(5.1333e6),
+    "bandwidth_percent": np.float32(67.0),
+    "element_width": np.float32(0.270e-3),
+    "element_height": np.float32(5e-3),
 }
 
 # ---------------------------------------------------------------------------
