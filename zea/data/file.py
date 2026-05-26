@@ -456,9 +456,10 @@ class File(h5py.File):
         i = 0
         while f"track_{i}" in tracks_group:
             track_group = tracks_group[f"track_{i}"]
-            label = track_group.attrs.get("label")
-            if label is not None:
-                label = str(label)
+            label = None
+            if "label" in track_group:
+                raw = track_group["label"][()]
+                label = raw.decode() if isinstance(raw, bytes) else str(raw)
             tracks.append(Track(i, track_group, label=label))
             i += 1
 

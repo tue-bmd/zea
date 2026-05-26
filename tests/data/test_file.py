@@ -993,8 +993,8 @@ class TestMultiTrackFile:
         path, raw_a, raw_b = _make_two_track_spec(tmp_path)
         with File(path) as f:
             t = f.get_track("track_b")
-        assert t.label == "track_b"
-        np.testing.assert_array_equal(t.data.raw_data[:], raw_b)
+            assert t.label == "track_b"
+            np.testing.assert_array_equal(t.data.raw_data[:], raw_b)
 
     def test_get_track_missing_label_raises(self, tmp_path):
         """File.get_track raises KeyError with available labels in the message."""

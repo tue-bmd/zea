@@ -1560,6 +1560,7 @@ class TrackSpec(Spec):
     SCHEMA = {
         "data": {"spec": DataSpec},
         "scan": {"spec": ScanSpec},
+        "label": {"dtype": str, "shape": ()},
     }
 
     def __post_init__(self):
@@ -1578,10 +1579,8 @@ class TrackSpec(Spec):
             raise ValueError("'label' must not be an empty or whitespace-only string.")
 
     def store_in_group(self, group: "h5py.Group", compression: str = "gzip") -> None:
-        """Store data and scan in the HDF5 group; also write label as an attribute."""
+        """Store data, scan, and label in the HDF5 group."""
         super().store_in_group(group, compression=compression)
-        if self.label is not None:
-            group.attrs["label"] = self.label
 
 
 @dataclass
@@ -1941,10 +1940,6 @@ class FileSpec(Spec):
             while f"track_{i}" in tracks_group:
                 track_group = tracks_group[f"track_{i}"]
                 track_dict = _load_group_as_dict(track_group)
-                # Label is stored as an HDF5 attribute on the track group.
-                label = track_group.attrs.get("label")
-                if label is not None:
-                    track_dict["label"] = str(label)
                 tracks.append(track_dict)
                 i += 1
             kwargs["tracks"] = tracks
