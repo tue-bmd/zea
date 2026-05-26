@@ -1,4 +1,3 @@
-import warnings
 from collections import defaultdict
 from dataclasses import MISSING, dataclass, field, fields
 from importlib.metadata import PackageNotFoundError
@@ -149,6 +148,22 @@ class Spec:
     def optional_fields(cls) -> tuple[str, ...]:
         """Return the names of fields that have a default value."""
         return tuple(f.name for f in fields(cls) if cls._is_optional_dataclass_field(f))
+
+    def warn_missing_optional_fields(self):
+        """Warn about optional fields that were not provided."""
+        _optional_fields = self.optional_fields()
+        for field_name in self.SCHEMA.keys():
+            if field_name in _optional_fields and getattr(self, field_name) is None:
+                if hasattr(self, "FIELD_METADATA"):
+                    meta = self.FIELD_METADATA.get(field_name, {})
+                    description = meta.get("description", _DEFAULT_FIELD_DESCRIPTION)
+                else:
+                    description = _DEFAULT_FIELD_DESCRIPTION
+                log.warning(
+                    f"Optional {self.__class__.__name__} field '{field_name}' is not set. "
+                    f"Description: {description} "
+                    "Defaulted to None."
+                )
 
     @staticmethod
     def _expected_shapes(shape_spec: Any) -> tuple[tuple, ...]:
@@ -551,13 +566,11 @@ class Map(Spec):
             # indicates the array was supplied in millimetres rather than metres.
             max_abs = np.max(np.abs(self.coordinates[np.isfinite(self.coordinates)]), initial=0.0)
             if max_abs > 1.0:
-                warnings.warn(
-                    log.warning(
-                        f"{type(self).__name__}: coordinates have a maximum absolute value of "
-                        f"{max_abs:.4g}, which exceeds 1 m.  Ultrasound scan regions are "
-                        "typically a few centimetres across.  Please verify that coordinates "
-                        "are in metres, not millimetres."
-                    )
+                log.warning(
+                    f"{type(self).__name__}: coordinates have a maximum absolute value of "
+                    f"{max_abs:.4g}, which exceeds 1 m.  Ultrasound scan regions are "
+                    "typically a few centimetres across.  Please verify that coordinates "
+                    "are in metres, not millimetres."
                 )
         else:
             log.warning(
@@ -842,7 +855,7 @@ class DataSpec(Spec):
     # Pipeline data products (plain arrays)
     raw_data: np.ndarray | None = None
     aligned_data: np.ndarray | None = None
-    # Spatial map data products (with extent metadata)
+    # Spatial map data products (with coordinates metadata)
     beamformed_data: BeamformedData | dict | None = None
     envelope_data: EnvelopeData | dict | None = None
     image: Image | dict | None = None
@@ -916,7 +929,7 @@ class DataSpec(Spec):
                     f"Custom data key '{key}' must be a spatial map "
                     f"(a dict with at least a 'values' key), not a flat array. "
                     f"Only 'raw_data' and 'aligned_data' are accepted as flat arrays. "
-                    f"Wrap your data: {{'values': array, 'extent': extent_array}}."
+                    f"Wrap your data: {{'values': array, 'coordinates': coordinates_array}}."
                 )
             setattr(self, key, value)
 
@@ -953,25 +966,6 @@ class DataSpec(Spec):
                         f"'{fname}' must have n_ch ∈ {{1, 2}} (RF or IQ), "
                         f"got n_ch={n_ch} (shape {arr.shape})."
                     )
-
-        suggested_map_keys = ", ".join(
-            sorted(
-                key
-                for key, value in type(self).SCHEMA.items()
-                if "spec" in value and issubclass(value["spec"], Map)
-            )
-        )
-
-        if getattr(self, "_extra_map_keys", ()):
-            custom_keys = ", ".join(sorted(self._extra_map_keys))
-            warnings.warn(
-                log.warning(
-                    f"Custom spatial map key(s) added to 'data': {custom_keys}. "
-                    "These are validated as generic Map specs. "
-                    "If your data matches an existing type, prefer one of the supported "
-                    f"spatial maps: {suggested_map_keys}."
-                )
-            )
 
 
 @dataclass
@@ -1168,12 +1162,15 @@ class ScanSpec(Spec):
             if np.all(self.demodulation_frequency == self.demodulation_frequency[0]):
                 self.demodulation_frequency = self.demodulation_frequency[0]
 
+        self.warn_missing_optional_fields()
+
 
 @dataclass
 class Subject(Spec):
     """Subject metadata associated with the study.
 
     Args:
+        id: Subject ID.
         type: Subject type, e.g. human, phantom, animal.
         age: Subject age in years.
         sex: Subject sex.
@@ -1194,18 +1191,17 @@ class Subject(Spec):
         "fat_percentage": {"dtype": np.float32, "shape": ()},
     }
 
+    FIELD_METADATA = {
+        "id": {"description": "Subject ID. Needed for subject-wise splits."},
+    }
+
     def __post_init__(self):
         super().__post_init__()
 
         if self.id is not None and not self.id.strip():
             raise ValueError("Subject ID cannot be an empty string")
-        if self.id is None:
-            warnings.warn(
-                log.warning(
-                    "Subject ID is not provided; please consider adding an ID for "
-                    "better traceability and to enable subject-wise splits."
-                )
-            )
+
+        self.warn_missing_optional_fields()
 
         if self.fat_percentage is not None and (
             self.fat_percentage < 0 or self.fat_percentage > 100
@@ -1488,24 +1484,7 @@ class MetadataSpec(Spec):
     def __post_init__(self):
         super().__post_init__()
 
-        suggested_signal_keys = ", ".join(
-            sorted(
-                key
-                for key, value in type(self).SCHEMA.items()
-                if "spec" in value and issubclass(value["spec"], Signal)
-            )
-        )
-
-        if getattr(self, "_extra_signal_keys", ()):
-            custom_keys = ", ".join(sorted(self._extra_signal_keys))
-            warnings.warn(
-                log.warning(
-                    f"Custom signal key(s) added to 'metadata': {custom_keys}. "
-                    "These are validated as generic SignalND specs. "
-                    "If your signal matches an existing type, prefer one of the supported "
-                    f"signal fields: {suggested_signal_keys}."
-                )
-            )
+        self.warn_missing_optional_fields()
 
 
 @dataclass
@@ -1949,28 +1928,50 @@ class FileSpec(Spec):
             data_dict = _load_group_as_dict(file["data"]) if "data" in file else {}
             scan_dict = _load_group_as_dict(file["scan"]) if "scan" in file else None
 
-            # Filter scan to known keys (legacy files have extra scalar fields)
-            if scan_dict is not None:
-                scan_schema_keys = set(ScanSpec.SCHEMA.keys())
-                scan_dict = {k: v for k, v in scan_dict.items() if k in scan_schema_keys}
-
-            # Drop legacy flat data/image arrays (can't be validated as Image spec)
-            for key in list(data_dict.keys()):
-                schema_entry = DataSpec.SCHEMA.get(key)
-                if schema_entry is not None and "spec" in schema_entry:
-                    if isinstance(data_dict[key], np.ndarray):
-                        log.debug(
-                            f"Skipping legacy flat dataset 'data/{key}' "
-                            "that cannot be validated as a nested spec."
-                        )
-                        del data_dict[key]
-
             kwargs["data"] = data_dict
             if scan_dict is not None:
                 kwargs["scan"] = scan_dict
 
-        # Map legacy root attribute 'probe' → 'probe_name'
-        if "probe_name" not in kwargs and "probe" in file.attrs:
-            kwargs["probe_name"] = file.attrs["probe"]
+        # 1. Map legacy root attribute 'probe' → 'probe_name' by delegating
+        #    to File.probe_name, which already checks both 'probe_name' and
+        #    'probe' attrs in priority order.
+        if "probe_name" not in kwargs:
+            try:
+                kwargs["probe_name"] = file.probe_name
+            except AttributeError:
+                log.warning(
+                    "File '%s' has no 'probe_name' or 'probe' attribute; probe name will be None.",
+                    file.filename,
+                )
+
+        # 2. Filter scan dict to only keys recognised by ScanSpec.SCHEMA so
+        #    that legacy scalar fields (n_frames, n_ax, n_el, n_tx, n_ch, …)
+        #    are silently dropped.
+        if "scan" in kwargs:
+            scan_schema_keys = set(ScanSpec.SCHEMA.keys())
+            kwargs["scan"] = {k: v for k, v in kwargs["scan"].items() if k in scan_schema_keys}
+
+        # 3. Handle legacy flat `data/<key>` datasets.  In old files spatial
+        #    maps (image, image_sc, envelope_data, …) were stored as plain
+        #    arrays (n_frames, z, x) rather than groups with values +
+        #    coordinates.  Wrap them as {"values": array} so DataSpec accepts
+        #    them.  raw_data and aligned_data are valid as flat arrays and are
+        #    left untouched.
+        if "data" in kwargs and isinstance(kwargs["data"], dict):
+            data_dict = kwargs["data"]
+            for key in list(data_dict.keys()):
+                if not isinstance(data_dict[key], np.ndarray):
+                    continue
+                schema_entry = DataSpec.SCHEMA.get(key)
+                # raw_data / aligned_data are plain-array fields — skip them.
+                if schema_entry is not None and "spec" not in schema_entry:
+                    continue
+                log.warning(
+                    "Legacy flat dataset 'data/%s' has no spatial coordinates. "
+                    "The array has been loaded as 'values'; coordinates information "
+                    "was not stored in this file and will be None.",
+                    key,
+                )
+                data_dict[key] = {"values": data_dict[key]}
 
         return cls(**kwargs)

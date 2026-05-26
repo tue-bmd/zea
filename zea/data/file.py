@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 from keras.utils import pad_sequences
 
+import zea
 from zea import log
 from zea.data.spec import DataSpec, FileSpec, MetadataSpec, MetricsSpec, ScanSpec
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
@@ -326,6 +327,44 @@ def _compute_all_track_timestamps(
 
     return timestamp_matrices_per_track
 
+def _parse_version(v: str) -> tuple[int, ...]:
+    return tuple(int(p) for p in v.split(".")[:3] if p.isdigit())
+
+
+def _warn_if_legacy_file(file: "File") -> None:
+    """Warn if *file* has no zea_version or was written before v0.1.0."""
+    version = file.attrs.get("zea_version", None)
+    if version is None or _parse_version(version) < (0, 1, 0):
+        legacy_version = version if version is not None else "<0.1.0"
+        log.warning(
+            f"This ``zea.File`` '{file.filename}' was created with a legacy version of "
+            f"zea ({legacy_version}), while you are using zea v{zea.__version__}. "
+            "It may behave in unexpected ways. Install an earlier version of zea<0.1.0 for full "
+            "compatibility or re-save the file with zea v0.1.0 or later (e.g. via File.create)."
+        )
+
+
+def _warn_custom_keys(data: dict, metadata: dict):
+    """Warn about custom keys in data/metadata dicts when saving."""
+    custom_maps = [k for k in data if k not in DataSpec.SCHEMA]
+    if custom_maps:
+        supported = ", ".join(k for k, v in DataSpec.SCHEMA.items() if "spec" in v)
+        log.warning(
+            f"Custom spatial map key(s) added to 'data': {', '.join(sorted(custom_maps))}. "
+            "These are validated as generic Map specs. "
+            "If your data matches an existing type, prefer one of the supported "
+            f"spatial maps: {supported}."
+        )
+    custom_signals = [k for k in metadata if k not in MetadataSpec.SCHEMA]
+    if custom_signals:
+        supported = ", ".join(k for k, v in MetadataSpec.SCHEMA.items() if "spec" in v)
+        log.warning(
+            f"Custom signal key(s) added to 'metadata': {', '.join(sorted(custom_signals))}. "
+            "These are validated as generic SignalND specs. "
+            "If your signal matches an existing type, prefer one of the supported "
+            f"signal fields: {supported}."
+        )
+
 
 class File(h5py.File):
     """h5py.File in zea format."""
@@ -339,18 +378,33 @@ class File(h5py.File):
                 the prefix 'hf://', in which case it will be resolved to a
                 huggingface path.
             mode (str, optional): The mode to open the file in. Defaults to "r".
+            revision (str, optional): HuggingFace revision (branch, tag, or commit hash)
+                to download from. Only used when ``name`` starts with ``hf://``.
+                Defaults to ``"main"``. Example: ``revision="v0.1.0"``.
+            repo_type (str, optional): HuggingFace repository type. Only used when
+                ``name`` starts with ``hf://``. Defaults to ``"dataset"``.
+            cache_dir (str or Path, optional): Local cache directory for downloaded
+                HuggingFace files. Only used when ``name`` starts with ``hf://``.
             *args: Additional arguments to pass to h5py.File.
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
 
         # Resolve huggingface path
         if str(name).startswith(HF_PREFIX):
-            name = _hf_resolve_path(str(name))
+            hf_kwargs = {}
+            for key in ("revision", "repo_type", "cache_dir"):
+                if key in kwargs:
+                    hf_kwargs[key] = kwargs.pop(key)
+            name = _hf_resolve_path(str(name), **hf_kwargs)
 
         # Disable locking for read mode by default
         if "locking" not in kwargs and mode == "r":
             # If the file is opened in read mode, disable locking
             kwargs["locking"] = False
+            
+        # Warn when opening an existing file that pre-dates zea v0.1.0
+        if mode in ("r", "r+"):
+            _warn_if_legacy_file(self)
 
         # Initialize the h5py.File
         super().__init__(name, mode, *args, **kwargs)
@@ -679,6 +733,7 @@ class File(h5py.File):
         if description is not None:
             kwargs["description"] = description
 
+        _warn_custom_keys(kwargs.get("data", {}), kwargs.get("metadata", {}))
         spec = FileSpec(**kwargs)
         spec.save(str(path), compression=compression)
 
@@ -1219,7 +1274,7 @@ def load_file_all_data_types(
 
     data_dict = {}
 
-    # Data types stored as HDF5 groups (Map-based specs with values/extent)
+    # Data types stored as HDF5 groups (Map-based specs with values/coordinates)
     _GROUP_DATA_TYPES = {"beamformed_data", "envelope_data", "image_sc", "image"}
 
     with File(path, mode="r") as file:
