@@ -783,7 +783,13 @@ def test_image_spec_accepts_neginf():
 class TestMultiTrackProbeConsistency:
     """FileSpec must reject multi-track files where probe-defining parameters differ."""
 
-    def _make_track(self, n_el: int = 4, geom_offset: float = 0.0, element_width: float = None, label: str = None):
+    def _make_track(
+        self,
+        n_el: int = 4,
+        geom_offset: float = 0.0,
+        element_width: float = None,
+        label: str = None,
+    ):
         """Return a minimal TrackSpec with raw_data and a scan."""
         n_frames, n_tx, n_ax, n_ch = 2, 2, 8, 1
         geom = np.zeros((n_el, 3), dtype=np.float32)
