@@ -5,6 +5,7 @@ This script should be run separately before the main conversion process.
 
 import csv
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from tqdm import tqdm
@@ -13,16 +14,15 @@ from zea import log
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
 
-def load_splits(source_dir):
+def load_splits(csv_path: str | Path):
     """
     Load splits from MeasurementsList.csv and return avi filenames
 
     Args:
-        source_dir: Source directory containing MeasurementsList.csv
+        csv_path: Path to the MeasurementsList.csv file
     Returns:
         Dictionary with keys 'train', 'val', 'test', 'rejected' and values as lists of avi filenames
     """
-    csv_path = Path(source_dir) / "MeasurementsList.csv"
     splits = {"train": [], "val": [], "test": [], "rejected": []}
     # Read CSV using built-in csv module
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
@@ -39,7 +39,7 @@ def load_splits(source_dir):
     return splits
 
 
-def find_avi_file(source_dir, hashed_filename, batch=None):
+def find_avi_file(source_dir: Path, hashed_filename: str, batch=None):
     """
     Find AVI file in the specified batch directory or any batch if not specified.
 
@@ -55,18 +55,12 @@ def find_avi_file(source_dir, hashed_filename, batch=None):
     if hashed_filename.endswith(".avi"):
         hashed_filename = hashed_filename[:-4]
 
-    if batch:
-        batch_dir = Path(source_dir) / batch
+    dirs = [source_dir / batch] if batch else source_dir.glob("Batch*")
+    for batch_dir in dirs:
         avi_path = batch_dir / f"{hashed_filename}.avi"
         if avi_path.exists():
             return avi_path
-        return None
-    else:
-        for batch_dir in Path(source_dir).glob("Batch*"):
-            avi_path = batch_dir / f"{hashed_filename}.avi"
-            if avi_path.exists():
-                return avi_path
-        return None
+    return None
 
 
 def load_first_frame(avi_file):
@@ -101,7 +95,37 @@ def load_first_frame(avi_file):
     return frame
 
 
-def precompute_cone_parameters(source_path: Path, output_path: Path, batch, max_files, force):
+def _find_avi_files(src: Path, splits: dict, batch):
+    # Collect and de-extension all filenames across splits
+    base_filenames = [
+        avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
+        for split_files in splits.values()
+        for avi_filename in split_files
+    ]
+
+    # Look up the AVI files in parallel (I/O-bound filesystem checks)
+    files_to_process = []
+    with ThreadPoolExecutor() as executor:
+        results = executor.map(
+            lambda name: (name, find_avi_file(src, name, batch=batch)),
+            base_filenames,
+        )
+        for base_filename, avi_file in tqdm(
+            results, total=len(base_filenames), desc="Finding AVI files"
+        ):
+            if avi_file:
+                files_to_process.append(avi_file)
+            else:
+                log.warning(
+                    f"Warning: Could not find AVI file for {base_filename} in batch "
+                    f"{batch if batch else 'any'}"
+                )
+    return files_to_process
+
+
+def precompute_cone_parameters(
+    source_path: Path, measurements_csv: str | Path, cone_params_csv: Path, batch, max_files, force
+):
     """
     Precompute and save cone parameters for all AVI files.
 
@@ -111,7 +135,8 @@ def precompute_cone_parameters(source_path: Path, output_path: Path, batch, max_
 
     Args:
         source_path: Source directory containing EchoNet-LVH data
-        output_path: Destination directory to save cone parameters
+        measurements_csv: Path to the MeasurementsList.csv file
+        cone_params_csv: Path to the output CSV file
         batch: Specific batch to process (e.g., "Batch2") or None for all
         max_files: Maximum number of files to process (or None for all)
         force: Whether to recompute parameters if they already exist
@@ -119,31 +144,14 @@ def precompute_cone_parameters(source_path: Path, output_path: Path, batch, max_
         Path to the CSV file containing cone parameters
     """
 
-    # Output file for cone parameters
-    cone_params_csv = output_path / "cone_parameters.csv"
-    cone_params_json = output_path / "cone_parameters.json"
-
     # Check if parameters already exist
     if cone_params_csv.exists() and not force:
         log.warning(f"Parameters already exist at {cone_params_csv}. Use --force to recompute.")
         return cone_params_csv
 
     # Get list of files to process
-    splits = load_splits(source_path)
-
-    files_to_process = []
-    for split_files in splits.values():
-        for avi_filename in split_files:
-            # Strip .avi if present
-            base_filename = avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
-            avi_file = find_avi_file(source_path, base_filename, batch=batch)
-            if avi_file:
-                files_to_process.append((avi_file, avi_filename))
-            else:
-                log.warning(
-                    f"Could not find AVI file for {base_filename} in batch "
-                    f"{batch if batch else 'any'}"
-                )
+    splits = load_splits(measurements_csv)
+    files_to_process = _find_avi_files(source_path, splits, batch)
 
     # Limit files if max_files is specified
     if max_files is not None:
@@ -230,6 +238,7 @@ def precompute_cone_parameters(source_path: Path, output_path: Path, batch, max_
                 writer.writerow(failure_record)
 
     # Also save as JSON for easier programmatic access
+    cone_params_json = cone_params_csv.with_suffix(".json")
     with open(cone_params_json, "w", encoding="utf-8") as jsonfile:
         json.dump(all_cone_params, jsonfile)
 

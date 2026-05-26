@@ -19,7 +19,6 @@ import os
 import shutil
 import tempfile
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import jax.numpy as jnp
@@ -29,7 +28,11 @@ from tqdm import tqdm
 from zea import log
 from zea.data import generate_zea_dataset
 from zea.data.convert.echonet import H5Processor
-from zea.data.convert.echonetlvh.precompute_crop import precompute_cone_parameters
+from zea.data.convert.echonetlvh.precompute_crop import (
+    _find_avi_files,
+    load_splits,
+    precompute_cone_parameters,
+)
 from zea.data.convert.utils import load_avi
 from zea.display import cartesian_to_polar_matrix
 from zea.func.tensor import translate
@@ -84,58 +87,6 @@ def overwrite_splits(csv_path, rejection_path=None):
                 )
         temp_path.replace(csv_path)
     log.info(f"Applied {rejection_counter} rejections to {csv_path}")
-
-
-def load_splits(csv_path):
-    """
-    Load splits from MeasurementsList.csv and return avi filenames
-
-    Args:
-        source_dir: Source directory containing MeasurementsList.csv
-    Returns:
-        Dictionary with keys 'train', 'val', 'test', 'rejected' and values as lists of avi filenames
-    """
-    splits = {"train": [], "val": [], "test": [], "rejected": []}
-    with open(csv_path, newline="", encoding="utf-8") as csvfile:
-        reader = csv.DictReader(csvfile)
-        file_split_map = {}
-        for row in reader:
-            filename = row["HashedFileName"]
-            split = row["split"]
-            file_split_map.setdefault(filename, split)
-        for filename, split in file_split_map.items():
-            splits[split].append(filename + ".avi")
-    return splits
-
-
-def find_avi_file(source_dir, hashed_filename, batch=None):
-    """
-    Find AVI file in the specified batch directory or any batch if not specified.
-
-    Args:
-        source_dir: Source directory containing BatchX subdirectories
-        hashed_filename: Hashed filename (with or without .avi extension)
-        batch: Specific batch directory to search in (e.g., "Batch2"), or None to search all batches
-
-    Returns:
-        Path to the AVI file if found, else None
-    """
-    # If filename already has .avi extension, strip it
-    if hashed_filename.endswith(".avi"):
-        hashed_filename = hashed_filename[:-4]
-
-    if batch:
-        batch_dir = Path(source_dir) / batch
-        avi_path = batch_dir / f"{hashed_filename}.avi"
-        if avi_path.exists():
-            return avi_path
-        return None
-    else:
-        for batch_dir in Path(source_dir).glob("Batch*"):
-            avi_path = batch_dir / f"{hashed_filename}.avi"
-            if avi_path.exists():
-                return avi_path
-        return None
 
 
 def load_cone_parameters(csv_path):
@@ -448,29 +399,6 @@ def transform_measurements_csv(csv_path, cone_params_csv=None):
         raise
 
 
-def _process_file_worker(avi_file, dst, splits, cone_parameters, range_from, process_range):
-    """
-    Function for a hyperthreading worker to process a single file.
-
-    Args:
-        avi_file: Path to the AVI file to process
-        dst: Destination directory for output
-        splits: Dictionary of splits
-        cone_parameters: Dictionary of cone parameters
-        range_from: Range from value for processing
-        process_range: Process range value for processing
-    Returns:
-        Result of processing the file
-    """
-
-    # create a fresh processor inside the worker process
-    proc = LVHProcessor(path_out_h5=dst, splits=splits, cone_params=cone_parameters)
-    # if LVHProcessor needs range_from/_process_range set, set them here
-    proc.range_from = range_from
-    proc._process_range = process_range
-    return proc(avi_file)
-
-
 def unzip(src: Path, dst: Path) -> Path:
     assert src.exists(), f"Source path {src} does not exist."
 
@@ -518,10 +446,9 @@ def convert_echonetlvh(
     if not no_rejection:
         overwrite_splits(measurements_csv, rejection_path)
 
-    # Check that cone parameters exist
+    # Precompute cone parameters if needed
     cone_params_csv = dst / "cone_parameters.csv"
-    if not cone_params_csv.exists():
-        precompute_cone_parameters(src, dst, batch, max_files, force)
+    precompute_cone_parameters(measurements_csv, cone_params_csv, batch, max_files, force)
 
     # If no specific conversion is requested, convert both
     if not (convert_measurements or convert_images):
@@ -536,30 +463,7 @@ def convert_echonetlvh(
         cone_parameters = load_cone_parameters(cone_params_csv)
         log.info(f"Loaded cone parameters for {len(cone_parameters)} files")
 
-        # Collect and de-extension all filenames across splits
-        base_filenames = [
-            avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
-            for split_files in splits.values()
-            for avi_filename in split_files
-        ]
-
-        # Look up the AVI files in parallel (I/O-bound filesystem checks)
-        files_to_process = []
-        with ThreadPoolExecutor() as executor:
-            results = executor.map(
-                lambda name: (name, find_avi_file(src, name, batch=batch)),
-                base_filenames,
-            )
-            for base_filename, avi_file in tqdm(
-                results, total=len(base_filenames), desc="Finding AVI files"
-            ):
-                if avi_file:
-                    files_to_process.append(avi_file)
-                else:
-                    log.warning(
-                        f"Warning: Could not find AVI file for {base_filename} in batch "
-                        f"{batch if batch else 'any'}"
-                    )
+        files_to_process = _find_avi_files(src, splits, batch)
 
         # List files that have already been processed (set for O(1) membership)
         files_done = {
