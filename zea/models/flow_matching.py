@@ -10,10 +10,14 @@ schedule and a velocity-field prediction objective.
     - :class:`~zea.models.diffusion.DiffusionModel`: DDIM-based counterpart.
     - Liu et al., *Flow Straight and Fast*, 2022. https://arxiv.org/abs/2209.03003
     - Lipman et al., *Flow Matching for Generative Modeling*, 2022. https://arxiv.org/abs/2210.02747
+    - Tong et al., *Improving and Generalizing Flow Matching with Minibatch OT*, 2023. https://arxiv.org/abs/2302.00482
 
 """
 
 from __future__ import annotations
+
+import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 import keras
 from keras import ops
@@ -60,6 +64,18 @@ class FlowMatchingModel(DiffusionModel):
     backwards from :math:`t = 1` (pure noise) to :math:`t = 0` (clean data)
     using a simple Euler discretisation (identical to the DDIM update rule under
     this linear schedule).
+
+    Noise samples are paired to data samples within each minibatch using
+    **minibatch Optimal Transport** (OT-CFM, Tong et al. 2023).  The
+    Hungarian algorithm solves the linear assignment problem
+
+    .. math::
+
+        \\pi^* = \\arg\\min_{\\pi \\in \\mathcal{P}} \\sum_{i,j}
+                \\pi_{ij} \\|x_0^{(i)} - \\varepsilon^{(j)}\\|^2
+
+    within each minibatch, replacing the random (independent) coupling used
+    in vanilla CFM.
 
     All sampling, guidance (DPS/DDS), and posterior-sampling machinery from
     :class:`~zea.models.diffusion.DiffusionModel` is inherited unchanged.
@@ -280,12 +296,49 @@ class FlowMatchingModel(DiffusionModel):
     # Training
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _ot_couple(data, noises):
+        """Permute ``noises`` to optimally pair with ``data`` via minibatch OT.
+
+        Solves the linear assignment problem
+
+        .. math::
+
+            \\pi^* = \\arg\\min_{\\pi} \\sum_{i,j}
+                    \\pi_{ij} \\|x_0^{(i)} - \\varepsilon^{(j)}\\|^2
+
+        using the Hungarian algorithm (scipy), then returns
+        ``noises`` permuted according to the optimal assignment.
+
+        Args:
+            data: Data batch of shape ``(batch_size, *input_shape)``.
+            noises: Noise batch of the same shape.
+
+        Returns:
+            Permuted noise tensor of the same shape as ``noises``.
+        """
+        data_np = ops.convert_to_numpy(data)
+        noises_np = ops.convert_to_numpy(noises)
+
+        batch_size = data_np.shape[0]
+        data_flat = data_np.reshape(batch_size, -1)
+        noises_flat = noises_np.reshape(batch_size, -1)
+
+        # Pairwise squared L2 cost  C[i, j] = ||x0_i − ε_j||²
+        diff = data_flat[:, None, :] - noises_flat[None, :, :]  # (B, B, D)
+        cost = np.sum(diff**2, axis=-1)  # (B, B)
+
+        _, col_ind = linear_sum_assignment(cost)
+        return ops.take(noises, col_ind, axis=0)
+
     def train_step(self, data):
-        """Custom train step for flow matching.
+        """Custom train step for OT-CFM.
 
         Trains the network to predict the velocity field
         :math:`v = \\varepsilon - x_0` from noisy observations
-        :math:`x_t = (1 - t)\\,x_0 + t\\,\\varepsilon`.
+        :math:`x_t = (1 - t)\\,x_0 + t\\,\\varepsilon`, where
+        :math:`(x_0, \\varepsilon)` pairs are drawn from the minibatch
+        optimal-transport coupling.
 
         Note:
             Only implemented for the TensorFlow backend.
@@ -299,6 +352,8 @@ class FlowMatchingModel(DiffusionModel):
         n_dims = len(input_shape)
 
         noises = keras.random.normal(shape=ops.shape(data))
+        # OT coupling: permute noises to minimise total transport cost
+        noises = self._ot_couple(data, noises)
 
         # Sample uniform random flow times in [min_t, max_t]
         diffusion_times = keras.random.uniform(
@@ -333,11 +388,13 @@ class FlowMatchingModel(DiffusionModel):
         return {m.name: m.result() for m in self.metrics}
 
     def test_step(self, data):
-        """Custom test step for flow matching."""
+        """Custom test step for OT-CFM."""
         batch_size, *input_shape = ops.shape(data)
         n_dims = len(input_shape)
 
         noises = keras.random.normal(shape=ops.shape(data))
+        # OT coupling: permute noises to minimise total transport cost
+        noises = self._ot_couple(data, noises)
 
         diffusion_times = keras.random.uniform(
             shape=[batch_size, *[1] * n_dims],
