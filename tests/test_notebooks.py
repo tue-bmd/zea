@@ -32,155 +32,122 @@ CONFIG_DIR = Path("configs")
 NOTEBOOKS_DIR = Path("docs/source/notebooks")
 NOTEBOOKS = list(NOTEBOOKS_DIR.rglob("*.ipynb"))
 
-# Per-notebook parameters for CI testing (faster execution). Parameters override the default
-# notebook parameters. Required backends are mapped to pytest markers on the parametrized test case.
-NOTEBOOK_OVERRIDES = {
+# Per-notebook parameters for CI testing (faster execution)
+# these overwrite the default parameters in the notebooks
+NOTEBOOK_PARAMETERS = {
     "diffusion_model_example.ipynb": {
-        "parameters": {
-            "n_unconditional_samples": 2,
-            "n_unconditional_steps": 2,
-            "n_conditional_samples": 2,
-            "n_conditional_steps": 2,
-        }
+        "n_unconditional_samples": 2,
+        "n_unconditional_steps": 2,
+        "n_conditional_samples": 2,
+        "n_conditional_steps": 2,
     },
     "custom_models_example.ipynb": {
-        "parameters": {
-            "grid_size_x": 10,
-            "grid_size_z": 10,
-        }
+        "grid_size_x": 10,
+        "grid_size_z": 10,
     },
     "agent_example.ipynb": {
-        "parameters": {
-            "n_prior_samples": 2,
-            "n_unconditional_steps": 2,
-            "n_initial_conditonal_steps": 1,
-            "n_conditional_steps": 2,
-            "n_conditional_samples": 2,
-        }
+        "n_prior_samples": 2,
+        "n_unconditional_steps": 2,
+        "n_initial_conditonal_steps": 1,
+        "n_conditional_steps": 2,
+        "n_conditional_samples": 2,
     },
     "task_based_perception_action_loop.ipynb": {
-        "parameters": {
-            "n_prior_steps": 2,
-            "n_posterior_steps": 2,
-            "n_particles": 2,
-        }
+        "n_prior_steps": 2,
+        "n_posterior_steps": 2,
+        "n_particles": 2,
     },
     "3d_beamforming_example.ipynb": {
-        "parameters": {
-            "downscale_rate": 8,
-        }
+        "downscale_rate": 8,
     },
     "zea_sequence_example.ipynb": {
-        "parameters": {
-            "n_frames": 15,
-            "n_tx": 1,
-            "n_tx_total": 3,
-        }
+        "n_frames": 15,
+        "n_tx": 1,
+        "n_tx_total": 3,
     },
     "zea_data_example.ipynb": {
-        "parameters": {
-            "config_picmus_iq": f"{CONFIG_DIR}/config_picmus_iq.yaml",
-        }
+        "config_picmus_iq": f"{CONFIG_DIR}/config_picmus_iq.yaml",
     },
     "zea_local_data.ipynb": {
-        "parameters": {
-            "config_picmus_rf": f"{CONFIG_DIR}/config_picmus_rf.yaml",
-        }
+        "config_picmus_rf": f"{CONFIG_DIR}/config_picmus_rf.yaml",
     },
     "doppler_example.ipynb": {
-        "parameters": {
-            "n_frames": 3,
-            "n_transmits": 2,
-        },
-        "required_backends": ("tensorflow",),
+        "n_frames": 3,
+        "n_transmits": 2,
     },
     "speckle_tracking_example.ipynb": {
-        "parameters": {
-            "num_frames": 5,
-            "num_points": 10,
-            "max_iterations": 2,
-        }
+        "num_frames": 5,
+        "num_points": 10,
+        "max_iterations": 2,
     },
     "hvae_model_example.ipynb": {
-        "parameters": {
-            "inference_fractions": [0.03],
-            "n_samples": 2,
-            "batch_size": 2,
-            "load_weights": False,
-        }
+        "inference_fractions": [0.03],
+        "n_samples": 2,
+        "batch_size": 2,
+        "load_weights": False,
     },
     "dbua_example.ipynb": {
-        "parameters": {
-            "num_iterations": 2,
-            "step_size": 1,
-        }
+        "num_iterations": 2,
+        "step_size": 1,
     },
     "nuclear_dehazing_example.ipynb": {
-        "parameters": {
-            "n_unconditional_samples": 1,
-            "n_unconditional_steps": 2,
-            "n_conditional_samples": 1,
-            "n_conditional_steps": 2,
-            "diffusion_steps": 2,
-            "window_size": 2,
-            "hard_project": True,
-            "omega": 1.0,
-            "gamma": 1.0,
-            "haze_level": 0.5,
-            "rank_weight_factor": 20,
-            "initial_step": 0,
-        }
+        "n_unconditional_samples": 1,
+        "n_unconditional_steps": 2,
+        "n_conditional_samples": 1,
+        "n_conditional_steps": 2,
+        "diffusion_steps": 2,
+        "window_size": 2,
+        "hard_project": True,
+        "omega": 1.0,
+        "gamma": 1.0,
+        "haze_level": 0.5,
+        "rank_weight_factor": 20,
+        "initial_step": 0,
     },
     "refocus_pipeline_example.ipynb": {
-        "parameters": {
-            "num_transmits": 2,
-            "grid_size_x": 16,
-            "grid_size_z": 16,
-        }
+        "num_transmits": 2,
+        "grid_size_x": 16,
+        "grid_size_z": 16,
     },
-    "taesd_autoencoder_example.ipynb": {
-        "required_backends": ("tensorflow",),
-    },
-    "carotid_segmentation_example.ipynb": {
-        "required_backends": ("tensorflow",),
-    },
-    "left_ventricle_segmentation_example.ipynb": {
-        "required_backends": ("tensorflow",),
-    },
-    "myocardial_quality_example.ipynb": {
-        "required_backends": ("tensorflow",),
-    },
+    # Add more notebooks and their parameters here as needed
+    # "other_notebook.ipynb": {
+    #     "param1": value1,
+    #     "param2": value2,
+    # },
+}
+
+TENSORFLOW_NOTEBOOKS = {
+    "doppler_example.ipynb",
+    "taesd_autoencoder_example.ipynb",
+    "carotid_segmentation_example.ipynb",
+    "left_ventricle_segmentation_example.ipynb",
+    "myocardial_quality_example.ipynb",
 }
 
 _notebook_names = [nb.name for nb in NOTEBOOKS]
-for notebook_name in NOTEBOOK_OVERRIDES:
+for notebook_name in NOTEBOOK_PARAMETERS:
     assert notebook_name in _notebook_names, (
         f"Notebook {notebook_name} not found in {NOTEBOOKS_DIR}. "
-        "Wrong definition in NOTEBOOK_OVERRIDES?"
+        "Wrong definition in NOTEBOOK_PARAMETERS?"
+    )
+for notebook_name in TENSORFLOW_NOTEBOOKS:
+    assert notebook_name in _notebook_names, (
+        f"Notebook {notebook_name} not found in {NOTEBOOKS_DIR}. "
+        "Wrong definition in TENSORFLOW_NOTEBOOKS?"
     )
 
 
-def _notebook_parameters(notebook_name):
-    return NOTEBOOK_OVERRIDES.get(notebook_name, {}).get("parameters", {})
+def _notebook_case(notebook):
+    marks = (pytest.mark.tensorflow,) if notebook.name in TENSORFLOW_NOTEBOOKS else ()
+    return pytest.param(notebook, id=notebook.name, marks=marks)
 
 
-def _notebook_marks(notebook_name):
-    required_backends = NOTEBOOK_OVERRIDES.get(notebook_name, {}).get("required_backends", ())
-    return tuple(getattr(pytest.mark, backend) for backend in required_backends)
-
-
-NOTEBOOK_CASES = [
-    pytest.param(notebook, id=notebook.name, marks=_notebook_marks(notebook.name))
-    for notebook in NOTEBOOKS
-]
+NOTEBOOK_CASES = [_notebook_case(notebook) for notebook in NOTEBOOKS]
 
 
 def pytest_sessionstart(session):
     print(f"📚 Preparing to test {len(NOTEBOOKS)} notebooks from {NOTEBOOKS_DIR}")
-    notebooks_with_parameters = sum(
-        bool(override.get("parameters")) for override in NOTEBOOK_OVERRIDES.values()
-    )
-    print(f"📝 Using custom parameters for {notebooks_with_parameters} notebooks")
+    print(f"📝 Using custom parameters for {len(NOTEBOOK_PARAMETERS)} notebooks")
 
 
 @pytest.mark.notebook
@@ -197,7 +164,7 @@ def test_notebook_runs(notebook, tmp_path, request):
     start = time.time()
 
     # Get custom parameters for this notebook if they exist
-    notebook_params = _notebook_parameters(notebook.name)
+    notebook_params = NOTEBOOK_PARAMETERS.get(notebook.name, {})
     if notebook_params:
         print(f"🔧 Using custom parameters: {notebook_params}")
 
