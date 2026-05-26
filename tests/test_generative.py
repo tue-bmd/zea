@@ -157,6 +157,7 @@ def animate_diffusion_trajectory_2d(
     log.success(f"Animated diffusion trajectory saved to {filename}")
 
 
+@pytest.mark.tensorflow
 def test_diffusion_fit_and_sample_2d(synthetic_2d_data, debug=False):
     """Test diffusion model fitting and sampling on synthetic 2D data."""
     data, *_ = synthetic_2d_data
