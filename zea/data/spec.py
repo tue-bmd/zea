@@ -1,4 +1,3 @@
-import warnings
 from collections import defaultdict
 from dataclasses import MISSING, dataclass, field, fields
 from importlib.metadata import PackageNotFoundError
@@ -149,6 +148,22 @@ class Spec:
     def optional_fields(cls) -> tuple[str, ...]:
         """Return the names of fields that have a default value."""
         return tuple(f.name for f in fields(cls) if cls._is_optional_dataclass_field(f))
+
+    def warn_missing_optional_fields(self):
+        """Warn about optional fields that were not provided."""
+        _optional_fields = self.optional_fields()
+        for field_name in self.SCHEMA.keys():
+            if field_name in _optional_fields and getattr(self, field_name) is None:
+                if hasattr(self, "FIELD_METADATA"):
+                    meta = self.FIELD_METADATA.get(field_name, {})
+                    description = meta.get("description", _DEFAULT_FIELD_DESCRIPTION)
+                else:
+                    description = _DEFAULT_FIELD_DESCRIPTION
+                log.warning(
+                    f"Optional {self.__class__.__name__} field '{field_name}' is not set. "
+                    f"Description: {description} "
+                    "Defaulted to None."
+                )
 
     @staticmethod
     def _expected_shapes(shape_spec: Any) -> tuple[tuple, ...]:
@@ -551,13 +566,11 @@ class Map(Spec):
             # indicates the array was supplied in millimetres rather than metres.
             max_abs = np.max(np.abs(self.coordinates[np.isfinite(self.coordinates)]), initial=0.0)
             if max_abs > 1.0:
-                warnings.warn(
-                    log.warning(
-                        f"{type(self).__name__}: coordinates have a maximum absolute value of "
-                        f"{max_abs:.4g}, which exceeds 1 m.  Ultrasound scan regions are "
-                        "typically a few centimetres across.  Please verify that coordinates "
-                        "are in metres, not millimetres."
-                    )
+                log.warning(
+                    f"{type(self).__name__}: coordinates have a maximum absolute value of "
+                    f"{max_abs:.4g}, which exceeds 1 m.  Ultrasound scan regions are "
+                    "typically a few centimetres across.  Please verify that coordinates "
+                    "are in metres, not millimetres."
                 )
         else:
             log.warning(
@@ -842,7 +855,7 @@ class DataSpec(Spec):
     # Pipeline data products (plain arrays)
     raw_data: np.ndarray | None = None
     aligned_data: np.ndarray | None = None
-    # Spatial map data products (with extent metadata)
+    # Spatial map data products (with coordinates metadata)
     beamformed_data: BeamformedData | dict | None = None
     envelope_data: EnvelopeData | dict | None = None
     image: Image | dict | None = None
@@ -916,7 +929,7 @@ class DataSpec(Spec):
                     f"Custom data key '{key}' must be a spatial map "
                     f"(a dict with at least a 'values' key), not a flat array. "
                     f"Only 'raw_data' and 'aligned_data' are accepted as flat arrays. "
-                    f"Wrap your data: {{'values': array, 'extent': extent_array}}."
+                    f"Wrap your data: {{'values': array, 'coordinates': coordinates_array}}."
                 )
             setattr(self, key, value)
 
@@ -953,25 +966,6 @@ class DataSpec(Spec):
                         f"'{fname}' must have n_ch ∈ {{1, 2}} (RF or IQ), "
                         f"got n_ch={n_ch} (shape {arr.shape})."
                     )
-
-        suggested_map_keys = ", ".join(
-            sorted(
-                key
-                for key, value in type(self).SCHEMA.items()
-                if "spec" in value and issubclass(value["spec"], Map)
-            )
-        )
-
-        if getattr(self, "_extra_map_keys", ()):
-            custom_keys = ", ".join(sorted(self._extra_map_keys))
-            warnings.warn(
-                log.warning(
-                    f"Custom spatial map key(s) added to 'data': {custom_keys}. "
-                    "These are validated as generic Map specs. "
-                    "If your data matches an existing type, prefer one of the supported "
-                    f"spatial maps: {suggested_map_keys}."
-                )
-            )
 
 
 @dataclass
@@ -1168,12 +1162,15 @@ class ScanSpec(Spec):
             if np.all(self.demodulation_frequency == self.demodulation_frequency[0]):
                 self.demodulation_frequency = self.demodulation_frequency[0]
 
+        self.warn_missing_optional_fields()
+
 
 @dataclass
 class Subject(Spec):
     """Subject metadata associated with the study.
 
     Args:
+        id: Subject ID.
         type: Subject type, e.g. human, phantom, animal.
         age: Subject age in years.
         sex: Subject sex.
@@ -1194,18 +1191,17 @@ class Subject(Spec):
         "fat_percentage": {"dtype": np.float32, "shape": ()},
     }
 
+    FIELD_METADATA = {
+        "id": {"description": "Subject ID. Needed for subject-wise splits."},
+    }
+
     def __post_init__(self):
         super().__post_init__()
 
         if self.id is not None and not self.id.strip():
             raise ValueError("Subject ID cannot be an empty string")
-        if self.id is None:
-            warnings.warn(
-                log.warning(
-                    "Subject ID is not provided; please consider adding an ID for "
-                    "better traceability and to enable subject-wise splits."
-                )
-            )
+
+        self.warn_missing_optional_fields()
 
         if self.fat_percentage is not None and (
             self.fat_percentage < 0 or self.fat_percentage > 100
@@ -1488,24 +1484,7 @@ class MetadataSpec(Spec):
     def __post_init__(self):
         super().__post_init__()
 
-        suggested_signal_keys = ", ".join(
-            sorted(
-                key
-                for key, value in type(self).SCHEMA.items()
-                if "spec" in value and issubclass(value["spec"], Signal)
-            )
-        )
-
-        if getattr(self, "_extra_signal_keys", ()):
-            custom_keys = ", ".join(sorted(self._extra_signal_keys))
-            warnings.warn(
-                log.warning(
-                    f"Custom signal key(s) added to 'metadata': {custom_keys}. "
-                    "These are validated as generic SignalND specs. "
-                    "If your signal matches an existing type, prefer one of the supported "
-                    f"signal fields: {suggested_signal_keys}."
-                )
-            )
+        self.warn_missing_optional_fields()
 
 
 @dataclass
