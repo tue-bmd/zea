@@ -148,10 +148,15 @@ the full timing of the acquisition.
     >>> import numpy as np
     >>> from zea import File
 
-    >>> n_frames, n_ax, n_el = 4, 512, 128
-    >>> n_tx_focused, n_tx_pw = 16, 8
+    >>> n_frames, n_ax, n_el = 2, 512, 128
+    >>> n_tx_focused, n_tx_pw = 3, 2
 
     >>> probe_geom = np.zeros((n_el, 3), dtype=np.float32)
+
+    >>> # One track index per global transmit event across all frames
+    >>> track_schedule = np.tile(
+    ...     [0] * n_tx_focused + [1] * n_tx_pw, n_frames
+    ... ).astype(np.int32)
 
     >>> f = File.create(
     ...     "acquisition.hdf5",
@@ -192,6 +197,8 @@ the full timing of the acquisition.
     ...         },
     ...     ],
     ...     probe_name="L11-4v",
+    ...     track_schedule=track_schedule,
+    ...     overwrite=True,
     ... )
     >>> f.close()
 
