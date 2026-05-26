@@ -176,6 +176,7 @@ the full timing of the acquisition.
     ...                 "focus_distances":        np.full(n_tx_focused, np.inf, dtype=np.float32),
     ...                 "transmit_origins":       np.zeros((n_tx_focused, 3), dtype=np.float32),
     ...                 "polar_angles":           np.zeros(n_tx_focused, dtype=np.float32),
+    ...                 "time_to_next_transmit": np.ones((n_frames, n_tx_focused), dtype=np.float32) * np.float32(1e-4),
     ...             },
     ...         },
     ...         # Track 1: plane-wave Doppler
@@ -193,6 +194,7 @@ the full timing of the acquisition.
     ...                 "focus_distances":        np.full(n_tx_pw, np.inf, dtype=np.float32),
     ...                 "transmit_origins":       np.zeros((n_tx_pw, 3), dtype=np.float32),
     ...                 "polar_angles":           np.zeros(n_tx_pw, dtype=np.float32),
+    ...                 "time_to_next_transmit": np.ones((n_frames, n_tx_pw), dtype=np.float32) * np.float32(2e-4),
     ...             },
     ...         },
     ...     ],
@@ -218,9 +220,13 @@ the full timing of the acquisition.
     ...     focused_track = f.get_track("focused_bmode")
     ...     focused_scan = focused_track.scan()
     ...     focused_raw  = focused_track.data.raw_data[:]
+    ...     # access the global timing information for the focused track:
+    ...     focused_track.timestamps
     ...     # ... process with e.g. a focused B-mode pipeline
     ...     planewave_scan = planewave_track.scan()
     ...     planewave_raw  = planewave_track.data.raw_data[:]
+    ...     # access the global timing information for the planewave track:
+    ...     planewave_track.timestamps
     ...     # ... process with e.g. a plane-wave Doppler pipeline
     ['focused_bmode', 'planewave_doppler']
 
