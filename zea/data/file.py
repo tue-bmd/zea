@@ -327,6 +327,7 @@ def _compute_all_track_timestamps(
 
     return timestamp_matrices_per_track
 
+
 def _parse_version(v: str) -> tuple[int, ...]:
     return tuple(int(p) for p in v.split(".")[:3] if p.isdigit())
 
@@ -401,7 +402,7 @@ class File(h5py.File):
         if "locking" not in kwargs and mode == "r":
             # If the file is opened in read mode, disable locking
             kwargs["locking"] = False
-            
+
         # Warn when opening an existing file that pre-dates zea v0.1.0
         if mode in ("r", "r+"):
             _warn_if_legacy_file(self)

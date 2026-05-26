@@ -889,6 +889,8 @@ class TestMultiTrackProbeConsistency:
         track_b = self._make_track(geom_offset=1.0, label="track_b")
         with pytest.raises(ValueError, match=r"Tracks 0 and 1"):
             FileSpec(tracks=[track_a, track_b])
+
+
 def _scan_bare(n_tx: int = 2, n_el: int = 4):
     """Minimal ScanSpec dict with only required fields (all optionals left as None)."""
     return {
