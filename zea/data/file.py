@@ -403,12 +403,12 @@ class File(h5py.File):
             # If the file is opened in read mode, disable locking
             kwargs["locking"] = False
 
+        # Initialize the h5py.File
+        super().__init__(name, mode, *args, **kwargs)
+
         # Warn when opening an existing file that pre-dates zea v0.1.0
         if mode in ("r", "r+"):
             _warn_if_legacy_file(self)
-
-        # Initialize the h5py.File
-        super().__init__(name, mode, *args, **kwargs)
 
     def __contains__(self, key):
         """Check whether *key* exists in the file.
