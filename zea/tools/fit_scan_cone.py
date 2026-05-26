@@ -580,31 +580,41 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
     plt.close()
 
 
-def main(avi_path):
-    """Demonstrate scan cone fitting on a sample AVI file."""
+def _load_first_frame(avi_file):
+    """
+    Load only the first frame of a video file.
+
+    Args:
+        avi_file: Path to the video file
+
+    Returns:
+        First frame as numpy array of shape (H, W) and dtype np.uint8 (grayscale)
+    """
     try:
         import cv2
     except ImportError as exc:
         raise ImportError(
-            "OpenCV is required for cone detection and visualization. "
+            "OpenCV is required for loading video files. "
             "Please install it with 'pip install opencv-python' or "
             "'pip install opencv-python-headless'."
         ) from exc
 
-    if not Path(avi_path).exists():
-        raise FileNotFoundError(f"AVI file not found: {avi_path}")
-
-    # Load first frame
-    cap = cv2.VideoCapture(avi_path)
+    cap = cv2.VideoCapture(str(avi_file))
     ret, frame = cap.read()
     cap.release()
 
     if not ret:
-        print(f"Failed to read video file: {avi_path}")
-        return
+        raise ValueError(f"Failed to read first frame from {avi_file}")
 
-    # Convert to grayscale
+    # Convert BGR to grayscale
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    return frame
+
+
+def main(avi_path):
+    """Demonstrate scan cone fitting on a sample AVI file."""
+    frame = _load_first_frame(avi_path)
 
     try:
         # Fit scan cone

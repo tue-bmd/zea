@@ -29,7 +29,11 @@ from zea.data.convert.echonet import H5Processor
 from zea.data.convert.utils import load_avi
 from zea.display import cartesian_to_polar_matrix
 from zea.func.tensor import translate, vmap
-from zea.tools.fit_scan_cone import crop_and_center_cone, fit_and_crop_around_scan_cone
+from zea.tools.fit_scan_cone import (
+    _load_first_frame,
+    crop_and_center_cone,
+    fit_and_crop_around_scan_cone,
+)
 
 
 def load_splits(csv_path: str | Path):
@@ -79,38 +83,6 @@ def find_avi_file(source_dir: Path, hashed_filename: str, batch=None):
         if avi_path.exists():
             return avi_path
     return None
-
-
-def load_first_frame(avi_file):
-    """
-    Load only the first frame of a video file.
-
-    Args:
-        avi_file: Path to the video file
-
-    Returns:
-        First frame as numpy array of shape (H, W) and dtype np.uint8 (grayscale)
-    """
-    try:
-        import cv2
-    except ImportError as exc:
-        raise ImportError(
-            "OpenCV is required for loading video files. "
-            "Please install it with 'pip install opencv-python' or "
-            "'pip install opencv-python-headless'."
-        ) from exc
-
-    cap = cv2.VideoCapture(str(avi_file))
-    ret, frame = cap.read()
-    cap.release()
-
-    if not ret:
-        raise ValueError(f"Failed to read first frame from {avi_file}")
-
-    # Convert BGR to grayscale
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-    return frame
 
 
 def _find_avi_files(src: Path, splits: dict, batch):
@@ -204,7 +176,7 @@ def precompute_cone_parameters(
         for avi_file, avi_filename in tqdm(files_to_process, desc="Computing cone parameters"):
             try:
                 # Load only the first frame of video using OpenCV directly
-                first_frame = load_first_frame(avi_file)
+                first_frame = _load_first_frame(avi_file)
 
                 # Detect cone parameters
                 _, full_cone_params = fit_and_crop_around_scan_cone(first_frame, return_params=True)
@@ -375,7 +347,7 @@ class LVHProcessor(H5Processor):
         )  # map over sequence of images, keep the angle fixed since it's constant across a sequence
         self.cone_parameters = cone_params or {}
 
-    def get_split(self, avi_file: str, sequence):
+    def get_split(self, avi_file: Path, sequence):
         """
         Get the split (train/val/test) for a given AVI file.
 
@@ -387,37 +359,36 @@ class LVHProcessor(H5Processor):
             String indicating the split ('train', 'val', or 'test')
         """
         # Extract base filename without extension
-        filename = Path(avi_file).stem + ".avi"
+        filename = avi_file.name
 
         for split, files in self.splits.items():
             if filename in files:
                 return split
         raise UserWarning("Unknown split for file: " + filename)
 
-    def __call__(self, avi_file):
+    def __call__(self, avi_file: Path):
         """Takes a single avi_file and generates a zea dataset
 
         Args:
-            avi_file: String or path to avi_file to be processed
+            avi_file: Path to avi_file to be processed
 
         Returns:
             zea dataset
         """
-
-        avi_filename = Path(avi_file).stem + ".avi"
+        avi_file = avi_file.with_suffix(".avi")
         sequence_np = load_avi(avi_file)
         sequence_processed = ops.convert_to_numpy(sequence_np)
         sequence_processed = translate(sequence_processed, self.range_from, self._process_range)
         # Get pre-computed cone parameters for this file
-        cone_params = self.cone_parameters.get(avi_filename)
+        cone_params = self.cone_parameters.get(avi_file.name)
         if cone_params is not None:
             # Apply pre-computed cropping parameters
             sequence_processed = crop_sequence_with_params(sequence_processed, cone_params)
         else:
-            raise UserWarning(f"No cone parameters for {avi_filename}")
+            raise UserWarning(f"No cone parameters for {avi_file.name}")
 
         split = self.get_split(avi_file, sequence_processed)
-        out_h5 = self.path_out_h5 / split / (Path(avi_file).stem + ".hdf5")
+        out_h5 = self.path_out_h5 / split / avi_file.with_suffix(".hdf5")
 
         angle = cone_params["opening_angle"] / 2  # angular field spans (-angle, +angle)
         polar_im_set = self.cart2pol_batched(sequence_processed, angle)
