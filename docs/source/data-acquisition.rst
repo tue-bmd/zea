@@ -143,83 +143,84 @@ the full timing of the acquisition.
 
 **Write — create a file with multiple tracks**
 
-.. code-block:: python
+.. doctest::
 
-    import numpy as np
-    from zea import File
+    >>> import numpy as np
+    >>> from zea import File
 
-    n_frames, n_ax, n_el = 4, 512, 128
-    n_tx_focused, n_tx_pw = 16, 8
+    >>> n_frames, n_ax, n_el = 4, 512, 128
+    >>> n_tx_focused, n_tx_pw = 16, 8
 
-    probe_geom = np.zeros((n_el, 3), dtype=np.float32)
+    >>> probe_geom = np.zeros((n_el, 3), dtype=np.float32)
 
-    f = File.create(
-        "acquisition.hdf5",
-        tracks=[
-            # Track 0: focused B-mode
-            {
-                "label": "focused_bmode",
-                "data": {"raw_data": np.zeros((n_frames, n_tx_focused, n_ax, n_el, 1), dtype=np.float32)},
-                "scan": {
-                    "probe_geometry":         probe_geom,
-                    "sampling_frequency":     np.float32(40e6),
-                    "center_frequency":       np.float32(7e6),
-                    "demodulation_frequency": np.float32(7e6),
-                    "initial_times":          np.zeros(n_tx_focused, dtype=np.float32),
-                    "t0_delays":              np.zeros((n_tx_focused, n_el), dtype=np.float32),
-                    "tx_apodizations":        np.ones((n_tx_focused, n_el), dtype=np.float32),
-                    "focus_distances":        np.full(n_tx_focused, np.inf, dtype=np.float32),
-                    "transmit_origins":       np.zeros((n_tx_focused, 3), dtype=np.float32),
-                    "polar_angles":           np.zeros(n_tx_focused, dtype=np.float32),
-                },
-            },
-            # Track 1: plane-wave Doppler
-            {
-                "label": "planewave_doppler",
-                "data": {"raw_data": np.zeros((n_frames, n_tx_pw, n_ax, n_el, 1), dtype=np.float32)},
-                "scan": {
-                    "probe_geometry":         probe_geom,
-                    "sampling_frequency":     np.float32(40e6),
-                    "center_frequency":       np.float32(7e6),
-                    "demodulation_frequency": np.float32(7e6),
-                    "initial_times":          np.zeros(n_tx_pw, dtype=np.float32),
-                    "t0_delays":              np.zeros((n_tx_pw, n_el), dtype=np.float32),
-                    "tx_apodizations":        np.ones((n_tx_pw, n_el), dtype=np.float32),
-                    "focus_distances":        np.full(n_tx_pw, np.inf, dtype=np.float32),
-                    "transmit_origins":       np.zeros((n_tx_pw, 3), dtype=np.float32),
-                    "polar_angles":           np.zeros(n_tx_pw, dtype=np.float32),
-                },
-            },
-        ],
-        probe_name="L11-4v",
-    )
-    f.close()
+    >>> f = File.create(
+    ...     "acquisition.hdf5",
+    ...     tracks=[
+    ...         # Track 0: focused B-mode
+    ...         {
+    ...             "label": "focused_bmode",
+    ...             "data": {"raw_data": np.zeros((n_frames, n_tx_focused, n_ax, n_el, 1), dtype=np.float32)},
+    ...             "scan": {
+    ...                 "probe_geometry":         probe_geom,
+    ...                 "sampling_frequency":     np.float32(40e6),
+    ...                 "center_frequency":       np.float32(7e6),
+    ...                 "demodulation_frequency": np.float32(7e6),
+    ...                 "initial_times":          np.zeros(n_tx_focused, dtype=np.float32),
+    ...                 "t0_delays":              np.zeros((n_tx_focused, n_el), dtype=np.float32),
+    ...                 "tx_apodizations":        np.ones((n_tx_focused, n_el), dtype=np.float32),
+    ...                 "focus_distances":        np.full(n_tx_focused, np.inf, dtype=np.float32),
+    ...                 "transmit_origins":       np.zeros((n_tx_focused, 3), dtype=np.float32),
+    ...                 "polar_angles":           np.zeros(n_tx_focused, dtype=np.float32),
+    ...             },
+    ...         },
+    ...         # Track 1: plane-wave Doppler
+    ...         {
+    ...             "label": "planewave_doppler",
+    ...             "data": {"raw_data": np.zeros((n_frames, n_tx_pw, n_ax, n_el, 1), dtype=np.float32)},
+    ...             "scan": {
+    ...                 "probe_geometry":         probe_geom,
+    ...                 "sampling_frequency":     np.float32(40e6),
+    ...                 "center_frequency":       np.float32(7e6),
+    ...                 "demodulation_frequency": np.float32(7e6),
+    ...                 "initial_times":          np.zeros(n_tx_pw, dtype=np.float32),
+    ...                 "t0_delays":              np.zeros((n_tx_pw, n_el), dtype=np.float32),
+    ...                 "tx_apodizations":        np.ones((n_tx_pw, n_el), dtype=np.float32),
+    ...                 "focus_distances":        np.full(n_tx_pw, np.inf, dtype=np.float32),
+    ...                 "transmit_origins":       np.zeros((n_tx_pw, 3), dtype=np.float32),
+    ...                 "polar_angles":           np.zeros(n_tx_pw, dtype=np.float32),
+    ...             },
+    ...         },
+    ...     ],
+    ...     probe_name="L11-4v",
+    ... )
+    >>> f.close()
 
 **Read — unpack multiple tracks from a file**
 
-.. code-block:: python
+.. doctest::
 
-    import zea
+    >>> import zea
 
-    with zea.File("acquisition.hdf5") as f:
-        probe = f.probe()              # probe is shared across all tracks
+    >>> with zea.File("acquisition.hdf5") as f:
+    ...     probe = f.probe()              # probe is shared across all tracks
+    ...     # See track labels:
+    ...     print(f.track_labels)          # ['focused_bmode', 'planewave_doppler']
+    ...     # Unpack in the same order as track_labels — always safe:
+    ...     focused_track, planewave_track = f.tracks
+    ...     # Or fetch a specific track by name:
+    ...     focused_track = f.get_track("focused_bmode")
+    ...     focused_scan = focused_track.scan()
+    ...     focused_raw  = focused_track.data.raw_data[:]
+    ...     # ... process with e.g. a focused B-mode pipeline
+    ...     planewave_scan = planewave_track.scan()
+    ...     planewave_raw  = planewave_track.data.raw_data[:]
+    ...     # ... process with e.g. a plane-wave Doppler pipeline
+    ['focused_bmode', 'planewave_doppler']
 
-        # See track labels:
-        print(f.track_labels)          # ['focused_bmode', 'planewave_doppler']
+.. testcleanup::
 
-        # Unpack in the same order as track_labels — always safe:
-        focused_track, planewave_track = f.tracks
-
-        # Or fetch a specific track by name:
-        focused_track = f.get_track("focused_bmode")
-
-        focused_scan = focused_track.scan()
-        focused_raw  = focused_track.data.raw_data[:]
-        # ... process with e.g. a focused B-mode pipeline
-
-        planewave_scan = planewave_track.scan()
-        planewave_raw  = planewave_track.data.raw_data[:]
-        # ... process with e.g. a plane-wave Doppler pipeline
+    import os
+    os.remove("acquisition.hdf5")
 
 -------------------------------
 ``zea`` data format reference
