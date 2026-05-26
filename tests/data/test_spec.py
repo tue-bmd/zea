@@ -615,12 +615,34 @@ class TestDataValidationErrors:
             )
             assert m1.coordinates.shape == (2, 16, 12, 3)
 
+            # Unchanneled with frame-broadcast: coordinates.shape == (*values.shape[1:], 3)
+            m1_broadcast = Map(
+                values=np.zeros((2, 16, 12), dtype=np.uint8),
+                coordinates=np.zeros((16, 12, 3), dtype=np.float32),
+            )
+            assert m1_broadcast.coordinates.shape == (16, 12, 3)
+
             # Channeled: coordinates.shape == (*values.shape[:-1], 3)
             m2 = Map(
                 values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
                 coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
             )
             assert m2.coordinates.shape == (2, 16, 12, 3)
+
+            # Channeled with frame-broadcast: coordinates.shape == (*values.shape[1:-1], 3)
+            m2_broadcast = Map(
+                values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                coordinates=np.zeros((16, 12, 3), dtype=np.float32),
+            )
+            assert m2_broadcast.coordinates.shape == (16, 12, 3)
+
+    def test_map_coordinates_frame_broadcast_shape_mismatch_raises(self):
+        """Frame-broadcast coordinates must still match non-frame spatial dimensions."""
+        with pytest.raises(ValueError, match="Image: coordinates shape"):
+            Image(
+                values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                coordinates=np.zeros((99, 12, 3), dtype=np.float32),
+            )
 
     def test_map_coordinates_millimetre_range_warns(self):
         """Coordinates with |value| > 1 m should trigger a units warning."""
