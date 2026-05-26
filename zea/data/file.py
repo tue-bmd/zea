@@ -89,17 +89,19 @@ class Track:
                 scan = track.scan()
     """
 
-    __slots__ = ("_index", "_group", "_timestamps")
+    __slots__ = ("_index", "_group", "_timestamps", "_label")
 
     def __init__(
         self,
         index: int,
         group: "h5py.Group",
         timestamps: "np.ndarray | None" = None,
+        label: "str | None" = None,
     ):
         object.__setattr__(self, "_index", index)
         object.__setattr__(self, "_group", group)
         object.__setattr__(self, "_timestamps", timestamps)
+        object.__setattr__(self, "_label", label)
 
     @property
     def data(self) -> GroupProxy:
@@ -132,6 +134,16 @@ class Track:
         return build_scan_from_dict(scan_dict, data_group=data_group, safe=safe, **kwargs)
 
     @property
+    def label(self) -> "str | None":
+        """Human-readable name for this track (e.g. ``'focused'`` or ``'planewave'``).
+
+        Returns ``None`` for single-track files or legacy files written without a label.
+        Use :attr:`File.track_names` to print all labels in acquisition order and
+        :meth:`File.get_track` to retrieve a track by name.
+        """
+        return self._label
+
+    @property
     def timestamps(self) -> "np.ndarray | None":
         """Global transmit timestamps for this track, shape ``(n_frames, n_tx)``.
 
@@ -142,7 +154,8 @@ class Track:
         return self._timestamps
 
     def __repr__(self) -> str:
-        return f"<Track index={self._index} keys={list(self._group.keys())}>"
+        label_part = f" label={self._label!r}" if self._label is not None else ""
+        return f"<Track index={self._index}{label_part} keys={list(self._group.keys())}>"
 
 
 def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
@@ -442,7 +455,11 @@ class File(h5py.File):
         tracks: list[Track] = []
         i = 0
         while f"track_{i}" in tracks_group:
-            tracks.append(Track(i, tracks_group[f"track_{i}"]))
+            track_group = tracks_group[f"track_{i}"]
+            label = track_group.attrs.get("label")
+            if label is not None:
+                label = str(label)
+            tracks.append(Track(i, track_group, label=label))
             i += 1
 
         schedule = self.track_schedule
@@ -456,6 +473,51 @@ class File(h5py.File):
             )
 
         return tracks
+
+    @property
+    def track_names(self) -> "list[str | None]":
+        """Labels of all tracks in acquisition order.
+
+        Returns a list with one entry per track.  Each entry is the label
+        string stored on that track, or ``None`` for unlabelled tracks (e.g.
+        single-track or legacy files).  The list order matches
+        :attr:`tracks`, so unpacking ``f.tracks`` in the same order as
+        ``f.track_names`` is always safe.
+
+        Example::
+
+            with File("acquisition.hdf5") as f:
+                print(f.track_names)  # ['focused', 'planewave']
+                focused, planewave = f.tracks  # safe — same order
+        """
+        return [t.label for t in self.tracks]
+
+    def get_track(self, label: str) -> "Track":
+        """Return the track with the given label.
+
+        Args:
+            label: The exact label string assigned to the desired track.
+
+        Returns:
+            Track: The matching :class:`Track` object.
+
+        Raises:
+            KeyError: If no track with that label exists, with a message
+                listing the available labels so the error is self-diagnosing.
+
+        Example::
+
+            with File("acquisition.hdf5") as f:
+                focused = f.get_track("focused")
+                raw = focused.data.raw_data[:]
+        """
+        for track in self.tracks:
+            if track.label == label:
+                return track
+        available = [t.label for t in self.tracks]
+        raise KeyError(
+            f"No track with label {label!r}. Available labels (in acquisition order): {available}"
+        )
 
     @property
     def track_schedule(self) -> "np.ndarray | None":

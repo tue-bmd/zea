@@ -876,8 +876,8 @@ def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
     f = File.create(
         path,
         tracks=[
-            {"data": {"raw_data": raw_a}, "scan": scan},
-            {"data": {"raw_data": raw_b}, "scan": scan},
+            {"data": {"raw_data": raw_a}, "scan": scan, "label": "track_a"},
+            {"data": {"raw_data": raw_b}, "scan": scan, "label": "track_b"},
         ],
         probe_name="two_track_probe",
     )
@@ -964,6 +964,69 @@ class TestMultiTrackFile:
             r = repr(f.tracks[1])
         assert "index=1" in r
 
+    def test_track_repr_includes_label(self, tmp_path):
+        """repr(track) includes the label when one is set."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            r = repr(f.tracks[0])
+        assert "label='track_a'" in r
+
+    # ------------------------------------------------------------------
+    # Track.label, File.track_names, File.get_track
+    # ------------------------------------------------------------------
+
+    def test_track_label_roundtrip(self, tmp_path):
+        """Labels written to HDF5 are read back correctly on each Track."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            assert f.tracks[0].label == "track_a"
+            assert f.tracks[1].label == "track_b"
+
+    def test_track_names_property(self, tmp_path):
+        """File.track_names returns labels in acquisition order."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            assert f.track_names == ["track_a", "track_b"]
+
+    def test_get_track_returns_correct_track(self, tmp_path):
+        """File.get_track returns the track whose label matches."""
+        path, raw_a, raw_b = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            t = f.get_track("track_b")
+        assert t.label == "track_b"
+        np.testing.assert_array_equal(t.data.raw_data[:], raw_b)
+
+    def test_get_track_missing_label_raises(self, tmp_path):
+        """File.get_track raises KeyError with available labels in the message."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            with pytest.raises(KeyError, match="track_a"):
+                f.get_track("nonexistent")
+
+    def test_filespec_multi_track_missing_label_raises(self):
+        """FileSpec raises ValueError when any track in a multi-track file has no label."""
+        raw = np.zeros((1, 2, 8, 4, 1), dtype=np.float32)
+        scan = _scan_minimal(n_frames=1, n_tx=2, n_el=4)
+        with pytest.raises(ValueError, match="label"):
+            FileSpec(
+                tracks=[
+                    {"data": {"raw_data": raw}, "scan": scan, "label": "track_a"},
+                    {"data": {"raw_data": raw}, "scan": scan},  # missing label
+                ]
+            )
+
+    def test_single_track_label_is_optional(self, tmp_path):
+        """A single-track file does not require a label."""
+        raw = np.zeros((2, 3, 8, 4, 1), dtype=np.float32)
+        path = tmp_path / "single_no_label.hdf5"
+        File.create(
+            path,
+            data={"raw_data": raw},
+            scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+        )
+        with File(path) as f:
+            assert f.tracks[0].label is None
+
     # ------------------------------------------------------------------
     # Guards on File.data and File.scan() for multi-track files
     # ------------------------------------------------------------------
@@ -1036,8 +1099,8 @@ class TestMultiTrackFile:
         File.create(
             path,
             tracks=[
-                {"data": {"raw_data": raw_a}, "scan": scan},
-                {"data": {"raw_data": raw_b}, "scan": scan},
+                {"data": {"raw_data": raw_a}, "scan": scan, "label": "track_a"},
+                {"data": {"raw_data": raw_b}, "scan": scan, "label": "track_b"},
             ],
         ).close()
 
@@ -1072,8 +1135,8 @@ class TestMultiTrackFile:
         File.create(
             path,
             tracks=[
-                {"data": {"raw_data": raw_a}, "scan": scan_a},
-                {"data": {"raw_data": raw_b}, "scan": scan_b},
+                {"data": {"raw_data": raw_a}, "scan": scan_a, "label": "track_a"},
+                {"data": {"raw_data": raw_b}, "scan": scan_b, "label": "track_b"},
             ],
             track_schedule=schedule,
         ).close()
@@ -1103,8 +1166,8 @@ class TestMultiTrackFile:
         with pytest.raises(ValueError, match="track_schedule"):
             FileSpec(
                 tracks=[
-                    {"data": {"raw_data": raw}, "scan": scan},
-                    {"data": {"raw_data": raw}, "scan": scan},
+                    {"data": {"raw_data": raw}, "scan": scan, "label": "track_a"},
+                    {"data": {"raw_data": raw}, "scan": scan, "label": "track_b"},
                 ],
                 track_schedule=schedule_bad,
             )
@@ -1117,8 +1180,8 @@ class TestMultiTrackFile:
 
         spec = FileSpec(
             tracks=[
-                {"data": {"raw_data": raw}, "scan": scan},
-                {"data": {"raw_data": raw}, "scan": scan},
+                {"data": {"raw_data": raw}, "scan": scan, "label": "track_a"},
+                {"data": {"raw_data": raw}, "scan": scan, "label": "track_b"},
             ],
             track_schedule=schedule,
         )
@@ -1146,8 +1209,8 @@ class TestMultiTrackFile:
 
         spec = FileSpec(
             tracks=[
-                {"data": {"raw_data": raw}, "scan": scan_no_t2nt},
-                {"data": {"raw_data": raw}, "scan": scan_no_t2nt},
+                {"data": {"raw_data": raw}, "scan": scan_no_t2nt, "label": "track_a"},
+                {"data": {"raw_data": raw}, "scan": scan_no_t2nt, "label": "track_b"},
             ],
             track_schedule=np.array([0, 1, 0, 1], dtype=np.int32),
         )
@@ -1240,8 +1303,8 @@ class TestMultiTrackFile:
         File.create(
             path,
             tracks=[
-                {"data": {"raw_data": raw_a}, "scan": scan_a},
-                {"data": {"raw_data": raw_b}, "scan": scan_b},
+                {"data": {"raw_data": raw_a}, "scan": scan_a, "label": "track_a"},
+                {"data": {"raw_data": raw_b}, "scan": scan_b, "label": "track_b"},
             ],
             track_schedule=schedule,
         ).close()

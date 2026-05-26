@@ -133,9 +133,11 @@ the full timing of the acquisition.
     ├── track_schedule          # optional int32[n_total_tx]
     └── tracks/
         ├── track_0/
+        │   ├── attrs:  label="focused_bmode"
         │   ├── data/           # raw_data, image, …
         │   └── scan/           # probe_geometry, t0_delays, …
         └── track_1/
+            ├── attrs:  label="planewave_doppler"
             ├── data/
             └── scan/
 
@@ -156,6 +158,7 @@ the full timing of the acquisition.
         tracks=[
             # Track 0: focused B-mode
             {
+                "label": "focused_bmode",
                 "data": {"raw_data": np.zeros((n_frames, n_tx_focused, n_ax, n_el, 1), dtype=np.float32)},
                 "scan": {
                     "probe_geometry":         probe_geom,
@@ -172,6 +175,7 @@ the full timing of the acquisition.
             },
             # Track 1: plane-wave Doppler
             {
+                "label": "planewave_doppler",
                 "data": {"raw_data": np.zeros((n_frames, n_tx_pw, n_ax, n_el, 1), dtype=np.float32)},
                 "scan": {
                     "probe_geometry":         probe_geom,
@@ -199,7 +203,15 @@ the full timing of the acquisition.
 
     with zea.File("acquisition.hdf5") as f:
         probe = f.probe()              # probe is shared across all tracks
+
+        # See track names in acquisition order before unpacking:
+        print(f.track_names)           # ['focused_bmode', 'planewave_doppler']
+
+        # Unpack in the same order as track_names — always safe:
         focused_track, planewave_track = f.tracks
+
+        # Or fetch a specific track by name:
+        focused_track = f.get_track("focused_bmode")
 
         focused_scan = focused_track.scan()
         focused_raw  = focused_track.data.raw_data[:]
