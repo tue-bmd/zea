@@ -412,12 +412,24 @@ class Spec:
 
     @staticmethod
     def create_dataset(
-        group: h5py.Group, field_name: str, value: Any, compression: str = "gzip"
+        group: h5py.Group,
+        field_name: str,
+        value: Any,
+        compression: str = "gzip",
+        chunk_frames: bool = False,
     ) -> None:
         """Create a dataset in the given group for the specified field and value,
         handling string and scalar values appropriately."""
         dataset_is_scalar = np.isscalar(value) or value.ndim == 0
         compression = None if dataset_is_scalar else compression
+        chunks = None
+        if (
+            chunk_frames
+            and not dataset_is_scalar
+            and isinstance(value, np.ndarray)
+            and value.ndim >= 2
+        ):
+            chunks = (1,) + value.shape[1:]
         if Spec._is_string_value(value):
             string_dtype = h5py.string_dtype(encoding="utf-8")
             string_value = np.asarray(value, dtype=object)
@@ -428,9 +440,11 @@ class Spec:
                 compression=compression,
             )
         else:
-            group.create_dataset(field_name, data=value, compression=compression)
+            group.create_dataset(field_name, data=value, compression=compression, chunks=chunks)
 
-    def store_in_group(self, group: h5py.Group, compression: str = "gzip") -> None:
+    def store_in_group(
+        self, group: h5py.Group, compression: str = "gzip", chunk_frames: bool = False
+    ) -> None:
         """Store the data in the given group (e.g. hdf5 group)."""
 
         assert isinstance(group, h5py.Group), "group must be an h5py Group"
@@ -445,9 +459,19 @@ class Spec:
             nested_spec = field_info.get("spec")
             if nested_spec is not None:
                 subgroup = group.create_group(field_name)
-                value.store_in_group(subgroup, compression=compression)
+                value.store_in_group(
+                    subgroup,
+                    compression=compression,
+                    chunk_frames=chunk_frames,
+                )
             else:
-                self.create_dataset(group, field_name, value, compression=compression)
+                self.create_dataset(
+                    group,
+                    field_name,
+                    value,
+                    compression=compression,
+                    chunk_frames=chunk_frames,
+                )
                 meta = field_metadata.get(field_name, {})
                 group[field_name].attrs["unit"] = meta.get("unit", _DEFAULT_FIELD_UNIT)
                 group[field_name].attrs["description"] = meta.get(
@@ -1579,9 +1603,11 @@ class TrackSpec(Spec):
         if self.label is not None and not self.label.strip():
             raise ValueError("'label' must not be an empty or whitespace-only string.")
 
-    def store_in_group(self, group: "h5py.Group", compression: str = "gzip") -> None:
+    def store_in_group(
+        self, group: "h5py.Group", compression: str = "gzip", chunk_frames: bool = False
+    ) -> None:
         """Store data, scan, and label in the HDF5 group."""
-        super().store_in_group(group, compression=compression)
+        super().store_in_group(group, compression=compression, chunk_frames=chunk_frames)
 
 
 @dataclass
@@ -1843,7 +1869,7 @@ class FileSpec(Spec):
         result["tracks"] = [t.to_dict() for t in self.tracks]
         return result
 
-    def save(self, path: str, compression: str = "gzip") -> None:
+    def save(self, path: str, compression: str = "gzip", chunk_frames: bool = False) -> None:
         """Save the dataset to the specified path."""
         # Lazy import to avoid circular dependency (spec.py is imported by file.py)
         from zea import File
@@ -1880,7 +1906,11 @@ class FileSpec(Spec):
             tracks_group = f.create_group("tracks")
             for i, track in enumerate(self.tracks):
                 track_group = tracks_group.create_group(f"track_{i}")
-                track.store_in_group(track_group, compression=compression)
+                track.store_in_group(
+                    track_group,
+                    compression=compression,
+                    chunk_frames=chunk_frames,
+                )
 
         log.info(f"File saved to {log.yellow(path)}")
 

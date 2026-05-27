@@ -631,6 +631,7 @@ class File(h5py.File):
         us_machine: str | None = None,
         description: str | None = None,
         compression: str = "gzip",
+        chunk_frames: bool = False,
         overwrite: bool = False,
     ) -> "File":
         """Create a new zea HDF5 file from data, scan, and optional metadata.
@@ -664,6 +665,9 @@ class File(h5py.File):
             us_machine: Name of the ultrasound machine.
             description: Free-text description of the acquisition.
             compression: HDF5 compression filter (default ``"gzip"``).
+            chunk_frames: If *True*, use frame-wise chunking for all datasets containing
+                a "frames" dimension. Dataset will be stored with HDF5 chunking enabled,
+                using a single frame (a single slice along the first dimension) per chunk.
             overwrite: If *False* (default), raise if the file exists.
 
         Returns:
@@ -736,7 +740,11 @@ class File(h5py.File):
 
         _warn_custom_keys(kwargs.get("data", {}), kwargs.get("metadata", {}))
         spec = FileSpec(**kwargs)
-        spec.save(str(path), compression=compression)
+        spec.save(
+            str(path),
+            compression=compression,
+            chunk_frames=chunk_frames,
+        )
 
         return cls(str(path), mode="r")
 
