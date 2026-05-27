@@ -68,8 +68,13 @@ class Probe(ProbeSpec):
 
     def __post_init__(self):
         # Legacy file support
-        if self.center_frequency.dtype == np.int32:
-            self.center_frequency = self.center_frequency.astype(np.float32)
+        if self.center_frequency is not None:
+            if isinstance(self.center_frequency, int):
+                self.center_frequency = np.float32(self.center_frequency)
+            elif isinstance(self.center_frequency, np.ndarray) and np.issubdtype(
+                self.center_frequency.dtype, np.integer
+            ):
+                self.center_frequency = self.center_frequency.astype(np.float32)
         super().__post_init__()
 
 

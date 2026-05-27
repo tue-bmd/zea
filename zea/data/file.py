@@ -2,7 +2,7 @@
 
 import enum
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import TYPE_CHECKING, List, Tuple, Union
 
 import h5py
 import numpy as np
@@ -15,8 +15,12 @@ from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.utils import deprecated, reduce_to_signature
-from zea.probes import Probe
 from zea.scan import Scan
+
+if TYPE_CHECKING:
+    # Imported lazily inside functions at runtime to avoid a circular import
+    # (zea.probes imports ProbeSpec from zea.data.spec, which loads this module).
+    from zea.probes import Probe
 
 
 class GroupProxy:
@@ -589,7 +593,7 @@ class File(h5py.File):
         return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
 
     @property
-    def probe(self) -> Probe:
+    def probe(self) -> "Probe":
         """Returns a Probe object initialized with the parameters from the file.
 
         Returns:
@@ -608,6 +612,8 @@ class File(h5py.File):
                 >>> print(probe.name)
                 'verasonics_l11_4v'
         """
+        from zea.probes import Probe
+
         if "probe" in self.keys():
             probe_parameters = self.recursively_load_dict_contents_from_group("probe")
         else:
@@ -907,7 +913,7 @@ def load_file(
     data_type="raw_data",
     indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
     scan_kwargs: dict = None,
-) -> Tuple[np.ndarray, Scan, Probe]:
+) -> Tuple[np.ndarray, Scan, "Probe"]:
     """Loads a zea data files (h5py file).
 
     Returns the data together with a scan object containing the parameters

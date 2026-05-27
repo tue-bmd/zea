@@ -697,11 +697,9 @@ def test_apply_window(axis, size, start, end, window_type):
 
     import keras
 
-    from zea import ops
+    from zea.ops.ultrasound import ApplyWindow
 
-    operation = ops.ultrasound.ApplyWindow(
-        axis=axis, size=size, start=start, end=end, window_type=window_type
-    )
+    operation = ApplyWindow(axis=axis, size=size, start=start, end=end, window_type=window_type)
 
     data = keras.ops.ones((256, 128, 64))
     data_out = operation(data=data)["data"]
