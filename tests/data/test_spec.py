@@ -1026,7 +1026,7 @@ class TestLoadingWarnings:
                 # scan() emits the legacy-waveforms warning, then fails because the
                 # file has no other scan parameters (n_tx is unset).
                 with pytest.raises(ValueError):
-                    f.scan()
+                    f.scan
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any("waveforms_one_way" in m and "stored as a dictionary" in m for m in messages)
 
@@ -1180,7 +1180,7 @@ class TestProbeSpec:
         spec.save(save_path)
 
         with File(save_path) as f:
-            assert f.probe_name == "verasonics_l11_4v"
+            assert f.probe.name == "verasonics_l11_4v"
             assert "probe" in f
 
         loaded = FileSpec.from_hdf5(File(str(save_path)))
@@ -1210,5 +1210,5 @@ class TestProbeSpec:
         )
 
         with File(path) as f:
-            assert f.probe_name == "my_probe"
+            assert f.probe.name == "my_probe"
             assert "probe" in f

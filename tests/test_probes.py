@@ -66,9 +66,9 @@ def test_probe_from_file(tmp_path):
         scan_grp.create_dataset("n_el", data=new_geometry.shape[0])
 
     with File(file_path, "r") as f:
-        probe = f.probe()
+        probe = f.probe
         assert np.allclose(probe.probe_geometry, new_geometry)
-        assert probe_registry.get_name(probe) == f.probe_name
+        assert probe_registry.get_name(probe) == f.probe.name
 
     # Use a probe name that is not registered
     unknown_probe_name = "unknown_probe_xyz"
@@ -86,6 +86,6 @@ def test_probe_from_file(tmp_path):
         scan_grp.create_dataset("n_el", data=probe_geometry.shape[0])
 
     with File(file_path, "r") as f:
-        probe = f.probe()
+        probe = f.probe
         assert np.allclose(probe.probe_geometry, probe_geometry)
         assert probe_registry.get_name(probe) == "generic"

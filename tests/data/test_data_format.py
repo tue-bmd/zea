@@ -75,7 +75,7 @@ def test_create_basic(tmp_hdf5_path):
         tmp_hdf5_path,
         data=DATA,
         scan=SCAN,
-        probe_name="generic",
+        probe={"name": "generic"},
         description="Dataset parameters for testing",
         overwrite=True,
     )
@@ -100,7 +100,7 @@ def test_wrong_scan_shape(key, tmp_hdf5_path):
             tmp_hdf5_path,
             data=DATA,
             scan=wrong_scan,
-            probe_name="generic",
+            probe={"name": "generic"},
             description="Dataset parameters for testing",
             overwrite=True,
         )
@@ -158,7 +158,7 @@ def test_existing_path(tmp_hdf5_path):
             tmp_hdf5_path,
             data=DATA,
             scan=SCAN,
-            probe_name="generic",
+            probe={"name": "generic"},
             description="Dataset parameters for testing",
         )
 
@@ -171,7 +171,7 @@ def test_overwrite(tmp_hdf5_path):
         tmp_hdf5_path,
         data=DATA,
         scan=SCAN,
-        probe_name="generic",
+        probe={"name": "generic"},
         description="Dataset parameters for testing",
         overwrite=True,
     )
@@ -188,7 +188,7 @@ def test_image_only(tmp_hdf5_path):
     f = File.create(
         tmp_hdf5_path,
         data={"image_sc": image_sc},
-        probe_name="generic",
+        probe={"name": "generic"},
         description="Image-only dataset",
         overwrite=True,
     )

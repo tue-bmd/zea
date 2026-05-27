@@ -108,9 +108,9 @@ def test_file_attributes():
     with File(FILE_PATH) as file:
         assert file.name == FILE_NAME, "File name should match expected value"
         assert file.n_frames == FILE_N_FRAMES, "Number of frames should match expected value"
-        assert file.probe_name == FILE_PROBE_NAME, "Probe name should match expected value"
-        assert isinstance(file.probe(), Probe), "Probe should be an instance of Probe class"
-        assert isinstance(file.scan(), Scan), "Scan should be an instance of Scan class"
+        assert file.probe.name == FILE_PROBE_NAME, "Probe name should match expected value"
+        assert isinstance(file.probe, Probe), "Probe should be an instance of Probe class"
+        assert isinstance(file.scan, Scan), "Scan should be an instance of Scan class"
 
         file.validate()
 
@@ -395,12 +395,12 @@ class TestProbeNameCompat:
         path, *_ = spec_file
 
         with File(path) as f:
-            assert f.probe_name == "test_probe"
+            assert f.probe.name == "test_probe"
 
     def test_probe_name_from_legacy_format(self, dummy_file):
         """Legacy files use 'probe' attr; File.probe_name handles both."""
         with File(dummy_file) as f:
-            assert f.probe_name == "generic"
+            assert f.probe.name == "generic"
 
 
 class TestImageOnlyFile:
@@ -623,7 +623,7 @@ class TestFileCreate:
         )
         assert f.mode == "r"
         np.testing.assert_array_equal(f.data.raw_data[()], raw)
-        assert f.probe_name == "create_test"
+        assert f.probe.name == "create_test"
         f.close()
 
     def test_create_raises_on_existing_file(self, tmp_path):
@@ -709,7 +709,7 @@ class TestMetadataMetricsAccessors:
         ).close()
 
         with File(path) as f:
-            meta = f.metadata()
+            meta = f.metadata
             assert meta.subject.id == "patient_01"
             assert meta.subject.age == 30
             assert meta.credit == "Test Lab"
@@ -734,7 +734,7 @@ class TestMetadataMetricsAccessors:
         ).close()
 
         with File(path) as f:
-            met = f.metrics()
+            met = f.metrics
             np.testing.assert_array_almost_equal(met.coherence_factor, cf)
 
     def test_metadata_raises_when_missing(self, tmp_path):
@@ -745,7 +745,7 @@ class TestMetadataMetricsAccessors:
 
         with File(path) as f:
             with pytest.raises(KeyError, match="metadata"):
-                f.metadata()
+                _ = f.metadata
 
     def test_metrics_raises_when_missing(self, tmp_path):
         """File without a metrics group raises KeyError."""
@@ -755,7 +755,7 @@ class TestMetadataMetricsAccessors:
 
         with File(path) as f:
             with pytest.raises(KeyError, match="metrics"):
-                f.metrics()
+                _ = f.metrics
 
 
 class TestZeaVersion:
@@ -924,7 +924,7 @@ class TestLegacyFileLoading:
         """probe_name is resolved from the legacy 'probe' root attribute."""
         path, *_ = legacy_file
         with File(path) as f:
-            assert f.probe_name == "legacy_probe"
+            assert f.probe.name == "legacy_probe"
             spec = f.validate_spec()
         assert spec.probe.name == "legacy_probe"
 

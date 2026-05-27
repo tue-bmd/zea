@@ -119,6 +119,17 @@ class Probe(Object):
             "n_el": self.n_el,
         }
 
+    @property
+    def name(self) -> str:
+        """Returns the name of this probe.
+
+        When created via :meth:`from_parameters` (e.g. from a file), returns
+        the stored probe name.  Otherwise returns the registry name.
+        """
+        if hasattr(self, "_name") and self._name is not None:
+            return self._name
+        return probe_registry.get_name(self)
+
     @classmethod
     def from_parameters(cls, probe_name: str, parameters: dict) -> "Probe":
         """Instantiate a probe by name, overriding with parameters from dict."""
@@ -129,10 +140,11 @@ class Probe(Object):
                     setattr(probe, key, value)
                 else:
                     raise ValueError(f"Unknown parameter {key} for probe {probe_name}")
-            return probe
-
-        # Fallback to generic probe with file parameters
-        return probe_registry["generic"](**parameters)
+        else:
+            # Fallback to generic probe with file parameters
+            probe = probe_registry["generic"](**parameters)
+        probe._name = probe_name
+        return probe
 
     @classmethod
     def from_name(cls, probe_name, fallback=False, **kwargs) -> "Probe":

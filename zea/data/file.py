@@ -498,16 +498,9 @@ class File(h5py.File):
         )
         return self["data"]["raw_data"].shape[2]
 
-    def scan(self, safe=True, **kwargs) -> Scan:
+    @property
+    def scan(self) -> Scan:
         """Returns a Scan object initialized with the parameters from the file.
-
-        Args:
-            safe (bool, optional): If True, will only use parameters that are
-                defined in the Scan class. If False, will use all parameters
-                from the file. Defaults to True.
-            **kwargs: Additional keyword arguments to pass to the Scan object.
-                These will override the parameters from the file if they are
-                present in the file.
 
         Returns:
             Scan: The scan object.
@@ -520,9 +513,25 @@ class File(h5py.File):
             ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
             ... )
             >>> with File(path) as f:
-            ...     scan = f.scan()
+            ...     scan = f.scan
             >>> type(scan).__name__
             'Scan'
+        """
+        return self.get_scan()
+
+    def get_scan(self, safe=True, **kwargs) -> Scan:
+        """Returns a Scan object with optional parameter overrides.
+
+        Args:
+            safe (bool, optional): If True, will only use parameters that are
+                defined in the Scan class. If False, will use all parameters
+                from the file. Defaults to True.
+            **kwargs: Additional keyword arguments to pass to the Scan object.
+                These will override the parameters from the file if they are
+                present in the file.
+
+        Returns:
+            Scan: The scan object.
         """
         scan_dict = self.get_scan_parameters()
 
@@ -591,27 +600,30 @@ class File(h5py.File):
         probe_parameters = reduce_to_signature(Probe.__init__, file_scan_parameters)
         return probe_parameters
 
+    @property
     def probe(self) -> Probe:
         """Returns a Probe object initialized with the parameters from the file.
 
         Returns:
             Probe: The probe object.
 
-        .. doctest::
+        Example:
+            .. doctest::
 
-            >>> from zea import File
-            >>> path = (
-            ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
-            ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
-            ... )
-            >>> with File(path) as f:
-            ...     probe = f.probe()
-            >>> type(probe).__name__
-            'Verasonics_l11_4v'
+                >>> from zea import File
+                >>> path = (
+                ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+                ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+                ... )
+                >>> with File(path) as f:
+                ...     probe = f.probe
+                >>> print(probe.name)
+                'verasonics_l11_4v'
         """
         probe_parameters_file = self.get_probe_parameters()
         return Probe.from_parameters(self.probe_name, probe_parameters_file)
 
+    @property
     def metadata(self) -> MetadataSpec:
         """Return a validated :class:`~zea.data.spec.MetadataSpec` object from the file.
 
@@ -621,17 +633,26 @@ class File(h5py.File):
         Raises:
             KeyError: If the file has no ``metadata`` group.
 
-        Example::
+        Example:
+            .. doctest::
 
-            >>> with File("my_file.hdf5") as f:  # doctest: +SKIP
-            ...     meta = f.metadata()
-            ...     print(meta.subject.id)
+                >>> from zea import File
+                >>> path = (
+                ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+                ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5",
+                ...     revision="v0.1.0a1"
+                ... )
+                >>> with File(path) as f:
+                ...     meta = f.metadata
+                ...     print(meta.subject.type)
+                'phantom'
         """
         if "metadata" not in self:
             raise KeyError("No 'metadata' group in this file.")
         raw = self.recursively_load_dict_contents_from_group("metadata")
         return MetadataSpec(**raw)
 
+    @property
     def metrics(self) -> MetricsSpec:
         """Return a validated :class:`~zea.data.spec.MetricsSpec` object from the file.
 
@@ -644,7 +665,7 @@ class File(h5py.File):
         Example::
 
             >>> with File("my_file.hdf5") as f:  # doctest: +SKIP
-            ...     met = f.metrics()
+            ...     met = f.metrics
             ...     print(met.coherence_factor.shape)
         """
         if "metrics" not in self:
@@ -844,7 +865,7 @@ def load_file_all_data_types(
 
     with File(path, mode="r") as file:
         # Load the probe object from the file
-        probe = file.probe()
+        probe = file.probe
 
         for data_type in DataTypes:
             if not file.has_key(data_type.value):
@@ -882,7 +903,7 @@ def load_file_all_data_types(
         if isinstance(indices, tuple) and len(indices) > 1:
             scan_kwargs["selected_transmits"] = indices[1]
 
-        scan = file.scan(**scan_kwargs)
+        scan = file.get_scan(**scan_kwargs)
 
         return data_dict, scan, probe
 
@@ -924,7 +945,7 @@ def load_file(
 
     with File(path, mode="r") as file:
         # Load the probe object from the file
-        probe = file.probe()
+        probe = file.probe
 
         # Load the desired frames from the file
         _key = file.format_key(data_type)
@@ -943,7 +964,7 @@ def load_file(
             if isinstance(indices, tuple) and len(indices) > 1:
                 scan_kwargs["selected_transmits"] = indices[1]
 
-        scan = file.scan(**scan_kwargs)
+        scan = file.get_scan(**scan_kwargs)
 
         return data, scan, probe
 
