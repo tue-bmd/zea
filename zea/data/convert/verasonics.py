@@ -538,6 +538,15 @@ class VerasonicsFile(h5py.File):
         # Convert the raw data to a numpy array to allow out-of-order indexing later
         raw_data = np.asarray(raw_data, dtype=np.int16)
 
+        # Add n_frames dimension if it is missing
+        if raw_data.ndim == 2:
+            raw_data = np.expand_dims(raw_data, axis=0)
+
+        assert raw_data.ndim == 3, (
+            "Expected raw data to have 3 dimensions at this point "
+            f"(n_frames, n_channels, n_samples), but got {raw_data.shape}."
+        )
+
         # Reorder and select channels based on probe elements
         if self.is_new_save_raw_format:
             raw_data = raw_data[:, self.probe.connector, :]
