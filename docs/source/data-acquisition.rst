@@ -35,8 +35,8 @@ Working with zea data files
     with File("my_acquisition.hdf5") as f:
         raw   = f.data.raw_data[:]        # all frames
         raw0  = f.data.raw_data[0]        # first frame only
-        scan  = f.scan()                  # returns zea.Scan
-        probe = f.probe()                 # returns zea.Probe
+        scan  = f.scan                    # returns zea.Scan
+        probe = f.probe                   # returns zea.Probe
 
     # For remote files (Hugging Face Hub):
     with File("hf://zeahub/picmus/.../contrast_speckle.hdf5") as f:
