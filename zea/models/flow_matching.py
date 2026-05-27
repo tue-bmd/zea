@@ -310,7 +310,7 @@ class FlowMatchingModel(DiffusionModel):
 
         # Sample uniform random flow times in [min_t, max_t]
         diffusion_times = keras.random.uniform(
-            shape=ops.concatenate([[batch_size], [1] * n_dims]),
+            shape=ops.stack([batch_size, *([1] * n_dims)]),
             minval=self.min_t,
             maxval=self.max_t,
         )
@@ -348,7 +348,7 @@ class FlowMatchingModel(DiffusionModel):
         noises = keras.random.normal(shape=ops.shape(data))
 
         diffusion_times = keras.random.uniform(
-            shape=ops.concatenate([[batch_size], [1] * n_dims]),
+            shape=ops.stack([batch_size, *([1] * n_dims)]),
             minval=self.min_t,
             maxval=self.max_t,
         )
