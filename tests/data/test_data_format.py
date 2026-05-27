@@ -27,7 +27,6 @@ DATA = {
 
 # Scan dict for File.create
 SCAN = {
-    "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
     "sampling_frequency": np.float32(30e6),
     "center_frequency": np.float32(6e6),
     "demodulation_frequency": np.float32(6e6),

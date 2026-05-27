@@ -14,7 +14,7 @@ from zea.data.spec import DataSpec, FileSpec, MetadataSpec, MetricsSpec, ScanSpe
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
-from zea.internal.utils import deprecated
+from zea.internal.utils import deprecated, reduce_to_signature
 from zea.probes import Probe
 from zea.scan import Scan
 
@@ -608,7 +608,14 @@ class File(h5py.File):
                 >>> print(probe.name)
                 'verasonics_l11_4v'
         """
-        return Probe(**self.recursively_load_dict_contents_from_group("probe"))
+        if "probe" in self.keys():
+            probe_parameters = self.recursively_load_dict_contents_from_group("probe")
+        else:
+            # Legacy files
+            probe_parameters = reduce_to_signature(Probe.__init__, self.get_parameters())
+            probe_parameters["name"] = self.probe_name
+
+        return Probe(**probe_parameters)
 
     @property
     def metadata(self) -> MetadataSpec:

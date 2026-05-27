@@ -66,6 +66,12 @@ class Probe(ProbeSpec):
         # TODO: merge this with Parameters.to_tensor()
         return dict_to_tensor(self.get_parameters(), keep_as_is=keep_as_is)
 
+    def __post_init__(self):
+        # Legacy file support
+        if self.center_frequency.dtype == np.int32:
+            self.center_frequency = self.center_frequency.astype(np.float32)
+        super().__post_init__()
+
 
 @probe_registry(name="verasonics_l11_4v")
 class Verasonics_l11_4v(Probe):
