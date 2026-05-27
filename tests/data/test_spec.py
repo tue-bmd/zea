@@ -23,7 +23,6 @@ from zea.data.spec import (
     SosMap,
     Spec,
     Subject,
-    TrackSpec,
 )
 
 
