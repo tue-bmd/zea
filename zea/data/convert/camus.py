@@ -39,6 +39,7 @@ Dataset splits:
 
 .. rubric:: Usage
 
+
 .. code-block:: console
 
    python -m zea.data.convert camus ./raw ./output --download
@@ -242,8 +243,7 @@ splits = {"train": [1, 401], "val": [401, 451], "test": [451, 501]}
 
 
 def get_split(patient_id: int) -> str:
-    """
-    Determine which dataset split a patient ID belongs to.
+    """Determine which dataset split a patient ID belongs to.
 
     Args:
         patient_id: Integer ID of the patient.
@@ -265,14 +265,14 @@ def get_split(patient_id: int) -> str:
 
 
 def _process_task(task):
-    """
-    Unpack a task tuple and invoke process_camus in a worker process.
+    """Unpack a task tuple and invoke process_camus in a worker process.
 
     Creates parent directories for the target outputs, calls process_camus
     with the unpacked paths, and logs then re-raises any exception raised by processing.
 
     Args:
         task (tuple): (source_file_str, output_file_str)
+
             - source_file_str: filesystem path to the source CAMUS file as a string.
             - output_file_str: filesystem path for the ZEA output file as a string.
     """
