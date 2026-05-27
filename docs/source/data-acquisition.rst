@@ -75,7 +75,7 @@ disk::
         "my_acquisition.hdf5",
         data={"raw_data": raw},
         scan=scan,
-        probe_name="L11-4v",
+        probe={"name": "L11-4v"},
     )
     f.close()
 
