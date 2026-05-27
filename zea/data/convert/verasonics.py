@@ -1172,7 +1172,7 @@ class VerasonicsProbe:
         This concerns ElementPos, elementWidth and lensCorrection.
         """
         _ALLOWED_UNITS = {"wavelengths", "mm"}
-        unit = self.decode_string(self.trans_obj["units"][:])
+        unit = self._file.decode_string(self.trans_obj["units"][:])
         assert unit in {"wavelengths", "mm"}, (
             f"Unexpected unit '{unit}' in file, must be one of {_ALLOWED_UNITS}"
         )
