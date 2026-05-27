@@ -46,7 +46,7 @@ def save_file(
     scan: Scan,
     probe: Probe,
     raw_data: np.ndarray = None,
-    aligned_data: np.ndarray = None,
+    aligned_data: dict = None,
     beamformed_data: dict = None,
     envelope_data: dict = None,
     image: dict = None,
@@ -260,9 +260,11 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
 
         if data_dict["aligned_data"] is not None:
             _assert_shapes_equal(
-                data_dict["aligned_data"], new_data["aligned_data"], "aligned_data"
+                data_dict["aligned_data"]["values"],
+                new_data["aligned_data"]["values"],
+                "aligned_data",
             )
-            data_dict["aligned_data"] += new_data["aligned_data"]
+            data_dict["aligned_data"]["values"] += new_data["aligned_data"]["values"]
 
         if data_dict["beamformed_data"] is not None:
             _assert_shapes_equal(
@@ -369,7 +371,7 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
     # Assuming the first dimension is the frame dimension
 
     # Map-based data types store values in a dict; these need special handling
-    _MAP_KEYS = {"beamformed_data", "envelope_data", "image_sc", "image"}
+    _MAP_KEYS = {"aligned_data", "beamformed_data", "envelope_data", "image_sc", "image"}
     _LOG_COMPOUND_KEYS = {"image", "image_sc"}
 
     compounded_data = {}
@@ -436,10 +438,12 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
         )
 
     # Assuming the second dimension is the transmit dimension
-    for key in ["raw_data", "aligned_data"]:
-        if data_dict[key] is None:
-            continue
-        data_dict[key] = np.mean(data_dict[key], axis=1, keepdims=True)
+    if data_dict["raw_data"] is not None:
+        data_dict["raw_data"] = np.mean(data_dict["raw_data"], axis=1, keepdims=True)
+    if data_dict["aligned_data"] is not None:
+        data_dict["aligned_data"]["values"] = np.mean(
+            data_dict["aligned_data"]["values"], axis=1, keepdims=True
+        )
 
     scan.set_transmits([0])
 
