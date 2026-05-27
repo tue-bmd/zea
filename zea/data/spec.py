@@ -1027,7 +1027,6 @@ class ScanSpec(Spec):
         tgc_gain_curve: The time-gain-compensation that was applied to every
             sample in the raw_data of shape (n_ax,). Divide by this curve to
             undo the TGC.
-        element_width: The width of the elements in the probe in meters.
         waveforms_one_way: One-way waveforms of shape (n_tx, .) as simulated
             by the Verasonics system. This is the waveform after being filtered
             by the transducer bandwidth once.
@@ -1049,7 +1048,6 @@ class ScanSpec(Spec):
     azimuth_angles: np.ndarray = None
     sound_speed: np.ndarray | float | None = None
     tgc_gain_curve: np.ndarray | None = None
-    element_width: np.ndarray | float | None = None
     waveforms_one_way: np.ndarray | None = None
     waveforms_two_way: np.ndarray | None = None
 
@@ -1067,7 +1065,6 @@ class ScanSpec(Spec):
         "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
         "sound_speed": {"dtype": np.float32, "shape": ()},
         "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
-        "element_width": {"dtype": np.float32, "shape": ()},
         "waveforms_one_way": {
             "dtype": np.float32,
             "shape": ("n_tx", "n_samples_one_way"),
@@ -1095,7 +1092,6 @@ class ScanSpec(Spec):
         "azimuth_angles": {"unit": "rad", "description": "Azimuthal angles of transmit beams."},
         "sound_speed": {"unit": "m/s", "description": "Speed of sound."},
         "tgc_gain_curve": {"unit": "-", "description": "Time-gain-compensation curve."},
-        "element_width": {"unit": "m", "description": "Element width of the probe."},
         "waveforms_one_way": {"unit": "V", "description": "One-way transmit waveforms."},
         "waveforms_two_way": {"unit": "V", "description": "Two-way transmit waveforms."},
     }
@@ -1152,8 +1148,6 @@ class ScanSpec(Spec):
                 f"TGC gain curve values must be non-negative, got values between "
                 f"{np.min(self.tgc_gain_curve)} and {np.max(self.tgc_gain_curve)}"
             )
-        if self.element_width is not None and self.element_width <= 0:
-            raise ValueError(f"Element width must be positive, got {self.element_width}")
 
         # Try to simplify the data by squeezing out any singleton dimensions,
         # e.g. if center_frequency is an array with all the same value
