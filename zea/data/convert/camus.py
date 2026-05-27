@@ -24,7 +24,7 @@ Dataset splits:
 
 .. admonition:: Reference
 
-   S. Leclerc, E. Smistad, J. Pedrosa, A. Ostvik, F. Cervenansky, F. Espinosa,
+   S\\. Leclerc, E. Smistad, J. Pedrosa, A. Ostvik, F. Cervenansky, F. Espinosa,
    T. Espeland, E. A. R. Berg, P.-M. Jodoin, T. Grenier, C. Lartizien,
    J. D'hooge, L. Lovstakken and O. Bernard.
    *Deep Learning for Segmentation Using an Open Large-Scale Dataset in
