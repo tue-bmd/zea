@@ -6,7 +6,7 @@ Usage:
 
 import argparse
 
-from zea import Folder
+from zea.data.datasets import Folder
 
 
 def get_parser():

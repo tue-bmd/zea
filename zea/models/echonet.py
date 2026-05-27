@@ -20,6 +20,14 @@ To try this model, simply load one of the available presets:
     A tutorial notebook where this model is used:
     :doc:`../notebooks/models/left_ventricle_segmentation_example`.
 
+.. note::
+    This model is only currently supported with the TensorFlow or JAX :ref:`backend-installation`.
+    When using TensorFlow as backend, the model will work out of the box. When using JAX as backend,
+    the model is built using TensorFlow and then converted to JAX. This requires both
+    TensorFlow and JAX to be installed, which can be tricky regarding compatible CUDA versions.
+    One option is to run in our :ref:`docker-information` container, which has been tested
+    to work with both backends.
+
 """
 
 from pathlib import Path
@@ -59,11 +67,15 @@ class EchoNetDynamic(BaseModel):
     def __init__(self, **kwargs):
         if backend.backend() not in ["tensorflow", "jax"]:
             raise NotImplementedError(
-                "EchoNetDynamic is only currently supported with the TensorFlow or Jax backend."
+                "EchoNetDynamic is only currently supported with the TensorFlow or JAX backend."
             )
         assert tf is not None, (
             "TensorFlow is not installed. Please install TensorFlow to use EchoNetDynamic. This is "
-            "required even if you are using the Jax backend, the model is built using TensorFlow."
+            "required even if you are using the JAX backend, the model is built using TensorFlow. "
+            "Installing JAX and TensorFlow together is tricky, regarding compatible CUDA versions. "
+            "One option is to run in our Docker container, which has been tested to work with "
+            "both backends. See https://zea.readthedocs.io/en/latest/installation.html#docker "
+            "for more details."
         )
 
         super().__init__(**kwargs)
@@ -76,20 +88,27 @@ class EchoNetDynamic(BaseModel):
         ]
         self.network = None
 
-    def build(self, input_shape):
+    def build(self, input_shape):  # pragma: no cover
         """Builds the network."""
-        self.maybe_convert_to_jax(input_shape)
+        self.maybe_convert_to_jax()
 
-    def maybe_convert_to_jax(self, input_shape):
-        """Converts the network to Jax if backend is Jax."""
+    def maybe_convert_to_jax(self):  # pragma: no cover
+        """Converts the network to JAX if backend is JAX.
+
+        JAX conversion traces the SavedModel using an example input of shape
+        ``(1, INFERENCE_SIZE, INFERENCE_SIZE, 3)``. At runtime, ``call()`` may pass
+        ``(B, INFERENCE_SIZE, INFERENCE_SIZE, 3)`` after resize/tile preprocessing.
+        """
         if backend.backend() == "jax":
-            inputs = ops.zeros(input_shape)
             from zea.backend import tf2jax
+
+            inputs = ops.zeros([1, INFERENCE_SIZE, INFERENCE_SIZE, 3])
 
             jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
 
             def call_fn(params, state, rng, inputs, training):
-                return jax_func(state, inputs)
+                with tf2jax.override_config("strict_shape_check", False):
+                    return jax_func(state, inputs)
 
             self.network = keras.layers.JaxLayer(call_fn, state=jax_params)
 

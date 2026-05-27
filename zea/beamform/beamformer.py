@@ -496,7 +496,7 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
 
 
 def complex_rotate(iq, theta):
-    """Phase-rotate IQ data by angle *theta*.
+    r"""Phase-rotate IQ data by angle *theta*.
 
     When delaying IQ-demodulated data it is not sufficient to interpolate the
     I and Q channels independently — the carrier phase shift must be
@@ -504,8 +504,8 @@ def complex_rotate(iq, theta):
 
     .. math::
 
-        I_\\Delta &= I' \\cos\\theta - Q' \\sin\\theta \\\\
-        Q_\\Delta &= Q' \\cos\\theta + I' \\sin\\theta
+        I_\Delta &= I' \cos\theta - Q' \sin\theta \\
+        Q_\Delta &= Q' \cos\theta + I' \sin\theta
 
     Args:
         iq (Tensor): IQ data of shape ``(..., 2)``.
@@ -521,28 +521,28 @@ def complex_rotate(iq, theta):
 
         .. math::
 
-            x(t) &= I(t)\\cos(\\omega_c t) + Q(t)\\cos(\\omega_c t + \\pi/2)\\\\
-            &= I(t)\\cos(\\omega_c t) - Q(t)\\sin(\\omega_c t)
+            x(t) &= I(t)\cos(\omega_c t) + Q(t)\cos(\omega_c t + \pi/2)\\
+            &= I(t)\cos(\omega_c t) - Q(t)\sin(\omega_c t)
 
 
         If we want to delay the RF data `x(t)` by `Δt` we can substitute in
-        :math:`t=t+\\Delta t`. We also define :math:`I'(t) = I(t + \\Delta t)`,
-        :math:`Q'(t) = Q(t + \\Delta t)`, and :math:`\\theta=\\omega_c\\Delta t`.
+        :math:`t=t+\Delta t`. We also define :math:`I'(t) = I(t + \Delta t)`,
+        :math:`Q'(t) = Q(t + \Delta t)`, and :math:`\theta=\omega_c\Delta t`.
         This gives us:
 
         .. math::
 
-            x(t + \\Delta t) &= I'(t) \\cos(\\omega_c (t + \\Delta t))
-            - Q'(t) \\sin(\\omega_c (t + \\Delta t))\\\\
-            &=  \\overbrace{(I'(t)\\cos(\\theta)
-            - Q'(t)\\sin(\\theta) )}^{I_\\Delta(t)} \\cos(\\omega_c t)\\\\
-            &- \\overbrace{(Q'(t)\\cos(\\theta)
-            + I'(t)\\sin(\\theta))}^{Q_\\Delta(t)} \\sin(\\omega_c t)
+            x(t + \Delta t) &= I'(t) \cos(\omega_c (t + \Delta t))
+            - Q'(t) \sin(\omega_c (t + \Delta t))\\
+            &=  \overbrace{(I'(t)\cos(\theta)
+            - Q'(t)\sin(\theta) )}^{I_\Delta(t)} \cos(\omega_c t)\\
+            &- \overbrace{(Q'(t)\cos(\theta)
+            + I'(t)\sin(\theta))}^{Q_\Delta(t)} \sin(\omega_c t)
 
         This means that to correctly interpolate the IQ data to the new components
-        :math:`I_\\Delta(t)` and :math:`Q_\\Delta(t)`, it is not sufficient to just
+        :math:`I_\Delta(t)` and :math:`Q_\Delta(t)`, it is not sufficient to just
         interpolate the I- and Q-channels independently. We also need to rotate the
-        I- and Q-channels by the angle :math:`\\theta`. This function performs this
+        I- and Q-channels by the angle :math:`\theta`. This function performs this
         rotation.
     """
     assert iq.shape[-1] == 2, (

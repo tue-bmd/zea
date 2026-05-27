@@ -216,37 +216,6 @@ def fn_requires_argument(fn, arg_name):
     return arg_name in params
 
 
-def find_methods_with_return_type(cls, return_type_hint: str):
-    """
-    Find all methods in a class that have the specified return type hint.
-
-    Args:
-        cls: The class to inspect.
-        return_type_hint (str): The return type hint to match.
-
-    Returns:
-        A list of method names that match the return type hint.
-    """
-    matching_methods = []
-    for name, member in inspect.getmembers(cls, predicate=inspect.isfunction):
-        annotations = getattr(member, "__annotations__", {})
-        return_annotation = annotations.get("return")
-        if return_annotation is None:
-            continue
-
-        # Convert annotation to string for comparison
-        if hasattr(return_annotation, "__name__"):
-            # For types like bool, int, str, custom classes
-            annotation_str = return_annotation.__name__
-        else:
-            # For string annotations or other types, convert to string
-            annotation_str = str(return_annotation)
-
-        if annotation_str == return_type_hint:
-            matching_methods.append(name)
-    return matching_methods
-
-
 def keep_trying(fn, args=None, required_set=None):
     """Keep trying to run a function until it succeeds.
 

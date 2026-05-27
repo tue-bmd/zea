@@ -24,8 +24,7 @@ import numpy as np
 from jax import jit, vmap
 from tqdm import tqdm
 
-from zea import log
-from zea.data import generate_zea_dataset
+from zea import File, log
 from zea.data.convert.echonet import H5Processor
 from zea.data.convert.echonetlvh.precompute_crop import precompute_cone_parameters
 from zea.data.convert.utils import load_avi, unzip
@@ -246,6 +245,7 @@ class LVHProcessor(H5Processor):
             (lambda matrix, angle: self.cart2pol_jit(matrix, angle=angle)), in_axes=(0, None)
         )  # map over sequence of images, keep the angle fixed since it's constant across a sequence
         self.cone_parameters = cone_params or {}
+        self.range_to = (0, 255)  # overwrite range_to to use uint8 range to save memory.
 
     def get_split(self, avi_file: str, sequence):
         """
@@ -293,11 +293,12 @@ class LVHProcessor(H5Processor):
 
         angle = cone_params["opening_angle"] / 2  # angular field spans (-angle, +angle)
         polar_im_set = self.cart2pol_batched(sequence_processed, angle)
-        sequence_processed = translate(sequence_processed, self._process_range, self.range_from)
+        sequence_processed = translate(sequence_processed, self._process_range, self.range_to)
+        assert self.range_to == (0, 255), "Expected range_to to be (0, 255) for uint8 conversion"
         sequence_processed_uint8 = jnp.asarray(jnp.floor(sequence_processed + 0.5), dtype=jnp.uint8)
         del sequence_processed
 
-        polar_im_set = translate(polar_im_set, self._process_range, (0, 255))
+        polar_im_set = translate(polar_im_set, self._process_range, self.range_to)
         polar_im_set_uint8 = jnp.asarray(jnp.floor(polar_im_set + 0.5), dtype=jnp.uint8)
         del polar_im_set
 
@@ -307,15 +308,23 @@ class LVHProcessor(H5Processor):
         if jnp.all(polar_im_set_uint8 == 0):
             raise ValueError(f"Polar sequence is all zeros for file {avi_file}")
 
-        zea_dataset = {
-            "path": out_h5,
-            "image_sc": sequence_processed_uint8,
-            "probe_name": "generic",
-            "description": "EchoNet-LVH dataset converted to zea format",
-            "image": polar_im_set_uint8,
-            "cast_to_float": False,
-        }
-        return generate_zea_dataset(**zea_dataset)
+        # Convert JAX arrays to numpy for File.create / spec validation
+        image_sc_np = np.asarray(sequence_processed_uint8)
+        polar_np = np.asarray(polar_im_set_uint8)
+
+        # Image spec requires (n_frames, x, z, y) — add y=1 dimension
+        polar_4d = polar_np[:, :, :, np.newaxis]
+
+        return File.create(
+            out_h5,
+            data={
+                "image_sc": {"values": image_sc_np},
+                "image": {"values": polar_4d},
+            },
+            scan={},
+            probe_name="generic",
+            description="EchoNet-LVH dataset converted to zea format",
+        )
 
 
 def transform_measurement_coordinates_with_cone_params(row, cone_params):

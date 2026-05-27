@@ -30,6 +30,13 @@ scan_args = {
     "waveforms_one_way": np.zeros((2, 64)),
     "waveforms_two_way": np.zeros((2, 64)),
     "tgc_gain_curve": np.ones((3328,)),
+    "probe_geometry": np.column_stack(
+        (
+            np.linspace(-0.019, 0.019, 10),
+            np.zeros(10),
+            np.zeros(10),
+        )
+    ),
 }
 
 
@@ -328,3 +335,37 @@ def test_inplace_modification_tensor_cache():
     assert not np.array_equal(tensor_dict["pfield"], tensor_dict2["pfield"]), (
         "_tensor_cache['pfield'] seems to be unaffected by in-place modification"
     )
+
+
+def test_update_behaviour_and_cache_invalidation():
+    """Test Parameters.update: skipping unchanged values and force invalidation."""
+    scan = Scan(**scan_args)
+
+    # Access grid to populate cache
+    _ = scan.grid
+    assert "grid" in scan._cache
+    cached_before = scan._cache.get("grid")
+
+    # Update with the same value (should be a no-op and keep cache)
+    scan.update(center_frequency=scan.center_frequency)
+    cached_after = scan._cache.get("grid")
+    assert cached_before is cached_after
+
+    # Force update with same value should invalidate cache (grid removed until next access)
+    scan.update(force=True, center_frequency=scan.center_frequency)
+    assert "grid" not in scan._cache
+
+    # Update with a different value should also invalidate cache
+    _ = scan.grid  # repopulate cache
+    scan.update(center_frequency=scan.center_frequency * 1.01)
+    assert "grid" not in scan._cache
+
+
+def test_update_ignores_unknown_keys():
+    """Ensure update ignores unknown keys."""
+
+    scan = Scan(**scan_args)
+
+    # Unknown key should be ignored without raising
+    scan.update(nonexistent_param=123)
+    assert not hasattr(scan, "nonexistent_param")

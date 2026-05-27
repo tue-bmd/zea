@@ -3,9 +3,7 @@
 Use to quickly read and write files or interact with file system.
 """
 
-import functools
 import os
-import time
 from io import BytesIO
 from pathlib import Path
 from typing import Generator
@@ -376,65 +374,6 @@ def matplotlib_figure_to_numpy(fig, **kwargs):
     image = np.array(image)[..., :3]
     buf.close()
     return image
-
-
-def retry_on_io_error(max_retries=3, initial_delay=0.5, retry_action=None):
-    """Decorator to retry functions on I/O errors with exponential backoff.
-
-    Args:
-        max_retries (int): Maximum number of retry attempts.
-        initial_delay (float): Initial delay between retries in seconds.
-        retry_action (callable, optional): Optional function to call before each retry attempt.
-            If decorating a method: ``retry_action(self, exception, attempt, *args, **kwargs)``
-            If decorating a function: ``retry_action(exception, attempt, *args, **kwargs)``
-
-    Returns:
-        callable: Decorated function with retry logic.
-
-    """
-
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            delay = initial_delay
-            last_exception = None
-
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except (OSError, IOError) as e:
-                    last_exception = e
-
-                    # if args exist and first arg is a class, update retry count of that method
-                    if args and hasattr(args[0], "retry_count"):
-                        args[0].retry_count = attempt + 1
-
-                    if attempt < max_retries - 1:
-                        # Execute custom retry action if provided
-                        if retry_action:
-                            # Pass all original arguments to retry_action
-                            retry_action(
-                                *args,
-                                exception=e,
-                                retry_count=attempt,
-                                **kwargs,
-                            )
-
-                        time.sleep(delay)
-
-                    else:
-                        # Last attempt failed
-                        log.error(f"Failed after {max_retries} attempts: {e}")
-
-            # If we've exhausted all retries
-            raise ValueError(
-                f"Failed to complete operation after {max_retries} attempts. "
-                f"Last error: {last_exception}"
-            )
-
-        return wrapper
-
-    return decorator
 
 
 def _convert_image_mode(img, mode="L"):

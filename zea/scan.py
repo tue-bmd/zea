@@ -90,10 +90,7 @@ from zea.beamform.pixelgrid import (
     check_for_aliasing,
     polar_pixel_grid,
 )
-from zea.display import (
-    compute_scan_convert_2d_coordinates,
-    compute_scan_convert_3d_coordinates,
-)
+from zea.display import compute_scan_convert_2d_coordinates
 from zea.internal.parameters import Parameters, cache_with_dependencies
 
 
@@ -173,7 +170,7 @@ class Scan(Parameters):
         grid_type (str, optional): Type of grid to use for beamforming.
             Can be "cartesian" or "polar". Defaults to "cartesian".
         dynamic_range (tuple, optional): Dynamic range for image display.
-            Defined in dB as (min_dB, max_dB). Defaults to (-60, 0).
+            Defined in dB as (min_dB, max_dB).
         distance_to_apex (float, optional): Distance from the transducer to the apex of the
             pixel grid. This property is used for polar grids. Will be computed automatically
             if not provided.
@@ -277,7 +274,7 @@ class Scan(Parameters):
         "distance_to_apex",
     )
     def grid(self):
-        """The beamforming grid of shape (grid_size_z, grid_size_x, 3)."""
+        """The beamforming grid of shape (grid_size_z, grid_size_x, [grid_size_y], 3)."""
         if self.grid_type == "polar":
             if self.is_3d:
                 raise NotImplementedError("3D polar grids are not yet supported.")
@@ -368,7 +365,10 @@ class Scan(Parameters):
                 radius * np.cos(-np.pi / 2 + self.polar_limits[0]),
                 radius * np.cos(-np.pi / 2 + self.polar_limits[1]),
             )
-            xlims_plane = (min(self.probe_geometry[:, 0]), max(self.probe_geometry[:, 0]))
+            xlims_plane = (
+                min(self.probe_geometry[:, 0]),
+                max(self.probe_geometry[:, 0]),
+            )
             xlims = (
                 min(xlims_polar[0], xlims_plane[0]),
                 max(xlims_polar[1], xlims_plane[1]),
@@ -411,17 +411,40 @@ class Scan(Parameters):
 
     @cache_with_dependencies("grid", "grid_type", "distance_to_apex")
     def extent(self):
-        """The extent of the beamforming grid in the format (xmin, xmax, zmax, zmin).
-        Can be directly used with `plt.imshow(x, extent=scan.extent)` for visualization.
         """
-        xlims = (self.grid[:, :, 0].min(), self.grid[:, :, 0].max())
-        zlims = (self.grid[:, :, 2].min(), self.grid[:, :, 2].max())
+        The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
+        """
+        xlims = (self.grid[..., 0].min(), self.grid[..., 0].max())
+        ylims = (self.grid[..., 1].min(), self.grid[..., 1].max())
+        zlims = (self.grid[..., 2].min(), self.grid[..., 2].max())
 
         # For polar grids, adjust zlims to account for distance to apex
         if self.grid_type == "polar":
             zlims = (zlims[0] + self.distance_to_apex, zlims[1])
 
-        return np.array([xlims[0], xlims[1], zlims[1], zlims[0]])
+        return np.array(
+            [
+                xlims[0],
+                xlims[1],
+                ylims[0],
+                ylims[1],
+                zlims[0],
+                zlims[1],
+            ]
+        )
+
+    @cache_with_dependencies("extent")
+    def extent_imshow(self):
+        """The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
+
+        Returns:
+            np.ndarray: The extent of the beamforming grid in the format (xmin, xmax, zmax, zmin).
+                This format can be used directly in matplotlib's ``plt.imshow``.
+        """
+        xlims_0, xlims_1, ylims_0, ylims_1, zlims_0, zlims_1 = self.extent
+        if ylims_0 != ylims_1:
+            log.warning("Are you sure you want to use 2D imshow extent for a 3D grid?")
+        return np.array([xlims_0, xlims_1, zlims_1, zlims_0])
 
     @cache_with_dependencies("grid")
     def flatgrid(self):
@@ -430,6 +453,7 @@ class Scan(Parameters):
 
     @cache_with_dependencies("grid_size_x", "grid_size_y", "grid_size_z")
     def is_3d(self):
+        """Whether the scan grid is 3D (True) or 2D (False)."""
         return self.grid_size_y > 1 and self.grid_size_x > 1 and self.grid_size_z > 1
 
     @property
@@ -699,14 +723,14 @@ class Scan(Parameters):
         if value is None:
             return None
 
-        selected = self.selected_transmits
-        return value[:, selected]
+        return value[:, self.selected_transmits]
 
     @cache_with_dependencies("n_ax")
     def tgc_gain_curve(self):
         """Time gain compensation (TGC) curve of shape (n_ax,)."""
         value = self._params.get("tgc_gain_curve")
         if value is None:
+            log.warning("No TGC gain curve provided, using ones")
             return np.ones(self.n_ax)
         return value[: self.n_ax]
 
@@ -715,6 +739,7 @@ class Scan(Parameters):
         """Indices of the waveform used for each transmit event of shape (n_tx,)."""
         value = self._params.get("tx_waveform_indices")
         if value is None:
+            log.warning("No transmit waveform indices provided, using zeros")
             return np.zeros(self.n_tx, dtype=int)
 
         return value[self.selected_transmits]
@@ -731,17 +756,20 @@ class Scan(Parameters):
         "pfield_kwargs",
     )
     def pfield(self) -> np.ndarray:
-        """Compute or return the pressure field (pfield) for weighting."""
-        assert not self.is_3d, "Pfield computation only supported for 2D scans"
+        """Compute or return the pressure field (pfield) for weighting
+        of shape (n_tx, grid_size_z, grid_size_x)."""
+        if self.is_3d:
+            raise NotImplementedError("Pfield computation is not yet implemented for 3D scans.")
+
         pfield = compute_pfield(
             sound_speed=self.sound_speed,
             center_frequency=self.center_frequency,
-            bandwidth_percent=self.bandwidth_percent,
             n_el=self.n_el,
             probe_geometry=self.probe_geometry,
             tx_apodizations=self.tx_apodizations,
             grid=self.grid,
             t0_delays=self.t0_delays,
+            bandwidth_percent=self.bandwidth_percent,
             **self.pfield_kwargs,
         )
         return ops.convert_to_numpy(pfield)
@@ -770,7 +798,12 @@ class Scan(Parameters):
         return value
 
     @cache_with_dependencies(
-        "rho_range", "theta_range", "resolution", "grid_size_z", "grid_size_x", "distance_to_apex"
+        "rho_range",
+        "theta_range",
+        "resolution",
+        "grid_size_z",
+        "grid_size_x",
+        "distance_to_apex",
     )
     def coordinates_2d(self):
         """The coordinates for scan conversion."""
@@ -793,28 +826,20 @@ class Scan(Parameters):
     )
     def coordinates_3d(self):
         """The coordinates for scan conversion."""
-        # TODO: no grid_size_y... this is broken
-        coords, _ = compute_scan_convert_3d_coordinates(
-            (self.grid_size_z, self.grid_size_x),
-            self.rho_range,
-            self.theta_range,
-            self.phi_range,
-            self.resolution,
-        )
-        return coords
+        raise NotImplementedError
 
-    @cache_with_dependencies("phi_range", "coordinates_2d", "coordinates_3d")
+    @cache_with_dependencies("is_3d", "coordinates_2d", "coordinates_3d")
     def coordinates(self):
-        """Get the coordinates for scan conversion, will be 3D if phi_range is set,
-        otherwise 2D."""
-        return self.coordinates_3d if getattr(self, "phi_range", None) else self.coordinates_2d
+        """Get the coordinates for scan conversion."""
+        return self.coordinates_3d if self.is_3d else self.coordinates_2d
 
     @cache_with_dependencies("time_to_next_transmit")
     def pulse_repetition_frequency(self):
         """The pulse repetition frequency (PRF) [Hz]. Assumes a constant PRF."""
         if self.time_to_next_transmit is None:
-            log.warning("Time to next transmit is not set, cannot compute PRF")
-            return None
+            raise ValueError(
+                "Time to next transmit must be set to compute pulse repetition frequency"
+            )
 
         pulse_repetition_interval = np.mean(self.time_to_next_transmit)
 
@@ -832,8 +857,7 @@ class Scan(Parameters):
         """
         time_to_next_transmit = self._params.get("time_to_next_transmit")
         if time_to_next_transmit is None:
-            log.warning("Time to next transmit is not set, cannot compute fps")
-            return None
+            raise ValueError("Time to next transmit must be set to compute frames per second")
 
         # Check if fps is constant
         uniq = np.unique(time_to_next_transmit, axis=0)  # frame axis

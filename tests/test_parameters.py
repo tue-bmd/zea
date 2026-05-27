@@ -17,7 +17,11 @@ import keras
 import numpy as np
 import pytest
 
-from zea.internal.parameters import MissingDependencyError, Parameters, cache_with_dependencies
+from zea.internal.parameters import (
+    MissingDependencyError,
+    Parameters,
+    cache_with_dependencies,
+)
 
 
 class DummyCircularParameters(Parameters):
@@ -131,6 +135,36 @@ class DummyParameters(Parameters):
             raise MissingDependencyError("Missing dependency: param6")
         # Just for test: sum the second value of optional_param and param6
         return base[1] + self.param6
+
+
+class DummyArrayParameters(Parameters):
+    """Minimal class for testing ndarray handling in Parameters.update()."""
+
+    VALID_PARAMS = {
+        "arr": {"type": np.ndarray},
+    }
+
+    @cache_with_dependencies("arr")
+    def arr_sum(self):
+        if not hasattr(self, "_arr_sum_count"):
+            self._arr_sum_count = 0
+        self._arr_sum_count += 1
+        return np.sum(self.arr)
+
+
+class DummyObjectParameters(Parameters):
+    """Minimal class for testing non-ndarray equality handling in update()."""
+
+    VALID_PARAMS = {
+        "obj": {"type": object},
+    }
+
+    @cache_with_dependencies("obj")
+    def marker(self):
+        if not hasattr(self, "_marker_count"):
+            self._marker_count = 0
+        self._marker_count += 1
+        return self._marker_count
 
 
 @pytest.fixture
@@ -352,3 +386,148 @@ def test_optional_parm_with_dependent_behavior():
     p2.optional_param = None
     assert np.allclose(p2.optional_param, expected)
     assert np.isclose(p2.dependent_on_optional, expected[1] + 8)
+
+
+def test_update_skips_unchanged_values_keeps_cache(dummy_params):
+    """Test update skips equal values and keeps cached computed properties."""
+    _ = dummy_params.computed1
+    assert "computed1" in dummy_params._cache
+    cached_before = dummy_params._cache["computed1"]
+
+    dummy_params.update(param1=dummy_params.param1)
+    cached_after = dummy_params._cache["computed1"]
+    assert cached_after is cached_before
+    assert dummy_params._computed1_count == 1
+
+
+def test_update_force_invalidates_cache_even_when_value_unchanged(dummy_params):
+    """Test force=True invalidates dependents even when incoming value is unchanged."""
+    _ = dummy_params.computed1
+    assert "computed1" in dummy_params._cache
+
+    dummy_params.update(force=True, param1=dummy_params.param1)
+    assert "computed1" not in dummy_params._cache
+
+    _ = dummy_params.computed1
+    assert dummy_params._computed1_count == 2
+
+
+def test_update_with_changed_value_invalidates_cache(dummy_params):
+    """Test update invalidates cached dependents when a value changes."""
+    _ = dummy_params.computed3
+    assert "computed3" in dummy_params._cache
+
+    dummy_params.update(param4=dummy_params.param4 * 1.01)
+    assert "computed3" not in dummy_params._cache
+
+
+def test_update_ignores_unknown_keys(dummy_params):
+    """Test update ignores unknown keys without creating attributes."""
+    dummy_params.update(non_existing_key=123)
+    assert not hasattr(dummy_params, "non_existing_key")
+
+
+def test_update_ndarray_equality_skips_recompute():
+    """Test update uses array equality and skips updates for equal ndarrays."""
+    params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+    _ = params.arr_sum
+    assert "arr_sum" in params._cache
+    cached_before = params._cache["arr_sum"]
+
+    params.update(arr=np.array([1.0, 2.0, 3.0]))
+    assert params._cache["arr_sum"] is cached_before
+    assert params._arr_sum_count == 1
+
+    params.update(arr=np.array([1.0, 2.0, 4.0]))
+    assert "arr_sum" not in params._cache
+
+
+def test_update_skips_none_to_none_for_existing_param(dummy_params):
+    """Test update skips when an existing parameter remains None."""
+    dummy_params.param5 = None
+    assert "param5" in dummy_params._params
+
+    # This should hit the old_exists + None/None early-continue path.
+    dummy_params.update(param5=None)
+    assert dummy_params.param5 is None
+
+
+def test_update_array_equal_type_error_falls_through_to_setattr():
+    """Test update catches np.array_equal errors and still applies setattr."""
+
+    class _RaisesOnEq:
+        def __eq__(self, other):
+            raise TypeError("bad equality")
+
+    old_arr = np.array([_RaisesOnEq()], dtype=object)
+    new_arr = np.array([_RaisesOnEq()], dtype=object)
+    params = DummyArrayParameters(arr=old_arr)
+
+    # np.array_equal(old_arr, new_arr) raises TypeError, code should fall through
+    # and still set the new value.
+    params.update(arr=new_arr)
+    assert params.arr is new_arr
+
+
+def test_update_non_array_bool_equality_skips_update():
+    """Test non-ndarray bool equality path skips assignment."""
+    params = DummyObjectParameters(obj=42)
+    _ = params.marker
+    assert "marker" in params._cache
+    cached_before = params._cache["marker"]
+
+    params.update(obj=42)
+    assert params._cache["marker"] is cached_before
+    assert params._marker_count == 1
+
+
+def test_update_non_array_arraylike_equality_uses_np_all():
+    """Test non-ndarray equality returning array-like uses np.all(eq)."""
+
+    class _EqArrayLike:
+        def __eq__(self, other):
+            return np.array([True, True], dtype=bool)
+
+    old_obj = _EqArrayLike()
+    new_obj = _EqArrayLike()
+    params = DummyObjectParameters(obj=old_obj)
+    _ = params.marker
+    cached_before = params._cache["marker"]
+
+    params.update(obj=new_obj)
+    assert params._cache["marker"] is cached_before
+    assert params._marker_count == 1
+
+
+def test_update_non_array_equality_exception_sets_value():
+    """Test non-ndarray equality exception path falls through to assignment."""
+
+    class _RaisesOnEq:
+        def __eq__(self, other):
+            raise TypeError("bad equality")
+
+    old_obj = _RaisesOnEq()
+    new_obj = _RaisesOnEq()
+    params = DummyObjectParameters(obj=old_obj)
+
+    params.update(obj=new_obj)
+    assert params.obj is new_obj
+
+
+def test_update_non_array_np_all_exception_falls_through():
+    """Test non-ndarray np.all(eq) exception path falls through to assignment."""
+
+    class _EqResultRaisesAll:
+        def __array__(self, dtype=None):
+            raise TypeError("cannot convert to array")
+
+    class _EqBadAll:
+        def __eq__(self, other):
+            return _EqResultRaisesAll()
+
+    old_obj = _EqBadAll()
+    new_obj = _EqBadAll()
+    params = DummyObjectParameters(obj=old_obj)
+
+    params.update(obj=new_obj)
+    assert params.obj is new_obj

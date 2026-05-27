@@ -1726,3 +1726,93 @@ def normalize(data, output_range, input_range=None):
     data = ops.clip(data, minval, maxval)
     normalized_data = translate(data, (minval, maxval), output_range)
     return normalized_data
+
+
+def split_into_windows(
+    sequence,
+    window_size: int,
+    stride: int | None = None,
+) -> tuple[list, list[list[int]]]:
+    """Split a sequence into overlapping or non-overlapping windows.
+
+    This function divides a sequence (e.g., video frames) into windows of a specified size,
+    optionally with overlap controlled by stride. If the last window is less than half the
+    window size, it is merged with the previous window to avoid very small windows.
+
+    Args:
+        sequence: Input sequence to split (e.g., list of frames, tensor).
+        window_size: Number of elements per window.
+        stride: Step size between windows. If ``None``, defaults to ``window_size``
+            (non-overlapping windows). Smaller stride values create overlapping windows.
+
+    Returns:
+        A tuple containing:
+
+        - **windows** (list): List of windowed subsequences as tensors.
+        - **window_indices** (list[list[int]]): List of index lists, where each inner
+          list contains the indices of elements in the corresponding window.
+
+    .. note::
+        This function is particularly useful for processing video sequences in batches,
+        such as in the Nuclear Diffusion dehazing method where temporal windows are
+        processed independently and then averaged to reduce memory usage.
+
+    Example:
+        .. doctest::
+
+            >>> import keras
+            >>> from zea.func.tensor import split_into_windows
+            >>> frames = keras.random.normal((10, 64, 64, 1))  # 10 frames
+            >>> windows, indices = split_into_windows(frames, window_size=4, stride=2)
+            >>> len(windows)
+            4
+            >>> [len(w) for w in windows]
+            [4, 4, 4, 4]
+            >>> indices
+            [[0, 1, 2, 3], [2, 3, 4, 5], [4, 5, 6, 7], [6, 7, 8, 9]]
+
+    """
+    if window_size <= 0:
+        raise ValueError("window_size must be > 0.")
+
+    if stride is None:
+        stride = window_size
+
+    if stride <= 0 or stride > window_size:
+        raise ValueError("stride must satisfy 0 < stride <= window_size.")
+
+    seq_len = ops.shape(sequence)[0]
+    windows = []
+    window_indices = []
+
+    start = 0
+    while start < seq_len:
+        end = start + window_size
+        if end >= seq_len:
+            # Handle remaining frames
+            remaining = seq_len - start
+            if remaining < window_size / 2 and window_indices:
+                # Merge remaining frames into the previous window
+                prev_indices = window_indices.pop()
+                new_indices = list(range(prev_indices[0], int(seq_len)))
+                windows.pop()
+                # Extract window from sequence using slicing
+                window = sequence[new_indices[0] : new_indices[-1] + 1]
+                windows.append(window)
+                window_indices.append(new_indices)
+            else:
+                # Create a final window with remaining frames
+                indices = list(range(start, int(seq_len)))
+                window = sequence[start : int(seq_len)]
+                windows.append(window)
+                window_indices.append(indices)
+            break
+        else:
+            # Create a full window
+            indices = list(range(start, end))
+            window = sequence[start:end]
+            windows.append(window)
+            window_indices.append(indices)
+        start += stride
+
+    return windows, window_indices

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from zea import ops
-from zea.beamform.phantoms import fish, rose, fibonacci, lissajous, golden_ratio
+from zea.beamform.phantoms import fibonacci, fish, golden_ratio, lissajous, rose
 from zea.internal.core import DEFAULT_DYNAMIC_RANGE
 from zea.internal.dummy_scan import _get_probe, _get_scan
 
@@ -163,7 +163,7 @@ def test_transmit_schemes(
     # Check if the scatterer is in the right location in the image
     _test_location(
         image.T,
-        extent=scan.extent,
+        extent=scan.extent_imshow,
         true_position=ultrasound_scatterers["positions"][0, target_scatterer_index],
     )
     # Check that the pipeline produced the expected outputs
@@ -228,7 +228,7 @@ def test_polar_grid(default_pipeline: ops.Pipeline, ultrasound_scatterers):
     # Check if the scatterer is in the right location in the image
     _test_location(
         image.T,
-        extent=scan.extent,
+        extent=scan.extent_imshow,
         true_position=ultrasound_scatterers["positions"][0, target_scatterer_index],
     )
 

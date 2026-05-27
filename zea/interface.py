@@ -219,7 +219,11 @@ class Interface:
                 )
 
         # get data from dataset
-        data = self.file.load_data(self.dtype, self.frame_no)
+        grp = self.file[self.file.format_key(self.dtype)]
+        if hasattr(grp, "keys") and "values" in grp:
+            data = grp["values"][self.frame_no]
+        else:
+            data = grp[self.frame_no]
 
         return data
 

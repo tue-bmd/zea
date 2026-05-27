@@ -24,6 +24,8 @@ Data copying
 .. autoprogram:: zea.data.__main__:get_parser()
    :prog: python -m zea.data
 
+.. _cli-file-operations:
+
 -------------------------------
 Data file manipulation
 -------------------------------

@@ -42,7 +42,7 @@ import tqdm
 
 from zea import log
 from zea.data.file import File
-from zea.data.preset_utils import (
+from zea.internal.preset_utils import (
     HF_DATASETS_DIR,
     HF_PREFIX,
     _hf_list_files,
@@ -103,6 +103,15 @@ class H5FileHandleCache:
             self._file_handle_cache[file_path] = file
 
         return self._file_handle_cache[file_path]
+
+    def pop(self, file_path):
+        """Pop a file from the cache and close it."""
+        file = self._file_handle_cache.pop(file_path, None)
+        if file is not None:
+            try:
+                file.close()
+            except Exception:
+                pass  # swallow exceptions during close
 
     def close(self):
         """Close all cached file handles."""
@@ -184,7 +193,7 @@ class Folder:
     def __init__(
         self,
         folder_path: str | Path | HFPath,
-        validate: bool = True,
+        validate: bool = False,
         hf_cache_dir: str = HF_DATASETS_DIR,
     ):
         single_file_error_msg = (
@@ -333,10 +342,7 @@ class Folder:
     def get_data_types(file_path):
         """Get data types from file."""
         with File(file_path) as file:
-            if "data" in file:
-                data_types = list(file["data"].keys())
-            else:
-                data_types = list(file["event_0"]["data"].keys())
+            data_types = list(file["data"].keys())
         return data_types
 
     def _write_validation_file(self, path, num_frames_per_file):
@@ -434,7 +440,7 @@ class Dataset(H5FileHandleCache):
     def __init__(
         self,
         file_paths: List[str] | str,
-        validate: bool = True,
+        validate: bool = False,
         directory_splits: list | None = None,
         **kwargs,
     ):

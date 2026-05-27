@@ -31,7 +31,7 @@ from tqdm import tqdm
 
 from zea import log
 from zea.data.convert.utils import download_from_girder, sitk_load, unzip
-from zea.data.data_format import generate_zea_dataset
+from zea.data.file import File
 from zea.func.tensor import translate
 from zea.internal.utils import find_first_nonzero_index
 
@@ -159,14 +159,16 @@ def process_camus(source_path, output_path, overwrite=False):
         image_seq_polar.append(transform_sc_image_to_polar(image))
     image_seq_polar = np.stack(image_seq_polar, axis=0)
 
-    # Change range to [-60, 0] dB
+    # Change range to [-60, 0] dB — keep as float32, not uint8
     image_seq = translate(image_seq, (0, 255), (-60, 0))
     image_seq_polar = translate(image_seq_polar, (0, 255), (-60, 0))
 
-    generate_zea_dataset(
+    # Add y dimension (elevation) — CAMUS is 2D, so y=1
+    image_seq_polar = np.expand_dims(image_seq_polar, axis=-1)
+
+    File.create(
         path=output_path,
-        image=image_seq_polar,
-        image_sc=image_seq,
+        data={"image_sc": {"values": image_seq}, "image": {"values": image_seq_polar}},
         probe_name="generic",
         description="camus dataset converted to zea format",
     )
