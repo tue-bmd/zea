@@ -243,7 +243,7 @@ the full timing of the acquisition.
 ``zea`` data format reference
 -------------------------------
 
-Files created with zea 0.0.12 and later are fully described by the
+Files created with zea 0.1.0 and later are fully described by the
 :class:`~zea.data.spec.FileSpec` class.
 
 .. note::
