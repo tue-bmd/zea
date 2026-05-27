@@ -62,17 +62,10 @@ class FlowMatchingModel(DiffusionModel):
     using a simple Euler discretisation (identical to the DDIM update rule under
     this linear schedule).
 
-    Noise samples are paired to data samples within each minibatch using
-    **minibatch Optimal Transport** (OT-CFM, Tong et al. 2023).  The
-    Hungarian algorithm solves the linear assignment problem
-
-    .. math::
-
-        \\pi^* = \\arg\\min_{\\pi \\in \\mathcal{P}} \\sum_{i,j}
-                \\pi_{ij} \\|x_0^{(i)} - \\varepsilon^{(j)}\\|^2
-
-    within each minibatch, replacing the random (independent) coupling used
-    in vanilla CFM.
+    Noise samples are drawn independently from :math:`\\mathcal{N}(0, I)` and
+    paired with data samples via **independent (random) coupling**, i.e. vanilla
+    CFM / Rectified Flow (Liu et al. 2022).  Minibatch Optimal Transport
+    coupling (OT-CFM, Tong et al. 2023) is not currently implemented.
 
     All sampling, guidance (DPS/DDS), and posterior-sampling machinery from
     :class:`~zea.models.diffusion.DiffusionModel` is inherited unchanged.
@@ -317,7 +310,7 @@ class FlowMatchingModel(DiffusionModel):
 
         # Sample uniform random flow times in [min_t, max_t]
         diffusion_times = keras.random.uniform(
-            shape=[batch_size, *[1] * n_dims],
+            shape=ops.concatenate([[batch_size], [1] * n_dims]),
             minval=self.min_t,
             maxval=self.max_t,
         )
@@ -355,7 +348,7 @@ class FlowMatchingModel(DiffusionModel):
         noises = keras.random.normal(shape=ops.shape(data))
 
         diffusion_times = keras.random.uniform(
-            shape=[batch_size, *[1] * n_dims],
+            shape=ops.concatenate([[batch_size], [1] * n_dims]),
             minval=self.min_t,
             maxval=self.max_t,
         )

@@ -8,6 +8,7 @@ from zea.models.flow_matching import FlowMatchingModel
 
 from . import DEFAULT_TEST_SEED
 
+
 def _make_minimal_flow_model(input_shape, guidance=None, operator=None):
     """Return a minimal FlowMatchingModel (no guidance) for unit-testing."""
     return FlowMatchingModel(
@@ -39,7 +40,6 @@ def test_flow_matching_schedule_sums_to_one():
     np.testing.assert_allclose(total, np.ones_like(total), atol=1e-6)
 
 
-
 def test_flow_matching_denoise_output_shapes():
     """denoise() returns (pred_noises, pred_images) with the same shape as input."""
     batch_size, n_features = 2, 2
@@ -49,9 +49,7 @@ def test_flow_matching_denoise_output_shapes():
     noise_rates = keras.ops.ones((batch_size, 1)) * 0.5
     signal_rates = keras.ops.ones((batch_size, 1)) * 0.5
 
-    pred_noises, pred_images = model.denoise(
-        noisy, noise_rates, signal_rates, training=False
-    )
+    pred_noises, pred_images = model.denoise(noisy, noise_rates, signal_rates, training=False)
     assert pred_noises.shape == noisy.shape
     assert pred_images.shape == noisy.shape
 
@@ -81,9 +79,9 @@ def test_flow_matching_reverse_step_deterministic():
 
     pred_images = keras.random.normal((batch_size, n_features))
     pred_noises = keras.random.normal((batch_size, n_features))
-    signal_rates = keras.ops.ones((batch_size, 1)) * 0.5      # α_t
+    signal_rates = keras.ops.ones((batch_size, 1)) * 0.5  # α_t
     next_signal_rates = keras.ops.ones((batch_size, 1)) * 0.6  # α_{t−Δt}
-    next_noise_rates = keras.ops.ones((batch_size, 1)) * 0.4   # σ_{t−Δt}
+    next_noise_rates = keras.ops.ones((batch_size, 1)) * 0.4  # σ_{t−Δt}
 
     result = model.reverse_diffusion_step(
         shape=(batch_size, n_features),
@@ -95,10 +93,9 @@ def test_flow_matching_reverse_step_deterministic():
         stochastic_sampling=False,
     )
 
-    expected = (
-        keras.ops.convert_to_numpy(next_signal_rates) * keras.ops.convert_to_numpy(pred_images)
-        + keras.ops.convert_to_numpy(next_noise_rates) * keras.ops.convert_to_numpy(pred_noises)
-    )
+    expected = keras.ops.convert_to_numpy(next_signal_rates) * keras.ops.convert_to_numpy(
+        pred_images
+    ) + keras.ops.convert_to_numpy(next_noise_rates) * keras.ops.convert_to_numpy(pred_noises)
     np.testing.assert_allclose(keras.ops.convert_to_numpy(result), expected, atol=1e-6)
 
 
@@ -142,7 +139,6 @@ def test_flow_matching_get_config_round_trip():
     assert restored.input_shape == model.input_shape
 
 
-
 def test_flow_matching_metrics_names():
     """metrics property should expose v_loss and i_loss trackers."""
     model = _make_minimal_flow_model((2,))
@@ -153,7 +149,6 @@ def test_flow_matching_metrics_names():
     names = [m.name for m in model.metrics]
     assert any("v_loss" in n for n in names)
     assert any("i_loss" in n for n in names)
-
 
 
 def test_flow_matching_sample_shape():
@@ -178,8 +173,6 @@ def test_flow_matching_sample_finite():
     model = _make_minimal_flow_model((n_features,))
     samples = model.sample(n_samples=2, n_steps=2, seed=seed_gen)
     assert np.isfinite(keras.ops.convert_to_numpy(samples)).all()
-
-
 
 
 def test_flow_matching_posterior_sample_shape():
@@ -211,7 +204,6 @@ def test_flow_matching_posterior_sample_shape():
         verbose=False,
     )
     assert out.shape == (n_measurements, n_samples, n_features)
-
 
 
 def test_flow_matching_dps_guidance_call():
