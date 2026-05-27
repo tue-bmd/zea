@@ -25,6 +25,7 @@ from zea.data.data_format import load_additional_elements, load_description
 from zea.data.file import File, load_file_all_data_types
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
+from zea.internal.parameters import MissingDependencyError
 from zea.log import logger
 
 ALL_DATA_TYPES_EXCEPT_RAW = set(_IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES) - {"raw_data"}
@@ -36,6 +37,14 @@ OPERATION_NAMES = [
     "resave",
     "extract",
 ]
+
+
+def _safe_getattr(obj, name):
+    """Get ``obj.name``, returning ``None`` if it is missing or has unmet dependencies."""
+    try:
+        return getattr(obj, name, None)
+    except MissingDependencyError:
+        return None
 
 
 def save_file(
@@ -118,14 +127,14 @@ def save_file(
     }
 
     optional_scan = {
-        "focus_distances": scan.focus_distances,
-        "transmit_origins": scan.transmit_origins,
-        "polar_angles": scan.polar_angles,
-        "azimuth_angles": scan.azimuth_angles,
-        "tx_apodizations": scan.tx_apodizations,
-        "time_to_next_transmit": scan.time_to_next_transmit,
-        "tgc_gain_curve": scan.tgc_gain_curve,
-        "element_width": scan.element_width,
+        "focus_distances": _safe_getattr(scan, "focus_distances"),
+        "transmit_origins": _safe_getattr(scan, "transmit_origins"),
+        "polar_angles": _safe_getattr(scan, "polar_angles"),
+        "azimuth_angles": _safe_getattr(scan, "azimuth_angles"),
+        "tx_apodizations": _safe_getattr(scan, "tx_apodizations"),
+        "time_to_next_transmit": _safe_getattr(scan, "time_to_next_transmit"),
+        "tgc_gain_curve": _safe_getattr(scan, "tgc_gain_curve"),
+        "element_width": _safe_getattr(scan, "element_width"),
     }
     for key, val in optional_scan.items():
         if val is not None:

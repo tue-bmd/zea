@@ -14,7 +14,7 @@ from zea.data.spec import DataSpec, FileSpec, MetadataSpec, MetricsSpec, ScanSpe
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
-from zea.internal.utils import deprecated, reduce_to_signature
+from zea.internal.utils import deprecated
 from zea.probes import Probe
 from zea.scan import Scan
 
@@ -588,18 +588,6 @@ class File(h5py.File):
 
         return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
 
-    def get_probe_parameters(self) -> dict:
-        """Returns a dictionary of probe parameters to initialize a probe
-        object that comes with the file (stored inside datafile).
-
-        Returns:
-            dict: The probe parameters.
-        """
-        file_scan_parameters = self.get_parameters()
-
-        probe_parameters = reduce_to_signature(Probe.__init__, file_scan_parameters)
-        return probe_parameters
-
     @property
     def probe(self) -> Probe:
         """Returns a Probe object initialized with the parameters from the file.
@@ -620,8 +608,7 @@ class File(h5py.File):
                 >>> print(probe.name)
                 'verasonics_l11_4v'
         """
-        probe_parameters_file = self.get_probe_parameters()
-        return Probe.from_parameters(self.probe_name, probe_parameters_file)
+        return Probe(**self.recursively_load_dict_contents_from_group("probe"))
 
     @property
     def metadata(self) -> MetadataSpec:
