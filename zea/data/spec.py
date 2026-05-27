@@ -505,6 +505,8 @@ class Map(Spec):
             where ``spatial_dims`` matches the spatial (non-channel) dimensions of ``values``.
             For non-channeled values the shape is ``(*values.shape, 3)``; for channeled values
             the shape is ``(*values.shape[:-1], 3)``.  The last axis holds ``[x, y, z]``.
+            The leading ``n_frames`` axis may be omitted to broadcast one coordinate grid
+            across all frames.
         labels: The labels corresponding to the ``n_ch`` channels in the values.
             This is required when values have an n_ch dimension, and should be None otherwise.
             For IQ data, this would typically be ``["I", "Q"]``.
@@ -552,14 +554,24 @@ class Map(Spec):
             # coordinates.shape[-1] is guaranteed == 3 by the SCHEMA check above.
             # Validate that the spatial axes match values (with or without a trailing channel axis).
             coords_spatial = self.coordinates.shape[:-1]
-            valid_spatial_shapes = {self.values.shape, self.values.shape[:-1]}
+            valid_spatial_shapes = {
+                self.values.shape,
+                self.values.shape[:-1],
+            }
+            # Also accept coordinates that omit the leading frame axis and
+            # therefore broadcast across frames.
+            if len(self.values.shape) > 1:
+                valid_spatial_shapes.add(self.values.shape[1:])
+            if len(self.values.shape[:-1]) > 1:
+                valid_spatial_shapes.add(self.values.shape[1:-1])
             if coords_spatial not in valid_spatial_shapes:
                 raise ValueError(
                     f"{type(self).__name__}: coordinates shape {self.coordinates.shape} is "
                     f"incompatible with values shape {self.values.shape}. "
                     f"coordinates.shape[:-1] must equal values.shape "
                     f"({self.values.shape}) for non-channeled data, or "
-                    f"values.shape[:-1] ({self.values.shape[:-1]}) for channeled data."
+                    f"values.shape[:-1] ({self.values.shape[:-1]}) for channeled data, "
+                    "with optional frame-axis broadcasting (leading n_frames omitted)."
                 )
             # Sanity-check units: clinical ultrasound scan regions are at most a few tens of
             # centimetres across, so any finite coordinate magnitude above 1 m almost certainly
@@ -625,6 +637,8 @@ class Segmentation(BooleanMap):
     Args:
         values: The segmentation values of shape ``(n_frames, z, x, y, n_labels)`` and type bool.
         coordinates: Per-pixel Cartesian positions in metres, shape ``(n_frames, z, x, y, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
         labels: The labels corresponding to the segmentation values, where each unique value
             in the values corresponds to a label in this list of shape ``(n_labels,)`` and type str.
     """
@@ -645,6 +659,8 @@ class Image(Map):
             and type uint8 or float32. For float32 values, the values should be in dB
             (between -inf and 0).
         coordinates: Per-pixel Cartesian positions in metres, shape ``(*values.shape, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
     """
 
     SCHEMA = {
@@ -679,6 +695,8 @@ class BeamformedData(FloatMap):
             n_ch is 1 for RF data or 2 for IQ data.
         coordinates: Per-pixel Cartesian positions in metres, shape
             ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
         labels: The labels for the channel dimension, e.g. ``["RF"]`` or ``["I", "Q"]``.
             Auto-generated from n_ch if not provided.
     """
@@ -719,6 +737,8 @@ class EnvelopeData(FloatMap):
         values: The envelope data of shape ``(n_frames, x, z)`` or
             ``(n_frames, z, x, y)`` and type float32.
         coordinates: Per-pixel Cartesian positions in metres, shape ``(*values.shape, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
     """
 
     SCHEMA = {
@@ -742,6 +762,8 @@ class SosMap(FloatMap):
             and type float32.
         coordinates: Per-pixel Cartesian positions in metres, shape
             ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
     """
 
     def __post_init__(self):
