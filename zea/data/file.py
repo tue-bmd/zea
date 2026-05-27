@@ -1035,6 +1035,13 @@ class File(h5py.File):
         Returns:
             Scan: The scan object.
         """
+        n = self._n_tracks
+        if n > 1:
+            raise AttributeError(
+                f"This file has {n} tracks. "
+                "Use file.tracks to get a list of tracks and call get_scan() on each: "
+                "file.tracks[i].get_scan()"
+            )
         scan_dict = self.get_scan_parameters()
 
         # Collect probe-group fields that Scan uses but may not appear in ScanSpec.

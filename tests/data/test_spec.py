@@ -855,58 +855,6 @@ def test_image_spec_accepts_neginf():
         Image(values=values_positive, coordinates=coordinates)
 
 
-class TestMultiTrackProbeConsistency:
-    """FileSpec must reject multi-track files where probe-defining parameters differ."""
-
-    def _make_track(
-        self,
-        n_el: int = 4,
-        geom_offset: float = 0.0,
-        element_width: float = None,
-        label: str = None,
-    ):
-        """Return a minimal TrackSpec with raw_data and a scan."""
-        n_frames, n_tx, n_ax, n_ch = 2, 2, 8, 1
-        geom = np.zeros((n_el, 3), dtype=np.float32)
-        geom[:, 0] = geom_offset  # shift x-coordinates to make geometry unique
-        scan_dict = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
-        scan_dict["probe_geometry"] = geom
-        if element_width is not None:
-            scan_dict["element_width"] = np.float32(element_width)
-        return TrackSpec(
-            data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
-            scan=scan_dict,
-            label=label,
-        )
-
-    def test_matching_probe_geometry_passes(self):
-        """Two tracks with identical probe_geometry should not raise."""
-        track_a = self._make_track(geom_offset=0.0, label="track_a")
-        track_b = self._make_track(geom_offset=0.0, label="track_b")
-        FileSpec(tracks=[track_a, track_b])  # should not raise
-
-    def test_mismatched_probe_geometry_raises(self):
-        """Two tracks with different probe_geometry must raise ValueError."""
-        track_a = self._make_track(geom_offset=0.0, label="track_a")
-        track_b = self._make_track(geom_offset=1.0, label="track_b")
-        with pytest.raises(ValueError, match="probe_geometry"):
-            FileSpec(tracks=[track_a, track_b])
-
-    def test_mismatched_element_width_raises(self):
-        """Two tracks with different element_width must raise ValueError."""
-        track_a = self._make_track(element_width=0.0003, label="track_a")
-        track_b = self._make_track(element_width=0.0006, label="track_b")
-        with pytest.raises(ValueError, match="element_width"):
-            FileSpec(tracks=[track_a, track_b])
-
-    def test_error_message_includes_track_indices(self):
-        """The error message should mention which track indices disagree."""
-        track_a = self._make_track(geom_offset=0.0, label="track_a")
-        track_b = self._make_track(geom_offset=1.0, label="track_b")
-        with pytest.raises(ValueError, match=r"Tracks 0 and 1"):
-            FileSpec(tracks=[track_a, track_b])
-
-
 def _scan_bare(n_tx: int = 2, n_el: int = 4):
     """Minimal ScanSpec dict with only required fields (all optionals left as None)."""
     return {

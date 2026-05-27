@@ -901,7 +901,7 @@ def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
             {"data": {"raw_data": raw_a}, "scan": scan, "label": "track_a"},
             {"data": {"raw_data": raw_b}, "scan": scan, "label": "track_b"},
         ],
-        probe_name="two_track_probe",
+        probe={"name": "two_track_probe"},
     )
     f.close()
     return path, raw_a, raw_b
@@ -1063,7 +1063,7 @@ class TestMultiTrackFile:
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
             with pytest.raises(AttributeError, match="2 tracks"):
-                f.scan()
+                _ = f.scan
 
     def test_error_message_mentions_tracks_property(self, tmp_path):
         """The error on file.data tells the user to use file.tracks."""
@@ -1073,7 +1073,7 @@ class TestMultiTrackFile:
                 _ = f.data
         with File(path) as f:
             with pytest.raises(AttributeError, match="file.tracks"):
-                f.scan()
+                _ = f.scan
 
     # ------------------------------------------------------------------
     # Single-track files: backwards-compatible access still works
@@ -1102,7 +1102,7 @@ class TestMultiTrackFile:
         ).close()
 
         with File(path) as f:
-            scan = f.scan()
+            scan = f.scan
         assert isinstance(scan, Scan)
         assert scan.n_tx == 3
 

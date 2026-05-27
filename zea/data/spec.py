@@ -1859,6 +1859,7 @@ class FileSpec(Spec):
         metadata: "MetadataSpec | dict | None" = None,
         metrics: "MetricsSpec | dict | None" = None,
         probe_name: "str | None" = None,
+        probe: "ProbeSpec | dict | None" = None,
         us_machine: "str | None" = None,
         description: "str | None" = None,
     ):
@@ -1872,11 +1873,17 @@ class FileSpec(Spec):
         else:
             _implicit_track = None
 
+        if probe_name is not None:
+            raise TypeError(
+                "probe_name is not a FileSpec parameter. "
+                "Use probe={'name': ...} to specify the probe name."
+            )
+
         self.tracks = list(tracks) if tracks is not None else []
         self.track_schedule = track_schedule
         self.metadata = metadata if metadata is not None else MetadataSpec()
         self.metrics = metrics if metrics is not None else MetricsSpec()
-        self.probe_name = probe_name
+        self.probe = probe
         self.us_machine = us_machine
         self.description = description
 
@@ -1956,35 +1963,6 @@ class FileSpec(Spec):
                     f"All track_schedule indices must be in [0, {n_tracks - 1}], "
                     f"got min={self.track_schedule.min()}, max={self.track_schedule.max()}"
                 )
-
-        # Validate that probe-defining scan parameters agree across all tracks.
-        # This guarantees that probe() can safely return parameters from track_0.
-        if len(self.tracks) > 1:
-            _PROBE_FIELDS = ("probe_geometry", "element_width")
-            ref_idx, ref_scan = next(
-                ((i, t.scan) for i, t in enumerate(self.tracks) if t.scan is not None),
-                (None, None),
-            )
-            if ref_scan is not None:
-                for cur_idx, track in enumerate(self.tracks):
-                    if cur_idx == ref_idx or track.scan is None:
-                        continue
-                    for field_name in _PROBE_FIELDS:
-                        ref_val = getattr(ref_scan, field_name, None)
-                        cur_val = getattr(track.scan, field_name, None)
-                        if ref_val is None or cur_val is None:
-                            continue
-                        equal = (
-                            np.array_equal(ref_val, cur_val)
-                            if isinstance(ref_val, np.ndarray)
-                            else ref_val == cur_val
-                        )
-                        if not equal:
-                            raise ValueError(
-                                f"Tracks {ref_idx} and {cur_idx} have different "
-                                f"'{field_name}' values. All tracks in a multi-track "
-                                "file must use the same physical probe."
-                            )
 
         # Warn if multi-track frame counts differ without a schedule
         if len(self.tracks) > 1 and self.track_schedule is None:
@@ -2084,24 +2062,16 @@ class FileSpec(Spec):
     def from_hdf5(cls, file: h5py.File) -> "FileSpec":
         """Load and validate a :class:`FileSpec` from an open HDF5 file.
 
-        <<<<<<< HEAD
-                This reads all groups into memory and runs the full spec validation
-                (dtype, shape, dimension consistency).  Legacy files are handled
-                transparently: extra scalar fields in the scan group (``n_frames``,
-                ``n_tx``, etc.) are ignored, and the ``probe`` root
-                attribute is mapped to ``probe.name``.
-        =======
-                Both the new ``tracks/track_N/`` format and the legacy flat
-                ``data/`` + ``scan/`` format are supported.  Extra scalar fields in
-                legacy scan groups (``n_frames``, ``n_tx``, etc.) are ignored,
-                and the ``probe`` root attribute is mapped to ``probe_name``.
-        >>>>>>> openh-rf
+        Both the new ``tracks/track_N/`` format and the legacy flat
+        ``data/`` + ``scan/`` format are supported.  Extra scalar fields in
+        legacy scan groups (``n_frames``, ``n_tx``, etc.) are ignored,
+        and the ``probe`` root attribute is mapped to ``probe.name``.
 
-                Args:
-                    file: An open ``h5py.File`` (or :class:`zea.File`).
+        Args:
+            file: An open ``h5py.File`` (or :class:`zea.File`).
 
-                Returns:
-                    FileSpec: A fully validated spec object.
+        Returns:
+            FileSpec: A fully validated spec object.
         """
 
         def _load_group_as_dict(group: h5py.Group) -> dict:
