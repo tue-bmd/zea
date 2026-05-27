@@ -2110,11 +2110,18 @@ class FileSpec(Spec):
         # New multi-track format: tracks/track_N/
         if "tracks" in file:
             tracks_group = file["tracks"]
+            scan_schema_keys = set(ScanSpec.SCHEMA.keys())
             tracks = []
             i = 0
             while f"track_{i}" in tracks_group:
                 track_group = tracks_group[f"track_{i}"]
                 track_dict = _load_group_as_dict(track_group)
+                # Filter legacy scalar fields from per-track scan dicts, matching
+                # the same treatment applied to single-track scan groups below.
+                if "scan" in track_dict and isinstance(track_dict["scan"], dict):
+                    track_dict["scan"] = {
+                        k: v for k, v in track_dict["scan"].items() if k in scan_schema_keys
+                    }
                 tracks.append(track_dict)
                 i += 1
             kwargs["tracks"] = tracks

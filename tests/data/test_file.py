@@ -1107,11 +1107,53 @@ class TestMultiTrackFile:
         assert scan.n_tx == 3
 
     # ------------------------------------------------------------------
+    # Probe: file-level access and track isolation
+    # ------------------------------------------------------------------
+
+    def test_track_scan_includes_file_level_probe_geometry(self, tmp_path):
+        """probe_geometry stored in the file-level probe group is injected into track.scan()."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 3, 4, 8, 1
+        geom = np.arange(n_el * 3, dtype=np.float32).reshape(n_el, 3) * 1e-3
+        scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+        path = tmp_path / "probe_geom.hdf5"
+        File.create(
+            path,
+            tracks=[
+                {
+                    "data": {
+                        "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+                    },
+                    "scan": scan,
+                    "label": "track_a",
+                },
+                {
+                    "data": {
+                        "raw_data": np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+                    },
+                    "scan": scan,
+                    "label": "track_b",
+                },
+            ],
+            probe={"probe_geometry": geom},
+        ).close()
+
+        with File(path) as f:
+            for track in f.tracks:
+                np.testing.assert_array_equal(track.scan().probe_geometry, geom)
+
+    def test_track_has_no_probe_attribute(self, tmp_path):
+        """Track exposes no .probe attribute; probe is accessed via File.probe."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            track = f.tracks[0]
+            with pytest.raises(AttributeError):
+                _ = track.probe
+
+    # ------------------------------------------------------------------
     # Dict-format track inputs
     # ------------------------------------------------------------------
 
     def test_multi_track_from_dicts(self, tmp_path):
-        """File.create accepts plain dicts for tracks."""
         n_frames, n_tx, n_el, n_ax, n_ch = 2, 3, 4, 8, 1
         raw_a = np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
         raw_b = np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)

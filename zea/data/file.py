@@ -94,7 +94,7 @@ class Track:
                 scan = track.scan()
     """
 
-    __slots__ = ("_index", "_group", "_timestamps", "_label")
+    __slots__ = ("_index", "_group", "_timestamps", "_label", "_probe")
 
     def __init__(
         self,
@@ -102,11 +102,13 @@ class Track:
         group: "h5py.Group",
         timestamps: "np.ndarray | None" = None,
         label: "str | None" = None,
+        probe: "dict | None" = None,
     ):
         object.__setattr__(self, "_index", index)
         object.__setattr__(self, "_group", group)
         object.__setattr__(self, "_timestamps", timestamps)
         object.__setattr__(self, "_label", label)
+        object.__setattr__(self, "_probe", probe)
 
     @property
     def data(self) -> GroupProxy:
@@ -135,8 +137,25 @@ class Track:
             )
         scan_dict = load_dict_from_hdf5_group(self._group["scan"])
         scan_dict = check_focus_distances(scan_dict)
+        # Collect probe-level fields (probe_geometry etc.) to inject AFTER the
+        # ScanSpec filter inside build_scan_from_dict, mirroring File.get_scan().
+        probe_supplements: "dict | None" = None
+        if self._probe is not None:
+            _PROBE_FIELDS = {
+                "probe_geometry",
+                "element_width",
+                "lens_sound_speed",
+                "lens_thickness",
+            }
+            probe_supplements = {k: v for k, v in self._probe.items() if k in _PROBE_FIELDS}
         data_group = self._group["data"] if "data" in self._group else None
-        return build_scan_from_dict(scan_dict, data_group=data_group, safe=safe, **kwargs)
+        return build_scan_from_dict(
+            scan_dict,
+            data_group=data_group,
+            safe=safe,
+            probe_supplements=probe_supplements,
+            **kwargs,
+        )
 
     @property
     def label(self) -> "str | None":
@@ -230,6 +249,7 @@ def build_scan_from_dict(
     scan_dict: dict,
     data_group: "h5py.Group | None" = None,
     safe: bool = True,
+    probe_supplements: "dict | None" = None,
     **kwargs,
 ) -> "Scan":
     """Build a :class:`~zea.scan.Scan` from a raw parameter dictionary.
@@ -239,6 +259,10 @@ def build_scan_from_dict(
         data_group: Optional HDF5 data group used to derive ``n_ax`` from
             ``raw_data`` when it cannot be inferred from the scan spec.
         safe: Forwarded to :meth:`~zea.scan.Scan.merge`.
+        probe_supplements: Optional dict of probe-level fields (e.g.
+            ``probe_geometry``) to inject into the scan dict *after* the
+            :class:`~zea.data.spec.ScanSpec` filter — these fields live in
+            :class:`~zea.data.spec.ProbeSpec` and would otherwise be stripped.
         **kwargs: Override any scan parameter.
 
     Returns:
@@ -258,6 +282,12 @@ def build_scan_from_dict(
             scan_dict["n_ax"] = data_group["raw_data"].shape[2]
     except (TypeError, ValueError) as exc:
         log.debug(f"ScanSpec validation skipped: {exc}. Using raw scan parameters from file.")
+
+    # Re-inject probe-level fields that were stripped by the ScanSpec filter.
+    if probe_supplements:
+        for _field, _value in probe_supplements.items():
+            if _field not in scan_dict or scan_dict.get(_field) is None:
+                scan_dict[_field] = _value
 
     return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
 
@@ -511,6 +541,11 @@ class File(h5py.File):
                 "Access data and scan parameters directly with file.data and file.scan()."
             )
         tracks_group = self["tracks"]
+        # Load file-level probe once so every track's scan() can supplement its
+        # scan parameters with probe_geometry, element_width, etc.
+        probe_dict: "dict | None" = None
+        if super().__contains__("probe"):
+            probe_dict = load_dict_from_hdf5_group(self["probe"])
         tracks: list[Track] = []
         i = 0
         while f"track_{i}" in tracks_group:
@@ -519,7 +554,7 @@ class File(h5py.File):
             if "label" in track_group:
                 raw = track_group["label"][()]
                 label = raw.decode() if isinstance(raw, bytes) else str(raw)
-            tracks.append(Track(i, track_group, label=label))
+            tracks.append(Track(i, track_group, label=label, probe=probe_dict))
             i += 1
 
         schedule = self.track_schedule
