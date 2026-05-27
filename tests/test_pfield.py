@@ -39,7 +39,7 @@ def test_pfield():
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
         n_ax=2047,
-        sampling_frequency=probe.sampling_frequency,
+        sampling_frequency=probe.center_frequency * 4,
         center_frequency=probe.center_frequency,
         polar_angles=np.array([0]),
         t0_delays=t0_delays,
@@ -73,7 +73,7 @@ def test_pfield_not_triggered():
         xlims=(-20e-3, 20e-3),
         zlims=(0, 40e-3),
         n_ax=1024,
-        sampling_frequency=probe.sampling_frequency,
+        sampling_frequency=probe.center_frequency * 4,
         center_frequency=probe.center_frequency,
     )
 

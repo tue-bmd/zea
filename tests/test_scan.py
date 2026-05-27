@@ -294,7 +294,7 @@ def test_inplace_modification():
 
     def edit2(scan):
         """edit another indirect dependency (np.ndarray) in-place"""
-        scan.probe_geometry[:, 0] += 0.001
+        scan.probe_geometry[:, 0] *= 1.02
         return scan
 
     def edit3(scan):

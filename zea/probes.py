@@ -66,15 +66,21 @@ class Probe(ProbeSpec):
         # TODO: merge this with Parameters.to_tensor()
         return dict_to_tensor(self.get_parameters(), keep_as_is=keep_as_is)
 
+    @staticmethod
+    def _legacy_int_to_float(value):
+        if isinstance(value, int):
+            return np.float32(value)
+        elif isinstance(value, np.ndarray) and np.issubdtype(value.dtype, np.integer):
+            return value.astype(np.float32)
+        elif np.isscalar(value) and isinstance(value, (int, np.integer)):
+            return np.float32(value)
+        else:
+            return value
+
     def __post_init__(self):
         # Legacy file support
         if self.center_frequency is not None:
-            if isinstance(self.center_frequency, int):
-                self.center_frequency = np.float32(self.center_frequency)
-            elif isinstance(self.center_frequency, np.ndarray) and np.issubdtype(
-                self.center_frequency.dtype, np.integer
-            ):
-                self.center_frequency = self.center_frequency.astype(np.float32)
+            self.center_frequency = self._legacy_int_to_float(self.center_frequency)
         super().__post_init__()
 
 
