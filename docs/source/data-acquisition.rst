@@ -166,7 +166,6 @@ the full timing of the acquisition.
     ...             "label": "focused_bmode",
     ...             "data": {"raw_data": np.zeros((n_frames, n_tx_focused, n_ax, n_el, 1))},
     ...             "scan": {
-    ...                 "probe_geometry":         probe_geom,
     ...                 "sampling_frequency":     40e6,
     ...                 "center_frequency":       7e6,
     ...                 "demodulation_frequency": 7e6,
@@ -184,7 +183,6 @@ the full timing of the acquisition.
     ...             "label": "planewave_doppler",
     ...             "data": {"raw_data": np.zeros((n_frames, n_tx_pw, n_ax, n_el, 1))},
     ...             "scan": {
-    ...                 "probe_geometry":         probe_geom,
     ...                 "sampling_frequency":     40e6,
     ...                 "center_frequency":       7e6,
     ...                 "demodulation_frequency": 7e6,
@@ -198,7 +196,7 @@ the full timing of the acquisition.
     ...             },
     ...         },
     ...     ],
-    ...     probe_name="L11-4v",
+    ...     probe={"name": "L11-4v", "probe_geometry": probe_geom},
     ...     track_schedule=track_schedule,
     ...     overwrite=True,
     ... )
@@ -211,7 +209,7 @@ the full timing of the acquisition.
     >>> import zea
 
     >>> with zea.File("acquisition.hdf5") as f:
-    ...     probe = f.probe()              # probe is shared across all tracks
+    ...     probe = f.probe             # probe is shared across all tracks
     ...     # See track labels:
     ...     print(f.track_labels)          # ['focused_bmode', 'planewave_doppler']
     ...     # Unpack in the same order as track_labels — always safe:
