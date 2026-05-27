@@ -716,12 +716,6 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - -
            - Time-gain-compensation curve.
            - |badge-opt|
-         * - ``element_width``
-           - ``float32``
-           - scalar
-           - m
-           - Element width of the probe.
-           - |badge-opt|
          * - ``waveforms_one_way``
            - ``float32``
            - (n_tx, n_samples_one_way)
