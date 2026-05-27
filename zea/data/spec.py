@@ -211,7 +211,7 @@ class Spec:
         """Validate a nested spec field, recursively validating its contents."""
         if isinstance(field_value, dict):
             # Try constructing the nested spec directly.  For backward compatibility,
-            # if unknown keyword arguments are present (e.g. n_elements / pitch stored
+            # if unknown keyword arguments are present (e.g. n_el / pitch stored
             # in the probe group of old HDF5 files, or probe_geometry in the scan
             # group), retry with only the fields known to this spec.  We intentionally
             # do NOT filter unconditionally because specs such as DataSpec and
@@ -1178,7 +1178,7 @@ class ProbeSpec(Spec):
         center_frequency: Probe nominal centre frequency in Hz.
         bandwidth_percent: Fractional bandwidth as a percentage (0-100).
         probe_geometry: Element positions in metres, shape (n_el, 3) with columns
-            (x, y, z).  :attr:`n_elements` and :attr:`pitch` are computed
+            (x, y, z).  :attr:`n_el` and :attr:`pitch` are computed
             automatically as read-only properties from this array.
         element_width: Width of a single transducer element in metres.
         element_height: Height (elevation aperture) of a single element in metres.
@@ -1242,7 +1242,7 @@ class ProbeSpec(Spec):
     }
 
     @property
-    def n_elements(self) -> int | None:
+    def n_el(self) -> int | None:
         """Number of transducer elements, derived from :attr:`probe_geometry`."""
         if self.probe_geometry is not None:
             return int(self.probe_geometry.shape[0])

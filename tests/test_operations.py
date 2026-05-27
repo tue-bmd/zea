@@ -249,11 +249,7 @@ def test_up_and_down_conversion(factor, batch_size):
         n_ch=1,
         selected_transmits="all",
     )
-    probe = Probe(
-        probe_geometry=probe_geometry,
-        center_frequency=3.125e6,
-        sampling_frequency=12.5e6,
-    )
+    probe = Probe(probe_geometry=probe_geometry, center_frequency=3.125e6)
 
     # use pipeline here so it is easy to propagate the scan parameters
     simulator_pipeline = Pipeline(

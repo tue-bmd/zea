@@ -1086,11 +1086,11 @@ class TestProbeSpec:
     def test_n_elements_derived_from_probe_geometry(self):
         pg = np.zeros((128, 3), dtype=np.float32)
         probe = ProbeSpec(probe_geometry=pg)
-        assert probe.n_elements == 128
+        assert probe.n_el == 128
 
     def test_n_elements_none_without_probe_geometry(self):
         probe = ProbeSpec()
-        assert probe.n_elements is None
+        assert probe.n_el is None
 
     def test_pitch_derived_from_probe_geometry(self):
         n_el = 4
@@ -1115,7 +1115,7 @@ class TestProbeSpec:
         # Simulate what _validate_nested_field does after filtering known fields
         pg = np.zeros((4, 3), dtype=np.float32)
         probe = ProbeSpec(probe_geometry=pg)
-        assert probe.n_elements == 4
+        assert probe.n_el == 4
 
     def test_invalid_lens_sound_speed_raises(self):
         with pytest.raises(ValueError, match="lens_sound_speed"):
