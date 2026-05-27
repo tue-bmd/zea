@@ -11,6 +11,7 @@ For more information about the dataset, resort to the following links:
 
 import csv
 import json
+import math
 import os
 import shutil
 import tempfile
@@ -161,6 +162,10 @@ def precompute_cone_parameters(
         "crop_top",
         "crop_bottom",
         "apex_x",
+        "apex_y",
+        "circle_radius",
+        "left_slope",
+        "right_slope",
         "new_width",
         "new_height",
         "opening_angle",
@@ -199,6 +204,10 @@ def precompute_cone_parameters(
                     "crop_top": full_cone_params["crop_top"],
                     "crop_bottom": full_cone_params["crop_bottom"],
                     "apex_x": full_cone_params["apex_x"],
+                    "apex_y": full_cone_params["apex_y"],
+                    "circle_radius": full_cone_params["circle_radius"],
+                    "left_slope": full_cone_params["left_slope"],
+                    "right_slope": full_cone_params["right_slope"],
                     "new_width": full_cone_params["new_width"],
                     "new_height": full_cone_params["new_height"],
                     "opening_angle": full_cone_params["opening_angle"],
@@ -343,8 +352,14 @@ class LVHProcessor(H5Processor):
         # Store the pre-computed cone parameters
         self.cart2pol_jit = jit(cartesian_to_polar_matrix)
         self.cart2pol_batched = vmap(
-            (lambda matrix, angle: self.cart2pol_jit(matrix, angle=angle)), in_axes=(0, None)
-        )  # map over sequence of images, keep the angle fixed since it's constant across a sequence
+            lambda matrix, tip_x, tip_y, r_max, theta_min, theta_max: self.cart2pol_jit(
+                matrix,
+                tip=(tip_x, tip_y),
+                r_max=r_max,
+                theta_range=(theta_min, theta_max),
+            ),
+            in_axes=(0, None, None, None, None, None),
+        )  # map over sequence of images; per-video cone geometry is broadcast
         self.cone_parameters = cone_params or {}
 
     def get_split(self, avi_file: Path, sequence):
@@ -390,8 +405,25 @@ class LVHProcessor(H5Processor):
         split = self.get_split(avi_file, sequence_processed)
         out_h5 = self.path_out_h5 / split / avi_file.with_suffix(".hdf5")
 
-        angle = cone_params["opening_angle"] / 2  # angular field spans (-angle, +angle)
-        polar_im_set = self.cart2pol_batched(sequence_processed, angle)
+        # Apex position in the cropped+padded image, mirroring crop_and_center_cone
+        apex_x_in_crop = cone_params["apex_x"] - cone_params["crop_left"]
+        cropped_width = cone_params["crop_right"] - cone_params["crop_left"]
+        left_padding = max(0, int(cropped_width / 2 - apex_x_in_crop))
+        tip_x = apex_x_in_crop + left_padding
+        tip_y = cone_params["apex_y"] - cone_params["crop_top"]
+        # Asymmetric angular extent from the fitted cone edges. Polar +theta lands on the
+        # left side of the image (after the 90° rotation in cartesian_to_polar_matrix),
+        # so theta_min comes from the right slope and theta_max from the left slope.
+        theta_min = -math.atan(cone_params["right_slope"])
+        theta_max = -math.atan(cone_params["left_slope"])
+        polar_im_set = self.cart2pol_batched(
+            sequence_processed,
+            tip_x,
+            tip_y,
+            cone_params["circle_radius"],
+            theta_min,
+            theta_max,
+        )
         sequence_processed = translate(sequence_processed, self._process_range, self.range_from)
         sequence_processed_uint8 = ops.cast(ops.floor(sequence_processed + 0.5), "uint8")
         del sequence_processed
