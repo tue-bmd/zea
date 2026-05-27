@@ -555,6 +555,7 @@ class Map(Spec):
             "shape": (
                 ("n_frames", "z", "x", "y", "n_spatial_ch"),
                 ("n_frames", "z", "x", "y"),
+                ("n_frames", "z", "x", "n_spatial_ch"),
                 ("n_frames", "z", "x"),
             ),
         },
@@ -659,18 +660,34 @@ class Segmentation(BooleanMap):
     """Segmentation data with per-pixel Cartesian coordinates.
 
     Args:
-        values: The segmentation values of shape ``(n_frames, z, x, y, n_labels)`` and type bool.
-        coordinates: Per-pixel Cartesian positions in metres, shape ``(n_frames, z, x, y, 3)``.
+        values: The segmentation values of shape ``(n_frames, z, x, y, n_labels)`` for 3D
+            (volumetric) data or ``(n_frames, z, x, n_labels)`` for 2D data, with type bool.
+        coordinates: Per-pixel Cartesian positions in metres, shape ``(*spatial_dims, 3)``
+            where ``spatial_dims`` matches the spatial (non-label) dimensions of ``values``.
             The leading frame axis may be omitted to broadcast one coordinate grid
             across all frames.
         labels: The labels corresponding to the segmentation values, where each unique value
             in the values corresponds to a label in this list of shape ``(n_labels,)`` and type str.
     """
 
+    SCHEMA = {
+        **BooleanMap.SCHEMA,
+        "values": {
+            **BooleanMap.SCHEMA["values"],
+            "shape": (
+                ("n_frames", "z", "x", "y", "n_spatial_ch"),
+                ("n_frames", "z", "x", "n_spatial_ch"),
+            ),
+        },
+    }
+
     def __post_init__(self):
-        assert self.values.ndim == 5, (
-            "Segmentation values must have 5 dimensions (n_frames, z, x, y, n_labels)"
+        assert self.values.ndim in (4, 5), (
+            "Segmentation values must have 4 or 5 dimensions: "
+            "(n_frames, z, x, n_labels) for 2D or (n_frames, z, x, y, n_labels) for 3D, "
+            f"got shape {self.values.shape}"
         )
+        assert self.labels is not None, "Segmentation requires labels to be provided"
         super().__post_init__()
 
 
