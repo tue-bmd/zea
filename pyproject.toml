@@ -250,8 +250,13 @@ markers = [
     "gpu: marks tests that exercise real GPU hardware (most meaningful offline; in CI CUDA_VISIBLE_DEVICES=\"\" forces CPU)",
 ]
 filterwarnings = [
+    "ignore:.*SwigPyPacked.*:DeprecationWarning",
+    "ignore:.*SwigPyObject.*:DeprecationWarning",
+    "ignore:.*swigvarlink.*:DeprecationWarning",
     "ignore::DeprecationWarning:jupyter_client.*",
     "ignore::DeprecationWarning:papermill.*",
+    "ignore:.*__array__ implementation doesn't accept a copy keyword.*:DeprecationWarning",
+    "ignore:.*os\\.fork\\(\\) was called.*:RuntimeWarning",
 ]
 
 [tool.coverage.report]

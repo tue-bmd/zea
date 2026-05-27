@@ -29,10 +29,12 @@ from typing import List
 import grain
 import keras
 import numpy as np
+from keras import ops
 
 from zea import log
 from zea.data.datasets import Dataset, H5FileHandleCache, count_samples_per_directory
 from zea.data.layers import Resizer
+from zea.func.tensor import translate
 from zea.utils import canonicalize_axis, map_negative_indices
 
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
@@ -338,10 +340,10 @@ class Dataloader:
 
     .. code-block:: text
 
-        grain threads (N) → h5py (thread-local handles) → numpy → user
+        grain threads (N) → h5py (thread-local handles) → numpy -> cpu tensor → user
 
-    The entire pipeline runs in numpy — no framework dependency until
-    you feed tensors to your model.
+    The entire pipeline runs using numpy, and the resizing is done on the selected
+    backend, all on cpu.
 
     Does the following in order to load a dataset:
 
@@ -352,13 +354,16 @@ class Dataloader:
             - shuffle
             - shard
             - add channel dim
-            - clip_image_range
-            - assert_image_range
+            - clip image range
+            - assert image range
             - resize
             - repeat
             - batch
+            - cast to float32
             - normalize
             - augmentation
+            - convert_to_tensor
+
 
     Args:
         file_paths: Path(s) to directory(ies) and/or HDF5 file(s).
@@ -428,6 +433,11 @@ class Dataloader:
         prefetch_buffer_size: Size of the Grain buffer for reading elements per Python
             process (not per thread). Useful when reading from a distributed file
             system. Default is ``500``.
+        reshuffle_each_epoch: Whether to reshuffle the dataset after each epoch.
+            Default is ``True``. For evaluation it might be useful to set this to
+            ``False``. Or when you want to use a persistent iterator between epochs, using
+            ``dataset_repetitions`` to specify the number of epochs.
+        convert_to_tensor: Whether to convert the data to a tensor (on cpu). Default is ``True``.
 
     Example:
         .. code-block:: python
@@ -480,6 +490,8 @@ class Dataloader:
         num_shards: int = 1,
         num_threads: int = 16,
         prefetch_buffer_size: int = 500,
+        reshuffle_each_epoch: bool = True,
+        convert_to_tensor: bool = True,
         **kwargs,
     ):
         # ── Validation ────────────────────────────────────────────────
@@ -499,7 +511,8 @@ class Dataloader:
         self.num_threads = num_threads
         self.prefetch_buffer_size = prefetch_buffer_size
         self.prefetch = prefetch
-        self.shuffle = shuffle
+        self._shuffle = shuffle
+        self.reshuffle_each_epoch = reshuffle_each_epoch
 
         # Grain requires a concrete seed for shuffle — generate one if needed
         if seed is None:
@@ -538,7 +551,8 @@ class Dataloader:
             dataset_repetitions=dataset_repetitions,
             drop_remainder=drop_remainder,
             augmentation=augmentation,
-            resizer=None,
+            resizer=None,  # set later
+            convert_to_tensor=convert_to_tensor,
         )
 
         # Pre-build the resizer (stateless, reusable across epochs)
@@ -575,17 +589,21 @@ class Dataloader:
         cfg = self._pipeline_cfg
 
         def _ds_map(ds, fn):
+            def on_cpu(x, _fn=fn):
+                with keras.device("cpu"):
+                    return _fn(x)
+
             if self.return_filename:
-                return ds.map(lambda item: (fn(item[0]), item[1]))
-            return ds.map(fn)
+                return ds.map(lambda item: (on_cpu(item[0]), item[1]))
+            return ds.map(on_cpu)
 
         ds = grain.MapDataset.source(self.source)
 
         # Set the seed for the whole pipeline
         ds = ds.seed(seed)
 
-        if self.shuffle:
-            ds = ds.shuffle(seed=seed)
+        if self._shuffle:
+            ds = ds.shuffle()
 
         if cfg["num_shards"] > 1:
             ds = ds[cfg["shard_index"] :: cfg["num_shards"]]
@@ -594,7 +612,7 @@ class Dataloader:
 
         if cfg["clip_image_range"] and cfg["image_range"] is not None:
             lo, hi = cfg["image_range"]
-            ds = _ds_map(ds, lambda x, _lo=lo, _hi=hi: keras.ops.clip(x, _lo, _hi))
+            ds = _ds_map(ds, lambda x, _lo=lo, _hi=hi: np.clip(x, _lo, _hi))
 
         if cfg["assert_image_range"] and cfg["image_range"] is not None:
             _ir = cfg["image_range"]
@@ -602,6 +620,7 @@ class Dataloader:
 
         if cfg["resizer"] is not None:
             ds = _ds_map(ds, cfg["resizer"])
+            ds = _ds_map(ds, ops.convert_to_numpy)
 
         if cfg["dataset_repetitions"] is not None:
             ds = ds.repeat(num_epochs=cfg["dataset_repetitions"])
@@ -609,12 +628,17 @@ class Dataloader:
         if self.batch_size is not None:
             ds = ds.batch(batch_size=self.batch_size, drop_remainder=cfg["drop_remainder"])
 
+        ds = _ds_map(ds, lambda x: x.astype(np.float32))
+
         if cfg["normalization_range"] is not None:
             _ir, _nr = cfg["image_range"], cfg["normalization_range"]
-            ds = _ds_map(ds, lambda x, _a=_ir, _b=_nr: Dataloader._normalize(x, _a, _b))
+            ds = _ds_map(ds, lambda x, _a=_ir, _b=_nr: translate(x, _a, _b))
 
         if cfg["augmentation"] is not None:
             ds = _ds_map(ds, cfg["augmentation"])
+
+        if cfg["convert_to_tensor"]:
+            ds = _ds_map(ds, ops.convert_to_tensor)
 
         return ds
 
@@ -642,10 +666,16 @@ class Dataloader:
             )
         )
 
+    def shuffle(self, seed: int | None = None):
+        """(Re-)shuffle the dataset. Rebuilds the pipeline with a fresh seed."""
+
+        seed = seed or int(self._rng.integers(0, 2**31))
+        self._map_dataset = self._build_pipeline(seed=seed)
+
     def __iter__(self):
-        # Rebuild the pipeline with a fresh seed so each epoch sees a different order
-        if self.shuffle:
-            self._map_dataset = self._build_pipeline(seed=int(self._rng.integers(0, 2**31)))
+        if self._shuffle and self.reshuffle_each_epoch:
+            self.shuffle()
+
         return iter(self.to_iter_dataset())
 
     def __len__(self):
@@ -663,15 +693,15 @@ class Dataloader:
     @staticmethod
     def _ensure_channel_dim(image):
         """Ensure at least 3-D (H, W, C) so batching produces uniform shapes."""
-        if len(keras.ops.shape(image)) < 3:
-            return keras.ops.expand_dims(image, axis=-1)
+        if len(np.shape(image)) < 3:
+            return np.expand_dims(image, axis=-1)
         return image
 
     @staticmethod
     def _assert_image_range(image, image_range):
         """Assert that image values are within the specified range."""
-        minval = float(keras.ops.min(image))
-        maxval = float(keras.ops.max(image))
+        minval = float(np.min(image))
+        maxval = float(np.max(image))
         if minval < image_range[0]:
             raise ValueError(
                 f"Image min {minval} is below image_range lower bound {image_range[0]}"
@@ -681,15 +711,6 @@ class Dataloader:
                 f"Image max {maxval} is above image_range upper bound {image_range[1]}"
             )
         return image
-
-    @staticmethod
-    def _normalize(image, image_range, normalization_range):
-        """Normalize image from image_range to normalization_range."""
-        left_min, left_max = image_range
-        right_min, right_max = normalization_range
-        scale = (right_max - right_min) / (left_max - left_min)
-        offset = right_min - scale * left_min
-        return keras.ops.add(keras.ops.multiply(image, scale), offset)
 
     def summary(self):
         """Print dataset statistics and per-directory breakdown."""

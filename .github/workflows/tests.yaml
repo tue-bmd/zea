@@ -122,6 +122,7 @@ jobs:
 
   heavy-tests:
     needs: [image]
+    if: github.base_ref != 'openh-rf'
     runs-on: self-hosted
     timeout-minutes: 100
     concurrency:

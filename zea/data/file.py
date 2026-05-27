@@ -79,6 +79,259 @@ def assert_key(file: h5py.File, key: str):
         raise KeyError(f"{key} not found in file")
 
 
+class Track:
+    """A single acquisition track within a :class:`File`.
+
+    Provides the same ``.data`` and ``.scan()`` interface as :class:`File`
+    but scoped to one ``tracks/track_N`` group.  Obtain instances through
+    :attr:`File.tracks` rather than constructing this class directly.
+
+    Example::
+
+        with File("multi_track.hdf5") as f:
+            for track in f.tracks:
+                raw = track.data.raw_data[:]
+                scan = track.scan()
+    """
+
+    __slots__ = ("_index", "_group", "_timestamps", "_label")
+
+    def __init__(
+        self,
+        index: int,
+        group: "h5py.Group",
+        timestamps: "np.ndarray | None" = None,
+        label: "str | None" = None,
+    ):
+        object.__setattr__(self, "_index", index)
+        object.__setattr__(self, "_group", group)
+        object.__setattr__(self, "_timestamps", timestamps)
+        object.__setattr__(self, "_label", label)
+
+    @property
+    def data(self) -> GroupProxy:
+        """Lazy proxy for this track's ``data`` group."""
+        if "data" not in self._group:
+            raise KeyError(
+                f"Track {self._index} has no 'data' group. "
+                f"Available keys: {list(self._group.keys())}"
+            )
+        return GroupProxy(self._group["data"])
+
+    def scan(self, safe: bool = True, **kwargs) -> "Scan":
+        """Build a :class:`~zea.scan.Scan` from this track's scan parameters.
+
+        Args:
+            safe: If ``True`` (default) only known Scan parameters are forwarded.
+            **kwargs: Override any scan parameter.
+
+        Returns:
+            Scan: Initialised scan object for this track.
+        """
+        if "scan" not in self._group:
+            raise KeyError(
+                f"Track {self._index} has no 'scan' group. "
+                f"Available keys: {list(self._group.keys())}"
+            )
+        scan_dict = load_dict_from_hdf5_group(self._group["scan"])
+        scan_dict = check_focus_distances(scan_dict)
+        data_group = self._group["data"] if "data" in self._group else None
+        return build_scan_from_dict(scan_dict, data_group=data_group, safe=safe, **kwargs)
+
+    @property
+    def label(self) -> "str | None":
+        """Human-readable name for this track (e.g. ``'focused'`` or ``'planewave'``).
+
+        Returns ``None`` for single-track files or legacy files written without a label.
+        Use :attr:`File.track_labels` to print all labels in acquisition order and
+        :meth:`File.get_track` to retrieve a track by name.
+        """
+        return self._label
+
+    @property
+    def timestamps(self) -> "np.ndarray | None":
+        """Global transmit timestamps for this track, shape ``(n_frames, n_tx)``.
+
+        Timestamps are pre-computed when the :class:`Track` is created via
+        :attr:`File.tracks`.  Returns ``None`` if the file has no
+        ``track_schedule`` or any track is missing ``time_to_next_transmit``.
+        """
+        return self._timestamps
+
+    def __repr__(self) -> str:
+        label_part = f" label={self._label!r}" if self._label is not None else ""
+        return f"<Track index={self._index}{label_part} keys={list(self._group.keys())}>"
+
+
+def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
+    """Recursively load the contents of an HDF5 group into a plain dict.
+
+    Datasets are returned as numpy arrays or scalars; nested groups are
+    converted recursively.  String datasets are decoded to ``np.str_``.
+
+    Args:
+        group: An open :class:`h5py.Group` (or :class:`h5py.File`).
+
+    Returns:
+        dict: Nested dictionary mirroring the group structure.
+    """
+    ans = {}
+    for key, item in group.items():
+        if isinstance(item, h5py.Dataset):
+            if h5py.check_string_dtype(item.dtype) is not None:
+                val = item.asstr()[()]
+                if isinstance(val, np.ndarray) and val.dtype == object:
+                    val = val.astype(np.str_)
+                ans[key] = val
+            else:
+                ans[key] = item[()]
+        elif isinstance(item, h5py.Group):
+            ans[key] = load_dict_from_hdf5_group(item)
+    return ans
+
+
+def check_focus_distances(scan_parameters: dict) -> dict:
+    """Warn and auto-convert focus distances stored in wavelengths to metres.
+
+    Some older files store ``focus_distances`` in wavelengths rather than
+    metres.  This helper detects the pattern (values ≥ 1 and ≠ ``inf``) and
+    converts them using ``sound_speed / center_frequency``.
+
+    Args:
+        scan_parameters: Raw scan parameter dict loaded from HDF5.
+
+    Returns:
+        dict: The same dict, with ``focus_distances`` converted when needed.
+    """
+    if "focus_distances" in scan_parameters:
+        focus_distances = scan_parameters["focus_distances"]
+        if np.any(np.logical_and(focus_distances >= 1, focus_distances != np.inf)):
+            log.warning(
+                "We have detected that focus distances are (probably) stored in "
+                "wavelengths. Please update your file! "
+                "Converting to metres automatically for now, but this assumes that "
+                "`center_frequency` is the probe centre frequency which is not always "
+                "the case!"
+            )
+            assert "sound_speed" in scan_parameters, (
+                "Cannot convert focus distances from wavelengths to metres "
+                "because sound_speed is not defined in the scan parameters."
+            )
+            assert "center_frequency" in scan_parameters, (
+                "Cannot convert focus distances from wavelengths to metres "
+                "because center_frequency is not defined in the scan parameters."
+            )
+            wavelength = scan_parameters["sound_speed"] / scan_parameters["center_frequency"]
+            scan_parameters["focus_distances"] = focus_distances * wavelength
+    return scan_parameters
+
+
+def build_scan_from_dict(
+    scan_dict: dict,
+    data_group: "h5py.Group | None" = None,
+    safe: bool = True,
+    **kwargs,
+) -> "Scan":
+    """Build a :class:`~zea.scan.Scan` from a raw parameter dictionary.
+
+    Args:
+        scan_dict: Raw scan parameters loaded from HDF5.
+        data_group: Optional HDF5 data group used to derive ``n_ax`` from
+            ``raw_data`` when it cannot be inferred from the scan spec.
+        safe: Forwarded to :meth:`~zea.scan.Scan.merge`.
+        **kwargs: Override any scan parameter.
+
+    Returns:
+        Scan: Initialised scan object.
+    """
+    scan_spec_keys = set(ScanSpec.SCHEMA.keys())
+    filtered = {k: v for k, v in scan_dict.items() if k in scan_spec_keys}
+
+    try:
+        scan_spec = ScanSpec(**filtered)
+        scan_dict = scan_spec.to_dict()
+        scan_dict["n_el"] = scan_spec.n_el
+        scan_dict["n_tx"] = scan_spec.n_tx
+        if scan_spec.tgc_gain_curve is not None:
+            scan_dict["n_ax"] = len(scan_spec.tgc_gain_curve)
+        elif data_group is not None and "raw_data" in data_group:
+            scan_dict["n_ax"] = data_group["raw_data"].shape[2]
+    except (TypeError, ValueError) as exc:
+        log.debug(f"ScanSpec validation skipped: {exc}. Using raw scan parameters from file.")
+
+    return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
+
+
+def _compute_all_track_timestamps(
+    schedule: "np.ndarray",
+    tracks: "list[Track]",
+) -> "list[np.ndarray | None]":
+    """Compute and return timestamps for every track given a track schedule.
+
+    Walks the schedule once, keeping a single scalar cumulative timestamp and
+    a per-track ``[frame_idx, tx_idx]`` counter to index into each track's
+    ``time_to_next_transmit`` array.  The schedule must cover exactly
+    ``sum(n_frames_t * n_tx_t)`` events across all tracks.
+
+    Args:
+        schedule: ``int32`` array mapping each global transmit event to a track
+            index, shape ``(n_total_tx,)``.
+        tracks: :class:`Track` list (without timestamps yet assigned).
+
+    Returns:
+        list: One ``np.ndarray`` of shape ``(n_frames_t, n_tx_t)`` per track,
+        or a list of ``None`` values if timestamps cannot be computed.
+    """
+    n_tracks = len(tracks)
+    t2nts: list[np.ndarray] = []
+
+    # pre-load time_to_next_transmit for each track,
+    # validating that it's present and has the right shape
+    for track in tracks:
+        t2nt = track.scan().time_to_next_transmit
+        if t2nt is None:
+            log.warning(
+                f"Track {track._index} has no 'time_to_next_transmit';"
+                " cannot compute track timestamps."
+            )
+            return [None] * n_tracks
+        t2nts.append(np.asarray(t2nt, dtype=np.float32))
+
+    n_frames_per_track = [t2nt.shape[0] for t2nt in t2nts]
+    n_tx_per_frame_per_track = [t2nt.shape[1] for t2nt in t2nts]
+
+    # results will be stored here as we walk the schedule
+    timestamp_matrices_per_track = [np.zeros_like(t2nt) for t2nt in t2nts]
+    # counters to keep track of where we are in each track's
+    # timestamp matrix.
+    track_counters = [[0, 0] for _ in tracks]  # [frame_idx, tx_idx] per track
+
+    cumulative_timestamp = 0.0
+
+    # walk through the schedule, filling in the timestamp matrices as we go
+    for track_idx in schedule:
+        frame_idx, tx_idx = track_counters[track_idx]
+        timestamp_matrices_per_track[track_idx][frame_idx, tx_idx] = cumulative_timestamp
+        cumulative_timestamp += float(t2nts[track_idx][frame_idx, tx_idx])
+
+        # update the counters keeping track of where we are in this track's timestamp matrix
+        tx_idx += 1
+        if tx_idx >= n_tx_per_frame_per_track[track_idx]:
+            tx_idx = 0
+            frame_idx += 1
+        track_counters[track_idx] = [frame_idx, tx_idx]
+
+    for i, (frame_idx, _) in enumerate(track_counters):
+        assert frame_idx == n_frames_per_track[i], (
+            f"There was a mismatch between the track_schedule and the number of frames and "
+            f"transmits in track {i}. "
+            f"Please ensure that the track_schedule correctly maps to the global number of "
+            f"transmit events."
+        )
+
+    return timestamp_matrices_per_track
+
+
 def _parse_version(v: str) -> tuple[int, ...]:
     return tuple(int(p) for p in v.split(".")[:3] if p.isdigit())
 
@@ -161,6 +414,48 @@ class File(h5py.File):
         if mode in ("r", "r+"):
             _warn_if_legacy_file(self)
 
+    def __contains__(self, key):
+        """Check whether *key* exists in the file.
+
+        Extends the h5py default to also match legacy short-form keys
+        (``"scan"``, ``"data"``) against the tracks layout
+        (``tracks/track_0/scan``, ``tracks/track_0/data``), including
+        sub-paths like ``"data/segmentation"``.
+        """
+        if super().__contains__(key):
+            return True
+        # Handle both "data" and "data/..." paths — only remap for single-track files.
+        parts = key.split("/", 1)
+        if parts[0] in ("scan", "data"):
+            if super().__contains__("tracks"):
+                if len(self["tracks"]) == 1:
+                    remapped = f"tracks/track_0/{key}"
+                    return super().__contains__(remapped)
+                else:
+                    log.warning(
+                        f"Multiple tracks found; Try accessing '{key}' on a specific track instead."
+                    )
+            return False
+        return False
+
+    def __getitem__(self, key):
+        """Open an object in the file.
+
+        Extends the h5py default to redirect ``"data"`` and ``"scan"`` (and
+        sub-paths like ``"data/segmentation"``) to the tracks layout for
+        single-track new-format files.  Multi-track files raise :exc:`AttributeError`.
+        """
+        parts = key.split("/", 1)
+        if parts[0] in ("data", "scan") and not super().__contains__(key):
+            n = self._n_tracks
+            if n > 1:
+                raise AttributeError(
+                    f"This file has {n} tracks; use file.tracks to access each one."
+                )
+            if n == 1:
+                return super().__getitem__(f"tracks/track_0/{key}")
+        return super().__getitem__(key)
+
     @property
     def path(self):
         """Return the path of the file."""
@@ -175,12 +470,165 @@ class File(h5py.File):
         """
         return self.attrs.get("zea_version", None)
 
+    @property
+    def _n_tracks(self) -> int:
+        """Return the number of tracks stored in this file.
+
+        Returns 0 for files with neither a ``tracks/`` group nor a legacy
+        ``data/`` group, 1 for legacy flat-format files, and the actual
+        track count for files written with the multi-track layout.
+        """
+        if "tracks" not in self:
+            return 1 if (super().__contains__("data") or super().__contains__("scan")) else 0
+        tracks_group = self["tracks"]
+        count = 0
+        while f"track_{count}" in tracks_group:
+            count += 1
+        return count
+
+    @property
+    def tracks(self) -> "list[Track]":
+        """Return a list of :class:`Track` objects, one per track.
+
+        Each track exposes ``.data`` (a :class:`GroupProxy`) and ``.scan()``
+        (a :class:`~zea.scan.Scan` factory method) for that specific track.
+
+        Raises:
+            AttributeError: For legacy flat-format files that have no
+                ``tracks/`` group — use :attr:`data` and :meth:`scan`
+                directly for those.
+
+        Example::
+
+            with File("multi_track.hdf5") as f:
+                for track in f.tracks:
+                    raw = track.data.raw_data[:]
+                    scan = track.scan()
+        """
+        if "tracks" not in self:
+            raise AttributeError(
+                "This file uses the legacy flat layout (no 'tracks' group). "
+                "Access data and scan parameters directly with file.data and file.scan()."
+            )
+        tracks_group = self["tracks"]
+        tracks: list[Track] = []
+        i = 0
+        while f"track_{i}" in tracks_group:
+            track_group = tracks_group[f"track_{i}"]
+            label = None
+            if "label" in track_group:
+                raw = track_group["label"][()]
+                label = raw.decode() if isinstance(raw, bytes) else str(raw)
+            tracks.append(Track(i, track_group, label=label))
+            i += 1
+
+        schedule = self.track_schedule
+        if schedule is not None:
+            all_timestamps = _compute_all_track_timestamps(schedule, tracks)
+            for track, ts in zip(tracks, all_timestamps):
+                object.__setattr__(track, "_timestamps", ts)
+        else:
+            log.warning(
+                "`track_schedule` was not found in the file; cannot compute track timestamps."
+            )
+
+        return tracks
+
+    @property
+    def track_labels(self) -> "list[str | None]":
+        """Labels of all tracks in acquisition order.
+
+        Returns a list with one entry per track.  Each entry is the label
+        string stored on that track, or ``None`` for unlabelled tracks (e.g.
+        single-track or legacy files).  The list order matches
+        :attr:`tracks`, so unpacking ``f.tracks`` in the same order as
+        ``f.track_labels`` is always safe.
+
+        Example::
+
+            with File("acquisition.hdf5") as f:
+                print(f.track_labels)  # ['focused', 'planewave']
+                focused, planewave = f.tracks  # safe — same order
+        """
+        return [t.label for t in self.tracks]
+
+    def get_track(self, label: str) -> "Track":
+        """Return the track with the given label.
+
+        Args:
+            label: The exact label string assigned to the desired track.
+
+        Returns:
+            Track: The matching :class:`Track` object.
+
+        Raises:
+            KeyError: If no track with that label exists, with a message
+                listing the available labels so the error is self-diagnosing.
+
+        Example::
+
+            with File("acquisition.hdf5") as f:
+                focused = f.get_track("focused")
+                raw = focused.data.raw_data[:]
+        """
+        for track in self.tracks:
+            if track.label == label:
+                return track
+        available = [t.label for t in self.tracks]
+        raise KeyError(
+            f"No track with label {label!r}. Available labels (in acquisition order): {available}"
+        )
+
+    @property
+    def track_schedule(self) -> "np.ndarray | None":
+        """Track index for each global transmit event, shape ``(n_total_tx,)``.
+
+        Returns an ``int32`` array that maps every transmit event (in
+        acquisition order) to the track it belongs to, or ``None`` if no
+        ``track_schedule`` dataset was stored in this file.
+
+        Example::
+
+            with File("multi_track.hdf5") as f:
+                sched = f.track_schedule  # e.g. array([0, 1, 0, 1, ...])
+        """
+        if "track_schedule" not in self:
+            return None
+        return self["track_schedule"][()].astype(np.int32)
+
+    @property
+    def _scan_h5_group(self) -> "h5py.Group | None":
+        """Return the HDF5 scan group for single-track / legacy files.
+
+        Track format (single track): ``tracks/track_0/scan/``
+        Legacy format: ``scan/`` at root
+        Returns ``None`` when neither is present.
+
+        Raises:
+            AttributeError: For multi-track files — use ``file.tracks[i]`` instead.
+        """
+        n = self._n_tracks
+        if n > 1:
+            raise AttributeError(
+                f"This file has {n} tracks. "
+                "Use file.tracks[i].scan() to access a specific track's scan parameters."
+            )
+        if "tracks" in self:
+            track0 = self["tracks"].get("track_0")
+            if track0 is not None and "scan" in track0:
+                return track0["scan"]
+        if super().__contains__("scan"):
+            return self["scan"]
+        return None
+
     @classmethod
     def create(
         cls,
         path,
-        data: dict,
+        data: dict | None = None,
         scan: dict | None = None,
+        tracks: list | None = None,
+        track_schedule: "np.ndarray | None" = None,
         metadata: dict | None = None,
         metrics: dict | None = None,
         probe_name: str | None = None,
@@ -188,6 +636,7 @@ class File(h5py.File):
         us_machine: str | None = None,
         description: str | None = None,
         compression: str = "gzip",
+        chunk_frames: bool = False,
         overwrite: bool = False,
     ) -> "File":
         """Create a new zea HDF5 file from data, scan, and optional metadata.
@@ -196,10 +645,23 @@ class File(h5py.File):
         schema (dtypes, shapes, dimension consistency) **before** anything is
         written to disk.
 
+        For single-track files, supply ``data`` and ``scan``.  For multi-track
+        files, supply ``tracks`` (a list of dicts with ``"data"`` and ``"scan"``
+        keys, or :class:`~zea.data.spec.TrackSpec` objects) and optionally
+        ``track_schedule``.
+
         Args:
             path: Destination file path.
             data: Data dict accepted by :class:`~zea.data.spec.DataSpec`.
+                Mutually exclusive with ``tracks``.
             scan: Scan-parameter dict accepted by :class:`~zea.data.spec.ScanSpec`.
+                Mutually exclusive with ``tracks``.
+            tracks: List of track dicts (each with ``"data"`` and ``"scan"``
+                keys) accepted by :class:`~zea.data.spec.TrackSpec` objects.
+                Mutually exclusive with ``data``/``scan``.
+            track_schedule: Optional int32 array of length ``n_total_tx``
+                indicating which track each global transmit belongs to.
+                Only used with ``tracks``.
             metadata: Optional metadata dict accepted by
                 :class:`~zea.data.spec.MetadataSpec`.
             metrics: Optional metrics dict accepted by
@@ -210,11 +672,15 @@ class File(h5py.File):
             us_machine: Name of the ultrasound machine.
             description: Free-text description of the acquisition.
             compression: HDF5 compression filter (default ``"gzip"``).
+            chunk_frames: If *True*, use frame-wise chunking for all datasets containing
+                a "frames" dimension. Dataset will be stored with HDF5 chunking enabled,
+                using a single frame (a single slice along the first dimension) per chunk.
             overwrite: If *False* (default), raise if the file exists.
 
         Returns:
-            File: The closed :class:`File` handle (re-open with
-            ``File(path)`` to read).
+            File: An open read-only :class:`File` handle.
+
+        Single-track example:
 
         .. doctest::
 
@@ -251,6 +717,9 @@ class File(h5py.File):
             >>> f.close()
             >>> os.unlink(path)
         """
+        if tracks is not None and (data is not None or scan is not None):
+            raise ValueError("Provide either 'tracks' or 'data'/'scan', not both.")
+
         path = Path(path)
 
         if path.exists() and not overwrite:
@@ -261,9 +730,19 @@ class File(h5py.File):
                 "probe_name is no longer supported. "
                 "Use probe={'name': ...} to specify the probe name."
             )
-        kwargs: dict = {"data": data}
-        if scan:
-            kwargs["scan"] = scan
+
+        kwargs: dict = {}
+        if tracks is not None:
+            kwargs["tracks"] = tracks
+            if track_schedule is not None:
+                kwargs["track_schedule"] = track_schedule
+        else:
+            if data is None:
+                raise ValueError("Either 'data' or 'tracks' must be provided.")
+            kwargs["data"] = data
+            if scan:
+                kwargs["scan"] = scan
+
         if metadata is not None:
             kwargs["metadata"] = metadata
         if metrics is not None:
@@ -277,13 +756,20 @@ class File(h5py.File):
 
         _warn_custom_keys(kwargs.get("data", {}), kwargs.get("metadata", {}))
         spec = FileSpec(**kwargs)
-        spec.save(str(path), compression=compression)
+        spec.save(
+            str(path),
+            compression=compression,
+            chunk_frames=chunk_frames,
+        )
 
         return cls(str(path), mode="r")
 
     @property
     def data(self) -> GroupProxy:
-        """Lazy proxy for the ``data`` group.
+        """Lazy proxy for the ``data`` group of a single-track file.
+
+        Supports both the new ``tracks/track_0/data/`` layout and the
+        legacy flat ``data/`` layout.
 
         Returns a :class:`GroupProxy` so individual datasets can be accessed
         as attributes without loading everything into RAM::
@@ -291,10 +777,27 @@ class File(h5py.File):
             with File(path) as f:
                 f.data.raw_data[:, :n_tx]  # read a slice
                 f.data.image.values[0]  # nested group access
+
+        Raises:
+            AttributeError: When the file contains more than one track.
+                Use :attr:`tracks` to iterate over individual tracks.
         """
-        if "data" not in self:
-            raise KeyError("No 'data' group in this file.")
-        return GroupProxy(self["data"])
+        n = self._n_tracks
+        if n > 1:
+            raise AttributeError(
+                f"This file has {n} tracks. "
+                "Use file.tracks to get a list of tracks and access each "
+                "track's data individually: file.tracks[i].data"
+            )
+        # New-format single track
+        if "tracks" in self:
+            track0 = self["tracks"].get("track_0")
+            if track0 is not None and "data" in track0:
+                return GroupProxy(track0["data"])
+        # Legacy format
+        if super().__contains__("data"):
+            return GroupProxy(self["data"])
+        raise KeyError("No 'data' group found in this file.")
 
     @property
     def name(self):
@@ -327,11 +830,20 @@ class File(h5py.File):
 
         assert isinstance(key, str), f"Key must be a string, got {type(key)}. "
 
-        # Return the key if it is in the file
+        # Return the key if it is already a valid top-level key (legacy layout)
         if key in self.keys():
             return key
 
-        # Add 'data/' prefix if not present
+        # New-format: redirect bare or data/-prefixed keys to tracks/track_0/
+        if "tracks" in self:
+            track0 = self["tracks"].get("track_0")
+            if track0 is not None and self._n_tracks == 1:
+                bare = key.removeprefix("data/")
+                data_grp = track0.get("data")
+                if data_grp is not None and bare in data_grp:
+                    return f"tracks/track_0/data/{bare}"
+
+        # Legacy: add 'data/' prefix if not present
         if "data/" not in key:
             key = "data/" + key
 
@@ -455,38 +967,14 @@ class File(h5py.File):
         Returns:
             dict: The scan parameters.
         """
-        if "scan" not in self:
+        scan_group = self._scan_h5_group
+        if scan_group is None:
             log.warning("Could not find scan parameters in file.")
             return {}
 
-        scan_parameters = self.recursively_load_dict_contents_from_group("scan")
-        scan_parameters = self._check_focus_distances(scan_parameters)
+        scan_parameters = load_dict_from_hdf5_group(scan_group)
+        scan_parameters = check_focus_distances(scan_parameters)
 
-        return scan_parameters
-
-    def _check_focus_distances(self, scan_parameters):
-        if "focus_distances" in scan_parameters:
-            focus_distances = scan_parameters["focus_distances"]
-            # check if focus distances are in wavelengths
-            if np.any(np.logical_and(focus_distances >= 1, focus_distances != np.inf)):
-                log.warning(
-                    f"We have detected that focus distances in '{self.path}' are "
-                    "(probably) stored wavelengths. Please update your file! "
-                    "Converting to meters automatically for now, but this assumes that "
-                    "`center_frequency` is the probe center frequency which is not always "
-                    "the case!"
-                )
-                assert "sound_speed" in scan_parameters, (
-                    "Cannot convert focus distances from wavelengths to meters "
-                    "because sound_speed is not defined in the scan parameters."
-                )
-                assert "center_frequency" in scan_parameters, (
-                    "Cannot convert focus distances from wavelengths to meters "
-                    "because center_frequency is not defined in the scan parameters."
-                )
-                wavelength = scan_parameters["sound_speed"] / scan_parameters["center_frequency"]
-                focus_distances = focus_distances * wavelength
-                scan_parameters["focus_distances"] = focus_distances
         return scan_parameters
 
     def get_scan_parameters(self) -> dict:
@@ -496,11 +984,17 @@ class File(h5py.File):
     @property
     def n_ax(self) -> int:
         """Number of axial samples."""
-        assert "data" in self, "Cannot determine n_ax because there is no data group in the file."
-        assert "raw_data" in self["data"], (
+        n = self._n_tracks
+        if n > 1:
+            raise AttributeError(
+                f"This file has {n} tracks. "
+                "Use file.tracks[i].data.raw_data.shape[2] to get n_ax for a specific track."
+            )
+        data_group = self.data._group
+        assert "raw_data" in data_group, (
             "Cannot determine n_ax because there is no raw_data in the data group."
         )
-        return self["data"]["raw_data"].shape[2]
+        return data_group["raw_data"].shape[2]
 
     @property
     def scan(self) -> Scan:
@@ -508,6 +1002,10 @@ class File(h5py.File):
 
         Returns:
             Scan: The scan object.
+
+        Raises:
+            AttributeError: When the file contains more than one track.
+                Use :attr:`tracks` and call ``.scan()`` on each track instead.
 
         .. doctest::
 
@@ -649,7 +1147,7 @@ class File(h5py.File):
         """
         if "metadata" not in self:
             raise KeyError("No 'metadata' group in this file.")
-        raw = self.recursively_load_dict_contents_from_group("metadata")
+        raw = load_dict_from_hdf5_group(self["metadata"])
         return MetadataSpec(**raw)
 
     @property
@@ -670,35 +1168,22 @@ class File(h5py.File):
         """
         if "metrics" not in self:
             raise KeyError("No 'metrics' group in this file.")
-        raw = self.recursively_load_dict_contents_from_group("metrics")
+        raw = load_dict_from_hdf5_group(self["metrics"])
         return MetricsSpec(**raw)
 
     def recursively_load_dict_contents_from_group(self, path: str) -> dict:
-        """Load dict from contents of group
+        """Load dict from contents of group.
 
-        Values inside the group are converted to numpy arrays
-        or primitive types (int, float, str).
+        .. deprecated::
+            Use the module-level :func:`load_dict_from_hdf5_group` function instead,
+            passing an :class:`h5py.Group` directly.
 
         Args:
             path (str): path to group
         Returns:
             dict: dictionary with contents of group
         """
-        ans = {}
-        for key, item in self[path].items():
-            if isinstance(item, h5py.Dataset):
-                if h5py.check_string_dtype(item.dtype) is not None:
-                    val = item.asstr()[()]
-                    # h5py returns object-dtype arrays for strings;
-                    # convert back to np.str_ so spec dtype checks pass.
-                    if isinstance(val, np.ndarray) and val.dtype == object:
-                        val = val.astype(np.str_)
-                    ans[key] = val
-                else:
-                    ans[key] = item[()]
-            elif isinstance(item, h5py.Group):
-                ans[key] = self.recursively_load_dict_contents_from_group(path + "/" + key + "/")
-        return ans
+        return load_dict_from_hdf5_group(self[path])
 
     def has_key(self, key: str) -> bool:
         """Check if the file has a specific key.
@@ -785,10 +1270,7 @@ class File(h5py.File):
         return FileSpec.from_hdf5(self)
 
     def __repr__(self):
-        return (
-            f"<zea.data.file.File at 0x{id(self):x} "
-            f'("{Path(self.filename).name}" mode={self.mode})>'
-        )
+        return f'<zea.File at 0x{id(self):x} ("{Path(self.filename).name}" mode={self.mode})>'
 
     def __str__(self):
         return f"zea HDF5 File: '{self.path.name}' (mode={self.mode})"
@@ -819,8 +1301,9 @@ class File(h5py.File):
 
         # Copy scan data if requested
         if "scan" in self and "scan" not in dst:
-            # Copy the scan data if it exists
-            self.copy("scan", dst)
+            # Use the actual HDF5 path (not our overridden key) for h5py.copy
+            scan_path = self._scan_h5_group.name.lstrip("/")
+            self.copy(scan_path, dst, name="scan")
 
     def summary(self):
         """Print the contents of the file."""
@@ -1058,16 +1541,27 @@ def _validate_file_impl(file: File) -> None:
     """Lightweight structural validation — no array data is loaded.
 
     Checks that:
-    - a ``data`` group is present at root OR one or more ``event_*`` groups each
-      containing a ``data`` group (event-structured files)
+    - a ``data`` group is present — either at ``tracks/track_N/data``,
+      at the root ``data`` group (legacy), or inside ``event_*`` sub-groups
     - for legacy files, every key in ``data`` is a recognised zea data type
     - for files created with zea v0.1.0 and later, every key in ``data``
     is in :class:`~zea.data.spec.DataSpec`\'s schema
     """
-    # Collect all data groups to validate: either root /data or per-event /event_*/data
+    # Collect all data groups to validate
     data_groups: list[tuple[str, h5py.Group]] = []
 
-    if "data" in file:
+    if super(File, file).__contains__("tracks"):
+        # New multi-track format: tracks/track_N/data
+        tracks_group = file["tracks"]
+        for track_key in tracks_group.keys():
+            track_grp = tracks_group[track_key]
+            assert "data" in track_grp, f"Track group '{track_key}' is missing a 'data' subgroup."
+            assert isinstance(track_grp["data"], h5py.Group), (
+                f"'{track_key}/data' is not a group - this may not be a zea file."
+            )
+            data_groups.append((f"tracks/{track_key}/data", track_grp["data"]))
+    elif super(File, file).__contains__("data"):
+        # Legacy root-level data group
         assert isinstance(file["data"], h5py.Group), (
             "'data' is not a group - this may not be a zea file."
         )
@@ -1087,7 +1581,7 @@ def _validate_file_impl(file: File) -> None:
 
     assert data_groups, (
         "'data' group not found in file. "
-        "Expected either a root 'data' group or event groups named 'event_*'."
+        "Expected either tracks/track_N/data, a root 'data' group, or event groups named 'event_*'."
     )
 
     for group_path, data_group in data_groups:

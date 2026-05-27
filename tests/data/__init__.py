@@ -61,9 +61,6 @@ def generate_dummy_data_dict(
         data_dict["image"] = {
             "values": np.zeros((n_frames, grid_size_z, grid_size_x), dtype=image_dtype),
         }
-        data_dict["image_sc"] = {
-            "values": np.zeros((n_frames, grid_size_z, grid_size_x), dtype=image_dtype),
-        }
 
     return data_dict
 

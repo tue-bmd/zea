@@ -427,12 +427,24 @@ class Spec:
 
     @staticmethod
     def create_dataset(
-        group: h5py.Group, field_name: str, value: Any, compression: str = "gzip"
+        group: h5py.Group,
+        field_name: str,
+        value: Any,
+        compression: str = "gzip",
+        chunk_frames: bool = False,
     ) -> None:
         """Create a dataset in the given group for the specified field and value,
         handling string and scalar values appropriately."""
         dataset_is_scalar = np.isscalar(value) or value.ndim == 0
         compression = None if dataset_is_scalar else compression
+        chunks = None
+        if (
+            chunk_frames
+            and not dataset_is_scalar
+            and isinstance(value, np.ndarray)
+            and value.ndim >= 2
+        ):
+            chunks = (1,) + value.shape[1:]
         if Spec._is_string_value(value):
             string_dtype = h5py.string_dtype(encoding="utf-8")
             string_value = np.asarray(value, dtype=object)
@@ -443,9 +455,11 @@ class Spec:
                 compression=compression,
             )
         else:
-            group.create_dataset(field_name, data=value, compression=compression)
+            group.create_dataset(field_name, data=value, compression=compression, chunks=chunks)
 
-    def store_in_group(self, group: h5py.Group, compression: str = "gzip") -> None:
+    def store_in_group(
+        self, group: h5py.Group, compression: str = "gzip", chunk_frames: bool = False
+    ) -> None:
         """Store the data in the given group (e.g. hdf5 group)."""
 
         assert isinstance(group, h5py.Group), "group must be an h5py Group"
@@ -460,9 +474,19 @@ class Spec:
             nested_spec = field_info.get("spec")
             if nested_spec is not None:
                 subgroup = group.create_group(field_name)
-                value.store_in_group(subgroup, compression=compression)
+                value.store_in_group(
+                    subgroup,
+                    compression=compression,
+                    chunk_frames=chunk_frames,
+                )
             else:
-                self.create_dataset(group, field_name, value, compression=compression)
+                self.create_dataset(
+                    group,
+                    field_name,
+                    value,
+                    compression=compression,
+                    chunk_frames=chunk_frames,
+                )
                 meta = field_metadata.get(field_name, {})
                 group[field_name].attrs["unit"] = meta.get("unit", _DEFAULT_FIELD_UNIT)
                 group[field_name].attrs["description"] = meta.get(
@@ -520,6 +544,8 @@ class Map(Spec):
             where ``spatial_dims`` matches the spatial (non-channel) dimensions of ``values``.
             For non-channeled values the shape is ``(*values.shape, 3)``; for channeled values
             the shape is ``(*values.shape[:-1], 3)``.  The last axis holds ``[x, y, z]``.
+            The leading ``n_frames`` axis may be omitted to broadcast one coordinate grid
+            across all frames.
         labels: The labels corresponding to the ``n_ch`` channels in the values.
             This is required when values have an n_ch dimension, and should be None otherwise.
             For IQ data, this would typically be ``["I", "Q"]``.
@@ -567,14 +593,24 @@ class Map(Spec):
             # coordinates.shape[-1] is guaranteed == 3 by the SCHEMA check above.
             # Validate that the spatial axes match values (with or without a trailing channel axis).
             coords_spatial = self.coordinates.shape[:-1]
-            valid_spatial_shapes = {self.values.shape, self.values.shape[:-1]}
+            valid_spatial_shapes = {
+                self.values.shape,
+                self.values.shape[:-1],
+            }
+            # Also accept coordinates that omit the leading frame axis and
+            # therefore broadcast across frames.
+            if len(self.values.shape) > 1:
+                valid_spatial_shapes.add(self.values.shape[1:])
+            if len(self.values.shape[:-1]) > 1:
+                valid_spatial_shapes.add(self.values.shape[1:-1])
             if coords_spatial not in valid_spatial_shapes:
                 raise ValueError(
                     f"{type(self).__name__}: coordinates shape {self.coordinates.shape} is "
                     f"incompatible with values shape {self.values.shape}. "
                     f"coordinates.shape[:-1] must equal values.shape "
                     f"({self.values.shape}) for non-channeled data, or "
-                    f"values.shape[:-1] ({self.values.shape[:-1]}) for channeled data."
+                    f"values.shape[:-1] ({self.values.shape[:-1]}) for channeled data, "
+                    "with optional frame-axis broadcasting (leading n_frames omitted)."
                 )
             # Sanity-check units: clinical ultrasound scan regions are at most a few tens of
             # centimetres across, so any finite coordinate magnitude above 1 m almost certainly
@@ -640,6 +676,8 @@ class Segmentation(BooleanMap):
     Args:
         values: The segmentation values of shape ``(n_frames, z, x, y, n_labels)`` and type bool.
         coordinates: Per-pixel Cartesian positions in metres, shape ``(n_frames, z, x, y, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
         labels: The labels corresponding to the segmentation values, where each unique value
             in the values corresponds to a label in this list of shape ``(n_labels,)`` and type str.
     """
@@ -660,6 +698,8 @@ class Image(Map):
             and type uint8 or float32. For float32 values, the values should be in dB
             (between -inf and 0).
         coordinates: Per-pixel Cartesian positions in metres, shape ``(*values.shape, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
     """
 
     SCHEMA = {
@@ -694,6 +734,8 @@ class BeamformedData(FloatMap):
             n_ch is 1 for RF data or 2 for IQ data.
         coordinates: Per-pixel Cartesian positions in metres, shape
             ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
         labels: The labels for the channel dimension, e.g. ``["RF"]`` or ``["I", "Q"]``.
             Auto-generated from n_ch if not provided.
     """
@@ -734,6 +776,8 @@ class EnvelopeData(FloatMap):
         values: The envelope data of shape ``(n_frames, x, z)`` or
             ``(n_frames, z, x, y)`` and type float32.
         coordinates: Per-pixel Cartesian positions in metres, shape ``(*values.shape, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
     """
 
     SCHEMA = {
@@ -757,6 +801,8 @@ class SosMap(FloatMap):
             and type float32.
         coordinates: Per-pixel Cartesian positions in metres, shape
             ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
     """
 
     def __post_init__(self):
@@ -1675,22 +1721,84 @@ class MetricsSpec(Spec):
 
 
 @dataclass
+class TrackSpec(Spec):
+    """A single acquisition track with its own data and scan parameters.
+
+    Used inside a multi-track :class:`FileSpec` where different transmit
+    sequences coexist in the same acquisition.  The ``track_schedule`` on
+    ``FileSpec`` specifies the global ordering of transmits across all tracks.
+
+    For multi-track files a human-readable ``label`` is required on every
+    track so that users can identify which track is which (e.g. ``"focused"``
+    vs ``"planewave"``). Further information can be provided in the ``description``
+    field of the parent :class:`FileSpec`, if necessary.
+    Single-track files may omit the label.
+
+    Args:
+        data (DataSpec | dict): The data for this track.
+        scan (ScanSpec | dict | None): The scan parameters for this track. Required when raw_data is
+            present in *data*.
+        label (str | None): Short human-readable name for this track (e.g. ``"focused"``
+            or ``"planewave"``).  Required when the parent :class:`FileSpec`
+            contains more than one track.
+    """
+
+    data: DataSpec | dict
+    scan: ScanSpec | dict | None = None
+    label: str | None = None
+
+    SCHEMA = {
+        "data": {"spec": DataSpec},
+        "scan": {"spec": ScanSpec},
+        "label": {"dtype": str, "shape": ()},
+    }
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        data = self.data
+        has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
+            isinstance(data, dict) and data.get("raw_data") is not None
+        )
+        if has_raw and self.scan is None:
+            raise ValueError("'scan' is required when 'raw_data' is provided in track data.")
+
+        if self.label is not None and not isinstance(self.label, str):
+            raise TypeError(f"'label' must be a str, got {type(self.label)}")
+        if self.label is not None and not self.label.strip():
+            raise ValueError("'label' must not be an empty or whitespace-only string.")
+
+    def store_in_group(
+        self, group: "h5py.Group", compression: str = "gzip", chunk_frames: bool = False
+    ) -> None:
+        """Store data, scan, and label in the HDF5 group."""
+        super().store_in_group(group, compression=compression, chunk_frames=chunk_frames)
+
+
+@dataclass
 class FileSpec(Spec):
     """A dataset containing all the data, scan parameters, metadata,
     and metrics for a single acquisition.
 
-    This class can be used to create a new dataset, which is validated upon initialization.
-    Afterwards, it can be saved to disk as hdf5 file.
+    A ``FileSpec`` always contains at least one track.  When ``data`` and
+    ``scan`` are supplied at construction time they are transparently wrapped
+    into a single :class:`TrackSpec`, so all existing call-sites continue to
+    work unchanged.  For multi-track files pass ``tracks`` directly.
 
     Args:
-        data: The data for the acquisition.
-        scan: The scan parameters.
+        data: Data for a single-track acquisition (wrapped into ``tracks[0]``).
+        scan: Scan parameters for a single-track acquisition.
+        tracks: Explicit list of :class:`TrackSpec` objects (multi-track mode).
+            Mutually exclusive with ``data``/``scan``.
+        track_schedule: 1-D int32 array of length ``n_total_tx`` giving the
+            track index for each global transmit event.
         metadata: Additional metadata about the acquisition.
         metrics: Metrics computed from the acquisition.
         probe: Physical probe specification (see :class:`ProbeSpec`).  The probe
             name is stored as ``probe.name``; use :attr:`zea.File.probe_name`
             to read it back from an HDF5 file.
         us_machine: The ultrasound machine used to acquire the data.
+        description: Free-text description.
 
     Example:
         .. doctest::
@@ -1718,17 +1826,23 @@ class FileSpec(Spec):
             (2, 4, 64, 8, 1)
     """
 
-    data: DataSpec | dict
-    scan: ScanSpec | dict | None = None
+    # NOTE: data and scan are intentionally NOT dataclass fields — they are
+    # accepted as constructor kwargs and folded into tracks[0] at init time.
+    # @property accessors below provide backwards-compatible single-track access.
+    tracks: list = field(default_factory=list)
+    track_schedule: np.ndarray | None = None
     metadata: MetadataSpec | dict = field(default_factory=MetadataSpec)
     metrics: MetricsSpec | dict = field(default_factory=MetricsSpec)
     probe: ProbeSpec | dict | None = None
     us_machine: str | None = None
     description: str | None = None
 
+    # tells the SCHEMA ↔ fields consistency test that 'tracks' is intentionally
+    # absent from SCHEMA (list[TrackSpec] doesn't fit the standard SCHEMA patterns)
+    _SCHEMA_EXCLUDED_FIELDS = frozenset({"tracks"})
+
     SCHEMA = {
-        "data": {"spec": DataSpec},
-        "scan": {"spec": ScanSpec},
+        "track_schedule": {"dtype": np.int32, "shape": ("n_total_tx",)},
         "metadata": {"spec": MetadataSpec},
         "metrics": {"spec": MetricsSpec},
         "probe": {"spec": ProbeSpec},
@@ -1736,18 +1850,192 @@ class FileSpec(Spec):
         "description": {"dtype": str, "shape": ()},
     }
 
-    def __post_init__(self):
+    def __init__(
+        self,
+        data: "DataSpec | dict | None" = None,
+        scan: "ScanSpec | dict | None" = None,
+        tracks: "list | None" = None,
+        track_schedule: "np.ndarray | None" = None,
+        metadata: "MetadataSpec | dict | None" = None,
+        metrics: "MetricsSpec | dict | None" = None,
+        probe_name: "str | None" = None,
+        us_machine: "str | None" = None,
+        description: "str | None" = None,
+    ):
+        if data is not None or scan is not None:
+            if tracks:
+                raise ValueError(
+                    "Provide either 'data'/'scan' (single-track shorthand) "
+                    "or 'tracks' (multi-track), not both."
+                )
+            _implicit_track: "dict | None" = {"data": data, "scan": scan}
+        else:
+            _implicit_track = None
+
+        self.tracks = list(tracks) if tracks is not None else []
+        self.track_schedule = track_schedule
+        self.metadata = metadata if metadata is not None else MetadataSpec()
+        self.metrics = metrics if metrics is not None else MetricsSpec()
+        self.probe_name = probe_name
+        self.us_machine = us_machine
+        self.description = description
+
+        self.__post_init__(_implicit_track)
+
+    # ------------------------------------------------------------------
+    # Backwards-compat read properties (single-track files only)
+    # ------------------------------------------------------------------
+
+    @property
+    def data(self) -> "DataSpec":
+        """Return the :class:`DataSpec` of the single track.
+
+        Raises :exc:`AttributeError` when the file has more than one track —
+        use ``spec.tracks[i].data`` instead.
+        """
+        if len(self.tracks) != 1:
+            raise AttributeError(
+                f"'data' is only available for single-track FileSpecs "
+                f"({len(self.tracks)} tracks present). Use spec.tracks[i].data."
+            )
+        return self.tracks[0].data
+
+    @property
+    def scan(self) -> "ScanSpec | None":
+        """Return the :class:`ScanSpec` of the single track.
+
+        Raises :exc:`AttributeError` when the file has more than one track —
+        use ``spec.tracks[i].scan`` instead.
+        """
+        if len(self.tracks) != 1:
+            raise AttributeError(
+                f"'scan' is only available for single-track FileSpecs "
+                f"({len(self.tracks)} tracks present). Use spec.tracks[i].scan."
+            )
+        return self.tracks[0].scan
+
+    def __post_init__(self, _implicit_track: "dict | None" = None):
+        # Fold implicit data/scan into a TrackSpec if provided
+        if _implicit_track is not None:
+            self.tracks = [TrackSpec(**_implicit_track)]
+
+        if not self.tracks:
+            raise ValueError("A FileSpec must contain at least one track.")
+
+        # Create TrackSpecs from dictionaries in the tracks list, if needed, and validate all tracks
+        track_specs = []
+        for i, t in enumerate(self.tracks):
+            if isinstance(t, dict):
+                try:
+                    t = TrackSpec(**t)
+                except (TypeError, ValueError) as e:
+                    raise type(e)(f"In tracks[{i}]: {e}") from e
+            elif not isinstance(t, TrackSpec):
+                raise TypeError(f"tracks[{i}] must be a TrackSpec or dict, got {type(t)}")
+            track_specs.append(t)
+        self.tracks = track_specs
+
+        # For multi-track files every track must have a label so users can
+        # identify tracks by name rather than relying on numeric indices.
+        if len(self.tracks) > 1:
+            missing = [i for i, t in enumerate(self.tracks) if not t.label]
+            if missing:
+                raise ValueError(
+                    f"All tracks in a multi-track file must have a 'label'. "
+                    f"Missing label for track(s) at index: {missing}. "
+                    f"Provide a short descriptive name for each track, e.g. "
+                    f"'focused' or 'planewave', so that "
+                    f"File.get_track(label) and File.track_labels work correctly."
+                )
+
+        # Validate track_schedule indices are in range
+        if self.track_schedule is not None:
+            n_tracks = len(self.tracks)
+            if not np.all((self.track_schedule >= 0) & (self.track_schedule < n_tracks)):
+                raise ValueError(
+                    f"All track_schedule indices must be in [0, {n_tracks - 1}], "
+                    f"got min={self.track_schedule.min()}, max={self.track_schedule.max()}"
+                )
+
+        # Validate that probe-defining scan parameters agree across all tracks.
+        # This guarantees that probe() can safely return parameters from track_0.
+        if len(self.tracks) > 1:
+            _PROBE_FIELDS = ("probe_geometry", "element_width")
+            ref_idx, ref_scan = next(
+                ((i, t.scan) for i, t in enumerate(self.tracks) if t.scan is not None),
+                (None, None),
+            )
+            if ref_scan is not None:
+                for cur_idx, track in enumerate(self.tracks):
+                    if cur_idx == ref_idx or track.scan is None:
+                        continue
+                    for field_name in _PROBE_FIELDS:
+                        ref_val = getattr(ref_scan, field_name, None)
+                        cur_val = getattr(track.scan, field_name, None)
+                        if ref_val is None or cur_val is None:
+                            continue
+                        equal = (
+                            np.array_equal(ref_val, cur_val)
+                            if isinstance(ref_val, np.ndarray)
+                            else ref_val == cur_val
+                        )
+                        if not equal:
+                            raise ValueError(
+                                f"Tracks {ref_idx} and {cur_idx} have different "
+                                f"'{field_name}' values. All tracks in a multi-track "
+                                "file must use the same physical probe."
+                            )
+
+        # Warn if multi-track frame counts differ without a schedule
+        if len(self.tracks) > 1 and self.track_schedule is None:
+            frame_counts = []
+            for track in self.tracks:
+                rd = (
+                    track.data.raw_data
+                    if isinstance(track.data, DataSpec)
+                    else (track.data.get("raw_data") if isinstance(track.data, dict) else None)
+                )
+                if rd is not None and hasattr(rd, "shape"):
+                    frame_counts.append(rd.shape[0])
+            if len(set(frame_counts)) > 1:
+                log.warning(
+                    "Tracks have different numbers of frames "
+                    f"({frame_counts}). Without a 'track_schedule' it is "
+                    "ambiguous how frames correspond across tracks. Consider "
+                    "passing 'track_schedule' to make the relationship explicit."
+                )
+
+        # Run base SCHEMA validation (metadata, metrics, scalars, track_schedule)
         super().__post_init__()
 
-        # scan is mandatory when raw channel data is present
-        data = self.data
-        has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
-            isinstance(data, dict) and data.get("raw_data") is not None
-        )
-        if has_raw and self.scan is None:
-            raise ValueError("'scan' is required when 'raw_data' is provided in the data.")
+        # Validate that dimensions which are present in both metadata and tracks
+        # are consistent across all tracks.
+        if isinstance(self.metadata, MetadataSpec):
+            _, meta_dim_sizes = self.metadata._collect_dimension_info("metadata.")
+            for i, track in enumerate(self.tracks):
+                _, track_dim_sizes = track._collect_dimension_info(f"tracks[{i}].")
+                for dim in CONSISTENCY_DIMENSIONS:
+                    if dim in meta_dim_sizes and dim in track_dim_sizes:
+                        all_sizes = meta_dim_sizes[dim] | track_dim_sizes[dim]
+                        if len(all_sizes) > 1:
+                            meta_fields, _ = self.metadata._collect_dimension_info("metadata.")
+                            track_fields, _ = track._collect_dimension_info(f"tracks[{i}].")
+                            raise ValueError(
+                                f"Dimension '{dim}' has inconsistent sizes across "
+                                f"fields {sorted(meta_fields[dim] | track_fields[dim])}: "
+                                f"{sorted(all_sizes)}"
+                            )
 
-    def save(self, path: str, compression: str = "gzip") -> None:
+    def to_dict(self) -> dict:
+        """Return this spec as a nested dictionary.
+
+        Includes all :attr:`SCHEMA` fields plus the ``tracks`` list.
+        """
+        result = super().to_dict()
+        result["tracks"] = [t.to_dict() for t in self.tracks]
+        return result
+
+    def save(self, path: str, compression: str = "gzip", chunk_frames: bool = False) -> None:
         """Save the dataset to the specified path."""
         # Lazy import to avoid circular dependency (spec.py is imported by file.py)
         from zea import File
@@ -1763,6 +2051,7 @@ class FileSpec(Spec):
         with File(str(path), "w") as f:
             f.attrs["zea_version"] = _zea_version
 
+            # Write scalar/array metadata fields (metadata, metrics, probe_name, etc.)
             for group_name, schema in self.SCHEMA.items():
                 if "spec" in schema:
                     value: Spec = getattr(self, group_name)
@@ -1773,7 +2062,21 @@ class FileSpec(Spec):
                 else:
                     value = getattr(self, group_name)
                     if value is not None:
-                        f.attrs[group_name] = value
+                        if group_name == "track_schedule":
+                            # Array field — store as dataset, not attr
+                            self.create_dataset(f, group_name, value, compression=compression)
+                        else:
+                            f.attrs[group_name] = value
+
+            # Write tracks (always at least one)
+            tracks_group = f.create_group("tracks")
+            for i, track in enumerate(self.tracks):
+                track_group = tracks_group.create_group(f"track_{i}")
+                track.store_in_group(
+                    track_group,
+                    compression=compression,
+                    chunk_frames=chunk_frames,
+                )
 
         log.info(f"File saved to {log.yellow(path)}")
 
@@ -1781,17 +2084,24 @@ class FileSpec(Spec):
     def from_hdf5(cls, file: h5py.File) -> "FileSpec":
         """Load and validate a :class:`FileSpec` from an open HDF5 file.
 
-        This reads all groups into memory and runs the full spec validation
-        (dtype, shape, dimension consistency).  Legacy files are handled
-        transparently: extra scalar fields in the scan group (``n_frames``,
-        ``n_tx``, etc.) are ignored, and the ``probe`` root
-        attribute is mapped to ``probe.name``.
+        <<<<<<< HEAD
+                This reads all groups into memory and runs the full spec validation
+                (dtype, shape, dimension consistency).  Legacy files are handled
+                transparently: extra scalar fields in the scan group (``n_frames``,
+                ``n_tx``, etc.) are ignored, and the ``probe`` root
+                attribute is mapped to ``probe.name``.
+        =======
+                Both the new ``tracks/track_N/`` format and the legacy flat
+                ``data/`` + ``scan/`` format are supported.  Extra scalar fields in
+                legacy scan groups (``n_frames``, ``n_tx``, etc.) are ignored,
+                and the ``probe`` root attribute is mapped to ``probe_name``.
+        >>>>>>> openh-rf
 
-        Args:
-            file: An open ``h5py.File`` (or :class:`zea.File`).
+                Args:
+                    file: An open ``h5py.File`` (or :class:`zea.File`).
 
-        Returns:
-            FileSpec: A fully validated spec object.
+                Returns:
+                    FileSpec: A fully validated spec object.
         """
 
         def _load_group_as_dict(group: h5py.Group) -> dict:
@@ -1814,20 +2124,39 @@ class FileSpec(Spec):
 
         kwargs: dict[str, Any] = {}
 
-        # Load spec groups (data, scan, metadata, metrics)
+        # Load scalar SCHEMA fields (metadata, metrics, probe_name, us_machine, description,
+        # track_schedule)
         for group_name, schema in cls.SCHEMA.items():
             if "spec" in schema:
                 if group_name in file:
                     kwargs[group_name] = _load_group_as_dict(file[group_name])
-                # else: leave missing, will use default or raise if required
+            elif group_name == "track_schedule":
+                if group_name in file:
+                    kwargs[group_name] = file[group_name][()].astype(np.int32)
             else:
-                # Scalar attrs (us_machine, description)
                 if group_name in file.attrs:
                     kwargs[group_name] = file.attrs[group_name]
 
-        # ------------------------------------------------------------------
-        # Legacy compatibility
-        # ------------------------------------------------------------------
+        # New multi-track format: tracks/track_N/
+        if "tracks" in file:
+            tracks_group = file["tracks"]
+            tracks = []
+            i = 0
+            while f"track_{i}" in tracks_group:
+                track_group = tracks_group[f"track_{i}"]
+                track_dict = _load_group_as_dict(track_group)
+                tracks.append(track_dict)
+                i += 1
+            kwargs["tracks"] = tracks
+
+        # Legacy flat format: data/ + scan/ at root
+        elif "data" in file or "scan" in file:
+            data_dict = _load_group_as_dict(file["data"]) if "data" in file else {}
+            scan_dict = _load_group_as_dict(file["scan"]) if "scan" in file else None
+
+            kwargs["data"] = data_dict
+            if scan_dict is not None:
+                kwargs["scan"] = scan_dict
 
         # 1. Map legacy root 'probe_name' or 'probe' attr into probe.name so
         #    that old files with a named probe but no probe group still round-trip.
@@ -1839,10 +2168,10 @@ class FileSpec(Spec):
             except AttributeError:
                 pass  # no probe info in file — leave probe as None
 
-        # 2. Filter scan dict to only keys recognised by Scan.SCHEMA so
-        #    that legacy scalar fields (n_frames, n_ax, n_el, n_tx, n_ch,
-        #    bandwidth_percent, …) don't cause unexpected-keyword errors.
-        if "scan" in kwargs and isinstance(kwargs["scan"], dict):
+        # 2. Filter scan dict to only keys recognised by ScanSpec.SCHEMA so
+        #    that legacy scalar fields (n_frames, n_ax, n_el, n_tx, n_ch, …)
+        #    are silently dropped.
+        if "scan" in kwargs:
             scan_schema_keys = set(ScanSpec.SCHEMA.keys())
             kwargs["scan"] = {k: v for k, v in kwargs["scan"].items() if k in scan_schema_keys}
 

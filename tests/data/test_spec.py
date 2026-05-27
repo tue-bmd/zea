@@ -23,6 +23,7 @@ from zea.data.spec import (
     SosMap,
     Spec,
     Subject,
+    TrackSpec,
 )
 
 
@@ -171,13 +172,15 @@ def test_spec_to_dict_is_recursive(dataset_spec: FileSpec):
     result = dataset_spec.to_dict()
 
     assert isinstance(result, dict)
-    assert isinstance(result["data"], dict)
-    assert isinstance(result["scan"], dict)
+    assert isinstance(result["tracks"], list)
+    assert len(result["tracks"]) == 1
+    assert isinstance(result["tracks"][0]["data"], dict)
+    assert isinstance(result["tracks"][0]["scan"], dict)
     assert isinstance(result["metadata"], dict)
     assert isinstance(result["metrics"], dict)
 
-    assert np.array_equal(result["data"]["raw_data"], dataset_spec.data.raw_data)
-    assert np.array_equal(result["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
+    assert np.array_equal(result["tracks"][0]["data"]["raw_data"], dataset_spec.data.raw_data)
+    assert np.array_equal(result["tracks"][0]["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
     assert np.array_equal(
         result["metadata"]["annotations"]["view"],
         dataset_spec.metadata.annotations.view,
@@ -206,9 +209,14 @@ def test_saving_and_loading(tmp_path, dataset_spec: FileSpec):
     dataset_spec.save(save_path)
 
     with File(save_path) as loaded_dataset:
-        # Check that the loaded data matches the original
-        assert np.array_equal(loaded_dataset["data"]["raw_data"], dataset_spec.data.raw_data)
-        assert np.array_equal(loaded_dataset["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
+        assert np.array_equal(
+            loaded_dataset["tracks"]["track_0"]["data"]["raw_data"],
+            dataset_spec.data.raw_data,
+        )
+        assert np.array_equal(
+            loaded_dataset["tracks"]["track_0"]["scan"]["t0_delays"],
+            dataset_spec.scan.t0_delays,
+        )
         assert np.array_equal(
             loaded_dataset["metadata"]["annotations"]["view"].asstr()[()],
             dataset_spec.metadata.annotations.view,
@@ -387,7 +395,7 @@ def test_data_accepts_custom_map_keys_and_warns(tmp_path):
     )
     assert isinstance(dataset.data, DataSpec)
     assert isinstance(dataset.data.custom_map, Map)
-    assert "custom_map" in dataset.to_dict()["data"]
+    assert "custom_map" in dataset.to_dict()["tracks"][0]["data"]
 
     with patch("zea.log.warning") as mock_warn:
         File.create(
@@ -444,6 +452,11 @@ def test_schema_keys_match_dataclass_fields_for_all_specs():
     for cls in spec_classes:
         dataclass_field_names = {field.name for field in fields(cls)}
         schema_field_names = set(cls.SCHEMA.keys())
+
+        # Some Spec subclasses declare fields that are intentionally excluded from SCHEMA
+        # (e.g. FileSpec.tracks is managed manually in save/from_hdf5).
+        excluded = getattr(cls, "_SCHEMA_EXCLUDED_FIELDS", frozenset())
+        dataclass_field_names -= excluded
 
         missing_in_schema = dataclass_field_names - schema_field_names
         extra_in_schema = schema_field_names - dataclass_field_names
@@ -601,12 +614,42 @@ class TestDataValidationErrors:
             )
             assert m1.coordinates.shape == (2, 16, 12, 3)
 
+            # Unchanneled with frame-broadcast: coordinates.shape == (*values.shape[1:], 3)
+            m1_broadcast = Map(
+                values=np.zeros((2, 16, 12), dtype=np.uint8),
+                coordinates=np.zeros((16, 12, 3), dtype=np.float32),
+            )
+            assert m1_broadcast.coordinates.shape == (16, 12, 3)
+
             # Channeled: coordinates.shape == (*values.shape[:-1], 3)
             m2 = Map(
                 values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
                 coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
             )
             assert m2.coordinates.shape == (2, 16, 12, 3)
+
+            # Channeled with frame-broadcast: coordinates.shape == (*values.shape[1:-1], 3)
+            m2_broadcast = Map(
+                values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                coordinates=np.zeros((16, 12, 3), dtype=np.float32),
+            )
+            assert m2_broadcast.coordinates.shape == (16, 12, 3)
+
+    def test_map_coordinates_frame_broadcast_shape_mismatch_raises(self):
+        """Frame-broadcast coordinates must still match non-frame spatial dimensions."""
+        with pytest.raises(ValueError, match="Image: coordinates shape"):
+            Image(
+                values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                coordinates=np.zeros((99, 12, 3), dtype=np.float32),
+            )
+
+    def test_map_coordinates_spatial_axis_omission_raises(self):
+        """Dropping a non-frame spatial axis from coordinates must raise ValueError."""
+        with pytest.raises(ValueError, match="Image: coordinates shape"):
+            Image(
+                values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
+                coordinates=np.zeros((2, 12, 3), dtype=np.float32),
+            )
 
     def test_map_coordinates_millimetre_range_warns(self):
         """Coordinates with |value| > 1 m should trigger a units warning."""
@@ -810,6 +853,58 @@ def test_image_spec_accepts_neginf():
     values_positive = np.full((2, 8, 8), 0.1, dtype=np.float32)
     with pytest.raises(ValueError, match="dB scale"):
         Image(values=values_positive, coordinates=coordinates)
+
+
+class TestMultiTrackProbeConsistency:
+    """FileSpec must reject multi-track files where probe-defining parameters differ."""
+
+    def _make_track(
+        self,
+        n_el: int = 4,
+        geom_offset: float = 0.0,
+        element_width: float = None,
+        label: str = None,
+    ):
+        """Return a minimal TrackSpec with raw_data and a scan."""
+        n_frames, n_tx, n_ax, n_ch = 2, 2, 8, 1
+        geom = np.zeros((n_el, 3), dtype=np.float32)
+        geom[:, 0] = geom_offset  # shift x-coordinates to make geometry unique
+        scan_dict = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+        scan_dict["probe_geometry"] = geom
+        if element_width is not None:
+            scan_dict["element_width"] = np.float32(element_width)
+        return TrackSpec(
+            data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+            scan=scan_dict,
+            label=label,
+        )
+
+    def test_matching_probe_geometry_passes(self):
+        """Two tracks with identical probe_geometry should not raise."""
+        track_a = self._make_track(geom_offset=0.0, label="track_a")
+        track_b = self._make_track(geom_offset=0.0, label="track_b")
+        FileSpec(tracks=[track_a, track_b])  # should not raise
+
+    def test_mismatched_probe_geometry_raises(self):
+        """Two tracks with different probe_geometry must raise ValueError."""
+        track_a = self._make_track(geom_offset=0.0, label="track_a")
+        track_b = self._make_track(geom_offset=1.0, label="track_b")
+        with pytest.raises(ValueError, match="probe_geometry"):
+            FileSpec(tracks=[track_a, track_b])
+
+    def test_mismatched_element_width_raises(self):
+        """Two tracks with different element_width must raise ValueError."""
+        track_a = self._make_track(element_width=0.0003, label="track_a")
+        track_b = self._make_track(element_width=0.0006, label="track_b")
+        with pytest.raises(ValueError, match="element_width"):
+            FileSpec(tracks=[track_a, track_b])
+
+    def test_error_message_includes_track_indices(self):
+        """The error message should mention which track indices disagree."""
+        track_a = self._make_track(geom_offset=0.0, label="track_a")
+        track_b = self._make_track(geom_offset=1.0, label="track_b")
+        with pytest.raises(ValueError, match=r"Tracks 0 and 1"):
+            FileSpec(tracks=[track_a, track_b])
 
 
 def _scan_bare(n_tx: int = 2, n_el: int = 4):

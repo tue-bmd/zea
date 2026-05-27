@@ -82,7 +82,6 @@ def test_file_operations_extract(tmp_hdf5_path):
     assert data_dict.aligned_data.shape[0] == 1
     assert data_dict.aligned_data.shape[1] == 2
     assert data_dict.beamformed_data["values"].shape[0] == 1
-    assert data_dict.image_sc["values"].shape[0] == 1
 
     _assert_beamformed_data_still_exists(output_path)
     _assert_descriptions_and_additional_elements_equal(input_path, output_path)
@@ -207,7 +206,6 @@ def test_file_operations_cli_extract(tmp_hdf5_path):
     assert data_dict.aligned_data.shape[0] == 2
     assert data_dict.aligned_data.shape[1] == 3
     assert data_dict.beamformed_data["values"].shape[0] == 2
-    assert data_dict.image_sc["values"].shape[0] == 2
 
 
 def test_file_operations_cli_resave(tmp_hdf5_path):
@@ -250,7 +248,6 @@ def test_file_operations_cli_compound_frames(tmp_hdf5_path):
     assert data_dict.raw_data.shape[0] == 1  # Only one frame should remain
     assert data_dict.aligned_data.shape[0] == 1
     assert data_dict.beamformed_data["values"].shape[0] == 1
-    assert data_dict.image_sc["values"].shape[0] == 1
 
 
 def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
@@ -276,6 +273,76 @@ def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
     assert data_dict.aligned_data.shape[1] == 1
 
 
+def test_file_operations_folder_resave(tmp_path):
+    """Tests that resave works on a folder of files, mirroring the folder structure."""
+
+    input_folder = tmp_path / "input"
+    output_folder = tmp_path / "output"
+
+    # Create a folder of example datasets, including a nested subfolder
+    input_paths = [
+        input_folder / "case_0.hdf5",
+        input_folder / "case_1.hdf5",
+        input_folder / "nested" / "case_2.hdf5",
+    ]
+    for path in input_paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        generate_example_dataset(path, add_optional_dtypes=True)
+
+    resave(input_folder, output_folder)
+
+    # Each input file should have a matching output file at the mirrored location
+    for input_path in input_paths:
+        output_path = output_folder / input_path.relative_to(input_folder)
+        assert output_path.is_file()
+        validate_file(output_path)
+        _assert_descriptions_and_additional_elements_equal(input_path, output_path)
+
+
+def test_file_operations_folder_compound_frames(tmp_path):
+    """Tests that compound_frames works on a folder of files."""
+
+    input_folder = tmp_path / "input"
+    output_folder = tmp_path / "output"
+    input_folder.mkdir()
+
+    input_paths = [input_folder / "case_0.hdf5", input_folder / "case_1.hdf5"]
+    for path in input_paths:
+        generate_example_dataset(path, add_optional_dtypes=True)
+
+    compound_frames(input_folder, output_folder)
+
+    for input_path in input_paths:
+        output_path = output_folder / input_path.name
+        assert output_path.is_file()
+        data_dict, _, _ = load_file_all_data_types(output_path)
+        for dataset in data_dict.values():
+            if dataset is not None:
+                arr = dataset["values"] if isinstance(dataset, dict) else dataset
+                assert arr.shape[0] == 1  # Only one frame should remain
+
+
+def test_file_operations_folder_sum(tmp_path):
+    """Tests that sum_data accepts a folder and sums all files it contains."""
+
+    input_folder = tmp_path / "input"
+    input_folder.mkdir()
+    output_path = tmp_path / "summed.hdf5"
+
+    input_paths = [input_folder / "case_0.hdf5", input_folder / "case_1.hdf5"]
+    for path in input_paths:
+        generate_example_dataset(path, add_optional_dtypes=True)
+
+    data0, _, _ = load_file(input_paths[0])
+    data1, _, _ = load_file(input_paths[1])
+
+    sum_data(input_folder, output_path)
+
+    with File(output_path) as f:
+        raw_data = f["data/raw_data"][:]
+        assert raw_data[0, 0, 0, 0, 0] == data0[0, 0, 0, 0, 0] + data1[0, 0, 0, 0, 0]
+
+
 def _load_description_and_additional_elements(path: Path):
     description = load_description(path)
     additional_elements = load_additional_elements(path)
@@ -293,7 +360,8 @@ def _assert_descriptions_and_additional_elements_equal(path, other_path: Path):
 
 def _assert_beamformed_data_still_exists(path: Path):
     with h5py.File(path, "r") as f:
-        assert "data/beamformed_data" in f
+        key = "tracks/track_0/data/beamformed_data" if "tracks" in f else "data/beamformed_data"
+        assert key in f
 
 
 def _make_file_with_distinct_demod_freq(tmp_path, demod_freq=5e6, center_freq=7e6):
@@ -373,7 +441,8 @@ def test_uint8_sum_no_truncation(tmp_path):
 
     for p in (input1, input2):
         with h5py.File(p, "r+") as hf:
-            hf["data/image/values"][0, 0, 0] = 200
+            key = "tracks/track_0/data/image/values" if "tracks" in hf else "data/image/values"
+            hf[key][0, 0, 0] = 200
 
     sum_data([input1, input2], output)
 
@@ -402,7 +471,8 @@ def test_compound_frames_uint8_linear(tmp_path):
     )
 
     with h5py.File(input_path, "r+") as hf:
-        hf["data/image/values"][:] = 100
+        key = "tracks/track_0/data/image/values" if "tracks" in hf else "data/image/values"
+        hf[key][:] = 100
 
     compound_frames(input_path, output_path)
 

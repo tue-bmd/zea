@@ -79,12 +79,171 @@ disk::
     )
     f.close()
 
+-------------------------------
+Multi-track files
+-------------------------------
+
+Some acquisitions interleave multiple transmit sequences in a single recording — for example,
+swapping between focused and plane-wave pulses.  Rather than splitting these into separate files, 
+``zea`` can store them as **Tracks**: self-contained bundles of raw data and scan parameters
+in a single HDF5 file. Each track will contain its own :class:`~zea.Scan` object, containing the parameters
+necessary to beamform the raw data in that track. This allows us to specify a :class:`~zea.Pipeline`
+*per-track*, which can be applied independently to each frame in that track.
+Global timing information can be stored in the optional ``track_schedule`` parameter, which 
+indicates which track each transmit event belongs to. Provided the 
+:func:`~zea.Scan.time_to_next_transmit` for each transmit event, this allows us to reconstruct 
+the full timing of the acquisition.
+
+.. raw:: html
+
+   <div style="display: flex; flex-direction: column; align-items: center; margin: 3em 0;">
+     <!-- Dark mode image -->
+     <img
+       src="_static/tracks-Dark.svg"
+       alt="zea data acquisition with multiple tracks"
+       style="display: none; width: 60%; padding-bottom: 1em;"
+       class="only-dark"
+     />
+     <!-- Light mode image -->
+     <img
+       src="_static/tracks-Light.svg"
+       alt="zea data acquisition with multiple tracks"
+       style="display: none; width: 60%; padding-bottom: 1em;"
+       class="only-light"
+     />
+     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
+        Illustrative example of a zea file with two tracks.
+     </div>
+   </div>
+   <style>
+     @media (prefers-color-scheme: dark) {
+       .only-dark { display: block !important; }
+     }
+     @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
+       .only-light { display: block !important; }
+     }
+   </style>
+
+**HDF5 layout**
+
+.. code-block:: text
+
+    acquisition.hdf5
+    ├── attrs:  probe_name, us_machine, zea_version, …
+    ├── track_schedule          # optional int32[n_total_tx]
+    └── tracks/
+        ├── track_0/
+        │   ├── attrs:  label="focused_bmode"
+        │   ├── data/           # raw_data, image, …
+        │   └── scan/           # probe_geometry, t0_delays, …
+        └── track_1/
+            ├── attrs:  label="planewave_doppler"
+            ├── data/
+            └── scan/
+
+**Write — create a file with multiple tracks**
+
+.. doctest::
+
+    >>> import numpy as np
+    >>> from zea import File
+
+    >>> n_frames, n_ax, n_el = 2, 512, 128
+    >>> n_tx_focused, n_tx_pw = 3, 2
+
+    >>> probe_geom = np.zeros((n_el, 3), dtype=np.float32)
+
+    >>> # One track index per global transmit event across all frames
+    >>> track_schedule = np.tile(
+    ...     [0] * n_tx_focused + [1] * n_tx_pw, n_frames
+    ... ).astype(np.int32)
+
+    >>> f = File.create(
+    ...     "acquisition.hdf5",
+    ...     tracks=[
+    ...         # Track 0: focused B-mode
+    ...         {
+    ...             "label": "focused_bmode",
+    ...             "data": {"raw_data": np.zeros((n_frames, n_tx_focused, n_ax, n_el, 1))},
+    ...             "scan": {
+    ...                 "probe_geometry":         probe_geom,
+    ...                 "sampling_frequency":     40e6,
+    ...                 "center_frequency":       7e6,
+    ...                 "demodulation_frequency": 7e6,
+    ...                 "initial_times":          np.zeros(n_tx_focused),
+    ...                 "t0_delays":              np.zeros((n_tx_focused, n_el)),
+    ...                 "tx_apodizations":        np.ones((n_tx_focused, n_el)),
+    ...                 "focus_distances":        np.full(n_tx_focused, np.inf),
+    ...                 "transmit_origins":       np.zeros((n_tx_focused, 3)),
+    ...                 "polar_angles":           np.zeros(n_tx_focused),
+    ...                 "time_to_next_transmit": np.ones((n_frames, n_tx_focused)) * 1e-4,
+    ...             },
+    ...         },
+    ...         # Track 1: plane-wave Doppler
+    ...         {
+    ...             "label": "planewave_doppler",
+    ...             "data": {"raw_data": np.zeros((n_frames, n_tx_pw, n_ax, n_el, 1))},
+    ...             "scan": {
+    ...                 "probe_geometry":         probe_geom,
+    ...                 "sampling_frequency":     40e6,
+    ...                 "center_frequency":       7e6,
+    ...                 "demodulation_frequency": 7e6,
+    ...                 "initial_times":          np.zeros(n_tx_pw),
+    ...                 "t0_delays":              np.zeros((n_tx_pw, n_el)),
+    ...                 "tx_apodizations":        np.ones((n_tx_pw, n_el)),
+    ...                 "focus_distances":        np.full(n_tx_pw, np.inf),
+    ...                 "transmit_origins":       np.zeros((n_tx_pw, 3)),
+    ...                 "polar_angles":           np.zeros(n_tx_pw),
+    ...                 "time_to_next_transmit": np.ones((n_frames, n_tx_pw)) * 2e-4,
+    ...             },
+    ...         },
+    ...     ],
+    ...     probe_name="L11-4v",
+    ...     track_schedule=track_schedule,
+    ...     overwrite=True,
+    ... )
+    >>> f.close()
+
+**Read — unpack multiple tracks from a file**
+
+.. doctest::
+
+    >>> import zea
+
+    >>> with zea.File("acquisition.hdf5") as f:
+    ...     probe = f.probe()              # probe is shared across all tracks
+    ...     # See track labels:
+    ...     print(f.track_labels)          # ['focused_bmode', 'planewave_doppler']
+    ...     # Unpack in the same order as track_labels — always safe:
+    ...     focused_track, planewave_track = f.tracks
+    ...     # Or fetch a specific track by name:
+    ...     focused_track = f.get_track("focused_bmode")
+    ...     focused_scan = focused_track.scan()
+    ...     focused_raw  = focused_track.data.raw_data[:]
+    ...     # access the global timing information for the focused track:
+    ...     focused_track.timestamps
+    ...     # ... process with e.g. a focused B-mode pipeline
+    ...     planewave_scan = planewave_track.scan()
+    ...     planewave_raw  = planewave_track.data.raw_data[:]
+    ...     # access the global timing information for the planewave track:
+    ...     planewave_track.timestamps
+    ...     # ... process with e.g. a plane-wave Doppler pipeline
+    ['focused_bmode', 'planewave_doppler']
+    array([[0.    , 0.0001, 0.0002],
+           [0.0007, 0.0008, 0.0009]], dtype=float32)
+    array([[0.0003, 0.0005],
+           [0.001 , 0.0012]], dtype=float32)
+
+.. testcleanup::
+
+    import os
+    os.remove("acquisition.hdf5")
 
 -------------------------------
 ``zea`` data format reference
 -------------------------------
 
-Files created with zea 0.0.12 and later are fully described by the
+Files created with zea 0.1.0 and later are fully described by the
 :class:`~zea.data.spec.FileSpec` class.
 
 .. note::
