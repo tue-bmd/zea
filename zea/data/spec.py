@@ -686,6 +686,44 @@ class Image(Map):
 
 
 @dataclass
+class AlignedData(Spec):
+    """Time-of-flight corrected data.
+
+    Args:
+        values: The aligned data of shape ``(n_frames, n_tx, n_ax, n_el, n_ch)``
+            and type float32 or int16. n_ch is 1 for RF data or 2 for IQ data.
+        labels: The labels for the channel dimension, e.g. ``["RF"]`` or ``["I", "Q"]``.
+            Auto-generated from n_ch if not provided.
+    """
+
+    values: np.ndarray
+    labels: np.ndarray | None = None
+
+    SCHEMA = {
+        "values": {
+            "dtype": (np.float32, np.int16),
+            "shape": ("n_frames", "n_tx", "n_ax", "n_el", "n_ch"),
+        },
+        "labels": {"dtype": np.str_, "shape": ("n_ch",)},
+    }
+
+    def __post_init__(self):
+        n_ch = self.values.shape[-1]
+        if n_ch not in (1, 2):
+            raise ValueError(
+                f"Aligned data must have n_ch ∈ {{1, 2}} (RF or IQ), "
+                f"got n_ch={n_ch} (shape {self.values.shape})."
+            )
+        if self.labels is None:
+            self.labels = (
+                np.array(["RF"], dtype=np.str_)
+                if n_ch == 1
+                else np.array(["I", "Q"], dtype=np.str_)
+            )
+        super().__post_init__()
+
+
+@dataclass
 class BeamformedData(FloatMap):
     """Beamformed (beamsummed) data with per-pixel Cartesian coordinates.
 
@@ -853,13 +891,12 @@ class ColorDopplerMap(FloatMap):
 class DataSpec(Spec):
     """Data group containing raw channels, derived pipeline products, and optional spatial maps.
 
-    Pipeline data products (plain arrays):
+    Plain-array data products:
         raw_data: Raw channel data of shape (n_frames, n_tx, n_ax, n_el, n_ch)
             and type float32 or int16.
-        aligned_data: Time-of-flight corrected data of shape
-            (n_frames, n_tx, n_ax, n_el, n_ch) and type float32 or int16.
 
-    Spatial map data products (values + per-pixel coordinates):
+    Grouped data products (values + optional metadata):
+        - aligned_data: Time-of-flight corrected data and optional labels.
         - beamformed_data: Beamformed (beamsummed) data and per-pixel coordinates.
         - envelope_data: Envelope-detected data and per-pixel coordinates.
         - image: Reconstructed image data and per-pixel coordinates.
@@ -871,13 +908,13 @@ class DataSpec(Spec):
         - color_doppler: Color Doppler velocity data and per-pixel coordinates.
         - \\*\\*kwargs: Any other spatially aligned map data and per-pixel coordinates.
 
-    At least one data field (pipeline or spatial map) must be provided.
+    At least one data field (plain-array or grouped) must be provided.
     """
 
-    # Pipeline data products (plain arrays)
+    # Plain-array data products
     raw_data: np.ndarray | None = None
-    aligned_data: np.ndarray | None = None
-    # Spatial map data products (with coordinates metadata)
+    # Grouped data products
+    aligned_data: AlignedData | dict | None = None
     beamformed_data: BeamformedData | dict | None = None
     envelope_data: EnvelopeData | dict | None = None
     image: Image | dict | None = None
@@ -889,16 +926,13 @@ class DataSpec(Spec):
     color_doppler: ColorDopplerMap | dict | None = None
 
     SCHEMA = {
-        # Pipeline data products
+        # Plain-array data products
         "raw_data": {
             "dtype": (np.float32, np.int16),
             "shape": ("n_frames", "n_tx", "n_ax", "n_el", "n_ch"),
         },
-        "aligned_data": {
-            "dtype": (np.float32, np.int16),
-            "shape": ("n_frames", "n_tx", "n_ax", "n_el", "n_ch"),
-        },
-        # Spatial map data products
+        # Grouped data products
+        "aligned_data": {"spec": AlignedData},
         "beamformed_data": {"spec": BeamformedData},
         "envelope_data": {"spec": EnvelopeData},
         "image": {"spec": Image},
@@ -912,13 +946,12 @@ class DataSpec(Spec):
 
     FIELD_METADATA = {
         "raw_data": {"unit": "-", "description": "Raw channel data."},
-        "aligned_data": {"unit": "-", "description": "Time-of-flight corrected data."},
     }
 
     def __init__(
         self,
         raw_data: np.ndarray | None = None,
-        aligned_data: np.ndarray | None = None,
+        aligned_data: AlignedData | dict | None = None,
         beamformed_data: BeamformedData | dict | None = None,
         envelope_data: EnvelopeData | dict | None = None,
         image: Image | dict | None = None,
@@ -950,7 +983,7 @@ class DataSpec(Spec):
                 raise TypeError(
                     f"Custom data key '{key}' must be a spatial map "
                     f"(a dict with at least a 'values' key), not a flat array. "
-                    f"Only 'raw_data' and 'aligned_data' are accepted as flat arrays. "
+                    f"Only 'raw_data' is accepted as a flat array. "
                     f"Wrap your data: {{'values': array, 'coordinates': coordinates_array}}."
                 )
             setattr(self, key, value)
@@ -977,17 +1010,15 @@ class DataSpec(Spec):
 
         super().__post_init__()
 
-        # n_ch must be 1 (RF) or 2 (IQ) for data types that carry a channel axis.
-        _N_CH_FIELDS = ("raw_data", "aligned_data")
-        for fname in _N_CH_FIELDS:
-            arr = getattr(self, fname, None)
-            if arr is not None and isinstance(arr, np.ndarray):
-                n_ch = arr.shape[-1]
-                if n_ch not in (1, 2):
-                    raise ValueError(
-                        f"'{fname}' must have n_ch ∈ {{1, 2}} (RF or IQ), "
-                        f"got n_ch={n_ch} (shape {arr.shape})."
-                    )
+        # n_ch must be 1 (RF) or 2 (IQ) for raw_data (checked for aligned_data by AlignedData).
+        arr = getattr(self, "raw_data", None)
+        if arr is not None and isinstance(arr, np.ndarray):
+            n_ch = arr.shape[-1]
+            if n_ch not in (1, 2):
+                raise ValueError(
+                    f"'raw_data' must have n_ch ∈ {{1, 2}} (RF or IQ), "
+                    f"got n_ch={n_ch} (shape {arr.shape})."
+                )
 
 
 @dataclass

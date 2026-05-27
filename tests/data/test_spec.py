@@ -693,7 +693,7 @@ class TestDataValidationErrors:
 
     def test_n_ch_3_raises_for_aligned_data(self):
         with pytest.raises(ValueError, match="n_ch"):
-            DataSpec(aligned_data=np.zeros((2, 3, 8, 4, 3), dtype=np.float32))
+            DataSpec(aligned_data={"values": np.zeros((2, 3, 8, 4, 3), dtype=np.float32)})
 
     def test_n_ch_3_raises_for_beamformed_data(self):
         with pytest.raises(ValueError, match="n_ch"):

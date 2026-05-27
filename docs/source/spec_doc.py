@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import numpy as np
 
 from zea.data.spec import (
+    AlignedData,
     Annotations,
     BeamformedData,
     ColorDopplerMap,
@@ -227,10 +228,9 @@ FILE_TREE = """\
    data_file.hdf5         (attrs: probe_name, us_machine, description, zea_version)
    \u251c\u2500\u2500 data/
    \u2502   \u251c\u2500\u2500 raw_data                  float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
-   \u2502   \u251c\u2500\u2500 aligned_data              float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
-   \u2502   \u251c\u2500\u2500 beamformed_data           float32          (n_frames, grid_z, grid_x, n_ch)
-   \u2502   \u251c\u2500\u2500 envelope_data             float32          (n_frames, grid_z, grid_x)
-   \u2502   \u251c\u2500\u2500 image_sc                  float32          (n_frames, grid_z_sc, grid_x_sc)
+   \u2502   \u251c\u2500\u2500 aligned_data/             group (AlignedData)
+   \u2502   \u251c\u2500\u2500 beamformed_data/          group (BeamformedData)
+   \u2502   \u251c\u2500\u2500 envelope_data/            group (EnvelopeData)
    \u2502   \u251c\u2500\u2500 image/                    group (Image)
    \u2502   \u251c\u2500\u2500 segmentation/             group (Segmentation)
    \u2502   \u251c\u2500\u2500 sos_map/                  group (SosMap)
@@ -285,8 +285,9 @@ ROOT_ATTRS_TABLE = """\
      - |badge-opt|
 """
 
-# Short descriptions for each spatial map type
+# Short descriptions for each grouped data type
 MAP_DESCRIPTIONS = {
+    "aligned_data": "Time-of-flight corrected data. Values are ``float32`` or ``int16`` in (n_frames, n_tx, n_ax, n_el, n_ch); ``labels`` names each channel (RF or I/Q).",  # noqa: E501
     "beamformed_data": "Beamformed (beamsummed) data. Values are ``float32`` in (n_frames, z, x, n_ch) or (n_frames, z, x, y, n_ch); ``labels`` names each channel (RF or I/Q).",  # noqa: E501
     "envelope_data": "Envelope-detected data. Values are ``float32`` in (n_frames, z, x) or (n_frames, z, x, y).",  # noqa: E501
     "image": "Reconstructed (log-compressed) image. Values are ``uint8`` in (n_frames, z, x) or (n_frames, z, x, y).",  # noqa: E501
@@ -348,16 +349,17 @@ def generate() -> str:
         "      :sync: data",
         "",
         "      Data group containing raw channel data, derived pipeline products,",
-        "      and optional spatial map groups.",
+        "      and optional grouped data products.",
         "",
-        "      **Pipeline arrays**",
+        "      **Data fields**",
         "",
         rst_full_table(DataSpec, base_indent=2),
         "",
-        "      **Spatial map groups**",
+        "      **Grouped data products**",
         "",
-        "      Each spatial map is an HDF5 sub-group with the same three fields:",
-        "      ``values`` (the data array), ``coordinates`` (per-pixel Cartesian positions in",
+        "      Each grouped data product is an HDF5 sub-group. Spatial map groups",
+        "      (beamformed_data, envelope_data, image, segmentation, and custom maps)",
+        "      also include a ``coordinates`` field (per-pixel Cartesian positions in",
         "      metres, shape ``(*spatial_dims, 3)`` where ``spatial_dims`` matches the spatial",
         "      (non-channel) dimensions of ``values``).",
         "      Custom spatial maps are also accepted — any extra key passed to",
@@ -367,6 +369,7 @@ def generate() -> str:
     ]
 
     map_classes = [
+        ("aligned_data", AlignedData),
         ("beamformed_data", BeamformedData),
         ("envelope_data", EnvelopeData),
         ("image", Image),

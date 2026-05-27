@@ -447,7 +447,9 @@ class TestAllPipelineDataTypes:
         n_frames, n_tx, n_el, n_ax, n_ch = 2, 3, 4, 8, 1
         data_dict = {
             "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
-            "aligned_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+            "aligned_data": {
+                "values": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+            },
             "beamformed_data": _make_map(np.zeros((n_frames, 16, 12, n_ch), dtype=np.float32)),
             "envelope_data": _make_map(np.zeros((n_frames, 16, 12), dtype=np.float32)),
             "image_sc": _make_map(np.zeros((n_frames, 32, 24), dtype=np.uint8)),
