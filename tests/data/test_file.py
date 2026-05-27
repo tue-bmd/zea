@@ -951,7 +951,7 @@ class TestMultiTrackFile:
                 _ = f.tracks
 
     # ------------------------------------------------------------------
-    # Track.data and Track.scan()
+    # Track.data and Track.scan
     # ------------------------------------------------------------------
 
     def test_track_data_returns_correct_array(self, tmp_path):
@@ -971,13 +971,13 @@ class TestMultiTrackFile:
     def test_track_scan_returns_scan_object(self, tmp_path):
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
-            scan = f.tracks[0].scan()
+            scan = f.tracks[0].scan
         assert isinstance(scan, Scan)
 
     def test_track_scan_kwargs_override(self, tmp_path):
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
-            scan = f.tracks[0].scan(sound_speed=np.float32(1480.0))
+            scan = f.tracks[0].get_scan(sound_speed=np.float32(1480.0))
         assert float(scan.sound_speed) == pytest.approx(1480.0)
 
     def test_track_repr(self, tmp_path):
@@ -1111,7 +1111,7 @@ class TestMultiTrackFile:
     # ------------------------------------------------------------------
 
     def test_track_scan_includes_file_level_probe_geometry(self, tmp_path):
-        """probe_geometry stored in the file-level probe group is injected into track.scan()."""
+        """probe_geometry stored in the file-level probe group is injected into track.scan."""
         n_frames, n_tx, n_el, n_ax, n_ch = 2, 3, 4, 8, 1
         geom = np.arange(n_el * 3, dtype=np.float32).reshape(n_el, 3) * 1e-3
         scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
@@ -1139,7 +1139,7 @@ class TestMultiTrackFile:
 
         with File(path) as f:
             for track in f.tracks:
-                np.testing.assert_array_equal(track.scan().probe_geometry, geom)
+                np.testing.assert_array_equal(track.scan.probe_geometry, geom)
 
     def test_track_has_no_probe_attribute(self, tmp_path):
         """Track exposes no .probe attribute; probe is accessed via File.probe."""

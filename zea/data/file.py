@@ -91,7 +91,7 @@ class Track:
         with File("multi_track.hdf5") as f:
             for track in f.tracks:
                 raw = track.data.raw_data[:]
-                scan = track.scan()
+                scan = track.scan
     """
 
     __slots__ = ("_index", "_group", "_timestamps", "_label", "_probe")
@@ -120,7 +120,18 @@ class Track:
             )
         return GroupProxy(self._group["data"])
 
-    def scan(self, safe: bool = True, **kwargs) -> "Scan":
+    @property
+    def scan(self) -> "Scan":
+        """Returns a :class:`~zea.scan.Scan` built from this track's scan parameters.
+
+        For parameter overrides use :meth:`get_scan` directly.
+
+        Returns:
+            Scan: Initialised scan object for this track.
+        """
+        return self.get_scan()
+
+    def get_scan(self, safe: bool = True, **kwargs) -> "Scan":
         """Build a :class:`~zea.scan.Scan` from this track's scan parameters.
 
         Args:
@@ -318,7 +329,7 @@ def _compute_all_track_timestamps(
     # pre-load time_to_next_transmit for each track,
     # validating that it's present and has the right shape
     for track in tracks:
-        t2nt = track.scan().time_to_next_transmit
+        t2nt = track.scan.time_to_next_transmit
         if t2nt is None:
             log.warning(
                 f"Track {track._index} has no 'time_to_next_transmit';"
@@ -533,7 +544,7 @@ class File(h5py.File):
             with File("multi_track.hdf5") as f:
                 for track in f.tracks:
                     raw = track.data.raw_data[:]
-                    scan = track.scan()
+                    scan = track.scan
         """
         if "tracks" not in self:
             raise AttributeError(
@@ -541,7 +552,7 @@ class File(h5py.File):
                 "Access data and scan parameters directly with file.data and file.scan()."
             )
         tracks_group = self["tracks"]
-        # Load file-level probe once so every track's scan() can supplement its
+        # Load file-level probe once so every track's scan can supplement its
         # scan parameters with probe_geometry, element_width, etc.
         probe_dict: "dict | None" = None
         if super().__contains__("probe"):
@@ -646,7 +657,7 @@ class File(h5py.File):
         if n > 1:
             raise AttributeError(
                 f"This file has {n} tracks. "
-                "Use file.tracks[i].scan() to access a specific track's scan parameters."
+                "Use file.tracks[i].scan to access a specific track's scan parameters."
             )
         if "tracks" in self:
             track0 = self["tracks"].get("track_0")
@@ -1074,8 +1085,8 @@ class File(h5py.File):
         if n > 1:
             raise AttributeError(
                 f"This file has {n} tracks. "
-                "Use file.tracks to get a list of tracks and call get_scan() on each: "
-                "file.tracks[i].get_scan()"
+                "Use file.tracks to get a list of tracks and access .scan on each: "
+                "file.tracks[i].scan"
             )
         scan_dict = self.get_scan_parameters()
 

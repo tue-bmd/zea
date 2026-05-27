@@ -218,12 +218,12 @@ the full timing of the acquisition.
     ...     focused_track, planewave_track = f.tracks
     ...     # Or fetch a specific track by name:
     ...     focused_track = f.get_track("focused_bmode")
-    ...     focused_scan = focused_track.scan()
+    ...     focused_scan = focused_track.scan
     ...     focused_raw  = focused_track.data.raw_data[:]
     ...     # access the global timing information for the focused track:
     ...     focused_track.timestamps
     ...     # ... process with e.g. a focused B-mode pipeline
-    ...     planewave_scan = planewave_track.scan()
+    ...     planewave_scan = planewave_track.scan
     ...     planewave_raw  = planewave_track.data.raw_data[:]
     ...     # access the global timing information for the planewave track:
     ...     planewave_track.timestamps
