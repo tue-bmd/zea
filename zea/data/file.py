@@ -1160,7 +1160,7 @@ class File(h5py.File):
                 ... )
                 >>> with File(path) as f:
                 ...     probe = f.probe
-                >>> print(probe.name)
+                >>> probe.name
                 'verasonics_l11_4v'
         """
         from zea.probes import Probe
@@ -1190,13 +1190,12 @@ class File(h5py.File):
                 >>> from zea import File
                 >>> path = (
                 ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
-                ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5",
-                ...     revision="v0.1.0a1"
+                ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
                 ... )
-                >>> with File(path) as f:
+                >>> with File(path, revision="v0.1.0a1") as f:
                 ...     meta = f.metadata
                 ...     print(meta.subject.type)
-                'phantom'
+                phantom
         """
         if "metadata" not in self:
             raise KeyError("No 'metadata' group in this file.")

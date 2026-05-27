@@ -49,7 +49,13 @@ Example Usage
 
     >>> # Initialize Scan from a Probe's parameters
     >>> probe = Probe.from_name("verasonics_l11_4v")
-    >>> scan = Scan(**probe.get_parameters(), grid_size_z=256, n_tx=11)
+    >>> scan = Scan(
+    ...     probe_geometry=probe.probe_geometry,
+    ...     center_frequency=probe.center_frequency,
+    ...     element_width=probe.element_width,
+    ...     grid_size_z=256,
+    ...     n_tx=11,
+    ... )
 
     >>> # Or initialize from a Config object
     >>> config = Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml")
