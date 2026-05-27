@@ -2,6 +2,7 @@
 
 import keras
 import numpy as np
+import pytest
 
 from zea.models.diffusion import DPS
 from zea.models.flow_matching import FlowMatchingModel
@@ -204,6 +205,44 @@ def test_flow_matching_posterior_sample_shape():
         verbose=False,
     )
     assert out.shape == (n_measurements, n_samples, n_features)
+
+
+def test_flow_matching_test_step_returns_losses():
+    """test_step returns a dict with v_loss and i_loss keys."""
+    batch_size, n_features = 4, 2
+    model = _make_minimal_flow_model((n_features,))
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=1e-3),
+        loss=keras.losses.MeanSquaredError(),
+    )
+
+    data = keras.random.normal((batch_size, n_features))
+    metrics = model.test_step(data)
+
+    assert "v_loss" in metrics
+    assert "i_loss" in metrics
+    assert np.isfinite(float(metrics["v_loss"]))
+    assert np.isfinite(float(metrics["i_loss"]))
+
+
+def test_flow_matching_train_step_returns_losses():
+    """train_step returns a dict with v_loss and i_loss keys (TF only)."""
+    pytest.importorskip("tensorflow")
+
+    batch_size, n_features = 4, 2
+    model = _make_minimal_flow_model((n_features,))
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=1e-3),
+        loss=keras.losses.MeanSquaredError(),
+    )
+
+    data = keras.random.normal((batch_size, n_features))
+    metrics = model.train_step(data)
+
+    assert "v_loss" in metrics
+    assert "i_loss" in metrics
+    assert np.isfinite(float(metrics["v_loss"]))
+    assert np.isfinite(float(metrics["i_loss"]))
 
 
 def test_flow_matching_dps_guidance_call():
