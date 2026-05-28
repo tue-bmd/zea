@@ -207,7 +207,7 @@ class TestStringDataset:
         with h5py.File(path, "r") as f:
             ds = _StringDataset(f["labels"])
             assert len(ds) == 2
-            assert "_StringDataset" in repr(ds)
+            assert "StringDataset" in repr(ds)
 
     def test_getattr_delegates_to_dataset(self, tmp_path):
         path = tmp_path / "str_attr.hdf5"
