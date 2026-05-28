@@ -7,17 +7,18 @@ including file and dataset access, validation, and data loading. For more inform
 Main classes
 ------------
 
-- :class:`zea.data.File` -- Open and access a single zea HDF5 data file.
-- :class:`zea.data.Dataset` -- Manage and iterate over a collection of zea data files.
+- :class:`zea.File` — open, create, and validate a single zea HDF5 file.
+- :class:`zea.Dataset` — manage and iterate over a collection of zea data files.
+- :class:`zea.Dataloader` — Data loader for training pipelines.
 
 See the data notebook for a more detailed example: :doc:`../notebooks/data/zea_data_example`
 
-Examples usage
-^^^^^^^^^^^^^^
+Example usage
+^^^^^^^^^^^^^
 
 .. doctest::
 
-    >>> from zea import File, Dataset
+    >>> from zea import File, Dataset, Dataloader
 
     >>> # Work with a single file
     >>> path_to_file = (
@@ -26,8 +27,7 @@ Examples usage
     ... )
 
     >>> with File(path_to_file, mode="r") as file:
-    ...     # file.summary()
-    ...     data = file.load_data("raw_data", indices=[0])
+    ...     data = file.data.raw_data[0]  # first frame
     ...     scan = file.scan()
     ...     probe = file.probe()
 
@@ -38,14 +38,26 @@ Examples usage
     ...     files.append(file)  # process each file as needed
     >>> dataset.close()
 
+    >>> # Use a dataloader for training
+    >>> dataloader = Dataloader(
+    ...     "hf://zeahub/camus-sample/",
+    ...     key="data/image",
+    ...     batch_size=4,
+    ...     image_size=(256, 256),
+    ...     shuffle=True,
+    ... )
+    >>> for batch in dataloader:
+    ...     # process batch for training
+    ...     pass
+
 """  # noqa: E501
 
 from .convert.camus import sitk_load
 from .data_format import (
     DatasetElement,
-    generate_example_dataset,
-    generate_zea_dataset,
+    generate_zea_dataset,  # deprecated, kept for backwards compatibility
     validate_input_data,
 )
+from .dataloader import Dataloader
 from .datasets import Dataset, Folder
 from .file import File, load_file

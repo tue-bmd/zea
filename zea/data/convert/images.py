@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from zea.data.data_format import generate_zea_dataset
+from zea.data.file import File
 from zea.io_lib import _SUPPORTED_IMG_TYPES, load_image
 
 
@@ -68,9 +68,15 @@ def _img_dir_to_h5_dir(
         )
 
         new_h5_file_path = new_dir_path / f"{group_id}.hdf5"
-        generate_zea_dataset(
+        if frames.dtype != np.uint8:
+            raise ValueError(
+                f"Expected image frames to have dtype uint8 (values in [0, 255]), "
+                f"but got dtype {frames.dtype}. Please convert before saving."
+            )
+        values = np.expand_dims(frames, axis=-1)  # add y dim
+        File.create(
             path=new_h5_file_path,
-            image=frames,
+            data={"image": {"values": values}},
             probe_name="generic",
             description=f"{dataset_name or 'image'} dataset converted to zea format",
         )

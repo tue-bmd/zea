@@ -20,13 +20,13 @@ Let's take a quick look at how to use ``zea`` to load and process ultrasound dat
 
    path = config.data.dataset_folder + "/" + config.data.file_path
    with zea.File(path) as file:
-      data = file.load_data("raw_data", indices=0)
+      data = file.data.raw_data[0]
       probe = file.probe()
       scan = file.scan(**config.scan)
 
    # using the pipeline as specified in the config file
    pipeline = zea.Pipeline.from_config(
-      config.pipeline,
+      config,
       with_batch_dim=False,
    )
    # preparing the parameters (converting to tensors)
@@ -54,7 +54,8 @@ Similarly, we can easily load one of the pretrained models from the :mod:`zea.mo
    model = AugmentedCamusSeg.from_preset("augmented_camus_seg")
 
    with zea.Dataset("hf://zeahub/camus-sample/") as dataset:
-      image = dataset[0].load_data("image_sc", indices=0)  # (H, W)
+      file = dataset[0]
+      image = file.data.image_sc[0]
 
    # Resize to 256x256 and normalize to [-1, 1] as expected by the model
    image = keras.ops.image.resize(image[None, ..., None], (256, 256))[0, ..., 0]

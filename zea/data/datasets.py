@@ -193,7 +193,7 @@ class Folder:
     def __init__(
         self,
         folder_path: str | Path | HFPath,
-        validate: bool = True,
+        validate: bool = False,
         hf_cache_dir: str = HF_DATASETS_DIR,
     ):
         single_file_error_msg = (
@@ -342,10 +342,7 @@ class Folder:
     def get_data_types(file_path):
         """Get data types from file."""
         with File(file_path) as file:
-            if "data" in file:
-                data_types = list(file["data"].keys())
-            else:
-                data_types = list(file["event_0"]["data"].keys())
+            data_types = list(file["data"].keys())
         return data_types
 
     def _write_validation_file(self, path, num_frames_per_file):
@@ -443,7 +440,7 @@ class Dataset(H5FileHandleCache):
     def __init__(
         self,
         file_paths: List[str] | str,
-        validate: bool = True,
+        validate: bool = False,
         directory_splits: list | None = None,
         **kwargs,
     ):

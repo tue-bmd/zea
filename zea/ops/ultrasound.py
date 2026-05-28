@@ -463,7 +463,11 @@ class LowPassFilterIQ(FirFilter):
     """
 
     def __init__(
-        self, axis: int = -3, num_taps: int = 127, filter_key: str = "low_pass_filter", **kwargs
+        self,
+        axis: int = -3,
+        num_taps: int = 127,
+        filter_key: str = "low_pass_filter",
+        **kwargs,
     ):
         """Initialize the LowPassFilterIQ operation.
 
@@ -517,7 +521,11 @@ class BandPassFilter(FirFilter):
     """
 
     def __init__(
-        self, axis: int = -3, num_taps: int = 127, filter_key: str = "band_pass_filter", **kwargs
+        self,
+        axis: int = -3,
+        num_taps: int = 127,
+        filter_key: str = "band_pass_filter",
+        **kwargs,
     ):
         """Initialize the BandPassFilter operation.
 
@@ -642,12 +650,22 @@ class LeeFilter(Filter):
 
         # Apply Gaussian blur to get local mean
         img_mean = gaussian_filter(
-            data, self.sigma, mode=self.mode, cval=self.cval, truncate=self.truncate, axes=axes
+            data,
+            self.sigma,
+            mode=self.mode,
+            cval=self.cval,
+            truncate=self.truncate,
+            axes=axes,
         )
 
         # Apply Gaussian blur to squared data to get local squared mean
         img_sqr_mean = gaussian_filter(
-            data**2, self.sigma, mode=self.mode, cval=self.cval, truncate=self.truncate, axes=axes
+            data**2,
+            self.sigma,
+            mode=self.mode,
+            cval=self.cval,
+            truncate=self.truncate,
+            axes=axes,
         )
 
         # Calculate local variance

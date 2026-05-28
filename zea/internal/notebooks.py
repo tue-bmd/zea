@@ -16,7 +16,9 @@ def animate_images(
         raise ValueError("images must be a non-empty sequence.")
     fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
     if scan is not None:
-        extent = scan.extent * 1e3 if getattr(scan, "extent") is not None else None
+        extent = (
+            scan.extent_imshow * 1e3 if getattr(scan, "extent_imshow", None) is not None else None
+        )
     else:
         extent = None
     im = ax.imshow(np.array(images[0]), animated=True, cmap=cmap, extent=extent)

@@ -16,7 +16,7 @@ import numpy as np
 from zea import log
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.data.convert.utils import unzip
-from zea.data.data_format import generate_zea_dataset
+from zea.data.file import File
 
 
 def convert(source_path, output_path, overwrite=False):
@@ -92,19 +92,23 @@ def convert(source_path, output_path, overwrite=False):
         # This line changes the data format to work with the old beamformer,
         # which is not in accordance with the new zea format
 
-    generate_zea_dataset(
+    File.create(
         path=output_path,
-        raw_data=raw_data,
-        center_frequency=center_frequency,
-        sampling_frequency=sampling_frequency,
-        probe_geometry=probe_geometry,
-        initial_times=initial_times,
-        sound_speed=sound_speed,
-        t0_delays=t0_delays,
-        focus_distances=focus_distances,
-        polar_angles=polar_angles,
-        azimuth_angles=azimuth_angles,
-        tx_apodizations=tx_apodizations,
+        data={"raw_data": raw_data.astype(np.float32)},
+        scan={
+            "center_frequency": center_frequency,
+            "demodulation_frequency": center_frequency,
+            "sampling_frequency": sampling_frequency,
+            "probe_geometry": probe_geometry,
+            "initial_times": initial_times,
+            "sound_speed": sound_speed,
+            "t0_delays": t0_delays,
+            "focus_distances": focus_distances,
+            "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+            "polar_angles": polar_angles,
+            "azimuth_angles": azimuth_angles,
+            "tx_apodizations": tx_apodizations,
+        },
         probe_name="verasonics_l11_4v",
         description="PICMUS dataset converted to zea format",
     )

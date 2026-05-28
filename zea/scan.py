@@ -170,7 +170,7 @@ class Scan(Parameters):
         grid_type (str, optional): Type of grid to use for beamforming.
             Can be "cartesian" or "polar". Defaults to "cartesian".
         dynamic_range (tuple, optional): Dynamic range for image display.
-            Defined in dB as (min_dB, max_dB). Defaults to (-60, 0).
+            Defined in dB as (min_dB, max_dB).
         distance_to_apex (float, optional): Distance from the transducer to the apex of the
             pixel grid. This property is used for polar grids. Will be computed automatically
             if not provided.
@@ -274,7 +274,7 @@ class Scan(Parameters):
         "distance_to_apex",
     )
     def grid(self):
-        """The beamforming grid of shape (grid_size_z, grid_size_x, 3)."""
+        """The beamforming grid of shape (grid_size_z, grid_size_x, [grid_size_y], 3)."""
         if self.grid_type == "polar":
             if self.is_3d:
                 raise NotImplementedError("3D polar grids are not yet supported.")
@@ -365,7 +365,10 @@ class Scan(Parameters):
                 radius * np.cos(-np.pi / 2 + self.polar_limits[0]),
                 radius * np.cos(-np.pi / 2 + self.polar_limits[1]),
             )
-            xlims_plane = (min(self.probe_geometry[:, 0]), max(self.probe_geometry[:, 0]))
+            xlims_plane = (
+                min(self.probe_geometry[:, 0]),
+                max(self.probe_geometry[:, 0]),
+            )
             xlims = (
                 min(xlims_polar[0], xlims_plane[0]),
                 max(xlims_polar[1], xlims_plane[1]),
@@ -408,17 +411,40 @@ class Scan(Parameters):
 
     @cache_with_dependencies("grid", "grid_type", "distance_to_apex")
     def extent(self):
-        """The extent of the beamforming grid in the format (xmin, xmax, zmax, zmin).
-        Can be directly used with `plt.imshow(x, extent=scan.extent)` for visualization.
         """
-        xlims = (self.grid[:, :, 0].min(), self.grid[:, :, 0].max())
-        zlims = (self.grid[:, :, 2].min(), self.grid[:, :, 2].max())
+        The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
+        """
+        xlims = (self.grid[..., 0].min(), self.grid[..., 0].max())
+        ylims = (self.grid[..., 1].min(), self.grid[..., 1].max())
+        zlims = (self.grid[..., 2].min(), self.grid[..., 2].max())
 
         # For polar grids, adjust zlims to account for distance to apex
         if self.grid_type == "polar":
             zlims = (zlims[0] + self.distance_to_apex, zlims[1])
 
-        return np.array([xlims[0], xlims[1], zlims[1], zlims[0]])
+        return np.array(
+            [
+                xlims[0],
+                xlims[1],
+                ylims[0],
+                ylims[1],
+                zlims[0],
+                zlims[1],
+            ]
+        )
+
+    @cache_with_dependencies("extent")
+    def extent_imshow(self):
+        """The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
+
+        Returns:
+            np.ndarray: The extent of the beamforming grid in the format (xmin, xmax, zmax, zmin).
+                This format can be used directly in matplotlib's ``plt.imshow``.
+        """
+        xlims_0, xlims_1, ylims_0, ylims_1, zlims_0, zlims_1 = self.extent
+        if ylims_0 != ylims_1:
+            log.warning("Are you sure you want to use 2D imshow extent for a 3D grid?")
+        return np.array([xlims_0, xlims_1, zlims_1, zlims_0])
 
     @cache_with_dependencies("grid")
     def flatgrid(self):
@@ -427,6 +453,7 @@ class Scan(Parameters):
 
     @cache_with_dependencies("grid_size_x", "grid_size_y", "grid_size_z")
     def is_3d(self):
+        """Whether the scan grid is 3D (True) or 2D (False)."""
         return self.grid_size_y > 1 and self.grid_size_x > 1 and self.grid_size_z > 1
 
     @property
@@ -737,12 +764,12 @@ class Scan(Parameters):
         pfield = compute_pfield(
             sound_speed=self.sound_speed,
             center_frequency=self.center_frequency,
-            bandwidth_percent=self.bandwidth_percent,
             n_el=self.n_el,
             probe_geometry=self.probe_geometry,
             tx_apodizations=self.tx_apodizations,
             grid=self.grid,
             t0_delays=self.t0_delays,
+            bandwidth_percent=self.bandwidth_percent,
             **self.pfield_kwargs,
         )
         return ops.convert_to_numpy(pfield)
@@ -771,7 +798,12 @@ class Scan(Parameters):
         return value
 
     @cache_with_dependencies(
-        "rho_range", "theta_range", "resolution", "grid_size_z", "grid_size_x", "distance_to_apex"
+        "rho_range",
+        "theta_range",
+        "resolution",
+        "grid_size_z",
+        "grid_size_x",
+        "distance_to_apex",
     )
     def coordinates_2d(self):
         """The coordinates for scan conversion."""

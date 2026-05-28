@@ -13,15 +13,14 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from zea.data.data_format import generate_zea_dataset, load_additional_elements, load_description
+from zea import Probe, Scan
+from zea.data.data_format import load_additional_elements, load_description
 from zea.data.datasets import Dataset
-from zea.data.file import load_file_all_data_types
+from zea.data.file import File, load_file_all_data_types
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.parameters import MissingDependencyError
 from zea.log import logger
-from zea.probes import Probe
-from zea.scan import Scan
 
 ALL_DATA_TYPES_EXCEPT_RAW = set(_IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES) - {"raw_data"}
 
@@ -47,14 +46,14 @@ def save_file(
     scan: Scan,
     probe: Probe,
     raw_data: np.ndarray = None,
-    aligned_data: np.ndarray = None,
-    beamformed_data: np.ndarray = None,
-    envelope_data: np.ndarray = None,
-    image: np.ndarray = None,
-    image_sc: np.ndarray = None,
-    additional_elements=None,
-    description="",
-    enable_compression=True,
+    aligned_data: dict = None,
+    beamformed_data: dict = None,
+    envelope_data: dict = None,
+    image: dict = None,
+    description=None,
+    custom_maps: dict | None = None,
+    metadata: dict | None = None,
+    compression=True,
     chunk_frames=False,
     **kwargs,
 ):
@@ -62,49 +61,98 @@ def save_file(
 
     Args:
         path (str, pathlike): The path to the hdf5 file.
-        raw_data (np.ndarray): The data to save.
         scan (Scan): The scan object containing the parameters of the acquisition.
         probe (Probe): The probe object containing the parameters of the probe.
-        additional_elements (list of DatasetElement, optional): Additional elements to save in the
-            file. Defaults to None.
-        enable_compression (bool, optional): Whether to enable gzip compression for the
-            datasets. Defaults to True.
+        raw_data (np.ndarray): The data to save.
+        aligned_data (np.ndarray, optional): Aligned data as a dict with ``"values"``
+            and ``"extent"`` keys (validated as :class:`~zea.data.spec.AlignedData`).
+        beamformed_data (dict, optional): Beamformed data as a dict with ``"values"`` and
+            ``"extent"`` keys (validated as :class:`~zea.data.spec.BeamformedData`).
+        envelope_data (dict, optional): Envelope-detected data as a dict with ``"values"``
+            and ``"extent"`` keys (validated as :class:`~zea.data.spec.EnvelopeData`).
+        image (dict, optional): Reconstructed (log-compressed) image data as a dict with
+            ``"values"`` and ``"extent"`` keys (validated as :class:`~zea.data.spec.Image`).
+        description (str, optional): A description for the dataset.
+        custom_maps (dict, optional): Custom spatial map entries to include in the ``data`` group.
+            Each key maps to a dict with ``"values"`` (np.ndarray, uint8) and ``"extent"``
+            (np.ndarray, float32, shape ``(6,)``) fields, plus optional ``"labels"``,
+            ``"description"``, and ``"unit"`` fields.  Example::
+
+                custom_maps = {
+                    "my_overlay": {
+                        "values": values_array,  # (n_frames, x, z, y[, n_ch]), uint8
+                        "extent": extent_array,  # (6,) float32
+                    }
+                }
+        metadata (dict, optional): Metadata to store in the ``metadata`` group, validated against
+            :class:`~zea.data.spec.MetadataSpec`.  Standard keys include ``"subject"``,
+            ``"credit"``, ``"annotations"``, ``"text_report"``, ``"ecg"``,
+            ``"probe_pose"``, and ``"voice_narration"``.  Custom signal keys are also
+            accepted and stored as :class:`~zea.data.spec.SignalND` entries.  Example::
+
+                metadata = {
+                    "credit": "My Lab, 2024",
+                    "annotations": {"label": np.array(["healthy", "healthy"])},
+                }
+        compression (str, optional): The HDF5 compression filter to use. Defaults to ``"gzip"``.
         chunk_frames (bool, optional): Whether to store the data datasets with HDF5
             chunked storage, using one frame per chunk. Defaults to False.
     """
 
-    generate_zea_dataset(
+    data = {}
+    for key, arr in [
+        ("raw_data", raw_data),
+        ("aligned_data", aligned_data),
+        ("beamformed_data", beamformed_data),
+        ("envelope_data", envelope_data),
+        ("image", image),
+    ]:
+        if arr is not None:
+            data[key] = arr
+
+    if custom_maps:
+        for key, map_dict in custom_maps.items():
+            data[key] = map_dict
+
+    scan_dict = {
+        "probe_geometry": probe.probe_geometry,
+        "sampling_frequency": np.float32(scan.sampling_frequency),
+        "center_frequency": np.float32(scan.center_frequency),
+        "demodulation_frequency": np.float32(scan.demodulation_frequency),
+        "initial_times": scan.initial_times,
+        "t0_delays": scan.t0_delays,
+        "sound_speed": np.float32(scan.sound_speed) if scan.sound_speed is not None else None,
+    }
+
+    optional_scan = {
+        "focus_distances": scan.focus_distances,
+        "transmit_origins": scan.transmit_origins,
+        "polar_angles": scan.polar_angles,
+        "azimuth_angles": scan.azimuth_angles,
+        "tx_apodizations": scan.tx_apodizations,
+        "time_to_next_transmit": scan.time_to_next_transmit,
+        "tgc_gain_curve": scan.tgc_gain_curve,
+        "element_width": scan.element_width,
+    }
+    for key, val in optional_scan.items():
+        if val is not None:
+            scan_dict[key] = val
+
+    # Filter out None values from scan_dict
+    scan_dict = {k: v for k, v in scan_dict.items() if v is not None}
+
+    f = File.create(
         path=path,
-        enable_compression=enable_compression,
-        chunk_frames=chunk_frames,
-        raw_data=raw_data,
-        aligned_data=aligned_data,
-        beamformed_data=beamformed_data,
-        image=image,
-        image_sc=image_sc,
-        envelope_data=envelope_data,
+        data=data,
+        scan=scan_dict if scan_dict else None,
+        metadata=metadata or None,
         probe_name="generic",
-        probe_geometry=_safe_getattr(probe, "probe_geometry"),
-        sampling_frequency=_safe_getattr(scan, "sampling_frequency"),
-        center_frequency=_safe_getattr(scan, "center_frequency"),
-        initial_times=_safe_getattr(scan, "initial_times"),
-        t0_delays=_safe_getattr(scan, "t0_delays"),
-        sound_speed=_safe_getattr(scan, "sound_speed"),
-        focus_distances=_safe_getattr(scan, "focus_distances"),
-        transmit_origins=_safe_getattr(scan, "transmit_origins"),
-        polar_angles=_safe_getattr(scan, "polar_angles"),
-        azimuth_angles=_safe_getattr(scan, "azimuth_angles"),
-        tx_apodizations=_safe_getattr(scan, "tx_apodizations"),
-        bandwidth_percent=_safe_getattr(scan, "bandwidth_percent"),
-        time_to_next_transmit=_safe_getattr(scan, "time_to_next_transmit"),
-        tgc_gain_curve=_safe_getattr(scan, "tgc_gain_curve"),
-        element_width=_safe_getattr(scan, "element_width"),
-        tx_waveform_indices=_safe_getattr(scan, "tx_waveform_indices"),
-        waveforms_one_way=_safe_getattr(scan, "waveforms_one_way"),
-        waveforms_two_way=_safe_getattr(scan, "waveforms_two_way"),
         description=description,
-        additional_elements=additional_elements,
+        compression=compression,
+        chunk_frames=chunk_frames,
+        overwrite=True,
     )
+    f.close()
 
 
 def _iter_folder_io(input_path: Path, output_path: Path):
@@ -156,6 +204,10 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     """
     Sums multiple raw data files and saves the result to a new file.
 
+    For images, this will actually average the images. If the images are uint8, it will average
+    directly. If the images are float32, we assume they are in the log-domain and we will do the
+    averaging in the linear domain.
+
     Args:
         input_paths (list[Path]): List of paths to the input raw data files. Each path
             may be a single file or a folder; folders are expanded into all zea files
@@ -172,6 +224,33 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     description = load_description(input_paths[0])
     additional_elements = load_additional_elements(input_paths[0])
 
+    image_is_uint8 = (
+        data_dict["image"] is not None
+        and isinstance(data_dict["image"], dict)
+        and data_dict["image"]["values"].dtype == np.uint8
+    )
+    image_sc_is_uint8 = (
+        data_dict["image_sc"] is not None
+        and isinstance(data_dict["image_sc"], dict)
+        and data_dict["image_sc"]["values"].dtype == np.uint8
+    )
+    image_is_float32 = (
+        data_dict["image"] is not None
+        and isinstance(data_dict["image"], dict)
+        and data_dict["image"]["values"].dtype == np.float32
+    )
+    image_sc_is_float32 = (
+        data_dict["image_sc"] is not None
+        and isinstance(data_dict["image_sc"], dict)
+        and data_dict["image_sc"]["values"].dtype == np.float32
+    )
+
+    # Cast to float32 to avoid overflow
+    if image_is_uint8:
+        data_dict["image"]["values"] = data_dict["image"]["values"].astype(np.float32)
+    if image_sc_is_uint8:
+        data_dict["image_sc"]["values"] = data_dict["image_sc"]["values"].astype(np.float32)
+
     for file in input_paths[1:]:
         new_data, new_scan, new_probe = load_file_all_data_types(file)
 
@@ -181,33 +260,78 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
 
         if data_dict["aligned_data"] is not None:
             _assert_shapes_equal(
-                data_dict["aligned_data"], new_data["aligned_data"], "aligned_data"
+                data_dict["aligned_data"]["values"],
+                new_data["aligned_data"]["values"],
+                "aligned_data",
             )
-            data_dict["aligned_data"] += new_data["aligned_data"]
+            data_dict["aligned_data"]["values"] += new_data["aligned_data"]["values"]
 
         if data_dict["beamformed_data"] is not None:
             _assert_shapes_equal(
-                data_dict["beamformed_data"], new_data["beamformed_data"], "beamformed_data"
+                data_dict["beamformed_data"]["values"],
+                new_data["beamformed_data"]["values"],
+                "beamformed_data",
             )
-            data_dict["beamformed_data"] += new_data["beamformed_data"]
+            data_dict["beamformed_data"]["values"] += new_data["beamformed_data"]["values"]
 
         if data_dict["envelope_data"] is not None:
             _assert_shapes_equal(
-                data_dict["envelope_data"], new_data["envelope_data"], "envelope_data"
+                data_dict["envelope_data"]["values"],
+                new_data["envelope_data"]["values"],
+                "envelope_data",
             )
-            data_dict["envelope_data"] += new_data["envelope_data"]
+            data_dict["envelope_data"]["values"] += new_data["envelope_data"]["values"]
 
         if data_dict["image"] is not None:
-            _assert_shapes_equal(data_dict["image"], new_data["image"], "image")
-            data_dict["image"] = np.log(np.exp(new_data["image"]) + np.exp(data_dict["image"]))
+            _assert_shapes_equal(data_dict["image"]["values"], new_data["image"]["values"], "image")
+            if image_is_float32:
+                data_dict["image"]["values"] = np.log(
+                    np.exp(new_data["image"]["values"]) + np.exp(data_dict["image"]["values"])
+                )
+            elif image_is_uint8:
+                data_dict["image"]["values"] = (
+                    new_data["image"]["values"] + data_dict["image"]["values"]
+                )
+            else:
+                raise ValueError("image values must be uint8 or float32")
 
         if data_dict["image_sc"] is not None:
-            _assert_shapes_equal(data_dict["image_sc"], new_data["image_sc"], "image_sc")
-            data_dict["image_sc"] = np.log(
-                np.exp(new_data["image_sc"]) + np.exp(data_dict["image_sc"])
+            _assert_shapes_equal(
+                data_dict["image_sc"]["values"],
+                new_data["image_sc"]["values"],
+                "image_sc",
             )
+            if image_sc_is_float32:
+                data_dict["image_sc"]["values"] = np.log(
+                    np.exp(new_data["image_sc"]["values"]) + np.exp(data_dict["image_sc"]["values"])
+                )
+            elif image_sc_is_uint8:
+                data_dict["image_sc"]["values"] = (
+                    new_data["image_sc"]["values"] + data_dict["image_sc"]["values"]
+                )
+            else:
+                raise ValueError("image_sc values must be uint8 or float32")
+
         assert scan == new_scan, "Scan parameters do not match."
         assert probe == new_probe, "Probe parameters do not match."
+
+    # Divide to get the mean; for uint8, keep float precision then clip and cast back
+    if image_is_uint8:
+        data_dict["image"]["values"] = np.clip(
+            data_dict["image"]["values"] / len(input_paths), 0, 255
+        ).astype(np.uint8)
+    if image_is_float32:
+        data_dict["image"]["values"] = np.minimum(
+            data_dict["image"]["values"] - np.log(len(input_paths)), 0.0
+        )
+    if image_sc_is_uint8:
+        data_dict["image_sc"]["values"] = np.clip(
+            data_dict["image_sc"]["values"] / len(input_paths), 0, 255
+        ).astype(np.uint8)
+    if image_sc_is_float32:
+        data_dict["image_sc"]["values"] = np.minimum(
+            data_dict["image_sc"]["values"] - np.log(len(input_paths)), 0.0
+        )
 
     if overwrite:
         _delete_file_if_exists(output_path)
@@ -246,13 +370,28 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
 
     # Assuming the first dimension is the frame dimension
 
+    # Map-based data types store values in a dict; these need special handling
+    _MAP_KEYS = {"aligned_data", "beamformed_data", "envelope_data", "image_sc", "image"}
+    _LOG_COMPOUND_KEYS = {"image", "image_sc"}
+
     compounded_data = {}
     for data_type in DataTypes:
         key = data_type.value
         if data_dict[key] is None:
             compounded_data[key] = None
             continue
-        if key == "image" or key == "image_sc":
+        if key in _MAP_KEYS:
+            values = data_dict[key]["values"]
+            if key in _LOG_COMPOUND_KEYS and values.dtype == np.float32:
+                values = np.log(np.mean(np.exp(values), axis=0, keepdims=True))
+            elif values.dtype == np.uint8:
+                values = np.clip(
+                    np.mean(values.astype(np.float32), axis=0, keepdims=True), 0, 255
+                ).astype(np.uint8)
+            else:
+                values = np.mean(values, axis=0, keepdims=True)
+            compounded_data[key] = {**data_dict[key], "values": values}
+        elif key in _LOG_COMPOUND_KEYS and data_dict[key]["values"].dtype == np.float32:
             compounded_data[key] = np.log(np.mean(np.exp(data_dict[key]), axis=0, keepdims=True))
         else:
             compounded_data[key] = np.mean(data_dict[key], axis=0, keepdims=True)
@@ -299,10 +438,12 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
         )
 
     # Assuming the second dimension is the transmit dimension
-    for key in ["raw_data", "aligned_data"]:
-        if data_dict[key] is None:
-            continue
-        data_dict[key] = np.mean(data_dict[key], axis=1, keepdims=True)
+    if data_dict["raw_data"] is not None:
+        data_dict["raw_data"] = np.mean(data_dict["raw_data"], axis=1, keepdims=True)
+    if data_dict["aligned_data"] is not None:
+        data_dict["aligned_data"]["values"] = np.mean(
+            data_dict["aligned_data"]["values"], axis=1, keepdims=True
+        )
 
     scan.set_transmits([0])
 

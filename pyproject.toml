@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "zea"
-version = "0.0.13"
+version = "0.1.0a0"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
     { name = "Tristan Stevens", email = "t.s.w.stevens@tue.nl" },
@@ -250,8 +250,13 @@ markers = [
     "gpu: marks tests that exercise real GPU hardware (most meaningful offline; in CI CUDA_VISIBLE_DEVICES=\"\" forces CPU)",
 ]
 filterwarnings = [
+    "ignore:.*SwigPyPacked.*:DeprecationWarning",
+    "ignore:.*SwigPyObject.*:DeprecationWarning",
+    "ignore:.*swigvarlink.*:DeprecationWarning",
     "ignore::DeprecationWarning:jupyter_client.*",
     "ignore::DeprecationWarning:papermill.*",
+    "ignore:.*__array__ implementation doesn't accept a copy keyword.*:DeprecationWarning",
+    "ignore:.*os\\.fork\\(\\) was called.*:RuntimeWarning",
 ]
 
 [tool.coverage.report]

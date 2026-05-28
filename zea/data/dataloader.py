@@ -284,12 +284,12 @@ class H5DataSource:
         file = file_handle_cache.get_file(file_name)
 
         try:
-            images = file.load_data(key, indices)
+            images = file[key][indices]
         except (OSError, IOError):
             # Invalidate cache entry and retry once
             file_handle_cache.pop(file_name)
             file = file_handle_cache.get_file(file_name)
-            images = file.load_data(key, indices)
+            images = file[key][indices]
 
         if self.insert_frame_axis:
             initial = self.initial_frame_axis
@@ -572,6 +572,12 @@ class Dataloader:
             )
 
         self._map_dataset = self._build_pipeline(seed)
+
+        if len(self._map_dataset) == 0:
+            raise ValueError(
+                "Dataloader produced no samples. Check that the dataset is non-empty "
+                "and that the filters/transforms do not discard all items."
+            )
 
         if return_filename:
             self._shape = self._map_dataset[0][0].shape
