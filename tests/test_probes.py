@@ -59,7 +59,8 @@ def test_file_create_accepts_probe_object():
         "polar_angles": np.zeros(n_tx, dtype=np.float32),
         "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
     }
-    _, path = tempfile.mkstemp(suffix=".hdf5")
+    fd, path = tempfile.mkstemp(suffix=".hdf5")
+    os.close(fd)
     try:
         f = File.create(path, data={"raw_data": raw}, scan=scan, probe=probe, overwrite=True)
         assert f.probe.name == "verasonics_l11_4v"
@@ -73,7 +74,8 @@ def test_file_create_probe_wrong_type():
     """File.create should raise TypeError when probe is an unsupported type."""
     n_frames, n_tx, n_el, n_ax = 1, 4, 128, 64
     raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
-    _, path = tempfile.mkstemp(suffix=".hdf5")
+    fd, path = tempfile.mkstemp(suffix=".hdf5")
+    os.close(fd)
     try:
         with pytest.raises(TypeError, match="probe must be a Probe object or a dict"):
             File.create(
