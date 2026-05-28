@@ -231,8 +231,9 @@ def process_cetus(source_path, output_path, overwrite=False):
             "credit": CETUS_CITATION,
             "annotations": {"label": np.array([time_point])},
         },
-        probe={"name": "generic"},
-        # TODO: includes files from both:
+        probe={"name": "Unspecified mix of GE 4V, Philips X5-1, Siemens 4Z1c"},
+        us_machine="Unspecified mix of GE Vivid E9, Philips iE33, Siemens SC2000",
+        # includes files from both:
         # - GE system refered as Vivid E9, using a 4V probe;
         # - Philips system refered as iE33, using a X5-1 probe;
         # - Siemens system refered as SC2000, using 4Z1c probe.
