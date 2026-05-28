@@ -1,4 +1,4 @@
-"""zea H5 file functionality."""
+"""zea data file (HDF5)."""
 
 import enum
 from pathlib import Path
@@ -18,8 +18,6 @@ from zea.internal.utils import deprecated, reduce_to_signature
 from zea.scan import Scan
 
 if TYPE_CHECKING:
-    # Imported lazily inside functions at runtime to avoid a circular import
-    # (zea.probes imports ProbeSpec from zea.data.spec, which loads this module).
     from zea.probes import Probe
 
 
@@ -57,7 +55,7 @@ class _StringDataset:
         return f"<_StringDataset wrapping {self._ds!r}>"
 
 
-class GroupProxy:
+class _GroupProxy:
     """Lazy proxy for an h5py.Group that exposes children as attributes.
 
     Datasets are returned as-is (h5py.Dataset supports slicing without
@@ -91,7 +89,7 @@ class GroupProxy:
                 f"Available keys: {list(self._group.keys())}"
             )
         if isinstance(child, h5py.Group):
-            return GroupProxy(child)
+            return _GroupProxy(child)
         if isinstance(child, h5py.Dataset) and h5py.check_string_dtype(child.dtype):
             return _StringDataset(child)
         return child  # h5py.Dataset – supports slicing natively
@@ -151,14 +149,14 @@ class Track:
         object.__setattr__(self, "_probe", probe)
 
     @property
-    def data(self) -> GroupProxy:
+    def data(self) -> _GroupProxy:
         """Lazy proxy for this track's ``data`` group."""
         if "data" not in self._group:
             raise KeyError(
                 f"Track {self._index} has no 'data' group. "
                 f"Available keys: {list(self._group.keys())}"
             )
-        return GroupProxy(self._group["data"])
+        return _GroupProxy(self._group["data"])
 
     @property
     def scan(self) -> "Scan":
@@ -854,7 +852,7 @@ class File(h5py.File):
         return cls(str(path), mode="r")
 
     @property
-    def data(self) -> GroupProxy:
+    def data(self) -> _GroupProxy:
         """Lazy proxy for the ``data`` group of a single-track file.
 
         Supports both the new ``tracks/track_0/data/`` layout and the
@@ -882,10 +880,10 @@ class File(h5py.File):
         if "tracks" in self:
             track0 = self["tracks"].get("track_0")
             if track0 is not None and "data" in track0:
-                return GroupProxy(track0["data"])
+                return _GroupProxy(track0["data"])
         # Legacy format
         if super().__contains__("data"):
-            return GroupProxy(self["data"])
+            return _GroupProxy(self["data"])
         raise KeyError("No 'data' group found in this file.")
 
     @property

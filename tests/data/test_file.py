@@ -9,7 +9,7 @@ import pytest
 
 import zea
 from zea.data.data_format import generate_zea_dataset
-from zea.data.file import File, GroupProxy, Track, dict_to_sorted_list, load_file
+from zea.data.file import File, Track, _GroupProxy, _StringDataset, dict_to_sorted_list, load_file
 from zea.data.spec import FileSpec, Image, Segmentation
 from zea.probes import Probe
 from zea.scan import Scan
@@ -175,6 +175,89 @@ def spec_file(tmp_path):
     return str(path), fspec, raw, env
 
 
+class TestStringDataset:
+    def test_array_slice_decodes_bytes(self, tmp_path):
+        path = tmp_path / "str_test.hdf5"
+        labels = np.array(["foo", "bar", "baz"])
+        with h5py.File(path, "w") as f:
+            f.create_dataset("labels", data=labels.astype(bytes))
+
+        with h5py.File(path, "r") as f:
+            ds = _StringDataset(f["labels"])
+            result = ds[:]
+            assert result.dtype.kind == "U"  # Unicode string dtype
+            np.testing.assert_array_equal(result, labels)
+
+    def test_scalar_access_returns_str(self, tmp_path):
+        path = tmp_path / "str_scalar.hdf5"
+        with h5py.File(path, "w") as f:
+            f.create_dataset("s", data=np.bytes_(b"hello"))
+
+        with h5py.File(path, "r") as f:
+            ds = _StringDataset(f["s"])
+            result = ds[()]
+            assert isinstance(result, str)
+            assert result == "hello"
+
+    def test_len_and_repr(self, tmp_path):
+        path = tmp_path / "str_len.hdf5"
+        with h5py.File(path, "w") as f:
+            f.create_dataset("labels", data=np.array([b"a", b"b"]))
+
+        with h5py.File(path, "r") as f:
+            ds = _StringDataset(f["labels"])
+            assert len(ds) == 2
+            assert "_StringDataset" in repr(ds)
+
+    def test_getattr_delegates_to_dataset(self, tmp_path):
+        path = tmp_path / "str_attr.hdf5"
+        with h5py.File(path, "w") as f:
+            f.create_dataset("labels", data=np.array([b"x"]))
+
+        with h5py.File(path, "r") as f:
+            ds = _StringDataset(f["labels"])
+            assert ds.shape == (1,)
+
+    def test_auto_wrapped_via_group_proxy(self, tmp_path):
+        """GroupProxy should auto-wrap string datasets in _StringDataset."""
+        path = tmp_path / "proxy_str.hdf5"
+        with h5py.File(path, "w") as f:
+            grp = f.create_group("data")
+            grp.create_dataset("labels", data=np.array([b"ED", b"ES"]))
+
+        with h5py.File(path, "r") as f:
+            proxy = _GroupProxy(f["data"])
+            result = proxy.labels[:]
+            assert isinstance(proxy.labels, _StringDataset)
+            np.testing.assert_array_equal(result, np.array(["ED", "ES"]))
+
+    def test_string_labels_decoded_via_zea_file(self, tmp_path):
+        """Segmentation labels written via File.create should be auto-decoded to strings."""
+        n_frames = 2
+        seg_labels = np.array(["background", "lumen"], dtype=np.str_)
+        seg_values = np.zeros((n_frames, 8, 8, 2), dtype=np.bool_)
+        path = tmp_path / "seg_str.hdf5"
+        File.create(
+            path,
+            data={
+                "segmentation": {
+                    "values": seg_values,
+                    "labels": seg_labels,
+                    "coordinates": np.zeros((8, 8, 3), dtype=np.float32),
+                },
+            },
+            scan=_scan_minimal(n_frames=n_frames),
+            probe={"name": "test"},
+        ).close()
+
+        with File(path) as f:
+            labels_ds = f.data.segmentation.labels
+            assert isinstance(labels_ds, _StringDataset)
+            result = labels_ds[:]
+            assert result.dtype.kind == "U"
+            np.testing.assert_array_equal(result, seg_labels)
+
+
 class TestGroupProxy:
     def test_attribute_access_returns_dataset(self, spec_file):
         path, _, raw, _ = spec_file
@@ -208,7 +291,7 @@ class TestGroupProxy:
 
         with File(path) as f:
             proxy = f.data.image
-            assert isinstance(proxy, GroupProxy)
+            assert isinstance(proxy, _GroupProxy)
             assert proxy.values.shape == (n_frames, 16, 12, 1)
 
     def test_missing_key_raises_attribute_error(self, spec_file):
@@ -241,7 +324,7 @@ class TestFileDataProperty:
         path, *_ = spec_file
 
         with File(path) as f:
-            assert isinstance(f.data, GroupProxy)
+            assert isinstance(f.data, _GroupProxy)
 
     def test_data_property_raises_when_no_data_group(self, simple_h5_file):
         with File(simple_h5_file) as f:
@@ -422,7 +505,7 @@ class TestImageOnlyFile:
         with File(path) as f:
             assert "image" in f.data
             proxy = f.data.image
-            assert isinstance(proxy, GroupProxy)
+            assert isinstance(proxy, _GroupProxy)
             assert proxy.values.shape[0] == n_frames
 
     def test_envelope_only_spec_file(self, tmp_path):
@@ -570,7 +653,7 @@ class TestSpatialData:
         path, img_values, img_coordinates, *_ = spatial_file
         with File(path) as f:
             proxy = f.data.image
-            assert isinstance(proxy, GroupProxy)
+            assert isinstance(proxy, _GroupProxy)
             assert "values" in proxy
             assert "coordinates" in proxy
 
@@ -589,7 +672,7 @@ class TestSpatialData:
         path, _, _, seg_values, seg_labels, _ = spatial_file
         with File(path) as f:
             np.testing.assert_array_equal(f.data.segmentation.values[()], seg_values)
-            loaded_labels = f.data.segmentation.labels.asstr()[()]
+            loaded_labels = f.data.segmentation.labels[:]
             np.testing.assert_array_equal(loaded_labels, seg_labels)
 
     def test_sos_map_values(self, spatial_file):
@@ -968,7 +1051,7 @@ class TestMultiTrackFile:
     def test_track_data_is_group_proxy(self, tmp_path):
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
-            assert isinstance(f.tracks[0].data, GroupProxy)
+            assert isinstance(f.tracks[0].data, _GroupProxy)
 
     def test_track_scan_returns_scan_object(self, tmp_path):
         path, *_ = _make_two_track_spec(tmp_path)
