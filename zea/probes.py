@@ -186,9 +186,25 @@ class Probe(ProbeSpec):
             return value
 
     def __post_init__(self):
-        # Legacy file support
-        if self.center_frequency is not None:
-            self.center_frequency = self._legacy_int_to_float(self.center_frequency)
+        # Legacy file support: HDF5 files may store float fields as integers,
+        # and scalar fields as 1-element arrays.
+        _scalar_float_fields = (
+            "center_frequency",
+            "bandwidth_percent",
+            "element_width",
+            "element_height",
+            "lens_sound_speed",
+            "lens_thickness",
+        )
+        for _field in _scalar_float_fields:
+            _val = getattr(self, _field, None)
+            if _val is not None:
+                if isinstance(_val, np.ndarray) and _val.size == 1:
+                    _val = _val.ravel()[0]
+                setattr(self, _field, self._legacy_int_to_float(_val))
+        _val = getattr(self, "probe_geometry", None)
+        if _val is not None:
+            setattr(self, "probe_geometry", self._legacy_int_to_float(_val))
         super().__post_init__()
 
 
