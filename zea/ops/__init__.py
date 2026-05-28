@@ -16,13 +16,14 @@ In many settings, it can be useful to apply an :class:`Operation` directly to th
 
 .. doctest::
 
-    >>> import numpy as np
-    >>> from zea.ops import EnvelopeDetect
-    >>> data = np.random.randn(2000, 128, 1)
+    >>> import keras
+    >>> from zea.ops import EnvelopeDetects
+    >>> data = keras.random.uniform((2000, 128, 1))
     >>> # static arguments are passed in the constructor
     >>> envelope_detect = EnvelopeDetect(axis=-1)
-    >>> # other parameters can be passed here along with the data
-    >>> envelope_data = envelope_detect(data=data)
+    >>> # other (dynamic) parameters can be passed here along with the data
+    >>> # the output is again a dictionary
+    >>> envelope_data = envelope_detect(data=data)["data"]
 
 .. note::
 
@@ -32,7 +33,9 @@ In many settings, it can be useful to apply an :class:`Operation` directly to th
 Using a pipeline
 ----------------
 
-There are many ways to initialize a :class:`Pipeline`. In its essence, a :class:`Pipeline` is just a list of multiple :class:`Operation`.
+There are many ways to initialize a :class:`Pipeline`. In its essence, a :class:`Pipeline` is just a sequence of multiple :class:`Operation`.
+A :class:`Pipeline` will chain these operations together, so that the output of one operation is the input of the next. All operations takes
+a dictionary of tensors and parameters as inputs and passes these along to the next operation, only picking the parameters they need.
 
 One of the more common pipelines you will encounter is a basic ultrasound raw channel data to B-mode image pipeline, which consists of a sequence of operations like demodulation, beamforming, envelope detection, normalization and log compression:
 
@@ -82,7 +85,7 @@ to illustrate the calling convention:
 
 .. doctest::
 
-    >>> import numpy as np
+    >>> import keras
     >>> from zea.ops import Pipeline, Normalize, LogCompress
 
     >>> pipeline = Pipeline(
@@ -90,14 +93,16 @@ to illustrate the calling convention:
     ...     with_batch_dim=False,
     ... )
 
-    >>> data = np.abs(np.random.default_rng(0).standard_normal((64, 64))).astype("float32")
+    >>> data = keras.ops.abs(keras.random.normal((64, 64)))
 
-    >>> # Pass data under pipeline.key together with any needed parameters
+    >>> # Pass data under pipeline.key (default: "data") together with any needed parameters
     >>> parameters = {"dynamic_range": (-60, 0)}
     >>> inputs = {"data": data}
     >>> outputs = pipeline(**inputs, **parameters)
-    >>> outputs[pipeline.output_key].shape
-    (64, 64)
+    >>> data_out = outputs[pipeline.output_key]
+    >>> data_out = keras.ops.convert_to_numpy(data_out)
+    >>> print(f"min: {data_out.min()}, max: {data_out.max()}")
+    min: -60.0, max: 0.0
 
 
 Saving and loading pipelines
