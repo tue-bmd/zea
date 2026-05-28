@@ -1405,6 +1405,17 @@ class ProbeSpec(Spec):
     def __post_init__(self):
         super().__post_init__()
 
+        # Derive element_width from probe_geometry pitch when not explicitly set.
+        # Use pitch * 0.9 as a common rule-of-thumb (assumes ~10 % kerf).
+        if (
+            self.element_width is None
+            and self.probe_geometry is not None
+            and len(self.probe_geometry) > 1
+        ):
+            _pitch = float(np.linalg.norm(self.probe_geometry[1] - self.probe_geometry[0]))
+            if _pitch > 0:
+                self.element_width = np.float32(0.9 * _pitch)
+
         if self.probe_geometry is not None:
             if self.probe_geometry.ndim != 2 or self.probe_geometry.shape[1] != 3:
                 raise ValueError(

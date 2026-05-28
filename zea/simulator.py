@@ -213,6 +213,10 @@ def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
         array-like: The directivity of the element.
     """
 
+    if element_width is None:
+        response = ops.ones_like(theta)
+        return response
+
     wavelength = sound_speed / f
 
     response = sinc(element_width / wavelength * ops.sin(theta))
