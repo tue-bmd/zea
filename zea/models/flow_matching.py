@@ -154,10 +154,6 @@ class FlowMatchingModel(DiffusionModel):
         signal_rates = 1.0 - noise_rates
         return noise_rates, signal_rates
 
-    # ------------------------------------------------------------------
-    # Velocity predictor / denoiser
-    # ------------------------------------------------------------------
-
     def denoise(
         self,
         noisy_images,
@@ -273,18 +269,10 @@ class FlowMatchingModel(DiffusionModel):
         z = keras.random.normal(shape=shape, seed=seed)
         return next_noisy_images + ops.sqrt(2.0 * dt) * z
 
-    # ------------------------------------------------------------------
-    # Metrics
-    # ------------------------------------------------------------------
-
     @property
     def metrics(self):
         """Metrics for training."""
         return [*self.velocity_loss_tracker, *self.image_loss_tracker]
-
-    # ------------------------------------------------------------------
-    # Training
-    # ------------------------------------------------------------------
 
     def train_step(self, data):
         """Custom train step for Rectified Flow (independent coupling).
