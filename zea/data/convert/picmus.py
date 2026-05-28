@@ -49,7 +49,14 @@ import numpy as np
 
 from zea import log
 from zea.beamform.delays import compute_t0_delays_planewave
-from zea.data.convert.utils import download_file, unzip, upload_dataset_to_hf, write_dataset_card
+from zea.data.convert.utils import (
+    check_output_dir_ownership,
+    download_file,
+    require_output_dir_ownership,
+    unzip,
+    upload_dataset_to_hf,
+    write_dataset_card,
+)
 from zea.data.file import File
 
 # ---------------------------------------------------------------------------
@@ -346,6 +353,8 @@ def convert_picmus(args):
     base_dir = Path(args.src)
     dst = Path(args.dst)
 
+    check_output_dir_ownership(dst, _PICMUS_HF_REPO_ID)
+
     # ------------------------------------------------------------------
     # Determine source directories
     # ------------------------------------------------------------------
@@ -424,6 +433,7 @@ def upload_picmus(output_folder: str | Path, revision: str) -> None:  # pragma: 
         output_folder: Root folder containing the converted HDF5 files.
         revision: Target branch name on the Hub (must not be ``"main"``).
     """
+    require_output_dir_ownership(output_folder, _PICMUS_HF_REPO_ID)
     upload_dataset_to_hf(
         folder=output_folder,
         repo_id=_PICMUS_HF_REPO_ID,
@@ -438,6 +448,7 @@ _PICMUS_DATASET_CARD = (
 license: other
 license_name: picmus-free-use
 license_link: https://www.creatis.insa-lyon.fr/Challenge/IEEE_IUS_2016/
+zea_repo_id: zeahub/picmus
 task_categories:
   - other
 tags:

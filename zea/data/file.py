@@ -23,6 +23,40 @@ if TYPE_CHECKING:
     from zea.probes import Probe
 
 
+class _StringDataset:
+    """Thin wrapper around an h5py string Dataset that auto-decodes bytes on read.
+
+    h5py returns variable-length or fixed-length string datasets as ``bytes``
+    objects.  This wrapper intercepts ``__getitem__`` and converts any bytes
+    elements to ``str`` so callers always receive a ``numpy.ndarray`` with
+    ``dtype=numpy.str_``.
+    """
+
+    __slots__ = ("_ds",)
+
+    def __init__(self, ds: h5py.Dataset):
+        self._ds = ds
+
+    def __getitem__(self, key):
+        data = self._ds[key]
+        if isinstance(data, np.ndarray):
+            decoded = np.array(
+                [v.decode() if isinstance(v, bytes) else str(v) for v in data.flat],
+                dtype=np.str_,
+            ).reshape(data.shape)
+            return decoded
+        return data.decode() if isinstance(data, bytes) else str(data)
+
+    def __getattr__(self, name: str):
+        return getattr(self._ds, name)
+
+    def __len__(self):
+        return len(self._ds)
+
+    def __repr__(self):
+        return f"<_StringDataset wrapping {self._ds!r}>"
+
+
 class GroupProxy:
     """Lazy proxy for an h5py.Group that exposes children as attributes.
 
@@ -37,6 +71,10 @@ class GroupProxy:
             f.data.raw_data[:, :n_tx]
             # nested groups work too
             f.data.image.values[0]
+
+    String datasets are automatically wrapped in :class:`_StringDataset` so
+    slicing always returns ``numpy.ndarray`` with ``dtype=numpy.str_`` rather
+    than raw ``bytes``.
     """
 
     __slots__ = ("_group",)
@@ -54,6 +92,8 @@ class GroupProxy:
             )
         if isinstance(child, h5py.Group):
             return GroupProxy(child)
+        if isinstance(child, h5py.Dataset) and h5py.check_string_dtype(child.dtype):
+            return _StringDataset(child)
         return child  # h5py.Dataset – supports slicing natively
 
     def __dir__(self):

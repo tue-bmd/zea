@@ -683,6 +683,22 @@ class Segmentation(BooleanMap):
             across all frames.
         labels: The labels corresponding to the segmentation values, where each unique value
             in the values corresponds to a label in this list of shape ``(n_labels,)`` and type str.
+
+    .. note::
+        To indicate that certain frames have no segmentation, add an explicit
+        ``"unannotated"`` entry to ``labels`` and set ``values[..., unannotated_idx]`` to
+        ``True`` for those frames (with all other label channels set to ``False``).  This
+        keeps the shape uniform across frames while clearly distinguishing genuinely
+        annotated frames from frames that were not labelled.  For example::
+
+            labels = np.array(["unannotated", "LV_endo", "LV_myo", "LA"])
+            values = np.zeros((n_frames, H, W, 4), dtype=bool)
+            # mark all frames as unannotated by default
+            values[:, :, :, 0] = True
+            # for annotated frames, set unannotated channel to False
+            # and the appropriate label channel to True
+            values[ed_idx, :, :, 0] = False
+            values[ed_idx, :, :, 1:] = segmentation_mask  # shape (H, W, 3)
     """
 
     SCHEMA = {
