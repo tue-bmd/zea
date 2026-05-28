@@ -27,7 +27,7 @@ from zea.data.spec import (
 
 
 def test_segmentation_spec():
-    # Correct usage
+    # Correct usage: 3D spatial (n_frames, z, x, y, n_labels)
     values = np.zeros((10, 256, 256, 1, 4), dtype=np.bool_)
     labels = np.array(["background", "label1", "label2", "label3"], dtype=np.str_)
     # values shape (10, 256, 256, 1, 4): spatial dims = (10, 256, 256, 1),
@@ -45,6 +45,36 @@ def test_segmentation_spec():
             labels=np.array(["background", "label1"], dtype=np.str_),
             coordinates=coordinates,
         )
+
+
+def test_segmentation_spec_2d():
+    """Segmentation with 2D spatial data: (n_frames, z, x, n_labels)."""
+    n_frames, z, x, n_labels = 10, 256, 256, 2
+    values = np.zeros((n_frames, z, x, n_labels), dtype=np.bool_)
+    labels = np.array(["lv", "myocardium"], dtype=np.str_)
+    coordinates = np.zeros((n_frames, z, x, 3), dtype=np.float32)
+
+    segmentation = Segmentation(values=values, labels=labels, coordinates=coordinates)
+    assert segmentation.values.shape == (n_frames, z, x, n_labels)
+    assert segmentation.labels.shape == (n_labels,)
+    assert segmentation.coordinates.shape == (n_frames, z, x, 3)
+
+    # Broadcast coordinates (no frame axis)
+    coords_broadcast = np.zeros((z, x, 3), dtype=np.float32)
+    seg_broadcast = Segmentation(values=values, labels=labels, coordinates=coords_broadcast)
+    assert seg_broadcast.coordinates.shape == (z, x, 3)
+
+    # Incorrect: labels shape mismatch
+    with pytest.raises(ValueError):
+        Segmentation(
+            values=values,
+            labels=np.array(["lv"], dtype=np.str_),
+            coordinates=coordinates,
+        )
+
+    # Incorrect: labels missing
+    with pytest.raises(AssertionError):
+        Segmentation(values=values, coordinates=coordinates)
 
 
 def _scan_minimal(n_frames: int = 3, n_tx: int = 2, n_el: int = 4):
@@ -693,7 +723,7 @@ class TestDataValidationErrors:
 
     def test_n_ch_3_raises_for_aligned_data(self):
         with pytest.raises(ValueError, match="n_ch"):
-            DataSpec(aligned_data=np.zeros((2, 3, 8, 4, 3), dtype=np.float32))
+            DataSpec(aligned_data={"values": np.zeros((2, 3, 8, 4, 3), dtype=np.float32)})
 
     def test_n_ch_3_raises_for_beamformed_data(self):
         with pytest.raises(ValueError, match="n_ch"):

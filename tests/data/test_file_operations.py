@@ -79,8 +79,8 @@ def test_file_operations_extract(tmp_hdf5_path):
 
     assert data_dict.raw_data.shape[0] == 1
     assert data_dict.raw_data.shape[1] == 2
-    assert data_dict.aligned_data.shape[0] == 1
-    assert data_dict.aligned_data.shape[1] == 2
+    assert data_dict.aligned_data["values"].shape[0] == 1
+    assert data_dict.aligned_data["values"].shape[1] == 2
     assert data_dict.beamformed_data["values"].shape[0] == 1
 
     _assert_beamformed_data_still_exists(output_path)
@@ -203,8 +203,8 @@ def test_file_operations_cli_extract(tmp_hdf5_path):
     data_dict = SimpleNamespace(**data_dict)
     assert data_dict.raw_data.shape[0] == 2
     assert data_dict.raw_data.shape[1] == 3
-    assert data_dict.aligned_data.shape[0] == 2
-    assert data_dict.aligned_data.shape[1] == 3
+    assert data_dict.aligned_data["values"].shape[0] == 2
+    assert data_dict.aligned_data["values"].shape[1] == 3
     assert data_dict.beamformed_data["values"].shape[0] == 2
 
 
@@ -246,7 +246,7 @@ def test_file_operations_cli_compound_frames(tmp_hdf5_path):
     data_dict, scan, probe = load_file_all_data_types(output_path)
     data_dict = SimpleNamespace(**data_dict)
     assert data_dict.raw_data.shape[0] == 1  # Only one frame should remain
-    assert data_dict.aligned_data.shape[0] == 1
+    assert data_dict.aligned_data["values"].shape[0] == 1
     assert data_dict.beamformed_data["values"].shape[0] == 1
 
 
@@ -270,7 +270,7 @@ def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
     data_dict, scan, probe = load_file_all_data_types(output_path)
     data_dict = SimpleNamespace(**data_dict)
     assert data_dict.raw_data.shape[1] == 1  # Only one transmit should remain
-    assert data_dict.aligned_data.shape[1] == 1
+    assert data_dict.aligned_data["values"].shape[1] == 1
 
 
 def test_file_operations_folder_resave(tmp_path):

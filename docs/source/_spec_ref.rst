@@ -16,10 +16,9 @@ Every ``zea`` HDF5 file follows the layout shown below.
    data_file.hdf5         (attrs: probe_name, us_machine, description, zea_version)
    ├── data/
    │   ├── raw_data                  float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
-   │   ├── aligned_data              float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
-   │   ├── beamformed_data           float32          (n_frames, grid_z, grid_x, n_ch)
-   │   ├── envelope_data             float32          (n_frames, grid_z, grid_x)
-   │   ├── image_sc                  float32          (n_frames, grid_z_sc, grid_x_sc)
+   │   ├── aligned_data/             group (AlignedData)
+   │   ├── beamformed_data/          group (BeamformedData)
+   │   ├── envelope_data/            group (EnvelopeData)
    │   ├── image/                    group (Image)
    │   ├── segmentation/             group (Segmentation)
    │   ├── sos_map/                  group (SosMap)
@@ -91,9 +90,9 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
       :sync: data
 
       Data group containing raw channel data, derived pipeline products,
-      and optional spatial map groups.
+      and optional grouped data products.
 
-      **Pipeline arrays**
+      **Data fields**
 
       .. list-table::
          :header-rows: 1
@@ -112,10 +111,10 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - Raw channel data.
            - |badge-opt|
          * - ``aligned_data``
-           - ``float32`` | ``int16``
-           - (n_frames, n_tx, n_ax, n_el, n_ch)
-           - -
-           - Time-of-flight corrected data.
+           - :class:`~zea.data.spec.AlignedData`
+           - group
+           - –
+           - 
            - |badge-opt|
          * - ``beamformed_data``
            - :class:`~zea.data.spec.BeamformedData`
@@ -172,15 +171,40 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - 
            - |badge-opt|
 
-      **Spatial map groups**
+      **Grouped data products**
 
-      Each spatial map is an HDF5 sub-group with the same three fields:
-      ``values`` (the data array), ``coordinates`` (per-pixel Cartesian positions in
+      Each grouped data product is an HDF5 sub-group. Spatial map groups
+      (beamformed_data, envelope_data, image, segmentation, and custom maps)
+      also include a ``coordinates`` field (per-pixel Cartesian positions in
       metres, shape ``(*spatial_dims, 3)`` where ``spatial_dims`` matches the spatial
       (non-channel) dimensions of ``values``).
       Custom spatial maps are also accepted — any extra key passed to
       :class:`~zea.data.spec.DataSpec` is validated as a generic
       :class:`~zea.data.spec.Map` sub-group.
+
+      .. dropdown:: ``aligned_data``
+
+         Time-of-flight corrected data. Values are ``float32`` or ``int16`` in (n_frames, n_tx, n_ax, n_el, n_ch); ``labels`` names each channel (RF or I/Q).
+
+         .. list-table::
+            :header-rows: 1
+            :widths: 22 20 28 10 10
+         
+            * - Field
+              - Type
+              - Shape
+              - Unit
+              - 
+            * - ``values``
+              - ``float32`` | ``int16``
+              - (n_frames, n_tx, n_ax, n_el, n_ch)
+              - –
+              - |badge-req|
+            * - ``labels``
+              - ``str``
+              - (n_ch)
+              - –
+              - |badge-opt|
 
       .. dropdown:: ``beamformed_data``
 
@@ -344,7 +368,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``bool``
-              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, n_spatial_ch)
               - –
               - |badge-req|
             * - ``coordinates``
@@ -393,7 +417,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32``
-              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x, n_spatial_ch) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``coordinates``
@@ -442,7 +466,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32``
-              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x, n_spatial_ch) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``coordinates``
@@ -491,7 +515,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32``
-              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x, n_spatial_ch) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``coordinates``
@@ -540,7 +564,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32``
-              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x, n_spatial_ch) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``coordinates``
@@ -589,7 +613,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32``
-              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x, n_spatial_ch) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``coordinates``
