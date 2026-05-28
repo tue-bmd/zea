@@ -790,7 +790,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - ``float32``
            - scalar
            - %
-           - Fractional bandwidth (0-100).
+           - Fractional bandwidth as a percentage.
            - |badge-opt|
          * - ``probe_geometry``
            - ``float32``
