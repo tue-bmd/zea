@@ -646,11 +646,6 @@ class Pipeline:
                 >>> config.to_yaml("pipeline.yaml")
                 >>> pipeline = Pipeline.from_path("pipeline.yaml")
 
-            .. testcleanup::
-
-                import os
-                os.remove("pipeline.yaml")
-
         """
         config = Config.from_path(file_path)
         return pipeline_from_config(config, **kwargs)
