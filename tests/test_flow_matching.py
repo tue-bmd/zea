@@ -140,6 +140,14 @@ def test_flow_matching_get_config_round_trip():
     assert restored.input_shape == model.input_shape
 
 
+def test_flow_matching_times_in_range():
+    """_sample_diffusion_times returns values in [min_t, max_t]."""
+    model = _make_minimal_flow_model((2,))
+    times = keras.ops.convert_to_numpy(model._sample_diffusion_times(1000, 1))
+    assert times.min() >= model.min_t
+    assert times.max() <= model.max_t
+
+
 def test_flow_matching_metrics_names():
     """metrics property should expose v_loss and i_loss trackers."""
     model = _make_minimal_flow_model((2,))

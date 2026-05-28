@@ -10,7 +10,8 @@ schedule and a velocity-field prediction objective.
     - :class:`~zea.models.diffusion.DiffusionModel`: DDIM-based counterpart.
     - Liu et al., *Flow Straight and Fast*, 2022. https://arxiv.org/abs/2209.03003
     - Lipman et al., *Flow Matching for Generative Modeling*, 2022. https://arxiv.org/abs/2210.02747
-    - Tong et al., *Improving and Generalizing Flow Matching with Minibatch OT*, 2023. https://arxiv.org/abs/2302.00482
+    - Esser et al., *Scaling Rectified Flow Transformers for High-Resolution Image Synthesis*, 2024.
+    https://arxiv.org/abs/2403.03206
 
 """
 
@@ -206,7 +207,7 @@ class FlowMatchingModel(DiffusionModel):
             ``pred_noises_est`` is :math:`\\hat{\\varepsilon}` and
             ``pred_images`` is :math:`\\hat{x}_0`.
         """
-        pred_velocities = self([noisy_images, noise_rates**2], training=training, network=network)
+        pred_velocities = self([noisy_images, noise_rates], training=training, network=network)
         # x̂₀ = x_t - t · v
         pred_images = noisy_images - noise_rates * pred_velocities
         # ε̂  = x̂₀ + v  (since v = ε − x₀  ⟹  ε = x₀ + v)
@@ -274,6 +275,23 @@ class FlowMatchingModel(DiffusionModel):
         """Metrics for training."""
         return [*self.velocity_loss_tracker, *self.image_loss_tracker]
 
+    def _sample_diffusion_times(self, batch_size, n_dims):
+        """Sample flow times for training using logit-normal sampling.
+
+        Returns a tensor of shape ``(batch_size, 1, ..., 1)`` (``n_dims``
+        trailing singleton axes) with values in ``[min_t, max_t]``.
+
+        Times are drawn as :math:`t = \\sigma(z)` where
+        :math:`z \\sim \\mathcal{N}(0, 1)` (Esser et al., *Scaling Rectified
+        Flow Transformers*, 2024), then linearly rescaled to
+        ``[min_t, max_t]``.  This concentrates training mass on the hard
+        intermediate timesteps near :math:`t = 0.5`.
+        """
+        shape = ops.stack([batch_size, *([1] * n_dims)])
+        z = keras.random.normal(shape=shape)
+        t01 = ops.sigmoid(z)  # maps ℝ → (0, 1)
+        return self.min_t + t01 * (self.max_t - self.min_t)
+
     def train_step(self, data):
         """Custom train step for Rectified Flow (independent coupling).
 
@@ -296,12 +314,7 @@ class FlowMatchingModel(DiffusionModel):
 
         noises = keras.random.normal(shape=ops.shape(data))
 
-        # Sample uniform random flow times in [min_t, max_t]
-        diffusion_times = keras.random.uniform(
-            shape=ops.stack([batch_size, *([1] * n_dims)]),
-            minval=self.min_t,
-            maxval=self.max_t,
-        )
+        diffusion_times = self._sample_diffusion_times(batch_size, n_dims)
         noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
 
         # x_t = (1 − t) · x₀ + t · ε
@@ -311,7 +324,7 @@ class FlowMatchingModel(DiffusionModel):
         target_velocities = noises - data
 
         with tf.GradientTape() as tape:
-            pred_velocities = self([noisy_data, noise_rates**2], training=True)
+            pred_velocities = self([noisy_data, noise_rates], training=True)
             pred_images = noisy_data - noise_rates * pred_velocities
             velocity_loss = self.loss(target_velocities, pred_velocities)
             image_loss = self.loss(data, pred_images)
@@ -335,17 +348,13 @@ class FlowMatchingModel(DiffusionModel):
 
         noises = keras.random.normal(shape=ops.shape(data))
 
-        diffusion_times = keras.random.uniform(
-            shape=ops.stack([batch_size, *([1] * n_dims)]),
-            minval=self.min_t,
-            maxval=self.max_t,
-        )
+        diffusion_times = self._sample_diffusion_times(batch_size, n_dims)
         noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
 
         noisy_data = signal_rates * data + noise_rates * noises
         target_velocities = noises - data
 
-        pred_velocities = self([noisy_data, noise_rates**2], training=False)
+        pred_velocities = self([noisy_data, noise_rates], training=False)
         pred_images = noisy_data - noise_rates * pred_velocities
         velocity_loss = self.loss(target_velocities, pred_velocities)
         image_loss = self.loss(data, pred_images)
