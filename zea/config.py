@@ -365,7 +365,7 @@ class Config(dict):
         del self[name]
 
     def __repr__(self):
-        return f"<Config {self.as_dict()}>"
+        return f"Config({self.as_dict()})"
 
     def to_json(self):
         """Return the config as a json string."""

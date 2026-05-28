@@ -69,6 +69,17 @@ def test_file_create_accepts_probe_object():
         os.unlink(path)
 
 
+def test_probe_repr():
+    """Probe repr is a single-line constructor-style string with key fields."""
+    probe = Probe.from_name("verasonics_l11_4v")
+    r = repr(probe)
+    assert r.startswith("Probe(")
+    assert r.endswith(")")
+    assert "\n" not in r
+    assert "name=" in r
+    assert "MHz" in r
+
+
 def test_file_create_probe_wrong_type():
     """File.create should raise TypeError when probe is an unsupported type."""
     n_frames, n_tx, n_el, n_ax = 1, 4, 128, 64

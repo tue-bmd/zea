@@ -52,7 +52,7 @@ class _StringDataset:
         return len(self._ds)
 
     def __repr__(self):
-        return f"<_StringDataset wrapping {self._ds!r}>"
+        return f"<StringDataset shape={self._ds.shape} dtype=str>"
 
 
 class _GroupProxy:
@@ -98,7 +98,7 @@ class _GroupProxy:
         return list(self._group.keys())
 
     def __repr__(self):
-        return f"<GroupProxy '{self._group.name}' keys={list(self._group.keys())}>"
+        return repr(self._group)
 
     def keys(self):
         """Return the keys of the underlying group."""
@@ -227,8 +227,9 @@ class Track:
         return self._timestamps
 
     def __repr__(self) -> str:
-        label_part = f" label={self._label!r}" if self._label is not None else ""
-        return f"<Track index={self._index}{label_part} keys={list(self._group.keys())}>"
+        label_part = f' "{self._label}"' if self._label is not None else ""
+        keys = list(self._group.get("data", {}).keys())
+        return f"<Track[{self._index}]{label_part} data={keys}>"
 
 
 def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
@@ -612,7 +613,7 @@ class File(h5py.File):
             for track, ts in zip(tracks, all_timestamps):
                 object.__setattr__(track, "_timestamps", ts)
         else:
-            log.warning(
+            log.warning_once(
                 "`track_schedule` was not found in the file; cannot compute track timestamps."
             )
 
@@ -634,7 +635,20 @@ class File(h5py.File):
                 print(f.track_labels)  # ['focused', 'planewave']
                 focused, planewave = f.tracks  # safe — same order
         """
-        return [t.label for t in self.tracks]
+        if "tracks" not in self:
+            return []
+        tracks_group = self["tracks"]
+        labels = []
+        i = 0
+        while f"track_{i}" in tracks_group:
+            tg = tracks_group[f"track_{i}"]
+            if "label" in tg:
+                raw = tg["label"][()]
+                labels.append(raw.decode() if isinstance(raw, bytes) else str(raw))
+            else:
+                labels.append(None)
+            i += 1
+        return labels
 
     def get_track(self, label: str) -> "Track":
         """Return the track with the given label.
@@ -1363,10 +1377,21 @@ class File(h5py.File):
         return FileSpec.from_hdf5(self)
 
     def __repr__(self):
-        return f'<zea.File at 0x{id(self):x} ("{Path(self.filename).name}" mode={self.mode})>'
-
-    def __str__(self):
-        return f"zea HDF5 File: '{self.path.name}' (mode={self.mode})"
+        name = Path(self.filename).name
+        try:
+            n = self._n_tracks
+            if n > 1:
+                labels = self.track_labels
+                label_str = ", ".join(
+                    f'"{label}"' if label else str(i) for i, label in enumerate(labels)
+                )
+                track_info = f"{n} tracks: {label_str}"
+            else:
+                track_info = f"{n} track"
+        except Exception:
+            track_info = ""
+        mode_info = f"mode {self.mode}"
+        return f'<File "{name}" ({mode_info}, {track_info})>'
 
     def copy_key(self, key: str, dst: "File"):
         """Copy a specific key to another file.

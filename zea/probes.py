@@ -152,6 +152,23 @@ class Probe(ProbeSpec):
     def get_parameters(self):
         return {key: getattr(self, key) for key in self.SCHEMA}
 
+    def __repr__(self) -> str:
+        parts = []
+        if self.name is not None:
+            parts.append(f"name='{self.name}'")
+        if self.type is not None:
+            parts.append(f"type='{self.type}'")
+        if self.probe_geometry is not None:
+            n_el = self.probe_geometry.shape[0]
+            parts.append(f"n_el={n_el}")
+        if self.center_frequency is not None:
+            parts.append(f"fc={float(self.center_frequency) / 1e6:.2f} MHz")
+        if self.bandwidth_percent is not None:
+            parts.append(f"bw={float(self.bandwidth_percent):.1f}%")
+        if self.element_width is not None:
+            parts.append(f"pitch={float(self.element_width) * 1e3:.3f} mm")
+        return f"Probe({', '.join(parts)})"
+
     @classmethod
     def from_name(cls, probe_name, **kwargs) -> "Probe":
         """Create a probe from its name.

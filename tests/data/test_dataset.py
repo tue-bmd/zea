@@ -204,8 +204,7 @@ def test_dataset_properties(dummy_dataset_path):
     with Dataset(dummy_dataset_path, validate=False) as dataset:
         assert dataset.n_files == 2
         assert len(dataset) == 2
-        assert repr(dataset).startswith("<zea.data.datasets.Dataset at 0x")
-        assert "2 files" in repr(dataset)
+        assert repr(dataset) == "Dataset(n_files=2)"
         assert str(dataset) == "Dataset with 2 files"
 
 

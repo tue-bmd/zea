@@ -522,6 +522,21 @@ class Spec:
         """Get the dtype of a field."""
         return cls.SCHEMA[field_name]["dtype"]
 
+    def __repr__(self) -> str:
+        parts = []
+        for field_name, field_info in self.SCHEMA.items():
+            value = getattr(self, field_name, None)
+            if value is None:
+                continue
+            nested_spec = field_info.get("spec")
+            if nested_spec is not None:
+                parts.append(f"{field_name}={value!r}")
+            elif isinstance(value, np.ndarray):
+                parts.append(f"{field_name}=array({value.dtype} {value.shape})")
+            else:
+                parts.append(f"{field_name}={value!r}")
+        return f"{self.__class__.__name__}({', '.join(parts)})"
+
 
 @dataclass
 class Map(Spec):
