@@ -11,7 +11,7 @@ schedule and a velocity-field prediction objective.
     - Liu et al., *Flow Straight and Fast*, 2022. https://arxiv.org/abs/2209.03003
     - Lipman et al., *Flow Matching for Generative Modeling*, 2022. https://arxiv.org/abs/2210.02747
     - Esser et al., *Scaling Rectified Flow Transformers for High-Resolution Image Synthesis*, 2024.
-    https://arxiv.org/abs/2403.03206
+      https://arxiv.org/abs/2403.03206
 
 """
 
