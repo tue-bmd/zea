@@ -1404,9 +1404,9 @@ class ProbeSpec(Spec):
             raise ValueError(
                 f"ProbeSpec: center_frequency must be positive, got {self.center_frequency}"
             )
-        if self.bandwidth_percent is not None and self.bandwidth_percent < 0:
+        if self.bandwidth_percent is not None and self.bandwidth_percent <= 0:
             raise ValueError(
-                f"ProbeSpec: bandwidth_percent must be non-negative, got {self.bandwidth_percent}"
+                f"ProbeSpec: bandwidth_percent must be positive, got {self.bandwidth_percent}"
             )
         if self.element_width is not None and self.element_width <= 0:
             raise ValueError(f"ProbeSpec: element_width must be positive, got {self.element_width}")
