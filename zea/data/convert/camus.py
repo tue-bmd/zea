@@ -44,6 +44,12 @@ Dataset splits:
 
    python -m zea.data.convert camus ./raw ./output --download
 
+For testing purposes, you can also convert a reduced dataset containing only 6 half-sequence files:
+
+.. code-block:: console
+
+    python -m zea.data.convert camus ./raw ./output --download --reduced-dataset
+
 """
 
 from __future__ import annotations
@@ -102,7 +108,21 @@ CAMUS_DESCRIPTION = (
 # HuggingFace Hub
 # ---------------------------------------------------------------------------
 
+
+# Default HF repo for full dataset
 _CAMUS_HF_REPO_ID = "zeahub/camus"
+# HF repo for reduced/sample dataset
+_CAMUS_SAMPLE_HF_REPO_ID = "zeahub/camus-sample"
+
+# Hardcoded list of sample files for --reduced-dataset
+_CAMUS_SAMPLE_FILES = [
+    "train/patient0101/patient0101_2CH_half_sequence.hdf5",
+    "train/patient0101/patient0101_4CH_half_sequence.hdf5",
+    "val/patient0401/patient0401_2CH_half_sequence.hdf5",
+    "val/patient0401/patient0401_4CH_half_sequence.hdf5",
+    "test/patient0451/patient0451_2CH_half_sequence.hdf5",
+    "test/patient0451/patient0451_4CH_half_sequence.hdf5",
+]
 
 
 def _parse_cfg(cfg_path: Path) -> dict:
@@ -444,10 +464,15 @@ def convert_camus(args):
             - no_hyperthreading (bool, optional): If True, run tasks serially instead
               of using a process pool.
     """
+
     camus_source_folder = Path(args.src)
     camus_output_folder = Path(args.dst)
 
-    check_output_dir_ownership(camus_output_folder, _CAMUS_HF_REPO_ID)
+    # Use sample repo if reduced-dataset flag is set
+    is_reduced = getattr(args, "reduced_dataset", False)
+    hf_repo_id = _CAMUS_SAMPLE_HF_REPO_ID if is_reduced else _CAMUS_HF_REPO_ID
+
+    check_output_dir_ownership(camus_output_folder, hf_repo_id)
 
     # Optionally download the dataset
     if getattr(args, "download", False):
@@ -471,20 +496,31 @@ def convert_camus(args):
             )
 
     # clone folder structure of source to output using pathlib
-    files = sorted(camus_source_folder.glob("**/*_half_sequence.nii.gz"))
+
     tasks = []
-    for source_file in files:
-        patient = source_file.name.removesuffix(".nii.gz").split("_")[0]
-        patient_id = int(patient.removeprefix("patient"))
-        split = get_split(patient_id)
-
-        output_file = camus_output_folder / split / source_file.relative_to(camus_source_folder)
-        # Replace .nii.gz with .hdf5
-        output_file = output_file.with_suffix("").with_suffix(".hdf5")
-        # make sure folder exists
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-
-        tasks.append((str(source_file), str(output_file)))
+    files = []
+    if is_reduced:
+        # Only process the hardcoded sample files
+        for rel_path in _CAMUS_SAMPLE_FILES:
+            split, patient, fname = rel_path.split("/")
+            # Raw CAMUS source has no split subdirectory — patient folders sit
+            # directly under camus_source_folder (e.g. raw-camus/patient0101/).
+            nii_fname = fname.replace(".hdf5", ".nii.gz")
+            source_file = camus_source_folder / patient / nii_fname
+            output_file = camus_output_folder / split / patient / fname
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            tasks.append((str(source_file), str(output_file)))
+            files.append(source_file)
+    else:
+        files = sorted(camus_source_folder.glob("**/*_half_sequence.nii.gz"))
+        for source_file in files:
+            patient = source_file.name.removesuffix(".nii.gz").split("_")[0]
+            patient_id = int(patient.removeprefix("patient"))
+            split = get_split(patient_id)
+            output_file = camus_output_folder / split / source_file.relative_to(camus_source_folder)
+            output_file = output_file.with_suffix("").with_suffix(".hdf5")
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            tasks.append((str(source_file), str(output_file)))
     if not tasks:
         log.info("No files found to process.")
         return
@@ -520,10 +556,14 @@ def convert_camus(args):
     )
 
     _copy_license(files, camus_output_folder)
-    write_dataset_card(camus_output_folder, _CAMUS_DATASET_CARD)
+    # Write special dataset card if reduced
+    if is_reduced:
+        write_dataset_card(camus_output_folder, _make_camus_sample_dataset_card())
+    else:
+        write_dataset_card(camus_output_folder, _CAMUS_DATASET_CARD)
 
     if getattr(args, "upload", False):
-        upload_camus(camus_output_folder, revision=args.revision)
+        upload_camus(camus_output_folder, revision=args.revision, repo_id=hf_repo_id)
 
 
 def _copy_license(files: list[Path], output_folder: Path) -> None:
@@ -539,7 +579,9 @@ def _copy_license(files: list[Path], output_folder: Path) -> None:
     log.warning("MANDATORY_CITATION.md not found in any patient directory.")
 
 
-def upload_camus(output_folder: str | Path, revision: str) -> None:  # pragma: no cover
+def upload_camus(  # pragma: no cover
+    output_folder: str | Path, revision: str, repo_id: str = _CAMUS_HF_REPO_ID
+) -> None:
     """Upload the converted CAMUS dataset to a HuggingFace Hub revision branch.
 
     Only for zea maintainers with push access to the repository.  Upload to
@@ -550,10 +592,10 @@ def upload_camus(output_folder: str | Path, revision: str) -> None:  # pragma: n
         output_folder: Root folder containing the train/val/test splits.
         revision: Target branch name on the Hub (must not be ``"main"``).
     """
-    require_output_dir_ownership(output_folder, _CAMUS_HF_REPO_ID)
+    require_output_dir_ownership(output_folder, repo_id)
     upload_dataset_to_hf(
         folder=output_folder,
-        repo_id=_CAMUS_HF_REPO_ID,
+        repo_id=repo_id,
         revision=revision,
         commit_message=f"Upload CAMUS dataset (zea format) to {revision}",
     )
@@ -671,3 +713,44 @@ If you use this dataset, please cite:
 - **zea toolkit**: <https://github.com/tue-bmd/zea>
 """
 )
+
+
+def _make_camus_sample_dataset_card() -> str:
+    """Build the dataset card for the reduced sample subset from the full card.
+
+    Derives the sample card from ``_CAMUS_DATASET_CARD`` by updating the YAML
+    frontmatter fields that differ and prepending a notice that this is a
+    sample subset.
+
+    Returns:
+        The dataset card string for the sample subset.
+    """
+    card = _CAMUS_DATASET_CARD
+    card = card.replace(
+        "zea_repo_id: zeahub/camus",
+        "zea_repo_id: zeahub/camus-sample",
+    )
+    card = card.replace(
+        'pretty_name: "CAMUS: Cardiac Acquisitions for Multi-structure Ultrasound Segmentation"',
+        'pretty_name: "CAMUS Sample: Cardiac Acquisitions for Multi-structure '
+        'Ultrasound Segmentation (Sample)"',
+    )
+    card = card.replace(
+        "size_categories:\n  - 1K<n<10K",
+        "size_categories:\n  - n<10",
+    )
+    card = card.replace(
+        "# CAMUS - 2-D Echocardiographic Ultrasound Dataset",
+        "# CAMUS Sample - 2-D Echocardiographic Ultrasound Dataset",
+    )
+    sample_notice = (
+        "\n> **This is a sample subset** of the full CAMUS dataset, provided for "
+        "demonstration and testing purposes. It contains 6 files (1 patient per split). "
+        "For the full dataset (500 patients), see: "
+        "[zeahub/camus](https://huggingface.co/datasets/zeahub/camus).\n"
+    )
+    card = card.replace(
+        "\n\nThis dataset is a **zea-format**",
+        sample_notice + "\nThis dataset is a **zea-format**",
+    )
+    return card

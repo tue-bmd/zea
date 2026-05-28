@@ -60,7 +60,9 @@ def _add_parser_args_camus(subparsers):
     camus_parser.add_argument(
         "--upload",
         action="store_true",
-        help="Upload the converted dataset to HuggingFace Hub (zeahub/camus).",
+        help=(
+            "Upload the converted dataset to HuggingFace Hub (zeahub/camus or zeahub/camus-sample)"
+        ),
     )
     camus_parser.add_argument(
         "--revision",
@@ -70,6 +72,12 @@ def _add_parser_args_camus(subparsers):
             "Revision branch to upload to on HuggingFace Hub. "
             "Required when --upload is set. Upload to 'main' is not allowed."
         ),
+    )
+    camus_parser.add_argument(
+        "--reduced-dataset",
+        dest="reduced_dataset",
+        action="store_true",
+        help="Only convert and upload a small hardcoded sample subset (camus-sample).",
     )
 
 
