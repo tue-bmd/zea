@@ -1152,14 +1152,15 @@ class TestMultiTrackFile:
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
             r = repr(f.tracks[1])
-        assert "index=1" in r
+        assert r.startswith("<Track[1]")
+        assert "data=" in r
 
     def test_track_repr_includes_label(self, tmp_path):
         """repr(track) includes the label when one is set."""
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
             r = repr(f.tracks[0])
-        assert "label='track_a'" in r
+        assert '"track_a"' in r
 
     # ------------------------------------------------------------------
     # Track.label, File.track_labels, File.get_track

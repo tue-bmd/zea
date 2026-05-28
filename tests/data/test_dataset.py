@@ -193,8 +193,7 @@ def test_folder_properties(dummy_dataset_path):
 
     assert folder.n_files == 2
     assert len(folder) == 2
-    assert repr(folder).startswith("<zea.data.datasets.Folder at 0x")
-    assert "2 files" in repr(folder)
+    assert repr(folder) == f"Folder(n_files=2, folder='{dummy_dataset_path}')"
     assert str(dummy_dataset_path) in repr(folder)
     assert str(folder) == f"Folder with 2 files in '{dummy_dataset_path}'"
 

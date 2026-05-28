@@ -179,7 +179,7 @@ class Config(dict):
                 >>> config.update_recursive({"a": 4, "b": {"c": 5}})
                 >>> # Notice how "d" is kept and only "c" is updated.
                 >>> print(config)
-                <Config {'a': 4, 'b': {'c': 5, 'd': 3}}>
+                Config({'a': 4, 'b': {'c': 5, 'd': 3}})
 
         Args:
             dictionary (dict, optional): Dictionary to update from.
