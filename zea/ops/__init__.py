@@ -73,7 +73,6 @@ One can also load a pipeline from a config or yaml/json file:
 .. testcleanup::
 
     import os
-
     os.remove("pipeline.yaml")
 
 Example of a yaml file:
