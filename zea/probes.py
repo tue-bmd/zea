@@ -1,14 +1,122 @@
-"""Module containing parameters and classes for different ultrasound probes.
+"""Ultrasound probe definitions and the base :class:`Probe` class.
 
-All probes are based on the base :class:`Probe` class.
+A probe describes the physical transducer: element positions, centre frequency,
+bandwidth, and properties such as element dimensions and lens geometry.
+All probe objects are instances of :class:`Probe`, which inherits validation from
+:class:`~zea.data.spec.ProbeSpec`.
 
-Supported probes
-----------------
+There are three ways to obtain a probe:
 
-- :class:`Probe` -- Base class for all probes
-- :class:`Verasonics_l11_4v` -- Verasonics L11-4V linear ultrasound transducer
-- :class:`Verasonics_l11_5v` -- Verasonics L11-5V linear ultrasound transducer
-- :class:`Esaote_sll1543` -- Esaote SLL1543 linear ultrasound transducer
+Loading a built-in probe
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+A small set of probes is pre-defined and can be retrieved by name:
+
+.. doctest::
+
+    >>> from zea import Probe
+    >>> probe = Probe.from_name("verasonics_l11_4v")
+    >>> probe.center_frequency
+    np.float32(6.25e+06)
+    >>> probe.n_el
+    128
+
+See :meth:`Probe.from_name` for the full list of registered names.
+
+Built-in probes
+~~~~~~~~~~~~~~~
+
+- :class:`Verasonics_l11_4v` -- Verasonics L11-4V linear array
+- :class:`Verasonics_l11_5v` -- Verasonics L11-5V linear array
+- :class:`Esaote_sll1543` -- Esaote SLL1543 linear array
+
+Loading a probe from a data file
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When you open a :class:`~zea.data.file.File`, the probe stored in that file is
+accessible through the :attr:`~zea.data.file.File.probe` property:
+
+.. doctest::
+
+    >>> from zea import File
+    >>> path = (
+    ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+    ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+    ... )
+    >>> with File(path) as f:
+    ...     probe = f.probe
+    >>> probe.name
+    'verasonics_l11_4v'
+
+Defining a custom probe
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Pass any combination of fields from :class:`~zea.data.spec.ProbeSpec` directly
+to :class:`Probe`.  Only the fields you provide are validated; everything else
+is left as ``None``:
+
+.. doctest::
+
+    >>> import numpy as np
+    >>> from zea import Probe
+    >>> from zea.probes import create_probe_geometry
+
+    >>> probe = Probe(
+    ...     name="my_probe",
+    ...     type="linear",
+    ...     center_frequency=np.float32(5e6),
+    ...     probe_geometry=create_probe_geometry(n_el=64, pitch=0.3e-3),
+    ... )
+    >>> probe.n_el
+    64
+
+You can also register a custom probe class with the
+:data:`~zea.internal.registry.probe_registry` decorator so it becomes
+retrievable by name — see the built-in classes below as examples.
+
+Saving a probe to a data file
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Pass a :class:`Probe` object directly to :meth:`~zea.data.file.File.create`
+via the ``probe`` argument, alternatively a simple dictionary of probe
+parameters will also work:
+
+.. doctest::
+
+    >>> import numpy as np
+    >>> from zea import File, Probe
+
+    >>> n_frames, n_tx, n_el, n_ax = 1, 4, 128, 64
+    >>> probe = Probe.from_name("verasonics_l11_4v")
+    >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+    >>> scan = {
+    ...     "sampling_frequency": np.float32(40e6),
+    ...     "center_frequency": np.float32(6.25e6),
+    ...     "demodulation_frequency": np.float32(6.25e6),
+    ...     "initial_times": np.zeros(n_tx, dtype=np.float32),
+    ...     "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+    ...     "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+    ...     "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+    ...     "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+    ...     "polar_angles": np.zeros(n_tx, dtype=np.float32),
+    ...     "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+    ... }
+    >>> f = File.create(
+    ...     "probe_example.hdf5",
+    ...     data={"raw_data": raw},
+    ...     scan=scan,
+    ...     probe=probe, # dictionary or zea.Probe object
+    ...     overwrite=True,
+    ... )
+    >>> f.probe.name
+    'verasonics_l11_4v'
+    >>> f.close()
+
+.. testcleanup::
+
+    import os
+    os.remove("probe_example.hdf5")
+
 """  # noqa: E501
 
 import numpy as np

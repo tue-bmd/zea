@@ -10,7 +10,7 @@ from keras.utils import pad_sequences
 
 import zea
 from zea import log
-from zea.data.spec import DataSpec, FileSpec, MetadataSpec, MetricsSpec, ScanSpec
+from zea.data.spec import DataSpec, FileSpec, MetadataSpec, MetricsSpec, ProbeSpec, ScanSpec
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
@@ -678,7 +678,7 @@ class File(h5py.File):
         metadata: dict | None = None,
         metrics: dict | None = None,
         probe_name: str | None = None,
-        probe: dict | None = None,
+        probe: "ProbeSpec | dict | None" = None,
         us_machine: str | None = None,
         description: str | None = None,
         compression: str = "gzip",
@@ -713,8 +713,8 @@ class File(h5py.File):
             metrics: Optional metrics dict accepted by
                 :class:`~zea.data.spec.MetricsSpec`.
             probe_name: Removed — use ``probe={'name': ...}`` instead.
-            probe: Structured probe specification dict accepted by
-                :class:`~zea.data.spec.ProbeSpec`.
+            probe: Probe specification as a :class:`~zea.probes.Probe` object or a
+                plain dict accepted by :class:`~zea.data.spec.ProbeSpec`.
             us_machine: Name of the ultrasound machine.
             description: Free-text description of the acquisition.
             compression: HDF5 compression filter (default ``"gzip"``).
@@ -776,6 +776,9 @@ class File(h5py.File):
                 "probe_name is no longer supported. "
                 "Use probe={'name': ...} to specify the probe name."
             )
+
+        if probe is not None and not isinstance(probe, (dict, ProbeSpec)):
+            raise TypeError(f"probe must be a Probe object or a dict, got {type(probe).__name__}.")
 
         kwargs: dict = {}
         if tracks is not None:
