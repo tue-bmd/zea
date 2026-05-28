@@ -17,7 +17,7 @@ In many settings, it can be useful to apply an :class:`Operation` directly to th
 .. doctest::
 
     >>> import keras
-    >>> from zea.ops import EnvelopeDetects
+    >>> from zea.ops import EnvelopeDetect
     >>> data = keras.random.uniform((2000, 128, 1))
     >>> # static arguments are passed in the constructor
     >>> envelope_detect = EnvelopeDetect(axis=-1)
