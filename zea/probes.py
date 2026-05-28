@@ -17,7 +17,7 @@ A small set of probes is pre-defined and can be retrieved by name:
     >>> from zea import Probe
     >>> probe = Probe.from_name("verasonics_l11_4v")
     >>> probe.center_frequency
-    np.float32(6.25e+06)
+    np.float32(6250000.0)
     >>> probe.n_el
     128
 
