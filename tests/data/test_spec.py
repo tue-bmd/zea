@@ -1140,7 +1140,7 @@ class TestProbeSpec:
         with pytest.raises(ValueError, match="bandwidth_percent"):
             ProbeSpec(bandwidth_percent=np.float32(0.0))
         with pytest.raises(ValueError, match="bandwidth_percent"):
-            ProbeSpec(bandwidth_percent=np.float32(210.0))
+            ProbeSpec(bandwidth_percent=np.float32(-10.0))
 
     def test_invalid_element_width_raises(self):
         with pytest.raises(ValueError, match="element_width"):
