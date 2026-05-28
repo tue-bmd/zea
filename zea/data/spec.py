@@ -1270,7 +1270,7 @@ class ProbeSpec(Spec):
         name: Probe model identifier (e.g. ``"verasonics_l11_4v"``).
         type: Probe geometry type: ``"linear"``, ``"phased"``, ``"curved"``, etc.
         center_frequency: Probe nominal centre frequency in Hz.
-        bandwidth_percent: Fractional bandwidth as a percentage (0-100).
+        bandwidth_percent: Fractional bandwidth as a percentage.
         probe_geometry: Element positions in metres, shape (n_el, 3) with columns
             (x, y, z).  :attr:`n_el` and :attr:`pitch` are computed
             automatically as read-only properties from this array.
@@ -1311,7 +1311,7 @@ class ProbeSpec(Spec):
         },
         "bandwidth_percent": {
             "unit": "%",
-            "description": "Fractional bandwidth (0-100).",
+            "description": "Fractional bandwidth as a percentage.",
         },
         "probe_geometry": {
             "unit": "m",
@@ -1404,9 +1404,9 @@ class ProbeSpec(Spec):
             raise ValueError(
                 f"ProbeSpec: center_frequency must be positive, got {self.center_frequency}"
             )
-        if self.bandwidth_percent is not None and not (0 < self.bandwidth_percent <= 200):
+        if self.bandwidth_percent is not None and self.bandwidth_percent < 0:
             raise ValueError(
-                f"ProbeSpec: bandwidth_percent must be in (0, 200], got {self.bandwidth_percent}"
+                f"ProbeSpec: bandwidth_percent must be non-negative, got {self.bandwidth_percent}"
             )
         if self.element_width is not None and self.element_width <= 0:
             raise ValueError(f"ProbeSpec: element_width must be positive, got {self.element_width}")
