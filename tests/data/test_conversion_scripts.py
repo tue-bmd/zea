@@ -26,6 +26,19 @@ from zea.io_lib import _SUPPORTED_IMG_TYPES
 from .. import DEFAULT_TEST_SEED
 
 
+def run_subprocess(cmd, **kwargs):
+    """Run a subprocess, letting output flow to pytest's capture.
+
+    Pytest shows captured stdout/stderr whenever the test fails, including
+    when a later assertion fails — so leaving subprocess output uncaptured
+    here gives us full visibility into what the conversion script did.
+    """
+    result = subprocess.run(cmd, **kwargs)
+    if result.returncode != 0:
+        pytest.fail(f"Command failed (exit {result.returncode}): {' '.join(cmd)}")
+    return result
+
+
 @pytest.mark.parametrize(
     "dataset", ["echonet", "echonetlvh", "camus", "cetus", "picmus", "verasonics"]
 )
@@ -42,10 +55,9 @@ def test_conversion_script(tmp_path_factory, dataset):
 
     extra_args = create_test_data_for_dataset(dataset, src)
 
-    subprocess.run(
+    run_subprocess(
         [sys.executable, "-m", "zea.data.convert", dataset, str(src), str(dst), *extra_args],
         env=create_env_for_dataset(dataset),
-        check=True,
     )
     verify_converted_test_dataset(dataset, src, dst)
 
@@ -54,7 +66,7 @@ def test_conversion_script(tmp_path_factory, dataset):
         # to verify that the script can copy and verify integrity of existing split files
         # We also test no_hyperthreading with the H5Processor for good measure
         dst2 = tmp_path_factory.mktemp("dst2")
-        subprocess.run(
+        run_subprocess(
             [
                 sys.executable,
                 "-m",
@@ -66,8 +78,6 @@ def test_conversion_script(tmp_path_factory, dataset):
                 str(dst),
                 "--no_hyperthreading",
             ],
-            check=True,
-            capture_output=True,
         )
         with open(dst / "split.yaml", "r") as f:
             split_content1 = yaml.safe_load(f)
@@ -946,7 +956,13 @@ def test_verasonics_compression_flag_respected(tmp_path):
     }
     data = {"raw_data": np.zeros((2, n_tx, 32, n_el, 1), dtype=np.float32)}
     path = tmp_path / "no_compression.hdf5"
-    f = File.create(path, data=data, scan=scan, probe_name="generic", compression=None)
+    f = File.create(
+        path,
+        data=data,
+        scan=scan,
+        probe={"name": "generic"},
+        compression=None,
+    )
     f.close()
 
     import h5py as _h5py

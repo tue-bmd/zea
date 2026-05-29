@@ -15,6 +15,7 @@ from zea.data.spec import (
     MetadataSpec,
     MetricsSpec,
     ProbePose,
+    ProbeSpec,
     ScanSpec,
     Segmentation,
     Signal1D,
@@ -22,7 +23,6 @@ from zea.data.spec import (
     SosMap,
     Spec,
     Subject,
-    TrackSpec,
 )
 
 
@@ -79,7 +79,6 @@ def test_segmentation_spec_2d():
 
 def _scan_minimal(n_frames: int = 3, n_tx: int = 2, n_el: int = 4):
     return {
-        "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
         "sampling_frequency": np.float32(30e6),
         "center_frequency": np.float32(5e6),
         "demodulation_frequency": np.float32(5e6),
@@ -344,7 +343,6 @@ def test_dataset_builder_dimension_consistency_across_nested_specs():
     n_tx, n_el, n_ax, n_ch = 2, 4, 8, 1
 
     scan = {
-        "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
         "sampling_frequency": np.float32(30e6),
         "center_frequency": np.float32(5e6),
         "demodulation_frequency": np.float32(5e6),
@@ -562,23 +560,10 @@ def test_subject_id_warning_includes_field_metadata_description():
 class TestScanValidationErrors:
     """TypeError / ValueError raised by Scan spec validation."""
 
-    def test_probe_geometry_wrong_dtype_raises(self):
-        scan = _scan_minimal()
-        scan["probe_geometry"] = np.zeros((4, 3), dtype=np.int32)
-        with pytest.raises(TypeError, match="probe_geometry"):
-            ScanSpec(**scan)
-
-    def test_probe_geometry_wrong_shape_raises(self):
-        """probe_geometry must be (n_el, 3) — literal 3 is enforced."""
-        scan = _scan_minimal(n_el=4)
-        scan["probe_geometry"] = np.zeros((4, 2), dtype=np.float32)
-        with pytest.raises(ValueError, match="probe_geometry"):
-            ScanSpec(**scan)
-
     def test_t0_delays_dimension_mismatch_raises(self):
-        """n_el in t0_delays doesn't match probe_geometry n_el."""
+        """n_el in tx_apodizations doesn't match t0_delays n_el."""
         scan = _scan_minimal(n_tx=3, n_el=4)
-        scan["t0_delays"] = np.zeros((3, 6), dtype=np.float32)  # 6 ≠ n_el=4
+        scan["tx_apodizations"] = np.ones((3, 6), dtype=np.float32)  # 6 ≠ n_el=4
         with pytest.raises(ValueError, match="n_el"):
             ScanSpec(**scan)
 
@@ -899,62 +884,9 @@ def test_image_spec_accepts_neginf():
         Image(values=values_positive, coordinates=coordinates)
 
 
-class TestMultiTrackProbeConsistency:
-    """FileSpec must reject multi-track files where probe-defining parameters differ."""
-
-    def _make_track(
-        self,
-        n_el: int = 4,
-        geom_offset: float = 0.0,
-        element_width: float = None,
-        label: str = None,
-    ):
-        """Return a minimal TrackSpec with raw_data and a scan."""
-        n_frames, n_tx, n_ax, n_ch = 2, 2, 8, 1
-        geom = np.zeros((n_el, 3), dtype=np.float32)
-        geom[:, 0] = geom_offset  # shift x-coordinates to make geometry unique
-        scan_dict = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
-        scan_dict["probe_geometry"] = geom
-        if element_width is not None:
-            scan_dict["element_width"] = np.float32(element_width)
-        return TrackSpec(
-            data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
-            scan=scan_dict,
-            label=label,
-        )
-
-    def test_matching_probe_geometry_passes(self):
-        """Two tracks with identical probe_geometry should not raise."""
-        track_a = self._make_track(geom_offset=0.0, label="track_a")
-        track_b = self._make_track(geom_offset=0.0, label="track_b")
-        FileSpec(tracks=[track_a, track_b])  # should not raise
-
-    def test_mismatched_probe_geometry_raises(self):
-        """Two tracks with different probe_geometry must raise ValueError."""
-        track_a = self._make_track(geom_offset=0.0, label="track_a")
-        track_b = self._make_track(geom_offset=1.0, label="track_b")
-        with pytest.raises(ValueError, match="probe_geometry"):
-            FileSpec(tracks=[track_a, track_b])
-
-    def test_mismatched_element_width_raises(self):
-        """Two tracks with different element_width must raise ValueError."""
-        track_a = self._make_track(element_width=0.0003, label="track_a")
-        track_b = self._make_track(element_width=0.0006, label="track_b")
-        with pytest.raises(ValueError, match="element_width"):
-            FileSpec(tracks=[track_a, track_b])
-
-    def test_error_message_includes_track_indices(self):
-        """The error message should mention which track indices disagree."""
-        track_a = self._make_track(geom_offset=0.0, label="track_a")
-        track_b = self._make_track(geom_offset=1.0, label="track_b")
-        with pytest.raises(ValueError, match=r"Tracks 0 and 1"):
-            FileSpec(tracks=[track_a, track_b])
-
-
 def _scan_bare(n_tx: int = 2, n_el: int = 4):
     """Minimal ScanSpec dict with only required fields (all optionals left as None)."""
     return {
-        "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
         "sampling_frequency": np.float32(30e6),
         "center_frequency": np.float32(5e6),
         "demodulation_frequency": np.float32(5e6),
@@ -985,12 +917,10 @@ class TestScanSpecSaveWarnings:
         assert any(f"ScanSpec field '{field}' is not set" in m for m in messages)
 
     def test_probe_geometry_out_of_range_warns(self):
-        scan = _scan_bare()
-        scan["probe_geometry"] = np.full((4, 3), 2.0, dtype=np.float32)
         with patch("zea.log.warning") as mock_warn:
-            ScanSpec(**scan)
+            ProbeSpec(probe_geometry=np.full((4, 3), 2.0, dtype=np.float32))
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
-        assert any("Probe geometry values are unusually large" in m for m in messages)
+        assert any("extend beyond" in m for m in messages)
 
     def test_focus_distances_large_warns(self):
         scan = _scan_bare()
@@ -1168,6 +1098,189 @@ class TestLoadingWarnings:
                 # scan() emits the legacy-waveforms warning, then fails because the
                 # file has no other scan parameters (n_tx is unset).
                 with pytest.raises(ValueError):
-                    f.scan()
+                    f.scan
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any("waveforms_one_way" in m and "stored as a dictionary" in m for m in messages)
+
+
+class TestProbeSpec:
+    """Unit tests for the ProbeSpec dataclass."""
+
+    def test_all_fields_none_by_default(self):
+        probe = ProbeSpec()
+        assert probe.name is None
+        assert probe.type is None
+        assert probe.center_frequency is None
+        assert probe.bandwidth_percent is None
+        assert probe.element_width is None
+        assert probe.lens_sound_speed is None
+        assert probe.lens_thickness is None
+
+    def test_full_probe_spec(self):
+        probe = ProbeSpec(
+            name="verasonics_l11_4v",
+            type="linear",
+            center_frequency=np.float32(5.208e6),
+            bandwidth_percent=np.float32(67.0),
+            element_width=np.float32(0.27e-3),
+            lens_sound_speed=np.float32(1000.0),
+            lens_thickness=np.float32(1.5e-3),
+        )
+        assert probe.name == "verasonics_l11_4v"
+        assert probe.type == "linear"
+        assert probe.center_frequency == pytest.approx(5.208e6, rel=1e-4)
+        assert probe.bandwidth_percent == pytest.approx(67.0)
+        assert probe.element_width == pytest.approx(0.27e-3, rel=1e-4)
+
+    def test_invalid_center_frequency_raises(self):
+        with pytest.raises(ValueError, match="center_frequency"):
+            ProbeSpec(center_frequency=np.float32(-1.0))
+
+    def test_invalid_bandwidth_percent_raises(self):
+        with pytest.raises(ValueError, match="bandwidth_percent"):
+            ProbeSpec(bandwidth_percent=np.float32(0.0))
+        with pytest.raises(ValueError, match="bandwidth_percent"):
+            ProbeSpec(bandwidth_percent=np.float32(-10.0))
+
+    def test_invalid_element_width_raises(self):
+        with pytest.raises(ValueError, match="element_width"):
+            ProbeSpec(element_width=np.float32(-0.001))
+
+    def test_probe_geometry_wrong_dtype_raises(self):
+        with pytest.raises(TypeError, match="probe_geometry"):
+            ProbeSpec(probe_geometry=np.zeros((4, 3), dtype=np.int32))
+
+    def test_probe_geometry_wrong_shape_raises(self):
+        """probe_geometry must be (n_el, 3) — literal 3 is enforced."""
+        with pytest.raises(ValueError, match="probe_geometry"):
+            ProbeSpec(probe_geometry=np.zeros((4, 2), dtype=np.float32))
+
+    def test_n_elements_derived_from_probe_geometry(self):
+        pg = np.zeros((128, 3), dtype=np.float32)
+        probe = ProbeSpec(probe_geometry=pg)
+        assert probe.n_el == 128
+
+    def test_n_elements_none_without_probe_geometry(self):
+        probe = ProbeSpec()
+        assert probe.n_el is None
+
+    def test_pitch_derived_from_probe_geometry(self):
+        n_el = 4
+        pitch_m = 0.3e-3
+        xs = np.arange(n_el, dtype=np.float32) * pitch_m
+        pg = np.zeros((n_el, 3), dtype=np.float32)
+        pg[:, 0] = xs
+        probe = ProbeSpec(probe_geometry=pg)
+        assert probe.pitch == pytest.approx(pitch_m, rel=1e-4)
+
+    def test_pitch_none_without_probe_geometry(self):
+        probe = ProbeSpec()
+        assert probe.pitch is None
+
+    def test_pitch_none_for_single_element(self):
+        pg = np.zeros((1, 3), dtype=np.float32)
+        probe = ProbeSpec(probe_geometry=pg)
+        assert probe.pitch is None
+
+    def test_probe_spec_ignores_legacy_n_elements_pitch_kwargs(self):
+        """Old HDF5 files may pass n_elements/pitch; they are silently ignored."""
+        # Simulate what _validate_nested_field does after filtering known fields
+        pg = np.zeros((4, 3), dtype=np.float32)
+        probe = ProbeSpec(probe_geometry=pg)
+        assert probe.n_el == 4
+
+    def test_invalid_lens_sound_speed_raises(self):
+        with pytest.raises(ValueError, match="lens_sound_speed"):
+            ProbeSpec(lens_sound_speed=np.float32(0.0))
+
+    def test_invalid_lens_thickness_raises(self):
+        with pytest.raises(ValueError, match="lens_thickness"):
+            ProbeSpec(lens_thickness=np.float32(-0.001))
+
+    def test_probe_spec_from_dict(self):
+        d = {"name": "L11-4v", "type": "linear", "center_frequency": np.float32(5e6)}
+        probe = ProbeSpec(**d)
+        assert probe.name == "L11-4v"
+        assert probe.center_frequency == pytest.approx(5e6)
+
+    def test_probe_casts_float64_to_float32(self):
+        probe = ProbeSpec(center_frequency=5.208e6)  # Python float → float64 → float32
+        assert probe.center_frequency.dtype == np.float32
+
+    def test_file_spec_probe_propagates_name(self):
+        """FileSpec.probe.name is accessible when probe dict is given."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+        spec = FileSpec(
+            data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe={
+                "name": "test_probe",
+                "type": "phased",
+                "center_frequency": np.float32(3e6),
+            },
+        )
+        assert spec.probe.name == "test_probe"
+        assert isinstance(spec.probe, ProbeSpec)
+        assert spec.probe.type == "phased"
+
+    def test_file_spec_probe_name_not_a_field(self):
+        """probe_name is not a FileSpec field; probe={'name': ...} is the way."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+        with pytest.raises(TypeError, match="probe_name"):
+            FileSpec(
+                data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                probe={"name": "inner_name", "type": "linear"},
+                probe_name="outer_name",
+            )
+
+    def test_probe_spec_round_trip_hdf5(self, tmp_path):
+        """ProbeSpec saved to HDF5 via FileSpec and loaded back preserves values."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+        save_path = tmp_path / "with_probe.hdf5"
+        spec = FileSpec(
+            data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe={
+                "name": "verasonics_l11_4v",
+                "type": "linear",
+                "center_frequency": np.float32(5.208e6),
+                "bandwidth_percent": np.float32(67.0),
+                "element_width": np.float32(0.27e-3),
+            },
+        )
+        spec.save(save_path)
+
+        with File(save_path) as f:
+            assert f.probe.name == "verasonics_l11_4v"
+            assert "probe" in f
+
+        loaded = FileSpec.from_hdf5(File(str(save_path)))
+        assert loaded.probe.name == "verasonics_l11_4v"
+        assert loaded.probe is not None
+        assert isinstance(loaded.probe, ProbeSpec)
+        assert loaded.probe.type == "linear"
+        assert loaded.probe.center_frequency == pytest.approx(5.208e6, rel=1e-4)
+        assert loaded.probe.bandwidth_percent == pytest.approx(67.0)
+
+    def test_file_create_with_probe_dict(self, tmp_path):
+        """File.create accepts a probe dict and stores probe group + probe_name attr."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+        path = tmp_path / "probe_create.hdf5"
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+        scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+
+        File.create(
+            path,
+            data={"raw_data": raw},
+            scan=scan,
+            probe={
+                "name": "my_probe",
+                "type": "linear",
+                "center_frequency": np.float32(7.5e6),
+            },
+        )
+
+        with File(path) as f:
+            assert f.probe.name == "my_probe"
+            assert "probe" in f

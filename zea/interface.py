@@ -67,8 +67,8 @@ class Interface:
             self.file.validate()
 
         # get probe and scan from file
-        self.probe = self.file.probe()
-        self.scan = self.file.scan(**self.config.scan)
+        self.probe = self.file.probe
+        self.scan = self.file.get_scan(**self.config.scan)
 
         # initialize Pipeline
         assert "pipeline" in self.config, (

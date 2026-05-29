@@ -1,26 +1,53 @@
-"""Functionality to convert the CAMUS dataset to the zea format.
+"""Convert the CAMUS dataset to the zea format.
 
 .. note::
-    Requires SimpleITK to be installed: ``pip install SimpleITK``.
 
-The CAMUS (Cardiac Acquisitions for Multi-structure Ultrasound Segmentation)
-dataset contains 2D echocardiographic sequences from 500 patients.
-The sequences are stored in NIfTI (.nii.gz) format.
+   Requires SimpleITK: ``pip install SimpleITK``.
 
-The dataset can be downloaded automatically using the ``--download`` flag::
+CAMUS (Cardiac Acquisitions for Multi-structure Ultrasound Segmentation) is a
+public dataset containing 2-D echocardiographic sequences from 500 patients.
+Sequences are stored in NIfTI (``.nii.gz``) format and include both 2-chamber
+(2CH) and 4-chamber (4CH) apical views.
 
-    python -m zea.data.convert camus <source_folder> <destination_folder> --download
+Dataset splits:
 
-**Links**:
+* **Train** - patients 1-400
+* **Validation** - patients 401-450
+* **Test** - patients 451-500
 
-- `Original dataset <https://humanheart-project.creatis.insa-lyon.fr/database/#collection/6373703d73e9f0047faa1bc8>`_
+.. admonition:: License
+
+   CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+
+   The CAMUS dataset is available free of charge strictly for non-commercial
+   scientific research purposes only.
+
+.. admonition:: Reference
+
+   S\\. Leclerc, E. Smistad, J. Pedrosa, A. Ostvik, F. Cervenansky, F. Espinosa,
+   T. Espeland, E. A. R. Berg, P.-M. Jodoin, T. Grenier, C. Lartizien,
+   J. D'hooge, L. Lovstakken and O. Bernard.
+   *Deep Learning for Segmentation Using an Open Large-Scale Dataset in
+   2D Echocardiography.*
+   IEEE Transactions on Medical Imaging, vol. 38, no. 9, pp. 2198-2210, 2019.
+   `DOI: 10.1109/TMI.2019.2900516 <https://doi.org/10.1109/TMI.2019.2900516>`_
+
+.. rubric:: Links
+
+* `Original dataset <https://humanheart-project.creatis.insa-lyon.fr/database/#collection/6373703d73e9f0047faa1bc8>`_
+* `Dataset on Hugging Face <https://huggingface.co/datasets/zeahub/camus>`_
+
+.. rubric:: Usage
+
+
+.. code-block:: console
+
+   python -m zea.data.convert camus ./raw ./output --download
 
 """
 
 from __future__ import annotations
 
-import logging
-import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -30,13 +57,48 @@ from skimage.transform import resize
 from tqdm import tqdm
 
 from zea import log
-from zea.data.convert.utils import download_from_girder, sitk_load, unzip
+from zea.data.convert.utils import (
+    download_from_girder,
+    sitk_load,
+    unzip,
+    upload_dataset_to_hf,
+    write_dataset_card,
+)
 from zea.data.file import File
 from zea.func.tensor import translate
 from zea.internal.utils import find_first_nonzero_index
 
 # Girder collection ID for the CAMUS dataset
 _CAMUS_COLLECTION_ID = "6373703d73e9f0047faa1bc8"
+
+# ---------------------------------------------------------------------------
+# Citation / license constants
+# ---------------------------------------------------------------------------
+
+CAMUS_CITATION = (
+    "S. Leclerc, E. Smistad, J. Pedrosa, A. Ostvik, F. Cervenansky, F. Espinosa, "
+    "T. Espeland, E. A. R. Berg, P.-M. Jodoin, T. Grenier, C. Lartizien, "
+    "J. D'hooge, L. Lovstakken and O. Bernard. "
+    '"Deep Learning for Segmentation Using an Open Large-Scale Dataset in '
+    '2D Echocardiography." '
+    "IEEE Transactions on Medical Imaging, vol. 38, no. 9, pp. 2198-2210, 2019. "
+    "https://doi.org/10.1109/TMI.2019.2900516"
+)
+
+CAMUS_LICENSE = "CC BY-NC-SA 4.0 (https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode)"
+
+CAMUS_DESCRIPTION = (
+    "CAMUS (Cardiac Acquisitions for Multi-structure Ultrasound Segmentation) "
+    "2D echocardiographic dataset converted to zea format. "
+    f"License: {CAMUS_LICENSE}. "
+    f"Citation: {CAMUS_CITATION}"
+)
+
+# ---------------------------------------------------------------------------
+# HuggingFace Hub
+# ---------------------------------------------------------------------------
+
+_CAMUS_HF_REPO_ID = "zeahub/camus"
 
 
 def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
@@ -142,12 +204,15 @@ def process_camus(source_path, output_path, overwrite=False):
             Defaults to False.
     """
 
+    source_path = Path(source_path)
+    output_path = Path(output_path)
+
     # Check if output file already exists and remove
-    if os.path.exists(output_path):
+    if output_path.exists():
         if overwrite:
-            os.remove(output_path)
+            output_path.unlink()
         else:
-            logging.warning("Output file already exists. Skipping conversion.")
+            log.warning("Output file %s already exists. Skipping.", log.yellow(output_path))
             return
 
     # Open the file
@@ -169,7 +234,7 @@ def process_camus(source_path, output_path, overwrite=False):
     File.create(
         path=output_path,
         data={"image_sc": {"values": image_seq}, "image": {"values": image_seq_polar}},
-        probe_name="generic",
+        probe={"name": "GE M5S"},
         description="camus dataset converted to zea format",
     )
 
@@ -178,8 +243,7 @@ splits = {"train": [1, 401], "val": [401, 451], "test": [451, 501]}
 
 
 def get_split(patient_id: int) -> str:
-    """
-    Determine which dataset split a patient ID belongs to.
+    """Determine which dataset split a patient ID belongs to.
 
     Args:
         patient_id: Integer ID of the patient.
@@ -201,14 +265,14 @@ def get_split(patient_id: int) -> str:
 
 
 def _process_task(task):
-    """
-    Unpack a task tuple and invoke process_camus in a worker process.
+    """Unpack a task tuple and invoke process_camus in a worker process.
 
     Creates parent directories for the target outputs, calls process_camus
     with the unpacked paths, and logs then re-raises any exception raised by processing.
 
     Args:
         task (tuple): (source_file_str, output_file_str)
+
             - source_file_str: filesystem path to the source CAMUS file as a string.
             - output_file_str: filesystem path for the ZEA output file as a string.
     """
@@ -224,8 +288,7 @@ def _process_task(task):
     try:
         process_camus(source_file, output_file, overwrite=False)
     except Exception:
-        # Log and re-raise so the main process can handle it
-        log.error("Error processing %s", source_file)
+        log.error("Error processing %s", log.yellow(source_file))
         raise
 
 
@@ -325,11 +388,145 @@ def convert_camus(args):
                 _process_task(t)
             except Exception as e:
                 log.error("Task processing failed: %s", e)
-        log.info("Processing finished for %d files (serial)", len(tasks))
+        log.info(
+            "Conversion complete. %d files written to %s",
+            len(tasks),
+            log.yellow(camus_output_folder),
+        )
+
+        write_dataset_card(camus_output_folder, _CAMUS_DATASET_CARD)
+
+        if getattr(args, "upload", False):
+            upload_camus(camus_output_folder, revision=args.revision)
         return
 
     # Submit tasks to the process pool and track progress
     with ProcessPoolExecutor() as exe:
         for _ in tqdm(exe.map(_process_task, tasks), total=len(tasks), desc="Processing files"):
             pass
-    log.info("Processing finished for %d files", len(tasks))
+    log.info(
+        "Conversion complete. %d files written to %s",
+        len(tasks),
+        log.yellow(camus_output_folder),
+    )
+
+    write_dataset_card(camus_output_folder, _CAMUS_DATASET_CARD)
+
+    if getattr(args, "upload", False):
+        upload_camus(camus_output_folder, revision=args.revision)
+
+
+def upload_camus(output_folder: str | Path, revision: str) -> None:  # pragma: no cover
+    """Upload the converted CAMUS dataset to a HuggingFace Hub revision branch.
+
+    Only for zea maintainers with push access to the repository.  Upload to
+    ``main`` is blocked; merge the revision branch into ``main`` manually after
+    verifying the upload.
+
+    Args:
+        output_folder: Root folder containing the train/val/test splits.
+        revision: Target branch name on the Hub (must not be ``"main"``).
+    """
+    upload_dataset_to_hf(
+        folder=output_folder,
+        repo_id=_CAMUS_HF_REPO_ID,
+        revision=revision,
+        commit_message=f"Upload CAMUS dataset (zea format) to {revision}",
+    )
+
+
+_CAMUS_DATASET_CARD = (
+    """\
+---
+license: cc-by-nc-sa-4.0
+task_categories:
+  - image-segmentation
+tags:
+  - ultrasound
+  - echocardiography
+  - 2d
+  - cardiac
+  - medical
+pretty_name: "CAMUS: Cardiac Acquisitions for Multi-structure Ultrasound Segmentation"
+size_categories:
+  - 1K<n<10K
+---
+
+# CAMUS - 2-D Echocardiographic Ultrasound Dataset
+
+This dataset is a **zea-format** (HDF5) conversion of the
+[CAMUS](https://humanheart-project.creatis.insa-lyon.fr/database/#collection/6373703d73e9f0047faa1bc8)
+dataset for multi-structure segmentation in 2-D echocardiography.
+
+| Property | Value |
+|---|---|
+| **Modality** | 2-D transthoracic echocardiography |
+| **Patients** | 500 |
+| **Views** | 2-chamber (2CH) and 4-chamber (4CH) apical |
+| **Splits** | train (1-400), val (401-450), test (451-500) |
+
+## Conversion
+
+This dataset was downloaded, converted to zea format, and uploaded using the
+[zea](https://github.com/tue-bmd/zea) data converter:
+
+```bash
+python -m zea.data.convert camus <src> <dst> --download
+```
+
+## Dataset structure
+
+```
+train/
+  patient0001/
+    patient0001_2CH_half_sequence.hdf5
+    patient0001_4CH_half_sequence.hdf5
+  ...
+val/
+  patient0401/ ...
+test/
+  patient0451/ ...
+```
+
+Each HDF5 file follows the [zea data format](https://github.com/tue-bmd/zea) and contains:
+
+- `data/image_sc` - scan-converted B-mode sequence, shape `(n_frames, H, W)`
+- `data/image` - polar-coordinate B-mode sequence, shape `(n_frames, H, W, 1)`
+
+## License
+
+"""
+    + CAMUS_LICENSE
+    + """
+
+The CAMUS dataset is available free of charge strictly for **non-commercial
+scientific research purposes only**.
+
+## Citation
+
+If you use this dataset, please cite:
+
+```bibtex
+@article{leclerc2019deep,
+  title   = {Deep Learning for Segmentation Using an Open Large-Scale Dataset in
+             2D Echocardiography},
+  author  = {Leclerc, Sarah and Smistad, Erik and Pedrosa, Joao and Ostvik, Andreas and
+             Cervenansky, Frederic and Espinosa, Florian and Espeland, Torvald and
+             Berg, Erik Andreas Rye and Jodoin, Pierre-Marc and Grenier, Thomas and
+             Lartizien, Carole and D'hooge, Jan and Lovstakken, Lasse and
+             Bernard, Olivier},
+  journal = {IEEE Transactions on Medical Imaging},
+  volume  = {38},
+  number  = {9},
+  pages   = {2198--2210},
+  year    = {2019},
+  doi     = {10.1109/TMI.2019.2900516}
+}
+```
+
+## Links
+
+- **Original dataset**: <https://humanheart-project.creatis.insa-lyon.fr/database/#collection/6373703d73e9f0047faa1bc8>
+- **zea toolkit**: <https://github.com/tue-bmd/zea>
+"""
+)

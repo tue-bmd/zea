@@ -77,7 +77,7 @@ def _img_dir_to_h5_dir(
         File.create(
             path=new_h5_file_path,
             data={"image": {"values": values}},
-            probe_name="generic",
+            probe={"name": "generic"},
             description=f"{dataset_name or 'image'} dataset converted to zea format",
         )
 

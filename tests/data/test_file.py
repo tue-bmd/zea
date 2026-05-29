@@ -108,9 +108,9 @@ def test_file_attributes():
     with File(FILE_PATH) as file:
         assert file.name == FILE_NAME, "File name should match expected value"
         assert file.n_frames == FILE_N_FRAMES, "Number of frames should match expected value"
-        assert file.probe_name == FILE_PROBE_NAME, "Probe name should match expected value"
-        assert isinstance(file.probe(), Probe), "Probe should be an instance of Probe class"
-        assert isinstance(file.scan(), Scan), "Scan should be an instance of Scan class"
+        assert file.probe.name == FILE_PROBE_NAME, "Probe name should match expected value"
+        assert isinstance(file.probe, Probe), "Probe should be an instance of Probe class"
+        assert isinstance(file.scan, Scan), "Scan should be an instance of Scan class"
 
         file.validate()
 
@@ -143,7 +143,6 @@ def test_dict_to_sorted_list():
 
 def _scan_minimal(n_frames=3, n_tx=2, n_el=4):
     return {
-        "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
         "sampling_frequency": np.float32(30e6),
         "center_frequency": np.float32(5e6),
         "demodulation_frequency": np.float32(5e6),
@@ -168,7 +167,7 @@ def spec_file(tmp_path):
     fspec = FileSpec(
         data={"raw_data": raw, "envelope_data": _make_map(env)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-        probe_name="test_probe",
+        probe={"name": "test_probe"},
         description="spec format test file",
     )
     path = tmp_path / "spec_format.hdf5"
@@ -260,7 +259,7 @@ class TestValidateSpec:
 
         np.testing.assert_array_equal(loaded_spec.data.raw_data, raw)
         np.testing.assert_array_equal(loaded_spec.data.envelope_data.values, env)
-        assert loaded_spec.probe_name == "test_probe"
+        assert loaded_spec.probe.name == "test_probe"
         assert loaded_spec.description == "spec format test file"
 
     def test_validate_spec_on_complete_legacy_file(self, tmp_path):
@@ -322,8 +321,8 @@ class TestValidateSpec:
             assert spec.data.image is not None
             np.testing.assert_array_equal(spec.data.image.values, img)
             assert spec.data.image.coordinates is None
-            # probe attr mapped to probe_name
-            assert spec.probe_name == "legacy_probe"
+            # probe attr mapped to probe.name
+            assert spec.probe.name == "legacy_probe"
 
     def test_validate_spec_raises_on_incomplete_legacy_file(self, tmp_path):
         """validate_spec() raises on legacy files missing required scan fields."""
@@ -377,9 +376,9 @@ class TestFieldMetadataAttrs:
             assert rd_ds.attrs["unit"] == "-"
             assert rd_ds.attrs["description"] != ""
 
-            # Check scan field metadata
-            pg_ds = f._scan_h5_group["probe_geometry"]
-            assert pg_ds.attrs["unit"] == "m"
+            # Check scan field metadata (t0_delays is always present)
+            td_ds = f._scan_h5_group["t0_delays"]
+            assert td_ds.attrs["unit"] == "s"
 
     def test_scan_field_metadata_matches_spec(self, spec_file):
         path, *_ = spec_file
@@ -396,12 +395,12 @@ class TestProbeNameCompat:
         path, *_ = spec_file
 
         with File(path) as f:
-            assert f.probe_name == "test_probe"
+            assert f.probe.name == "test_probe"
 
     def test_probe_name_from_legacy_format(self, dummy_file):
         """Legacy files use 'probe' attr; File.probe_name handles both."""
         with File(dummy_file) as f:
-            assert f.probe_name == "generic"
+            assert f.probe.name == "generic"
 
 
 class TestImageOnlyFile:
@@ -457,7 +456,7 @@ class TestAllPipelineDataTypes:
         fspec = FileSpec(
             data=data_dict,
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe_name="all_pipeline",
+            probe={"name": "all_pipeline"},
         )
         path = tmp_path / "all_pipeline.hdf5"
         fspec.save(str(path))
@@ -484,7 +483,7 @@ class TestSlicing:
             path,
             data={"raw_data": raw, "envelope_data": _make_map(env)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe_name="slice_test",
+            probe={"name": "slice_test"},
         )
         f.close()
         return str(path), raw, env
@@ -555,7 +554,7 @@ class TestSpatialData:
                 "sos_map": {"values": sos_values, "coordinates": sos_coordinates},
             },
             scan=_scan_minimal(n_frames=n_frames),
-            probe_name="spatial_test",
+            probe={"name": "spatial_test"},
         )
         f.close()
         return (
@@ -621,12 +620,12 @@ class TestFileCreate:
             path,
             data={"raw_data": raw},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe_name="create_test",
+            probe={"name": "create_test"},
             description="created via File.create",
         )
         assert f.mode == "r"
         np.testing.assert_array_equal(f.data.raw_data[()], raw)
-        assert f.probe_name == "create_test"
+        assert f.probe.name == "create_test"
         f.close()
 
     def test_create_raises_on_existing_file(self, tmp_path):
@@ -712,7 +711,7 @@ class TestMetadataMetricsAccessors:
         ).close()
 
         with File(path) as f:
-            meta = f.metadata()
+            meta = f.metadata
             assert meta.subject.id == "patient_01"
             assert meta.subject.age == 30
             assert meta.credit == "Test Lab"
@@ -737,7 +736,7 @@ class TestMetadataMetricsAccessors:
         ).close()
 
         with File(path) as f:
-            met = f.metrics()
+            met = f.metrics
             np.testing.assert_array_almost_equal(met.coherence_factor, cf)
 
     def test_metadata_raises_when_missing(self, tmp_path):
@@ -748,7 +747,7 @@ class TestMetadataMetricsAccessors:
 
         with File(path) as f:
             with pytest.raises(KeyError, match="metadata"):
-                f.metadata()
+                _ = f.metadata
 
     def test_metrics_raises_when_missing(self, tmp_path):
         """File without a metrics group raises KeyError."""
@@ -758,7 +757,7 @@ class TestMetadataMetricsAccessors:
 
         with File(path) as f:
             with pytest.raises(KeyError, match="metrics"):
-                f.metrics()
+                _ = f.metrics
 
 
 class TestZeaVersion:
@@ -841,7 +840,7 @@ class TestZeaVersion:
             path,
             data={"raw_data": np.ones((n_frames, n_tx, 8, n_el, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe_name="test_probe",
+            probe={"name": "test_probe"},
         ).close()
 
         with File(path) as f:
@@ -904,7 +903,7 @@ def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
             {"data": {"raw_data": raw_a}, "scan": scan, "label": "track_a"},
             {"data": {"raw_data": raw_b}, "scan": scan, "label": "track_b"},
         ],
-        probe_name="two_track_probe",
+        probe={"name": "two_track_probe"},
     )
     f.close()
     return path, raw_a, raw_b
@@ -954,7 +953,7 @@ class TestMultiTrackFile:
                 _ = f.tracks
 
     # ------------------------------------------------------------------
-    # Track.data and Track.scan()
+    # Track.data and Track.scan
     # ------------------------------------------------------------------
 
     def test_track_data_returns_correct_array(self, tmp_path):
@@ -974,13 +973,13 @@ class TestMultiTrackFile:
     def test_track_scan_returns_scan_object(self, tmp_path):
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
-            scan = f.tracks[0].scan()
+            scan = f.tracks[0].scan
         assert isinstance(scan, Scan)
 
     def test_track_scan_kwargs_override(self, tmp_path):
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
-            scan = f.tracks[0].scan(sound_speed=np.float32(1480.0))
+            scan = f.tracks[0].get_scan(sound_speed=np.float32(1480.0))
         assert float(scan.sound_speed) == pytest.approx(1480.0)
 
     def test_track_repr(self, tmp_path):
@@ -1066,7 +1065,7 @@ class TestMultiTrackFile:
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
             with pytest.raises(AttributeError, match="2 tracks"):
-                f.scan()
+                _ = f.scan
 
     def test_error_message_mentions_tracks_property(self, tmp_path):
         """The error on file.data tells the user to use file.tracks."""
@@ -1076,7 +1075,7 @@ class TestMultiTrackFile:
                 _ = f.data
         with File(path) as f:
             with pytest.raises(AttributeError, match="file.tracks"):
-                f.scan()
+                _ = f.scan
 
     # ------------------------------------------------------------------
     # Single-track files: backwards-compatible access still works
@@ -1105,16 +1104,58 @@ class TestMultiTrackFile:
         ).close()
 
         with File(path) as f:
-            scan = f.scan()
+            scan = f.scan
         assert isinstance(scan, Scan)
         assert scan.n_tx == 3
+
+    # ------------------------------------------------------------------
+    # Probe: file-level access and track isolation
+    # ------------------------------------------------------------------
+
+    def test_track_scan_includes_file_level_probe_geometry(self, tmp_path):
+        """probe_geometry stored in the file-level probe group is injected into track.scan."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 3, 4, 8, 1
+        geom = np.arange(n_el * 3, dtype=np.float32).reshape(n_el, 3) * 1e-3
+        scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+        path = tmp_path / "probe_geom.hdf5"
+        File.create(
+            path,
+            tracks=[
+                {
+                    "data": {
+                        "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+                    },
+                    "scan": scan,
+                    "label": "track_a",
+                },
+                {
+                    "data": {
+                        "raw_data": np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+                    },
+                    "scan": scan,
+                    "label": "track_b",
+                },
+            ],
+            probe={"probe_geometry": geom},
+        ).close()
+
+        with File(path) as f:
+            for track in f.tracks:
+                np.testing.assert_array_equal(track.scan.probe_geometry, geom)
+
+    def test_track_has_no_probe_attribute(self, tmp_path):
+        """Track exposes no .probe attribute; probe is accessed via File.probe."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            track = f.tracks[0]
+            with pytest.raises(AttributeError):
+                _ = track.probe
 
     # ------------------------------------------------------------------
     # Dict-format track inputs
     # ------------------------------------------------------------------
 
     def test_multi_track_from_dicts(self, tmp_path):
-        """File.create accepts plain dicts for tracks."""
         n_frames, n_tx, n_el, n_ax, n_ch = 2, 3, 4, 8, 1
         raw_a = np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
         raw_b = np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
@@ -1408,9 +1449,9 @@ class TestLegacyFileLoading:
         """probe_name is resolved from the legacy 'probe' root attribute."""
         path, *_ = legacy_file
         with File(path) as f:
-            assert f.probe_name == "legacy_probe"
+            assert f.probe.name == "legacy_probe"
             spec = f.validate_spec()
-        assert spec.probe_name == "legacy_probe"
+        assert spec.probe.name == "legacy_probe"
 
     def test_raw_data_loaded(self, legacy_file):
         """raw_data array is loaded with the correct shape."""

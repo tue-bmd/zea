@@ -35,8 +35,8 @@ Working with zea data files
     with File("my_acquisition.hdf5") as f:
         raw   = f.data.raw_data[:]        # all frames
         raw0  = f.data.raw_data[0]        # first frame only
-        scan  = f.scan()                  # returns zea.Scan
-        probe = f.probe()                 # returns zea.Probe
+        scan  = f.scan                    # returns zea.Scan
+        probe = f.probe                   # returns zea.Probe
 
     # For remote files (Hugging Face Hub):
     with File("hf://zeahub/picmus/.../contrast_speckle.hdf5") as f:
@@ -54,11 +54,10 @@ disk::
     from zea import File
 
     n_frames, n_tx, n_el, n_ax = 2, 32, 128, 512
-    raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
-    geom = np.zeros((n_el, 3), dtype=np.float32)
+    raw_data = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+    probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
 
     scan = {
-        "probe_geometry": geom,
         "sampling_frequency": np.float32(40e6),
         "center_frequency":   np.float32(7e6),
         "demodulation_frequency": np.float32(7e6),
@@ -71,11 +70,16 @@ disk::
         "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
     }
 
+    probe = {
+        "name": "L11-4v",
+        "probe_geometry": probe_geometry,
+    }
+
     f = File.create(
         "my_acquisition.hdf5",
-        data={"raw_data": raw},
+        data={"raw_data": raw_data},
         scan=scan,
-        probe_name="L11-4v",
+        probe=probe,
     )
     f.close()
 
@@ -84,14 +88,14 @@ Multi-track files
 -------------------------------
 
 Some acquisitions interleave multiple transmit sequences in a single recording — for example,
-swapping between focused and plane-wave pulses.  Rather than splitting these into separate files, 
+swapping between focused and plane-wave pulses.  Rather than splitting these into separate files,
 ``zea`` can store them as **Tracks**: self-contained bundles of raw data and scan parameters
 in a single HDF5 file. Each track will contain its own :class:`~zea.Scan` object, containing the parameters
 necessary to beamform the raw data in that track. This allows us to specify a :class:`~zea.Pipeline`
 *per-track*, which can be applied independently to each frame in that track.
-Global timing information can be stored in the optional ``track_schedule`` parameter, which 
-indicates which track each transmit event belongs to. Provided the 
-:func:`~zea.Scan.time_to_next_transmit` for each transmit event, this allows us to reconstruct 
+Global timing information can be stored in the optional ``track_schedule`` parameter, which
+indicates which track each transmit event belongs to. Provided the
+:func:`~zea.Scan.time_to_next_transmit` for each transmit event, this allows us to reconstruct
 the full timing of the acquisition.
 
 .. raw:: html
@@ -129,13 +133,16 @@ the full timing of the acquisition.
 .. code-block:: text
 
     acquisition.hdf5
-    ├── attrs:  probe_name, us_machine, zea_version, …
+    ├── attrs:  us_machine, description, zea_version
+    ├── probe/                  # probe_geometry, center_frequency, …
+    ├── metadata/               # credit, annotations, subject, …
+    ├── metrics/                # optional evaluation metrics
     ├── track_schedule          # optional int32[n_total_tx]
     └── tracks/
         ├── track_0/
         │   ├── attrs:  label="focused_bmode"
         │   ├── data/           # raw_data, image, …
-        │   └── scan/           # probe_geometry, t0_delays, …
+        │   └── scan/           # focus_distances, t0_delays, …
         └── track_1/
             ├── attrs:  label="planewave_doppler"
             ├── data/
@@ -147,11 +154,13 @@ the full timing of the acquisition.
 
     >>> import numpy as np
     >>> from zea import File
+    >>> from zea.probes import create_probe_geometry
 
     >>> n_frames, n_ax, n_el = 2, 512, 128
     >>> n_tx_focused, n_tx_pw = 3, 2
+    >>> pitch = 0.0003
 
-    >>> probe_geom = np.zeros((n_el, 3), dtype=np.float32)
+    >>> probe_geometry = create_probe_geometry(n_el, pitch)
 
     >>> # One track index per global transmit event across all frames
     >>> track_schedule = np.tile(
@@ -166,7 +175,6 @@ the full timing of the acquisition.
     ...             "label": "focused_bmode",
     ...             "data": {"raw_data": np.zeros((n_frames, n_tx_focused, n_ax, n_el, 1))},
     ...             "scan": {
-    ...                 "probe_geometry":         probe_geom,
     ...                 "sampling_frequency":     40e6,
     ...                 "center_frequency":       7e6,
     ...                 "demodulation_frequency": 7e6,
@@ -184,7 +192,6 @@ the full timing of the acquisition.
     ...             "label": "planewave_doppler",
     ...             "data": {"raw_data": np.zeros((n_frames, n_tx_pw, n_ax, n_el, 1))},
     ...             "scan": {
-    ...                 "probe_geometry":         probe_geom,
     ...                 "sampling_frequency":     40e6,
     ...                 "center_frequency":       7e6,
     ...                 "demodulation_frequency": 7e6,
@@ -198,7 +205,7 @@ the full timing of the acquisition.
     ...             },
     ...         },
     ...     ],
-    ...     probe_name="L11-4v",
+    ...     probe={"name": "L11-4v", "probe_geometry": probe_geometry},
     ...     track_schedule=track_schedule,
     ...     overwrite=True,
     ... )
@@ -211,19 +218,19 @@ the full timing of the acquisition.
     >>> import zea
 
     >>> with zea.File("acquisition.hdf5") as f:
-    ...     probe = f.probe()              # probe is shared across all tracks
+    ...     probe = f.probe             # probe is shared across all tracks
     ...     # See track labels:
     ...     print(f.track_labels)          # ['focused_bmode', 'planewave_doppler']
     ...     # Unpack in the same order as track_labels — always safe:
     ...     focused_track, planewave_track = f.tracks
     ...     # Or fetch a specific track by name:
     ...     focused_track = f.get_track("focused_bmode")
-    ...     focused_scan = focused_track.scan()
+    ...     focused_scan = focused_track.scan
     ...     focused_raw  = focused_track.data.raw_data[:]
     ...     # access the global timing information for the focused track:
     ...     focused_track.timestamps
     ...     # ... process with e.g. a focused B-mode pipeline
-    ...     planewave_scan = planewave_track.scan()
+    ...     planewave_scan = planewave_track.scan
     ...     planewave_raw  = planewave_track.data.raw_data[:]
     ...     # access the global timing information for the planewave track:
     ...     planewave_track.timestamps
