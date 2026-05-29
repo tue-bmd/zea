@@ -126,10 +126,47 @@ for nbp_name in NOTEBOOK_PARAMETERS.keys():
         "Wrong definition in NOTEBOOK_PARAMETERS?"
     )
 
+# Populated during the test run: {notebook_name: (folder, duration_seconds)}
+_timings: dict[str, tuple[str, float]] = {}
+
 
 def pytest_sessionstart(session):
     print(f"📚 Preparing to test {len(NOTEBOOKS)} notebooks from {NOTEBOOKS_DIR}")
     print(f"📝 Using custom parameters for {len(NOTEBOOK_PARAMETERS)} notebooks")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if not _timings:
+        return
+
+    # Group by folder
+    from collections import defaultdict
+
+    by_folder: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for name, (folder, duration) in sorted(_timings.items()):
+        by_folder[folder].append((name, duration))
+
+    col_w = max(len(name) for name, _ in _timings.items()) + 2
+    print("\n" + "=" * (col_w + 20))
+    print("📊 Notebook run-time summary")
+    print("=" * (col_w + 20))
+
+    grand_total = 0.0
+    for folder in sorted(by_folder):
+        entries = sorted(by_folder[folder], key=lambda x: -x[1])
+        folder_total = sum(d for _, d in entries)
+        grand_total += folder_total
+        print(f"\n  📁 {folder}  ({folder_total:.1f}s total)")
+        for name, duration in entries:
+            mins, secs = divmod(duration, 60)
+            time_str = f"{int(mins)}m {secs:.1f}s" if mins else f"{secs:.1f}s"
+            print(f"    {name:<{col_w}}  {time_str:>8}")
+
+    print("\n" + "-" * (col_w + 20))
+    grand_mins, grand_secs = divmod(grand_total, 60)
+    grand_str = f"{int(grand_mins)}m {grand_secs:.1f}s" if grand_mins else f"{grand_secs:.1f}s"
+    print(f"  {'TOTAL':<{col_w}}  {grand_str:>8}")
+    print("=" * (col_w + 20) + "\n")
 
 
 @pytest.mark.notebook
@@ -163,4 +200,5 @@ def test_notebook_runs(notebook, tmp_path, request):
     )
 
     duration = time.time() - start
+    _timings[notebook.name] = (notebook.parent.name, duration)
     print(f"✅ Finished {notebook.name} in {duration:.1f}s")
