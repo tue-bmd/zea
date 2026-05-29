@@ -254,9 +254,9 @@ Here is a minimal example of how to load and save a config file using zea:
     >>> config = check_config(config)
 
     >>> # Access or change parameters
-    >>> config.scan.sampling_frequency = 8e6
-    >>> print(config.scan.sampling_frequency)
-    8000000.0
+    >>> config.parameters.grid_size_x = 512
+    >>> print(config.parameters.grid_size_x)
+    512
 
     >>> # Save the config back to file
     >>> config.to_yaml("my_new_config.yaml")

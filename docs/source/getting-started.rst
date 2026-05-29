@@ -21,9 +21,9 @@ Let's take a quick look at how to use ``zea`` to load and process ultrasound dat
    path = config.data.dataset_folder + "/" + config.data.file_path
    with zea.File(path) as file:
       data = file.data.raw_data[0]
-      probe = file.probe
-      scan = file.scan
-      scan.update(**config.scan)
+      # load the merged probe + scan parameters and apply config overrides
+      parameters = file.load_parameters()
+      parameters.update(**config.parameters)
 
    # using the pipeline as specified in the config file
    pipeline = zea.Pipeline.from_config(
@@ -31,10 +31,10 @@ Let's take a quick look at how to use ``zea`` to load and process ultrasound dat
       with_batch_dim=False,
    )
    # preparing the parameters (converting to tensors)
-   parameters = pipeline.prepare_parameters(probe, scan)
+   tensors = pipeline.prepare_parameters(parameters)
 
    # running the pipeline!
-   image = pipeline(data=data, **parameters)["data"]
+   image = pipeline(data=data, **tensors)["data"]
 
    # show the image
    image = zea.display.to_8bit(image)

@@ -34,9 +34,11 @@ PARAMETER_DESCRIPTIONS = {
         "dynamic_range": "The dynamic range for showing data in db [min, max]",
         "user": "The user to use when loading data (null, dict)",
     },
-    "scan": {
+    "parameters": {
         "description": (
-            "The scan section contains the parameters pertaining to the reconstruction."
+            "The parameters section is a flat mapping of scan/probe/custom parameters "
+            "that overwrite values loaded from the data file. Documented reconstruction "
+            "parameters are listed below; arbitrary custom parameters are also allowed."
         ),
         "selected_transmits": (
             "The number of transmits in a frame. Can be 'all' for all transmits, an "
