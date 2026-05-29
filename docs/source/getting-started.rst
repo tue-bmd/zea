@@ -29,16 +29,8 @@ assembling parameters, building and applying the pipeline, and visualising resul
        style="display: none; width: 80%; padding-bottom: 1em;"
        class="only-light"
      />
-     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666); max-width: 80%;">
-       <strong>①</strong> Generate <code>zea.Parameters</code> from a zea file using
-       <code>f.load_parameters()</code> — combines scan and probe information to compute the
-       parameters needed for beamforming.
-       <strong>②</strong> Optionally apply additional parameter overrides from a
-       <code>config.yaml</code>.
-       <strong>③</strong> Initialise the pipeline, either from a <code>config.yaml</code>
-       config or manually in code.
-       <strong>④</strong> Pass data and parameters to the pipeline for processing.
-       <strong>⑤</strong> Visualise your outputs.
+     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
+       Overview of the zea data processing workflow.
      </div>
    </div>
    <style>
@@ -49,6 +41,13 @@ assembling parameters, building and applying the pipeline, and visualising resul
        .only-light { display: block !important; }
      }
    </style>
+
+① Generate ``zea.Parameters`` from a zea file using ``File.load_parameters()`` — this combines
+scan and probe information from the file to compute all parameters needed for beamforming.
+② Optionally apply additional parameter overrides from a ``config.yaml``.
+③ Initialise the pipeline, either from a ``config.yaml`` or manually in code.
+④ Pass data and parameters to the pipeline for processing.
+⑤ Visualise your outputs.
 
 .. code-block:: python
 
