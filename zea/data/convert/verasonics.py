@@ -1237,9 +1237,9 @@ class VerasonicsProbe:
 
         # Convert the probe element width to meters
         if self.unit == "mm":
-            element_width = element_width / 1000
+            element_width = element_width / 1000  # mm -> m
         else:
-            element_width = element_width * self.wavelength
+            element_width = element_width * self.wavelength  # wavelengths -> m
 
         return element_width
 
@@ -1247,7 +1247,7 @@ class VerasonicsProbe:
     def element_length(self):
         """Element length for row-column probes in meters."""
         if "ElementLength" in self.trans_obj.keys():
-            return self.trans_obj["ElementLength"][:].item() * 1e6
+            return self.trans_obj["ElementLength"][:].item() / 1000  # mm -> m
 
     @property
     def connector(self):
