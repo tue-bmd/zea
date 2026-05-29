@@ -75,7 +75,10 @@ postprocess_schema = Schema(
 )
 
 # scan
-scan_schema = Schema(
+# Schema for the flat ``parameters:`` config section (formerly ``scan:``).
+# ``ignore_extra_keys`` allows arbitrary custom/manual parameters in addition
+# to the documented recon parameters below.
+parameters_schema = Schema(
     {
         Optional("xlims", default=None): Or(None, list_of_size_two),
         Optional("zlims", default=None): Or(None, list_of_size_two),
@@ -103,7 +106,8 @@ scan_schema = Schema(
         Optional("rho_range", default=None): Or(None, list_of_size_two),
         Optional("fill_value", default=0.0): any_number,
         Optional("resolution", default=None): Or(None, positive_float),
-    }
+    },
+    ignore_extra_keys=True,
 )
 
 # plot
@@ -147,8 +151,9 @@ config_schema = Schema(
         Optional("pipeline", default=pipeline_schema.validate({})): pipeline_schema,
         # Flat mapping of scan/probe/custom parameters that overwrite values
         # loaded from the file (see ``File.load_parameters`` and
-        # ``Pipeline.prepare_parameters``).  Arbitrary keys are allowed.
-        Optional("parameters", default={}): dict,
+        # ``Pipeline.prepare_parameters``).  Documented recon parameters are
+        # validated; arbitrary custom keys are also allowed (ignore_extra_keys).
+        Optional("parameters", default=parameters_schema.validate({})): parameters_schema,
         # Deprecated alias for ``parameters``; still accepted for backward
         # compatibility (migrated to ``parameters`` on load).
         Optional("scan"): Or(None, dict),

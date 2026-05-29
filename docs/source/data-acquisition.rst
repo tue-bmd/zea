@@ -12,7 +12,7 @@ be found in :mod:`zea.data` module documentation.
    :doc:`Config <config>`.  Example notebooks on data handling live in :doc:`Examples <examples>`.
 
 The philosophy behind the zea data format is to store data alongside all necessary parameters to
-process it (e.g. :class:`~zea.Scan` parameters), and additional metadata (e.g. acquisition conditions, patient info, etc.)
+process it (e.g. :class:`~zea.Parameters`), and additional metadata (e.g. acquisition conditions, patient info, etc.)
 in a single file. This makes it easy to manage and share data, and ensures that all necessary information
 is always available when loading a file.
 
@@ -24,7 +24,7 @@ to load the entire file into memory.
 Working with zea data files
 -------------------------------
 
-``zea`` stores each acquisition as a single HDF5 file following the :ref:`schema <data-spec>`.  The primary API is :class:`zea.File`. It operates similarly to `h5py.File <https://docs.h5py.org/en/latest/high/file.html>`_, but with an additional interface of parsing parameters into :class:`~zea.Scan` and :class:`~zea.Probe` objects, and validating the file against the zea data spec.
+``zea`` stores each acquisition as a single HDF5 file following the :ref:`schema <data-spec>`.  The primary API is :class:`zea.File`. It operates similarly to `h5py.File <https://docs.h5py.org/en/latest/high/file.html>`_, but with an additional interface of parsing parameters into a :class:`~zea.Parameters` object (the merged probe + scan parameters, via :meth:`~zea.File.load_parameters`), and validating the file against the zea data spec.
 
 **Open and read an existing file**
 
@@ -35,7 +35,8 @@ Working with zea data files
     with File("my_acquisition.hdf5") as f:
         raw   = f.data.raw_data[:]        # all frames
         raw0  = f.data.raw_data[0]        # first frame only
-        scan  = f.scan                    # returns zea.Scan
+        parameters = f.load_parameters()  # returns zea.Parameters (merged probe + scan)
+        scan  = f.scan                    # returns zea.data.spec.ScanSpec (bare scan group)
         probe = f.probe                   # returns zea.Probe
 
     # For remote files (Hugging Face Hub):
@@ -90,12 +91,13 @@ Multi-track files
 Some acquisitions interleave multiple transmit sequences in a single recording — for example,
 swapping between focused and plane-wave pulses.  Rather than splitting these into separate files,
 ``zea`` can store them as **Tracks**: self-contained bundles of raw data and scan parameters
-in a single HDF5 file. Each track will contain its own :class:`~zea.Scan` object, containing the parameters
+in a single HDF5 file. Each track exposes its own :class:`~zea.Parameters` object (via
+``track.load_parameters()``), containing the parameters
 necessary to beamform the raw data in that track. This allows us to specify a :class:`~zea.Pipeline`
 *per-track*, which can be applied independently to each frame in that track.
 Global timing information can be stored in the optional ``track_schedule`` parameter, which
 indicates which track each transmit event belongs to. Provided the
-:func:`~zea.Scan.time_to_next_transmit` for each transmit event, this allows us to reconstruct
+``time_to_next_transmit`` for each transmit event, this allows us to reconstruct
 the full timing of the acquisition.
 
 .. raw:: html
@@ -134,7 +136,7 @@ the full timing of the acquisition.
 
     acquisition.hdf5
     ├── attrs:  us_machine, description, zea_version
-    ├── probe/                  # probe_geometry, center_frequency, …
+    ├── probe/                  # probe_geometry, probe_center_frequency, …
     ├── metadata/               # credit, annotations, subject, …
     ├── metrics/                # optional evaluation metrics
     ├── track_schedule          # optional int32[n_total_tx]
@@ -225,12 +227,12 @@ the full timing of the acquisition.
     ...     focused_track, planewave_track = f.tracks
     ...     # Or fetch a specific track by name:
     ...     focused_track = f.get_track("focused_bmode")
-    ...     focused_scan = focused_track.scan
+    ...     focused_parameters = focused_track.load_parameters()
     ...     focused_raw  = focused_track.data.raw_data[:]
     ...     # access the global timing information for the focused track:
     ...     focused_track.timestamps
     ...     # ... process with e.g. a focused B-mode pipeline
-    ...     planewave_scan = planewave_track.scan
+    ...     planewave_parameters = planewave_track.load_parameters()
     ...     planewave_raw  = planewave_track.data.raw_data[:]
     ...     # access the global timing information for the planewave track:
     ...     planewave_track.timestamps
