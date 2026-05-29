@@ -166,25 +166,46 @@ def download_file(url: str, destination: str | Path) -> Path:  # pragma: no cove
     """
     destination = Path(destination)
     if destination.exists():
-        log.info("File already exists: %s. Skipping download.", destination.name)
+        log.info(f"File already exists: {destination.name}. Skipping download.")
         return destination
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     timeout = int(os.getenv("ZEA_DOWNLOAD_TIMEOUT", "600"))
     filename = destination.name
+    temp_path = destination.with_name(f"{destination.name}.part")
 
-    log.info("Downloading %s ...", filename)
-    with urllib.request.urlopen(url, timeout=timeout) as response:
-        total = int(response.headers.get("content-length", 0))
-        with (
-            open(destination, "wb") as f,
-            tqdm(total=total or None, unit="B", unit_scale=True, desc=filename) as progress,
-        ):
-            while chunk := response.read(8192):
-                f.write(chunk)
-                progress.update(len(chunk))
+    if temp_path.exists():
+        temp_path.unlink()
 
-    log.info("Downloaded %s to %s", filename, destination.parent)
+    log.info(f"Downloading {filename} ...")
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            total_header = response.headers.get("content-length")
+            total = int(total_header) if total_header is not None else None
+            bytes_written = 0
+            with (
+                open(temp_path, "wb") as f,
+                tqdm(total=total or None, unit="B", unit_scale=True, desc=filename) as progress,
+            ):
+                while chunk := response.read(8192):
+                    f.write(chunk)
+                    bytes_written += len(chunk)
+                    progress.update(len(chunk))
+                f.flush()
+                os.fsync(f.fileno())
+
+        if total is not None and bytes_written != total:
+            raise IOError(
+                f"Downloaded size mismatch for {filename}: "
+                f"expected {total} bytes, got {bytes_written}."
+            )
+
+        temp_path.replace(destination)
+    finally:
+        if temp_path.exists() and not destination.exists():
+            temp_path.unlink(missing_ok=True)
+
+    log.info(f"Downloaded {filename} to {destination.parent}")
     return destination
 
 

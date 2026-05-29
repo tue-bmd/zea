@@ -146,7 +146,7 @@ def save_file(
         data=data,
         scan=scan_dict if scan_dict else None,
         metadata=metadata or None,
-        probe={"name": "generic"},
+        probe=probe or None,
         description=description or None,
         compression=compression,
         chunk_frames=chunk_frames,

@@ -13,7 +13,7 @@ Every ``zea`` HDF5 file follows the layout shown below.
 
 .. code-block:: text
 
-   data_file.hdf5         (attrs: probe_name, us_machine, description, zea_version)
+   data_file.hdf5         (attrs: us_machine, description, zea_version)
    ├── data/
    │   ├── raw_data                  float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
    │   ├── aligned_data/             group (AlignedData)
@@ -27,7 +27,6 @@ Every ``zea`` HDF5 file follows the layout shown below.
    │   ├── color_doppler/            group (ColorDopplerMap)
    │   └── <custom>/                 group (any spatial map)
    ├── scan/
-   │   ├── probe_geometry            float32  (n_el, 3)
    │   ├── sampling_frequency        float32  scalar
    │   ├── center_frequency          float32  scalar | (n_tx,)
    │   ├── t0_delays                 float32  (n_tx, n_el)
@@ -55,11 +54,6 @@ Stored as HDF5 root-level attributes (not groups).
      - Description
      - Values
      -
-   * - ``probe_name``
-     - ``str``
-     - Name of the ultrasound probe.
-     - e.g. ``"L11-4v"``, ``"C5-2"``
-     - |badge-opt|
    * - ``us_machine``
      - ``str``
      - Name of the ultrasound system.

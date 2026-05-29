@@ -54,11 +54,10 @@ disk::
     from zea import File
 
     n_frames, n_tx, n_el, n_ax = 2, 32, 128, 512
-    raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
-    geom = np.zeros((n_el, 3), dtype=np.float32)
+    raw_data = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+    probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
 
     scan = {
-        "probe_geometry": geom,
         "sampling_frequency": np.float32(40e6),
         "center_frequency":   np.float32(7e6),
         "demodulation_frequency": np.float32(7e6),
@@ -71,11 +70,16 @@ disk::
         "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
     }
 
+    probe = {
+        "name": "L11-4v",
+        "probe_geometry": probe_geometry,
+    }
+
     f = File.create(
         "my_acquisition.hdf5",
-        data={"raw_data": raw},
+        data={"raw_data": raw_data},
         scan=scan,
-        probe={"name": "L11-4v"},
+        probe=probe,
     )
     f.close()
 
@@ -84,14 +88,14 @@ Multi-track files
 -------------------------------
 
 Some acquisitions interleave multiple transmit sequences in a single recording — for example,
-swapping between focused and plane-wave pulses.  Rather than splitting these into separate files, 
+swapping between focused and plane-wave pulses.  Rather than splitting these into separate files,
 ``zea`` can store them as **Tracks**: self-contained bundles of raw data and scan parameters
 in a single HDF5 file. Each track will contain its own :class:`~zea.Scan` object, containing the parameters
 necessary to beamform the raw data in that track. This allows us to specify a :class:`~zea.Pipeline`
 *per-track*, which can be applied independently to each frame in that track.
-Global timing information can be stored in the optional ``track_schedule`` parameter, which 
-indicates which track each transmit event belongs to. Provided the 
-:func:`~zea.Scan.time_to_next_transmit` for each transmit event, this allows us to reconstruct 
+Global timing information can be stored in the optional ``track_schedule`` parameter, which
+indicates which track each transmit event belongs to. Provided the
+:func:`~zea.Scan.time_to_next_transmit` for each transmit event, this allows us to reconstruct
 the full timing of the acquisition.
 
 .. raw:: html
@@ -129,13 +133,16 @@ the full timing of the acquisition.
 .. code-block:: text
 
     acquisition.hdf5
-    ├── attrs:  probe_name, us_machine, zea_version, …
+    ├── attrs:  us_machine, description, zea_version
+    ├── probe/                  # probe_geometry, center_frequency, …
+    ├── metadata/               # credit, annotations, subject, …
+    ├── metrics/                # optional evaluation metrics
     ├── track_schedule          # optional int32[n_total_tx]
     └── tracks/
         ├── track_0/
         │   ├── attrs:  label="focused_bmode"
         │   ├── data/           # raw_data, image, …
-        │   └── scan/           # probe_geometry, t0_delays, …
+        │   └── scan/           # focus_distances, t0_delays, …
         └── track_1/
             ├── attrs:  label="planewave_doppler"
             ├── data/
@@ -147,11 +154,13 @@ the full timing of the acquisition.
 
     >>> import numpy as np
     >>> from zea import File
+    >>> from zea.probes import create_probe_geometry
 
     >>> n_frames, n_ax, n_el = 2, 512, 128
     >>> n_tx_focused, n_tx_pw = 3, 2
+    >>> pitch = 0.0003
 
-    >>> probe_geom = np.zeros((n_el, 3), dtype=np.float32)
+    >>> probe_geometry = create_probe_geometry(n_el, pitch)
 
     >>> # One track index per global transmit event across all frames
     >>> track_schedule = np.tile(
@@ -196,7 +205,7 @@ the full timing of the acquisition.
     ...             },
     ...         },
     ...     ],
-    ...     probe={"name": "L11-4v", "probe_geometry": probe_geom},
+    ...     probe={"name": "L11-4v", "probe_geometry": probe_geometry},
     ...     track_schedule=track_schedule,
     ...     overwrite=True,
     ... )

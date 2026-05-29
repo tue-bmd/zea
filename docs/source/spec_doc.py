@@ -226,7 +226,7 @@ def rst_dropdown(cls, title, base_indent=0, open_=False, compact=False) -> str:
 FILE_TREE = """\
 .. code-block:: text
 
-   data_file.hdf5         (attrs: probe_name, us_machine, description, zea_version)
+   data_file.hdf5         (attrs: us_machine, description, zea_version)
    \u251c\u2500\u2500 data/
    \u2502   \u251c\u2500\u2500 raw_data                  float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
    \u2502   \u251c\u2500\u2500 aligned_data/             group (AlignedData)
@@ -240,7 +240,6 @@ FILE_TREE = """\
    \u2502   \u251c\u2500\u2500 color_doppler/            group (ColorDopplerMap)
    \u2502   \u2514\u2500\u2500 <custom>/                 group (any spatial map)
    \u251c\u2500\u2500 scan/
-   \u2502   \u251c\u2500\u2500 probe_geometry            float32  (n_el, 3)
    \u2502   \u251c\u2500\u2500 sampling_frequency        float32  scalar
    \u2502   \u251c\u2500\u2500 center_frequency          float32  scalar | (n_tx,)
    \u2502   \u251c\u2500\u2500 t0_delays                 float32  (n_tx, n_el)
@@ -264,11 +263,6 @@ ROOT_ATTRS_TABLE = """\
      - Description
      - Values
      -
-   * - ``probe_name``
-     - ``str``
-     - Name of the ultrasound probe.
-     - e.g. ``"L11-4v"``, ``"C5-2"``
-     - |badge-opt|
    * - ``us_machine``
      - ``str``
      - Name of the ultrasound system.
