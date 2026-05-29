@@ -244,8 +244,8 @@ class Probe(ProbeSpec):
         * :attr:`probe_geometry` is not set,
         * the probe has fewer than 2 elements, or
         * the elements are not arranged along a single axis (not a 1-D / linear array).
-        * the spacing is non-uniform (elements are present but
-        clearly not a ULA), to surface likely data errors rather than silently returning None.
+        * the spacing is non-uniform (elements are present but clearly not a ULA),
+            to surface likely data errors rather than silently returning ``None``.
 
         """
         if self.probe_geometry is None:
