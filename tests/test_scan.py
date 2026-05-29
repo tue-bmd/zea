@@ -1,9 +1,9 @@
-"""Tests for the Scan class."""
+"""Tests for the Parameters class."""
 
 import numpy as np
 import pytest
 
-from zea.scan import Scan
+from zea.scan import Parameters
 
 scan_args = {
     "n_tx": 10,
@@ -41,10 +41,10 @@ scan_args = {
 
 
 def test_scan_repr():
-    """Scan repr is a single-line constructor-style string."""
-    scan = Scan(**scan_args)
+    """Parameters repr is a single-line constructor-style string."""
+    scan = Parameters(**scan_args)
     r = repr(scan)
-    assert r.startswith("Scan(")
+    assert r.startswith("Parameters(")
     assert r.endswith(")")
     assert "\n" not in r
     assert "sampling_frequency=" in r
@@ -52,20 +52,20 @@ def test_scan_repr():
 
 
 def test_scan_str():
-    """Scan str is a multi-line constructor-style string."""
-    scan = Scan(**scan_args)
+    """Parameters str is a multi-line constructor-style string."""
+    scan = Parameters(**scan_args)
     s = str(scan)
-    assert s.startswith("Scan(\n")
+    assert s.startswith("Parameters(\n")
     assert s.endswith("\n)")
     assert "\n" in s
     assert "sampling_frequency=" in s
 
 
 def test_scan_compare():
-    """Test comparison of Scan objects."""
-    scan = Scan(**scan_args)
-    scan2 = Scan(**scan_args)
-    scan3 = Scan(**scan_args)
+    """Test comparison of Parameters objects."""
+    scan = Parameters(**scan_args)
+    scan2 = Parameters(**scan_args)
+    scan3 = Parameters(**scan_args)
     scan3.sound_speed = 1000
 
     assert scan == scan2
@@ -73,8 +73,8 @@ def test_scan_compare():
 
 
 def test_scan_copy():
-    """Test copying of Scan objects."""
-    scan = Scan(**scan_args)
+    """Test copying of Parameters objects."""
+    scan = Parameters(**scan_args)
     scan_copy = scan.copy()
 
     assert scan == scan_copy
@@ -91,7 +91,7 @@ def test_scan_copy():
 )
 def test_scan_copy_selected_transmits(selection):
     """Test that selected_transmits is copied correctly."""
-    scan = Scan(**scan_args)
+    scan = Parameters(**scan_args)
     scan.set_transmits(selection)
     scan_copy = scan.copy()
 
@@ -126,7 +126,7 @@ def test_set_transmits(selection):
         elif selection == "plane":
             local_scan_args["focus_distances"] = np.full(scan_args["n_tx"], np.inf)
 
-    scan = Scan(**local_scan_args)
+    scan = Parameters(**local_scan_args)
     scan.set_transmits(selection)
 
     if selection is None:
@@ -155,7 +155,7 @@ def test_set_transmits(selection):
 
 def test_scan_erroneous_set_transmits():
     """Test erroneous inputs to set_transmits."""
-    scan = Scan(**scan_args)
+    scan = Parameters(**scan_args)
 
     with pytest.raises(ValueError):
         scan.set_transmits(-1)
@@ -174,8 +174,8 @@ def test_scan_erroneous_set_transmits():
 
 
 def test_initialization():
-    """Test initialization of Scan class."""
-    scan = Scan(**scan_args)
+    """Test initialization of Parameters class."""
+    scan = Parameters(**scan_args)
 
     assert scan.n_tx == scan_args["n_tx"]
     assert scan.n_el == scan_args["n_el"]
@@ -212,7 +212,7 @@ def test_initialization():
     ],
 )
 def test_selected_transmits_affects_shape(attr, expected_shape):
-    scan = Scan(**scan_args)
+    scan = Parameters(**scan_args)
     # Check initial shape
     val = getattr(scan, attr)
     val_tensor = scan.to_tensor(include=[attr])[attr]
@@ -258,8 +258,8 @@ def test_selected_transmits_affects_shape(attr, expected_shape):
 
 
 def test_set_attributes():
-    """Test setting attributes of Scan class."""
-    scan = Scan(**scan_args)
+    """Test setting attributes of Parameters class."""
+    scan = Parameters(**scan_args)
 
     scan.selected_transmits = [0]
 
@@ -268,26 +268,26 @@ def test_set_attributes():
 
 
 def test_accessing_valid_but_unset_attributes():
-    """Test accessing valid but unset attributes of Scan class."""
+    """Test accessing valid but unset attributes of Parameters class."""
 
-    scan = Scan(n_tx=5)
+    scan = Parameters(n_tx=5)
     scan.focus_distances
 
 
 def test_scan_pickle():
-    """Test pickling and unpickling of Scan class."""
+    """Test pickling and unpickling of Parameters class."""
     import pickle
 
-    scan = Scan(**scan_args)
+    scan = Parameters(**scan_args)
     scan_pickled = pickle.dumps(scan)
     scan_unpickled = pickle.loads(scan_pickled)
 
-    assert scan == scan_unpickled, "Unpickled Scan object does not match the original"
-    assert scan is not scan_unpickled, "Unpickled Scan object is the same instance as the original"
+    assert scan == scan_unpickled, "Unpickled Parameters object does not match the original"
+    assert scan is not scan_unpickled, "Unpickled Parameters object is the same instance as the original"
 
 
 def test_valid_params_default():
-    """Test that modifying pfield_kwargs in one Scan instance does not affect another.
+    """Test that modifying pfield_kwargs in one Parameters instance does not affect another.
 
     The origin of this test is a bug where in VALID_PARAMS, the default value for pfield_kwargs
     was a mutable dictionary, leading to shared state across instances.
@@ -360,7 +360,7 @@ def test_inplace_modification_tensor_cache():
 
 def test_update_behaviour_and_cache_invalidation():
     """Test Parameters.update: skipping unchanged values and force invalidation."""
-    scan = Scan(**scan_args)
+    scan = Parameters(**scan_args)
 
     # Access grid to populate cache
     _ = scan.grid
@@ -382,11 +382,57 @@ def test_update_behaviour_and_cache_invalidation():
     assert "grid" not in scan._cache
 
 
-def test_update_ignores_unknown_keys():
-    """Ensure update ignores unknown keys."""
+def test_update_stores_unknown_keys_as_custom():
+    """Ensure update stores unknown keys as custom (passthrough) parameters."""
 
-    scan = Scan(**scan_args)
+    scan = Parameters(**scan_args)
 
-    # Unknown key should be ignored without raising
+    # Unknown key is stored as a custom passthrough parameter (not rejected).
     scan.update(nonexistent_param=123)
-    assert not hasattr(scan, "nonexistent_param")
+    assert scan.nonexistent_param == 123
+    assert scan._custom_params["nonexistent_param"] == 123
+
+
+def test_valid_params_cover_specs():
+    """Every ScanSpec and ProbeSpec field must be a valid Parameters key.
+
+    Enforces the single-source-of-truth contract: any file-backed parameter
+    (scan or probe) can be held by the Parameters class. ``center_frequency``
+    is intentionally excluded from ProbeSpec (renamed to
+    ``probe_center_frequency``) to avoid colliding with the scan field.
+    """
+    from zea.data.spec import ProbeSpec, ScanSpec
+
+    valid = set(Parameters.VALID_PARAMS)
+    missing_scan = set(ScanSpec.SCHEMA) - valid
+    missing_probe = set(ProbeSpec.SCHEMA) - valid
+    assert not missing_scan, f"ScanSpec fields missing from Parameters.VALID_PARAMS: {missing_scan}"
+    assert not missing_probe, (
+        f"ProbeSpec fields missing from Parameters.VALID_PARAMS: {missing_probe}"
+    )
+
+
+def test_scan_and_probe_specs_are_disjoint():
+    """ScanSpec and ProbeSpec field names must not collide.
+
+    A collision would make merging probe + scan parameters into a single
+    Parameters object ambiguous. This guards against re-introducing one.
+    """
+    from zea.data.spec import ProbeSpec, ScanSpec
+
+    overlap = set(ScanSpec.SCHEMA) & set(ProbeSpec.SCHEMA)
+    assert overlap == set(), f"ScanSpec and ProbeSpec share field names: {overlap}"
+
+
+def test_custom_parameters_passthrough_to_tensor():
+    """Custom params are stored as-is, ignored by derivation, and surface in to_tensor."""
+    scan = Parameters(**scan_args)
+    scan.update(my_custom_parameter=42)
+    assert scan.my_custom_parameter == 42
+    # Custom param is not a validated leaf param.
+    assert "my_custom_parameter" not in scan._params
+    # It still flows through to_tensor when requested.
+    tensors = scan.to_tensor(include=["my_custom_parameter", "center_frequency"])
+    assert "my_custom_parameter" in tensors
+    # Derived properties still compute (custom params don't interfere).
+    assert scan.wavelength == scan.sound_speed / scan.center_frequency

@@ -142,7 +142,7 @@ def test_transmit_schemes(
     probe = _get_probe(probe_kind)
     scan = _get_scan(probe, scan_kind)
 
-    parameters = default_pipeline.prepare_parameters(probe, scan)
+    parameters = default_pipeline.prepare_parameters(scan)
 
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
@@ -175,7 +175,7 @@ def test_transmit_schemes(
     # Additional test for planewave: verify focus_distance=0 gives same result
     if scan_kind == "planewave":
         scan_zero_focus = _get_scan(probe, scan_kind, focus_distances=np.zeros(scan.n_tx))
-        parameters_zero = default_pipeline.prepare_parameters(probe, scan_zero_focus)
+        parameters_zero = default_pipeline.prepare_parameters(scan_zero_focus)
 
         output_zero_focus = default_pipeline(
             **parameters_zero,
@@ -207,7 +207,7 @@ def test_polar_grid(default_pipeline: ops.Pipeline, ultrasound_scatterers):
 
     default_pipeline.append(ops.ScanConvert(order=3))
 
-    parameters = default_pipeline.prepare_parameters(probe, scan)
+    parameters = default_pipeline.prepare_parameters(scan)
 
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)

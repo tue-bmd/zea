@@ -9,7 +9,7 @@ import h5py
 import numpy as np
 import pytest
 
-from zea import Probe, Scan
+from zea import Parameters, Probe
 from zea.data.data_format import (
     load_additional_elements,
     load_description,
@@ -373,7 +373,7 @@ def _make_file_with_distinct_demod_freq(tmp_path, demod_freq=5e6, center_freq=7e
     scan_dict["n_ax"] = n_ax
     scan_dict["demodulation_frequency"] = np.float32(demod_freq)
 
-    scan = Scan(**scan_dict)
+    scan = Parameters(**scan_dict)
     probe = Probe(probe_geometry=scan_dict["probe_geometry"])
     raw = np.zeros((2, n_tx, n_ax, n_el, 1), dtype=np.float32)
 
