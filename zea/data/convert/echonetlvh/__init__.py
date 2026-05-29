@@ -357,6 +357,7 @@ class LVHProcessor(H5Processor):
                 tip=(tip_x, tip_y),
                 r_max=r_max,
                 theta_range=(theta_min, theta_max),
+                # polar_shape=(768, 1024),
             ),
             in_axes=(0, None, None, None, None, None),
         )  # map over sequence of images; per-video cone geometry is broadcast
@@ -397,34 +398,27 @@ class LVHProcessor(H5Processor):
         sequence_processed = translate(sequence_processed, self.range_from, self._process_range)
         # Get pre-computed cone parameters for this file
         cone_params = self.cone_parameters.get(avi_file.name)
-        if cone_params is not None:
-            # Apply pre-computed cropping parameters
-            sequence_processed = crop_sequence_with_params(sequence_processed, cone_params)
-        else:
+        if cone_params is None:
             raise UserWarning(f"No cone parameters for {avi_file.name}")
 
         split = self.get_split(avi_file, sequence_processed)
         out_h5 = self.path_out_h5 / split / avi_file.with_suffix(".hdf5")
 
-        # Apex position in the cropped+padded image, mirroring crop_and_center_cone
-        apex_x_in_crop = cone_params["apex_x"] - cone_params["crop_left"]
-        cropped_width = cone_params["crop_right"] - cone_params["crop_left"]
-        left_padding = max(0, int(cropped_width / 2 - apex_x_in_crop))
-        tip_x = apex_x_in_crop + left_padding
-        tip_y = cone_params["apex_y"] - cone_params["crop_top"]
-        # Asymmetric angular extent from the fitted cone edges. Polar +theta lands on the
-        # left side of the image (after the 90° rotation in cartesian_to_polar_matrix),
-        # so theta_min comes from the right slope and theta_max from the left slope.
-        theta_min = -math.atan(cone_params["right_slope"])
-        theta_max = -math.atan(cone_params["left_slope"])
+        # Polar conversion runs on the uncropped frame using apex coordinates in
+        # original-image space; theta_min/theta_max come from the fitted slopes
+        # (polar +theta lands on the left after the 90° rotation in
+        # cartesian_to_polar_matrix, so right_slope → theta_min).
         polar_im_set = self.cart2pol_batched(
             sequence_processed,
-            tip_x,
-            tip_y,
+            cone_params["apex_x"],
+            cone_params["apex_y"],
             cone_params["circle_radius"],
-            theta_min,
-            theta_max,
+            -math.atan(cone_params["right_slope"]),
+            -math.atan(cone_params["left_slope"]),
         )
+
+        # Cropped + centered cartesian view is only needed for image_sc
+        sequence_processed = crop_sequence_with_params(sequence_processed, cone_params)
         sequence_processed = translate(sequence_processed, self._process_range, self.range_to)
         assert self.range_to == (0, 255), "Expected range_to to be (0, 255) for uint8 conversion"
         sequence_processed_uint8 = ops.cast(ops.floor(sequence_processed + 0.5), "uint8")
