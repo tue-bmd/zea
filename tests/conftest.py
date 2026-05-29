@@ -34,6 +34,13 @@ def pytest_addoption(parser):
         default=None,
         help="Run only the notebook matching this name (e.g. --notebook dbua_example.ipynb)",
     )
+    parser.addoption(
+        "--notebook-dir",
+        action="append",
+        default=None,
+        help="Run only notebooks under this subfolder (e.g. --notebook-dir models)."
+        " Can be repeated.",
+    )
 
 
 def pytest_collection_modifyitems(config, items):

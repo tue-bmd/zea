@@ -140,6 +140,11 @@ def test_notebook_runs(notebook, tmp_path, request):
     if notebook_filter and notebook_filter not in notebook.name:
         pytest.skip(f"Skipped (--notebook={notebook_filter})")
 
+    # Filter by --notebook-dir CLI option if provided
+    notebook_dir_filter = request.config.getoption("--notebook-dir")
+    if notebook_dir_filter and notebook.parent.name not in notebook_dir_filter:
+        pytest.skip(f"Skipped (--notebook-dir={notebook_dir_filter})")
+
     print(f"\n📘 Starting notebook: {notebook.name}")
 
     output_path = tmp_path / notebook.name

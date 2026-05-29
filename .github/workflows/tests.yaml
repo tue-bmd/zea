@@ -131,13 +131,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Run heavy Pytest
+      - name: Run heavy tests
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
-            sh -lc "pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'heavy' ./tests"
+            sh -lc "pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'heavy' ./tests/test_ops_infra.py ./tests/test_transmit_schemes.py ./tests/data/test_conversion_scripts.py"
 
       - name: Upload heavy test results to Codecov
         uses: codecov/codecov-action@v6
@@ -146,13 +146,81 @@ jobs:
           slug: ${{ env.MAIN_REPO }}
           flags: heavy
 
-      - name: Run notebook tests with Pytest
+  notebook-tests-agent:
+    needs: [image]
+    runs-on: self-hosted
+    timeout-minutes: 100
+    concurrency:
+      group: notebook-tests-agent-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run agent notebook tests
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
-            sh -lc "pytest -p no:cacheprovider -s -m 'notebook'"
+            sh -lc "pytest -p no:cacheprovider -s -m 'notebook' --notebook-dir agent"
+
+  notebook-tests-models:
+    needs: [image]
+    runs-on: self-hosted
+    timeout-minutes: 100
+    concurrency:
+      group: notebook-tests-models-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run models notebook tests
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/zea" \
+            -w /zea \
+            ${{ needs.image.outputs.docker_image }} \
+            sh -lc "pytest -p no:cacheprovider -s -m 'notebook' --notebook-dir models"
+
+  notebook-tests-pipeline:
+    needs: [image]
+    runs-on: self-hosted
+    timeout-minutes: 100
+    concurrency:
+      group: notebook-tests-pipeline-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run pipeline notebook tests
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/zea" \
+            -w /zea \
+            ${{ needs.image.outputs.docker_image }} \
+            sh -lc "pytest -p no:cacheprovider -s -m 'notebook' --notebook-dir pipeline"
+
+  notebook-tests-data-metrics:
+    needs: [image]
+    runs-on: self-hosted
+    timeout-minutes: 100
+    concurrency:
+      group: notebook-tests-data-metrics-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run data and metrics notebook tests
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/zea" \
+            -w /zea \
+            ${{ needs.image.outputs.docker_image }} \
+            sh -lc "pytest -p no:cacheprovider -s -m 'notebook' --notebook-dir data --notebook-dir metrics"
 
   test-docs-build:
     needs: [image]
