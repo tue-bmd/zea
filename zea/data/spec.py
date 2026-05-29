@@ -1373,63 +1373,8 @@ class ProbeSpec(Spec):
             return int(self.probe_geometry.shape[0])
         return None
 
-    @property
-    def pitch(self) -> float | None:
-        """Centre-to-centre element spacing in metres, derived from :attr:`probe_geometry`.
-
-        Returns ``None`` when:
-
-        * :attr:`probe_geometry` is not set,
-        * the probe has fewer than 2 elements,
-        * the elements are not arranged along a single axis (not a 1-D / linear array), or
-        * the element positions are not uniformly spaced.
-
-        Raises :class:`ValueError` if the spacing is non-uniform (elements are present but
-        clearly not a ULA), to surface likely data errors rather than silently returning None.
-        """
-        if self.probe_geometry is None:
-            return None
-
-        n_el = self.probe_geometry.shape[0]
-        if n_el < 2:
-            return None
-
-        # Only valid for 1-D (linear) arrangements – all elements must lie on the x-axis
-        # (y == 0 and z == 0 for every element).
-        if not (
-            np.allclose(self.probe_geometry[:, 1], 0) and np.allclose(self.probe_geometry[:, 2], 0)
-        ):
-            return None
-
-        spacings = np.diff(self.probe_geometry[:, 0])
-        if not np.allclose(spacings, spacings[0], rtol=1e-3):
-            raise ValueError(
-                "Cannot compute pitch: element x-positions are not uniformly spaced. "
-                f"Min spacing: {spacings.min():.4e} m, max: {spacings.max():.4e} m."
-            )
-
-        return float(spacings[0])
-
-    @property
-    def kerf(self) -> float | None:
-        """Gap between elements in metres, derived from :attr:`element_width` and :attr:`pitch`."""
-        if self.element_width is not None and self.pitch is not None:
-            return self.pitch - self.element_width
-        return None
-
     def __post_init__(self):
         super().__post_init__()
-
-        # Derive element_width from probe_geometry pitch when not explicitly set.
-        # Use pitch * 0.9 as a common rule-of-thumb (assumes ~10 % kerf).
-        if (
-            self.element_width is None
-            and self.probe_geometry is not None
-            and len(self.probe_geometry) > 1
-        ):
-            _pitch = float(np.linalg.norm(self.probe_geometry[1] - self.probe_geometry[0]))
-            if _pitch > 0:
-                self.element_width = np.float32(0.9 * _pitch)
 
         if self.probe_geometry is not None:
             if self.probe_geometry.ndim != 2 or self.probe_geometry.shape[1] != 3:

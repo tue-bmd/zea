@@ -45,6 +45,7 @@ import numpy as np
 from keras import ops
 
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
+from zea.probes import Probe
 
 
 def simulate_rf(
@@ -91,6 +92,17 @@ def simulate_rf(
     """
 
     n_tx = t0_delays.shape[0]
+
+    if element_width is None:
+        try:
+            pitch = Probe.get_pitch(probe_geometry)
+        except ValueError as exc:
+            raise ValueError(
+                "Element width is not provided and cannot be estimated using the probe geometry. "
+                "Please provide the element width or ensure that the probe geometry is a 1-D "
+                "linear array."
+            ) from exc
+        element_width = pitch * 0.9  # 90% of the pitch
 
     pulse_spectrum_fn = get_pulse_spectrum_fn(center_frequency, n_period=4)
 
