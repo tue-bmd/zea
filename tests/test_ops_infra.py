@@ -1057,16 +1057,23 @@ def test_all_functions_exported():
 
 
 def test_pipeline_repr():
-    """Test Pipeline.__repr__ output format."""
+    """Pipeline repr is constructor-style with no angle brackets."""
     pipeline = ops.Pipeline([MultiplyOperation(), AddOperation()], name="test_pipe")
     r = repr(pipeline)
-    assert r == "<Pipeline test_pipe=(MultiplyOperation, AddOperation)>"
+    assert r.startswith("Pipeline(")
+    assert r.endswith(")")
+    assert "<" not in r
+    assert "name='test_pipe'" in r
+    assert "operations=[" in r
+    assert "MultiplyOperation" in r
+    assert "AddOperation" in r
 
     # Nested pipeline repr
     inner = ops.Pipeline([AddOperation()], name="inner")
     outer = ops.Pipeline([MultiplyOperation(), inner], name="outer")
     r2 = repr(outer)
-    assert "Pipeline inner" in r2
+    assert "Pipeline(" in r2
+    assert "inner" in r2
 
 
 def test_pipeline_eq():
@@ -1210,11 +1217,13 @@ def test_patched_grid_get_dict():
 
 
 def test_beamform_repr():
-    """Test Beamform.__repr__ returns the expected format."""
+    """Test Beamform.__repr__ returns constructor-style format."""
 
     b = Beamform(num_patches=1, jit_options=None)
     r = repr(b)
-    assert r.startswith("<Beamform")
+    assert r.startswith("Beamform(")
+    assert r.endswith(")")
+    assert "<" not in r
     assert "TOFCorrection" in r
 
 

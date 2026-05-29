@@ -312,6 +312,15 @@ def test_config_recursive():
     config_check_equal_recursive(config, expected_config)
 
 
+def test_config_repr():
+    """Config repr is Config({...}) with no angle brackets."""
+    config = Config(simple_dict)
+    r = repr(config)
+    assert r.startswith("Config(")
+    assert r.endswith(")")
+    assert "<" not in r
+
+
 def test_config_pickle():
     """Tests if the config can be pickled and unpickled without changing its contents."""
     import pickle

@@ -17,6 +17,7 @@ Example usage
 """
 
 import contextlib
+import inspect
 import logging
 import os
 import re
@@ -241,11 +242,25 @@ def success(message):
     return message
 
 
+# Track locations that have already emitted a once-only warning
+_warned_locations: set = set()
+
+
 def warning(message, *args, **kwargs):
     """Prints a message with log level warning."""
     logger.warning(message, *args, **kwargs)
     if file_logger:
         file_logger.warning(remove_color_escape_codes(message), *args, **kwargs)
+    return message
+
+
+def warning_once(message, *args, **kwargs):
+    """Prints a warning message only once per call location."""
+    frame = inspect.stack()[1]
+    key = f"{frame.filename}:{frame.lineno}"
+    if key not in _warned_locations:
+        _warned_locations.add(key)
+        warning(message, *args, **kwargs)
     return message
 
 

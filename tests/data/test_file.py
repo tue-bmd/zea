@@ -207,7 +207,7 @@ class TestStringDataset:
         with h5py.File(path, "r") as f:
             ds = _StringDataset(f["labels"])
             assert len(ds) == 2
-            assert "_StringDataset" in repr(ds)
+            assert "StringDataset" in repr(ds)
 
     def test_getattr_delegates_to_dataset(self, tmp_path):
         path = tmp_path / "str_attr.hdf5"
@@ -317,6 +317,14 @@ class TestGroupProxy:
             d = dir(f.data)
             assert "raw_data" in d
             assert "envelope_data" in d
+
+    def test_repr_delegates_to_h5py(self, spec_file):
+        """_GroupProxy repr shows the underlying HDF5 group path."""
+        path, *_ = spec_file
+        with File(path) as f:
+            r = repr(f.data)
+        assert "HDF5 group" in r
+        assert "data" in r
 
 
 class TestFileDataProperty:
@@ -992,6 +1000,81 @@ def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
     return path, raw_a, raw_b
 
 
+class TestRepr:
+    """Tests for __repr__ / __str__ of File, Track, _StringDataset."""
+
+    def test_file_repr_single_track(self, tmp_path):
+        """Single-track file repr shows filename, mode and '1 track'."""
+        path = tmp_path / "single.hdf5"
+        File.create(
+            path,
+            data={"raw_data": np.zeros((1, 2, 8, 4, 1), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=1, n_tx=2, n_el=4),
+        ).close()
+        with File(path) as f:
+            r = repr(f)
+        assert r.startswith('<File "')
+        assert "single.hdf5" in r
+        assert "mode r" in r
+        assert "1 track" in r
+
+    def test_file_repr_multi_track_with_labels(self, tmp_path):
+        """Multi-track repr includes track count and label names."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            r = repr(f)
+        assert "2 tracks" in r
+        assert '"track_a"' in r
+        assert '"track_b"' in r
+
+    def test_file_str_equals_repr(self, tmp_path):
+        path = tmp_path / "s.hdf5"
+        File.create(
+            path,
+            data={"raw_data": np.zeros((1, 2, 8, 4, 1), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=1, n_tx=2, n_el=4),
+        ).close()
+        with File(path) as f:
+            assert repr(f) == str(f)
+
+    def test_track_repr_with_label(self, tmp_path):
+        """Track repr shows index, label, and data keys."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            r = repr(f.tracks[0])
+        assert r.startswith("<Track[0]")
+        assert '"track_a"' in r
+        assert "data=" in r
+        assert "raw_data" in r
+
+    def test_track_repr_without_label(self, tmp_path):
+        """Track repr omits label part when track has no label."""
+        path = tmp_path / "nolabel.hdf5"
+        File.create(
+            path,
+            data={"raw_data": np.zeros((1, 2, 8, 4, 1), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=1, n_tx=2, n_el=4),
+        ).close()
+        with File(path) as f:
+            r = repr(f.tracks[0])
+        assert "<Track[0]" in r
+        assert "data=" in r
+        # no spurious quote from a missing label
+        assert r.count('"') == 0 or r.startswith("<Track[0] data=")
+
+    def test_string_dataset_repr(self, tmp_path):
+        """_StringDataset repr mentions shape and str dtype."""
+        path = tmp_path / "sd.hdf5"
+        with h5py.File(path, "w") as f:
+            f.create_dataset("labels", data=np.array([b"a", b"b"]))
+        with h5py.File(path, "r") as f:
+            ds = _StringDataset(f["labels"])
+            r = repr(ds)
+        assert "StringDataset" in r
+        assert "shape" in r
+        assert "str" in r
+
+
 class TestMultiTrackFile:
     """Tests for File.tracks, Track, and single-track guards."""
 
@@ -1069,14 +1152,15 @@ class TestMultiTrackFile:
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
             r = repr(f.tracks[1])
-        assert "index=1" in r
+        assert r.startswith("<Track[1]")
+        assert "data=" in r
 
     def test_track_repr_includes_label(self, tmp_path):
         """repr(track) includes the label when one is set."""
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
             r = repr(f.tracks[0])
-        assert "label='track_a'" in r
+        assert '"track_a"' in r
 
     # ------------------------------------------------------------------
     # Track.label, File.track_labels, File.get_track

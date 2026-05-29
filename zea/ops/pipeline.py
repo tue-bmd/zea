@@ -520,7 +520,7 @@ class Pipeline:
                 operations.append(repr(operation))
             else:
                 operations.append(operation.__class__.__name__)
-        return f"<Pipeline {self.name}=({', '.join(operations)})>"
+        return f"Pipeline(name={self.name!r}, operations=[{', '.join(operations)}])"
 
     @classmethod
     def load(cls, file_path: str, **kwargs) -> "Pipeline":
@@ -1104,7 +1104,7 @@ class Beamform(Pipeline):
                 operations.append(repr(operation))
             else:
                 operations.append(operation.__class__.__name__)
-        return f"<Beamform {self.name}=({', '.join(operations)})>"
+        return f"Beamform(name={self.name!r}, operations=[{', '.join(operations)}])"
 
     def get_dict(self, compact=True) -> dict:
         """Convert the pipeline to a dictionary.

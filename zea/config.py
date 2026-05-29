@@ -179,7 +179,7 @@ class Config(dict):
                 >>> config.update_recursive({"a": 4, "b": {"c": 5}})
                 >>> # Notice how "d" is kept and only "c" is updated.
                 >>> print(config)
-                <Config {'a': 4, 'b': {'c': 5, 'd': 3}}>
+                Config({'a': 4, 'b': {'c': 5, 'd': 3}})
 
         Args:
             dictionary (dict, optional): Dictionary to update from.
@@ -365,7 +365,7 @@ class Config(dict):
         del self[name]
 
     def __repr__(self):
-        return f"<Config {self.as_dict()}>"
+        return f"Config({self.as_dict()})"
 
     def to_json(self):
         """Return the config as a json string."""
