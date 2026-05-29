@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+import zea
 from zea.scan import Scan
 
 scan_args = {
@@ -272,6 +273,82 @@ def test_accessing_valid_but_unset_attributes():
 
     scan = Scan(n_tx=5)
     scan.focus_distances
+
+
+def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
+    local_scan_args = scan_args.copy()
+    local_scan_args.pop("azimuth_angles", None)
+    local_scan_args.pop("t0_delays", None)
+    local_scan_args.pop("tx_apodizations", None)
+    local_scan_args.pop("focus_distances", None)
+    local_scan_args.pop("transmit_origins", None)
+    local_scan_args.pop("initial_times", None)
+    local_scan_args.pop("tgc_gain_curve", None)
+    local_scan_args.pop("tx_waveform_indices", None)
+
+    warnings = []
+
+    # Reset warning_once state to make this test deterministic.
+    zea.log._warned_locations.clear()
+
+    def _capture_warning(message, *args, **kwargs):
+        warnings.append(message)
+        return message
+
+    monkeypatch.setattr("zea.scan.log.warning", _capture_warning)
+
+    # Nothing should be warned at initialization, only on-demand when fallback
+    # properties are actually accessed.
+    scan = Scan(**local_scan_args)
+    assert len(warnings) == 0
+
+    for i in range(5):
+        scan.selected_transmits = slice(0, i + 1)
+        _ = scan.azimuth_angles
+        _ = scan.t0_delays
+        _ = scan.tx_apodizations
+        _ = scan.focus_distances
+        _ = scan.transmit_origins
+        _ = scan.initial_times
+        _ = scan.tgc_gain_curve
+        _ = scan.tx_waveform_indices
+
+    assert warnings.count("No ``azimuth_angles`` provided, using zeros") == 1
+    assert warnings.count("No ``t0_delays`` provided, using zeros") == 1
+    assert warnings.count("No ``tx_apodizations`` provided, using ones") == 1
+    assert warnings.count("No ``focus_distances`` provided, using zeros") == 1
+    assert warnings.count("No ``transmit_origins`` provided, using zeros") == 1
+    assert warnings.count("No ``initial_times`` provided, using zeros") == 1
+    assert warnings.count("No ``tgc_gain_curve`` provided, using ones") == 1
+    assert warnings.count("No ``tx_waveform_indices`` provided, using zeros") == 1
+
+
+def test_missing_defaults_warn_once_per_scan_instance(monkeypatch):
+    local_scan_args = scan_args.copy()
+    local_scan_args.pop("tx_waveform_indices", None)
+
+    warnings = []
+
+    zea.log._warned_locations.clear()
+
+    def _capture_warning(message, *args, **kwargs):
+        warnings.append(message)
+        return message
+
+    monkeypatch.setattr("zea.scan.log.warning", _capture_warning)
+
+    scan1 = Scan(**local_scan_args)
+    scan2 = Scan(**local_scan_args)
+
+    # First access in each instance should warn.
+    _ = scan1.tx_waveform_indices
+    _ = scan2.tx_waveform_indices
+
+    # Repeated access in same instance should not warn again.
+    _ = scan1.tx_waveform_indices
+    _ = scan2.tx_waveform_indices
+
+    assert warnings.count("No ``tx_waveform_indices`` provided, using zeros") == 2
 
 
 def test_scan_pickle():

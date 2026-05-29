@@ -464,6 +464,9 @@ class Spec:
 
         assert isinstance(group, h5py.Group), "group must be an h5py Group"
 
+        # Optional fields should only warn when persisting to disk, not on load.
+        self.warn_missing_optional_fields()
+
         field_metadata = getattr(self, "FIELD_METADATA", {})
 
         for field_name, field_info in self.SCHEMA.items():
@@ -1286,8 +1289,6 @@ class ScanSpec(Spec):
             if np.all(self.demodulation_frequency == self.demodulation_frequency[0]):
                 self.demodulation_frequency = self.demodulation_frequency[0]
 
-        self.warn_missing_optional_fields()
-
 
 @dataclass
 class ProbeSpec(Spec):
@@ -1446,8 +1447,6 @@ class Subject(Spec):
 
         if self.id is not None and not self.id.strip():
             raise ValueError("Subject ID cannot be an empty string")
-
-        self.warn_missing_optional_fields()
 
         if self.fat_percentage is not None and (
             self.fat_percentage < 0 or self.fat_percentage > 100
@@ -1729,8 +1728,6 @@ class MetadataSpec(Spec):
 
     def __post_init__(self):
         super().__post_init__()
-
-        self.warn_missing_optional_fields()
 
 
 @dataclass

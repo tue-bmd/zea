@@ -900,7 +900,7 @@ def _scan_bare(n_tx: int = 2, n_el: int = 4):
 
 
 class TestScanSpecSaveWarnings:
-    """log.warning calls emitted during ScanSpec / FileSpec construction."""
+    """log.warning calls emitted during save/serialization."""
 
     @pytest.mark.parametrize(
         "field",
@@ -913,6 +913,25 @@ class TestScanSpecSaveWarnings:
     def test_optional_scan_field_missing_warns(self, field):
         with patch("zea.log.warning") as mock_warn:
             ScanSpec(**_scan_bare())
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any(f"ScanSpec field '{field}' is not set" in m for m in messages)
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            f.name
+            for f in fields(ScanSpec)
+            if f.default is None and f.name in ScanSpec.FIELD_METADATA
+        ],
+    )
+    def test_optional_scan_field_missing_warns_on_save(self, field, tmp_path):
+        path = tmp_path / "scan_save_warns.hdf5"
+        with patch("zea.log.warning") as mock_warn:
+            File.create(
+                path,
+                data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+                scan=_scan_bare(n_tx=2, n_el=4),
+            )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any(f"ScanSpec field '{field}' is not set" in m for m in messages)
 
@@ -1008,16 +1027,29 @@ class TestScanSpecSaveWarnings:
                 metadata={"subject": {"type": "human"}},
             )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
-        assert any("Optional Subject field 'id' is not set" in m for m in messages)
+        assert not any("Optional Subject field 'id' is not set" in m for m in messages)
 
 
 class TestSubjectFieldWarnings:
-    """log.warning calls emitted when Subject optional fields are None."""
+    """Subject optional-field warning behavior."""
 
     @pytest.mark.parametrize("field", list(Subject.SCHEMA))
     def test_optional_subject_field_missing_warns(self, field):
         with patch("zea.log.warning") as mock_warn:
             Subject()
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any(f"Optional Subject field '{field}' is not set" in m for m in messages)
+
+    @pytest.mark.parametrize("field", list(Subject.SCHEMA))
+    def test_optional_subject_field_missing_warns_on_save(self, field, tmp_path):
+        path = tmp_path / "subject_save_warns.hdf5"
+        with patch("zea.log.warning") as mock_warn:
+            File.create(
+                path,
+                data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=2, n_tx=2, n_el=4),
+                metadata={"subject": {}},
+            )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any(f"Optional Subject field '{field}' is not set" in m for m in messages)
 
@@ -1035,7 +1067,7 @@ class TestSubjectFieldWarnings:
 
 
 class TestMetadataSpecFieldWarnings:
-    """log.warning calls emitted when MetadataSpec optional fields are None."""
+    """MetadataSpec optional-field warning behavior."""
 
     @pytest.mark.parametrize(
         "field",
@@ -1044,6 +1076,22 @@ class TestMetadataSpecFieldWarnings:
     def test_optional_metadata_field_missing_warns(self, field):
         with patch("zea.log.warning") as mock_warn:
             MetadataSpec()
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any(f"Optional MetadataSpec field '{field}' is not set" in m for m in messages)
+
+    @pytest.mark.parametrize(
+        "field",
+        [f.name for f in fields(MetadataSpec) if f.default is None],
+    )
+    def test_optional_metadata_field_missing_warns_on_save(self, field, tmp_path):
+        path = tmp_path / "metadata_save_warns.hdf5"
+        with patch("zea.log.warning") as mock_warn:
+            File.create(
+                path,
+                data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=2, n_tx=2, n_el=4),
+                metadata={},
+            )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any(f"Optional MetadataSpec field '{field}' is not set" in m for m in messages)
 

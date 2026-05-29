@@ -254,12 +254,17 @@ def warning(message, *args, **kwargs):
     return message
 
 
-def warning_once(message, *args, **kwargs):
-    """Prints a warning message only once per call location."""
+def warning_once(message, *args, key=None, **kwargs):
+    """Prints a warning message only once for a dedupe key.
+
+    By default, deduplication is per call location. A custom ``key`` can be
+    provided to scope once-only behavior (for example, per object instance).
+    """
     frame = inspect.stack()[1]
-    key = f"{frame.filename}:{frame.lineno}"
-    if key not in _warned_locations:
-        _warned_locations.add(key)
+    location_key = f"{frame.filename}:{frame.lineno}"
+    dedupe_key = location_key if key is None else (location_key, key)
+    if dedupe_key not in _warned_locations:
+        _warned_locations.add(dedupe_key)
         warning(message, *args, **kwargs)
     return message
 

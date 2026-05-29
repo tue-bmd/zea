@@ -634,7 +634,10 @@ class Scan(Parameters):
         of shape (n_tx,). These angles are often used in 3D imaging."""
         value = self._params.get("azimuth_angles")
         if value is None:
-            log.warning("No azimuth angles provided, using zeros")
+            log.warning_once(
+                "No azimuth angles provided, using zeros",
+                key=(id(self), "azimuth_angles"),
+            )
             return np.zeros(self.n_tx)
 
         return value[self.selected_transmits]
@@ -656,7 +659,10 @@ class Scan(Parameters):
         shape (n_tx, n_el), shifted such that the smallest delay is 0."""
         value = self._params.get("t0_delays")
         if value is None:
-            log.warning("No transmit delays provided, using zeros")
+            log.warning_once(
+                "No ``t0_delays`` provided, using zeros",
+                key=(id(self), "t0_delays"),
+            )
             return np.zeros((self.n_tx, self.n_el))
 
         return value[self.selected_transmits]
@@ -666,7 +672,10 @@ class Scan(Parameters):
         """Transmit apodizations of shape (n_tx, n_el)."""
         value = self._params.get("tx_apodizations")
         if value is None:
-            log.warning("No transmit apodizations provided, using ones")
+            log.warning_once(
+                "No ``tx_apodizations`` provided, using ones",
+                key=(id(self), "tx_apodizations"),
+            )
             return np.ones((self.n_tx, self.n_el))
 
         return value[self.selected_transmits]
@@ -676,7 +685,10 @@ class Scan(Parameters):
         """Focus distances in meters for each event of shape (n_tx,)."""
         value = self._params.get("focus_distances")
         if value is None:
-            log.warning("No focus distances provided, using zeros")
+            log.warning_once(
+                "No ``focus_distances`` provided, using zeros",
+                key=(id(self), "focus_distances"),
+            )
             return np.zeros(self.n_tx)
 
         return value[self.selected_transmits]
@@ -686,7 +698,10 @@ class Scan(Parameters):
         """Transmit origins of shape (n_tx, 3)."""
         value = self._params.get("transmit_origins")
         if value is None:
-            log.warning("No transmit origins provided, using zeros")
+            log.warning_once(
+                "No ``transmit_origins`` provided, using zeros",
+                key=(id(self), "transmit_origins"),
+            )
             return np.zeros((self.n_tx, 3))
 
         return value[self.selected_transmits]
@@ -696,7 +711,10 @@ class Scan(Parameters):
         """Initial times in seconds for each event of shape (n_tx,)."""
         value = self._params.get("initial_times")
         if value is None:
-            log.warning("No initial times provided, using zeros")
+            log.warning_once(
+                "No ``initial_times`` provided, using zeros",
+                key=(id(self), "initial_times"),
+            )
             return np.zeros(self.n_tx)
 
         return value[self.selected_transmits]
@@ -736,7 +754,10 @@ class Scan(Parameters):
         """Time gain compensation (TGC) curve of shape (n_ax,)."""
         value = self._params.get("tgc_gain_curve")
         if value is None:
-            log.warning("No TGC gain curve provided, using ones")
+            log.warning_once(
+                "No ``tgc_gain_curve`` provided, using ones",
+                key=(id(self), "tgc_gain_curve"),
+            )
             return np.ones(self.n_ax)
         return value[: self.n_ax]
 
@@ -745,7 +766,10 @@ class Scan(Parameters):
         """Indices of the waveform used for each transmit event of shape (n_tx,)."""
         value = self._params.get("tx_waveform_indices")
         if value is None:
-            log.warning("No transmit waveform indices provided, using zeros")
+            log.warning_once(
+                "No ``tx_waveform_indices`` provided, using zeros",
+                key=(id(self), "tx_waveform_indices"),
+            )
             return np.zeros(self.n_tx, dtype=int)
 
         return value[self.selected_transmits]
