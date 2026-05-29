@@ -145,7 +145,13 @@ config_schema = Schema(
         "data": data_schema,
         Optional("plot", default=plot_schema.validate({})): plot_schema,
         Optional("pipeline", default=pipeline_schema.validate({})): pipeline_schema,
-        Optional("scan", default=scan_schema.validate({})): scan_schema,
+        # Flat mapping of scan/probe/custom parameters that overwrite values
+        # loaded from the file (see ``File.load_parameters`` and
+        # ``Pipeline.prepare_parameters``).  Arbitrary keys are allowed.
+        Optional("parameters", default={}): dict,
+        # Deprecated alias for ``parameters``; still accepted for backward
+        # compatibility (migrated to ``parameters`` on load).
+        Optional("scan"): Or(None, dict),
         Optional("device", default="auto:1"): Or(
             "cpu",
             "gpu",
@@ -160,5 +166,8 @@ config_schema = Schema(
             None, list_of_positive_integers, positive_integer_and_zero
         ),
         Optional("git", default=None): Or(None, str),
-    }
+    },
+    # Allow arbitrary extra top-level keys; they are ignored by the workflow
+    # unless accessed manually from code (see redesign of Config).
+    ignore_extra_keys=True,
 )

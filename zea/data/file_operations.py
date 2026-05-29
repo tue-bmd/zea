@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from zea import Probe, Scan
+from zea import Parameters, Probe
 from zea.data.data_format import load_additional_elements, load_description
 from zea.data.datasets import Dataset
 from zea.data.file import File, load_file_all_data_types
@@ -43,7 +43,7 @@ def _safe_getattr(obj, name):
 
 def save_file(
     path,
-    scan: Scan,
+    scan: Parameters,
     probe: Probe,
     raw_data: np.ndarray = None,
     aligned_data: dict = None,
@@ -61,7 +61,7 @@ def save_file(
 
     Args:
         path (str, pathlike): The path to the hdf5 file.
-        scan (Scan): The scan object containing the parameters of the acquisition.
+        scan (Parameters): The parameters object containing the acquisition parameters.
         probe (Probe): The probe object containing the parameters of the probe.
         raw_data (np.ndarray): The data to save.
         aligned_data (np.ndarray, optional): Aligned data as a dict with ``"values"``
@@ -460,8 +460,8 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
     )
 
 
-def _all_tx_are_identical(scan: Scan):
-    """Checks if all transmits in a Scan object are identical."""
+def _all_tx_are_identical(scan: Parameters):
+    """Checks if all transmits in a Parameters object are identical."""
     attributes_to_check = [
         scan.polar_angles,
         scan.azimuth_angles,

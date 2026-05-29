@@ -1,12 +1,13 @@
-"""Structure containing parameters defining an ultrasound scan.
+"""Structure containing the parameters defining an ultrasound acquisition.
 
-This module provides the :class:`Scan` class, a flexible structure
-for managing all parameters related to an ultrasound scan acquisition.
+This module provides the :class:`Parameters` class, a flexible structure
+for managing all parameters related to an ultrasound acquisition (merged probe
+and scan parameters).
 
 Features
 ^^^^^^^^
 
-- **Flexible initialization:** The :class:`Scan` class supports lazy initialization,
+- **Flexible initialization:** The :class:`Parameters` class supports lazy initialization,
   allowing you to specify any combination of supported parameters. You can pass only
   the parameters you have, and the rest will be computed or set to defaults as needed.
 
@@ -36,7 +37,7 @@ Comparison to ``zea.Config`` and ``zea.Probe``
 
 - :class:`zea.probes.Probe`: Contains only probe-specific parameters (e.g., geometry, frequency).
 
-- :class:`zea.scan.Scan`: Combines all parameters relevant to an ultrasound acquisition,
+- :class:`zea.scan.Parameters`: Combines all parameters relevant to an ultrasound acquisition,
   including probe, acquisition, and scan region. It also provides automatic computation
   of derived properties and dependency management.
 
@@ -45,13 +46,13 @@ Example Usage
 
 .. doctest::
 
-    >>> from zea import Config, Probe, Scan
+    >>> from zea import Config, Probe, Parameters
 
-    >>> # Initialize Scan from a Probe's parameters
+    >>> # Initialize Parameters from a Probe's parameters
     >>> probe = Probe.from_name("verasonics_l11_4v")
-    >>> scan = Scan(
+    >>> parameters = Parameters(
     ...     probe_geometry=probe.probe_geometry,
-    ...     center_frequency=probe.center_frequency,
+    ...     center_frequency=probe.probe_center_frequency,
     ...     element_width=probe.element_width,
     ...     grid_size_z=256,
     ...     n_tx=11,
@@ -59,10 +60,10 @@ Example Usage
 
     >>> # Or initialize from a Config object
     >>> config = Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml")
-    >>> scan = Scan(n_tx=11, **config.scan)
+    >>> parameters = Parameters(n_tx=11, **config.parameters)
 
     >>> # Or manually specify parameters
-    >>> scan = Scan(
+    >>> parameters = Parameters(
     ...     grid_size_x=128,
     ...     grid_size_z=256,
     ...     xlims=(-0.02, 0.02),
@@ -77,12 +78,12 @@ Example Usage
     ... )
 
     >>> # Access a derived property (computed lazily)
-    >>> grid = scan.grid  # shape: (grid_size_z, grid_size_x, 3)
+    >>> grid = parameters.grid  # shape: (grid_size_z, grid_size_x, 3)
 
     >>> # Select a subset of transmit events
-    >>> _ = scan.set_transmits(3)  # Use 3 evenly spaced transmits
-    >>> _ = scan.set_transmits([0, 2, 4])  # Use specific transmit indices
-    >>> _ = scan.set_transmits("all")  # Use all transmits
+    >>> _ = parameters.set_transmits(3)  # Use 3 evenly spaced transmits
+    >>> _ = parameters.set_transmits([0, 2, 4])  # Use specific transmit indices
+    >>> _ = parameters.set_transmits("all")  # Use all transmits
 
 """
 
@@ -97,11 +98,24 @@ from zea.beamform.pixelgrid import (
     polar_pixel_grid,
 )
 from zea.display import compute_scan_convert_2d_coordinates
-from zea.internal.parameters import Parameters, cache_with_dependencies
+from zea.internal.parameters import BaseParameters, cache_with_dependencies
 
 
-class Scan(Parameters):
-    """Represents an ultrasound scan configuration with computed properties.
+class Parameters(BaseParameters):
+    """Represents a full ultrasound acquisition configuration with computed properties.
+
+    A :class:`Parameters` object holds **all** parameters relevant to an
+    acquisition — merged probe and scan parameters — and computes derived
+    quantities (grid, wavelength, pfield, scan-conversion coordinates, ...)
+    lazily with dependency tracking and caching.  Obtain one from a file via
+    :meth:`zea.data.file.File.load_parameters`.
+
+    The set of valid file-backed parameters is derived from
+    :class:`~zea.data.spec.ScanSpec` and :class:`~zea.data.spec.ProbeSpec`
+    (single source of truth), extended with recon/beamforming parameters that
+    are not stored in the file.  Arbitrary custom parameters may also be set;
+    they are stored as passthrough values and ignored by derivation
+    (see :class:`~zea.internal.parameters.BaseParameters`).
 
     Args:
         grid_size_x (int): Grid width in pixels. For a cartesian grid, this is the lateral (x)
@@ -182,6 +196,10 @@ class Scan(Parameters):
             if not provided.
     """
 
+    # Valid file-backed parameters mirror the scan/probe specs (ScanSpec +
+    # ProbeSpec); a regression test enforces that every spec field appears here
+    # (see tests/test_parameters.py::test_valid_params_cover_specs).  The
+    # remaining entries are recon/beamforming parameters not stored in the file.
     VALID_PARAMS = {
         # beamforming related parameters
         "grid_size_x": {"type": int},
@@ -202,6 +220,11 @@ class Scan(Parameters):
             "type": (type(None), str, int, list, slice, np.ndarray),
             "default": None,
         },
+        # probe identification (from ProbeSpec)
+        "name": {"type": str},
+        "type": {"type": str},
+        "probe_center_frequency": {"type": float},
+        "element_height": {"type": float},
         # acquisition parameters
         "sound_speed": {"type": float, "default": 1540.0},
         "sampling_frequency": {"type": float},

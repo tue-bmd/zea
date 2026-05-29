@@ -20,8 +20,9 @@ data:
   # envelope_data, image, image_sc)
   to_dtype: image_sc
 
-# The scan section contains the parameters pertaining to the reconstruction.
-scan:
+# The parameters section contains scan/probe/custom parameters that overwrite
+# values loaded from the data file (flat mapping).
+parameters:
   # The range of theta values in radians for scan conversion (null, [min, max]).
   theta_range: [-0.78, 0.78] # [-45, 45] in rads
   # The range of rho values in meters for scan conversion (null, [min, max]).

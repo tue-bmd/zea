@@ -1,11 +1,11 @@
 """
 Parameter management system for ultrasound imaging.
 
-This module provides the :class:`Parameters` base class, which implements
+This module provides the :class:`BaseParameters` base class, which implements
 dependency-tracked, type-checked, and cacheable parameter logic for scientific
-applications, primarily to support :class:`zea.Scan`.
+applications, primarily to support :class:`zea.Parameters`.
 
-See the Parameters class docstring for details on features and usage.
+See the BaseParameters class docstring for details on features and usage.
 """
 
 import functools
@@ -26,7 +26,7 @@ def cache_with_dependencies(*deps):
         func._dependencies = deps
 
         @functools.wraps(func)
-        def wrapper(self: Parameters):
+        def wrapper(self: "BaseParameters"):
             self._assert_dependencies_met(func.__name__)
 
             if func.__name__ in self._cache:
@@ -80,11 +80,19 @@ class NoDependencyError(ValueError):
         super().__init__(f"'{name}' is not a computed property with dependencies.")
 
 
-class Parameters(ZeaObject):
+class BaseParameters(ZeaObject):
     """Base class for parameters with dependencies.
 
     This class provides a robust parameter management system,
     supporting dependency tracking, lazy evaluation, and type validation.
+
+    **Custom (passthrough) parameters:** any keyword that is *not* listed in
+    ``VALID_PARAMS`` is stored separately in ``self._custom_params``.  Custom
+    parameters are never type-checked, never participate in dependency
+    derivation, and never invalidate cached computed properties.  They are kept
+    as-is so they can be passed through to, for example, a pipeline call.  This
+    lets a :class:`BaseParameters` object double as a container for arbitrary
+    manual parameters alongside the validated, derivable ones.
 
     **Features:**
 
@@ -127,7 +135,7 @@ class Parameters(ZeaObject):
 
     .. doctest::
 
-        >>> class MyParams(Parameters):
+        >>> class MyParams(BaseParameters):
         ...     VALID_PARAMS = {
         ...         "a": {"type": int, "default": 1},
         ...         "b": {"type": float, "default": 2.0},
@@ -187,6 +195,9 @@ class Parameters(ZeaObject):
 
         # Internal state
         self._params = {}
+        # Custom (passthrough) parameters that are not part of VALID_PARAMS.
+        # These are stored as-is and ignored by dependency derivation.
+        self._custom_params = {}
         self._properties = self.get_properties()
         self._cache = {}
         self._dependency_versions = {}
@@ -270,14 +281,14 @@ class Parameters(ZeaObject):
         )
 
     def copy(self):
-        """Return a deep copy of the Parameters object."""
-        return self.__class__(**deepcopy(self._params))
+        """Return a deep copy of the parameters object (including custom params)."""
+        return self.__class__(**deepcopy(self._params), **deepcopy(self._custom_params))
 
     @property
     def serialized(self):
         """Compute the checksum of the object only if not already done"""
         if self._serialized is None:
-            self._serialized = serialize_elements([self._params])
+            self._serialized = serialize_elements([self._params, self._custom_params])
         return self._serialized
 
     @classmethod
@@ -323,6 +334,10 @@ class Parameters(ZeaObject):
         # Check for existence of _params to avoid issues during unpickling
         return "_params" in self.__dict__ and name in self._params
 
+    def _has_custom_param(self, name):
+        """Check if a custom (passthrough) parameter is set."""
+        return "_custom_params" in self.__dict__ and name in self._custom_params
+
     def __getattr__(self, item):
         """Handle attribute access for parameters only.
 
@@ -332,6 +347,10 @@ class Parameters(ZeaObject):
         # Return parameter value if it exists
         if self._has_param(item):
             return self._params[item]
+
+        # Return custom (passthrough) parameter value if it exists
+        if self._has_custom_param(item):
+            return self._custom_params[item]
 
         # If a class-level property exists (e.g. a computed property),
         # call its descriptor to compute and return the value. This
@@ -367,6 +386,17 @@ class Parameters(ZeaObject):
                 f"To change '{key}', set one or more of its leaf parameters: {leaf_params}"
             )
 
+        # Give clear error message on assignment to read-only (plain) properties
+        if isinstance(class_attr, property) and key not in self.VALID_PARAMS:
+            raise AttributeError(f"Cannot set read-only property '{key}'.")
+
+        # Any key not in VALID_PARAMS is stored as a custom (passthrough) parameter.
+        # Custom params are never type-checked and never participate in derivation.
+        if key not in self.VALID_PARAMS:
+            self._custom_params[key] = value
+            self._serialized = None  # see core object
+            return
+
         # Validate new value
         value = self._validate_parameter(key, value)
 
@@ -379,8 +409,11 @@ class Parameters(ZeaObject):
     def update(self, force=False, **kwargs):
         """Update parameters, skipping values that haven't changed unless forced.
 
-        Only valid parameters (those listed in ``VALID_PARAMS``) are considered;
-        unknown keys are silently ignored.
+        Validated parameters (those listed in ``VALID_PARAMS``) are type-checked
+        and may invalidate cached computed properties.  Any other key is stored
+        as a custom (passthrough) parameter, except names that collide with a
+        method or computed property of the class, which are silently ignored
+        (they cannot be overridden).
 
         Args:
             force: If True, set every parameter unconditionally (triggers cache
@@ -389,6 +422,13 @@ class Parameters(ZeaObject):
         """
         for key, new_val in kwargs.items():
             if key not in self.VALID_PARAMS:
+                # Cannot override methods or (computed/plain) properties.
+                class_attr = getattr(self.__class__, key, None)
+                if callable(class_attr) or isinstance(class_attr, property):
+                    continue
+                # Genuine custom passthrough parameter.
+                self._custom_params[key] = new_val
+                self._serialized = None
                 continue
 
             if not force:
@@ -423,10 +463,13 @@ class Parameters(ZeaObject):
             setattr(self, key, new_val)
 
     def __delattr__(self, name):
-        # Allow deletion of parameters, but not properties
+        # Allow deletion of parameters and custom params, but not properties
         if name in self._params:
             del self._params[name]
             self._invalidate(name)
+        elif name in self._custom_params:
+            del self._custom_params[name]
+            self._serialized = None
         elif name in self.VALID_PARAMS:
             raise ValueError(f"Cannot delete parameter '{name}' because it is not set.")
         else:
@@ -559,7 +602,8 @@ class Parameters(ZeaObject):
         # Determine which keys to include
         param_keys = set(self._params.keys())
         property_keys = set(self._properties)
-        all_keys = param_keys | property_keys
+        custom_keys = set(self._custom_params.keys())
+        all_keys = param_keys | property_keys | custom_keys
 
         if include == "all":
             keys = all_keys
@@ -616,6 +660,8 @@ class Parameters(ZeaObject):
             if v is None:
                 continue
             param_lines.append(f"{k}={self._fmt_value(k, v)}")
+        for k, v in self._custom_params.items():
+            param_lines.append(f"{k}={self._fmt_value(k, v)}")
         param_str = ", ".join(param_lines)
         return f"{self.__class__.__name__}({param_str})"
 
@@ -624,6 +670,8 @@ class Parameters(ZeaObject):
         for k, v in self._params.items():
             if v is None:
                 continue
+            param_lines.append(f"    {k}={self._fmt_value(k, v)}")
+        for k, v in self._custom_params.items():
             param_lines.append(f"    {k}={self._fmt_value(k, v)}")
         param_str = ",\n".join(param_lines)
         return f"{self.__class__.__name__}(\n{param_str}\n)"
