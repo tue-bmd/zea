@@ -1,5 +1,5 @@
 import json
-from typing import TYPE_CHECKING, Any, Dict, List, Union
+from typing import Any, Dict, List, Union
 
 import keras
 import numpy as np
@@ -29,11 +29,6 @@ from zea.ops.ultrasound import (
 )
 from zea.scan import Parameters
 from zea.utils import FunctionTimer
-
-if TYPE_CHECKING:
-    # Imported lazily inside functions at runtime to avoid a circular import
-    # (zea.probes imports ProbeSpec from zea.data.spec, which can pull in this module).
-    from zea.probes import Probe
 
 
 @ops_registry("pipeline")
