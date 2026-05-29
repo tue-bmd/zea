@@ -78,7 +78,7 @@ internally routed through each operation in the pipeline, which picks the parame
 outputs until the final output is produced.
 
 Additionally, all these input arguments should be converted to tensors at the start, as the operations and pipelines are
-implemented with the machine learning backend of choice (JAX, TensorFlow, or PyTorch). One can use the :meth:`Pipeline.prepare_parameters` method to convert commonly used objects such as :class:`~zea.Scan` and :class:`~zea.Probe` into a flat dictionary of tensors that can be directly passed to the pipeline.
+implemented with the machine learning backend of choice (JAX, TensorFlow, or PyTorch). One can use the :meth:`Pipeline.prepare_parameters` method to convert a :class:`~zea.Parameters` object (the merged probe + scan parameters) into a flat dictionary of tensors that can be directly passed to the pipeline.
 
 See the tutorial notebook :doc:`../notebooks/pipeline/zea_pipeline_example` for a complete example including data loading, parameter preparation, and pipeline execution on real ultrasound data. Below a minimal stand-alone snippet is shown
 to illustrate the calling convention:

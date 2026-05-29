@@ -27,7 +27,7 @@ from zea.ops.ultrasound import (
     ReshapeGrid,
     TOFCorrection,
 )
-from zea.scan import Scan
+from zea.scan import Parameters
 from zea.utils import FunctionTimer
 
 if TYPE_CHECKING:
@@ -323,7 +323,7 @@ class Pipeline:
                     f"[zea.Pipeline] Operation '{operation.__class__.__name__}' "
                     f"requires input key '{exc.args[0]}', "
                     "but it was not provided in the inputs.\n"
-                    "Check whether the objects (such as `zea.Scan`) passed to "
+                    "Check whether the objects (such as `zea.Parameters`) passed to "
                     "`pipeline.prepare_parameters()` contain all required keys.\n"
                     f"Current list of all passed keys: {list(inputs.keys())}\n"
                     f"Valid keys for this pipeline: {self.valid_keys}"
@@ -352,13 +352,13 @@ class Pipeline:
             **inputs: Tensor inputs forwarded to the operations.
         """
 
-        if any(key in inputs for key in ["probe", "scan", "config"]) or any(
+        if any(key in inputs for key in ["probe", "scan", "config", "parameters"]) or any(
             isinstance(arg, ZEAObject) for arg in inputs.values()
         ):
             raise ValueError(
-                "Probe, Scan and Config objects should be first processed with "
+                "Parameters (and Probe/Config) objects should be first processed with "
                 "`Pipeline.prepare_parameters` before calling the pipeline. "
-                "e.g. inputs = Pipeline.prepare_parameters(probe, scan, config)"
+                "e.g. inputs = pipeline.prepare_parameters(parameters, **manual_params)"
             )
 
         if any(isinstance(arg, str) for arg in inputs.values()):
@@ -712,76 +712,59 @@ class Pipeline:
 
     def prepare_parameters(
         self,
-        probe: "Probe" = None,
-        scan: Scan = None,
-        config: Config = None,
+        parameters: Parameters = None,
         device: Union[str, None] = None,
-        **kwargs,
+        **manual,
     ):
-        """Prepare Probe, Scan and Config objects for the pipeline.
+        """Prepare a :class:`~zea.scan.Parameters` object for the pipeline.
 
-        Serializes `zea.core.Object` instances and converts them to
-        dictionary of tensors.
+        Converts the (validated and derived) parameters needed by this
+        pipeline's operations into a dictionary of tensors, then overlays any
+        manually supplied parameters (e.g. ``config.parameters`` or ad-hoc
+        keyword arguments). Manual parameters take priority over the values in
+        ``parameters``.
 
         Args:
-            probe: Probe object.
-            scan: Scan object.
-            config: Config object.
-            **kwargs: Additional keyword arguments to be included in the inputs.
+            parameters: :class:`~zea.scan.Parameters` object. Only the keys
+                this pipeline ``needs`` (and that are not provided manually) are
+                converted, so derivation is lazy and minimal.
+            device: Device to place the tensors on. Defaults to the pipeline
+                device.
+            **manual: Additional parameters to include in the inputs (converted
+                to tensors). These overwrite values taken from ``parameters``.
 
         Returns:
             dict: Dictionary of inputs with all values as tensors.
+
+        Example:
+            .. code-block:: python
+
+                tensors = pipeline.prepare_parameters(parameters, **config.parameters)
+                outputs = pipeline(data=raw_data, **tensors)
         """
         _device = device if device is not None else self.device
 
-        # Initialize dictionaries for probe, scan, and config
-        probe_dict, scan_dict, config_dict = {}, {}, {}
+        params_dict = {}
+        manual_keys = set(manual.keys())
 
-        config_keys, kwargs_keys = set(), set()
-        if config is not None:
-            config_keys = set(config.keys())
-        kwargs_keys = set(kwargs.keys())
-
-        # Process args to extract Probe, Scan, and Config objects
-        if probe is not None:
-            from zea.probes import Probe
-
-            assert isinstance(probe, Probe), (
-                f"Expected an instance of `zea.probes.Probe`, got {type(probe)}"
+        if parameters is not None:
+            assert isinstance(parameters, Parameters), (
+                f"Expected an instance of `zea.scan.Parameters`, got {type(parameters)}"
             )
+            # Only convert keys the pipeline needs and that are not overridden
+            # manually, so we avoid deriving unnecessary parameters.
+            needs_keys = self.needs_keys - manual_keys
             with backend.device(_device):
-                probe_dict = probe.to_tensor(keep_as_is=self.static_params)
+                params_dict = parameters.to_tensor(
+                    include=needs_keys, keep_as_is=self.static_params
+                )
 
-        if scan is not None:
-            assert isinstance(scan, Scan), (
-                f"Expected an instance of `zea.scan.Scan`, got {type(scan)}"
-            )
-            needs_keys = self.needs_keys - config_keys - kwargs_keys
-            with backend.device(_device):
-                scan_dict = scan.to_tensor(include=needs_keys, keep_as_is=self.static_params)
-
-        if config is not None:
-            assert isinstance(config, Config), (
-                f"Expected an instance of `zea.config.Config`, got {type(config)}"
-            )
-            with backend.device(_device):
-                config_dict.update(config.to_tensor(keep_as_is=self.static_params))
-
-        # Convert all kwargs to tensors
+        # Convert all manual params to tensors
         with backend.device(_device):
-            tensor_kwargs = dict_to_tensor(kwargs, keep_as_is=self.static_params)
+            tensor_manual = dict_to_tensor(manual, keep_as_is=self.static_params)
 
-        # combine probe, scan, config and kwargs
-        # explicitly so we know which keys overwrite which
-        # kwargs > config > scan > probe
-        inputs = {
-            **probe_dict,
-            **scan_dict,
-            **config_dict,
-            **tensor_kwargs,
-        }
-
-        return inputs
+        # Manual parameters overwrite values taken from the parameters object.
+        return {**params_dict, **tensor_manual}
 
 
 @ops_registry("map")

@@ -16,7 +16,7 @@ A small set of probes is pre-defined and can be retrieved by name:
 
     >>> from zea import Probe
     >>> probe = Probe.from_name("verasonics_l11_4v")
-    >>> probe.center_frequency
+    >>> probe.probe_center_frequency
     np.float32(6250000.0)
     >>> probe.n_el
     128
@@ -64,7 +64,7 @@ is left as ``None``:
     >>> probe = Probe(
     ...     name="my_probe",
     ...     type="linear",
-    ...     center_frequency=np.float32(5e6),
+    ...     probe_center_frequency=np.float32(5e6),
     ...     probe_geometry=create_probe_geometry(n_el=64, pitch=0.3e-3),
     ... )
     >>> probe.n_el
@@ -149,6 +149,24 @@ def create_probe_geometry(n_el, pitch):
 
 
 class Probe(ProbeSpec):
+    # Legacy probe groups (zea < redesign) stored the probe centre frequency
+    # under "center_frequency"; it now lives under "probe_center_frequency"
+    # (renamed to avoid colliding with the scan transmit centre frequency).
+    _LEGACY_KEY_ALIASES = {"center_frequency": "probe_center_frequency"}
+
+    @classmethod
+    def _remap_legacy_keys(cls, params: dict) -> dict:
+        """Return a copy of ``params`` with legacy probe keys renamed.
+
+        Used when loading probe groups from older HDF5 files so they remain
+        compatible with the current :class:`~zea.data.spec.ProbeSpec` schema.
+        """
+        params = dict(params)
+        for old_key, new_key in cls._LEGACY_KEY_ALIASES.items():
+            if old_key in params and new_key not in params:
+                params[new_key] = params.pop(old_key)
+        return params
+
     def get_parameters(self):
         return {key: getattr(self, key) for key in self.SCHEMA}
 
@@ -161,8 +179,8 @@ class Probe(ProbeSpec):
         if self.probe_geometry is not None:
             n_el = self.probe_geometry.shape[0]
             parts.append(f"n_el={n_el}")
-        if self.center_frequency is not None:
-            parts.append(f"fc={float(self.center_frequency) / 1e6:.2f} MHz")
+        if self.probe_center_frequency is not None:
+            parts.append(f"fc={float(self.probe_center_frequency) / 1e6:.2f} MHz")
         if self.bandwidth_percent is not None:
             parts.append(f"bw={float(self.bandwidth_percent):.1f}%")
         if self.element_width is not None:
@@ -264,7 +282,7 @@ class Probe(ProbeSpec):
         # Legacy file support: HDF5 files may store float fields as integers,
         # and scalar fields as 1-element arrays.
         _scalar_float_fields = (
-            "center_frequency",
+            "probe_center_frequency",
             "bandwidth_percent",
             "element_width",
             "element_height",
@@ -297,7 +315,7 @@ class Verasonics_l11_4v(Probe):
         super().__init__(
             name="verasonics_l11_4v",
             type="linear",
-            center_frequency=center_frequency,
+            probe_center_frequency=center_frequency,
             bandwidth_percent=bandwidth_percent,
             probe_geometry=probe_geometry,
         )
@@ -320,7 +338,7 @@ class Verasonics_l11_5v(Probe):
         super().__init__(
             name="verasonics_l11_5v",
             type="linear",
-            center_frequency=center_frequency,
+            probe_center_frequency=center_frequency,
             bandwidth_percent=bandwidth_percent,
             probe_geometry=probe_geometry,
         )
@@ -343,7 +361,7 @@ class Esaote_sll1543(Probe):
         super().__init__(
             name="esaote_sll1543",
             type="linear",
-            center_frequency=center_frequency,
+            probe_center_frequency=center_frequency,
             bandwidth_percent=bandwidth_percent,
             probe_geometry=probe_geometry,
         )
