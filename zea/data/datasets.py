@@ -42,6 +42,9 @@ import tqdm
 
 from zea import log
 from zea.data.file import File
+from zea.datapaths import format_data_path
+from zea.internal.cache import cache_output
+from zea.internal.core import hash_elements
 from zea.internal.preset_utils import (
     HF_DATASETS_DIR,
     HF_PREFIX,
@@ -49,9 +52,6 @@ from zea.internal.preset_utils import (
     _hf_parse_path,
     _hf_resolve_path,
 )
-from zea.datapaths import format_data_path
-from zea.internal.cache import cache_output
-from zea.internal.core import hash_elements
 from zea.internal.utils import calculate_file_hash, reduce_to_signature
 from zea.io_lib import search_file_tree
 from zea.tools.hf import HFPath
@@ -376,10 +376,7 @@ class Folder:
             log.warning(f"Unable to write validation flag: {e}")
 
     def __repr__(self):
-        return (
-            f"<zea.data.datasets.Folder at 0x{id(self):x}: "
-            f"{self.n_files} files, folder='{self.folder_path}'>"
-        )
+        return f"Folder(n_files={self.n_files}, folder='{self.folder_path}')"
 
     def __str__(self):
         return f"Folder with {self.n_files} files in '{self.folder_path}'"
@@ -549,7 +546,7 @@ class Dataset(H5FileHandleCache):
         return sum(self.get_file(file_path).n_frames for file_path in self.file_paths)
 
     def __repr__(self):
-        return f"<zea.data.datasets.Dataset at 0x{id(self):x}: {self.n_files} files>"
+        return f"Dataset(n_files={self.n_files})"
 
     def __str__(self):
         return f"Dataset with {self.n_files} files"

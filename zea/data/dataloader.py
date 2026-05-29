@@ -684,10 +684,10 @@ class Dataloader:
 
     def __repr__(self):
         return (
-            f"<Dataloader: {len(self.source)} samples, "
+            f"Dataloader(n_samples={len(self.source)}, "
             f"batch_size={self.batch_size}, "
             f"key='{self.source.key}', "
-            f"threads={self.num_threads}>"
+            f"threads={self.num_threads})"
         )
 
     @staticmethod

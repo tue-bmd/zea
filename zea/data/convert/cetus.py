@@ -55,7 +55,9 @@ from tqdm import tqdm
 
 from zea import log
 from zea.data.convert.utils import (
+    check_output_dir_ownership,
     download_from_girder,
+    require_output_dir_ownership,
     sitk_load,
     upload_dataset_to_hf,
     write_dataset_card,
@@ -127,10 +129,10 @@ def _detect_background_level(volume: np.ndarray) -> float:
 def process_cetus(source_path, output_path, overwrite=False):
     """Convert a single CETUS patient time-point to a zea HDF5 file.
 
-    Each file stores the 3D B-mode volume as ``image_sc`` (scan-converted image).
+    Each file stores the 3D B-mode volume as ``image`` (scan-converted image).
     If a corresponding ground truth segmentation file exists, it is stored as a
-    ``Segmentation`` map under ``data/segmentation``. Both maps include a
-    per-voxel coordinate grid (shape ``(1, D, H, W, 3)``) derived from the NIfTI
+    ``Segmentation`` map under ``data/segmentation``. Both maps share a
+    per-voxel coordinate grid (shape ``(D, H, W, 3)``) derived from the NIfTI
     voxel spacing.
 
     Patient ID and citation are stored in the ``metadata`` group.
@@ -194,10 +196,10 @@ def process_cetus(source_path, output_path, overwrite=False):
     h_range = np.arange(H, dtype=np.float32) * voxel_spacing[1]
     w_range = np.arange(W, dtype=np.float32) * voxel_spacing[2]
     d_grid, h_grid, w_grid = np.meshgrid(d_range, h_range, w_range, indexing="ij")
-    coordinates = np.stack([d_grid, h_grid, w_grid], axis=-1)[np.newaxis]  # (1, D, H, W, 3)
+    coordinates = np.stack([d_grid, h_grid, w_grid], axis=-1)  # (D, H, W, 3)
 
     data = {
-        "image_sc": {
+        "image": {
             "values": image_sc.astype(np.float32),
             "coordinates": coordinates,
         }
@@ -314,6 +316,8 @@ def convert_cetus(args):
     cetus_source_folder = Path(args.src)
     cetus_output_folder = Path(args.dst)
 
+    check_output_dir_ownership(cetus_output_folder, _HF_REPO_ID)
+
     # Optionally download the dataset
     if getattr(args, "download", False):
         cetus_source_folder = download_cetus(cetus_source_folder)
@@ -411,6 +415,7 @@ def upload_cetus(output_folder: str | Path, revision: str) -> None:  # pragma: n
         output_folder: Root folder containing the train/val/test splits.
         revision: Target branch name on the Hub (must not be ``"main"``).
     """
+    require_output_dir_ownership(output_folder, _HF_REPO_ID)
     upload_dataset_to_hf(
         folder=output_folder,
         repo_id=_HF_REPO_ID,
@@ -428,6 +433,7 @@ _HF_REPO_ID = "zeahub/cetus-miccai-2014"
 _DATASET_CARD = """\
 ---
 license: cc-by-nc-sa-4.0
+zea_repo_id: zeahub/cetus-miccai-2014
 task_categories:
   - image-segmentation
 tags:
@@ -483,10 +489,12 @@ test/
 Each HDF5 file follows the
 [zea data format](https://github.com/tue-bmd/zea) and contains:
 
-- `data/image_sc` - B-mode volume in dB, shape `(1, depth, height, width)`
-- `non_standard_elements/segmentation` - binary LV mask, same shape
-- `non_standard_elements/voxel_spacing` - `(x, y, z)` in metres
-- `non_standard_elements/patient_id`, `time_point`, `citation`, `license`
+- `data/image/values` - B-mode volume in dB, shape `(1, depth, height, width)`
+- `data/image/coordinates` - voxel positions in metres, shape `(depth, height, width, 3)`
+- `data/segmentation/values` - binary LV endocardium mask, shape `(1, depth, height, width, 1)`
+- `data/segmentation/labels` - `["endocardium"]`
+- `metadata/subject/id` - patient name (e.g. `patient01`)
+- `metadata/annotations/label` - time point: `["ED"]` or `["ES"]`
 
 ## License
 

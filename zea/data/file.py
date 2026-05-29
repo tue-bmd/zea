@@ -1,4 +1,4 @@
-"""zea H5 file functionality."""
+"""zea data file (HDF5)."""
 
 import enum
 from pathlib import Path
@@ -18,12 +18,44 @@ from zea.internal.utils import deprecated, reduce_to_signature
 from zea.scan import Scan
 
 if TYPE_CHECKING:
-    # Imported lazily inside functions at runtime to avoid a circular import
-    # (zea.probes imports ProbeSpec from zea.data.spec, which loads this module).
     from zea.probes import Probe
 
 
-class GroupProxy:
+class _StringDataset:
+    """Thin wrapper around an h5py string Dataset that auto-decodes bytes on read.
+
+    h5py returns variable-length or fixed-length string datasets as ``bytes``
+    objects.  This wrapper intercepts ``__getitem__`` and converts any bytes
+    elements to ``str`` so callers always receive a ``numpy.ndarray`` with
+    ``dtype=numpy.str_``.
+    """
+
+    __slots__ = ("_ds",)
+
+    def __init__(self, ds: h5py.Dataset):
+        self._ds = ds
+
+    def __getitem__(self, key):
+        data = self._ds[key]
+        if isinstance(data, np.ndarray):
+            decoded = np.array(
+                [v.decode() if isinstance(v, bytes) else str(v) for v in data.flat],
+                dtype=np.str_,
+            ).reshape(data.shape)
+            return decoded
+        return data.decode() if isinstance(data, bytes) else str(data)
+
+    def __getattr__(self, name: str):
+        return getattr(self._ds, name)
+
+    def __len__(self):
+        return len(self._ds)
+
+    def __repr__(self):
+        return f"<StringDataset shape={self._ds.shape} dtype=str>"
+
+
+class _GroupProxy:
     """Lazy proxy for an h5py.Group that exposes children as attributes.
 
     Datasets are returned as-is (h5py.Dataset supports slicing without
@@ -37,6 +69,10 @@ class GroupProxy:
             f.data.raw_data[:, :n_tx]
             # nested groups work too
             f.data.image.values[0]
+
+    String datasets are automatically wrapped in :class:`_StringDataset` so
+    slicing always returns ``numpy.ndarray`` with ``dtype=numpy.str_`` rather
+    than raw ``bytes``.
     """
 
     __slots__ = ("_group",)
@@ -53,14 +89,16 @@ class GroupProxy:
                 f"Available keys: {list(self._group.keys())}"
             )
         if isinstance(child, h5py.Group):
-            return GroupProxy(child)
+            return _GroupProxy(child)
+        if isinstance(child, h5py.Dataset) and h5py.check_string_dtype(child.dtype):
+            return _StringDataset(child)
         return child  # h5py.Dataset – supports slicing natively
 
     def __dir__(self):
         return list(self._group.keys())
 
     def __repr__(self):
-        return f"<GroupProxy '{self._group.name}' keys={list(self._group.keys())}>"
+        return repr(self._group)
 
     def keys(self):
         """Return the keys of the underlying group."""
@@ -111,14 +149,14 @@ class Track:
         object.__setattr__(self, "_probe", probe)
 
     @property
-    def data(self) -> GroupProxy:
+    def data(self) -> _GroupProxy:
         """Lazy proxy for this track's ``data`` group."""
         if "data" not in self._group:
             raise KeyError(
                 f"Track {self._index} has no 'data' group. "
                 f"Available keys: {list(self._group.keys())}"
             )
-        return GroupProxy(self._group["data"])
+        return _GroupProxy(self._group["data"])
 
     @property
     def scan(self) -> "Scan":
@@ -189,8 +227,9 @@ class Track:
         return self._timestamps
 
     def __repr__(self) -> str:
-        label_part = f" label={self._label!r}" if self._label is not None else ""
-        return f"<Track index={self._index}{label_part} keys={list(self._group.keys())}>"
+        label_part = f' "{self._label}"' if self._label is not None else ""
+        keys = list(self._group.get("data", {}).keys())
+        return f"<Track[{self._index}]{label_part} data={keys}>"
 
 
 def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
@@ -574,7 +613,7 @@ class File(h5py.File):
             for track, ts in zip(tracks, all_timestamps):
                 object.__setattr__(track, "_timestamps", ts)
         else:
-            log.warning(
+            log.warning_once(
                 "`track_schedule` was not found in the file; cannot compute track timestamps."
             )
 
@@ -596,7 +635,20 @@ class File(h5py.File):
                 print(f.track_labels)  # ['focused', 'planewave']
                 focused, planewave = f.tracks  # safe — same order
         """
-        return [t.label for t in self.tracks]
+        if "tracks" not in self:
+            return []
+        tracks_group = self["tracks"]
+        labels = []
+        i = 0
+        while f"track_{i}" in tracks_group:
+            tg = tracks_group[f"track_{i}"]
+            if "label" in tg:
+                raw = tg["label"][()]
+                labels.append(raw.decode() if isinstance(raw, bytes) else str(raw))
+            else:
+                labels.append(None)
+            i += 1
+        return labels
 
     def get_track(self, label: str) -> "Track":
         """Return the track with the given label.
@@ -814,7 +866,7 @@ class File(h5py.File):
         return cls(str(path), mode="r")
 
     @property
-    def data(self) -> GroupProxy:
+    def data(self) -> _GroupProxy:
         """Lazy proxy for the ``data`` group of a single-track file.
 
         Supports both the new ``tracks/track_0/data/`` layout and the
@@ -842,10 +894,10 @@ class File(h5py.File):
         if "tracks" in self:
             track0 = self["tracks"].get("track_0")
             if track0 is not None and "data" in track0:
-                return GroupProxy(track0["data"])
+                return _GroupProxy(track0["data"])
         # Legacy format
         if super().__contains__("data"):
-            return GroupProxy(self["data"])
+            return _GroupProxy(self["data"])
         raise KeyError("No 'data' group found in this file.")
 
     @property
@@ -1325,10 +1377,21 @@ class File(h5py.File):
         return FileSpec.from_hdf5(self)
 
     def __repr__(self):
-        return f'<zea.File at 0x{id(self):x} ("{Path(self.filename).name}" mode={self.mode})>'
-
-    def __str__(self):
-        return f"zea HDF5 File: '{self.path.name}' (mode={self.mode})"
+        name = Path(self.filename).name
+        try:
+            n = self._n_tracks
+            if n > 1:
+                labels = self.track_labels
+                label_str = ", ".join(
+                    f'"{label}"' if label else str(i) for i, label in enumerate(labels)
+                )
+                track_info = f"{n} tracks: {label_str}"
+            else:
+                track_info = f"{n} track"
+        except Exception:
+            track_info = ""
+        mode_info = f"mode {self.mode}"
+        return f'<File "{name}" ({mode_info}, {track_info})>'
 
     def copy_key(self, key: str, dst: "File"):
         """Copy a specific key to another file.

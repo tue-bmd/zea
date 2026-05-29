@@ -124,6 +124,16 @@ def unzip(src: str | Path, dataset: str) -> Path:
             log.info(f"Found Batch1, Batch2, Batch3, Batch4 and MeasurementsList.csv in {src}.")
         return unzip_dir
 
+    # CAMUS special cases: Girder download produces a database_nifti sub-folder,
+    # or the user may have extracted patient* folders directly into src.
+    if dataset == "camus":
+        if (src / "database_nifti").exists():
+            log.info(f"Found database_nifti folder in {src}.")
+            return src / "database_nifti"
+        if any(src.glob("patient*")):
+            log.info(f"Found patient folders directly in {src}.")
+            return src
+
     zip_path = src / zip_name
     if not zip_path.exists():
         raise FileNotFoundError(f"Could not find {zip_name} or {folder_name} folder in {src}.")
@@ -299,6 +309,78 @@ def download_from_girder(  # pragma: no cover
 # ---------------------------------------------------------------------------
 # HuggingFace Hub helpers
 # ---------------------------------------------------------------------------
+
+
+def check_output_dir_ownership(folder: "str | Path", repo_id: str) -> None:
+    """Raise if *folder* already contains data from a different dataset.
+
+    The check is based on the ``zea_repo_id`` field written into the dataset
+    card (``README.md``) by each converter.  A directory is considered *owned*
+    by a specific dataset when its README.md contains ``zea_repo_id: <repo_id>``.
+
+    * **Empty or non-existent directory** → passes (first-time run).
+    * **Directory with matching README.md** → passes (re-run of same dataset).
+    * **Directory with mismatched README.md** → raises :class:`FileExistsError`.
+    * **Directory with HDF5 files but no README.md** → raises :class:`FileExistsError`.
+
+    Args:
+        folder: Output directory to inspect.
+        repo_id: Expected dataset repository ID, e.g. ``"zeahub/picmus"``.
+
+    Raises:
+        FileExistsError: If the directory belongs to a different dataset.
+    """
+    folder = Path(folder)
+    readme = folder / "README.md"
+
+    if not folder.exists():
+        return  # fresh directory — OK
+
+    if readme.exists():
+        if f"zea_repo_id: {repo_id}" not in readme.read_text():
+            raise FileExistsError(
+                f"Output directory '{folder}' already contains data from a different dataset "
+                f"(README.md does not declare 'zea_repo_id: {repo_id}'). "
+                "Use a separate output directory for each dataset."
+            )
+        return  # correct dataset — OK (re-run)
+
+    # No README.md yet — fail only if HDF5 files are present (stale/foreign data)
+    if any(folder.rglob("*.hdf5")):
+        raise FileExistsError(
+            f"Output directory '{folder}' already contains HDF5 files but no dataset "
+            "README.md.  Use a separate, empty output directory for each dataset, "
+            "or delete this directory to start fresh."
+        )
+
+
+def require_output_dir_ownership(folder: "str | Path", repo_id: str) -> None:
+    """Raise if *folder* does not contain a verified dataset card for *repo_id*.
+
+    Used as a pre-flight check before uploading to HuggingFace Hub to prevent
+    accidentally uploading files from a different dataset.
+
+    Args:
+        folder: Directory to check.
+        repo_id: Expected dataset repository ID, e.g. ``"zeahub/picmus"``.
+
+    Raises:
+        FileNotFoundError: If no README.md is found.
+        ValueError: If the README.md does not match *repo_id*.
+    """
+    folder = Path(folder)
+    readme = folder / "README.md"
+
+    if not readme.exists():
+        raise FileNotFoundError(
+            f"No README.md found in '{folder}'. Run the conversion step before uploading."
+        )
+    if f"zea_repo_id: {repo_id}" not in readme.read_text():
+        raise ValueError(
+            f"'{folder}/README.md' does not declare 'zea_repo_id: {repo_id}'. "
+            f"This directory does not appear to contain the '{repo_id}' dataset. "
+            "Make sure you are uploading the correct directory."
+        )
 
 
 def write_dataset_card(folder: str | Path, card_content: str) -> Path:  # pragma: no cover

@@ -593,18 +593,29 @@ class Parameters(ZeaObject):
 
         return tensor_dict
 
+    @staticmethod
+    def _fmt_value(k: str, v) -> str:
+        """Format a single parameter value for display."""
+        if isinstance(v, np.ndarray):
+            return f"array({v.dtype} {v.shape})"
+        if isinstance(v, list):
+            if len(v) > 8:
+                head = ", ".join(repr(x) for x in v[:4])
+                tail = ", ".join(repr(x) for x in v[-2:])
+                return f"[{head}, ..., {tail}] (len={len(v)})"
+            return repr(v)
+        # Show Hz-based fields in MHz for readability
+        _freq_keys = {"center_frequency", "sampling_frequency", "demodulation_frequency"}
+        if k in _freq_keys and isinstance(v, (int, float, np.floating, np.integer)):
+            return f"{float(v) / 1e6:.4g} MHz"
+        return repr(v)
+
     def __repr__(self):
         param_lines = []
         for k, v in self._params.items():
             if v is None:
                 continue
-
-            # Handle arrays by showing their shape instead of content
-            if isinstance(v, np.ndarray):
-                param_lines.append(f"{k}=array(shape={v.shape})")
-            else:
-                param_lines.append(f"{k}={repr(v)}")
-
+            param_lines.append(f"{k}={self._fmt_value(k, v)}")
         param_str = ", ".join(param_lines)
         return f"{self.__class__.__name__}({param_str})"
 
@@ -613,13 +624,7 @@ class Parameters(ZeaObject):
         for k, v in self._params.items():
             if v is None:
                 continue
-
-            # Handle arrays by showing their shape instead of content
-            if isinstance(v, np.ndarray):
-                param_lines.append(f"    {k}=array(shape={v.shape})")
-            else:
-                param_lines.append(f"    {k}={v}")
-
+            param_lines.append(f"    {k}={self._fmt_value(k, v)}")
         param_str = ",\n".join(param_lines)
         return f"{self.__class__.__name__}(\n{param_str}\n)"
 

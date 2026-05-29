@@ -16,7 +16,13 @@ import SimpleITK as sitk
 import yaml
 
 from zea.data.convert.images import convert_image_dataset
-from zea.data.convert.utils import load_avi, sitk_load, unzip
+from zea.data.convert.utils import (
+    check_output_dir_ownership,
+    load_avi,
+    require_output_dir_ownership,
+    sitk_load,
+    unzip,
+)
 from zea.data.convert.verasonics import VerasonicsFile
 from zea.data.file import File
 from zea.func.tensor import translate
@@ -383,10 +389,11 @@ def create_camus_test_data(src):
     Creates test data representing the CAMUS dataset.
     Makes a folder CAMUS_public with in it, database_nifti and database_split folders
     database_nifti folder:
-        patient0001 folder:
-            file.nii.gz (SimpleITK image with random data and metadata)
-        patient0002 folder:
-            ...
+        patient0050 folder:
+            Info_2CH.cfg
+            patient0050_2CH_half_sequence.nii.gz
+            patient0050_2CH_half_sequence_gt.nii.gz
+        ...
     database_split folder:
         can be empty
 
@@ -399,13 +406,21 @@ def create_camus_test_data(src):
     os.mkdir(src / "CAMUS_public" / "database_split")
 
     data_folder = src / "CAMUS_public" / "database_nifti"
+    n_frames = 10
     for i in [50, 420, 470]:  # Patients to be put in train, val, test
-        patient_folder = data_folder / f"patient{i:04d}"
+        patient_name = f"patient{i:04d}"
+        patient_folder = data_folder / patient_name
         os.mkdir(patient_folder)
-        filepath = patient_folder / f"patient{i:04d}_half_sequence.nii.gz"
+
+        # Write Info_2CH.cfg (required by process_camus)
+        cfg_path = patient_folder / "Info_2CH.cfg"
+        cfg_path.write_text(
+            f"ED: 1\nES: {n_frames}\nNbFrame: {n_frames}\n"
+            "Sex: F\nAge: 56\nImageQuality: Good\nEF: 54\nFrameRate: 48.4\n"
+        )
 
         # Create some data that does not crash the
-        # transform_sc_image_to_polar function in camus.py
+        # _build_polar_image function in camus.py
         img = np.zeros((32, 32), dtype=float)
         active_cols = rng.choice(32, size=30, replace=False)
         active_cols.sort()
@@ -415,7 +430,7 @@ def create_camus_test_data(src):
             end = min(32, start + length)
             img[start:end, c] = rng.uniform(0.2, 1.0, end - start)
         img_set = []
-        for _ in range(10):
+        for _ in range(n_frames):
             noise = rng.normal(0, 0.02, (32, 32))
             img += noise
             img = np.clip(img, 0, None)
@@ -423,8 +438,9 @@ def create_camus_test_data(src):
         img = np.stack(img_set, axis=0)
         img[:, 0, :] = 0.0
 
-        # Create SimpleITK image with metadata
-        image = sitk.GetImageFromArray(img)
+        # Write B-mode half-sequence (view = 2CH)
+        filepath = patient_folder / f"{patient_name}_2CH_half_sequence.nii.gz"
+        image = sitk.GetImageFromArray(img.astype(np.float32))
         image.SetOrigin((0.0, 0.0, 0.0))
         image.SetSpacing((1.0, 1.0, 1.0))
         image.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
@@ -432,6 +448,16 @@ def create_camus_test_data(src):
         image.SetMetaData("Modality", "US")
         image.SetMetaData("StudyDate", "01011970")
         sitk.WriteImage(image, str(filepath))
+
+        # Write ground-truth segmentation (labels 0-3, same spatial shape)
+        gt = np.zeros((n_frames, 32, 32), dtype=np.uint8)
+        gt[0, 8:24, 8:24] = 1  # LV_endo at ED frame
+        gt[n_frames - 1, 10:22, 10:22] = 1  # LV_endo at ES frame
+        gt_image = sitk.GetImageFromArray(gt)
+        gt_image.SetSpacing((1.0, 1.0, 1.0))
+        sitk.WriteImage(
+            gt_image, str(patient_folder / f"{patient_name}_2CH_half_sequence_gt.nii.gz")
+        )
 
     return ["--no_hyperthreading"]  # for code coverage to hit
 
@@ -673,25 +699,26 @@ def verify_converted_camus_test_data(dst):
     Args:
         dst (Path): Path to the destination directory where converted test data is located.
     """
-    splits = ["train", "val", "test"]
     expected_patients = {
-        "train": ["patient0050_half_sequence.hdf5"],
-        "val": ["patient0420_half_sequence.hdf5"],
-        "test": ["patient0470_half_sequence.hdf5"],
+        "train": ["patient0050_2CH_half_sequence.hdf5"],
+        "val": ["patient0420_2CH_half_sequence.hdf5"],
+        "test": ["patient0470_2CH_half_sequence.hdf5"],
     }
-    for split in splits:
+    for split, expected_files in expected_patients.items():
         split_dir = dst / split
         assert split_dir.exists(), f"Missing directory: {split_dir}"
         h5_files = list(split_dir.rglob("*.hdf5"))
         h5_filenames = [f.name for f in h5_files]
-        assert set(h5_filenames) == set(expected_patients[split]), (
+        assert set(h5_filenames) == set(expected_files), (
             f"Mismatch in converted hdf5 files for split {split}"
         )
 
         # Load the hdf5 file and check for expected datasets
         for h5_file in h5_files:
             with File(h5_file, "r") as f:
-                assert "data" in f, f"Missing 'data' in {h5_file}"
+                assert "data/image" in f, f"Missing 'data/image' in {h5_file}"
+                assert "data/image_polar" in f, f"Missing 'data/image_polar' in {h5_file}"
+                assert "data/segmentation" in f, f"Missing 'data/segmentation' in {h5_file}"
                 f.validate()
 
 
@@ -716,8 +743,8 @@ def verify_converted_cetus_test_data(dst):
     sample = dst / "train" / "patient01" / "patient01_ED.hdf5"
     with File(sample, "r") as f:
         assert "data" in f, "Missing 'data' group"
-        img = f.data.image_sc.values[:]
-        assert img.ndim == 4, f"Expected 4-D image_sc, got {img.ndim}"
+        img = f.data.image.values[:]
+        assert img.ndim == 4, f"Expected 4-D image, got {img.ndim}"
         f.validate()
         assert "data/segmentation" in f
         assert "metadata/subject" in f
@@ -970,3 +997,95 @@ def test_verasonics_compression_flag_respected(tmp_path):
     with _h5py.File(path, "r") as hf:
         ds = hf["tracks/track_0/data/raw_data"]
         assert ds.compression is None, "dataset should have no compression"
+
+
+def test_check_output_dir_ownership_empty_dir(tmp_path):
+    """test check_output_dir_ownership with empty directory (should pass)."""
+
+    output_dir = tmp_path / "empty_output"
+    # Should not raise for non-existent directory
+    check_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+def test_check_output_dir_ownership_matching_readme(tmp_path):
+    """test check_output_dir_ownership with matching README.md (should pass on re-run)."""
+
+    output_dir = tmp_path / "existing_output"
+    output_dir.mkdir()
+
+    # Write a README with matching repo_id
+    readme = output_dir / "README.md"
+    readme.write_text("# Dataset\nzea_repo_id: zeahub/test_dataset\n")
+
+    # Should not raise when repo_id matches
+    check_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+def test_check_output_dir_ownership_mismatched_readme(tmp_path):
+    """test check_output_dir_ownership with mismatched README.md (should raise)."""
+
+    output_dir = tmp_path / "mismatched_output"
+    output_dir.mkdir()
+
+    # Write a README with different repo_id
+    readme = output_dir / "README.md"
+    readme.write_text("# Dataset\nzea_repo_id: zeahub/different_dataset\n")
+
+    # Should raise FileExistsError when repo_id doesn't match
+    with pytest.raises(FileExistsError, match="already contains data from a different dataset"):
+        check_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+def test_check_output_dir_ownership_hdf5_no_readme(tmp_path):
+    """test check_output_dir_ownership with HDF5 files but no README (should raise)."""
+
+    output_dir = tmp_path / "stale_output"
+    output_dir.mkdir()
+
+    # Create a dummy HDF5 file but no README
+    hdf5_file = output_dir / "data.hdf5"
+    hdf5_file.touch()
+
+    # Should raise FileExistsError when HDF5 files exist without README
+    with pytest.raises(FileExistsError, match="already contains HDF5 files but no dataset README"):
+        check_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+def test_require_output_dir_ownership_missing_readme(tmp_path):
+    """test require_output_dir_ownership with no README.md (should raise FileNotFoundError)."""
+
+    output_dir = tmp_path / "missing_readme"
+    output_dir.mkdir()
+
+    # Should raise FileNotFoundError when README.md is missing
+    with pytest.raises(FileNotFoundError, match="No README.md found"):
+        require_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+def test_require_output_dir_ownership_matching_readme(tmp_path):
+    """test require_output_dir_ownership with matching README.md (should pass)."""
+
+    output_dir = tmp_path / "valid_output"
+    output_dir.mkdir()
+
+    # Write a README with matching repo_id
+    readme = output_dir / "README.md"
+    readme.write_text("# Dataset\nzea_repo_id: zeahub/test_dataset\n")
+
+    # Should not raise when repo_id matches
+    require_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+def test_require_output_dir_ownership_mismatched_readme(tmp_path):
+    """test require_output_dir_ownership with mismatched README.md (should raise ValueError)."""
+
+    output_dir = tmp_path / "wrong_dataset_output"
+    output_dir.mkdir()
+
+    # Write a README with different repo_id
+    readme = output_dir / "README.md"
+    readme.write_text("# Dataset\nzea_repo_id: zeahub/different_dataset\n")
+
+    # Should raise ValueError when repo_id doesn't match
+    with pytest.raises(ValueError, match="does not declare 'zea_repo_id"):
+        require_output_dir_ownership(output_dir, "zeahub/test_dataset")

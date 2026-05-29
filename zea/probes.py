@@ -152,6 +152,23 @@ class Probe(ProbeSpec):
     def get_parameters(self):
         return {key: getattr(self, key) for key in self.SCHEMA}
 
+    def __repr__(self) -> str:
+        parts = []
+        if self.name is not None:
+            parts.append(f"name='{self.name}'")
+        if self.type is not None:
+            parts.append(f"type='{self.type}'")
+        if self.probe_geometry is not None:
+            n_el = self.probe_geometry.shape[0]
+            parts.append(f"n_el={n_el}")
+        if self.center_frequency is not None:
+            parts.append(f"fc={float(self.center_frequency) / 1e6:.2f} MHz")
+        if self.bandwidth_percent is not None:
+            parts.append(f"bw={float(self.bandwidth_percent):.1f}%")
+        if self.element_width is not None:
+            parts.append(f"pitch={float(self.element_width) * 1e3:.3f} mm")
+        return f"Probe({', '.join(parts)})"
+
     @classmethod
     def from_name(cls, probe_name, **kwargs) -> "Probe":
         """Create a probe from its name.
@@ -185,10 +202,84 @@ class Probe(ProbeSpec):
         else:
             return value
 
+    @staticmethod
+    def get_pitch(probe_geometry: np.ndarray) -> float | None:
+        """Compute the pitch (centre-to-centre element spacing) in metres from
+        the probe geometry.
+
+        Returns ``None`` when the pitch is not defined for the geometry (fewer
+        than 2 elements, or not a 1-D / linear array). Raises :class:`ValueError`
+        when the array looks like a ULA but the element positions are not
+        uniformly spaced, to surface likely data errors rather than silently
+        returning ``None``.
+        """
+
+        n_el = probe_geometry.shape[0]
+        if n_el < 2:
+            raise ValueError(f"Cannot compute pitch: probe has fewer than 2 elements (n_el={n_el})")
+
+        # Only valid for 1-D (linear) arrangements – all elements must lie on the x-axis
+        # (y == 0 and z == 0 for every element).
+        if not (np.allclose(probe_geometry[:, 1], 0) and np.allclose(probe_geometry[:, 2], 0)):
+            raise ValueError(
+                "Cannot compute pitch: probe geometry is not 1-D (linear array). "
+                "Element positions must have y=0 and z=0 for all elements."
+            )
+
+        spacings = np.diff(probe_geometry[:, 0])
+        if not np.allclose(spacings, spacings[0], rtol=1e-3):
+            raise ValueError(
+                "Cannot compute pitch: element x-positions are not uniformly spaced. "
+                f"Min spacing: {spacings.min():.4e} m, max: {spacings.max():.4e} m."
+            )
+
+        return float(spacings[0])
+
+    @property
+    def pitch(self) -> float | None:
+        """Centre-to-centre element spacing in metres, derived from :attr:`probe_geometry`.
+
+        Raises :class:`ValueError` when:
+
+        * :attr:`probe_geometry` is not set,
+        * the probe has fewer than 2 elements, or
+        * the elements are not arranged along a single axis (not a 1-D / linear array).
+        * the spacing is non-uniform (elements are present but clearly not a ULA),
+            to surface likely data errors rather than silently returning ``None``.
+
+        """
+        if self.probe_geometry is None:
+            raise ValueError("Cannot compute pitch: probe_geometry is not set")
+
+        return self.get_pitch(self.probe_geometry)
+
+    @property
+    def kerf(self) -> float | None:
+        """Gap between elements in metres, derived from :attr:`element_width` and :attr:`pitch`."""
+        if self.element_width is not None and self.pitch is not None:
+            return self.pitch - self.element_width
+        return None
+
     def __post_init__(self):
-        # Legacy file support
-        if self.center_frequency is not None:
-            self.center_frequency = self._legacy_int_to_float(self.center_frequency)
+        # Legacy file support: HDF5 files may store float fields as integers,
+        # and scalar fields as 1-element arrays.
+        _scalar_float_fields = (
+            "center_frequency",
+            "bandwidth_percent",
+            "element_width",
+            "element_height",
+            "lens_sound_speed",
+            "lens_thickness",
+        )
+        for _field in _scalar_float_fields:
+            _val = getattr(self, _field, None)
+            if _val is not None:
+                if isinstance(_val, np.ndarray) and _val.size == 1:
+                    _val = _val.ravel()[0]
+                setattr(self, _field, self._legacy_int_to_float(_val))
+        _val = getattr(self, "probe_geometry", None)
+        if _val is not None:
+            setattr(self, "probe_geometry", self._legacy_int_to_float(_val))
         super().__post_init__()
 
 

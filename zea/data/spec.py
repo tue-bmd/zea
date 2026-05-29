@@ -522,6 +522,21 @@ class Spec:
         """Get the dtype of a field."""
         return cls.SCHEMA[field_name]["dtype"]
 
+    def __repr__(self) -> str:
+        parts = []
+        for field_name, field_info in self.SCHEMA.items():
+            value = getattr(self, field_name, None)
+            if value is None:
+                continue
+            nested_spec = field_info.get("spec")
+            if nested_spec is not None:
+                parts.append(f"{field_name}={value!r}")
+            elif isinstance(value, np.ndarray):
+                parts.append(f"{field_name}=array({value.dtype} {value.shape})")
+            else:
+                parts.append(f"{field_name}={value!r}")
+        return f"{self.__class__.__name__}({', '.join(parts)})"
+
 
 @dataclass
 class Map(Spec):
@@ -683,6 +698,22 @@ class Segmentation(BooleanMap):
             across all frames.
         labels: The labels corresponding to the segmentation values, where each unique value
             in the values corresponds to a label in this list of shape ``(n_labels,)`` and type str.
+
+    .. note::
+        To indicate that certain frames have no segmentation, add an explicit
+        ``"unannotated"`` entry to ``labels`` and set ``values[..., unannotated_idx]`` to
+        ``True`` for those frames (with all other label channels set to ``False``).  This
+        keeps the shape uniform across frames while clearly distinguishing genuinely
+        annotated frames from frames that were not labelled.  For example::
+
+            labels = np.array(["unannotated", "LV_endo", "LV_myo", "LA"])
+            values = np.zeros((n_frames, H, W, 4), dtype=bool)
+            # mark all frames as unannotated by default
+            values[:, :, :, 0] = True
+            # for annotated frames, set unannotated channel to False
+            # and the appropriate label channel to True
+            values[ed_idx, :, :, 0] = False
+            values[ed_idx, :, :, 1:] = segmentation_mask  # shape (H, W, 3)
     """
 
     SCHEMA = {
@@ -1340,50 +1371,6 @@ class ProbeSpec(Spec):
         """Number of transducer elements, derived from :attr:`probe_geometry`."""
         if self.probe_geometry is not None:
             return int(self.probe_geometry.shape[0])
-        return None
-
-    @property
-    def pitch(self) -> float | None:
-        """Centre-to-centre element spacing in metres, derived from :attr:`probe_geometry`.
-
-        Returns ``None`` when:
-
-        * :attr:`probe_geometry` is not set,
-        * the probe has fewer than 2 elements,
-        * the elements are not arranged along a single axis (not a 1-D / linear array), or
-        * the element positions are not uniformly spaced.
-
-        Raises :class:`ValueError` if the spacing is non-uniform (elements are present but
-        clearly not a ULA), to surface likely data errors rather than silently returning None.
-        """
-        if self.probe_geometry is None:
-            return None
-
-        n_el = self.probe_geometry.shape[0]
-        if n_el < 2:
-            return None
-
-        # Only valid for 1-D (linear) arrangements – all elements must lie on the x-axis
-        # (y == 0 and z == 0 for every element).
-        if not (
-            np.allclose(self.probe_geometry[:, 1], 0) and np.allclose(self.probe_geometry[:, 2], 0)
-        ):
-            return None
-
-        spacings = np.diff(self.probe_geometry[:, 0])
-        if not np.allclose(spacings, spacings[0], rtol=1e-3):
-            raise ValueError(
-                "Cannot compute pitch: element x-positions are not uniformly spaced. "
-                f"Min spacing: {spacings.min():.4e} m, max: {spacings.max():.4e} m."
-            )
-
-        return float(spacings[0])
-
-    @property
-    def kerf(self) -> float | None:
-        """Gap between elements in metres, derived from :attr:`element_width` and :attr:`pitch`."""
-        if self.element_width is not None and self.pitch is not None:
-            return self.pitch - self.element_width
         return None
 
     def __post_init__(self):
