@@ -405,8 +405,12 @@ class BaseParameters(ZeaObject):
         # Invalidate cache for this parameter if it is also a computed property
         self._invalidate(key)
 
-    def update(self, force=False, **kwargs):
-        """Update parameters, skipping values that haven't changed unless forced.
+    def update(self, params=None, *, force=False, **kwargs):
+        """Update parameters from a mapping and/or keyword arguments.
+
+        Mirrors ``dict.update``: accepts an optional positional mapping
+        (e.g. ``config.parameters``) and/or keyword arguments. Keyword arguments
+        take precedence over the mapping on key collisions.
 
         Validated parameters (those listed in ``VALID_PARAMS``) are type-checked
         and may invalidate cached computed properties.  Any other key is stored
@@ -415,11 +419,15 @@ class BaseParameters(ZeaObject):
         (they cannot be overridden).
 
         Args:
+            params: Optional mapping of parameters to set.
             force: If True, set every parameter unconditionally (triggers cache
                 invalidation even when the value is unchanged).  Default is False,
                 which skips unchanged values.
+            **kwargs: Parameters to set as keyword arguments.
         """
-        for key, new_val in kwargs.items():
+        merged = dict(params) if params else {}
+        merged.update(kwargs)
+        for key, new_val in merged.items():
             if key not in self.VALID_PARAMS:
                 # Cannot override methods or (computed/plain) properties.
                 class_attr = getattr(self.__class__, key, None)
