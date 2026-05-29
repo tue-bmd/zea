@@ -88,7 +88,7 @@ these sequences contain parameters that may not be expressed by a single :class:
 or are intended to be processed with different :class:`~zea.Pipeline`\s — for example,
 swapping between focused B-mode and plane-wave Doppler pulses.  Rather than splitting these into separate files, 
 ``zea`` can store them as **Tracks**: self-contained bundles of raw data and scan parameters
-in a single HDF5 file. Each track will contain its own :class:`~zea.Scan` object, containing the parameters
+in a single HDF5 file, with a shared :class:`~zea.Probe` and metadata. Each track will contain its own :class:`~zea.Scan` object, containing the parameters
 necessary to beamform the raw data in that track. This allows us to specify a :class:`~zea.Pipeline`
 *per-track*, which can be applied independently to each frame in that track.
 Global timing information can be stored in the optional ``track_schedule`` parameter, which 
