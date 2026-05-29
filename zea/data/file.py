@@ -360,6 +360,7 @@ def _probe_supplement_dict(probe_dict: "dict | None") -> dict:
 
 def _build_scan_spec(scan_dict: dict) -> "ScanSpec":
     """Build a validated :class:`~zea.data.spec.ScanSpec` from a raw scan dict."""
+    scan_dict = _reformat_waveforms(scan_dict)
     filtered = {k: v for k, v in scan_dict.items() if k in ScanSpec.SCHEMA}
     return ScanSpec(**filtered)
 

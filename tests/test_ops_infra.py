@@ -23,7 +23,7 @@ from zea.ops.pipeline import (
     pipeline_to_yaml,
 )
 from zea.probes import Probe
-from zea.scan import Scan
+from zea.scan import Parameters
 
 from . import DEFAULT_TEST_SEED
 
@@ -359,11 +359,15 @@ def test_pipeline_validation():
         _ = ops.Pipeline(operations=operations)
 
 
-def test_pipeline_with_scan_probe_config():
-    """Tests the Pipeline with Scan, Probe, and Config objects as inputs."""
+def test_pipeline_with_parameters():
+    """Tests the Pipeline with a Parameters object as input.
 
-    probe = Probe(probe_geometry=np.zeros((128, 3)))
-    scan = Scan(
+    ``prepare_parameters`` only converts the keys a pipeline ``needs`` (plus any
+    manually supplied params), so parameters that no operation requires are not
+    forwarded.
+    """
+
+    scan = Parameters(
         n_tx=128,
         n_ax=256,
         n_el=128,
@@ -371,25 +375,27 @@ def test_pipeline_with_scan_probe_config():
         center_frequency=5.0,
         sampling_frequency=5.0,
         xlims=(-2e-3, 2e-3),
+        probe_geometry=np.zeros((128, 3)),
     )
 
     operations = [MultiplyOperation(), AddOperation()]
     pipeline = ops.Pipeline(operations=operations)
 
-    parameters = pipeline.prepare_parameters(probe, scan)
+    parameters = pipeline.prepare_parameters(scan)
     result = pipeline(**parameters, x=2, y=3)
 
     assert "z" in result
-    assert "probe_geometry" in result  # Check if we parsed the probe object correctly
-    assert "n_tx" not in result  # n_tx is not needed in the pipeline
+    # n_tx and probe_geometry are not needed by these operations, so they are
+    # not forwarded by prepare_parameters.
+    assert "n_tx" not in result
+    assert "probe_geometry" not in result
 
     # Now let's use n_tx, such that it has to be in the pipeline
     pipeline.append(AddTransmitsOperation())
-    parameters = pipeline.prepare_parameters(probe, scan)
+    parameters = pipeline.prepare_parameters(scan)
     result = pipeline(**parameters, x=2, y=3)
 
     assert "z" in result
-    assert "probe_geometry" in result  # Check if we parsed the probe object correctly
     assert "n_tx" in result  # now we actually need to have n_tx in the result
 
 
@@ -731,7 +737,7 @@ def get_probe():
 
     return Probe(
         probe_geometry=probe_geometry,
-        center_frequency=3.125e6,
+        probe_center_frequency=3.125e6,
     )
 
 
@@ -760,13 +766,13 @@ def get_scan(ultrasound_probe, grid_size_x=None, grid_size_z=None):
         probe_geometry=probe_geometry, polar_angles=angles, sound_speed=sound_speed
     )
 
-    return Scan(
+    return Parameters(
         grid_size_x=grid_size_x,
         grid_size_z=grid_size_z,
         n_tx=n_tx,
         n_ax=n_ax,
         n_el=n_el,
-        center_frequency=ultrasound_probe.center_frequency / 100,
+        center_frequency=ultrasound_probe.probe_center_frequency / 100,
         sampling_frequency=12.5e6 / 100,
         probe_geometry=probe_geometry,
         t0_delays=t0_delays,
@@ -834,7 +840,7 @@ def ultrasound_scatterers():
 def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers, with_batch_dim):
     """Tests the simulator operation."""
     pipeline = ops.Pipeline([ops.Simulate()], with_batch_dim=with_batch_dim)
-    parameters = pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+    parameters = pipeline.prepare_parameters(ultrasound_scan)
 
     if not with_batch_dim:
         # remove batch_dim of scatterers for pipeline without batch dimension
@@ -863,14 +869,14 @@ def test_default_ultrasound_pipeline(
     """Tests the default ultrasound pipeline."""
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
-    parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+    parameters = default_pipeline.prepare_parameters(ultrasound_scan)
     output_default = default_pipeline(
         **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
 
-    parameters = patched_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+    parameters = patched_pipeline.prepare_parameters(ultrasound_scan)
 
     output_patched = patched_pipeline(
         **parameters,
@@ -894,14 +900,14 @@ def test_default_ultrasound_pipeline(
     )
 
 
-def test_pipeline_parameter_tracing(ultrasound_scan: Scan):
+def test_pipeline_parameter_tracing(ultrasound_scan: Parameters):
     """Tests that the pipeline can run without parameters that are not needed as input because they
     are computed inside the pipeline."""
 
     pipeline = ops.Pipeline([ops.Demodulate(), ops.TOFCorrection()])
     ultrasound_scan._params.pop("n_ch", None)  # remove a parameter that is not needed
     ultrasound_scan._params.pop("demodulation_frequency", None)
-    params = pipeline.prepare_parameters(scan=ultrasound_scan)
+    params = pipeline.prepare_parameters(ultrasound_scan)
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     data = rng.standard_normal(
         (1, ultrasound_scan.n_tx, ultrasound_scan.n_ax, ultrasound_scan.n_el, 1)

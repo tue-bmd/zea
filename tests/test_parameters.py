@@ -1,6 +1,6 @@
-"""Tests for the Parameters base class.
+"""Tests for the BaseParameters base class.
 
-This test suite verifies the following features of the Parameters system:
+This test suite verifies the following features of the BaseParameters system:
 
 - Type validation and error handling for parameter assignment
 - Dependency tracking and lazy computation of properties
@@ -19,12 +19,12 @@ import pytest
 
 from zea.internal.parameters import (
     MissingDependencyError,
-    Parameters,
+    BaseParameters,
     cache_with_dependencies,
 )
 
 
-class DummyCircularParameters(Parameters):
+class DummyCircularParameters(BaseParameters):
     """A simple test class with a circular dependency."""
 
     VALID_PARAMS = {
@@ -40,7 +40,7 @@ class DummyCircularParameters(Parameters):
         return self.computed1
 
 
-class DummyInvalidParameters(Parameters):
+class DummyInvalidParameters(BaseParameters):
     """A simple test class with an invalid parameter type."""
 
     VALID_PARAMS = {
@@ -56,7 +56,7 @@ class DummyInvalidParameters(Parameters):
         return self.computed1
 
 
-class DummyParameters(Parameters):
+class DummyParameters(BaseParameters):
     """A simple test class with parameters and computed properties.
 
     This class is used for testing the Parameter framework with simple
@@ -137,8 +137,8 @@ class DummyParameters(Parameters):
         return base[1] + self.param6
 
 
-class DummyArrayParameters(Parameters):
-    """Minimal class for testing ndarray handling in Parameters.update()."""
+class DummyArrayParameters(BaseParameters):
+    """Minimal class for testing ndarray handling in BaseParameters.update()."""
 
     VALID_PARAMS = {
         "arr": {"type": np.ndarray},
@@ -152,7 +152,7 @@ class DummyArrayParameters(Parameters):
         return np.sum(self.arr)
 
 
-class DummyObjectParameters(Parameters):
+class DummyObjectParameters(BaseParameters):
     """Minimal class for testing non-ndarray equality handling in update()."""
 
     VALID_PARAMS = {
@@ -186,17 +186,22 @@ def test_catch_invalid_dependency():
 
 
 def test_type_validation_on_init():
-    """Test that invalid parameter names and types raise errors on init."""
-    with pytest.raises(ValueError, match="Invalid parameter: invalid_param"):
-        DummyParameters(param1=1, param2=2, invalid_param=3)
+    """Unknown params become custom passthrough; known params are still type-checked."""
+    # Unknown parameter is stored as a custom (passthrough) parameter, not rejected.
+    p = DummyParameters(param1=1, param2=2, invalid_param=3)
+    assert p.invalid_param == 3
+    assert "invalid_param" not in p._params
+    assert p._custom_params["invalid_param"] == 3
+    # Known parameters with the wrong type still raise.
     with pytest.raises(TypeError, match="Parameter 'param4' expected type float"):
         DummyParameters(param1=1, param2=2, param3=1500.0, param4="not_a_float")
 
 
 def test_type_validation_on_set(dummy_params):
-    """Test that setting invalid parameter names/types after init raises errors."""
-    with pytest.raises(ValueError, match="Invalid parameter: invalid_param"):
-        dummy_params.invalid_param = 42
+    """Setting an unknown attribute stores it as a custom parameter (no error)."""
+    dummy_params.invalid_param = 42
+    assert dummy_params.invalid_param == 42
+    assert dummy_params._custom_params["invalid_param"] == 42
     with pytest.raises(TypeError, match="Parameter 'param3' expected type float"):
         dummy_params.param3 = "not_a_float"
 
@@ -273,7 +278,7 @@ def test_to_tensor_includes_all(dummy_params: DummyParameters):
     )
 
 
-def test_to_tensor_excludes(dummy_params: Parameters):
+def test_to_tensor_excludes(dummy_params: BaseParameters):
     """Test that to_tensor excludes specified keys."""
     # Exclude computed1 and param2
     tensors = dummy_params.to_tensor(exclude=["computed1", "param2"])
@@ -328,7 +333,7 @@ def test_to_tensor_partial_computed_subset(dummy_params):
 
 
 def test_repr_and_str(dummy_params):
-    """Test __repr__ and __str__ output for Parameters."""
+    """Test __repr__ and __str__ output for BaseParameters."""
     r = repr(dummy_params)
     s = str(dummy_params)
     assert "DummyParameters" in r
@@ -421,10 +426,13 @@ def test_update_with_changed_value_invalidates_cache(dummy_params):
     assert "computed3" not in dummy_params._cache
 
 
-def test_update_ignores_unknown_keys(dummy_params):
-    """Test update ignores unknown keys without creating attributes."""
+def test_update_stores_unknown_keys_as_custom(dummy_params):
+    """Test update stores unknown keys as custom (passthrough) parameters."""
     dummy_params.update(non_existing_key=123)
-    assert not hasattr(dummy_params, "non_existing_key")
+    assert dummy_params.non_existing_key == 123
+    assert dummy_params._custom_params["non_existing_key"] == 123
+    # Custom params are not treated as validated leaf params.
+    assert "non_existing_key" not in dummy_params._params
 
 
 def test_update_ndarray_equality_skips_recompute():
