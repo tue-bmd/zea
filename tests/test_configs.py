@@ -326,3 +326,97 @@ def test_config_pickle():
 
     # Check if the config is the same
     config_check_equal_recursive(config, unpickled)
+
+
+# ---------------------------------------------------------------------------
+# Deprecation tests – added for PR that updated configs/README.md to show
+# the Config.from_path("hf://...") API and marked from_hf/from_yaml as deprecated
+# ---------------------------------------------------------------------------
+
+
+def test_config_from_hf_is_deprecated(tmp_path, monkeypatch):
+    """Config.from_hf() should call log.deprecated (it is decorated with @deprecated)."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("key: value\n", encoding="utf-8")
+
+    deprecated_calls = []
+
+    # Intercept the custom log.deprecated used inside the deprecated() decorator
+    monkeypatch.setattr("zea.config.log.deprecated", lambda msg, *a, **kw: deprecated_calls.append(msg))
+    # Make _hf_resolve_path return our local file so no network call is made
+    monkeypatch.setattr("zea.config._hf_resolve_path", lambda path, **kw: config_path)
+
+    config = Config.from_hf("zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset")
+
+    assert config.key == "value"
+    assert len(deprecated_calls) == 1
+    assert "from_hf" in deprecated_calls[0]
+
+
+def test_config_from_yaml_is_deprecated(tmp_path, monkeypatch):
+    """Config.from_yaml() should call log.deprecated (it is decorated with @deprecated)."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("x: 42\n", encoding="utf-8")
+
+    deprecated_calls = []
+    monkeypatch.setattr("zea.config.log.deprecated", lambda msg, *a, **kw: deprecated_calls.append(msg))
+
+    config = Config.from_yaml(config_path)
+
+    assert config.x == 42
+    assert len(deprecated_calls) == 1
+    assert "from_yaml" in deprecated_calls[0]
+
+
+def test_config_from_hf_builds_correct_hf_uri(tmp_path, monkeypatch):
+    """Config.from_hf() must construct the hf:// URI in the form hf://repo_id/filename."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("setting: true\n", encoding="utf-8")
+
+    captured_paths = []
+
+    def fake_from_path(cls_or_path, *args, **kwargs):
+        # called as classmethod: first positional arg is the path
+        captured_paths.append(cls_or_path)
+        return Config({"setting": True})
+
+    # Silence deprecation logging so output is clean
+    monkeypatch.setattr("zea.config.log.deprecated", lambda *a, **kw: None)
+    monkeypatch.setattr("zea.config.Config.from_path", classmethod(lambda cls, path, **kw: (captured_paths.append(path), Config({"setting": True}))[1]))
+
+    Config.from_hf("zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset")
+
+    assert len(captured_paths) == 1
+    assert captured_paths[0] == "hf://zeahub/configs/config_picmus_rf.yaml"
+
+
+def test_config_from_path_with_revision_kwarg(tmp_path, monkeypatch):
+    """Config.from_path() with hf:// URI and revision= kwarg should forward revision."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("version: 11\n", encoding="utf-8")
+
+    resolve_calls = []
+
+    def fake_resolve(path, **kwargs):
+        resolve_calls.append((path, kwargs))
+        return config_path
+
+    monkeypatch.setattr("zea.config._hf_resolve_path", fake_resolve)
+
+    config = Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml", revision="v0.0.11")
+
+    assert config.version == 11
+    assert len(resolve_calls) == 1
+    assert resolve_calls[0][0] == "hf://zeahub/configs/config_picmus_rf.yaml"
+    assert resolve_calls[0][1].get("revision") == "v0.0.11"
+
+
+def test_config_from_path_local_file(tmp_path):
+    """Config.from_path() with a local path should load the YAML without network calls."""
+    config_path = tmp_path / "local_config.yaml"
+    config_path.write_text("alpha: 1\nbeta: hello\n", encoding="utf-8")
+
+    config = Config.from_path(config_path)
+
+    assert config.alpha == 1
+    assert config.beta == "hello"
