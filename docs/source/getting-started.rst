@@ -9,6 +9,47 @@ Getting Started
 
 Let's take a quick look at how to use ``zea`` to load and process ultrasound data.
 
+The diagram and code snippet below illustrate the basic data flow in ``zea``: loading a file and
+assembling parameters, building and applying the pipeline, and visualising results.
+
+.. raw:: html
+
+   <div style="display: flex; flex-direction: column; align-items: center; margin: 3em 0;">
+     <!-- Dark mode image -->
+     <img
+       src="_static/zea_workflow_dark.svg"
+       alt="zea workflow diagram"
+       style="display: none; width: 80%; padding-bottom: 1em;"
+       class="only-dark"
+     />
+     <!-- Light mode image -->
+     <img
+       src="_static/zea_workflow_light.svg"
+       alt="zea workflow diagram"
+       style="display: none; width: 80%; padding-bottom: 1em;"
+       class="only-light"
+     />
+     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666); max-width: 80%;">
+       <strong>①</strong> Generate <code>zea.Parameters</code> from a zea file using
+       <code>f.load_parameters()</code> — combines scan and probe information to compute the
+       parameters needed for beamforming.
+       <strong>②</strong> Optionally apply additional parameter overrides from a
+       <code>config.yaml</code>.
+       <strong>③</strong> Initialise the pipeline, either from a <code>config.yaml</code>
+       config or manually in code.
+       <strong>④</strong> Pass data and parameters to the pipeline for processing.
+       <strong>⑤</strong> Visualise your outputs.
+     </div>
+   </div>
+   <style>
+     @media (prefers-color-scheme: dark) {
+       .only-dark { display: block !important; }
+     }
+     @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
+       .only-light { display: block !important; }
+     }
+   </style>
+
 .. code-block:: python
 
    import zea
