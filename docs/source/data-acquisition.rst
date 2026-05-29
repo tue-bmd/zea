@@ -88,10 +88,12 @@ disk::
 Multi-track files
 -------------------------------
 
-Some acquisitions interleave multiple transmit sequences in a single recording — for example,
-swapping between focused and plane-wave pulses.  Rather than splitting these into separate files,
+Some acquisitions interleave multiple transmit sequences in a single recording. Sometimes 
+these sequences contain parameters that may not be expressed by a single :class:`~zea.Scan`, 
+or are intended to be processed with different :class:`~zea.Pipeline`\s — for example,
+swapping between focused B-mode and plane-wave Doppler pulses.  Rather than splitting these into separate files, 
 ``zea`` can store them as **Tracks**: self-contained bundles of raw data and scan parameters
-in a single HDF5 file. Each track exposes its own :class:`~zea.Parameters` object (via
+in a single HDF5 file, with a shared :class:`~zea.Probe` and metadata. Each track exposes its own :class:`~zea.Parameters` object (via
 ``track.load_parameters()``), containing the parameters
 necessary to beamform the raw data in that track. This allows us to specify a :class:`~zea.Pipeline`
 *per-track*, which can be applied independently to each frame in that track.
