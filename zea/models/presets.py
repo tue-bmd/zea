@@ -146,7 +146,16 @@ diffusion_model_presets = {
     },
 }
 
-flow_matching_presets = {}
+flow_matching_presets = {
+    "flowmatching-echonetlvh": {
+        "metadata": {
+            "description": ("Flow matching model trained on EchoNetLVH dataset."),
+            "params": 15_382_786,
+            "path": "flow_matching",
+        },
+        "hf_handle": "hf://zeahub/flowmatching-echonetlvh",
+    },
+}
 
 carotid_segmenter_presets = {
     "carotid-segmenter": {
