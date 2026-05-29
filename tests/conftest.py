@@ -20,6 +20,7 @@ from . import (  # noqa: E402
     DUMMY_DATASET_GRID_SIZE_X,
     DUMMY_DATASET_GRID_SIZE_Z,
     DUMMY_DATASET_N_FRAMES,
+    _notebook_timings,
     backend_workers,
 )
 
@@ -41,6 +42,48 @@ def pytest_addoption(parser):
         help="Run only notebooks under this subfolder (e.g. --notebook-dir models)."
         " Can be repeated.",
     )
+
+
+def pytest_sessionstart(session):
+    from pathlib import Path
+
+    notebooks_dir = Path("docs/source/notebooks")
+    notebooks = list(notebooks_dir.rglob("*.ipynb"))
+    if notebooks:
+        print(f"📚 Preparing to test {len(notebooks)} notebooks from {notebooks_dir}")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if not _notebook_timings:
+        return
+
+    from collections import defaultdict
+
+    by_folder: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for name, (folder, duration) in sorted(_notebook_timings.items()):
+        by_folder[folder].append((name, duration))
+
+    col_w = max(len(name) for name, _ in _notebook_timings.items()) + 2
+    print("\n" + "=" * (col_w + 20))
+    print("📊 Notebook run-time summary")
+    print("=" * (col_w + 20))
+
+    grand_total = 0.0
+    for folder in sorted(by_folder):
+        entries = sorted(by_folder[folder], key=lambda x: -x[1])
+        folder_total = sum(d for _, d in entries)
+        grand_total += folder_total
+        print(f"\n  📁 {folder}  ({folder_total:.1f}s total)")
+        for name, duration in entries:
+            mins, secs = divmod(duration, 60)
+            time_str = f"{int(mins)}m {secs:.1f}s" if mins else f"{secs:.1f}s"
+            print(f"    {name:<{col_w}}  {time_str:>8}")
+
+    print("\n" + "-" * (col_w + 20))
+    grand_mins, grand_secs = divmod(grand_total, 60)
+    grand_str = f"{int(grand_mins)}m {grand_secs:.1f}s" if grand_mins else f"{grand_secs:.1f}s"
+    print(f"  {'TOTAL':<{col_w}}  {grand_str:>8}")
+    print("=" * (col_w + 20) + "\n")
 
 
 def pytest_collection_modifyitems(config, items):

@@ -26,3 +26,6 @@ DUMMY_DATASET_GRID_SIZE_Z = 256
 DUMMY_DATASET_GRID_SIZE_X = 256
 
 DEFAULT_TEST_SEED = 42
+
+# Populated during notebook test runs: {notebook_name: (folder, duration_seconds)}
+_notebook_timings: dict[str, tuple[str, float]] = {}
