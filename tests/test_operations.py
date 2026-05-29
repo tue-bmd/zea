@@ -21,7 +21,6 @@ from zea.func.ultrasound import (
     make_tgc_curve,
 )
 from zea.ops import Pipeline, Simulate, beamformer_registry
-from zea.probes import Probe
 from zea.scan import Parameters
 
 from . import DEFAULT_TEST_SEED, backend_equality_check
@@ -249,7 +248,6 @@ def test_up_and_down_conversion(factor, batch_size):
         n_ch=1,
         selected_transmits="all",
     )
-    probe = Probe(probe_geometry=probe_geometry, probe_center_frequency=3.125e6)
 
     # use pipeline here so it is easy to propagate the scan parameters
     simulator_pipeline = Pipeline(

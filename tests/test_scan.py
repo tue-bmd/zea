@@ -283,7 +283,9 @@ def test_scan_pickle():
     scan_unpickled = pickle.loads(scan_pickled)
 
     assert scan == scan_unpickled, "Unpickled Parameters object does not match the original"
-    assert scan is not scan_unpickled, "Unpickled Parameters object is the same instance as the original"
+    assert scan is not scan_unpickled, (
+        "Unpickled Parameters object is the same instance as the original"
+    )
 
 
 def test_valid_params_default():
