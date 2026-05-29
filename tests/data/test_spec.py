@@ -1164,24 +1164,6 @@ class TestProbeSpec:
         probe = ProbeSpec()
         assert probe.n_el is None
 
-    def test_pitch_derived_from_probe_geometry(self):
-        n_el = 4
-        pitch_m = 0.3e-3
-        xs = np.arange(n_el, dtype=np.float32) * pitch_m
-        pg = np.zeros((n_el, 3), dtype=np.float32)
-        pg[:, 0] = xs
-        probe = ProbeSpec(probe_geometry=pg)
-        assert probe.pitch == pytest.approx(pitch_m, rel=1e-4)
-
-    def test_pitch_none_without_probe_geometry(self):
-        probe = ProbeSpec()
-        assert probe.pitch is None
-
-    def test_pitch_none_for_single_element(self):
-        pg = np.zeros((1, 3), dtype=np.float32)
-        probe = ProbeSpec(probe_geometry=pg)
-        assert probe.pitch is None
-
     def test_probe_spec_ignores_legacy_n_elements_pitch_kwargs(self):
         """Old HDF5 files may pass n_elements/pitch; they are silently ignored."""
         # Simulate what _validate_nested_field does after filtering known fields

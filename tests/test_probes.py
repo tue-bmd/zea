@@ -97,3 +97,24 @@ def test_file_create_probe_wrong_type():
             )
     finally:
         os.unlink(path)
+
+
+def test_pitch_derived_from_probe_geometry():
+    """If the probe geometry is provided, the pitch should be derived from it."""
+    n_el = 4
+    pitch_m = 0.3e-3
+    xs = np.arange(n_el, dtype=np.float32) * pitch_m
+    pg = np.zeros((n_el, 3), dtype=np.float32)
+    pg[:, 0] = xs
+    probe = Probe(probe_geometry=pg)
+    assert probe.pitch == pytest.approx(pitch_m, rel=1e-4)
+
+    probe = Probe()
+
+    with pytest.raises(ValueError, match="Cannot compute pitch: probe_geometry is not set"):
+        _ = probe.pitch
+
+    pg = np.zeros((1, 3), dtype=np.float32)
+    probe = Probe(probe_geometry=pg)
+    with pytest.raises(ValueError, match="Cannot compute pitch: probe has fewer than 2 elements"):
+        _ = probe.pitch
