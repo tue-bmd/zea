@@ -120,7 +120,7 @@ diffusion_model_presets = {
     "diffusion-echonet-dynamic": {
         "metadata": {
             "description": ("Diffusion model trained on EchoNet-Dynamic dataset."),
-            "params": 3_906_754,
+            "params": 1_953_377,
             "path": "diffusion",
         },
         "hf_handle": "hf://zeahub/diffusion-echonet-dynamic",
@@ -128,7 +128,7 @@ diffusion_model_presets = {
     "diffusion-echonetlvh-3-frame": {
         "metadata": {
             "description": ("3-frame diffusion model trained on EchoNetLVH dataset."),
-            "params": 3_907_014,
+            "params": 1_953_507,
             "path": "diffusion",
         },
         "hf_handle": "hf://zeahub/diffusion-echonetlvh",
@@ -150,7 +150,7 @@ flow_matching_presets = {
     "flowmatching-echonetlvh": {
         "metadata": {
             "description": ("Flow matching model trained on EchoNetLVH dataset."),
-            "params": 15_382_786,
+            "params": 7_691_393,
             "path": "flow_matching",
         },
         "hf_handle": "hf://zeahub/flowmatching-echonetlvh",
