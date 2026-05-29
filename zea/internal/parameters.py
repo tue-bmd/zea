@@ -141,17 +141,16 @@ class BaseParameters(ZeaObject):
         ...         "b": {"type": float, "default": 2.0},
         ...         "d": {"type": float},  # optional dependency
         ...     }
-
+        ...
         ...     @cache_with_dependencies("a", "b")
         ...     def c(self):
-        ...        return self.a + self.b
-
+        ...         return self.a + self.b
+        ...
         ...     @cache_with_dependencies("a", "b")
         ...     def d(self):
         ...         if self._params.get("d") is not None:
         ...             return self._params["d"]
         ...         return self.a * self.b
-
         >>> p = MyParams(a=3)
         >>> print(p.c)  # Computes and caches c
         5.0
