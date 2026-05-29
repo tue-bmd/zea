@@ -45,7 +45,6 @@ import numpy as np
 from keras import ops
 
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
-from zea.probes import Probe
 
 
 def simulate_rf(
@@ -95,6 +94,8 @@ def simulate_rf(
 
     if element_width is None:
         try:
+            from zea.probes import Probe
+
             pitch = Probe.get_pitch(probe_geometry)
         except ValueError as exc:
             raise ValueError(
