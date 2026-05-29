@@ -13,7 +13,7 @@ Every ``zea`` HDF5 file follows the layout shown below.
 
 .. code-block:: text
 
-   data_file.hdf5         (attrs: probe_name, us_machine, description, zea_version)
+   data_file.hdf5         (attrs: us_machine, description, zea_version)
    ├── data/
    │   ├── raw_data                  float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
    │   ├── aligned_data/             group (AlignedData)
@@ -27,7 +27,6 @@ Every ``zea`` HDF5 file follows the layout shown below.
    │   ├── color_doppler/            group (ColorDopplerMap)
    │   └── <custom>/                 group (any spatial map)
    ├── scan/
-   │   ├── probe_geometry            float32  (n_el, 3)
    │   ├── sampling_frequency        float32  scalar
    │   ├── center_frequency          float32  scalar | (n_tx,)
    │   ├── t0_delays                 float32  (n_tx, n_el)
@@ -55,11 +54,6 @@ Stored as HDF5 root-level attributes (not groups).
      - Description
      - Values
      -
-   * - ``probe_name``
-     - ``str``
-     - Name of the ultrasound probe.
-     - e.g. ``"L11-4v"``, ``"C5-2"``
-     - |badge-opt|
    * - ``us_machine``
      - ``str``
      - Name of the ultrasound system.
@@ -662,12 +656,6 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - Unit
            - Description
            - 
-         * - ``probe_geometry``
-           - ``float32``
-           - (n_el, 3)
-           - m
-           - Probe geometry (x, y, z) per element.
-           - |badge-req|
          * - ``sampling_frequency``
            - ``float32``
            - scalar
@@ -746,12 +734,6 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - -
            - Time-gain-compensation curve.
            - |badge-opt|
-         * - ``element_width``
-           - ``float32``
-           - scalar
-           - m
-           - Element width of the probe.
-           - |badge-opt|
          * - ``waveforms_one_way``
            - ``float32``
            - (n_tx, n_samples_one_way)
@@ -763,6 +745,76 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - (n_tx, n_samples_two_way)
            - V
            - Two-way transmit waveforms.
+           - |badge-opt|
+
+   .. tab-item:: probe
+      :sync: probe
+
+      Probe group with probe geometry and frequency parameters.
+
+      .. list-table::
+         :header-rows: 1
+         :widths: 22 16 18 7 27 10
+      
+         * - Field
+           - Type
+           - Shape
+           - Unit
+           - Description
+           - 
+         * - ``name``
+           - ``str``
+           - scalar
+           - –
+           - Probe model name/identifier.
+           - |badge-opt|
+         * - ``type``
+           - ``str``
+           - scalar
+           - –
+           - Probe geometry type (linear, phased, curved, ...).
+           - |badge-opt|
+         * - ``center_frequency``
+           - ``float32``
+           - scalar
+           - Hz
+           - Probe nominal centre frequency.
+           - |badge-opt|
+         * - ``bandwidth_percent``
+           - ``float32``
+           - scalar
+           - %
+           - Fractional bandwidth as a percentage.
+           - |badge-opt|
+         * - ``probe_geometry``
+           - ``float32``
+           - (n_el, 3)
+           - m
+           - Element positions (x, y, z) per element, shape (n_el, 3).
+           - |badge-opt|
+         * - ``element_width``
+           - ``float32``
+           - scalar
+           - m
+           - Width of a single transducer element.
+           - |badge-opt|
+         * - ``element_height``
+           - ``float32``
+           - scalar
+           - m
+           - Height (elevation aperture) of a single transducer element.
+           - |badge-opt|
+         * - ``lens_sound_speed``
+           - ``float32``
+           - scalar
+           - m/s
+           - Speed of sound in the acoustic lens.
+           - |badge-opt|
+         * - ``lens_thickness``
+           - ``float32``
+           - scalar
+           - m
+           - Thickness of the acoustic lens.
            - |badge-opt|
 
    .. tab-item:: metadata

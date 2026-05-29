@@ -9,7 +9,7 @@ def compute_lens_corrected_travel_times(
     """Compute the travel time of the shortest path between the element and the pixel.
 
     Args:
-        element_pos (ndarray): The position of the element of shape (n_elements, 3).
+        element_pos (ndarray): The position of the element of shape (n_el, 3).
         pixel_pos (ndarray): The position of the pixel of shape (n_pixels, 3).
         lens_thickness (float): The thickness of the lens in meters.
         c_lens (float): The speed of sound in the lens in m/s.
@@ -17,7 +17,7 @@ def compute_lens_corrected_travel_times(
         n_iter (int): The number of iterations to run the Newton-Raphson method.
 
     Returns:
-        ndarray: The travel times of shape (n_pixels, n_elements).
+        ndarray: The travel times of shape (n_pixels, n_el).
     """
 
     pixel_pos = pixel_pos[:, None] - element_pos[None]

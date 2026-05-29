@@ -28,8 +28,8 @@ Example usage
 
     >>> with File(path_to_file, mode="r") as file:
     ...     data = file.data.raw_data[0]  # first frame
-    ...     scan = file.scan()
-    ...     probe = file.probe()
+    ...     scan = file.scan
+    ...     probe = file.probe
 
     >>> # Work with a dataset (folder or list of files)
     >>> dataset = Dataset("hf://zeahub/picmus")

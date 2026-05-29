@@ -125,14 +125,14 @@ def save_file(
     }
 
     optional_scan = {
-        "focus_distances": scan.focus_distances,
-        "transmit_origins": scan.transmit_origins,
-        "polar_angles": scan.polar_angles,
-        "azimuth_angles": scan.azimuth_angles,
-        "tx_apodizations": scan.tx_apodizations,
-        "time_to_next_transmit": scan.time_to_next_transmit,
-        "tgc_gain_curve": scan.tgc_gain_curve,
-        "element_width": scan.element_width,
+        "focus_distances": _safe_getattr(scan, "focus_distances"),
+        "transmit_origins": _safe_getattr(scan, "transmit_origins"),
+        "polar_angles": _safe_getattr(scan, "polar_angles"),
+        "azimuth_angles": _safe_getattr(scan, "azimuth_angles"),
+        "tx_apodizations": _safe_getattr(scan, "tx_apodizations"),
+        "time_to_next_transmit": _safe_getattr(scan, "time_to_next_transmit"),
+        "tgc_gain_curve": _safe_getattr(scan, "tgc_gain_curve"),
+        "element_width": _safe_getattr(scan, "element_width"),
     }
     for key, val in optional_scan.items():
         if val is not None:
@@ -146,8 +146,8 @@ def save_file(
         data=data,
         scan=scan_dict if scan_dict else None,
         metadata=metadata or None,
-        probe_name="generic",
-        description=description,
+        probe=probe or None,
+        description=description or None,
         compression=compression,
         chunk_frames=chunk_frames,
         overwrite=True,

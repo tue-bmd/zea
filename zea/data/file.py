@@ -2,7 +2,7 @@
 
 import enum
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import TYPE_CHECKING, List, Tuple, Union
 
 import h5py
 import numpy as np
@@ -10,13 +10,17 @@ from keras.utils import pad_sequences
 
 import zea
 from zea import log
-from zea.data.spec import DataSpec, FileSpec, MetadataSpec, MetricsSpec, ScanSpec
+from zea.data.spec import DataSpec, FileSpec, MetadataSpec, MetricsSpec, ProbeSpec, ScanSpec
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.utils import deprecated, reduce_to_signature
-from zea.probes import Probe
 from zea.scan import Scan
+
+if TYPE_CHECKING:
+    # Imported lazily inside functions at runtime to avoid a circular import
+    # (zea.probes imports ProbeSpec from zea.data.spec, which loads this module).
+    from zea.probes import Probe
 
 
 class GroupProxy:
@@ -87,10 +91,10 @@ class Track:
         with File("multi_track.hdf5") as f:
             for track in f.tracks:
                 raw = track.data.raw_data[:]
-                scan = track.scan()
+                scan = track.scan
     """
 
-    __slots__ = ("_index", "_group", "_timestamps", "_label")
+    __slots__ = ("_index", "_group", "_timestamps", "_label", "_probe")
 
     def __init__(
         self,
@@ -98,11 +102,13 @@ class Track:
         group: "h5py.Group",
         timestamps: "np.ndarray | None" = None,
         label: "str | None" = None,
+        probe: "dict | None" = None,
     ):
         object.__setattr__(self, "_index", index)
         object.__setattr__(self, "_group", group)
         object.__setattr__(self, "_timestamps", timestamps)
         object.__setattr__(self, "_label", label)
+        object.__setattr__(self, "_probe", probe)
 
     @property
     def data(self) -> GroupProxy:
@@ -114,7 +120,18 @@ class Track:
             )
         return GroupProxy(self._group["data"])
 
-    def scan(self, safe: bool = True, **kwargs) -> "Scan":
+    @property
+    def scan(self) -> "Scan":
+        """Returns a :class:`~zea.scan.Scan` built from this track's scan parameters.
+
+        For parameter overrides use :meth:`get_scan` directly.
+
+        Returns:
+            Scan: Initialised scan object for this track.
+        """
+        return self.get_scan()
+
+    def get_scan(self, safe: bool = True, **kwargs) -> "Scan":
         """Build a :class:`~zea.scan.Scan` from this track's scan parameters.
 
         Args:
@@ -131,8 +148,25 @@ class Track:
             )
         scan_dict = load_dict_from_hdf5_group(self._group["scan"])
         scan_dict = check_focus_distances(scan_dict)
+        # Collect probe-level fields (probe_geometry etc.) to inject AFTER the
+        # ScanSpec filter inside build_scan_from_dict, mirroring File.get_scan().
+        probe_supplements: "dict | None" = None
+        if self._probe is not None:
+            _PROBE_FIELDS = {
+                "probe_geometry",
+                "element_width",
+                "lens_sound_speed",
+                "lens_thickness",
+            }
+            probe_supplements = {k: v for k, v in self._probe.items() if k in _PROBE_FIELDS}
         data_group = self._group["data"] if "data" in self._group else None
-        return build_scan_from_dict(scan_dict, data_group=data_group, safe=safe, **kwargs)
+        return build_scan_from_dict(
+            scan_dict,
+            data_group=data_group,
+            safe=safe,
+            probe_supplements=probe_supplements,
+            **kwargs,
+        )
 
     @property
     def label(self) -> "str | None":
@@ -226,6 +260,7 @@ def build_scan_from_dict(
     scan_dict: dict,
     data_group: "h5py.Group | None" = None,
     safe: bool = True,
+    probe_supplements: "dict | None" = None,
     **kwargs,
 ) -> "Scan":
     """Build a :class:`~zea.scan.Scan` from a raw parameter dictionary.
@@ -235,6 +270,10 @@ def build_scan_from_dict(
         data_group: Optional HDF5 data group used to derive ``n_ax`` from
             ``raw_data`` when it cannot be inferred from the scan spec.
         safe: Forwarded to :meth:`~zea.scan.Scan.merge`.
+        probe_supplements: Optional dict of probe-level fields (e.g.
+            ``probe_geometry``) to inject into the scan dict *after* the
+            :class:`~zea.data.spec.ScanSpec` filter — these fields live in
+            :class:`~zea.data.spec.ProbeSpec` and would otherwise be stripped.
         **kwargs: Override any scan parameter.
 
     Returns:
@@ -254,6 +293,12 @@ def build_scan_from_dict(
             scan_dict["n_ax"] = data_group["raw_data"].shape[2]
     except (TypeError, ValueError) as exc:
         log.debug(f"ScanSpec validation skipped: {exc}. Using raw scan parameters from file.")
+
+    # Re-inject probe-level fields that were stripped by the ScanSpec filter.
+    if probe_supplements:
+        for _field, _value in probe_supplements.items():
+            if _field not in scan_dict or scan_dict.get(_field) is None:
+                scan_dict[_field] = _value
 
     return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
 
@@ -284,7 +329,7 @@ def _compute_all_track_timestamps(
     # pre-load time_to_next_transmit for each track,
     # validating that it's present and has the right shape
     for track in tracks:
-        t2nt = track.scan().time_to_next_transmit
+        t2nt = track.scan.time_to_next_transmit
         if t2nt is None:
             log.warning(
                 f"Track {track._index} has no 'time_to_next_transmit';"
@@ -499,7 +544,7 @@ class File(h5py.File):
             with File("multi_track.hdf5") as f:
                 for track in f.tracks:
                     raw = track.data.raw_data[:]
-                    scan = track.scan()
+                    scan = track.scan
         """
         if "tracks" not in self:
             raise AttributeError(
@@ -507,6 +552,11 @@ class File(h5py.File):
                 "Access data and scan parameters directly with file.data and file.scan()."
             )
         tracks_group = self["tracks"]
+        # Load file-level probe once so every track's scan can supplement its
+        # scan parameters with probe_geometry, element_width, etc.
+        probe_dict: "dict | None" = None
+        if super().__contains__("probe"):
+            probe_dict = load_dict_from_hdf5_group(self["probe"])
         tracks: list[Track] = []
         i = 0
         while f"track_{i}" in tracks_group:
@@ -515,7 +565,7 @@ class File(h5py.File):
             if "label" in track_group:
                 raw = track_group["label"][()]
                 label = raw.decode() if isinstance(raw, bytes) else str(raw)
-            tracks.append(Track(i, track_group, label=label))
+            tracks.append(Track(i, track_group, label=label, probe=probe_dict))
             i += 1
 
         schedule = self.track_schedule
@@ -607,7 +657,7 @@ class File(h5py.File):
         if n > 1:
             raise AttributeError(
                 f"This file has {n} tracks. "
-                "Use file.tracks[i].scan() to access a specific track's scan parameters."
+                "Use file.tracks[i].scan to access a specific track's scan parameters."
             )
         if "tracks" in self:
             track0 = self["tracks"].get("track_0")
@@ -628,6 +678,7 @@ class File(h5py.File):
         metadata: dict | None = None,
         metrics: dict | None = None,
         probe_name: str | None = None,
+        probe: "ProbeSpec | dict | None" = None,
         us_machine: str | None = None,
         description: str | None = None,
         compression: str = "gzip",
@@ -661,7 +712,9 @@ class File(h5py.File):
                 :class:`~zea.data.spec.MetadataSpec`.
             metrics: Optional metrics dict accepted by
                 :class:`~zea.data.spec.MetricsSpec`.
-            probe_name: Name of the probe.
+            probe_name: Removed — use ``probe={'name': ...}`` instead.
+            probe: Probe specification as a :class:`~zea.probes.Probe` object or a
+                plain dict accepted by :class:`~zea.data.spec.ProbeSpec`.
             us_machine: Name of the ultrasound machine.
             description: Free-text description of the acquisition.
             compression: HDF5 compression filter (default ``"gzip"``).
@@ -685,7 +738,6 @@ class File(h5py.File):
             >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
             >>> geom = np.zeros((n_el, 3), dtype=np.float32)
             >>> scan = {
-            ...     "probe_geometry": geom,
             ...     "sampling_frequency": np.float32(40e6),
             ...     "center_frequency": np.float32(5e6),
             ...     "demodulation_frequency": np.float32(5e6),
@@ -700,7 +752,11 @@ class File(h5py.File):
 
             >>> _, path = tempfile.mkstemp(suffix=".hdf5")
             >>> f = File.create(
-            ...     path, data={"raw_data": raw}, scan=scan, probe_name="L11-4v", overwrite=True
+            ...     path,
+            ...     data={"raw_data": raw},
+            ...     scan=scan,
+            ...     probe={"name": "L11-4v"},
+            ...     overwrite=True,
             ... )
             >>> f.probe_name
             'L11-4v'
@@ -714,6 +770,15 @@ class File(h5py.File):
 
         if path.exists() and not overwrite:
             raise FileExistsError(f"File already exists: {path}")
+
+        if probe_name is not None:
+            raise TypeError(
+                "probe_name is no longer supported. "
+                "Use probe={'name': ...} to specify the probe name."
+            )
+
+        if probe is not None and not isinstance(probe, (dict, ProbeSpec)):
+            raise TypeError(f"probe must be a Probe object or a dict, got {type(probe).__name__}.")
 
         kwargs: dict = {}
         if tracks is not None:
@@ -731,8 +796,8 @@ class File(h5py.File):
             kwargs["metadata"] = metadata
         if metrics is not None:
             kwargs["metrics"] = metrics
-        if probe_name is not None:
-            kwargs["probe_name"] = probe_name
+        if probe is not None:
+            kwargs["probe"] = probe
         if us_machine is not None:
             kwargs["us_machine"] = us_machine
         if description is not None:
@@ -905,10 +970,14 @@ class File(h5py.File):
     @property
     def probe_name(self):
         """Reads the probe name from the data file and returns it."""
-        # Support both 'probe_name' (new spec) and 'probe' (legacy files)
-        for attr_key in ("probe_name", "probe"):
-            if attr_key in self.attrs:
-                return self.attrs[attr_key]
+        # Priority: 'probe_name' attr → 'probe' group name → legacy 'probe' attr
+        if "probe_name" in self.attrs:
+            return self.attrs["probe_name"]
+        # Check the structured probe group for a 'name' dataset.
+        if "probe" in self and "name" in self["probe"]:
+            return self["probe"]["name"].asstr()[()]
+        if "probe" in self.attrs:
+            return self.attrs["probe"]
         raise AttributeError(
             "Probe name not found in file attributes. "
             "Make sure you are using a zea file. "
@@ -976,16 +1045,9 @@ class File(h5py.File):
         )
         return data_group["raw_data"].shape[2]
 
-    def scan(self, safe=True, **kwargs) -> Scan:
+    @property
+    def scan(self) -> Scan:
         """Returns a Scan object initialized with the parameters from the file.
-
-        Args:
-            safe (bool, optional): If True, will only use parameters that are
-                defined in the Scan class. If False, will use all parameters
-                from the file. Defaults to True.
-            **kwargs: Additional keyword arguments to pass to the Scan object.
-                These will override the parameters from the file if they are
-                present in the file.
 
         Returns:
             Scan: The scan object.
@@ -1002,75 +1064,120 @@ class File(h5py.File):
             ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
             ... )
             >>> with File(path) as f:
-            ...     scan = f.scan()
+            ...     scan = f.scan
             >>> type(scan).__name__
             'Scan'
+        """
+        return self.get_scan()
+
+    def get_scan(self, safe=True, **kwargs) -> Scan:
+        """Returns a Scan object with optional parameter overrides.
+
+        Args:
+            safe (bool, optional): If True, will only use parameters that are
+                defined in the Scan class. If False, will use all parameters
+                from the file. Defaults to True.
+            **kwargs: Additional keyword arguments to pass to the Scan object.
+                These will override the parameters from the file if they are
+                present in the file.
+
+        Returns:
+            Scan: The scan object.
         """
         n = self._n_tracks
         if n > 1:
             raise AttributeError(
                 f"This file has {n} tracks. "
-                "Use file.tracks to get a list of tracks and call scan() on each: "
-                "file.tracks[i].scan()"
+                "Use file.tracks to get a list of tracks and access .scan on each: "
+                "file.tracks[i].scan"
             )
         scan_dict = self.get_scan_parameters()
-        # Get the underlying data group for n_ax fallback
-        data_group = None
+
+        # Collect probe-group fields that Scan uses but may not appear in ScanSpec.
+        # probe_geometry is no longer a ScanSpec field — it lives in ProbeSpec.
+        # element_width / lens_sound_speed / lens_thickness are in both specs;
+        # the probe group fills them in if absent from the scan group.
+        # backward-compat: old files stored probe_geometry in the scan group.
+        _PROBE_TO_SCAN_FIELDS = {
+            "probe_geometry",
+            "element_width",
+            "lens_sound_speed",
+            "lens_thickness",
+        }
+        # Capture these fields before the ScanSpec filter discards them.
+        _probe_supplements: dict = {}
+        if "probe" in self:
+            probe_data = self.recursively_load_dict_contents_from_group("probe")
+            for _field in _PROBE_TO_SCAN_FIELDS:
+                if _field in probe_data:
+                    _probe_supplements[_field] = probe_data[_field]
+        # Fall back to scan group for fields no longer in ScanSpec (e.g. probe_geometry
+        # in legacy files that stored it there).
+        for _field in _PROBE_TO_SCAN_FIELDS:
+            if _field not in _probe_supplements and _field in scan_dict:
+                _probe_supplements[_field] = scan_dict[_field]
+
+        # Try spec-based validation; fall back gracefully for legacy files
+        # that may be missing fields the spec now requires.
+        scan_spec_keys = set(ScanSpec.SCHEMA.keys())
+        filtered = {k: v for k, v in scan_dict.items() if k in scan_spec_keys}
+
         try:
-            data_group = self.data._group
-        except (KeyError, AttributeError):
-            pass
-        return build_scan_from_dict(scan_dict, data_group=data_group, safe=safe, **kwargs)
+            scan_spec = ScanSpec(**filtered)
+            scan_dict = scan_spec.to_dict()
+            scan_dict["n_el"] = scan_spec.n_el
+            scan_dict["n_tx"] = scan_spec.n_tx
+            # Derive n_ax from the spec when possible (avoids requiring raw_data).
+            # tgc_gain_curve has shape (n_ax,) and is the spec's authoritative source.
+            if scan_spec.tgc_gain_curve is not None:
+                scan_dict["n_ax"] = len(scan_spec.tgc_gain_curve)
+            elif "data" in self and "raw_data" in self["data"]:
+                scan_dict["n_ax"] = self.n_ax
+        except (TypeError, ValueError) as exc:
+            log.debug(
+                f"ScanSpec validation skipped for '{self.path}': {exc}. "
+                "Using raw scan parameters from file."
+            )
 
-    def get_probe_parameters(self) -> dict:
-        """Returns a dictionary of probe parameters to initialize a probe
-        object that comes with the file (stored inside datafile).
+        # Re-inject probe supplements; scan_dict has priority over probe group.
+        for _field, _value in _probe_supplements.items():
+            if _field not in scan_dict or scan_dict.get(_field) is None:
+                scan_dict[_field] = _value
 
-        Probe hardware parameters (geometry, centre frequency, etc.) are
-        always read from the first available scan group.
+        return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
 
-        Returns:
-            dict: The probe parameters.
-        """
-        # For multi-track files, probe parameters are read from the first
-        # track's scan group if it exists;
-        # for single-track files, the root-level scan group is used.
-        # If no scan group is found, an empty dict is returned.
-        if self._n_tracks > 1:
-            track0 = self["tracks"].get("track_0")
-            scan_group = track0["scan"] if (track0 is not None and "scan" in track0) else None
-        else:
-            scan_group = self._scan_h5_group
-
-        if scan_group is None:
-            return {}
-
-        file_scan_parameters = load_dict_from_hdf5_group(scan_group)
-        file_scan_parameters = check_focus_distances(file_scan_parameters)
-        probe_parameters = reduce_to_signature(Probe.__init__, file_scan_parameters)
-        return probe_parameters
-
-    def probe(self) -> Probe:
+    @property
+    def probe(self) -> "Probe":
         """Returns a Probe object initialized with the parameters from the file.
 
         Returns:
             Probe: The probe object.
 
-        .. doctest::
+        Example:
+            .. doctest::
 
-            >>> from zea import File
-            >>> path = (
-            ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
-            ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
-            ... )
-            >>> with File(path) as f:
-            ...     probe = f.probe()
-            >>> type(probe).__name__
-            'Verasonics_l11_4v'
+                >>> from zea import File
+                >>> path = (
+                ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+                ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+                ... )
+                >>> with File(path) as f:
+                ...     probe = f.probe
+                >>> probe.name
+                'verasonics_l11_4v'
         """
-        probe_parameters_file = self.get_probe_parameters()
-        return Probe.from_parameters(self.probe_name, probe_parameters_file)
+        from zea.probes import Probe
 
+        if "probe" in self.keys():
+            probe_parameters = self.recursively_load_dict_contents_from_group("probe")
+        else:
+            # Legacy files
+            probe_parameters = reduce_to_signature(Probe.__init__, self.get_parameters())
+            probe_parameters["name"] = self.probe_name
+
+        return Probe(**probe_parameters)
+
+    @property
     def metadata(self) -> MetadataSpec:
         """Return a validated :class:`~zea.data.spec.MetadataSpec` object from the file.
 
@@ -1080,17 +1187,25 @@ class File(h5py.File):
         Raises:
             KeyError: If the file has no ``metadata`` group.
 
-        Example::
+        Example:
+            .. doctest::
 
-            >>> with File("my_file.hdf5") as f:  # doctest: +SKIP
-            ...     meta = f.metadata()
-            ...     print(meta.subject.id)
+                >>> from zea import File
+                >>> path = (
+                ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+                ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+                ... )
+                >>> with File(path, revision="v0.1.0a1") as f:
+                ...     meta = f.metadata
+                ...     print(meta.subject.type)
+                phantom
         """
         if "metadata" not in self:
             raise KeyError("No 'metadata' group in this file.")
         raw = load_dict_from_hdf5_group(self["metadata"])
         return MetadataSpec(**raw)
 
+    @property
     def metrics(self) -> MetricsSpec:
         """Return a validated :class:`~zea.data.spec.MetricsSpec` object from the file.
 
@@ -1103,7 +1218,7 @@ class File(h5py.File):
         Example::
 
             >>> with File("my_file.hdf5") as f:  # doctest: +SKIP
-            ...     met = f.metrics()
+            ...     met = f.metrics
             ...     print(met.coherence_factor.shape)
         """
         if "metrics" not in self:
@@ -1288,7 +1403,7 @@ def load_file_all_data_types(
 
     with File(path, mode="r") as file:
         # Load the probe object from the file
-        probe = file.probe()
+        probe = file.probe
 
         for data_type in DataTypes:
             if not file.has_key(data_type.value):
@@ -1326,7 +1441,7 @@ def load_file_all_data_types(
         if isinstance(indices, tuple) and len(indices) > 1:
             scan_kwargs["selected_transmits"] = indices[1]
 
-        scan = file.scan(**scan_kwargs)
+        scan = file.get_scan(**scan_kwargs)
 
         return data_dict, scan, probe
 
@@ -1336,7 +1451,7 @@ def load_file(
     data_type="raw_data",
     indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
     scan_kwargs: dict = None,
-) -> Tuple[np.ndarray, Scan, Probe]:
+) -> Tuple[np.ndarray, Scan, "Probe"]:
     """Loads a zea data files (h5py file).
 
     Returns the data together with a scan object containing the parameters
@@ -1368,7 +1483,7 @@ def load_file(
 
     with File(path, mode="r") as file:
         # Load the probe object from the file
-        probe = file.probe()
+        probe = file.probe
 
         # Load the desired frames from the file
         _key = file.format_key(data_type)
@@ -1387,7 +1502,7 @@ def load_file(
             if isinstance(indices, tuple) and len(indices) > 1:
                 scan_kwargs["selected_transmits"] = indices[1]
 
-        scan = file.scan(**scan_kwargs)
+        scan = file.get_scan(**scan_kwargs)
 
         return data, scan, probe
 

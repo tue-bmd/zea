@@ -443,7 +443,7 @@ class H5Processor:
         File.create(
             path=out_h5,
             data=data,
-            probe_name="generic",
+            probe={"name": "generic"},
             description="EchoNet dataset converted to zea format",
         )
 

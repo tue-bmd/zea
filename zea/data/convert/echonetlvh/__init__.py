@@ -322,7 +322,7 @@ class LVHProcessor(H5Processor):
                 "image": {"values": polar_4d},
             },
             scan={},
-            probe_name="generic",
+            probe={"name": "generic"},
             description="EchoNet-LVH dataset converted to zea format",
         )
 

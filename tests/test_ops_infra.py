@@ -362,7 +362,7 @@ def test_pipeline_validation():
 def test_pipeline_with_scan_probe_config():
     """Tests the Pipeline with Scan, Probe, and Config objects as inputs."""
 
-    probe = Probe.from_name("generic")
+    probe = Probe(probe_geometry=np.zeros((128, 3)))
     scan = Scan(
         n_tx=128,
         n_ax=256,
@@ -732,7 +732,6 @@ def get_probe():
     return Probe(
         probe_geometry=probe_geometry,
         center_frequency=3.125e6,
-        sampling_frequency=12.5e6,
     )
 
 
@@ -768,7 +767,7 @@ def get_scan(ultrasound_probe, grid_size_x=None, grid_size_z=None):
         n_ax=n_ax,
         n_el=n_el,
         center_frequency=ultrasound_probe.center_frequency / 100,
-        sampling_frequency=ultrasound_probe.sampling_frequency / 100,
+        sampling_frequency=12.5e6 / 100,
         probe_geometry=probe_geometry,
         t0_delays=t0_delays,
         tx_apodizations=tx_apodizations,
