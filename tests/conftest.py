@@ -2,6 +2,8 @@
 
 import os
 import tempfile
+from collections import defaultdict
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pytest
@@ -45,8 +47,6 @@ def pytest_addoption(parser):
 
 
 def pytest_sessionstart(session):
-    from pathlib import Path
-
     notebooks_dir = Path("docs/source/notebooks")
     notebooks = list(notebooks_dir.rglob("*.ipynb"))
     if notebooks:
@@ -56,8 +56,6 @@ def pytest_sessionstart(session):
 def pytest_sessionfinish(session, exitstatus):
     if not _notebook_timings:
         return
-
-    from collections import defaultdict
 
     by_folder: dict[str, list[tuple[str, float]]] = defaultdict(list)
     for name, (folder, duration) in sorted(_notebook_timings.items()):

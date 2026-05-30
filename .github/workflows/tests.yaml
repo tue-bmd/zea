@@ -137,7 +137,7 @@ jobs:
             -v "${{ github.workspace }}:/zea" \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
-            sh -lc "pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'heavy' ./tests/test_ops_infra.py ./tests/test_transmit_schemes.py ./tests/data/test_conversion_scripts.py"
+            sh -lc "pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'heavy' ./tests"
 
       - name: Upload heavy test results to Codecov
         uses: codecov/codecov-action@v6
