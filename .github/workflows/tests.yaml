@@ -10,6 +10,8 @@ env:
   REGISTRY: ghcr.io
   BASE_IMAGE: ghcr.io/tue-bmd/zea/all-cpu
   MAIN_REPO: tue-bmd/zea
+  HF_CACHE_MOUNT: /opt/hf-cache:/root/.cache/huggingface
+  ZEA_CACHE_MOUNT: /opt/zea-cache:/root/.cache/zea
 
 jobs:
   tag:
@@ -135,6 +137,10 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
+            -v ${{ env.HF_CACHE_MOUNT }} \
+            -v ${{ env.ZEA_CACHE_MOUNT }} \
+            -e HF_HOME=/root/.cache/huggingface \
+            -e ZEA_CACHE_DIR=/root/.cache/zea \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
             sh -lc "pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'heavy' ./tests"
@@ -161,6 +167,10 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
+            -v ${{ env.HF_CACHE_MOUNT }} \
+            -v ${{ env.ZEA_CACHE_MOUNT }} \
+            -e HF_HOME=/root/.cache/huggingface \
+            -e ZEA_CACHE_DIR=/root/.cache/zea \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
             sh -lc "pytest -p no:cacheprovider -s -m 'notebook' --notebook-dir agent"
@@ -180,6 +190,10 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
+            -v ${{ env.HF_CACHE_MOUNT }} \
+            -v ${{ env.ZEA_CACHE_MOUNT }} \
+            -e HF_HOME=/root/.cache/huggingface \
+            -e ZEA_CACHE_DIR=/root/.cache/zea \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
             sh -lc "pytest -p no:cacheprovider -s -m 'notebook' --notebook-dir models"
@@ -199,6 +213,10 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
+            -v ${{ env.HF_CACHE_MOUNT }} \
+            -v ${{ env.ZEA_CACHE_MOUNT }} \
+            -e HF_HOME=/root/.cache/huggingface \
+            -e ZEA_CACHE_DIR=/root/.cache/zea \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
             sh -lc "pytest -p no:cacheprovider -s -m 'notebook' --notebook-dir pipeline"
@@ -218,6 +236,10 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
+            -v ${{ env.HF_CACHE_MOUNT }} \
+            -v ${{ env.ZEA_CACHE_MOUNT }} \
+            -e HF_HOME=/root/.cache/huggingface \
+            -e ZEA_CACHE_DIR=/root/.cache/zea \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
             sh -lc "pytest -p no:cacheprovider -s -m 'notebook' --notebook-dir data --notebook-dir metrics"
