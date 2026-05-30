@@ -513,11 +513,13 @@ def test_field_metadata_keys_are_subset_of_schema_for_all_specs():
             )
 
 
-def test_subject_id_warning_for_missing_id():
+def test_subject_id_warning_for_missing_id(tmp_path):
     n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
 
+    path = tmp_path / "subject_id_missing_warns_on_save.hdf5"
     with patch("zea.log.warning") as mock_warn:
-        FileSpec(
+        File.create(
+            path,
             data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             metadata={
@@ -532,16 +534,19 @@ def test_subject_id_warning_for_missing_id():
                 "common_midpoint_phase_error": np.zeros((n_frames,), dtype=np.float32),
                 "coherence_factor": np.ones((n_frames,), dtype=np.float32),
             },
+            overwrite=True,
         )
     messages = [str(c.args[0]) for c in mock_warn.call_args_list]
     assert any("Optional Subject field 'id' is not set" in m for m in messages)
 
 
-def test_subject_id_warning_includes_field_metadata_description():
+def test_subject_id_warning_includes_field_metadata_description(tmp_path):
     n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
 
+    path = tmp_path / "subject_id_description_warns_on_save.hdf5"
     with patch("zea.log.warning") as mock_warn:
-        FileSpec(
+        File.create(
+            path,
             data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             metadata={
@@ -552,6 +557,7 @@ def test_subject_id_warning_includes_field_metadata_description():
                     "fat_percentage": np.float32(17.5),
                 }
             },
+            overwrite=True,
         )
     messages = [str(c.args[0]) for c in mock_warn.call_args_list]
     assert any("subject-wise splits" in m for m in messages)

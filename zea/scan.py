@@ -635,7 +635,7 @@ class Scan(Parameters):
         value = self._params.get("azimuth_angles")
         if value is None:
             log.warning_once(
-                "No azimuth angles provided, using zeros",
+                "No ``azimuth_angles`` provided, using zeros",
                 key=(id(self), "azimuth_angles"),
             )
             return np.zeros(self.n_tx)
