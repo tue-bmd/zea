@@ -10,8 +10,10 @@ env:
   REGISTRY: ghcr.io
   BASE_IMAGE: ghcr.io/tue-bmd/zea/all-cpu
   MAIN_REPO: tue-bmd/zea
-  HF_CACHE_MOUNT: /opt/hf-cache:/root/.cache/huggingface
-  ZEA_CACHE_MOUNT: /opt/zea-cache:/root/.cache/zea
+  HF_CACHE_HOST: /cache/huggingface
+  HF_CACHE_CONTAINER: /cache/huggingface
+  ZEA_CACHE_HOST: /cache/zea
+  ZEA_CACHE_CONTAINER: /cache/zea
 
 jobs:
   tag:
@@ -137,10 +139,11 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
-            -v ${{ env.HF_CACHE_MOUNT }} \
-            -v ${{ env.ZEA_CACHE_MOUNT }} \
-            -e HF_HOME=/root/.cache/huggingface \
-            -e ZEA_CACHE_DIR=/root/.cache/zea \
+            -v $HF_CACHE_HOST:$HF_CACHE_CONTAINER \
+            -v $ZEA_CACHE_HOST:$ZEA_CACHE_CONTAINER \
+            -e HF_HOME=$HF_CACHE_CONTAINER \
+            -e HUGGINGFACE_HUB_CACHE=$HF_CACHE_CONTAINER \
+            -e ZEA_CACHE_DIR=$ZEA_CACHE_CONTAINER \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
             sh -lc "pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'heavy' ./tests"
@@ -167,10 +170,11 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
-            -v ${{ env.HF_CACHE_MOUNT }} \
-            -v ${{ env.ZEA_CACHE_MOUNT }} \
-            -e HF_HOME=/root/.cache/huggingface \
-            -e ZEA_CACHE_DIR=/root/.cache/zea \
+            -v ${{ env.HF_CACHE_HOST }}:${{ env.HF_CACHE_CONTAINER }} \
+            -v ${{ env.ZEA_CACHE_HOST }}:${{ env.ZEA_CACHE_CONTAINER }} \
+            -e HF_HOME=${{ env.HF_CACHE_CONTAINER }} \
+            -e HUGGINGFACE_HUB_CACHE=${{ env.HF_CACHE_CONTAINER }} \
+            -e ZEA_CACHE_DIR=${{ env.ZEA_CACHE_CONTAINER }} \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
             sh -lc "pytest -p no:cacheprovider -s -m 'notebook' --notebook-dir agent"
@@ -190,10 +194,11 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
-            -v ${{ env.HF_CACHE_MOUNT }} \
-            -v ${{ env.ZEA_CACHE_MOUNT }} \
-            -e HF_HOME=/root/.cache/huggingface \
-            -e ZEA_CACHE_DIR=/root/.cache/zea \
+            -v ${{ env.HF_CACHE_HOST }}:${{ env.HF_CACHE_CONTAINER }} \
+            -v ${{ env.ZEA_CACHE_HOST }}:${{ env.ZEA_CACHE_CONTAINER }} \
+            -e HF_HOME=${{ env.HF_CACHE_CONTAINER }} \
+            -e HUGGINGFACE_HUB_CACHE=${{ env.HF_CACHE_CONTAINER }} \
+            -e ZEA_CACHE_DIR=${{ env.ZEA_CACHE_CONTAINER }} \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
             sh -lc "pytest -p no:cacheprovider -s -m 'notebook' --notebook-dir models"
@@ -213,10 +218,11 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
-            -v ${{ env.HF_CACHE_MOUNT }} \
-            -v ${{ env.ZEA_CACHE_MOUNT }} \
-            -e HF_HOME=/root/.cache/huggingface \
-            -e ZEA_CACHE_DIR=/root/.cache/zea \
+            -v ${{ env.HF_CACHE_HOST }}:${{ env.HF_CACHE_CONTAINER }} \
+            -v ${{ env.ZEA_CACHE_HOST }}:${{ env.ZEA_CACHE_CONTAINER }} \
+            -e HF_HOME=${{ env.HF_CACHE_CONTAINER }} \
+            -e HUGGINGFACE_HUB_CACHE=${{ env.HF_CACHE_CONTAINER }} \
+            -e ZEA_CACHE_DIR=${{ env.ZEA_CACHE_CONTAINER }} \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
             sh -lc "pytest -p no:cacheprovider -s -m 'notebook' --notebook-dir pipeline"
@@ -236,10 +242,11 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
-            -v ${{ env.HF_CACHE_MOUNT }} \
-            -v ${{ env.ZEA_CACHE_MOUNT }} \
-            -e HF_HOME=/root/.cache/huggingface \
-            -e ZEA_CACHE_DIR=/root/.cache/zea \
+            -v ${{ env.HF_CACHE_HOST }}:${{ env.HF_CACHE_CONTAINER }} \
+            -v ${{ env.ZEA_CACHE_HOST }}:${{ env.ZEA_CACHE_CONTAINER }} \
+            -e HF_HOME=${{ env.HF_CACHE_CONTAINER }} \
+            -e HUGGINGFACE_HUB_CACHE=${{ env.HF_CACHE_CONTAINER }} \
+            -e ZEA_CACHE_DIR=${{ env.ZEA_CACHE_CONTAINER }} \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
             sh -lc "pytest -p no:cacheprovider -s -m 'notebook' --notebook-dir data --notebook-dir metrics"
