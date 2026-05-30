@@ -15,8 +15,9 @@ data:
   # The dynamic range for showing data in db [min, max]
   dynamic_range: [-60, 0]
 
-# The parameters section contains scan/probe/custom parameters that overwrite
-# values loaded from the data file (flat mapping).
+# The parameters section is a flat mapping of scan/probe/custom parameters that
+# overwrite values loaded from the data file. Documented reconstruction
+# parameters are listed below; arbitrary custom parameters are also allowed.
 parameters:
   # The number of transmits in a frame. Can be 'all' for all transmits, an
   # integer for a specific number of transmits selected evenly from the
