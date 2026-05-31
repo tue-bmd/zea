@@ -26,6 +26,8 @@ from pathlib import Path
 import papermill as pm
 import pytest
 
+from . import _notebook_timings
+
 CONFIG_DIR = Path("configs")
 
 # Automatically discover notebooks
@@ -127,11 +129,6 @@ for nbp_name in NOTEBOOK_PARAMETERS.keys():
     )
 
 
-def pytest_sessionstart(session):
-    print(f"📚 Preparing to test {len(NOTEBOOKS)} notebooks from {NOTEBOOKS_DIR}")
-    print(f"📝 Using custom parameters for {len(NOTEBOOK_PARAMETERS)} notebooks")
-
-
 @pytest.mark.notebook
 @pytest.mark.parametrize("notebook", NOTEBOOKS, ids=lambda x: x.name)
 def test_notebook_runs(notebook, tmp_path, request):
@@ -139,6 +136,11 @@ def test_notebook_runs(notebook, tmp_path, request):
     notebook_filter = request.config.getoption("--notebook")
     if notebook_filter and notebook_filter not in notebook.name:
         pytest.skip(f"Skipped (--notebook={notebook_filter})")
+
+    # Filter by --notebook-dir CLI option if provided
+    notebook_dir_filter = request.config.getoption("--notebook-dir")
+    if notebook_dir_filter and notebook.parent.name not in notebook_dir_filter:
+        pytest.skip(f"Skipped (--notebook-dir={notebook_dir_filter})")
 
     print(f"\n📘 Starting notebook: {notebook.name}")
 
@@ -158,4 +160,5 @@ def test_notebook_runs(notebook, tmp_path, request):
     )
 
     duration = time.time() - start
+    _notebook_timings[notebook.name] = (notebook.parent.name, duration)
     print(f"✅ Finished {notebook.name} in {duration:.1f}s")
