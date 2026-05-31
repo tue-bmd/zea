@@ -216,6 +216,7 @@ def _write_datasets(
     additional_elements=None,
     cast_to_float=True,
     enable_compression=True,
+    chunk_frames=False,
     **kwargs,
 ):
     if kwargs:
@@ -231,9 +232,20 @@ def _write_datasets(
         data = first_not_none_item(arr)
         return data.shape[axis] if data is not None else None
 
-    def _add_dataset(group_name: str, name: str, data: np.ndarray, description: str, unit: str):
+    def _add_dataset(
+        group_name: str,
+        name: str,
+        data: np.ndarray,
+        description: str,
+        unit: str,
+        chunk_per_frame: bool = False,
+    ):
         """Adds a dataset to the given group with a description and unit.
-        If data is None, the dataset is not added."""
+        If data is None, the dataset is not added.
+
+        If ``chunk_per_frame`` is True, the dataset is stored with HDF5 chunked
+        storage using one frame (a single slice along the first axis) per chunk.
+        """
         if data is None:
             return
 
@@ -247,7 +259,13 @@ def _write_datasets(
 
         dataset_is_scalar = np.isscalar(data) or data.ndim == 0
         compression = "gzip" if enable_compression and not dataset_is_scalar else None
-        new_dataset = group.create_dataset(name, data=data, compression=compression)
+
+        # Store one frame per chunk so individual frames can be read efficiently.
+        chunks = None
+        if chunk_per_frame and not dataset_is_scalar and data.shape[0] > 0:
+            chunks = (1, *data.shape[1:])
+
+        new_dataset = group.create_dataset(name, data=data, compression=compression, chunks=chunks)
         new_dataset.attrs["description"] = description
         new_dataset.attrs["unit"] = unit
 
@@ -284,6 +302,7 @@ def _write_datasets(
         data=_convert_datatype(raw_data),
         description="The raw_data of shape (n_frames, n_tx, n_ax, n_el, n_ch).",
         unit="unitless",
+        chunk_per_frame=chunk_frames,
     )
 
     _add_dataset(
@@ -292,6 +311,7 @@ def _write_datasets(
         data=_convert_datatype(aligned_data),
         description="The aligned_data of shape (n_frames, n_tx, n_ax, n_el, n_ch).",
         unit="unitless",
+        chunk_per_frame=chunk_frames,
     )
 
     _add_dataset(
@@ -300,6 +320,7 @@ def _write_datasets(
         data=_convert_datatype(envelope_data),
         description="The envelope_data of shape (n_frames, grid_size_z, grid_size_x).",
         unit="unitless",
+        chunk_per_frame=chunk_frames,
     )
 
     _add_dataset(
@@ -308,6 +329,7 @@ def _write_datasets(
         data=_convert_datatype(beamformed_data),
         description="The beamformed_data of shape (n_frames, grid_size_z, grid_size_x).",
         unit="unitless",
+        chunk_per_frame=chunk_frames,
     )
 
     _add_dataset(
@@ -316,6 +338,7 @@ def _write_datasets(
         data=_convert_datatype(image),
         unit="unitless",
         description="The images of shape [n_frames, grid_size_z, grid_size_x]",
+        chunk_per_frame=chunk_frames,
     )
 
     _add_dataset(
@@ -324,6 +347,7 @@ def _write_datasets(
         data=_convert_datatype(image_sc),
         unit="unitless",
         description=("The scan converted images of shape [n_frames, output_size_z, output_size_x]"),
+        chunk_per_frame=chunk_frames,
     )
 
     # Write scan group
@@ -616,6 +640,7 @@ def generate_zea_dataset(
     cast_to_float=True,
     overwrite=False,
     enable_compression=True,
+    chunk_frames=False,
 ):
     """Generates a dataset in the zea format.
 
@@ -681,6 +706,11 @@ def generate_zea_dataset(
         enable_compression (bool): Whether to enable gzip compression for datasets.
             Defaults to True. Compression reduces disk space at the cost of increased
             write time.
+        chunk_frames (bool): Whether to store the data datasets (raw_data, aligned_data,
+            envelope_data, beamformed_data, image and image_sc) with HDF5 chunked
+            storage, using one frame (a single slice along the first axis) per chunk.
+            Defaults to False. This speeds up reading individual frames from large
+            files at the cost of a small storage overhead.
 
     """
     # check if all args are lists
@@ -722,11 +752,11 @@ def generate_zea_dataset(
     # make sure input arguments of func is same length as data_and_parameters
     # except `path` and `event_structure` arguments and ofcourse `data_and_parameters` itself
     assert (
-        len(data_and_parameters) == len(inspect.signature(generate_zea_dataset).parameters) - 5
+        len(data_and_parameters) == len(inspect.signature(generate_zea_dataset).parameters) - 6
     ), (
         "All arguments should be put in data_and_parameters except "
-        "`path`, `event_structure`, `cast_to_float`, `overwrite`, and `enable_compression` "
-        "arguments."
+        "`path`, `event_structure`, `cast_to_float`, `overwrite`, `enable_compression`, "
+        "and `chunk_frames` arguments."
     )
 
     if event_structure:
@@ -793,6 +823,7 @@ def generate_zea_dataset(
                     scan_group_name=f"event_{i}/scan",
                     cast_to_float=cast_to_float,
                     enable_compression=enable_compression,
+                    chunk_frames=chunk_frames,
                     **_data_and_parameters,
                 )
 
@@ -803,6 +834,7 @@ def generate_zea_dataset(
                 scan_group_name="scan",
                 cast_to_float=cast_to_float,
                 enable_compression=enable_compression,
+                chunk_frames=chunk_frames,
                 **data_and_parameters,
             )
 
