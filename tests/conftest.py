@@ -1,16 +1,10 @@
 """This file contains fixtures that are used by all tests in the tests directory."""
 
-import os
-import tempfile
 from collections import defaultdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pytest
-
-_tmp_cache_dir = tempfile.TemporaryDirectory(prefix="zea_test_cache_")
-
-os.environ["ZEA_CACHE_DIR"] = _tmp_cache_dir.name  # set before importing zea
 
 from zea.data.data_format import generate_example_dataset  # noqa: E402
 from zea.internal.device import backend_cuda_available  # noqa: E402
@@ -100,14 +94,6 @@ def run_once_after_all_tests():
     yield
     print("Stopping workers")
     backend_workers.stop_workers()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def clean_cache_dir():
-    """Fixture to clean the cache directory after all tests."""
-    yield
-    print("Cleaning cache directory")
-    _tmp_cache_dir.cleanup()
 
 
 @pytest.fixture
