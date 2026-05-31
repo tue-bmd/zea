@@ -155,6 +155,7 @@ jobs:
           slug: ${{ env.MAIN_REPO }}
           flags: heavy
   notebook-tests:
+    name: notebook-tests (${{ matrix.label }})
     needs: [image]
     runs-on: self-hosted
     timeout-minutes: 100
@@ -164,12 +165,16 @@ jobs:
         include:
           - name: agent
             dirs: agent
+            label: agent
           - name: models
             dirs: models
+            label: models
           - name: pipeline
             dirs: pipeline
+            label: pipeline
           - name: data-metrics
             dirs: "data metrics"
+            label: data+metrics
     concurrency:
       group: notebook-tests-${{ matrix.name }}-${{ github.ref }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
