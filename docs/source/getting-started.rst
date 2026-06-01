@@ -9,6 +9,46 @@ Getting Started
 
 Let's take a quick look at how to use ``zea`` to load and process ultrasound data.
 
+The diagram and code snippet below illustrate the basic data flow in ``zea``: loading a file and
+assembling parameters, building and applying the pipeline, and visualising results.
+
+.. raw:: html
+
+   <div style="display: flex; flex-direction: column; align-items: center; margin: 3em 0;">
+     <!-- Dark mode image -->
+     <img
+       src="_static/zea_workflow_dark.svg"
+       alt="zea workflow diagram"
+       style="display: none; width: 80%; padding-bottom: 1em;"
+       class="only-dark"
+     />
+     <!-- Light mode image -->
+     <img
+       src="_static/zea_workflow_light.svg"
+       alt="zea workflow diagram"
+       style="display: none; width: 80%; padding-bottom: 1em;"
+       class="only-light"
+     />
+     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
+       Overview of the zea data processing workflow.
+     </div>
+   </div>
+   <style>
+     @media (prefers-color-scheme: dark) {
+       .only-dark { display: block !important; }
+     }
+     @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
+       .only-light { display: block !important; }
+     }
+   </style>
+
+① Generate ``zea.Parameters`` from a zea file using ``File.load_parameters()`` — this combines
+scan and probe information from the file to compute all parameters needed for beamforming.
+② Optionally apply additional parameter overrides from a ``config.yaml``.
+③ Initialise the pipeline, either from a ``config.yaml`` or manually in code.
+④ Pass data and parameters to the pipeline for processing.
+⑤ Visualise your outputs.
+
 .. code-block:: python
 
    import zea

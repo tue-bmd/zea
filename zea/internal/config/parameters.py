@@ -82,6 +82,10 @@ PARAMETER_DESCRIPTIONS = {
         "rho_range": ("The range of rho values in meters for scan conversion (null, [min, max])."),
         "resolution": ("The resolution for scan conversion in meters per pixel (float, optional)."),
     },
+    "scan": (
+        "Deprecated alias for 'parameters'. Supported for backward compatibility; "
+        "prefer using 'parameters'."
+    ),
     "pipeline": {
         "description": "This section contains the necessary parameters for building the pipeline.",
         "operations": (

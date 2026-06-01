@@ -178,3 +178,5 @@ Parameters Reference
      - The name for the plot
    * - ``plot.video_extension``
      - The file extension to use when saving the video (mp4, gif)
+   * - ``scan``
+     - Deprecated alias for 'parameters'. Supported for backward compatibility; prefer using 'parameters'.

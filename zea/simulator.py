@@ -93,15 +93,23 @@ def simulate_rf(
     n_tx = t0_delays.shape[0]
 
     if element_width is None:
+        if ops.is_tensor(probe_geometry):
+            raise ValueError(
+                "Element width is not provided, and automatic inference is not available for "
+                "traced/symbolic probe geometry (for example under JAX JIT or TensorFlow graph "
+                "mode). Please provide `element_width` explicitly in the scan/probe parameters."
+            )
+
         try:
             from zea.probes import Probe
 
             pitch = Probe.get_pitch(probe_geometry)
         except ValueError as exc:
             raise ValueError(
-                "Element width is not provided and cannot be estimated using the probe geometry. "
-                "Please provide the element width or ensure that the probe geometry is a 1-D "
-                "linear array."
+                "Element width is not provided and automatic estimation failed from probe "
+                "geometry. Please provide `element_width` explicitly or ensure the probe "
+                "geometry is a 1-D uniformly spaced linear array. "
+                f"Details: {exc}"
             ) from exc
         element_width = pitch * 0.9  # 90% of the pitch
 

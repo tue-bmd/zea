@@ -67,7 +67,7 @@ def flatten_schema_keys(schema, prefix=""):
     if isinstance(schema, dict):
         for k, v in schema.items():
             if isinstance(k, Optional):
-                key = k.key
+                key = getattr(k, "schema", getattr(k, "key", k))
             else:
                 key = k
             full = f"{prefix}.{key}" if prefix else str(key)
