@@ -174,7 +174,7 @@ class Track:
         scan_dict = check_focus_distances(load_dict_from_hdf5_group(self._group["scan"]))
         return _build_scan_spec(scan_dict)
 
-    def load_parameters(self, safe: bool = True, **parameters) -> "Parameters":
+    def load_parameters(self, safe: bool = True, **overrides) -> "Parameters":
         """Load this track's parameters (merged probe + scan) as :class:`~zea.Parameters`.
 
         Each track shares the same probe but has its own scan, so the returned
@@ -183,7 +183,7 @@ class Track:
 
         Args:
             safe: If ``True`` (default) only known parameters are forwarded.
-            **parameters: Override any parameter.
+            **overrides: Override any parameter.
 
         Returns:
             Parameters: Initialised parameters object for this track.
@@ -200,7 +200,7 @@ class Track:
             probe_dict=self._probe,
             data_group=data_group,
             safe=safe,
-            **parameters,
+            **overrides,
         )
 
     @property
@@ -297,13 +297,13 @@ def build_parameters_from_dict(
     probe_dict: "dict | None" = None,
     data_group: "h5py.Group | None" = None,
     safe: bool = True,
-    **parameters,
+    **overrides,
 ) -> "Parameters":
     """Build a :class:`~zea.Parameters` from raw scan + probe dictionaries.
 
     The scan and probe groups have non-overlapping field names, so they are
     simply merged. ``ScanSpec`` validation is used (when possible) to derive
-    ``n_el``/``n_tx``/``n_ax``. Explicit ``parameters`` override file values.
+    ``n_el``/``n_tx``/``n_ax``. Explicit ``overrides`` override file values.
 
     Args:
         scan_dict: Raw scan-group parameters loaded from HDF5.
@@ -313,7 +313,7 @@ def build_parameters_from_dict(
         data_group: Optional HDF5 data group used to derive ``n_ax`` from
             ``raw_data`` when it cannot be inferred from the scan spec.
         safe: Forwarded to :meth:`~zea.Parameters.merge`.
-        **parameters: Override any parameter.
+        **overrides: Override any parameter.
 
     Returns:
         Parameters: Initialised parameters object (merged probe + scan).
@@ -342,7 +342,7 @@ def build_parameters_from_dict(
     # Merge probe + scan (non-overlapping names); scan keeps priority for any
     # legacy field present in both groups.
     merged = {**probe_supplements, **scan_dict}
-    return Parameters.merge(_reformat_waveforms(merged), parameters, safe=safe)
+    return Parameters.merge(_reformat_waveforms(merged), overrides, safe=safe)
 
 
 def _probe_supplement_dict(probe_dict: "dict | None") -> dict:
@@ -1158,7 +1158,7 @@ class File(h5py.File):
         scan_dict = check_focus_distances(self.get_scan_parameters())
         return _build_scan_spec(scan_dict)
 
-    def load_parameters(self, safe=True, **parameters) -> "Parameters":
+    def load_parameters(self, safe=True, **overrides) -> "Parameters":
         """Load the acquisition parameters (merged probe + scan) from the file.
 
         Reads both the ``scan`` and ``probe`` groups and merges them into a
@@ -1171,7 +1171,7 @@ class File(h5py.File):
             safe (bool, optional): If True (default), only parameters known to
                 :class:`~zea.Parameters` are forwarded; unknown file keys
                 are dropped. If False, all parameters are passed through.
-            **parameters: Override any parameter from the file. Custom
+            **overrides: Override any parameter from the file. Custom
                 (non-spec) keys are stored as passthrough parameters.
 
         Returns:
@@ -1210,7 +1210,7 @@ class File(h5py.File):
             probe_dict=probe_data,
             data_group=data_group,
             safe=safe,
-            **parameters,
+            **overrides,
         )
 
     @property

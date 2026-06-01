@@ -12,6 +12,13 @@ control data loading, preprocessing, model settings, and scan parameters.
   Configs are used to initialize :doc:`zea.Models <models>` and the :doc:`pipeline`.
   For the data format and file I/O, see :doc:`data-acquisition`.
 
+.. note::
+  The ``parameters`` section is a flat mapping that overrides values loaded from the
+  data file. It mirrors :class:`zea.Parameters` (the merged :class:`zea.Probe` and scan
+  parameters — see :doc:`data-acquisition`), and may additionally contain arbitrary
+  custom parameters that are passed straight through to the pipeline. The documented
+  reconstruction keys below are the most common ones, but they are not exhaustive.
+
 Configs are written in YAML format and can be loaded, edited, and saved using the ``zea`` API.
 
 -------------------------------

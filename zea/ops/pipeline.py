@@ -357,7 +357,7 @@ class Pipeline:
             raise ValueError(
                 "Parameters (and Probe/Config) objects should be first processed with "
                 "`Pipeline.prepare_parameters` before calling the pipeline. "
-                "e.g. inputs = pipeline.prepare_parameters(parameters, **manual_params)"
+                "e.g. inputs = pipeline.prepare_parameters(parameters, **overrides)"
             )
 
         if any(isinstance(arg, str) for arg in inputs.values()):
@@ -713,24 +713,25 @@ class Pipeline:
         self,
         parameters: "Parameters" = None,
         device: Union[str, None] = None,
-        **manual,
+        **overrides,
     ):
         """Prepare a :class:`~zea.Parameters` object for the pipeline.
 
         Converts the (validated and derived) parameters needed by this
         pipeline's operations into a dictionary of tensors, then overlays any
-        manually supplied parameters (e.g. ``config.parameters`` or ad-hoc
-        keyword arguments). Manual parameters take priority over the values in
+        manually supplied overrides (e.g. ``config.parameters`` or ad-hoc
+        keyword arguments). Overrides take priority over the values in
         ``parameters``.
 
         Args:
             parameters: :class:`~zea.Parameters` object. Only the keys
-                this pipeline ``needs`` (and that are not provided manually) are
+                this pipeline ``needs`` (and that are not overridden) are
                 converted, so derivation is lazy and minimal.
             device: Device to place the tensors on. Defaults to the pipeline
                 device.
-            **manual: Additional parameters to include in the inputs (converted
-                to tensors). These overwrite values taken from ``parameters``.
+            **overrides: Additional parameters to include in the inputs
+                (converted to tensors). These overwrite values taken from
+                ``parameters``.
 
         Returns:
             dict: Dictionary of inputs with all values as tensors.
@@ -746,26 +747,26 @@ class Pipeline:
         _device = device if device is not None else self.device
 
         params_dict = {}
-        manual_keys = set(manual.keys())
+        override_keys = set(overrides.keys())
 
         if parameters is not None:
             assert isinstance(parameters, Parameters), (
                 f"Expected an instance of `zea.Parameters`, got {type(parameters)}"
             )
-            # Only convert keys the pipeline needs and that are not overridden
-            # manually, so we avoid deriving unnecessary parameters.
-            needs_keys = self.needs_keys - manual_keys
+            # Only convert keys the pipeline needs and that are not overridden,
+            # so we avoid deriving unnecessary parameters.
+            needs_keys = self.needs_keys - override_keys
             with backend.device(_device):
                 params_dict = parameters.to_tensor(
                     include=needs_keys, keep_as_is=self.static_params
                 )
 
-        # Convert all manual params to tensors
+        # Convert all overrides to tensors
         with backend.device(_device):
-            tensor_manual = dict_to_tensor(manual, keep_as_is=self.static_params)
+            tensor_overrides = dict_to_tensor(overrides, keep_as_is=self.static_params)
 
-        # Manual parameters overwrite values taken from the parameters object.
-        return {**params_dict, **tensor_manual}
+        # Overrides overwrite values taken from the parameters object.
+        return {**params_dict, **tensor_overrides}
 
 
 @ops_registry("map")

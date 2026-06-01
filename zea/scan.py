@@ -46,9 +46,19 @@ Example Usage
 
 .. doctest::
 
-    >>> from zea import Config, Probe, Parameters
+    >>> from zea import Config, File, Probe, Parameters
 
-    >>> # Initialize Parameters from a Probe's parameters
+    >>> # The usual entry point: load the merged probe + scan parameters from a file
+    >>> path = (
+    ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+    ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+    ... )
+    >>> with File(path) as f:
+    ...     parameters = f.load_parameters()
+    >>> type(parameters).__name__
+    'Parameters'
+
+    >>> # You can also build one from a Probe's parameters ...
     >>> probe = Probe.from_name("verasonics_l11_4v")
     >>> parameters = Parameters(
     ...     probe_geometry=probe.probe_geometry,
@@ -58,11 +68,11 @@ Example Usage
     ...     n_tx=11,
     ... )
 
-    >>> # Or initialize from a Config object
+    >>> # ... from a Config's parameters ...
     >>> config = Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml")
     >>> parameters = Parameters(n_tx=11, **config.parameters)
 
-    >>> # Or manually specify parameters
+    >>> # ... or fully manually
     >>> parameters = Parameters(
     ...     grid_size_x=128,
     ...     grid_size_z=256,
