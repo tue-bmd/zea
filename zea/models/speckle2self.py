@@ -57,11 +57,15 @@ Architecture notes
 
 import keras
 import numpy as np
+from keras import ops
 
+import zea
 from zea.internal.registry import model_registry
 from zea.models.base import BaseModel
 from zea.models.preset_utils import get_preset_loader, register_presets
 from zea.models.presets import speckle2self_presets
+
+INFERENCE_SIZE = 512
 
 
 def _build_torch_classes():  # pragma: no cover
@@ -453,24 +457,15 @@ class Speckle2Self(BaseModel):
     (Romaguera et al., 2025).  The model applies per-image linear normalisation
     before the network and clips outputs to ``[0, 1]``.
 
-    Weights can be loaded from a ``.pth`` checkpoint
-    (:meth:`from_pth`) or from a Hugging Face preset (:meth:`from_preset`).
-    An ONNX fallback is available via :meth:`from_onnx` for environments
-    without PyTorch.
-
-    Args:
-        None — use :meth:`from_preset`, :meth:`from_pth`, or :meth:`from_onnx`
-        to attach weights.
-
     Example:
         .. code-block:: python
 
             import numpy as np
             from zea.models.speckle2self import Speckle2Self
 
-            model = Speckle2Self.from_pth("model_2833.pth")
-            env = np.random.rand(2, 1, 512, 512).astype("float32")
-            out = model(env)  # shape (2, 1, 512, 512), values in [0, 1]
+            model = Speckle2Self.from_preset("speckle2self-invivo")
+            env = np.random.rand(2, 512, 512, 1).astype("float32")
+            out = model(env)
     """
 
     def __init__(self, **kwargs):
@@ -481,69 +476,59 @@ class Speckle2Self(BaseModel):
     def call(self, inputs):
         """Run speckle reduction on a batch of linear-envelope images.
 
-        Pads ``H`` and ``W`` to multiples of 16 (required by the 4-level
+        Pads ``height`` and ``width`` to multiples of 16 (required by the 4-level
         encoder), runs inference, then crops back and clips to ``[0, 1]``.
 
         Args:
             inputs (array-like): Linear envelope images.
-                Shape: ``(N, 1, H, W)`` or ``(N, H, W)``.
+                Shape: ``(N, H, W, 1)`` for the Keras weights
+                or ``(N, 1, H, W)`` when using the ONNX / PyTorch weights.
                 Values: Any positive range; **not** log-compressed.
 
         Returns:
             np.ndarray: Despeckled images, same shape as input, values in
             ``[0, 1]``.
         """
+        assert inputs.ndim == 4, (
+            f"Input should have 4 dimensions (B, H, W, C), but has {inputs.ndim}."
+        )
+
+        assert inputs.shape[-1] == 1, f"Input should have 1 channel, but has {inputs.shape[-1]}."
+
+        original_size = ops.shape(inputs)[1:3]
+        inputs = ops.image.resize(inputs, [INFERENCE_SIZE, INFERENCE_SIZE])
+        inputs = zea.func.normalize(inputs, output_range=(0, 1))
+
         if self._onnx_sess is not None:
-            return self._call_onnx(inputs)
-        return self._call_keras(inputs)
+            outputs = self._call_onnx(inputs)
+
+        outputs = self._call_keras(inputs)
+        outputs = ops.image.resize(outputs, original_size)
+
+        outputs = ops.clip(outputs, 0, 1)
+
+        return outputs
 
     def _call_keras(self, inputs):
-        x = np.asarray(inputs, dtype=np.float32)
+        num_frames, height, width, num_channels = ops.shape(inputs)
 
-        squeeze_ch = x.ndim == 3
-        if squeeze_ch:
-            x = x[:, np.newaxis, :, :]  # (N, 1, H, W)
+        output = self.net(inputs, training=False)
 
-        N, C, H, W = x.shape
-
-        # Pad to multiples of 16 (4 stride-2 encoder layers → 2^4 = 16)
-        ph = (16 - H % 16) % 16
-        pw = (16 - W % 16) % 16
-        if ph > 0 or pw > 0:
-            x = np.pad(x, ((0, 0), (0, 0), (0, ph), (0, pw)), mode="reflect")
-
-        # Keras net expects NHWC (channels_last)
-        x_nhwc = np.transpose(x, (0, 2, 3, 1))  # (N, H', W', 1)
-        out_nhwc = np.asarray(self.net(x_nhwc, training=False))
-        output = np.transpose(out_nhwc, (0, 3, 1, 2))  # (N, 1, H', W')
-
-        output = np.clip(output[:, :, :H, :W], 0.0, 1.0)
-
-        if squeeze_ch:
-            return output[:, 0, :, :]
         return output
 
     def _call_onnx(self, inputs):  # pragma: no cover
-        x = np.asarray(inputs, dtype=np.float32)
+        inputs = ops.convert_to_numpy(inputs, dtype=np.float32)
 
-        squeeze_ch = x.ndim == 3
-        if squeeze_ch:
-            x = x[:, np.newaxis, :, :]
+        inputs = np.transpose(inputs, (0, 3, 1, 2))  # (N, 1, H, W) for ONNX input
 
-        N, C, H, W = x.shape
-        ph = (16 - H % 16) % 16
-        pw = (16 - W % 16) % 16
-        if ph > 0 or pw > 0:
-            x = np.pad(x, ((0, 0), (0, 0), (0, ph), (0, pw)), mode="reflect")
+        num_frames, num_channels, height, width = inputs.shape
 
         in_name = self._onnx_sess.get_inputs()[0].name
         out_name = self._onnx_sess.get_outputs()[0].name
-        output = self._onnx_sess.run([out_name], {in_name: x})[0]
+        output = self._onnx_sess.run([out_name], {in_name: inputs})[0]
 
-        output = np.clip(output[:, :, :H, :W], 0.0, 1.0)
+        output = np.transpose(output, (0, 2, 3, 1))  # back to (N, H, W, 1)
 
-        if squeeze_ch:
-            return output[:, 0, :, :]
         return output
 
     def _load_from_pth(self, pth_path):  # pragma: no cover
@@ -561,55 +546,40 @@ class Speckle2Self(BaseModel):
         state_dict = torch.load(pth_path, map_location="cpu")
         _load_pth_into_keras_net(self.net, state_dict)
 
-    def custom_load_weights(self, preset, **kwargs):
+    def custom_load_weights(self, preset, backend="keras", **kwargs):
         """Load weights from a preset (Hugging Face or local directory).
-
-        Resolution order:
-
-        1. ``model.weights.h5`` — native Keras weights (preferred, no PyTorch
-           dependency at inference time).
-        2. ``model.pth`` — PyTorch checkpoint; loaded via
-           :meth:`_load_from_pth`.
-        3. ``model.onnx`` — ONNX file loaded via ``onnxruntime`` (legacy
-           fallback; requires ``pip install onnxruntime``).
 
         Args:
             preset: Preset identifier passed from :meth:`from_preset`.
                 Accepts Hugging Face handles (``hf://...``) or local directory
                 paths.
+            backend: Which backend to use for loading weights. Options:
+                * ``"keras"``: Load native Keras weights from ``model.weights.h5``.
+                * ``"torch"``: Load PyTorch checkpoint from ``model.pth``, original
+                    source for the weights.
+                * ``"onnx"``: Load ONNX file from ``model.onnx`` using ONNX Runtime.
         """
         loader = get_preset_loader(preset)
 
-        # 1. Try native Keras weights (.h5)
-        try:
+        if backend == "keras":
             filename = loader.get_file("model.weights.h5")
-            # Build the model before loading weights
             if not self.built:
-                self(np.zeros((1, 1, 16, 16), dtype=np.float32))
+                self(ops.zeros((1, 16, 16, 1), dtype="float32"))
             self.load_weights(filename)
-            return
-        except Exception:  # pragma: no cover
-            pass
-
-        # 2. Try PyTorch checkpoint (.pth)
-        try:  # pragma: no cover
+        elif backend == "onnx":  # pragma: no cover
+            try:
+                import onnxruntime
+            except ImportError as e:
+                raise ImportError(
+                    "Install onnxruntime or provide a .weights.h5 file for Speckle2Self"
+                ) from e
+            filename = loader.get_file("model.onnx")
+            self._onnx_sess = onnxruntime.InferenceSession(filename)
+        elif backend == "torch":  # pragma: no cover
             filename = loader.get_file("model.pth")
             self._load_from_pth(filename)
-            return
-        except Exception:  # pragma: no cover
-            pass
-
-        # 3. Fall back to ONNX
-        try:  # pragma: no cover
-            import onnxruntime
-        except ImportError as e:  # pragma: no cover
-            raise ImportError(
-                "No loadable weights found in preset (tried model.weights.h5, "
-                "model.pth, model.onnx). Install onnxruntime or provide a "
-                ".pth / .weights.h5 file."
-            ) from e
-        filename = loader.get_file("model.onnx")
-        self._onnx_sess = onnxruntime.InferenceSession(filename)
+        else:  # pragma: no cover
+            raise ValueError(f"Unsupported backend '{backend}' for Speckle2Self preset")
 
     @classmethod
     def from_pth(cls, pth_path):  # pragma: no cover
