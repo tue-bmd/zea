@@ -15,6 +15,7 @@ from copy import deepcopy
 import numpy as np
 
 from zea import log
+from zea.data.spec import Spec, check_dtype
 from zea.internal.core import Object as ZeaObject
 from zea.internal.core import _to_tensor, hash_elements, serialize_elements
 
@@ -137,9 +138,9 @@ class BaseParameters(ZeaObject):
 
         >>> class MyParams(BaseParameters):
         ...     VALID_PARAMS = {
-        ...         "a": {"type": int, "default": 1},
-        ...         "b": {"type": float, "default": 2.0},
-        ...         "d": {"type": float},  # optional dependency
+        ...         "a": {"dtype": np.int32, "default": 1},
+        ...         "b": {"dtype": np.float32, "default": 2.0},
+        ...         "d": {"dtype": np.float32},  # optional dependency
         ...     }
         ...
         ...     @cache_with_dependencies("a", "b")
@@ -223,98 +224,17 @@ class BaseParameters(ZeaObject):
                 f"Invalid parameter: {key}. Valid parameters are: {list(cls.VALID_PARAMS.keys())}"
             )
 
-        # Cast the value if needed and possible
-        expected_type = cls.VALID_PARAMS[key]["type"]
-        if expected_type is not None and value is not None and not isinstance(value, expected_type):
-            value = cls._cast(key, value)
-
-        # Check again
-        if expected_type is not None and value is not None and not isinstance(value, expected_type):
-            allowed = cls._human_readable_type(expected_type)
-            raise TypeError(
-                f"Parameter '{key}' expected type {allowed}, got {type(value).__name__}"
-            )
+        # Cast the value if needed and possible, and check dtype
+        expected_dtype = cls.VALID_PARAMS[key]["dtype"]
+        if not isinstance(expected_dtype, (list, tuple)):
+            expected_dtype = [expected_dtype]
+        value = Spec._cast_native_to_numpy(value, expected_dtype)
+        try:
+            check_dtype(value, expected_dtype)
+        except TypeError as e:
+            raise type(e)(f"In field '{key}': {e}") from e
 
         return value
-
-    @classmethod
-    def _cast(cls, key, value):
-        """Cast parameter to the expected type if 'cast_from' is specified.
-
-        Additionally, int to float conversion is allowed implicitly."""
-        # If the value is a single-element array, convert it to a scalar
-        # If it's a numpy scalar, convert it to a native Python type
-        if (isinstance(value, np.ndarray) and value.size == 1) or isinstance(value, np.generic):
-            value = value.item()
-
-        # Assume the key exists in VALID_PARAMS
-        config = cls.VALID_PARAMS[key]
-
-        if value is None:
-            return value
-
-        cast_to = config["type"]
-        if isinstance(cast_to, tuple):
-            raise ValueError(f"Casting to multiple types is not supported for parameter '{key}'.")
-
-        if "cast_from" not in config:
-            if isinstance(value, int) and cast_to is float:
-                # Allow implicit conversion from int to float
-                return float(value)
-            return value
-
-        cast_types = config["cast_from"]
-        if not isinstance(cast_types, tuple):
-            cast_types = (cast_types,)
-
-        if any(isinstance(value, t) for t in cast_types):
-            value = cast_to(value)
-
-        return value
-
-    @staticmethod
-    def _valid_params_from_spec(spec_cls) -> dict:
-        """Derive ``VALID_PARAMS`` entries from a :class:`~zea.data.spec.Spec` SCHEMA.
-
-        Lets subclasses use the data specs as the single source of truth for
-        *which* file-backed parameters exist. Array-shaped fields map to
-        ``np.ndarray``; scalar fields map to their Python scalar type
-        (``float``/``int``/``str``). Fields that allow both a scalar and an array
-        shape map to a tuple of both. Type/default refinements (e.g. defaults, or
-        forcing a scalar-only type) should be layered on top by the subclass.
-        """
-        params = {}
-        for name, info in spec_cls.SCHEMA.items():
-            # Skip nested-spec fields (not leaf parameters).
-            if info.get("spec") is not None:
-                continue
-            shape_spec = info["shape"]
-            # Normalize to a tuple of shape-tuples.
-            shapes = (
-                shape_spec if (shape_spec and isinstance(shape_spec[0], tuple)) else (shape_spec,)
-            )
-            has_array = any(len(s) > 0 for s in shapes)
-            has_scalar = any(len(s) == 0 for s in shapes)
-
-            dtype = info["dtype"]
-            first_dtype = dtype[0] if isinstance(dtype, (list, tuple)) else dtype
-            if first_dtype is str:
-                scalar_type = str
-            else:
-                try:
-                    scalar_type = (
-                        float if np.issubdtype(np.dtype(first_dtype), np.floating) else int
-                    )
-                except TypeError:
-                    scalar_type = float
-
-            types = []
-            if has_array:
-                types.append(np.ndarray)
-            if has_scalar:
-                types.append(scalar_type)
-            params[name] = {"type": tuple(types) if len(types) > 1 else types[0]}
-        return params
 
     @staticmethod
     def _human_readable_type(type):

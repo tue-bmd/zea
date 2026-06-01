@@ -38,13 +38,8 @@ def check_dtype(value: Any, expected_dtype: List[type]) -> None:
     Works for numpy arrays, numpy scalars, and Python native types.
     """
     for dt in expected_dtype:
-        try:
+        if isinstance(dt, type) and issubclass(dt, np.generic):
             expected_np_dtype = np.dtype(dt)
-            is_numpy_dtype = True
-        except TypeError:
-            is_numpy_dtype = False
-
-        if is_numpy_dtype:
             if hasattr(value, "dtype"):
                 if np.issubdtype(value.dtype, expected_np_dtype):
                     return

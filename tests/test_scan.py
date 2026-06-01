@@ -31,7 +31,6 @@ scan_args = {
     "tx_apodizations": np.ones((10, 10)),
     "focus_distances": np.ones(10) * 0.04,
     "initial_times": np.zeros((10,)),
-    "tx_waveform_indices": np.zeros(10, dtype=int),
     "waveforms_one_way": np.zeros((2, 64)),
     "waveforms_two_way": np.zeros((2, 64)),
     "tgc_gain_curve": np.ones((3328,)),
@@ -185,23 +184,23 @@ def test_initialization():
     assert parameters.n_tx == scan_args["n_tx"]
     assert parameters.n_el == scan_args["n_el"]
     assert parameters.n_ch == scan_args["n_ch"]
-    assert parameters.xlims == scan_args["xlims"]
-    assert parameters.ylims == scan_args["ylims"]
-    assert parameters.zlims == scan_args["zlims"]
-    assert parameters.center_frequency == scan_args["center_frequency"]
-    assert parameters.sampling_frequency == scan_args["sampling_frequency"]
-    assert parameters.demodulation_frequency == scan_args["demodulation_frequency"]
-    assert parameters.sound_speed == scan_args["sound_speed"]
-    assert parameters.n_ax == scan_args["n_ax"]
-    assert parameters.grid_size_x == scan_args["grid_size_x"]
-    assert parameters.grid_size_z == scan_args["grid_size_z"]
-    assert np.all(parameters.polar_angles == scan_args["polar_angles"])
-    assert np.all(parameters.azimuth_angles == scan_args["azimuth_angles"])
-    assert np.all(parameters.t0_delays == scan_args["t0_delays"])
-    assert np.all(parameters.tx_apodizations == scan_args["tx_apodizations"])
-    assert np.all(parameters.focus_distances == scan_args["focus_distances"])
-    assert np.all(parameters.initial_times == scan_args["initial_times"])
-    assert parameters.pixels_per_wavelength == scan_args["pixels_per_wavelength"]
+    assert np.allclose(parameters.xlims, scan_args["xlims"])
+    assert np.allclose(parameters.ylims, scan_args["ylims"])
+    assert np.allclose(parameters.zlims, scan_args["zlims"])
+    assert np.allclose(parameters.center_frequency, scan_args["center_frequency"])
+    assert np.allclose(parameters.sampling_frequency, scan_args["sampling_frequency"])
+    assert np.allclose(parameters.demodulation_frequency, scan_args["demodulation_frequency"])
+    assert np.allclose(parameters.sound_speed, scan_args["sound_speed"])
+    assert np.allclose(parameters.n_ax, scan_args["n_ax"])
+    assert np.allclose(parameters.grid_size_x, scan_args["grid_size_x"])
+    assert np.allclose(parameters.grid_size_z, scan_args["grid_size_z"])
+    assert np.allclose(parameters.polar_angles, scan_args["polar_angles"])
+    assert np.allclose(parameters.azimuth_angles, scan_args["azimuth_angles"])
+    assert np.allclose(parameters.t0_delays, scan_args["t0_delays"])
+    assert np.allclose(parameters.tx_apodizations, scan_args["tx_apodizations"])
+    assert np.allclose(parameters.focus_distances, scan_args["focus_distances"])
+    assert np.allclose(parameters.initial_times, scan_args["initial_times"])
+    assert np.allclose(parameters.pixels_per_wavelength, scan_args["pixels_per_wavelength"])
 
 
 @pytest.mark.parametrize(
@@ -213,7 +212,6 @@ def test_initialization():
         ("tx_apodizations", (10, 10)),
         ("focus_distances", (10,)),
         ("initial_times", (10,)),
-        ("tx_waveform_indices", (10,)),
     ],
 )
 def test_selected_transmits_affects_shape(attr, expected_shape):
@@ -288,7 +286,6 @@ def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
     local_scan_args.pop("transmit_origins", None)
     local_scan_args.pop("initial_times", None)
     local_scan_args.pop("tgc_gain_curve", None)
-    local_scan_args.pop("tx_waveform_indices", None)
 
     warnings = []
 
@@ -315,7 +312,6 @@ def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
         _ = scan.transmit_origins
         _ = scan.initial_times
         _ = scan.tgc_gain_curve
-        _ = scan.tx_waveform_indices
 
     assert warnings.count("No ``azimuth_angles`` provided, using zeros") == 1
     assert warnings.count("No ``t0_delays`` provided, using zeros") == 1
@@ -324,12 +320,11 @@ def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
     assert warnings.count("No ``transmit_origins`` provided, using zeros") == 1
     assert warnings.count("No ``initial_times`` provided, using zeros") == 1
     assert warnings.count("No ``tgc_gain_curve`` provided, using ones") == 1
-    assert warnings.count("No ``tx_waveform_indices`` provided, using zeros") == 1
 
 
 def test_missing_defaults_warn_once_per_scan_instance(monkeypatch):
     local_scan_args = scan_args.copy()
-    local_scan_args.pop("tx_waveform_indices", None)
+    local_scan_args.pop("azimuth_angles", None)
 
     warnings = []
 
@@ -341,18 +336,18 @@ def test_missing_defaults_warn_once_per_scan_instance(monkeypatch):
 
     monkeypatch.setattr("zea.scan.log.warning", _capture_warning)
 
-    scan1 = Parameters(**local_scan_args)
-    scan2 = Parameters(**local_scan_args)
+    parameters1 = Parameters(**local_scan_args)
+    parameters2 = Parameters(**local_scan_args)
 
     # First access in each instance should warn.
-    _ = scan1.tx_waveform_indices
-    _ = scan2.tx_waveform_indices
+    _ = parameters1.azimuth_angles
+    _ = parameters2.azimuth_angles
 
     # Repeated access in same instance should not warn again.
-    _ = scan1.tx_waveform_indices
-    _ = scan2.tx_waveform_indices
+    _ = parameters1.azimuth_angles
+    _ = parameters2.azimuth_angles
 
-    assert warnings.count("No ``tx_waveform_indices`` provided, using zeros") == 2
+    assert warnings.count("No ``azimuth_angles`` provided, using zeros") == 2
 
 
 def test_scan_pickle():
