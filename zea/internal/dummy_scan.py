@@ -23,7 +23,6 @@ def _get_linear_probe():
     return Probe(
         probe_geometry=probe_geometry,
         center_frequency=2.5e6,
-        sampling_frequency=10e6,
     )
 
 
@@ -43,7 +42,6 @@ def _get_phased_array_probe():
     return Probe(
         probe_geometry=probe_geometry,
         center_frequency=3.12e6,
-        sampling_frequency=12.5e6,
     )
 
 
@@ -117,7 +115,7 @@ def _get_planewave_scan(ultrasound_probe, grid_type, **kwargs):
         n_tx=n_tx,
         n_el=n_el,
         center_frequency=ultrasound_probe.center_frequency,
-        sampling_frequency=ultrasound_probe.sampling_frequency,
+        sampling_frequency=10e6,
         probe_geometry=probe_geometry,
         t0_delays=t0_delays,
         tx_apodizations=tx_apodizations,
@@ -150,7 +148,7 @@ def _get_multistatic_scan(ultrasound_probe, grid_type, **kwargs):
         n_tx=n_tx,
         n_el=n_el,
         center_frequency=ultrasound_probe.center_frequency,
-        sampling_frequency=ultrasound_probe.sampling_frequency,
+        sampling_frequency=10e6,
         probe_geometry=probe_geometry,
         t0_delays=t0_delays,
         tx_apodizations=tx_apodizations,
@@ -196,7 +194,7 @@ def _get_diverging_scan(ultrasound_probe, grid_type, **kwargs):
         n_tx=n_tx,
         n_el=n_el,
         center_frequency=ultrasound_probe.center_frequency,
-        sampling_frequency=ultrasound_probe.sampling_frequency,
+        sampling_frequency=10e6,
         probe_geometry=ultrasound_probe.probe_geometry,
         t0_delays=t0_delays,
         tx_apodizations=tx_apodizations,
@@ -241,7 +239,7 @@ def _get_focused_scan(ultrasound_probe, grid_type, **kwargs):
         n_tx=n_tx,
         n_el=n_el,
         center_frequency=ultrasound_probe.center_frequency,
-        sampling_frequency=ultrasound_probe.sampling_frequency,
+        sampling_frequency=10e6,
         probe_geometry=ultrasound_probe.probe_geometry,
         t0_delays=t0_delays,
         tx_apodizations=tx_apodizations,
@@ -299,7 +297,7 @@ def _get_linescan_scan(ultrasound_probe, grid_type, **kwargs):
         n_tx=n_tx,
         n_el=n_el,
         center_frequency=ultrasound_probe.center_frequency,
-        sampling_frequency=ultrasound_probe.sampling_frequency,
+        sampling_frequency=10e6,
         probe_geometry=ultrasound_probe.probe_geometry,
         t0_delays=t0_delays,
         tx_apodizations=tx_apodizations,

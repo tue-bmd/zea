@@ -210,7 +210,22 @@ class Spec:
     ) -> "Spec":
         """Validate a nested spec field, recursively validating its contents."""
         if isinstance(field_value, dict):
-            field_value = nested_spec(**field_value)
+            # Try constructing the nested spec directly.  For backward compatibility,
+            # if unknown keyword arguments are present (e.g. n_el / pitch stored
+            # in the probe group of old HDF5 files, or probe_geometry in the scan
+            # group), retry with only the fields known to this spec.  We intentionally
+            # do NOT filter unconditionally because specs such as DataSpec and
+            # MetadataSpec legitimately accept extra keys via their custom __init__.
+            try:
+                field_value = nested_spec(**field_value)
+            except TypeError as _exc:
+                if "unexpected keyword argument" in str(_exc):
+                    known_fields = {f.name for f in fields(nested_spec)}
+                    field_value = nested_spec(
+                        **{k: v for k, v in field_value.items() if k in known_fields}
+                    )
+                else:
+                    raise
             setattr(self, field_name, field_value)
 
         # Check that the nested spec field is now an instance of the expected Spec subclass
@@ -507,6 +522,21 @@ class Spec:
         """Get the dtype of a field."""
         return cls.SCHEMA[field_name]["dtype"]
 
+    def __repr__(self) -> str:
+        parts = []
+        for field_name, field_info in self.SCHEMA.items():
+            value = getattr(self, field_name, None)
+            if value is None:
+                continue
+            nested_spec = field_info.get("spec")
+            if nested_spec is not None:
+                parts.append(f"{field_name}={value!r}")
+            elif isinstance(value, np.ndarray):
+                parts.append(f"{field_name}=array({value.dtype} {value.shape})")
+            else:
+                parts.append(f"{field_name}={value!r}")
+        return f"{self.__class__.__name__}({', '.join(parts)})"
+
 
 @dataclass
 class Map(Spec):
@@ -668,6 +698,22 @@ class Segmentation(BooleanMap):
             across all frames.
         labels: The labels corresponding to the segmentation values, where each unique value
             in the values corresponds to a label in this list of shape ``(n_labels,)`` and type str.
+
+    .. note::
+        To indicate that certain frames have no segmentation, add an explicit
+        ``"unannotated"`` entry to ``labels`` and set ``values[..., unannotated_idx]`` to
+        ``True`` for those frames (with all other label channels set to ``False``).  This
+        keeps the shape uniform across frames while clearly distinguishing genuinely
+        annotated frames from frames that were not labelled.  For example::
+
+            labels = np.array(["unannotated", "LV_endo", "LV_myo", "LA"])
+            values = np.zeros((n_frames, H, W, 4), dtype=bool)
+            # mark all frames as unannotated by default
+            values[:, :, :, 0] = True
+            # for annotated frames, set unannotated channel to False
+            # and the appropriate label channel to True
+            values[ed_idx, :, :, 0] = False
+            values[ed_idx, :, :, 1:] = segmentation_mask  # shape (H, W, 3)
     """
 
     SCHEMA = {
@@ -1069,8 +1115,6 @@ class ScanSpec(Spec):
     All fields are aligned with the data format specification.
 
     Args:
-        probe_geometry: The probe geometry in meters of shape (n_el, 3),
-            represented as (x, y, z) coordinates.
         sampling_frequency: The sampling frequency in Hz.
         center_frequency: The center frequency in Hz of the transmit pulse.
             Single scalar if all transmits share the same center frequency;
@@ -1108,7 +1152,6 @@ class ScanSpec(Spec):
         tgc_gain_curve: The time-gain-compensation that was applied to every
             sample in the raw_data of shape (n_ax,). Divide by this curve to
             undo the TGC.
-        element_width: The width of the elements in the probe in meters.
         waveforms_one_way: One-way waveforms of shape (n_tx, .) as simulated
             by the Verasonics system. This is the waveform after being filtered
             by the transducer bandwidth once.
@@ -1117,7 +1160,6 @@ class ScanSpec(Spec):
             by the transducer bandwidth twice.
     """
 
-    probe_geometry: np.ndarray
     sampling_frequency: np.ndarray | float
     center_frequency: np.ndarray | float
     demodulation_frequency: np.ndarray | float
@@ -1131,12 +1173,10 @@ class ScanSpec(Spec):
     azimuth_angles: np.ndarray = None
     sound_speed: np.ndarray | float | None = None
     tgc_gain_curve: np.ndarray | None = None
-    element_width: np.ndarray | float | None = None
     waveforms_one_way: np.ndarray | None = None
     waveforms_two_way: np.ndarray | None = None
 
     SCHEMA = {
-        "probe_geometry": {"dtype": np.float32, "shape": ("n_el", 3)},
         "sampling_frequency": {"dtype": np.float32, "shape": ()},
         "center_frequency": {"dtype": np.float32, "shape": ((), ("n_tx",))},
         "demodulation_frequency": {"dtype": np.float32, "shape": ((), ("n_tx",))},
@@ -1150,7 +1190,6 @@ class ScanSpec(Spec):
         "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
         "sound_speed": {"dtype": np.float32, "shape": ()},
         "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
-        "element_width": {"dtype": np.float32, "shape": ()},
         "waveforms_one_way": {
             "dtype": np.float32,
             "shape": ("n_tx", "n_samples_one_way"),
@@ -1162,7 +1201,6 @@ class ScanSpec(Spec):
     }
 
     FIELD_METADATA = {
-        "probe_geometry": {"unit": "m", "description": "Probe geometry (x, y, z) per element."},
         "sampling_frequency": {"unit": "Hz", "description": "Sampling frequency."},
         "center_frequency": {
             "unit": "Hz",
@@ -1179,7 +1217,6 @@ class ScanSpec(Spec):
         "azimuth_angles": {"unit": "rad", "description": "Azimuthal angles of transmit beams."},
         "sound_speed": {"unit": "m/s", "description": "Speed of sound."},
         "tgc_gain_curve": {"unit": "-", "description": "Time-gain-compensation curve."},
-        "element_width": {"unit": "m", "description": "Element width of the probe."},
         "waveforms_one_way": {"unit": "V", "description": "One-way transmit waveforms."},
         "waveforms_two_way": {"unit": "V", "description": "Two-way transmit waveforms."},
     }
@@ -1197,11 +1234,6 @@ class ScanSpec(Spec):
     def __post_init__(self):
         super().__post_init__()
 
-        if np.any(self.probe_geometry > 1.0) or np.any(self.probe_geometry < -1.0):
-            log.warning(
-                "Probe geometry values are unusually large, extending beyond +/- 1.0 meters. "
-                "Please verify that the probe geometry values are correct and in meters."
-            )
         if self.sampling_frequency <= 0:
             raise ValueError(f"Sampling frequency must be positive, got {self.sampling_frequency}")
         if np.any(self.center_frequency < 0):
@@ -1241,8 +1273,6 @@ class ScanSpec(Spec):
                 f"TGC gain curve values must be non-negative, got values between "
                 f"{np.min(self.tgc_gain_curve)} and {np.max(self.tgc_gain_curve)}"
             )
-        if self.element_width is not None and self.element_width <= 0:
-            raise ValueError(f"Element width must be positive, got {self.element_width}")
 
         # Try to simplify the data by squeezing out any singleton dimensions,
         # e.g. if center_frequency is an array with all the same value
@@ -1257,6 +1287,128 @@ class ScanSpec(Spec):
                 self.demodulation_frequency = self.demodulation_frequency[0]
 
         self.warn_missing_optional_fields()
+
+
+@dataclass
+class ProbeSpec(Spec):
+    """Probe hardware specification.
+
+    Stores static, physical characteristics of the transducer that are not
+    captured by the per-acquisition :class:`ScanSpec`.  All fields are
+    optional so that partial information can be recorded.
+
+    Args:
+        name: Probe model identifier (e.g. ``"verasonics_l11_4v"``).
+        type: Probe geometry type: ``"linear"``, ``"phased"``, ``"curved"``, etc.
+        center_frequency: Probe nominal centre frequency in Hz.
+        bandwidth_percent: Fractional bandwidth as a percentage.
+        probe_geometry: Element positions in metres, shape (n_el, 3) with columns
+            (x, y, z).  :attr:`n_el` and :attr:`pitch` are computed
+            automatically as read-only properties from this array.
+        element_width: Width of a single transducer element in metres.
+        element_height: Height (elevation aperture) of a single element in metres.
+        lens_sound_speed: Speed of sound in the acoustic lens in m/s.
+        lens_thickness: Thickness of the acoustic lens in metres.
+    """
+
+    name: str | None = None
+    type: str | None = None
+    center_frequency: np.float32 | None = None
+    bandwidth_percent: np.float32 | None = None
+    probe_geometry: np.ndarray | None = None
+    element_width: np.float32 | None = None
+    element_height: np.float32 | None = None
+    lens_sound_speed: np.float32 | None = None
+    lens_thickness: np.float32 | None = None
+
+    SCHEMA = {
+        "name": {"dtype": str, "shape": ()},
+        "type": {"dtype": str, "shape": ()},
+        "center_frequency": {"dtype": np.float32, "shape": ()},
+        "bandwidth_percent": {"dtype": np.float32, "shape": ()},
+        "probe_geometry": {"dtype": np.float32, "shape": ("n_el", 3)},
+        "element_width": {"dtype": np.float32, "shape": ()},
+        "element_height": {"dtype": np.float32, "shape": ()},
+        "lens_sound_speed": {"dtype": np.float32, "shape": ()},
+        "lens_thickness": {"dtype": np.float32, "shape": ()},
+    }
+
+    FIELD_METADATA = {
+        "name": {"description": "Probe model name/identifier."},
+        "type": {"description": "Probe geometry type (linear, phased, curved, ...)."},
+        "center_frequency": {
+            "unit": "Hz",
+            "description": "Probe nominal centre frequency.",
+        },
+        "bandwidth_percent": {
+            "unit": "%",
+            "description": "Fractional bandwidth as a percentage.",
+        },
+        "probe_geometry": {
+            "unit": "m",
+            "description": "Element positions (x, y, z) per element, shape (n_el, 3).",
+        },
+        "element_width": {
+            "unit": "m",
+            "description": "Width of a single transducer element.",
+        },
+        "element_height": {
+            "unit": "m",
+            "description": "Height (elevation aperture) of a single transducer element.",
+        },
+        "lens_sound_speed": {
+            "unit": "m/s",
+            "description": "Speed of sound in the acoustic lens.",
+        },
+        "lens_thickness": {
+            "unit": "m",
+            "description": "Thickness of the acoustic lens.",
+        },
+    }
+
+    @property
+    def n_el(self) -> int | None:
+        """Number of transducer elements, derived from :attr:`probe_geometry`."""
+        if self.probe_geometry is not None:
+            return int(self.probe_geometry.shape[0])
+        return None
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.probe_geometry is not None:
+            if self.probe_geometry.ndim != 2 or self.probe_geometry.shape[1] != 3:
+                raise ValueError(
+                    f"ProbeSpec: probe_geometry must have shape (n_el, 3), "
+                    f"got {self.probe_geometry.shape}"
+                )
+            if np.any(self.probe_geometry > 1.0) or np.any(self.probe_geometry < -1.0):
+                log.warning(
+                    "ProbeSpec probe_geometry values extend beyond \u00b11.0 m. "
+                    "Please verify the values are in metres."
+                )
+        if self.center_frequency is not None and self.center_frequency <= 0:
+            raise ValueError(
+                f"ProbeSpec: center_frequency must be positive, got {self.center_frequency}"
+            )
+        if self.bandwidth_percent is not None and self.bandwidth_percent <= 0:
+            raise ValueError(
+                f"ProbeSpec: bandwidth_percent must be positive, got {self.bandwidth_percent}"
+            )
+        if self.element_width is not None and self.element_width <= 0:
+            raise ValueError(f"ProbeSpec: element_width must be positive, got {self.element_width}")
+        if self.element_height is not None and self.element_height <= 0:
+            raise ValueError(
+                f"ProbeSpec: element_height must be positive, got {self.element_height}"
+            )
+        if self.lens_sound_speed is not None and self.lens_sound_speed <= 0:
+            raise ValueError(
+                f"ProbeSpec: lens_sound_speed must be positive, got {self.lens_sound_speed}"
+            )
+        if self.lens_thickness is not None and self.lens_thickness < 0:
+            raise ValueError(
+                f"ProbeSpec: lens_thickness must be non-negative, got {self.lens_thickness}"
+            )
 
 
 @dataclass
@@ -1677,7 +1829,9 @@ class FileSpec(Spec):
             track index for each global transmit event.
         metadata: Additional metadata about the acquisition.
         metrics: Metrics computed from the acquisition.
-        probe_name: The name of the probe used to acquire the data.
+        probe: Physical probe specification (see :class:`ProbeSpec`).  The probe
+            name is stored as ``probe.name``; use :attr:`zea.File.probe_name`
+            to read it back from an HDF5 file.
         us_machine: The ultrasound machine used to acquire the data.
         description: Free-text description.
 
@@ -1692,7 +1846,6 @@ class FileSpec(Spec):
             ...         "raw_data": np.zeros((2, 4, 64, 8, 1), dtype=np.float32),
             ...     },
             ...     scan={
-            ...         "probe_geometry": np.zeros((8, 3), dtype=np.float32),
             ...         "sampling_frequency": np.float32(40e6),
             ...         "center_frequency": np.float32(5e6),
             ...         "demodulation_frequency": np.float32(5e6),
@@ -1715,7 +1868,7 @@ class FileSpec(Spec):
     track_schedule: np.ndarray | None = None
     metadata: MetadataSpec | dict = field(default_factory=MetadataSpec)
     metrics: MetricsSpec | dict = field(default_factory=MetricsSpec)
-    probe_name: str | None = None
+    probe: ProbeSpec | dict | None = None
     us_machine: str | None = None
     description: str | None = None
 
@@ -1727,7 +1880,7 @@ class FileSpec(Spec):
         "track_schedule": {"dtype": np.int32, "shape": ("n_total_tx",)},
         "metadata": {"spec": MetadataSpec},
         "metrics": {"spec": MetricsSpec},
-        "probe_name": {"dtype": str, "shape": ()},
+        "probe": {"spec": ProbeSpec},
         "us_machine": {"dtype": str, "shape": ()},
         "description": {"dtype": str, "shape": ()},
     }
@@ -1741,6 +1894,7 @@ class FileSpec(Spec):
         metadata: "MetadataSpec | dict | None" = None,
         metrics: "MetricsSpec | dict | None" = None,
         probe_name: "str | None" = None,
+        probe: "ProbeSpec | dict | None" = None,
         us_machine: "str | None" = None,
         description: "str | None" = None,
     ):
@@ -1754,11 +1908,17 @@ class FileSpec(Spec):
         else:
             _implicit_track = None
 
+        if probe_name is not None:
+            raise TypeError(
+                "probe_name is not a FileSpec parameter. "
+                "Use probe={'name': ...} to specify the probe name."
+            )
+
         self.tracks = list(tracks) if tracks is not None else []
         self.track_schedule = track_schedule
         self.metadata = metadata if metadata is not None else MetadataSpec()
         self.metrics = metrics if metrics is not None else MetricsSpec()
-        self.probe_name = probe_name
+        self.probe = probe
         self.us_machine = us_machine
         self.description = description
 
@@ -1838,35 +1998,6 @@ class FileSpec(Spec):
                     f"All track_schedule indices must be in [0, {n_tracks - 1}], "
                     f"got min={self.track_schedule.min()}, max={self.track_schedule.max()}"
                 )
-
-        # Validate that probe-defining scan parameters agree across all tracks.
-        # This guarantees that probe() can safely return parameters from track_0.
-        if len(self.tracks) > 1:
-            _PROBE_FIELDS = ("probe_geometry", "element_width")
-            ref_idx, ref_scan = next(
-                ((i, t.scan) for i, t in enumerate(self.tracks) if t.scan is not None),
-                (None, None),
-            )
-            if ref_scan is not None:
-                for cur_idx, track in enumerate(self.tracks):
-                    if cur_idx == ref_idx or track.scan is None:
-                        continue
-                    for field_name in _PROBE_FIELDS:
-                        ref_val = getattr(ref_scan, field_name, None)
-                        cur_val = getattr(track.scan, field_name, None)
-                        if ref_val is None or cur_val is None:
-                            continue
-                        equal = (
-                            np.array_equal(ref_val, cur_val)
-                            if isinstance(ref_val, np.ndarray)
-                            else ref_val == cur_val
-                        )
-                        if not equal:
-                            raise ValueError(
-                                f"Tracks {ref_idx} and {cur_idx} have different "
-                                f"'{field_name}' values. All tracks in a multi-track "
-                                "file must use the same physical probe."
-                            )
 
         # Warn if multi-track frame counts differ without a schedule
         if len(self.tracks) > 1 and self.track_schedule is None:
@@ -1969,7 +2100,7 @@ class FileSpec(Spec):
         Both the new ``tracks/track_N/`` format and the legacy flat
         ``data/`` + ``scan/`` format are supported.  Extra scalar fields in
         legacy scan groups (``n_frames``, ``n_tx``, etc.) are ignored,
-        and the ``probe`` root attribute is mapped to ``probe_name``.
+        and the ``probe`` root attribute is mapped to ``probe.name``.
 
         Args:
             file: An open ``h5py.File`` (or :class:`zea.File`).
@@ -2014,11 +2145,18 @@ class FileSpec(Spec):
         # New multi-track format: tracks/track_N/
         if "tracks" in file:
             tracks_group = file["tracks"]
+            scan_schema_keys = set(ScanSpec.SCHEMA.keys())
             tracks = []
             i = 0
             while f"track_{i}" in tracks_group:
                 track_group = tracks_group[f"track_{i}"]
                 track_dict = _load_group_as_dict(track_group)
+                # Filter legacy scalar fields from per-track scan dicts, matching
+                # the same treatment applied to single-track scan groups below.
+                if "scan" in track_dict and isinstance(track_dict["scan"], dict):
+                    track_dict["scan"] = {
+                        k: v for k, v in track_dict["scan"].items() if k in scan_schema_keys
+                    }
                 tracks.append(track_dict)
                 i += 1
             kwargs["tracks"] = tracks
@@ -2032,17 +2170,15 @@ class FileSpec(Spec):
             if scan_dict is not None:
                 kwargs["scan"] = scan_dict
 
-        # 1. Map legacy root attribute 'probe' → 'probe_name' by delegating
-        #    to File.probe_name, which already checks both 'probe_name' and
-        #    'probe' attrs in priority order.
-        if "probe_name" not in kwargs:
+        # 1. Map legacy root 'probe_name' or 'probe' attr into probe.name so
+        #    that old files with a named probe but no probe group still round-trip.
+        if "probe" not in kwargs:
             try:
-                kwargs["probe_name"] = file.probe_name
+                legacy_name = file.probe_name
+                if legacy_name is not None:
+                    kwargs["probe"] = {"name": legacy_name}
             except AttributeError:
-                log.warning(
-                    "File '%s' has no 'probe_name' or 'probe' attribute; probe name will be None.",
-                    file.filename,
-                )
+                pass  # no probe info in file — leave probe as None
 
         # 2. Filter scan dict to only keys recognised by ScanSpec.SCHEMA so
         #    that legacy scalar fields (n_frames, n_ax, n_el, n_tx, n_ch, …)

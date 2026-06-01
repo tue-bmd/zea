@@ -158,37 +158,10 @@ class VerasonicsFile(h5py.File):
         return int(dataset[:].item())
 
     @property
-    def probe_unit(self):
-        """The unit the probe dimensions are defined in."""
-        _ALLOWED_UNITS = {"wavelengths", "mm"}
-        unit = self.decode_string(self["Trans"]["units"][:])
-        assert unit in {"wavelengths", "mm"}, (
-            f"Unexpected unit '{unit}' in file, must be one of {_ALLOWED_UNITS}"
-        )
-        return unit
-
-    @property
-    def probe_geometry(self):
-        """The probe geometry of shape (n_el, 3)."""
-        # Read the probe geometry from the file
-        probe_geometry = self["Trans"]["ElementPos"][:3, :]
-
-        # Transpose the probe geometry to have the shape (n_el, 3)
-        probe_geometry = probe_geometry.T
-
-        # Convert the probe geometry to meters
-        if self.probe_unit == "mm":
-            probe_geometry = probe_geometry / 1000
-        else:
-            probe_geometry = probe_geometry * self.wavelength
-
-        return probe_geometry
-
-    @property
     def wavelength(self):
         """Wavelength of the probe from the file in meters."""
 
-        return self.sound_speed / self.probe_center_frequency
+        return self.sound_speed / self.probe.center_frequency
 
     def read_transmit_events(
         self, event=None, frames="all", allow_accumulate=False, buffer_index=0
@@ -470,15 +443,6 @@ class VerasonicsFile(h5py.File):
         return n_ax.item()
 
     @property
-    def probe_connector(self):
-        """Probe connector indices."""
-        probe_connector = self["Trans"]["ConnectorES"][:]
-        probe_connector = np.squeeze(probe_connector, axis=0)
-        probe_connector = probe_connector.astype(np.int32)
-        probe_connector = probe_connector - 1  # make 0-based
-        return probe_connector
-
-    @property
     def is_new_save_raw_format(self):
         return "save_raw_version" in self.keys()
 
@@ -574,9 +538,18 @@ class VerasonicsFile(h5py.File):
         # Convert the raw data to a numpy array to allow out-of-order indexing later
         raw_data = np.asarray(raw_data, dtype=np.int16)
 
+        # Add n_frames dimension if it is missing
+        if raw_data.ndim == 2:
+            raw_data = np.expand_dims(raw_data, axis=0)
+
+        assert raw_data.ndim == 3, (
+            "Expected raw data to have 3 dimensions at this point "
+            f"(n_frames, n_channels, n_samples), but got {raw_data.shape}."
+        )
+
         # Reorder and select channels based on probe elements
         if self.is_new_save_raw_format:
-            raw_data = raw_data[:, self.probe_connector, :]
+            raw_data = raw_data[:, self.probe.connector, :]
         else:
             log.warning(
                 "Data was not saved using the updated `save_raw` function (version >= 1.0). "
@@ -626,12 +599,6 @@ class VerasonicsFile(h5py.File):
             )
 
         return raw_data
-
-    @property
-    def probe_center_frequency(self):
-        """Center frequency of the probe from the file in Hz."""
-
-        return self["Trans"]["frequency"][:].item() * 1e6
 
     def read_center_frequency(self, waveform_index):
         """Center frequency of the transmit from the file in Hz."""
@@ -698,22 +665,9 @@ class VerasonicsFile(h5py.File):
         return np.stack(initial_times).astype(np.float32)
 
     @property
-    def probe_name(self):
-        """The name of the probe from the file."""
-        probe_name = self["Trans"]["name"][:]
-        probe_name = self.decode_string(probe_name)
-        # Translates between verasonics probe names and zea probe names
-        if probe_name in _VERASONICS_TO_ZEA_PROBE_NAMES:
-            probe_name = _VERASONICS_TO_ZEA_PROBE_NAMES[probe_name]
-        else:
-            log.warning(
-                f"Probe name '{probe_name}' is not in the list of known probes. "
-                "Please add it to the _VERASONICS_TO_ZEA_PROBE_NAMES dictionary. "
-                "Falling back to generic probe."
-            )
-            probe_name = "generic"
-
-        return probe_name
+    def probe(self) -> "VerasonicsProbe":
+        """The probe object from the file."""
+        return VerasonicsProbe(self)
 
     def read_focus_distances(self, tx_order, event=None):
         """Reads the focus distances from the file.
@@ -763,12 +717,6 @@ class VerasonicsFile(h5py.File):
 
         return origins
 
-    @property
-    def _probe_geometry_is_ordered_ula(self):
-        """Checks if the probe geometry is ordered as a uniform linear array (ULA)."""
-        diff_vec = self.probe_geometry[1:] - self.probe_geometry[:-1]
-        return np.isclose(diff_vec, diff_vec[0]).all()
-
     def planewave_focal_distance_to_inf(self, focus_distances, t0_delays, tx_apodizations):
         """Detects plane wave transmits and sets the focus distance to infinity.
 
@@ -781,10 +729,10 @@ class VerasonicsFile(h5py.File):
             focus_distances (np.ndarray): The focus distances of shape (n_tx,).
 
         Note:
-            This function assumes that the probe_geometry is a 1d uniform linear array.
+            This function assumes that the probe geometry is a 1d uniform linear array.
             If not it will warn and return.
         """
-        if not self._probe_geometry_is_ordered_ula:
+        if not self.probe._probe_geometry_is_ordered_ula:
             log.warning(
                 "The probe geometry is not ordered as a uniform linear array. "
                 "Focal distances are not set to infinity for plane waves."
@@ -835,15 +783,6 @@ class VerasonicsFile(h5py.File):
           Therefore, we need to halve the sampling frequency.
         """
         return self.sample_mode in (50, 100)
-
-    @property
-    def lens_correction(self):
-        """The lens correction: 1 way delay in wavelengths thru lens"""
-
-        try:
-            return self["Trans"]["lensCorrection"][:].item()
-        except KeyError:
-            return None
 
     @property
     def tgc_gain_curve(self):
@@ -947,19 +886,6 @@ class VerasonicsFile(h5py.File):
 
         return image_data
 
-    @property
-    def element_width(self):
-        """The element width in meters from the file."""
-        element_width = self["Trans"]["elementWidth"][:].item()
-
-        # Convert the probe element width to meters
-        if self.probe_unit == "mm":
-            element_width = element_width / 1000
-        else:
-            element_width = element_width * self.wavelength
-
-        return element_width
-
     def read_scan(self, event=None, frames=None, allow_accumulate=False, buffer_index=0) -> dict:
         """Reads all scan parameters from the file and returns them in a dictionary.
 
@@ -1005,7 +931,7 @@ class VerasonicsFile(h5py.File):
         )
 
         return {
-            "probe_geometry": self.probe_geometry,
+            "probe_geometry": self.probe.geometry,
             "time_to_next_transmit": time_to_next_transmit,
             "t0_delays": t0_delays,
             "tx_apodizations": tx_apodizations,
@@ -1021,7 +947,7 @@ class VerasonicsFile(h5py.File):
             "waveforms_one_way": waveforms_one_way,
             "waveforms_two_way": waveforms_two_way,
             "tgc_gain_curve": self.tgc_gain_curve,
-            "element_width": self.element_width,
+            "element_width": self.probe.element_width,
         }
 
     def read_verasonics_file(
@@ -1074,10 +1000,10 @@ class VerasonicsFile(h5py.File):
 
         additional_elements = []
 
-        if self.lens_correction is not None:
+        if self.probe.lens_correction is not None:
             el_lens_correction = DatasetElement(
                 dataset_name="lens_correction",
-                data=self.lens_correction,
+                data=self.probe.lens_correction,
                 description=(
                     "The lens correction value used by Verasonics. This value is the "
                     "additional path length in wavelength that the lens introduces. "
@@ -1211,13 +1137,139 @@ class VerasonicsFile(h5py.File):
             path=output_path,
             data=data_dict,
             scan=scan_dict,
-            probe_name=self.probe_name,
+            probe={"name": self.probe.name},
             description="Verasonics data",
             compression=compression,
         )
 
         if additional_elements:
             _write_user_additional_elements_to_file(output_path, additional_elements)
+
+
+class VerasonicsProbe:
+    def __init__(self, file: VerasonicsFile):
+        self._file = file
+        self.trans_obj = file["Trans"]
+
+    @property
+    def wavelength(self):
+        """The wavelength of the probe in meters."""
+        return self._file.wavelength
+
+    @property
+    def name(self):
+        """The name of the probe from the file."""
+        name = self.trans_obj["name"][:]
+        name = self._file.decode_string(name)
+        # Translates between verasonics probe names and zea probe names
+        if name in _VERASONICS_TO_ZEA_PROBE_NAMES:
+            name = _VERASONICS_TO_ZEA_PROBE_NAMES[name]
+        else:
+            log.warning(
+                f"Probe name '{name}' is not in the list of known probes. "
+                "Please add it to the _VERASONICS_TO_ZEA_PROBE_NAMES dictionary. "
+                "Falling back to generic probe."
+            )
+            name = "generic"
+
+        return name
+
+    @property
+    def unit(self):
+        """The unit some probe dimensions are defined in.
+
+        This concerns ElementPos, elementWidth and lensCorrection.
+        """
+        _ALLOWED_UNITS = {"wavelengths", "mm"}
+        unit = self._file.decode_string(self.trans_obj["units"][:])
+        assert unit in {"wavelengths", "mm"}, (
+            f"Unexpected unit '{unit}' in file, must be one of {_ALLOWED_UNITS}"
+        )
+        return unit
+
+    @property
+    def center_frequency(self):
+        """Center frequency of the probe from the file in Hz."""
+
+        return self.trans_obj["frequency"][:].item() * 1e6
+
+    @property
+    def geometry(self):
+        """The probe geometry of shape (n_el, 3)."""
+        # Read the probe geometry from the file
+        geometry = self.trans_obj["ElementPos"][:3, :]
+
+        # Transpose the probe geometry to have the shape (n_el, 3)
+        geometry = geometry.T
+
+        # Convert the probe geometry to meters
+        if self.unit == "mm":
+            geometry = geometry / 1000
+        else:
+            geometry = geometry * self.wavelength
+
+        return geometry
+
+    @property
+    def bandwidth(self):
+        """Bandwidth of the probe: -6dB lower and upper cutoff pts in Hz."""
+        if "Bandwidth" in self.trans_obj.keys():
+            return self.trans_obj["Bandwidth"][:].item() * 1e6
+
+    @property
+    def type(self):
+        """The type of the probe from the file."""
+        if "type" in self.trans_obj.keys():
+            _id_to_str = {
+                0: "linear",
+                1: "curved",
+                2: "2D-array",
+                3: "annular",
+                4: "row-column",
+            }
+            probe_type_id = self.trans_obj["type"][:]
+            return _id_to_str.get(probe_type_id)
+
+    @property
+    def element_width(self):
+        """The element width in meters from the file."""
+        element_width = self.trans_obj["elementWidth"][:].item()
+
+        # Convert the probe element width to meters
+        if self.unit == "mm":
+            element_width = element_width / 1000  # mm -> m
+        else:
+            element_width = element_width * self.wavelength  # wavelengths -> m
+
+        return element_width
+
+    @property
+    def element_length(self):
+        """Element length for row-column probes in meters."""
+        if "ElementLength" in self.trans_obj.keys():
+            return self.trans_obj["ElementLength"][:].item() / 1000  # mm -> m
+
+    @property
+    def connector(self):
+        """Probe connector indices."""
+        connector = self.trans_obj["ConnectorES"][:]
+        connector = np.squeeze(connector, axis=0)
+        connector = connector.astype(np.int32)
+        connector = connector - 1  # make 0-based
+        return connector
+
+    @property
+    def lens_correction(self):
+        """The lens correction: 1 way delay in wavelengths thru lens"""
+
+        if "lensCorrection" in self.trans_obj.keys():
+            return self.trans_obj["lensCorrection"][:].item()
+
+    @property
+    def _probe_geometry_is_ordered_ula(self):
+        """Checks if the probe geometry is ordered as a uniform linear array (ULA)."""
+        diff_vec = self.geometry[1:] - self.geometry[:-1]
+        return np.isclose(diff_vec, diff_vec[0]).all()
 
 
 def _write_user_additional_elements(h5file, additional_elements, prefix=""):

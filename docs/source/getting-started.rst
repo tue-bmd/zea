@@ -21,8 +21,9 @@ Let's take a quick look at how to use ``zea`` to load and process ultrasound dat
    path = config.data.dataset_folder + "/" + config.data.file_path
    with zea.File(path) as file:
       data = file.data.raw_data[0]
-      probe = file.probe()
-      scan = file.scan(**config.scan)
+      probe = file.probe
+      scan = file.scan
+      scan.update(**config.scan)
 
    # using the pipeline as specified in the config file
    pipeline = zea.Pipeline.from_config(

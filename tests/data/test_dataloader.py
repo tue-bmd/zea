@@ -653,9 +653,11 @@ def test_dataloader_repr(dummy_hdf5):
         batch_size=4,
     )
     repr_str = repr(loader)
-    assert "<Dataloader:" in repr_str
+    assert "Dataloader(" in repr_str
+    assert "n_samples=" in repr_str
     assert "batch_size=4" in repr_str
     assert "key='data'" in repr_str
+    assert "threads=" in repr_str
 
 
 def test_assert_image_range_below():

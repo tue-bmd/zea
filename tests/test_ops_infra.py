@@ -362,7 +362,7 @@ def test_pipeline_validation():
 def test_pipeline_with_scan_probe_config():
     """Tests the Pipeline with Scan, Probe, and Config objects as inputs."""
 
-    probe = Probe.from_name("generic")
+    probe = Probe(probe_geometry=np.zeros((128, 3)))
     scan = Scan(
         n_tx=128,
         n_ax=256,
@@ -732,7 +732,6 @@ def get_probe():
     return Probe(
         probe_geometry=probe_geometry,
         center_frequency=3.125e6,
-        sampling_frequency=12.5e6,
     )
 
 
@@ -768,7 +767,7 @@ def get_scan(ultrasound_probe, grid_size_x=None, grid_size_z=None):
         n_ax=n_ax,
         n_el=n_el,
         center_frequency=ultrasound_probe.center_frequency / 100,
-        sampling_frequency=ultrasound_probe.sampling_frequency / 100,
+        sampling_frequency=12.5e6 / 100,
         probe_geometry=probe_geometry,
         t0_delays=t0_delays,
         tx_apodizations=tx_apodizations,
@@ -1058,16 +1057,23 @@ def test_all_functions_exported():
 
 
 def test_pipeline_repr():
-    """Test Pipeline.__repr__ output format."""
+    """Pipeline repr is constructor-style with no angle brackets."""
     pipeline = ops.Pipeline([MultiplyOperation(), AddOperation()], name="test_pipe")
     r = repr(pipeline)
-    assert r == "<Pipeline test_pipe=(MultiplyOperation, AddOperation)>"
+    assert r.startswith("Pipeline(")
+    assert r.endswith(")")
+    assert "<" not in r
+    assert "name='test_pipe'" in r
+    assert "operations=[" in r
+    assert "MultiplyOperation" in r
+    assert "AddOperation" in r
 
     # Nested pipeline repr
     inner = ops.Pipeline([AddOperation()], name="inner")
     outer = ops.Pipeline([MultiplyOperation(), inner], name="outer")
     r2 = repr(outer)
-    assert "Pipeline inner" in r2
+    assert "Pipeline(" in r2
+    assert "inner" in r2
 
 
 def test_pipeline_eq():
@@ -1211,11 +1217,13 @@ def test_patched_grid_get_dict():
 
 
 def test_beamform_repr():
-    """Test Beamform.__repr__ returns the expected format."""
+    """Test Beamform.__repr__ returns constructor-style format."""
 
     b = Beamform(num_patches=1, jit_options=None)
     r = repr(b)
-    assert r.startswith("<Beamform")
+    assert r.startswith("Beamform(")
+    assert r.endswith(")")
+    assert "<" not in r
     assert "TOFCorrection" in r
 
 

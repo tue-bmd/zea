@@ -629,7 +629,7 @@ def generate_zea_dataset(
     # make sure input arguments of func is same length as data_and_parameters
     # except `path`, `cast_to_float`, `overwrite`, and `enable_compression` arguments
     assert (
-        len(data_and_parameters) == len(inspect.signature(generate_zea_dataset).parameters) - 6
+        len(data_and_parameters) == len(inspect.signature(generate_zea_dataset).parameters) - 5
     ), (
         "All arguments should be put in data_and_parameters except "
         "`path`, `cast_to_float`, `overwrite`, `enable_compression`, "

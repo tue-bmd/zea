@@ -40,6 +40,27 @@ scan_args = {
 }
 
 
+def test_scan_repr():
+    """Scan repr is a single-line constructor-style string."""
+    scan = Scan(**scan_args)
+    r = repr(scan)
+    assert r.startswith("Scan(")
+    assert r.endswith(")")
+    assert "\n" not in r
+    assert "sampling_frequency=" in r
+    assert "MHz" in r
+
+
+def test_scan_str():
+    """Scan str is a multi-line constructor-style string."""
+    scan = Scan(**scan_args)
+    s = str(scan)
+    assert s.startswith("Scan(\n")
+    assert s.endswith("\n)")
+    assert "\n" in s
+    assert "sampling_frequency=" in s
+
+
 def test_scan_compare():
     """Test comparison of Scan objects."""
     scan = Scan(**scan_args)
@@ -294,7 +315,7 @@ def test_inplace_modification():
 
     def edit2(scan):
         """edit another indirect dependency (np.ndarray) in-place"""
-        scan.probe_geometry[:, 0] += 0.001
+        scan.probe_geometry[:, 0] *= 1.02
         return scan
 
     def edit3(scan):

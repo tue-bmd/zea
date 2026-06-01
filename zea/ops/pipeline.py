@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, List, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Union
 
 import keras
 import numpy as np
@@ -27,9 +27,13 @@ from zea.ops.ultrasound import (
     ReshapeGrid,
     TOFCorrection,
 )
-from zea.probes import Probe
 from zea.scan import Scan
 from zea.utils import FunctionTimer
+
+if TYPE_CHECKING:
+    # Imported lazily inside functions at runtime to avoid a circular import
+    # (zea.probes imports ProbeSpec from zea.data.spec, which can pull in this module).
+    from zea.probes import Probe
 
 
 @ops_registry("pipeline")
@@ -516,7 +520,7 @@ class Pipeline:
                 operations.append(repr(operation))
             else:
                 operations.append(operation.__class__.__name__)
-        return f"<Pipeline {self.name}=({', '.join(operations)})>"
+        return f"Pipeline(name={self.name!r}, operations=[{', '.join(operations)}])"
 
     @classmethod
     def load(cls, file_path: str, **kwargs) -> "Pipeline":
@@ -641,6 +645,7 @@ class Pipeline:
                 ... )
                 >>> config.to_yaml("pipeline.yaml")
                 >>> pipeline = Pipeline.from_path("pipeline.yaml")
+
         """
         config = Config.from_path(file_path)
         return pipeline_from_config(config, **kwargs)
@@ -707,7 +712,7 @@ class Pipeline:
 
     def prepare_parameters(
         self,
-        probe: Probe = None,
+        probe: "Probe" = None,
         scan: Scan = None,
         config: Config = None,
         device: Union[str, None] = None,
@@ -739,6 +744,8 @@ class Pipeline:
 
         # Process args to extract Probe, Scan, and Config objects
         if probe is not None:
+            from zea.probes import Probe
+
             assert isinstance(probe, Probe), (
                 f"Expected an instance of `zea.probes.Probe`, got {type(probe)}"
             )
@@ -1097,7 +1104,7 @@ class Beamform(Pipeline):
                 operations.append(repr(operation))
             else:
                 operations.append(operation.__class__.__name__)
-        return f"<Beamform {self.name}=({', '.join(operations)})>"
+        return f"Beamform(name={self.name!r}, operations=[{', '.join(operations)}])"
 
     def get_dict(self, compact=True) -> dict:
         """Convert the pipeline to a dictionary.

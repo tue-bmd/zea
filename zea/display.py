@@ -44,7 +44,7 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
             ... )
 
             >>> with zea.File(file_path, mode="r") as file:
-            ...     data = file.load_data("image", indices=0)
+            ...     data = file.data.image[0]
 
             >>> image, _ = zea.display.scan_convert(
             ...     data,
