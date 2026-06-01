@@ -23,8 +23,14 @@ def sinusoidal_embedding(x, embedding_min_frequency, embedding_max_frequency, em
     return embeddings
 
 
-def ResidualBlock(width):
-    """Residual block with swish activation."""
+def ResidualBlock(width, normalization="batch_norm"):
+    """Residual block with swish activation.
+
+    Args:
+        width: Number of filters.
+        normalization: Normalization type. One of ``"batch_norm"`` or
+            ``"group_norm"``. Defaults to ``"batch_norm"``.
+    """
 
     def apply(x):
         input_width = ops.shape(x)[3]
@@ -32,7 +38,10 @@ def ResidualBlock(width):
             residual = x
         else:
             residual = layers.Conv2D(width, kernel_size=1)(x)
-        x = layers.BatchNormalization(center=False, scale=False)(x)
+        if normalization == "group_norm":
+            x = layers.GroupNormalization(groups=min(32, width))(x)
+        else:
+            x = layers.BatchNormalization(center=False, scale=False)(x)
         x = layers.Conv2D(width, kernel_size=3, padding="same", activation="swish")(x)
         x = layers.Conv2D(width, kernel_size=3, padding="same")(x)
         x = layers.Add()([x, residual])
@@ -41,13 +50,13 @@ def ResidualBlock(width):
     return apply
 
 
-def DownBlock(width, block_depth):
+def DownBlock(width, block_depth, normalization="batch_norm"):
     """Downsampling block with residual connections."""
 
     def apply(x):
         x, skips = x
         for _ in range(block_depth):
-            x = ResidualBlock(width)(x)
+            x = ResidualBlock(width, normalization=normalization)(x)
             skips.append(x)
         x = layers.AveragePooling2D(pool_size=2)(x)
         return x
@@ -55,7 +64,7 @@ def DownBlock(width, block_depth):
     return apply
 
 
-def UpBlock(width, block_depth):
+def UpBlock(width, block_depth, normalization="batch_norm"):
     """Upsampling block with residual connections."""
 
     def apply(x):
@@ -63,7 +72,7 @@ def UpBlock(width, block_depth):
         x = layers.UpSampling2D(size=2, interpolation="bilinear")(x)
         for _ in range(block_depth):
             x = layers.Concatenate()([x, skips.pop()])
-            x = ResidualBlock(width)(x)
+            x = ResidualBlock(width, normalization=normalization)(x)
         return x
 
     return apply

@@ -10,6 +10,10 @@ env:
   REGISTRY: ghcr.io
   BASE_IMAGE: ghcr.io/tue-bmd/zea/all-cpu
   MAIN_REPO: tue-bmd/zea
+  HF_CACHE_HOST: /cache/huggingface
+  HF_CACHE_CONTAINER: /cache/huggingface
+  ZEA_CACHE_HOST: /cache/zea
+  ZEA_CACHE_CONTAINER: /cache/zea
 
 jobs:
   tag:
@@ -131,10 +135,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Run heavy Pytest
+      - name: Run heavy tests
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
+            -v $HF_CACHE_HOST:$HF_CACHE_CONTAINER \
+            -v $ZEA_CACHE_HOST:$ZEA_CACHE_CONTAINER \
+            -e HF_HOME=$HF_CACHE_CONTAINER \
+            -e HUGGINGFACE_HUB_CACHE=$HF_CACHE_CONTAINER \
+            -e ZEA_CACHE_DIR=$ZEA_CACHE_CONTAINER \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
             sh -lc "pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'heavy' ./tests"
@@ -145,14 +154,47 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ env.MAIN_REPO }}
           flags: heavy
+  notebook-tests:
+    name: notebook-tests (${{ matrix.label }})
+    needs: [image]
+    runs-on: self-hosted
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: agent
+            dirs: agent
+            label: agent
+          - name: models
+            dirs: models
+            label: models
+          - name: pipeline
+            dirs: pipeline
+            label: pipeline
+          - name: data-metrics
+            dirs: "data metrics"
+            label: data+metrics
+    concurrency:
+      group: notebook-tests-${{ matrix.name }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
 
-      - name: Run notebook tests with Pytest
+      - name: Run ${{ matrix.name }} notebook tests
         run: |
+          DIRS_ARGS=$(echo "${{ matrix.dirs }}" | tr ' ' '\n' | sed 's/^/--notebook-dir /' | tr '\n' ' ')
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
+            -v ${{ env.HF_CACHE_HOST }}:${{ env.HF_CACHE_CONTAINER }} \
+            -v ${{ env.ZEA_CACHE_HOST }}:${{ env.ZEA_CACHE_CONTAINER }} \
+            -e HF_HOME=${{ env.HF_CACHE_CONTAINER }} \
+            -e HUGGINGFACE_HUB_CACHE=${{ env.HF_CACHE_CONTAINER }} \
+            -e ZEA_CACHE_DIR=${{ env.ZEA_CACHE_CONTAINER }} \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
-            sh -lc "pytest -p no:cacheprovider -s -m 'notebook'"
+            sh -lc "pytest -p no:cacheprovider -s -m 'notebook' $DIRS_ARGS"
 
   test-docs-build:
     needs: [image]

@@ -161,6 +161,7 @@ def get_time_conditional_unetwork(
     embedding_min_frequency=1.0,
     embedding_max_frequency=1000.0,
     embedding_dims=32,
+    normalization="batch_norm",
 ):
     """Get a basic UNet architecture with time-conditional sinusoidal embeddings
 
@@ -173,6 +174,8 @@ def get_time_conditional_unetwork(
         embedding_min_frequency: float, minimum frequency for sinusoidal embeddings
         embedding_max_frequency: float, maximum frequency for sinusoidal embeddings
         embedding_dims: int, number of dimensions for sinusoidal embeddings (must be even)
+        normalization: str, normalization type. One of ``"batch_norm"`` or ``"group_norm"``.
+            Defaults to ``"batch_norm"``.
 
     Returns:
         keras.Model
@@ -204,13 +207,13 @@ def get_time_conditional_unetwork(
 
     skips = []
     for width in widths[:-1]:
-        x = DownBlock(width, block_depth)([x, skips])
+        x = DownBlock(width, block_depth, normalization=normalization)([x, skips])
 
     for _ in range(block_depth):
-        x = ResidualBlock(widths[-1])(x)
+        x = ResidualBlock(widths[-1], normalization=normalization)(x)
 
     for width in reversed(widths[:-1]):
-        x = UpBlock(width, block_depth)([x, skips])
+        x = UpBlock(width, block_depth, normalization=normalization)([x, skips])
 
     x = layers.Conv2D(n_channels, kernel_size=1, kernel_initializer="zeros")(x)
 
