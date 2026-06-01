@@ -158,6 +158,8 @@ _LAZY_ATTRS = {
     "Pipeline": ("zea.ops", "Pipeline"),
     "Probe": ("zea.probes", "Probe"),
     "Parameters": ("zea.scan", "Parameters"),
+    # Deprecated alias for Parameters (emits a DeprecationWarning when used).
+    "Scan": ("zea.scan", "Scan"),
 }
 
 

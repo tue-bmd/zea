@@ -273,6 +273,50 @@ class BaseParameters(ZeaObject):
         return value
 
     @staticmethod
+    def _valid_params_from_spec(spec_cls) -> dict:
+        """Derive ``VALID_PARAMS`` entries from a :class:`~zea.data.spec.Spec` SCHEMA.
+
+        Lets subclasses use the data specs as the single source of truth for
+        *which* file-backed parameters exist. Array-shaped fields map to
+        ``np.ndarray``; scalar fields map to their Python scalar type
+        (``float``/``int``/``str``). Fields that allow both a scalar and an array
+        shape map to a tuple of both. Type/default refinements (e.g. defaults, or
+        forcing a scalar-only type) should be layered on top by the subclass.
+        """
+        params = {}
+        for name, info in spec_cls.SCHEMA.items():
+            # Skip nested-spec fields (not leaf parameters).
+            if info.get("spec") is not None:
+                continue
+            shape_spec = info["shape"]
+            # Normalize to a tuple of shape-tuples.
+            shapes = (
+                shape_spec if (shape_spec and isinstance(shape_spec[0], tuple)) else (shape_spec,)
+            )
+            has_array = any(len(s) > 0 for s in shapes)
+            has_scalar = any(len(s) == 0 for s in shapes)
+
+            dtype = info["dtype"]
+            first_dtype = dtype[0] if isinstance(dtype, (list, tuple)) else dtype
+            if first_dtype is str:
+                scalar_type = str
+            else:
+                try:
+                    scalar_type = (
+                        float if np.issubdtype(np.dtype(first_dtype), np.floating) else int
+                    )
+                except TypeError:
+                    scalar_type = float
+
+            types = []
+            if has_array:
+                types.append(np.ndarray)
+            if has_scalar:
+                types.append(scalar_type)
+            params[name] = {"type": tuple(types) if len(types) > 1 else types[0]}
+        return params
+
+    @staticmethod
     def _human_readable_type(type):
         """Convert a type or tuple of types to a human-readable string."""
         return (

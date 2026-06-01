@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, List, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Union
 
 import keras
 import numpy as np
@@ -27,8 +27,12 @@ from zea.ops.ultrasound import (
     ReshapeGrid,
     TOFCorrection,
 )
-from zea.scan import Parameters
 from zea.utils import FunctionTimer
+
+if TYPE_CHECKING:
+    # Imported lazily at runtime (inside prepare_parameters) to avoid a circular
+    # import: zea.scan imports the data specs, which can pull in this module.
+    from zea.scan import Parameters
 
 
 @ops_registry("pipeline")
@@ -707,7 +711,7 @@ class Pipeline:
 
     def prepare_parameters(
         self,
-        parameters: Parameters = None,
+        parameters: "Parameters" = None,
         device: Union[str, None] = None,
         **manual,
     ):
@@ -734,9 +738,11 @@ class Pipeline:
         Example:
             .. code-block:: python
 
-                tensors = pipeline.prepare_parameters(parameters, **config.parameters)
-                outputs = pipeline(data=raw_data, **tensors)
+                inputs = pipeline.prepare_parameters(parameters, **config.parameters)
+                outputs = pipeline(data=raw_data, **inputs)
         """
+        from zea.scan import Parameters
+
         _device = device if device is not None else self.device
 
         params_dict = {}

@@ -174,7 +174,7 @@ class Track:
         scan_dict = check_focus_distances(load_dict_from_hdf5_group(self._group["scan"]))
         return _build_scan_spec(scan_dict)
 
-    def load_parameters(self, safe: bool = True, **overrides) -> "Parameters":
+    def load_parameters(self, safe: bool = True, **parameters) -> "Parameters":
         """Load this track's parameters (merged probe + scan) as :class:`~zea.scan.Parameters`.
 
         Each track shares the same probe but has its own scan, so the returned
@@ -183,7 +183,7 @@ class Track:
 
         Args:
             safe: If ``True`` (default) only known parameters are forwarded.
-            **overrides: Override any parameter.
+            **parameters: Override any parameter.
 
         Returns:
             Parameters: Initialised parameters object for this track.
@@ -197,10 +197,10 @@ class Track:
         data_group = self._group["data"] if "data" in self._group else None
         return build_parameters_from_dict(
             scan_dict,
+            probe_dict=self._probe,
             data_group=data_group,
             safe=safe,
-            probe_supplements=_probe_supplement_dict(self._probe),
-            **overrides,
+            **parameters,
         )
 
     @property
@@ -294,28 +294,35 @@ def check_focus_distances(scan_parameters: dict) -> dict:
 
 def build_parameters_from_dict(
     scan_dict: dict,
+    probe_dict: "dict | None" = None,
     data_group: "h5py.Group | None" = None,
     safe: bool = True,
-    probe_supplements: "dict | None" = None,
-    **kwargs,
+    **parameters,
 ) -> "Parameters":
-    """Build a :class:`~zea.scan.Parameters` from a raw parameter dictionary.
+    """Build a :class:`~zea.scan.Parameters` from raw scan + probe dictionaries.
+
+    The scan and probe groups have non-overlapping field names, so they are
+    simply merged. ``ScanSpec`` validation is used (when possible) to derive
+    ``n_el``/``n_tx``/``n_ax``. Explicit ``parameters`` override file values.
 
     Args:
-        scan_dict: Raw scan parameters loaded from HDF5.
+        scan_dict: Raw scan-group parameters loaded from HDF5.
+        probe_dict: Raw probe-group parameters loaded from HDF5 (optional).
+            Legacy probe files that stored probe fields in the scan group are
+            handled transparently.
         data_group: Optional HDF5 data group used to derive ``n_ax`` from
             ``raw_data`` when it cannot be inferred from the scan spec.
         safe: Forwarded to :meth:`~zea.scan.Parameters.merge`.
-        probe_supplements: Optional dict of probe-level fields (e.g.
-            ``probe_geometry``, ``probe_center_frequency``) to merge in *after*
-            the :class:`~zea.data.spec.ScanSpec` filter — these fields live in
-            :class:`~zea.data.spec.ProbeSpec` and would otherwise be stripped.
-        **kwargs: Override any parameter.
+        **parameters: Override any parameter.
 
     Returns:
         Parameters: Initialised parameters object (merged probe + scan).
     """
     from zea.scan import Parameters
+
+    # Probe-level fields may live in the probe group (preferred) or, for legacy
+    # files, in the scan group. Collect from both; the probe group wins.
+    probe_supplements = _probe_supplement_dict({**scan_dict, **(probe_dict or {})})
 
     scan_spec_keys = set(ScanSpec.SCHEMA.keys())
     filtered = {k: v for k, v in scan_dict.items() if k in scan_spec_keys}
@@ -332,14 +339,10 @@ def build_parameters_from_dict(
     except (TypeError, ValueError) as exc:
         log.debug(f"ScanSpec validation skipped: {exc}. Using raw scan parameters from file.")
 
-    # Merge probe-level fields (probe_geometry, probe_center_frequency, ...) that
-    # were stripped by the ScanSpec filter.  The scan group keeps priority.
-    if probe_supplements:
-        for _field, _value in probe_supplements.items():
-            if _field not in scan_dict or scan_dict.get(_field) is None:
-                scan_dict[_field] = _value
-
-    return Parameters.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
+    # Merge probe + scan (non-overlapping names); scan keeps priority for any
+    # legacy field present in both groups.
+    merged = {**probe_supplements, **scan_dict}
+    return Parameters.merge(_reformat_waveforms(merged), parameters, safe=safe)
 
 
 def _probe_supplement_dict(probe_dict: "dict | None") -> dict:
@@ -1155,18 +1158,20 @@ class File(h5py.File):
         scan_dict = check_focus_distances(self.get_scan_parameters())
         return _build_scan_spec(scan_dict)
 
-    def load_parameters(self, safe=True, **overrides) -> "Parameters":
+    def load_parameters(self, safe=True, **parameters) -> "Parameters":
         """Load the acquisition parameters (merged probe + scan) from the file.
 
         Reads both the ``scan`` and ``probe`` groups and merges them into a
         single :class:`~zea.scan.Parameters` object that owns derivation,
-        caching, and lazy loading of derived quantities.
+        caching, and lazy loading of derived quantities. The probe and scan
+        groups live at the same level and have non-overlapping field names, so
+        merging is a plain dict union.
 
         Args:
             safe (bool, optional): If True (default), only parameters known to
                 :class:`~zea.scan.Parameters` are forwarded; unknown file keys
                 are dropped. If False, all parameters are passed through.
-            **overrides: Override any parameter from the file. Custom
+            **parameters: Override any parameter from the file. Custom
                 (non-spec) keys are stored as passthrough parameters.
 
         Returns:
@@ -1196,26 +1201,16 @@ class File(h5py.File):
                 "file.tracks[i].load_parameters() on each."
             )
         scan_dict = self.get_scan_parameters()
-
-        # Gather probe-group fields (probe_geometry, probe_center_frequency, ...)
-        # to merge into the parameters after the ScanSpec filter.  Legacy files
-        # may have stored some of these (e.g. probe_geometry) in the scan group.
-        probe_data = {}
-        if "probe" in self:
-            probe_data = self.recursively_load_dict_contents_from_group("probe")
-        probe_supplements = _probe_supplement_dict(probe_data)
-        # Fall back to scan group for probe fields stored there by legacy files.
-        for _field in set(ProbeSpec.SCHEMA.keys()):
-            if _field not in probe_supplements and _field in scan_dict:
-                probe_supplements[_field] = scan_dict[_field]
-
+        probe_data = (
+            self.recursively_load_dict_contents_from_group("probe") if "probe" in self else {}
+        )
         data_group = self["data"] if "data" in self else None
         return build_parameters_from_dict(
             scan_dict,
+            probe_dict=probe_data,
             data_group=data_group,
             safe=safe,
-            probe_supplements=probe_supplements,
-            **overrides,
+            **parameters,
         )
 
     @property

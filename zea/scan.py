@@ -97,8 +97,62 @@ from zea.beamform.pixelgrid import (
     check_for_aliasing,
     polar_pixel_grid,
 )
+from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
 from zea.internal.parameters import BaseParameters, cache_with_dependencies
+from zea.internal.utils import deprecated
+
+# Recon/beamforming-only parameters (not stored in the file) plus type/default
+# refinements for spec-backed fields that need a specific scalar type or default.
+# Everything else is derived from ScanSpec/ProbeSpec (single source of truth).
+_RECON_AND_OVERRIDES = {
+    # beamforming related parameters
+    "grid_size_x": {"type": int},
+    "grid_size_y": {"type": int},
+    "grid_size_z": {"type": int},
+    "xlims": {"type": (tuple, list)},
+    "ylims": {"type": (tuple, list)},
+    "zlims": {"type": (tuple, list)},
+    "pixels_per_wavelength": {"type": int, "default": 4},
+    "pfield_kwargs": {"type": dict, "default": {}},
+    "apply_lens_correction": {"type": bool, "default": False},
+    "grid_type": {"type": str, "default": "cartesian"},
+    "polar_limits": {"type": (tuple, list)},
+    "dynamic_range": {"type": (tuple, list)},
+    "selected_transmits": {
+        "type": (type(None), str, int, list, slice, np.ndarray),
+        "default": None,
+    },
+    # acquisition parameters (override spec-derived types/defaults)
+    "sound_speed": {"type": float, "default": 1540.0},
+    "center_frequency": {"type": float},
+    "demodulation_frequency": {"type": float},
+    "bandwidth_percent": {"type": float, "default": 200.0},
+    "element_width": {"type": float},
+    "n_frames": {"type": int},
+    "n_el": {"type": int},
+    "n_tx": {"type": int},
+    "n_ax": {"type": int},
+    "n_ch": {"type": int},
+    "attenuation_coef": {"type": float, "default": 0.0},
+    "f_number": {"type": float, "default": 1.0},
+    # probe-specific (override spec-derived float types)
+    "probe_center_frequency": {"type": float},
+    "lens_sound_speed": {"type": float},
+    "lens_thickness": {"type": float},
+    # array parameters with explicit None defaults / recon-only arrays
+    "waveforms_one_way": {"type": np.ndarray, "default": None},
+    "waveforms_two_way": {"type": np.ndarray, "default": None},
+    "t_peak": {"type": np.ndarray},
+    "tx_waveform_indices": {"type": np.ndarray},
+    # scan conversion parameters
+    "theta_range": {"type": (tuple, list)},
+    "phi_range": {"type": (tuple, list), "default": None},
+    "rho_range": {"type": (tuple, list)},
+    "fill_value": {"type": float},
+    "resolution": {"type": float, "default": None},
+    "distance_to_apex": {"type": float},
+}
 
 
 class Parameters(BaseParameters):
@@ -196,71 +250,13 @@ class Parameters(BaseParameters):
             if not provided.
     """
 
-    # Valid file-backed parameters mirror the scan/probe specs (ScanSpec +
-    # ProbeSpec); a regression test enforces that every spec field appears here
-    # (see tests/test_parameters.py::test_valid_params_cover_specs).  The
-    # remaining entries are recon/beamforming parameters not stored in the file.
+    # Single source of truth: file-backed parameter names/types are derived from
+    # the scan and probe specs; recon/beamforming-only parameters and a few
+    # type/default refinements are layered on top via ``_RECON_AND_OVERRIDES``.
     VALID_PARAMS = {
-        # beamforming related parameters
-        "grid_size_x": {"type": int},
-        "grid_size_y": {"type": int},
-        "grid_size_z": {"type": int},
-        "xlims": {"type": (tuple, list)},
-        "ylims": {"type": (tuple, list)},
-        "zlims": {"type": (tuple, list)},
-        "pixels_per_wavelength": {"type": int, "default": 4},
-        "pfield_kwargs": {"type": dict, "default": {}},
-        "apply_lens_correction": {"type": bool, "default": False},
-        "lens_sound_speed": {"type": float},
-        "lens_thickness": {"type": float},
-        "grid_type": {"type": str, "default": "cartesian"},
-        "polar_limits": {"type": (tuple, list)},
-        "dynamic_range": {"type": (tuple, list)},
-        "selected_transmits": {
-            "type": (type(None), str, int, list, slice, np.ndarray),
-            "default": None,
-        },
-        # probe identification (from ProbeSpec)
-        "name": {"type": str},
-        "type": {"type": str},
-        "probe_center_frequency": {"type": float},
-        "element_height": {"type": float},
-        # acquisition parameters
-        "sound_speed": {"type": float, "default": 1540.0},
-        "sampling_frequency": {"type": float},
-        "center_frequency": {"type": float},
-        "n_frames": {"type": int},
-        "n_el": {"type": int},
-        "n_tx": {"type": int},
-        "n_ax": {"type": int},
-        "n_ch": {"type": int},
-        "bandwidth_percent": {"type": float, "default": 200.0},
-        "demodulation_frequency": {"type": float},
-        "element_width": {"type": float},
-        "attenuation_coef": {"type": float, "default": 0.0},
-        "f_number": {"type": float, "default": 1.0},
-        # array parameters
-        "probe_geometry": {"type": np.ndarray},
-        "polar_angles": {"type": np.ndarray},
-        "azimuth_angles": {"type": np.ndarray},
-        "t0_delays": {"type": np.ndarray},
-        "tx_apodizations": {"type": np.ndarray},
-        "focus_distances": {"type": np.ndarray},
-        "transmit_origins": {"type": np.ndarray},
-        "initial_times": {"type": np.ndarray},
-        "time_to_next_transmit": {"type": np.ndarray},
-        "tgc_gain_curve": {"type": np.ndarray},
-        "waveforms_one_way": {"type": np.ndarray, "default": None},
-        "waveforms_two_way": {"type": np.ndarray, "default": None},
-        "tx_waveform_indices": {"type": np.ndarray},
-        "t_peak": {"type": np.ndarray},
-        # scan conversion parameters
-        "theta_range": {"type": (tuple, list)},
-        "phi_range": {"type": (tuple, list), "default": None},
-        "rho_range": {"type": (tuple, list)},
-        "fill_value": {"type": float},
-        "resolution": {"type": float, "default": None},
-        "distance_to_apex": {"type": float},
+        **BaseParameters._valid_params_from_spec(ScanSpec),
+        **BaseParameters._valid_params_from_spec(ProbeSpec),
+        **_RECON_AND_OVERRIDES,
     }
 
     @cache_with_dependencies("probe_geometry")
@@ -904,3 +900,17 @@ class Parameters(BaseParameters):
             self.set_transmits(value)
         else:
             return super().__setattr__(key, value)
+
+
+class Scan(Parameters):
+    """Deprecated alias for :class:`Parameters`.
+
+    ``Scan`` was renamed to :class:`zea.Parameters` (which now holds the merged
+    probe and scan parameters). This subclass is kept temporarily to ease the
+    transition: instantiating it emits a :class:`DeprecationWarning` pointing to
+    :class:`zea.Parameters`. It will be removed in a future release.
+    """
+
+    @deprecated(replacement="zea.Parameters")
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
