@@ -18,8 +18,8 @@ import numpy as np
 import pytest
 
 from zea.internal.parameters import (
-    MissingDependencyError,
     BaseParameters,
+    MissingDependencyError,
     cache_with_dependencies,
 )
 
@@ -28,7 +28,7 @@ class DummyCircularParameters(BaseParameters):
     """A simple test class with a circular dependency."""
 
     VALID_PARAMS = {
-        "param1": {"type": int},
+        "param1": {"dtype": int},
     }
 
     @cache_with_dependencies("param1", "computed2")
@@ -44,7 +44,7 @@ class DummyInvalidParameters(BaseParameters):
     """A simple test class with an invalid parameter type."""
 
     VALID_PARAMS = {
-        "param1": {"type": int},
+        "param1": {"dtype": int},
     }
 
     @cache_with_dependencies("param1")
@@ -79,13 +79,13 @@ class DummyParameters(BaseParameters):
     """
 
     VALID_PARAMS = {
-        "param1": {"type": int},
-        "param2": {"type": int},
-        "param3": {"type": float, "default": 1540.0},
-        "param4": {"type": float},
-        "param5": {"type": float},
-        "param6": {"type": float},
-        "optional_param": {"type": (list, type(None))},
+        "param1": {"dtype": int},
+        "param2": {"dtype": int},
+        "param3": {"dtype": float, "default": 1540.0},
+        "param4": {"dtype": float},
+        "param5": {"dtype": float},
+        "param6": {"dtype": float},
+        "optional_param": {"dtype": (list, type(None))},
     }
 
     def _timestamp(self):
@@ -141,7 +141,7 @@ class DummyArrayParameters(BaseParameters):
     """Minimal class for testing ndarray handling in BaseParameters.update()."""
 
     VALID_PARAMS = {
-        "arr": {"type": np.ndarray},
+        "arr": {"dtype": np.ndarray},
     }
 
     @cache_with_dependencies("arr")
@@ -156,7 +156,7 @@ class DummyObjectParameters(BaseParameters):
     """Minimal class for testing non-ndarray equality handling in update()."""
 
     VALID_PARAMS = {
-        "obj": {"type": object},
+        "obj": {"dtype": object},
     }
 
     @cache_with_dependencies("obj")

@@ -780,7 +780,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - Hz
            - Probe nominal centre frequency.
            - |badge-opt|
-         * - ``bandwidth_percent``
+         * - ``probe_bandwidth_percent``
            - ``float32``
            - scalar
            - %

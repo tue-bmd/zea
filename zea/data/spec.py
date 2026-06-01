@@ -38,13 +38,8 @@ def check_dtype(value: Any, expected_dtype: List[type]) -> None:
     Works for numpy arrays, numpy scalars, and Python native types.
     """
     for dt in expected_dtype:
-        try:
+        if isinstance(dt, type) and issubclass(dt, np.generic):
             expected_np_dtype = np.dtype(dt)
-            is_numpy_dtype = True
-        except TypeError:
-            is_numpy_dtype = False
-
-        if is_numpy_dtype:
             if hasattr(value, "dtype"):
                 if np.issubdtype(value.dtype, expected_np_dtype):
                     return
@@ -1305,7 +1300,7 @@ class ProbeSpec(Spec):
             distinctly from :attr:`ScanSpec.center_frequency` (the per-acquisition
             transmit frequency) so the two never collide when merged into a single
             :class:`zea.Parameters` object.
-        bandwidth_percent: Fractional bandwidth as a percentage.
+        probe_bandwidth_percent: Fractional bandwidth as a percentage.
         probe_geometry: Element positions in metres, shape (n_el, 3) with columns
             (x, y, z).  :attr:`n_el` and :attr:`pitch` are computed
             automatically as read-only properties from this array.
@@ -1318,7 +1313,7 @@ class ProbeSpec(Spec):
     name: str | None = None
     type: str | None = None
     probe_center_frequency: np.float32 | None = None
-    bandwidth_percent: np.float32 | None = None
+    probe_bandwidth_percent: np.float32 | None = None
     probe_geometry: np.ndarray | None = None
     element_width: np.float32 | None = None
     element_height: np.float32 | None = None
@@ -1329,7 +1324,7 @@ class ProbeSpec(Spec):
         "name": {"dtype": str, "shape": ()},
         "type": {"dtype": str, "shape": ()},
         "probe_center_frequency": {"dtype": np.float32, "shape": ()},
-        "bandwidth_percent": {"dtype": np.float32, "shape": ()},
+        "probe_bandwidth_percent": {"dtype": np.float32, "shape": ()},
         "probe_geometry": {"dtype": np.float32, "shape": ("n_el", 3)},
         "element_width": {"dtype": np.float32, "shape": ()},
         "element_height": {"dtype": np.float32, "shape": ()},
@@ -1344,7 +1339,7 @@ class ProbeSpec(Spec):
             "unit": "Hz",
             "description": "Probe nominal centre frequency.",
         },
-        "bandwidth_percent": {
+        "probe_bandwidth_percent": {
             "unit": "%",
             "description": "Fractional bandwidth as a percentage.",
         },
@@ -1396,9 +1391,10 @@ class ProbeSpec(Spec):
                 "ProbeSpec: probe_center_frequency must be positive, got "
                 f"{self.probe_center_frequency}"
             )
-        if self.bandwidth_percent is not None and self.bandwidth_percent <= 0:
+        if self.probe_bandwidth_percent is not None and self.probe_bandwidth_percent <= 0:
             raise ValueError(
-                f"ProbeSpec: bandwidth_percent must be positive, got {self.bandwidth_percent}"
+                "ProbeSpec: probe_bandwidth_percent must be positive, "
+                f"got {self.probe_bandwidth_percent}"
             )
         if self.element_width is not None and self.element_width <= 0:
             raise ValueError(f"ProbeSpec: element_width must be positive, got {self.element_width}")

@@ -181,8 +181,8 @@ class Probe(ProbeSpec):
             parts.append(f"n_el={n_el}")
         if self.probe_center_frequency is not None:
             parts.append(f"fc={float(self.probe_center_frequency) / 1e6:.2f} MHz")
-        if self.bandwidth_percent is not None:
-            parts.append(f"bw={float(self.bandwidth_percent):.1f}%")
+        if self.probe_bandwidth_percent is not None:
+            parts.append(f"bw={float(self.probe_bandwidth_percent):.1f}%")
         if self.element_width is not None:
             parts.append(f"pitch={float(self.element_width) * 1e3:.3f} mm")
         return f"Probe({', '.join(parts)})"
@@ -283,7 +283,7 @@ class Probe(ProbeSpec):
         # and scalar fields as 1-element arrays.
         _scalar_float_fields = (
             "probe_center_frequency",
-            "bandwidth_percent",
+            "probe_bandwidth_percent",
             "element_width",
             "element_height",
             "lens_sound_speed",
@@ -310,13 +310,13 @@ class Verasonics_l11_4v(Probe):
 
         probe_geometry = create_probe_geometry(n_el=128, pitch=0.3e-3)
         center_frequency = 6.25e6
-        bandwidth_percent = (11 - 4) * 100 / (center_frequency / 1e6)
+        probe_bandwidth_percent = (11 - 4) * 100 / (center_frequency / 1e6)
 
         super().__init__(
             name="verasonics_l11_4v",
             type="linear",
             probe_center_frequency=center_frequency,
-            bandwidth_percent=bandwidth_percent,
+            probe_bandwidth_percent=probe_bandwidth_percent,
             probe_geometry=probe_geometry,
         )
 
@@ -330,7 +330,7 @@ class Verasonics_l11_5v(Probe):
 
         probe_geometry = create_probe_geometry(n_el=128, pitch=0.3e-3)
         center_frequency = 6.25e6
-        bandwidth_percent = (11 - 5) * 100 / (center_frequency / 1e6)
+        probe_bandwidth_percent = (11 - 5) * 100 / (center_frequency / 1e6)
 
         # elevation_focus = 18e-3
         # sensitivity = -52 +/- 3 dB
@@ -339,7 +339,7 @@ class Verasonics_l11_5v(Probe):
             name="verasonics_l11_5v",
             type="linear",
             probe_center_frequency=center_frequency,
-            bandwidth_percent=bandwidth_percent,
+            probe_bandwidth_percent=probe_bandwidth_percent,
             probe_geometry=probe_geometry,
         )
 
@@ -356,12 +356,12 @@ class Esaote_sll1543(Probe):
 
         probe_geometry = create_probe_geometry(n_el=192, pitch=0.245 / 1e3)
         center_frequency = 8e6
-        bandwidth_percent = (13 - 3) * 100 / (center_frequency / 1e6)
+        probe_bandwidth_percent = (13 - 3) * 100 / (center_frequency / 1e6)
 
         super().__init__(
             name="esaote_sll1543",
             type="linear",
             probe_center_frequency=center_frequency,
-            bandwidth_percent=bandwidth_percent,
+            probe_bandwidth_percent=probe_bandwidth_percent,
             probe_geometry=probe_geometry,
         )

@@ -112,58 +112,6 @@ from zea.display import compute_scan_convert_2d_coordinates
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated
 
-# Recon/beamforming-only parameters (not stored in the file) plus type/default
-# refinements for spec-backed fields that need a specific scalar type or default.
-# Everything else is derived from ScanSpec/ProbeSpec (single source of truth).
-_RECON_AND_OVERRIDES = {
-    # beamforming related parameters
-    "grid_size_x": {"type": int},
-    "grid_size_y": {"type": int},
-    "grid_size_z": {"type": int},
-    "xlims": {"type": (tuple, list)},
-    "ylims": {"type": (tuple, list)},
-    "zlims": {"type": (tuple, list)},
-    "pixels_per_wavelength": {"type": int, "default": 4},
-    "pfield_kwargs": {"type": dict, "default": {}},
-    "apply_lens_correction": {"type": bool, "default": False},
-    "grid_type": {"type": str, "default": "cartesian"},
-    "polar_limits": {"type": (tuple, list)},
-    "dynamic_range": {"type": (tuple, list)},
-    "selected_transmits": {
-        "type": (type(None), str, int, list, slice, np.ndarray),
-        "default": None,
-    },
-    # acquisition parameters (override spec-derived types/defaults)
-    "sound_speed": {"type": float, "default": 1540.0},
-    "center_frequency": {"type": float},
-    "demodulation_frequency": {"type": float},
-    "bandwidth_percent": {"type": float, "default": 200.0},
-    "element_width": {"type": float},
-    "n_frames": {"type": int},
-    "n_el": {"type": int},
-    "n_tx": {"type": int},
-    "n_ax": {"type": int},
-    "n_ch": {"type": int},
-    "attenuation_coef": {"type": float, "default": 0.0},
-    "f_number": {"type": float, "default": 1.0},
-    # probe-specific (override spec-derived float types)
-    "probe_center_frequency": {"type": float},
-    "lens_sound_speed": {"type": float},
-    "lens_thickness": {"type": float},
-    # array parameters with explicit None defaults / recon-only arrays
-    "waveforms_one_way": {"type": np.ndarray, "default": None},
-    "waveforms_two_way": {"type": np.ndarray, "default": None},
-    "t_peak": {"type": np.ndarray},
-    "tx_waveform_indices": {"type": np.ndarray},
-    # scan conversion parameters
-    "theta_range": {"type": (tuple, list)},
-    "phi_range": {"type": (tuple, list), "default": None},
-    "rho_range": {"type": (tuple, list)},
-    "fill_value": {"type": float},
-    "resolution": {"type": float, "default": None},
-    "distance_to_apex": {"type": float},
-}
-
 
 class Parameters(BaseParameters):
     """Represents a full ultrasound acquisition configuration with computed properties.
@@ -215,7 +163,7 @@ class Parameters(BaseParameters):
             beam comes to focus for each transmit in meters of shape (n_tx,).
         transmit_origins (np.ndarray): Transmit origins of shape (n_tx, 3).
         initial_times (np.ndarray): Initial times in seconds for each event of shape (n_tx,).
-        bandwidth_percent (float, optional): Bandwidth as percentage of center
+        probe_bandwidth_percent (float, optional): Bandwidth as percentage of center
             frequency. Defaults to 200.0.
         time_to_next_transmit (np.ndarray): The time between subsequent
             transmit events of shape (n_frames, n_tx).
@@ -224,10 +172,8 @@ class Parameters(BaseParameters):
             (n_waveforms, n_samples).
         waveforms_two_way (np.ndarray): The two-way transmit waveforms of shape
             (n_waveforms, n_samples).
-        tx_waveform_indices (np.ndarray): Indices of the waveform used for each
-            transmit event of shape (n_tx,).
         t_peak (np.ndarray, optional): The time of the peak of the pulse of every transmit waveform
-            of shape (n_waveforms,).
+            of shape (n_tx,).
         pixels_per_wavelength (int, optional): Number of pixels per wavelength.
             Defaults to 4.
         element_width (float, optional): Width of each transducer element in meters.
@@ -261,14 +207,46 @@ class Parameters(BaseParameters):
             if not provided.
     """
 
-    # Single source of truth: file-backed parameter names/types are derived from
-    # the scan and probe specs; recon/beamforming-only parameters and a few
-    # type/default refinements are layered on top via ``_RECON_AND_OVERRIDES``.
+    # Valid parameters are derived from the scan and probe specs + a few
+    # beamforming-only parameters.
     VALID_PARAMS = {
-        **BaseParameters._valid_params_from_spec(ScanSpec),
-        **BaseParameters._valid_params_from_spec(ProbeSpec),
-        **_RECON_AND_OVERRIDES,
+        **ScanSpec.SCHEMA,
+        **ProbeSpec.SCHEMA,
+        "grid_size_x": {"dtype": np.int32},
+        "grid_size_y": {"dtype": np.int32},
+        "grid_size_z": {"dtype": np.int32},
+        "xlims": {"dtype": np.float32, "shape": (2,)},
+        "ylims": {"dtype": np.float32, "shape": (2,)},
+        "zlims": {"dtype": np.float32, "shape": (2,)},
+        "pixels_per_wavelength": {"dtype": np.int32, "default": 4},
+        "pfield_kwargs": {"dtype": dict, "default": {}},
+        "apply_lens_correction": {"dtype": np.bool_, "default": False},
+        "grid_type": {"dtype": str, "default": "cartesian"},
+        "polar_limits": {"dtype": np.float32, "shape": (2,)},
+        "dynamic_range": {"dtype": np.float32, "shape": (2,)},
+        "selected_transmits": {
+            "dtype": (type(None), str, int, list, slice, np.ndarray),
+            "default": None,
+        },
+        "n_frames": {"dtype": np.int32},
+        "n_el": {"dtype": np.int32},
+        "n_tx": {"dtype": np.int32},
+        "n_ax": {"dtype": np.int32},
+        "n_ch": {"dtype": np.int32},
+        "attenuation_coef": {"dtype": np.float32, "default": 0.0},
+        "f_number": {"dtype": np.float32, "default": 1.0},
+        "t_peak": {"dtype": np.float32},
+        "theta_range": {"dtype": np.float32, "shape": (2,)},
+        "phi_range": {"dtype": np.float32, "shape": (2,)},
+        "rho_range": {"dtype": np.float32, "shape": (2,)},
+        "fill_value": {"dtype": np.float32},
+        "resolution": {"dtype": np.float32},
+        "distance_to_apex": {"dtype": np.float32},
     }
+
+    # Add some defaults that are not stored in a file
+    VALID_PARAMS["sound_speed"]["default"] = 1540.0
+    VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
 
     @cache_with_dependencies("probe_geometry")
     def aperture_size(self):
@@ -761,12 +739,12 @@ class Parameters(BaseParameters):
 
         return 1
 
-    @cache_with_dependencies("center_frequency", "n_waveforms")
+    @cache_with_dependencies("center_frequency")
     def t_peak(self):
-        """The time of the peak of the pulse in seconds of shape (n_waveforms,)."""
+        """The time of the peak of the pulse in seconds of shape (n_tx,)."""
         t_peak = self._params.get("t_peak")
         if t_peak is None:
-            t_peak = np.array([1 / self.center_frequency] * self.n_waveforms)
+            t_peak = np.array([1 / self.center_frequency] * self.n_tx)
 
         return t_peak
 
@@ -791,23 +769,10 @@ class Parameters(BaseParameters):
             return np.ones(self.n_ax)
         return value[: self.n_ax]
 
-    @cache_with_dependencies("selected_transmits", "n_tx")
-    def tx_waveform_indices(self):
-        """Indices of the waveform used for each transmit event of shape (n_tx,)."""
-        value = self._params.get("tx_waveform_indices")
-        if value is None:
-            log.warning_once(
-                "No ``tx_waveform_indices`` provided, using zeros",
-                key=(id(self), "tx_waveform_indices"),
-            )
-            return np.zeros(self.n_tx, dtype=int)
-
-        return value[self.selected_transmits]
-
     @cache_with_dependencies(
         "sound_speed",
         "center_frequency",
-        "bandwidth_percent",
+        "probe_bandwidth_percent",
         "n_el",
         "probe_geometry",
         "tx_apodizations",
@@ -829,7 +794,7 @@ class Parameters(BaseParameters):
             tx_apodizations=self.tx_apodizations,
             grid=self.grid,
             t0_delays=self.t0_delays,
-            bandwidth_percent=self.bandwidth_percent,
+            probe_bandwidth_percent=self.probe_bandwidth_percent,
             **self.pfield_kwargs,
         )
         return ops.convert_to_numpy(pfield)

@@ -1165,7 +1165,7 @@ class TestProbeSpec:
         assert probe.name is None
         assert probe.type is None
         assert probe.probe_center_frequency is None
-        assert probe.bandwidth_percent is None
+        assert probe.probe_bandwidth_percent is None
         assert probe.element_width is None
         assert probe.lens_sound_speed is None
         assert probe.lens_thickness is None
@@ -1175,7 +1175,7 @@ class TestProbeSpec:
             name="verasonics_l11_4v",
             type="linear",
             probe_center_frequency=np.float32(5.208e6),
-            bandwidth_percent=np.float32(67.0),
+            probe_bandwidth_percent=np.float32(67.0),
             element_width=np.float32(0.27e-3),
             lens_sound_speed=np.float32(1000.0),
             lens_thickness=np.float32(1.5e-3),
@@ -1183,18 +1183,18 @@ class TestProbeSpec:
         assert probe.name == "verasonics_l11_4v"
         assert probe.type == "linear"
         assert probe.probe_center_frequency == pytest.approx(5.208e6, rel=1e-4)
-        assert probe.bandwidth_percent == pytest.approx(67.0)
+        assert probe.probe_bandwidth_percent == pytest.approx(67.0)
         assert probe.element_width == pytest.approx(0.27e-3, rel=1e-4)
 
     def test_invalid_center_frequency_raises(self):
         with pytest.raises(ValueError, match="probe_center_frequency"):
             ProbeSpec(probe_center_frequency=np.float32(-1.0))
 
-    def test_invalid_bandwidth_percent_raises(self):
-        with pytest.raises(ValueError, match="bandwidth_percent"):
-            ProbeSpec(bandwidth_percent=np.float32(0.0))
-        with pytest.raises(ValueError, match="bandwidth_percent"):
-            ProbeSpec(bandwidth_percent=np.float32(-10.0))
+    def test_invalid_probe_bandwidth_percent_raises(self):
+        with pytest.raises(ValueError, match="probe_bandwidth_percent"):
+            ProbeSpec(probe_bandwidth_percent=np.float32(0.0))
+        with pytest.raises(ValueError, match="probe_bandwidth_percent"):
+            ProbeSpec(probe_bandwidth_percent=np.float32(-10.0))
 
     def test_invalid_element_width_raises(self):
         with pytest.raises(ValueError, match="element_width"):
@@ -1281,7 +1281,7 @@ class TestProbeSpec:
                 "name": "verasonics_l11_4v",
                 "type": "linear",
                 "probe_center_frequency": np.float32(5.208e6),
-                "bandwidth_percent": np.float32(67.0),
+                "probe_bandwidth_percent": np.float32(67.0),
                 "element_width": np.float32(0.27e-3),
             },
         )
@@ -1297,7 +1297,7 @@ class TestProbeSpec:
         assert isinstance(loaded.probe, ProbeSpec)
         assert loaded.probe.type == "linear"
         assert loaded.probe.probe_center_frequency == pytest.approx(5.208e6, rel=1e-4)
-        assert loaded.probe.bandwidth_percent == pytest.approx(67.0)
+        assert loaded.probe.probe_bandwidth_percent == pytest.approx(67.0)
 
     def test_legacy_probe_center_frequency_remapped_on_load(self, tmp_path):
         """Legacy probe groups storing ``center_frequency`` load as ``probe_center_frequency``."""
