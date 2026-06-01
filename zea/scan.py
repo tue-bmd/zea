@@ -511,6 +511,11 @@ class Parameters(BaseParameters):
         """
         n_tx_total = self._params.get("n_tx")
         if n_tx_total is None:
+            if selection is None:
+                # n_tx not yet known (e.g. file with image-only data); store as-is.
+                self._params["selected_transmits"] = None
+                self._invalidate("selected_transmits")
+                return self
             raise ValueError("n_tx must be set before calling set_transmits")
 
         # Handle array-like - convert to list of indices

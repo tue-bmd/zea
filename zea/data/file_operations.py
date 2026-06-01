@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from zea import Parameters, Probe
+from zea import Parameters
 from zea.data.data_format import load_additional_elements, load_description
 from zea.data.datasets import Dataset
 from zea.data.file import File, load_file_all_data_types
@@ -44,7 +44,6 @@ def _safe_getattr(obj, name):
 def save_file(
     path,
     parameters: Parameters,
-    probe: Probe | None = None,
     raw_data: np.ndarray = None,
     aligned_data: dict = None,
     beamformed_data: dict = None,
@@ -62,11 +61,7 @@ def save_file(
     Args:
         path (str, pathlike): The path to the hdf5 file.
         parameters (Parameters): The parameters object containing acquisition and probe
-            parameters.  When ``probe`` is omitted the probe dict is derived automatically
-            via :meth:`~zea.Parameters.to_probe_dict`.
-        probe (Probe, optional): A :class:`~zea.Probe` object or plain dict with probe
-            fields.  When provided it takes precedence over the probe information stored
-            in ``parameters``.  Defaults to ``None``.
+            parameters.
         raw_data (np.ndarray): The data to save.
         aligned_data (np.ndarray, optional): Aligned data as a dict with ``"values"``
             and ``"extent"`` keys (validated as :class:`~zea.data.spec.AlignedData`).
@@ -118,17 +113,13 @@ def save_file(
         for key, map_dict in custom_maps.items():
             data[key] = map_dict
 
-    scan_dict = parameters.to_scan_dict()
-
-    probe_dict = probe if probe is not None else parameters.to_probe_dict() or None
-
     f = File.create(
         path=path,
         data=data,
-        scan=scan_dict if scan_dict else None,
-        metadata=metadata or None,
-        probe=probe_dict,
-        description=description or None,
+        scan=parameters.to_scan_dict(),
+        metadata=metadata,
+        probe=parameters.to_probe_dict(),
+        description=description,
         compression=compression,
         chunk_frames=chunk_frames,
         overwrite=True,

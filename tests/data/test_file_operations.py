@@ -9,7 +9,7 @@ import h5py
 import numpy as np
 import pytest
 
-from zea import Parameters, Probe
+from zea import Parameters
 from zea.data.data_format import (
     load_additional_elements,
     load_description,
@@ -382,11 +382,10 @@ def _make_file_with_distinct_demod_freq(tmp_path, demod_freq=5e6, center_freq=7e
     scan_dict["demodulation_frequency"] = np.float32(demod_freq)
 
     parameters = Parameters(**scan_dict)
-    probe = Probe(probe_geometry=scan_dict["probe_geometry"])
     raw = np.zeros((2, n_tx, n_ax, n_el, 1), dtype=np.float32)
 
     path = tmp_path / "scan_demod.hdf5"
-    save_file(path=path, parameters=parameters, probe=probe, raw_data=raw)
+    save_file(path=path, parameters=parameters, raw_data=raw)
     return path, demod_freq, center_freq
 
 
@@ -494,8 +493,7 @@ def test_save_file_from_parameters_round_trip(tmp_path):
     """Round-trip: generate a file, load its Parameters, save to a new file, validate.
 
     This is the canonical usage pattern for reprocessing: load parameters from an
-    existing file (no need to manually reconstruct scan/probe dicts) and save the
-    result to a new file using save_file(path, parameters=parameters, ...).
+    existing file.
     """
     src_path = tmp_path / "source.hdf5"
     dst_path = tmp_path / "output.hdf5"
