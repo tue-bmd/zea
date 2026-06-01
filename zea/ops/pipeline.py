@@ -1656,7 +1656,6 @@ class Refocus(Operation):
             * ``"focus_distances"`` — zeros ``(n_el,)`` (no focus).
             * ``"transmit_origins"`` — element positions ``(n_el, 3)``.
             * ``"initial_times"`` — zeros ``(n_el,)``.
-            * ``"tx_waveform_indices"`` — zeros ``(n_el,)``.
             * ``"flat_pfield"`` — ``None`` (resets pfield so downstream
               :class:`PfieldWeighting` becomes a no-op).
         """
@@ -1685,7 +1684,6 @@ class Refocus(Operation):
         sa_polar_angles = ops.zeros((n_el,), dtype=dtype)
         sa_focus_distances = ops.zeros((n_el,), dtype=dtype)
         sa_initial_times = ops.zeros((n_el,), dtype=dtype)
-        sa_tx_waveform_indices = ops.zeros((n_el,), dtype="int32")
 
         return {
             self.output_key: decoded,
@@ -1695,7 +1693,6 @@ class Refocus(Operation):
             "focus_distances": sa_focus_distances,
             "transmit_origins": probe_geometry,
             "initial_times": sa_initial_times,
-            "tx_waveform_indices": sa_tx_waveform_indices,
             "flat_pfield": None,
         }
 

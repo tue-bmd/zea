@@ -173,7 +173,7 @@ class Parameters(BaseParameters):
         waveforms_two_way (np.ndarray): The two-way transmit waveforms of shape
             (n_waveforms, n_samples).
         t_peak (np.ndarray, optional): The time of the peak of the pulse of every transmit waveform
-            of shape (n_waveforms,).
+            of shape (n_tx,).
         pixels_per_wavelength (int, optional): Number of pixels per wavelength.
             Defaults to 4.
         element_width (float, optional): Width of each transducer element in meters.
@@ -739,12 +739,12 @@ class Parameters(BaseParameters):
 
         return 1
 
-    @cache_with_dependencies("center_frequency", "n_waveforms")
+    @cache_with_dependencies("center_frequency")
     def t_peak(self):
-        """The time of the peak of the pulse in seconds of shape (n_waveforms,)."""
+        """The time of the peak of the pulse in seconds of shape (n_tx,)."""
         t_peak = self._params.get("t_peak")
         if t_peak is None:
-            t_peak = np.array([1 / self.center_frequency] * self.n_waveforms)
+            t_peak = np.array([1 / self.center_frequency] * self.n_tx)
 
         return t_peak
 
