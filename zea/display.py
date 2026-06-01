@@ -529,6 +529,106 @@ def rotate_coordinates(coords, angle_deg):
     return coords @ ops.transpose(rotation_matrix)
 
 
+def _polar_to_cartesian_coordinates(polar_shape, cartesian_shape, tip, r_max, theta_range):
+    cart_rows, cart_cols = cartesian_shape
+    polar_rows, polar_cols = polar_shape
+    theta_min, theta_max = theta_range
+    center_x, center_y = tip
+
+    # Cartesian pixel coordinates
+    y, x = ops.meshgrid(
+        ops.arange(cart_rows),
+        ops.arange(cart_cols),
+        indexing="ij",
+    )
+
+    # Coordinates relative to probe tip
+    dx = x - center_x
+    dy = y - center_y
+
+    # Undo the +90° rotation used in cartesian_to_polar_matrix
+    x_unrot = dy
+    y_unrot = -dx
+
+    # Convert back to polar coordinates
+    r = ops.sqrt(x_unrot**2 + y_unrot**2)
+    theta = ops.arctan2(y_unrot, x_unrot)
+
+    # Convert physical coordinates -> polar image indices
+    r_idx = (r / r_max) * (polar_rows - 1)
+    theta_idx = (theta - theta_min) / (theta_max - theta_min) * (polar_cols - 1)
+
+    # Sample polar image
+    return ops.stack([ops.ravel(r_idx), ops.ravel(theta_idx)], axis=0)
+
+
+# TODO: we might be able to merge this with scan_convert_2d
+# TODO: round-trip test
+def polar_to_cartesian_matrix(
+    polar_matrix,
+    cartesian_shape,
+    fill_value=0.0,
+    tip=None,
+    r_max=None,
+    angle=None,
+    theta_range=None,
+    interpolation_order=1,
+):
+    """
+    Approximate inverse of cartesian_to_polar_matrix.
+
+    Parameters
+    ----------
+    polar_matrix : ndarray
+        Polar image.
+    cartesian_shape : tuple
+        Desired output shape (rows, cols).
+    fill_value : float
+        Value assigned outside the polar domain.
+    tip : tuple, optional
+        (x, y) origin used in the forward transform.
+    r_max : float, optional
+        Maximum radius used in the forward transform.
+    angle : float, optional
+        Symmetric half-angle in radians.
+    theta_range : tuple, optional
+        (theta_min, theta_max).
+    interpolation_order : int
+        Passed to scipy.ndimage.map_coordinates.
+
+    Returns
+    -------
+    cartesian_matrix : ndarray
+    """
+
+    assert angle is None or theta_range is None
+
+    if theta_range is None and angle is None:
+        theta_range = (-np.deg2rad(45), np.deg2rad(45))
+
+    cart_rows, cart_cols = cartesian_shape
+
+    if tip is None:
+        tip = (cart_cols / 2, 0)
+
+    if r_max is None:
+        r_max = cart_rows
+
+    coords = _polar_to_cartesian_coordinates(
+        polar_matrix.shape, cartesian_shape, tip, r_max, theta_range
+    )
+
+    cartesian = map_coordinates(
+        polar_matrix,
+        coords,
+        order=interpolation_order,
+        fill_mode="constant",
+        fill_value=fill_value,
+    )
+
+    return ops.reshape(cartesian, cartesian_shape)
+
+
 def cartesian_to_polar_matrix(
     cartesian_matrix,
     fill_value=0.0,
@@ -561,7 +661,9 @@ def cartesian_to_polar_matrix(
             1 = linear, 2+ = spline). Matches the convention of `scipy.ndimage.map_coordinates`.
 
     Returns:
-        polar_matrix (Array): The image re-sampled in polar coordinates with shape `polar_shape`.
+        polar_matrix (Array): The image re-sampled in polar coordinates with shape `polar_shape`,
+        coordinates (Array): The Cartesian coordinates corresponding to each pixel in the
+            polar output.
     """
     assert "float" in ops.dtype(cartesian_matrix), "Input image must be float type"
     assert angle is None or theta_range is None, (
@@ -621,7 +723,204 @@ def cartesian_to_polar_matrix(
     )
 
     polar_matrix = ops.rot90(ops.reshape(polar_values, (polar_cols, polar_rows)), k=-1)
-    return polar_matrix
+    return polar_matrix, coords_for_interp
+
+
+def polar_geometry_from_coordinates(coordinates):
+    """Recover the polar scan geometry from a per-pixel Cartesian coordinate grid.
+
+    Inverts the geometry produced by :func:`~zea.beamform.pixelgrid.polar_pixel_grid`:
+    a polar :class:`~zea.data.spec.Map` stores, for every pixel ``[radial, polar]``, its
+    Cartesian position ``[x, y, z]``. This recovers the apex (the common ray origin), the
+    radial extent and the angular extent from that grid, which is exactly what is needed to
+    resample the map back onto a regular Cartesian grid (see
+    :func:`map_polar_to_cartesian`).
+
+    The grid is assumed to lie in the x-z imaging plane (the ``y`` component is ignored), with
+    the radial axis first and the polar/angular axis second -- the layout of ``polar_pixel_grid``
+    and of ``Map`` values shaped ``(z, x, ...)``. Angles are measured from the +z (depth) axis,
+    matching ``polar_pixel_grid`` where ``x = r·sin(theta)`` and ``z = r·cos(theta)``.
+
+    Args:
+        coordinates: float array of shape ``(num_radial, num_polar, 3)``. A leading frame axis
+            (shape ``(n_frames, num_radial, num_polar, 3)``) is accepted; the first frame is used,
+            assuming the geometry is shared across frames.
+
+    Returns:
+        apex (np.ndarray): ``(x, z)`` Cartesian position of the cone apex (common ray origin).
+        r_range (tuple): ``(r_min, r_max)`` radial distances from the apex spanned by the grid.
+        theta_range (tuple): ``(theta_min, theta_max)``, the angles in radians of the first and
+            last polar columns. Ordered by column index, not by magnitude, so it can be fed
+            directly into the inverse resampling.
+    """
+    coordinates = np.asarray(coordinates, dtype=np.float64)
+    if coordinates.ndim == 4:
+        coordinates = coordinates[0]
+    assert coordinates.ndim == 3 and coordinates.shape[-1] == 3, (
+        f"Expected coordinates of shape (num_radial, num_polar, 3), got {coordinates.shape}"
+    )
+
+    # Work in the x-z imaging plane.
+    xz = coordinates[..., [0, 2]]  # (num_radial, num_polar, 2)
+
+    # Each polar column is a straight ray; recover its origin (point) and direction.
+    point = xz[0]  # (num_polar, 2): nearest sample on each ray
+    direction = xz[-1] - xz[0]
+    direction /= np.linalg.norm(direction, axis=-1, keepdims=True)
+
+    # Apex = the point closest to all rays (least-squares ray intersection):
+    #   minimise sum_i || (I - d_i d_iᵀ)(apex - p_i) ||²  =>  A apex = b.
+    eye = np.eye(2)
+    projectors = eye - direction[:, :, None] * direction[:, None, :]  # (num_polar, 2, 2)
+    a_mat = projectors.sum(axis=0)
+    b_vec = np.einsum("nij,nj->i", projectors, point)
+    apex = np.linalg.solve(a_mat, b_vec)
+
+    # Radial extent: distance of every pixel from the apex.
+    radii = np.linalg.norm(xz - apex, axis=-1)
+    r_range = (float(radii.min()), float(radii.max()))
+
+    # Angular extent of the first/last column (theta measured from +z).
+    rel = xz - apex
+    theta = np.arctan2(rel[..., 0], rel[..., 1])  # atan2(dx, dz)
+    theta_per_column = theta.mean(axis=0)  # average along the ray for robustness
+    theta_range = (float(theta_per_column[0]), float(theta_per_column[-1]))
+
+    return apex, r_range, theta_range
+
+
+def polar_geometry_from_coords_for_interp(coords_for_interp, polar_shape):
+    """Recover the pixel-space polar geometry from the sampling map of a forward transform.
+
+    :func:`cartesian_to_polar_matrix` returns ``coords_for_interp``:
+    the ``(2, polar_rows*polar_cols)``
+    array of ``[row, col]`` pixel locations it sampled the Cartesian image at, one per polar grid
+    point. That array fully embeds the geometry used in the forward call, so this recovers the
+    ``tip``, ``r_max`` and ``theta_range`` needed to invert it with
+    :func:`polar_to_cartesian_matrix`
+    -- *without* having to keep the original parameters around.
+
+    This is the pixel-space counterpart to :func:`polar_geometry_from_coordinates` (which instead
+    works on a physical ``[x, y, z]`` metre grid). The two conventions are not interchangeable.
+
+    .. note::
+        This relies on the exact ravel/rotation convention of :func:`cartesian_to_polar_matrix`
+        (radius is the fast axis, angle the slow axis). If that function changes, update this too.
+
+    Args:
+        coords_for_interp: The second return value of :func:`cartesian_to_polar_matrix`, shape
+            ``(2, polar_rows*polar_cols)`` with rows ``[row (y), col (x)]``.
+        polar_shape (tuple): ``(polar_rows, polar_cols)`` of the polar image, i.e.
+            ``(num_radial, num_angular)``.
+
+    Returns:
+        tip (tuple): ``(x, y)`` pixel coordinates of the polar origin (probe tip / apex).
+        r_max (float): Maximum radius in pixels.
+        theta_range (tuple): Angular extent ordered to match the *columns of the returned polar
+            image*, so it can be passed straight back to :func:`polar_to_cartesian_matrix` for a
+            flip-free round-trip. Because :func:`cartesian_to_polar_matrix` ends with a
+            ``rot90(k=-1)`` that reverses the angular axis, the polar image's columns run from the
+            larger to the smaller angle, so this is ``(theta_max, theta_min)`` in geometric terms.
+    """
+    polar_rows, polar_cols = polar_shape
+    coords_for_interp = np.asarray(ops.convert_to_numpy(coords_for_interp), dtype=np.float64)
+
+    # Ravel order in cartesian_to_polar_matrix is (polar_cols, polar_rows): angle is the slow
+    # axis, radius the fast axis. Row 0 of coords is y (image row), row 1 is x (image col).
+    yq = coords_for_interp[0].reshape(polar_cols, polar_rows)
+    xq = coords_for_interp[1].reshape(polar_cols, polar_rows)
+
+    # Radius 0 (first column) collapses to the tip for every angle.
+    center_x = float(xq[:, 0].mean())
+    center_y = float(yq[:, 0].mean())
+
+    # The farthest radius column sits at distance r_max from the tip (rotation preserves distance).
+    r_max = float(np.sqrt((xq[:, -1] - center_x) ** 2 + (yq[:, -1] - center_y) ** 2).mean())
+
+    # Per-column angle, inverting the +90 deg rotation: dx = -r sin(theta), dy = r cos(theta).
+    theta = np.arctan2(-(xq[:, -1] - center_x), yq[:, -1] - center_y)
+    # Reverse the order so theta_range matches the polar image columns (rot90(k=-1) in the forward
+    # transform flips the angular axis); this lets polar_to_cartesian_matrix invert without a flip.
+    theta_range = (float(theta[-1]), float(theta[0]))
+
+    return (center_x, center_y), r_max, theta_range
+
+
+# def map_polar_to_cartesian(
+#     coordinates,
+#     values,
+#     cartesian_shape=None,
+#     fill_value=0.0,
+#     interpolation_order=1,
+# ):
+#     """Resample a polar :class:`~zea.data.spec.Map` onto a regular Cartesian grid.
+
+#     Round-trip companion that takes a polar map's per-pixel ``coordinates`` and ``values`` and
+#     produces a Cartesian image, by recovering the scan geometry with
+#     :func:`polar_geometry_from_coordinates` and inverting the polar sampling analytically (no
+#     lossy scatter, no holes -- only the small interpolation blur inherent to resampling).
+
+#     Args:
+#         coordinates: Per-pixel Cartesian positions of the polar grid, shape
+#             ``(num_radial, num_polar, 3)`` (a leading frame axis is accepted).
+#         values: Polar map values, spatial shape ``(num_radial, num_polar)`` matching
+#             ``coordinates``.
+#         cartesian_shape (tuple, optional): Output ``(rows, cols)`` = ``(n_z, n_x)``. Defaults to
+#             the spatial shape of ``values``.
+#         fill_value (float): Value assigned to Cartesian pixels outside the polar cone.
+#         interpolation_order (int): Passed to :func:`map_coordinates`.
+
+#     Returns:
+#         cartesian_values (Array): The map resampled onto a regular Cartesian grid, shape
+#             ``cartesian_shape``.
+#         cartesian_coordinates (np.ndarray): Per-pixel ``[x, y, z]`` positions of that grid
+#             (``y = 0``), shape ``(*cartesian_shape, 3)``, ready to build a Cartesian ``Map``.
+#     """
+#     apex, (r_min, r_max), (theta_min, theta_max) = polar_geometry_from_coordinates(coordinates)
+
+#     num_radial, num_polar = ops.shape(values)
+#     if cartesian_shape is None:
+#         cart_rows, cart_cols = num_radial, num_polar
+#     else:
+#         cart_rows, cart_cols = cartesian_shape
+
+#     # Target regular grid spanning the bounding box of the polar coordinates (x-z plane).
+#     coords_np = np.asarray(coordinates, dtype=np.float64)
+#     if coords_np.ndim == 4:
+#         coords_np = coords_np[0]
+#     x_min, x_max = coords_np[..., 0].min(), coords_np[..., 0].max()
+#     z_min, z_max = coords_np[..., 2].min(), coords_np[..., 2].max()
+
+#     xs = np.linspace(x_min, x_max, cart_cols)
+#     zs = np.linspace(z_min, z_max, cart_rows)
+#     z_grid, x_grid = np.meshgrid(zs, xs, indexing="ij")  # (rows, cols), rows=z, cols=x
+
+#     # Cartesian pixel -> polar (r, theta) -> fractional polar indices.
+#     dx = x_grid - apex[0]
+#     dz = z_grid - apex[1]
+#     r = np.sqrt(dx**2 + dz**2)
+#     theta = np.arctan2(dx, dz)
+
+#     r_idx = (r - r_min) / (r_max - r_min) * (num_radial - 1)
+#     theta_idx = (theta - theta_min) / (theta_max - theta_min) * (num_polar - 1)
+
+#     coords_for_interp = ops.stack(
+#         [ops.ravel(ops.array(r_idx, "float32")), ops.ravel(ops.array(theta_idx, "float32"))]
+#     )
+#     cartesian_values = map_coordinates(
+#         values,
+#         coords_for_interp,
+#         order=interpolation_order,
+#         fill_mode="constant",
+#         fill_value=fill_value,
+#     )
+#     cartesian_values = ops.reshape(cartesian_values, (cart_rows, cart_cols))
+
+#     cartesian_coordinates = np.stack([x_grid, np.zeros_like(x_grid), z_grid], axis=-1).astype(
+#         np.float32
+#     )
+
+#     return cartesian_values, cartesian_coordinates
 
 
 def inverse_scan_convert_2d(
@@ -669,7 +968,7 @@ def inverse_scan_convert_2d(
         assert image_range is not None, "image_range must be provided when find_scan_cone is True"
         cartesian_image = fit_and_crop_around_scan_cone(cartesian_image, image_range)
 
-    polar_image = cartesian_to_polar_matrix(
+    polar_image, _ = cartesian_to_polar_matrix(
         cartesian_image,
         fill_value=fill_value,
         angle=angle,

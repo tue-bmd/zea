@@ -20,15 +20,15 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import keras
+import numpy as np
 from keras import ops
 from tqdm import tqdm
 
 from zea import File, log
-import numpy as np
 from zea.backend import jit
 from zea.data.convert.echonet import H5Processor
 from zea.data.convert.utils import load_avi
-from zea.display import cartesian_to_polar_matrix
+from zea.display import _polar_to_cartesian_coordinates, cartesian_to_polar_matrix
 from zea.func.tensor import translate, vmap
 from zea.tools.fit_scan_cone import (
     _load_first_frame,
@@ -357,7 +357,7 @@ class LVHProcessor(H5Processor):
                 tip=(tip_x, tip_y),
                 r_max=r_max,
                 theta_range=(theta_min, theta_max),
-                # polar_shape=(768, 1024),
+                polar_shape=(600, 600),
             ),
             in_axes=(0, None, None, None, None, None),
         )  # map over sequence of images; per-video cone geometry is broadcast
@@ -392,6 +392,7 @@ class LVHProcessor(H5Processor):
         Returns:
             zea dataset
         """
+        # TODO: sort avi's by (h, w) to avoid retracing
         avi_file = avi_file.with_suffix(".avi")
         sequence_np = load_avi(avi_file)
         sequence_processed = ops.convert_to_numpy(sequence_np)
@@ -408,7 +409,7 @@ class LVHProcessor(H5Processor):
         # original-image space; theta_min/theta_max come from the fitted slopes
         # (polar +theta lands on the left after the 90° rotation in
         # cartesian_to_polar_matrix, so right_slope → theta_min).
-        polar_im_set = self.cart2pol_batched(
+        polar_im_set, coordinates = self.cart2pol_batched(
             sequence_processed,
             cone_params["apex_x"],
             cone_params["apex_y"],
@@ -417,16 +418,16 @@ class LVHProcessor(H5Processor):
             -math.atan(cone_params["left_slope"]),
         )
 
+        polar_im_set = translate(polar_im_set, self._process_range, self.range_to)
+        polar_im_set_uint8 = ops.cast(ops.floor(polar_im_set + 0.5), "uint8")
+        del polar_im_set
+
         # Cropped + centered cartesian view is only needed for image_sc
         sequence_processed = crop_sequence_with_params(sequence_processed, cone_params)
         sequence_processed = translate(sequence_processed, self._process_range, self.range_to)
         assert self.range_to == (0, 255), "Expected range_to to be (0, 255) for uint8 conversion"
         sequence_processed_uint8 = ops.cast(ops.floor(sequence_processed + 0.5), "uint8")
         del sequence_processed
-
-        polar_im_set = translate(polar_im_set, self._process_range, self.range_to)
-        polar_im_set_uint8 = ops.cast(ops.floor(polar_im_set + 0.5), "uint8")
-        del polar_im_set
 
         if ops.all(sequence_processed_uint8 == 0):
             raise ValueError(f"Processed sequence is all zeros for file {avi_file}")
@@ -444,8 +445,8 @@ class LVHProcessor(H5Processor):
         return File.create(
             out_h5,
             data={
-                "image_sc": {"values": image_sc_np},
-                "image": {"values": polar_4d},
+                "image": {"values": image_sc_np},
+                "image_polar": {"values": polar_4d, "unit": "pixels", "coordinates": coordinates},
             },
             scan={},
             probe={"name": "generic"},
