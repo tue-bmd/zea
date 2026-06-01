@@ -348,7 +348,7 @@ class DiffusionModel(DeepGenerativeModel):
 
         # Sample uniform random diffusion times in [min_t, max_t]
         diffusion_times = keras.random.uniform(
-            shape=[batch_size, *[1] * n_dims],
+            shape=ops.stack([batch_size, *([1] * n_dims)]),
             minval=self.min_t,
             maxval=self.max_t,
         )
@@ -388,7 +388,7 @@ class DiffusionModel(DeepGenerativeModel):
 
         # sample uniform random diffusion times
         diffusion_times = keras.random.uniform(
-            shape=[batch_size, *[1] * n_dims],
+            shape=ops.stack([batch_size, *([1] * n_dims)]),
             minval=self.min_t,
             maxval=self.max_t,
         )
