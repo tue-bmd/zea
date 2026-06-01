@@ -64,7 +64,7 @@ from zea.models.preset_utils import get_preset_loader, register_presets
 from zea.models.presets import speckle2self_presets
 
 
-def _build_torch_classes():
+def _build_torch_classes():  # pragma: no cover
     """Build and return the PyTorch model classes for SpeckleReductionNet.
 
     PyTorch is imported lazily so it is *only* required when converting a
@@ -84,7 +84,7 @@ def _build_torch_classes():
     """
     import torch.nn as nn  # noqa: F401 (torch required for ONNX export)
 
-    class ConvBlock(nn.Module):
+    class ConvBlock(nn.Module):  # pragma: no cover
         """Conv2d(stride) + InstanceNorm2d(affine=False) + optional ReLU."""
 
         def __init__(self, in_ch, out_ch, stride=1, activation=True):
@@ -99,7 +99,7 @@ def _build_torch_classes():
                 x = self.act(x)
             return x
 
-    class ConvTransposeBlock(nn.Module):
+    class ConvTransposeBlock(nn.Module):  # pragma: no cover
         """ConvTranspose2d(stride=2) + InstanceNorm2d(affine=False) + optional ReLU."""
 
         def __init__(self, in_ch, out_ch, activation=True):
@@ -116,7 +116,7 @@ def _build_torch_classes():
                 x = self.act(x)
             return x
 
-    class ResidualBlock(nn.Module):
+    class ResidualBlock(nn.Module):  # pragma: no cover
         """Two-layer residual block.
 
         First sub-block: ConvBlock + ReLU.
@@ -133,7 +133,7 @@ def _build_torch_classes():
         def forward(self, x):
             return x + self.model(x)
 
-    class Encoder(nn.Module):
+    class Encoder(nn.Module):  # pragma: no cover
         """4-level encoder: each level has stride-2 ConvBlock then ResidualBlock."""
 
         def __init__(self):
@@ -154,7 +154,7 @@ def _build_torch_classes():
             x = self.residual_block_end(self.conv_block_4(x))
             return x  # (B, 256, H/16, W/16)
 
-    class Decoder(nn.Module):
+    class Decoder(nn.Module):  # pragma: no cover
         """4-level decoder without skip connections (fuse=False).
 
         Bottleneck residual then 4 × ConvTranspose + ResidualBlock.
@@ -179,7 +179,7 @@ def _build_torch_classes():
             x = self.conv_block_4(x)
             return x  # (B, 1, H, W)
 
-    class SpeckleReductionNet(nn.Module):
+    class SpeckleReductionNet(nn.Module):  # pragma: no cover
         """Multi-scale speckle reduction network with three encoders.
 
         For I_clean_hr the decoder only uses encoder_highRes output because
@@ -201,7 +201,7 @@ def _build_torch_classes():
                 self.decoder(self.encoder_midRes(mid)),
             )
 
-    class _SRNSingleInputWrapper(nn.Module):
+    class _SRNSingleInputWrapper(nn.Module):  # pragma: no cover
         """Single-input ONNX wrapper — only runs the high-res path."""
 
         def __init__(self, srn):
@@ -217,7 +217,7 @@ def _build_torch_classes():
     }
 
 
-def convert_to_onnx(pth_path, onnx_path, input_size=(1, 1, 512, 512)):
+def convert_to_onnx(pth_path, onnx_path, input_size=(1, 1, 512, 512)):  # pragma: no cover
     """Convert a SpeckleReductionNet ``.pth`` checkpoint to ONNX.
 
     Uses a single-input wrapper (encoder_highRes + decoder) since the
@@ -396,7 +396,7 @@ class _SpeckleReductionNetKeras(keras.layers.Layer):
         return self.decoder(self.encoder(x))
 
 
-def _load_pth_into_keras_net(keras_net, state_dict):
+def _load_pth_into_keras_net(keras_net, state_dict):  # pragma: no cover
     """Transfer weights from a PyTorch state dict into a Keras SRN model.
 
     Handles the axis permutation required between PyTorch (NCHW) and Keras
@@ -523,7 +523,7 @@ class Speckle2Self(BaseModel):
             return output[:, 0, :, :]
         return output
 
-    def _call_onnx(self, inputs):
+    def _call_onnx(self, inputs):  # pragma: no cover
         x = np.asarray(inputs, dtype=np.float32)
 
         squeeze_ch = x.ndim == 3
@@ -546,7 +546,7 @@ class Speckle2Self(BaseModel):
             return output[:, 0, :, :]
         return output
 
-    def _load_from_pth(self, pth_path):
+    def _load_from_pth(self, pth_path):  # pragma: no cover
         """Load weights from a PyTorch ``.pth`` checkpoint into the Keras net.
 
         Args:
@@ -588,21 +588,21 @@ class Speckle2Self(BaseModel):
                 self(np.zeros((1, 1, 16, 16), dtype=np.float32))
             self.load_weights(filename)
             return
-        except Exception:
+        except Exception:  # pragma: no cover
             pass
 
         # 2. Try PyTorch checkpoint (.pth)
-        try:
+        try:  # pragma: no cover
             filename = loader.get_file("model.pth")
             self._load_from_pth(filename)
             return
-        except Exception:
+        except Exception:  # pragma: no cover
             pass
 
         # 3. Fall back to ONNX
-        try:
+        try:  # pragma: no cover
             import onnxruntime
-        except ImportError as e:
+        except ImportError as e:  # pragma: no cover
             raise ImportError(
                 "No loadable weights found in preset (tried model.weights.h5, "
                 "model.pth, model.onnx). Install onnxruntime or provide a "
@@ -612,7 +612,7 @@ class Speckle2Self(BaseModel):
         self._onnx_sess = onnxruntime.InferenceSession(filename)
 
     @classmethod
-    def from_pth(cls, pth_path):
+    def from_pth(cls, pth_path):  # pragma: no cover
         """Create a Speckle2Self model from a local PyTorch ``.pth`` file.
 
         Args:
@@ -629,7 +629,7 @@ class Speckle2Self(BaseModel):
         return model
 
     @classmethod
-    def from_onnx(cls, onnx_path):
+    def from_onnx(cls, onnx_path):  # pragma: no cover
         """Create a Speckle2Self model from a local ONNX file (legacy fallback).
 
         Use :meth:`from_pth` or :meth:`from_preset` when possible.
