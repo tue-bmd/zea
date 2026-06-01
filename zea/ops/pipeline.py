@@ -715,7 +715,7 @@ class Pipeline:
         device: Union[str, None] = None,
         **manual,
     ):
-        """Prepare a :class:`~zea.scan.Parameters` object for the pipeline.
+        """Prepare a :class:`~zea.Parameters` object for the pipeline.
 
         Converts the (validated and derived) parameters needed by this
         pipeline's operations into a dictionary of tensors, then overlays any
@@ -724,7 +724,7 @@ class Pipeline:
         ``parameters``.
 
         Args:
-            parameters: :class:`~zea.scan.Parameters` object. Only the keys
+            parameters: :class:`~zea.Parameters` object. Only the keys
                 this pipeline ``needs`` (and that are not provided manually) are
                 converted, so derivation is lazy and minimal.
             device: Device to place the tensors on. Defaults to the pipeline
@@ -750,7 +750,7 @@ class Pipeline:
 
         if parameters is not None:
             assert isinstance(parameters, Parameters), (
-                f"Expected an instance of `zea.scan.Parameters`, got {type(parameters)}"
+                f"Expected an instance of `zea.Parameters`, got {type(parameters)}"
             )
             # Only convert keys the pipeline needs and that are not overridden
             # manually, so we avoid deriving unnecessary parameters.

@@ -175,7 +175,7 @@ class Track:
         return _build_scan_spec(scan_dict)
 
     def load_parameters(self, safe: bool = True, **parameters) -> "Parameters":
-        """Load this track's parameters (merged probe + scan) as :class:`~zea.scan.Parameters`.
+        """Load this track's parameters (merged probe + scan) as :class:`~zea.Parameters`.
 
         Each track shares the same probe but has its own scan, so the returned
         object has the same shape as :meth:`File.load_parameters` for a
@@ -299,7 +299,7 @@ def build_parameters_from_dict(
     safe: bool = True,
     **parameters,
 ) -> "Parameters":
-    """Build a :class:`~zea.scan.Parameters` from raw scan + probe dictionaries.
+    """Build a :class:`~zea.Parameters` from raw scan + probe dictionaries.
 
     The scan and probe groups have non-overlapping field names, so they are
     simply merged. ``ScanSpec`` validation is used (when possible) to derive
@@ -312,7 +312,7 @@ def build_parameters_from_dict(
             handled transparently.
         data_group: Optional HDF5 data group used to derive ``n_ax`` from
             ``raw_data`` when it cannot be inferred from the scan spec.
-        safe: Forwarded to :meth:`~zea.scan.Parameters.merge`.
+        safe: Forwarded to :meth:`~zea.Parameters.merge`.
         **parameters: Override any parameter.
 
     Returns:
@@ -598,7 +598,7 @@ class File(h5py.File):
 
         Each track exposes ``.data`` (a :class:`GroupProxy`), ``.scan`` (a
         :class:`~zea.data.spec.ScanSpec`) and ``.load_parameters()`` (a
-        :class:`~zea.scan.Parameters` factory method) for that specific track.
+        :class:`~zea.Parameters` factory method) for that specific track.
 
         Raises:
             AttributeError: For legacy flat-format files that have no
@@ -1162,14 +1162,14 @@ class File(h5py.File):
         """Load the acquisition parameters (merged probe + scan) from the file.
 
         Reads both the ``scan`` and ``probe`` groups and merges them into a
-        single :class:`~zea.scan.Parameters` object that owns derivation,
+        single :class:`~zea.Parameters` object that owns derivation,
         caching, and lazy loading of derived quantities. The probe and scan
         groups live at the same level and have non-overlapping field names, so
         merging is a plain dict union.
 
         Args:
             safe (bool, optional): If True (default), only parameters known to
-                :class:`~zea.scan.Parameters` are forwarded; unknown file keys
+                :class:`~zea.Parameters` are forwarded; unknown file keys
                 are dropped. If False, all parameters are passed through.
             **parameters: Override any parameter from the file. Custom
                 (non-spec) keys are stored as passthrough parameters.
