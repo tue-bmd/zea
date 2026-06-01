@@ -501,8 +501,9 @@ class Speckle2Self(BaseModel):
 
         if self._onnx_sess is not None:
             outputs = self._call_onnx(inputs)
+        else:
+            outputs = self._call_keras(inputs)
 
-        outputs = self._call_keras(inputs)
         outputs = ops.image.resize(outputs, original_size)
 
         outputs = ops.clip(outputs, 0, 1)
@@ -517,7 +518,7 @@ class Speckle2Self(BaseModel):
         return output
 
     def _call_onnx(self, inputs):  # pragma: no cover
-        inputs = ops.convert_to_numpy(inputs, dtype=np.float32)
+        inputs = ops.convert_to_numpy(inputs).astype(np.float32)
 
         inputs = np.transpose(inputs, (0, 3, 1, 2))  # (N, 1, H, W) for ONNX input
 
