@@ -97,6 +97,8 @@ Example Usage
 
 """
 
+from copy import deepcopy
+
 import numpy as np
 from keras import ops
 
@@ -207,11 +209,15 @@ class Parameters(BaseParameters):
             if not provided.
     """
 
+    probe_schema = deepcopy(ProbeSpec.SCHEMA)
+    probe_schema.pop("name")
+    probe_schema.pop("type")
+
     # Valid parameters are derived from the scan and probe specs + a few
     # beamforming-only parameters.
     VALID_PARAMS = {
         **ScanSpec.SCHEMA,
-        **ProbeSpec.SCHEMA,
+        **probe_schema,
         "grid_size_x": {"dtype": np.int32},
         "grid_size_y": {"dtype": np.int32},
         "grid_size_z": {"dtype": np.int32},
