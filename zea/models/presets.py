@@ -162,7 +162,7 @@ flow_matching_presets = {
         "metadata": {
             "description": (
                 "Flow matching model trained on EchoNetLVH dataset. "
-                "Three-channel model, input shape (256, 256, 3)."
+                "3-frame model, input shape (256, 256, 3)."
             ),
             "params": 7_691_651,
             "path": "flow_matching",
