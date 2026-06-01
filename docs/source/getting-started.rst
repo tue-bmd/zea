@@ -30,11 +30,11 @@ Let's take a quick look at how to use ``zea`` to load and process ultrasound dat
       config,
       with_batch_dim=False,
    )
-   # preparing the parameters (converting to tensors)
-   tensors = pipeline.prepare_parameters(parameters)
+   # prepare the inputs (converts the needed parameters to tensors)
+   inputs = pipeline.prepare_parameters(parameters)
 
    # running the pipeline!
-   image = pipeline(data=data, **tensors)["data"]
+   image = pipeline(data=data, **inputs)["data"]
 
    # show the image
    image = zea.display.to_8bit(image)
