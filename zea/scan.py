@@ -163,7 +163,7 @@ class Parameters(BaseParameters):
             beam comes to focus for each transmit in meters of shape (n_tx,).
         transmit_origins (np.ndarray): Transmit origins of shape (n_tx, 3).
         initial_times (np.ndarray): Initial times in seconds for each event of shape (n_tx,).
-        bandwidth_percent (float, optional): Bandwidth as percentage of center
+        probe_bandwidth_percent (float, optional): Bandwidth as percentage of center
             frequency. Defaults to 200.0.
         time_to_next_transmit (np.ndarray): The time between subsequent
             transmit events of shape (n_frames, n_tx).
@@ -246,7 +246,7 @@ class Parameters(BaseParameters):
 
     # Add some defaults that are not stored in a file
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
-    VALID_PARAMS["bandwidth_percent"]["default"] = 200.0
+    VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
 
     @cache_with_dependencies("probe_geometry")
     def aperture_size(self):
@@ -772,7 +772,7 @@ class Parameters(BaseParameters):
     @cache_with_dependencies(
         "sound_speed",
         "center_frequency",
-        "bandwidth_percent",
+        "probe_bandwidth_percent",
         "n_el",
         "probe_geometry",
         "tx_apodizations",
@@ -794,7 +794,7 @@ class Parameters(BaseParameters):
             tx_apodizations=self.tx_apodizations,
             grid=self.grid,
             t0_delays=self.t0_delays,
-            bandwidth_percent=self.bandwidth_percent,
+            probe_bandwidth_percent=self.probe_bandwidth_percent,
             **self.pfield_kwargs,
         )
         return ops.convert_to_numpy(pfield)

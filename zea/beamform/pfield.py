@@ -36,7 +36,7 @@ def _abs_sinc(x):
 def compute_pfield(
     sound_speed,
     center_frequency,
-    bandwidth_percent,
+    probe_bandwidth_percent,
     n_el,
     probe_geometry,
     tx_apodizations,
@@ -56,7 +56,8 @@ def compute_pfield(
     Args:
         sound_speed (float): Speed of sound in the medium.
         center_frequency (float): Center frequency of the transmit pulse in Hz.
-        bandwidth_percent (float): Bandwidth of the probe, pulse-echo 6dB fractional bandwidth (%)
+        probe_bandwidth_percent (float): Bandwidth of the probe, pulse-echo 6dB
+            fractional bandwidth (%)
         n_el (int): Number of elements in the probe.
         probe_geometry (array): Geometry of the probe elements.
         tx_apodizations (array): Transmit apodizations of shape (n_tx, n_el).
@@ -92,7 +93,7 @@ def compute_pfield(
     # cast to float32
     sound_speed = ops.cast(sound_speed, "float32")
     center_frequency = ops.cast(center_frequency, "float32")
-    bandwidth_percent = ops.cast(bandwidth_percent, "float32")
+    probe_bandwidth_percent = ops.cast(probe_bandwidth_percent, "float32")
     attenuation_coef = ops.cast(attenuation_coef, "float32")
     db_thresh = ops.cast(db_thresh, "float32")
 
@@ -127,7 +128,7 @@ def compute_pfield(
     # %------------------------------------%
 
     # subdivide elements into sub elements or not? (to satisfy Fraunhofer approximation)
-    lambda_min = sound_speed / (center_frequency * (1 + bandwidth_percent / 200))
+    lambda_min = sound_speed / (center_frequency * (1 + probe_bandwidth_percent / 200))
     num_sub_elements = ops.ceil(element_width / lambda_min)
 
     size_orig = ops.shape(grid_x)
@@ -182,7 +183,7 @@ def compute_pfield(
         return 1j * ops.cast(imag, "complex64")
 
     # FREQUENCY RESPONSE of the ensemble PZT + probe
-    w_bandwidth = bandwidth_percent * center_angular_freq / 100  # angular frequency bandwidth
+    w_bandwidth = probe_bandwidth_percent * center_angular_freq / 100  # angular frequency bandwidth
     p_shape = ops.log(126) / ops.log(epsilon + 2 * center_angular_freq / w_bandwidth)
 
     def probe_spectrum(w):
