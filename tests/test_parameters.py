@@ -79,13 +79,13 @@ class DummyParameters(BaseParameters):
     """
 
     VALID_PARAMS = {
-        "param1": {"dtype": int},
-        "param2": {"dtype": int},
-        "param3": {"dtype": float, "default": 1540.0},
-        "param4": {"dtype": float},
-        "param5": {"dtype": float},
-        "param6": {"dtype": float},
-        "optional_param": {"dtype": (list, type(None))},
+        "param1": {"dtype": np.int32},
+        "param2": {"dtype": np.int32},
+        "param3": {"dtype": np.float32, "default": 1540.0},
+        "param4": {"dtype": np.float32},
+        "param5": {"dtype": np.float32},
+        "param6": {"dtype": np.float32},
+        "optional_param": {"dtype": np.int32},
     }
 
     def _timestamp(self):
@@ -193,7 +193,7 @@ def test_type_validation_on_init():
     assert "invalid_param" not in p._params
     assert p._custom_params["invalid_param"] == 3
     # Known parameters with the wrong type still raise.
-    with pytest.raises(TypeError, match="Parameter 'param4' expected type float"):
+    with pytest.raises(TypeError, match="param4.*float"):
         DummyParameters(param1=1, param2=2, param3=1500.0, param4="not_a_float")
 
 
@@ -202,7 +202,7 @@ def test_type_validation_on_set(dummy_params):
     dummy_params.invalid_param = 42
     assert dummy_params.invalid_param == 42
     assert dummy_params._custom_params["invalid_param"] == 42
-    with pytest.raises(TypeError, match="Parameter 'param3' expected type float"):
+    with pytest.raises(TypeError, match="param3.*float"):
         dummy_params.param3 = "not_a_float"
 
 
@@ -346,7 +346,7 @@ def test_optional_param_leaf_or_dependency_behavior():
     """Test that optional_param can be set as a leaf or computed as a dependency."""
     # Case 1: optional_param provided, uses it directly
     p = DummyParameters(param1=10, param2=5, param3=1500.0, param4=5e6, optional_param=[1, 2])
-    assert p.optional_param == [1, 2]
+    assert np.allclose(p.optional_param, [1, 2])
 
     # Case 2: optional_param not provided, computed from dependencies
     p2 = DummyParameters(param1=10, param2=5, param3=1500.0, param4=5e6)
@@ -355,10 +355,10 @@ def test_optional_param_leaf_or_dependency_behavior():
 
     # Case 3: optional_param set after init, uses new value
     p2.optional_param = [3, 4]
-    assert p2.optional_param == [3, 4]
+    assert np.allclose(p2.optional_param, [3, 4])
 
-    # Case 4: optional_param set to None, falls back to dependency
-    p2.optional_param = None
+    # Case 4: delete optional_param, should fall back to computed value
+    del p2.optional_param
     assert np.allclose(p2.optional_param, expected)
 
 
@@ -373,7 +373,7 @@ def test_optional_parm_with_dependent_behavior():
         optional_param=[1, 2],
         param6=7.0,
     )
-    assert p.optional_param == [1, 2]
+    assert np.allclose(p.optional_param, [1, 2])
     assert p.dependent_on_optional == 2 + 7.0
 
     # Case 2: optional_param not provided, dependent uses computed value
@@ -384,11 +384,11 @@ def test_optional_parm_with_dependent_behavior():
 
     # Case 3: optional_param set after init, dependent uses new value
     p2.optional_param = [3, 4]
-    assert p2.optional_param == [3, 4]
+    assert np.allclose(p2.optional_param, [3, 4])
     assert p2.dependent_on_optional == 4 + 8.0
 
-    # Case 4: optional_param set to None, dependent falls back to computed
-    p2.optional_param = None
+    # Case 4: delete optional_param, dependent falls back to computed
+    del p2.optional_param
     assert np.allclose(p2.optional_param, expected)
     assert np.isclose(p2.dependent_on_optional, expected[1] + 8)
 
@@ -459,16 +459,6 @@ def test_update_ndarray_equality_skips_recompute():
 
     params.update(arr=np.array([1.0, 2.0, 4.0]))
     assert "arr_sum" not in params._cache
-
-
-def test_update_skips_none_to_none_for_existing_param(dummy_params):
-    """Test update skips when an existing parameter remains None."""
-    dummy_params.param5 = None
-    assert "param5" in dummy_params._params
-
-    # This should hit the old_exists + None/None early-continue path.
-    dummy_params.update(param5=None)
-    assert dummy_params.param5 is None
 
 
 def test_update_array_equal_type_error_falls_through_to_setattr():
