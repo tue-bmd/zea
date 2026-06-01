@@ -149,11 +149,25 @@ diffusion_model_presets = {
 flow_matching_presets = {
     "flowmatching-echonetlvh": {
         "metadata": {
-            "description": ("Flow matching model trained on EchoNetLVH dataset."),
+            "description": (
+                "Flow matching model trained on EchoNetLVH dataset. "
+                "Single-channel (grayscale) model, input shape (256, 256, 1)."
+            ),
             "params": 7_691_393,
             "path": "flow_matching",
         },
-        "hf_handle": "hf://zeahub/flowmatching-echonetlvh",
+        "hf_handle": "hf://zeahub/flowmatching-echonetlvh/1ch",
+    },
+    "flowmatching-echonetlvh-3ch": {
+        "metadata": {
+            "description": (
+                "Flow matching model trained on EchoNetLVH dataset. "
+                "Three-channel model, input shape (256, 256, 3)."
+            ),
+            "params": 7_691_651,
+            "path": "flow_matching",
+        },
+        "hf_handle": "hf://zeahub/flowmatching-echonetlvh/3ch",
     },
 }
 
