@@ -168,7 +168,7 @@ class Probe(ProbeSpec):
         return params
 
     def get_parameters(self):
-        return {key: getattr(self, key) for key in self.SCHEMA}
+        return {key: getattr(self, key) for key in self.SCHEMA if getattr(self, key) is not None}
 
     def __repr__(self) -> str:
         parts = []
