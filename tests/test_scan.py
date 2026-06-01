@@ -1,9 +1,14 @@
 """Tests for the Parameters class."""
 
+import pickle
+
 import numpy as np
 import pytest
 
-from zea.scan import Parameters
+import zea
+from zea import Parameters
+from zea.data.spec import ProbeSpec, ScanSpec
+from zea.internal.dummy_scan import get_scan
 
 scan_args = {
     "n_tx": 10,
@@ -274,9 +279,84 @@ def test_accessing_valid_but_unset_attributes():
     parameters.focus_distances
 
 
+def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
+    local_scan_args = scan_args.copy()
+    local_scan_args.pop("azimuth_angles", None)
+    local_scan_args.pop("t0_delays", None)
+    local_scan_args.pop("tx_apodizations", None)
+    local_scan_args.pop("focus_distances", None)
+    local_scan_args.pop("transmit_origins", None)
+    local_scan_args.pop("initial_times", None)
+    local_scan_args.pop("tgc_gain_curve", None)
+    local_scan_args.pop("tx_waveform_indices", None)
+
+    warnings = []
+
+    # Reset warning_once state to make this test deterministic.
+    zea.log._warned_locations.clear()
+
+    def _capture_warning(message, *args, **kwargs):
+        warnings.append(message)
+        return message
+
+    monkeypatch.setattr("zea.scan.log.warning", _capture_warning)
+
+    # Nothing should be warned at initialization, only on-demand when fallback
+    # properties are actually accessed.
+    scan = Parameters(**local_scan_args)
+    assert len(warnings) == 0
+
+    for i in range(5):
+        scan.selected_transmits = slice(0, i + 1)
+        _ = scan.azimuth_angles
+        _ = scan.t0_delays
+        _ = scan.tx_apodizations
+        _ = scan.focus_distances
+        _ = scan.transmit_origins
+        _ = scan.initial_times
+        _ = scan.tgc_gain_curve
+        _ = scan.tx_waveform_indices
+
+    assert warnings.count("No ``azimuth_angles`` provided, using zeros") == 1
+    assert warnings.count("No ``t0_delays`` provided, using zeros") == 1
+    assert warnings.count("No ``tx_apodizations`` provided, using ones") == 1
+    assert warnings.count("No ``focus_distances`` provided, using zeros") == 1
+    assert warnings.count("No ``transmit_origins`` provided, using zeros") == 1
+    assert warnings.count("No ``initial_times`` provided, using zeros") == 1
+    assert warnings.count("No ``tgc_gain_curve`` provided, using ones") == 1
+    assert warnings.count("No ``tx_waveform_indices`` provided, using zeros") == 1
+
+
+def test_missing_defaults_warn_once_per_scan_instance(monkeypatch):
+    local_scan_args = scan_args.copy()
+    local_scan_args.pop("tx_waveform_indices", None)
+
+    warnings = []
+
+    zea.log._warned_locations.clear()
+
+    def _capture_warning(message, *args, **kwargs):
+        warnings.append(message)
+        return message
+
+    monkeypatch.setattr("zea.scan.log.warning", _capture_warning)
+
+    scan1 = Parameters(**local_scan_args)
+    scan2 = Parameters(**local_scan_args)
+
+    # First access in each instance should warn.
+    _ = scan1.tx_waveform_indices
+    _ = scan2.tx_waveform_indices
+
+    # Repeated access in same instance should not warn again.
+    _ = scan1.tx_waveform_indices
+    _ = scan2.tx_waveform_indices
+
+    assert warnings.count("No ``tx_waveform_indices`` provided, using zeros") == 2
+
+
 def test_scan_pickle():
     """Test pickling and unpickling of Parameters class."""
-    import pickle
 
     parameters = Parameters(**scan_args)
     parameters_pickled = pickle.dumps(parameters)
@@ -296,7 +376,6 @@ def test_valid_params_default():
     The origin of this test is a bug where in VALID_PARAMS, the default value for pfield_kwargs
     was a mutable dictionary, leading to shared state across instances.
     """
-    from zea.internal.dummy_scan import get_scan
 
     scan1 = get_scan()
     scan1.pfield_kwargs["norm"] = False
@@ -310,7 +389,6 @@ def test_valid_params_default():
 
 def test_inplace_modification():
     """Test that modifying pfield_kwargs in-place, will update the pfield."""
-    from zea.internal.dummy_scan import get_scan
 
     def edit1(parameters):
         """edit direct dependency (dict) in-place"""
@@ -350,7 +428,6 @@ def test_inplace_modification():
 
 def test_inplace_modification_tensor_cache():
     """Test that modifying pfield_kwargs in-place, will update the pfield_tensor."""
-    from zea.internal.dummy_scan import get_scan
 
     parameters = get_scan(pfield_kwargs={"norm": True})
     tensor_dict = parameters.to_tensor(include=["pfield"])
@@ -405,8 +482,6 @@ def test_valid_params_cover_specs():
     is intentionally excluded from ProbeSpec (renamed to
     ``probe_center_frequency``) to avoid colliding with the scan field.
     """
-    from zea.data.spec import ProbeSpec, ScanSpec
-
     valid = set(Parameters.VALID_PARAMS)
     missing_scan = set(ScanSpec.SCHEMA) - valid
     missing_probe = set(ProbeSpec.SCHEMA) - valid
@@ -422,8 +497,6 @@ def test_scan_and_probe_specs_are_disjoint():
     A collision would make merging probe + scan parameters into a single
     Parameters object ambiguous. This guards against re-introducing one.
     """
-    from zea.data.spec import ProbeSpec, ScanSpec
-
     overlap = set(ScanSpec.SCHEMA) & set(ProbeSpec.SCHEMA)
     assert overlap == set(), f"ScanSpec and ProbeSpec share field names: {overlap}"
 
