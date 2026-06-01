@@ -81,6 +81,7 @@ The following steps are recommended when adding a new model:
 
 4. Add a preset for the model in :mod:`zea.models.presets`. This basically allows you to have multiple weights presets for a given model architecture.
 5. Make sure to register the presets in your model module by importing the presets module and calling ``register_presets`` with the model class as an argument.
+6. Lastly, add the model to the :mod:`zea.models` package by importing it in the :file:`__init__.py` file.
 """
 
 from . import (
@@ -90,8 +91,10 @@ from . import (
     diffusion,
     echonet,
     echonetlvh,
+    flow_matching,
     generative,
     gmm,
+    hvae,
     layers,
     lpips,
     lv_segmentation,
