@@ -49,49 +49,107 @@ See :class:`zea.File` for the full API reference.
 
 Use :meth:`zea.File.create` to build a validated file from NumPy arrays.
 All inputs are checked against the full schema before anything is written to
-disk::
+disk.
+
+.. doctest::
+
+    >>> import numpy as np
+    >>> from zea import File
+
+    >>> n_frames, n_tx, n_el, n_ax = 2, 32, 128, 512
+    >>> raw_data = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+    >>> probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
+
+    >>> scan = {
+    ...    "sampling_frequency": np.float32(40e6),
+    ...    "center_frequency":   np.float32(7e6),
+    ...    "demodulation_frequency": np.float32(7e6),
+    ...    "initial_times":      np.zeros(n_tx, dtype=np.float32),
+    ...    "t0_delays":          np.zeros((n_tx, n_el), dtype=np.float32),
+    ...    "tx_apodizations":    np.ones((n_tx, n_el),  dtype=np.float32),
+    ...    "focus_distances":    np.full(n_tx, np.inf,  dtype=np.float32),
+    ...    "transmit_origins":   np.zeros((n_tx, 3),    dtype=np.float32),
+    ...    "polar_angles":       np.zeros(n_tx, dtype=np.float32),
+    ...    "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+    ... }
+
+    >>> probe = {
+    ...    "name": "verasonics_l11_4v",
+    ...    "probe_geometry": probe_geometry,
+    ... }
+
+    >>> f = File.create(
+    ...    "my_acquisition.hdf5",
+    ...    data={"raw_data": raw_data},
+    ...    scan=scan,
+    ...    probe=probe,
+    ... )
+    >>> f.close()
+
+**Save from a Parameters object**
+
+When you already hold a :class:`~zea.Parameters` object — e.g. loaded from an
+existing file — you can round-trip it back to a new file using
+:meth:`~zea.Parameters.to_scan_dict` and :meth:`~zea.Parameters.to_probe_dict`
+to reconstruct the dicts that :meth:`~zea.File.create` expects.  No manual
+field-by-field reconstruction is needed:
+
+.. testsetup::
 
     import numpy as np
     from zea import File
 
-    n_frames, n_tx, n_el, n_ax = 2, 32, 128, 512
-    raw_data = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
-    probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
+    import numpy as np
+    from zea import File
 
+    n_frames, n_tx, n_el, n_ax = 2, 4, 8, 64
+    raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
     scan = {
-        "sampling_frequency": np.float32(40e6),
-        "center_frequency":   np.float32(7e6),
-        "demodulation_frequency": np.float32(7e6),
-        "initial_times":      np.zeros(n_tx, dtype=np.float32),
-        "t0_delays":          np.zeros((n_tx, n_el), dtype=np.float32),
-        "tx_apodizations":    np.ones((n_tx, n_el),  dtype=np.float32),
-        "focus_distances":    np.full(n_tx, np.inf,  dtype=np.float32),
-        "transmit_origins":   np.zeros((n_tx, 3),    dtype=np.float32),
-        "polar_angles":       np.zeros(n_tx, dtype=np.float32),
-        "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+            "sampling_frequency":     np.float32(40e6),
+            "center_frequency":       np.float32(7e6),
+            "demodulation_frequency": np.float32(7e6),
+            "initial_times":          np.zeros(n_tx, dtype=np.float32),
+            "t0_delays":              np.zeros((n_tx, n_el), dtype=np.float32),
+            "tx_apodizations":        np.ones((n_tx, n_el), dtype=np.float32),
+            "focus_distances":        np.full(n_tx, np.inf, dtype=np.float32),
+            "transmit_origins":       np.zeros((n_tx, 3), dtype=np.float32),
+            "polar_angles":           np.zeros(n_tx, dtype=np.float32),
+            "time_to_next_transmit":  np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
     }
-
-    probe = {
-        "name": "L11-4v",
-        "probe_geometry": probe_geometry,
-    }
-
-    f = File.create(
-        "my_acquisition.hdf5",
-        data={"raw_data": raw_data},
-        scan=scan,
-        probe=probe,
-    )
+    f = File.create("source.hdf5", data={"raw_data": raw}, scan=scan, overwrite=True)
     f.close()
+
+.. doctest::
+
+    >>> # load parameters from any file
+    >>> with File("source.hdf5") as f:
+    ...     parameters = f.load_parameters() # returns a `zea.Parameters` object
+    ...     raw_data = f.data.raw_data[:]
+
+    >>> # save those parameters to a new file, without manually reconstructing the scan and probe dicts
+    >>> f2 = File.create(
+    ...     "output.hdf5",
+    ...     data={"raw_data": raw_data},
+    ...     scan=parameters.to_scan_dict(),
+    ...     probe=parameters.to_probe_dict() or None,
+    ...     overwrite=True,
+    ... )
+    >>> f2.close()
+
+.. testcleanup::
+
+    import os
+    os.remove("source.hdf5")
+    os.remove("output.hdf5")
 
 -------------------------------
 Multi-track files
 -------------------------------
 
-Some acquisitions interleave multiple transmit sequences in a single recording. Sometimes 
-these sequences contain parameters that may not be expressed by a single :class:`~zea.Scan`, 
+Some acquisitions interleave multiple transmit sequences in a single recording. Sometimes
+these sequences contain parameters that may not be expressed by a single :class:`~zea.Scan`,
 or are intended to be processed with different :class:`~zea.Pipeline`\s — for example,
-swapping between focused B-mode and plane-wave Doppler pulses.  Rather than splitting these into separate files, 
+swapping between focused B-mode and plane-wave Doppler pulses.  Rather than splitting these into separate files,
 ``zea`` can store them as **Tracks**: self-contained bundles of raw data and scan parameters
 in a single HDF5 file, with a shared :class:`~zea.Probe` and metadata. Each track exposes its own :class:`~zea.Parameters` object (via
 ``track.load_parameters()``), containing the parameters

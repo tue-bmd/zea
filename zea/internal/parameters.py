@@ -746,3 +746,36 @@ class BaseParameters(ZeaObject):
         if len(params) == 0:
             log.info(f"Could not find proper scan parameters in {kwargs}.")
         return cls(**params)
+
+    # ------------------------------------------------------------------
+    # Flat dict-like interface
+    # The object behaves as a read-only flat dict over the union of
+    # ``_params`` and ``_custom_params``.  ``__getitem__`` / ``__setitem__``
+    # / ``__delitem__`` are inherited from :class:`~zea.internal.core.Object`.
+    # ------------------------------------------------------------------
+
+    def _flat(self) -> dict:
+        """Merged view of stored params and custom params (the flat dict)."""
+        return {**self._params, **self._custom_params}
+
+    def __len__(self) -> int:
+        return len(self._params) + len(self._custom_params)
+
+    def __iter__(self):
+        yield from self._params
+        yield from self._custom_params
+
+    def __contains__(self, item) -> bool:
+        return item in self._params or item in self._custom_params
+
+    def keys(self):
+        """Return all stored parameter keys (valid + custom)."""
+        return self._flat().keys()
+
+    def values(self):
+        """Return all stored parameter values (valid + custom)."""
+        return self._flat().values()
+
+    def items(self):
+        """Return (key, value) pairs for all stored parameters (valid + custom)."""
+        return self._flat().items()

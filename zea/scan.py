@@ -109,7 +109,7 @@ from zea.beamform.pixelgrid import (
 )
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
-from zea.internal.parameters import BaseParameters, cache_with_dependencies
+from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated
 
 # Recon/beamforming-only parameters (not stored in the file) plus type/default
@@ -928,6 +928,61 @@ class Parameters(BaseParameters):
         time = np.mean(np.sum(time_to_next_transmit, axis=1))
         fps = 1 / time
         return fps
+
+    def to_scan_dict(self) -> dict:
+        """Return scan parameters as a plain dict.
+
+        Suitable for passing directly to :meth:`~zea.File.create` as the
+        ``scan`` argument, or to :func:`~zea.data.file_operations.save_file`
+        alongside :meth:`to_probe_dict`.
+
+        Only fields defined in :class:`~zea.data.spec.ScanSpec` that are
+        currently stored on this object are included (``None`` values are
+        omitted).  Values are read through property access so that any active
+        :attr:`selected_transmits` filtering is applied (e.g. after calling
+        :meth:`set_transmits`).
+
+        Returns:
+            dict: Scan parameter dict keyed by :class:`~zea.data.spec.ScanSpec`
+                field names.
+        """
+        result = {}
+        for field in ScanSpec.fields():
+            # Only include fields that were explicitly stored as a non-None value.
+            # Skipping None here is critical: fields like ``tgc_gain_curve`` that
+            # are absent in the source file are stored as None in ``_params``.
+            # Calling ``getattr`` on them would trigger computed defaults (e.g.
+            # ones), which would be written to the new file and break round-trips.
+            if field not in self._params or self._params[field] is None:
+                continue
+            try:
+                value = getattr(self, field)  # applies selected_transmits filtering
+            except MissingDependencyError:
+                continue
+            if value is not None:
+                result[field] = value
+        return result
+
+    def to_probe_dict(self) -> dict:
+        """Return file-backed probe parameters as a plain dict.
+
+        Suitable for passing directly to :meth:`~zea.File.create` as the
+        ``probe`` argument, or to :func:`~zea.data.file_operations.save_file`
+        alongside :meth:`to_scan_dict`.
+
+        Only fields defined in :class:`~zea.data.spec.ProbeSpec` that are
+        currently stored on this object are included (``None`` values are
+        omitted).
+
+        Returns:
+            dict: Probe parameter dict keyed by :class:`~zea.data.spec.ProbeSpec`
+                field names.
+        """
+        return {
+            field: self._params[field]
+            for field in ProbeSpec.fields()
+            if field in self._params and self._params[field] is not None
+        }
 
     def __setattr__(self, key, value):
         if key == "selected_transmits":

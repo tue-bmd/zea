@@ -44,7 +44,7 @@ def _safe_getattr(obj, name):
 def save_file(
     path,
     parameters: Parameters,
-    probe: Probe,
+    probe: Probe | None = None,
     raw_data: np.ndarray = None,
     aligned_data: dict = None,
     beamformed_data: dict = None,
@@ -61,8 +61,12 @@ def save_file(
 
     Args:
         path (str, pathlike): The path to the hdf5 file.
-        scan (Parameters): The parameters object containing the acquisition parameters.
-        probe (Probe): The probe object containing the parameters of the probe.
+        parameters (Parameters): The parameters object containing acquisition and probe
+            parameters.  When ``probe`` is omitted the probe dict is derived automatically
+            via :meth:`~zea.Parameters.to_probe_dict`.
+        probe (Probe, optional): A :class:`~zea.Probe` object or plain dict with probe
+            fields.  When provided it takes precedence over the probe information stored
+            in ``parameters``.  Defaults to ``None``.
         raw_data (np.ndarray): The data to save.
         aligned_data (np.ndarray, optional): Aligned data as a dict with ``"values"``
             and ``"extent"`` keys (validated as :class:`~zea.data.spec.AlignedData`).
@@ -74,14 +78,14 @@ def save_file(
             ``"values"`` and ``"extent"`` keys (validated as :class:`~zea.data.spec.Image`).
         description (str, optional): A description for the dataset.
         custom_maps (dict, optional): Custom spatial map entries to include in the ``data`` group.
-            Each key maps to a dict with ``"values"`` (np.ndarray, uint8) and ``"extent"``
-            (np.ndarray, float32, shape ``(6,)``) fields, plus optional ``"labels"``,
-            ``"description"``, and ``"unit"`` fields.  Example::
+            Each key maps to a dict with ``"values"`` (np.ndarray, uint8) and ``"coordinates"``
+            (np.ndarray, float32, shape ``(n_frames, ..., 3)``) fields, plus optional
+            ``"description"`` and ``"unit"`` fields.  Example::
 
                 custom_maps = {
                     "my_overlay": {
-                        "values": values_array,  # (n_frames, x, z, y[, n_ch]), uint8
-                        "extent": extent_array,  # (6,) float32
+                        "values": values_array,      # (n_frames, z, x[, n_ch]), uint8
+                        "coordinates": coords_array, # (n_frames, z, x, 3), float32
                     }
                 }
         metadata (dict, optional): Metadata to store in the ``metadata`` group, validated against
@@ -114,41 +118,16 @@ def save_file(
         for key, map_dict in custom_maps.items():
             data[key] = map_dict
 
-    scan_dict = {
-        "probe_geometry": probe.probe_geometry,
-        "sampling_frequency": np.float32(parameters.sampling_frequency),
-        "center_frequency": np.float32(parameters.center_frequency),
-        "demodulation_frequency": np.float32(parameters.demodulation_frequency),
-        "initial_times": parameters.initial_times,
-        "t0_delays": parameters.t0_delays,
-        "sound_speed": (
-            np.float32(parameters.sound_speed) if parameters.sound_speed is not None else None
-        ),
-    }
+    scan_dict = parameters.to_scan_dict()
 
-    optional_scan = {
-        "focus_distances": _safe_getattr(parameters, "focus_distances"),
-        "transmit_origins": _safe_getattr(parameters, "transmit_origins"),
-        "polar_angles": _safe_getattr(parameters, "polar_angles"),
-        "azimuth_angles": _safe_getattr(parameters, "azimuth_angles"),
-        "tx_apodizations": _safe_getattr(parameters, "tx_apodizations"),
-        "time_to_next_transmit": _safe_getattr(parameters, "time_to_next_transmit"),
-        "tgc_gain_curve": _safe_getattr(parameters, "tgc_gain_curve"),
-        "element_width": _safe_getattr(parameters, "element_width"),
-    }
-    for key, val in optional_scan.items():
-        if val is not None:
-            scan_dict[key] = val
-
-    # Filter out None values from scan_dict
-    scan_dict = {k: v for k, v in scan_dict.items() if v is not None}
+    probe_dict = probe if probe is not None else parameters.to_probe_dict() or None
 
     f = File.create(
         path=path,
         data=data,
         scan=scan_dict if scan_dict else None,
         metadata=metadata or None,
-        probe=probe or None,
+        probe=probe_dict,
         description=description or None,
         compression=compression,
         chunk_frames=chunk_frames,
@@ -267,7 +246,7 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     with Dataset(input_paths, validate=False) as dataset:
         input_paths = [file.path for file in dataset]
 
-    data_dict, parameters, probe = load_file_all_data_types(input_paths[0])
+    data_dict, parameters = load_file_all_data_types(input_paths[0])
     description = load_description(input_paths[0])
     additional_elements = load_additional_elements(input_paths[0])
 
@@ -299,7 +278,7 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
         data_dict["image_sc"]["values"] = data_dict["image_sc"]["values"].astype(np.float32)
 
     for file in input_paths[1:]:
-        new_data, new_parameters, new_probe = load_file_all_data_types(file)
+        new_data, new_parameters = load_file_all_data_types(file)
 
         if data_dict["raw_data"] is not None:
             _assert_shapes_equal(data_dict["raw_data"], new_data["raw_data"], "raw_data")
@@ -360,7 +339,6 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
                 raise ValueError("image_sc values must be uint8 or float32")
 
         assert parameters == new_parameters, "Scan parameters do not match."
-        assert probe == new_probe, "Probe parameters do not match."
 
     # Divide to get the mean; for uint8, keep float precision then clip and cast back
     if image_is_uint8:
@@ -386,7 +364,6 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     save_file(
         path=output_path,
         parameters=parameters,
-        probe=probe,
         additional_elements=additional_elements,
         description=description,
         **data_dict,
@@ -411,7 +388,7 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
             Defaults to False.
     """
 
-    data_dict, parameters, probe = load_file_all_data_types(input_path)
+    data_dict, parameters = load_file_all_data_types(input_path)
     additional_elements = load_additional_elements(input_path)
     description = load_description(input_path)
 
@@ -451,7 +428,6 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
     save_file(
         path=output_path,
         parameters=parameters,
-        probe=probe,
         additional_elements=additional_elements,
         description=description,
         **compounded_data,
@@ -475,7 +451,7 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
             Defaults to False.
     """
 
-    data_dict, parameters, probe = load_file_all_data_types(input_path)
+    data_dict, parameters = load_file_all_data_types(input_path)
     additional_elements = load_additional_elements(input_path)
     description = load_description(input_path)
 
@@ -500,7 +476,6 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
     save_file(
         path=output_path,
         parameters=parameters,
-        probe=probe,
         additional_elements=additional_elements,
         description=description,
         **data_dict,
@@ -553,7 +528,7 @@ def resave(
             chunked storage, using one frame per chunk. Defaults to False.
     """
 
-    data_dict, parameters, probe = load_file_all_data_types(input_path)
+    data_dict, parameters = load_file_all_data_types(input_path)
     additional_elements = load_additional_elements(input_path)
     description = load_description(input_path)
     parameters.set_transmits("all")
@@ -564,7 +539,6 @@ def resave(
         path=output_path,
         **data_dict,
         parameters=parameters,
-        probe=probe,
         additional_elements=additional_elements,
         description=description,
         enable_compression=enable_compression,
@@ -597,7 +571,7 @@ def extract_frames_transmits(
             Defaults to False.
     """
     indices = (frame_indices, transmit_indices)
-    data_dict, parameters, probe = load_file_all_data_types(input_path, indices=indices)
+    data_dict, parameters = load_file_all_data_types(input_path, indices=indices)
 
     additional_elements = load_additional_elements(input_path)
     description = load_description(input_path)
@@ -611,7 +585,6 @@ def extract_frames_transmits(
         path=output_path,
         **data_dict,
         parameters=parameters,
-        probe=probe,
         additional_elements=additional_elements,
         description=description,
     )

@@ -121,14 +121,14 @@ def test_file_attributes():
 
 def test_load_file_function(dummy_file):
     """Test the load_file function."""
-
     selected_transmits = [0, 2, 4]
-    data, scan, probe = load_file(dummy_file, indices=(slice(2), selected_transmits))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        data, scan = load_file(dummy_file, indices=(slice(2), selected_transmits))
 
     assert data.shape[0] == 2, "Data should have 2 frames"
     assert data.shape[1] == 3, "Data should have 3 selected transmits"
     assert isinstance(scan, Parameters), "load_file should return a Parameters object"
-    assert isinstance(probe, Probe), "Probe should be an instance of Probe class"
     assert scan.selected_transmits == selected_transmits, (
         "Selected transmits should match expected value"
     )
@@ -973,7 +973,9 @@ def test_load_file_image_type(tmp_path):
         image_dtype=np.uint8,
     )
 
-    data, scan, probe = load_file(path, data_type="image")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        data, scan = load_file(path, data_type="image")
     assert isinstance(data, np.ndarray), "load_file should return ndarray for image type"
     assert data.shape[0] == 2, "should load all 2 frames"
 

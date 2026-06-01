@@ -834,11 +834,11 @@ class File(h5py.File):
             ...     path,
             ...     data={"raw_data": raw},
             ...     scan=scan,
-            ...     probe={"name": "L11-4v"},
+            ...     probe={"name": "verasonics_l11_4v"},
             ...     overwrite=True,
             ... )
             >>> f.probe_name
-            'L11-4v'
+            'verasonics_l11_4v'
             >>> f.close()
             >>> os.unlink(path)
         """
@@ -1454,8 +1454,9 @@ def load_file_all_data_types(
 ):
     """Loads a zea data files (h5py file).
 
-    Returns all data types together with a scan object containing the parameters
-    of the acquisition and a probe object containing the parameters of the probe.
+    Returns all data types together with a parameters object containing the parameters
+    of the acquisition. Probe information is available via ``parameters.to_probe_dict()``
+    or ``File.probe``.
 
     Additionally, it can load a specific subset of frames / transmits.
 
@@ -1472,7 +1473,6 @@ def load_file_all_data_types(
     Returns:
         (dict): A dictionary with all data types as keys and the corresponding data as values.
         (Parameters): A parameters object containing the parameters of the acquisition.
-        (Probe): A probe object containing the parameters of the probe.
     """
     # Define the additional keyword parameters from the scan object
     if scan_kwargs is None:
@@ -1484,9 +1484,6 @@ def load_file_all_data_types(
     _GROUP_DATA_TYPES = {"aligned_data", "beamformed_data", "envelope_data", "image_sc", "image"}
 
     with File(path, mode="r") as file:
-        # Load the probe object from the file
-        probe = file.probe
-
         for data_type in DataTypes:
             if not file.has_key(data_type.value):
                 data_dict[data_type.value] = None
@@ -1525,19 +1522,21 @@ def load_file_all_data_types(
 
         parameters = file.load_parameters(**scan_kwargs)
 
-        return data_dict, parameters, probe
+        return data_dict, parameters
 
 
+@deprecated(replacement="File(...) with file.load_parameters() and file.data.<type>[...]")
 def load_file(
     path,
     data_type="raw_data",
     indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
     scan_kwargs: dict = None,
-) -> Tuple[np.ndarray, "Parameters", "Probe"]:
+) -> Tuple[np.ndarray, "Parameters"]:
     """Loads a zea data files (h5py file).
 
-    Returns the data together with a scan object containing the parameters
-    of the acquisition and a probe object containing the parameters of the probe.
+    Returns the data together with a parameters object containing the parameters
+    of the acquisition. Probe information is available via ``parameters.to_probe_dict()``
+    or ``File.probe``.
 
     Additionally, it can load a specific subset of frames / transmits.
 
@@ -1557,16 +1556,12 @@ def load_file(
     Returns:
         (np.ndarray): The raw data of shape (n_frames, n_tx, n_ax, n_el, n_ch).
         (Parameters): A parameters object containing the parameters of the acquisition.
-        (Probe): A probe object containing the parameters of the probe.
     """
     # Define the additional keyword parameters from the scan object
     if scan_kwargs is None:
         scan_kwargs = {}
 
     with File(path, mode="r") as file:
-        # Load the probe object from the file
-        probe = file.probe
-
         # Load the desired frames from the file
         _key = file.format_key(data_type)
         _indices = indices if indices is not None else slice(None)
@@ -1586,7 +1581,7 @@ def load_file(
 
         parameters = file.load_parameters(**scan_kwargs)
 
-        return data, parameters, probe
+        return data, parameters
 
 
 def _print_hdf5_attrs(hdf5_obj, prefix=""):
