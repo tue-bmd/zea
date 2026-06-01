@@ -435,6 +435,17 @@ def test_update_stores_unknown_keys_as_custom(dummy_params):
     assert "non_existing_key" not in dummy_params._params
 
 
+def test_update_accepts_positional_mapping(dummy_params):
+    """update() accepts a positional mapping (e.g. config.parameters) like dict.update."""
+    # Positional mapping with both a validated param and a custom passthrough key.
+    dummy_params.update({"param1": 99, "custom_key": "hi"})
+    assert dummy_params.param1 == 99
+    assert dummy_params.custom_key == "hi"
+    # Keyword arguments take precedence over the positional mapping on collision.
+    dummy_params.update({"param1": 1}, param1=7)
+    assert dummy_params.param1 == 7
+
+
 def test_update_ndarray_equality_skips_recompute():
     """Test update uses array equality and skips updates for equal ndarrays."""
     params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))

@@ -367,7 +367,7 @@ def test_pipeline_with_parameters():
     forwarded.
     """
 
-    scan = Parameters(
+    parameters = Parameters(
         n_tx=128,
         n_ax=256,
         n_el=128,
@@ -381,8 +381,8 @@ def test_pipeline_with_parameters():
     operations = [MultiplyOperation(), AddOperation()]
     pipeline = ops.Pipeline(operations=operations)
 
-    parameters = pipeline.prepare_parameters(scan)
-    result = pipeline(**parameters, x=2, y=3)
+    inputs = pipeline.prepare_parameters(parameters)
+    result = pipeline(**inputs, x=2, y=3)
 
     assert "z" in result
     # n_tx and probe_geometry are not needed by these operations, so they are
@@ -392,8 +392,8 @@ def test_pipeline_with_parameters():
 
     # Now let's use n_tx, such that it has to be in the pipeline
     pipeline.append(AddTransmitsOperation())
-    parameters = pipeline.prepare_parameters(scan)
-    result = pipeline(**parameters, x=2, y=3)
+    inputs = pipeline.prepare_parameters(parameters)
+    result = pipeline(**inputs, x=2, y=3)
 
     assert "z" in result
     assert "n_tx" in result  # now we actually need to have n_tx in the result
@@ -794,7 +794,7 @@ def get_scan(ultrasound_probe, grid_size_x=None, grid_size_z=None):
 
 
 @pytest.fixture
-def ultrasound_scan(ultrasound_probe):
+def ultrasound_parameters(ultrasound_probe):
     """Returns a scan for ultrasound simulation tests."""
     return get_scan(ultrasound_probe, grid_size_x=20, grid_size_z=20)
 
@@ -837,10 +837,10 @@ def ultrasound_scatterers():
     "with_batch_dim",
     [False, True],
 )
-def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers, with_batch_dim):
+def test_simulator(ultrasound_probe, ultrasound_parameters, ultrasound_scatterers, with_batch_dim):
     """Tests the simulator operation."""
     pipeline = ops.Pipeline([ops.Simulate()], with_batch_dim=with_batch_dim)
-    parameters = pipeline.prepare_parameters(ultrasound_scan)
+    inputs = pipeline.prepare_parameters(ultrasound_parameters)
 
     if not with_batch_dim:
         # remove batch_dim of scatterers for pipeline without batch dimension
@@ -848,12 +848,17 @@ def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers, wit
         ultrasound_scatterers["magnitudes"] = ultrasound_scatterers["magnitudes"][0]
 
     output = pipeline(
-        **parameters,
+        **inputs,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
     # assert output shape with batch dimension if with_batch_dim else without
-    expected_shape = (ultrasound_scan.n_tx, ultrasound_scan.n_ax, ultrasound_scan.n_el, 1)
+    expected_shape = (
+        ultrasound_parameters.n_tx,
+        ultrasound_parameters.n_ax,
+        ultrasound_parameters.n_el,
+        1,
+    )
     expected_shape = (1,) + expected_shape if with_batch_dim else expected_shape
     assert output["data"].shape == expected_shape
 
@@ -863,23 +868,23 @@ def test_default_ultrasound_pipeline(
     default_pipeline,
     patched_pipeline,
     ultrasound_probe,
-    ultrasound_scan,
+    ultrasound_parameters,
     ultrasound_scatterers,
 ):
     """Tests the default ultrasound pipeline."""
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
-    parameters = default_pipeline.prepare_parameters(ultrasound_scan)
+    inputs = default_pipeline.prepare_parameters(ultrasound_parameters)
     output_default = default_pipeline(
-        **parameters,
+        **inputs,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
 
-    parameters = patched_pipeline.prepare_parameters(ultrasound_scan)
+    inputs = patched_pipeline.prepare_parameters(ultrasound_parameters)
 
     output_patched = patched_pipeline(
-        **parameters,
+        **inputs,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
@@ -900,19 +905,19 @@ def test_default_ultrasound_pipeline(
     )
 
 
-def test_pipeline_parameter_tracing(ultrasound_scan: Parameters):
+def test_pipeline_parameter_tracing(ultrasound_parameters: Parameters):
     """Tests that the pipeline can run without parameters that are not needed as input because they
     are computed inside the pipeline."""
 
     pipeline = ops.Pipeline([ops.Demodulate(), ops.TOFCorrection()])
-    ultrasound_scan._params.pop("n_ch", None)  # remove a parameter that is not needed
-    ultrasound_scan._params.pop("demodulation_frequency", None)
-    params = pipeline.prepare_parameters(ultrasound_scan)
+    ultrasound_parameters._params.pop("n_ch", None)  # remove a parameter that is not needed
+    ultrasound_parameters._params.pop("demodulation_frequency", None)
+    inputs = pipeline.prepare_parameters(ultrasound_parameters)
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     data = rng.standard_normal(
-        (1, ultrasound_scan.n_tx, ultrasound_scan.n_ax, ultrasound_scan.n_el, 1)
+        (1, ultrasound_parameters.n_tx, ultrasound_parameters.n_ax, ultrasound_parameters.n_el, 1)
     )
-    output = pipeline(data=data, **params)
+    output = pipeline(data=data, **inputs)
     assert "demodulation_frequency" in output
 
 

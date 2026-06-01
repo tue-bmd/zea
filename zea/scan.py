@@ -37,7 +37,7 @@ Comparison to ``zea.Config`` and ``zea.Probe``
 
 - :class:`zea.probes.Probe`: Contains only probe-specific parameters (e.g., geometry, frequency).
 
-- :class:`zea.scan.Parameters`: Combines all parameters relevant to an ultrasound acquisition,
+- :class:`zea.Parameters`: Combines all parameters relevant to an ultrasound acquisition,
   including probe, acquisition, and scan region. It also provides automatic computation
   of derived properties and dependency management.
 
@@ -168,8 +168,9 @@ class Parameters(BaseParameters):
     :class:`~zea.data.spec.ScanSpec` and :class:`~zea.data.spec.ProbeSpec`
     (single source of truth), extended with recon/beamforming parameters that
     are not stored in the file.  Arbitrary custom parameters may also be set;
-    they are stored as passthrough values and ignored by derivation
-    (see :class:`~zea.internal.parameters.BaseParameters`).
+    they are stored as-is and are not used to compute any derived parameters
+    (e.g. the beamforming grid). They are simply passed through — for example
+    to a pipeline call (see :class:`~zea.internal.parameters.BaseParameters`).
 
     Args:
         grid_size_x (int): Grid width in pixels. For a cartesian grid, this is the lateral (x)

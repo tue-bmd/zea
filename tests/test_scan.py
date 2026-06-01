@@ -42,8 +42,8 @@ scan_args = {
 
 def test_scan_repr():
     """Parameters repr is a single-line constructor-style string."""
-    scan = Parameters(**scan_args)
-    r = repr(scan)
+    parameters = Parameters(**scan_args)
+    r = repr(parameters)
     assert r.startswith("Parameters(")
     assert r.endswith(")")
     assert "\n" not in r
@@ -53,8 +53,8 @@ def test_scan_repr():
 
 def test_scan_str():
     """Parameters str is a multi-line constructor-style string."""
-    scan = Parameters(**scan_args)
-    s = str(scan)
+    parameters = Parameters(**scan_args)
+    s = str(parameters)
     assert s.startswith("Parameters(\n")
     assert s.endswith("\n)")
     assert "\n" in s
@@ -63,23 +63,23 @@ def test_scan_str():
 
 def test_scan_compare():
     """Test comparison of Parameters objects."""
-    scan = Parameters(**scan_args)
-    scan2 = Parameters(**scan_args)
-    scan3 = Parameters(**scan_args)
-    scan3.sound_speed = 1000
+    parameters = Parameters(**scan_args)
+    parameters2 = Parameters(**scan_args)
+    parameters3 = Parameters(**scan_args)
+    parameters3.sound_speed = 1000
 
-    assert scan == scan2
-    assert scan != scan3
+    assert parameters == parameters2
+    assert parameters != parameters3
 
 
 def test_scan_copy():
     """Test copying of Parameters objects."""
-    scan = Parameters(**scan_args)
-    scan_copy = scan.copy()
+    parameters = Parameters(**scan_args)
+    parameters_copy = parameters.copy()
 
-    assert scan == scan_copy
-    scan.n_tx = 20
-    assert scan != scan_copy
+    assert parameters == parameters_copy
+    parameters.n_tx = 20
+    assert parameters != parameters_copy
 
 
 @pytest.mark.parametrize(
@@ -91,13 +91,13 @@ def test_scan_copy():
 )
 def test_scan_copy_selected_transmits(selection):
     """Test that selected_transmits is copied correctly."""
-    scan = Parameters(**scan_args)
-    scan.set_transmits(selection)
-    scan_copy = scan.copy()
+    parameters = Parameters(**scan_args)
+    parameters.set_transmits(selection)
+    parameters_copy = parameters.copy()
 
-    assert np.array_equal(scan.selected_transmits, scan_copy.selected_transmits)
-    scan.set_transmits(scan_args["n_tx"] // 5)
-    assert not np.array_equal(scan.selected_transmits, scan_copy.selected_transmits)
+    assert np.array_equal(parameters.selected_transmits, parameters_copy.selected_transmits)
+    parameters.set_transmits(scan_args["n_tx"] // 5)
+    assert not np.array_equal(parameters.selected_transmits, parameters_copy.selected_transmits)
 
 
 @pytest.mark.parametrize(
@@ -126,77 +126,77 @@ def test_set_transmits(selection):
         elif selection == "plane":
             local_scan_args["focus_distances"] = np.full(scan_args["n_tx"], np.inf)
 
-    scan = Parameters(**local_scan_args)
-    scan.set_transmits(selection)
+    parameters = Parameters(**local_scan_args)
+    parameters.set_transmits(selection)
 
     if selection is None:
-        assert scan.n_tx == scan_args["n_tx"]
+        assert parameters.n_tx == scan_args["n_tx"]
     elif isinstance(selection, str):
         if selection == "all":
-            assert scan.n_tx == scan_args["n_tx"]
+            assert parameters.n_tx == scan_args["n_tx"]
         elif selection == "center":
-            assert scan.n_tx == 1
-            assert scan.selected_transmits[0] == scan_args["n_tx"] // 2
+            assert parameters.n_tx == 1
+            assert parameters.selected_transmits[0] == scan_args["n_tx"] // 2
         elif selection == "focused":
-            assert np.all(scan.focus_distances > 0)
+            assert np.all(parameters.focus_distances > 0)
         elif selection == "diverging":
-            assert np.all(scan.focus_distances < 0)
+            assert np.all(parameters.focus_distances < 0)
         elif selection == "plane":
-            assert np.all(np.isinf(scan.focus_distances))
+            assert np.all(np.isinf(parameters.focus_distances))
     elif isinstance(selection, int):
-        assert scan.n_tx == selection
+        assert parameters.n_tx == selection
     elif isinstance(selection, (list, np.ndarray)):
         expected = selection if isinstance(selection, list) else selection.tolist()
-        assert np.array_equal(scan.selected_transmits, expected)
+        assert np.array_equal(parameters.selected_transmits, expected)
     elif isinstance(selection, slice):
         expected = list(range(*selection.indices(scan_args["n_tx"])))
-        assert np.array_equal(scan.selected_transmits, expected)
+        assert np.array_equal(parameters.selected_transmits, expected)
 
 
 def test_scan_erroneous_set_transmits():
     """Test erroneous inputs to set_transmits."""
-    scan = Parameters(**scan_args)
+    parameters = Parameters(**scan_args)
 
     with pytest.raises(ValueError):
-        scan.set_transmits(-1)
+        parameters.set_transmits(-1)
 
     with pytest.raises(ValueError):
-        scan.set_transmits(scan_args["n_tx"] + 1)
+        parameters.set_transmits(scan_args["n_tx"] + 1)
 
     with pytest.raises(ValueError):
-        scan.set_transmits([0, scan_args["n_tx"]])
+        parameters.set_transmits([0, scan_args["n_tx"]])
 
     with pytest.raises(ValueError):
-        scan.set_transmits([0, 1, 2.3])
+        parameters.set_transmits([0, 1, 2.3])
 
     with pytest.raises(ValueError):
-        scan.set_transmits("invalid_string")
+        parameters.set_transmits("invalid_string")
 
 
 def test_initialization():
     """Test initialization of Parameters class."""
-    scan = Parameters(**scan_args)
+    parameters = Parameters(**scan_args)
 
-    assert scan.n_tx == scan_args["n_tx"]
-    assert scan.n_el == scan_args["n_el"]
-    assert scan.n_ch == scan_args["n_ch"]
-    assert scan.xlims == scan_args["xlims"]
-    assert scan.ylims == scan_args["ylims"]
-    assert scan.zlims == scan_args["zlims"]
-    assert scan.center_frequency == scan_args["center_frequency"]
-    assert scan.sampling_frequency == scan_args["sampling_frequency"]
-    assert scan.demodulation_frequency == scan_args["demodulation_frequency"]
-    assert scan.sound_speed == scan_args["sound_speed"]
-    assert scan.n_ax == scan_args["n_ax"]
-    assert scan.grid_size_x == scan_args["grid_size_x"]
-    assert scan.grid_size_z == scan_args["grid_size_z"]
-    assert np.all(scan.polar_angles == scan_args["polar_angles"])
-    assert np.all(scan.azimuth_angles == scan_args["azimuth_angles"])
-    assert np.all(scan.t0_delays == scan_args["t0_delays"])
-    assert np.all(scan.tx_apodizations == scan_args["tx_apodizations"])
-    assert np.all(scan.focus_distances == scan_args["focus_distances"])
-    assert np.all(scan.initial_times == scan_args["initial_times"])
-    assert scan.pixels_per_wavelength == scan_args["pixels_per_wavelength"]
+    assert parameters.n_tx == scan_args["n_tx"]
+    assert parameters.n_el == scan_args["n_el"]
+    assert parameters.n_ch == scan_args["n_ch"]
+    assert parameters.xlims == scan_args["xlims"]
+    assert parameters.ylims == scan_args["ylims"]
+    assert parameters.zlims == scan_args["zlims"]
+    assert parameters.center_frequency == scan_args["center_frequency"]
+    assert parameters.sampling_frequency == scan_args["sampling_frequency"]
+    assert parameters.demodulation_frequency == scan_args["demodulation_frequency"]
+    assert parameters.sound_speed == scan_args["sound_speed"]
+    assert parameters.n_ax == scan_args["n_ax"]
+    assert parameters.grid_size_x == scan_args["grid_size_x"]
+    assert parameters.grid_size_z == scan_args["grid_size_z"]
+    assert np.all(parameters.polar_angles == scan_args["polar_angles"])
+    assert np.all(parameters.azimuth_angles == scan_args["azimuth_angles"])
+    assert np.all(parameters.t0_delays == scan_args["t0_delays"])
+    assert np.all(parameters.tx_apodizations == scan_args["tx_apodizations"])
+    assert np.all(parameters.focus_distances == scan_args["focus_distances"])
+    assert np.all(parameters.initial_times == scan_args["initial_times"])
+    assert parameters.pixels_per_wavelength == scan_args["pixels_per_wavelength"]
 
 
 @pytest.mark.parametrize(
@@ -212,78 +212,80 @@ def test_initialization():
     ],
 )
 def test_selected_transmits_affects_shape(attr, expected_shape):
-    scan = Parameters(**scan_args)
+    parameters = Parameters(**scan_args)
     # Check initial shape
-    val = getattr(scan, attr)
-    val_tensor = scan.to_tensor(include=[attr])[attr]
+    val = getattr(parameters, attr)
+    val_tensor = parameters.to_tensor(include=[attr])[attr]
     assert val.shape == val_tensor.shape == expected_shape
 
     # Select 3 transmits
-    scan.set_transmits(3)
-    val = getattr(scan, attr)
-    val_tensor = scan.to_tensor(include=[attr])[attr]
+    parameters.set_transmits(3)
+    val = getattr(parameters, attr)
+    val_tensor = parameters.to_tensor(include=[attr])[attr]
 
     # For 2D arrays, first dimension is always n_tx
     assert val.shape[0] == val_tensor.shape[0] == 3
 
     # Select center transmit
-    scan.set_transmits("center")
-    val = getattr(scan, attr)
-    val_tensor = scan.to_tensor(include=[attr])[attr]
+    parameters.set_transmits("center")
+    val = getattr(parameters, attr)
+    val_tensor = parameters.to_tensor(include=[attr])[attr]
     assert val.shape[0] == val_tensor.shape[0] == 1
 
     # Select all again
-    scan.set_transmits("all")
-    val = getattr(scan, attr)
-    val_tensor = scan.to_tensor(include=[attr])[attr]
+    parameters.set_transmits("all")
+    val = getattr(parameters, attr)
+    val_tensor = parameters.to_tensor(include=[attr])[attr]
     assert val.shape[0] == val_tensor.shape[0] == expected_shape[0]
 
     # Select with some numpy array
-    scan.set_transmits(np.arange(3))
-    val = getattr(scan, attr)
-    val_tensor = scan.to_tensor(include=[attr])[attr]
+    parameters.set_transmits(np.arange(3))
+    val = getattr(parameters, attr)
+    val_tensor = parameters.to_tensor(include=[attr])[attr]
     assert val.shape[0] == val_tensor.shape[0] == 3
 
     # Select with a list
-    scan.set_transmits([1, 2, 3])
-    val = getattr(scan, attr)
-    val_tensor = scan.to_tensor(include=[attr])[attr]
+    parameters.set_transmits([1, 2, 3])
+    val = getattr(parameters, attr)
+    val_tensor = parameters.to_tensor(include=[attr])[attr]
     assert val.shape[0] == val_tensor.shape[0] == 3
 
     # Select with a slice
-    scan.set_transmits(slice(0, 5, 2))
-    val = getattr(scan, attr)
-    val_tensor = scan.to_tensor(include=[attr])[attr]
+    parameters.set_transmits(slice(0, 5, 2))
+    val = getattr(parameters, attr)
+    val_tensor = parameters.to_tensor(include=[attr])[attr]
     assert val.shape[0] == val_tensor.shape[0] == 3
 
 
 def test_set_attributes():
     """Test setting attributes of Parameters class."""
-    scan = Parameters(**scan_args)
+    parameters = Parameters(**scan_args)
 
-    scan.selected_transmits = [0]
+    parameters.selected_transmits = [0]
 
     with pytest.raises(ValueError):
-        scan.grid = np.zeros((10, 10))
+        parameters.grid = np.zeros((10, 10))
 
 
 def test_accessing_valid_but_unset_attributes():
     """Test accessing valid but unset attributes of Parameters class."""
 
-    scan = Parameters(n_tx=5)
-    scan.focus_distances
+    parameters = Parameters(n_tx=5)
+    parameters.focus_distances
 
 
 def test_scan_pickle():
     """Test pickling and unpickling of Parameters class."""
     import pickle
 
-    scan = Parameters(**scan_args)
-    scan_pickled = pickle.dumps(scan)
-    scan_unpickled = pickle.loads(scan_pickled)
+    parameters = Parameters(**scan_args)
+    parameters_pickled = pickle.dumps(parameters)
+    parameters_unpickled = pickle.loads(parameters_pickled)
 
-    assert scan == scan_unpickled, "Unpickled Parameters object does not match the original"
-    assert scan is not scan_unpickled, (
+    assert parameters == parameters_unpickled, (
+        "Unpickled Parameters object does not match the original"
+    )
+    assert parameters is not parameters_unpickled, (
         "Unpickled Parameters object is the same instance as the original"
     )
 
@@ -299,49 +301,49 @@ def test_valid_params_default():
     scan1 = get_scan()
     scan1.pfield_kwargs["norm"] = False
 
-    scan2 = get_scan()
-    assert scan2.pfield_kwargs == {}, (
+    parameters2 = get_scan()
+    assert parameters2.pfield_kwargs == {}, (
         "scan2.pfield_kwargs seems to be affected by scan1 modification"
     )
-    assert scan1 != scan2, "scan1 and scan2 should be different after modification of scan1"
+    assert scan1 != parameters2, "scan1 and scan2 should be different after modification of scan1"
 
 
 def test_inplace_modification():
     """Test that modifying pfield_kwargs in-place, will update the pfield."""
     from zea.internal.dummy_scan import get_scan
 
-    def edit1(scan):
+    def edit1(parameters):
         """edit direct dependency (dict) in-place"""
-        scan.pfield_kwargs["norm"] = False
-        return scan
+        parameters.pfield_kwargs["norm"] = False
+        return parameters
 
-    def edit2(scan):
+    def edit2(parameters):
         """edit another indirect dependency (np.ndarray) in-place"""
-        scan.probe_geometry[:, 0] *= 1.02
-        return scan
+        parameters.probe_geometry[:, 0] *= 1.02
+        return parameters
 
-    def edit3(scan):
+    def edit3(parameters):
         """edit indirect dependency (list) in-place
         pfield -> grid -> zlims"""
         # convert to list to allow in-place edit
         # this will invalidate pfield
-        scan.zlims = list(scan.zlims)
+        parameters.zlims = list(parameters.zlims)
         # therefore we need to force a computation of pfield to cache it
-        _ = scan.pfield.copy()
+        _ = parameters.pfield.copy()
         # and then edit in-place
-        scan.zlims[1] += 0.01
-        return scan
+        parameters.zlims[1] += 0.01
+        return parameters
 
     for edit_fn in (edit1, edit2, edit3):
-        scan = get_scan(pfield_kwargs={"norm": True})
-        original_pfield = scan.pfield.copy()
-        assert "pfield" in scan._cache, "pfield should be cached after first access"
+        parameters = get_scan(pfield_kwargs={"norm": True})
+        original_pfield = parameters.pfield.copy()
+        assert "pfield" in parameters._cache, "pfield should be cached after first access"
 
         # Modify something in-place
-        scan = edit_fn(scan)
+        parameters = edit_fn(parameters)
 
         # Check that the grid has been updated
-        assert not np.array_equal(original_pfield, scan.pfield), (
+        assert not np.array_equal(original_pfield, parameters.pfield), (
             f"scan.pfield seems to be unaffected by in-place modification in {edit_fn.__name__}"
         )
 
@@ -350,10 +352,10 @@ def test_inplace_modification_tensor_cache():
     """Test that modifying pfield_kwargs in-place, will update the pfield_tensor."""
     from zea.internal.dummy_scan import get_scan
 
-    scan = get_scan(pfield_kwargs={"norm": True})
-    tensor_dict = scan.to_tensor(include=["pfield"])
-    scan.pfield_kwargs["norm"] = False  # in-place modification
-    tensor_dict2 = scan.to_tensor(include=["pfield"])
+    parameters = get_scan(pfield_kwargs={"norm": True})
+    tensor_dict = parameters.to_tensor(include=["pfield"])
+    parameters.pfield_kwargs["norm"] = False  # in-place modification
+    tensor_dict2 = parameters.to_tensor(include=["pfield"])
 
     assert not np.array_equal(tensor_dict["pfield"], tensor_dict2["pfield"]), (
         "_tensor_cache['pfield'] seems to be unaffected by in-place modification"
@@ -362,37 +364,37 @@ def test_inplace_modification_tensor_cache():
 
 def test_update_behaviour_and_cache_invalidation():
     """Test Parameters.update: skipping unchanged values and force invalidation."""
-    scan = Parameters(**scan_args)
+    parameters = Parameters(**scan_args)
 
     # Access grid to populate cache
-    _ = scan.grid
-    assert "grid" in scan._cache
-    cached_before = scan._cache.get("grid")
+    _ = parameters.grid
+    assert "grid" in parameters._cache
+    cached_before = parameters._cache.get("grid")
 
     # Update with the same value (should be a no-op and keep cache)
-    scan.update(center_frequency=scan.center_frequency)
-    cached_after = scan._cache.get("grid")
+    parameters.update(center_frequency=parameters.center_frequency)
+    cached_after = parameters._cache.get("grid")
     assert cached_before is cached_after
 
     # Force update with same value should invalidate cache (grid removed until next access)
-    scan.update(force=True, center_frequency=scan.center_frequency)
-    assert "grid" not in scan._cache
+    parameters.update(force=True, center_frequency=parameters.center_frequency)
+    assert "grid" not in parameters._cache
 
     # Update with a different value should also invalidate cache
-    _ = scan.grid  # repopulate cache
-    scan.update(center_frequency=scan.center_frequency * 1.01)
-    assert "grid" not in scan._cache
+    _ = parameters.grid  # repopulate cache
+    parameters.update(center_frequency=parameters.center_frequency * 1.01)
+    assert "grid" not in parameters._cache
 
 
 def test_update_stores_unknown_keys_as_custom():
     """Ensure update stores unknown keys as custom (passthrough) parameters."""
 
-    scan = Parameters(**scan_args)
+    parameters = Parameters(**scan_args)
 
     # Unknown key is stored as a custom passthrough parameter (not rejected).
-    scan.update(nonexistent_param=123)
-    assert scan.nonexistent_param == 123
-    assert scan._custom_params["nonexistent_param"] == 123
+    parameters.update(nonexistent_param=123)
+    assert parameters.nonexistent_param == 123
+    assert parameters._custom_params["nonexistent_param"] == 123
 
 
 def test_valid_params_cover_specs():
@@ -428,13 +430,13 @@ def test_scan_and_probe_specs_are_disjoint():
 
 def test_custom_parameters_passthrough_to_tensor():
     """Custom params are stored as-is, ignored by derivation, and surface in to_tensor."""
-    scan = Parameters(**scan_args)
-    scan.update(my_custom_parameter=42)
-    assert scan.my_custom_parameter == 42
+    parameters = Parameters(**scan_args)
+    parameters.update(my_custom_parameter=42)
+    assert parameters.my_custom_parameter == 42
     # Custom param is not a validated leaf param.
-    assert "my_custom_parameter" not in scan._params
+    assert "my_custom_parameter" not in parameters._params
     # It still flows through to_tensor when requested.
-    tensors = scan.to_tensor(include=["my_custom_parameter", "center_frequency"])
+    tensors = parameters.to_tensor(include=["my_custom_parameter", "center_frequency"])
     assert "my_custom_parameter" in tensors
     # Derived properties still compute (custom params don't interfere).
-    assert scan.wavelength == scan.sound_speed / scan.center_frequency
+    assert parameters.wavelength == parameters.sound_speed / parameters.center_frequency

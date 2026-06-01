@@ -230,7 +230,7 @@ def test_up_and_down_conversion(factor, batch_size):
         ]
     )
 
-    scan = Parameters(
+    parameters = Parameters(
         n_tx=n_tx,
         n_ax=n_ax,
         n_el=n_el,
@@ -258,7 +258,7 @@ def test_up_and_down_conversion(factor, batch_size):
             ops.UpMix(upsampling_rate=factor),
         ]
     )
-    parameters = simulator_pipeline.prepare_parameters(scan)
+    inputs = simulator_pipeline.prepare_parameters(parameters)
 
     data = []
     _data = []
@@ -287,7 +287,7 @@ def test_up_and_down_conversion(factor, batch_size):
         scat_positions = np.expand_dims(scat_positions, axis=0)  # add batch dimension
 
         output = simulator_pipeline(
-            **parameters,
+            **inputs,
             scatterer_positions=scat_positions.astype(np.float32),
             scatterer_magnitudes=np.ones((1, n_scat), dtype=np.float32),
         )

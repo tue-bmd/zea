@@ -43,7 +43,7 @@ def _safe_getattr(obj, name):
 
 def save_file(
     path,
-    scan: Parameters,
+    parameters: Parameters,
     probe: Probe,
     raw_data: np.ndarray = None,
     aligned_data: dict = None,
@@ -116,23 +116,25 @@ def save_file(
 
     scan_dict = {
         "probe_geometry": probe.probe_geometry,
-        "sampling_frequency": np.float32(scan.sampling_frequency),
-        "center_frequency": np.float32(scan.center_frequency),
-        "demodulation_frequency": np.float32(scan.demodulation_frequency),
-        "initial_times": scan.initial_times,
-        "t0_delays": scan.t0_delays,
-        "sound_speed": np.float32(scan.sound_speed) if scan.sound_speed is not None else None,
+        "sampling_frequency": np.float32(parameters.sampling_frequency),
+        "center_frequency": np.float32(parameters.center_frequency),
+        "demodulation_frequency": np.float32(parameters.demodulation_frequency),
+        "initial_times": parameters.initial_times,
+        "t0_delays": parameters.t0_delays,
+        "sound_speed": (
+            np.float32(parameters.sound_speed) if parameters.sound_speed is not None else None
+        ),
     }
 
     optional_scan = {
-        "focus_distances": _safe_getattr(scan, "focus_distances"),
-        "transmit_origins": _safe_getattr(scan, "transmit_origins"),
-        "polar_angles": _safe_getattr(scan, "polar_angles"),
-        "azimuth_angles": _safe_getattr(scan, "azimuth_angles"),
-        "tx_apodizations": _safe_getattr(scan, "tx_apodizations"),
-        "time_to_next_transmit": _safe_getattr(scan, "time_to_next_transmit"),
-        "tgc_gain_curve": _safe_getattr(scan, "tgc_gain_curve"),
-        "element_width": _safe_getattr(scan, "element_width"),
+        "focus_distances": _safe_getattr(parameters, "focus_distances"),
+        "transmit_origins": _safe_getattr(parameters, "transmit_origins"),
+        "polar_angles": _safe_getattr(parameters, "polar_angles"),
+        "azimuth_angles": _safe_getattr(parameters, "azimuth_angles"),
+        "tx_apodizations": _safe_getattr(parameters, "tx_apodizations"),
+        "time_to_next_transmit": _safe_getattr(parameters, "time_to_next_transmit"),
+        "tgc_gain_curve": _safe_getattr(parameters, "tgc_gain_curve"),
+        "element_width": _safe_getattr(parameters, "element_width"),
     }
     for key, val in optional_scan.items():
         if val is not None:
@@ -265,7 +267,7 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     with Dataset(input_paths, validate=False) as dataset:
         input_paths = [file.path for file in dataset]
 
-    data_dict, scan, probe = load_file_all_data_types(input_paths[0])
+    data_dict, parameters, probe = load_file_all_data_types(input_paths[0])
     description = load_description(input_paths[0])
     additional_elements = load_additional_elements(input_paths[0])
 
@@ -297,7 +299,7 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
         data_dict["image_sc"]["values"] = data_dict["image_sc"]["values"].astype(np.float32)
 
     for file in input_paths[1:]:
-        new_data, new_scan, new_probe = load_file_all_data_types(file)
+        new_data, new_parameters, new_probe = load_file_all_data_types(file)
 
         if data_dict["raw_data"] is not None:
             _assert_shapes_equal(data_dict["raw_data"], new_data["raw_data"], "raw_data")
@@ -357,7 +359,7 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
             else:
                 raise ValueError("image_sc values must be uint8 or float32")
 
-        assert scan == new_scan, "Scan parameters do not match."
+        assert parameters == new_parameters, "Scan parameters do not match."
         assert probe == new_probe, "Probe parameters do not match."
 
     # Divide to get the mean; for uint8, keep float precision then clip and cast back
@@ -383,7 +385,7 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
 
     save_file(
         path=output_path,
-        scan=scan,
+        parameters=parameters,
         probe=probe,
         additional_elements=additional_elements,
         description=description,
@@ -409,7 +411,7 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
             Defaults to False.
     """
 
-    data_dict, scan, probe = load_file_all_data_types(input_path)
+    data_dict, parameters, probe = load_file_all_data_types(input_path)
     additional_elements = load_additional_elements(input_path)
     description = load_description(input_path)
 
@@ -441,14 +443,14 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
         else:
             compounded_data[key] = np.mean(data_dict[key], axis=0, keepdims=True)
 
-    scan = _scan_reduce_frames(scan, [0])
+    parameters = _scan_reduce_frames(parameters, [0])
 
     if overwrite:
         _delete_file_if_exists(output_path)
 
     save_file(
         path=output_path,
-        scan=scan,
+        parameters=parameters,
         probe=probe,
         additional_elements=additional_elements,
         description=description,
@@ -473,11 +475,11 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
             Defaults to False.
     """
 
-    data_dict, scan, probe = load_file_all_data_types(input_path)
+    data_dict, parameters, probe = load_file_all_data_types(input_path)
     additional_elements = load_additional_elements(input_path)
     description = load_description(input_path)
 
-    if not _all_tx_are_identical(scan):
+    if not _all_tx_are_identical(parameters):
         logger.warning(
             "Not all transmits are identical. Compounding transmits may lead to unexpected results."
         )
@@ -490,14 +492,14 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
             data_dict["aligned_data"]["values"], axis=1, keepdims=True
         )
 
-    scan.set_transmits([0])
+    parameters.set_transmits([0])
 
     if overwrite:
         _delete_file_if_exists(output_path)
 
     save_file(
         path=output_path,
-        scan=scan,
+        parameters=parameters,
         probe=probe,
         additional_elements=additional_elements,
         description=description,
@@ -505,16 +507,16 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
     )
 
 
-def _all_tx_are_identical(scan: Parameters):
+def _all_tx_are_identical(parameters: Parameters):
     """Checks if all transmits in a Parameters object are identical."""
     attributes_to_check = [
-        scan.polar_angles,
-        scan.azimuth_angles,
-        scan.t0_delays,
-        scan.tx_apodizations,
-        scan.focus_distances,
-        scan.transmit_origins,
-        scan.initial_times,
+        parameters.polar_angles,
+        parameters.azimuth_angles,
+        parameters.t0_delays,
+        parameters.tx_apodizations,
+        parameters.focus_distances,
+        parameters.transmit_origins,
+        parameters.initial_times,
     ]
 
     for attr in attributes_to_check:
@@ -551,17 +553,17 @@ def resave(
             chunked storage, using one frame per chunk. Defaults to False.
     """
 
-    data_dict, scan, probe = load_file_all_data_types(input_path)
+    data_dict, parameters, probe = load_file_all_data_types(input_path)
     additional_elements = load_additional_elements(input_path)
     description = load_description(input_path)
-    scan.set_transmits("all")
+    parameters.set_transmits("all")
 
     if overwrite:
         _delete_file_if_exists(output_path)
     save_file(
         path=output_path,
         **data_dict,
-        scan=scan,
+        parameters=parameters,
         probe=probe,
         additional_elements=additional_elements,
         description=description,
@@ -595,12 +597,12 @@ def extract_frames_transmits(
             Defaults to False.
     """
     indices = (frame_indices, transmit_indices)
-    data_dict, scan, probe = load_file_all_data_types(input_path, indices=indices)
+    data_dict, parameters, probe = load_file_all_data_types(input_path, indices=indices)
 
     additional_elements = load_additional_elements(input_path)
     description = load_description(input_path)
 
-    scan = _scan_reduce_frames(scan, frame_indices)
+    parameters = _scan_reduce_frames(parameters, frame_indices)
 
     if overwrite:
         _delete_file_if_exists(output_path)
@@ -608,7 +610,7 @@ def extract_frames_transmits(
     save_file(
         path=output_path,
         **data_dict,
-        scan=scan,
+        parameters=parameters,
         probe=probe,
         additional_elements=additional_elements,
         description=description,
@@ -643,13 +645,13 @@ def _interpret_indices(input_str_list):
     return indices
 
 
-def _scan_reduce_frames(scan, frame_indices):
-    transmit_indices = scan.selected_transmits
-    scan.set_transmits("all")
-    if scan.time_to_next_transmit is not None:
-        scan.time_to_next_transmit = scan.time_to_next_transmit[frame_indices]
-    scan.set_transmits(transmit_indices)
-    return scan
+def _scan_reduce_frames(parameters, frame_indices):
+    transmit_indices = parameters.selected_transmits
+    parameters.set_transmits("all")
+    if parameters.time_to_next_transmit is not None:
+        parameters.time_to_next_transmit = parameters.time_to_next_transmit[frame_indices]
+    parameters.set_transmits(transmit_indices)
+    return parameters
 
 
 def get_parser():

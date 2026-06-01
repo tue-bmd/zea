@@ -72,7 +72,7 @@ def test_file_operations_extract(tmp_hdf5_path):
     extract_frames_transmits(
         input_path, output_path, frame_indices=slice(1), transmit_indices=[0, 3]
     )
-    data_dict, scan, probe = load_file_all_data_types(output_path)
+    data_dict, parameters, probe = load_file_all_data_types(output_path)
     data_dict = SimpleNamespace(**data_dict)
 
     _assert_descriptions_and_additional_elements_equal(input_path, output_path)
@@ -119,7 +119,7 @@ def test_file_operations_compound_frames(tmp_hdf5_path):
 
     _assert_descriptions_and_additional_elements_equal(input_path, output_path)
 
-    data_dict, scan, probe = load_file_all_data_types(output_path)
+    data_dict, parameters, probe = load_file_all_data_types(output_path)
     data_dict = SimpleNamespace(**data_dict)
     for dataset in vars(data_dict).values():
         if dataset is None:
@@ -142,12 +142,12 @@ def test_file_operations_compound_transmits(tmp_hdf5_path):
 
     _assert_descriptions_and_additional_elements_equal(input_path, output_path)
 
-    data, scan, probe = load_file(output_path)
+    data, parameters, probe = load_file(output_path)
     assert data.shape[1] == 1  # Only one transmit should remain
-    assert scan["initial_times"].shape[0] == 1
-    assert scan["t0_delays"].shape[0] == 1
-    assert scan["azimuth_angles"].shape[0] == 1
-    assert scan["tx_apodizations"].shape[0] == 1
+    assert parameters["initial_times"].shape[0] == 1
+    assert parameters["t0_delays"].shape[0] == 1
+    assert parameters["azimuth_angles"].shape[0] == 1
+    assert parameters["tx_apodizations"].shape[0] == 1
 
 
 def test_file_operations_cli_sum(tmp_hdf5_path):
@@ -199,7 +199,7 @@ def test_file_operations_cli_extract(tmp_hdf5_path):
         + " --frames 0-1 --transmits 0 3 4"
     )
 
-    data_dict, scan, probe = load_file_all_data_types(output_path)
+    data_dict, parameters, probe = load_file_all_data_types(output_path)
     data_dict = SimpleNamespace(**data_dict)
     assert data_dict.raw_data.shape[0] == 2
     assert data_dict.raw_data.shape[1] == 3
@@ -243,7 +243,7 @@ def test_file_operations_cli_compound_frames(tmp_hdf5_path):
         + str(output_path)
     )
 
-    data_dict, scan, probe = load_file_all_data_types(output_path)
+    data_dict, parameters, probe = load_file_all_data_types(output_path)
     data_dict = SimpleNamespace(**data_dict)
     assert data_dict.raw_data.shape[0] == 1  # Only one frame should remain
     assert data_dict.aligned_data["values"].shape[0] == 1
@@ -267,7 +267,7 @@ def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
         + str(output_path)
     )
 
-    data_dict, scan, probe = load_file_all_data_types(output_path)
+    data_dict, parameters, probe = load_file_all_data_types(output_path)
     data_dict = SimpleNamespace(**data_dict)
     assert data_dict.raw_data.shape[1] == 1  # Only one transmit should remain
     assert data_dict.aligned_data["values"].shape[1] == 1
@@ -373,12 +373,12 @@ def _make_file_with_distinct_demod_freq(tmp_path, demod_freq=5e6, center_freq=7e
     scan_dict["n_ax"] = n_ax
     scan_dict["demodulation_frequency"] = np.float32(demod_freq)
 
-    scan = Parameters(**scan_dict)
+    parameters = Parameters(**scan_dict)
     probe = Probe(probe_geometry=scan_dict["probe_geometry"])
     raw = np.zeros((2, n_tx, n_ax, n_el, 1), dtype=np.float32)
 
     path = tmp_path / "scan_demod.hdf5"
-    save_file(path=path, scan=scan, probe=probe, raw_data=raw)
+    save_file(path=path, parameters=parameters, probe=probe, raw_data=raw)
     return path, demod_freq, center_freq
 
 
