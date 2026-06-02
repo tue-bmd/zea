@@ -142,7 +142,7 @@ def _write_datasets(
             group = dataset[group_name]
 
         dataset_is_scalar = np.isscalar(data) or data.ndim == 0
-        compression = "gzip" if enable_compression and not dataset_is_scalar else None
+        compression = "lzf" if enable_compression and not dataset_is_scalar else None
 
         # Store one frame per chunk so individual frames can be read efficiently.
         chunks = None
@@ -580,7 +580,7 @@ def generate_zea_dataset(
         cast_to_float (bool): Whether to store data as float32. You may want to set this
             to False if storing images.
         overwrite (bool): Whether to overwrite the file if it already exists. Defaults to False.
-        enable_compression (bool): Whether to enable gzip compression for datasets.
+        enable_compression (bool): Whether to enable lzf compression for datasets.
             Defaults to True. Compression reduces disk space at the cost of increased
             write time.
         chunk_frames (bool): Whether to store the data datasets (raw_data, aligned_data,

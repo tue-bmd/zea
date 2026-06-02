@@ -17,6 +17,7 @@ from zea import Probe, Scan
 from zea.data.data_format import load_additional_elements, load_description
 from zea.data.datasets import Dataset
 from zea.data.file import File, load_file_all_data_types
+from zea.data.spec import DEFAULT_COMPRESSION
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.parameters import MissingDependencyError
@@ -53,7 +54,7 @@ def save_file(
     description=None,
     custom_maps: dict | None = None,
     metadata: dict | None = None,
-    compression=True,
+    compression: str = DEFAULT_COMPRESSION,
     chunk_frames=False,
     **kwargs,
 ):
@@ -94,7 +95,7 @@ def save_file(
                     "credit": "My Lab, 2024",
                     "annotations": {"label": np.array(["healthy", "healthy"])},
                 }
-        compression (str, optional): The HDF5 compression filter to use. Defaults to ``"gzip"``.
+        compression (str, optional): The HDF5 compression filter to use. Defaults to ``"lzf"``.
         chunk_frames (bool, optional): Whether to store the data datasets with HDF5
             chunked storage, using one frame per chunk. Defaults to False.
     """
@@ -545,7 +546,7 @@ def resave(
         output_path (Path): Path to the output file (or folder) where the data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists.
             Defaults to False.
-        enable_compression (bool, optional): Whether to enable gzip compression for the
+        enable_compression (bool, optional): Whether to enable lzf compression for the
             datasets. Defaults to True.
         chunk_frames (bool, optional): Whether to store the data datasets with HDF5
             chunked storage, using one frame per chunk. Defaults to False.
@@ -722,7 +723,7 @@ def _add_parser_resave(subparsers):
         "--disable-compression",
         action="store_true",
         default=False,
-        help="Disable gzip compression for the datasets.",
+        help="Disable lzf compression for the datasets.",
     )
 
 

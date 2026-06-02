@@ -24,6 +24,7 @@ UNITS = {
     "%": "percent",
 }
 
+DEFAULT_COMPRESSION = "lzf"
 
 # Default unit/description for every SCHEMA leaf field.  Subclasses may
 # override by defining their own FIELD_METADATA dict.
@@ -430,7 +431,7 @@ class Spec:
         group: h5py.Group,
         field_name: str,
         value: Any,
-        compression: str = "gzip",
+        compression: str = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
     ) -> None:
         """Create a dataset in the given group for the specified field and value,
@@ -458,7 +459,10 @@ class Spec:
             group.create_dataset(field_name, data=value, compression=compression, chunks=chunks)
 
     def store_in_group(
-        self, group: h5py.Group, compression: str = "gzip", chunk_frames: bool = False
+        self,
+        group: h5py.Group,
+        compression: str = DEFAULT_COMPRESSION,
+        chunk_frames: bool = False,
     ) -> None:
         """Store the data in the given group (e.g. hdf5 group)."""
 
@@ -1801,7 +1805,10 @@ class TrackSpec(Spec):
             raise ValueError("'label' must not be an empty or whitespace-only string.")
 
     def store_in_group(
-        self, group: "h5py.Group", compression: str = "gzip", chunk_frames: bool = False
+        self,
+        group: "h5py.Group",
+        compression: str = DEFAULT_COMPRESSION,
+        chunk_frames: bool = False,
     ) -> None:
         """Store data, scan, and label in the HDF5 group."""
         super().store_in_group(group, compression=compression, chunk_frames=chunk_frames)
@@ -2045,7 +2052,12 @@ class FileSpec(Spec):
         result["tracks"] = [t.to_dict() for t in self.tracks]
         return result
 
-    def save(self, path: str, compression: str = "gzip", chunk_frames: bool = False) -> None:
+    def save(
+        self,
+        path: str,
+        compression: str = DEFAULT_COMPRESSION,
+        chunk_frames: bool = False,
+    ) -> None:
         """Save the dataset to the specified path."""
         # Lazy import to avoid circular dependency (spec.py is imported by file.py)
         from zea import File

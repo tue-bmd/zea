@@ -53,6 +53,7 @@ from schema import And, Optional, Or, Regex, Schema
 from zea import log
 from zea.data.data_format import DatasetElement
 from zea.data.file import File
+from zea.data.spec import DEFAULT_COMPRESSION
 from zea.func import log_compress, normalize
 from zea.internal.device import init_device
 from zea.utils import strtobool
@@ -1132,7 +1133,7 @@ class VerasonicsFile(h5py.File):
 
         # Generate the zea dataset
         log.info("Generating zea dataset...")
-        compression = "gzip" if enable_compression else None
+        compression = DEFAULT_COMPRESSION if enable_compression else None
         File.create(
             path=output_path,
             data=data_dict,
@@ -1299,7 +1300,7 @@ def _write_user_additional_elements(h5file, additional_elements, prefix=""):
 
         data = np.asarray(element.data)
         is_scalar = np.isscalar(data) or data.ndim == 0
-        compression = "gzip" if not is_scalar else None
+        compression = DEFAULT_COMPRESSION if not is_scalar else None
         ds = h5file[group_path].create_dataset(
             element.dataset_name, data=data, compression=compression
         )
