@@ -15,7 +15,7 @@ def dict_to_sorted_list(dictionary: dict):
     Example:
         .. doctest::
 
-            >>> from zea.data.file import dict_to_sorted_list
+            >>> from zea.data.legacy_file import dict_to_sorted_list
             >>> input_dict = {"number_000": 5, "number_001": 1, "number_002": 23}
             >>> dict_to_sorted_list(input_dict)
             [5, 1, 23]
