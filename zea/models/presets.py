@@ -61,6 +61,20 @@ augmented_camus_seg_presets = {
     },
 }
 
+speckle2self_presets = {
+    "speckle2self-invivo": {
+        "metadata": {
+            "description": (
+                "Speckle2Self speckle reduction model trained on in-vivo ultrasound data. "
+                "Original paper and code: https://arxiv.org/abs/2507.06828"
+            ),
+            "params": 3_910_785,
+            "path": "speckle2self",
+        },
+        "hf_handle": "hf://zeahub/speckle2self-invivo",
+    },
+}
+
 regional_quality_presets = {
     "mobilenetv2_regional_quality": {
         "metadata": {

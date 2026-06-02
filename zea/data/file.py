@@ -15,6 +15,7 @@ from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.utils import deprecated, reduce_to_signature
+from zea.probes import Probe
 
 if TYPE_CHECKING:
     from zea.probes import Probe
