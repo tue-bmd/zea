@@ -13,6 +13,7 @@ from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 
 import zea
 from zea.internal.cache import ZEA_CACHE_DIR
+from zea.internal.preset_utils import _hf_parse_path
 from zea.internal.registry import model_registry
 
 HF_PREFIX = "hf://"
@@ -82,7 +83,8 @@ def get_file(preset, path):
                 f"`from_preset()` requires the `huggingface_hub` package to load from '{preset}'. "
                 "Please install with `pip install huggingface_hub`."
             )
-        hf_handle = preset.removeprefix(HF_SCHEME + "://")
+        repo_id, subpath = _hf_parse_path(preset)
+        filename = f"{subpath}/{path}" if subpath else path
 
         def _download_from_hf(repo_id, filename):
             return huggingface_hub.hf_hub_download(
@@ -93,11 +95,11 @@ def get_file(preset, path):
 
         try:
             # Try without login first
-            return _download_from_hf(hf_handle, path)
+            return _download_from_hf(repo_id, filename)
         except huggingface_hub.utils.RepositoryNotFoundError:
             # Try to login and retry download
             huggingface_hub.login(new_session=False)
-            return _download_from_hf(hf_handle, path)
+            return _download_from_hf(repo_id, filename)
         except HFValidationError as e:
             raise ValueError(
                 "Unexpected Hugging Face preset. Hugging Face model handles "

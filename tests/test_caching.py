@@ -1,13 +1,17 @@
 """Tests for the caching utility."""
 
+import os
 import time
+from pathlib import Path
 
 import keras
 import numpy as np
 import pytest
 
+import zea.internal.cache as cache_mod
 from zea.internal.cache import cache_output, cache_summary, clear_cache, get_function_source
 from zea.internal.core import Object
+
 from . import DEFAULT_TEST_SEED
 
 # Global variable for the expected duration of the expensive operation
@@ -76,11 +80,29 @@ class CustomObject(Object):
 
 
 @pytest.fixture(scope="module", autouse=True)
-def clean_cache():
-    """Fixture to clean up the cache directory before and after tests."""
+def clean_cache(tmp_path_factory):
+    """Run cache tests against an isolated temp cache directory."""
+    tmp_cache_root = tmp_path_factory.mktemp("zea_test_cache")
+    tmp_cache_dir = Path(tmp_cache_root) / "cached_funcs"
+    tmp_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    prev_cache_env = os.environ.get("ZEA_CACHE_DIR")
+    prev_zea_cache_dir = cache_mod.ZEA_CACHE_DIR
+    prev_cache_dir = cache_mod._CACHE_DIR
+    os.environ["ZEA_CACHE_DIR"] = str(tmp_cache_root)
+    cache_mod.ZEA_CACHE_DIR = Path(tmp_cache_root)
+    cache_mod._CACHE_DIR = tmp_cache_dir
+
     clear_cache()
     yield
     clear_cache()
+
+    cache_mod.ZEA_CACHE_DIR = prev_zea_cache_dir
+    cache_mod._CACHE_DIR = prev_cache_dir
+    if prev_cache_env is None:
+        os.environ.pop("ZEA_CACHE_DIR", None)
+    else:
+        os.environ["ZEA_CACHE_DIR"] = prev_cache_env
 
 
 def test_get_function_source():
