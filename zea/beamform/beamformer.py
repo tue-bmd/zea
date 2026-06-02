@@ -226,6 +226,7 @@ def tof_correction(
         rxdel = ops.moveaxis(rxdel, 1, 0)  # -> (n_pix, n_el)
 
     # ---- F-number mask (receive aperture) ------------------------------
+    f_number = ops.cast(f_number, flatgrid.dtype)
     mask = ops.cond(
         f_number == 0,
         lambda: ops.ones((n_pix, n_el, 1)),
