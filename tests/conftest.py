@@ -19,10 +19,7 @@ from .backend_utils import (  # noqa: E402
     format_backend_skip_reason,
     format_missing_backend_details,
     missing_required_backends,
-    get_test_backend,
 )
-
-os.environ["KERAS_BACKEND"] = get_test_backend()
 
 plt.rcParams["backend"] = "agg"
 

@@ -33,8 +33,8 @@ def split_seed(seed, n):
     if seed is None:
         return [None for _ in range(n)]
 
-    # If seed is a legacy JAX PRNG key, split it into n independent keys.
-    if is_jax_prng_key(seed):
+    # If seed is a JAX key, split it into n independent keys.
+    if is_jax_key(seed):
         import jax
 
         return jax.random.split(seed, n)
@@ -44,10 +44,7 @@ def split_seed(seed, n):
         # independent draws across repeated calls, regardless of backend.
         return [seed for _ in range(n)]
 
-    raise TypeError(
-        "seed must be None, an int, keras.random.SeedGenerator, or a legacy "
-        "jax.random.PRNGKey() key. Typed jax.random.key() keys are not currently supported."
-    )
+    raise TypeError("seed must be None, an int, keras.random.SeedGenerator, or a JAX key.")
 
 
 def materialize_seed(seed):
@@ -55,6 +52,7 @@ def materialize_seed(seed):
 
     On JAX, `keras.random.SeedGenerator` is stateful and cannot be safely used
     in `ops.map`. This function converts it into an explicit legacy PRNG key outside those traces.
+    Existing JAX keys are returned unchanged.
     """
     if seed is None:
         return None
@@ -72,14 +70,17 @@ def materialize_seed(seed):
     return seed
 
 
-def is_jax_prng_key(x):
-    """Distinguish between jax.random.PRNGKey() and jax.random.key()"""
-    if keras.backend.backend() == "jax":
-        import jax
-
-        return isinstance(x, jax.Array) and x.shape == (2,) and x.dtype == jax.numpy.uint32
-    else:
+def is_jax_key(x):
+    """Return True for both legacy jax.random.PRNGKey() and typed jax.random.key() keys."""
+    if keras.backend.backend() != "jax":
         return False
+    import jax
+
+    if not isinstance(x, jax.Array):
+        return False
+
+    is_legacy_key = x.shape == (2,) and x.dtype == jax.numpy.uint32
+    return is_legacy_key or jax.dtypes.issubdtype(x.dtype, jax.dtypes.prng_key)
 
 
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):

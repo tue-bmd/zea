@@ -56,7 +56,7 @@ def test_metrics(metric_name):
     assert metric_value.shape == (), f"Metric {metric_name} did not return a scalar value"
 
     # Regression test against TensorFlow implementations for SSIM and PSNR
-    if runs_on("tensorflow") and metric_name == "ssim":
+    if metric_name == "ssim" and runs_on("tensorflow"):
         import tensorflow as tf
 
         expected_value = tf.image.ssim(
@@ -65,7 +65,7 @@ def test_metrics(metric_name):
             max_val=255.0,
         )
         np.testing.assert_allclose(metric_value, expected_value, rtol=1e-5, atol=1e-5)
-    elif runs_on("tensorflow") and metric_name == "psnr":
+    elif metric_name == "psnr" and runs_on("tensorflow"):
         import tensorflow as tf
 
         expected_value = tf.image.psnr(

@@ -286,7 +286,17 @@ class RandomCircleInclusion(layers.Layer):
             x_is_symbolic_tensor = not isinstance(ops.shape(x)[0], int)
             if x_is_symbolic_tensor:
                 if self.randomize_location_across_batch:
-                    imgs, centers = ops.map(lambda arg: self._call(arg, seed), x)
+                    if keras.backend.backend() == "jax" and seed is not None:
+                        import jax
+
+                        n = ops.shape(x)[0]
+                        indices = jax.lax.iota(jax.numpy.int32, n)
+                        imgs, centers = ops.map(
+                            lambda args: self._call(args[0], jax.random.fold_in(seed, args[1])),
+                            (x, indices),
+                        )
+                    else:
+                        imgs, centers = ops.map(lambda arg: self._call(arg, seed), x)
                 else:
                     raise NotImplementedError(
                         "You cannot fix circle locations across batch while using "

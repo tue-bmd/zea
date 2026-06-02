@@ -28,7 +28,7 @@ from .. import DEFAULT_TEST_SEED
 @pytest.mark.parametrize(
     "dataset",
     [
-        "echonet",
+        pytest.param("echonet", marks=pytest.mark.tensorflow),
         pytest.param("echonetlvh", marks=pytest.mark.jax),
         "camus",
         "cetus",
@@ -88,6 +88,8 @@ def test_conversion_script(tmp_path_factory, dataset):
 
 def create_env_for_dataset(dataset):
     env = os.environ.copy()
+    if dataset == "echonet":
+        env["KERAS_BACKEND"] = "tensorflow"
     if dataset == "echonetlvh":
         env["KERAS_BACKEND"] = "jax"
     return env
