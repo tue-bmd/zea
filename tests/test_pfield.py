@@ -41,7 +41,7 @@ def test_pfield():
         n_ax=2047,
         sampling_frequency=probe.probe_center_frequency * 4,
         center_frequency=probe.probe_center_frequency,
-        polar_angles=np.array([0]),
+        polar_angles=np.array([0.0]),
         t0_delays=t0_delays,
         focus_distances=focus_distances,
         tx_apodizations=tx_apodizations,
