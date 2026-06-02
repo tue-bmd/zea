@@ -36,9 +36,6 @@ class DataTypes(enum.Enum):
                         center frequency is removed from the signal.
     image           --> After log compression of the envelope data, the
                         image is formed.
-    image_sc        --> The scan converted image is transformed to cartesian
-                        (x, y) format to account for possible curved arrays.
-
     """
 
     RAW_DATA = "raw_data"
@@ -46,7 +43,6 @@ class DataTypes(enum.Enum):
     BEAMFORMED_DATA = "beamformed_data"
     ENVELOPE_DATA = "envelope_data"
     IMAGE = "image"
-    IMAGE_SC = "image_sc"
 
 
 class ModTypes(enum.Enum):

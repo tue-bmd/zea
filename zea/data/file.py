@@ -176,9 +176,44 @@ class Track:
         return ScanSpec(**scan_dict)
 
     @property
+    def n_frames(self) -> int:
+        """Number of frames."""
+        return _shape_from_data_group(
+            self._group["data"],
+            index=0,
+            name="n_frames",
+            requires_raw=False,
+        )
+
+    @property
+    def n_tx(self) -> int:
+        """Number of transmit events."""
+        return _shape_from_data_group(
+            self._group["data"],
+            index=1,
+            name="n_tx",
+            requires_raw=True,
+        )
+
+    @property
     def n_ax(self) -> int:
         """Number of axial samples."""
-        return self.data.raw_data.shape[2]
+        return _shape_from_data_group(
+            self._group["data"],
+            index=2,
+            name="n_ax",
+            requires_raw=True,
+        )
+
+    @property
+    def n_el(self) -> int:
+        """Number of elements."""
+        return _shape_from_data_group(
+            self._group["data"],
+            index=3,
+            name="n_el",
+            requires_raw=True,
+        )
 
     def load_parameters(self, **overrides) -> "Parameters":
         """Load this track's parameters (merged probe + scan) as :class:`~zea.Parameters`.
@@ -263,6 +298,58 @@ def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
         elif isinstance(item, h5py.Group):
             ans[key] = load_dict_from_hdf5_group(item)
     return ans
+
+
+def _get_data_array_shape(data_group: "h5py.Group") -> "tuple | None":
+    """Return the shape one of the data arrays in *data_group*.
+
+    Checks flat datasets first (e.g., ``raw_data``).
+    Then looks for the first spatial map group (e.g., ``image``) containing a ``values``
+    dataset and returns its shape.
+
+    Returns ``None`` if neither is found.
+    """
+    flat_datasets = [k for k in data_group if isinstance(data_group[k], h5py.Dataset)]
+    spatial_map_groups = [k for k in data_group if isinstance(data_group[k], h5py.Group)]
+
+    has_raw_data = False
+
+    # first check for one of the recognized data arrays
+    for key in _DATA_TYPES:
+        if key in flat_datasets:
+            if key == "raw_data":
+                has_raw_data = True
+            return data_group[key].shape, has_raw_data
+        if key in spatial_map_groups:
+            group = data_group[key]
+            if "values" in group and isinstance(group["values"], h5py.Dataset):
+                return group["values"].shape, has_raw_data
+
+    # if none of the arrays are found under their expected names,
+    # look for any other dataset
+    for key in flat_datasets:
+        return data_group[key].shape, has_raw_data
+
+    for key in spatial_map_groups:
+        group = data_group[key]
+        if "values" in group and isinstance(group["values"], h5py.Dataset):
+            return group["values"].shape, has_raw_data
+
+    return None, has_raw_data
+
+
+def _shape_from_data_group(
+    data_group: "h5py.Group", index: int, name: str = "", requires_raw: bool = False
+) -> int:
+    shape, has_raw_data = _get_data_array_shape(data_group)
+    if requires_raw and not has_raw_data:
+        raise TypeError(f"`{name}` is only available if the file contains a `raw_data` dataset")
+
+    if shape is None:
+        raise TypeError(
+            f"Cannot determine `{name}`, no recognized data arrays found in the data group."
+        ) from None
+    return shape[index]
 
 
 def _compute_all_track_timestamps(
@@ -397,6 +484,10 @@ class File(h5py.File):
             *args: Additional arguments to pass to h5py.File.
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
+        # First check if the file is an HDF5 file
+        assert str(name).endswith(".hdf5") or str(name).endswith(".h5"), (
+            "File must be an HDF5 file with .hdf5 or .h5 extension."
+        )
 
         # Resolve huggingface path
         if str(name).startswith(HF_PREFIX):
@@ -482,6 +573,11 @@ class File(h5py.File):
         ``data/`` group, 1 for legacy flat-format files, and the actual
         track count for files written with the multi-track layout.
         """
+        if not self.id.valid:
+            raise ValueError(
+                "File is closed. Use 'with File(...) as f:' or call f.close() "
+                "explicitly after you're done."
+            )
         if "tracks" not in self:
             return 1 if (super().__contains__("data") or super().__contains__("scan")) else 0
         tracks_group = self["tracks"]
@@ -711,7 +807,7 @@ class File(h5py.File):
             >>> import numpy as np
             >>> from zea import File
 
-            >>> n_frames, n_tx, n_el, n_ax = 2, 4, 8, 64
+            >>> n_frames, n_tx, n_ax, n_el = 2, 4, 64, 8
             >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
             >>> geom = np.zeros((n_el, 3), dtype=np.float32)
             >>> scan = {
@@ -835,10 +931,61 @@ class File(h5py.File):
         """Return the stem of the file."""
         return self.path.stem
 
+    def _get_single_track_data_group(self) -> "h5py.Group":
+        """Return the data group for single-track / legacy files."""
+        if "tracks" in self:
+            return self["tracks/track_0/data"]
+        return self["data"]
+
     @property
-    def n_frames(self):
-        """Return number of frames in a file."""
-        return int(self.file["scan"]["n_frames"][()])
+    def n_frames(self) -> int:
+        """Number of frames."""
+        if self._n_tracks > 1:
+            raise AttributeError(
+                f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_frames."
+            )
+        return _shape_from_data_group(
+            self._get_single_track_data_group(),
+            index=0,
+            name="n_frames",
+            requires_raw=False,
+        )
+
+    @property
+    def n_tx(self) -> int:
+        """Number of transmit events."""
+        if self._n_tracks > 1:
+            raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_tx.")
+        return _shape_from_data_group(
+            self._get_single_track_data_group(),
+            index=1,
+            name="n_tx",
+            requires_raw=True,
+        )
+
+    @property
+    def n_ax(self) -> int:
+        """Number of axial samples."""
+        if self._n_tracks > 1:
+            raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_ax.")
+        return _shape_from_data_group(
+            self._get_single_track_data_group(),
+            index=2,
+            name="n_ax",
+            requires_raw=True,
+        )
+
+    @property
+    def n_el(self) -> int:
+        """Number of elements."""
+        if self._n_tracks > 1:
+            raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_el.")
+        return _shape_from_data_group(
+            self._get_single_track_data_group(),
+            index=3,
+            name="n_el",
+            requires_raw=True,
+        )
 
     def shape(self, key) -> tuple:
         """Return shape of some key."""
@@ -997,21 +1144,6 @@ class File(h5py.File):
         scan_parameters = load_dict_from_hdf5_group(scan_group)
 
         return scan_parameters
-
-    @property
-    def n_ax(self) -> int:
-        """Number of axial samples."""
-        n = self._n_tracks
-        if n > 1:
-            raise AttributeError(
-                f"This file has {n} tracks. "
-                "Use file.tracks[i].data.raw_data.shape[2] to get n_ax for a specific track."
-            )
-        data_group = self.data._group
-        assert "raw_data" in data_group, (
-            "Cannot determine n_ax because there is no raw_data in the data group."
-        )
-        return data_group["raw_data"].shape[2]
 
     @property
     def scan(self) -> "ScanSpec | None":
