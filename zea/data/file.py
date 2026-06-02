@@ -10,7 +10,15 @@ import numpy as np
 import zea
 from zea import log
 from zea.data.legacy_file import legacy_probe, legacy_scan
-from zea.data.spec import DataSpec, FileSpec, MetadataSpec, MetricsSpec, ProbeSpec, ScanSpec
+from zea.data.spec import (
+    DEFAULT_COMPRESSION,
+    DataSpec,
+    FileSpec,
+    MetadataSpec,
+    MetricsSpec,
+    ProbeSpec,
+    ScanSpec,
+)
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
@@ -754,7 +762,7 @@ class File(h5py.File):
         probe: "ProbeSpec | dict | None" = None,
         us_machine: str | None = None,
         description: str | None = None,
-        compression: str = "gzip",
+        compression: str = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
         overwrite: bool = False,
     ) -> "File":
@@ -790,7 +798,7 @@ class File(h5py.File):
                 plain dict accepted by :class:`~zea.data.spec.ProbeSpec`.
             us_machine: Name of the ultrasound machine.
             description: Free-text description of the acquisition.
-            compression: HDF5 compression filter (default ``"gzip"``).
+            compression: HDF5 compression filter (default ``"lzf"``).
             chunk_frames: If *True*, use frame-wise chunking for all datasets containing
                 a "frames" dimension. Dataset will be stored with HDF5 chunking enabled,
                 using a single frame (a single slice along the first dimension) per chunk.

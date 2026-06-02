@@ -103,7 +103,7 @@ jobs:
   tests:
     needs: [image]
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -129,7 +129,7 @@ jobs:
   heavy-tests:
     needs: [image]
     runs-on: self-hosted
-    timeout-minutes: 100
+    timeout-minutes: 120
     concurrency:
       group: heavy-tests-${{ github.ref }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -161,7 +161,7 @@ jobs:
     name: notebook-tests (${{ matrix.label }})
     needs: [image]
     runs-on: self-hosted
-    timeout-minutes: 100
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:

@@ -25,6 +25,7 @@ from zea.data.convert.utils import (
 )
 from zea.data.convert.verasonics import VerasonicsFile
 from zea.data.file import File
+from zea.data.spec import DEFAULT_COMPRESSION
 from zea.func.tensor import translate
 from zea.internal.preset_utils import _hf_resolve_path
 from zea.io_lib import _SUPPORTED_IMG_TYPES
@@ -961,11 +962,13 @@ def test_images_uint8_passes():
 
 def test_verasonics_compression_flag_respected(tmp_path):
     """When enable_compression=False the File.create call must use
-    compression=None, not force 'gzip'."""
+    compression=None, not force 'lzf'."""
     enable_compression = False
-    compression = "gzip" if enable_compression else None
+    compression = DEFAULT_COMPRESSION if enable_compression else None
 
-    assert (compression or "gzip") == "gzip", "old code always used gzip"
+    assert (compression or DEFAULT_COMPRESSION) == DEFAULT_COMPRESSION, (
+        "old code always used default compression"
+    )
     assert compression is None, "fixed code uses None when compression is disabled"
 
     n_tx, n_el = 4, 16
