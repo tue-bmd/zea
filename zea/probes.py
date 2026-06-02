@@ -149,8 +149,16 @@ def create_probe_geometry(n_el, pitch):
 
 
 class Probe(ProbeSpec):
+    # These are not converted to Parameters object
+    _NON_PARAMETERS = ("name", "type")
+
     def get_parameters(self):
-        return {key: getattr(self, key) for key in self.SCHEMA if getattr(self, key) is not None}
+        """Return a dict of the probe parameters."""
+        return {
+            key: getattr(self, key)
+            for key in self.SCHEMA
+            if getattr(self, key) is not None and key not in Probe._NON_PARAMETERS
+        }
 
     def __repr__(self) -> str:
         parts = []

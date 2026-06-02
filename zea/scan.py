@@ -109,10 +109,11 @@ from zea.beamform.pixelgrid import (
     check_for_aliasing,
     polar_pixel_grid,
 )
-from zea.data.spec import ProbeSpec, ScanSpec
+from zea.data.spec import ScanSpec, ProbeSpec
 from zea.display import compute_scan_convert_2d_coordinates
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated
+from zea.probes import Probe
 
 
 class Parameters(BaseParameters):
@@ -210,9 +211,9 @@ class Parameters(BaseParameters):
     """
 
     scan_schema = deepcopy(ScanSpec.SCHEMA)
-    probe_schema = deepcopy(ProbeSpec.SCHEMA)
-    probe_schema.pop("name")
-    probe_schema.pop("type")
+    probe_schema = deepcopy(Probe.SCHEMA)
+    for key in Probe._NON_PARAMETERS:
+        probe_schema.pop(key)
 
     # Valid parameters are derived from the scan and probe specs + a few
     # beamforming-only parameters.

@@ -1013,7 +1013,7 @@ class File(h5py.File):
         return data_group["raw_data"].shape[2]
 
     @property
-    def scan(self) -> "ScanSpec":
+    def scan(self) -> "ScanSpec | None":
         """Return the validated :class:`~zea.data.spec.ScanSpec` for this file.
 
         This is the bare scan group as a spec object.  For a full, derivable
@@ -1048,7 +1048,7 @@ class File(h5py.File):
         if _is_legacy_file(self):
             scan_dict = legacy_scan(scan_dict)
 
-        return ScanSpec(**scan_dict)
+        return ScanSpec(**scan_dict) if len(scan_dict) > 0 else None
 
     def load_parameters(self, **overrides) -> "Parameters":
         """Load the acquisition parameters (merged probe + scan) from the file.
@@ -1095,13 +1095,17 @@ class File(h5py.File):
         scan = self.scan
         probe = self.probe
 
-        probe_dict = probe.to_dict()
-        scan_dict = scan.to_dict()
-        other_dict = {
-            "n_ax": self.n_ax,
-            "n_el": scan.n_el,
-            "n_tx": scan.n_tx,
-        }
+        probe_dict = probe.get_parameters()
+        if scan is not None:
+            scan_dict = scan.to_dict()
+            other_dict = {
+                "n_ax": self.n_ax,
+                "n_el": scan.n_el,
+                "n_tx": scan.n_tx,
+            }
+        else:
+            scan_dict = {}
+            other_dict = {}
         merged_dict = {**probe_dict, **scan_dict, **other_dict, **overrides}
 
         # skip None values
