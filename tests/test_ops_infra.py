@@ -1365,3 +1365,21 @@ def test_pipeline_jax_jit_kwargs_merge_preserves_user_keys(monkeypatch):
 
     assert pipeline.jit_kwargs["donate_argnums"] == (0,)
     assert set(pipeline.jit_kwargs["static_argnames"]) == {"user_static", "my_static"}
+
+
+def test_default_pipeline_jit_options_none():
+    """Default pipeline jit_options should be None."""
+    pipeline = ops.Pipeline.from_default(jit_options=None)
+
+    assert pipeline.jit_options is None, "Default pipeline jit_options should be None"
+
+    def _assert_not_jitted(pipeline):
+        """Assert that the pipeline is not JIT compiled."""
+        for operation in pipeline.operations:
+            if isinstance(operation, Pipeline):
+                assert operation.jit_options is None, "Nested pipeline should not have jit_options"
+                _assert_not_jitted(operation)
+            else:
+                assert operation.jit_compile is False
+
+    _assert_not_jitted(pipeline)

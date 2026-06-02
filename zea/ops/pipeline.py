@@ -397,34 +397,38 @@ class Pipeline:
         """Get the jit_options property of the pipeline."""
         return self._jit_options
 
+    def set_jit(self, value: bool):
+        """Set the JIT compilation for the pipeline."""
+        if value:
+            self._jit()
+        else:
+            self._unjit()
+
     @jit_options.setter
     def jit_options(self, value: Union[str, None]):
         """Set the jit_options property of the pipeline."""
-        self._jit_options = value
-        if value == "pipeline":
-            assert self.jittable, log.error(
-                "jit_options 'pipeline' cannot be used as the entire pipeline is not jittable. "
-                "The following operations are not jittable: "
-                f"{self.unjitable_ops}. "
-                "Try setting jit_options to 'ops' or None."
-            )
-            self.jit()
-            return
-        else:
-            self.unjit()
 
+        assert value in ["pipeline", "ops", None], "jit_options must be 'pipeline', 'ops', or None"
+
+        self._jit_options = value
+        self.set_jit(value == "pipeline")
         for operation in self.operations:
             if isinstance(operation, Pipeline):
                 operation.jit_options = value
             else:
-                if operation.jittable and operation._jit_compile:
-                    operation.set_jit(value == "ops")
+                operation.set_jit(value == "ops")
 
-    def jit(self):
+    def _jit(self):
         """JIT compile the pipeline."""
+        if not self.jittable:
+            raise ValueError(
+                "Cannot JIT compile the pipeline because not all operations are jittable. "
+                f"The following operations are not jittable: {self.unjitable_ops}"
+                "Try setting jit_options to 'ops' or None."
+            )
         self._call_pipeline = jit(self.call, **self.jit_kwargs)
 
-    def unjit(self):
+    def _unjit(self):
         """Un-JIT compile the pipeline."""
         self._call_pipeline = self.call
 
@@ -870,33 +874,31 @@ class Map(Pipeline):
                 "Consider setting one of them to process data in chunks or batches."
             )
 
-        def call_item(**inputs):
-            """Process data in patches."""
-            mapped_args = []
-            for argname in argnames:
-                mapped_args.append(inputs.pop(argname, None))
+    def call_item(self, **inputs):
+        """Process data in patches."""
+        mapped_args = []
+        for argname in self.argnames:
+            mapped_args.append(inputs.pop(argname, None))
 
-            def patched_call(*args):
-                mapped_kwargs = [(k, v) for k, v in zip(argnames, args)]
-                out = super(Map, self).call(**dict(mapped_kwargs), **inputs)
+        def patched_call(*args):
+            mapped_kwargs = [(k, v) for k, v in zip(self.argnames, args)]
+            out = super(Map, self).call(**dict(mapped_kwargs), **inputs)
 
-                # TODO: maybe it is possible to output everything?
-                # e.g. prepend a empty dimension to all inputs and just map over everything?
-                return out[self.output_key]
+            # TODO: maybe it is possible to output everything?
+            # e.g. prepend a empty dimension to all inputs and just map over everything?
+            return out[self.output_key]
 
-            out = vmap(
-                patched_call,
-                in_axes=in_axes,
-                out_axes=out_axes,
-                chunks=chunks,
-                batch_size=batch_size,
-                fn_supports_batch=True,
-                disable_jit=not bool(self.jit_options),
-            )(*mapped_args)
+        out = vmap(
+            patched_call,
+            in_axes=self.in_axes,
+            out_axes=self.out_axes,
+            chunks=self.chunks,
+            batch_size=self.batch_size,
+            fn_supports_batch=True,
+            disable_jit=not bool(self.jit_options),
+        )(*mapped_args)
 
-            return out
-
-        self.call_item = call_item
+        return out
 
     @property
     def jit_options(self):
@@ -904,22 +906,26 @@ class Map(Pipeline):
         return self._jit_options
 
     @jit_options.setter
-    def jit_options(self, value):
+    def jit_options(self, value: Union[str, None]):
         """Set the jit_options property of the pipeline."""
-        self._jit_options = value
-        if value in ["pipeline", "ops"]:
-            self.jit()
-        else:
-            self.unjit()
 
-    def jit(self):
+        assert value in ["pipeline", "ops", None], "jit_options must be 'pipeline', 'ops', or None"
+
+        self._jit_options = value
+        self.set_jit(value == "pipeline" or value == "ops")
+        for operation in self.operations:
+            if isinstance(operation, Pipeline):
+                operation.jit_options = None
+            else:
+                operation.set_jit(False)
+
+    def _jit(self):
         """JIT compile the pipeline."""
         self._jittable_call = jit(self.jittable_call, **self.jit_kwargs)
 
-    def unjit(self):
+    def _unjit(self):
         """Un-JIT compile the pipeline."""
         self._jittable_call = self.jittable_call
-        self._call_pipeline = self.call
 
     @property
     def with_batch_dim(self):
