@@ -12,8 +12,8 @@ on:
 jobs:
   sync-configs:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: github.repository == 'tue-bmd/zea'
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
