@@ -3,11 +3,13 @@
 Implements the SpeckleReductionNet architecture from the Speckle2Self paper
 (Romaguera et al., arXiv:2507.06828) as a native Keras 3 model.
 
-The Keras implementation (``_SpeckleReductionNetKeras``) is the **primary**
-inference backend.  The PyTorch classes in :func:`_build_torch_classes` are
-kept for ONNX conversion only and are never imported at runtime.  An ONNX
-fallback is also provided via :meth:`Speckle2Self.from_onnx` for environments
-that have ``onnxruntime`` but not ``torch``.
+.. note::
+
+    The Keras implementation (``_SpeckleReductionNetKeras``) is the **primary**
+    inference backend.  The PyTorch classes in :func:`_build_torch_classes` are
+    kept for ONNX conversion only and are never imported at runtime.  An ONNX
+    fallback is also provided via :meth:`Speckle2Self.from_onnx` for environments
+    that have ``onnxruntime`` but not ``torch``.
 
 Usage
 -----
@@ -17,19 +19,7 @@ Usage
     from zea.models.speckle2self import Speckle2Self
 
     model = Speckle2Self.from_preset("speckle2self-invivo")
-
-    # Inputs: linear envelope (NOT log-compressed), shape (N, 1, H, W).
-    # Per-image linear normalisation is applied before the model.
-    despeckled = model(envelope_batch)  # → (N, 1, H, W), values in [0, 1]
-
-Converting a .pth checkpoint to ONNX
---------------------------------------
-
-.. code-block:: python
-
-    from zea.models.speckle2self import convert_to_onnx
-
-    convert_to_onnx("model_2833.pth", "speckle2self.onnx")
+    despeckled = model(bmode_frames)
 
 Architecture notes
 ------------------
@@ -474,16 +464,14 @@ class Speckle2Self(BaseModel):
         self._onnx_sess = None  # set by from_onnx(); overrides Keras inference
 
     def call(self, inputs):
-        """Run speckle reduction on a batch of linear-envelope images.
+        """Run speckle reduction on a batch of B-Mode images.
 
         Pads ``height`` and ``width`` to multiples of 16 (required by the 4-level
         encoder), runs inference, then crops back and clips to ``[0, 1]``.
 
         Args:
-            inputs (array-like): Linear envelope images.
-                Shape: ``(N, H, W, 1)`` for the Keras weights
-                or ``(N, 1, H, W)`` when using the ONNX / PyTorch weights.
-                Values: Any positive range; **not** log-compressed.
+            inputs (array-like): B-Mode images. Auto-normalization is applied
+                per image inside this method. Shape: ``(N, H, W, 1)``.
 
         Returns:
             np.ndarray: Despeckled images, same shape as input, values in
