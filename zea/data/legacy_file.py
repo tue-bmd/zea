@@ -105,6 +105,12 @@ def check_focus_distances(scan_parameters: dict) -> dict:
     return scan_parameters
 
 
+def _if_exists_cast_to_float(key, parameters):
+    """Cast a value to float if it exists."""
+    if key in parameters:
+        parameters[key] = np.float32(parameters[key])
+
+
 def legacy_scan(scan_parameters: dict):
     """Format scan parameters for legacy file."""
 
@@ -117,6 +123,7 @@ def legacy_scan(scan_parameters: dict):
     n_tx = scan_parameters.pop("n_tx", None)
     scan_parameters.pop("n_ch", None)
     scan_parameters.pop("n_frames", None)
+    scan_parameters.pop("bandwidth_percent", None)
 
     if "demodulation_frequency" not in scan_parameters:
         if "center_frequency" in scan_parameters:
@@ -127,13 +134,14 @@ def legacy_scan(scan_parameters: dict):
     if "transmit_origins" not in scan_parameters:
         scan_parameters["transmit_origins"] = np.zeros((n_tx, 3))
 
-    scan_parameters["sampling_frequency"] = np.float32(scan_parameters["sampling_frequency"])
-    scan_parameters["demodulation_frequency"] = np.float32(
-        scan_parameters["demodulation_frequency"]
-    )
-    scan_parameters["center_frequency"] = np.float32(scan_parameters["center_frequency"])
-    scan_parameters["initial_times"] = np.float32(scan_parameters["initial_times"])
-    scan_parameters["transmit_origins"] = np.float32(scan_parameters["transmit_origins"])
+    for key in [
+        "sampling_frequency",
+        "demodulation_frequency",
+        "center_frequency",
+        "initial_times",
+        "transmit_origins",
+    ]:
+        _if_exists_cast_to_float(key, scan_parameters)
 
     return scan_parameters
 
@@ -141,7 +149,8 @@ def legacy_scan(scan_parameters: dict):
 def legacy_probe(scan_parameters: dict):
     """Format probe parameters for legacy file."""
 
-    probe_parameters = {
-        "probe_geometry": scan_parameters["probe_geometry"],
-    }
+    probe_parameters = {}
+    if "probe_geometry" in scan_parameters:
+        probe_parameters["probe_geometry"] = scan_parameters["probe_geometry"]
+
     return probe_parameters

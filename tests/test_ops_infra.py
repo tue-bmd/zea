@@ -1097,7 +1097,7 @@ def test_pipeline_eq():
     assert p1 != p3
 
     # Also checks arguments to operations etc...
-    p4 = ops.Pipeline([MultiplyOperation(), AddOperation(jittable=False)], jit_options=None)
+    p4 = ops.Pipeline([MultiplyOperation(), AddOperation(output_key="test")], jit_options=None)
     assert p1 != p4
 
     # Non-Pipeline comparison
