@@ -542,7 +542,7 @@ class Speckle2Self(BaseModel):
 
         # Build the full model (outer Speckle2Self) so save_weights works later
         if not self.built:
-            self(np.zeros((1, 1, 16, 16), dtype=np.float32))
+            self(np.zeros((1, 16, 16, 1), dtype=np.float32))
 
         state_dict = torch.load(pth_path, map_location="cpu")
         _load_pth_into_keras_net(self.net, state_dict)
@@ -566,6 +566,7 @@ class Speckle2Self(BaseModel):
         loader = get_preset_loader(preset)
 
         if backend == "keras":
+            self._onnx_sess = None
             filename = loader.get_file("model.weights.h5")
             if not self.built:
                 self(ops.zeros((1, 16, 16, 1), dtype="float32"))
@@ -580,6 +581,7 @@ class Speckle2Self(BaseModel):
             filename = loader.get_file("model.onnx")
             self._onnx_sess = onnxruntime.InferenceSession(filename)
         elif backend == "torch":  # pragma: no cover
+            self._onnx_sess = None
             filename = loader.get_file("model.pth")
             self._load_from_pth(filename)
         else:  # pragma: no cover
