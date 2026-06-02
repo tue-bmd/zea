@@ -1,15 +1,7 @@
 """Speckle2Self self-supervised speckle reduction model for ultrasound images.
 
 Implements the SpeckleReductionNet architecture from the Speckle2Self paper
-(Romaguera et al., arXiv:2507.06828) as a native Keras 3 model.
-
-.. note::
-
-    The Keras implementation (``_SpeckleReductionNetKeras``) is the **primary**
-    inference backend.  The PyTorch classes in :func:`_build_torch_classes` are
-    kept for ONNX conversion only and are never imported at runtime.  An ONNX
-    fallback is also provided via :meth:`Speckle2Self.from_onnx` for environments
-    that have ``onnxruntime`` but not ``torch``.
+(Li et al., Medical Image Analysis, 2025) as a `zea.Model`.
 
 Usage
 -----
@@ -35,7 +27,16 @@ Architecture notes
 .. important::
 
     This is a ``zea`` implementation of the model.
-    For the original paper and code, see `arXiv:2507.06828 <https://arxiv.org/abs/2507.06828>`_.
+    For the original `paper <https://arxiv.org/abs/2507.06828>`_ and `
+    code <https://github.com/noseefood/speckle2self>`_.
+
+.. note::
+
+    The Keras implementation (``_SpeckleReductionNetKeras``) is the **primary**
+    inference backend.  The PyTorch classes in :func:`_build_torch_classes` are
+    kept for ONNX conversion only and are never imported at runtime.  An ONNX
+    fallback is also provided via :meth:`Speckle2Self.from_onnx` for environments
+    that have ``onnxruntime`` but not ``torch``.
 
 .. note::
 
@@ -444,8 +445,12 @@ class Speckle2Self(BaseModel):
     """Self-supervised speckle reduction model for ultrasound images.
 
     Native Keras 3 implementation of the SpeckleReductionNet
-    (Romaguera et al., 2025).  The model applies per-image linear normalisation
-    before the network and clips outputs to ``[0, 1]``.
+    (Li et al., Medical Image Analysis, 2025).
+
+    .. note::
+
+        The model applies per-image linear normalisation
+        before the network and clips outputs to ``[0, 1]``.
 
     Example:
         .. code-block:: python
@@ -546,8 +551,7 @@ class Speckle2Self(BaseModel):
 
                 - ``"keras"``: Load native Keras weights from ``model.weights.h5``.
                 - ``"torch"``: Load PyTorch checkpoint from ``model.pth``, original
-                source for the weights.
-
+                    source for the weights.
                 - ``"onnx"``: Load ONNX file from ``model.onnx`` using ONNX Runtime.
 
         """
