@@ -116,7 +116,12 @@ field-by-field reconstruction is needed:
             "polar_angles":           np.zeros(n_tx, dtype=np.float32),
             "time_to_next_transmit":  np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
     }
-    f = File.create("source.hdf5", data={"raw_data": raw}, scan=scan, overwrite=True)
+    f = File.create(
+        "source.hdf5",
+        data={"raw_data": raw},
+        probe={"name": "test_probe"},
+        scan=scan, overwrite=True,
+    )
     f.close()
 
 .. doctest::

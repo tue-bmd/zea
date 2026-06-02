@@ -113,6 +113,8 @@ def _if_exists_cast_to_float(key, parameters):
 
 def legacy_scan(scan_parameters: dict):
     """Format scan parameters for legacy file."""
+    if set(scan_parameters.keys()) == {"n_ax", "n_frames", "n_tx"}:
+        return {}
 
     scan_parameters = check_focus_distances(scan_parameters)
     scan_parameters = _reformat_waveforms(scan_parameters)

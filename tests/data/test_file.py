@@ -1613,6 +1613,7 @@ class TestLegacyFileLoading:
     def test_legacy_warning_fires(self, legacy_file):
         """Opening a legacy file emits the version warning."""
         path, *_ = legacy_file
+        zea.log._warned_locations.clear()
         with patch("zea.data.file.log.warning") as mock_warn:
             with File(path):
                 pass
