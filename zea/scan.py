@@ -209,6 +209,7 @@ class Parameters(BaseParameters):
             if not provided.
     """
 
+    scan_schema = deepcopy(ScanSpec.SCHEMA)
     probe_schema = deepcopy(ProbeSpec.SCHEMA)
     probe_schema.pop("name")
     probe_schema.pop("type")
@@ -216,7 +217,7 @@ class Parameters(BaseParameters):
     # Valid parameters are derived from the scan and probe specs + a few
     # beamforming-only parameters.
     VALID_PARAMS = {
-        **ScanSpec.SCHEMA,
+        **scan_schema,
         **probe_schema,
         "grid_size_x": {"dtype": np.int32},
         "grid_size_y": {"dtype": np.int32},
@@ -750,14 +751,14 @@ class Parameters(BaseParameters):
 
         return 1
 
-    @cache_with_dependencies("center_frequency")
+    @cache_with_dependencies("center_frequency", "selected_transmits")
     def t_peak(self):
         """The time of the peak of the pulse in seconds of shape (n_tx,)."""
         t_peak = self._params.get("t_peak")
         if t_peak is None:
-            t_peak = np.array([1 / self.center_frequency] * self.n_tx)
+            t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
 
-        return t_peak
+        return t_peak[self.selected_transmits]
 
     @cache_with_dependencies("selected_transmits")
     def time_to_next_transmit(self):
