@@ -1172,7 +1172,7 @@ class File(h5py.File):
             ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
             ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
             ... )
-            >>> with File(path, revision="v0.1.0a1", mode="r") as f:
+            >>> with File(path, revision="v0.1.0", mode="r") as f:
             ...     scan = f.scan
             >>> type(scan).__name__
             'ScanSpec'
@@ -1305,7 +1305,7 @@ class File(h5py.File):
                 ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
                 ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
                 ... )
-                >>> with File(path, revision="v0.1.0a1") as f:
+                >>> with File(path, revision="v0.1.0") as f:
                 ...     meta = f.metadata
                 ...     print(meta.subject.type)
                 phantom
