@@ -344,11 +344,12 @@ def _warn_if_legacy_file(file: "File") -> None:
     version = file.attrs.get("zea_version", None)
     if version is None or _parse_version(version) < (0, 1, 0):
         legacy_version = version if version is not None else "<0.1.0"
-        log.warning(
+        log.warning_once(
             f"This ``zea.File`` '{file.filename}' was created with a legacy version of "
             f"zea ({legacy_version}), while you are using zea v{zea.__version__}. "
             "It may behave in unexpected ways. Install an earlier version of zea<0.1.0 for full "
-            "compatibility or re-save the file with zea v0.1.0 or later (e.g. via File.create)."
+            "compatibility or re-save the file with zea v0.1.0 or later (e.g. via File.create).",
+            key=file.filename,
         )
 
 
