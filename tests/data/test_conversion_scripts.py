@@ -26,7 +26,15 @@ from .. import DEFAULT_TEST_SEED
 
 
 @pytest.mark.parametrize(
-    "dataset", ["echonet", "echonetlvh", "camus", "cetus", "picmus", "verasonics"]
+    "dataset",
+    [
+        "echonet",
+        pytest.param("echonetlvh", marks=pytest.mark.jax),
+        "camus",
+        "cetus",
+        "picmus",
+        "verasonics",
+    ],
 )
 @pytest.mark.heavy
 def test_conversion_script(tmp_path_factory, dataset):

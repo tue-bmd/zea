@@ -28,14 +28,13 @@ plt.rcParams["backend"] = "agg"
 
 
 def _skip_unavailable_backends_enabled(config):
-    return bool(config.getoption("--skip-unavailable-backends"))
+    return bool(config.getoption("--skip-unavailable-backends")) or bool(
+        config.getoption("--torch-override")
+    )
 
 
-def _gpu_available():
-    """Check whether any ML backend has CUDA available in this environment."""
-    from zea.internal.device import backend_cuda_available
-
-    return any(backend_cuda_available(backend) for backend in ML_BACKENDS)
+def _torch_override(config):
+    return bool(config.getoption("--torch-override"))
 
 
 def _required_backends_for_item(item):
@@ -68,6 +67,13 @@ def pytest_addoption(parser):
         help="Skip tests that require ML backends unavailable in the current environment.",
     )
     parser.addoption(
+        "--torch-override",
+        action="store_true",
+        default=False,
+        help="Run tests with the torch backend. "
+        "Torch support is currently in alpha, and tests are expected to fail.",
+    )
+    parser.addoption(
         "--notebook-dir",
         action="append",
         default=None,
@@ -96,6 +102,12 @@ def pytest_configure(config):
             "To skip tests that require unavailable back-ends, "
             "use pytest --skip-unavailable-backends.\n\n"
             f"{format_missing_backend_details()}"
+        )
+    if len(available) == 1 and available[0] == "torch" and not _torch_override(config):
+        raise pytest.UsageError(
+            "Only the torch back-end is available, and torch support is currently alpha. "
+            "Some tests are expected to fail. \n"
+            "To run the test suite anyway, use pytest --torch-override."
         )
 
 
@@ -141,7 +153,7 @@ def pytest_sessionfinish(session, exitstatus):
 
 def pytest_collection_modifyitems(config, items):
     for item in items:
-        if "gpu" in item.keywords and not _gpu_available():
+        if "gpu" in item.keywords and not _GPU_AVAILABLE:
             skip_gpu = pytest.mark.skip(reason="No CUDA GPU available at runtime")
             item.add_marker(skip_gpu)
         if _skip_unavailable_backends_enabled(config):
