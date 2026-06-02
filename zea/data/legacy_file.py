@@ -149,7 +149,8 @@ def legacy_scan(scan_parameters: dict):
 def legacy_probe(scan_parameters: dict):
     """Format probe parameters for legacy file."""
 
-    probe_parameters = {
-        "probe_geometry": scan_parameters["probe_geometry"],
-    }
+    probe_parameters = {}
+    if "probe_geometry" in scan_parameters:
+        probe_parameters["probe_geometry"] = scan_parameters["probe_geometry"]
+
     return probe_parameters
