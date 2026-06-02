@@ -840,7 +840,9 @@ def calculate_delays_heterogeneous_medium(
     count = ops.cast(ops.sum(valid_mask, axis=1), masked_sum.dtype)
     mean_slowness = masked_sum / (count + 1e-9)
 
-    assert t_peak.shape == n_tx, f"Expected t_peak to have shape n_tx={n_tx}, got {t_peak.shape}."
+    assert t_peak.shape == (n_tx,), (
+        f"Expected t_peak to have shape (n_tx,)=({n_tx},), got {t_peak.shape}."
+    )
 
     tof = mean_slowness * ray_lengths
     rx_delays = tof * sampling_frequency

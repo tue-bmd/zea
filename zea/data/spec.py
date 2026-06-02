@@ -268,6 +268,12 @@ class Spec:
 
             return value
 
+        # If the spec expects a native Python type and the value already matches it,
+        # keep it as-is instead of converting to a numpy scalar.
+        for dt in expected_dtype:
+            if isinstance(dt, type) and not issubclass(dt, np.generic) and isinstance(value, dt):
+                return value
+
         for dt in expected_dtype:
             try:
                 target_dtype = np.dtype(dt)
@@ -466,6 +472,8 @@ class Spec:
 
         for field_name, field_info in self.SCHEMA.items():
             value = getattr(self, field_name)
+
+            # We do not store fields with value None in the file.
             if value is None:
                 continue
 

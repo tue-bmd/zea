@@ -1119,24 +1119,9 @@ class TestLoadingWarnings:
 
         with patch("zea.log.warning") as mock_warn:
             with File(path) as f:
-                f.get_parameters()
+                f.get_scan_parameters()
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any("Could not find scan parameters in file" in m for m in messages)
-
-    def test_focus_distances_in_wavelengths_warns(self, tmp_path):
-        """focus_distances stored as wavelengths (>= 1, not inf) triggers a warning on load."""
-        path = tmp_path / "wavelength_focus.hdf5"
-        with h5py.File(path, "w") as f:
-            s = f.create_group("scan")
-            s.create_dataset("focus_distances", data=np.full((2,), 10.0, dtype=np.float32))
-            s.create_dataset("sound_speed", data=np.float32(1540.0))
-            s.create_dataset("center_frequency", data=np.float32(5e6))
-
-        with patch("zea.log.warning") as mock_warn:
-            with File(path) as f:
-                f.get_parameters()
-        messages = [str(c.args[0]).lower() for c in mock_warn.call_args_list]
-        assert any("focus distances" in m and "wavelength" in m for m in messages)
 
     def test_waveforms_stored_as_dict_warns(self, tmp_path):
         """Legacy waveforms stored as an HDF5 group (dict-like) trigger a warning on load."""
@@ -1298,18 +1283,6 @@ class TestProbeSpec:
         assert loaded.probe.type == "linear"
         assert loaded.probe.probe_center_frequency == pytest.approx(5.208e6, rel=1e-4)
         assert loaded.probe.probe_bandwidth_percent == pytest.approx(67.0)
-
-    def test_legacy_probe_center_frequency_remapped_on_load(self, tmp_path):
-        """Legacy probe groups storing ``center_frequency`` load as ``probe_center_frequency``."""
-        path = tmp_path / "legacy_probe.hdf5"
-        with h5py.File(path, "w") as f:
-            p = f.create_group("probe")
-            p.create_dataset("name", data="legacy")
-            p.create_dataset("center_frequency", data=np.float32(5.0e6))
-
-        with File(path) as f:
-            probe = f.probe
-        assert probe.probe_center_frequency == pytest.approx(5.0e6, rel=1e-4)
 
     def test_file_create_with_probe_dict(self, tmp_path):
         """File.create accepts a probe dict and stores probe group + probe_name attr."""

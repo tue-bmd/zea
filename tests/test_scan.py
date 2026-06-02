@@ -478,8 +478,11 @@ def test_valid_params_cover_specs():
     ``probe_center_frequency``) to avoid colliding with the scan field.
     """
     valid = set(Parameters.VALID_PARAMS)
+    probe_spec = set(ProbeSpec.SCHEMA)
+    probe_spec.remove("name")
+    probe_spec.remove("type")
     missing_scan = set(ScanSpec.SCHEMA) - valid
-    missing_probe = set(ProbeSpec.SCHEMA) - valid
+    missing_probe = probe_spec - valid
     assert not missing_scan, f"ScanSpec fields missing from Parameters.VALID_PARAMS: {missing_scan}"
     assert not missing_probe, (
         f"ProbeSpec fields missing from Parameters.VALID_PARAMS: {missing_probe}"

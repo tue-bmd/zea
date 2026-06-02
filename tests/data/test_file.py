@@ -9,7 +9,8 @@ import pytest
 
 import zea
 from zea.data.data_format import generate_zea_dataset
-from zea.data.file import File, Track, _GroupProxy, _StringDataset, dict_to_sorted_list, load_file
+from zea.data.file import File, Track, _GroupProxy, _StringDataset, load_file
+from zea.data.legacy_file import dict_to_sorted_list
 from zea.data.spec import FileSpec, Image, ScanSpec, Segmentation
 from zea.probes import Probe
 from zea.scan import Parameters

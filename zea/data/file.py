@@ -6,15 +6,15 @@ from typing import TYPE_CHECKING, List, Tuple, Union
 
 import h5py
 import numpy as np
-from keras.utils import pad_sequences
 
 import zea
 from zea import log
+from zea.data.legacy_file import legacy_probe, legacy_scan
 from zea.data.spec import DataSpec, FileSpec, MetadataSpec, MetricsSpec, ProbeSpec, ScanSpec
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
-from zea.internal.utils import deprecated, reduce_to_signature
+from zea.internal.utils import deprecated
 
 if TYPE_CHECKING:
     from zea.probes import Probe
@@ -171,10 +171,16 @@ class Track:
                 f"Track {self._index} has no 'scan' group. "
                 f"Available keys: {list(self._group.keys())}"
             )
-        scan_dict = check_focus_distances(load_dict_from_hdf5_group(self._group["scan"]))
-        return _build_scan_spec(scan_dict)
+        scan_dict = load_dict_from_hdf5_group(self._group["scan"])
 
-    def load_parameters(self, safe: bool = True, **overrides) -> "Parameters":
+        return ScanSpec(**scan_dict)
+
+    @property
+    def n_ax(self) -> int:
+        """Number of axial samples."""
+        return self.data.raw_data.shape[2]
+
+    def load_parameters(self, **overrides) -> "Parameters":
         """Load this track's parameters (merged probe + scan) as :class:`~zea.Parameters`.
 
         Each track shares the same probe but has its own scan, so the returned
@@ -182,26 +188,29 @@ class Track:
         single-track file.
 
         Args:
-            safe: If ``True`` (default) only known parameters are forwarded.
             **overrides: Override any parameter.
 
         Returns:
             Parameters: Initialised parameters object for this track.
         """
+        from zea.scan import Parameters
+
         if "scan" not in self._group:
             raise KeyError(
                 f"Track {self._index} has no 'scan' group. "
                 f"Available keys: {list(self._group.keys())}"
             )
-        scan_dict = check_focus_distances(load_dict_from_hdf5_group(self._group["scan"]))
-        data_group = self._group["data"] if "data" in self._group else None
-        return build_parameters_from_dict(
-            scan_dict,
-            probe_dict=self._probe,
-            data_group=data_group,
-            safe=safe,
-            **overrides,
-        )
+
+        scan = self.scan
+        scan_dict = scan.to_dict()
+        other_dict = {
+            "n_ax": self.n_ax,
+            "n_el": scan.n_el,
+            "n_tx": scan.n_tx,
+        }
+        merged_dict = {**self._probe, **scan_dict, **other_dict, **overrides}
+
+        return Parameters(**merged_dict)
 
     @property
     def label(self) -> "str | None":
@@ -254,118 +263,6 @@ def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
         elif isinstance(item, h5py.Group):
             ans[key] = load_dict_from_hdf5_group(item)
     return ans
-
-
-def check_focus_distances(scan_parameters: dict) -> dict:
-    """Warn and auto-convert focus distances stored in wavelengths to metres.
-
-    Some older files store ``focus_distances`` in wavelengths rather than
-    metres.  This helper detects the pattern (values ≥ 1 and ≠ ``inf``) and
-    converts them using ``sound_speed / center_frequency``.
-
-    Args:
-        scan_parameters: Raw scan parameter dict loaded from HDF5.
-
-    Returns:
-        dict: The same dict, with ``focus_distances`` converted when needed.
-    """
-    if "focus_distances" in scan_parameters:
-        focus_distances = scan_parameters["focus_distances"]
-        if np.any(np.logical_and(focus_distances >= 1, focus_distances != np.inf)):
-            log.warning(
-                "We have detected that focus distances are (probably) stored in "
-                "wavelengths. Please update your file! "
-                "Converting to metres automatically for now, but this assumes that "
-                "`center_frequency` is the probe centre frequency which is not always "
-                "the case!"
-            )
-            assert "sound_speed" in scan_parameters, (
-                "Cannot convert focus distances from wavelengths to metres "
-                "because sound_speed is not defined in the scan parameters."
-            )
-            assert "center_frequency" in scan_parameters, (
-                "Cannot convert focus distances from wavelengths to metres "
-                "because center_frequency is not defined in the scan parameters."
-            )
-            wavelength = scan_parameters["sound_speed"] / scan_parameters["center_frequency"]
-            scan_parameters["focus_distances"] = focus_distances * wavelength
-    return scan_parameters
-
-
-def build_parameters_from_dict(
-    scan_dict: dict,
-    probe_dict: "dict | None" = None,
-    data_group: "h5py.Group | None" = None,
-    safe: bool = True,
-    **overrides,
-) -> "Parameters":
-    """Build a :class:`~zea.Parameters` from raw scan + probe dictionaries.
-
-    The scan and probe groups have non-overlapping field names, so they are
-    simply merged. ``ScanSpec`` validation is used (when possible) to derive
-    ``n_el``/``n_tx``/``n_ax``. Explicit ``overrides`` override file values.
-
-    Args:
-        scan_dict: Raw scan-group parameters loaded from HDF5.
-        probe_dict: Raw probe-group parameters loaded from HDF5 (optional).
-            Legacy probe files that stored probe fields in the scan group are
-            handled transparently.
-        data_group: Optional HDF5 data group used to derive ``n_ax`` from
-            ``raw_data`` when it cannot be inferred from the scan spec.
-        safe: Forwarded to :meth:`~zea.Parameters.merge`.
-        **overrides: Override any parameter.
-
-    Returns:
-        Parameters: Initialised parameters object (merged probe + scan).
-    """
-    from zea.scan import Parameters
-
-    # Probe-level fields may live in the probe group (preferred) or, for legacy
-    # files, in the scan group. Collect from both; the probe group wins.
-    probe_supplements = _probe_supplement_dict({**scan_dict, **(probe_dict or {})})
-
-    scan_spec_keys = set(ScanSpec.SCHEMA.keys())
-    filtered = {k: v for k, v in scan_dict.items() if k in scan_spec_keys}
-
-    try:
-        scan_spec = ScanSpec(**filtered)
-        scan_dict = scan_spec.to_dict()
-        scan_dict["n_el"] = scan_spec.n_el
-        scan_dict["n_tx"] = scan_spec.n_tx
-        if scan_spec.tgc_gain_curve is not None:
-            scan_dict["n_ax"] = len(scan_spec.tgc_gain_curve)
-        elif data_group is not None and "raw_data" in data_group:
-            scan_dict["n_ax"] = data_group["raw_data"].shape[2]
-    except (TypeError, ValueError) as exc:
-        log.debug(f"ScanSpec validation skipped: {exc}. Using raw scan parameters from file.")
-
-    # Merge probe + scan (non-overlapping names); scan keeps priority for any
-    # legacy field present in both groups.
-    merged = {**probe_supplements, **scan_dict}
-    return Parameters.merge(_reformat_waveforms(merged), overrides, safe=safe)
-
-
-def _probe_supplement_dict(probe_dict: "dict | None") -> dict:
-    """Return probe-group fields, renamed and filtered, for merging into Parameters.
-
-    Legacy probe keys (e.g. ``center_frequency``) are remapped to their current
-    names (``probe_center_frequency``) and only known
-    :class:`~zea.data.spec.ProbeSpec` fields are kept.
-    """
-    if not probe_dict:
-        return {}
-    from zea.probes import Probe
-
-    remapped = Probe._remap_legacy_keys(probe_dict)
-    probe_keys = set(ProbeSpec.SCHEMA.keys())
-    return {k: v for k, v in remapped.items() if k in probe_keys}
-
-
-def _build_scan_spec(scan_dict: dict) -> "ScanSpec":
-    """Build a validated :class:`~zea.data.spec.ScanSpec` from a raw scan dict."""
-    scan_dict = _reformat_waveforms(scan_dict)
-    filtered = {k: v for k, v in scan_dict.items() if k in ScanSpec.SCHEMA}
-    return ScanSpec(**filtered)
 
 
 def _compute_all_track_timestamps(
@@ -947,10 +844,6 @@ class File(h5py.File):
         key = self.format_key(key)
         return self[key].shape
 
-    def load_scan(self):
-        """Alias for get_scan_parameters."""
-        return self.get_scan_parameters()
-
     def format_key(self, key):
         """Format the key to match the data type."""
         if isinstance(key, enum.Enum):
@@ -1085,7 +978,7 @@ class File(h5py.File):
         description = self.attrs["description"]
         return description
 
-    def get_parameters(self):
+    def get_scan_parameters(self):
         """Returns a dictionary of parameters to initialize a scan
         object that comes with the file (stored inside datafile).
 
@@ -1101,13 +994,8 @@ class File(h5py.File):
             return {}
 
         scan_parameters = load_dict_from_hdf5_group(scan_group)
-        scan_parameters = check_focus_distances(scan_parameters)
 
         return scan_parameters
-
-    def get_scan_parameters(self) -> dict:
-        """Returns a dictionary of scan parameters stored in the file."""
-        return self.get_parameters()
 
     @property
     def n_ax(self) -> int:
@@ -1155,10 +1043,14 @@ class File(h5py.File):
                 "Use file.tracks to get a list of tracks and access .scan on each: "
                 "file.tracks[i].scan"
             )
-        scan_dict = check_focus_distances(self.get_scan_parameters())
-        return _build_scan_spec(scan_dict)
+        scan_dict = self.get_scan_parameters()
 
-    def load_parameters(self, safe=True, **overrides) -> "Parameters":
+        if _is_legacy_file(self):
+            scan_dict = legacy_scan(scan_dict)
+
+        return ScanSpec(**scan_dict)
+
+    def load_parameters(self, **overrides) -> "Parameters":
         """Load the acquisition parameters (merged probe + scan) from the file.
 
         Reads both the ``scan`` and ``probe`` groups and merges them into a
@@ -1168,9 +1060,6 @@ class File(h5py.File):
         merging is a plain dict union.
 
         Args:
-            safe (bool, optional): If True (default), only parameters known to
-                :class:`~zea.Parameters` are forwarded; unknown file keys
-                are dropped. If False, all parameters are passed through.
             **overrides: Override any parameter from the file. Custom
                 (non-spec) keys are stored as passthrough parameters.
 
@@ -1193,6 +1082,8 @@ class File(h5py.File):
             >>> type(parameters).__name__
             'Parameters'
         """
+        from zea.scan import Parameters
+
         n = self._n_tracks
         if n > 1:
             raise AttributeError(
@@ -1200,18 +1091,23 @@ class File(h5py.File):
                 "Use file.tracks to get a list of tracks and call "
                 "file.tracks[i].load_parameters() on each."
             )
-        scan_dict = self.get_scan_parameters()
-        probe_data = (
-            self.recursively_load_dict_contents_from_group("probe") if "probe" in self else {}
-        )
-        data_group = self["data"] if "data" in self else None
-        return build_parameters_from_dict(
-            scan_dict,
-            probe_dict=probe_data,
-            data_group=data_group,
-            safe=safe,
-            **overrides,
-        )
+
+        scan = self.scan
+        probe = self.probe
+
+        probe_dict = probe.to_dict()
+        scan_dict = scan.to_dict()
+        other_dict = {
+            "n_ax": self.n_ax,
+            "n_el": scan.n_el,
+            "n_tx": scan.n_tx,
+        }
+        merged_dict = {**probe_dict, **scan_dict, **other_dict, **overrides}
+
+        # skip None values
+        merged_dict = {k: v for k, v in merged_dict.items() if v is not None}
+
+        return Parameters(**merged_dict)
 
     @property
     def probe(self) -> "Probe":
@@ -1236,17 +1132,15 @@ class File(h5py.File):
         from zea.probes import Probe
 
         if "probe" in self.keys():
-            probe_parameters = self.recursively_load_dict_contents_from_group("probe")
-            # Map legacy probe keys (e.g. center_frequency -> probe_center_frequency).
-            probe_parameters = Probe._remap_legacy_keys(probe_parameters)
+            probe_dict = self.recursively_load_dict_contents_from_group("probe")
+        elif _is_legacy_file(self):
+            scan_dict = self.get_scan_parameters()
+            probe_dict = legacy_probe(scan_dict)
+            probe_dict["name"] = self.probe_name
         else:
-            # Legacy files: probe data lives alongside the scan parameters. Remap
-            # legacy keys first so e.g. center_frequency feeds probe_center_frequency.
-            legacy = Probe._remap_legacy_keys(self.get_parameters())
-            probe_parameters = reduce_to_signature(Probe.__init__, legacy)
-            probe_parameters["name"] = self.probe_name
+            raise KeyError("No 'probe' group found in this file.")
 
-        return Probe(**probe_parameters)
+        return Probe(**probe_dict)
 
     @property
     def metadata(self) -> MetadataSpec:
@@ -1740,69 +1634,3 @@ def _validate_file_impl(file: File) -> None:
                     f"'{group_path}/{key}' is not in the DataSpec schema. "
                     f"Known keys: {sorted(known)}"
                 )
-
-
-def _reformat_waveforms(scan_kwargs: dict) -> dict:
-    """Reformat waveforms from dict to array if needed. This is for backwards compatibility and will
-    be removed in a future version of zea.
-
-    Args:
-        scan_kwargs (dict): The scan parameters.
-
-    Returns:
-        scan_kwargs (dict): The scan parameters with the keys waveforms_one_way and
-            waveforms_two_way reformatted to arrays if they were stored as dicts.
-    """
-
-    # TODO: remove this in a future version of zea
-    if "waveforms_one_way" in scan_kwargs and isinstance(scan_kwargs["waveforms_one_way"], dict):
-        log.warning(
-            "The waveforms_one_way parameter is stored as a dictionary in the file. "
-            "Converting to array. This will be deprecated in future versions of zea. "
-            "Please update your files to store waveforms as arrays of shape `(n_tx, n_samples)`."
-        )
-        scan_kwargs["waveforms_one_way"] = _waveforms_dict_to_array(
-            scan_kwargs["waveforms_one_way"]
-        )
-
-    if "waveforms_two_way" in scan_kwargs and isinstance(scan_kwargs["waveforms_two_way"], dict):
-        log.warning(
-            "The waveforms_two_way parameter is stored as a dictionary in the file. "
-            "Converting to array. This will be deprecated in future versions of zea. "
-            "Please update your files to store waveforms as arrays of shape `(n_tx, n_samples)`."
-        )
-        scan_kwargs["waveforms_two_way"] = _waveforms_dict_to_array(
-            scan_kwargs["waveforms_two_way"]
-        )
-    return scan_kwargs
-
-
-def _waveforms_dict_to_array(waveforms_dict: dict):
-    """Convert waveforms stored as a dictionary to a padded numpy array."""
-    waveforms = dict_to_sorted_list(waveforms_dict)
-    return pad_sequences(waveforms, dtype=np.float32, padding="post")
-
-
-def dict_to_sorted_list(dictionary: dict):
-    """Convert a dictionary with sortable keys to a sorted list of values.
-
-    .. note::
-
-        This function operates on the top level of the dictionary only.
-        If the dictionary contains nested dictionaries, those will not be sorted.
-
-    Example:
-        .. doctest::
-
-            >>> from zea.data.file import dict_to_sorted_list
-            >>> input_dict = {"number_000": 5, "number_001": 1, "number_002": 23}
-            >>> dict_to_sorted_list(input_dict)
-            [5, 1, 23]
-
-    Args:
-        dictionary (dict): The dictionary to convert. The keys must be sortable.
-
-    Returns:
-        list: The sorted list of values.
-    """
-    return [value for _, value in sorted(dictionary.items())]

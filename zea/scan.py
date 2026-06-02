@@ -227,7 +227,7 @@ class Parameters(BaseParameters):
         "zlims": {"dtype": np.float32, "shape": (2,)},
         "pixels_per_wavelength": {"dtype": np.int32, "default": 4},
         "pfield_kwargs": {"dtype": dict, "default": {}},
-        "apply_lens_correction": {"dtype": np.bool_, "default": False},
+        "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
         "grid_type": {"dtype": str, "default": "cartesian"},
         "polar_limits": {"dtype": np.float32, "shape": (2,)},
         "dynamic_range": {"dtype": np.float32, "shape": (2,)},
@@ -238,17 +238,17 @@ class Parameters(BaseParameters):
         "n_frames": {"dtype": np.int32},
         "n_el": {"dtype": np.int32},
         "n_tx": {"dtype": np.int32},
-        "n_ax": {"dtype": np.int32},
+        "n_ax": {"dtype": int},  # native dtype on purpose
         "n_ch": {"dtype": np.int32},
         "attenuation_coef": {"dtype": np.float32, "default": 0.0},
-        "f_number": {"dtype": np.float32, "default": 1.0},
+        "f_number": {"dtype": float, "default": 1.0},  # native dtype on purpose
         "t_peak": {"dtype": np.float32},
         "theta_range": {"dtype": np.float32, "shape": (2,)},
         "phi_range": {"dtype": np.float32, "shape": (2,)},
         "rho_range": {"dtype": np.float32, "shape": (2,)},
-        "fill_value": {"dtype": np.float32},
-        "resolution": {"dtype": np.float32},
-        "distance_to_apex": {"dtype": np.float32},
+        "fill_value": {"dtype": float},
+        "resolution": {"dtype": (np.float32, type(None)), "default": None},
+        "distance_to_apex": {"dtype": np.float32, "default": 0.0},
     }
 
     # Add some defaults that are not stored in a file
@@ -853,22 +853,12 @@ class Parameters(BaseParameters):
         )
         return coords
 
-    @cache_with_dependencies(
-        "rho_range",
-        "theta_range",
-        "phi_range",
-        "resolution",
-        "grid_size_z",
-        "grid_size_x",
-    )
-    def coordinates_3d(self):
-        """The coordinates for scan conversion."""
-        raise NotImplementedError
-
-    @cache_with_dependencies("is_3d", "coordinates_2d", "coordinates_3d")
+    @cache_with_dependencies("is_3d", "coordinates_2d")
     def coordinates(self):
         """Get the coordinates for scan conversion."""
-        return self.coordinates_3d if self.is_3d else self.coordinates_2d
+        if self.is_3d:
+            raise NotImplementedError
+        return self.coordinates_2d
 
     @cache_with_dependencies("time_to_next_transmit")
     def pulse_repetition_frequency(self):

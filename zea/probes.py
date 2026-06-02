@@ -149,24 +149,6 @@ def create_probe_geometry(n_el, pitch):
 
 
 class Probe(ProbeSpec):
-    # Legacy probe groups (zea < redesign) stored the probe centre frequency
-    # under "center_frequency"; it now lives under "probe_center_frequency"
-    # (renamed to avoid colliding with the scan transmit centre frequency).
-    _LEGACY_KEY_ALIASES = {"center_frequency": "probe_center_frequency"}
-
-    @classmethod
-    def _remap_legacy_keys(cls, params: dict) -> dict:
-        """Return a copy of ``params`` with legacy probe keys renamed.
-
-        Used when loading probe groups from older HDF5 files so they remain
-        compatible with the current :class:`~zea.data.spec.ProbeSpec` schema.
-        """
-        params = dict(params)
-        for old_key, new_key in cls._LEGACY_KEY_ALIASES.items():
-            if old_key in params and new_key not in params:
-                params[new_key] = params.pop(old_key)
-        return params
-
     def get_parameters(self):
         return {key: getattr(self, key) for key in self.SCHEMA if getattr(self, key) is not None}
 
@@ -208,17 +190,6 @@ class Probe(ProbeSpec):
         """Convert the attributes in the object to tensors."""
         # TODO: merge this with Parameters.to_tensor()
         return dict_to_tensor(self.get_parameters(), keep_as_is=keep_as_is)
-
-    @staticmethod
-    def _legacy_int_to_float(value):
-        if isinstance(value, int):
-            return np.float32(value)
-        elif isinstance(value, np.ndarray) and np.issubdtype(value.dtype, np.integer):
-            return value.astype(np.float32)
-        elif np.isscalar(value) and isinstance(value, (int, np.integer)):
-            return np.float32(value)
-        else:
-            return value
 
     @staticmethod
     def get_pitch(probe_geometry: np.ndarray) -> float | None:
@@ -277,28 +248,6 @@ class Probe(ProbeSpec):
         if self.element_width is not None and self.pitch is not None:
             return self.pitch - self.element_width
         return None
-
-    def __post_init__(self):
-        # Legacy file support: HDF5 files may store float fields as integers,
-        # and scalar fields as 1-element arrays.
-        _scalar_float_fields = (
-            "probe_center_frequency",
-            "probe_bandwidth_percent",
-            "element_width",
-            "element_height",
-            "lens_sound_speed",
-            "lens_thickness",
-        )
-        for _field in _scalar_float_fields:
-            _val = getattr(self, _field, None)
-            if _val is not None:
-                if isinstance(_val, np.ndarray) and _val.size == 1:
-                    _val = _val.ravel()[0]
-                setattr(self, _field, self._legacy_int_to_float(_val))
-        _val = getattr(self, "probe_geometry", None)
-        if _val is not None:
-            setattr(self, "probe_geometry", self._legacy_int_to_float(_val))
-        super().__post_init__()
 
 
 @probe_registry(name="verasonics_l11_4v")

@@ -1000,8 +1000,6 @@ class ApplyWindow(Operation):
     [start (zero)] - [size (window)] - [middle (unmodified)] - [size (window)] - [end (zero)]
     """
 
-    STATIC_PARAMS = ["axis", "size", "window_type", "start", "end"]
-
     def __init__(self, axis=-3, size=32, start=16, end=0, window_type="hanning", **kwargs):
         """
         Args:
