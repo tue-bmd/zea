@@ -555,10 +555,13 @@ class Speckle2Self(BaseModel):
                 Accepts Hugging Face handles (``hf://...``) or local directory
                 paths.
             backend: Which backend to use for loading weights. Options:
-                * ``"keras"``: Load native Keras weights from ``model.weights.h5``.
-                * ``"torch"``: Load PyTorch checkpoint from ``model.pth``, original
-                    source for the weights.
-                * ``"onnx"``: Load ONNX file from ``model.onnx`` using ONNX Runtime.
+
+                - ``"keras"``: Load native Keras weights from ``model.weights.h5``.
+                - ``"torch"``: Load PyTorch checkpoint from ``model.pth``, original
+                source for the weights.
+
+                - ``"onnx"``: Load ONNX file from ``model.onnx`` using ONNX Runtime.
+
         """
         loader = get_preset_loader(preset)
 
