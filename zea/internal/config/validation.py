@@ -1,178 +1,522 @@
-"""Validate configuration yaml files.
+"""Validate configuration dictionaries.
 
-https://github.com/keleshev/schema
-https://www.andrewvillazon.com/validate-yaml-python-schema/
+Config validation follows the same dataclass-Spec pattern used elsewhere in zea
+for :class:`~zea.data.spec.ProbeSpec` / :class:`~zea.data.spec.ScanSpec`: each
+config section is a :func:`dataclasses.dataclass` with typed fields, default
+values, and validation in ``__post_init__``.
 
-This file specifies bare bone structure of the config files.
-Furthermore it check the config file you create for validity and sets
-missing (if optional) parameters to default values. When adding functionality
-that needs parameters from the config file, make sure to add those paremeters here.
-Also if that parameter is optional, add a default value.
+Unlike the array Specs in :mod:`zea.data.spec` (which validate numpy
+``dtype``/``shape`` and named-dimension consistency), config values are plain
+Python scalars / lists / dicts, so validation here uses small validator
+callables (enums, numeric ranges, regexes).
 
+The ``parameters`` section and the top-level config are *open*: they accept
+arbitrary extra keys, which are stored and re-emitted unchanged.  This mirrors
+:class:`zea.Parameters`, which keeps unknown keys as pass-through
+``_custom_params``.  When adding a documented parameter, add a field (with a
+default if optional) to the relevant ``*Config`` dataclass below.
 """
 
+import re
+from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
-
-from schema import And, Optional, Or, Regex, Schema
+from typing import Any, Callable, ClassVar, Optional, Type
 
 from zea.internal.checks import _DATA_TYPES
 from zea.metrics import metrics_registry
 
-# predefined checks, later used in schema to check validity of parameter
-any_number = Or(
-    int,
-    float,
-    error="Must be a number, scientific notation should be of form x.xe+xx, "
-    "otherwise interpreted as string",
-)
-list_of_size_two = And(list, lambda _list: len(_list) == 2)
-positive_integer = And(int, lambda i: i > 0)
-positive_integer_and_zero = And(int, lambda i: i >= 0)
-positive_float = And(float, lambda f: f > 0)
-list_of_floats = And(list, lambda _list: all(isinstance(_l, float) for _l in _list))
-list_of_positive_integers = And(list, lambda _list: all(_l >= 0 for _l in _list))
-percentage = And(any_number, lambda f: 0 <= f <= 100)
-
 _ALLOWED_PLOT_LIBS = ("opencv", "matplotlib")
 
-# pipeline / operations
-pipeline_schema = Schema(
-    {
-        Optional("operations", default=["identity"]): Or(
-            None, [Or(str, {"name": str, "params": dict}, {"name": str})]
-        ),
-        Optional("with_batch_dim", default=True): bool,
-        Optional("jit_options", default="ops"): Or(None, "ops", "pipeline"),
-        Optional("jit_kwargs", default=None): Or(None, dict),
-        Optional("name", default="pipeline"): str,
-        Optional("validate", default=True): bool,
+
+# ---------------------------------------------------------------------------
+# Validator helpers
+#
+# Each validator is a ``Callable[[Any], Any]`` that returns the (possibly
+# coerced) value or raises ``ValueError`` with a human-readable message.  These
+# replace the ``schema`` library primitives (``And`` / ``Or`` / ``Regex`` /
+# lambdas) that were previously used.
+# ---------------------------------------------------------------------------
+
+
+def boolean(value: Any) -> bool:
+    """Validate a boolean."""
+    if not isinstance(value, bool):
+        raise ValueError(f"must be a boolean, got {type(value).__name__}")
+    return value
+
+
+def string(value: Any) -> str:
+    """Validate a string."""
+    if not isinstance(value, str):
+        raise ValueError(f"must be a string, got {type(value).__name__}")
+    return value
+
+
+def integer(value: Any) -> int:
+    """Validate an integer (``bool`` is rejected)."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"must be an integer, got {type(value).__name__}")
+    return value
+
+
+def any_number(value: Any) -> Any:
+    """Validate a number (``int`` or ``float``, ``bool`` is rejected)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(
+            "must be a number, scientific notation should be of form x.xe+xx, "
+            "otherwise interpreted as string"
+        )
+    return value
+
+
+def positive_integer(value: Any) -> int:
+    """Validate a strictly positive integer."""
+    integer(value)
+    if value <= 0:
+        raise ValueError(f"must be a positive integer, got {value}")
+    return value
+
+
+def positive_integer_and_zero(value: Any) -> int:
+    """Validate a non-negative integer."""
+    integer(value)
+    if value < 0:
+        raise ValueError(f"must be a non-negative integer, got {value}")
+    return value
+
+
+def positive_float(value: Any) -> float:
+    """Validate a strictly positive float."""
+    if isinstance(value, bool) or not isinstance(value, float):
+        raise ValueError(f"must be a float, got {type(value).__name__}")
+    if value <= 0:
+        raise ValueError(f"must be a positive float, got {value}")
+    return value
+
+
+def mapping(value: Any) -> dict:
+    """Validate a dict (mapping)."""
+    if not isinstance(value, dict):
+        raise ValueError(f"must be a dict, got {type(value).__name__}")
+    return value
+
+
+def list_of_size_two(value: Any) -> list:
+    """Validate a list of exactly two elements."""
+    if not isinstance(value, list) or len(value) != 2:
+        raise ValueError(f"must be a list of length two, got {value!r}")
+    return value
+
+
+def list_of_positive_integers(value: Any) -> list:
+    """Validate a list of non-negative integers."""
+    if not isinstance(value, list) or not all(
+        isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in value
+    ):
+        raise ValueError(f"must be a list of non-negative integers, got {value!r}")
+    return value
+
+
+def string_or_path(value: Any) -> Any:
+    """Validate a string or :class:`pathlib.Path`."""
+    if not isinstance(value, (str, Path)):
+        raise ValueError(f"must be a string or path, got {type(value).__name__}")
+    return value
+
+
+def enum(*allowed: Any) -> Callable[[Any], Any]:
+    """Build a validator that accepts only one of ``allowed`` values."""
+
+    def validate(value: Any) -> Any:
+        if value not in allowed:
+            raise ValueError(f"must be one of {list(allowed)}, got {value!r}")
+        return value
+
+    return validate
+
+
+def regex(pattern: str) -> Callable[[Any], str]:
+    """Build a validator that fully matches ``pattern``."""
+    compiled = re.compile(pattern)
+
+    def validate(value: Any) -> str:
+        if not isinstance(value, str) or compiled.fullmatch(value) is None:
+            raise ValueError(f"must match pattern {pattern!r}, got {value!r}")
+        return value
+
+    return validate
+
+
+def any_of(*validators: Callable[[Any], Any]) -> Callable[[Any], Any]:
+    """Build a validator that passes if any of ``validators`` passes."""
+
+    def validate(value: Any) -> Any:
+        errors = []
+        for validator in validators:
+            try:
+                return validator(value)
+            except ValueError as exc:
+                errors.append(str(exc))
+        raise ValueError(" or ".join(errors))
+
+    return validate
+
+
+def optional(validator: Callable[[Any], Any]) -> Callable[[Any], Any]:
+    """Build a validator that also accepts ``None``."""
+
+    def validate(value: Any) -> Any:
+        if value is None:
+            return None
+        return validator(value)
+
+    return validate
+
+
+def operations_list(value: Any) -> list:
+    """Validate the pipeline ``operations`` list.
+
+    Each element is either an operation name (str) or a mapping with a ``name``
+    (str) and optional ``params`` (dict).
+    """
+    if not isinstance(value, list):
+        raise ValueError(f"must be a list of operations, got {type(value).__name__}")
+    for op in value:
+        if isinstance(op, str):
+            continue
+        if isinstance(op, dict):
+            if not isinstance(op.get("name"), str):
+                raise ValueError(f"operation {op!r} must have a string 'name'")
+            unexpected = set(op) - {"name", "params"}
+            if unexpected:
+                raise ValueError(f"operation {op!r} has unexpected keys {sorted(unexpected)}")
+            if "params" in op and not isinstance(op["params"], dict):
+                raise ValueError(f"operation {op!r} 'params' must be a dict")
+            continue
+        raise ValueError(f"invalid operation {op!r}")
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Config Spec base class
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ConfigSpec:
+    """Base class for config sections.
+
+    Subclasses are dataclasses that declare their fields (with defaults for
+    optional fields) and the following class variables:
+
+    - ``VALIDATORS``: maps a field name to a validator callable.
+    - ``NESTED``: maps a field name to a nested :class:`ConfigSpec` subclass.
+    - ``ALLOW_EXTRA``: when ``True`` arbitrary extra keys are accepted and
+      passed through unchanged (used for the open ``parameters`` section and the
+      top-level config).
+    """
+
+    VALIDATORS: ClassVar[dict[str, Callable[[Any], Any]]] = {}
+    NESTED: ClassVar[dict[str, Type["ConfigSpec"]]] = {}
+    ALLOW_EXTRA: ClassVar[bool] = False
+
+    def __post_init__(self) -> None:
+        if not hasattr(self, "_extra"):
+            self._extra: dict[str, Any] = {}
+        for name in self.field_names():
+            value = getattr(self, name)
+            nested = self.NESTED.get(name)
+            if nested is not None:
+                setattr(self, name, self._coerce_nested(name, nested, value))
+                continue
+            validator = self.VALIDATORS.get(name)
+            if validator is not None:
+                try:
+                    value = validator(value)
+                except ValueError as exc:
+                    raise ValueError(f"{type(self).__name__}.{name}: {exc}") from exc
+                setattr(self, name, value)
+
+    def _coerce_nested(
+        self, name: str, nested: Type["ConfigSpec"], value: Any
+    ) -> "ConfigSpec":
+        if value is None:
+            # Optional nested section: fall back to its defaults.
+            return nested.from_dict({})
+        if isinstance(value, nested):
+            return value
+        if isinstance(value, dict):
+            try:
+                return nested.from_dict(value)
+            except ValueError as exc:
+                raise ValueError(f"{type(self).__name__}.{name}: {exc}") from exc
+        raise ValueError(
+            f"{type(self).__name__}.{name}: expected a mapping for "
+            f"{nested.__name__}, got {type(value).__name__}"
+        )
+
+    # -- construction / serialization --------------------------------------
+
+    @classmethod
+    def from_dict(cls, dictionary: Optional[dict]) -> "ConfigSpec":
+        """Validate ``dictionary`` and return a populated spec instance."""
+        if dictionary is None:
+            dictionary = {}
+        if not isinstance(dictionary, dict):
+            raise ValueError(
+                f"{cls.__name__}: expected a mapping, got {type(dictionary).__name__}"
+            )
+
+        field_names = set(cls.field_names())
+        known = {k: v for k, v in dictionary.items() if k in field_names}
+        extra = {k: v for k, v in dictionary.items() if k not in field_names}
+
+        if extra and not cls.ALLOW_EXTRA:
+            raise ValueError(f"{cls.__name__}: unexpected keys {sorted(extra)}")
+
+        missing = [name for name in cls.required_fields() if name not in known]
+        if missing:
+            raise ValueError(f"{cls.__name__}: missing required keys {missing}")
+
+        obj = cls(**known)
+        if extra:
+            obj._extra.update(extra)
+        return obj
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a plain dict with defaults filled and nested specs expanded."""
+        result: dict[str, Any] = {}
+        for name in self.field_names():
+            value = getattr(self, name)
+            if isinstance(value, ConfigSpec):
+                value = value.to_dict()
+            result[name] = value
+        result.update(self._extra)
+        return result
+
+    # -- introspection (used by tooling / docs) ----------------------------
+
+    @classmethod
+    def field_names(cls) -> tuple[str, ...]:
+        """Return the names of all declared fields."""
+        return tuple(f.name for f in fields(cls))
+
+    @classmethod
+    def required_fields(cls) -> tuple[str, ...]:
+        """Return the names of fields without a default value."""
+        return tuple(
+            f.name
+            for f in fields(cls)
+            if f.default is MISSING and f.default_factory is MISSING
+        )
+
+    @classmethod
+    def optional_fields(cls) -> tuple[str, ...]:
+        """Return the names of fields with a default value."""
+        required = set(cls.required_fields())
+        return tuple(name for name in cls.field_names() if name not in required)
+
+    @classmethod
+    def all_field_paths(cls, prefix: str = "") -> set[str]:
+        """Return all documented field paths in dot notation, recursing nested specs."""
+        paths: set[str] = set()
+        for name in cls.field_names():
+            full = f"{prefix}.{name}" if prefix else name
+            nested = cls.NESTED.get(name)
+            if nested is not None:
+                paths |= nested.all_field_paths(full)
+            else:
+                paths.add(full)
+        return paths
+
+
+# ---------------------------------------------------------------------------
+# Config sections
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DataConfig(ConfigSpec):
+    """The ``data:`` section: what data to load and how."""
+
+    dtype: Any
+    dataset_folder: Any
+    resolution: Any = None
+    to_dtype: Any = "image"
+    file_path: Any = None
+    local: Any = True
+    frame_no: Any = None
+    dynamic_range: Any = field(default_factory=lambda: [-60, 0])
+    input_range: Any = None
+    output_range: Any = None
+    apodization: Any = None
+    user: Any = None
+
+    VALIDATORS: ClassVar[dict] = {
+        "dtype": enum(*_DATA_TYPES),
+        "dataset_folder": string,
+        "resolution": optional(positive_float),
+        "to_dtype": enum(*_DATA_TYPES),
+        "file_path": optional(string_or_path),
+        "local": boolean,
+        "frame_no": optional(any_of(enum("all"), integer)),
+        "dynamic_range": list_of_size_two,
+        "input_range": optional(list_of_size_two),
+        "output_range": optional(list_of_size_two),
+        "apodization": optional(string),
+        "user": optional(mapping),
     }
-)
 
-# postprocess DEPRECATED
-postprocess_schema = Schema(
-    {
-        Optional("contrast_boost", default=None): Or(
-            None,
-            {
-                "k_p": float,
-                "k_n": float,
-                "threshold": float,
-            },
-        ),
-        Optional("thresholding", default=None): Or(
-            None,
-            {
-                Optional("percentile", default=None): Or(None, percentage),
-                Optional("threshold", default=None): Or(None, any_number),
-                Optional("fill_value", default="min"): Or("min", "max", "threshold", any_number),
-                Optional("below_threshold", default=True): bool,
-                Optional("threshold_type", default="hard"): Or("hard", "soft"),
-            },
-        ),
-        Optional("lista", default=None): Or(bool, None),
+
+@dataclass
+class PlotConfig(ConfigSpec):
+    """The ``plot:`` section: UI / plotting settings."""
+
+    save: Any = False
+    plot_lib: Any = "opencv"
+    fps: Any = 20
+    tag: Any = None
+    headless: Any = False
+    selector: Any = None
+    selector_metric: Any = "gcnr"
+    fliplr: Any = False
+    image_extension: Any = "png"
+    video_extension: Any = "gif"
+
+    VALIDATORS: ClassVar[dict] = {
+        "save": boolean,
+        "plot_lib": enum(*_ALLOWED_PLOT_LIBS),
+        "fps": integer,
+        "tag": optional(string),
+        "headless": boolean,
+        "selector": optional(enum("rectangle", "lasso")),
+        "selector_metric": enum(*metrics_registry.registered_names()),
+        "fliplr": boolean,
+        "image_extension": enum("png", "jpg"),
+        "video_extension": enum("mp4", "gif"),
     }
-)
 
-# scan
-# Schema for the flat ``parameters:`` config section (formerly ``scan:``).
-# ``ignore_extra_keys`` allows arbitrary custom/manual parameters in addition
-# to the documented recon parameters below.
-parameters_schema = Schema(
-    {
-        Optional("xlims", default=None): Or(None, list_of_size_two),
-        Optional("zlims", default=None): Or(None, list_of_size_two),
-        Optional("ylims", default=None): Or(None, list_of_size_two),
-        Optional("selected_transmits", default=None): Or(
-            None,
-            positive_integer,
-            list_of_positive_integers,
-            "all",
-            "center",
-        ),
-        Optional("grid_size_x", default=None): Or(None, positive_integer),
-        Optional("grid_size_z", default=None): Or(None, positive_integer),
-        Optional("n_ch", default=None): Or(None, int),
-        Optional("n_ax", default=None): Or(None, int),
-        Optional("center_frequency", default=None): Or(None, any_number),
-        Optional("sampling_frequency", default=None): Or(None, any_number),
-        Optional("demodulation_frequency", default=None): Or(None, any_number),
-        Optional("f_number", default=None): Or(None, positive_float),
-        Optional("apply_lens_correction", default=False): bool,
-        Optional("lens_thickness", default=1e-3): positive_float,
-        Optional("lens_sound_speed", default=1000): Or(positive_float, positive_integer),
-        Optional("theta_range", default=None): Or(None, list_of_size_two),
-        Optional("phi_range", default=None): Or(None, list_of_size_two),
-        Optional("rho_range", default=None): Or(None, list_of_size_two),
-        Optional("fill_value", default=0.0): any_number,
-        Optional("resolution", default=None): Or(None, positive_float),
-    },
-    ignore_extra_keys=True,
-)
 
-# plot
-plot_schema = Schema(
-    {
-        Optional("save", default=False): bool,
-        Optional("plot_lib", default="opencv"): Or(*_ALLOWED_PLOT_LIBS),
-        Optional("fps", default=20): int,
-        Optional("tag", default=None): Or(None, str),
-        Optional("headless", default=False): bool,
-        Optional("selector", default=None): Or(None, "rectangle", "lasso"),
-        Optional("selector_metric", default="gcnr"): Or(*metrics_registry.registered_names()),
-        Optional("fliplr", default=False): bool,
-        Optional("image_extension", default="png"): Or("png", "jpg"),
-        Optional("video_extension", default="gif"): Or("mp4", "gif"),
+@dataclass
+class PipelineConfig(ConfigSpec):
+    """The ``pipeline:`` section: operations and JIT settings."""
+
+    operations: Any = field(default_factory=lambda: ["identity"])
+    with_batch_dim: Any = True
+    jit_options: Any = "ops"
+    jit_kwargs: Any = None
+    name: Any = "pipeline"
+    validate: Any = True
+
+    VALIDATORS: ClassVar[dict] = {
+        "operations": optional(operations_list),
+        "with_batch_dim": boolean,
+        "jit_options": optional(enum("ops", "pipeline")),
+        "jit_kwargs": optional(mapping),
+        "name": string,
+        "validate": boolean,
     }
-)
 
-data_schema = Schema(
-    {
-        "dtype": Or(*_DATA_TYPES),
-        "dataset_folder": str,
-        Optional("resolution", default=None): Or(None, positive_float),
-        Optional("to_dtype", default="image"): Or(*_DATA_TYPES),
-        Optional("file_path", default=None): Or(None, str, Path),
-        Optional("local", default=True): bool,
-        Optional("frame_no", default=None): Or(None, "all", int),
-        Optional("dynamic_range", default=[-60, 0]): list_of_size_two,
-        Optional("input_range", default=None): Or(None, list_of_size_two),
-        Optional("output_range", default=None): Or(None, list_of_size_two),
-        Optional("apodization", default=None): Or(None, str),
-        Optional("user", default=None): Or(None, dict),
+
+@dataclass
+class ParametersConfig(ConfigSpec):
+    """The ``parameters:`` section: flat scan/probe/custom parameters.
+
+    This section is *open*: documented reconstruction parameters are validated,
+    and arbitrary custom keys are accepted and passed through unchanged
+    (consistent with :class:`zea.Parameters`).
+    """
+
+    xlims: Any = None
+    zlims: Any = None
+    ylims: Any = None
+    selected_transmits: Any = None
+    grid_size_x: Any = None
+    grid_size_z: Any = None
+    n_ch: Any = None
+    n_ax: Any = None
+    center_frequency: Any = None
+    sampling_frequency: Any = None
+    demodulation_frequency: Any = None
+    f_number: Any = None
+    apply_lens_correction: Any = False
+    lens_thickness: Any = 1e-3
+    lens_sound_speed: Any = 1000
+    theta_range: Any = None
+    phi_range: Any = None
+    rho_range: Any = None
+    fill_value: Any = 0.0
+    resolution: Any = None
+
+    ALLOW_EXTRA: ClassVar[bool] = True
+    VALIDATORS: ClassVar[dict] = {
+        "xlims": optional(list_of_size_two),
+        "zlims": optional(list_of_size_two),
+        "ylims": optional(list_of_size_two),
+        "selected_transmits": optional(
+            any_of(positive_integer, list_of_positive_integers, enum("all", "center"))
+        ),
+        "grid_size_x": optional(positive_integer),
+        "grid_size_z": optional(positive_integer),
+        "n_ch": optional(integer),
+        "n_ax": optional(integer),
+        "center_frequency": optional(any_number),
+        "sampling_frequency": optional(any_number),
+        "demodulation_frequency": optional(any_number),
+        "f_number": optional(positive_float),
+        "apply_lens_correction": boolean,
+        "lens_thickness": positive_float,
+        "lens_sound_speed": any_of(positive_float, positive_integer),
+        "theta_range": optional(list_of_size_two),
+        "phi_range": optional(list_of_size_two),
+        "rho_range": optional(list_of_size_two),
+        "fill_value": any_number,
+        "resolution": optional(positive_float),
     }
-)
 
-# top level schema
-config_schema = Schema(
-    {
-        "data": data_schema,
-        Optional("plot", default=plot_schema.validate({})): plot_schema,
-        Optional("pipeline", default=pipeline_schema.validate({})): pipeline_schema,
-        # Flat mapping of scan/probe/custom parameters that overwrite values
-        # loaded from the file (see ``File.load_parameters`` and
-        # ``Pipeline.prepare_parameters``).  Documented recon parameters are
-        # validated; arbitrary custom keys are also allowed (ignore_extra_keys).
-        Optional("parameters", default=parameters_schema.validate({})): parameters_schema,
-        # Deprecated alias for ``parameters``; still accepted for backward
-        # compatibility (migrated to ``parameters`` on load).
-        Optional("scan"): Or(None, dict),
-        Optional("device", default="auto:1"): Or(
-            "cpu",
-            "gpu",
-            "cuda",
-            Regex(r"cuda:\d+"),
-            Regex(r"gpu:\d+"),
-            Regex(r"auto:\d+"),
-            Regex(r"auto:-\d+"),
-            None,
+
+@dataclass
+class ConfigSchema(ConfigSpec):
+    """The top-level config.
+
+    This is *open*: arbitrary extra top-level sections (e.g. ``model:``) are
+    accepted and passed through unchanged.  The deprecated ``scan:`` section is
+    aliased to ``parameters:`` before validation (see
+    :func:`zea.config._migrate_legacy_config`).
+    """
+
+    data: Any
+    plot: Any = None
+    pipeline: Any = None
+    parameters: Any = None
+    device: Any = "auto:1"
+    hide_devices: Any = None
+    git: Any = None
+
+    ALLOW_EXTRA: ClassVar[bool] = True
+    NESTED: ClassVar[dict] = {
+        "data": DataConfig,
+        "plot": PlotConfig,
+        "pipeline": PipelineConfig,
+        "parameters": ParametersConfig,
+    }
+    VALIDATORS: ClassVar[dict] = {
+        "device": optional(
+            any_of(
+                enum("cpu", "gpu", "cuda"),
+                regex(r"cuda:\d+"),
+                regex(r"gpu:\d+"),
+                regex(r"auto:-?\d+"),
+            )
         ),
-        Optional("hide_devices", default=None): Or(
-            None, list_of_positive_integers, positive_integer_and_zero
-        ),
-        Optional("git", default=None): Or(None, str),
-    },
-    # Allow arbitrary extra top-level keys; they are ignored by the workflow
-    # unless accessed manually from code (see redesign of Config).
-    ignore_extra_keys=True,
-)
+        "hide_devices": optional(any_of(list_of_positive_integers, positive_integer_and_zero)),
+        "git": optional(string),
+    }
+
+
+def validate_config(config: Optional[dict]) -> dict:
+    """Validate a config dict and return a plain dict with defaults filled in.
+
+    This is the replacement for the previous ``config_schema.validate(...)``.
+    """
+    return ConfigSchema.from_dict(config).to_dict()
