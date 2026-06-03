@@ -134,7 +134,12 @@ def legacy_scan(scan_parameters: dict):
             raise ValueError("No demodulation or center frequency found in scan parameters.")
 
     if "transmit_origins" not in scan_parameters:
-        scan_parameters["transmit_origins"] = np.zeros((n_tx, 3))
+        n_tx = scan_parameters.pop("n_tx", None)
+        if n_tx is None:
+            raise ValueError(
+                "Cannot infer 'transmit_origins' because 'n_tx' is missing in scan parameters."
+            )
+        scan_parameters["transmit_origins"] = np.zeros((int(n_tx), 3), dtype=np.float32)
 
     if "sampling_frequency" in scan_parameters:
         scan_parameters["sampling_frequency"] = np.squeeze(scan_parameters["sampling_frequency"])
