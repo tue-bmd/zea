@@ -1383,7 +1383,6 @@ def get_answer(prompt, additional_options=None):
 def make_dataset_card(repo_id):
     return f"""\
 ---
-license: other
 zea_repo_id: {repo_id}
 ---
 
