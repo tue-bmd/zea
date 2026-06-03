@@ -1661,6 +1661,7 @@ class Refocus(Operation):
             * ``"focus_distances"`` — zeros ``(n_el,)`` (no focus).
             * ``"transmit_origins"`` — element positions ``(n_el, 3)``.
             * ``"initial_times"`` — zeros ``(n_el,)``.
+            * ``"t_peak"`` — shared transmit-waveform peak time ``(n_el,)``.
             * ``"flat_pfield"`` — ``None`` (resets pfield so downstream
               :class:`PfieldWeighting` becomes a no-op).
         """
@@ -1690,6 +1691,13 @@ class Refocus(Operation):
         sa_focus_distances = ops.zeros((n_el,), dtype=dtype)
         sa_initial_times = ops.zeros((n_el,), dtype=dtype)
 
+        t_peak = kwargs.get("t_peak")
+        if t_peak is not None:
+            t_peak_flat = ops.reshape(ops.cast(t_peak, dtype), (-1,))
+            sa_t_peak = ops.broadcast_to(t_peak_flat[:1], (n_el,))
+        else:
+            sa_t_peak = ops.zeros((n_el,), dtype=dtype)
+
         return {
             self.output_key: decoded,
             "t0_delays": sa_t0_delays,
@@ -1698,6 +1706,7 @@ class Refocus(Operation):
             "focus_distances": sa_focus_distances,
             "transmit_origins": probe_geometry,
             "initial_times": sa_initial_times,
+            "t_peak": sa_t_peak,
             "flat_pfield": None,
         }
 
