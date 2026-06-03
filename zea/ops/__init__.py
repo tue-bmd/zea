@@ -43,6 +43,7 @@ One of the more common pipelines you will encounter is a basic ultrasound raw ch
 
     >>> from zea.ops import (
     ...     Beamform,
+    ...     Cast,
     ...     Demodulate,
     ...     Pipeline,
     ...     EnvelopeDetect,
@@ -51,6 +52,7 @@ One of the more common pipelines you will encounter is a basic ultrasound raw ch
     ... )
 
     >>> operations = [
+    ...     Cast(dtype="float32"),
     ...     Demodulate(),
     ...     Beamform(beamformer="delay_and_sum"),
     ...     EnvelopeDetect(),
@@ -118,10 +120,11 @@ version-controlled, shared, or reproduced on any machine.
 .. doctest::
 
     >>> from zea import Pipeline
-    >>> from zea.ops import Beamform, EnvelopeDetect, Normalize, LogCompress
+    >>> from zea.ops import Beamform, Cast, EnvelopeDetect, Normalize, LogCompress
 
     >>> pipeline = Pipeline(
     ...     operations=[
+    ...         Cast(dtype="float32"),
     ...         Demodulate(),
     ...         Beamform(beamformer="delay_and_sum"),
     ...         EnvelopeDetect(),
@@ -156,6 +159,9 @@ pipeline looks like this:
 
     pipeline:
       operations:
+        - name: cast
+            params:
+                dtype: float32
         - name: demodulate
         - name: beamform
           params:
@@ -218,6 +224,9 @@ are automatically moved to the specified device.
 
 from zea.internal.registry import beamformer_registry, ops_registry
 from zea.ops import keras_ops
+from zea.ops.keras_ops import Cast
+
+ops_registry.registry["cast"] = Cast
 
 from .base import Identity, Lambda, Mean, Operation, get_ops
 from .pipeline import (
@@ -303,4 +312,5 @@ __all__ = [
     "CommonMidpointPhaseError",
     # Keras operations
     "keras_ops",
+    "Cast",
 ]

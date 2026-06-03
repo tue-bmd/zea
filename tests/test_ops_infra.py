@@ -10,6 +10,7 @@ import pytest
 from zea import func, ops
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.config import Config
+from zea.data.file import File
 from zea.internal.core import DEFAULT_DYNAMIC_RANGE, DataTypes
 from zea.internal.registry import ops_registry
 from zea.ops.keras_ops import Squeeze
@@ -919,6 +920,47 @@ def test_pipeline_parameter_tracing(ultrasound_parameters: Parameters):
     )
     output = pipeline(data=data, **inputs)
     assert "demodulation_frequency" in output
+
+
+def test_demodulate_int16_requires_cast():
+    """Demodulate should raise a clear error for int16 raw input."""
+    data = np.zeros((1, 4, 8, 2, 1), dtype=np.int16)
+    op = ops.Demodulate(jit_compile=False)
+
+    with pytest.raises(ValueError, match=r"Cast\(dtype='float32'\)"):
+        op(data=data, demodulation_frequency=1e6, sampling_frequency=20e6)
+
+
+def test_demodulate_int16_from_hdf5_requires_cast(tmp_path):
+    """Demodulate should raise a clear cast error for int16 raw_data loaded from HDF5."""
+    n_frames, n_tx, n_ax = 1, 2, 8
+    probe = Probe.from_name("verasonics_l11_4v")
+    n_el = probe.n_el
+    path = tmp_path / "int16_raw_data.hdf5"
+
+    scan = {
+        "sampling_frequency": np.float32(20e6),
+        "center_frequency": np.float32(5e6),
+        "demodulation_frequency": np.float32(5e6),
+        "initial_times": np.zeros(n_tx, dtype=np.float32),
+        "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+        "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+        "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+        "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+        "polar_angles": np.zeros(n_tx, dtype=np.float32),
+        "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+    }
+    raw_data = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.int16)
+
+    f = File.create(path, data={"raw_data": raw_data}, scan=scan, probe=probe)
+    f.close()
+
+    with File(path, "r") as f_read:
+        loaded = f_read.data.raw_data[:]
+
+    op = ops.Demodulate(jit_compile=False)
+    with pytest.raises(ValueError, match=r"Cast\(dtype='float32'\)"):
+        op(data=loaded, demodulation_frequency=5e6, sampling_frequency=20e6)
 
 
 def test_ops_pass_positional_arg():
