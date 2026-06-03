@@ -206,22 +206,7 @@ class Spec:
     ) -> "Spec":
         """Validate a nested spec field, recursively validating its contents."""
         if isinstance(field_value, dict):
-            # Try constructing the nested spec directly.  For backward compatibility,
-            # if unknown keyword arguments are present (e.g. n_el / pitch stored
-            # in the probe group of old HDF5 files, or probe_geometry in the scan
-            # group), retry with only the fields known to this spec.  We intentionally
-            # do NOT filter unconditionally because specs such as DataSpec and
-            # MetadataSpec legitimately accept extra keys via their custom __init__.
-            try:
-                field_value = nested_spec(**field_value)
-            except TypeError as _exc:
-                if "unexpected keyword argument" in str(_exc):
-                    known_fields = {f.name for f in fields(nested_spec)}
-                    field_value = nested_spec(
-                        **{k: v for k, v in field_value.items() if k in known_fields}
-                    )
-                else:
-                    raise
+            field_value = nested_spec(**field_value)
             setattr(self, field_name, field_value)
 
         # Check that the nested spec field is now an instance of the expected Spec subclass
@@ -2114,7 +2099,7 @@ class FileSpec(Spec):
     def from_hdf5(cls, file: h5py.File) -> "FileSpec":
         """Load and validate a :class:`FileSpec` from an open HDF5 file.
 
-        Both the new ``tracks/track_N/`` format and the legacy flat
+        Both the new ``tracks/track_N/`` format and the normal flat
         ``data/`` + ``scan/`` format are supported.  Extra scalar fields in
         legacy scan groups (``n_frames``, ``n_tx``, etc.) are ignored,
         and the ``probe`` root attribute is mapped to ``probe.name``.

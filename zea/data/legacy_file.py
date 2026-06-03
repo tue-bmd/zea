@@ -136,6 +136,9 @@ def legacy_scan(scan_parameters: dict):
     if "transmit_origins" not in scan_parameters:
         scan_parameters["transmit_origins"] = np.zeros((n_tx, 3))
 
+    if "sampling_frequency" in scan_parameters:
+        scan_parameters["sampling_frequency"] = np.squeeze(scan_parameters["sampling_frequency"])
+
     for key in [
         "sampling_frequency",
         "demodulation_frequency",
