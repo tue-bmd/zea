@@ -1391,6 +1391,10 @@ def convert_verasonics(args):
             - device (str): Device to use for processing.
     """
 
+    if getattr(args, "upload", False):
+        assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
+        assert args.revision, "revision must be provided when --upload is True."
+
     init_device(args.device)
 
     # Variable to indicate what to do with existing files.
@@ -1544,8 +1548,6 @@ def convert_verasonics(args):
                     write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
 
                     if getattr(args, "upload", False):
-                        assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
-                        assert args.revision, "revision must be provided when --upload is True."
                         upload_verasonics(
                             output_path,
                             revision=args.revision,
