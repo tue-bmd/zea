@@ -218,6 +218,7 @@ are automatically moved to the specified device.
 
 from zea.internal.registry import beamformer_registry, ops_registry
 from zea.ops import keras_ops
+from zea.ops.keras_ops import Cast
 
 from .base import Identity, Lambda, Mean, Operation, get_ops
 from .pipeline import (
@@ -303,4 +304,5 @@ __all__ = [
     "CommonMidpointPhaseError",
     # Keras operations
     "keras_ops",
+    "Cast",
 ]
