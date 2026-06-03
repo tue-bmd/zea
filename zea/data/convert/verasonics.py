@@ -932,7 +932,6 @@ class VerasonicsFile(h5py.File):
         )
 
         return {
-            "probe_geometry": self.probe.geometry,
             "time_to_next_transmit": time_to_next_transmit,
             "t0_delays": t0_delays,
             "tx_apodizations": tx_apodizations,
@@ -1138,7 +1137,7 @@ class VerasonicsFile(h5py.File):
             path=output_path,
             data=data_dict,
             scan=scan_dict,
-            probe={"name": self.probe.name},
+            probe=self.probe.to_probe_spec(),
             description="Verasonics data",
             compression=compression,
         )
@@ -1271,6 +1270,17 @@ class VerasonicsProbe:
         """Checks if the probe geometry is ordered as a uniform linear array (ULA)."""
         diff_vec = self.geometry[1:] - self.geometry[:-1]
         return np.isclose(diff_vec, diff_vec[0]).all()
+
+    def to_probe_spec(self):
+        """Convert the probe to a dict compatible with :class:`~zea.data.spec.ProbeSpec`."""
+        return {
+            "name": self.name,
+            "type": self.type,
+            "probe_center_frequency": self.center_frequency,
+            "probe_bandwidth_percent": self.bandwidth,
+            "probe_geometry": self.geometry,
+            "element_width": self.element_width,
+        }
 
 
 def _write_user_additional_elements(h5file, additional_elements, prefix=""):
