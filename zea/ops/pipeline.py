@@ -16,7 +16,6 @@ from zea.internal.core import Object as ZEAObject
 from zea.internal.registry import beamformer_registry, ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Operation, get_ops
-from zea.ops.keras_ops import Cast
 from zea.ops.tensor import Normalize
 from zea.ops.ultrasound import (
     ApplyWindow,
@@ -223,7 +222,7 @@ class Pipeline:
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
         """
-        operations = [Cast(dtype="float32")]
+        operations = []
 
         # Add the demodulate operation
         if not baseband:
@@ -1033,7 +1032,6 @@ class Beamform(Pipeline):
             num_patches (int): Number of patches to split the grid into for patch-wise
                 beamforming. If 1, no patching is performed.
             enable_pfield (bool): Whether to include pressure field weighting in the beamforming.
-
         """
 
         self.beamformer_type = beamformer
