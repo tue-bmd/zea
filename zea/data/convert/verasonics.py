@@ -1540,17 +1540,17 @@ def convert_verasonics(args):
                     traceback.print_exc()
 
                     continue
+                else:  # only run on success
+                    write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
 
-        write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
-
-        if getattr(args, "upload", False):
-            assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
-            assert args.revision, "revision must be provided when --upload is True."
-            upload_verasonics(
-                output_path,
-                revision=args.revision,
-                repo_id=args.hf_repo_id,
-            )
+                    if getattr(args, "upload", False):
+                        assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
+                        assert args.revision, "revision must be provided when --upload is True."
+                        upload_verasonics(
+                            output_path,
+                            revision=args.revision,
+                            repo_id=args.hf_repo_id,
+                        )
 
 
 def upload_verasonics(
