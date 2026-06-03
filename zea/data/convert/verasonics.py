@@ -1227,7 +1227,7 @@ class VerasonicsProbe:
                 3: "annular",
                 4: "row-column",
             }
-            probe_type_id = self.trans_obj["type"][:]
+            probe_type_id = int(self.trans_obj["type"][:].item())
             return _id_to_str.get(probe_type_id)
 
     @property
