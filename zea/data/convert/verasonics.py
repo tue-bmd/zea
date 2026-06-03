@@ -1364,16 +1364,16 @@ def get_answer(prompt, additional_options=None):
 
 def make_dataset_card(repo_id):
     return f"""\
-    ---
-    license: other
-    zea_repo_id: {repo_id}
-    ---
+---
+license: other
+zea_repo_id: {repo_id}
+---
 
-    # Verasonics ultrasound data (zea format)
+# Verasonics ultrasound data (zea format)
 
-    This dataset contains raw ultrasound data acquired with Verasonics systems,
-    converted to the [zea](https://github.com/tue-mps/zea) HDF5 format.
-    """
+This dataset contains raw ultrasound data acquired with Verasonics systems,
+converted to the [zea](https://github.com/tue-bmd/zea) HDF5 format.
+"""
 
 
 def convert_verasonics(args):
@@ -1545,6 +1545,7 @@ def convert_verasonics(args):
 
         if getattr(args, "upload", False):
             assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
+            assert args.revision, "revision must be provided when --upload is True."
             upload_verasonics(
                 output_path,
                 revision=args.revision,
