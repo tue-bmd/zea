@@ -238,6 +238,25 @@ def _add_parser_args_verasonics(subparsers):
         help="Disable compression when saving the zea dataset. By default, compression is "
         "enabled, which reduces disk space at the cost of increased conversion time.",
     )
+    verasonics_parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload the converted dataset to HuggingFace Hub after conversion. "
+        "Only for zea maintainers with push access to the repository.",
+    )
+    verasonics_parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help="Required when --upload is set. Upload to 'main' is not allowed.",
+    )
+    verasonics_parser.add_argument(
+        "--hf_repo_id",
+        type=str,
+        default="",
+        help="HuggingFace repo ID for ownership checks and optional upload. "
+        "Required if --upload is set.",
+    )
 
 
 def get_parser():
