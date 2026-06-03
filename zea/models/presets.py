@@ -183,6 +183,18 @@ flow_matching_presets = {
         },
         "hf_handle": "hf://zeahub/flowmatching-echonetlvh/3ch",
     },
+    "flowmatching-echonetlvh-12ch": {
+        "metadata": {
+            "description": (
+                "Flow matching model trained on EchoNetLVH dataset. "
+                "12-frame model, input shape (256, 256, 12), "
+                "input range [0, 1]."
+            ),
+            "params": 7_692_177,
+            "path": "flow_matching",
+        },
+        "hf_handle": "hf://zeahub/flowmatching-echonetlvh/12ch",
+    },
 }
 
 carotid_segmenter_presets = {
