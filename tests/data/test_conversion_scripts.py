@@ -1,5 +1,6 @@
 """Test dataset conversion scripts"""
 
+import argparse
 import csv
 import os
 import shutil
@@ -23,7 +24,7 @@ from zea.data.convert.utils import (
     sitk_load,
     unzip,
 )
-from zea.data.convert.verasonics import VerasonicsFile
+from zea.data.convert.verasonics import VerasonicsFile, convert_verasonics
 from zea.data.file import File
 from zea.data.spec import DEFAULT_COMPRESSION
 from zea.func.tensor import translate
@@ -1000,6 +1001,56 @@ def test_verasonics_compression_flag_respected(tmp_path):
     with _h5py.File(path, "r") as hf:
         ds = hf["tracks/track_0/data/raw_data"]
         assert ds.compression is None, "dataset should have no compression"
+
+
+def test_verasonics_upload_requires_hf_repo_id(tmp_path, monkeypatch):
+    """When upload is enabled, hf_repo_id must be provided before upload starts."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+
+    args = argparse.Namespace(
+        src=str(src),
+        dst=str(dst),
+        frames=None,
+        allow_accumulate=False,
+        device="cpu",
+        no_compression=False,
+        upload=True,
+        hf_repo_id="",
+        revision="test-branch",
+    )
+
+    monkeypatch.setattr("zea.data.convert.verasonics.init_device", lambda *_: None)
+
+    with pytest.raises(AssertionError, match="hf_repo_id must be provided"):
+        convert_verasonics(args)
+
+
+def test_verasonics_upload_requires_revision(tmp_path, monkeypatch):
+    """When upload is enabled, revision must be provided before upload starts."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+
+    args = argparse.Namespace(
+        src=str(src),
+        dst=str(dst),
+        frames=None,
+        allow_accumulate=False,
+        device="cpu",
+        no_compression=False,
+        upload=True,
+        hf_repo_id="zeahub/test-dataset",
+        revision=None,
+    )
+
+    monkeypatch.setattr("zea.data.convert.verasonics.init_device", lambda *_: None)
+
+    with pytest.raises(AssertionError, match="revision must be provided"):
+        convert_verasonics(args)
 
 
 def test_check_output_dir_ownership_empty_dir(tmp_path):
