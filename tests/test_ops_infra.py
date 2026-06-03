@@ -921,6 +921,15 @@ def test_pipeline_parameter_tracing(ultrasound_parameters: Parameters):
     assert "demodulation_frequency" in output
 
 
+def test_demodulate_int16_requires_cast():
+    """Demodulate should raise a clear error for int16 raw input."""
+    data = np.zeros((1, 4, 8, 2, 1), dtype=np.int16)
+    op = ops.Demodulate(jit_compile=False)
+
+    with pytest.raises(ValueError, match=r"Cast\(dtype='float32'\)"):
+        op(data=data, demodulation_frequency=1e6, sampling_frequency=20e6)
+
+
 def test_ops_pass_positional_arg():
     """Test that passing positional arguments to Operation raises a custom error."""
     op = AddOperation()
