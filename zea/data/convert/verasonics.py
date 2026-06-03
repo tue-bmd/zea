@@ -51,6 +51,11 @@ from keras import ops
 from schema import And, Optional, Or, Regex, Schema
 
 from zea import log
+from zea.data.convert.utils import (
+    require_output_dir_ownership,
+    upload_dataset_to_hf,
+    write_dataset_card,
+)
 from zea.data.data_format import DatasetElement
 from zea.data.file import File
 from zea.data.spec import DEFAULT_COMPRESSION
@@ -1367,6 +1372,20 @@ def get_answer(prompt, additional_options=None):
         log.warning("Invalid input.")
 
 
+def make_dataset_card(repo_id):
+    return f"""\
+    ---
+    license: other
+    zea_repo_id: {repo_id}
+    ---
+
+    # Verasonics ultrasound data (zea format)
+
+    This dataset contains raw ultrasound data acquired with Verasonics systems,
+    converted to the [zea](https://github.com/tue-mps/zea) HDF5 format.
+    """
+
+
 def convert_verasonics(args):
     """
     Converts a Verasonics MATLAB workspace file (.mat) or a directory containing multiple
@@ -1531,3 +1550,36 @@ def convert_verasonics(args):
                     traceback.print_exc()
 
                     continue
+
+        write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
+
+        if getattr(args, "upload", False):
+            assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
+            upload_verasonics(
+                output_path,
+                revision=args.revision,
+                repo_id=args.hf_repo_id,
+            )
+
+
+def upload_verasonics(
+    output_folder: str | Path, revision: str, repo_id: str
+) -> None:  # pragma: no cover
+    """Upload the converted Verasonics dataset to a HuggingFace Hub revision branch.
+
+    Only for zea maintainers with push access to the repository.  Upload to
+    ``main`` is blocked; merge the revision branch into ``main`` manually after
+    verifying the upload.
+
+    Args:
+        output_folder: Root folder containing the converted HDF5 files.
+        revision: Target branch name on the Hub (must not be ``"main"``).
+        repo_id: Target HuggingFace repository ID.
+    """
+    require_output_dir_ownership(output_folder, repo_id)
+    upload_dataset_to_hf(
+        folder=output_folder,
+        repo_id=repo_id,
+        revision=revision,
+        commit_message=f"Upload Verasonics dataset (zea format) to {revision}",
+    )
