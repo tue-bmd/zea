@@ -1133,7 +1133,7 @@ class VerasonicsFile(h5py.File):
         # Generate the zea dataset
         log.info("Generating zea dataset...")
         compression = DEFAULT_COMPRESSION if enable_compression else None
-        File.create(
+        f = File.create(
             path=output_path,
             data=data_dict,
             scan=scan_dict,
@@ -1141,6 +1141,7 @@ class VerasonicsFile(h5py.File):
             description="Verasonics data",
             compression=compression,
         )
+        f.close()
 
         if additional_elements:
             _write_user_additional_elements_to_file(output_path, additional_elements)
@@ -1214,7 +1215,15 @@ class VerasonicsProbe:
     def bandwidth(self):
         """Bandwidth of the probe: -6dB lower and upper cutoff pts in Hz."""
         if "Bandwidth" in self.trans_obj.keys():
-            return self.trans_obj["Bandwidth"][:].item() * 1e6
+            return self.trans_obj["Bandwidth"][:].squeeze() * 1e6
+
+    @property
+    def bandwidth_percent(self):
+        """Bandwidth of the probe as a percentage of the center frequency."""
+        if self.bandwidth is not None:
+            assert self.bandwidth[1] > self.bandwidth[0], "Bandwidth must be positive"
+            diff = self.bandwidth[1] - self.bandwidth[0]
+            return 100 * (diff / self.center_frequency)
 
     @property
     def type(self):
@@ -1277,7 +1286,7 @@ class VerasonicsProbe:
             "name": self.name,
             "type": self.type,
             "probe_center_frequency": self.center_frequency,
-            "probe_bandwidth_percent": self.bandwidth,
+            "probe_bandwidth_percent": self.bandwidth_percent,
             "probe_geometry": self.geometry,
             "element_width": self.element_width,
         }
