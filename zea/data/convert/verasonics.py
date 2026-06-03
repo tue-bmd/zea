@@ -952,7 +952,6 @@ class VerasonicsFile(h5py.File):
             "waveforms_one_way": waveforms_one_way,
             "waveforms_two_way": waveforms_two_way,
             "tgc_gain_curve": self.tgc_gain_curve,
-            "element_width": self.probe.element_width,
         }
 
     def read_verasonics_file(
