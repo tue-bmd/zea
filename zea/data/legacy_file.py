@@ -160,6 +160,7 @@ def legacy_scan(scan_parameters: dict):
         "center_frequency",
         "initial_times",
         "transmit_origins",
+        "sound_speed",
     ]:
         _if_exists_cast_to_float(key, scan_parameters)
 
