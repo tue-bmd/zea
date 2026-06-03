@@ -625,12 +625,13 @@ class Pipeline:
         return pipeline_from_config(Config(config), **kwargs)
 
     @classmethod
-    def from_path(cls, file_path: str, **kwargs) -> "Pipeline":
+    def from_path(cls, file_path: str, revision: str = None, **kwargs) -> "Pipeline":
         """Create a pipeline from a YAML/config file path.
 
         Args:
             file_path (str): Path to the config file (local or ``hf://`` URI).
                 Must have a ``pipeline`` key with a subkey ``operations``.
+            revision (str, optional): Revision of the config file (for Hugging Face ``hf://`` URIs).
             **kwargs: Additional keyword arguments to be passed to the pipeline.
 
         Example:
@@ -650,7 +651,7 @@ class Pipeline:
                 >>> pipeline = Pipeline.from_path("pipeline.yaml")
 
         """
-        config = Config.from_path(file_path)
+        config = Config.from_path(file_path, revision=revision)
         return pipeline_from_config(config, **kwargs)
 
     @classmethod

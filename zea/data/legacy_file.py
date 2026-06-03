@@ -111,6 +111,19 @@ def _if_exists_cast_to_float(key, parameters):
         parameters[key] = np.float32(parameters[key])
 
 
+def infer_n_tx(scan_parameters: dict):
+    """Infer n_tx from n_frames and n_ax."""
+    if "n_tx" in scan_parameters:
+        return scan_parameters["n_tx"]
+    if "t0_delays" in scan_parameters:
+        return scan_parameters["t0_delays"].shape[0]
+    if "focus_distances" in scan_parameters:
+        return scan_parameters["focus_distances"].shape[0]
+    if "polar_angles" in scan_parameters:
+        return scan_parameters["polar_angles"].shape[0]
+    raise ValueError("Cannot infer 'n_tx' from scan parameters. ")
+
+
 def legacy_scan(scan_parameters: dict):
     """Format scan parameters for legacy file."""
     if set(scan_parameters.keys()) == {"n_ax", "n_frames", "n_tx"}:
@@ -134,15 +147,12 @@ def legacy_scan(scan_parameters: dict):
             raise ValueError("No demodulation or center frequency found in scan parameters.")
 
     if "transmit_origins" not in scan_parameters:
-        n_tx = scan_parameters.pop("n_tx", None)
-        if n_tx is None:
-            raise ValueError(
-                "Cannot infer 'transmit_origins' because 'n_tx' is missing in scan parameters."
-            )
+        n_tx = infer_n_tx(scan_parameters)
         scan_parameters["transmit_origins"] = np.zeros((int(n_tx), 3), dtype=np.float32)
 
-    if "sampling_frequency" in scan_parameters:
-        scan_parameters["sampling_frequency"] = np.squeeze(scan_parameters["sampling_frequency"])
+    for key in ["sampling_frequency", "sound_speed", "center_frequency", "demodulation_frequency"]:
+        if key in scan_parameters:
+            scan_parameters[key] = np.squeeze(scan_parameters[key])
 
     for key in [
         "sampling_frequency",
