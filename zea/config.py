@@ -53,7 +53,7 @@ from typing import Union
 import yaml
 
 from zea import log
-from zea.internal.config.validation import config_schema
+from zea.internal.config.validation import validate_config
 from zea.internal.core import dict_to_tensor
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.utils import deprecated
@@ -508,7 +508,7 @@ def check_config(config: Union[dict, Config], verbose: bool = False):
 
     def _try_validate_config(config):
         try:
-            config = config_schema.validate(config)
+            config = validate_config(config)
             return config
         except Exception as e:
             log.error(f"Config is not valid: {e}")

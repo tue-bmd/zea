@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-from schema import SchemaError
 
 from zea.config import Config, check_config
 from zea.internal.setup_zea import setup_config
@@ -70,11 +69,11 @@ def test_all_configs_valid(file):
         configuration = check_config(configuration)
         # check another time, since defaults are now set, which are not
         # checked by the first check_config. Basically this checks if the
-        # config_validation.py entries are correct.
+        # validation.py entries are correct.
         check_config(configuration)
 
-    except SchemaError as se:
-        raise ValueError(f"Error in config {file}") from se
+    except ValueError as ve:
+        raise ValueError(f"Error in config {file}") from ve
 
 
 def test_dot_indexing():
