@@ -12,6 +12,13 @@ control data loading, preprocessing, model settings, and scan parameters.
   Configs are used to initialize :doc:`zea.Models <models>` and the :doc:`pipeline`.
   For the data format and file I/O, see :doc:`data-acquisition`.
 
+.. note::
+  The ``parameters`` section is a flat mapping that overrides values loaded from the
+  data file. It mirrors :class:`zea.Parameters` (the merged :class:`zea.Probe` and scan
+  parameters — see :doc:`data-acquisition`), and may additionally contain arbitrary
+  custom parameters that are passed straight through to the pipeline. The documented
+  reconstruction keys below are the most common ones, but they are not exhaustive.
+
 Configs are written in YAML format and can be loaded, edited, and saved using the ``zea`` API.
 
 -------------------------------
@@ -34,9 +41,9 @@ Here is a minimal example of how to load and save a config file using zea:
     >>> config = check_config(config)
 
     >>> # Access or change parameters
-    >>> config.scan.sampling_frequency = 8e6
-    >>> print(config.scan.sampling_frequency)
-    8000000.0
+    >>> config.parameters.grid_size_x = 512
+    >>> print(config.parameters.grid_size_x)
+    512
 
     >>> # Save the config back to file
     >>> config.to_yaml("my_new_config.yaml")
@@ -100,6 +107,48 @@ Parameters Reference
      - The git commit hash or branch for reproducibility (string, optional).
    * - ``hide_devices``
      - List of device indices to hide from selection (list of int, optional).
+   * - ``parameters``
+     - The parameters section is a flat mapping of scan/probe/custom parameters that overwrite values loaded from the data file. Documented reconstruction parameters are listed below; arbitrary custom parameters are also allowed.
+   * - ``parameters.apply_lens_correction``
+     - Set to true to apply lens correction in the time-of-flight calculation
+   * - ``parameters.center_frequency``
+     - The center frequency of the transmit pulse in Hz
+   * - ``parameters.demodulation_frequency``
+     - The demodulation frequency of the data in Hz. This is the assumed center frequency of the transmit waveform used to demodulate the rf data to iq data.
+   * - ``parameters.f_number``
+     - The receive f-number for apodization. Set to zero to disable masking. The f-number is the ratio between the distance from the transducer and the size of the aperture.
+   * - ``parameters.fill_value``
+     - Value to fill the image with outside the defined region (float, default 0.0).
+   * - ``parameters.grid_size_x``
+     - The number of pixels in the beamforming grid in the x-direction
+   * - ``parameters.grid_size_z``
+     - The number of pixels in the beamforming grid in the z-direction
+   * - ``parameters.lens_sound_speed``
+     - The speed of sound in the lens in m/s. Usually around 1000 m/s
+   * - ``parameters.lens_thickness``
+     - The thickness of the lens in meters
+   * - ``parameters.n_ax``
+     - The number of samples in a receive recording per channel.
+   * - ``parameters.n_ch``
+     - The number of channels in the raw data (1 for rf data, 2 for iq data)
+   * - ``parameters.phi_range``
+     - The range of phi values in radians for 3D scan conversion (null, [min, max]).
+   * - ``parameters.resolution``
+     - The resolution for scan conversion in meters per pixel (float, optional).
+   * - ``parameters.rho_range``
+     - The range of rho values in meters for scan conversion (null, [min, max]).
+   * - ``parameters.sampling_frequency``
+     - The sampling frequency of the data in Hz
+   * - ``parameters.selected_transmits``
+     - The number of transmits in a frame. Can be 'all' for all transmits, an integer for a specific number of transmits selected evenly from the transmits in the frame, or a list of integers for specific transmits to select from the frame.
+   * - ``parameters.theta_range``
+     - The range of theta values in radians for scan conversion (null, [min, max]).
+   * - ``parameters.xlims``
+     - The limits of the x-axis in the scan in meters (null, [min, max])
+   * - ``parameters.ylims``
+     - The limits of the y-axis in the scan in meters (null, [min, max])
+   * - ``parameters.zlims``
+     - The limits of the z-axis in the scan in meters (null, [min, max])
    * - ``pipeline``
      - This section contains the necessary parameters for building the pipeline.
    * - ``pipeline.jit_kwargs``
@@ -137,44 +186,4 @@ Parameters Reference
    * - ``plot.video_extension``
      - The file extension to use when saving the video (mp4, gif)
    * - ``scan``
-     - The scan section contains the parameters pertaining to the reconstruction.
-   * - ``scan.apply_lens_correction``
-     - Set to true to apply lens correction in the time-of-flight calculation
-   * - ``scan.center_frequency``
-     - The center frequency of the transmit pulse in Hz
-   * - ``scan.demodulation_frequency``
-     - The demodulation frequency of the data in Hz. This is the assumed center frequency of the transmit waveform used to demodulate the rf data to iq data.
-   * - ``scan.f_number``
-     - The receive f-number for apodization. Set to zero to disable masking. The f-number is the ratio between the distance from the transducer and the size of the aperture.
-   * - ``scan.fill_value``
-     - Value to fill the image with outside the defined region (float, default 0.0).
-   * - ``scan.grid_size_x``
-     - The number of pixels in the beamforming grid in the x-direction
-   * - ``scan.grid_size_z``
-     - The number of pixels in the beamforming grid in the z-direction
-   * - ``scan.lens_sound_speed``
-     - The speed of sound in the lens in m/s. Usually around 1000 m/s
-   * - ``scan.lens_thickness``
-     - The thickness of the lens in meters
-   * - ``scan.n_ax``
-     - The number of samples in a receive recording per channel.
-   * - ``scan.n_ch``
-     - The number of channels in the raw data (1 for rf data, 2 for iq data)
-   * - ``scan.phi_range``
-     - The range of phi values in radians for 3D scan conversion (null, [min, max]).
-   * - ``scan.resolution``
-     - The resolution for scan conversion in meters per pixel (float, optional).
-   * - ``scan.rho_range``
-     - The range of rho values in meters for scan conversion (null, [min, max]).
-   * - ``scan.sampling_frequency``
-     - The sampling frequency of the data in Hz
-   * - ``scan.selected_transmits``
-     - The number of transmits in a frame. Can be 'all' for all transmits, an integer for a specific number of transmits selected evenly from the transmits in the frame, or a list of integers for specific transmits to select from the frame.
-   * - ``scan.theta_range``
-     - The range of theta values in radians for scan conversion (null, [min, max]).
-   * - ``scan.xlims``
-     - The limits of the x-axis in the scan in meters (null, [min, max])
-   * - ``scan.ylims``
-     - The limits of the y-axis in the scan in meters (null, [min, max])
-   * - ``scan.zlims``
-     - The limits of the z-axis in the scan in meters (null, [min, max])
+     - Deprecated alias for 'parameters'. Supported for backward compatibility; prefer using 'parameters'.

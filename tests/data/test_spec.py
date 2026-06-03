@@ -1119,24 +1119,9 @@ class TestLoadingWarnings:
 
         with patch("zea.log.warning") as mock_warn:
             with File(path) as f:
-                f.get_parameters()
+                f.get_scan_parameters()
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any("Could not find scan parameters in file" in m for m in messages)
-
-    def test_focus_distances_in_wavelengths_warns(self, tmp_path):
-        """focus_distances stored as wavelengths (>= 1, not inf) triggers a warning on load."""
-        path = tmp_path / "wavelength_focus.hdf5"
-        with h5py.File(path, "w") as f:
-            s = f.create_group("scan")
-            s.create_dataset("focus_distances", data=np.full((2,), 10.0, dtype=np.float32))
-            s.create_dataset("sound_speed", data=np.float32(1540.0))
-            s.create_dataset("center_frequency", data=np.float32(5e6))
-
-        with patch("zea.log.warning") as mock_warn:
-            with File(path) as f:
-                f.get_parameters()
-        messages = [str(c.args[0]).lower() for c in mock_warn.call_args_list]
-        assert any("focus distances" in m and "wavelength" in m for m in messages)
 
     def test_waveforms_stored_as_dict_warns(self, tmp_path):
         """Legacy waveforms stored as an HDF5 group (dict-like) trigger a warning on load."""
@@ -1149,9 +1134,9 @@ class TestLoadingWarnings:
 
         with patch("zea.log.warning") as mock_warn:
             with File(path) as f:
-                # scan() emits the legacy-waveforms warning, then fails because the
-                # file has no other scan parameters (n_tx is unset).
-                with pytest.raises(ValueError):
+                # f.scan emits the legacy-waveforms warning, then fails because the
+                # file has no other (required) ScanSpec fields.
+                with pytest.raises((ValueError, TypeError)):
                     f.scan
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any("waveforms_one_way" in m and "stored as a dictionary" in m for m in messages)
@@ -1164,8 +1149,8 @@ class TestProbeSpec:
         probe = ProbeSpec()
         assert probe.name is None
         assert probe.type is None
-        assert probe.center_frequency is None
-        assert probe.bandwidth_percent is None
+        assert probe.probe_center_frequency is None
+        assert probe.probe_bandwidth_percent is None
         assert probe.element_width is None
         assert probe.lens_sound_speed is None
         assert probe.lens_thickness is None
@@ -1174,27 +1159,27 @@ class TestProbeSpec:
         probe = ProbeSpec(
             name="verasonics_l11_4v",
             type="linear",
-            center_frequency=np.float32(5.208e6),
-            bandwidth_percent=np.float32(67.0),
+            probe_center_frequency=np.float32(5.208e6),
+            probe_bandwidth_percent=np.float32(67.0),
             element_width=np.float32(0.27e-3),
             lens_sound_speed=np.float32(1000.0),
             lens_thickness=np.float32(1.5e-3),
         )
         assert probe.name == "verasonics_l11_4v"
         assert probe.type == "linear"
-        assert probe.center_frequency == pytest.approx(5.208e6, rel=1e-4)
-        assert probe.bandwidth_percent == pytest.approx(67.0)
+        assert probe.probe_center_frequency == pytest.approx(5.208e6, rel=1e-4)
+        assert probe.probe_bandwidth_percent == pytest.approx(67.0)
         assert probe.element_width == pytest.approx(0.27e-3, rel=1e-4)
 
     def test_invalid_center_frequency_raises(self):
-        with pytest.raises(ValueError, match="center_frequency"):
-            ProbeSpec(center_frequency=np.float32(-1.0))
+        with pytest.raises(ValueError, match="probe_center_frequency"):
+            ProbeSpec(probe_center_frequency=np.float32(-1.0))
 
-    def test_invalid_bandwidth_percent_raises(self):
-        with pytest.raises(ValueError, match="bandwidth_percent"):
-            ProbeSpec(bandwidth_percent=np.float32(0.0))
-        with pytest.raises(ValueError, match="bandwidth_percent"):
-            ProbeSpec(bandwidth_percent=np.float32(-10.0))
+    def test_invalid_probe_bandwidth_percent_raises(self):
+        with pytest.raises(ValueError, match="probe_bandwidth_percent"):
+            ProbeSpec(probe_bandwidth_percent=np.float32(0.0))
+        with pytest.raises(ValueError, match="probe_bandwidth_percent"):
+            ProbeSpec(probe_bandwidth_percent=np.float32(-10.0))
 
     def test_invalid_element_width_raises(self):
         with pytest.raises(ValueError, match="element_width"):
@@ -1234,14 +1219,14 @@ class TestProbeSpec:
             ProbeSpec(lens_thickness=np.float32(-0.001))
 
     def test_probe_spec_from_dict(self):
-        d = {"name": "L11-4v", "type": "linear", "center_frequency": np.float32(5e6)}
+        d = {"name": "L11-4v", "type": "linear", "probe_center_frequency": np.float32(5e6)}
         probe = ProbeSpec(**d)
         assert probe.name == "L11-4v"
-        assert probe.center_frequency == pytest.approx(5e6)
+        assert probe.probe_center_frequency == pytest.approx(5e6)
 
     def test_probe_casts_float64_to_float32(self):
-        probe = ProbeSpec(center_frequency=5.208e6)  # Python float → float64 → float32
-        assert probe.center_frequency.dtype == np.float32
+        probe = ProbeSpec(probe_center_frequency=5.208e6)  # Python float → float64 → float32
+        assert probe.probe_center_frequency.dtype == np.float32
 
     def test_file_spec_probe_propagates_name(self):
         """FileSpec.probe.name is accessible when probe dict is given."""
@@ -1252,7 +1237,7 @@ class TestProbeSpec:
             probe={
                 "name": "test_probe",
                 "type": "phased",
-                "center_frequency": np.float32(3e6),
+                "probe_center_frequency": np.float32(3e6),
             },
         )
         assert spec.probe.name == "test_probe"
@@ -1280,8 +1265,8 @@ class TestProbeSpec:
             probe={
                 "name": "verasonics_l11_4v",
                 "type": "linear",
-                "center_frequency": np.float32(5.208e6),
-                "bandwidth_percent": np.float32(67.0),
+                "probe_center_frequency": np.float32(5.208e6),
+                "probe_bandwidth_percent": np.float32(67.0),
                 "element_width": np.float32(0.27e-3),
             },
         )
@@ -1296,8 +1281,8 @@ class TestProbeSpec:
         assert loaded.probe is not None
         assert isinstance(loaded.probe, ProbeSpec)
         assert loaded.probe.type == "linear"
-        assert loaded.probe.center_frequency == pytest.approx(5.208e6, rel=1e-4)
-        assert loaded.probe.bandwidth_percent == pytest.approx(67.0)
+        assert loaded.probe.probe_center_frequency == pytest.approx(5.208e6, rel=1e-4)
+        assert loaded.probe.probe_bandwidth_percent == pytest.approx(67.0)
 
     def test_file_create_with_probe_dict(self, tmp_path):
         """File.create accepts a probe dict and stores probe group + probe_name attr."""
@@ -1313,7 +1298,7 @@ class TestProbeSpec:
             probe={
                 "name": "my_probe",
                 "type": "linear",
-                "center_frequency": np.float32(7.5e6),
+                "probe_center_frequency": np.float32(7.5e6),
             },
         )
 

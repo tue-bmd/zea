@@ -774,13 +774,13 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - –
            - Probe geometry type (linear, phased, curved, ...).
            - |badge-opt|
-         * - ``center_frequency``
+         * - ``probe_center_frequency``
            - ``float32``
            - scalar
            - Hz
            - Probe nominal centre frequency.
            - |badge-opt|
-         * - ``bandwidth_percent``
+         * - ``probe_bandwidth_percent``
            - ``float32``
            - scalar
            - %

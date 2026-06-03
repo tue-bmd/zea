@@ -16,7 +16,7 @@ A small set of probes is pre-defined and can be retrieved by name:
 
     >>> from zea import Probe
     >>> probe = Probe.from_name("verasonics_l11_4v")
-    >>> probe.center_frequency
+    >>> probe.probe_center_frequency
     np.float32(6250000.0)
     >>> probe.n_el
     128
@@ -64,7 +64,7 @@ is left as ``None``:
     >>> probe = Probe(
     ...     name="my_probe",
     ...     type="linear",
-    ...     center_frequency=np.float32(5e6),
+    ...     probe_center_frequency=np.float32(5e6),
     ...     probe_geometry=create_probe_geometry(n_el=64, pitch=0.3e-3),
     ... )
     >>> probe.n_el
@@ -149,8 +149,16 @@ def create_probe_geometry(n_el, pitch):
 
 
 class Probe(ProbeSpec):
+    # These are not converted to Parameters object
+    _NON_PARAMETERS = ("name", "type")
+
     def get_parameters(self):
-        return {key: getattr(self, key) for key in self.SCHEMA}
+        """Return a dict of the probe parameters."""
+        return {
+            key: getattr(self, key)
+            for key in self.SCHEMA
+            if getattr(self, key) is not None and key not in Probe._NON_PARAMETERS
+        }
 
     def __repr__(self) -> str:
         parts = []
@@ -161,10 +169,10 @@ class Probe(ProbeSpec):
         if self.probe_geometry is not None:
             n_el = self.probe_geometry.shape[0]
             parts.append(f"n_el={n_el}")
-        if self.center_frequency is not None:
-            parts.append(f"fc={float(self.center_frequency) / 1e6:.2f} MHz")
-        if self.bandwidth_percent is not None:
-            parts.append(f"bw={float(self.bandwidth_percent):.1f}%")
+        if self.probe_center_frequency is not None:
+            parts.append(f"fc={float(self.probe_center_frequency) / 1e6:.2f} MHz")
+        if self.probe_bandwidth_percent is not None:
+            parts.append(f"bw={float(self.probe_bandwidth_percent):.1f}%")
         if self.element_width is not None:
             parts.append(f"pitch={float(self.element_width) * 1e3:.3f} mm")
         return f"Probe({', '.join(parts)})"
@@ -190,17 +198,6 @@ class Probe(ProbeSpec):
         """Convert the attributes in the object to tensors."""
         # TODO: merge this with Parameters.to_tensor()
         return dict_to_tensor(self.get_parameters(), keep_as_is=keep_as_is)
-
-    @staticmethod
-    def _legacy_int_to_float(value):
-        if isinstance(value, int):
-            return np.float32(value)
-        elif isinstance(value, np.ndarray) and np.issubdtype(value.dtype, np.integer):
-            return value.astype(np.float32)
-        elif np.isscalar(value) and isinstance(value, (int, np.integer)):
-            return np.float32(value)
-        else:
-            return value
 
     @staticmethod
     def get_pitch(probe_geometry: np.ndarray) -> float | None:
@@ -260,28 +257,6 @@ class Probe(ProbeSpec):
             return self.pitch - self.element_width
         return None
 
-    def __post_init__(self):
-        # Legacy file support: HDF5 files may store float fields as integers,
-        # and scalar fields as 1-element arrays.
-        _scalar_float_fields = (
-            "center_frequency",
-            "bandwidth_percent",
-            "element_width",
-            "element_height",
-            "lens_sound_speed",
-            "lens_thickness",
-        )
-        for _field in _scalar_float_fields:
-            _val = getattr(self, _field, None)
-            if _val is not None:
-                if isinstance(_val, np.ndarray) and _val.size == 1:
-                    _val = _val.ravel()[0]
-                setattr(self, _field, self._legacy_int_to_float(_val))
-        _val = getattr(self, "probe_geometry", None)
-        if _val is not None:
-            setattr(self, "probe_geometry", self._legacy_int_to_float(_val))
-        super().__post_init__()
-
 
 @probe_registry(name="verasonics_l11_4v")
 class Verasonics_l11_4v(Probe):
@@ -292,13 +267,13 @@ class Verasonics_l11_4v(Probe):
 
         probe_geometry = create_probe_geometry(n_el=128, pitch=0.3e-3)
         center_frequency = 6.25e6
-        bandwidth_percent = (11 - 4) * 100 / (center_frequency / 1e6)
+        probe_bandwidth_percent = (11 - 4) * 100 / (center_frequency / 1e6)
 
         super().__init__(
             name="verasonics_l11_4v",
             type="linear",
-            center_frequency=center_frequency,
-            bandwidth_percent=bandwidth_percent,
+            probe_center_frequency=center_frequency,
+            probe_bandwidth_percent=probe_bandwidth_percent,
             probe_geometry=probe_geometry,
         )
 
@@ -312,7 +287,7 @@ class Verasonics_l11_5v(Probe):
 
         probe_geometry = create_probe_geometry(n_el=128, pitch=0.3e-3)
         center_frequency = 6.25e6
-        bandwidth_percent = (11 - 5) * 100 / (center_frequency / 1e6)
+        probe_bandwidth_percent = (11 - 5) * 100 / (center_frequency / 1e6)
 
         # elevation_focus = 18e-3
         # sensitivity = -52 +/- 3 dB
@@ -320,8 +295,8 @@ class Verasonics_l11_5v(Probe):
         super().__init__(
             name="verasonics_l11_5v",
             type="linear",
-            center_frequency=center_frequency,
-            bandwidth_percent=bandwidth_percent,
+            probe_center_frequency=center_frequency,
+            probe_bandwidth_percent=probe_bandwidth_percent,
             probe_geometry=probe_geometry,
         )
 
@@ -338,12 +313,12 @@ class Esaote_sll1543(Probe):
 
         probe_geometry = create_probe_geometry(n_el=192, pitch=0.245 / 1e3)
         center_frequency = 8e6
-        bandwidth_percent = (13 - 3) * 100 / (center_frequency / 1e6)
+        probe_bandwidth_percent = (13 - 3) * 100 / (center_frequency / 1e6)
 
         super().__init__(
             name="esaote_sll1543",
             type="linear",
-            center_frequency=center_frequency,
-            bandwidth_percent=bandwidth_percent,
+            probe_center_frequency=center_frequency,
+            probe_bandwidth_percent=probe_bandwidth_percent,
             probe_geometry=probe_geometry,
         )

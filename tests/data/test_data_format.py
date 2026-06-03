@@ -229,21 +229,19 @@ def test_custom_map(tmp_hdf5_path):
 
 
 @pytest.fixture
-def _scan_and_probe(tmp_path):
-    """Return a minimal Scan + Probe pair by round-tripping through generate_example_dataset."""
-    from zea.data.file import load_file
-
-    path = tmp_path / "_scan_probe_helper.hdf5"
+def _parameters(tmp_path):
+    """Return a Parameters object loaded via File.load_parameters()."""
+    path = tmp_path / "_parameters_helper.hdf5"
     generate_example_dataset(path, n_frames=n_frames, n_tx=n_tx, n_el=n_el, n_ax=n_ax)
-    data_dict, scan, probe = load_file(path)
-    return scan, probe
+    with File(path) as f:
+        parameters = f.load_parameters()
+    return parameters
 
 
-def test_save_file_custom_maps(tmp_hdf5_path, _scan_and_probe):
+def test_save_file_custom_maps(tmp_hdf5_path, _parameters):
     """Tests that save_file correctly stores custom spatial maps in the data group."""
     import warnings
 
-    scan, probe = _scan_and_probe
     custom_values = np.zeros((n_frames, 32, 32, 1), dtype=np.uint8)
     custom_coordinates = np.zeros((n_frames, 32, 32, 3), dtype=np.float32)
 
@@ -251,8 +249,7 @@ def test_save_file_custom_maps(tmp_hdf5_path, _scan_and_probe):
         warnings.simplefilter("ignore")
         save_file(
             path=tmp_hdf5_path,
-            scan=scan,
-            probe=probe,
+            parameters=_parameters,
             raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
             custom_maps={
                 "my_overlay": {
@@ -268,14 +265,11 @@ def test_save_file_custom_maps(tmp_hdf5_path, _scan_and_probe):
         np.testing.assert_array_equal(f.data.my_overlay.coordinates[:], custom_coordinates)
 
 
-def test_save_file_custom_metadata(tmp_hdf5_path, _scan_and_probe):
+def test_save_file_custom_metadata(tmp_hdf5_path, _parameters):
     """Tests that save_file correctly stores metadata in the metadata group."""
-    scan, probe = _scan_and_probe
-
     save_file(
         path=tmp_hdf5_path,
-        scan=scan,
-        probe=probe,
+        parameters=_parameters,
         raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
         metadata={
             "credit": "Test Lab, 2024",
@@ -299,27 +293,3 @@ def test_validate_input_data_docstring():
     doc = validate_input_data.__doc__
     assert "If a dict" not in doc, "docstring must not advertise dict support"
     assert "ndarray" in doc, "docstring must say ndarray"
-
-
-def test_bandwidth_percent_warns(tmp_path):
-    """generate_zea_dataset must emit a UserWarning when bandwidth_percent is
-    passed, so callers know the value will be dropped."""
-    from zea.data.data_format import generate_zea_dataset
-
-    n_tx, n_el = 4, 16
-    raw = np.zeros((2, n_tx, 32, n_el, 1), dtype=np.float32)
-
-    path = tmp_path / "bw.hdf5"
-    with pytest.warns(UserWarning, match="bandwidth_percent"):
-        generate_zea_dataset(
-            path=str(path),
-            raw_data=raw,
-            probe_geometry=np.zeros((n_el, 3), dtype=np.float32),
-            sampling_frequency=40e6,
-            center_frequency=7e6,
-            demodulation_frequency=7e6,
-            initial_times=np.zeros(n_tx, dtype=np.float32),
-            t0_delays=np.zeros((n_tx, n_el), dtype=np.float32),
-            probe_name="generic",
-            bandwidth_percent=60.0,
-        )

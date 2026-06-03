@@ -67,7 +67,7 @@ def flatten_schema_keys(schema, prefix=""):
     if isinstance(schema, dict):
         for k, v in schema.items():
             if isinstance(k, Optional):
-                key = k.key
+                key = getattr(k, "schema", getattr(k, "key", k))
             else:
                 key = k
             full = f"{prefix}.{key}" if prefix else str(key)
@@ -232,6 +232,13 @@ control data loading, preprocessing, model settings, and scan parameters.
   Configs are used to initialize :doc:`zea.Models <models>` and the :doc:`pipeline`.
   For the data format and file I/O, see :doc:`data-acquisition`.
 
+.. note::
+  The ``parameters`` section is a flat mapping that overrides values loaded from the
+  data file. It mirrors :class:`zea.Parameters` (the merged :class:`zea.Probe` and scan
+  parameters — see :doc:`data-acquisition`), and may additionally contain arbitrary
+  custom parameters that are passed straight through to the pipeline. The documented
+  reconstruction keys below are the most common ones, but they are not exhaustive.
+
 Configs are written in YAML format and can be loaded, edited, and saved using the ``zea`` API.
 
 -------------------------------
@@ -254,9 +261,9 @@ Here is a minimal example of how to load and save a config file using zea:
     >>> config = check_config(config)
 
     >>> # Access or change parameters
-    >>> config.scan.sampling_frequency = 8e6
-    >>> print(config.scan.sampling_frequency)
-    8000000.0
+    >>> config.parameters.grid_size_x = 512
+    >>> print(config.parameters.grid_size_x)
+    512
 
     >>> # Save the config back to file
     >>> config.to_yaml("my_new_config.yaml")

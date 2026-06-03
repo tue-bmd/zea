@@ -937,7 +937,6 @@ class VerasonicsFile(h5py.File):
         )
 
         return {
-            "probe_geometry": self.probe.geometry,
             "time_to_next_transmit": time_to_next_transmit,
             "t0_delays": t0_delays,
             "tx_apodizations": tx_apodizations,
@@ -953,7 +952,6 @@ class VerasonicsFile(h5py.File):
             "waveforms_one_way": waveforms_one_way,
             "waveforms_two_way": waveforms_two_way,
             "tgc_gain_curve": self.tgc_gain_curve,
-            "element_width": self.probe.element_width,
         }
 
     def read_verasonics_file(
@@ -1139,14 +1137,15 @@ class VerasonicsFile(h5py.File):
         # Generate the zea dataset
         log.info("Generating zea dataset...")
         compression = DEFAULT_COMPRESSION if enable_compression else None
-        File.create(
+        f = File.create(
             path=output_path,
             data=data_dict,
             scan=scan_dict,
-            probe={"name": self.probe.name},
+            probe=self.probe.to_probe_spec(),
             description="Verasonics data",
             compression=compression,
         )
+        f.close()
 
         if additional_elements:
             _write_user_additional_elements_to_file(output_path, additional_elements)
@@ -1220,7 +1219,15 @@ class VerasonicsProbe:
     def bandwidth(self):
         """Bandwidth of the probe: -6dB lower and upper cutoff pts in Hz."""
         if "Bandwidth" in self.trans_obj.keys():
-            return self.trans_obj["Bandwidth"][:].item() * 1e6
+            return self.trans_obj["Bandwidth"][:].squeeze() * 1e6
+
+    @property
+    def bandwidth_percent(self):
+        """Bandwidth of the probe as a percentage of the center frequency."""
+        if self.bandwidth is not None:
+            assert self.bandwidth[1] > self.bandwidth[0], "Bandwidth must be positive"
+            diff = self.bandwidth[1] - self.bandwidth[0]
+            return 100 * (diff / self.center_frequency)
 
     @property
     def type(self):
@@ -1233,7 +1240,7 @@ class VerasonicsProbe:
                 3: "annular",
                 4: "row-column",
             }
-            probe_type_id = self.trans_obj["type"][:]
+            probe_type_id = int(self.trans_obj["type"][:].item())
             return _id_to_str.get(probe_type_id)
 
     @property
@@ -1276,6 +1283,17 @@ class VerasonicsProbe:
         """Checks if the probe geometry is ordered as a uniform linear array (ULA)."""
         diff_vec = self.geometry[1:] - self.geometry[:-1]
         return np.isclose(diff_vec, diff_vec[0]).all()
+
+    def to_probe_spec(self):
+        """Convert the probe to a dict compatible with :class:`~zea.data.spec.ProbeSpec`."""
+        return {
+            "name": self.name,
+            "type": self.type,
+            "probe_center_frequency": self.center_frequency,
+            "probe_bandwidth_percent": self.bandwidth_percent,
+            "probe_geometry": self.geometry,
+            "element_width": self.element_width,
+        }
 
 
 def _write_user_additional_elements(h5file, additional_elements, prefix=""):
@@ -1544,15 +1562,17 @@ def convert_verasonics(args):
                     traceback.print_exc()
 
                     continue
-                else:  # only run on success
-                    write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
 
-                    if getattr(args, "upload", False):
-                        upload_verasonics(
-                            output_path,
-                            revision=args.revision,
-                            repo_id=args.hf_repo_id,
-                        )
+        write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
+
+        if getattr(args, "upload", False):
+            assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
+            assert args.revision, "revision must be provided when --upload is True."
+            upload_verasonics(
+                output_path,
+                revision=args.revision,
+                repo_id=args.hf_repo_id,
+            )
 
 
 def upload_verasonics(

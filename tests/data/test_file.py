@@ -9,10 +9,11 @@ import pytest
 
 import zea
 from zea.data.data_format import generate_zea_dataset
-from zea.data.file import File, Track, _GroupProxy, _StringDataset, dict_to_sorted_list, load_file
-from zea.data.spec import FileSpec, Image, Segmentation
+from zea.data.file import File, Track, _GroupProxy, _StringDataset, load_file
+from zea.data.legacy_file import dict_to_sorted_list
+from zea.data.spec import FileSpec, Image, ScanSpec, Segmentation
 from zea.probes import Probe
-from zea.scan import Scan
+from zea.scan import Parameters
 
 from . import generate_example_dataset
 
@@ -110,21 +111,56 @@ def test_file_attributes():
         assert file.n_frames == FILE_N_FRAMES, "Number of frames should match expected value"
         assert file.probe.name == FILE_PROBE_NAME, "Probe name should match expected value"
         assert isinstance(file.probe, Probe), "Probe should be an instance of Probe class"
-        assert isinstance(file.scan, Scan), "Scan should be an instance of Scan class"
+        # load_parameters tolerates legacy files missing some spec fields and
+        # returns a full (derivable) Parameters object.
+        assert isinstance(file.load_parameters(), Parameters), (
+            "load_parameters should return a Parameters object"
+        )
 
         file.validate()
 
 
+def test_image_only_dataset_load_parameters(tmp_path):
+    """Image-only datasets carry no probe (or scan) group.
+
+    ``File.probe`` should return an empty Probe rather than raising, and
+    ``load_parameters`` should still return a Parameters object.
+    """
+    n_frames = 2
+    fspec = FileSpec(
+        data={
+            "image": {
+                "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+                "coordinates": np.zeros((n_frames, 16, 12, 3), dtype=np.float32),
+            },
+        },
+    )
+    path = tmp_path / "image_only.hdf5"
+    fspec.save(str(path))
+
+    with File(path) as f:
+        assert "probe" not in f.keys(), "Image-only file should have no probe group"
+        assert f.scan is None, "Image-only file should have no scan group"
+
+        probe = f.probe
+        assert isinstance(probe, Probe), "probe should be an (empty) Probe instance"
+        assert probe.get_parameters() == {}, "Empty probe should have no parameters"
+
+        assert isinstance(f.load_parameters(), Parameters), (
+            "load_parameters should return a Parameters object for image-only files"
+        )
+
+
 def test_load_file_function(dummy_file):
     """Test the load_file function."""
-
     selected_transmits = [0, 2, 4]
-    data, scan, probe = load_file(dummy_file, indices=(slice(2), selected_transmits))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        data, scan = load_file(dummy_file, indices=(slice(2), selected_transmits))
 
     assert data.shape[0] == 2, "Data should have 2 frames"
     assert data.shape[1] == 3, "Data should have 3 selected transmits"
-    assert isinstance(scan, Scan), "Scan should be an instance of Scan class"
-    assert isinstance(probe, Probe), "Probe should be an instance of Probe class"
+    assert isinstance(scan, Parameters), "load_file should return a Parameters object"
     assert scan.selected_transmits == selected_transmits, (
         "Selected transmits should match expected value"
     )
@@ -969,7 +1005,9 @@ def test_load_file_image_type(tmp_path):
         image_dtype=np.uint8,
     )
 
-    data, scan, probe = load_file(path, data_type="image")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        data, scan = load_file(path, data_type="image")
     assert isinstance(data, np.ndarray), "load_file should return ndarray for image type"
     assert data.shape[0] == 2, "should load all 2 frames"
 
@@ -1140,12 +1178,12 @@ class TestMultiTrackFile:
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
             scan = f.tracks[0].scan
-        assert isinstance(scan, Scan)
+        assert isinstance(scan, ScanSpec)
 
     def test_track_scan_kwargs_override(self, tmp_path):
         path, *_ = _make_two_track_spec(tmp_path)
         with File(path) as f:
-            scan = f.tracks[0].get_scan(sound_speed=np.float32(1480.0))
+            scan = f.tracks[0].load_parameters(sound_speed=np.float32(1480.0))
         assert float(scan.sound_speed) == pytest.approx(1480.0)
 
     def test_track_repr(self, tmp_path):
@@ -1272,7 +1310,7 @@ class TestMultiTrackFile:
 
         with File(path) as f:
             scan = f.scan
-        assert isinstance(scan, Scan)
+        assert isinstance(scan, ScanSpec)
         assert scan.n_tx == 3
 
     # ------------------------------------------------------------------
@@ -1280,7 +1318,7 @@ class TestMultiTrackFile:
     # ------------------------------------------------------------------
 
     def test_track_scan_includes_file_level_probe_geometry(self, tmp_path):
-        """probe_geometry stored in the file-level probe group is injected into track.scan."""
+        """probe_geometry from the file-level probe group is merged into track.load_parameters()."""
         n_frames, n_tx, n_el, n_ax, n_ch = 2, 3, 4, 8, 1
         geom = np.arange(n_el * 3, dtype=np.float32).reshape(n_el, 3) * 1e-3
         scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
@@ -1308,7 +1346,7 @@ class TestMultiTrackFile:
 
         with File(path) as f:
             for track in f.tracks:
-                np.testing.assert_array_equal(track.scan.probe_geometry, geom)
+                np.testing.assert_array_equal(track.load_parameters().probe_geometry, geom)
 
     def test_track_has_no_probe_attribute(self, tmp_path):
         """Track exposes no .probe attribute; probe is accessed via File.probe."""
@@ -1606,6 +1644,7 @@ class TestLegacyFileLoading:
     def test_legacy_warning_fires(self, legacy_file):
         """Opening a legacy file emits the version warning."""
         path, *_ = legacy_file
+        zea.log._warned_locations.clear()
         with patch("zea.data.file.log.warning") as mock_warn:
             with File(path):
                 pass

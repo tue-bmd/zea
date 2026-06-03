@@ -974,7 +974,6 @@ def test_verasonics_compression_flag_respected(tmp_path):
 
     n_tx, n_el = 4, 16
     scan = {
-        "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
         "sampling_frequency": np.float32(40e6),
         "center_frequency": np.float32(7e6),
         "demodulation_frequency": np.float32(7e6),
@@ -991,7 +990,7 @@ def test_verasonics_compression_flag_respected(tmp_path):
         path,
         data=data,
         scan=scan,
-        probe={"name": "generic"},
+        probe={"name": "generic", "probe_geometry": np.zeros((n_el, 3), dtype=np.float32)},
         compression=None,
     )
     f.close()

@@ -93,7 +93,6 @@ def tof_correction(
     polar_angles,
     focus_distances,
     t_peak,
-    tx_waveform_indices,
     transmit_origins,
     apply_lens_correction=False,
     lens_thickness=1e-3,
@@ -146,10 +145,7 @@ def tof_correction(
         polar_angles (Tensor): Steering angles in radians of shape ``(n_tx,)``.
         focus_distances (Tensor): Focus distances in meters of shape
             ``(n_tx,)``.  Use ``0`` or ``np.inf`` for plane-wave transmission.
-        t_peak (Tensor): Time of each waveform peak in seconds of shape
-            ``(n_waveforms,)``.
-        tx_waveform_indices (Tensor): Index into ``t_peak`` for each transmit
-            of shape ``(n_tx,)``.
+        t_peak (Tensor): Time of each waveform peak in seconds of shape ``(n_tx,)``.
         transmit_origins (Tensor): Origin of each transmit beam of shape
             ``(n_tx, 3)``.
         apply_lens_correction (bool, optional): Apply acoustic-lens correction
@@ -201,7 +197,6 @@ def tof_correction(
             focus_distances,
             polar_angles,
             t_peak,
-            tx_waveform_indices,
             transmit_origins,
             apply_lens_correction,
             lens_thickness,
@@ -224,7 +219,6 @@ def tof_correction(
             initial_times,
             sampling_frequency,
             t_peak,
-            tx_waveform_indices,
         )
         # calculate_delays_heterogeneous_medium returns txdel (n_tx, n_pix), rxdel (n_el, n_pix)
         # Transpose both to the shared convention.
@@ -232,6 +226,7 @@ def tof_correction(
         rxdel = ops.moveaxis(rxdel, 1, 0)  # -> (n_pix, n_el)
 
     # ---- F-number mask (receive aperture) ------------------------------
+    f_number = ops.cast(f_number, flatgrid.dtype)
     mask = ops.cond(
         f_number == 0,
         lambda: ops.ones((n_pix, n_el, 1)),
@@ -333,7 +328,6 @@ def calculate_delays(
     focus_distances,
     polar_angles,
     t_peak,
-    tx_waveform_indices,
     transmit_origins,
     apply_lens_correction=False,
     lens_thickness=None,
@@ -366,10 +360,7 @@ def calculate_delays(
             Use ``0`` or ``np.inf`` for plane-wave transmission.
         polar_angles (Tensor): Polar steering angles in radians of shape
             ``(n_tx,)``.
-        t_peak (Tensor): Waveform peak times in seconds of shape
-            ``(n_waveforms,)``.
-        tx_waveform_indices (Tensor): Index into ``t_peak`` for each transmit
-            of shape ``(n_tx,)``.
+        t_peak (Tensor): Waveform peak times in seconds of shape ``(n_tx,)``.
         transmit_origins (Tensor): Origin of each transmit beam of shape
             ``(n_tx, 3)``.
         apply_lens_correction (bool, optional): Apply acoustic-lens
@@ -422,7 +413,10 @@ def calculate_delays(
     )
 
     # Add the offset to the transmit peak time
-    tx_delays += ops.take(t_peak, tx_waveform_indices)[None]
+    assert t_peak.shape == (tx_delays.shape[1],), (
+        f"Expected t_peak to have shape n_tx={(tx_delays.shape[1],)}, got {t_peak.shape}."
+    )
+    tx_delays += t_peak[None]
 
     # TODO: nan to num needed?
     # tx_delays = ops.nan_to_num(tx_delays, nan=0.0, posinf=0.0, neginf=0.0)
@@ -743,7 +737,6 @@ def calculate_delays_heterogeneous_medium(
     initial_times,
     sampling_frequency,
     t_peak,
-    tx_waveform_indices,
     n_ray_points=100,
 ):
     """Compute delays using a spatially-varying speed-of-sound map.
@@ -780,9 +773,7 @@ def calculate_delays_heterogeneous_medium(
         probe_geometry (Tensor): Element positions of shape ``(n_el, 3)``.
         initial_times (Tensor): Per-transmit time offsets of shape ``(n_tx,)``.
         sampling_frequency (float): Sampling frequency in Hz.
-        t_peak (Tensor): Waveform peak times of shape ``(n_waveforms,)``.
-        tx_waveform_indices (Tensor): Index into ``t_peak`` for each transmit
-            of shape ``(n_tx,)``.
+        t_peak (Tensor): Waveform peak times of shape ``(n_tx,)``.
         n_ray_points (int, optional): Number of integration points along
             each element-to-pixel ray.  Higher values improve accuracy at
             the cost of computation time.  Defaults to ``100``.
@@ -850,6 +841,10 @@ def calculate_delays_heterogeneous_medium(
     count = ops.cast(ops.sum(valid_mask, axis=1), masked_sum.dtype)
     mean_slowness = masked_sum / (count + 1e-9)
 
+    assert t_peak.shape == (n_tx,), (
+        f"Expected t_peak to have shape (n_tx,)=({n_tx},), got {t_peak.shape}."
+    )
+
     tof = mean_slowness * ray_lengths
     rx_delays = tof * sampling_frequency
     tx_delays = (
@@ -859,6 +854,6 @@ def calculate_delays_heterogeneous_medium(
         - initial_times[:, None]
         # can take diag because of the multistatic assumption (n_tx == n_el)
         + ops.diag(t0_delays)[:, None]
-        + ops.take(t_peak, tx_waveform_indices)[:, None]
+        + t_peak[:, None]
     ) * sampling_frequency
     return tx_delays, rx_delays

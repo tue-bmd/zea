@@ -39,13 +39,8 @@ def check_dtype(value: Any, expected_dtype: List[type]) -> None:
     Works for numpy arrays, numpy scalars, and Python native types.
     """
     for dt in expected_dtype:
-        try:
+        if isinstance(dt, type) and issubclass(dt, np.generic):
             expected_np_dtype = np.dtype(dt)
-            is_numpy_dtype = True
-        except TypeError:
-            is_numpy_dtype = False
-
-        if is_numpy_dtype:
             if hasattr(value, "dtype"):
                 if np.issubdtype(value.dtype, expected_np_dtype):
                     return
@@ -211,22 +206,7 @@ class Spec:
     ) -> "Spec":
         """Validate a nested spec field, recursively validating its contents."""
         if isinstance(field_value, dict):
-            # Try constructing the nested spec directly.  For backward compatibility,
-            # if unknown keyword arguments are present (e.g. n_el / pitch stored
-            # in the probe group of old HDF5 files, or probe_geometry in the scan
-            # group), retry with only the fields known to this spec.  We intentionally
-            # do NOT filter unconditionally because specs such as DataSpec and
-            # MetadataSpec legitimately accept extra keys via their custom __init__.
-            try:
-                field_value = nested_spec(**field_value)
-            except TypeError as _exc:
-                if "unexpected keyword argument" in str(_exc):
-                    known_fields = {f.name for f in fields(nested_spec)}
-                    field_value = nested_spec(
-                        **{k: v for k, v in field_value.items() if k in known_fields}
-                    )
-                else:
-                    raise
+            field_value = nested_spec(**field_value)
             setattr(self, field_name, field_value)
 
         # Check that the nested spec field is now an instance of the expected Spec subclass
@@ -273,6 +253,12 @@ class Spec:
                 return value.astype(expected_float_dtype, copy=False)
 
             return value
+
+        # If the spec expects a native Python type and the value already matches it,
+        # keep it as-is instead of converting to a numpy scalar.
+        for dt in expected_dtype:
+            if isinstance(dt, type) and not issubclass(dt, np.generic) and isinstance(value, dt):
+                return value
 
         for dt in expected_dtype:
             try:
@@ -475,6 +461,8 @@ class Spec:
 
         for field_name, field_info in self.SCHEMA.items():
             value = getattr(self, field_name)
+
+            # We do not store fields with value None in the file.
             if value is None:
                 continue
 
@@ -1305,8 +1293,11 @@ class ProbeSpec(Spec):
     Args:
         name: Probe model identifier (e.g. ``"verasonics_l11_4v"``).
         type: Probe geometry type: ``"linear"``, ``"phased"``, ``"curved"``, etc.
-        center_frequency: Probe nominal centre frequency in Hz.
-        bandwidth_percent: Fractional bandwidth as a percentage.
+        probe_center_frequency: Probe nominal centre frequency in Hz. Named
+            distinctly from :attr:`ScanSpec.center_frequency` (the per-acquisition
+            transmit frequency) so the two never collide when merged into a single
+            :class:`zea.Parameters` object.
+        probe_bandwidth_percent: Fractional bandwidth as a percentage.
         probe_geometry: Element positions in metres, shape (n_el, 3) with columns
             (x, y, z).  :attr:`n_el` and :attr:`pitch` are computed
             automatically as read-only properties from this array.
@@ -1318,8 +1309,8 @@ class ProbeSpec(Spec):
 
     name: str | None = None
     type: str | None = None
-    center_frequency: np.float32 | None = None
-    bandwidth_percent: np.float32 | None = None
+    probe_center_frequency: np.float32 | None = None
+    probe_bandwidth_percent: np.float32 | None = None
     probe_geometry: np.ndarray | None = None
     element_width: np.float32 | None = None
     element_height: np.float32 | None = None
@@ -1329,8 +1320,8 @@ class ProbeSpec(Spec):
     SCHEMA = {
         "name": {"dtype": str, "shape": ()},
         "type": {"dtype": str, "shape": ()},
-        "center_frequency": {"dtype": np.float32, "shape": ()},
-        "bandwidth_percent": {"dtype": np.float32, "shape": ()},
+        "probe_center_frequency": {"dtype": np.float32, "shape": ()},
+        "probe_bandwidth_percent": {"dtype": np.float32, "shape": ()},
         "probe_geometry": {"dtype": np.float32, "shape": ("n_el", 3)},
         "element_width": {"dtype": np.float32, "shape": ()},
         "element_height": {"dtype": np.float32, "shape": ()},
@@ -1341,11 +1332,11 @@ class ProbeSpec(Spec):
     FIELD_METADATA = {
         "name": {"description": "Probe model name/identifier."},
         "type": {"description": "Probe geometry type (linear, phased, curved, ...)."},
-        "center_frequency": {
+        "probe_center_frequency": {
             "unit": "Hz",
             "description": "Probe nominal centre frequency.",
         },
-        "bandwidth_percent": {
+        "probe_bandwidth_percent": {
             "unit": "%",
             "description": "Fractional bandwidth as a percentage.",
         },
@@ -1392,13 +1383,15 @@ class ProbeSpec(Spec):
                     "ProbeSpec probe_geometry values extend beyond \u00b11.0 m. "
                     "Please verify the values are in metres."
                 )
-        if self.center_frequency is not None and self.center_frequency <= 0:
+        if self.probe_center_frequency is not None and self.probe_center_frequency <= 0:
             raise ValueError(
-                f"ProbeSpec: center_frequency must be positive, got {self.center_frequency}"
+                "ProbeSpec: probe_center_frequency must be positive, got "
+                f"{self.probe_center_frequency}"
             )
-        if self.bandwidth_percent is not None and self.bandwidth_percent <= 0:
+        if self.probe_bandwidth_percent is not None and self.probe_bandwidth_percent <= 0:
             raise ValueError(
-                f"ProbeSpec: bandwidth_percent must be positive, got {self.bandwidth_percent}"
+                "ProbeSpec: probe_bandwidth_percent must be positive, "
+                f"got {self.probe_bandwidth_percent}"
             )
         if self.element_width is not None and self.element_width <= 0:
             raise ValueError(f"ProbeSpec: element_width must be positive, got {self.element_width}")
@@ -2106,7 +2099,7 @@ class FileSpec(Spec):
     def from_hdf5(cls, file: h5py.File) -> "FileSpec":
         """Load and validate a :class:`FileSpec` from an open HDF5 file.
 
-        Both the new ``tracks/track_N/`` format and the legacy flat
+        Both the new ``tracks/track_N/`` format and the normal flat
         ``data/`` + ``scan/`` format are supported.  Extra scalar fields in
         legacy scan groups (``n_frames``, ``n_tx``, etc.) are ignored,
         and the ``probe`` root attribute is mapped to ``probe.name``.

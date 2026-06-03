@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, List, Tuple, Union
 
 import h5py
 import numpy as np
-from keras.utils import pad_sequences
 
 import zea
 from zea import log
+from zea.data.legacy_file import legacy_probe, legacy_scan
 from zea.data.spec import (
     DEFAULT_COMPRESSION,
     DataSpec,
@@ -22,11 +22,11 @@ from zea.data.spec import (
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
-from zea.internal.utils import deprecated, reduce_to_signature
-from zea.scan import Scan
+from zea.internal.utils import deprecated
 
 if TYPE_CHECKING:
     from zea.probes import Probe
+    from zea.scan import Parameters
 
 
 class _StringDataset:
@@ -128,16 +128,17 @@ def assert_key(file: h5py.File, key: str):
 class Track:
     """A single acquisition track within a :class:`File`.
 
-    Provides the same ``.data`` and ``.scan()`` interface as :class:`File`
-    but scoped to one ``tracks/track_N`` group.  Obtain instances through
-    :attr:`File.tracks` rather than constructing this class directly.
+    Provides the same ``.data``, ``.scan`` and ``.load_parameters()`` interface
+    as :class:`File` but scoped to one ``tracks/track_N`` group.  Obtain
+    instances through :attr:`File.tracks` rather than constructing this class
+    directly.
 
     Example::
 
         with File("multi_track.hdf5") as f:
             for track in f.tracks:
                 raw = track.data.raw_data[:]
-                scan = track.scan
+                parameters = track.load_parameters()
     """
 
     __slots__ = ("_index", "_group", "_timestamps", "_label", "_probe")
@@ -167,25 +168,11 @@ class Track:
         return _GroupProxy(self._group["data"])
 
     @property
-    def scan(self) -> "Scan":
-        """Returns a :class:`~zea.scan.Scan` built from this track's scan parameters.
+    def scan(self) -> "ScanSpec":
+        """Return the validated :class:`~zea.data.spec.ScanSpec` for this track.
 
-        For parameter overrides use :meth:`get_scan` directly.
-
-        Returns:
-            Scan: Initialised scan object for this track.
-        """
-        return self.get_scan()
-
-    def get_scan(self, safe: bool = True, **kwargs) -> "Scan":
-        """Build a :class:`~zea.scan.Scan` from this track's scan parameters.
-
-        Args:
-            safe: If ``True`` (default) only known Scan parameters are forwarded.
-            **kwargs: Override any scan parameter.
-
-        Returns:
-            Scan: Initialised scan object for this track.
+        This is the bare scan group as a spec object.  For a full, derivable
+        parameter object (merged probe + scan) use :meth:`load_parameters`.
         """
         if "scan" not in self._group:
             raise KeyError(
@@ -193,26 +180,80 @@ class Track:
                 f"Available keys: {list(self._group.keys())}"
             )
         scan_dict = load_dict_from_hdf5_group(self._group["scan"])
-        scan_dict = check_focus_distances(scan_dict)
-        # Collect probe-level fields (probe_geometry etc.) to inject AFTER the
-        # ScanSpec filter inside build_scan_from_dict, mirroring File.get_scan().
-        probe_supplements: "dict | None" = None
-        if self._probe is not None:
-            _PROBE_FIELDS = {
-                "probe_geometry",
-                "element_width",
-                "lens_sound_speed",
-                "lens_thickness",
-            }
-            probe_supplements = {k: v for k, v in self._probe.items() if k in _PROBE_FIELDS}
-        data_group = self._group["data"] if "data" in self._group else None
-        return build_scan_from_dict(
-            scan_dict,
-            data_group=data_group,
-            safe=safe,
-            probe_supplements=probe_supplements,
-            **kwargs,
+
+        return ScanSpec(**scan_dict)
+
+    @property
+    def n_frames(self) -> int:
+        """Number of frames."""
+        return _shape_from_data_group(
+            self._group["data"],
+            index=0,
+            name="n_frames",
+            requires_raw=False,
         )
+
+    @property
+    def n_tx(self) -> int:
+        """Number of transmit events."""
+        return _shape_from_data_group(
+            self._group["data"],
+            index=1,
+            name="n_tx",
+            requires_raw=True,
+        )
+
+    @property
+    def n_ax(self) -> int:
+        """Number of axial samples."""
+        return _shape_from_data_group(
+            self._group["data"],
+            index=2,
+            name="n_ax",
+            requires_raw=True,
+        )
+
+    @property
+    def n_el(self) -> int:
+        """Number of elements."""
+        return _shape_from_data_group(
+            self._group["data"],
+            index=3,
+            name="n_el",
+            requires_raw=True,
+        )
+
+    def load_parameters(self, **overrides) -> "Parameters":
+        """Load this track's parameters (merged probe + scan) as :class:`~zea.Parameters`.
+
+        Each track shares the same probe but has its own scan, so the returned
+        object has the same shape as :meth:`File.load_parameters` for a
+        single-track file.
+
+        Args:
+            **overrides: Override any parameter.
+
+        Returns:
+            Parameters: Initialised parameters object for this track.
+        """
+        from zea.scan import Parameters
+
+        if "scan" not in self._group:
+            raise KeyError(
+                f"Track {self._index} has no 'scan' group. "
+                f"Available keys: {list(self._group.keys())}"
+            )
+
+        scan = self.scan
+        scan_dict = scan.to_dict()
+        other_dict = {
+            "n_ax": self.n_ax,
+            "n_el": scan.n_el,
+            "n_tx": scan.n_tx,
+        }
+        merged_dict = {**self._probe, **scan_dict, **other_dict, **overrides}
+
+        return Parameters(**merged_dict)
 
     @property
     def label(self) -> "str | None":
@@ -267,87 +308,56 @@ def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
     return ans
 
 
-def check_focus_distances(scan_parameters: dict) -> dict:
-    """Warn and auto-convert focus distances stored in wavelengths to metres.
+def _get_data_array_shape(data_group: "h5py.Group") -> "tuple | None":
+    """Return the shape one of the data arrays in *data_group*.
 
-    Some older files store ``focus_distances`` in wavelengths rather than
-    metres.  This helper detects the pattern (values ≥ 1 and ≠ ``inf``) and
-    converts them using ``sound_speed / center_frequency``.
+    Checks flat datasets first (e.g., ``raw_data``).
+    Then looks for the first spatial map group (e.g., ``image``) containing a ``values``
+    dataset and returns its shape.
 
-    Args:
-        scan_parameters: Raw scan parameter dict loaded from HDF5.
-
-    Returns:
-        dict: The same dict, with ``focus_distances`` converted when needed.
+    Returns ``None`` if neither is found.
     """
-    if "focus_distances" in scan_parameters:
-        focus_distances = scan_parameters["focus_distances"]
-        if np.any(np.logical_and(focus_distances >= 1, focus_distances != np.inf)):
-            log.warning(
-                "We have detected that focus distances are (probably) stored in "
-                "wavelengths. Please update your file! "
-                "Converting to metres automatically for now, but this assumes that "
-                "`center_frequency` is the probe centre frequency which is not always "
-                "the case!"
-            )
-            assert "sound_speed" in scan_parameters, (
-                "Cannot convert focus distances from wavelengths to metres "
-                "because sound_speed is not defined in the scan parameters."
-            )
-            assert "center_frequency" in scan_parameters, (
-                "Cannot convert focus distances from wavelengths to metres "
-                "because center_frequency is not defined in the scan parameters."
-            )
-            wavelength = scan_parameters["sound_speed"] / scan_parameters["center_frequency"]
-            scan_parameters["focus_distances"] = focus_distances * wavelength
-    return scan_parameters
+    flat_datasets = [k for k in data_group if isinstance(data_group[k], h5py.Dataset)]
+    spatial_map_groups = [k for k in data_group if isinstance(data_group[k], h5py.Group)]
+
+    has_raw_data = False
+
+    # first check for one of the recognized data arrays
+    for key in _DATA_TYPES:
+        if key in flat_datasets:
+            if key == "raw_data":
+                has_raw_data = True
+            return data_group[key].shape, has_raw_data
+        if key in spatial_map_groups:
+            group = data_group[key]
+            if "values" in group and isinstance(group["values"], h5py.Dataset):
+                return group["values"].shape, has_raw_data
+
+    # if none of the arrays are found under their expected names,
+    # look for any other dataset
+    for key in flat_datasets:
+        return data_group[key].shape, has_raw_data
+
+    for key in spatial_map_groups:
+        group = data_group[key]
+        if "values" in group and isinstance(group["values"], h5py.Dataset):
+            return group["values"].shape, has_raw_data
+
+    return None, has_raw_data
 
 
-def build_scan_from_dict(
-    scan_dict: dict,
-    data_group: "h5py.Group | None" = None,
-    safe: bool = True,
-    probe_supplements: "dict | None" = None,
-    **kwargs,
-) -> "Scan":
-    """Build a :class:`~zea.scan.Scan` from a raw parameter dictionary.
+def _shape_from_data_group(
+    data_group: "h5py.Group", index: int, name: str = "", requires_raw: bool = False
+) -> int:
+    shape, has_raw_data = _get_data_array_shape(data_group)
+    if requires_raw and not has_raw_data:
+        raise TypeError(f"`{name}` is only available if the file contains a `raw_data` dataset")
 
-    Args:
-        scan_dict: Raw scan parameters loaded from HDF5.
-        data_group: Optional HDF5 data group used to derive ``n_ax`` from
-            ``raw_data`` when it cannot be inferred from the scan spec.
-        safe: Forwarded to :meth:`~zea.scan.Scan.merge`.
-        probe_supplements: Optional dict of probe-level fields (e.g.
-            ``probe_geometry``) to inject into the scan dict *after* the
-            :class:`~zea.data.spec.ScanSpec` filter — these fields live in
-            :class:`~zea.data.spec.ProbeSpec` and would otherwise be stripped.
-        **kwargs: Override any scan parameter.
-
-    Returns:
-        Scan: Initialised scan object.
-    """
-    scan_spec_keys = set(ScanSpec.SCHEMA.keys())
-    filtered = {k: v for k, v in scan_dict.items() if k in scan_spec_keys}
-
-    try:
-        scan_spec = ScanSpec(**filtered)
-        scan_dict = scan_spec.to_dict()
-        scan_dict["n_el"] = scan_spec.n_el
-        scan_dict["n_tx"] = scan_spec.n_tx
-        if scan_spec.tgc_gain_curve is not None:
-            scan_dict["n_ax"] = len(scan_spec.tgc_gain_curve)
-        elif data_group is not None and "raw_data" in data_group:
-            scan_dict["n_ax"] = data_group["raw_data"].shape[2]
-    except (TypeError, ValueError) as exc:
-        log.debug(f"ScanSpec validation skipped: {exc}. Using raw scan parameters from file.")
-
-    # Re-inject probe-level fields that were stripped by the ScanSpec filter.
-    if probe_supplements:
-        for _field, _value in probe_supplements.items():
-            if _field not in scan_dict or scan_dict.get(_field) is None:
-                scan_dict[_field] = _value
-
-    return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
+    if shape is None:
+        raise TypeError(
+            f"Cannot determine `{name}`, no recognized data arrays found in the data group."
+        ) from None
+    return shape[index]
 
 
 def _compute_all_track_timestamps(
@@ -429,11 +439,12 @@ def _warn_if_legacy_file(file: "File") -> None:
     version = file.attrs.get("zea_version", None)
     if version is None or _parse_version(version) < (0, 1, 0):
         legacy_version = version if version is not None else "<0.1.0"
-        log.warning(
+        log.warning_once(
             f"This ``zea.File`` '{file.filename}' was created with a legacy version of "
             f"zea ({legacy_version}), while you are using zea v{zea.__version__}. "
             "It may behave in unexpected ways. Install an earlier version of zea<0.1.0 for full "
-            "compatibility or re-save the file with zea v0.1.0 or later (e.g. via File.create)."
+            "compatibility or re-save the file with zea v0.1.0 or later (e.g. via File.create).",
+            key=file.filename,
         )
 
 
@@ -481,6 +492,10 @@ class File(h5py.File):
             *args: Additional arguments to pass to h5py.File.
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
+        # First check if the file is an HDF5 file
+        assert str(name).endswith(".hdf5") or str(name).endswith(".h5"), (
+            "File must be an HDF5 file with .hdf5 or .h5 extension."
+        )
 
         # Resolve huggingface path
         if str(name).startswith(HF_PREFIX):
@@ -566,6 +581,11 @@ class File(h5py.File):
         ``data/`` group, 1 for legacy flat-format files, and the actual
         track count for files written with the multi-track layout.
         """
+        if not self.id.valid:
+            raise ValueError(
+                "File is closed. Use 'with File(...) as f:' or call f.close() "
+                "explicitly after you're done."
+            )
         if "tracks" not in self:
             return 1 if (super().__contains__("data") or super().__contains__("scan")) else 0
         tracks_group = self["tracks"]
@@ -578,8 +598,9 @@ class File(h5py.File):
     def tracks(self) -> "list[Track]":
         """Return a list of :class:`Track` objects, one per track.
 
-        Each track exposes ``.data`` (a :class:`GroupProxy`) and ``.scan()``
-        (a :class:`~zea.scan.Scan` factory method) for that specific track.
+        Each track exposes ``.data`` (a :class:`GroupProxy`), ``.scan`` (a
+        :class:`~zea.data.spec.ScanSpec`) and ``.load_parameters()`` (a
+        :class:`~zea.Parameters` factory method) for that specific track.
 
         Raises:
             AttributeError: For legacy flat-format files that have no
@@ -591,12 +612,12 @@ class File(h5py.File):
             with File("multi_track.hdf5") as f:
                 for track in f.tracks:
                     raw = track.data.raw_data[:]
-                    scan = track.scan
+                    parameters = track.load_parameters()
         """
         if "tracks" not in self:
             raise AttributeError(
                 "This file uses the legacy flat layout (no 'tracks' group). "
-                "Access data and scan parameters directly with file.data and file.scan()."
+                "Access data and parameters directly with file.data and file.load_parameters()."
             )
         tracks_group = self["tracks"]
         # Load file-level probe once so every track's scan can supplement its
@@ -794,7 +815,7 @@ class File(h5py.File):
             >>> import numpy as np
             >>> from zea import File
 
-            >>> n_frames, n_tx, n_el, n_ax = 2, 4, 8, 64
+            >>> n_frames, n_tx, n_ax, n_el = 2, 4, 64, 8
             >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
             >>> geom = np.zeros((n_el, 3), dtype=np.float32)
             >>> scan = {
@@ -815,11 +836,11 @@ class File(h5py.File):
             ...     path,
             ...     data={"raw_data": raw},
             ...     scan=scan,
-            ...     probe={"name": "L11-4v"},
+            ...     probe={"name": "verasonics_l11_4v"},
             ...     overwrite=True,
             ... )
             >>> f.probe_name
-            'L11-4v'
+            'verasonics_l11_4v'
             >>> f.close()
             >>> os.unlink(path)
         """
@@ -918,19 +939,66 @@ class File(h5py.File):
         """Return the stem of the file."""
         return self.path.stem
 
+    def _get_single_track_data_group(self) -> "h5py.Group":
+        """Return the data group for single-track / legacy files."""
+        if "tracks" in self:
+            return self["tracks/track_0/data"]
+        return self["data"]
+
     @property
-    def n_frames(self):
-        """Return number of frames in a file."""
-        return int(self.file["scan"]["n_frames"][()])
+    def n_frames(self) -> int:
+        """Number of frames."""
+        if self._n_tracks > 1:
+            raise AttributeError(
+                f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_frames."
+            )
+        return _shape_from_data_group(
+            self._get_single_track_data_group(),
+            index=0,
+            name="n_frames",
+            requires_raw=False,
+        )
+
+    @property
+    def n_tx(self) -> int:
+        """Number of transmit events."""
+        if self._n_tracks > 1:
+            raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_tx.")
+        return _shape_from_data_group(
+            self._get_single_track_data_group(),
+            index=1,
+            name="n_tx",
+            requires_raw=True,
+        )
+
+    @property
+    def n_ax(self) -> int:
+        """Number of axial samples."""
+        if self._n_tracks > 1:
+            raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_ax.")
+        return _shape_from_data_group(
+            self._get_single_track_data_group(),
+            index=2,
+            name="n_ax",
+            requires_raw=True,
+        )
+
+    @property
+    def n_el(self) -> int:
+        """Number of elements."""
+        if self._n_tracks > 1:
+            raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_el.")
+        return _shape_from_data_group(
+            self._get_single_track_data_group(),
+            index=3,
+            name="n_el",
+            requires_raw=True,
+        )
 
     def shape(self, key) -> tuple:
         """Return shape of some key."""
         key = self.format_key(key)
         return self[key].shape
-
-    def load_scan(self):
-        """Alias for get_scan_parameters."""
-        return self.get_scan_parameters()
 
     def format_key(self, key):
         """Format the key to match the data type."""
@@ -1066,7 +1134,7 @@ class File(h5py.File):
         description = self.attrs["description"]
         return description
 
-    def get_parameters(self):
+    def get_scan_parameters(self):
         """Returns a dictionary of parameters to initialize a scan
         object that comes with the file (stored inside datafile).
 
@@ -1082,39 +1150,20 @@ class File(h5py.File):
             return {}
 
         scan_parameters = load_dict_from_hdf5_group(scan_group)
-        scan_parameters = check_focus_distances(scan_parameters)
 
         return scan_parameters
 
-    def get_scan_parameters(self) -> dict:
-        """Returns a dictionary of scan parameters stored in the file."""
-        return self.get_parameters()
-
     @property
-    def n_ax(self) -> int:
-        """Number of axial samples."""
-        n = self._n_tracks
-        if n > 1:
-            raise AttributeError(
-                f"This file has {n} tracks. "
-                "Use file.tracks[i].data.raw_data.shape[2] to get n_ax for a specific track."
-            )
-        data_group = self.data._group
-        assert "raw_data" in data_group, (
-            "Cannot determine n_ax because there is no raw_data in the data group."
-        )
-        return data_group["raw_data"].shape[2]
+    def scan(self) -> "ScanSpec | None":
+        """Return the validated :class:`~zea.data.spec.ScanSpec` for this file.
 
-    @property
-    def scan(self) -> Scan:
-        """Returns a Scan object initialized with the parameters from the file.
-
-        Returns:
-            Scan: The scan object.
+        This is the bare scan group as a spec object.  For a full, derivable
+        parameter object (merged probe + scan, with caching and derived
+        properties) use :meth:`load_parameters`.
 
         Raises:
             AttributeError: When the file contains more than one track.
-                Use :attr:`tracks` and call ``.scan()`` on each track instead.
+                Use :attr:`tracks` and access ``.scan`` on each track instead.
 
         .. doctest::
 
@@ -1123,26 +1172,10 @@ class File(h5py.File):
             ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
             ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
             ... )
-            >>> with File(path) as f:
+            >>> with File(path, revision="v0.1.0", mode="r") as f:
             ...     scan = f.scan
             >>> type(scan).__name__
-            'Scan'
-        """
-        return self.get_scan()
-
-    def get_scan(self, safe=True, **kwargs) -> Scan:
-        """Returns a Scan object with optional parameter overrides.
-
-        Args:
-            safe (bool, optional): If True, will only use parameters that are
-                defined in the Scan class. If False, will use all parameters
-                from the file. Defaults to True.
-            **kwargs: Additional keyword arguments to pass to the Scan object.
-                These will override the parameters from the file if they are
-                present in the file.
-
-        Returns:
-            Scan: The scan object.
+            'ScanSpec'
         """
         n = self._n_tracks
         if n > 1:
@@ -1153,58 +1186,73 @@ class File(h5py.File):
             )
         scan_dict = self.get_scan_parameters()
 
-        # Collect probe-group fields that Scan uses but may not appear in ScanSpec.
-        # probe_geometry is no longer a ScanSpec field — it lives in ProbeSpec.
-        # element_width / lens_sound_speed / lens_thickness are in both specs;
-        # the probe group fills them in if absent from the scan group.
-        # backward-compat: old files stored probe_geometry in the scan group.
-        _PROBE_TO_SCAN_FIELDS = {
-            "probe_geometry",
-            "element_width",
-            "lens_sound_speed",
-            "lens_thickness",
-        }
-        # Capture these fields before the ScanSpec filter discards them.
-        _probe_supplements: dict = {}
-        if "probe" in self:
-            probe_data = self.recursively_load_dict_contents_from_group("probe")
-            for _field in _PROBE_TO_SCAN_FIELDS:
-                if _field in probe_data:
-                    _probe_supplements[_field] = probe_data[_field]
-        # Fall back to scan group for fields no longer in ScanSpec (e.g. probe_geometry
-        # in legacy files that stored it there).
-        for _field in _PROBE_TO_SCAN_FIELDS:
-            if _field not in _probe_supplements and _field in scan_dict:
-                _probe_supplements[_field] = scan_dict[_field]
+        if _is_legacy_file(self):
+            scan_dict = legacy_scan(scan_dict)
 
-        # Try spec-based validation; fall back gracefully for legacy files
-        # that may be missing fields the spec now requires.
-        scan_spec_keys = set(ScanSpec.SCHEMA.keys())
-        filtered = {k: v for k, v in scan_dict.items() if k in scan_spec_keys}
+        return ScanSpec(**scan_dict) if len(scan_dict) > 0 else None
 
-        try:
-            scan_spec = ScanSpec(**filtered)
-            scan_dict = scan_spec.to_dict()
-            scan_dict["n_el"] = scan_spec.n_el
-            scan_dict["n_tx"] = scan_spec.n_tx
-            # Derive n_ax from the spec when possible (avoids requiring raw_data).
-            # tgc_gain_curve has shape (n_ax,) and is the spec's authoritative source.
-            if scan_spec.tgc_gain_curve is not None:
-                scan_dict["n_ax"] = len(scan_spec.tgc_gain_curve)
-            elif "data" in self and "raw_data" in self["data"]:
-                scan_dict["n_ax"] = self.n_ax
-        except (TypeError, ValueError) as exc:
-            log.debug(
-                f"ScanSpec validation skipped for '{self.path}': {exc}. "
-                "Using raw scan parameters from file."
+    def load_parameters(self, **overrides) -> "Parameters":
+        """Load the acquisition parameters (merged probe + scan) from the file.
+
+        Reads both the ``scan`` and ``probe`` groups and merges them into a
+        single :class:`~zea.Parameters` object that owns derivation,
+        caching, and lazy loading of derived quantities. The probe and scan
+        groups live at the same level and have non-overlapping field names, so
+        merging is a plain dict union.
+
+        Args:
+            **overrides: Override any parameter from the file. Custom
+                (non-spec) keys are stored as passthrough parameters.
+
+        Returns:
+            Parameters: The merged, derivable parameters object.
+
+        Raises:
+            AttributeError: When the file contains more than one track.
+                Use :attr:`tracks` and call ``.load_parameters()`` on each track.
+
+        .. doctest::
+
+            >>> from zea import File
+            >>> path = (
+            ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+            ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+            ... )
+            >>> with File(path) as f:
+            ...     parameters = f.load_parameters()
+            >>> type(parameters).__name__
+            'Parameters'
+        """
+        from zea.scan import Parameters
+
+        n = self._n_tracks
+        if n > 1:
+            raise AttributeError(
+                f"This file has {n} tracks. "
+                "Use file.tracks to get a list of tracks and call "
+                "file.tracks[i].load_parameters() on each."
             )
 
-        # Re-inject probe supplements; scan_dict has priority over probe group.
-        for _field, _value in _probe_supplements.items():
-            if _field not in scan_dict or scan_dict.get(_field) is None:
-                scan_dict[_field] = _value
+        scan = self.scan
+        probe = self.probe
 
-        return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
+        probe_dict = probe.get_parameters()
+        if scan is not None:
+            scan_dict = scan.to_dict()
+            other_dict = {
+                "n_ax": self.n_ax,
+                "n_el": scan.n_el,
+                "n_tx": scan.n_tx,
+            }
+        else:
+            scan_dict = {}
+            other_dict = {}
+        merged_dict = {**probe_dict, **scan_dict, **other_dict, **overrides}
+
+        # skip None values
+        merged_dict = {k: v for k, v in merged_dict.items() if v is not None}
+
+        return Parameters(**merged_dict)
 
     @property
     def probe(self) -> "Probe":
@@ -1229,13 +1277,17 @@ class File(h5py.File):
         from zea.probes import Probe
 
         if "probe" in self.keys():
-            probe_parameters = self.recursively_load_dict_contents_from_group("probe")
+            probe_dict = self.recursively_load_dict_contents_from_group("probe")
+        elif _is_legacy_file(self):
+            scan_dict = self.get_scan_parameters()
+            probe_dict = legacy_probe(scan_dict)
+            probe_dict["name"] = self.probe_name
         else:
-            # Legacy files
-            probe_parameters = reduce_to_signature(Probe.__init__, self.get_parameters())
-            probe_parameters["name"] = self.probe_name
+            # Image-only datasets carry no probe group; an empty Probe lets
+            # load_parameters merge in nothing rather than failing.
+            probe_dict = {}
 
-        return Probe(**probe_parameters)
+        return Probe(**probe_dict)
 
     @property
     def metadata(self) -> MetadataSpec:
@@ -1255,7 +1307,7 @@ class File(h5py.File):
                 ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
                 ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
                 ... )
-                >>> with File(path, revision="v0.1.0a1") as f:
+                >>> with File(path, revision="v0.1.0") as f:
                 ...     meta = f.metadata
                 ...     print(meta.subject.type)
                 phantom
@@ -1443,8 +1495,9 @@ def load_file_all_data_types(
 ):
     """Loads a zea data files (h5py file).
 
-    Returns all data types together with a scan object containing the parameters
-    of the acquisition and a probe object containing the parameters of the probe.
+    Returns all data types together with a parameters object containing the parameters
+    of the acquisition. Probe information is available via ``parameters.to_probe_dict()``
+    or ``File.probe``.
 
     Additionally, it can load a specific subset of frames / transmits.
 
@@ -1455,13 +1508,12 @@ def load_file_all_data_types(
         indices (optional): The indices to load. Defaults to None in
             which case all frames are loaded.
         scan_kwargs (Config, dict, optional): Additional keyword arguments
-            to pass to the Scan object. These will override the parameters from the file
-            if they are present in the file. Defaults to None.
+            to pass to :meth:`File.load_parameters`. These will override the
+            parameters from the file if they are present. Defaults to None.
 
     Returns:
         (dict): A dictionary with all data types as keys and the corresponding data as values.
-        (Scan): A scan object containing the parameters of the acquisition.
-        (Probe): A probe object containing the parameters of the probe.
+        (Parameters): A parameters object containing the parameters of the acquisition.
     """
     # Define the additional keyword parameters from the scan object
     if scan_kwargs is None:
@@ -1473,9 +1525,6 @@ def load_file_all_data_types(
     _GROUP_DATA_TYPES = {"aligned_data", "beamformed_data", "envelope_data", "image_sc", "image"}
 
     with File(path, mode="r") as file:
-        # Load the probe object from the file
-        probe = file.probe
-
         for data_type in DataTypes:
             if not file.has_key(data_type.value):
                 data_dict[data_type.value] = None
@@ -1512,21 +1561,23 @@ def load_file_all_data_types(
         if isinstance(indices, tuple) and len(indices) > 1:
             scan_kwargs["selected_transmits"] = indices[1]
 
-        scan = file.get_scan(**scan_kwargs)
+        parameters = file.load_parameters(**scan_kwargs)
 
-        return data_dict, scan, probe
+        return data_dict, parameters
 
 
+@deprecated(replacement="File(...) with file.load_parameters() and file.data.<type>[...]")
 def load_file(
     path,
     data_type="raw_data",
     indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
     scan_kwargs: dict = None,
-) -> Tuple[np.ndarray, Scan, "Probe"]:
+) -> Tuple[np.ndarray, "Parameters"]:
     """Loads a zea data files (h5py file).
 
-    Returns the data together with a scan object containing the parameters
-    of the acquisition and a probe object containing the parameters of the probe.
+    Returns the data together with a parameters object containing the parameters
+    of the acquisition. Probe information is available via ``parameters.to_probe_dict()``
+    or ``File.probe``.
 
     Additionally, it can load a specific subset of frames / transmits.
 
@@ -1540,22 +1591,18 @@ def load_file(
         indices (optional): The indices to load. Defaults to None in
             which case all frames are loaded.
         scan_kwargs (Config, dict, optional): Additional keyword arguments
-            to pass to the Scan object. These will override the parameters from the file
-            if they are present in the file. Defaults to None.
+            to pass to :meth:`File.load_parameters`. These will override the
+            parameters from the file if they are present. Defaults to None.
 
     Returns:
         (np.ndarray): The raw data of shape (n_frames, n_tx, n_ax, n_el, n_ch).
-        (Scan): A scan object containing the parameters of the acquisition.
-        (Probe): A probe object containing the parameters of the probe.
+        (Parameters): A parameters object containing the parameters of the acquisition.
     """
     # Define the additional keyword parameters from the scan object
     if scan_kwargs is None:
         scan_kwargs = {}
 
     with File(path, mode="r") as file:
-        # Load the probe object from the file
-        probe = file.probe
-
         # Load the desired frames from the file
         _key = file.format_key(data_type)
         _indices = indices if indices is not None else slice(None)
@@ -1573,9 +1620,9 @@ def load_file(
             if isinstance(indices, tuple) and len(indices) > 1:
                 scan_kwargs["selected_transmits"] = indices[1]
 
-        scan = file.get_scan(**scan_kwargs)
+        parameters = file.load_parameters(**scan_kwargs)
 
-        return data, scan, probe
+        return data, parameters
 
 
 def _print_hdf5_attrs(hdf5_obj, prefix=""):
@@ -1734,69 +1781,3 @@ def _validate_file_impl(file: File) -> None:
                     f"'{group_path}/{key}' is not in the DataSpec schema. "
                     f"Known keys: {sorted(known)}"
                 )
-
-
-def _reformat_waveforms(scan_kwargs: dict) -> dict:
-    """Reformat waveforms from dict to array if needed. This is for backwards compatibility and will
-    be removed in a future version of zea.
-
-    Args:
-        scan_kwargs (dict): The scan parameters.
-
-    Returns:
-        scan_kwargs (dict): The scan parameters with the keys waveforms_one_way and
-            waveforms_two_way reformatted to arrays if they were stored as dicts.
-    """
-
-    # TODO: remove this in a future version of zea
-    if "waveforms_one_way" in scan_kwargs and isinstance(scan_kwargs["waveforms_one_way"], dict):
-        log.warning(
-            "The waveforms_one_way parameter is stored as a dictionary in the file. "
-            "Converting to array. This will be deprecated in future versions of zea. "
-            "Please update your files to store waveforms as arrays of shape `(n_tx, n_samples)`."
-        )
-        scan_kwargs["waveforms_one_way"] = _waveforms_dict_to_array(
-            scan_kwargs["waveforms_one_way"]
-        )
-
-    if "waveforms_two_way" in scan_kwargs and isinstance(scan_kwargs["waveforms_two_way"], dict):
-        log.warning(
-            "The waveforms_two_way parameter is stored as a dictionary in the file. "
-            "Converting to array. This will be deprecated in future versions of zea. "
-            "Please update your files to store waveforms as arrays of shape `(n_tx, n_samples)`."
-        )
-        scan_kwargs["waveforms_two_way"] = _waveforms_dict_to_array(
-            scan_kwargs["waveforms_two_way"]
-        )
-    return scan_kwargs
-
-
-def _waveforms_dict_to_array(waveforms_dict: dict):
-    """Convert waveforms stored as a dictionary to a padded numpy array."""
-    waveforms = dict_to_sorted_list(waveforms_dict)
-    return pad_sequences(waveforms, dtype=np.float32, padding="post")
-
-
-def dict_to_sorted_list(dictionary: dict):
-    """Convert a dictionary with sortable keys to a sorted list of values.
-
-    .. note::
-
-        This function operates on the top level of the dictionary only.
-        If the dictionary contains nested dictionaries, those will not be sorted.
-
-    Example:
-        .. doctest::
-
-            >>> from zea.data.file import dict_to_sorted_list
-            >>> input_dict = {"number_000": 5, "number_001": 1, "number_002": 23}
-            >>> dict_to_sorted_list(input_dict)
-            [5, 1, 23]
-
-    Args:
-        dictionary (dict): The dictionary to convert. The keys must be sortable.
-
-    Returns:
-        list: The sorted list of values.
-    """
-    return [value for _, value in sorted(dictionary.items())]

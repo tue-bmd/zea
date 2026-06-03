@@ -17,8 +17,10 @@ data:
   # The frame number to load when running the UI (null, int, 'all')
   frame_no: all
 
-# The scan section contains the parameters pertaining to the reconstruction.
-scan:
+# The parameters section is a flat mapping of scan/probe/custom parameters that
+# overwrite values loaded from the data file. Documented reconstruction
+# parameters are listed below; arbitrary custom parameters are also allowed.
+parameters:
   # The number of transmits in a frame. Can be 'all' for all transmits, an
   # integer for a specific number of transmits selected evenly from the
   # transmits in the frame, or a list of integers for specific transmits to

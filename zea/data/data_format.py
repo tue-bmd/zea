@@ -3,7 +3,6 @@ Functions to write and validate datasets in the zea format.
 """
 
 import inspect
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -647,15 +646,6 @@ def generate_zea_dataset(
         image=image,
         image_sc=image_sc,
     )
-
-    if bandwidth_percent is not None:
-        warnings.warn(
-            "bandwidth_percent is not supported by generate_zea_dataset and will be "
-            "dropped before calling _write_datasets. Remove the argument or migrate "
-            "to File.create().",
-            UserWarning,
-            stacklevel=2,
-        )
 
     # Convert path to Path object
     path = Path(path)

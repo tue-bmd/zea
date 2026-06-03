@@ -86,8 +86,8 @@ PICMUS_DESCRIPTION = (
 _L11_4V_PROBE = {
     "name": "verasonics_l11_4v",
     "type": "linear",
-    "center_frequency": np.float32(5.1333e6),
-    "bandwidth_percent": np.float32(67.0),
+    "probe_center_frequency": np.float32(5.1333e6),
+    "probe_bandwidth_percent": np.float32(67.0),
     "element_width": np.float32(0.270e-3),
     "element_height": np.float32(5e-3),
 }
@@ -411,7 +411,7 @@ def convert_picmus(args):
                     output_file.parent.rmdir()
                 except OSError:
                     pass
-                log.error("Failed to convert %s", log.yellow(str_file))
+                log.error(f"Failed to convert {log.yellow(file)}. Skipping.", exc_info=True)
                 continue
 
     log.info(f"Finished converting PICMUS dataset. Output written to {log.yellow(dst)}")

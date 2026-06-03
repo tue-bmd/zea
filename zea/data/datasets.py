@@ -195,6 +195,7 @@ class Folder:
         folder_path: str | Path | HFPath,
         validate: bool = False,
         hf_cache_dir: str = HF_DATASETS_DIR,
+        revision: str | None = None,
     ):
         single_file_error_msg = (
             f"Folder class requires a directory path, but got a single file: {str(folder_path)}. "
@@ -209,15 +210,18 @@ class Folder:
         # Hugging Face support
         folder_path_str = str(folder_path)
         if folder_path_str.startswith(HF_PREFIX):
+            hf_kwargs = {}
+            if revision is not None:
+                hf_kwargs["revision"] = revision
             repo_id, subpath = _hf_parse_path(folder_path_str)
-            files = _hf_list_files(repo_id)
+            files = _hf_list_files(repo_id, **hf_kwargs)
 
             # Check if it's a single file (not a directory)
             if subpath and any(f == subpath for f in files):
                 raise ValueError(single_file_error_msg)
 
             # It's a directory, resolve to local cache
-            folder_path = _hf_resolve_path(folder_path_str, cache_dir=hf_cache_dir)
+            folder_path = _hf_resolve_path(folder_path_str, cache_dir=hf_cache_dir, **hf_kwargs)
 
         # Check if the resolved path is a directory
         self.folder_path = Path(folder_path)
@@ -439,6 +443,7 @@ class Dataset(H5FileHandleCache):
         file_paths: List[str] | str,
         validate: bool = False,
         directory_splits: list | None = None,
+        revision: str | None = None,
         **kwargs,
     ):
         """Initializes the Dataset.
@@ -450,10 +455,13 @@ class Dataset(H5FileHandleCache):
             directory_splits (list, optional): List of directory split by. Is a list of floats
                 between 0 and 1, with the same length as the number of file_paths given.
                 If none, all files in file_paths are used.
+            revision (str, optional): HuggingFace revision (branch, tag, or commit hash).
+                Only used when ``file_paths`` contains ``hf://`` paths. Defaults to ``None``.
 
         """
         super().__init__(**kwargs)
         self.validate = validate
+        self.revision = revision
         self.file_paths = self.find_files(file_paths)
 
         if directory_splits is not None:
@@ -491,7 +499,7 @@ class Dataset(H5FileHandleCache):
                 file_path = Path(file_path)
 
             if file_path.is_dir():
-                folder = Folder(file_path, self.validate)
+                folder = Folder(file_path, self.validate, revision=self.revision)
                 file_paths += folder.file_paths
                 del folder
             elif file_path.is_file():

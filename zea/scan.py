@@ -1,12 +1,13 @@
-"""Structure containing parameters defining an ultrasound scan.
+"""Structure containing the parameters defining an ultrasound acquisition.
 
-This module provides the :class:`Scan` class, a flexible structure
-for managing all parameters related to an ultrasound scan acquisition.
+This module provides the :class:`Parameters` class, a flexible structure
+for managing all parameters related to an ultrasound acquisition (merged probe
+and scan parameters).
 
 Features
 ^^^^^^^^
 
-- **Flexible initialization:** The :class:`Scan` class supports lazy initialization,
+- **Flexible initialization:** The :class:`Parameters` class supports lazy initialization,
   allowing you to specify any combination of supported parameters. You can pass only
   the parameters you have, and the rest will be computed or set to defaults as needed.
 
@@ -36,7 +37,7 @@ Comparison to ``zea.Config`` and ``zea.Probe``
 
 - :class:`zea.probes.Probe`: Contains only probe-specific parameters (e.g., geometry, frequency).
 
-- :class:`zea.scan.Scan`: Combines all parameters relevant to an ultrasound acquisition,
+- :class:`zea.Parameters`: Combines all parameters relevant to an ultrasound acquisition,
   including probe, acquisition, and scan region. It also provides automatic computation
   of derived properties and dependency management.
 
@@ -45,24 +46,34 @@ Example Usage
 
 .. doctest::
 
-    >>> from zea import Config, Probe, Scan
+    >>> from zea import Config, File, Probe, Parameters
 
-    >>> # Initialize Scan from a Probe's parameters
+    >>> # The usual entry point: load the merged probe + scan parameters from a file
+    >>> path = (
+    ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+    ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+    ... )
+    >>> with File(path) as f:
+    ...     parameters = f.load_parameters()
+    >>> type(parameters).__name__
+    'Parameters'
+
+    >>> # You can also build one from a Probe's parameters ...
     >>> probe = Probe.from_name("verasonics_l11_4v")
-    >>> scan = Scan(
+    >>> parameters = Parameters(
     ...     probe_geometry=probe.probe_geometry,
-    ...     center_frequency=probe.center_frequency,
+    ...     center_frequency=probe.probe_center_frequency,
     ...     element_width=probe.element_width,
     ...     grid_size_z=256,
     ...     n_tx=11,
     ... )
 
-    >>> # Or initialize from a Config object
+    >>> # ... from a Config's parameters ...
     >>> config = Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml")
-    >>> scan = Scan(n_tx=11, **config.scan)
+    >>> parameters = Parameters(n_tx=11, **config.parameters)
 
-    >>> # Or manually specify parameters
-    >>> scan = Scan(
+    >>> # ... or fully manually
+    >>> parameters = Parameters(
     ...     grid_size_x=128,
     ...     grid_size_z=256,
     ...     xlims=(-0.02, 0.02),
@@ -77,14 +88,16 @@ Example Usage
     ... )
 
     >>> # Access a derived property (computed lazily)
-    >>> grid = scan.grid  # shape: (grid_size_z, grid_size_x, 3)
+    >>> grid = parameters.grid  # shape: (grid_size_z, grid_size_x, 3)
 
     >>> # Select a subset of transmit events
-    >>> _ = scan.set_transmits(3)  # Use 3 evenly spaced transmits
-    >>> _ = scan.set_transmits([0, 2, 4])  # Use specific transmit indices
-    >>> _ = scan.set_transmits("all")  # Use all transmits
+    >>> _ = parameters.set_transmits(3)  # Use 3 evenly spaced transmits
+    >>> _ = parameters.set_transmits([0, 2, 4])  # Use specific transmit indices
+    >>> _ = parameters.set_transmits("all")  # Use all transmits
 
 """
+
+from copy import deepcopy
 
 import numpy as np
 from keras import ops
@@ -96,12 +109,29 @@ from zea.beamform.pixelgrid import (
     check_for_aliasing,
     polar_pixel_grid,
 )
+from zea.data.spec import ScanSpec, ProbeSpec
 from zea.display import compute_scan_convert_2d_coordinates
-from zea.internal.parameters import Parameters, cache_with_dependencies
+from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
+from zea.internal.utils import deprecated
+from zea.probes import Probe
 
 
-class Scan(Parameters):
-    """Represents an ultrasound scan configuration with computed properties.
+class Parameters(BaseParameters):
+    """Represents a full ultrasound acquisition configuration with computed properties.
+
+    A :class:`Parameters` object holds **all** parameters relevant to an
+    acquisition — merged probe and scan parameters — and computes derived
+    quantities (grid, wavelength, pfield, scan-conversion coordinates, ...)
+    lazily with dependency tracking and caching.  Obtain one from a file via
+    :meth:`zea.data.file.File.load_parameters`.
+
+    The set of valid file-backed parameters is derived from
+    :class:`~zea.data.spec.ScanSpec` and :class:`~zea.data.spec.ProbeSpec`
+    (single source of truth), extended with recon/beamforming parameters that
+    are not stored in the file.  Arbitrary custom parameters may also be set;
+    they are stored as-is and are not used to compute any derived parameters
+    (e.g. the beamforming grid). They are simply passed through — for example
+    to a pipeline call (see :class:`~zea.internal.parameters.BaseParameters`).
 
     Args:
         grid_size_x (int): Grid width in pixels. For a cartesian grid, this is the lateral (x)
@@ -136,7 +166,7 @@ class Scan(Parameters):
             beam comes to focus for each transmit in meters of shape (n_tx,).
         transmit_origins (np.ndarray): Transmit origins of shape (n_tx, 3).
         initial_times (np.ndarray): Initial times in seconds for each event of shape (n_tx,).
-        bandwidth_percent (float, optional): Bandwidth as percentage of center
+        probe_bandwidth_percent (float, optional): Bandwidth as percentage of center
             frequency. Defaults to 200.0.
         time_to_next_transmit (np.ndarray): The time between subsequent
             transmit events of shape (n_frames, n_tx).
@@ -145,10 +175,8 @@ class Scan(Parameters):
             (n_waveforms, n_samples).
         waveforms_two_way (np.ndarray): The two-way transmit waveforms of shape
             (n_waveforms, n_samples).
-        tx_waveform_indices (np.ndarray): Indices of the waveform used for each
-            transmit event of shape (n_tx,).
         t_peak (np.ndarray, optional): The time of the peak of the pulse of every transmit waveform
-            of shape (n_waveforms,).
+            of shape (n_tx,).
         pixels_per_wavelength (int, optional): Number of pixels per wavelength.
             Defaults to 4.
         element_width (float, optional): Width of each transducer element in meters.
@@ -182,63 +210,51 @@ class Scan(Parameters):
             if not provided.
     """
 
+    scan_schema = deepcopy(ScanSpec.SCHEMA)
+    probe_schema = deepcopy(Probe.SCHEMA)
+    for key in Probe._NON_PARAMETERS:
+        probe_schema.pop(key)
+
+    # Valid parameters are derived from the scan and probe specs + a few
+    # beamforming-only parameters.
     VALID_PARAMS = {
-        # beamforming related parameters
-        "grid_size_x": {"type": int},
-        "grid_size_y": {"type": int},
-        "grid_size_z": {"type": int},
-        "xlims": {"type": (tuple, list)},
-        "ylims": {"type": (tuple, list)},
-        "zlims": {"type": (tuple, list)},
-        "pixels_per_wavelength": {"type": int, "default": 4},
-        "pfield_kwargs": {"type": dict, "default": {}},
-        "apply_lens_correction": {"type": bool, "default": False},
-        "lens_sound_speed": {"type": float},
-        "lens_thickness": {"type": float},
-        "grid_type": {"type": str, "default": "cartesian"},
-        "polar_limits": {"type": (tuple, list)},
-        "dynamic_range": {"type": (tuple, list)},
+        **scan_schema,
+        **probe_schema,
+        "grid_size_x": {"dtype": np.int32},
+        "grid_size_y": {"dtype": np.int32},
+        "grid_size_z": {"dtype": np.int32},
+        "xlims": {"dtype": np.float32, "shape": (2,)},
+        "ylims": {"dtype": np.float32, "shape": (2,)},
+        "zlims": {"dtype": np.float32, "shape": (2,)},
+        "pixels_per_wavelength": {"dtype": np.int32, "default": 4},
+        "pfield_kwargs": {"dtype": dict, "default": {}},
+        "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
+        "grid_type": {"dtype": str, "default": "cartesian"},
+        "polar_limits": {"dtype": np.float32, "shape": (2,)},
+        "dynamic_range": {"dtype": np.float32, "shape": (2,)},
         "selected_transmits": {
-            "type": (type(None), str, int, list, slice, np.ndarray),
+            "dtype": (type(None), str, int, list, slice, np.ndarray),
             "default": None,
         },
-        # acquisition parameters
-        "sound_speed": {"type": float, "default": 1540.0},
-        "sampling_frequency": {"type": float},
-        "center_frequency": {"type": float},
-        "n_frames": {"type": int},
-        "n_el": {"type": int},
-        "n_tx": {"type": int},
-        "n_ax": {"type": int},
-        "n_ch": {"type": int},
-        "bandwidth_percent": {"type": float, "default": 200.0},
-        "demodulation_frequency": {"type": float},
-        "element_width": {"type": float},
-        "attenuation_coef": {"type": float, "default": 0.0},
-        "f_number": {"type": float, "default": 1.0},
-        # array parameters
-        "probe_geometry": {"type": np.ndarray},
-        "polar_angles": {"type": np.ndarray},
-        "azimuth_angles": {"type": np.ndarray},
-        "t0_delays": {"type": np.ndarray},
-        "tx_apodizations": {"type": np.ndarray},
-        "focus_distances": {"type": np.ndarray},
-        "transmit_origins": {"type": np.ndarray},
-        "initial_times": {"type": np.ndarray},
-        "time_to_next_transmit": {"type": np.ndarray},
-        "tgc_gain_curve": {"type": np.ndarray},
-        "waveforms_one_way": {"type": np.ndarray, "default": None},
-        "waveforms_two_way": {"type": np.ndarray, "default": None},
-        "tx_waveform_indices": {"type": np.ndarray},
-        "t_peak": {"type": np.ndarray},
-        # scan conversion parameters
-        "theta_range": {"type": (tuple, list)},
-        "phi_range": {"type": (tuple, list), "default": None},
-        "rho_range": {"type": (tuple, list)},
-        "fill_value": {"type": float},
-        "resolution": {"type": float, "default": None},
-        "distance_to_apex": {"type": float},
+        "n_frames": {"dtype": np.int32},
+        "n_el": {"dtype": np.int32},
+        "n_tx": {"dtype": np.int32},
+        "n_ax": {"dtype": int},  # native dtype on purpose
+        "n_ch": {"dtype": np.int32},
+        "attenuation_coef": {"dtype": np.float32, "default": 0.0},
+        "f_number": {"dtype": float, "default": 1.0},  # native dtype on purpose
+        "t_peak": {"dtype": np.float32},
+        "theta_range": {"dtype": np.float32, "shape": (2,)},
+        "phi_range": {"dtype": np.float32, "shape": (2,)},
+        "rho_range": {"dtype": np.float32, "shape": (2,)},
+        "fill_value": {"dtype": float},
+        "resolution": {"dtype": (np.float32, type(None)), "default": None},
+        "distance_to_apex": {"dtype": np.float32, "default": 0.0},
     }
+
+    # Add some defaults that are not stored in a file
+    VALID_PARAMS["sound_speed"]["default"] = 1540.0
+    VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
 
     @cache_with_dependencies("probe_geometry")
     def aperture_size(self):
@@ -497,6 +513,11 @@ class Scan(Parameters):
         """
         n_tx_total = self._params.get("n_tx")
         if n_tx_total is None:
+            if selection is None:
+                # n_tx not yet known (e.g. file with image-only data); store as-is.
+                self._params["selected_transmits"] = None
+                self._invalidate("selected_transmits")
+                return self
             raise ValueError("n_tx must be set before calling set_transmits")
 
         # Handle array-like - convert to list of indices
@@ -731,14 +752,14 @@ class Scan(Parameters):
 
         return 1
 
-    @cache_with_dependencies("center_frequency", "n_waveforms")
+    @cache_with_dependencies("center_frequency", "selected_transmits")
     def t_peak(self):
-        """The time of the peak of the pulse in seconds of shape (n_waveforms,)."""
+        """The time of the peak of the pulse in seconds of shape (n_tx,)."""
         t_peak = self._params.get("t_peak")
         if t_peak is None:
-            t_peak = np.array([1 / self.center_frequency] * self.n_waveforms)
+            t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
 
-        return t_peak
+        return t_peak[self.selected_transmits]
 
     @cache_with_dependencies("selected_transmits")
     def time_to_next_transmit(self):
@@ -761,23 +782,10 @@ class Scan(Parameters):
             return np.ones(self.n_ax)
         return value[: self.n_ax]
 
-    @cache_with_dependencies("selected_transmits", "n_tx")
-    def tx_waveform_indices(self):
-        """Indices of the waveform used for each transmit event of shape (n_tx,)."""
-        value = self._params.get("tx_waveform_indices")
-        if value is None:
-            log.warning_once(
-                "No ``tx_waveform_indices`` provided, using zeros",
-                key=(id(self), "tx_waveform_indices"),
-            )
-            return np.zeros(self.n_tx, dtype=int)
-
-        return value[self.selected_transmits]
-
     @cache_with_dependencies(
         "sound_speed",
         "center_frequency",
-        "bandwidth_percent",
+        "probe_bandwidth_percent",
         "n_el",
         "probe_geometry",
         "tx_apodizations",
@@ -799,7 +807,7 @@ class Scan(Parameters):
             tx_apodizations=self.tx_apodizations,
             grid=self.grid,
             t0_delays=self.t0_delays,
-            bandwidth_percent=self.bandwidth_percent,
+            probe_bandwidth_percent=self.probe_bandwidth_percent,
             **self.pfield_kwargs,
         )
         return ops.convert_to_numpy(pfield)
@@ -846,22 +854,12 @@ class Scan(Parameters):
         )
         return coords
 
-    @cache_with_dependencies(
-        "rho_range",
-        "theta_range",
-        "phi_range",
-        "resolution",
-        "grid_size_z",
-        "grid_size_x",
-    )
-    def coordinates_3d(self):
-        """The coordinates for scan conversion."""
-        raise NotImplementedError
-
-    @cache_with_dependencies("is_3d", "coordinates_2d", "coordinates_3d")
+    @cache_with_dependencies("is_3d", "coordinates_2d")
     def coordinates(self):
         """Get the coordinates for scan conversion."""
-        return self.coordinates_3d if self.is_3d else self.coordinates_2d
+        if self.is_3d:
+            raise NotImplementedError
+        return self.coordinates_2d
 
     @cache_with_dependencies("time_to_next_transmit")
     def pulse_repetition_frequency(self):
@@ -899,9 +897,78 @@ class Scan(Parameters):
         fps = 1 / time
         return fps
 
+    def to_scan_dict(self) -> dict:
+        """Return scan parameters as a plain dict.
+
+        Suitable for passing directly to :meth:`~zea.File.create` as the
+        ``scan`` argument, or to :func:`~zea.data.file_operations.save_file`
+        alongside :meth:`to_probe_dict`.
+
+        Only fields defined in :class:`~zea.data.spec.ScanSpec` that are
+        currently stored on this object are included (``None`` values are
+        omitted).  Values are read through property access so that any active
+        :attr:`selected_transmits` filtering is applied (e.g. after calling
+        :meth:`set_transmits`).
+
+        Returns:
+            dict: Scan parameter dict keyed by :class:`~zea.data.spec.ScanSpec`
+                field names.
+        """
+        result = {}
+        for field in ScanSpec.fields():
+            # Only include fields that were explicitly stored as a non-None value.
+            # Skipping None here is critical: fields like ``tgc_gain_curve`` that
+            # are absent in the source file are stored as None in ``_params``.
+            # Calling ``getattr`` on them would trigger computed defaults (e.g.
+            # ones), which would be written to the new file and break round-trips.
+            if field not in self._params or self._params[field] is None:
+                continue
+            try:
+                value = getattr(self, field)  # applies selected_transmits filtering
+            except MissingDependencyError:
+                continue
+            if value is not None:
+                result[field] = value
+        return result
+
+    def to_probe_dict(self) -> dict:
+        """Return file-backed probe parameters as a plain dict.
+
+        Suitable for passing directly to :meth:`~zea.File.create` as the
+        ``probe`` argument, or to :func:`~zea.data.file_operations.save_file`
+        alongside :meth:`to_scan_dict`.
+
+        Only fields defined in :class:`~zea.data.spec.ProbeSpec` that are
+        currently stored on this object are included (``None`` values are
+        omitted).
+
+        Returns:
+            dict: Probe parameter dict keyed by :class:`~zea.data.spec.ProbeSpec`
+                field names.
+        """
+        return {
+            field: self._params[field]
+            for field in ProbeSpec.fields()
+            if field in self._params and self._params[field] is not None
+        }
+
     def __setattr__(self, key, value):
         if key == "selected_transmits":
             # If setting selected_transmits, call set_transmits to handle logic
             self.set_transmits(value)
         else:
             return super().__setattr__(key, value)
+
+
+class Scan(Parameters):
+    """Deprecated alias for :class:`Parameters`.
+
+    ``Scan`` was renamed to :class:`zea.Parameters` (which now holds the merged
+    probe and scan parameters). This subclass is kept temporarily to ease the
+    transition: instantiating it emits a :class:`DeprecationWarning` pointing to
+    :class:`zea.Parameters`. It will be removed in a future release.
+    """
+
+    @deprecated(replacement="zea.Parameters")
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
