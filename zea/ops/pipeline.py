@@ -86,6 +86,9 @@ class Pipeline:
         self._call_pipeline = self.call
         self.name = name
 
+        # By default cast to float32 for Ops compatibility
+        operations = [Cast(dtype="float32")] + operations
+
         self._pipeline_layers = operations
 
         if jit_options not in ["pipeline", "ops", None]:
@@ -223,7 +226,7 @@ class Pipeline:
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
         """
-        operations = [Cast(dtype="float32")]
+        operations = []
 
         # Add the demodulate operation
         if not baseband:
