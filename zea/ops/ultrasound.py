@@ -363,6 +363,8 @@ class Demodulate(Operation):
     def call(self, demodulation_frequency=None, sampling_frequency=None, **kwargs):
         data = kwargs[self.key]
 
+        # By default cast to float32 for compatibility
+        data = ops.cast(data, "float32")
         # Split the complex signal into two channels
         iq_data_two_channel = demodulate(
             data=data,
