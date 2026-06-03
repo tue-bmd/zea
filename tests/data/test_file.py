@@ -120,6 +120,37 @@ def test_file_attributes():
         file.validate()
 
 
+def test_image_only_dataset_load_parameters(tmp_path):
+    """Image-only datasets carry no probe (or scan) group.
+
+    ``File.probe`` should return an empty Probe rather than raising, and
+    ``load_parameters`` should still return a Parameters object.
+    """
+    n_frames = 2
+    fspec = FileSpec(
+        data={
+            "image": {
+                "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+                "coordinates": np.zeros((n_frames, 16, 12, 3), dtype=np.float32),
+            },
+        },
+    )
+    path = tmp_path / "image_only.hdf5"
+    fspec.save(str(path))
+
+    with File(path) as f:
+        assert "probe" not in f.keys(), "Image-only file should have no probe group"
+        assert f.scan is None, "Image-only file should have no scan group"
+
+        probe = f.probe
+        assert isinstance(probe, Probe), "probe should be an (empty) Probe instance"
+        assert probe.get_parameters() == {}, "Empty probe should have no parameters"
+
+        assert isinstance(f.load_parameters(), Parameters), (
+            "load_parameters should return a Parameters object for image-only files"
+        )
+
+
 def test_load_file_function(dummy_file):
     """Test the load_file function."""
     selected_transmits = [0, 2, 4]

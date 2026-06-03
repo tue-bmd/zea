@@ -1283,7 +1283,9 @@ class File(h5py.File):
             probe_dict = legacy_probe(scan_dict)
             probe_dict["name"] = self.probe_name
         else:
-            raise KeyError("No 'probe' group found in this file.")
+            # Image-only datasets carry no probe group; an empty Probe lets
+            # load_parameters merge in nothing rather than failing.
+            probe_dict = {}
 
         return Probe(**probe_dict)
 
