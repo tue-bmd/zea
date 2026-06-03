@@ -14,7 +14,6 @@ from zea.data.file import File
 from zea.internal.core import DEFAULT_DYNAMIC_RANGE, DataTypes
 from zea.internal.registry import ops_registry
 from zea.ops.keras_ops import Squeeze
-from zea.probes import Probe
 from zea.ops.pipeline import (
     Beamform,
     Map,
