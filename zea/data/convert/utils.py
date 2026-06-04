@@ -405,6 +405,7 @@ def upload_dataset_to_hf(  # pragma: no cover
     revision: str,
     file_glob: str = "*.hdf5",
     commit_message: str | None = None,
+    allow_patterns: "list[str] | None" = None,
 ) -> None:
     """Upload a converted dataset to a HuggingFace Hub revision branch.
 
@@ -420,6 +421,9 @@ def upload_dataset_to_hf(  # pragma: no cover
             Defaults to ``"*.hdf5"``.
         commit_message: Commit message.  Defaults to
             ``"Upload <repo_id> (zea format) to <revision>"``.
+        allow_patterns: Optional list of glob patterns limiting which files in
+            *folder* are uploaded.  When ``None`` (default) the whole folder is
+            uploaded.  Use this to scope an upload to specific files.
 
     Raises:
         ValueError: If *revision* is ``"main"``.
@@ -491,5 +495,6 @@ def upload_dataset_to_hf(  # pragma: no cover
         repo_type="dataset",
         revision=revision,
         commit_message=commit_message,
+        allow_patterns=allow_patterns,
     )
     log.info(f"Uploaded to https://huggingface.co/datasets/{repo_id}/tree/{revision}")

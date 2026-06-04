@@ -1421,31 +1421,10 @@ def convert_verasonics(args):
 
     log.info(f"Selected path: {log.yellow(selected_path)}")
 
-    # Do the conversion of a single file
-    if not selected_path_is_directory:
-        if output_path.is_file():
-            answer = get_answer(
-                f"File {log.yellow(output_path)} exists. Overwrite?"
-                "\n\ty\t - Overwrite"
-                "\n\tn\t - Skip"
-                "\nAnswer: "
-            )
-            if answer is True:
-                log.warning(f"{selected_path} exists. Deleting...")
-                output_path.unlink(missing_ok=False)
-            else:
-                log.info("Aborting...")
-                sys.exit()
-        _zea_from_verasonics_workspace(
-            selected_path,
-            output_path,
-            frames=args.frames,
-            allow_accumulate=args.allow_accumulate,
-            enable_compression=not args.no_compression,
-        )
-    else:
-        # Continue with the rest of your code...
-        for root, dirs, files in os.walk(selected_path):
+    # Build the list of (input, output) file pairs to convert
+    if selected_path_is_directory:
+        file_pairs = []
+        for root, _dirs, files in os.walk(selected_path):
             for mat_file in files:
                 # Skip non-mat files
                 if not mat_file.endswith(".mat"):
@@ -1453,87 +1432,122 @@ def convert_verasonics(args):
 
                 log.info(f"Found raw data file {log.yellow(mat_file)}")
 
-                # Convert the file to a Path object
-                mat_file = Path(mat_file)
-
-                # Construct the output path
-                relative_path = (Path(root) / Path(mat_file)).relative_to(selected_path)
-                file_output_path = output_path / (relative_path.with_suffix(".hdf5"))
-
-                full_path = selected_path / relative_path
-
-                # Handle existing files
-                if file_output_path.is_file():
-                    if existing_file_policy is None:
-                        answer = get_answer(
-                            f"File {log.yellow(file_output_path)} exists. Overwrite?"
-                            "\n\ty\t - Overwrite"
-                            "\n\tn\t - Skip"
-                            "\n\tya\t - Overwrite all existing files"
-                            "\n\tna\t - Skip all existing files"
-                            "\nAnswer: ",
-                            additional_options=("ya", "na"),
-                        )
-                        if answer == "ya":
-                            existing_file_policy = "overwrite"
-                        elif answer == "na":
-                            existing_file_policy = "skip"
-                            continue
-
-                    if existing_file_policy == "skip" or answer is False:
-                        log.info("Skipping...")
-                        continue
-
-                    if existing_file_policy == "overwrite" or answer is True:
-                        log.warning(f"{log.yellow(file_output_path)} exists. Deleting...")
-                        file_output_path.unlink(missing_ok=False)
-
-                try:
-                    _zea_from_verasonics_workspace(
-                        full_path,
-                        file_output_path,
-                        frames=args.frames,
-                        allow_accumulate=args.allow_accumulate,
-                        enable_compression=not args.no_compression,
+                relative_path = (Path(root) / mat_file).relative_to(selected_path)
+                file_pairs.append(
+                    (
+                        selected_path / relative_path,
+                        output_path / relative_path.with_suffix(".hdf5"),
                     )
-                except Exception:
-                    # Print error message without raising it
-                    log.error(f"Failed to convert {mat_file}")
-                    # Print stacktrace
-                    traceback.print_exc()
+                )
+    else:
+        file_pairs = [(selected_path, output_path)]
 
+    num_converted = 0
+    for full_path, file_output_path in file_pairs:
+        # Handle existing files
+        if file_output_path.is_file():
+            if existing_file_policy is None:
+                answer = get_answer(
+                    f"File {log.yellow(file_output_path)} exists. Overwrite?"
+                    "\n\ty\t - Overwrite"
+                    "\n\tn\t - Skip"
+                    "\n\tya\t - Overwrite all existing files"
+                    "\n\tna\t - Skip all existing files"
+                    "\nAnswer: ",
+                    additional_options=("ya", "na"),
+                )
+                if answer == "ya":
+                    existing_file_policy = "overwrite"
+                elif answer == "na":
+                    existing_file_policy = "skip"
                     continue
 
-        write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
+            if existing_file_policy == "skip" or answer is False:
+                log.info("Skipping...")
+                continue
 
-        if getattr(args, "upload", False):
-            assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
-            assert args.revision, "revision must be provided when --upload is True."
-            upload_verasonics(
-                output_path,
-                revision=args.revision,
-                repo_id=args.hf_repo_id,
+            if existing_file_policy == "overwrite" or answer is True:
+                log.warning(f"{log.yellow(file_output_path)} exists. Deleting...")
+                file_output_path.unlink(missing_ok=False)
+
+        try:
+            _zea_from_verasonics_workspace(
+                full_path,
+                file_output_path,
+                frames=args.frames,
+                allow_accumulate=args.allow_accumulate,
+                enable_compression=not args.no_compression,
             )
+            num_converted += 1
+        except Exception:
+            # Print error message without raising it
+            log.error(f"Failed to convert {full_path.name}")
+            # Print stacktrace
+            traceback.print_exc()
+
+            continue
+
+    # Do not write a dataset card or upload anything when nothing was converted
+    # (e.g. all files failed or were skipped).
+    if getattr(args, "upload", False) and num_converted == 0:
+        log.error("No files were converted successfully; skipping upload.")
+        return
+
+    # Write the dataset card next to the converted output: in the output
+    # directory for a directory conversion, or alongside the file for a single
+    # file. The card is required for the upload ownership check below.
+    if selected_path_is_directory:
+        write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
+    elif getattr(args, "upload", False):
+        write_dataset_card(output_path.parent, make_dataset_card(args.hf_repo_id))
+
+    if getattr(args, "upload", False):
+        assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
+        assert args.revision, "revision must be provided when --upload is True."
+        upload_verasonics(
+            output_path,
+            revision=args.revision,
+            repo_id=args.hf_repo_id,
+        )
 
 
 def upload_verasonics(
-    output_folder: str | Path, revision: str, repo_id: str
+    output_path: str | Path, revision: str, repo_id: str
 ) -> None:  # pragma: no cover
-    """Upload the converted Verasonics dataset to a HuggingFace Hub revision branch.
+    """Upload a converted Verasonics dataset to a HuggingFace Hub revision branch.
+
+    Accepts either a directory of converted HDF5 files or a single converted
+    HDF5 file.  For a single file only that file (and its dataset card) is
+    uploaded, leaving any sibling files in the same directory untouched.
 
     Only for zea maintainers with push access to the repository.  Upload to
     ``main`` is blocked; merge the revision branch into ``main`` manually after
     verifying the upload.
 
     Args:
-        output_folder: Root folder containing the converted HDF5 files.
+        output_path: Directory containing the converted HDF5 files, or a single
+            converted HDF5 file.
         revision: Target branch name on the Hub (must not be ``"main"``).
         repo_id: Target HuggingFace repository ID.
     """
-    require_output_dir_ownership(output_folder, repo_id)
+    output_path = Path(output_path)
+    if output_path.is_dir():
+        folder = output_path
+        file_glob = "*.hdf5"
+        allow_patterns = None
+    else:
+        # Single file: upload only this file plus its dataset card, scoped via
+        # allow_patterns so sibling files in the directory are not uploaded.
+        folder = output_path.parent
+        file_glob = output_path.name
+        allow_patterns = [output_path.name, "README.md"]
+
+    require_output_dir_ownership(folder, repo_id)
     upload_dataset_to_hf(
-        folder=output_folder,
+        folder=folder,
         repo_id=repo_id,
         revision=revision,
+        file_glob=file_glob,
+        allow_patterns=allow_patterns,
         commit_message=f"Upload Verasonics dataset (zea format) to {revision}",
     )
