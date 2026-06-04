@@ -1633,8 +1633,8 @@ class Annotations(Spec):
 
     SCHEMA = {
         "anatomy": {"dtype": np.str_, "shape": (("n_frames",), ())},
-        "view": {"dtype": np.str_, "shape": ("n_frames",)},
-        "label": {"dtype": np.str_, "shape": ("n_frames",)},
+        "view": {"dtype": np.str_, "shape": ("n_frames", ())},
+        "label": {"dtype": np.str_, "shape": ("n_frames", ())},
         "image_quality": {"dtype": np.str_, "shape": (("n_frames",), ())},
     }
 
