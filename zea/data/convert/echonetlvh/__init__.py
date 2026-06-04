@@ -315,7 +315,7 @@ class LVHProcessor(H5Processor):
         # Image spec requires (n_frames, x, z, y) — add y=1 dimension
         polar_4d = polar_np[:, :, :, np.newaxis]
 
-        return File.create(
+        File.create(
             out_h5,
             data={
                 "image_sc": {"values": image_sc_np},
@@ -458,29 +458,6 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
     except Exception as e:
         log.error(f"Error processing CSV file: {str(e)}")
         raise
-
-
-def _process_file_worker(avi_file, dst, splits, cone_parameters, range_from, process_range):
-    """
-    Function for a hyperthreading worker to process a single file.
-
-    Args:
-        avi_file: Path to the AVI file to process
-        dst: Destination directory for output
-        splits: Dictionary of splits
-        cone_parameters: Dictionary of cone parameters
-        range_from: Range from value for processing
-        process_range: Process range value for processing
-    Returns:
-        Result of processing the file
-    """
-
-    # create a fresh processor inside the worker process
-    proc = LVHProcessor(path_out_h5=dst, splits=splits, cone_params=cone_parameters)
-    # if LVHProcessor needs range_from/_process_range set, set them here
-    proc.range_from = range_from
-    proc._process_range = process_range
-    return proc(avi_file)
 
 
 def convert_echonetlvh(args):

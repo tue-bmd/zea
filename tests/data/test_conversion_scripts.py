@@ -986,14 +986,13 @@ def test_verasonics_compression_flag_respected(tmp_path):
     }
     data = {"raw_data": np.zeros((2, n_tx, 32, n_el, 1), dtype=np.float32)}
     path = tmp_path / "no_compression.hdf5"
-    f = File.create(
+    File.create(
         path,
         data=data,
         scan=scan,
         probe={"name": "generic", "probe_geometry": np.zeros((n_el, 3), dtype=np.float32)},
         compression=None,
     )
-    f.close()
 
     import h5py as _h5py
 

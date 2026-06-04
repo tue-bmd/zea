@@ -78,13 +78,12 @@ disk.
     ...    "probe_geometry": probe_geometry,
     ... }
 
-    >>> f = File.create(
+    >>> File.create(
     ...    "my_acquisition.hdf5",
     ...    data={"raw_data": raw_data},
     ...    scan=scan,
     ...    probe=probe,
     ... )
-    >>> f.close()
 
 **Save from a Parameters object**
 
@@ -116,13 +115,12 @@ field-by-field reconstruction is needed:
             "polar_angles":           np.zeros(n_tx, dtype=np.float32),
             "time_to_next_transmit":  np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
     }
-    f = File.create(
+    File.create(
         "source.hdf5",
         data={"raw_data": raw},
-        probe={"name": "test_probe"},
+        probe={"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))},
         scan=scan, overwrite=True,
     )
-    f.close()
 
 .. doctest::
 
@@ -132,14 +130,13 @@ field-by-field reconstruction is needed:
     ...     raw_data = f.data.raw_data[:]
 
     >>> # save those parameters to a new file, without manually reconstructing the scan and probe dicts
-    >>> f2 = File.create(
+    >>> File.create(
     ...     "output.hdf5",
     ...     data={"raw_data": raw_data},
     ...     scan=parameters.to_scan_dict(),
     ...     probe=parameters.to_probe_dict() or None,
     ...     overwrite=True,
     ... )
-    >>> f2.close()
 
 .. testcleanup::
 
@@ -234,7 +231,7 @@ the full timing of the acquisition.
     ...     [0] * n_tx_focused + [1] * n_tx_pw, n_frames
     ... ).astype(np.int32)
 
-    >>> f = File.create(
+    >>> File.create(
     ...     "acquisition.hdf5",
     ...     tracks=[
     ...         # Track 0: focused B-mode
@@ -276,7 +273,6 @@ the full timing of the acquisition.
     ...     track_schedule=track_schedule,
     ...     overwrite=True,
     ... )
-    >>> f.close()
 
 **Read — unpack multiple tracks from a file**
 
@@ -361,7 +357,7 @@ some real values.  Pass it as a sub-dict under the key you want:
     # For a simple placeholder without a real grid:
     # coordinates = np.zeros((n_frames, 64, 64, 3), dtype=np.float32)
 
-    f = File.create(
+    File.create(
         "my_acquisition.hdf5",
         data={
             "raw_data": raw,
@@ -373,7 +369,6 @@ some real values.  Pass it as a sub-dict under the key you want:
         },
         scan=scan,
     )
-    f.close()
 
     # Reading back
     with File("my_acquisition.hdf5") as f:
@@ -396,7 +391,7 @@ metadata argument.
 
 .. code-block:: python
 
-    f = File.create(
+    File.create(
         "my_acquisition.hdf5",
         data={"raw_data": raw},
         scan=scan,
@@ -425,7 +420,7 @@ Custom signal keys (anything beyond the standard names) are accepted and stored 
         "sampling_frequency": np.float32(10.0),   # Hz
     }
 
-    f = File.create(
+    File.create(
         "my_acquisition.hdf5",
         data={"raw_data": raw},
         scan=scan,
@@ -434,7 +429,6 @@ Custom signal keys (anything beyond the standard names) are accepted and stored 
             "respiratory_signal": respiratory_signal,   # <-- custom SignalND field
         },
     )
-    f.close()
 
     # Reading back
     with File("my_acquisition.hdf5") as f:

@@ -169,28 +169,22 @@ class Spec:
 
     @staticmethod
     def _merge_dimension_info(
-        dim_to_fields: defaultdict[str, set[str]],
-        dim_to_sizes: defaultdict[str, set[int]],
-        nested_dim_to_fields: defaultdict[str, set[str]],
-        nested_dim_to_sizes: defaultdict[str, set[int]],
+        dim_to_field_sizes: defaultdict[str, dict[str, int]],
+        nested_dim_to_field_sizes: defaultdict[str, dict[str, int]],
     ) -> None:
-        for dim_name, nested_fields in nested_dim_to_fields.items():
-            dim_to_fields[dim_name].update(nested_fields)
-        for dim_name, nested_sizes in nested_dim_to_sizes.items():
-            dim_to_sizes[dim_name].update(nested_sizes)
+        for dim_name, nested_field_sizes in nested_dim_to_field_sizes.items():
+            dim_to_field_sizes[dim_name].update(nested_field_sizes)
 
     @staticmethod
     def _track_named_dimensions(
-        dim_to_fields: defaultdict[str, set[str]],
-        dim_to_sizes: defaultdict[str, set[int]],
+        dim_to_field_sizes: defaultdict[str, dict[str, int]],
         field_path: str,
         matched_shape: tuple,
         shape: tuple,
     ) -> None:
         for i, dim_name in enumerate(matched_shape):
             if isinstance(dim_name, str) and dim_name in CONSISTENCY_DIMENSIONS:
-                dim_to_fields[dim_name].add(field_path)
-                dim_to_sizes[dim_name].add(shape[i])
+                dim_to_field_sizes[dim_name][field_path] = shape[i]
 
     @staticmethod
     def _raise_if_shape_mismatch(
@@ -274,8 +268,7 @@ class Spec:
         field_name: str,
         field_info: dict,
         field_value: Any,
-        dim_to_fields: defaultdict[str, set[str]],
-        dim_to_sizes: defaultdict[str, set[int]],
+        dim_to_field_sizes: defaultdict[str, dict[str, int]],
     ) -> None:
         expected_dtype = field_info["dtype"]
         if not isinstance(expected_dtype, (list, tuple)):
@@ -296,32 +289,39 @@ class Spec:
             self._raise_if_shape_mismatch(field_name, field_value, expected_shapes)
 
         self._track_named_dimensions(
-            dim_to_fields=dim_to_fields,
-            dim_to_sizes=dim_to_sizes,
+            dim_to_field_sizes=dim_to_field_sizes,
             field_path=field_name,
             matched_shape=matched_shape,
             shape=value_shape(field_value),
         )
 
     @staticmethod
-    def _raise_if_inconsistent_dimensions(
-        dim_to_fields: defaultdict[str, set[str]],
-        dim_to_sizes: defaultdict[str, set[int]],
-    ) -> None:
-        for dim_name, sizes in dim_to_sizes.items():
-            if len(sizes) > 1:
-                field_names = sorted(dim_to_fields[dim_name])
-                raise ValueError(
-                    f"Dimension '{dim_name}' has inconsistent sizes across "
-                    f"fields {field_names}: {sorted(sizes)}"
-                )
+    def _format_inconsistent_dimension(dim_name: str, field_sizes: dict[str, int]) -> str:
+        """Build an error message listing each field grouped by its size for a dimension."""
+        sizes_to_fields = defaultdict(list)
+        for field_path, size in field_sizes.items():
+            sizes_to_fields[size].append(field_path)
+        lines = [
+            f"  size {size}: {', '.join(sorted(sizes_to_fields[size]))}"
+            for size in sorted(sizes_to_fields)
+        ]
+        return f"Dimension '{dim_name}' has inconsistent sizes:\n" + "\n".join(lines)
 
-    def _collect_dimension_info(
-        self, prefix: str = ""
-    ) -> tuple[defaultdict[str, set[str]], defaultdict[str, set[int]]]:
-        """Collect named dimension usage and observed sizes for this spec subtree."""
-        dim_to_fields = defaultdict(set)
-        dim_to_sizes = defaultdict(set)
+    @classmethod
+    def _raise_if_inconsistent_dimensions(
+        cls,
+        dim_to_field_sizes: defaultdict[str, dict[str, int]],
+    ) -> None:
+        for dim_name, field_sizes in dim_to_field_sizes.items():
+            if len(set(field_sizes.values())) > 1:
+                raise ValueError(cls._format_inconsistent_dimension(dim_name, field_sizes))
+
+    def _collect_dimension_info(self, prefix: str = "") -> defaultdict[str, dict[str, int]]:
+        """Collect the observed size of each named dimension per field in this spec subtree.
+
+        Returns a mapping ``dim_name -> {field_path: size}``.
+        """
+        dim_to_field_sizes = defaultdict(dict)
 
         for field_name, field_info in self.SCHEMA.items():
             field_value = getattr(self, field_name)
@@ -330,15 +330,10 @@ class Spec:
 
             nested_spec = field_info.get("spec")
             if nested_spec is not None:
-                nested_dim_to_fields, nested_dim_to_sizes = field_value._collect_dimension_info(
+                nested_dim_to_field_sizes = field_value._collect_dimension_info(
                     prefix=f"{prefix}{field_name}."
                 )
-                self._merge_dimension_info(
-                    dim_to_fields,
-                    dim_to_sizes,
-                    nested_dim_to_fields,
-                    nested_dim_to_sizes,
-                )
+                self._merge_dimension_info(dim_to_field_sizes, nested_dim_to_field_sizes)
                 continue
 
             expected_shapes = self._expected_shapes(field_info["shape"])
@@ -349,18 +344,16 @@ class Spec:
                 continue
 
             self._track_named_dimensions(
-                dim_to_fields=dim_to_fields,
-                dim_to_sizes=dim_to_sizes,
+                dim_to_field_sizes=dim_to_field_sizes,
                 field_path=f"{prefix}{field_name}",
                 matched_shape=matched_shape,
                 shape=value_shape(field_value),
             )
 
-        return dim_to_fields, dim_to_sizes
+        return dim_to_field_sizes
 
     def __post_init__(self):
-        dim_to_fields = defaultdict(set)
-        dim_to_sizes = defaultdict(set)
+        dim_to_field_sizes = defaultdict(dict)
         dataclass_fields = {f.name: f for f in fields(self)}
 
         for field_name, field_info in self.SCHEMA.items():
@@ -380,26 +373,20 @@ class Spec:
                 except (TypeError, ValueError) as e:
                     raise type(e)(f"In field '{field_name}': {e}") from e
 
-                nested_dim_to_fields, nested_dim_to_sizes = field_value._collect_dimension_info(
+                nested_dim_to_field_sizes = field_value._collect_dimension_info(
                     prefix=f"{field_name}."
                 )
-                self._merge_dimension_info(
-                    dim_to_fields,
-                    dim_to_sizes,
-                    nested_dim_to_fields,
-                    nested_dim_to_sizes,
-                )
+                self._merge_dimension_info(dim_to_field_sizes, nested_dim_to_field_sizes)
                 continue
 
             self._validate_and_track_primitive_field(
                 field_name=field_name,
                 field_info=field_info,
                 field_value=field_value,
-                dim_to_fields=dim_to_fields,
-                dim_to_sizes=dim_to_sizes,
+                dim_to_field_sizes=dim_to_field_sizes,
             )
 
-        self._raise_if_inconsistent_dimensions(dim_to_fields, dim_to_sizes)
+        self._raise_if_inconsistent_dimensions(dim_to_field_sizes)
 
     @staticmethod
     def _is_string_value(value: Any) -> bool:
@@ -1643,8 +1630,8 @@ class Annotations(Spec):
 
     SCHEMA = {
         "anatomy": {"dtype": np.str_, "shape": (("n_frames",), ())},
-        "view": {"dtype": np.str_, "shape": ("n_frames",)},
-        "label": {"dtype": np.str_, "shape": ("n_frames",)},
+        "view": {"dtype": np.str_, "shape": (("n_frames",), ())},
+        "label": {"dtype": np.str_, "shape": (("n_frames",), ())},
         "image_quality": {"dtype": np.str_, "shape": (("n_frames",), ())},
     }
 
@@ -1703,14 +1690,16 @@ class MetadataSpec(Spec):
         for key, value in extra_signals.items():
             if key in reserved_keys:
                 raise TypeError(f"Invalid custom metadata key '{key}': reserved name")
-            if isinstance(value, np.ndarray):
+            try:
+                value = SignalND(**value)
+            except TypeError as e:
                 raise TypeError(
-                    f"Custom metadata key '{key}' must be a SignalND "
-                    f"(a dict with 'samples', 'start_time_offset', and 'sampling_frequency'), "
-                    f"not a flat array. "
-                    f"Wrap your data: {{'samples': array, 'start_time_offset': 0.0, "
-                    f"'sampling_frequency': fs}}."
-                )
+                    f"You are supplying a custom 'metadata' key '{key}'. We assume that is an "
+                    "N-dimensional sampled signal with timing metadata (SignalND). "
+                    "Wrap your data: {'samples': array, 'start_time_offset': 0.0, "
+                    "'sampling_frequency': fs}, "
+                    "or maybe you were looking for another field in 'metadata'?"
+                ) from e
             setattr(self, key, value)
 
         # Add custom extra signals to the schema as generic SignalND specs, so they get validated.
@@ -1853,6 +1842,7 @@ class FileSpec(Spec):
             ...         "transmit_origins": np.zeros((4, 3), dtype=np.float32),
             ...         "polar_angles": np.zeros(4, dtype=np.float32),
             ...     },
+            ...     probe={"name": "test_probe", "probe_geometry": np.zeros((8, 3))},
             ... )
             >>> dataset.data.raw_data.shape
             (2, 4, 64, 8, 1)
@@ -1974,6 +1964,26 @@ class FileSpec(Spec):
             track_specs.append(t)
         self.tracks = track_specs
 
+        # If any track contains raw_data, the file must define probe_geometry so
+        # the acquisition can be beamformed.
+        def _track_has_raw(track):
+            d = track.data
+            return (isinstance(d, DataSpec) and d.raw_data is not None) or (
+                isinstance(d, dict) and d.get("raw_data") is not None
+            )
+
+        if any(_track_has_raw(t) for t in self.tracks):
+            probe = self.probe
+            probe_geometry = (
+                probe.probe_geometry
+                if isinstance(probe, ProbeSpec)
+                else (probe.get("probe_geometry") if isinstance(probe, dict) else None)
+            )
+            if probe_geometry is None:
+                raise ValueError(
+                    "'probe_geometry' is required when 'raw_data' is provided in track data."
+                )
+
         # For multi-track files every track must have a label so users can
         # identify tracks by name rather than relying on numeric indices.
         if len(self.tracks) > 1:
@@ -2021,20 +2031,14 @@ class FileSpec(Spec):
         # Validate that dimensions which are present in both metadata and tracks
         # are consistent across all tracks.
         if isinstance(self.metadata, MetadataSpec):
-            _, meta_dim_sizes = self.metadata._collect_dimension_info("metadata.")
+            meta_dim_field_sizes = self.metadata._collect_dimension_info("metadata.")
             for i, track in enumerate(self.tracks):
-                _, track_dim_sizes = track._collect_dimension_info(f"tracks[{i}].")
+                track_dim_field_sizes = track._collect_dimension_info(f"tracks[{i}].")
                 for dim in CONSISTENCY_DIMENSIONS:
-                    if dim in meta_dim_sizes and dim in track_dim_sizes:
-                        all_sizes = meta_dim_sizes[dim] | track_dim_sizes[dim]
-                        if len(all_sizes) > 1:
-                            meta_fields, _ = self.metadata._collect_dimension_info("metadata.")
-                            track_fields, _ = track._collect_dimension_info(f"tracks[{i}].")
-                            raise ValueError(
-                                f"Dimension '{dim}' has inconsistent sizes across "
-                                f"fields {sorted(meta_fields[dim] | track_fields[dim])}: "
-                                f"{sorted(all_sizes)}"
-                            )
+                    if dim in meta_dim_field_sizes and dim in track_dim_field_sizes:
+                        field_sizes = {**meta_dim_field_sizes[dim], **track_dim_field_sizes[dim]}
+                        if len(set(field_sizes.values())) > 1:
+                            raise ValueError(self._format_inconsistent_dimension(dim, field_sizes))
 
     def to_dict(self) -> dict:
         """Return this spec as a nested dictionary.
@@ -2094,122 +2098,3 @@ class FileSpec(Spec):
                 )
 
         log.info(f"File saved to {log.yellow(path)}")
-
-    @classmethod
-    def from_hdf5(cls, file: h5py.File) -> "FileSpec":
-        """Load and validate a :class:`FileSpec` from an open HDF5 file.
-
-        Both the new ``tracks/track_N/`` format and the normal flat
-        ``data/`` + ``scan/`` format are supported.  Extra scalar fields in
-        legacy scan groups (``n_frames``, ``n_tx``, etc.) are ignored,
-        and the ``probe`` root attribute is mapped to ``probe.name``.
-
-        Args:
-            file: An open ``h5py.File`` (or :class:`zea.File`).
-
-        Returns:
-            FileSpec: A fully validated spec object.
-        """
-
-        def _load_group_as_dict(group: h5py.Group) -> dict:
-            result = {}
-            for key in group.keys():
-                item = group[key]
-                if isinstance(item, h5py.Group):
-                    result[key] = _load_group_as_dict(item)
-                elif isinstance(item, h5py.Dataset):
-                    if h5py.check_string_dtype(item.dtype) is not None:
-                        val = item.asstr()[()]
-                        # h5py returns object-dtype arrays for strings;
-                        # convert back to np.str_ so spec dtype checks pass.
-                        if isinstance(val, np.ndarray) and val.dtype == object:
-                            val = val.astype(np.str_)
-                        result[key] = val
-                    else:
-                        result[key] = item[()]
-            return result
-
-        kwargs: dict[str, Any] = {}
-
-        # Load scalar SCHEMA fields (metadata, metrics, probe_name, us_machine, description,
-        # track_schedule)
-        for group_name, schema in cls.SCHEMA.items():
-            if "spec" in schema:
-                if group_name in file:
-                    kwargs[group_name] = _load_group_as_dict(file[group_name])
-            elif group_name == "track_schedule":
-                if group_name in file:
-                    kwargs[group_name] = file[group_name][()].astype(np.int32)
-            else:
-                if group_name in file.attrs:
-                    kwargs[group_name] = file.attrs[group_name]
-
-        # New multi-track format: tracks/track_N/
-        if "tracks" in file:
-            tracks_group = file["tracks"]
-            scan_schema_keys = set(ScanSpec.SCHEMA.keys())
-            tracks = []
-            i = 0
-            while f"track_{i}" in tracks_group:
-                track_group = tracks_group[f"track_{i}"]
-                track_dict = _load_group_as_dict(track_group)
-                # Filter legacy scalar fields from per-track scan dicts, matching
-                # the same treatment applied to single-track scan groups below.
-                if "scan" in track_dict and isinstance(track_dict["scan"], dict):
-                    track_dict["scan"] = {
-                        k: v for k, v in track_dict["scan"].items() if k in scan_schema_keys
-                    }
-                tracks.append(track_dict)
-                i += 1
-            kwargs["tracks"] = tracks
-
-        # Legacy flat format: data/ + scan/ at root
-        elif "data" in file or "scan" in file:
-            data_dict = _load_group_as_dict(file["data"]) if "data" in file else {}
-            scan_dict = _load_group_as_dict(file["scan"]) if "scan" in file else None
-
-            kwargs["data"] = data_dict
-            if scan_dict is not None:
-                kwargs["scan"] = scan_dict
-
-        # 1. Map legacy root 'probe_name' or 'probe' attr into probe.name so
-        #    that old files with a named probe but no probe group still round-trip.
-        if "probe" not in kwargs:
-            try:
-                legacy_name = file.probe_name
-                if legacy_name is not None:
-                    kwargs["probe"] = {"name": legacy_name}
-            except AttributeError:
-                pass  # no probe info in file — leave probe as None
-
-        # 2. Filter scan dict to only keys recognised by ScanSpec.SCHEMA so
-        #    that legacy scalar fields (n_frames, n_ax, n_el, n_tx, n_ch, …)
-        #    are silently dropped.
-        if "scan" in kwargs:
-            scan_schema_keys = set(ScanSpec.SCHEMA.keys())
-            kwargs["scan"] = {k: v for k, v in kwargs["scan"].items() if k in scan_schema_keys}
-
-        # 3. Handle legacy flat `data/<key>` datasets.  In old files spatial
-        #    maps (image, image_sc, envelope_data, …) were stored as plain
-        #    arrays (n_frames, z, x) rather than groups with values +
-        #    coordinates.  Wrap them as {"values": array} so DataSpec accepts
-        #    them.  raw_data and aligned_data are valid as flat arrays and are
-        #    left untouched.
-        if "data" in kwargs and isinstance(kwargs["data"], dict):
-            data_dict = kwargs["data"]
-            for key in list(data_dict.keys()):
-                if not isinstance(data_dict[key], np.ndarray):
-                    continue
-                schema_entry = DataSpec.SCHEMA.get(key)
-                # raw_data / aligned_data are plain-array fields — skip them.
-                if schema_entry is not None and "spec" not in schema_entry:
-                    continue
-                log.warning(
-                    "Legacy flat dataset 'data/%s' has no spatial coordinates. "
-                    "The array has been loaded as 'values'; coordinates information "
-                    "was not stored in this file and will be None.",
-                    key,
-                )
-                data_dict[key] = {"values": data_dict[key]}
-
-        return cls(**kwargs)

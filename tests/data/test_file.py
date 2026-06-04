@@ -193,6 +193,13 @@ def _scan_minimal(n_frames=3, n_tx=2, n_el=4):
     }
 
 
+def _probe_minimal(name=None, n_el=4):
+    probe = {"probe_geometry": np.zeros((n_el, 3), dtype=np.float32)}
+    if name is not None:
+        probe["name"] = name
+    return probe
+
+
 @pytest.fixture
 def spec_file(tmp_path):
     """Create a spec-format HDF5 file via FileSpec.save()."""
@@ -203,7 +210,7 @@ def spec_file(tmp_path):
     fspec = FileSpec(
         data={"raw_data": raw, "envelope_data": _make_map(env)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-        probe={"name": "test_probe"},
+        probe=_probe_minimal("test_probe", n_el=n_el),
         description="spec format test file",
     )
     path = tmp_path / "spec_format.hdf5"
@@ -284,7 +291,7 @@ class TestStringDataset:
             },
             scan=_scan_minimal(n_frames=n_frames),
             probe={"name": "test"},
-        ).close()
+        )
 
         with File(path) as f:
             labels_ds = f.data.segmentation.labels
@@ -321,6 +328,7 @@ class TestGroupProxy:
                 },
             },
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
         )
         path = tmp_path / "nested.hdf5"
         fspec.save(str(path))
@@ -462,6 +470,8 @@ class TestValidateSpec:
             s = f.create_group("scan")
             s.create_dataset("probe_geometry", data=np.zeros((4, 3), dtype=np.float32))
             s.create_dataset("sampling_frequency", data=np.float32(40e6))
+            s.create_dataset("center_frequency", data=np.float32(5e6))
+            s.create_dataset("t0_delays", data=np.zeros((2, 4), dtype=np.float32))
 
         with File(str(path)) as f:
             with pytest.raises(TypeError, match="missing.*required"):
@@ -482,6 +492,7 @@ class TestValidateSpec:
                     },
                 },
                 scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                probe=_probe_minimal(n_el=n_el),
             )
 
         path = tmp_path / "custom_map.hdf5"
@@ -583,7 +594,7 @@ class TestAllPipelineDataTypes:
         fspec = FileSpec(
             data=data_dict,
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe={"name": "all_pipeline"},
+            probe=_probe_minimal("all_pipeline", n_el=n_el),
         )
         path = tmp_path / "all_pipeline.hdf5"
         fspec.save(str(path))
@@ -606,13 +617,12 @@ class TestSlicing:
         raw = np.random.randn(n_frames, n_tx, n_ax, n_el, n_ch).astype(np.float32)
         env = np.random.randn(n_frames, 32, 24).astype(np.float32)
         path = tmp_path / "sliceable.hdf5"
-        f = File.create(
+        File.create(
             path,
             data={"raw_data": raw, "envelope_data": _make_map(env)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe={"name": "slice_test"},
+            probe=_probe_minimal("slice_test", n_el=n_el),
         )
-        f.close()
         return str(path), raw, env
 
     def test_single_frame(self, sliceable_file):
@@ -668,7 +678,7 @@ class TestSpatialData:
         sos_coordinates = np.zeros((n_frames, 64, 48, 3), dtype=np.float32)
 
         path = tmp_path / "spatial.hdf5"
-        f = File.create(
+        File.create(
             path,
             data={
                 "envelope_data": _make_map(np.ones((n_frames, 32, 24), dtype=np.float32)),
@@ -683,7 +693,6 @@ class TestSpatialData:
             scan=_scan_minimal(n_frames=n_frames),
             probe={"name": "spatial_test"},
         )
-        f.close()
         return (
             str(path),
             img_values,
@@ -738,30 +747,13 @@ class TestSpatialData:
 
 
 class TestFileCreate:
-    def test_create_returns_readable_file(self, tmp_path):
-        n_frames, n_tx, n_el, n_ax, n_ch = 2, 3, 4, 8, 1
-        raw = np.ones((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
-        path = tmp_path / "created.hdf5"
-
-        f = File.create(
-            path,
-            data={"raw_data": raw},
-            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe={"name": "create_test"},
-            description="created via File.create",
-        )
-        assert f.mode == "r"
-        np.testing.assert_array_equal(f.data.raw_data[()], raw)
-        assert f.probe.name == "create_test"
-        f.close()
-
     def test_create_raises_on_existing_file(self, tmp_path):
         path = tmp_path / "exists.hdf5"
         File.create(
             path,
             data={"envelope_data": _make_map(np.ones((2, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=2),
-        ).close()
+        )
 
         with pytest.raises(FileExistsError):
             File.create(
@@ -776,17 +768,17 @@ class TestFileCreate:
             path,
             data={"envelope_data": _make_map(np.ones((2, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=2),
-        ).close()
+        )
 
         # Should succeed with overwrite=True
-        f = File.create(
+        File.create(
             path,
             data={"envelope_data": _make_map(np.zeros((3, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=3),
             overwrite=True,
         )
-        assert f.data.envelope_data.values.shape[0] == 3
-        f.close()
+        with File(path) as f:
+            assert f.data.envelope_data.values.shape[0] == 3
 
     def test_create_validates_before_writing(self, tmp_path):
         """Bad shape should be caught before any file is created."""
@@ -835,7 +827,7 @@ class TestMetadataMetricsAccessors:
             data={"envelope_data": _make_map(np.ones((n_frames, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             metadata=metadata,
-        ).close()
+        )
 
         with File(path) as f:
             meta = f.metadata
@@ -860,7 +852,7 @@ class TestMetadataMetricsAccessors:
             data={"envelope_data": _make_map(np.ones((n_frames, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             metrics={"coherence_factor": cf},
-        ).close()
+        )
 
         with File(path) as f:
             met = f.metrics
@@ -897,7 +889,7 @@ class TestZeaVersion:
             path,
             data={"envelope_data": _make_map(np.ones((2, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=2),
-        ).close()
+        )
 
         with File(path) as f:
             assert f.zea_version == zea.__version__
@@ -953,7 +945,7 @@ class TestZeaVersion:
             path,
             data={"envelope_data": _make_map(np.ones((2, 8, 6), dtype=np.float32))},
             scan=_scan_minimal(n_frames=2),
-        ).close()
+        )
 
         with File(path) as f:
             result = f.validate()
@@ -967,8 +959,8 @@ class TestZeaVersion:
             path,
             data={"raw_data": np.ones((n_frames, n_tx, 8, n_el, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe={"name": "test_probe"},
-        ).close()
+            probe=_probe_minimal("test_probe", n_el=n_el),
+        )
 
         with File(path) as f:
             # validate() returns a simple status dict
@@ -1026,15 +1018,14 @@ def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
 
     scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
     path = tmp_path / "two_tracks.hdf5"
-    f = File.create(
+    File.create(
         path,
         tracks=[
             {"data": {"raw_data": raw_a}, "scan": scan, "label": "track_a"},
             {"data": {"raw_data": raw_b}, "scan": scan, "label": "track_b"},
         ],
-        probe={"name": "two_track_probe"},
+        probe=_probe_minimal("two_track_probe", n_el=n_el),
     )
-    f.close()
     return path, raw_a, raw_b
 
 
@@ -1048,7 +1039,8 @@ class TestRepr:
             path,
             data={"raw_data": np.zeros((1, 2, 8, 4, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=1, n_tx=2, n_el=4),
-        ).close()
+            probe=_probe_minimal(n_el=4),
+        )
         with File(path) as f:
             r = repr(f)
         assert r.startswith('<File "')
@@ -1071,7 +1063,8 @@ class TestRepr:
             path,
             data={"raw_data": np.zeros((1, 2, 8, 4, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=1, n_tx=2, n_el=4),
-        ).close()
+            probe=_probe_minimal(n_el=4),
+        )
         with File(path) as f:
             assert repr(f) == str(f)
 
@@ -1092,7 +1085,8 @@ class TestRepr:
             path,
             data={"raw_data": np.zeros((1, 2, 8, 4, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=1, n_tx=2, n_el=4),
-        ).close()
+            probe=_probe_minimal(n_el=4),
+        )
         with File(path) as f:
             r = repr(f.tracks[0])
         assert "<Track[0]" in r
@@ -1131,12 +1125,12 @@ class TestMultiTrackFile:
         """A single-track new-format file exposes one Track."""
         raw = np.zeros((2, 3, 8, 4, 1), dtype=np.float32)
         path = tmp_path / "single_track.hdf5"
-        f = File.create(
+        File.create(
             path,
             data={"raw_data": raw},
             scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+            probe=_probe_minimal(n_el=4),
         )
-        f.close()
 
         with File(path) as f:
             tracks = f.tracks
@@ -1241,7 +1235,8 @@ class TestMultiTrackFile:
                 tracks=[
                     {"data": {"raw_data": raw}, "scan": scan, "label": "track_a"},
                     {"data": {"raw_data": raw}, "scan": scan},  # missing label
-                ]
+                ],
+                probe=_probe_minimal(n_el=4),
             )
 
     def test_single_track_label_is_optional(self, tmp_path):
@@ -1252,6 +1247,7 @@ class TestMultiTrackFile:
             path,
             data={"raw_data": raw},
             scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+            probe=_probe_minimal(n_el=4),
         )
         with File(path) as f:
             assert f.tracks[0].label is None
@@ -1294,7 +1290,8 @@ class TestMultiTrackFile:
             path,
             data={"raw_data": raw},
             scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
-        ).close()
+            probe=_probe_minimal(n_el=4),
+        )
 
         with File(path) as f:
             np.testing.assert_array_equal(f.data.raw_data[:], raw)
@@ -1306,7 +1303,8 @@ class TestMultiTrackFile:
             path,
             data={"raw_data": np.zeros((2, 3, 8, 4, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
-        ).close()
+            probe=_probe_minimal(n_el=4),
+        )
 
         with File(path) as f:
             scan = f.scan
@@ -1342,7 +1340,7 @@ class TestMultiTrackFile:
                 },
             ],
             probe={"probe_geometry": geom},
-        ).close()
+        )
 
         with File(path) as f:
             for track in f.tracks:
@@ -1373,7 +1371,8 @@ class TestMultiTrackFile:
                 {"data": {"raw_data": raw_a}, "scan": scan, "label": "track_a"},
                 {"data": {"raw_data": raw_b}, "scan": scan, "label": "track_b"},
             ],
-        ).close()
+            probe=_probe_minimal(n_el=n_el),
+        )
 
         with File(path) as f:
             tracks = f.tracks
@@ -1410,7 +1409,8 @@ class TestMultiTrackFile:
                 {"data": {"raw_data": raw_b}, "scan": scan_b, "label": "track_b"},
             ],
             track_schedule=schedule,
-        ).close()
+            probe=_probe_minimal(n_el=n_el),
+        )
         return path, schedule, dt_a, dt_b
 
     def test_track_schedule_stored_and_loaded(self, tmp_path):
@@ -1441,6 +1441,7 @@ class TestMultiTrackFile:
                     {"data": {"raw_data": raw}, "scan": scan, "label": "track_b"},
                 ],
                 track_schedule=schedule_bad,
+                probe=_probe_minimal(n_el=4),
             )
 
     def test_track_schedule_valid_does_not_raise(self, tmp_path):
@@ -1455,6 +1456,7 @@ class TestMultiTrackFile:
                 {"data": {"raw_data": raw}, "scan": scan, "label": "track_b"},
             ],
             track_schedule=schedule,
+            probe=_probe_minimal(n_el=4),
         )
         path = tmp_path / "valid_schedule.hdf5"
         spec.save(str(path))  # should not raise
@@ -1484,6 +1486,7 @@ class TestMultiTrackFile:
                 {"data": {"raw_data": raw}, "scan": scan_no_t2nt, "label": "track_b"},
             ],
             track_schedule=np.array([0, 1, 0, 1], dtype=np.int32),
+            probe=_probe_minimal(n_el=n_el),
         )
         path = tmp_path / "no_t2nt.hdf5"
         spec.save(str(path))
@@ -1578,7 +1581,8 @@ class TestMultiTrackFile:
                 {"data": {"raw_data": raw_b}, "scan": scan_b, "label": "track_b"},
             ],
             track_schedule=schedule,
-        ).close()
+            probe=_probe_minimal(n_el=n_el),
+        )
 
         with File(path) as f:
             ts_a = f.tracks[0].timestamps
@@ -1665,17 +1669,6 @@ class TestLegacyFileLoading:
         with File(path) as f:
             spec = f.validate_spec()
         assert spec.data.raw_data.shape == raw.shape
-
-    def test_flat_image_sc_wrapped_as_values(self, legacy_file):
-        """Flat legacy image_sc is loaded as an extra Map; coordinates is None."""
-        path, _, image_sc = legacy_file
-        with patch("zea.data.spec.log.warning"):
-            with File(path) as f:
-                spec = f.validate_spec()
-        assert "image_sc" in spec.data._extra_map_keys
-        assert spec.data.image_sc is not None
-        np.testing.assert_array_equal(spec.data.image_sc.values, image_sc)
-        assert spec.data.image_sc.coordinates is None
 
     def test_scalar_scan_fields_ignored(self, legacy_file):
         """Redundant scalar scan fields (n_frames, n_tx, etc.) are silently filtered."""

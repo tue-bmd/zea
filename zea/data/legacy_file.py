@@ -2,6 +2,7 @@ import numpy as np
 from keras.utils import pad_sequences
 
 from zea import log
+from zea.data.spec import DataSpec
 
 
 def dict_to_sorted_list(dictionary: dict):
@@ -175,3 +176,29 @@ def legacy_probe(scan_parameters: dict):
         probe_parameters["probe_geometry"] = scan_parameters["probe_geometry"]
 
     return probe_parameters
+
+
+def legacy_data(data: dict) -> dict:
+    """Format a legacy ``data`` dict for :class:`~zea.data.spec.DataSpec`.
+
+    In old files spatial maps (``image``, ``image_sc``, ``envelope_data``, …)
+    were stored as plain arrays of shape ``(n_frames, z, x)`` rather than groups
+    with ``values`` + ``coordinates``.  Wrap each such array as
+    ``{"values": array}`` so :class:`~zea.data.spec.DataSpec` accepts it.  The
+    plain-array fields ``raw_data`` and ``aligned_data`` are left untouched.
+    """
+    formatted = dict(data)
+    for key, value in data.items():
+        if not isinstance(value, np.ndarray):
+            continue
+        schema_entry = DataSpec.SCHEMA.get(key)
+        # raw_data / aligned_data are valid plain-array fields — leave as-is.
+        if schema_entry is not None and "spec" not in schema_entry:
+            continue
+        log.warning(
+            f"Legacy flat dataset 'data/{key}' has no spatial coordinates. "
+            "The array has been loaded as 'values'; coordinates were not stored "
+            "in this file and will be None."
+        )
+        formatted[key] = {"values": value}
+    return formatted

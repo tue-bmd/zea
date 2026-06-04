@@ -114,7 +114,7 @@ def save_file(
         for key, map_dict in custom_maps.items():
             data[key] = map_dict
 
-    f = File.create(
+    File.create(
         path=path,
         data=data,
         scan=parameters.to_scan_dict(),
@@ -125,52 +125,6 @@ def save_file(
         chunk_frames=chunk_frames,
         overwrite=True,
     )
-    f.close()
-
-
-def _iter_folder_io(input_path: Path, output_path: Path):
-    """Yields ``(input_file, output_file)`` path pairs for a folder operation.
-
-    Uses :class:`zea.Dataset` to iterate over every zea file in ``input_path``. The
-    output folder mirrors the structure of the input folder.
-
-    Args:
-        input_path (Path): Path to a folder containing zea data files.
-        output_path (Path): Path to the output folder.
-
-    Yields:
-        tuple[Path, Path]: Pairs of (input file, output file) paths.
-    """
-    input_path, output_path = Path(input_path), Path(output_path)
-    with Dataset(input_path, validate=False) as dataset:
-        for file in dataset:
-            yield file.path, output_path / file.path.relative_to(input_path)
-
-
-def _supports_folders(operation):
-    """Decorator that lets a single-file operation also accept a folder as input.
-
-    When the decorated operation is called with a folder as ``input_path``, it is
-    applied to every zea file in that folder (iterated with :class:`zea.Dataset`),
-    writing the results to ``output_path`` and mirroring the input folder structure.
-    A single file is processed as before.
-    """
-
-    @functools.wraps(operation)
-    def wrapper(input_path, output_path, *args, **kwargs):
-        if not Path(input_path).is_dir():
-            return operation(input_path, output_path, *args, **kwargs)
-        output_path = Path(output_path)
-        if output_path.is_file():
-            raise NotADirectoryError(
-                f"Input {input_path} is a folder, so output {output_path} must be a "
-                "folder, but it is an existing file."
-            )
-        for in_path, out_path in tqdm(list(_iter_folder_io(input_path, output_path))):
-            operation(in_path, out_path, *args, **kwargs)
-        return None
-
-    return wrapper
 
 
 def _iter_folder_io(input_path: Path, output_path: Path):

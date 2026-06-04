@@ -9,7 +9,7 @@ import numpy as np
 
 import zea
 from zea import log
-from zea.data.legacy_file import legacy_probe, legacy_scan
+from zea.data.legacy_file import legacy_data, legacy_probe, legacy_scan
 from zea.data.spec import (
     DEFAULT_COMPRESSION,
     DataSpec,
@@ -765,7 +765,7 @@ class File(h5py.File):
         compression: str = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
         overwrite: bool = False,
-    ) -> "File":
+    ):
         """Create a new zea HDF5 file from data, scan, and optional metadata.
 
         All inputs are validated against the :class:`~zea.data.spec.FileSpec`
@@ -817,7 +817,7 @@ class File(h5py.File):
 
             >>> n_frames, n_tx, n_ax, n_el = 2, 4, 64, 8
             >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
-            >>> geom = np.zeros((n_el, 3), dtype=np.float32)
+            >>> probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
             >>> scan = {
             ...     "sampling_frequency": np.float32(40e6),
             ...     "center_frequency": np.float32(5e6),
@@ -832,16 +832,13 @@ class File(h5py.File):
             ... }
 
             >>> _, path = tempfile.mkstemp(suffix=".hdf5")
-            >>> f = File.create(
+            >>> File.create(
             ...     path,
             ...     data={"raw_data": raw},
             ...     scan=scan,
-            ...     probe={"name": "verasonics_l11_4v"},
+            ...     probe={"name": "verasonics_l11_4v", "probe_geometry": probe_geometry},
             ...     overwrite=True,
             ... )
-            >>> f.probe_name
-            'verasonics_l11_4v'
-            >>> f.close()
             >>> os.unlink(path)
         """
         if tracks is not None and (data is not None or scan is not None):
@@ -891,8 +888,6 @@ class File(h5py.File):
             compression=compression,
             chunk_frames=chunk_frames,
         )
-
-        return cls(str(path), mode="r")
 
     @property
     def data(self) -> _GroupProxy:
@@ -1406,6 +1401,58 @@ class File(h5py.File):
             log.error(f"File {self.path} is not a valid zea file.\n{e}\n")
             raise
 
+    def _to_file_spec(self) -> FileSpec:
+        """Load the whole file into a validated :class:`~zea.data.spec.FileSpec`.
+
+        Unlike the lazy :attr:`data` / :attr:`scan` accessors, every dataset is
+        read into memory here.  Both the multi-track ``tracks/track_N/`` layout
+        and the legacy flat ``data/`` + ``scan/`` layout are supported.
+
+        Returns:
+            FileSpec: A fully validated spec object, with all arrays in RAM.
+        """
+        kwargs: dict = {"tracks": self._load_tracks(), "probe": self.probe}
+
+        if self.track_schedule is not None:
+            kwargs["track_schedule"] = self.track_schedule
+        if "metadata" in self:
+            kwargs["metadata"] = self.metadata
+        if "metrics" in self:
+            kwargs["metrics"] = self.metrics
+        if "us_machine" in self.attrs:
+            kwargs["us_machine"] = self.attrs["us_machine"]
+        if "description" in self.attrs:
+            kwargs["description"] = self.attrs["description"]
+
+        return FileSpec(**kwargs)
+
+    def _load_tracks(self) -> "list[dict]":
+        """Read every track's ``data`` and ``scan`` fully into a list of dicts.
+
+        Each dict is shaped for :class:`~zea.data.spec.TrackSpec`. Legacy
+        flat-format files are returned as a single, unlabelled track.
+        """
+        # Legacy flat layout: one unlabelled track at the file root.
+        if "tracks" not in self:
+            track: dict = {}
+            if super().__contains__("data"):
+                data = load_dict_from_hdf5_group(self["data"])
+                track["data"] = legacy_data(data) if _is_legacy_file(self) else data
+            if self.scan is not None:
+                track["scan"] = self.scan
+            return [track]
+
+        # Multi-track layout: tracks/track_N/{data,scan,label}.
+        tracks = []
+        for track in self.tracks:
+            track_dict: dict = {"label": track.label}
+            if "data" in track._group:
+                track_dict["data"] = load_dict_from_hdf5_group(track._group["data"])
+            if "scan" in track._group:
+                track_dict["scan"] = track.scan
+            tracks.append(track_dict)
+        return tracks
+
     def validate_spec(self) -> FileSpec:
         """Full schema validation — loads all data into RAM.
 
@@ -1434,7 +1481,7 @@ class File(h5py.File):
             ...     spec = f.validate_spec()
             ...     print(spec.scan.n_tx)
         """
-        return FileSpec.from_hdf5(self)
+        return self._to_file_spec()
 
     def __repr__(self):
         name = Path(self.filename).name
@@ -1714,8 +1761,8 @@ def _validate_file_impl(file: File) -> None:
     """Lightweight structural validation — no array data is loaded.
 
     Checks that:
-    - a ``data`` group is present — either at ``tracks/track_N/data``,
-      at the root ``data`` group (legacy), or inside ``event_*`` sub-groups
+    - a ``data`` group is present — either at ``tracks/track_N/data``
+      or at the root ``data`` group (legacy)
     - for legacy files, every key in ``data`` is a recognised zea data type
     - for files created with zea v0.1.0 and later, every key in ``data``
     is in :class:`~zea.data.spec.DataSpec`\'s schema
@@ -1739,22 +1786,10 @@ def _validate_file_impl(file: File) -> None:
             "'data' is not a group - this may not be a zea file."
         )
         data_groups.append(("data", file["data"]))
-    else:
-        event_keys = [
-            k for k in file.keys() if k.startswith("event_") and k[len("event_") :].isdigit()
-        ]
-        for event_key in event_keys:
-            assert "data" in file[event_key], (
-                f"Event group '{event_key}' is missing a 'data' subgroup."
-            )
-            assert isinstance(file[event_key]["data"], h5py.Group), (
-                f"'{event_key}/data' is not a group - this may not be a zea file."
-            )
-            data_groups.append((f"{event_key}/data", file[event_key]["data"]))
 
     assert data_groups, (
         "'data' group not found in file. "
-        "Expected either tracks/track_N/data, a root 'data' group, or event groups named 'event_*'."
+        "Expected either tracks/track_N/data or a root 'data' group."
     )
 
     for group_path, data_group in data_groups:

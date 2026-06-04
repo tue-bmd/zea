@@ -62,10 +62,10 @@ def test_file_create_accepts_probe_object():
     fd, path = tempfile.mkstemp(suffix=".hdf5")
     os.close(fd)
     try:
-        f = File.create(path, data={"raw_data": raw}, scan=scan, probe=probe, overwrite=True)
-        assert f.probe.name == "verasonics_l11_4v"
-        assert f.probe.n_el == 128
-        f.close()
+        File.create(path, data={"raw_data": raw}, scan=scan, probe=probe, overwrite=True)
+        with File(path) as f:
+            assert f.probe.name == "verasonics_l11_4v"
+            assert f.probe.n_el == 128
     finally:
         os.unlink(path)
 
