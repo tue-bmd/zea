@@ -1690,14 +1690,16 @@ class MetadataSpec(Spec):
         for key, value in extra_signals.items():
             if key in reserved_keys:
                 raise TypeError(f"Invalid custom metadata key '{key}': reserved name")
-            if isinstance(value, np.ndarray):
+            try:
+                value = SignalND(**value)
+            except TypeError as e:
                 raise TypeError(
-                    f"Custom metadata key '{key}' must be a SignalND "
-                    f"(a dict with 'samples', 'start_time_offset', and 'sampling_frequency'), "
-                    f"not a flat array. "
-                    f"Wrap your data: {{'samples': array, 'start_time_offset': 0.0, "
-                    f"'sampling_frequency': fs}}."
-                )
+                    f"You are supplying a custom 'metadata' key {key}. We assume that is an "
+                    "N-dimensional sampled signal with timing metadata (SignalND). "
+                    "Wrap your data: {'samples': array, 'start_time_offset': 0.0, "
+                    "'sampling_frequency': fs}, "
+                    "or maybe you were looking for another field in 'metadata'?"
+                ) from e
             setattr(self, key, value)
 
         # Add custom extra signals to the schema as generic SignalND specs, so they get validated.
