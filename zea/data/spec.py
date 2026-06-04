@@ -169,28 +169,22 @@ class Spec:
 
     @staticmethod
     def _merge_dimension_info(
-        dim_to_fields: defaultdict[str, set[str]],
-        dim_to_sizes: defaultdict[str, set[int]],
-        nested_dim_to_fields: defaultdict[str, set[str]],
-        nested_dim_to_sizes: defaultdict[str, set[int]],
+        dim_to_field_sizes: defaultdict[str, dict[str, int]],
+        nested_dim_to_field_sizes: defaultdict[str, dict[str, int]],
     ) -> None:
-        for dim_name, nested_fields in nested_dim_to_fields.items():
-            dim_to_fields[dim_name].update(nested_fields)
-        for dim_name, nested_sizes in nested_dim_to_sizes.items():
-            dim_to_sizes[dim_name].update(nested_sizes)
+        for dim_name, nested_field_sizes in nested_dim_to_field_sizes.items():
+            dim_to_field_sizes[dim_name].update(nested_field_sizes)
 
     @staticmethod
     def _track_named_dimensions(
-        dim_to_fields: defaultdict[str, set[str]],
-        dim_to_sizes: defaultdict[str, set[int]],
+        dim_to_field_sizes: defaultdict[str, dict[str, int]],
         field_path: str,
         matched_shape: tuple,
         shape: tuple,
     ) -> None:
         for i, dim_name in enumerate(matched_shape):
             if isinstance(dim_name, str) and dim_name in CONSISTENCY_DIMENSIONS:
-                dim_to_fields[dim_name].add(field_path)
-                dim_to_sizes[dim_name].add(shape[i])
+                dim_to_field_sizes[dim_name][field_path] = shape[i]
 
     @staticmethod
     def _raise_if_shape_mismatch(
@@ -274,8 +268,7 @@ class Spec:
         field_name: str,
         field_info: dict,
         field_value: Any,
-        dim_to_fields: defaultdict[str, set[str]],
-        dim_to_sizes: defaultdict[str, set[int]],
+        dim_to_field_sizes: defaultdict[str, dict[str, int]],
     ) -> None:
         expected_dtype = field_info["dtype"]
         if not isinstance(expected_dtype, (list, tuple)):
@@ -296,32 +289,39 @@ class Spec:
             self._raise_if_shape_mismatch(field_name, field_value, expected_shapes)
 
         self._track_named_dimensions(
-            dim_to_fields=dim_to_fields,
-            dim_to_sizes=dim_to_sizes,
+            dim_to_field_sizes=dim_to_field_sizes,
             field_path=field_name,
             matched_shape=matched_shape,
             shape=value_shape(field_value),
         )
 
     @staticmethod
-    def _raise_if_inconsistent_dimensions(
-        dim_to_fields: defaultdict[str, set[str]],
-        dim_to_sizes: defaultdict[str, set[int]],
-    ) -> None:
-        for dim_name, sizes in dim_to_sizes.items():
-            if len(sizes) > 1:
-                field_names = sorted(dim_to_fields[dim_name])
-                raise ValueError(
-                    f"Dimension '{dim_name}' has inconsistent sizes across "
-                    f"fields {field_names}: {sorted(sizes)}"
-                )
+    def _format_inconsistent_dimension(dim_name: str, field_sizes: dict[str, int]) -> str:
+        """Build an error message listing each field grouped by its size for a dimension."""
+        sizes_to_fields = defaultdict(list)
+        for field_path, size in field_sizes.items():
+            sizes_to_fields[size].append(field_path)
+        lines = [
+            f"  size {size}: {', '.join(sorted(sizes_to_fields[size]))}"
+            for size in sorted(sizes_to_fields)
+        ]
+        return f"Dimension '{dim_name}' has inconsistent sizes:\n" + "\n".join(lines)
 
-    def _collect_dimension_info(
-        self, prefix: str = ""
-    ) -> tuple[defaultdict[str, set[str]], defaultdict[str, set[int]]]:
-        """Collect named dimension usage and observed sizes for this spec subtree."""
-        dim_to_fields = defaultdict(set)
-        dim_to_sizes = defaultdict(set)
+    @classmethod
+    def _raise_if_inconsistent_dimensions(
+        cls,
+        dim_to_field_sizes: defaultdict[str, dict[str, int]],
+    ) -> None:
+        for dim_name, field_sizes in dim_to_field_sizes.items():
+            if len(set(field_sizes.values())) > 1:
+                raise ValueError(cls._format_inconsistent_dimension(dim_name, field_sizes))
+
+    def _collect_dimension_info(self, prefix: str = "") -> defaultdict[str, dict[str, int]]:
+        """Collect the observed size of each named dimension per field in this spec subtree.
+
+        Returns a mapping ``dim_name -> {field_path: size}``.
+        """
+        dim_to_field_sizes = defaultdict(dict)
 
         for field_name, field_info in self.SCHEMA.items():
             field_value = getattr(self, field_name)
@@ -330,15 +330,10 @@ class Spec:
 
             nested_spec = field_info.get("spec")
             if nested_spec is not None:
-                nested_dim_to_fields, nested_dim_to_sizes = field_value._collect_dimension_info(
+                nested_dim_to_field_sizes = field_value._collect_dimension_info(
                     prefix=f"{prefix}{field_name}."
                 )
-                self._merge_dimension_info(
-                    dim_to_fields,
-                    dim_to_sizes,
-                    nested_dim_to_fields,
-                    nested_dim_to_sizes,
-                )
+                self._merge_dimension_info(dim_to_field_sizes, nested_dim_to_field_sizes)
                 continue
 
             expected_shapes = self._expected_shapes(field_info["shape"])
@@ -349,18 +344,16 @@ class Spec:
                 continue
 
             self._track_named_dimensions(
-                dim_to_fields=dim_to_fields,
-                dim_to_sizes=dim_to_sizes,
+                dim_to_field_sizes=dim_to_field_sizes,
                 field_path=f"{prefix}{field_name}",
                 matched_shape=matched_shape,
                 shape=value_shape(field_value),
             )
 
-        return dim_to_fields, dim_to_sizes
+        return dim_to_field_sizes
 
     def __post_init__(self):
-        dim_to_fields = defaultdict(set)
-        dim_to_sizes = defaultdict(set)
+        dim_to_field_sizes = defaultdict(dict)
         dataclass_fields = {f.name: f for f in fields(self)}
 
         for field_name, field_info in self.SCHEMA.items():
@@ -380,26 +373,20 @@ class Spec:
                 except (TypeError, ValueError) as e:
                     raise type(e)(f"In field '{field_name}': {e}") from e
 
-                nested_dim_to_fields, nested_dim_to_sizes = field_value._collect_dimension_info(
+                nested_dim_to_field_sizes = field_value._collect_dimension_info(
                     prefix=f"{field_name}."
                 )
-                self._merge_dimension_info(
-                    dim_to_fields,
-                    dim_to_sizes,
-                    nested_dim_to_fields,
-                    nested_dim_to_sizes,
-                )
+                self._merge_dimension_info(dim_to_field_sizes, nested_dim_to_field_sizes)
                 continue
 
             self._validate_and_track_primitive_field(
                 field_name=field_name,
                 field_info=field_info,
                 field_value=field_value,
-                dim_to_fields=dim_to_fields,
-                dim_to_sizes=dim_to_sizes,
+                dim_to_field_sizes=dim_to_field_sizes,
             )
 
-        self._raise_if_inconsistent_dimensions(dim_to_fields, dim_to_sizes)
+        self._raise_if_inconsistent_dimensions(dim_to_field_sizes)
 
     @staticmethod
     def _is_string_value(value: Any) -> bool:
@@ -2041,20 +2028,14 @@ class FileSpec(Spec):
         # Validate that dimensions which are present in both metadata and tracks
         # are consistent across all tracks.
         if isinstance(self.metadata, MetadataSpec):
-            _, meta_dim_sizes = self.metadata._collect_dimension_info("metadata.")
+            meta_dim_field_sizes = self.metadata._collect_dimension_info("metadata.")
             for i, track in enumerate(self.tracks):
-                _, track_dim_sizes = track._collect_dimension_info(f"tracks[{i}].")
+                track_dim_field_sizes = track._collect_dimension_info(f"tracks[{i}].")
                 for dim in CONSISTENCY_DIMENSIONS:
-                    if dim in meta_dim_sizes and dim in track_dim_sizes:
-                        all_sizes = meta_dim_sizes[dim] | track_dim_sizes[dim]
-                        if len(all_sizes) > 1:
-                            meta_fields, _ = self.metadata._collect_dimension_info("metadata.")
-                            track_fields, _ = track._collect_dimension_info(f"tracks[{i}].")
-                            raise ValueError(
-                                f"Dimension '{dim}' has inconsistent sizes across "
-                                f"fields {sorted(meta_fields[dim] | track_fields[dim])}: "
-                                f"{sorted(all_sizes)}"
-                            )
+                    if dim in meta_dim_field_sizes and dim in track_dim_field_sizes:
+                        field_sizes = {**meta_dim_field_sizes[dim], **track_dim_field_sizes[dim]}
+                        if len(set(field_sizes.values())) > 1:
+                            raise ValueError(self._format_inconsistent_dimension(dim, field_sizes))
 
     def to_dict(self) -> dict:
         """Return this spec as a nested dictionary.

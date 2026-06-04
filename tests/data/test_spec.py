@@ -279,6 +279,28 @@ def test_scan_dimension_count_consistency():
         ScanSpec(**scan)
 
 
+def test_inconsistent_dimension_error_groups_fields_by_size():
+    """The error message groups the offending fields by their observed size."""
+    scan = _scan_minimal(n_tx=2)
+    # initial_times disagrees (n_tx=3) with the other n_tx=2 fields.
+    scan["initial_times"] = np.zeros((3,), dtype=np.float32)
+
+    with pytest.raises(ValueError) as exc_info:
+        ScanSpec(**scan)
+
+    message = str(exc_info.value)
+    assert message.startswith("Dimension 'n_tx' has inconsistent sizes:")
+    # Each distinct size is reported on its own line with its fields.
+    assert "size 2: " in message
+    assert "size 3: " in message
+    # The lone disagreeing field appears under its own size.
+    assert "size 3: initial_times" in message
+    # Fields that share the majority size are grouped together (sorted).
+    assert "t0_delays" in message and "tx_apodizations" in message
+    size_2_line = next(line for line in message.splitlines() if line.strip().startswith("size 2:"))
+    assert "t0_delays" in size_2_line
+
+
 def test_signal_nd_accepts_variable_trailing_dimensions_with_ellipsis():
     signal = SignalND(
         samples=np.zeros((10, 3, 4, 5), dtype=np.float32),
@@ -784,6 +806,44 @@ class TestMetadataAndMetricsValidationErrors:
                     }
                 },
             )
+
+    def test_annotations_n_frames_mismatch_against_later_track_raises(self):
+        """Metadata may agree with track 0 but conflict with a later track.
+
+        Exercises the multi-track loop in ``FileSpec.__post_init__``: the
+        per-track consistency check must keep iterating past the matching
+        track and report which track disagrees.
+        """
+        n_tx, n_el, n_ax, n_ch = 2, 4, 8, 1
+        n_frames_match, n_frames_conflict = 3, 5
+
+        def _track(n_frames):
+            return {
+                "data": {
+                    "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+                },
+                "scan": _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                "label": f"track_{n_frames}",
+            }
+
+        with pytest.raises(ValueError) as exc_info:
+            FileSpec(
+                tracks=[_track(n_frames_match), _track(n_frames_conflict)],
+                probe=_probe_minimal(n_el=n_el),
+                metadata={
+                    "annotations": {
+                        "view": np.array(["a4c"] * n_frames_match, dtype=np.str_),
+                    }
+                },
+            )
+
+        message = str(exc_info.value)
+        assert message.startswith("Dimension 'n_frames' has inconsistent sizes:")
+        # The message attributes the sizes to the metadata field and the
+        # conflicting track (not track 0, which matched the metadata).
+        assert "metadata.annotations.view" in message
+        assert "tracks[1]." in message
+        assert "tracks[0]." not in message
 
 
 class TestProbePoseValidation:
