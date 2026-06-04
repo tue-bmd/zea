@@ -3,15 +3,12 @@ from dataclasses import MISSING, dataclass, field, fields
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _get_pkg_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Tuple
+from typing import Any, List, Tuple
 
 import h5py
 import numpy as np
 
 from zea import log
-
-if TYPE_CHECKING:
-    from zea.data.file import File
 
 CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch", "n_spatial_ch"}
 
@@ -2101,67 +2098,120 @@ class FileSpec(Spec):
         log.info(f"File saved to {log.yellow(path)}")
 
     @classmethod
-    def from_hdf5(cls, file: "File") -> "FileSpec":
-        """Load and validate a :class:`FileSpec` from an open zea :class:`~zea.File`.
+    def from_hdf5(cls, file: h5py.File) -> "FileSpec":
+        """Load and validate a :class:`FileSpec` from an open HDF5 file.
 
-        Both the new ``tracks/track_N/`` format and the legacy flat
-        ``data/`` + ``scan/`` format are supported.  Scan and probe parameters
-        are read through the file's own :attr:`~zea.File.scan`,
-        :attr:`~zea.File.tracks` and :attr:`~zea.File.probe` accessors, so the
-        legacy handling (dropping scalar fields such as ``n_frames`` / ``n_tx``,
-        mapping the legacy ``probe`` root attribute to ``probe.name``, deriving
-        ``probe_geometry``, …) lives in one place instead of being
-        re-implemented here.
+        Both the new ``tracks/track_N/`` format and the normal flat
+        ``data/`` + ``scan/`` format are supported.  Extra scalar fields in
+        legacy scan groups (``n_frames``, ``n_tx``, etc.) are ignored,
+        and the ``probe`` root attribute is mapped to ``probe.name``.
 
         Args:
-            file: An open :class:`~zea.File`.
+            file: An open ``h5py.File`` (or :class:`zea.File`).
 
         Returns:
             FileSpec: A fully validated spec object.
         """
 
+        def _load_group_as_dict(group: h5py.Group) -> dict:
+            result = {}
+            for key in group.keys():
+                item = group[key]
+                if isinstance(item, h5py.Group):
+                    result[key] = _load_group_as_dict(item)
+                elif isinstance(item, h5py.Dataset):
+                    if h5py.check_string_dtype(item.dtype) is not None:
+                        val = item.asstr()[()]
+                        # h5py returns object-dtype arrays for strings;
+                        # convert back to np.str_ so spec dtype checks pass.
+                        if isinstance(val, np.ndarray) and val.dtype == object:
+                            val = val.astype(np.str_)
+                        result[key] = val
+                    else:
+                        result[key] = item[()]
+            return result
+
         kwargs: dict[str, Any] = {}
 
-        # Scalar / spec metadata groups (metadata, metrics, us_machine,
-        # description, track_schedule).  'probe' is excluded here and resolved
-        # below via file.probe so its legacy handling stays in one place.
+        # Load scalar SCHEMA fields (metadata, metrics, probe_name, us_machine, description,
+        # track_schedule)
         for group_name, schema in cls.SCHEMA.items():
-            if group_name == "probe":
-                continue
             if "spec" in schema:
                 if group_name in file:
-                    kwargs[group_name] = file.recursively_load_dict_contents_from_group(group_name)
+                    kwargs[group_name] = _load_group_as_dict(file[group_name])
             elif group_name == "track_schedule":
-                if file.track_schedule is not None:
-                    kwargs[group_name] = file.track_schedule
+                if group_name in file:
+                    kwargs[group_name] = file[group_name][()].astype(np.int32)
             else:
                 if group_name in file.attrs:
                     kwargs[group_name] = file.attrs[group_name]
 
-        kwargs["probe"] = file.probe
-
         # New multi-track format: tracks/track_N/
         if "tracks" in file:
             tracks_group = file["tracks"]
+            scan_schema_keys = set(ScanSpec.SCHEMA.keys())
             tracks = []
-            for i, track in enumerate(file.tracks):
+            i = 0
+            while f"track_{i}" in tracks_group:
                 track_group = tracks_group[f"track_{i}"]
-                track_dict: dict[str, Any] = {"label": track.label}
-                if "data" in track_group:
-                    track_dict["data"] = file.recursively_load_dict_contents_from_group(
-                        f"tracks/track_{i}/data"
-                    )
-                if "scan" in track_group:
-                    track_dict["scan"] = track.scan
+                track_dict = _load_group_as_dict(track_group)
+                # Filter legacy scalar fields from per-track scan dicts, matching
+                # the same treatment applied to single-track scan groups below.
+                if "scan" in track_dict and isinstance(track_dict["scan"], dict):
+                    track_dict["scan"] = {
+                        k: v for k, v in track_dict["scan"].items() if k in scan_schema_keys
+                    }
                 tracks.append(track_dict)
+                i += 1
             kwargs["tracks"] = tracks
 
         # Legacy flat format: data/ + scan/ at root
         elif "data" in file or "scan" in file:
-            if "data" in file:
-                kwargs["data"] = file.recursively_load_dict_contents_from_group("data")
-            scan = file.scan
-            if scan is not None:
-                kwargs["scan"] = scan
+            data_dict = _load_group_as_dict(file["data"]) if "data" in file else {}
+            scan_dict = _load_group_as_dict(file["scan"]) if "scan" in file else None
 
-        return cls(**kwargs, probe=file.probe, scan=scan)
+            kwargs["data"] = data_dict
+            if scan_dict is not None:
+                kwargs["scan"] = scan_dict
+
+        # 1. Map legacy root 'probe_name' or 'probe' attr into probe.name so
+        #    that old files with a named probe but no probe group still round-trip.
+        if "probe" not in kwargs:
+            try:
+                legacy_name = file.probe_name
+                if legacy_name is not None:
+                    kwargs["probe"] = {"name": legacy_name}
+            except AttributeError:
+                pass  # no probe info in file — leave probe as None
+
+        # 2. Filter scan dict to only keys recognised by ScanSpec.SCHEMA so
+        #    that legacy scalar fields (n_frames, n_ax, n_el, n_tx, n_ch, …)
+        #    are silently dropped.
+        if "scan" in kwargs:
+            scan_schema_keys = set(ScanSpec.SCHEMA.keys())
+            kwargs["scan"] = {k: v for k, v in kwargs["scan"].items() if k in scan_schema_keys}
+
+        # 3. Handle legacy flat `data/<key>` datasets.  In old files spatial
+        #    maps (image, image_sc, envelope_data, …) were stored as plain
+        #    arrays (n_frames, z, x) rather than groups with values +
+        #    coordinates.  Wrap them as {"values": array} so DataSpec accepts
+        #    them.  raw_data and aligned_data are valid as flat arrays and are
+        #    left untouched.
+        if "data" in kwargs and isinstance(kwargs["data"], dict):
+            data_dict = kwargs["data"]
+            for key in list(data_dict.keys()):
+                if not isinstance(data_dict[key], np.ndarray):
+                    continue
+                schema_entry = DataSpec.SCHEMA.get(key)
+                # raw_data / aligned_data are plain-array fields — skip them.
+                if schema_entry is not None and "spec" not in schema_entry:
+                    continue
+                log.warning(
+                    "Legacy flat dataset 'data/%s' has no spatial coordinates. "
+                    "The array has been loaded as 'values'; coordinates information "
+                    "was not stored in this file and will be None.",
+                    key,
+                )
+                data_dict[key] = {"values": data_dict[key]}
+
+        return cls(**kwargs)
