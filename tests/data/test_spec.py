@@ -430,7 +430,7 @@ def test_metadata_accepts_custom_signal_nd_keys_and_warns(tmp_path):
 def test_metadata_custom_key_requires_signal_nd_spec():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
-    with pytest.raises(TypeError, match="Expected field 'custom_signal' to be"):
+    with pytest.raises(TypeError, match="custom 'metadata' key 'custom_signal'"):
         FileSpec(
             data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),

@@ -1694,7 +1694,7 @@ class MetadataSpec(Spec):
                 value = SignalND(**value)
             except TypeError as e:
                 raise TypeError(
-                    f"You are supplying a custom 'metadata' key {key}. We assume that is an "
+                    f"You are supplying a custom 'metadata' key '{key}'. We assume that is an "
                     "N-dimensional sampled signal with timing metadata (SignalND). "
                     "Wrap your data: {'samples': array, 'start_time_offset': 0.0, "
                     "'sampling_frequency': fs}, "
