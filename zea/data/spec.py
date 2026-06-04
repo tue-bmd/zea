@@ -1974,6 +1974,26 @@ class FileSpec(Spec):
             track_specs.append(t)
         self.tracks = track_specs
 
+        # If any track contains raw_data, the file must define probe_geometry so
+        # the acquisition can be beamformed.
+        def _track_has_raw(track):
+            d = track.data
+            return (isinstance(d, DataSpec) and d.raw_data is not None) or (
+                isinstance(d, dict) and d.get("raw_data") is not None
+            )
+
+        if any(_track_has_raw(t) for t in self.tracks):
+            probe = self.probe
+            probe_geometry = (
+                probe.probe_geometry
+                if isinstance(probe, ProbeSpec)
+                else (probe.get("probe_geometry") if isinstance(probe, dict) else None)
+            )
+            if probe_geometry is None:
+                raise ValueError(
+                    "'probe_geometry' is required when 'raw_data' is provided in track data."
+                )
+
         # For multi-track files every track must have a label so users can
         # identify tracks by name rather than relying on numeric indices.
         if len(self.tracks) > 1:

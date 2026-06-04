@@ -193,6 +193,13 @@ def _scan_minimal(n_frames=3, n_tx=2, n_el=4):
     }
 
 
+def _probe_minimal(name=None, n_el=4):
+    probe = {"probe_geometry": np.zeros((n_el, 3), dtype=np.float32)}
+    if name is not None:
+        probe["name"] = name
+    return probe
+
+
 @pytest.fixture
 def spec_file(tmp_path):
     """Create a spec-format HDF5 file via FileSpec.save()."""
@@ -203,7 +210,7 @@ def spec_file(tmp_path):
     fspec = FileSpec(
         data={"raw_data": raw, "envelope_data": _make_map(env)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-        probe={"name": "test_probe"},
+        probe=_probe_minimal("test_probe", n_el=n_el),
         description="spec format test file",
     )
     path = tmp_path / "spec_format.hdf5"
@@ -321,6 +328,7 @@ class TestGroupProxy:
                 },
             },
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
         )
         path = tmp_path / "nested.hdf5"
         fspec.save(str(path))
@@ -444,10 +452,8 @@ class TestValidateSpec:
             spec = f.validate_spec()
             assert isinstance(spec, FileSpec)
             np.testing.assert_array_equal(spec.data.raw_data, raw)
-            # Legacy flat image is now wrapped as Map with values; coordinates is None
-            assert spec.data.image is not None
-            np.testing.assert_array_equal(spec.data.image.values, img)
-            assert spec.data.image.coordinates is None
+            # Legacy flat image (plain array, no coordinates) is dropped, not supported.
+            assert spec.data.image is None
             # probe attr mapped to probe.name
             assert spec.probe.name == "legacy_probe"
 
@@ -464,7 +470,9 @@ class TestValidateSpec:
             s.create_dataset("sampling_frequency", data=np.float32(40e6))
 
         with File(str(path)) as f:
-            with pytest.raises(TypeError, match="missing.*required"):
+            # The legacy scan conversion (via file.scan) rejects this file because
+            # it has neither a demodulation nor a center frequency.
+            with pytest.raises(ValueError, match="demodulation or center frequency"):
                 f.validate_spec()
 
     def test_validate_spec_passes_for_custom_map_key(self, tmp_path):
@@ -583,7 +591,7 @@ class TestAllPipelineDataTypes:
         fspec = FileSpec(
             data=data_dict,
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe={"name": "all_pipeline"},
+            probe=_probe_minimal("all_pipeline", n_el=n_el),
         )
         path = tmp_path / "all_pipeline.hdf5"
         fspec.save(str(path))
@@ -610,7 +618,7 @@ class TestSlicing:
             path,
             data={"raw_data": raw, "envelope_data": _make_map(env)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe={"name": "slice_test"},
+            probe=_probe_minimal("slice_test", n_el=n_el),
         )
         f.close()
         return str(path), raw, env
@@ -747,7 +755,7 @@ class TestFileCreate:
             path,
             data={"raw_data": raw},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe={"name": "create_test"},
+            probe=_probe_minimal("create_test", n_el=n_el),
             description="created via File.create",
         )
         assert f.mode == "r"
@@ -1032,7 +1040,7 @@ def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
             {"data": {"raw_data": raw_a}, "scan": scan, "label": "track_a"},
             {"data": {"raw_data": raw_b}, "scan": scan, "label": "track_b"},
         ],
-        probe={"name": "two_track_probe"},
+        probe=_probe_minimal("two_track_probe", n_el=n_el),
     )
     f.close()
     return path, raw_a, raw_b
@@ -1665,17 +1673,6 @@ class TestLegacyFileLoading:
         with File(path) as f:
             spec = f.validate_spec()
         assert spec.data.raw_data.shape == raw.shape
-
-    def test_flat_image_sc_wrapped_as_values(self, legacy_file):
-        """Flat legacy image_sc is loaded as an extra Map; coordinates is None."""
-        path, _, image_sc = legacy_file
-        with patch("zea.data.spec.log.warning"):
-            with File(path) as f:
-                spec = f.validate_spec()
-        assert "image_sc" in spec.data._extra_map_keys
-        assert spec.data.image_sc is not None
-        np.testing.assert_array_equal(spec.data.image_sc.values, image_sc)
-        assert spec.data.image_sc.coordinates is None
 
     def test_scalar_scan_fields_ignored(self, legacy_file):
         """Redundant scalar scan fields (n_frames, n_tx, etc.) are silently filtered."""

@@ -41,6 +41,12 @@ SCAN = {
     "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
 }
 
+# Probe dict for File.create (probe_geometry is required when raw_data is present)
+PROBE = {
+    "name": "generic",
+    "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
+}
+
 
 @pytest.fixture
 def tmp_hdf5_path(tmp_path) -> Generator[Path, None, None]:
@@ -74,7 +80,7 @@ def test_create_basic(tmp_hdf5_path):
         tmp_hdf5_path,
         data=DATA,
         scan=SCAN,
-        probe={"name": "generic"},
+        probe=PROBE,
         description="Dataset parameters for testing",
         overwrite=True,
     )
@@ -99,7 +105,7 @@ def test_wrong_scan_shape(key, tmp_hdf5_path):
             tmp_hdf5_path,
             data=DATA,
             scan=wrong_scan,
-            probe={"name": "generic"},
+            probe=PROBE,
             description="Dataset parameters for testing",
             overwrite=True,
         )
@@ -121,6 +127,7 @@ def test_omit_optional_scan_key(key, tmp_hdf5_path):
         tmp_hdf5_path,
         data=DATA,
         scan=reduced_scan,
+        probe=PROBE,
         overwrite=True,
     )
     f.close()
@@ -157,7 +164,7 @@ def test_existing_path(tmp_hdf5_path):
             tmp_hdf5_path,
             data=DATA,
             scan=SCAN,
-            probe={"name": "generic"},
+            probe=PROBE,
             description="Dataset parameters for testing",
         )
 
@@ -170,7 +177,7 @@ def test_overwrite(tmp_hdf5_path):
         tmp_hdf5_path,
         data=DATA,
         scan=SCAN,
-        probe={"name": "generic"},
+        probe=PROBE,
         description="Dataset parameters for testing",
         overwrite=True,
     )
@@ -187,7 +194,7 @@ def test_image_only(tmp_hdf5_path):
     f = File.create(
         tmp_hdf5_path,
         data={"image_sc": image_sc},
-        probe={"name": "generic"},
+        probe=PROBE,
         description="Image-only dataset",
         overwrite=True,
     )
@@ -218,6 +225,7 @@ def test_custom_map(tmp_hdf5_path):
                 },
             },
             scan=SCAN,
+            probe=PROBE,
             overwrite=True,
         )
     f.close()
