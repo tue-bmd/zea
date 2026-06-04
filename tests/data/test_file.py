@@ -452,8 +452,10 @@ class TestValidateSpec:
             spec = f.validate_spec()
             assert isinstance(spec, FileSpec)
             np.testing.assert_array_equal(spec.data.raw_data, raw)
-            # Legacy flat image (plain array, no coordinates) is dropped, not supported.
-            assert spec.data.image is None
+            # Legacy flat image is now wrapped as Map with values; coordinates is None
+            assert spec.data.image is not None
+            np.testing.assert_array_equal(spec.data.image.values, img)
+            assert spec.data.image.coordinates is None
             # probe attr mapped to probe.name
             assert spec.probe.name == "legacy_probe"
 
@@ -468,6 +470,8 @@ class TestValidateSpec:
             s = f.create_group("scan")
             s.create_dataset("probe_geometry", data=np.zeros((4, 3), dtype=np.float32))
             s.create_dataset("sampling_frequency", data=np.float32(40e6))
+            s.create_dataset("center_frequency", data=np.float32(5e6))
+            s.create_dataset("t0_delays", data=np.zeros((2, 4), dtype=np.float32))
 
         with File(str(path)) as f:
             with pytest.raises(TypeError, match="missing.*required"):

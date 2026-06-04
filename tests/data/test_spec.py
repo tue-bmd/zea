@@ -1406,7 +1406,7 @@ class TestProbeSpec:
             assert f.probe.name == "verasonics_l11_4v"
             assert "probe" in f
 
-        loaded = FileSpec.from_hdf5(File(str(save_path)))
+        loaded = File(str(save_path))._to_file_spec()
         assert loaded.probe.name == "verasonics_l11_4v"
         assert loaded.probe is not None
         assert isinstance(loaded.probe, ProbeSpec)

@@ -9,7 +9,7 @@ import numpy as np
 
 import zea
 from zea import log
-from zea.data.legacy_file import legacy_probe, legacy_scan
+from zea.data.legacy_file import legacy_data, legacy_probe, legacy_scan
 from zea.data.spec import (
     DEFAULT_COMPRESSION,
     DataSpec,
@@ -1401,6 +1401,58 @@ class File(h5py.File):
             log.error(f"File {self.path} is not a valid zea file.\n{e}\n")
             raise
 
+    def _to_file_spec(self) -> FileSpec:
+        """Load the whole file into a validated :class:`~zea.data.spec.FileSpec`.
+
+        Unlike the lazy :attr:`data` / :attr:`scan` accessors, every dataset is
+        read into memory here.  Both the multi-track ``tracks/track_N/`` layout
+        and the legacy flat ``data/`` + ``scan/`` layout are supported.
+
+        Returns:
+            FileSpec: A fully validated spec object, with all arrays in RAM.
+        """
+        kwargs: dict = {"tracks": self._load_tracks(), "probe": self.probe}
+
+        if self.track_schedule is not None:
+            kwargs["track_schedule"] = self.track_schedule
+        if "metadata" in self:
+            kwargs["metadata"] = self.metadata
+        if "metrics" in self:
+            kwargs["metrics"] = self.metrics
+        if "us_machine" in self.attrs:
+            kwargs["us_machine"] = self.attrs["us_machine"]
+        if "description" in self.attrs:
+            kwargs["description"] = self.attrs["description"]
+
+        return FileSpec(**kwargs)
+
+    def _load_tracks(self) -> "list[dict]":
+        """Read every track's ``data`` and ``scan`` fully into a list of dicts.
+
+        Each dict is shaped for :class:`~zea.data.spec.TrackSpec`. Legacy
+        flat-format files are returned as a single, unlabelled track.
+        """
+        # Legacy flat layout: one unlabelled track at the file root.
+        if "tracks" not in self:
+            track: dict = {}
+            if super().__contains__("data"):
+                data = load_dict_from_hdf5_group(self["data"])
+                track["data"] = legacy_data(data) if _is_legacy_file(self) else data
+            if self.scan is not None:
+                track["scan"] = self.scan
+            return [track]
+
+        # Multi-track layout: tracks/track_N/{data,scan,label}.
+        tracks = []
+        for track in self.tracks:
+            track_dict: dict = {"label": track.label}
+            if "data" in track._group:
+                track_dict["data"] = load_dict_from_hdf5_group(track._group["data"])
+            if "scan" in track._group:
+                track_dict["scan"] = track.scan
+            tracks.append(track_dict)
+        return tracks
+
     def validate_spec(self) -> FileSpec:
         """Full schema validation — loads all data into RAM.
 
@@ -1429,7 +1481,7 @@ class File(h5py.File):
             ...     spec = f.validate_spec()
             ...     print(spec.scan.n_tx)
         """
-        return FileSpec.from_hdf5(self)
+        return self._to_file_spec()
 
     def __repr__(self):
         name = Path(self.filename).name

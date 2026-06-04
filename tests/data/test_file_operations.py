@@ -381,7 +381,7 @@ def _make_file_with_distinct_demod_freq(tmp_path, demod_freq=5e6, center_freq=7e
     scan_dict["n_ax"] = n_ax
     scan_dict["demodulation_frequency"] = np.float32(demod_freq)
 
-    parameters = Parameters(**scan_dict)
+    parameters = Parameters(**scan_dict, probe_geometry=np.zeros((n_el, 3), dtype=np.float32))
     raw = np.zeros((2, n_tx, n_ax, n_el, 1), dtype=np.float32)
 
     path = tmp_path / "scan_demod.hdf5"
