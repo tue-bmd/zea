@@ -34,7 +34,6 @@ zea
    display
    doppler
    func
-   interface
    io_lib
    log
    metrics

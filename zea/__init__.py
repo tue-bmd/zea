@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from .data.datasets import Dataset, Folder
     from .data.file import File, load_file
     from .datapaths import set_data_paths
-    from .interface import Interface
     from .internal.device import init_device
     from .internal.setup_zea import setup, setup_config
     from .ops import Pipeline
@@ -151,7 +150,6 @@ _LAZY_ATTRS = {
     "File": ("zea.data.file", "File"),
     "load_file": ("zea.data.file", "load_file"),
     "set_data_paths": ("zea.datapaths", "set_data_paths"),
-    "Interface": ("zea.interface", "Interface"),
     "init_device": ("zea.internal.device", "init_device"),
     "setup": ("zea.internal.setup_zea", "setup"),
     "setup_config": ("zea.internal.setup_zea", "setup_config"),

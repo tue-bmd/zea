@@ -3,12 +3,10 @@ Command line interface
 
 Besides the main :doc:`zea API documentation <_autosummary/zea>`, ``zea`` also provides a command line interface (CLI).
 
--------------------------------
-File reading and visualization
--------------------------------
-
-.. autoprogram:: zea.__main__:get_parser()
-   :prog: zea
+.. note::
+   The ``zea`` CLI is currently a placeholder. Extended visualization and data
+   inspection commands will be added in a future release. In the meantime,
+   use ``python -m zea.data.convert`` and ``python -m zea.data`` below.
 
 -------------------------------
 Convert datasets

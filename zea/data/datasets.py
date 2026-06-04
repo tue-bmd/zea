@@ -511,18 +511,11 @@ class Dataset(H5FileHandleCache):
         return file_paths
 
     @classmethod
-    def from_config(cls, dataset_folder, user=None, **kwargs):
+    def from_config(cls, path, user=None, **kwargs):
         """Creates a Dataset from a config file."""
-        path = format_data_path(dataset_folder, user)
-
-        if "file_path" in kwargs:
-            log.warning(
-                "Found 'file_path' in config, this will be ignored since a Dataset is "
-                + "always multiple files."
-            )
-
+        resolved = format_data_path(path, user)
         reduced_params = reduce_to_signature(cls.__init__, kwargs)
-        return cls(path, **reduced_params)
+        return cls(resolved, **reduced_params)
 
     def __len__(self):
         """Returns the number of files in the dataset."""

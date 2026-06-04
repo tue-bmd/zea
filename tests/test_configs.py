@@ -76,6 +76,12 @@ def test_all_configs_valid(file):
         raise ValueError(f"Error in config {file}") from ve
 
 
+def test_config_rejects_string_path():
+    """Config(path) must raise TypeError — use Config.from_path() instead."""
+    with pytest.raises(TypeError, match="Config.from_path"):
+        Config("configs/config_picmus_rf.yaml")
+
+
 def test_dot_indexing():
     """Tests if the dot indexing works for simple dictionaries."""
     dictionary = {"a": 3, "b": 4}

@@ -71,6 +71,8 @@ Stored as HDF5 root-level attributes (not groups).
      - |badge-opt|
 
 
+.. _group-reference:
+
 Group reference
 ~~~~~~~~~~~~~~~
 

@@ -26,11 +26,11 @@ Example Usage
     >>> config = Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml")
 
     >>> # Access attributes with dot notation
-    >>> print(config.data.dtype)
-    raw_data
+    >>> print(config.data.local)
+    False
 
     >>> # Update recursively
-    >>> config.update_recursive({"data": {"dtype": "raw_data"}})
+    >>> config.update_recursive({"data": {"local": False}})
 
     >>> # Save to YAML
     >>> config.to_yaml("new_config.yaml")
@@ -103,6 +103,11 @@ class Config(dict):
         super().__setattr__("__accessed__", {})
         super().__setattr__("__parent__", __parent__)
 
+        if isinstance(dictionary, (str, Path)):
+            raise TypeError(
+                f"Config() expects a dict, not {type(dictionary).__name__!r}. "
+                "To load from a file use Config.from_path()."
+            )
         if dictionary is None:
             dictionary = {}
         if kwargs:

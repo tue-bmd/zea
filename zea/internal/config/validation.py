@@ -13,8 +13,7 @@ callables (enums, numeric ranges, regexes).
 The ``parameters`` section and the top-level config are *open*: they accept
 arbitrary extra keys, which are stored and re-emitted unchanged.  This mirrors
 :class:`zea.Parameters`, which keeps unknown keys as pass-through
-``_custom_params``.  When adding a documented parameter, add a field (with a
-default if optional) to the relevant ``*Config`` dataclass below.
+``_custom_params``.
 """
 
 import re
@@ -22,19 +21,11 @@ from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Optional, Type
 
-from zea.internal.checks import _DATA_TYPES
-from zea.metrics import metrics_registry
-
-_ALLOWED_PLOT_LIBS = ("opencv", "matplotlib")
-
-
 # ---------------------------------------------------------------------------
 # Validator helpers
 #
 # Each validator is a ``Callable[[Any], Any]`` that returns the (possibly
-# coerced) value or raises ``ValueError`` with a human-readable message.  These
-# replace the ``schema`` library primitives (``And`` / ``Or`` / ``Regex`` /
-# lambdas) that were previously used.
+# coerced) value or raises ``ValueError`` with a human-readable message.
 # ---------------------------------------------------------------------------
 
 
@@ -331,64 +322,31 @@ class ConfigSpec:
 
 @dataclass
 class DataConfig(ConfigSpec):
-    """The ``data:`` section: what data to load and how."""
+    """The ``data:`` section: data path and loading settings."""
 
-    dtype: Any
-    dataset_folder: Any
-    resolution: Any = None
-    to_dtype: Any = "image"
-    file_path: Any = None
+    path: Any = None
     local: Any = True
-    frame_no: Any = None
-    dynamic_range: Any = field(default_factory=lambda: [-60, 0])
-    input_range: Any = None
-    output_range: Any = None
-    apodization: Any = None
+    indices: Any = None
     user: Any = None
 
     VALIDATORS: ClassVar[dict] = {
-        "dtype": enum(*_DATA_TYPES),
-        "dataset_folder": string,
-        "resolution": optional(positive_float),
-        "to_dtype": enum(*_DATA_TYPES),
-        "file_path": optional(string_or_path),
+        "path": optional(string_or_path),
         "local": boolean,
-        "frame_no": optional(any_of(enum("all"), integer)),
-        "dynamic_range": list_of_size_two,
-        "input_range": optional(list_of_size_two),
-        "output_range": optional(list_of_size_two),
-        "apodization": optional(string),
+        "indices": optional(any_of(enum("all"), integer, list_of_positive_integers)),
         "user": optional(mapping),
     }
 
 
 @dataclass
-class PlotConfig(ConfigSpec):
-    """The ``plot:`` section: UI / plotting settings."""
+class ParametersConfig(ConfigSpec):
+    """The ``parameters:`` section — open pass-through for scan/probe/custom parameters.
 
-    save: Any = False
-    plot_lib: Any = "opencv"
-    fps: Any = 20
-    tag: Any = None
-    headless: Any = False
-    selector: Any = None
-    selector_metric: Any = "gcnr"
-    fliplr: Any = False
-    image_extension: Any = "png"
-    video_extension: Any = "gif"
+    ProbeSpec and ScanSpec are the single source of truth for which parameter
+    names are valid. Any key listed here overrides the value loaded from the
+    data file; arbitrary custom keys are forwarded to the pipeline unchanged.
+    """
 
-    VALIDATORS: ClassVar[dict] = {
-        "save": boolean,
-        "plot_lib": enum(*_ALLOWED_PLOT_LIBS),
-        "fps": integer,
-        "tag": optional(string),
-        "headless": boolean,
-        "selector": optional(enum("rectangle", "lasso")),
-        "selector_metric": enum(*metrics_registry.registered_names()),
-        "fliplr": boolean,
-        "image_extension": enum("png", "jpg"),
-        "video_extension": enum("mp4", "gif"),
-    }
+    ALLOW_EXTRA: ClassVar[bool] = True
 
 
 @dataclass
@@ -413,74 +371,16 @@ class PipelineConfig(ConfigSpec):
 
 
 @dataclass
-class ParametersConfig(ConfigSpec):
-    """The ``parameters:`` section: flat scan/probe/custom parameters.
-
-    This section is *open*: documented reconstruction parameters are validated,
-    and arbitrary custom keys are accepted and passed through unchanged
-    (consistent with :class:`zea.Parameters`).
-    """
-
-    xlims: Any = None
-    zlims: Any = None
-    ylims: Any = None
-    selected_transmits: Any = None
-    grid_size_x: Any = None
-    grid_size_z: Any = None
-    n_ch: Any = None
-    n_ax: Any = None
-    center_frequency: Any = None
-    sampling_frequency: Any = None
-    demodulation_frequency: Any = None
-    f_number: Any = None
-    apply_lens_correction: Any = False
-    lens_thickness: Any = 1e-3
-    lens_sound_speed: Any = 1000
-    theta_range: Any = None
-    phi_range: Any = None
-    rho_range: Any = None
-    fill_value: Any = 0.0
-    resolution: Any = None
-
-    ALLOW_EXTRA: ClassVar[bool] = True
-    VALIDATORS: ClassVar[dict] = {
-        "xlims": optional(list_of_size_two),
-        "zlims": optional(list_of_size_two),
-        "ylims": optional(list_of_size_two),
-        "selected_transmits": optional(
-            any_of(positive_integer, list_of_positive_integers, enum("all", "center"))
-        ),
-        "grid_size_x": optional(positive_integer),
-        "grid_size_z": optional(positive_integer),
-        "n_ch": optional(integer),
-        "n_ax": optional(integer),
-        "center_frequency": optional(any_number),
-        "sampling_frequency": optional(any_number),
-        "demodulation_frequency": optional(any_number),
-        "f_number": optional(positive_float),
-        "apply_lens_correction": boolean,
-        "lens_thickness": positive_float,
-        "lens_sound_speed": any_of(positive_float, positive_integer),
-        "theta_range": optional(list_of_size_two),
-        "phi_range": optional(list_of_size_two),
-        "rho_range": optional(list_of_size_two),
-        "fill_value": any_number,
-        "resolution": optional(positive_float),
-    }
-
-
-@dataclass
 class ConfigSchema(ConfigSpec):
     """The top-level config.
 
-    This is *open*: arbitrary extra top-level sections (e.g. ``model:``) are
-    accepted and passed through unchanged.  The deprecated ``scan:`` section is
-    aliased to ``parameters:`` before validation (see
+    This is *open*: arbitrary extra top-level sections (e.g. ``data:``,
+    ``model:``) are accepted and passed through unchanged.  The deprecated
+    ``scan:`` section is aliased to ``parameters:`` before validation (see
     :func:`zea.config._migrate_legacy_config`).
     """
 
-    data: Any
-    plot: Any = None
+    data: Any = None
     pipeline: Any = None
     parameters: Any = None
     device: Any = "auto:1"
@@ -490,7 +390,6 @@ class ConfigSchema(ConfigSpec):
     ALLOW_EXTRA: ClassVar[bool] = True
     NESTED: ClassVar[dict] = {
         "data": DataConfig,
-        "plot": PlotConfig,
         "pipeline": PipelineConfig,
         "parameters": ParametersConfig,
     }

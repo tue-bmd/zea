@@ -40,6 +40,7 @@ The data is stored in the ``data`` group and the scan parameters are stored in t
 """  # noqa: E501
 
 import os
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -48,7 +49,6 @@ import h5py
 import numpy as np
 import yaml
 from keras import ops
-from schema import And, Optional, Or, Regex, Schema
 
 from zea import log
 from zea.data.convert.utils import (
@@ -69,22 +69,60 @@ _VERASONICS_TO_ZEA_PROBE_NAMES = {
 }
 
 
-_CONVERT_YAML_SCHEMA = Schema(
-    {
-        "files": [
-            {
-                "name": str,
-                Optional("first_frame"): And(int, lambda x: x >= 0),
-                Optional("frames"): Or(
-                    "all",
-                    And(str, Regex(r"^\d+(-\d+)?$")),  # Matches "30-99" or single number like "5"
-                    [And(int, lambda x: x >= 0)],  # List of non-negative integers
-                ),
-                Optional("transmits"): Or("all", [And(int, lambda x: x >= 0)]),
-            }
-        ]
-    }
-)
+_FRAMES_RANGE_RE = re.compile(r"^\d+(-\d+)?$")
+
+
+def _validate_convert_config(data):
+    """Validate the structure of a convert.yaml config dict.
+
+    Expected shape::
+
+        files:
+          - name: <str>
+            first_frame: <int >= 0>          # optional
+            frames: all | "N" | "N-M" | [N, ...] # optional
+            transmits: all | [N, ...]         # optional
+    """
+    if not isinstance(data, dict) or "files" not in data:
+        raise ValueError("convert.yaml must have a top-level 'files' key")
+    if not isinstance(data["files"], list):
+        raise ValueError("'files' must be a list")
+    for entry in data["files"]:
+        if not isinstance(entry, dict):
+            raise ValueError(f"each entry in 'files' must be a dict, got {type(entry).__name__}")
+        if not isinstance(entry.get("name"), str):
+            raise ValueError(f"each file entry must have a string 'name', got {entry!r}")
+        if "first_frame" in entry:
+            ff = entry["first_frame"]
+            if not isinstance(ff, int) or isinstance(ff, bool) or ff < 0:
+                raise ValueError(f"'first_frame' must be a non-negative int, got {ff!r}")
+        if "frames" in entry:
+            fr = entry["frames"]
+            if not (
+                fr == "all"
+                or (isinstance(fr, str) and _FRAMES_RANGE_RE.fullmatch(fr))
+                or (
+                    isinstance(fr, list)
+                    and all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in fr)
+                )
+            ):
+                raise ValueError(
+                    f"'frames' must be 'all', a range string like '30-99', or a list of "
+                    f"non-negative ints, got {fr!r}"
+                )
+        if "transmits" in entry:
+            tr = entry["transmits"]
+            if not (
+                tr == "all"
+                or (
+                    isinstance(tr, list)
+                    and all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in tr)
+                )
+            ):
+                raise ValueError(
+                    f"'transmits' must be 'all' or a list of non-negative ints, got {tr!r}"
+                )
+    return data
 
 
 class VerasonicsFile(h5py.File):
@@ -452,7 +490,7 @@ class VerasonicsFile(h5py.File):
                 data = yaml.load(file, Loader=yaml.FullLoader)
 
             # Validate the YAML structure
-            validated_data = _CONVERT_YAML_SCHEMA.validate(data)
+            validated_data = _validate_convert_config(data)
 
             files = validated_data["files"]
             filenames = [file["name"] for file in files]

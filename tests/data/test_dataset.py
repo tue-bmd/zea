@@ -62,12 +62,12 @@ _ALL_DATA_TYPES = _IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES
 )
 def test_dataset_indexing(file_idx, idx, expected_shape, dummy_dataset_path):
     """Test ui initialization function"""
-    config = {"data": {"dataset_folder": dummy_dataset_path, "dtype": "image"}}
+    config = {"data": {"path": str(dummy_dataset_path)}}
     config = check_config(Config(config))
     dataset = Dataset.from_config(**config.data)
 
     file = dataset[file_idx]
-    data = file[file.format_key(config.data.dtype)]["values"][idx]
+    data = file[file.format_key("image")]["values"][idx]
 
     assert data.shape == expected_shape, (
         f"Data shape {data.shape} does not match expected shape {expected_shape}"

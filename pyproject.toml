@@ -40,7 +40,6 @@ dependencies = [
     "matplotlib >=3.8",
     "scipy >=1.13",
     "pillow >=12.2.0",
-    "schema >=0.7",
     "tqdm >=4",
     "pyyaml >=6",
     "decorator >=5",
