@@ -490,6 +490,7 @@ class TestValidateSpec:
                     },
                 },
                 scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                probe=_probe_minimal(n_el=n_el),
             )
 
         path = tmp_path / "custom_map.hdf5"
@@ -956,7 +957,7 @@ class TestZeaVersion:
             path,
             data={"raw_data": np.ones((n_frames, n_tx, 8, n_el, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            probe={"name": "test_probe"},
+            probe=_probe_minimal("test_probe", n_el=n_el),
         )
 
         with File(path) as f:
@@ -1036,6 +1037,7 @@ class TestRepr:
             path,
             data={"raw_data": np.zeros((1, 2, 8, 4, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=1, n_tx=2, n_el=4),
+            probe=_probe_minimal(n_el=4),
         )
         with File(path) as f:
             r = repr(f)
@@ -1059,6 +1061,7 @@ class TestRepr:
             path,
             data={"raw_data": np.zeros((1, 2, 8, 4, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=1, n_tx=2, n_el=4),
+            probe=_probe_minimal(n_el=4),
         )
         with File(path) as f:
             assert repr(f) == str(f)
@@ -1080,6 +1083,7 @@ class TestRepr:
             path,
             data={"raw_data": np.zeros((1, 2, 8, 4, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=1, n_tx=2, n_el=4),
+            probe=_probe_minimal(n_el=4),
         )
         with File(path) as f:
             r = repr(f.tracks[0])
@@ -1123,6 +1127,7 @@ class TestMultiTrackFile:
             path,
             data={"raw_data": raw},
             scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+            probe=_probe_minimal(n_el=4),
         )
 
         with File(path) as f:
@@ -1228,7 +1233,8 @@ class TestMultiTrackFile:
                 tracks=[
                     {"data": {"raw_data": raw}, "scan": scan, "label": "track_a"},
                     {"data": {"raw_data": raw}, "scan": scan},  # missing label
-                ]
+                ],
+                probe=_probe_minimal(n_el=4),
             )
 
     def test_single_track_label_is_optional(self, tmp_path):
@@ -1239,6 +1245,7 @@ class TestMultiTrackFile:
             path,
             data={"raw_data": raw},
             scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+            probe=_probe_minimal(n_el=4),
         )
         with File(path) as f:
             assert f.tracks[0].label is None
@@ -1281,6 +1288,7 @@ class TestMultiTrackFile:
             path,
             data={"raw_data": raw},
             scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+            probe=_probe_minimal(n_el=4),
         )
 
         with File(path) as f:
@@ -1293,6 +1301,7 @@ class TestMultiTrackFile:
             path,
             data={"raw_data": np.zeros((2, 3, 8, 4, 1), dtype=np.float32)},
             scan=_scan_minimal(n_frames=2, n_tx=3, n_el=4),
+            probe=_probe_minimal(n_el=4),
         )
 
         with File(path) as f:
@@ -1360,6 +1369,7 @@ class TestMultiTrackFile:
                 {"data": {"raw_data": raw_a}, "scan": scan, "label": "track_a"},
                 {"data": {"raw_data": raw_b}, "scan": scan, "label": "track_b"},
             ],
+            probe=_probe_minimal(n_el=n_el),
         )
 
         with File(path) as f:
@@ -1397,6 +1407,7 @@ class TestMultiTrackFile:
                 {"data": {"raw_data": raw_b}, "scan": scan_b, "label": "track_b"},
             ],
             track_schedule=schedule,
+            probe=_probe_minimal(n_el=n_el),
         )
         return path, schedule, dt_a, dt_b
 
@@ -1428,6 +1439,7 @@ class TestMultiTrackFile:
                     {"data": {"raw_data": raw}, "scan": scan, "label": "track_b"},
                 ],
                 track_schedule=schedule_bad,
+                probe=_probe_minimal(n_el=4),
             )
 
     def test_track_schedule_valid_does_not_raise(self, tmp_path):
@@ -1442,6 +1454,7 @@ class TestMultiTrackFile:
                 {"data": {"raw_data": raw}, "scan": scan, "label": "track_b"},
             ],
             track_schedule=schedule,
+            probe=_probe_minimal(n_el=4),
         )
         path = tmp_path / "valid_schedule.hdf5"
         spec.save(str(path))  # should not raise
@@ -1471,6 +1484,7 @@ class TestMultiTrackFile:
                 {"data": {"raw_data": raw}, "scan": scan_no_t2nt, "label": "track_b"},
             ],
             track_schedule=np.array([0, 1, 0, 1], dtype=np.int32),
+            probe=_probe_minimal(n_el=n_el),
         )
         path = tmp_path / "no_t2nt.hdf5"
         spec.save(str(path))
@@ -1565,6 +1579,7 @@ class TestMultiTrackFile:
                 {"data": {"raw_data": raw_b}, "scan": scan_b, "label": "track_b"},
             ],
             track_schedule=schedule,
+            probe=_probe_minimal(n_el=n_el),
         )
 
         with File(path) as f:
