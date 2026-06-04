@@ -76,7 +76,7 @@ def test_example_dataset(example_dataset_path):
 
 def test_create_basic(tmp_hdf5_path):
     """Tests basic File.create with data and scan dicts."""
-    f = File.create(
+    File.create(
         tmp_hdf5_path,
         data=DATA,
         scan=SCAN,
@@ -84,7 +84,6 @@ def test_create_basic(tmp_hdf5_path):
         description="Dataset parameters for testing",
         overwrite=True,
     )
-    f.close()
     validate_file(tmp_hdf5_path)
 
 
@@ -101,7 +100,7 @@ def test_wrong_scan_shape(key, tmp_hdf5_path):
     wrong_scan = SCAN.copy()
     wrong_scan[key] = np.zeros((n_frames, n_tx + 7, n_el + 1), dtype=np.float32)
     with pytest.raises((AssertionError, ValueError, TypeError)):
-        f = File.create(
+        File.create(
             tmp_hdf5_path,
             data=DATA,
             scan=wrong_scan,
@@ -109,7 +108,6 @@ def test_wrong_scan_shape(key, tmp_hdf5_path):
             description="Dataset parameters for testing",
             overwrite=True,
         )
-        f.close()
 
 
 @pytest.mark.parametrize(
@@ -123,14 +121,13 @@ def test_omit_optional_scan_key(key, tmp_hdf5_path):
         key (str): The optional key to omit from the scan dictionary.
     """
     reduced_scan = {k: v for k, v in SCAN.items() if k != key}
-    f = File.create(
+    File.create(
         tmp_hdf5_path,
         data=DATA,
         scan=reduced_scan,
         probe=PROBE,
         overwrite=True,
     )
-    f.close()
     validate_file(tmp_hdf5_path)
 
 
@@ -173,7 +170,7 @@ def test_overwrite(tmp_hdf5_path):
     """Tests that overwrite=True allows replacing an existing file."""
     tmp_hdf5_path.touch()
 
-    f = File.create(
+    File.create(
         tmp_hdf5_path,
         data=DATA,
         scan=SCAN,
@@ -181,7 +178,6 @@ def test_overwrite(tmp_hdf5_path):
         description="Dataset parameters for testing",
         overwrite=True,
     )
-    f.close()
     validate_file(tmp_hdf5_path)
 
 
@@ -191,14 +187,13 @@ def test_image_only(tmp_hdf5_path):
         "values": np.zeros((n_frames, 256, 256), dtype=np.uint8),
         "coordinates": np.zeros((n_frames, 256, 256, 3), dtype=np.float32),
     }
-    f = File.create(
+    File.create(
         tmp_hdf5_path,
         data={"image_sc": image_sc},
         probe=PROBE,
         description="Image-only dataset",
         overwrite=True,
     )
-    f.close()
 
     with File(tmp_hdf5_path) as dataset:
         assert dataset.data.image_sc.values.shape == (n_frames, 256, 256)
@@ -213,7 +208,7 @@ def test_custom_map(tmp_hdf5_path):
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        f = File.create(
+        File.create(
             tmp_hdf5_path,
             data={
                 "raw_data": DATA["raw_data"],
@@ -228,7 +223,6 @@ def test_custom_map(tmp_hdf5_path):
             probe=PROBE,
             overwrite=True,
         )
-    f.close()
 
     with File(tmp_hdf5_path) as f:
         assert "my_custom_overlay" in f["data"]

@@ -114,7 +114,7 @@ def save_file(
         for key, map_dict in custom_maps.items():
             data[key] = map_dict
 
-    f = File.create(
+    File.create(
         path=path,
         data=data,
         scan=parameters.to_scan_dict(),
@@ -125,7 +125,6 @@ def save_file(
         chunk_frames=chunk_frames,
         overwrite=True,
     )
-    f.close()
 
 
 def _iter_folder_io(input_path: Path, output_path: Path):

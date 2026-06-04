@@ -952,8 +952,7 @@ def test_demodulate_int16_from_hdf5_requires_cast(tmp_path):
     }
     raw_data = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.int16)
 
-    f = File.create(path, data={"raw_data": raw_data}, scan=scan, probe=probe)
-    f.close()
+    File.create(path, data={"raw_data": raw_data}, scan=scan, probe=probe)
 
     with File(path, "r") as f_read:
         loaded = f_read.data.raw_data[:]

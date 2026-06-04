@@ -1080,7 +1080,7 @@ class VerasonicsFile(h5py.File):
         # Generate the zea dataset
         log.info("Generating zea dataset...")
         compression = DEFAULT_COMPRESSION if enable_compression else None
-        f = File.create(
+        File.create(
             path=output_path,
             data=data_dict,
             scan=scan_dict,
@@ -1088,7 +1088,6 @@ class VerasonicsFile(h5py.File):
             description="Verasonics data",
             compression=compression,
         )
-        f.close()
 
         if additional_elements:
             _write_user_additional_elements_to_file(output_path, additional_elements)

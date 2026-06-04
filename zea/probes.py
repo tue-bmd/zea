@@ -101,16 +101,13 @@ parameters will also work:
     ...     "polar_angles": np.zeros(n_tx, dtype=np.float32),
     ...     "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
     ... }
-    >>> f = File.create(
+    >>> File.create(
     ...     "probe_example.hdf5",
     ...     data={"raw_data": raw},
     ...     scan=scan,
     ...     probe=probe, # dictionary or zea.Probe object
     ...     overwrite=True,
     ... )
-    >>> f.probe.name
-    'verasonics_l11_4v'
-    >>> f.close()
 
 .. testcleanup::
 

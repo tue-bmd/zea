@@ -765,7 +765,7 @@ class File(h5py.File):
         compression: str = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
         overwrite: bool = False,
-    ) -> "File":
+    ):
         """Create a new zea HDF5 file from data, scan, and optional metadata.
 
         All inputs are validated against the :class:`~zea.data.spec.FileSpec`
@@ -832,16 +832,13 @@ class File(h5py.File):
             ... }
 
             >>> _, path = tempfile.mkstemp(suffix=".hdf5")
-            >>> f = File.create(
+            >>> File.create(
             ...     path,
             ...     data={"raw_data": raw},
             ...     scan=scan,
             ...     probe={"name": "verasonics_l11_4v"},
             ...     overwrite=True,
             ... )
-            >>> f.probe_name
-            'verasonics_l11_4v'
-            >>> f.close()
             >>> os.unlink(path)
         """
         if tracks is not None and (data is not None or scan is not None):
@@ -891,8 +888,6 @@ class File(h5py.File):
             compression=compression,
             chunk_frames=chunk_frames,
         )
-
-        return cls(str(path), mode="r")
 
     @property
     def data(self) -> _GroupProxy:
