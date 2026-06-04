@@ -470,9 +470,7 @@ class TestValidateSpec:
             s.create_dataset("sampling_frequency", data=np.float32(40e6))
 
         with File(str(path)) as f:
-            # The legacy scan conversion (via file.scan) rejects this file because
-            # it has neither a demodulation nor a center frequency.
-            with pytest.raises(ValueError, match="demodulation or center frequency"):
+            with pytest.raises(TypeError, match="missing.*required"):
                 f.validate_spec()
 
     def test_validate_spec_passes_for_custom_map_key(self, tmp_path):
