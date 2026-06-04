@@ -237,9 +237,7 @@ class ConfigSpec:
                     raise ValueError(f"{type(self).__name__}.{name}: {exc}") from exc
                 setattr(self, name, value)
 
-    def _coerce_nested(
-        self, name: str, nested: Type["ConfigSpec"], value: Any
-    ) -> "ConfigSpec":
+    def _coerce_nested(self, name: str, nested: Type["ConfigSpec"], value: Any) -> "ConfigSpec":
         if value is None:
             # Optional nested section: fall back to its defaults.
             return nested.from_dict({})
@@ -263,9 +261,7 @@ class ConfigSpec:
         if dictionary is None:
             dictionary = {}
         if not isinstance(dictionary, dict):
-            raise ValueError(
-                f"{cls.__name__}: expected a mapping, got {type(dictionary).__name__}"
-            )
+            raise ValueError(f"{cls.__name__}: expected a mapping, got {type(dictionary).__name__}")
 
         field_names = set(cls.field_names())
         known = {k: v for k, v in dictionary.items() if k in field_names}
@@ -305,9 +301,7 @@ class ConfigSpec:
     def required_fields(cls) -> tuple[str, ...]:
         """Return the names of fields without a default value."""
         return tuple(
-            f.name
-            for f in fields(cls)
-            if f.default is MISSING and f.default_factory is MISSING
+            f.name for f in fields(cls) if f.default is MISSING and f.default_factory is MISSING
         )
 
     @classmethod
