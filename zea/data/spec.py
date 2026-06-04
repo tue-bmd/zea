@@ -1843,6 +1843,7 @@ class FileSpec(Spec):
             ...         "transmit_origins": np.zeros((4, 3), dtype=np.float32),
             ...         "polar_angles": np.zeros(4, dtype=np.float32),
             ...     },
+            ...     probe={"name": "test_probe", "probe_geometry": np.zeros((8, 3))},
             ... )
             >>> dataset.data.raw_data.shape
             (2, 4, 64, 8, 1)

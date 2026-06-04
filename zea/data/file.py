@@ -817,7 +817,7 @@ class File(h5py.File):
 
             >>> n_frames, n_tx, n_ax, n_el = 2, 4, 64, 8
             >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
-            >>> geom = np.zeros((n_el, 3), dtype=np.float32)
+            >>> probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
             >>> scan = {
             ...     "sampling_frequency": np.float32(40e6),
             ...     "center_frequency": np.float32(5e6),
@@ -836,7 +836,7 @@ class File(h5py.File):
             ...     path,
             ...     data={"raw_data": raw},
             ...     scan=scan,
-            ...     probe={"name": "verasonics_l11_4v"},
+            ...     probe={"name": "verasonics_l11_4v", "probe_geometry": probe_geometry},
             ...     overwrite=True,
             ... )
             >>> os.unlink(path)

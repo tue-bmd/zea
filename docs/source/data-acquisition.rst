@@ -118,7 +118,7 @@ field-by-field reconstruction is needed:
     File.create(
         "source.hdf5",
         data={"raw_data": raw},
-        probe={"name": "test_probe"},
+        probe={"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))},
         scan=scan, overwrite=True,
     )
 
