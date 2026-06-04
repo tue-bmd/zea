@@ -1714,8 +1714,8 @@ def _validate_file_impl(file: File) -> None:
     """Lightweight structural validation — no array data is loaded.
 
     Checks that:
-    - a ``data`` group is present — either at ``tracks/track_N/data``,
-      at the root ``data`` group (legacy), or inside ``event_*`` sub-groups
+    - a ``data`` group is present — either at ``tracks/track_N/data``
+      or at the root ``data`` group (legacy)
     - for legacy files, every key in ``data`` is a recognised zea data type
     - for files created with zea v0.1.0 and later, every key in ``data``
     is in :class:`~zea.data.spec.DataSpec`\'s schema
@@ -1739,22 +1739,10 @@ def _validate_file_impl(file: File) -> None:
             "'data' is not a group - this may not be a zea file."
         )
         data_groups.append(("data", file["data"]))
-    else:
-        event_keys = [
-            k for k in file.keys() if k.startswith("event_") and k[len("event_") :].isdigit()
-        ]
-        for event_key in event_keys:
-            assert "data" in file[event_key], (
-                f"Event group '{event_key}' is missing a 'data' subgroup."
-            )
-            assert isinstance(file[event_key]["data"], h5py.Group), (
-                f"'{event_key}/data' is not a group - this may not be a zea file."
-            )
-            data_groups.append((f"{event_key}/data", file[event_key]["data"]))
 
     assert data_groups, (
         "'data' group not found in file. "
-        "Expected either tracks/track_N/data, a root 'data' group, or event groups named 'event_*'."
+        "Expected either tracks/track_N/data or a root 'data' group."
     )
 
     for group_path, data_group in data_groups:
