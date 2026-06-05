@@ -231,6 +231,55 @@ def test_scan_convert_apex_offset(shift_cols, shift_rows):
     np.testing.assert_allclose(shifted[:h, :w], cropped[:h, :w], rtol=0, atol=1e-4)
 
 
+def test_polar_to_cartesian_matrix_roundtrip():
+    """polar_to_cartesian_matrix is a faithful inverse of cartesian_to_polar_matrix.
+
+    Unlike scan_convert_2d (which fits the cone bounding box into the output), it pins the
+    apex at ``tip`` on a full-size canvas, so a forward/inverse round-trip reconstructs the
+    original frame at its original position and scale. Uses an *asymmetric* theta_range to
+    guard against an angular shift: the inverse is obtained by passing theta_range in the
+    reversed order (matching cartesian_to_polar_matrix's rot90 column ordering, which is what
+    polar_geometry_from_coords_for_interp returns).
+    """
+    from keras import ops
+
+    from zea import display
+
+    height, width = 220, 300
+    yy, xx = np.meshgrid(np.arange(height), np.arange(width), indexing="ij")
+    apex_x, apex_y = 170.0, 30.0
+    # cartesian_to_polar_matrix convention: theta = arctan2(-(x - apex_x), y - apex_y).
+    r = np.sqrt((xx - apex_x) ** 2 + (yy - apex_y) ** 2)
+    theta = np.arctan2(-(xx - apex_x), yy - apex_y)
+    theta_min, theta_max = -0.3, 0.6  # asymmetric cone
+    mask = (theta > theta_min) & (theta < theta_max) & (r < 180)
+    blob = np.exp(-(((xx - 150) / 12) ** 2 + ((yy - 150) / 12) ** 2))  # off-centre marker
+    image = np.where(mask, 0.3 + blob, 0.0).astype("float32")
+
+    polar, _ = display.cartesian_to_polar_matrix(
+        ops.convert_to_tensor(image),
+        tip=(apex_x, apex_y),
+        r_max=180.0,
+        theta_range=(theta_min, theta_max),
+    )
+    # Invert: theta_range reversed to match the polar image's column order.
+    back = display.polar_to_cartesian_matrix(
+        polar,
+        (height, width),
+        tip=(apex_x, apex_y),
+        r_max=180.0,
+        theta_range=(theta_max, theta_min),
+    )
+    back = np.nan_to_num(ops.convert_to_numpy(back))
+
+    assert back.shape == (height, width)
+    # Faithful reconstruction inside the cone (residual is double-resampling blur).
+    assert np.abs(back - image)[mask].mean() < 0.1
+    # The off-centre marker returns to its location (an angular shift would move it).
+    by, bx = np.unravel_index(np.argmax(back), back.shape)
+    assert abs(by - 150) < 12 and abs(bx - 150) < 12
+
+
 @pytest.mark.parametrize(
     "size, dynamic_range",
     [
