@@ -213,7 +213,7 @@ def test_polar_to_cartesian_matrix_roundtrip():
     blob = np.exp(-(((xx - 150) / 12) ** 2 + ((yy - 150) / 12) ** 2))  # off-centre marker
     image = np.where(mask, 0.3 + blob, 0.0).astype("float32")
 
-    polar, _ = display.cartesian_to_polar_matrix(
+    polar = display.cartesian_to_polar_matrix(
         ops.convert_to_tensor(image),
         tip=(apex_x, apex_y),
         r_max=180.0,

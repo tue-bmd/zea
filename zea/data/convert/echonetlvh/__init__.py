@@ -27,7 +27,7 @@ from tqdm import tqdm
 from zea import File, log
 from zea.backend import jit
 from zea.data.convert.utils import load_avi
-from zea.display import cartesian_to_polar_matrix
+from zea.display import cartesian_to_polar_matrix, polar_to_cartesian_matrix
 from zea.func.tensor import vmap
 from zea.tools.fit_scan_cone import (
     _load_first_frame,
@@ -407,6 +407,35 @@ class LVHProcessor:
                 return split
         raise UserWarning("Unknown split for file: " + filename)
 
+    @staticmethod
+    def scan_convert(image_polar, cone_params, cartesian_shape, order=1):
+        """
+        Scan convert the 'image_polar' to cartesian coordinates to exactly
+        match the cropped original (i.e. the 'image' in the file.), using the cone parameters.
+
+        Not used in this script, but useful for reference.
+        """
+        # Match crop_and_center_cone, which crops with int()-truncated boundaries.
+        crop_left = int(cone_params["crop_left"])
+        crop_right = int(cone_params["crop_right"])
+        crop_top = int(cone_params["crop_top"])
+        apex_x_in_crop = cone_params["apex_x"] - crop_left
+        cropped_width = crop_right - crop_left
+        left_padding = max(0, int(cropped_width / 2 - apex_x_in_crop))
+        tip_x = apex_x_in_crop + left_padding
+        tip_y = cone_params["apex_y"] - crop_top
+        tip = (tip_x, tip_y)
+
+        r_max = cone_params["circle_radius"]
+
+        theta_max = -math.atan(cone_params["right_slope"])
+        theta_min = -math.atan(cone_params["left_slope"])
+        theta_range = (theta_min, theta_max)
+
+        return polar_to_cartesian_matrix(
+            image_polar, cartesian_shape, tip, r_max, theta_range, order=order
+        )
+
     def __call__(self, avi_file: Path):
         """Takes a single avi_file and generates a zea dataset
 
@@ -431,7 +460,7 @@ class LVHProcessor:
         # original-image space; theta_min/theta_max come from the fitted slopes
         # (polar +theta lands on the left after the 90° rotation in
         # cartesian_to_polar_matrix, so right_slope → theta_min).
-        polar_im_set, coordinates = self.cart2pol_batched(
+        polar_im_set = self.cart2pol_batched(
             sequence_processed,
             cone_params["apex_x"],
             cone_params["apex_y"],
@@ -467,7 +496,7 @@ class LVHProcessor:
             out_h5,
             data={
                 "image": {"values": image_sc_np},
-                "image_polar": {"values": polar_4d, "unit": "pixels", "coordinates": coordinates},
+                "image_polar": {"values": polar_4d, "unit": "pixels"},
             },
             metadata={
                 "annotations": {"anatomy": "heart", "view": "PLAX"},

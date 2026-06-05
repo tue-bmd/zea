@@ -29,12 +29,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from keras import ops
 
-import zea
 from zea import log
-from zea.display import (
-    cartesian_to_polar_matrix,
-    polar_geometry_from_coords_for_interp,
-)
+from zea.data.convert.echonetlvh import LVHProcessor
+from zea.display import cartesian_to_polar_matrix
 from zea.tools.fit_scan_cone import (
     _load_first_frame,
     crop_and_center_cone,
@@ -133,24 +130,11 @@ def process_one(avi_path: Path, output_dir: Path):
     frame_f32 = ops.cast(frame, "float32")
     cropped = crop_and_center_cone(frame_f32, cone_params, backend=ops)
 
-    polar_new, _ = polar_this_branch(cropped, cone_params)
-    polar_old, _ = polar_openh_rf(cropped, cone_params)
-    polar_no_crop, coords_for_interp = polar_direct(frame_f32, cone_params)
+    polar_new = polar_this_branch(cropped, cone_params)
+    polar_old = polar_openh_rf(cropped, cone_params)
+    polar_no_crop = polar_direct(frame_f32, cone_params)
 
-    # Recover the forward geometry straight from the sampling map (no stored params needed),
-    # then invert with polar_to_cartesian_matrix, which pins the apex at ``tip`` on a
-    # full-size canvas and reconstructs the original frame 1:1.
-    tip, r_max, theta_range = polar_geometry_from_coords_for_interp(
-        coords_for_interp, polar_no_crop.shape
-    )
-    back_cartesian = zea.display.polar_to_cartesian_matrix(
-        polar_no_crop,
-        frame_f32.shape,
-        tip=tip,
-        r_max=r_max,
-        theta_range=theta_range,
-    )
-    back_cartesian = crop_and_center_cone(back_cartesian, cone_params, backend=ops)
+    back_cartesian = LVHProcessor.scan_convert(polar_no_crop, cone_params, cropped.shape)
 
     save_comparison(
         np.asarray(frame),
