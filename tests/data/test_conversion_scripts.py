@@ -62,6 +62,7 @@ def test_conversion_script(tmp_path_factory, dataset):
     dst = base / "dst"
 
     extra_args = create_test_data_for_dataset(dataset, src)
+    dst.mkdir()
 
     run_subprocess(
         [sys.executable, "-m", "zea.data.convert", dataset, str(src), str(dst), *extra_args],
@@ -316,8 +317,8 @@ def create_echonetlvh_test_data(src):
                         "Y2": float(y2),
                         "Frames": n_frames,
                         "FPS": fps,
-                        "Width": float(final_width),
-                        "Height": final_height,
+                        "Width": int(final_width),
+                        "Height": int(final_height),
                         "split": split,
                     }
                 )
@@ -594,12 +595,16 @@ def verify_converted_echonetlvh_test_data(dst):
 
     Checks:
     - HDF5 files exist in train/val/test directories
-    - Files contain required datasets (scan, image, image_sc)
+    - Files contain required datasets (scan, image, image_polar)
     - Cone parameters CSV was generated with valid crop bounds
 
     Args:
         dst (Path): path to the destination directory where converted test data is located.
     """
+    from zea.data.convert.echonetlvh import LVHProcessor, load_cone_parameters
+
+    cone_params_csv = dst / "cone_parameters.csv"
+
     # Expected files per split
     expected_splits = {
         "train": [
@@ -610,42 +615,7 @@ def verify_converted_echonetlvh_test_data(dst):
         "test": ["0X4444444444444444.hdf5"],
     }
 
-    # Verify HDF5 files exist in correct splits
-    for split, expected_files in expected_splits.items():
-        split_dir = dst / split
-        assert split_dir.exists(), f"Missing directory: {split_dir}"
-
-        h5_files = list(split_dir.rglob("*.hdf5"))
-        h5_filenames = [f.name for f in h5_files]
-
-        assert set(h5_filenames) == set(expected_files), (
-            f"Mismatch in converted hdf5 files for split {split}. "
-            f"Expected: {expected_files}, Got: {h5_filenames}"
-        )
-
-        # Verify each HDF5 file has required content
-        for h5_file in h5_files:
-            with File(h5_file, "r") as f:
-                assert "data" in f, f"Missing 'data' in {h5_file}"
-                assert "image" in f["data"], f"Missing 'image' (polar) in {h5_file}"
-                assert "image_sc" in f["data"], f"Missing 'image_sc' (scan converted) in {h5_file}"
-
-                # image is now a Map group with values and extent subfields
-                image_values = f.data.image.values[:]
-                image_sc = f.data.image_sc.values[:]
-
-                assert image_values.ndim == 4, (
-                    f"Polar image should be of shape (F, H, W, 1) in {h5_file}"
-                )
-                assert image_sc.ndim == 3, (
-                    f"Scan converted image should be of shape (F, H, W) in {h5_file}"
-                )
-
-                # Validate the file
-                f.validate()
-
     # Verify cone parameters CSV was generated
-    cone_params_csv = dst / "cone_parameters.csv"
     assert cone_params_csv.exists(), "Missing cone_parameters.csv"
 
     # Verify cone parameters content
@@ -692,6 +662,54 @@ def verify_converted_echonetlvh_test_data(dst):
                 assert row.get("status").startswith("error"), (
                     "Expected error status for 0X5555555555555555.avi due to crop overshoot"
                 )
+
+    cone_params = load_cone_parameters(cone_params_csv)
+
+    # Verify HDF5 files exist in correct splits
+    for split, expected_files in expected_splits.items():
+        split_dir = dst / split
+        assert split_dir.exists(), f"Missing directory: {split_dir}"
+
+        h5_files = list(split_dir.rglob("*.hdf5"))
+        h5_filenames = [f.name for f in h5_files]
+
+        assert set(h5_filenames) == set(expected_files), (
+            f"Mismatch in converted hdf5 files for split {split}. "
+            f"Expected: {expected_files}, Got: {h5_filenames}"
+        )
+
+        # Verify each HDF5 file has required content
+        for h5_file in h5_files:
+            with File(h5_file, "r") as f:
+                assert "data" in f, f"Missing 'data' in {h5_file}"
+                assert "image" in f["data"], f"Missing 'image' in {h5_file}"
+                assert "image_polar" in f["data"], (
+                    f"Missing 'image_polar' (scan converted) in {h5_file}"
+                )
+
+                # image is now a Map group with values and extent subfields
+                image = f.data.image.values[:]
+                image_polar = f.data.image_polar.values[:]
+
+                assert image_polar.ndim == 4, (
+                    f"Polar image should be of shape (F, H, W, 1) in {h5_file}"
+                )
+                assert image.ndim == 3, (
+                    f"Scan converted image should be of shape (F, H, W) in {h5_file}"
+                )
+
+                # Validate the file
+                f.validate()
+
+                # Convert polar to cartesian
+                frame_idx = 0
+                image_float = image[frame_idx].astype(np.float32)
+                image_polar_float = image_polar[frame_idx].astype(np.float32)
+                back_cartesian = LVHProcessor.scan_convert(
+                    image_polar_float, cone_params[h5_file.stem + ".avi"], image_float.shape
+                )
+                back_cartesian = np.asarray(back_cartesian)
+                np.testing.assert_array_almost_equal(back_cartesian, image_float, decimal=5)
 
 
 def verify_converted_camus_test_data(dst):

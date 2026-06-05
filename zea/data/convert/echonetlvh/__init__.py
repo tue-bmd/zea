@@ -17,6 +17,7 @@ import shutil
 import tempfile
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 
 import keras
@@ -75,8 +76,8 @@ def load_shapes(csv_path: str | Path):
         reader = csv.DictReader(csvfile)
         for row in reader:
             filename = row["HashedFileName"]
-            height = row["Height"]
-            width = row["Width"]
+            height = int(row["Height"])
+            width = int(row["Width"])
             shape = (height, width)
             if filename not in shapes:
                 shapes[filename] = shape
@@ -85,6 +86,7 @@ def load_shapes(csv_path: str | Path):
                     f"MeasurementsList.csv has multiple entries for {filename}, "
                     "and the shapes are different"
                 )
+    return shapes
 
 
 def find_avi_file(source_dir: Path, hashed_filename: str, batch=None):
@@ -203,7 +205,7 @@ def precompute_cone_parameters(
         writer.writeheader()
 
         # Process each file
-        for avi_file, avi_filename in tqdm(files_to_process, desc="Computing cone parameters"):
+        for avi_file in tqdm(files_to_process, desc="Computing cone parameters"):
             try:
                 # Load only the first frame of video using OpenCV directly
                 first_frame = _load_first_frame(avi_file)
@@ -223,7 +225,7 @@ def precompute_cone_parameters(
 
                 # Extract only the essential parameters
                 essential_params = {
-                    "avi_filename": avi_filename,
+                    "avi_filename": avi_file.name,
                     "crop_left": full_cone_params["crop_left"],
                     "crop_right": full_cone_params["crop_right"],
                     "crop_top": full_cone_params["crop_top"],
@@ -243,14 +245,14 @@ def precompute_cone_parameters(
                 writer.writerow(essential_params)
 
                 # Store in dictionary
-                all_cone_params[avi_filename] = essential_params
+                all_cone_params[avi_file.name] = essential_params
 
             except Exception as e:
                 log.error(f"Error processing {avi_file}: {str(e)}")
 
                 # Write failure record
                 failure_record = {
-                    "avi_filename": avi_filename,
+                    "avi_filename": avi_file.name,
                     "status": f"error: {str(e)}",
                 }
 
@@ -377,14 +379,13 @@ class LVHProcessor:
         self.splits = splits
         self.cone_parameters = cone_params or {}
 
-        self.cart2pol_jit = jit(cartesian_to_polar_matrix)
+        self.cart2pol_jit = jit(partial(cartesian_to_polar_matrix, polar_shape=polar_shape))
         self.cart2pol_batched = vmap(
             lambda matrix, tip_x, tip_y, r_max, theta_min, theta_max: self.cart2pol_jit(
                 matrix,
                 tip=(tip_x, tip_y),
                 r_max=r_max,
                 theta_range=(theta_min, theta_max),
-                polar_shape=polar_shape,
             ),
             in_axes=(0, None, None, None, None, None),
         )
@@ -446,7 +447,8 @@ class LVHProcessor:
             zea dataset
         """
         avi_file = avi_file.with_suffix(".avi")
-        sequence_np = load_avi(avi_file)  # check dtype here
+        sequence_np = load_avi(avi_file)
+        sequence_np = sequence_np.astype(np.float32)
         sequence_processed = ops.convert_to_numpy(sequence_np)
         # Get pre-computed cone parameters for this file
         cone_params = self.cone_parameters.get(avi_file.name)
@@ -454,7 +456,7 @@ class LVHProcessor:
             raise UserWarning(f"No cone parameters for {avi_file.name}")
 
         split = self.get_split(avi_file)
-        out_h5 = self.path_out_h5 / split / avi_file.with_suffix(".hdf5")
+        out_h5 = self.path_out_h5 / split / (avi_file.stem + ".hdf5")
 
         # Polar conversion runs on the uncropped frame using apex coordinates in
         # original-image space; theta_min/theta_max come from the fitted slopes
@@ -693,7 +695,7 @@ def convert_echonetlvh(
 
     # Precompute cone parameters if needed
     cone_params_csv = dst / "cone_parameters.csv"
-    precompute_cone_parameters(measurements_csv, cone_params_csv, batch, max_files, force)
+    precompute_cone_parameters(src, measurements_csv, cone_params_csv, batch, max_files, force)
 
     # If no specific conversion is requested, convert both
     if not (convert_measurements or convert_images):
@@ -733,7 +735,7 @@ def convert_echonetlvh(
 
         # Sort files by (h, w) to avoid retracing
         shapes = load_shapes(measurements_csv)
-        files_to_process = sorted(files_to_process, key=lambda x: shapes[x.name])
+        files_to_process = sorted(files_to_process, key=lambda x: shapes[x.stem])
 
         log.info("Starting the conversion process.")
 
