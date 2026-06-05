@@ -644,7 +644,6 @@ def polar_to_cartesian_matrix(
     tip: Union[Tuple[float, float], None] = None,
     r_max: Union[float, None] = None,
     theta_range: Union[Tuple[float, float], None] = None,
-    angle: Union[float, None] = None,
     pitch: float = 1.0,
     fill_value: float = 0.0,
     order: int = 1,
@@ -669,10 +668,7 @@ def polar_to_cartesian_matrix(
             it must match the column order of ``polar_matrix``. To invert
             :func:`cartesian_to_polar_matrix` (whose final ``rot90`` reverses the angular
             axis) pass it reversed, i.e. ``(theta_max, theta_min)`` -- which is exactly what
-            :func:`polar_geometry_from_coords_for_interp` returns. Mutually exclusive with
-            ``angle``.
-        angle (float, optional): Symmetric shorthand for ``theta_range=(-angle, angle)``.
-            Defaults to pi/4 when both are None.
+            :func:`polar_geometry_from_coords_for_interp` returns. Defaults to (-45, 45) degrees.
         pitch (float, optional): Output units per pixel (radial units of ``r_max``).
             Defaults to 1.0, i.e. ``tip`` and ``r_max`` are in pixels.
         fill_value (float, optional): Value for pixels outside the polar domain.
@@ -683,9 +679,6 @@ def polar_to_cartesian_matrix(
             shape ``cartesian_shape``.
     """
     assert "float" in ops.dtype(polar_matrix), "Input image must be float type"
-    assert angle is None or theta_range is None, (
-        "Specify either `angle` (symmetric) or `theta_range` (asymmetric), not both"
-    )
 
     cart_rows, cart_cols = cartesian_shape
     if tip is None:
@@ -693,9 +686,7 @@ def polar_to_cartesian_matrix(
     if r_max is None:
         r_max = cart_rows
     if theta_range is None:
-        if angle is None:
-            angle = np.deg2rad(45)
-        theta_range = (-angle, angle)
+        theta_range = (-np.deg2rad(45), np.deg2rad(45))
 
     tip_x, tip_y = tip
     dtype = ops.dtype(polar_matrix)
