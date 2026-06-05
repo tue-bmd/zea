@@ -120,11 +120,14 @@ def save_file(
 
 def _iter_folder_io(input_path: Path, output_path: Path):
     """Yields ``(input_file, output_file)`` path pairs for a folder operation.
+
     Uses :class:`zea.Dataset` to iterate over every zea file in ``input_path``. The
     output folder mirrors the structure of the input folder.
+
     Args:
         input_path (Path): Path to a folder containing zea data files.
         output_path (Path): Path to the output folder.
+
     Yields:
         tuple[Path, Path]: Pairs of (input file, output file) paths.
     """
@@ -136,6 +139,7 @@ def _iter_folder_io(input_path: Path, output_path: Path):
 
 def _supports_folders(operation):
     """Decorator that lets a single-file operation also accept a folder as input.
+
     When the decorated operation is called with a folder as ``input_path``, it is
     applied to every zea file in that folder (iterated with :class:`zea.Dataset`),
     writing the results to ``output_path`` and mirroring the input folder structure.

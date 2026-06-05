@@ -26,10 +26,9 @@ from tqdm import tqdm
 
 from zea import File, log
 from zea.backend import jit
-from zea.data.convert.echonet import H5Processor
 from zea.data.convert.utils import load_avi
-from zea.display import _polar_to_cartesian_coordinates, cartesian_to_polar_matrix
-from zea.func.tensor import translate, vmap
+from zea.display import cartesian_to_polar_matrix
+from zea.func.tensor import vmap
 from zea.tools.fit_scan_cone import (
     _load_first_frame,
     crop_and_center_cone,
@@ -60,6 +59,32 @@ def load_splits(csv_path: str | Path):
         for filename, split in file_split_map.items():
             splits[split].append(filename + ".avi")
     return splits
+
+
+def load_shapes(csv_path: str | Path):
+    """
+    Load shapes from MeasurementsList.csv and return avi filenames
+
+    Args:
+        csv_path: Path to the MeasurementsList.csv file
+
+    Returns: dictionary with the filename as key and the shape as value
+    """
+    shapes = {}
+    with open(csv_path, "r", encoding="utf-8") as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            filename = row["HashedFileName"]
+            height = row["Height"]
+            width = row["Width"]
+            shape = (height, width)
+            if filename not in shapes:
+                shapes[filename] = shape
+            else:
+                assert shapes[filename] == shape, (
+                    f"MeasurementsList.csv has multiple entries for {filename}, "
+                    "and the shapes are different"
+                )
 
 
 def find_avi_file(source_dir: Path, hashed_filename: str, batch=None):
@@ -344,12 +369,14 @@ def crop_sequence_with_params(sequence, cone_params):
     return crop_sequence(sequence)
 
 
-class LVHProcessor(H5Processor):
-    """Modified H5Processor for EchoNet-LVH dataset."""
+class LVHProcessor:
+    """Processor for EchoNet-LVH dataset."""
 
-    def __init__(self, *args, cone_params=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Store the pre-computed cone parameters
+    def __init__(self, path_out_h5: str, splits: dict, cone_params: dict, polar_shape=(600, 600)):
+        self.path_out_h5 = Path(path_out_h5)
+        self.splits = splits
+        self.cone_parameters = cone_params or {}
+
         self.cart2pol_jit = jit(cartesian_to_polar_matrix)
         self.cart2pol_batched = vmap(
             lambda matrix, tip_x, tip_y, r_max, theta_min, theta_max: self.cart2pol_jit(
@@ -357,20 +384,17 @@ class LVHProcessor(H5Processor):
                 tip=(tip_x, tip_y),
                 r_max=r_max,
                 theta_range=(theta_min, theta_max),
-                polar_shape=(600, 600),
+                polar_shape=polar_shape,
             ),
             in_axes=(0, None, None, None, None, None),
-        )  # map over sequence of images; per-video cone geometry is broadcast
-        self.cone_parameters = cone_params or {}
-        self.range_to = (0, 255)  # overwrite range_to to use uint8 range to save memory.
+        )
 
-    def get_split(self, avi_file: Path, sequence):
+    def get_split(self, avi_file: Path):
         """
         Get the split (train/val/test) for a given AVI file.
 
         Args:
             avi_file: Path to the AVI file
-            sequence: Video sequence (unused)
 
         Returns:
             String indicating the split ('train', 'val', or 'test')
@@ -392,17 +416,15 @@ class LVHProcessor(H5Processor):
         Returns:
             zea dataset
         """
-        # TODO: sort avi's by (h, w) to avoid retracing
         avi_file = avi_file.with_suffix(".avi")
-        sequence_np = load_avi(avi_file)
+        sequence_np = load_avi(avi_file)  # check dtype here
         sequence_processed = ops.convert_to_numpy(sequence_np)
-        sequence_processed = translate(sequence_processed, self.range_from, self._process_range)
         # Get pre-computed cone parameters for this file
         cone_params = self.cone_parameters.get(avi_file.name)
         if cone_params is None:
             raise UserWarning(f"No cone parameters for {avi_file.name}")
 
-        split = self.get_split(avi_file, sequence_processed)
+        split = self.get_split(avi_file)
         out_h5 = self.path_out_h5 / split / avi_file.with_suffix(".hdf5")
 
         # Polar conversion runs on the uncropped frame using apex coordinates in
@@ -418,14 +440,11 @@ class LVHProcessor(H5Processor):
             -math.atan(cone_params["left_slope"]),
         )
 
-        polar_im_set = translate(polar_im_set, self._process_range, self.range_to)
         polar_im_set_uint8 = ops.cast(ops.floor(polar_im_set + 0.5), "uint8")
         del polar_im_set
 
         # Cropped + centered cartesian view is only needed for image_sc
         sequence_processed = crop_sequence_with_params(sequence_processed, cone_params)
-        sequence_processed = translate(sequence_processed, self._process_range, self.range_to)
-        assert self.range_to == (0, 255), "Expected range_to to be (0, 255) for uint8 conversion"
         sequence_processed_uint8 = ops.cast(ops.floor(sequence_processed + 0.5), "uint8")
         del sequence_processed
 
@@ -442,14 +461,21 @@ class LVHProcessor(H5Processor):
         # Image spec requires (n_frames, x, z, y) — add y=1 dimension
         polar_4d = polar_np[:, :, :, np.newaxis]
 
+        # TODO: would be cool if we could store all the information of
+        # 'MeasurementsList.csv' and 'cone_parameters.csv' in the metadata
         File.create(
             out_h5,
             data={
                 "image": {"values": image_sc_np},
                 "image_polar": {"values": polar_4d, "unit": "pixels", "coordinates": coordinates},
             },
-            scan={},
-            probe={"name": "generic"},
+            metadata={
+                "annotations": {"anatomy": "heart", "view": "PLAX"},
+                "subject": {
+                    "id": avi_file.name,
+                    "type": "human",
+                },
+            },
             description="EchoNet-LVH dataset converted to zea format",
         )
 
@@ -675,6 +701,10 @@ def convert_echonetlvh(
 
         # Initialize processor with splits and cone parameters
         processor = LVHProcessor(path_out_h5=dst, splits=splits, cone_params=cone_parameters)
+
+        # Sort files by (h, w) to avoid retracing
+        shapes = load_shapes(measurements_csv)
+        files_to_process = sorted(files_to_process, key=lambda x: shapes[x.name])
 
         log.info("Starting the conversion process.")
 
