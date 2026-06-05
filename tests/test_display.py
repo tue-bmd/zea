@@ -118,17 +118,17 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error, angle
 
     rho_range = (0, 100)
 
-    if angle is None:
-        theta_range = np.deg2rad((-45, 45))
-    else:
-        theta_range = (-angle, angle)
+    theta_range = np.deg2rad((-45, 45))
 
     # Scan convert
     cartesian_data, _ = display.scan_convert_2d(polar_data, rho_range, theta_range)
 
     # Inverse scan convert
     cartesian_data_inv = display.inverse_scan_convert_2d(
-        cartesian_data, output_size=polar_data.shape, find_scan_cone=False, angle=angle
+        cartesian_data,
+        output_size=polar_data.shape,
+        find_scan_cone=False,
+        theta_range=theta_range,
     )
     cartesian_data_inv = ops.convert_to_numpy(cartesian_data_inv)
 

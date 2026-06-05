@@ -556,7 +556,6 @@ def cartesian_to_polar_matrix(
     polar_shape=None,
     tip=None,
     r_max=None,
-    angle=None,
     theta_range=None,
     interpolation_order=1,
 ):
@@ -572,12 +571,9 @@ def cartesian_to_polar_matrix(
             transformation (typically the probe tip). Defaults to the center-top of the image.
         r_max (float, optional): Maximum radius to consider in the polar transform.
             Defaults to the height of the input image.
-        angle (float, optional): Symmetric shorthand for ``theta_range=(-angle, angle)``,
-            in radians. Mutually exclusive with ``theta_range``. Defaults to π/4 radians
-            (45 degrees) when both ``angle`` and ``theta_range`` are None.
         theta_range (tuple, optional): ``(theta_min, theta_max)`` angular extent of the polar
             grid in radians, allowing asymmetric cones. Use this when the left and right
-            cone boundaries do not have equal half-angles. Mutually exclusive with ``angle``.
+            cone boundaries do not have equal half-angles. Defaults to (-45, 45) degrees.
         interpolation_order (int): Order of interpolation to use (0 = nearest-neighbor,
             1 = linear, 2+ = spline). Matches the convention of `scipy.ndimage.map_coordinates`.
 
@@ -587,14 +583,9 @@ def cartesian_to_polar_matrix(
             polar output.
     """
     assert "float" in ops.dtype(cartesian_matrix), "Input image must be float type"
-    assert angle is None or theta_range is None, (
-        "Specify either `angle` (symmetric) or `theta_range` (asymmetric), not both"
-    )
 
     if theta_range is None:
-        if angle is None:
-            angle = np.deg2rad(45)
-        theta_min, theta_max = -angle, angle
+        theta_min, theta_max = -np.deg2rad(45), np.deg2rad(45)
     else:
         theta_min, theta_max = theta_range
 
@@ -782,7 +773,6 @@ def polar_geometry_from_coords_for_interp(coords_for_interp, polar_shape):
 def inverse_scan_convert_2d(
     cartesian_image,
     fill_value=0.0,
-    angle=None,
     theta_range=None,
     output_size=None,
     interpolation_order=1,
@@ -800,11 +790,8 @@ def inverse_scan_convert_2d(
         cartesian_image (tensor): 2D image array in Cartesian coordinates of type float.
         fill_value (float): Value used to fill regions outside the original image
             during interpolation.
-        angle (float, optional): Symmetric shorthand for ``theta_range=(-angle, angle)``,
-            in radians. Mutually exclusive with ``theta_range``. Defaults to π/4 radians
-            (45 degrees) when both are None.
         theta_range (tuple, optional): ``(theta_min, theta_max)`` angular extent of the polar
-            grid in radians, allowing asymmetric cones. Mutually exclusive with ``angle``.
+            grid in radians, allowing asymmetric cones. Defaults to (-45, 45) degrees.
         output_size (tuple, optional): Shape (rows, cols) of the resulting polar image.
             If None, the shape of the input image is used.
         interpolation_order (int): Order of interpolation used in resampling
@@ -827,7 +814,6 @@ def inverse_scan_convert_2d(
     polar_image, _ = cartesian_to_polar_matrix(
         cartesian_image,
         fill_value=fill_value,
-        angle=angle,
         theta_range=theta_range,
         polar_shape=output_size,
         interpolation_order=interpolation_order,

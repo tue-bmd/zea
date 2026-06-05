@@ -29,11 +29,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from keras import ops
 
+import zea
 from zea import log
 from zea.display import (
     cartesian_to_polar_matrix,
     polar_geometry_from_coords_for_interp,
-    polar_to_cartesian_matrix,
 )
 from zea.tools.fit_scan_cone import (
     _load_first_frame,
@@ -60,20 +60,11 @@ def polar_this_branch(cropped_frame, cone_params):
     )
 
 
-def back_to_cartesian(polar_image, cone_params):
-    return polar_to_cartesian_matrix(
-        polar_image,
-        cartesian_shape=(cone_params["original_height"], cone_params["original_width"]),
-        tip=(cone_params["apex_x"], cone_params["apex_y"]),
-        r_max=cone_params["circle_radius"],
-        theta_range=(-math.atan(cone_params["left_slope"]), -math.atan(cone_params["right_slope"])),
-    )
-
-
 def polar_openh_rf(cropped_frame, cone_params):
     """Polar conversion as performed on the openh-rf branch (symmetric, defaults)."""
     angle = cone_params["opening_angle"] / 2
-    return cartesian_to_polar_matrix(cropped_frame, angle=angle)
+    theta_range = (-angle, angle)
+    return cartesian_to_polar_matrix(cropped_frame, theta_range=theta_range)
 
 
 def polar_direct(original_frame, cone_params):
@@ -147,12 +138,17 @@ def process_one(avi_path: Path, output_dir: Path):
     polar_no_crop, coords_for_interp = polar_direct(frame_f32, cone_params)
 
     # Recover the forward geometry straight from the sampling map (no stored params needed),
-    # then invert with the matching pixel-space transform.
+    # then invert with polar_to_cartesian_matrix, which pins the apex at ``tip`` on a
+    # full-size canvas and reconstructs the original frame 1:1.
     tip, r_max, theta_range = polar_geometry_from_coords_for_interp(
         coords_for_interp, polar_no_crop.shape
     )
-    back_cartesian = polar_to_cartesian_matrix(
-        polar_no_crop, frame_f32.shape, tip=tip, r_max=r_max, theta_range=theta_range
+    back_cartesian = zea.display.polar_to_cartesian_matrix(
+        polar_no_crop,
+        frame_f32.shape,
+        tip=tip,
+        r_max=r_max,
+        theta_range=theta_range,
     )
     back_cartesian = crop_and_center_cone(back_cartesian, cone_params, backend=ops)
 
