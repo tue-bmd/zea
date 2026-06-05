@@ -138,6 +138,11 @@ class Operation(keras.Operation):
         """Get the static parameters of the operation."""
         return getattr(self.__class__, "STATIC_PARAMS", [])
 
+    @property
+    def jit_compile(self):
+        """Get the JIT compilation flag."""
+        return self._jit_compile
+
     def set_jit(self, jit_compile: bool):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
         self._jit_compile = jit_compile

@@ -10,6 +10,7 @@ on:
 jobs:
   set-tag:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       docker_tag: ${{ steps.set.outputs.tag }}
     steps:

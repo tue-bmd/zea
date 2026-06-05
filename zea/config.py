@@ -545,9 +545,27 @@ def _load_config_from_yaml(path, config_class=Config, loader=yaml.FullLoader):
     with open(Path(path), "r", encoding="utf-8") as file:
         dictionary = yaml.load(file, Loader=loader)
     if dictionary:
+        dictionary = _migrate_legacy_config(dictionary)
         return config_class(dictionary)
     else:
         return config_class()
+
+
+def _migrate_legacy_config(dictionary: dict) -> dict:
+    """Migrate deprecated config layouts in place.
+
+    The legacy ``scan:`` section has been replaced by a flat ``parameters:``
+    mapping (see the Config/Parameters redesign).  When a config still uses
+    ``scan:`` (and has no ``parameters:`` key), it is aliased to ``parameters``
+    with a deprecation warning so existing config files keep working.
+    """
+    if isinstance(dictionary, dict) and "scan" in dictionary and "parameters" not in dictionary:
+        log.warning(
+            "Config key 'scan' is deprecated; use 'parameters' instead. "
+            "Aliasing 'scan' -> 'parameters'."
+        )
+        dictionary["parameters"] = dictionary.pop("scan")
+    return dictionary
 
 
 def _path_to_str(path):

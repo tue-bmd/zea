@@ -442,7 +442,7 @@ class LVHProcessor(H5Processor):
         # Image spec requires (n_frames, x, z, y) — add y=1 dimension
         polar_4d = polar_np[:, :, :, np.newaxis]
 
-        return File.create(
+        File.create(
             out_h5,
             data={
                 "image": {"values": image_sc_np},

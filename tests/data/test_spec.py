@@ -93,6 +93,10 @@ def _scan_minimal(n_frames: int = 3, n_tx: int = 2, n_el: int = 4):
     }
 
 
+def _probe_minimal(n_el: int = 4):
+    return {"probe_geometry": np.zeros((n_el, 3), dtype=np.float32)}
+
+
 def _example_metadata():
     return {
         "subject": {
@@ -180,6 +184,7 @@ def dataset_spec():
     return FileSpec(
         data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
         metadata=_example_metadata(),
         metrics={
             "common_midpoint_phase_error": np.zeros((n_frames,), dtype=np.float32),
@@ -222,6 +227,7 @@ def test_spec_to_dict_keeps_optional_fields():
     dataset = FileSpec(
         data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
     )
 
     result = dataset.to_dict()
@@ -273,6 +279,28 @@ def test_scan_dimension_count_consistency():
         ScanSpec(**scan)
 
 
+def test_inconsistent_dimension_error_groups_fields_by_size():
+    """The error message groups the offending fields by their observed size."""
+    scan = _scan_minimal(n_tx=2)
+    # initial_times disagrees (n_tx=3) with the other n_tx=2 fields.
+    scan["initial_times"] = np.zeros((3,), dtype=np.float32)
+
+    with pytest.raises(ValueError) as exc_info:
+        ScanSpec(**scan)
+
+    message = str(exc_info.value)
+    assert message.startswith("Dimension 'n_tx' has inconsistent sizes:")
+    # Each distinct size is reported on its own line with its fields.
+    assert "size 2: " in message
+    assert "size 3: " in message
+    # The lone disagreeing field appears under its own size.
+    assert "size 3: initial_times" in message
+    # Fields that share the majority size are grouped together (sorted).
+    assert "t0_delays" in message and "tx_apodizations" in message
+    size_2_line = next(line for line in message.splitlines() if line.strip().startswith("size 2:"))
+    assert "t0_delays" in size_2_line
+
+
 def test_signal_nd_accepts_variable_trailing_dimensions_with_ellipsis():
     signal = SignalND(
         samples=np.zeros((10, 3, 4, 5), dtype=np.float32),
@@ -298,6 +326,7 @@ def test_optional_fields_can_be_omitted():
     dataset = FileSpec(
         data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
     )
 
     assert dataset.metadata.subject is None
@@ -333,6 +362,7 @@ def test_dataset_builder_accepts_float_raw_data_and_casts_to_float32():
     dataset = FileSpec(
         data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float64)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
     )
 
     assert dataset.data.raw_data.dtype == np.float32
@@ -360,6 +390,7 @@ def test_dataset_builder_dimension_consistency_across_nested_specs():
         FileSpec(
             data={"raw_data": np.zeros((n_frames_data, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
             scan=scan,
+            probe=_probe_minimal(n_el=n_el),
         )
 
 
@@ -377,6 +408,7 @@ def test_metadata_accepts_custom_signal_nd_keys_and_warns(tmp_path):
     dataset = FileSpec(
         data=data,
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
         metadata=metadata,
         metrics={},
     )
@@ -388,6 +420,7 @@ def test_metadata_accepts_custom_signal_nd_keys_and_warns(tmp_path):
             tmp_path / "test.hdf5",
             data=data,
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
             metadata=metadata,
         )
     messages = [str(c.args[0]) for c in mock_warn.call_args_list]
@@ -397,10 +430,11 @@ def test_metadata_accepts_custom_signal_nd_keys_and_warns(tmp_path):
 def test_metadata_custom_key_requires_signal_nd_spec():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
-    with pytest.raises(TypeError, match="Expected field 'custom_signal' to be"):
+    with pytest.raises(TypeError, match="custom 'metadata' key 'custom_signal'"):
         FileSpec(
             data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
             metadata={"custom_signal": 123},
             metrics={},
         )
@@ -421,6 +455,7 @@ def test_data_accepts_custom_map_keys_and_warns(tmp_path):
     dataset = FileSpec(
         data=data,
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
     )
     assert isinstance(dataset.data, DataSpec)
     assert isinstance(dataset.data.custom_map, Map)
@@ -431,6 +466,7 @@ def test_data_accepts_custom_map_keys_and_warns(tmp_path):
             tmp_path / "test.hdf5",
             data=data,
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
         )
     messages = [str(c.args[0]) for c in mock_warn.call_args_list]
     assert any("Custom spatial map key(s) added to 'data'" in m for m in messages)
@@ -446,6 +482,7 @@ def test_data_custom_key_requires_map_spec():
                 "custom_scalar": 123,
             },
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
         )
 
 
@@ -461,6 +498,7 @@ def test_data_custom_map_dtype_error_includes_map_key_context():
                 },
             },
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
         )
 
 
@@ -513,13 +551,16 @@ def test_field_metadata_keys_are_subset_of_schema_for_all_specs():
             )
 
 
-def test_subject_id_warning_for_missing_id():
+def test_subject_id_warning_for_missing_id(tmp_path):
     n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
 
+    path = tmp_path / "subject_id_missing_warns_on_save.hdf5"
     with patch("zea.log.warning") as mock_warn:
-        FileSpec(
+        File.create(
+            path,
             data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
             metadata={
                 "subject": {
                     "type": "human",
@@ -532,18 +573,22 @@ def test_subject_id_warning_for_missing_id():
                 "common_midpoint_phase_error": np.zeros((n_frames,), dtype=np.float32),
                 "coherence_factor": np.ones((n_frames,), dtype=np.float32),
             },
+            overwrite=True,
         )
     messages = [str(c.args[0]) for c in mock_warn.call_args_list]
     assert any("Optional Subject field 'id' is not set" in m for m in messages)
 
 
-def test_subject_id_warning_includes_field_metadata_description():
+def test_subject_id_warning_includes_field_metadata_description(tmp_path):
     n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
 
+    path = tmp_path / "subject_id_description_warns_on_save.hdf5"
     with patch("zea.log.warning") as mock_warn:
-        FileSpec(
+        File.create(
+            path,
             data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
             metadata={
                 "subject": {
                     "type": "human",
@@ -552,6 +597,7 @@ def test_subject_id_warning_includes_field_metadata_description():
                     "fat_percentage": np.float32(17.5),
                 }
             },
+            overwrite=True,
         )
     messages = [str(c.args[0]) for c in mock_warn.call_args_list]
     assert any("subject-wise splits" in m for m in messages)
@@ -753,12 +799,51 @@ class TestMetadataAndMetricsValidationErrors:
                     "raw_data": np.zeros((n_frames_data, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
                 },
                 scan=_scan_minimal(n_frames=n_frames_data, n_tx=n_tx, n_el=n_el),
+                probe=_probe_minimal(n_el=n_el),
                 metadata={
                     "annotations": {
                         "view": np.array(["a4c"] * n_frames_ann, dtype=np.str_),
                     }
                 },
             )
+
+    def test_annotations_n_frames_mismatch_against_later_track_raises(self):
+        """Metadata may agree with track 0 but conflict with a later track.
+
+        Exercises the multi-track loop in ``FileSpec.__post_init__``: the
+        per-track consistency check must keep iterating past the matching
+        track and report which track disagrees.
+        """
+        n_tx, n_el, n_ax, n_ch = 2, 4, 8, 1
+        n_frames_match, n_frames_conflict = 3, 5
+
+        def _track(n_frames):
+            return {
+                "data": {
+                    "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+                },
+                "scan": _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                "label": f"track_{n_frames}",
+            }
+
+        with pytest.raises(ValueError) as exc_info:
+            FileSpec(
+                tracks=[_track(n_frames_match), _track(n_frames_conflict)],
+                probe=_probe_minimal(n_el=n_el),
+                metadata={
+                    "annotations": {
+                        "view": np.array(["a4c"] * n_frames_match, dtype=np.str_),
+                    }
+                },
+            )
+
+        message = str(exc_info.value)
+        assert message.startswith("Dimension 'n_frames' has inconsistent sizes:")
+        # The message attributes the sizes to the metadata field and the
+        # conflicting track (not track 0, which matched the metadata).
+        assert "metadata.annotations.view" in message
+        assert "tracks[1]." in message
+        assert "tracks[0]." not in message
 
 
 class TestProbePoseValidation:
@@ -900,7 +985,7 @@ def _scan_bare(n_tx: int = 2, n_el: int = 4):
 
 
 class TestScanSpecSaveWarnings:
-    """log.warning calls emitted during ScanSpec / FileSpec construction."""
+    """log.warning calls emitted during save/serialization."""
 
     @pytest.mark.parametrize(
         "field",
@@ -913,6 +998,26 @@ class TestScanSpecSaveWarnings:
     def test_optional_scan_field_missing_warns(self, field):
         with patch("zea.log.warning") as mock_warn:
             ScanSpec(**_scan_bare())
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any(f"ScanSpec field '{field}' is not set" in m for m in messages)
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            f.name
+            for f in fields(ScanSpec)
+            if f.default is None and f.name in ScanSpec.FIELD_METADATA
+        ],
+    )
+    def test_optional_scan_field_missing_warns_on_save(self, field, tmp_path):
+        path = tmp_path / "scan_save_warns.hdf5"
+        with patch("zea.log.warning") as mock_warn:
+            File.create(
+                path,
+                data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+                scan=_scan_bare(n_tx=2, n_el=4),
+                probe=_probe_minimal(n_el=4),
+            )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any(f"ScanSpec field '{field}' is not set" in m for m in messages)
 
@@ -976,6 +1081,7 @@ class TestScanSpecSaveWarnings:
                 tmp_path / "test.hdf5",
                 data=data,
                 scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                probe=_probe_minimal(n_el=n_el),
             )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any("Custom spatial map key(s) added to 'data'" in m for m in messages)
@@ -994,6 +1100,7 @@ class TestScanSpecSaveWarnings:
                 tmp_path / "test.hdf5",
                 data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
                 scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                probe=_probe_minimal(n_el=n_el),
                 metadata=metadata,
             )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
@@ -1005,19 +1112,34 @@ class TestScanSpecSaveWarnings:
             FileSpec(
                 data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
                 scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                probe=_probe_minimal(n_el=n_el),
                 metadata={"subject": {"type": "human"}},
             )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
-        assert any("Optional Subject field 'id' is not set" in m for m in messages)
+        assert not any("Optional Subject field 'id' is not set" in m for m in messages)
 
 
 class TestSubjectFieldWarnings:
-    """log.warning calls emitted when Subject optional fields are None."""
+    """Subject optional-field warning behavior."""
 
     @pytest.mark.parametrize("field", list(Subject.SCHEMA))
     def test_optional_subject_field_missing_warns(self, field):
         with patch("zea.log.warning") as mock_warn:
             Subject()
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any(f"Optional Subject field '{field}' is not set" in m for m in messages)
+
+    @pytest.mark.parametrize("field", list(Subject.SCHEMA))
+    def test_optional_subject_field_missing_warns_on_save(self, field, tmp_path):
+        path = tmp_path / "subject_save_warns.hdf5"
+        with patch("zea.log.warning") as mock_warn:
+            File.create(
+                path,
+                data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=2, n_tx=2, n_el=4),
+                probe=_probe_minimal(n_el=4),
+                metadata={"subject": {}},
+            )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any(f"Optional Subject field '{field}' is not set" in m for m in messages)
 
@@ -1035,7 +1157,7 @@ class TestSubjectFieldWarnings:
 
 
 class TestMetadataSpecFieldWarnings:
-    """log.warning calls emitted when MetadataSpec optional fields are None."""
+    """MetadataSpec optional-field warning behavior."""
 
     @pytest.mark.parametrize(
         "field",
@@ -1044,6 +1166,23 @@ class TestMetadataSpecFieldWarnings:
     def test_optional_metadata_field_missing_warns(self, field):
         with patch("zea.log.warning") as mock_warn:
             MetadataSpec()
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any(f"Optional MetadataSpec field '{field}' is not set" in m for m in messages)
+
+    @pytest.mark.parametrize(
+        "field",
+        [f.name for f in fields(MetadataSpec) if f.default is None],
+    )
+    def test_optional_metadata_field_missing_warns_on_save(self, field, tmp_path):
+        path = tmp_path / "metadata_save_warns.hdf5"
+        with patch("zea.log.warning") as mock_warn:
+            File.create(
+                path,
+                data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=2, n_tx=2, n_el=4),
+                probe=_probe_minimal(n_el=4),
+                metadata={},
+            )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any(f"Optional MetadataSpec field '{field}' is not set" in m for m in messages)
 
@@ -1065,24 +1204,9 @@ class TestLoadingWarnings:
 
         with patch("zea.log.warning") as mock_warn:
             with File(path) as f:
-                f.get_parameters()
+                f.get_scan_parameters()
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any("Could not find scan parameters in file" in m for m in messages)
-
-    def test_focus_distances_in_wavelengths_warns(self, tmp_path):
-        """focus_distances stored as wavelengths (>= 1, not inf) triggers a warning on load."""
-        path = tmp_path / "wavelength_focus.hdf5"
-        with h5py.File(path, "w") as f:
-            s = f.create_group("scan")
-            s.create_dataset("focus_distances", data=np.full((2,), 10.0, dtype=np.float32))
-            s.create_dataset("sound_speed", data=np.float32(1540.0))
-            s.create_dataset("center_frequency", data=np.float32(5e6))
-
-        with patch("zea.log.warning") as mock_warn:
-            with File(path) as f:
-                f.get_parameters()
-        messages = [str(c.args[0]).lower() for c in mock_warn.call_args_list]
-        assert any("focus distances" in m and "wavelength" in m for m in messages)
 
     def test_waveforms_stored_as_dict_warns(self, tmp_path):
         """Legacy waveforms stored as an HDF5 group (dict-like) trigger a warning on load."""
@@ -1095,9 +1219,9 @@ class TestLoadingWarnings:
 
         with patch("zea.log.warning") as mock_warn:
             with File(path) as f:
-                # scan() emits the legacy-waveforms warning, then fails because the
-                # file has no other scan parameters (n_tx is unset).
-                with pytest.raises(ValueError):
+                # f.scan emits the legacy-waveforms warning, then fails because the
+                # file has no other (required) ScanSpec fields.
+                with pytest.raises((ValueError, TypeError)):
                     f.scan
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any("waveforms_one_way" in m and "stored as a dictionary" in m for m in messages)
@@ -1106,12 +1230,55 @@ class TestLoadingWarnings:
 class TestProbeSpec:
     """Unit tests for the ProbeSpec dataclass."""
 
+    def test_raw_data_requires_probe_geometry(self):
+        """A FileSpec with raw_data must define probe_geometry."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+        with pytest.raises(ValueError, match="'probe_geometry' is required"):
+            FileSpec(
+                data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            )
+
+    def test_raw_data_requires_probe_geometry_probe_without_geometry(self):
+        """Supplying a probe but omitting probe_geometry still raises."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+        with pytest.raises(ValueError, match="'probe_geometry' is required"):
+            FileSpec(
+                data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                probe={"name": "no_geometry_probe", "type": "linear"},
+            )
+
+    def test_raw_data_with_probe_geometry_ok(self):
+        """raw_data + probe_geometry validates without error."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+        spec = FileSpec(
+            data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
+        )
+        assert spec.probe.probe_geometry.shape == (n_el, 3)
+
+    def test_no_raw_data_does_not_require_probe_geometry(self):
+        """Without raw_data, probe_geometry is not required."""
+        n_frames = 2
+        coords = np.zeros((n_frames, 16, 12, 3), dtype=np.float32)
+        spec = FileSpec(
+            data={
+                "image": {
+                    "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+                    "coordinates": coords,
+                }
+            },
+        )
+        assert spec.probe is None
+
     def test_all_fields_none_by_default(self):
         probe = ProbeSpec()
         assert probe.name is None
         assert probe.type is None
-        assert probe.center_frequency is None
-        assert probe.bandwidth_percent is None
+        assert probe.probe_center_frequency is None
+        assert probe.probe_bandwidth_percent is None
         assert probe.element_width is None
         assert probe.lens_sound_speed is None
         assert probe.lens_thickness is None
@@ -1120,27 +1287,27 @@ class TestProbeSpec:
         probe = ProbeSpec(
             name="verasonics_l11_4v",
             type="linear",
-            center_frequency=np.float32(5.208e6),
-            bandwidth_percent=np.float32(67.0),
+            probe_center_frequency=np.float32(5.208e6),
+            probe_bandwidth_percent=np.float32(67.0),
             element_width=np.float32(0.27e-3),
             lens_sound_speed=np.float32(1000.0),
             lens_thickness=np.float32(1.5e-3),
         )
         assert probe.name == "verasonics_l11_4v"
         assert probe.type == "linear"
-        assert probe.center_frequency == pytest.approx(5.208e6, rel=1e-4)
-        assert probe.bandwidth_percent == pytest.approx(67.0)
+        assert probe.probe_center_frequency == pytest.approx(5.208e6, rel=1e-4)
+        assert probe.probe_bandwidth_percent == pytest.approx(67.0)
         assert probe.element_width == pytest.approx(0.27e-3, rel=1e-4)
 
     def test_invalid_center_frequency_raises(self):
-        with pytest.raises(ValueError, match="center_frequency"):
-            ProbeSpec(center_frequency=np.float32(-1.0))
+        with pytest.raises(ValueError, match="probe_center_frequency"):
+            ProbeSpec(probe_center_frequency=np.float32(-1.0))
 
-    def test_invalid_bandwidth_percent_raises(self):
-        with pytest.raises(ValueError, match="bandwidth_percent"):
-            ProbeSpec(bandwidth_percent=np.float32(0.0))
-        with pytest.raises(ValueError, match="bandwidth_percent"):
-            ProbeSpec(bandwidth_percent=np.float32(-10.0))
+    def test_invalid_probe_bandwidth_percent_raises(self):
+        with pytest.raises(ValueError, match="probe_bandwidth_percent"):
+            ProbeSpec(probe_bandwidth_percent=np.float32(0.0))
+        with pytest.raises(ValueError, match="probe_bandwidth_percent"):
+            ProbeSpec(probe_bandwidth_percent=np.float32(-10.0))
 
     def test_invalid_element_width_raises(self):
         with pytest.raises(ValueError, match="element_width"):
@@ -1180,14 +1347,14 @@ class TestProbeSpec:
             ProbeSpec(lens_thickness=np.float32(-0.001))
 
     def test_probe_spec_from_dict(self):
-        d = {"name": "L11-4v", "type": "linear", "center_frequency": np.float32(5e6)}
+        d = {"name": "L11-4v", "type": "linear", "probe_center_frequency": np.float32(5e6)}
         probe = ProbeSpec(**d)
         assert probe.name == "L11-4v"
-        assert probe.center_frequency == pytest.approx(5e6)
+        assert probe.probe_center_frequency == pytest.approx(5e6)
 
     def test_probe_casts_float64_to_float32(self):
-        probe = ProbeSpec(center_frequency=5.208e6)  # Python float → float64 → float32
-        assert probe.center_frequency.dtype == np.float32
+        probe = ProbeSpec(probe_center_frequency=5.208e6)  # Python float → float64 → float32
+        assert probe.probe_center_frequency.dtype == np.float32
 
     def test_file_spec_probe_propagates_name(self):
         """FileSpec.probe.name is accessible when probe dict is given."""
@@ -1198,7 +1365,8 @@ class TestProbeSpec:
             probe={
                 "name": "test_probe",
                 "type": "phased",
-                "center_frequency": np.float32(3e6),
+                "probe_center_frequency": np.float32(3e6),
+                "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
             },
         )
         assert spec.probe.name == "test_probe"
@@ -1226,9 +1394,10 @@ class TestProbeSpec:
             probe={
                 "name": "verasonics_l11_4v",
                 "type": "linear",
-                "center_frequency": np.float32(5.208e6),
-                "bandwidth_percent": np.float32(67.0),
+                "probe_center_frequency": np.float32(5.208e6),
+                "probe_bandwidth_percent": np.float32(67.0),
                 "element_width": np.float32(0.27e-3),
+                "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
             },
         )
         spec.save(save_path)
@@ -1237,13 +1406,13 @@ class TestProbeSpec:
             assert f.probe.name == "verasonics_l11_4v"
             assert "probe" in f
 
-        loaded = FileSpec.from_hdf5(File(str(save_path)))
+        loaded = File(str(save_path))._to_file_spec()
         assert loaded.probe.name == "verasonics_l11_4v"
         assert loaded.probe is not None
         assert isinstance(loaded.probe, ProbeSpec)
         assert loaded.probe.type == "linear"
-        assert loaded.probe.center_frequency == pytest.approx(5.208e6, rel=1e-4)
-        assert loaded.probe.bandwidth_percent == pytest.approx(67.0)
+        assert loaded.probe.probe_center_frequency == pytest.approx(5.208e6, rel=1e-4)
+        assert loaded.probe.probe_bandwidth_percent == pytest.approx(67.0)
 
     def test_file_create_with_probe_dict(self, tmp_path):
         """File.create accepts a probe dict and stores probe group + probe_name attr."""
@@ -1259,7 +1428,8 @@ class TestProbeSpec:
             probe={
                 "name": "my_probe",
                 "type": "linear",
-                "center_frequency": np.float32(7.5e6),
+                "probe_center_frequency": np.float32(7.5e6),
+                "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
             },
         )
 

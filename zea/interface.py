@@ -66,9 +66,10 @@ class Interface:
         if validate_file:
             self.file.validate()
 
-        # get probe and scan from file
+        # get probe and parameters from file
         self.probe = self.file.probe
-        self.scan = self.file.get_scan(**self.config.scan)
+        self._param_overrides = dict(self.config.get("parameters", {}) or {})
+        self.parameters = self.file.load_parameters(**self._param_overrides)
 
         # initialize Pipeline
         assert "pipeline" in self.config, (
@@ -80,7 +81,9 @@ class Interface:
             with_batch_dim=False,
             jit_options=None,
         )
-        self.parameters = self.process.prepare_parameters(self.probe, self.scan, self.config.scan)
+        self.input_tensors = self.process.prepare_parameters(
+            self.parameters, **self._param_overrides
+        )
 
         # initialize attributes for UI class
         self.data = None
@@ -245,15 +248,15 @@ class Interface:
         data_type = self.process.operations[0].input_data_type
         if data_type in [DataTypes.RAW_DATA, DataTypes.ALIGNED_DATA]:
             n_tx = self.data.shape[0]
-            assert len(self.scan.selected_transmits) <= n_tx, (
-                f"Number of selected transmits {len(self.scan.selected_transmits)} "
+            assert len(self.parameters.selected_transmits) <= n_tx, (
+                f"Number of selected transmits {len(self.parameters.selected_transmits)} "
                 f"exceeds number of transmits in raw data {n_tx}"
             )
-            self.data = np.take(self.data, self.scan.selected_transmits, axis=0)
+            self.data = np.take(self.data, self.parameters.selected_transmits, axis=0)
 
         inputs = {self.process.key: self.data}
 
-        outputs = self.process(**inputs, **self.parameters)
+        outputs = self.process(**inputs, **self.input_tensors)
 
         self.image = outputs[self.process.output_key]
 
@@ -325,12 +328,12 @@ class Interface:
 
     def _init_plt_figure(self):
         figsize = (10, 10)
-        if self.scan:
+        if self.parameters:
             extent = [
-                self.scan.xlims[0] * 1e3,
-                self.scan.xlims[1] * 1e3,
-                self.scan.zlims[1] * 1e3,
-                self.scan.zlims[0] * 1e3,
+                self.parameters.xlims[0] * 1e3,
+                self.parameters.xlims[1] * 1e3,
+                self.parameters.zlims[1] * 1e3,
+                self.parameters.zlims[0] * 1e3,
             ]
             # set figure aspect ratio to match scan
             aspect_ratio = abs(extent[1] - extent[0]) / abs(extent[3] - extent[2])

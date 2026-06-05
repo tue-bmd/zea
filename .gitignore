@@ -5,6 +5,8 @@
 /log
 docs/source/_autosummary/*
 !docs/source/_autosummary/zea.rst
+raw*/
+output*/
 
 # Temporary files
 temp/

@@ -1,5 +1,6 @@
 """Test dataset conversion scripts"""
 
+import argparse
 import csv
 import os
 import shutil
@@ -23,8 +24,9 @@ from zea.data.convert.utils import (
     sitk_load,
     unzip,
 )
-from zea.data.convert.verasonics import VerasonicsFile
+from zea.data.convert.verasonics import VerasonicsFile, convert_verasonics
 from zea.data.file import File
+from zea.data.spec import DEFAULT_COMPRESSION
 from zea.func.tensor import translate
 from zea.internal.preset_utils import _hf_resolve_path
 from zea.io_lib import _SUPPORTED_IMG_TYPES
@@ -961,16 +963,17 @@ def test_images_uint8_passes():
 
 def test_verasonics_compression_flag_respected(tmp_path):
     """When enable_compression=False the File.create call must use
-    compression=None, not force 'gzip'."""
+    compression=None, not force 'lzf'."""
     enable_compression = False
-    compression = "gzip" if enable_compression else None
+    compression = DEFAULT_COMPRESSION if enable_compression else None
 
-    assert (compression or "gzip") == "gzip", "old code always used gzip"
+    assert (compression or DEFAULT_COMPRESSION) == DEFAULT_COMPRESSION, (
+        "old code always used default compression"
+    )
     assert compression is None, "fixed code uses None when compression is disabled"
 
     n_tx, n_el = 4, 16
     scan = {
-        "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
         "sampling_frequency": np.float32(40e6),
         "center_frequency": np.float32(7e6),
         "demodulation_frequency": np.float32(7e6),
@@ -983,20 +986,69 @@ def test_verasonics_compression_flag_respected(tmp_path):
     }
     data = {"raw_data": np.zeros((2, n_tx, 32, n_el, 1), dtype=np.float32)}
     path = tmp_path / "no_compression.hdf5"
-    f = File.create(
+    File.create(
         path,
         data=data,
         scan=scan,
-        probe={"name": "generic"},
+        probe={"name": "generic", "probe_geometry": np.zeros((n_el, 3), dtype=np.float32)},
         compression=None,
     )
-    f.close()
 
     import h5py as _h5py
 
     with _h5py.File(path, "r") as hf:
         ds = hf["tracks/track_0/data/raw_data"]
         assert ds.compression is None, "dataset should have no compression"
+
+
+def test_verasonics_upload_requires_hf_repo_id(tmp_path, monkeypatch):
+    """When upload is enabled, hf_repo_id must be provided before upload starts."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+
+    args = argparse.Namespace(
+        src=str(src),
+        dst=str(dst),
+        frames=None,
+        allow_accumulate=False,
+        device="cpu",
+        no_compression=False,
+        upload=True,
+        hf_repo_id="",
+        revision="test-branch",
+    )
+
+    monkeypatch.setattr("zea.data.convert.verasonics.init_device", lambda *_: None)
+
+    with pytest.raises(AssertionError, match="hf_repo_id must be provided"):
+        convert_verasonics(args)
+
+
+def test_verasonics_upload_requires_revision(tmp_path, monkeypatch):
+    """When upload is enabled, revision must be provided before upload starts."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+
+    args = argparse.Namespace(
+        src=str(src),
+        dst=str(dst),
+        frames=None,
+        allow_accumulate=False,
+        device="cpu",
+        no_compression=False,
+        upload=True,
+        hf_repo_id="zeahub/test-dataset",
+        revision=None,
+    )
+
+    monkeypatch.setattr("zea.data.convert.verasonics.init_device", lambda *_: None)
+
+    with pytest.raises(AssertionError, match="revision must be provided"):
+        convert_verasonics(args)
 
 
 def test_check_output_dir_ownership_empty_dir(tmp_path):

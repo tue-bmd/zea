@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from .internal.setup_zea import setup, setup_config
     from .ops import Pipeline
     from .probes import Probe
-    from .scan import Scan
+    from .scan import Parameters
 
 try:
     # dynamically add __version__ attribute (see pyproject.toml)
@@ -157,6 +157,8 @@ _LAZY_ATTRS = {
     "setup_config": ("zea.internal.setup_zea", "setup_config"),
     "Pipeline": ("zea.ops", "Pipeline"),
     "Probe": ("zea.probes", "Probe"),
+    "Parameters": ("zea.scan", "Parameters"),
+    # Deprecated alias for Parameters (emits a DeprecationWarning when used).
     "Scan": ("zea.scan", "Scan"),
 }
 

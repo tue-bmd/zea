@@ -140,14 +140,14 @@ def test_transmit_schemes(
     """Tests the default ultrasound pipeline."""
 
     probe = _get_probe(probe_kind)
-    scan = _get_scan(probe, scan_kind)
+    parameters = _get_scan(probe, scan_kind)
 
-    parameters = default_pipeline.prepare_parameters(probe, scan)
+    inputs = default_pipeline.prepare_parameters(parameters)
 
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
     output_default = default_pipeline(
-        **parameters,
+        **inputs,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
@@ -163,7 +163,7 @@ def test_transmit_schemes(
     # Check if the scatterer is in the right location in the image
     _test_location(
         image.T,
-        extent=scan.extent_imshow,
+        extent=parameters.extent_imshow,
         true_position=ultrasound_scatterers["positions"][0, target_scatterer_index],
     )
     # Check that the pipeline produced the expected outputs
@@ -174,11 +174,13 @@ def test_transmit_schemes(
 
     # Additional test for planewave: verify focus_distance=0 gives same result
     if scan_kind == "planewave":
-        scan_zero_focus = _get_scan(probe, scan_kind, focus_distances=np.zeros(scan.n_tx))
-        parameters_zero = default_pipeline.prepare_parameters(probe, scan_zero_focus)
+        parameters_zero_focus = _get_scan(
+            probe, scan_kind, focus_distances=np.zeros(parameters.n_tx)
+        )
+        inputs_zero = default_pipeline.prepare_parameters(parameters_zero_focus)
 
         output_zero_focus = default_pipeline(
-            **parameters_zero,
+            **inputs_zero,
             scatterer_positions=ultrasound_scatterers["positions"],
             scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
         )
@@ -200,19 +202,19 @@ def test_transmit_schemes(
 def test_polar_grid(default_pipeline: ops.Pipeline, ultrasound_scatterers):
     """Tests the polar grid generation."""
     probe = _get_probe("linear")
-    scan = _get_scan(probe, "focused", grid_type="polar")
+    parameters = _get_scan(probe, "focused", grid_type="polar")
 
     # Check if the grid type is set correctly
-    assert scan.grid_type == "polar"
+    assert parameters.grid_type == "polar"
 
     default_pipeline.append(ops.ScanConvert(order=3))
 
-    parameters = default_pipeline.prepare_parameters(probe, scan)
+    inputs = default_pipeline.prepare_parameters(parameters)
 
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
     output_default = default_pipeline(
-        **parameters,
+        **inputs,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
@@ -228,7 +230,7 @@ def test_polar_grid(default_pipeline: ops.Pipeline, ultrasound_scatterers):
     # Check if the scatterer is in the right location in the image
     _test_location(
         image.T,
-        extent=scan.extent_imshow,
+        extent=parameters.extent_imshow,
         true_position=ultrasound_scatterers["positions"][0, target_scatterer_index],
     )
 
