@@ -530,26 +530,6 @@ def _interpolate_batch(images, coordinates, fill_value=0.0, order=1, vectorize=T
     return images_sc
 
 
-def cart2pol(x, y):
-    """Convert x, y cartesian coordinates to polar coordinates theta, rho."""
-    theta = ops.mod(ops.arctan2(x, -y), np.pi * 2)
-    rho = ops.sqrt(x**2 + y**2)
-    return (theta, rho)
-
-
-def rotate_coordinates(coords, angle_deg):
-    """Rotate (x, y) coordinates by a given angle in degrees."""
-    angle_rad = np.deg2rad(angle_deg)
-    rotation_matrix = ops.array(
-        [
-            [ops.cos(angle_rad), -ops.sin(angle_rad)],
-            [ops.sin(angle_rad), ops.cos(angle_rad)],
-        ],
-        dtype=coords.dtype,
-    )
-    return coords @ ops.transpose(rotation_matrix)
-
-
 def cartesian_to_polar_matrix(
     cartesian_matrix,
     fill_value=0.0,
