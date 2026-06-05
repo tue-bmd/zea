@@ -608,23 +608,18 @@ def cartesian_to_polar_matrix(
 
     center_x, center_y = tip
 
-    # Interpolation grid in polar coordinates
+    # Polar sampling grid: rows are radius (0..r_max), columns are angle. The columns run from
+    # theta_max down to theta_min so the lateral axis of the polar image keeps the same
+    # left-right orientation as the Cartesian image.
     r = ops.linspace(0, r_max, polar_rows, dtype="float32")
-    theta = ops.linspace(theta_min, theta_max, polar_cols, dtype="float32")
-    r_grid, theta_grid = ops.meshgrid(r, theta)
+    theta = ops.linspace(theta_max, theta_min, polar_cols, dtype="float32")
+    r_grid, theta_grid = ops.meshgrid(r, theta, indexing="ij")
 
-    # convert discretized radii and angle intervals to polar coordinates
-    x_polar = r_grid * ops.cos(theta_grid)
-    y_polar = r_grid * ops.sin(theta_grid)
-
-    # Inverse rotation to match original orientation
-    polar_coords = ops.stack([ops.ravel(x_polar), ops.ravel(y_polar)], axis=0)
-    polar_coords_rotated = ops.transpose(rotate_coordinates(ops.transpose(polar_coords), 90))
-
-    # Shift to image indices
-    yq = polar_coords_rotated[1, :] + center_y
-    xq = polar_coords_rotated[0, :] + center_x
-    coords_for_interp = ops.stack([yq, xq])
+    # Cartesian pixel each (r, theta) samples from. The probe images "downwards" (+depth = +y),
+    # so depth = center_y + r cos(theta) and lateral = center_x - r sin(theta).
+    xq = center_x - r_grid * ops.sin(theta_grid)
+    yq = center_y + r_grid * ops.cos(theta_grid)
+    coords_for_interp = ops.stack([ops.ravel(yq), ops.ravel(xq)])
 
     polar_values = map_coordinates(
         cartesian_matrix,
@@ -634,7 +629,7 @@ def cartesian_to_polar_matrix(
         fill_value=fill_value,
     )
 
-    polar_matrix = ops.rot90(ops.reshape(polar_values, (polar_cols, polar_rows)), k=-1)
+    polar_matrix = ops.reshape(polar_values, (polar_rows, polar_cols))
     return polar_matrix, coords_for_interp
 
 
@@ -719,8 +714,9 @@ def polar_geometry_from_coords_for_interp(coords_for_interp, polar_shape):
     works on a physical ``[x, y, z]`` metre grid). The two conventions are not interchangeable.
 
     .. note::
-        This relies on the exact ravel/rotation convention of :func:`cartesian_to_polar_matrix`
-        (radius is the fast axis, angle the slow axis). If that function changes, update this too.
+        This relies on the exact ravel convention of :func:`cartesian_to_polar_matrix`
+        (radius is the slow axis / rows, angle the fast axis / cols). If that function
+        changes, update this too.
 
     Args:
         coords_for_interp: The second return value of :func:`cartesian_to_polar_matrix`, shape
@@ -733,30 +729,30 @@ def polar_geometry_from_coords_for_interp(coords_for_interp, polar_shape):
         r_max (float): Maximum radius in pixels.
         theta_range (tuple): Angular extent ordered to match the *columns of the returned polar
             image*, so it can be passed straight back to the inverse transform for a
-            flip-free round-trip. Because :func:`cartesian_to_polar_matrix` ends with a
-            ``rot90(k=-1)`` that reverses the angular axis, the polar image's columns run from the
+            flip-free round-trip. :func:`cartesian_to_polar_matrix` lays its columns out from the
             larger to the smaller angle, so this is ``(theta_max, theta_min)`` in geometric terms.
     """
     polar_rows, polar_cols = polar_shape
     coords_for_interp = np.asarray(ops.convert_to_numpy(coords_for_interp), dtype=np.float64)
 
-    # Ravel order in cartesian_to_polar_matrix is (polar_cols, polar_rows): angle is the slow
-    # axis, radius the fast axis. Row 0 of coords is y (image row), row 1 is x (image col).
-    yq = coords_for_interp[0].reshape(polar_cols, polar_rows)
-    xq = coords_for_interp[1].reshape(polar_cols, polar_rows)
+    # Ravel order in cartesian_to_polar_matrix is (polar_rows, polar_cols): radius is the slow
+    # axis (rows), angle the fast axis (cols). Row 0 of coords is y (image row), row 1 is x.
+    yq = coords_for_interp[0].reshape(polar_rows, polar_cols)
+    xq = coords_for_interp[1].reshape(polar_rows, polar_cols)
 
-    # Radius 0 (first column) collapses to the tip for every angle.
-    center_x = float(xq[:, 0].mean())
-    center_y = float(yq[:, 0].mean())
+    # Radius 0 (first row) collapses to the tip for every angle.
+    center_x = float(xq[0, :].mean())
+    center_y = float(yq[0, :].mean())
 
-    # The farthest radius column sits at distance r_max from the tip (rotation preserves distance).
-    r_max = float(np.sqrt((xq[:, -1] - center_x) ** 2 + (yq[:, -1] - center_y) ** 2).mean())
+    # The farthest radius (last row) sits at distance r_max from the tip.
+    r_max = float(np.sqrt((xq[-1, :] - center_x) ** 2 + (yq[-1, :] - center_y) ** 2).mean())
 
-    # Per-column angle, inverting the +90 deg rotation: dx = -r sin(theta), dy = r cos(theta).
-    theta = np.arctan2(-(xq[:, -1] - center_x), yq[:, -1] - center_y)
-    # Reverse the order so theta_range matches the polar image columns (rot90(k=-1) in the forward
-    # transform flips the angular axis); this lets the inverse transform run without a flip.
-    theta_range = (float(theta[-1]), float(theta[0]))
+    # Per-column angle from the outer row: lateral = center_x - r sin(theta),
+    # depth = center_y + r cos(theta).
+    theta = np.arctan2(-(xq[-1, :] - center_x), yq[-1, :] - center_y)
+    # Columns already run from theta_max (col 0) to theta_min (last col) -- the order the inverse
+    # transform expects -- so return them as-is.
+    theta_range = (float(theta[0]), float(theta[-1]))
 
     return (center_x, center_y), r_max, theta_range
 
