@@ -850,7 +850,7 @@ class Parameters(BaseParameters):
             self.rho_range,
             self.theta_range,
             self.resolution,
-            distance_to_apex=self.distance_to_apex,
+            apex=(0.0, self.distance_to_apex),
         )
         return coords
 

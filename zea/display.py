@@ -150,11 +150,12 @@ def compute_scan_convert_2d_coordinates(
     theta_range: Tuple[float, float],
     resolution: Union[float, None] = None,
     dtype: str = "float32",
-    distance_to_apex: float = 0.0,
+    apex: Tuple[float, float] = (0.0, 0.0),
 ):
     """Precompute coordinates for 2d scan conversion from polar coordinates"""
     assert len(rho_range) == 2, "rho_range should be a tuple of length 2"
     assert len(theta_range) == 2, "theta_range should be a tuple of length 2"
+    assert len(apex) == 2, "apex should be a tuple of length 2 (x0, z0)"
     assert rho_range[0] < rho_range[1], "min_rho should be less than max_rho"
 
     rho = ops.linspace(rho_range[0], rho_range[1], image_shape[-2], dtype=dtype)
@@ -176,8 +177,14 @@ def compute_scan_convert_2d_coordinates(
         # average of arc lengths and radial step
         resolution = ops.mean([sRT, d_rho])  # mm per pixel
 
-    x_vec = ops.arange(x_lim[0], x_lim[1], resolution)
-    z_vec = ops.arange(z_lim[0] + distance_to_apex, z_lim[1], resolution)
+    # ``apex`` is the (x0, z0) distance from the cone apex (rho=0) to the start of the
+    # Cartesian output window. Offsetting the window start relocates the apex relative to
+    # the frame: a positive z0 pushes the apex above the top edge (cropping the near field),
+    # which is exactly how the virtual-apex / distance-to-apex offset of a sector probe is
+    # accounted for.
+    x0, z0 = apex
+    x_vec = ops.arange(x_lim[0] + x0, x_lim[1], resolution)
+    z_vec = ops.arange(z_lim[0] + z0, z_lim[1], resolution)
 
     z_grid, x_grid = ops.meshgrid(z_vec, x_vec)
 
@@ -200,7 +207,7 @@ def compute_scan_convert_2d_coordinates(
         "theta_range": theta_range,
         "d_rho": d_rho,
         "d_theta": d_theta,
-        "distance_to_apex": distance_to_apex,
+        "apex": apex,
     }
     return coordinates, parameters
 
@@ -213,7 +220,7 @@ def scan_convert_2d(
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,
     order: int = 1,
-    distance_to_apex: float = 0.0,
+    apex: Tuple[float, float] = (0.0, 0.0),
     **kwargs,
 ):
     """
@@ -236,8 +243,13 @@ def scan_convert_2d(
             outside the input image ranges. Defaults to 0.0. When set to NaN,
             no interpolation at the edges will happen.
         order (int, optional): The order of the spline interpolation. Defaults to 1.
-        distance_to_apex (float, optional): Distance from the apex to the
-            start of the z-axis in Cartesian grid. Defaults to 0.0.
+        apex (tuple, optional): ``(x0, z0)`` distance (same units as ``rho_range``)
+            from the cone apex (rho=0) to the start of the Cartesian output window.
+            Offsetting the window start relocates the apex relative to the frame: a
+            positive ``z0`` pushes the apex above the top edge, cropping the near
+            field, which is how a sector probe's virtual-apex (distance-to-apex)
+            offset is accounted for. Defaults to ``(0.0, 0.0)`` (apex at the
+            top-centre of the cone).
 
     Returns:
         ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
@@ -262,7 +274,7 @@ def scan_convert_2d(
             theta_range,
             resolution,
             dtype=image.dtype,
-            distance_to_apex=distance_to_apex,
+            apex=apex,
         )
 
     images_sc = _interpolate_batch(image, coordinates, fill_value, order=order, **kwargs)
@@ -425,6 +437,7 @@ def scan_convert(
     fill_value: float = 0.0,
     order: int = 1,
     with_batch_dim: bool = False,
+    apex: Tuple[float, float] = (0.0, 0.0),
 ):
     """Scan convert image based on number of dimensions."""
     if len(image.shape) == 2 + int(with_batch_dim):
@@ -436,6 +449,7 @@ def scan_convert(
             coordinates,
             fill_value,
             order,
+            apex=apex,
         )
     elif len(image.shape) == 3 + int(with_batch_dim):
         return scan_convert_3d(
@@ -527,106 +541,6 @@ def rotate_coordinates(coords, angle_deg):
         dtype=coords.dtype,
     )
     return coords @ ops.transpose(rotation_matrix)
-
-
-def _polar_to_cartesian_coordinates(polar_shape, cartesian_shape, tip, r_max, theta_range):
-    cart_rows, cart_cols = cartesian_shape
-    polar_rows, polar_cols = polar_shape
-    theta_min, theta_max = theta_range
-    center_x, center_y = tip
-
-    # Cartesian pixel coordinates
-    y, x = ops.meshgrid(
-        ops.arange(cart_rows),
-        ops.arange(cart_cols),
-        indexing="ij",
-    )
-
-    # Coordinates relative to probe tip
-    dx = x - center_x
-    dy = y - center_y
-
-    # Undo the +90° rotation used in cartesian_to_polar_matrix
-    x_unrot = dy
-    y_unrot = -dx
-
-    # Convert back to polar coordinates
-    r = ops.sqrt(x_unrot**2 + y_unrot**2)
-    theta = ops.arctan2(y_unrot, x_unrot)
-
-    # Convert physical coordinates -> polar image indices
-    r_idx = (r / r_max) * (polar_rows - 1)
-    theta_idx = (theta - theta_min) / (theta_max - theta_min) * (polar_cols - 1)
-
-    # Sample polar image
-    return ops.stack([ops.ravel(r_idx), ops.ravel(theta_idx)], axis=0)
-
-
-# TODO: we might be able to merge this with scan_convert_2d
-# TODO: round-trip test
-def polar_to_cartesian_matrix(
-    polar_matrix,
-    cartesian_shape,
-    fill_value=0.0,
-    tip=None,
-    r_max=None,
-    angle=None,
-    theta_range=None,
-    interpolation_order=1,
-):
-    """
-    Approximate inverse of cartesian_to_polar_matrix.
-
-    Parameters
-    ----------
-    polar_matrix : ndarray
-        Polar image.
-    cartesian_shape : tuple
-        Desired output shape (rows, cols).
-    fill_value : float
-        Value assigned outside the polar domain.
-    tip : tuple, optional
-        (x, y) origin used in the forward transform.
-    r_max : float, optional
-        Maximum radius used in the forward transform.
-    angle : float, optional
-        Symmetric half-angle in radians.
-    theta_range : tuple, optional
-        (theta_min, theta_max).
-    interpolation_order : int
-        Passed to scipy.ndimage.map_coordinates.
-
-    Returns
-    -------
-    cartesian_matrix : ndarray
-    """
-
-    assert angle is None or theta_range is None
-
-    if theta_range is None and angle is None:
-        theta_range = (-np.deg2rad(45), np.deg2rad(45))
-
-    cart_rows, cart_cols = cartesian_shape
-
-    if tip is None:
-        tip = (cart_cols / 2, 0)
-
-    if r_max is None:
-        r_max = cart_rows
-
-    coords = _polar_to_cartesian_coordinates(
-        polar_matrix.shape, cartesian_shape, tip, r_max, theta_range
-    )
-
-    cartesian = map_coordinates(
-        polar_matrix,
-        coords,
-        order=interpolation_order,
-        fill_mode="constant",
-        fill_value=fill_value,
-    )
-
-    return ops.reshape(cartesian, cartesian_shape)
 
 
 def cartesian_to_polar_matrix(
@@ -796,9 +710,8 @@ def polar_geometry_from_coords_for_interp(coords_for_interp, polar_shape):
     the ``(2, polar_rows*polar_cols)``
     array of ``[row, col]`` pixel locations it sampled the Cartesian image at, one per polar grid
     point. That array fully embeds the geometry used in the forward call, so this recovers the
-    ``tip``, ``r_max`` and ``theta_range`` needed to invert it with
-    :func:`polar_to_cartesian_matrix`
-    -- *without* having to keep the original parameters around.
+    ``tip``, ``r_max`` and ``theta_range`` needed to invert it with a matching pixel-space
+    transform -- *without* having to keep the original parameters around.
 
     This is the pixel-space counterpart to :func:`polar_geometry_from_coordinates` (which instead
     works on a physical ``[x, y, z]`` metre grid). The two conventions are not interchangeable.
@@ -817,7 +730,7 @@ def polar_geometry_from_coords_for_interp(coords_for_interp, polar_shape):
         tip (tuple): ``(x, y)`` pixel coordinates of the polar origin (probe tip / apex).
         r_max (float): Maximum radius in pixels.
         theta_range (tuple): Angular extent ordered to match the *columns of the returned polar
-            image*, so it can be passed straight back to :func:`polar_to_cartesian_matrix` for a
+            image*, so it can be passed straight back to the inverse transform for a
             flip-free round-trip. Because :func:`cartesian_to_polar_matrix` ends with a
             ``rot90(k=-1)`` that reverses the angular axis, the polar image's columns run from the
             larger to the smaller angle, so this is ``(theta_max, theta_min)`` in geometric terms.
@@ -840,7 +753,7 @@ def polar_geometry_from_coords_for_interp(coords_for_interp, polar_shape):
     # Per-column angle, inverting the +90 deg rotation: dx = -r sin(theta), dy = r cos(theta).
     theta = np.arctan2(-(xq[:, -1] - center_x), yq[:, -1] - center_y)
     # Reverse the order so theta_range matches the polar image columns (rot90(k=-1) in the forward
-    # transform flips the angular axis); this lets polar_to_cartesian_matrix invert without a flip.
+    # transform flips the angular axis); this lets the inverse transform run without a flip.
     theta_range = (float(theta[-1]), float(theta[0]))
 
     return (center_x, center_y), r_max, theta_range
