@@ -341,7 +341,6 @@ def _build_polar_image(
         zlims=(0.0, r_max),
         num_radial_pixels=n_r,
         num_polar_pixels=n_theta,
-        distance_to_apex=0.0,
     ).astype(np.float32)  # (n_r, n_theta, 3)
 
     x_polar = polar_coords[:, :, 0]  # (n_r, n_theta), x=0 at apex centre

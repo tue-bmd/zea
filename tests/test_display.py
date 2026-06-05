@@ -188,49 +188,6 @@ def test_scan_conversion_and_inverse_padded(size, pattern_creator, allowed_error
     return cartesian_data_inv
 
 
-@pytest.mark.parametrize("shift_cols, shift_rows", [(0, 0), (29, 0), (0, 35)])
-def test_scan_convert_apex_offset(shift_cols, shift_rows):
-    """The ``apex`` offset shifts the start of the Cartesian output window.
-
-    ``apex=(x0, z0)`` is the distance from the cone apex (rho=0) to the start of the
-    x/z output window, so a positive offset crops the near edge of the frame. Asserts
-    that (1) ``apex=(0, 0)`` reproduces the default scan conversion exactly, and (2) a
-    positive offset of a whole number of pixels crops exactly that many rows/columns
-    off the start of the window, leaving the remaining content identical.
-    """
-    from keras import ops
-
-    from zea import display
-
-    polar_data = create_radial_pattern((200, 200))
-    rho_range = (0, 100)
-    theta_range = np.deg2rad((-45, 45))
-
-    baseline, params = display.scan_convert_2d(polar_data, rho_range, theta_range)
-    baseline = ops.convert_to_numpy(baseline)
-
-    if shift_cols == 0 and shift_rows == 0:
-        shifted, _ = display.scan_convert_2d(polar_data, rho_range, theta_range, apex=(0.0, 0.0))
-        shifted = ops.convert_to_numpy(shifted)
-        # apex=(0, 0) must reproduce the default behaviour exactly.
-        assert shifted.shape == baseline.shape
-        np.testing.assert_allclose(shifted, baseline, rtol=0, atol=0)
-        return
-
-    # Offset by a whole number of pixels so the cropped window stays aligned to the
-    # baseline grid (a non-integer offset would resample at a fractional-pixel shift).
-    resolution = float(ops.convert_to_numpy(params["resolution"]))
-    apex = (shift_cols * resolution, shift_rows * resolution)
-    shifted, _ = display.scan_convert_2d(polar_data, rho_range, theta_range, apex=apex)
-    shifted = ops.convert_to_numpy(shifted)
-
-    cropped = baseline[shift_rows:, shift_cols:]
-    h = min(shifted.shape[0], cropped.shape[0])
-    w = min(shifted.shape[1], cropped.shape[1])
-    assert h > 0 and w > 0, "apex offset cropped away the whole frame"
-    np.testing.assert_allclose(shifted[:h, :w], cropped[:h, :w], rtol=0, atol=1e-4)
-
-
 def test_polar_to_cartesian_matrix_roundtrip():
     """polar_to_cartesian_matrix is a faithful inverse of cartesian_to_polar_matrix.
 

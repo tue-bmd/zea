@@ -183,12 +183,11 @@ def compute_scan_convert_2d_coordinates(
     theta_range: Tuple[float, float],
     resolution: Union[float, None] = None,
     dtype: str = "float32",
-    apex: Tuple[float, float] = (0.0, 0.0),
+    distance_to_apex: float = 0.0,
 ):
     """Precompute coordinates for 2d scan conversion from polar coordinates"""
     assert len(rho_range) == 2, "rho_range should be a tuple of length 2"
     assert len(theta_range) == 2, "theta_range should be a tuple of length 2"
-    assert len(apex) == 2, "apex should be a tuple of length 2 (x0, z0)"
     assert rho_range[0] < rho_range[1], "min_rho should be less than max_rho"
 
     rho = ops.linspace(rho_range[0], rho_range[1], image_shape[-2], dtype=dtype)
@@ -210,13 +209,8 @@ def compute_scan_convert_2d_coordinates(
         # average of arc lengths and radial step
         resolution = ops.mean([sRT, d_rho])  # mm per pixel
 
-    # ``apex`` is the (x0, z0) offset of the cone apex (rho=0) from the start of the
-    # Cartesian output window. A positive z0 pushes the apex above the top edge (cropping
-    # the near field), which is how a sector probe's virtual-apex (distance-to-apex) offset
-    # is accounted for.
-    x0, z0 = apex
-    x_vec = ops.arange(x_lim[0] + x0, x_lim[1], resolution)
-    z_vec = ops.arange(z_lim[0] + z0, z_lim[1], resolution)
+    x_vec = ops.arange(x_lim[0], x_lim[1], resolution)
+    z_vec = ops.arange(z_lim[0] + distance_to_apex, z_lim[1], resolution)
 
     coordinates = _polar_sampling_coordinates(x_vec, z_vec, rho, theta)
     parameters = {
@@ -227,7 +221,7 @@ def compute_scan_convert_2d_coordinates(
         "theta_range": theta_range,
         "d_rho": d_rho,
         "d_theta": d_theta,
-        "apex": apex,
+        "distance_to_apex": distance_to_apex,
     }
     return coordinates, parameters
 
@@ -240,7 +234,7 @@ def scan_convert_2d(
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,
     order: int = 1,
-    apex: Tuple[float, float] = (0.0, 0.0),
+    distance_to_apex: float = 0.0,
     **kwargs,
 ):
     """
@@ -263,11 +257,8 @@ def scan_convert_2d(
             outside the input image ranges. Defaults to 0.0. When set to NaN,
             no interpolation at the edges will happen.
         order (int, optional): The order of the spline interpolation. Defaults to 1.
-        apex (tuple, optional): ``(x0, z0)`` offset (same units as ``rho_range``) of the
-            cone apex (rho=0) from the start of the Cartesian output window. A positive
-            ``z0`` pushes the apex above the top edge, cropping the near field, which is how
-            a sector probe's virtual-apex (distance-to-apex) offset is accounted for.
-            Defaults to ``(0.0, 0.0)`` (apex at the top-centre of the cone).
+        distance_to_apex (float, optional): Distance from the apex to the
+            start of the z-axis in Cartesian grid. Defaults to 0.0.
 
     Returns:
         ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
@@ -292,7 +283,7 @@ def scan_convert_2d(
             theta_range,
             resolution,
             dtype=image.dtype,
-            apex=apex,
+            distance_to_apex=distance_to_apex,
         )
 
     images_sc = _interpolate_batch(image, coordinates, fill_value, order=order, **kwargs)
@@ -455,7 +446,6 @@ def scan_convert(
     fill_value: float = 0.0,
     order: int = 1,
     with_batch_dim: bool = False,
-    apex: Tuple[float, float] = (0.0, 0.0),
 ):
     """Scan convert image based on number of dimensions."""
     if len(image.shape) == 2 + int(with_batch_dim):
@@ -467,7 +457,6 @@ def scan_convert(
             coordinates,
             fill_value,
             order,
-            apex=apex,
         )
     elif len(image.shape) == 3 + int(with_batch_dim):
         return scan_convert_3d(
