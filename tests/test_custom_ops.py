@@ -73,6 +73,45 @@ def test_get_ops_module_path_unknown_class_raises():
         get_ops("tests.fixtures.custom_ops.NotARegisteredClass")
 
 
+def test_get_ops_module_path_registered_under_full_dotted_key():
+    """Covers path A: post-import ``ops_name in ops_registry`` check (line 68-69).
+
+    ``DottedKeyOp`` is registered under its full module path as the key.
+    ``dotted_key_ops`` is never imported elsewhere, so on the first call the
+    module import triggers the decorator, and the second registry check fires.
+    """
+    full_key = "tests.fixtures.dotted_key_ops.DottedKeyOp"
+    cls = get_ops(full_key)  # import happens here; path A check fires
+    from tests.fixtures.dotted_key_ops import DottedKeyOp
+
+    assert cls is DottedKeyOp
+
+
+def test_get_ops_unregistered_class_in_module_raises():
+    """Covers path B: ``except KeyError: pass`` when class exists but is not registered.
+
+    ``UnregisteredOp`` is importable but has no ``@ops_registry`` decorator.
+    ``get_name(cls)`` raises ``KeyError`` (path B caught); the shortname
+    ``"UnregisteredOp"`` is also not a registry key, so ``ValueError`` is raised.
+    """
+    with pytest.raises(ValueError, match="not found in registry"):
+        get_ops("tests.fixtures.unregistered_ops.UnregisteredOp")
+
+
+def test_get_ops_module_path_shortname_fallback():
+    """Covers path C: class-name shortname fallback after path B.
+
+    ``tests.fixtures.unregistered_ops.Identity`` is importable but unregistered,
+    so ``get_name(cls)`` raises ``KeyError`` (path B caught).  The lowercased
+    class name ``"identity"`` IS a registry key, so path C returns the built-in
+    :class:`~zea.ops.base.Identity` class.
+    """
+    from zea.ops.base import Identity as BuiltinIdentity
+
+    cls = get_ops("tests.fixtures.unregistered_ops.Identity")
+    assert cls is BuiltinIdentity
+
+
 def test_get_ops_module_path_already_imported_returns_same_object():
     """Calling get_ops with module path twice returns the identical class object."""
     cls_by_path = get_ops("tests.fixtures.custom_ops.ScaleByFactorOp")
