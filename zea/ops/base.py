@@ -140,7 +140,7 @@ class Operation(keras.Operation):
         output_data_type: Union[DataTypes, None] = None,
         key: Union[str, None] = "data",
         output_key: Union[str, None] = None,
-        cache_inputs: Union[bool, List[str]] = False,
+        cache_inputs: bool = False,
         cache_outputs: bool = False,
         jit_compile: bool = True,
         with_batch_dim: bool = True,
@@ -159,8 +159,11 @@ class Operation(keras.Operation):
             output_key (str or None): Dict key the operation writes its result to.
                 Defaults to ``key``. Set to a different value to preserve the original
                 input under ``key`` while producing a new key for downstream operations.
-            cache_inputs (bool or list of str): Keys whose values are stored and merged
-                into every subsequent call, or ``True`` to cache all inputs.
+            cache_inputs (bool): When ``True``, values stored via
+                :meth:`set_input_cache` are merged into every call. ``False``
+                means the cache is empty by default. Selective per-key caching
+                is not supported; use :meth:`set_input_cache` directly to
+                control which keys are stored.
             cache_outputs (bool): Memoize outputs keyed by a hash of the merged inputs.
             jit_compile (bool): Wrap :meth:`call` with :func:`~zea.backend.jit` for
                 faster execution. Disable for easier interactive debugging.

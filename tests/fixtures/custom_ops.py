@@ -34,9 +34,11 @@ class ScaleByFactorOp(Operation):
 class Fixturepassthrough(Operation):
     """Return *data* unchanged.
 
-    Registry key ``"fixture_passthrough"`` matches ``Fixturepassthrough``
-    when lower-cased, so this class exercises the shortname-fallback path that
-    was already present before the identity-based fix.
+    Registry key ``"fixture_passthrough"`` does **not** match
+    ``Fixturepassthrough`` lower-cased (``"fixturepassthrough"`` vs
+    ``"fixture_passthrough"`` — the underscore differs), so this class also
+    exercises the identity-based resolution path added to
+    :func:`~zea.ops.base.get_ops`.
     """
 
     def call(self, data, **kwargs):

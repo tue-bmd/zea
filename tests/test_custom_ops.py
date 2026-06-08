@@ -53,12 +53,12 @@ def test_get_ops_module_path_registry_key_differs_from_class_name():
     assert cls is ScaleByFactorOp
 
 
-def test_get_ops_module_path_registry_key_matches_lowercased_class_name():
-    """Module-path lookup also works via the shortname fallback path.
+def test_get_ops_module_path_registry_key_differs_by_underscore():
+    """Module-path lookup resolves by identity when key differs only by underscore.
 
-    ``Fixturepassthrough`` is registered as ``"fixture_passthrough"``; the
-    shortname ``"Fixturepassthrough"`` lower-cases to ``"fixturepassthrough"``
-    which is a different key, so identity-based lookup is still needed.
+    ``Fixturepassthrough`` is registered as ``"fixture_passthrough"``; its
+    lower-cased class name ``"fixturepassthrough"`` does not match the registry
+    key (the underscore breaks the match), so identity-based lookup is required.
     """
     from tests.fixtures.custom_ops import Fixturepassthrough
 
