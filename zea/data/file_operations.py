@@ -361,8 +361,6 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
             else:
                 values = np.mean(values, axis=0, keepdims=True)
             compounded_data[key] = {**data_dict[key], "values": values}
-        elif key in _LOG_COMPOUND_KEYS and data_dict[key]["values"].dtype == np.float32:
-            compounded_data[key] = np.log(np.mean(np.exp(data_dict[key]), axis=0, keepdims=True))
         else:
             compounded_data[key] = np.mean(data_dict[key], axis=0, keepdims=True)
 

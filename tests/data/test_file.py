@@ -1147,7 +1147,7 @@ class TestMultiTrackFile:
             g.create_dataset("raw_data", data=np.zeros((1, 2, 8, 4, 1), dtype=np.float32))
 
         with File(path) as f:
-            with pytest.raises(AttributeError, match="legacy"):
+            with pytest.raises(AttributeError, match="flat layout"):
                 _ = f.tracks
 
     # ------------------------------------------------------------------

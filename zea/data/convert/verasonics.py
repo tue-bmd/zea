@@ -1496,9 +1496,9 @@ def convert_verasonics(args):
     # Write the dataset card next to the converted output: in the output
     # directory for a directory conversion, or alongside the file for a single
     # file. The card is required for the upload ownership check below.
-    if selected_path_is_directory:
+    if selected_path_is_directory and args.hf_repo_id:
         write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
-    elif getattr(args, "upload", False):
+    elif getattr(args, "upload", False) and args.hf_repo_id:
         write_dataset_card(output_path.parent, make_dataset_card(args.hf_repo_id))
 
     if getattr(args, "upload", False):

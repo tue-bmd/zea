@@ -251,7 +251,7 @@ class Track:
             "n_el": scan.n_el,
             "n_tx": scan.n_tx,
         }
-        merged_dict = {**self._probe, **scan_dict, **other_dict, **overrides}
+        merged_dict = {**(self._probe or {}), **scan_dict, **other_dict, **overrides}
 
         return Parameters(**merged_dict)
 
@@ -577,8 +577,8 @@ class File(h5py.File):
     def _n_tracks(self) -> int:
         """Return the number of tracks stored in this file.
 
-        Returns 0 for files with neither a ``tracks/`` group nor a legacy
-        ``data/`` group, 1 for legacy flat-format files, and the actual
+        Returns 0 for files with neither a ``tracks/`` group nor a root-level
+        ``data/`` group, 1 for flat-layout files (no tracks group), and the actual
         track count for files written with the multi-track layout.
         """
         if not self.id.valid:
@@ -603,7 +603,7 @@ class File(h5py.File):
         :class:`~zea.Parameters` factory method) for that specific track.
 
         Raises:
-            AttributeError: For legacy flat-format files that have no
+            AttributeError: For flat-layout files that have no
                 ``tracks/`` group — use :attr:`data` and :meth:`scan`
                 directly for those.
 
@@ -616,7 +616,7 @@ class File(h5py.File):
         """
         if "tracks" not in self:
             raise AttributeError(
-                "This file uses the legacy flat layout (no 'tracks' group). "
+                "This file uses the flat layout (no 'tracks' group). "
                 "Access data and parameters directly with file.data and file.load_parameters()."
             )
         tracks_group = self["tracks"]
@@ -725,10 +725,10 @@ class File(h5py.File):
 
     @property
     def _scan_h5_group(self) -> "h5py.Group | None":
-        """Return the HDF5 scan group for single-track / legacy files.
+        """Return the HDF5 scan group for single-track or flat-layout files.
 
         Track format (single track): ``tracks/track_0/scan/``
-        Legacy format: ``scan/`` at root
+        Flat layout (no tracks group): ``scan/`` at root
         Returns ``None`` when neither is present.
 
         Raises:
@@ -894,7 +894,7 @@ class File(h5py.File):
         """Lazy proxy for the ``data`` group of a single-track file.
 
         Supports both the new ``tracks/track_0/data/`` layout and the
-        legacy flat ``data/`` layout.
+        flat ``data/`` layout (files without a tracks group).
 
         Returns a :class:`GroupProxy` so individual datasets can be accessed
         as attributes without loading everything into RAM::
@@ -919,7 +919,7 @@ class File(h5py.File):
             track0 = self["tracks"].get("track_0")
             if track0 is not None and "data" in track0:
                 return _GroupProxy(track0["data"])
-        # Legacy format
+        # Flat layout (no tracks group): root-level data/ group
         if super().__contains__("data"):
             return _GroupProxy(self["data"])
         raise KeyError("No 'data' group found in this file.")
@@ -935,7 +935,7 @@ class File(h5py.File):
         return self.path.stem
 
     def _get_single_track_data_group(self) -> "h5py.Group":
-        """Return the data group for single-track / legacy files."""
+        """Return the data group for single-track or flat-layout files."""
         if "tracks" in self:
             return self["tracks/track_0/data"]
         return self["data"]
@@ -1002,7 +1002,7 @@ class File(h5py.File):
 
         assert isinstance(key, str), f"Key must be a string, got {type(key)}. "
 
-        # Return the key if it is already a valid top-level key (legacy layout)
+        # Return the key if it is already a valid top-level key (flat layout or new-format)
         if key in self.keys():
             return key
 
@@ -1015,7 +1015,7 @@ class File(h5py.File):
                 if data_grp is not None and bare in data_grp:
                     return f"tracks/track_0/data/{bare}"
 
-        # Legacy: add 'data/' prefix if not present
+        # Flat layout: add 'data/' prefix if not present
         if "data/" not in key:
             key = "data/" + key
 
@@ -1406,7 +1406,7 @@ class File(h5py.File):
 
         Unlike the lazy :attr:`data` / :attr:`scan` accessors, every dataset is
         read into memory here.  Both the multi-track ``tracks/track_N/`` layout
-        and the legacy flat ``data/`` + ``scan/`` layout are supported.
+        and the flat ``data/`` + ``scan/`` layout (files without a tracks group) are supported.
 
         Returns:
             FileSpec: A fully validated spec object, with all arrays in RAM.
@@ -1429,10 +1429,10 @@ class File(h5py.File):
     def _load_tracks(self) -> "list[dict]":
         """Read every track's ``data`` and ``scan`` fully into a list of dicts.
 
-        Each dict is shaped for :class:`~zea.data.spec.TrackSpec`. Legacy
-        flat-format files are returned as a single, unlabelled track.
+        Each dict is shaped for :class:`~zea.data.spec.TrackSpec`. Flat-layout
+        files (no tracks group) are returned as a single, unlabelled track.
         """
-        # Legacy flat layout: one unlabelled track at the file root.
+        # Flat layout: one unlabelled track at the file root.
         if "tracks" not in self:
             track: dict = {}
             if super().__contains__("data"):
@@ -1570,6 +1570,10 @@ def load_file_all_data_types(
 
     # Data types stored as HDF5 groups (Map-based specs with values/coordinates)
     _GROUP_DATA_TYPES = {"aligned_data", "beamformed_data", "envelope_data", "image_sc", "image"}
+    # Among _GROUP_DATA_TYPES, only aligned_data has a transmit (n_tx) axis as its 2nd dimension.
+    # All others have spatial axes after n_frames, so a transmit-selection tuple index must not
+    # be applied to them (it would mis-slice a spatial dimension instead of a transmit dimension).
+    _GROUP_TYPES_WITH_TX_AXIS = {"aligned_data"}
 
     with File(path, mode="r") as file:
         for data_type in DataTypes:
@@ -1589,7 +1593,18 @@ def load_file_all_data_types(
                     ds = item[sub_key]
                     if isinstance(ds, h5py.Dataset):
                         if sub_key == "values":
-                            group_dict[sub_key] = ds[_indices]
+                            # Apply only the frame index to types without a transmit axis so
+                            # the transmit-selection element of a tuple does not accidentally
+                            # slice a spatial dimension.
+                            if (
+                                isinstance(_indices, tuple)
+                                and len(_indices) > 1
+                                and data_type.value not in _GROUP_TYPES_WITH_TX_AXIS
+                            ):
+                                indices_for_ds = (_indices[0],)
+                            else:
+                                indices_for_ds = _indices
+                            group_dict[sub_key] = ds[indices_for_ds]
                         elif h5py.check_string_dtype(ds.dtype) is not None:
                             val = ds.asstr()[()]
                             if isinstance(val, np.ndarray) and val.dtype == object:
