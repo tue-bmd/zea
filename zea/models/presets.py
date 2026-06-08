@@ -195,6 +195,42 @@ flow_matching_presets = {
         },
         "hf_handle": "hf://zeahub/flowmatching-echonetlvh/12ch",
     },
+    "flowmatching-echonetlvh-dit": {
+        "metadata": {
+            "description": (
+                "Diffusion Transformer (DiT) flow matching model trained on EchoNetLVH dataset. "
+                "Single-channel model, input shape (256, 256, 1), "
+                "input range [0, 1]. Uses second-order Euler–Heun sampling."
+            ),
+            "params": 32_904_640,
+            "path": "flow_matching",
+        },
+        "hf_handle": "hf://zeahub/flowmatching-echonetlvh/1ch-dit",
+    },
+    "flowmatching-echonetlvh-dit-3ch": {
+        "metadata": {
+            "description": (
+                "Diffusion Transformer (DiT) flow matching model trained on EchoNetLVH dataset. "
+                "3-frame model, input shape (256, 256, 3), "
+                "input range [0, 1]. Uses second-order Euler–Heun sampling."
+            ),
+            "params": 33_003_072,
+            "path": "flow_matching",
+        },
+        "hf_handle": "hf://zeahub/flowmatching-echonetlvh/3ch-dit",
+    },
+    "flowmatching-echonetlvh-dit-7ch": {
+        "metadata": {
+            "description": (
+                "Diffusion Transformer (DiT) flow matching model trained on EchoNetLVH dataset. "
+                "7-frame model, input shape (256, 256, 7), "
+                "input range [0, 1]. Uses second-order Euler–Heun sampling."
+            ),
+            "params": 58_618_816,
+            "path": "flow_matching",
+        },
+        "hf_handle": "hf://zeahub/flowmatching-echonetlvh/7ch-dit",
+    },
 }
 
 carotid_segmenter_presets = {
