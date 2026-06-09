@@ -22,6 +22,7 @@ from zea.func.ultrasound import (
     get_band_pass_filter,
     get_low_pass_iq_filter,
     log_compress,
+    suppress_tissue,
     upmix,
 )
 from zea.internal.core import (
@@ -1210,27 +1211,7 @@ class TissueSuppression(Operation):
         cutoff : int
             Number of principal components (tissue) to reject.
         """
-        if cutoff <= 0:
-            return data
-
-        # 1. Reshape to Casorati Matrix: (Frames, Space)
-        original_shape = data.shape
-        n_frames = original_shape[0]
-        data_2d = data.reshape(n_frames, -1)
-
-        # 2. Reduced SVD directly on the Casorati matrix
-        U, s, Vh = ops.linalg.svd(data_2d, full_matrices=False)
-
-        # 3. Suppress tissue by zeroing the first 'cutoff' singular values
-        s_filtered = s.copy()
-        mask = ops.arange(s.shape[0]) > cutoff
-        s_filtered = s_filtered * mask
-
-        # 4. Reconstruct: U @ diag(s_filtered) @ Vh, optimised as (U * s_filtered) @ Vh
-        reconstructed = (U * s_filtered) @ Vh
-
-        # 5. Restore original shape
-        return reconstructed.reshape(original_shape)
+        return suppress_tissue(data, cutoff)
 
     def call(self, **kwargs):
         data = kwargs[self.key]

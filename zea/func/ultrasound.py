@@ -928,3 +928,39 @@ def dehaze_nuclear_diffusion(
         haze_frames = hazy_np - haze_frames - 1
 
     return tissue_frames, haze_frames
+
+
+def suppress_tissue(data: np.ndarray, cutoff: int = 5) -> np.ndarray:
+    """
+    Suppresses tissue using Direct SVD.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Shape (Frames, ...)
+    cutoff : int
+        Number of principal components (tissue) to reject.
+    """
+    if cutoff <= 0:
+        return data
+
+    original_shape = data.shape
+    n_frames = original_shape[0]
+    data_2d = data.reshape(n_frames, -1)
+
+    casorati_matrix = data_2d @ data_2d.T
+
+    # We call the data X
+    # X = U @ S @ Vh
+    # Xh@X =  Vh @ Sh @ Uh @ U @ S @ Vh = V @ Sh @ S @ Vh
+
+    # Compute the SVD of the grammian
+    V, S, _ = ops.linalg.svd(casorati_matrix)
+
+    # Remove the right singular vectors
+    reconstructed = data_2d.T @ V
+
+    # Reconstruct with only part of the vectors
+    reconstructed = reconstructed[:, cutoff:] @ V[:, cutoff:].T
+
+    return reconstructed.T.reshape(data.shape)
