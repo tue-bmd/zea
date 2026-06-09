@@ -962,3 +962,46 @@ def test_common_midpoint_phase_error_coherent_data():
     assert phase_error.shape == (n_pix,), f"Expected shape ({n_pix},), got {phase_error.shape}"
 
     return phase_error
+
+
+@backend_equality_check(decimal=4)
+def test_tissue_suppression():
+    """Test that TissueSuppression reduces stationary tissue component."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    n_frames, n_tx, n_ax, n_ch = 10, 4, 32, 8
+    shape = (n_frames, n_tx, n_ax, n_ch)
+
+    # Stationary tissue: same signal repeated across all frames
+
+    gradient = np.linspace(0, 1, n_ax).reshape(1, 1, n_ax, 1)
+    tissue = np.ones(shape) * gradient
+
+    # Blood component: random per frame
+    blood = rng.standard_normal(shape) * 0.1
+
+    data = (tissue + blood).astype(np.float32)
+
+    cutoff = 3
+    op = ops.TissueSuppression(cutoff=cutoff)
+    data_tensor = keras.ops.convert_to_tensor(data)
+    output = keras.ops.convert_to_numpy(op(data=data_tensor)["data"])
+
+    assert output.shape == shape, f"Expected shape {shape}, got {output.shape}"
+    assert output.dtype == data.dtype, f"Expected dtype {data.dtype}, got {output.dtype}"
+
+    # After suppression, energy should be lower than the original tissue-dominated signal
+    assert np.mean(output**2) < np.mean(data**2), "Tissue suppression should reduce signal energy"
+
+    correlation_across_frames = np.corrcoef(output.reshape(n_frames, -1))
+    # The correlation across frames should be reduced after tissue suppression
+    assert np.mean(correlation_across_frames) < 0.5, (
+        "Tissue suppression should reduce correlation across frames, got mean correlation: "
+        f"{np.mean(correlation_across_frames)}"
+    )
+
+    return output

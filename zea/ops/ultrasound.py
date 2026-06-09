@@ -22,6 +22,7 @@ from zea.func.ultrasound import (
     get_band_pass_filter,
     get_low_pass_iq_filter,
     log_compress,
+    suppress_tissue,
     upmix,
 )
 from zea.internal.core import (
@@ -1184,3 +1185,31 @@ class CommonMidpointPhaseError(Operation):
                 data,
             )
         return {self.output_key: pemap}
+
+
+@ops_registry("tissue_suppression")
+class TissueSuppression(Operation):
+    """Tissue suppression using SVD-based clutter filtering.
+
+    Removes stationary tissue components from multi-frame ultrasound data
+    by zeroing the dominant singular values of the Casorati matrix.
+    """
+
+    def __init__(self, cutoff: int = 5, **kwargs):
+        super().__init__(**kwargs)
+        self.cutoff = cutoff
+
+    def suppress_tissue(self, data):
+        """
+        Suppresses tissue using Direct SVD.
+
+        Args:
+            data (ops.Tensor): Shape (n_frames, ...)
+
+        """
+        return suppress_tissue(data, self.cutoff)
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        filtered = self.suppress_tissue(ops.array(data))
+        return {self.output_key: ops.cast(ops.array(filtered), data.dtype)}
