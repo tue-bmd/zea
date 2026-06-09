@@ -588,7 +588,7 @@ class BandPassFilter(FirFilter):
         selected_passband = passband if passband is not None else self.passband
 
         if selected_passband is not None:
-            f1, f2 = _validate_and_unpack_passband(selected_passband)
+            f1, f2 = self._validate_and_unpack_passband(selected_passband)
         else:
             if demodulation_frequency is None or bandwidth is None:
                 raise ValueError(
