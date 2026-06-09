@@ -1201,10 +1201,10 @@ class TissueSuppression(Operation):
 
     def suppress_tissue(self, data) -> np.ndarray:
         """
-        Suppresses tissue using Direct SVD (Reduced).
+        Suppresses tissue using Direct SVD.
 
         Args:
-            data (ops.Tensor): Shape (n_frames, n_tx, n_ax, n_el, n_ch)
+            data (ops.Tensor): Shape (n_frames, ...)
 
         """
         return suppress_tissue(data, self.cutoff)

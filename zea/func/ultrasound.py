@@ -935,7 +935,7 @@ def suppress_tissue(data, cutoff: int = 5) -> np.ndarray:
     Suppresses tissue using Direct SVD.
 
     Args:
-        data (np.ndarray): Shape (Frames, ...)
+        data (ops.Tensor): Shape (n_frames, ...)
         cutoff (int): Number of principal components (tissue) to reject.
     """
     if cutoff <= 0:
