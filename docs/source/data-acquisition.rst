@@ -149,14 +149,22 @@ Multi-track files
 -------------------------------
 
 Some acquisitions interleave multiple transmit sequences in a single recording. Sometimes
-these sequences contain parameters that may not be expressed by a single :class:`~zea.Scan`,
-or are intended to be processed with different :class:`~zea.Pipeline`\s — for example,
-swapping between focused B-mode and plane-wave Doppler pulses.  Rather than splitting these into separate files,
-``zea`` can store them as **Tracks**: self-contained bundles of raw data and scan parameters
-in a single HDF5 file, with a shared :class:`~zea.Probe` and metadata. Each track exposes its own :class:`~zea.Parameters` object (via
+these sequences contain parameters that may not be expressed by a single ``ScanSpec`` + ``DataSpec`` pair.
+
+.. admonition:: Example
+
+   Imagine an acquisition that alternates between B-mode and Doppler pulses, where
+   a different number of axial samples is recorded for each type. In this case, the ``n_ax``
+   dimension of the raw data would differ between the two pulse types, and thus could not
+   be represented by a single ``DataSpec``, which expects a non-ragged tensor for ``raw_data``.
+
+Rather than splitting these into separate files, ``zea`` can store them as **Tracks**: 
+self-contained bundles of raw data and scan parameters in a single HDF5 file, 
+with a shared :class:`~zea.Probe` and metadata. Each track exposes its own :class:`~zea.Parameters` object (via
 ``track.load_parameters()``), containing the parameters
 necessary to beamform the raw data in that track. This allows us to specify a :class:`~zea.Pipeline`
-*per-track*, which can be applied independently to each frame in that track.
+*per-track*, which can be applied independently to each frame in that track. Taking the example above,
+we could specify a B-mode pipeline to apply to the B-mode track, and a Doppler pipeline to apply to the Doppler track.
 Global timing information can be stored in the optional ``track_schedule`` parameter, which
 indicates which track each transmit event belongs to. Provided the
 ``time_to_next_transmit`` for each transmit event, this allows us to reconstruct

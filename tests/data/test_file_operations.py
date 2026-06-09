@@ -489,6 +489,45 @@ def test_compound_frames_uint8_linear(tmp_path):
     assert pixel == pytest.approx(100, abs=1), f"Expected ~100, got {pixel}"
 
 
+def test_load_file_all_data_types_coordinates_indexed(tmp_path):
+    """Frame-indexed coordinates must be sliced in sync with the values dataset.
+
+    When load_file_all_data_types is called with frame indices, a coordinates
+    dataset that carries a leading frame axis must be sliced by the same frame
+    index rather than loaded whole.
+    """
+    path = tmp_path / "coords.hdf5"
+    n_frames, H, W = 4, 8, 8
+
+    # values: each frame is filled with its frame index so we can verify slicing
+    values = np.array(
+        [np.full((H, W), float(f), dtype=np.float32) for f in range(n_frames)]
+    )  # (n_frames, H, W)
+
+    # coordinates: shape (n_frames, H, W, 3); x-component == frame index
+    coords = np.zeros((n_frames, H, W, 3), dtype=np.float32)
+    for f in range(n_frames):
+        coords[f, :, :, 0] = float(f) * 0.001  # unique x-value per frame (metres)
+
+    # Write directly with h5py to avoid spec validation complexity for this unit test
+    with h5py.File(path, "w") as hf:
+        hf.attrs["zea_version"] = "0.1.0"
+        tg = hf.require_group("tracks/track_0/data/image")
+        tg.create_dataset("values", data=values)
+        tg.create_dataset("coordinates", data=coords)
+
+    frame_sel = [1, 3]
+    data_dict, _ = load_file_all_data_types(path, indices=(frame_sel,))
+
+    loaded_values = data_dict["image"]["values"]
+    loaded_coords = data_dict["image"]["coordinates"]
+
+    assert loaded_values.shape[0] == len(frame_sel), "values must have selected frames"
+    assert loaded_coords.shape[0] == len(frame_sel), "coordinates must have selected frames"
+    np.testing.assert_array_equal(loaded_values, values[frame_sel])
+    np.testing.assert_array_equal(loaded_coords, coords[frame_sel])
+
+
 def test_save_file_from_parameters_round_trip(tmp_path):
     """Round-trip: generate a file, load its Parameters, save to a new file, validate.
 

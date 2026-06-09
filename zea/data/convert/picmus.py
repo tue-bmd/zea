@@ -278,7 +278,7 @@ def convert(source_path, output_path, overwrite=False):
 
         initial_times = np.zeros((n_tx,))
         for n in range(n_tx):
-            v = np.array([np.sin(polar_angles[n]), 0, np.cos(0)])
+            v = np.array([np.sin(polar_angles[n]), 0, np.cos(polar_angles[n])])
             initial_times[n] = -np.min(np.sum(probe_geometry * v[None], axis=1)) / sound_speed
 
             t0_delays[n] = compute_t0_delays_planewave(

@@ -93,14 +93,16 @@ def check_focus_distances(scan_parameters: dict) -> dict:
                 "`center_frequency` is the probe centre frequency which is not always "
                 "the case!"
             )
-            assert "sound_speed" in scan_parameters, (
-                "Cannot convert focus distances from wavelengths to metres "
-                "because sound_speed is not defined in the scan parameters."
-            )
-            assert "center_frequency" in scan_parameters, (
-                "Cannot convert focus distances from wavelengths to metres "
-                "because center_frequency is not defined in the scan parameters."
-            )
+            if "sound_speed" not in scan_parameters:
+                raise ValueError(
+                    "Cannot convert focus distances from wavelengths to metres "
+                    "because sound_speed is not defined in the scan parameters."
+                )
+            if "center_frequency" not in scan_parameters:
+                raise ValueError(
+                    "Cannot convert focus distances from wavelengths to metres "
+                    "because center_frequency is not defined in the scan parameters."
+                )
             wavelength = scan_parameters["sound_speed"] / scan_parameters["center_frequency"]
             scan_parameters["focus_distances"] = focus_distances * wavelength
     return scan_parameters

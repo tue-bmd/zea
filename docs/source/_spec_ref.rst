@@ -31,6 +31,12 @@ Every ``zea`` HDF5 file follows the layout shown below.
    │   ├── center_frequency          float32  scalar | (n_tx,)
    │   ├── t0_delays                 float32  (n_tx, n_el)
    │   └── …
+   ├── probe/
+   │   ├── name                      str
+   │   ├── type                      str
+   │   ├── probe_geometry            float32  (n_el, 3)
+   │   ├── probe_center_frequency    float32  scalar
+   │   └── …
    ├── metadata/
    │   ├── subject/                  group (Subject)
    │   ├── annotations/              group (Annotations)

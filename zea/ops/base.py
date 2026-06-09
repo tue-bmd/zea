@@ -20,9 +20,72 @@ from zea.utils import (
 )
 
 
-def get_ops(ops_name):
-    """Get the operation from the registry."""
-    return ops_registry[ops_name]
+def get_ops(ops_name: str):
+    """Retrieve an :class:`Operation` subclass from the registry by name.
+
+    Two lookup forms are supported:
+
+    **Registry name** (plain string)
+        A key previously registered with ``@ops_registry("name")``,
+        e.g. ``"demodulate"``.  The lookup is case-insensitive.
+
+    **Module path** (dotted string containing a ``"."``)
+        A fully-qualified import path such as
+        ``"my_package.my_module.MyOp"``.  The module is imported
+        automatically, then the class is located in the registry by *object
+        identity* — so the registry key does **not** need to match the class
+        name.
+
+    Args:
+        ops_name (str): Registry name or dotted module path of the operation.
+
+    Returns:
+        type: The :class:`Operation` subclass registered under ``ops_name``.
+
+    Raises:
+        ValueError: If ``ops_name`` is a dotted module path but the class
+            cannot be found in the registry after importing the module.
+        KeyError: If ``ops_name`` is a plain name that is not registered.
+
+    Examples:
+        .. code-block:: python
+
+            # By registry name
+            cls = get_ops("demodulate")
+
+            # By module path — the class may be registered under any key
+            cls = get_ops("my_project.processing.MyCustomOp")
+            pipeline = Pipeline(operations=[cls(factor=2.0)])
+    """
+    if ops_name in ops_registry:
+        return ops_registry[ops_name]
+
+    if "." in ops_name:
+        module_name, class_name = ops_name.rsplit(".", 1)
+        module = __import__(module_name, fromlist=[class_name])
+
+        # Check again: module may have registered the op under the full dotted key
+        if ops_name in ops_registry:
+            return ops_registry[ops_name]
+
+        # Resolve by class object identity — works even when registry key ≠ class name
+        cls = getattr(module, class_name, None)
+        if cls is not None:
+            try:
+                return ops_registry[ops_registry.get_name(cls)]
+            except KeyError:
+                pass
+
+        # Last fallback: class name used directly as registry key (case-insensitive)
+        if class_name in ops_registry:
+            return ops_registry[class_name]
+
+        raise ValueError(
+            f"Operation '{ops_name}' or '{class_name}' not found in registry, "
+            "even after attempting to import module."
+        )
+
+    return ops_registry[ops_name]  # raises KeyError with a helpful message
 
 
 def _to_native(value):
@@ -39,8 +102,34 @@ def _to_native(value):
 
 
 class Operation(keras.Operation):
-    """
-    A base abstract class for operations in the pipeline with caching functionality.
+    """Abstract base class for pipeline operations with caching and JIT support.
+
+    Every operation:
+
+    * receives and returns a :class:`dict` of named tensors
+    * is identified by a key in :data:`~zea.internal.registry.ops_registry`
+    * can be composed into a :class:`~zea.ops.Pipeline`
+    * optionally caches inputs and/or outputs for repeated calls with the
+      same arguments
+
+    Subclasses **must** implement :meth:`call`, which performs the actual
+    computation and must return a :class:`dict`.
+
+    Examples:
+        .. code-block:: python
+
+            from zea.internal.registry import ops_registry
+            from zea.ops.base import Operation
+
+
+            @ops_registry("my_scale")
+            class MyScale(Operation):
+                def __init__(self, factor: float = 2.0, **kwargs):
+                    super().__init__(**kwargs)
+                    self.factor = factor
+
+                def call(self, data, **kwargs):
+                    return {"data": data * self.factor}
     """
 
     ADD_OUTPUT_KEYS: List[str] = []
@@ -51,7 +140,7 @@ class Operation(keras.Operation):
         output_data_type: Union[DataTypes, None] = None,
         key: Union[str, None] = "data",
         output_key: Union[str, None] = None,
-        cache_inputs: Union[bool, List[str]] = False,
+        cache_inputs: bool = False,
         cache_outputs: bool = False,
         jit_compile: bool = True,
         with_batch_dim: bool = True,
@@ -62,24 +151,31 @@ class Operation(keras.Operation):
     ):
         """
         Args:
-            input_data_type (DataTypes): The data type of the input data
-            output_data_type (DataTypes): The data type of the output data
-            key: The key for the input data (operation will operate on this key)
-                Defaults to "data".
-            output_key: The key for the output data (operation will output to this key)
-                Defaults to the same as the input key. If you want to store intermediate
-                results, you can set this to a different key. But make sure to update the
-                input key of the next operation to match the output key of this operation.
-            cache_inputs: A list of input keys to cache or True to cache all inputs
-            cache_outputs: A list of output keys to cache or True to cache all outputs
-            jit_compile: Whether to JIT compile the 'call' method for faster execution
-            with_batch_dim: Whether operations should expect a batch dimension in the input
-            jit_kwargs: Additional keyword arguments for the JIT compiler
-            jittable: Whether the operation can be JIT compiled
-            additional_output_keys: A list of additional output keys produced by the operation.
-                These are used to track if all keys are available for downstream operations.
-                If the operation has a conditional output, it is best to add all possible
-                output keys here.
+            input_data_type (DataTypes or None): Expected data type of the input tensor.
+                Used for pipeline data-type validation; pass ``None`` to skip.
+            output_data_type (DataTypes or None): Data type produced by this operation.
+            key (str or None): Dict key the operation reads from (and writes to by
+                default). Defaults to ``"data"``.
+            output_key (str or None): Dict key the operation writes its result to.
+                Defaults to ``key``. Set to a different value to preserve the original
+                input under ``key`` while producing a new key for downstream operations.
+            cache_inputs (bool): When ``True``, values stored via
+                :meth:`set_input_cache` are merged into every call. ``False``
+                means the cache is empty by default. Selective per-key caching
+                is not supported; use :meth:`set_input_cache` directly to
+                control which keys are stored.
+            cache_outputs (bool): Memoize outputs keyed by a hash of the merged inputs.
+            jit_compile (bool): Wrap :meth:`call` with :func:`~zea.backend.jit` for
+                faster execution. Disable for easier interactive debugging.
+            with_batch_dim (bool): Whether inputs carry a leading batch dimension.
+                Affects default axis selection in filter-type operations.
+            jit_kwargs (dict or None): Extra keyword arguments forwarded to the JIT
+                compiler.
+            jittable (bool): Mark the operation as JIT-compilable. Set to ``False`` for
+                operations that use Python control flow incompatible with tracing.
+            additional_output_keys (list of str or None): Extra dict keys this operation
+                may produce beyond ``output_key``. Used for pipeline key-availability
+                validation. Defaults to the class-level :attr:`ADD_OUTPUT_KEYS` list.
         """
         super().__init__(**kwargs)
 

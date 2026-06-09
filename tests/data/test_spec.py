@@ -8,6 +8,7 @@ import pytest
 from zea.data import spec as spec_module
 from zea.data.file import File
 from zea.data.spec import (
+    Annotations,
     DataSpec,
     FileSpec,
     Image,
@@ -354,6 +355,30 @@ def test_scan_accepts_float_inputs_and_casts_to_float32():
     )
     assert scan_spec.initial_times.dtype == np.dtype(ScanSpec.SCHEMA["initial_times"]["dtype"])
     assert scan_spec.t0_delays.dtype == np.dtype(ScanSpec.SCHEMA["t0_delays"]["dtype"])
+
+
+def test_spec_accepts_lists_for_string_fields():
+    n_frames, z, x, n_labels = 3, 16, 12, 2
+
+    # Segmentation labels as plain list
+    seg = Segmentation(
+        values=np.zeros((n_frames, z, x, n_labels), dtype=np.bool_),
+        labels=["background", "tissue"],
+        coordinates=np.zeros((n_frames, z, x, 3), dtype=np.float32),
+    )
+    assert isinstance(seg.labels, np.ndarray)
+    assert np.issubdtype(seg.labels.dtype, np.character)
+    assert list(seg.labels) == ["background", "tissue"]
+
+    # Annotations view and label as plain lists
+    ann = Annotations(
+        view=["a4c"] * n_frames,
+        label=["normal"] * n_frames,
+    )
+    assert isinstance(ann.view, np.ndarray)
+    assert isinstance(ann.label, np.ndarray)
+    assert np.issubdtype(ann.view.dtype, np.character)
+    assert np.issubdtype(ann.label.dtype, np.character)
 
 
 def test_dataset_builder_accepts_float_raw_data_and_casts_to_float32():

@@ -244,6 +244,12 @@ FILE_TREE = """\
    \u2502   \u251c\u2500\u2500 center_frequency          float32  scalar | (n_tx,)
    \u2502   \u251c\u2500\u2500 t0_delays                 float32  (n_tx, n_el)
    \u2502   \u2514\u2500\u2500 \u2026
+   \u251c\u2500\u2500 probe/
+   \u2502   \u251c\u2500\u2500 name                      str
+   \u2502   \u251c\u2500\u2500 type                      str
+   \u2502   \u251c\u2500\u2500 probe_geometry            float32  (n_el, 3)
+   \u2502   \u251c\u2500\u2500 probe_center_frequency    float32  scalar
+   \u2502   \u2514\u2500\u2500 \u2026
    \u251c\u2500\u2500 metadata/
    \u2502   \u251c\u2500\u2500 subject/                  group (Subject)
    \u2502   \u251c\u2500\u2500 annotations/              group (Annotations)

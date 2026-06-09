@@ -236,6 +236,21 @@ class Spec:
         if isinstance(value, (str, bytes)):
             return value
 
+        # Auto-convert list/tuple to numpy array when a numpy dtype is expected.
+        # Skip if list/tuple is itself a valid native type for this field.
+        if isinstance(value, (list, tuple)) and expected_np_dtypes:
+            for dt in expected_dtype:
+                if (
+                    isinstance(dt, type)
+                    and not issubclass(dt, np.generic)
+                    and isinstance(value, dt)
+                ):
+                    return value
+            target = (
+                expected_float_dtype if expected_float_dtype is not None else expected_np_dtypes[0]
+            )
+            return np.asarray(value, dtype=target)
+
         if hasattr(value, "dtype"):
             value_dtype = np.dtype(value.dtype)
 

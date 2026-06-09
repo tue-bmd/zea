@@ -6,7 +6,18 @@ Example of saving the entire workspace to a .mat file (MATLAB):
 
         >> setup_script;
         >> VSX;
-        >> save_raw('C:/path/to/raw_data.mat');
+        >> save('C:/path/to/raw_data.mat', '-v7.3');
+
+.. important::
+
+    The ``.mat`` file **must** be saved in HDF5 format (MATLAB v7.3 or later).
+    Older ``.mat`` files are not HDF5-compatible and cannot be opened by this converter.
+    To save in the correct format from MATLAB, use the ``-v7.3`` flag:
+
+.. note::
+
+    We also have a `save_raw` function (not available in zea at the moment)
+    which saves all relevant variables from the workspace only. This results in a smaller file size and faster conversion.
 
 Then convert the saved `raw_data.mat` file to zea format using the following code (Python):
 
@@ -130,7 +141,24 @@ class VerasonicsFile(h5py.File):
 
     This class extends the h5py.File class to handle Verasonics-specific
     data structures and conventions.
+
+    .. note::
+
+        The ``.mat`` file must be saved in HDF5 format (MATLAB v7.3).
+        Use ``save('file.mat', '-v7.3')`` in MATLAB before converting.
     """
+
+    def __init__(self, name, mode="r", **kwargs):
+        try:
+            super().__init__(name, mode, **kwargs)
+        except OSError as e:
+            raise OSError(
+                f"Cannot open '{name}' as an HDF5 file.\n\n"
+                "This usually means the .mat file was not saved in HDF5 format.\n"
+                "MATLAB saves in HDF5 format only when you use the '-v7.3' flag:\n\n"
+                "    save('C:/path/to/raw_data.mat', '-v7.3')\n\n"
+                "Re-save the workspace in MATLAB with this flag and try again."
+            ) from e
 
     def dereference_index(self, dataset, index):
         """Get the element at the given index from the dataset, dereferencing it if
@@ -1534,9 +1562,9 @@ def convert_verasonics(args):
     # Write the dataset card next to the converted output: in the output
     # directory for a directory conversion, or alongside the file for a single
     # file. The card is required for the upload ownership check below.
-    if selected_path_is_directory:
+    if selected_path_is_directory and args.hf_repo_id:
         write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
-    elif getattr(args, "upload", False):
+    elif getattr(args, "upload", False) and args.hf_repo_id:
         write_dataset_card(output_path.parent, make_dataset_card(args.hf_repo_id))
 
     if getattr(args, "upload", False):

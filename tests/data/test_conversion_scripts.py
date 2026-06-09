@@ -928,17 +928,19 @@ def test_camus_db_not_cast_to_uint8():
     assert np.any(result < 0), "negative dB values must be preserved"
 
 
-def test_echonet_polar_float32_stored():
-    """The echonet converter's _translate output is a float in [-60, 0] dB.
-    Casting it to uint8 corrupts all negative values."""
-    polar_db = np.array([[-60.0, -30.0, 0.0], [-1.0, -45.0, -10.0]], dtype=np.float32)
+def test_echonet_polar_float32_stored(tmp_path):
+    """H5Processor._translate must return float32 in [-60, 0] dB, not uint8."""
+    from zea.data.convert.echonet import H5Processor
 
-    broken = polar_db.astype(np.uint8)
-    assert np.any(broken != polar_db.clip(0, 255)), "uint8 cast corrupts negative dB values"
+    processor = H5Processor(path_out_h5=tmp_path)
 
-    fixed = polar_db.astype(np.float32)
-    assert fixed.dtype == np.float32
-    assert np.all(fixed == polar_db), "float32 preserves all dB values"
+    # Input is in the [0, 1] processing range (normalised before _translate)
+    data = np.array([[0.0, 0.5, 1.0], [0.25, 0.75, 0.1]], dtype=np.float32)
+    result = processor._translate(data)
+
+    assert result.dtype == np.float32, "dB output must be float32, not uint8"
+    assert np.all(result >= -60) and np.all(result <= 0), "dB values must be in [-60, 0]"
+    assert np.any(result < 0), "negative dB values must be preserved"
 
 
 def test_images_non_uint8_raises():
@@ -955,10 +957,20 @@ def test_images_non_uint8_raises():
             )
 
 
-def test_images_uint8_passes():
-    """uint8 frames with values in [0, 255] must pass without error."""
-    frames = np.zeros((3, 64, 64), dtype=np.uint8)
-    assert frames.dtype == np.uint8
+def test_images_uint8_passes(tmp_path):
+    """convert_image_dataset must complete without error for uint8 PNG images."""
+    from PIL import Image
+
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+
+    frame = np.zeros((64, 64), dtype=np.uint8)
+    Image.fromarray(frame, mode="L").save(src / "frame.png")
+
+    convert_image_dataset(str(src), str(dst))
+
+    assert any(dst.rglob("*.hdf5")), "expected at least one output HDF5 file"
 
 
 def test_verasonics_compression_flag_respected(tmp_path):
