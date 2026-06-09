@@ -253,6 +253,155 @@ def test_flow_matching_train_step_returns_losses():
     assert np.isfinite(float(metrics["i_loss"]))
 
 
+def _make_dit_flow_model(image_shape=(16, 16, 1), guidance=None, operator=None):
+    """Return a small DiT-backed FlowMatchingModel for unit-testing."""
+    return FlowMatchingModel(
+        input_shape=image_shape,
+        network_name="dit_time_conditional",
+        network_kwargs={
+            "patch_size": 8,
+            "hidden_size": 32,
+            "depth": 2,
+            "num_heads": 4,
+            "embedding_dims": 16,
+        },
+        guidance=guidance,
+        operator=operator,
+    )
+
+
+def test_flow_matching_dit_denoise_output_shapes():
+    """DiT backend: denoise() preserves the image shape."""
+    image_shape = (16, 16, 1)
+    model = _make_dit_flow_model(image_shape)
+
+    noisy = keras.random.uniform((2, *image_shape))
+    noise_rates = keras.ops.ones((2, 1, 1, 1)) * 0.5
+    signal_rates = keras.ops.ones((2, 1, 1, 1)) * 0.5
+
+    pred_noises, pred_images = model.denoise(noisy, noise_rates, signal_rates, training=False)
+    assert pred_noises.shape == noisy.shape
+    assert pred_images.shape == noisy.shape
+
+
+def test_flow_matching_dit_sample_shape_and_finite():
+    """DiT backend: model.sample() returns the right shape and finite values."""
+    keras.utils.set_random_seed(DEFAULT_TEST_SEED)
+    seed_gen = keras.random.SeedGenerator(DEFAULT_TEST_SEED)
+
+    image_shape = (16, 16, 1)
+    model = _make_dit_flow_model(image_shape)
+
+    samples = model.sample(n_samples=2, n_steps=2, seed=seed_gen, verbose=False)
+    assert samples.shape == (2, *image_shape)
+    assert np.isfinite(keras.ops.convert_to_numpy(samples)).all()
+
+
+def test_flow_matching_dit_config_round_trip():
+    """DiT-backed FlowMatchingModel can be reconstructed from its own config."""
+    image_shape = (16, 16, 1)
+    model = _make_dit_flow_model(image_shape)
+    config = model.get_config()
+    assert config["network_name"] == "dit_time_conditional"
+
+    restored = FlowMatchingModel.from_config(config)
+    assert tuple(restored.input_shape) == image_shape
+    assert restored.network.count_params() == model.network.count_params()
+
+
+def test_flow_matching_default_solver_is_heun():
+    """Flow matching defaults to the second-order Heun solver."""
+    model = _make_minimal_flow_model((2,))
+    assert model.solver == "heun"
+
+
+def test_flow_matching_invalid_solver_raises():
+    """An unknown solver name is rejected at construction time."""
+    with pytest.raises(ValueError):
+        FlowMatchingModel(
+            input_shape=(2,),
+            network_name="dense_time_conditional",
+            network_kwargs={"widths": [8], "output_dim": 2},
+            guidance=None,
+            operator=None,
+            solver="rk4",
+        )
+
+
+def test_flow_matching_solver_config_round_trip():
+    """The solver choice survives a get_config/from_config round trip."""
+    model = FlowMatchingModel(
+        input_shape=(2,),
+        network_name="dense_time_conditional",
+        network_kwargs={"widths": [8], "output_dim": 2},
+        guidance=None,
+        operator=None,
+        solver="euler",
+    )
+    restored = FlowMatchingModel.from_config(model.get_config())
+    assert restored.solver == "euler"
+
+
+def test_flow_matching_heun_sample_shape_and_finite():
+    """Both solvers produce samples of the right shape with finite values."""
+    keras.utils.set_random_seed(DEFAULT_TEST_SEED)
+    n_features, n_samples = 2, 2
+    for solver in ("euler", "heun"):
+        model = FlowMatchingModel(
+            input_shape=(n_features,),
+            network_name="dense_time_conditional",
+            network_kwargs={"widths": [8], "output_dim": n_features},
+            guidance=None,
+            operator=None,
+            solver=solver,
+        )
+        seed_gen = keras.random.SeedGenerator(DEFAULT_TEST_SEED)
+        samples = model.sample(n_samples=n_samples, n_steps=3, seed=seed_gen, verbose=False)
+        assert samples.shape == (n_samples, n_features)
+        assert np.isfinite(keras.ops.convert_to_numpy(samples)).all()
+
+
+def test_flow_matching_heun_exact_on_linear_velocity():
+    """Heun integrates an x-independent, linear-in-t velocity field exactly.
+
+    For ``dx/dt = v(t) = t`` integrated from ``t=1`` to ``t=0`` the exact
+    solution is ``x(0) = x(1) - 0.5``.  The trapezoidal Heun corrector is exact
+    for a velocity that is linear in ``t``, whereas Euler incurs an O(Δt) error.
+    """
+
+    class _MockFM(FlowMatchingModel):
+        def denoise(self, noisy_images, noise_rates, signal_rates, training, network=None):
+            velocity = noise_rates  # v = t, independent of x
+            pred_images = noisy_images - noise_rates * velocity  # x̂₀ = x_t - t·v
+            pred_noises = pred_images + velocity  # ε̂ = x̂₀ + v
+            return pred_noises, pred_images
+
+    x1 = 3.0
+    exact = x1 - 0.5
+
+    def _final_x0(solver):
+        model = _MockFM(
+            input_shape=(1,),
+            network_name="dense_time_conditional",
+            network_kwargs={"widths": [2], "output_dim": 1},
+            guidance=None,
+            operator=None,
+            solver=solver,
+        )
+        init = keras.ops.ones((1, 1)) * x1
+        model.reverse_diffusion(
+            initial_noise=init, diffusion_steps=4, verbose=False, track_progress_type="x_t"
+        )
+        return float(np.asarray(model.track_progress[-1]).ravel()[0])
+
+    heun_val = _final_x0("heun")
+    euler_val = _final_x0("euler")
+
+    np.testing.assert_allclose(heun_val, exact, atol=1e-5)
+    # Euler is only first-order, so it should be strictly less accurate here.
+    assert abs(euler_val - exact) > abs(heun_val - exact)
+
+
 def test_flow_matching_dps_guidance_call():
     """DPS guidance works with FlowMatchingModel and returns correct shapes."""
     from zea.internal.operators import InpaintingOperator

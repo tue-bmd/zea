@@ -136,6 +136,7 @@ from . import (
     deeplabv3,
     dense,
     diffusion,
+    dit,
     echonet,
     echonetlvh,
     flow_matching,
