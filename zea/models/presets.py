@@ -61,6 +61,20 @@ augmented_camus_seg_presets = {
     },
 }
 
+speckle2self_presets = {
+    "speckle2self-invivo": {
+        "metadata": {
+            "description": (
+                "Speckle2Self speckle reduction model trained on in-vivo ultrasound data. "
+                "Original paper and code: https://arxiv.org/abs/2507.06828"
+            ),
+            "params": 3_910_785,
+            "path": "speckle2self",
+        },
+        "hf_handle": "hf://zeahub/speckle2self-invivo",
+    },
+}
+
 regional_quality_presets = {
     "mobilenetv2_regional_quality": {
         "metadata": {
@@ -168,6 +182,54 @@ flow_matching_presets = {
             "path": "flow_matching",
         },
         "hf_handle": "hf://zeahub/flowmatching-echonetlvh/3ch",
+    },
+    "flowmatching-echonetlvh-12ch": {
+        "metadata": {
+            "description": (
+                "Flow matching model trained on EchoNetLVH dataset. "
+                "12-frame model, input shape (256, 256, 12), "
+                "input range [0, 1]."
+            ),
+            "params": 7_692_177,
+            "path": "flow_matching",
+        },
+        "hf_handle": "hf://zeahub/flowmatching-echonetlvh/12ch",
+    },
+    "flowmatching-echonetlvh-dit": {
+        "metadata": {
+            "description": (
+                "Diffusion Transformer (DiT) flow matching model trained on EchoNetLVH dataset. "
+                "Single-channel model, input shape (256, 256, 1), "
+                "input range [0, 1]. Uses second-order Euler–Heun sampling."
+            ),
+            "params": 32_904_640,
+            "path": "flow_matching",
+        },
+        "hf_handle": "hf://zeahub/flowmatching-echonetlvh/1ch-dit",
+    },
+    "flowmatching-echonetlvh-dit-3ch": {
+        "metadata": {
+            "description": (
+                "Diffusion Transformer (DiT) flow matching model trained on EchoNetLVH dataset. "
+                "3-frame model, input shape (256, 256, 3), "
+                "input range [0, 1]. Uses second-order Euler–Heun sampling."
+            ),
+            "params": 33_003_072,
+            "path": "flow_matching",
+        },
+        "hf_handle": "hf://zeahub/flowmatching-echonetlvh/3ch-dit",
+    },
+    "flowmatching-echonetlvh-dit-7ch": {
+        "metadata": {
+            "description": (
+                "Diffusion Transformer (DiT) flow matching model trained on EchoNetLVH dataset. "
+                "7-frame model, input shape (256, 256, 7), "
+                "input range [0, 1]. Uses second-order Euler–Heun sampling."
+            ),
+            "params": 58_618_816,
+            "path": "flow_matching",
+        },
+        "hf_handle": "hf://zeahub/flowmatching-echonetlvh/7ch-dit",
     },
 }
 

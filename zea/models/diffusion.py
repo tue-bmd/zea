@@ -31,6 +31,7 @@ from zea.internal.operators import Operator
 from zea.internal.registry import diffusion_guidance_registry, model_registry, operator_registry
 from zea.internal.utils import fn_requires_argument
 from zea.models.dense import get_time_conditional_dense_network
+from zea.models.dit import get_time_conditional_dit_network
 from zea.models.generative import DeepGenerativeModel
 from zea.models.preset_utils import register_presets
 from zea.models.presets import diffusion_model_presets
@@ -71,7 +72,8 @@ class DiffusionModel(DeepGenerativeModel):
             min_signal_rate: Minimum signal rate for the diffusion schedule.
             max_signal_rate: Maximum signal rate for the diffusion schedule.
             network_name: Name of the network architecture to use. Options are
-                "unet_time_conditional" or "dense_time_conditional".
+                "unet_time_conditional", "dense_time_conditional", or
+                "dit_time_conditional" (Diffusion Transformer).
             network_kwargs: Additional keyword arguments for the network.
             name: Name of the model.
             guidance: Guidance method to use. Can be a string, or dict with
@@ -106,6 +108,11 @@ class DiffusionModel(DeepGenerativeModel):
             assert len(input_shape) == 1, "Dense network only supports 1D input"
             self.network = get_time_conditional_dense_network(
                 input_dim=self.input_shape[0],
+                **self.network_kwargs,
+            )
+        elif network_name == "dit_time_conditional":
+            self.network = get_time_conditional_dit_network(
+                image_shape=self.input_shape,
                 **self.network_kwargs,
             )
         else:
@@ -525,6 +532,60 @@ class DiffusionModel(DeepGenerativeModel):
         )
         return next_noisy_images
 
+    def solver_step(
+        self,
+        noisy_images,
+        noise_rates,
+        signal_rates,
+        next_noise_rates,
+        next_signal_rates,
+        shape,
+        network=None,
+        training: bool = False,
+        seed=None,
+        stochastic_sampling: bool = False,
+    ):
+        """Take a single solver step from ``x_t`` to ``x_{t-Δt}``.
+
+        Denoises the current noisy images and applies one reverse-diffusion
+        (DDIM / DDPM) update.  This is the integration step used by
+        :meth:`reverse_diffusion`; subclasses may override it to implement
+        higher-order ODE solvers (see
+        :meth:`~zea.models.flow_matching.FlowMatchingModel.solver_step`).
+
+        Args:
+            noisy_images: Current noisy images ``x_t``.
+            noise_rates: Noise rates at the current time.
+            signal_rates: Signal rates at the current time.
+            next_noise_rates: Noise rates at the next (lower) time.
+            next_signal_rates: Signal rates at the next (lower) time.
+            shape: Shape of the image tensor.
+            network: Explicit network to use (``None`` selects based on
+                ``training``).
+            training: Whether to call the network in training mode.
+            seed: Random seed generator (for stochastic sampling).
+            stochastic_sampling: Whether to use stochastic (DDPM) sampling.
+
+        Returns:
+            A ``(next_noisy_images, pred_images)`` tuple where
+            ``next_noisy_images`` is ``x_{t-Δt}`` and ``pred_images`` is the
+            clean-image estimate ``x̂₀`` at the current step.
+        """
+        pred_noises, pred_images = self.denoise(
+            noisy_images, noise_rates, signal_rates, training=training, network=network
+        )
+        next_noisy_images = self.reverse_diffusion_step(
+            shape=shape,
+            pred_images=pred_images,
+            pred_noises=pred_noises,
+            signal_rates=signal_rates,
+            next_signal_rates=next_signal_rates,
+            next_noise_rates=next_noise_rates,
+            seed=seed,
+            stochastic_sampling=stochastic_sampling,
+        )
+        return next_noisy_images, pred_images
+
     def reverse_diffusion(
         self,
         initial_noise,
@@ -600,7 +661,7 @@ class DiffusionModel(DeepGenerativeModel):
             next_diffusion_times = diffusion_times - step_size
             next_noise_rates, next_signal_rates = self.diffusion_schedule(next_diffusion_times)
 
-            # denoise
+            # select the network used for sampling
             if network_type == "ema":
                 network = self.ema_network
             elif network_type == "main":
@@ -608,23 +669,17 @@ class DiffusionModel(DeepGenerativeModel):
             else:
                 network = None
 
-            pred_noises, pred_images = self.denoise(
-                noisy_images,
-                noise_rates,
-                signal_rates,
-                training=training,
-                network=network,
-            )
-
             seed, seed1 = split_seed(seed, 2)
 
-            next_noisy_images = self.reverse_diffusion_step(
-                shape=(num_images, *input_shape),
-                pred_images=pred_images,
-                pred_noises=pred_noises,
+            next_noisy_images, pred_images = self.solver_step(
+                noisy_images=noisy_images,
+                noise_rates=noise_rates,
                 signal_rates=signal_rates,
-                next_signal_rates=next_signal_rates,
                 next_noise_rates=next_noise_rates,
+                next_signal_rates=next_signal_rates,
+                shape=(num_images, *input_shape),
+                network=network,
+                training=training,
                 seed=seed1,
                 stochastic_sampling=stochastic_sampling,
             )
