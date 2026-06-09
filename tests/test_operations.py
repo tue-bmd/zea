@@ -982,9 +982,9 @@ def test_tissue_suppression():
     tissue = np.ones(shape) * gradient
 
     # Blood component: random per frame
-    blood = rng.standard_normal(shape).astype(np.float32) * 0.1
+    blood = rng.standard_normal(shape) * 0.1
 
-    data = tissue + blood
+    data = (tissue + blood).astype(np.float32)
 
     cutoff = 3
     op = ops.TissueSuppression(cutoff=cutoff)
