@@ -784,6 +784,13 @@ def test_band_pass_filter():
     assert not np.allclose(result_init_passband, result_call_passband, rtol=rtol, atol=atol)
     assert not np.allclose(result_demod_frequency, result_call_passband, rtol=rtol, atol=atol)
 
+    with pytest.raises(ValueError, match="passband must be an iterable of two numeric values"):
+        operation(
+            data=data,
+            sampling_frequency=40e6,
+            passband=(4e6,),
+        )
+
     return result_default
 
 

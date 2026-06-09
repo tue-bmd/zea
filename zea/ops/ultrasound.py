@@ -541,6 +541,10 @@ class BandPassFilter(FirFilter):
                 Default is -3, which is the ``n_ax`` axis for standard ultrasound data layout.
             num_taps (int): Number of taps in the FIR filter. Default is 127.
                 Odd will result in a type I filter, even in a type II filter.
+            passband (tuple[float, float] | None): Lower and upper cutoff frequencies for
+                the bandpass filter. See class docstring for detailed behavior. ``None``
+                disables explicit passband parameters and derives these from call-time frequency
+                parameters.
         """
         if "complex_channels" in kwargs and kwargs["complex_channels"]:
             raise ValueError(
@@ -584,17 +588,7 @@ class BandPassFilter(FirFilter):
         selected_passband = passband if passband is not None else self.passband
 
         if selected_passband is not None:
-            try:
-                f1, f2 = selected_passband
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    "passband must be an iterable of exactly two numeric values (f1, f2)."
-                ) from exc
-
-            if not all(
-                isinstance(f, (int, float, np.number)) and not isinstance(f, bool) for f in (f1, f2)
-            ):
-                raise ValueError("passband must contain exactly two numeric values (f1, f2).")
+            f1, f2 = _validate_and_unpack_passband(selected_passband)
         else:
             if demodulation_frequency is None or bandwidth is None:
                 raise ValueError(
@@ -609,6 +603,28 @@ class BandPassFilter(FirFilter):
         )
         kwargs[self.filter_key] = bpf
         return super().call(**kwargs)
+
+    @staticmethod
+    def _validate_and_unpack_passband(selected_passband):
+        """Validate passband and return (f1, f2)."""
+        passband_error_message = "passband must be an iterable of two numeric values"
+
+        try:
+            passband_values = tuple(selected_passband)
+            f1 = passband_values[0]
+            f2 = passband_values[1]
+        except (TypeError, IndexError) as exc:
+            raise ValueError(passband_error_message) from exc
+
+        if len(passband_values) != 2:
+            raise ValueError(passband_error_message)
+
+        if not all(
+            isinstance(f, (int, float, np.number)) and not isinstance(f, bool) for f in (f1, f2)
+        ):
+            raise ValueError(passband_error_message)
+
+        return f1, f2
 
 
 @ops_registry("channels_to_complex")
