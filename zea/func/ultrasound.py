@@ -946,9 +946,9 @@ def suppress_tissue(data: np.ndarray, cutoff: int = 5) -> np.ndarray:
 
     original_shape = data.shape
     n_frames = original_shape[0]
-    data_2d = data.reshape(n_frames, -1)
+    data_2d = ops.reshape(data, (n_frames, -1))
 
-    casorati_matrix = data_2d @ data_2d.T
+    casorati_matrix = ops.matmul(data_2d, ops.transpose(data_2d))
 
     # We call the data X
     # X = U @ S @ Vh
@@ -958,9 +958,9 @@ def suppress_tissue(data: np.ndarray, cutoff: int = 5) -> np.ndarray:
     V, S, _ = ops.linalg.svd(casorati_matrix)
 
     # Remove the right singular vectors
-    reconstructed = data_2d.T @ V
+    reconstructed = ops.matmul(ops.transpose(data_2d), V)
 
     # Reconstruct with only part of the vectors
-    reconstructed = reconstructed[:, cutoff:] @ V[:, cutoff:].T
+    reconstructed = ops.matmul(reconstructed[:, cutoff:], ops.transpose(V[:, cutoff:]))
 
-    return reconstructed.T.reshape(data.shape)
+    return ops.reshape(ops.transpose(reconstructed), original_shape)
