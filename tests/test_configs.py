@@ -326,6 +326,66 @@ def test_config_repr():
     assert "<" not in r
 
 
+def test_pipeline_operations_compact_form():
+    """``pipeline`` and ``parameters`` stay Config objects, but the individual
+    ``pipeline.operations`` entries are kept as plain ``str``/``dict`` rather
+    than nested Config objects: a name-only operation collapses to its bare
+    name string, while an operation with ``params`` stays a plain dict.
+    """
+    config = Config(
+        {
+            "parameters": {"grid_size_x": 400},
+            "pipeline": {
+                "operations": [
+                    {"name": "demodulate"},
+                    {"name": "downsample", "params": {"factor": 4}},
+                    {"name": "normalize", "params": {}},
+                    "log_compress",
+                ],
+            },
+        }
+    )
+
+    # Nested mappings are still Config objects ...
+    assert isinstance(config.pipeline, Config)
+    assert isinstance(config.parameters, Config)
+
+    # ... but operations are plain str/dict, never Config.
+    operations = config.pipeline.operations
+    assert operations == [
+        "demodulate",
+        {"name": "downsample", "params": {"factor": 4}},
+        "normalize",
+        "log_compress",
+    ]
+    for operation in operations:
+        assert isinstance(operation, (str, dict))
+        assert not isinstance(operation, Config)
+
+
+def test_pipeline_operations_compact_after_check_config():
+    """``check_config`` re-wraps the validated dict into a Config; operations
+    must remain in the compact str/dict form afterwards (regression test for
+    operations being turned back into a list of Config objects)."""
+    config = Config(
+        {
+            "data": {"dtype": "raw_data", "dataset_folder": "dummy"},
+            "pipeline": {
+                "operations": [
+                    {"name": "demodulate"},
+                    {"name": "downsample", "params": {"factor": 4}},
+                ]
+            },
+        }
+    )
+    config = check_config(config)
+    assert config.pipeline.operations == [
+        "demodulate",
+        {"name": "downsample", "params": {"factor": 4}},
+    ]
+    assert not any(isinstance(op, Config) for op in config.pipeline.operations)
+
+
 def test_config_pickle():
     """Tests if the config can be pickled and unpickled without changing its contents."""
     import pickle

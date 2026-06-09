@@ -54,8 +54,14 @@ overrides.
 
     >>> config = Config.from_path("../configs/config_picmus_rf.yaml")
     >>> config = check_config(config)   # fills defaults, validates
-    >>> config.pipeline.operations
-    ['demodulate', 'downsample', 'beamform', 'envelope_detect', 'normalize', 'log_compress']
+    >>> config.pipeline.operations # doctest: +NORMALIZE_WHITESPACE
+    ['demodulate',
+     {'name': 'downsample', 'params': {'factor': 4}},
+     {'name': 'beamform', 'params': {'beamformer': 'delay_and_sum', 'enable_pfield': False, 'num_patches': 200}},
+     'envelope_detect',
+     'normalize',
+     'log_compress']
+
     >>> config.to_yaml("my_config.yaml")
 
 .. testcleanup::
