@@ -1184,3 +1184,55 @@ class CommonMidpointPhaseError(Operation):
                 data,
             )
         return {self.output_key: pemap}
+
+
+@ops_registry("tissue_suppression")
+class TissueSuppression(Operation):
+    """Tissue suppression using SVD-based clutter filtering.
+
+    Removes stationary tissue components from multi-frame ultrasound data
+    by zeroing the dominant singular values of the Casorati matrix.
+    """
+
+    def __init__(self, cutoff: int = 5, **kwargs):
+        super().__init__(**kwargs)
+        self.cutoff = cutoff
+
+    @staticmethod
+    def suppress_tissue(data: np.ndarray, cutoff: int = 5) -> np.ndarray:
+        """
+        Suppresses tissue using Direct SVD (Reduced).
+
+        Parameters
+        ----------
+        data : np.ndarray
+            Shape (Frames, Transmits, Samples, Channels)
+        cutoff : int
+            Number of principal components (tissue) to reject.
+        """
+        if cutoff <= 0:
+            return data
+
+        # 1. Reshape to Casorati Matrix: (Frames, Space)
+        original_shape = data.shape
+        n_frames = original_shape[0]
+        data_2d = data.reshape(n_frames, -1)
+
+        # 2. Reduced SVD directly on the Casorati matrix
+        U, s, Vh = ops.linalg.svd(data_2d, full_matrices=False)
+
+        # 3. Suppress tissue by zeroing the first 'cutoff' singular values
+        s_filtered = s.copy()
+        mask = ops.arange(s.shape[0]) > cutoff
+        s_filtered = s_filtered * mask
+
+        # 4. Reconstruct: U @ diag(s_filtered) @ Vh, optimised as (U * s_filtered) @ Vh
+        reconstructed = (U * s_filtered) @ Vh
+
+        # 5. Restore original shape
+        return reconstructed.reshape(original_shape)
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        filtered = self.suppress_tissue(ops.array(data), self.cutoff)
+        return {self.output_key: ops.cast(ops.array(filtered), data.dtype)}
