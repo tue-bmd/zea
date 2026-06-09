@@ -36,8 +36,8 @@ single :class:`~zea.Parameters` object and adds derived quantities
 .. code-block:: python
 
    with zea.File("data.hdf5") as f:
-       parameters = f.load_parameters()          # single-track
-       parameters = f.load_parameters(track=0)   # multi-track
+       parameters = f.load_parameters()             # single-track
+       parameters = f.tracks[0].load_parameters()   # multi-track
 
 ----------------------------
 Config
@@ -92,7 +92,7 @@ Supported keys
    * - ``indices``
      - ``null``
      - Which frames to load: ``null`` (default), ``'all'``, a single ``int``, or
-       a list of ints.
+       a list of positive ints.
 
 **parameters** — override any field from the :ref:`group-reference` or pass
 custom keys straight through to the pipeline:

@@ -595,6 +595,8 @@ def _compact_operation(operation):
     if isinstance(operation, Config):
         operation = operation.as_dict()
     if isinstance(operation, dict):
+        if isinstance(operation.get("params"), Config):
+            operation = {**operation, "params": operation["params"].as_dict()}
         keys = set(operation)
         if keys == {"name"} or (keys == {"name", "params"} and not operation["params"]):
             return operation["name"]
