@@ -1199,7 +1199,7 @@ class TissueSuppression(Operation):
         super().__init__(**kwargs)
         self.cutoff = cutoff
 
-    def suppress_tissue(self, data) -> np.ndarray:
+    def suppress_tissue(self, data):
         """
         Suppresses tissue using Direct SVD.
 

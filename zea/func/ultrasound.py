@@ -930,7 +930,7 @@ def dehaze_nuclear_diffusion(
     return tissue_frames, haze_frames
 
 
-def suppress_tissue(data, cutoff: int = 5) -> np.ndarray:
+def suppress_tissue(data, cutoff: int = 5):
     """
     Suppresses tissue using Direct SVD.
 
@@ -940,6 +940,8 @@ def suppress_tissue(data, cutoff: int = 5) -> np.ndarray:
     """
     if cutoff <= 0:
         return data
+    if cutoff >= data.shape[0]:
+        raise ValueError(f"Cutoff must be between 0 and n_frames-1, got {cutoff}.")
 
     original_shape = data.shape
     n_frames = original_shape[0]

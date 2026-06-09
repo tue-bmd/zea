@@ -997,11 +997,11 @@ def test_tissue_suppression():
     # After suppression, energy should be lower than the original tissue-dominated signal
     assert np.mean(output**2) < np.mean(data**2), "Tissue suppression should reduce signal energy"
 
-    correlation_accross_frames = np.corrcoef(output.reshape(n_frames, -1))
+    correlation_across_frames = np.corrcoef(output.reshape(n_frames, -1))
     # The correlation across frames should be reduced after tissue suppression
-    assert np.mean(correlation_accross_frames) < 0.5, (
+    assert np.mean(correlation_across_frames) < 0.5, (
         "Tissue suppression should reduce correlation across frames, got mean correlation: "
-        f"{np.mean(correlation_accross_frames)}"
+        f"{np.mean(correlation_across_frames)}"
     )
 
     return output
