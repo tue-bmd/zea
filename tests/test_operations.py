@@ -977,8 +977,9 @@ def test_tissue_suppression():
     shape = (n_frames, n_transmits, n_samples, n_channels)
 
     # Stationary tissue: same signal repeated across all frames
-    tissue = rng.standard_normal((1, n_transmits, n_samples, n_channels)).astype(np.float32)
-    tissue = np.repeat(tissue, n_frames, axis=0)
+
+    gradient = np.linspace(0, 1, n_samples).reshape(1, 1, n_samples, 1)
+    tissue = np.ones(shape) * gradient
 
     # Blood component: random per frame
     blood = rng.standard_normal(shape).astype(np.float32) * 0.1
@@ -995,5 +996,12 @@ def test_tissue_suppression():
 
     # After suppression, energy should be lower than the original tissue-dominated signal
     assert np.mean(output**2) < np.mean(data**2), "Tissue suppression should reduce signal energy"
+
+    correlation_accross_frames = np.corrcoef(output.reshape(n_frames, -1))
+    # The correlation across frames should be reduced after tissue suppression
+    assert np.mean(correlation_accross_frames) < 0.5, (
+        "Tissue suppression should reduce correlation across frames, got mean correlation: "
+        f"{np.mean(correlation_accross_frames)}"
+    )
 
     return output
