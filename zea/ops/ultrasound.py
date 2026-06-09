@@ -1199,21 +1199,17 @@ class TissueSuppression(Operation):
         super().__init__(**kwargs)
         self.cutoff = cutoff
 
-    @staticmethod
-    def suppress_tissue(data: np.ndarray, cutoff: int = 5) -> np.ndarray:
+    def suppress_tissue(self, data) -> np.ndarray:
         """
         Suppresses tissue using Direct SVD (Reduced).
 
-        Parameters
-        ----------
-        data : np.ndarray
-            Shape (Frames, Transmits, Samples, Channels)
-        cutoff : int
-            Number of principal components (tissue) to reject.
+        Args:
+            data (ops.Tensor): Shape (n_frames, n_tx, n_ax, n_el, n_ch)
+
         """
-        return suppress_tissue(data, cutoff)
+        return suppress_tissue(data, self.cutoff)
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        filtered = self.suppress_tissue(ops.array(data), self.cutoff)
+        filtered = self.suppress_tissue(ops.array(data))
         return {self.output_key: ops.cast(ops.array(filtered), data.dtype)}

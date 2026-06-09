@@ -930,16 +930,13 @@ def dehaze_nuclear_diffusion(
     return tissue_frames, haze_frames
 
 
-def suppress_tissue(data: np.ndarray, cutoff: int = 5) -> np.ndarray:
+def suppress_tissue(data, cutoff: int = 5) -> np.ndarray:
     """
     Suppresses tissue using Direct SVD.
 
-    Parameters
-    ----------
-    data : np.ndarray
-        Shape (Frames, ...)
-    cutoff : int
-        Number of principal components (tissue) to reject.
+    Args:
+        data (np.ndarray): Shape (Frames, ...)
+        cutoff (int): Number of principal components (tissue) to reject.
     """
     if cutoff <= 0:
         return data

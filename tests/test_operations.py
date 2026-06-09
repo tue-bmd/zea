@@ -973,12 +973,12 @@ def test_tissue_suppression():
 
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
 
-    n_frames, n_transmits, n_samples, n_channels = 10, 4, 32, 8
-    shape = (n_frames, n_transmits, n_samples, n_channels)
+    n_frames, n_tx, n_ax, n_ch = 10, 4, 32, 8
+    shape = (n_frames, n_tx, n_ax, n_ch)
 
     # Stationary tissue: same signal repeated across all frames
 
-    gradient = np.linspace(0, 1, n_samples).reshape(1, 1, n_samples, 1)
+    gradient = np.linspace(0, 1, n_ax).reshape(1, 1, n_ax, 1)
     tissue = np.ones(shape) * gradient
 
     # Blood component: random per frame
