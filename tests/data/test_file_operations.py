@@ -269,6 +269,75 @@ def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
     assert data_dict["aligned_data"].shape[1] == 1
 
 
+def test_file_operations_folder_resave(tmp_path):
+    """Tests that resave works on a folder of files, mirroring the folder structure."""
+
+    input_folder = tmp_path / "input"
+    output_folder = tmp_path / "output"
+
+    # Create a folder of example datasets, including a nested subfolder
+    input_paths = [
+        input_folder / "case_0.hdf5",
+        input_folder / "case_1.hdf5",
+        input_folder / "nested" / "case_2.hdf5",
+    ]
+    for path in input_paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        generate_example_dataset(path, add_optional_dtypes=True)
+
+    resave(input_folder, output_folder)
+
+    # Each input file should have a matching output file at the mirrored location
+    for input_path in input_paths:
+        output_path = output_folder / input_path.relative_to(input_folder)
+        assert output_path.is_file()
+        validate_file(output_path)
+        _assert_descriptions_and_additional_elements_equal(input_path, output_path)
+
+
+def test_file_operations_folder_compound_frames(tmp_path):
+    """Tests that compound_frames works on a folder of files."""
+
+    input_folder = tmp_path / "input"
+    output_folder = tmp_path / "output"
+    input_folder.mkdir()
+
+    input_paths = [input_folder / "case_0.hdf5", input_folder / "case_1.hdf5"]
+    for path in input_paths:
+        generate_example_dataset(path, add_optional_dtypes=True)
+
+    compound_frames(input_folder, output_folder)
+
+    for input_path in input_paths:
+        output_path = output_folder / input_path.name
+        assert output_path.is_file()
+        data_dict, _, _ = load_file_all_data_types(output_path)
+        for dataset in data_dict.values():
+            if dataset is not None:
+                assert dataset.shape[0] == 1  # Only one frame should remain
+
+
+def test_file_operations_folder_sum(tmp_path):
+    """Tests that sum_data accepts a folder and sums all files it contains."""
+
+    input_folder = tmp_path / "input"
+    input_folder.mkdir()
+    output_path = tmp_path / "summed.hdf5"
+
+    input_paths = [input_folder / "case_0.hdf5", input_folder / "case_1.hdf5"]
+    for path in input_paths:
+        generate_example_dataset(path, add_optional_dtypes=True)
+
+    data0, _, _ = load_file(input_paths[0])
+    data1, _, _ = load_file(input_paths[1])
+
+    sum_data(input_folder, output_path)
+
+    with File(output_path) as f:
+        raw_data = f["data/raw_data"][:]
+        assert raw_data[0, 0, 0, 0, 0] == data0[0, 0, 0, 0, 0] + data1[0, 0, 0, 0, 0]
+
+
 def _load_description_and_additional_elements(path: Path):
     description = load_description(path)
     additional_elements = load_additional_elements(path)

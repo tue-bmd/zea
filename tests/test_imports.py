@@ -7,6 +7,7 @@ import glob
 import importlib
 import inspect
 import os
+import pkgutil
 import subprocess
 import sys
 import textwrap
@@ -15,11 +16,13 @@ from pathlib import Path
 
 import pytest
 
+import zea
+
 from .helpers import run_in_subprocess
 
 
 @contextlib.contextmanager
-def no_ml_lib_import(backends: list = None, allow_keras_backend=True):
+def no_ml_lib_import(backends: list = None, allow_keras_backend=False):
     """Context manager to check if any backend in backends gets imported inside of it.
     Will raise an ImportError if any of the backends are imported."""
 
@@ -87,9 +90,11 @@ def test_check_imports_errors(directory, verbose=False):
 
 
 @run_in_subprocess
-def test_package_only_imports_keras_backend():
+def test_package_does_not_import_ml_libs():
     """Test that the package does not import heavy ML libraries like torch, tensorflow,
     or jax running in a fresh environment.
+
+    This feature is useful for speed, and GPU device selection.
 
     NOTE: Only torch and tensorflow because keras with numpy backend will also import jax.
     See: /usr/local/lib/python3.10/dist-packages/keras/src/backend/numpy/image.py"""
@@ -103,6 +108,7 @@ def _subprocess_import_zea_with_only_backend(backend):  # pragma: no cover
     This function is run in a subprocess to test zea import with only one backend available.
     """
     import builtins
+    import importlib.util
     import os
     import sys
     import traceback
@@ -125,6 +131,22 @@ def _subprocess_import_zea_with_only_backend(backend):  # pragma: no cover
         return import_orig(name, *args, **kwargs)
 
     builtins.__import__ = mocked_import
+
+    # Also patch ``importlib.util.find_spec`` so that the simulated
+    # "unavailable backend" state is detected by zea's bootstrap check, which
+    # uses ``find_spec`` (and would otherwise see the on-disk packages).
+    find_spec_orig = importlib.util.find_spec
+
+    def mocked_find_spec(name, *args, **kwargs):
+        if name in all_backends and (backend is None or name != backend):
+            return None
+        if any(name.startswith(b + ".") for b in all_backends) and (
+            backend is None or not name.startswith(backend + ".")
+        ):
+            return None
+        return find_spec_orig(name, *args, **kwargs)
+
+    importlib.util.find_spec = mocked_find_spec
 
     # Remove all backends from sys.modules except the allowed one
     for b in all_backends:
@@ -193,3 +215,25 @@ def test_import_zea_with_backend_subprocess(backend, should_succeed):
     else:
         if result.returncode == 0:
             assert False, "zea should not import if all backends are missing"
+
+
+def test_all_model_modules_imported():
+    """Test that all public submodules in zea/models/ are imported in zea.models.__init__.py.
+
+    Modules intentionally kept internal (not exposed at the package level) can be
+    listed in EXCLUDED below.
+    """
+
+    # Internal helpers — intentionally not re-exported at the zea.models top level
+    EXCLUDED = {"base", "preset_utils"}
+
+    missing = [
+        name
+        for _finder, name, _ispkg in pkgutil.iter_modules(zea.models.__path__)
+        if not name.startswith("_") and name not in EXCLUDED and not hasattr(zea.models, name)
+    ]
+
+    assert not missing, (
+        f"The following submodules are not imported in zea/models/__init__.py: {missing}. "
+        "Either import them there or add them to EXCLUDED in this test."
+    )

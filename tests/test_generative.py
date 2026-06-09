@@ -1,13 +1,17 @@
 """Tests for generative models in zea."""
 
+from unittest.mock import MagicMock
+
 import keras
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
 from zea import log
+from zea.func.ultrasound import dehaze_nuclear_diffusion
+from zea.internal.operators import InpaintingOperator, LinearInterpOperator
 from zea.io_lib import matplotlib_figure_to_numpy, save_video
-from zea.models.diffusion import DiffusionModel
+from zea.models.diffusion import DDS, DPS, DiffusionModel, NuclearDiffusion
 from zea.models.gmm import GaussianMixtureModel, match_means_covariances
 
 from . import DEFAULT_TEST_SEED
@@ -254,3 +258,263 @@ def test_diffusion_posterior_sample_shape():
         verbose=False,
     )
     assert out.shape == (n_measurements, n_samples, n_features)
+
+
+def test_dehaze_nuclear_diffusion_shape_logic():
+    """Test dehaze_nuclear_diffusion shape logic."""
+
+    keras.utils.set_random_seed(DEFAULT_TEST_SEED)
+    seed_gen = keras.random.SeedGenerator(DEFAULT_TEST_SEED)
+
+    # Create test video data
+    n_frames = 10
+    height, width, channels = 32, 32, 1
+    hazy_video = keras.random.uniform(
+        (n_frames, height, width, channels),
+        minval=-1,
+        maxval=1,
+        seed=seed_gen,
+    )
+
+    model = DiffusionModel(
+        input_shape=(height, width, channels),
+        guidance="nuclear-dps",
+        operator="linear_interp",
+    )
+
+    # Test with non-overlapping windows
+    tissue_frames, haze_frames = dehaze_nuclear_diffusion(
+        hazy_video,
+        model,
+        n_steps=2,
+        initial_step=0,
+        window_size=3,
+        window_stride=3,  # Non-overlapping
+        hard_project=False,
+        seed=seed_gen,
+        verbose=False,
+        omega=1.0,
+        gamma=1.0,
+    )
+
+    # Check output shapes
+    assert tissue_frames.shape == (n_frames, height, width, channels)
+    assert haze_frames.shape == (n_frames, height, width, channels)
+
+    # Test with overlapping windows
+    tissue_frames_overlap, haze_frames_overlap = dehaze_nuclear_diffusion(
+        hazy_video,
+        model,
+        n_steps=2,
+        initial_step=0,
+        window_size=4,
+        window_stride=2,  # Overlapping
+        hard_project=False,
+        seed=seed_gen,
+        verbose=False,
+        omega=1.0,
+        gamma=1.0,
+    )
+
+    # Check output shapes with overlap
+    assert tissue_frames_overlap.shape == (n_frames, height, width, channels)
+    assert haze_frames_overlap.shape == (n_frames, height, width, channels)
+
+
+def test_dehaze_nuclear_diffusion_hard_projection():
+    """Test dehaze_nuclear_diffusion with hard projection enabled."""
+
+    keras.utils.set_random_seed(DEFAULT_TEST_SEED)
+    seed_gen = keras.random.SeedGenerator(DEFAULT_TEST_SEED)
+
+    # Create test video data with some bright values
+    n_frames = 5
+    height, width, channels = 16, 16, 1
+    hazy_video = keras.random.uniform((n_frames, height, width, channels), minval=-1, maxval=1)
+
+    model = DiffusionModel(
+        input_shape=(height, width, channels),
+        guidance="nuclear-dps",
+        operator="linear_interp",
+    )
+
+    # Test with hard projection
+    tissue_frames, haze_frames = dehaze_nuclear_diffusion(
+        hazy_video,
+        model,
+        n_steps=2,
+        initial_step=0,
+        window_size=3,
+        window_stride=None,
+        hard_project=True,
+        seed=seed_gen,
+        verbose=False,
+        omega=1.0,
+        gamma=1.0,
+    )
+
+    # Check that shapes are correct
+    assert tissue_frames.shape == (n_frames, height, width, channels)
+    assert haze_frames.shape == (n_frames, height, width, channels)
+
+    # With hard projection, positive values in tissue should come from hazy input
+    hazy_np = keras.ops.convert_to_numpy(hazy_video)
+    positive_mask = tissue_frames > 0
+    if positive_mask.any():
+        # Where tissue is positive, it should match hazy input
+        np.testing.assert_array_almost_equal(
+            tissue_frames[positive_mask], hazy_np[positive_mask], decimal=5
+        )
+
+
+def test_dehaze_nuclear_diffusion_validation():
+    """Test dehaze_nuclear_diffusion raises errors for invalid configurations."""
+
+    # Create test video data
+    n_frames = 5
+    height, width, channels = 16, 16, 1
+    hazy_video = keras.random.uniform((n_frames, height, width, channels), minval=-1, maxval=1)
+
+    # Test with model without guidance function
+    mock_model = MagicMock()
+    mock_model.guidance_fn = None
+
+    with pytest.raises(ValueError, match="guidance function"):
+        dehaze_nuclear_diffusion(
+            hazy_video,
+            mock_model,
+            n_steps=2,
+            initial_step=0,
+            window_size=3,
+            verbose=False,
+        )
+
+    # Test with wrong guidance type
+    mock_model.guidance_fn = MagicMock(spec=DPS)
+
+    with pytest.raises(ValueError, match="Nuclear Diffusion"):
+        dehaze_nuclear_diffusion(
+            hazy_video,
+            mock_model,
+            n_steps=2,
+            initial_step=0,
+            window_size=3,
+            verbose=False,
+        )
+
+
+def _make_minimal_diffusion_model(input_shape):
+    """Create a minimal DiffusionModel with no guidance for direct guidance testing."""
+    return DiffusionModel(
+        input_shape=input_shape,
+        network_name="dense_time_conditional",
+        network_kwargs={"widths": [8], "output_dim": input_shape[0]},
+        guidance=None,
+        operator=None,
+    )
+
+
+def test_dps_guidance_call():
+    """Test DPS guidance returns (gradients, (error, (pred_noises, pred_images))).
+
+    JIT is disabled for easier testing, but also to trigger coverage of the executed code paths.
+    """
+    n_features, batch_size = 4, 2
+
+    model = _make_minimal_diffusion_model((n_features,))
+    guidance = DPS(diffusion_model=model, operator=InpaintingOperator(), disable_jit=True)
+
+    noisy = keras.random.uniform((batch_size, n_features))
+    measurements = keras.random.uniform((batch_size, n_features))
+    mask = keras.ops.ones((batch_size, n_features))
+    noise_rates = keras.ops.ones((batch_size, 1)) * 0.5
+    signal_rates = keras.ops.ones((batch_size, 1)) * 0.5
+
+    gradients, (error, (pred_noises, pred_images)) = guidance(
+        noisy,
+        measurements=measurements,
+        noise_rates=noise_rates,
+        signal_rates=signal_rates,
+        omega=1.0,
+        mask=mask,
+    )
+
+    assert gradients.shape == noisy.shape
+    assert pred_noises.shape == noisy.shape
+    assert pred_images.shape == noisy.shape
+    assert np.isfinite(float(error))
+
+
+def test_dds_guidance_call():
+    """Test DDS guidance returns (gradients, (error, (pred_noises, pred_images))).
+
+    JIT is disabled for easier testing, but also to trigger coverage of the executed code paths.
+    """
+    n_features, batch_size = 4, 2
+
+    model = _make_minimal_diffusion_model((n_features,))
+    guidance = DDS(diffusion_model=model, operator=InpaintingOperator(), disable_jit=True)
+
+    noisy = keras.random.uniform((batch_size, n_features))
+    measurements = keras.random.uniform((batch_size, n_features))
+    mask = keras.ops.ones((batch_size, n_features))
+    noise_rates = keras.ops.ones((batch_size, 1)) * 0.5
+    signal_rates = keras.ops.ones((batch_size, 1)) * 0.5
+
+    gradients, (error, (pred_noises, pred_images)) = guidance(
+        noisy,
+        measurements=measurements,
+        noise_rates=noise_rates,
+        signal_rates=signal_rates,
+        n_inner=3,
+        eps=1e-2,
+        mask=mask,
+    )
+
+    assert gradients.shape == noisy.shape
+    assert pred_noises.shape == noisy.shape
+    assert pred_images.shape == noisy.shape
+    assert np.isfinite(float(error))
+
+
+def test_nuclear_diffusion_guidance_call():
+    """Test NuclearDiffusion guidance returns ((grad_tissue, grad_haze), (error, aux)).
+
+    JIT is disabled for easier testing, but also to trigger coverage of the executed code paths.
+    """
+    batch, frames, h, w, c = 1, 3, 8, 8, 1
+
+    # DiffusionModel input_shape is per-frame (h, w, c)
+    model = DiffusionModel(
+        input_shape=(h, w, c),
+        guidance=None,
+        operator=None,
+    )
+    guidance = NuclearDiffusion(
+        diffusion_model=model, operator=LinearInterpOperator(), disable_jit=True
+    )
+
+    noisy_tissue = keras.random.uniform((batch, frames, h, w, c))
+    noisy_haze = keras.random.uniform((batch, frames, h, w, c))
+    measurements = keras.random.uniform((batch, frames, h, w, c))
+    noise_rates = keras.ops.ones((batch, frames, 1, 1, 1)) * 0.5
+    signal_rates = keras.ops.ones((batch, frames, 1, 1, 1)) * 0.5
+
+    (grad_tissue, grad_haze), (error, aux) = guidance(
+        noisy_tissue,
+        noisy_haze,
+        measurements=measurements,
+        noise_rates=noise_rates,
+        signal_rates=signal_rates,
+        omega=1.0,
+        gamma=1.0,
+        step=50,
+        total_steps=100,
+        initial_step=keras.ops.convert_to_tensor(0, dtype="float32"),
+    )
+
+    assert grad_tissue.shape == noisy_tissue.shape
+    assert grad_haze.shape == noisy_haze.shape
+    assert np.isfinite(float(error))
+    # aux = (pred_noises_tissue, pred_tissue, pred_haze, l2_error, nuclear_penalty)
+    assert len(aux) == 5

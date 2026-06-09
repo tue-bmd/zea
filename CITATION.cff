@@ -1,56 +1,92 @@
-cff-version: 1.2.0
-message: "If you use this software, please cite it as follows:"
-title: "zea: A Toolbox for Cognitive Ultrasound Imaging"
-version: 0.0.11
-doi: 10.48550/arXiv.2512.01433
-date-released: 2026-03-13
-repository-code: https://github.com/tue-bmd/zea
-license: Apache-2.0
-keywords:
-  - Python
-  - ultrasound
-  - Keras
-  - machine learning
-  - signal processing
-  - deep generative models
+cff-version: "1.2.0"
 authors:
+- family-names: Stevens
+  given-names: Tristan S. W.
+  orcid: "https://orcid.org/0000-0002-8563-5931"
+- family-names: Nierop
+  given-names: Wessel L.
+  name-particle: van
+  orcid: "https://orcid.org/0009-0003-3141-3369"
+- family-names: Luijten
+  given-names: Ben
+  orcid: "https://orcid.org/0000-0002-1797-8721"
+- family-names: Schaft
+  given-names: Vincent
+  name-particle: van de
+  orcid: "https://orcid.org/0000-0002-8515-5372"
+- family-names: Nolan
+  given-names: Oisín
+  orcid: "https://orcid.org/0009-0002-6939-7627"
+- family-names: Federici
+  given-names: Beatrice
+  orcid: "https://orcid.org/0009-0003-2496-8825"
+- family-names: Harten
+  given-names: Louis D.
+  name-particle: van
+  orcid: "https://orcid.org/0000-0002-0943-2825"
+- family-names: Penninga
+  given-names: Simon W.
+  orcid: "https://orcid.org/0009-0003-4095-8168"
+- family-names: Schueler
+  given-names: Noortje I. P.
+  orcid: "https://orcid.org/0009-0003-7134-6850"
+- family-names: Sloun
+  given-names: Ruud J. G.
+  name-particle: van
+  orcid: "https://orcid.org/0000-0003-2845-0495"
+contact:
+- family-names: Stevens
+  given-names: Tristan S. W.
+  orcid: "https://orcid.org/0000-0002-8563-5931"
+doi: 10.5281/zenodo.19676300
+message: If you use this software, please cite our article in the
+  Journal of Open Source Software.
+preferred-citation:
+  authors:
   - family-names: Stevens
-    given-names: Tristan S.W.
-    orcid: https://orcid.org/0000-0002-8563-5931
-    affiliation: Eindhoven University of Technology, the Netherlands
-  - family-names: van Nierop
+    given-names: Tristan S. W.
+    orcid: "https://orcid.org/0000-0002-8563-5931"
+  - family-names: Nierop
     given-names: Wessel L.
-    orcid: https://orcid.org/0009-0003-3141-3369
-    affiliation: Eindhoven University of Technology, the Netherlands
+    name-particle: van
+    orcid: "https://orcid.org/0009-0003-3141-3369"
   - family-names: Luijten
     given-names: Ben
-    orcid: https://orcid.org/0000-0002-1797-8721
-    affiliation: Eindhoven University of Technology, the Netherlands
-  - family-names: van de Schaft
+    orcid: "https://orcid.org/0000-0002-1797-8721"
+  - family-names: Schaft
     given-names: Vincent
-    orcid: https://orcid.org/0000-0002-8515-5372
-    affiliation: Eindhoven University of Technology, the Netherlands
+    name-particle: van de
+    orcid: "https://orcid.org/0000-0002-8515-5372"
   - family-names: Nolan
-    given-names: Oisín I.
-    orcid: https://orcid.org/0009-0002-6939-7627
-    affiliation: Eindhoven University of Technology, the Netherlands
+    given-names: Oisín
+    orcid: "https://orcid.org/0009-0002-6939-7627"
   - family-names: Federici
     given-names: Beatrice
-    orcid: https://orcid.org/0009-0003-2496-8825
-    affiliation: Eindhoven University of Technology, the Netherlands
-  - family-names: van Harten
+    orcid: "https://orcid.org/0009-0003-2496-8825"
+  - family-names: Harten
     given-names: Louis D.
-    orcid: https://orcid.org/0000-0002-0943-2825
-    affiliation: Eindhoven University of Technology, the Netherlands
+    name-particle: van
+    orcid: "https://orcid.org/0000-0002-0943-2825"
   - family-names: Penninga
     given-names: Simon W.
-    orcid: https://orcid.org/0009-0003-4095-8168
-    affiliation: Eindhoven University of Technology, the Netherlands
+    orcid: "https://orcid.org/0009-0003-4095-8168"
   - family-names: Schueler
-    given-names: Noortje I.P.
-    orcid: https://orcid.org/0009-0003-7134-6850
-    affiliation: Eindhoven University of Technology, the Netherlands
-  - family-names: van Sloun
-    given-names: Ruud J.G.
-    orcid: https://orcid.org/0000-0003-2845-0495
-    affiliation: Eindhoven University of Technology, the Netherlands
+    given-names: Noortje I. P.
+    orcid: "https://orcid.org/0009-0003-7134-6850"
+  - family-names: Sloun
+    given-names: Ruud J. G.
+    name-particle: van
+    orcid: "https://orcid.org/0000-0003-2845-0495"
+  date-published: 2026-05-02
+  doi: 10.21105/joss.09881
+  issn: 2475-9066
+  issue: 121
+  journal: Journal of Open Source Software
+  publisher:
+    name: Open Journals
+  start: 9881
+  title: "zea: A Toolbox for Cognitive Ultrasound Imaging"
+  type: article
+  url: "https://joss.theoj.org/papers/10.21105/joss.09881"
+  volume: 11
+title: "zea: A Toolbox for Cognitive Ultrasound Imaging"

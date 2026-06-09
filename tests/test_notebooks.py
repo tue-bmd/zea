@@ -26,6 +26,8 @@ from pathlib import Path
 import papermill as pm
 import pytest
 
+from . import _notebook_timings
+
 CONFIG_DIR = Path("configs")
 
 # Automatically discover notebooks
@@ -90,6 +92,28 @@ NOTEBOOK_PARAMETERS = {
         "num_iterations": 2,
         "step_size": 1,
     },
+    "nuclear_dehazing_example.ipynb": {
+        "n_unconditional_samples": 1,
+        "n_unconditional_steps": 2,
+        "n_conditional_samples": 1,
+        "n_conditional_steps": 2,
+        "diffusion_steps": 2,
+        "window_size": 2,
+        "hard_project": True,
+        "omega": 1.0,
+        "gamma": 1.0,
+        "haze_level": 0.5,
+        "rank_weight_factor": 20,
+        "initial_step": 0,
+    },
+    "refocus_pipeline_example.ipynb": {
+        "num_transmits": 2,
+        "grid_size_x": 16,
+        "grid_size_z": 16,
+    },
+    "zea_simulation_example.ipynb": {
+        "n_repeats": 2,
+    },
     # Add more notebooks and their parameters here as needed
     # "other_notebook.ipynb": {
     #     "param1": value1,
@@ -105,11 +129,6 @@ for nbp_name in NOTEBOOK_PARAMETERS.keys():
     )
 
 
-def pytest_sessionstart(session):
-    print(f"📚 Preparing to test {len(NOTEBOOKS)} notebooks from {NOTEBOOKS_DIR}")
-    print(f"📝 Using custom parameters for {len(NOTEBOOK_PARAMETERS)} notebooks")
-
-
 @pytest.mark.notebook
 @pytest.mark.parametrize("notebook", NOTEBOOKS, ids=lambda x: x.name)
 def test_notebook_runs(notebook, tmp_path, request):
@@ -117,6 +136,11 @@ def test_notebook_runs(notebook, tmp_path, request):
     notebook_filter = request.config.getoption("--notebook")
     if notebook_filter and notebook_filter not in notebook.name:
         pytest.skip(f"Skipped (--notebook={notebook_filter})")
+
+    # Filter by --notebook-dir CLI option if provided
+    notebook_dir_filter = request.config.getoption("--notebook-dir")
+    if notebook_dir_filter and notebook.parent.name not in notebook_dir_filter:
+        pytest.skip(f"Skipped (--notebook-dir={notebook_dir_filter})")
 
     print(f"\n📘 Starting notebook: {notebook.name}")
 
@@ -136,4 +160,5 @@ def test_notebook_runs(notebook, tmp_path, request):
     )
 
     duration = time.time() - start
+    _notebook_timings[notebook.name] = (notebook.parent.name, duration)
     print(f"✅ Finished {notebook.name} in {duration:.1f}s")

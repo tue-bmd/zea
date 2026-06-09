@@ -118,6 +118,22 @@ def test_wrong_shape(key, tmp_hdf5_path):
         generate_zea_dataset(path=tmp_hdf5_path, **wrong_parameters)
 
 
+@pytest.mark.parametrize("chunk_frames", [True, False])
+def test_chunk_frames(chunk_frames, tmp_hdf5_path):
+    """Tests that chunk_frames stores data datasets with one frame per chunk."""
+    generate_zea_dataset(path=tmp_hdf5_path, chunk_frames=chunk_frames, **DATASET_PARAMETERS)
+
+    validate_file(tmp_hdf5_path)
+
+    with File(tmp_hdf5_path) as dataset:
+        raw_data = dataset["data/raw_data"]
+        if chunk_frames:
+            # One frame (a single slice along the first axis) per chunk.
+            assert raw_data.chunks == (1,) + raw_data.shape[1:]
+        # Data must still be readable regardless of chunking.
+        assert np.array_equal(dataset.load_data("raw_data"), DATASET_PARAMETERS["raw_data"])
+
+
 def test_existing_path(tmp_hdf5_path):
     """Tests if passing a path that already exists raises an error."""
     # Ensure that the file exists

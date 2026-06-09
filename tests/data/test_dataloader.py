@@ -1,6 +1,7 @@
 """Test H5 dataloader functions"""
 
 import hashlib
+import importlib
 import pickle
 
 import h5py
@@ -21,6 +22,7 @@ from .. import DEFAULT_TEST_SEED
 CAMUS_DATASET_PATH = HFPath("hf://zeahub/camus-sample")
 CAMUS_FILE = CAMUS_DATASET_PATH / "val/patient0401/patient0401_4CH_half_sequence.hdf5"
 DUMMY_IMAGE_SHAPE = (28, 28)
+DUMMY_N_FRAMES = 100
 
 
 @pytest.fixture
@@ -29,7 +31,7 @@ def dummy_hdf5(tmp_path):
     file_path = tmp_path / "dummy_data.hdf5"
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     with h5py.File(file_path, "w") as f:
-        data = rng.standard_normal((100, *DUMMY_IMAGE_SHAPE))
+        data = rng.standard_normal((DUMMY_N_FRAMES, *DUMMY_IMAGE_SHAPE))
         f.create_dataset("data", data=data)
     return file_path
 
@@ -207,7 +209,7 @@ def test_dataloader(
     shuffle_keys = []
     for _ in range(n_shuffle_iters):
         h = ""
-        for batch in iter(dataset):
+        for batch in dataset:
             key = hashlib.md5(pickle.dumps(batch)).hexdigest()
             h += key
         shuffle_keys.append(h)
@@ -598,6 +600,49 @@ def test_dataset_property(dummy_hdf5):
     assert loader.dataset is not None
 
 
+def test_h5_data_source_with_disabled_cache(multi_shape_dataset, monkeypatch):
+    """H5DataSource must survive multiprocessing.Pool when caching is disabled.
+
+    Regression test for a bug where tempfile.TemporaryDirectory was used as the
+    ZEA_CACHE_DIR. On Linux (fork-based multiprocessing), forked Pool workers
+    inherit the TemporaryDirectory object and its weakref.finalize cleanup
+    callback. If the finalizer fires in any worker, it deletes the shared temp
+    dir from under the parent process, causing a FileNotFoundError.
+
+    The fix replaces TemporaryDirectory with tempfile.mkdtemp so there is no
+    weakref.finalize for forked children to inherit.
+    """
+
+    import zea.data.dataloader as _dataloader_mod
+    import zea.data.datasets as _datasets_mod
+    import zea.internal.cache as _cache_mod
+
+    # Set the env var *before* reloading so the import-time _disable_cache()
+    # call in zea.internal.cache exercises the mkdtemp path (not TemporaryDirectory).
+    # monkeypatch auto-restores the env var after the test.
+    monkeypatch.setenv("ZEA_DISABLE_CACHE", "1")
+    importlib.reload(_cache_mod)
+    importlib.reload(_datasets_mod)
+    importlib.reload(_dataloader_mod)
+
+    try:
+        source = _dataloader_mod.H5DataSource(
+            file_paths=multi_shape_dataset,
+            key="data",
+            n_frames=1,
+            validate=False,
+        )
+        assert len(source) > 0
+    finally:
+        # Restore modules to cache-enabled state for subsequent tests.
+        # Remove the env var first so the reload picks up the enabled path;
+        # monkeypatch's own teardown will then be a harmless no-op.
+        monkeypatch.delenv("ZEA_DISABLE_CACHE", raising=False)
+        importlib.reload(_cache_mod)
+        importlib.reload(_datasets_mod)
+        importlib.reload(_dataloader_mod)
+
+
 def test_dataloader_repr(dummy_hdf5):
     """Test Dataloader __repr__ includes key information."""
     loader = Dataloader(
@@ -627,14 +672,6 @@ def test_assert_image_range_above():
         Dataloader._assert_image_range(image, (0, 1))
 
 
-def test_normalize():
-    """Test _normalize maps values from image_range to normalization_range."""
-    image = np.array([0.0, 0.5, 1.0])
-    result = np.array(Dataloader._normalize(image, (0, 1), (0, 10)))
-    expected = np.array([0.0, 5.0, 10.0])
-    np.testing.assert_allclose(result, expected)
-
-
 def test_summary(dummy_hdf5, capsys):
     """Test summary() prints dataset statistics."""
     loader = Dataloader(
@@ -647,3 +684,46 @@ def test_summary(dummy_hdf5, capsys):
     captured = capsys.readouterr()
     assert "Dataloader with" in captured.out
     assert "samples" in captured.out
+
+
+def test_shape_attribute(dummy_hdf5):
+    """Test that the shape attribute is set correctly."""
+
+    # Without returning filenames
+    loader = Dataloader(
+        dummy_hdf5,
+        key="data",
+        shuffle=False,
+        validate=False,
+        batch_size=1,
+    )
+    batch = next(iter(loader))
+    assert batch.shape == (1, *DUMMY_IMAGE_SHAPE, 1)
+    assert loader.shape == (1, *DUMMY_IMAGE_SHAPE, 1)
+
+    # With returning filenames
+    loader = Dataloader(
+        dummy_hdf5,
+        key="data",
+        shuffle=False,
+        validate=False,
+        batch_size=1,
+        return_filename=True,
+    )
+    batch = next(iter(loader))
+    assert batch[0].shape == (1, *DUMMY_IMAGE_SHAPE, 1)
+    assert loader.shape == (1, *DUMMY_IMAGE_SHAPE, 1)
+
+
+def test_len_attribute(dummy_hdf5):
+    """Test that the len attribute is set correctly."""
+
+    # Without returning filenames
+    loader = Dataloader(
+        dummy_hdf5,
+        key="data",
+        shuffle=False,
+        validate=False,
+        batch_size=1,
+    )
+    assert len(loader) == DUMMY_N_FRAMES

@@ -9,7 +9,6 @@ import numpy as np
 from keras.utils import pad_sequences
 
 from zea import log
-from zea.data.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.checks import (
     _DATA_TYPES,
     _NON_IMAGE_DATA_TYPES,
@@ -17,6 +16,7 @@ from zea.internal.checks import (
     get_check,
 )
 from zea.internal.core import DataTypes
+from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.utils import reduce_to_signature
 from zea.probes import Probe
 from zea.scan import Scan
@@ -173,7 +173,7 @@ class File(h5py.File):
         self,
         data_type,
         indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
-    ):
+    ) -> np.ndarray:
         """Load data from the file.
 
         .. include:: ../common/file_indexing.rst
@@ -538,7 +538,7 @@ def load_file(
     data_type="raw_data",
     indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
     scan_kwargs: dict = None,
-):
+) -> Tuple[np.ndarray, Scan, Probe]:
     """Loads a zea data files (h5py file).
 
     Returns the data together with a scan object containing the parameters

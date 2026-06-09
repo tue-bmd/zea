@@ -108,6 +108,7 @@ from .pipeline import (
     MinimumVariance,
     PatchedGrid,
     Pipeline,
+    Refocus,
 )
 from .tensor import GaussianBlur, Normalize, Pad, Threshold
 from .ultrasound import (
@@ -153,6 +154,7 @@ __all__ = [
     "Map",
     "PatchedGrid",
     "Pipeline",
+    "Refocus",
     # Tensor operations
     "GaussianBlur",
     "Normalize",
