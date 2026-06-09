@@ -43,6 +43,9 @@ exclude_patterns = [
     "_build",
     "Thumbs.db",
     ".DS_Store",
+    # Included verbatim by data-acquisition.rst; excluded as a standalone
+    # document so its labels (e.g. ``group-reference``) are not defined twice.
+    "_spec_ref.rst",
     "_autosummary/zea.backend.tf2jax.rst",
     # Exclude internal implementation modules from documentation
     "_autosummary/zea.func.tensor.rst",
@@ -113,3 +116,48 @@ redirects = {
 # this will make sure that when an __all__ is defined in a module, the members
 # listed in __all__ are the only ones included in the autosummary documentation
 autosummary_ignore_module_all = False
+
+# -- Top-level public API aliases --------------------------------------------
+# A handful of classes are defined in submodules but re-exported at the package
+# top level (``zea.Config`` etc.) as the encouraged import path. We document
+# them *only* under their ``zea.X`` alias and hide the copy in the defining
+# submodule, so each object has a single, unambiguous cross-reference target.
+# autodoc still registers the canonical (submodule) name as an alias, so
+# existing references like ``:class:`~zea.config.Config``` keep resolving.
+#
+# Maps the canonical ``module.Qualname`` to the public alias used in the docs.
+TOPLEVEL_API_ALIASES = {
+    "zea.config.Config": "zea.Config",
+    "zea.data.dataloader.Dataloader": "zea.Dataloader",
+    "zea.data.datasets.Dataset": "zea.Dataset",
+    "zea.data.datasets.Folder": "zea.Folder",
+    "zea.data.file.File": "zea.File",
+    "zea.ops.pipeline.Pipeline": "zea.Pipeline",
+    "zea.probes.Probe": "zea.Probe",
+    "zea.scan.Parameters": "zea.Parameters",
+}
+
+_REEXPORTED_CANONICALS = set(TOPLEVEL_API_ALIASES)
+
+
+def _skip_reexported_members(app, what, name, obj, skip, options):
+    """Hide re-exported classes in their defining submodule.
+
+    These classes are documented under their top-level ``zea.X`` alias instead
+    (see ``TOPLEVEL_API_ALIASES``), which keeps a single documentation target
+    per object and avoids "more than one target found" warnings.
+
+    Returns ``None`` (rather than ``skip``) for everything else so the default
+    filtering still applies. autosummary fires this event with ``skip=False``
+    for every member, so echoing ``skip`` back would force private members into
+    the generated summary tables.
+    """
+    if what == "module":
+        canonical = f"{getattr(obj, '__module__', '')}.{getattr(obj, '__qualname__', '')}"
+        if canonical in _REEXPORTED_CANONICALS:
+            return True
+    return None
+
+
+def setup(app):
+    app.connect("autodoc-skip-member", _skip_reexported_members)

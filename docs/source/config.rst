@@ -146,10 +146,9 @@ are accepted and passed through unchanged.
 API reference
 ----------------------------
 
-.. autoclass:: zea.Config
-   :members: from_path, from_yaml, to_yaml
-   :undoc-members:
-   :show-inheritance:
+.. autosummary::
+
+   zea.Config
 
 .. autofunction:: zea.config.check_config
    :no-index:

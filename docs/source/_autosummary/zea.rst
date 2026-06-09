@@ -7,6 +7,21 @@ zea
 
 .. automodule:: zea
 
+.. rubric:: Classes
+
+
+.. autosummary::
+   :toctree:
+
+   Config
+   Dataloader
+   Dataset
+   File
+   Folder
+   Parameters
+   Pipeline
+   Probe
+
 .. rubric:: Functions
 
 .. autosummary::
