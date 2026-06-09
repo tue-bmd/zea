@@ -494,9 +494,9 @@ class LowPassFilterIQ(FirFilter):
     def call(self, bandwidth, sampling_frequency, center_frequency, **kwargs):
         lpf = get_low_pass_iq_filter(
             self.num_taps,
-            sampling_frequency,
-            center_frequency,
-            bandwidth,
+            ops.convert_to_numpy(sampling_frequency).item(),
+            ops.convert_to_numpy(center_frequency).item(),
+            ops.convert_to_numpy(bandwidth).item(),
         )
         kwargs[self.filter_key] = lpf
         return super().call(**kwargs)
