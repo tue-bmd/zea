@@ -60,6 +60,7 @@ exclude_patterns = [
     "_autosummary/zea.tracking.lucas_kanade.rst",
     "_autosummary/zea.models.hvae.model.rst",
     "_autosummary/zea.models.hvae.utils.rst",
+    "_autosummary/zea.cli_args.rst",
 ]
 
 autodoc_default_options = {
