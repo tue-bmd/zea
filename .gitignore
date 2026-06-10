@@ -31,6 +31,7 @@ __pycache__/
 .DS_Store
 /.ideas
 .devcontainer
+.claude
 
 # C extensions
 *.so
