@@ -44,12 +44,14 @@ class File(h5py.File):
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
 
+        # Extract HF-only kwargs so they never reach h5py
+        hf_kwargs = {}
+        for key in ("revision", "repo_type", "cache_dir"):
+            if key in kwargs:
+                hf_kwargs[key] = kwargs.pop(key)
+
         # Resolve huggingface path
         if str(name).startswith(HF_PREFIX):
-            hf_kwargs = {}
-            for key in ("revision", "repo_type", "cache_dir"):
-                if key in kwargs:
-                    hf_kwargs[key] = kwargs.pop(key)
             name = _hf_resolve_path(str(name), **hf_kwargs)
 
         # Disable locking for read mode by default

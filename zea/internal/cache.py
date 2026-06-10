@@ -199,7 +199,8 @@ def clear_cache(func_name=None):
         This only clears cached function *results* as decorated by `@cache_output`.
         It does NOT clear downloaded HuggingFace dataset files.
         To force a fresh HF download, delete the relevant subdirectory under
-        ``~/.cache/zea/huggingface/datasets/`` manually.
+        ``ZEA_CACHE_DIR / "huggingface" / "datasets"`` (``HF_DATASETS_DIR`` in
+        ``zea.internal.preset_utils``) manually.
 
     """
     total_cleared = 0
