@@ -14,7 +14,7 @@ from typing import Annotated, Union
 
 import tyro
 
-from zea.data.process import ProcessArgs
+from zea.cli_args import ProcessArgs
 
 
 @dataclass

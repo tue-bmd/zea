@@ -3,6 +3,7 @@
 import importlib
 import importlib.util
 import os
+import sys
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
@@ -47,6 +48,10 @@ except PackageNotFoundError:
 
 def _bootstrap_backend():
     """Setup function to initialize the zea package."""
+
+    # No printing when using --help flag
+    if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
+        return
 
     def _check_backend_installed():
         """Verify that the required ML backend is installed.
