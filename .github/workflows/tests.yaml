@@ -120,7 +120,7 @@ jobs:
             sh -c "pip install -e .[tests] && pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
 
       - name: Upload results to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ env.MAIN_REPO }}
@@ -151,7 +151,7 @@ jobs:
             sh -lc "pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'heavy' ./tests"
 
       - name: Upload heavy test results to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ env.MAIN_REPO }}
