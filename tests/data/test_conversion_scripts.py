@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import types
 import zipfile
 from pathlib import Path
 
@@ -792,6 +793,253 @@ def verify_converted_verasonics_test_data(src, dst):
         assert "data" in f, f"Missing 'data' in {h5_file}"
         assert "scan" in f, f"Missing 'scan' in {h5_file}"
         f.validate()
+
+
+def _install_fake_echoxflow(monkeypatch, src, recordings):
+    """Install a fake ``echoxflow`` module so convert_echoxflow can run end-to-end.
+
+    The real EchoXFlow reader is a separate, optional third-party package
+    (``pip install echoxflow``) that parses a ``croissant.json`` catalog into
+    record/store/stream objects.  It is not a dependency of zea, so to test the
+    converter against data shaped like the real dataset we replicate that small
+    API surface with fakes backed by synthetic numpy frames.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture (used to inject ``sys.modules``).
+        src (Path): EchoXFlow data root; a ``croissant.json`` placeholder is
+            written here so the converter's default catalog path exists.
+        recordings (list[dict]): One dict per recording with keys ``exam_id``,
+            ``recording_id``, ``frames`` (uint8, shape (F, H, W)), ``fps``,
+            ``geometry`` (object or None) and ``ecg`` (1-D float array or None).
+    """
+    MODALITY = "2d_brightness_mode"
+
+    class FakeGeometry:
+        def __init__(self):
+            self.angle_start_rad = -np.pi / 4
+            self.angle_end_rad = np.pi / 4
+            self.depth_start_m = 0.0
+            self.depth_end_m = 0.08
+
+    class FakeStream:
+        def __init__(self, data, fps, geometry):
+            self.data = data
+            self.sample_rate_hz = fps
+            self.timestamps = np.arange(len(data), dtype=np.float32) / fps
+            self.metadata = types.SimpleNamespace(geometry=geometry)
+
+    class FakeEcg:
+        def __init__(self, samples, fps):
+            self.data = samples
+            self.sample_rate_hz = fps
+            self.timestamps = np.arange(len(samples), dtype=np.float32) / fps
+
+    class FakeStore:
+        def __init__(self, spec):
+            self._spec = spec
+
+        def load_stream(self, name):
+            if name == MODALITY:
+                return FakeStream(self._spec["frames"], self._spec["fps"], self._spec["geometry"])
+            if name == "ecg" and self._spec["ecg"] is not None:
+                return FakeEcg(self._spec["ecg"], self._spec["fps"])
+            raise KeyError(name)
+
+    class FakeRecord:
+        def __init__(self, spec):
+            self._spec = spec
+            self.exam_id = spec["exam_id"]
+            self.recording_id = spec["recording_id"]
+
+        def sample_rate_hz(self, _modality):
+            return self._spec["fps"]
+
+        def has_array_path(self, path):
+            return path == "data/ecg" and self._spec["ecg"] is not None
+
+    catalog = types.SimpleNamespace(recordings=[FakeRecord(r) for r in recordings])
+
+    def load_croissant(_path):
+        return catalog
+
+    def find_recordings(croissant, min_frame_counts, predicate, **_kwargs):
+        min_frames = min_frame_counts[MODALITY]
+        return [
+            rec
+            for rec in croissant.recordings
+            if len(rec._spec["frames"]) >= min_frames and predicate(rec)
+        ]
+
+    def open_recording(record, root):  # noqa: ARG001 - root unused by the fake
+        return FakeStore(record._spec)
+
+    fake_module = types.ModuleType("echoxflow")
+    fake_module.load_croissant = load_croissant
+    fake_module.find_recordings = find_recordings
+    fake_module.open_recording = open_recording
+    monkeypatch.setitem(sys.modules, "echoxflow", fake_module)
+
+    (src / "croissant.json").write_text("{}")
+
+
+def create_echoxflow_test_data(src, monkeypatch):
+    """Create EchoXFlow-like synthetic recordings and install the fake reader.
+
+    Produces three recordings:
+    - two qualifying B-mode recordings (one with ECG + geometry, one without
+      either) that should be converted, and
+    - one short recording that falls below ``--min-frames`` and is filtered out
+      by ``find_recordings`` (so we also exercise the frame-count predicate).
+
+    Args:
+        src (Path): source directory (EchoXFlow data root).
+        monkeypatch: pytest monkeypatch fixture, forwarded to install the fake.
+
+    Returns:
+        dict: the expected ``{exam_id: [recording_id, ...]}`` of converted files.
+    """
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    class _Geometry:
+        angle_start_rad = -np.pi / 4
+        angle_end_rad = np.pi / 4
+        depth_start_m = 0.0
+        depth_end_m = 0.08
+
+    recordings = [
+        {
+            "exam_id": "exam_A",
+            "recording_id": "rec_0",
+            "frames": rng.integers(0, 256, (12, 48, 32), dtype=np.uint8),
+            "fps": 50.0,
+            "geometry": _Geometry(),
+            "ecg": rng.normal(size=200).astype(np.float32),
+        },
+        {
+            "exam_id": "exam_B",
+            "recording_id": "rec_1",
+            "frames": rng.integers(0, 256, (15, 40, 28), dtype=np.uint8),
+            "fps": 45.0,
+            "geometry": None,  # exercises the no-coordinates path
+            "ecg": None,  # exercises the no-ecg path
+        },
+        {
+            "exam_id": "exam_B",
+            "recording_id": "rec_too_short",
+            "frames": rng.integers(0, 256, (3, 40, 28), dtype=np.uint8),
+            "fps": 45.0,
+            "geometry": None,
+            "ecg": None,
+        },
+    ]
+
+    _install_fake_echoxflow(monkeypatch, src, recordings)
+
+    # rec_too_short has only 3 frames (< default --min-frames=10) so it is filtered out.
+    return {"exam_A": ["rec_0"], "exam_B": ["rec_1"]}
+
+
+def verify_converted_echoxflow_test_data(dst, expected):
+    """Verify EchoXFlow conversion produced valid per-recording HDF5 files.
+
+    Args:
+        dst (Path): destination directory of converted files.
+        expected (dict): ``{exam_id: [recording_id, ...]}`` of expected outputs.
+    """
+    produced = {p.name for p in dst.rglob("*.hdf5")}
+    expected_names = {f"{rec}.hdf5" for recs in expected.values() for rec in recs}
+    assert produced == expected_names, (
+        f"Mismatch in converted hdf5 files. Expected {expected_names}, got {produced}"
+    )
+
+    for exam_id, recs in expected.items():
+        for rec in recs:
+            h5_file = dst / exam_id / f"{rec}.hdf5"
+            assert h5_file.exists(), f"Missing converted file: {h5_file}"
+            with File(h5_file, "r") as f:
+                assert "data/image" in f, f"Missing 'data/image' in {h5_file}"
+                image = f.data.image.values[:]
+                assert image.ndim == 4, f"Expected (F, H, W, 1) image, got {image.shape}"
+                assert image.dtype == np.uint8, f"Expected uint8 image in {h5_file}"
+                # subject.id is mapped from exam_id and enables subject-wise splits.
+                assert "metadata/subject" in f, f"Missing 'metadata/subject' in {h5_file}"
+                f.validate()
+
+    # exam_A/rec_0 has geometry + ecg -> coordinates and an ecg signal must be present.
+    with File(dst / "exam_A" / "rec_0.hdf5", "r") as f:
+        assert "coordinates" in f["data/image"], "Expected per-pixel coordinates for rec_0"
+        assert "metadata/ecg" in f, "Expected ecg metadata for rec_0"
+
+    # exam_B/rec_1 has neither -> no coordinates, no ecg.
+    with File(dst / "exam_B" / "rec_1.hdf5", "r") as f:
+        assert "coordinates" not in f["data/image"], "rec_1 should have no coordinates"
+        assert "metadata/ecg" not in f, "rec_1 should have no ecg metadata"
+
+    # The conversion writes a dataset card stamped with the default zeahub repo id.
+    readme = dst / "README.md"
+    assert readme.exists(), "Missing dataset card README.md"
+    assert "zea_repo_id: zeahub/echoxflow" in readme.read_text(), (
+        "Dataset card must declare the default zea_repo_id"
+    )
+
+
+@pytest.mark.heavy
+def test_echoxflow_conversion_script(tmp_path_factory, monkeypatch):
+    """Convert EchoXFlow-like data end-to-end through convert_echoxflow.
+
+    EchoXFlow's reader is the optional third-party ``echoxflow`` package, which
+    is not installed in CI, so this case cannot use the subprocess CLI path used
+    by the other datasets.  Instead we inject a fake ``echoxflow`` module that
+    produces synthetic recordings shaped like the real dataset and call the
+    converter in-process.
+    """
+    from zea.data.convert.echoxflow import convert_echoxflow
+
+    base = tmp_path_factory.mktemp("echoxflow_base")
+    src = base / "src"
+    dst = base / "dst"
+    src.mkdir()
+
+    expected = create_echoxflow_test_data(src, monkeypatch)
+
+    args = argparse.Namespace(
+        src=str(src),
+        dst=str(dst),
+        croissant=None,
+        min_frames=10,
+        min_fps=30.0,
+        limit=None,
+        overwrite=False,
+        upload=False,
+        revision=None,
+        hf_repo_id="",
+    )
+    convert_echoxflow(args)
+
+    verify_converted_echoxflow_test_data(dst, expected)
+
+
+def test_echoxflow_missing_package_raises(monkeypatch):
+    """convert_echoxflow must raise a clear ImportError when echoxflow is absent."""
+    from zea.data.convert.echoxflow import convert_echoxflow
+
+    # Ensure importing echoxflow fails even if it ever gets installed.
+    monkeypatch.setitem(sys.modules, "echoxflow", None)
+
+    args = argparse.Namespace(
+        src="/tmp/echoxflow_src",
+        dst="/tmp/echoxflow_dst",
+        croissant=None,
+        min_frames=10,
+        min_fps=30.0,
+        limit=None,
+        overwrite=False,
+        upload=False,
+        revision=None,
+        hf_repo_id="",
+    )
+    with pytest.raises(ImportError, match="not installed"):
+        convert_echoxflow(args)
 
 
 @pytest.mark.parametrize("image_type", _SUPPORTED_IMG_TYPES)
