@@ -57,20 +57,11 @@ def _get_snapshot_dir_from_downloaded_file(downloaded_file_path: str | Path) -> 
     HF Hub downloads to: cache_dir/datasets--org--repo/snapshots/{hash}/path/to/filename
     This navigates up to find the {hash} directory (the snapshot directory).
     """
-    file_path = Path(downloaded_file_path)
-
-    # Navigate up the path until we find the snapshots directory
-    current = file_path.parent
-    while current.name != "snapshots" and current.parent != current:
+    current = Path(downloaded_file_path).parent
+    while current.parent != current:
+        if current.parent.name == "snapshots":
+            return current
         current = current.parent
-
-    if current.name == "snapshots":
-        # Return the snapshot hash directory (first subdirectory of snapshots)
-        snapshot_dirs = [d for d in current.iterdir() if d.is_dir()]
-        if snapshot_dirs:
-            # Return the most recent snapshot directory
-            return max(snapshot_dirs, key=lambda p: p.stat().st_mtime)
-
     raise FileNotFoundError(f"Could not find snapshot directory for {downloaded_file_path}")
 
 
