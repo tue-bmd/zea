@@ -351,7 +351,8 @@ class ScanConvert(Operation):
 @ops_registry("demodulate")
 class Demodulate(Operation):
     """Demodulates the input data to baseband. After this operation, the carrier frequency
-    is removed (0 Hz) and the data is in IQ format stored in two real valued channels."""
+    is removed (0 Hz) and the data is in IQ format stored in two real valued channels.
+    """
 
     ADD_OUTPUT_KEYS = ["center_frequency", "n_ch"]
 
@@ -463,7 +464,11 @@ class LowPassFilterIQ(FirFilter):
     """
 
     def __init__(
-        self, axis: int = -3, num_taps: int = 127, filter_key: str = "low_pass_filter", **kwargs
+        self,
+        axis: int = -3,
+        num_taps: int = 127,
+        filter_key: str = "low_pass_filter",
+        **kwargs,
     ):
         """Initialize the LowPassFilterIQ operation.
 
@@ -506,10 +511,15 @@ class LowPassFilterIQ(FirFilter):
 class BandPassFilter(FirFilter):
     """Apply a band-pass FIR filter to the real input signal using convolution.
 
-    The bandwidth parameter in the call method defines the passband centered around
-    ``demodulation_frequency``, with edges at ``demodulation_frequency - bandwidth/2``
-    and ``demodulation_frequency + bandwidth/2``. So, make sure this is used before demodulation
-    to baseband.
+    By default, the call-time ``bandwidth`` defines the passband centered around
+    ``demodulation_frequency``, with edges at
+    ``demodulation_frequency - bandwidth/2`` and
+    ``demodulation_frequency + bandwidth/2``.
+
+    Optionally, a fixed ``passband=(f1, f2)`` can be provided at initialization, or a
+    call-time ``passband`` can be provided to override both the fixed passband and the
+    ``demodulation_frequency``/``bandwidth``-based computation. Make sure this is used
+    before demodulation to baseband.
 
     This operation is provided for convenience and will recompute the filter weights every
     time it is called. Alternatively, you can use :class:`FirFilter` with pre-computed
@@ -517,7 +527,12 @@ class BandPassFilter(FirFilter):
     """
 
     def __init__(
-        self, axis: int = -3, num_taps: int = 127, filter_key: str = "band_pass_filter", **kwargs
+        self,
+        axis: int = -3,
+        num_taps: int = 127,
+        filter_key: str = "band_pass_filter",
+        passband=None,
+        **kwargs,
     ):
         """Initialize the BandPassFilter operation.
 
@@ -526,6 +541,10 @@ class BandPassFilter(FirFilter):
                 Default is -3, which is the ``n_ax`` axis for standard ultrasound data layout.
             num_taps (int): Number of taps in the FIR filter. Default is 127.
                 Odd will result in a type I filter, even in a type II filter.
+            passband (tuple[float, float] | None): Lower and upper cutoff frequencies for
+                the bandpass filter. See class docstring for detailed behavior. ``None``
+                disables explicit passband parameters and derives these from call-time frequency
+                parameters.
         """
         if "complex_channels" in kwargs and kwargs["complex_channels"]:
             raise ValueError(
@@ -539,28 +558,73 @@ class BandPassFilter(FirFilter):
             **kwargs,
         )
         self.num_taps = num_taps
+        self.passband = passband
 
-    def call(self, sampling_frequency, demodulation_frequency, bandwidth, **kwargs):
+    def call(
+        self,
+        sampling_frequency,
+        demodulation_frequency=None,
+        bandwidth=None,
+        passband=None,
+        **kwargs,
+    ):
         """Apply band-pass filter with specified bandwidth.
 
         Args:
             sampling_frequency (float): Sampling frequency in Hz.
-            demodulation_frequency (float): Center frequency in Hz.
-            bandwidth (float): Bandwidth in Hz. The filter will pass frequencies from
+            demodulation_frequency (float): Center frequency in Hz. Used only when no
+                passband override is provided.
+            bandwidth (float): Bandwidth in Hz. Used only when no passband override is
+                provided. The filter will pass frequencies from
                 ``demodulation_frequency - bandwidth/2`` to
                 ``demodulation_frequency + bandwidth/2``.
+            passband (tuple): Optional tuple containing the lower and upper frequencies in
+                Hz. This overrides both init-time passband and the
+                ``demodulation_frequency``/``bandwidth``-based passband.
 
         Returns:
             dict: Dictionary containing filtered signal.
         """
-        f1 = demodulation_frequency - bandwidth / 2
-        f2 = demodulation_frequency + bandwidth / 2
+        selected_passband = passband if passband is not None else self.passband
+
+        if selected_passband is not None:
+            f1, f2 = self._validate_and_unpack_passband(selected_passband)
+        else:
+            if demodulation_frequency is None or bandwidth is None:
+                raise ValueError(
+                    "BandPassFilter requires either passband=(f1, f2) or both "
+                    "demodulation_frequency and bandwidth."
+                )
+            f1 = demodulation_frequency - bandwidth / 2
+            f2 = demodulation_frequency + bandwidth / 2
 
         bpf = get_band_pass_filter(
             self.num_taps, sampling_frequency, f1, f2, validate=not self._jit_compile
         )
         kwargs[self.filter_key] = bpf
         return super().call(**kwargs)
+
+    @staticmethod
+    def _validate_and_unpack_passband(selected_passband):
+        """Validate passband and return (f1, f2)."""
+        passband_error_message = "passband must be an iterable of two numeric values"
+
+        try:
+            passband_values = tuple(selected_passband)
+            f1 = passband_values[0]
+            f2 = passband_values[1]
+        except (TypeError, IndexError) as exc:
+            raise ValueError(passband_error_message) from exc
+
+        if len(passband_values) != 2:
+            raise ValueError(passband_error_message)
+
+        if not all(
+            isinstance(f, (int, float, np.number)) and not isinstance(f, bool) for f in (f1, f2)
+        ):
+            raise ValueError(passband_error_message)
+
+        return f1, f2
 
 
 @ops_registry("channels_to_complex")
@@ -642,12 +706,22 @@ class LeeFilter(Filter):
 
         # Apply Gaussian blur to get local mean
         img_mean = gaussian_filter(
-            data, self.sigma, mode=self.mode, cval=self.cval, truncate=self.truncate, axes=axes
+            data,
+            self.sigma,
+            mode=self.mode,
+            cval=self.cval,
+            truncate=self.truncate,
+            axes=axes,
         )
 
         # Apply Gaussian blur to squared data to get local squared mean
         img_sqr_mean = gaussian_filter(
-            data**2, self.sigma, mode=self.mode, cval=self.cval, truncate=self.truncate, axes=axes
+            data**2,
+            self.sigma,
+            mode=self.mode,
+            cval=self.cval,
+            truncate=self.truncate,
+            axes=axes,
         )
 
         # Calculate local variance

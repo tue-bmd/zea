@@ -738,14 +738,60 @@ def test_band_pass_filter():
     data = rng.standard_normal((2, 1, 128, 16, 1)).astype("float32")
     data = keras.ops.convert_to_tensor(data)
 
+    operation = ops.BandPassFilter(
+        axis=-3,
+        with_batch_dim=True,
+        passband=(3.5e6, 6.5e6),
+    )
+
+    # Uses init-time passband.
+    result_init_passband = operation(
+        data=data,
+        sampling_frequency=40e6,
+    )["data"]
+
+    # Call-time passband should override init-time passband.
+    result_call_passband = operation(
+        data=data,
+        sampling_frequency=40e6,
+        passband=(4e6, 6e6),
+    )["data"]
+
+    # With init-time passband set, demod/bandwidth should not override it.
+    result_demod_frequency = operation(
+        data=data,
+        sampling_frequency=40e6,
+        demodulation_frequency=5e6,
+        bandwidth=2e6,
+    )["data"]
+
+    # Test the frequency/bandwidth input mode when no fixed passband is set.
     operation = ops.BandPassFilter(axis=-3, with_batch_dim=True)
-    result = operation(
+    result_default = operation(
         data=data,
         sampling_frequency=40e6,
         demodulation_frequency=5e6,
         bandwidth=3e6,
     )["data"]
-    return result
+
+    rtol, atol = 1e-5, 1e-6
+    result_init_passband = keras.ops.convert_to_numpy(result_init_passband)
+    result_call_passband = keras.ops.convert_to_numpy(result_call_passband)
+    result_demod_frequency = keras.ops.convert_to_numpy(result_demod_frequency)
+
+    # Compare the three passband-related modes.
+    assert np.allclose(result_init_passband, result_demod_frequency, rtol=rtol, atol=atol)
+    assert not np.allclose(result_init_passband, result_call_passband, rtol=rtol, atol=atol)
+    assert not np.allclose(result_demod_frequency, result_call_passband, rtol=rtol, atol=atol)
+
+    with pytest.raises(ValueError, match="passband must be an iterable of two numeric values"):
+        operation(
+            data=data,
+            sampling_frequency=40e6,
+            passband=(4e6,),
+        )
+
+    return result_default
 
 
 def test_make_tgc_curve():
