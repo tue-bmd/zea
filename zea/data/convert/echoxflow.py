@@ -11,9 +11,17 @@ Usage::
 
 ``src`` is the EchoXFlow data root (e.g. ``/data/EchoXFlow/data``) containing a
 ``croissant.json`` catalog. Reading EchoXFlow recordings requires the optional
-``echoxflow`` package (``pip install echoxflow``).
+``echoxflow`` package (https://github.com/Ahus-AIM/EchoXFlow), which is not
+published on PyPI; install it directly from GitHub::
+
+    pip install "echoxflow @ git+https://github.com/Ahus-AIM/EchoXFlow.git"
+
+EchoXFlow declares ``requires-python = ">=3.13"``, but the reader also runs on
+Python 3.11/3.12 (only pip's metadata check blocks it); there, append
+``--ignore-requires-python`` to the command above.
 """
 
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +39,7 @@ from zea.data.file import File
 
 MODALITY = "2d_brightness_mode"
 _ECHOXFLOW_HF_REPO_ID = "zeahub/echoxflow"
+_ECHOXFLOW_GIT = "git+https://github.com/Ahus-AIM/EchoXFlow.git"
 
 
 def _import_echoxflow():
@@ -43,9 +52,14 @@ def _import_echoxflow():
     try:
         from echoxflow import find_recordings, load_croissant, open_recording
     except ImportError as exc:
+        command = f'pip install "echoxflow @ {_ECHOXFLOW_GIT}"'
+        if sys.version_info < (3, 13):
+            # EchoXFlow pins requires-python to >=3.13, but the reader runs fine on
+            # 3.11/3.12 (zarr>=3.1 needs >=3.11); only pip's metadata check blocks it.
+            command += " --ignore-requires-python"
         raise ImportError(
-            "The `echoxflow` package is not installed. "
-            "Please install it with `pip install echoxflow` to convert EchoXFlow recordings."
+            "Converting EchoXFlow recordings requires the `echoxflow` package, "
+            f"which is not published on PyPI. Install it from GitHub with:\n    {command}"
         ) from exc
     return find_recordings, load_croissant, open_recording
 

@@ -799,10 +799,11 @@ def _install_fake_echoxflow(monkeypatch, src, recordings):
     """Install a fake ``echoxflow`` module so convert_echoxflow can run end-to-end.
 
     The real EchoXFlow reader is a separate, optional third-party package
-    (``pip install echoxflow``) that parses a ``croissant.json`` catalog into
-    record/store/stream objects.  It is not a dependency of zea, so to test the
-    converter against data shaped like the real dataset we replicate that small
-    API surface with fakes backed by synthetic numpy frames.
+    (installed from GitHub, see ``zea.data.convert.echoxflow``) that parses a
+    ``croissant.json`` catalog into record/store/stream objects.  It is not a
+    dependency of zea, so to test the converter against data shaped like the
+    real dataset we replicate that small API surface with fakes backed by
+    synthetic numpy frames.
 
     Args:
         monkeypatch: pytest monkeypatch fixture (used to inject ``sys.modules``).
@@ -1038,7 +1039,7 @@ def test_echoxflow_missing_package_raises(monkeypatch):
         revision=None,
         hf_repo_id="",
     )
-    with pytest.raises(ImportError, match="not installed"):
+    with pytest.raises(ImportError, match="Install it from GitHub"):
         convert_echoxflow(args)
 
 
