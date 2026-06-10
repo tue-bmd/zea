@@ -89,6 +89,29 @@ def _download_files_in_path(
     return downloaded_files
 
 
+_HF_H5_EXTENSIONS = (".hdf5", ".h5")
+
+
+def _hf_list_h5_files(hf_path: str, **kwargs) -> list[str]:
+    """List HDF5 filenames in an HF repo path (relative to repo root, no download).
+
+    Handles:
+    - hf://org/repo           — all .h5/.hdf5 files in the repo
+    - hf://org/repo/subdir    — all .h5/.hdf5 files under subdir/
+    - hf://org/repo/file.h5   — [file.h5] if it exists as a single file
+    """
+    repo_id, subpath = _hf_parse_path(hf_path)
+    all_files = list(_hf_list_files(repo_id, **kwargs))
+
+    if subpath and any(f == subpath for f in all_files):
+        return [subpath]
+    elif subpath:
+        prefix = subpath.rstrip("/") + "/"
+        return [f for f in all_files if f.startswith(prefix) and f.endswith(_HF_H5_EXTENSIONS)]
+    else:
+        return [f for f in all_files if f.endswith(_HF_H5_EXTENSIONS)]
+
+
 def _hf_resolve_path(
     hf_path: str, cache_dir=HF_DATASETS_DIR, repo_type="dataset", **kwargs
 ) -> Path:

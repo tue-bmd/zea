@@ -241,7 +241,16 @@ class H5DataSource:
         assert self.n_frames > 0, f"`n_frames` must be > 0, got {self.n_frames}"
 
         # Discover files and shapes (reuses Dataset machinery)
-        _dataset = Dataset(file_paths, validate=validate, revision=revision, **kwargs)
+        lazy = kwargs.pop("lazy", False)
+        if lazy:
+            raise ValueError(
+                "lazy=True is not supported in Dataloader / H5DataSource. "
+                "All files must be downloaded before building the data pipeline. "
+                "Use Dataset(..., lazy=True) directly for interactive use."
+            )
+        _dataset = Dataset(
+            file_paths, validate=validate, revision=revision, _suggest_lazy=False, **kwargs
+        )
         self.file_paths = _dataset.file_paths
         self.file_shapes = _dataset.load_file_shapes(key)
         _dataset.close()

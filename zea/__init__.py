@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from .backend import device
     from .config import Config
     from .data.dataloader import Dataloader
-    from .data.datasets import Dataset, Folder
+    from .data.datasets import Dataset
     from .data.file import File, load_file
     from .datapaths import set_data_paths
     from .internal.device import init_device
@@ -146,7 +146,6 @@ _LAZY_ATTRS = {
     "Config": ("zea.config", "Config"),
     "Dataloader": ("zea.data.dataloader", "Dataloader"),
     "Dataset": ("zea.data.datasets", "Dataset"),
-    "Folder": ("zea.data.datasets", "Folder"),
     "File": ("zea.data.file", "File"),
     "load_file": ("zea.data.file", "load_file"),
     "set_data_paths": ("zea.datapaths", "set_data_paths"),

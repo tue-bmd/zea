@@ -49,6 +49,7 @@ from zea.internal.preset_utils import (
     HF_DATASETS_DIR,
     HF_PREFIX,
     _hf_list_files,
+    _hf_list_h5_files,
     _hf_parse_path,
     _hf_resolve_path,
 )
@@ -444,6 +445,8 @@ class Dataset(H5FileHandleCache):
         validate: bool = False,
         directory_splits: list | None = None,
         revision: str | None = None,
+        lazy: bool = False,
+        _suggest_lazy: bool = True,
         **kwargs,
     ):
         """Initializes the Dataset.
@@ -457,11 +460,16 @@ class Dataset(H5FileHandleCache):
                 If none, all files in file_paths are used.
             revision (str, optional): HuggingFace revision (branch, tag, or commit hash).
                 Only used when ``file_paths`` contains ``hf://`` paths. Defaults to ``None``.
+            lazy (bool, optional): If True, ``hf://`` files are not downloaded at init — each
+                file is downloaded on first access. ``len(ds)`` returns the number of files
+                (not total frames). Defaults to False.
 
         """
         super().__init__(**kwargs)
         self.validate = validate
         self.revision = revision
+        self.lazy = lazy
+        self._suggest_lazy = _suggest_lazy
         self.file_paths = self.find_files(file_paths)
 
         if directory_splits is not None:
@@ -478,9 +486,48 @@ class Dataset(H5FileHandleCache):
         """Load the shapes of the datasets in each file."""
         return _find_h5_file_shapes(self.file_paths, key, _file_hash(self.file_paths))
 
+    def _find_hf_files(self, hf_path: str) -> List[str]:
+        """Resolve an HF path to a list of local paths (or HF strings if lazy)."""
+        repo_id, _ = _hf_parse_path(hf_path)
+        hf_kwargs = {}
+        if self.revision is not None:
+            hf_kwargs["revision"] = self.revision
+
+        hf_files = _hf_list_h5_files(hf_path, **hf_kwargs)
+
+        if not hf_files:
+            raise FileNotFoundError(f"No HDF5 files found in {hf_path}")
+
+        if len(hf_files) > 10 and not self.lazy:
+            msg = (
+                f"About to download {len(hf_files)} files from '{hf_path}'. This may take a while."
+            )
+            if self._suggest_lazy:
+                msg += (
+                    f" Use {type(self).__name__}(..., lazy=True) to defer "
+                    "downloads until each file is first accessed."
+                )
+            log.warning(msg)
+
+        if self.lazy:
+            return [f"{HF_PREFIX}{repo_id}/{f}" for f in hf_files]
+
+        resolved = _hf_resolve_path(hf_path, **hf_kwargs)
+        if resolved.is_dir():
+            paths = sorted(str(fp) for fp in search_file_tree(resolved, filetypes=FILE_TYPES))
+            if self.validate:
+                for p in paths:
+                    with File(p) as f:
+                        f.validate()
+            return paths
+        else:
+            if self.validate:
+                with File(resolved) as f:
+                    f.validate()
+            return [str(resolved)]
+
     def find_files(self, paths) -> List[str]:
         """Find files and optionally validate folders and files."""
-        # Initialize file paths and shapes
         file_paths = []
 
         if not isinstance(paths, (list, tuple)):
@@ -488,26 +535,21 @@ class Dataset(H5FileHandleCache):
 
         for file_path in paths:
             if isinstance(file_path, (list, tuple)):
-                # If the path is a list, recursively call find_files
                 file_paths += self.find_files(file_path)
                 continue
 
             file_path = str(file_path)
-            if file_path.startswith(HF_PREFIX):
-                file_path = HFPath(file_path)
-            else:
-                file_path = Path(file_path)
 
+            if file_path.startswith(HF_PREFIX):
+                file_paths += self._find_hf_files(file_path)
+                continue
+
+            file_path = Path(file_path)
             if file_path.is_dir():
                 folder = Folder(file_path, self.validate, revision=self.revision)
                 file_paths += folder.file_paths
                 del folder
             elif file_path.is_file():
-                if str(file_path).startswith(HF_PREFIX):
-                    hf_kwargs = {}
-                    if self.revision is not None:
-                        hf_kwargs["revision"] = self.revision
-                    file_path = _hf_resolve_path(str(file_path), **hf_kwargs)
                 file_paths.append(str(file_path))
                 with File(file_path) as file:
                     if self.validate:
@@ -533,8 +575,15 @@ class Dataset(H5FileHandleCache):
 
     def __getitem__(self, index) -> File:
         """Retrieves an item from the dataset."""
-        file = self.get_file(self.file_paths[index])
-        return file
+        path = self.file_paths[index]
+        if path.startswith(HF_PREFIX):
+            hf_kwargs = {}
+            if self.revision is not None:
+                hf_kwargs["revision"] = self.revision
+            local_path = str(_hf_resolve_path(path, **hf_kwargs))
+            self.file_paths[index] = local_path
+            path = local_path
+        return self.get_file(path)
 
     def __iter__(self):
         """
