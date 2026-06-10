@@ -231,12 +231,19 @@ def _fetch_hf_revisions(path: str) -> list[str]:
         return ["main"]
 
 
-def _list_dataset_files(path: str, revision: str | None = None) -> tuple[list[str], list[str]]:
+def _list_dataset_files(
+    path: str,
+    revision: str | None = None,
+    _errors: list | None = None,
+) -> tuple[list[str], list[str]]:
     """List HDF5 files in a dataset without downloading any data.
 
     For HF paths this queries the repo file listing API (fast, no download).
     For local paths it scans the directory tree.
     Returns (display_names, full_paths).
+
+    If *_errors* is provided (a list), any exception encountered is appended to
+    it instead of being silently dropped, so callers can surface the problem.
     """
     path = (path or "").strip()
     if not path:
@@ -257,13 +264,21 @@ def _list_dataset_files(path: str, revision: str | None = None) -> tuple[list[st
             hf_paths = [f"hf://{repo_id}/{f}" for f in hdf5s]
             names = [Path(f).name for f in hdf5s]
             return names, hf_paths
-        except Exception:
+        except Exception as exc:
+            if _errors is not None:
+                _errors.append(exc)
             return [], []
     else:
         p = Path(path)
         if p.is_file() and p.suffix.lower() in (".hdf5", ".h5"):
             return [p.name], [str(p)]
+        if not p.exists():
+            if _errors is not None:
+                _errors.append(FileNotFoundError(f"Path not found: {path}"))
+            return [], []
         if not p.is_dir():
+            if _errors is not None:
+                _errors.append(ValueError(f"Not a directory or HDF5 file: {path}"))
             return [], []
         files = sorted(list(p.rglob("*.hdf5")) + list(p.rglob("*.h5")))
         return [f.name for f in files], [str(f) for f in files]
@@ -360,9 +375,14 @@ def _read_file_info(file_path: str) -> dict:
             except Exception:
                 pass
 
+            # For multi-track files the data lives at tracks/track_0/data/{bare}.
+            # Use that path directly to avoid triggering "Multiple tracks found"
+            # warnings on every format_key call.
+            _data_root = "tracks/track_0/data" if n_tracks > 1 else None
+
             # n_ax from raw_data shape
             try:
-                fkey = f.format_key("data/raw_data")
+                fkey = f"{_data_root}/raw_data" if _data_root else f.format_key("data/raw_data")
                 shp = f[fkey].shape
                 if len(shp) >= 3:
                     info["n_ax"] = int(shp[2])
@@ -372,7 +392,7 @@ def _read_file_info(file_path: str) -> dict:
             # Discover data keys: only data/<flat> (no slash) and data/<map>/values
             available = []
             try:
-                data_prefix = f.format_key("data")
+                data_prefix = _data_root if _data_root else f.format_key("data")
                 if data_prefix in f:
                     data_grp = f[data_prefix]
 
@@ -391,7 +411,9 @@ def _read_file_info(file_path: str) -> dict:
             if not available:
                 for k in _DATA_KEYS:
                     try:
-                        if f.format_key(k) in f:
+                        bare = k.removeprefix("data/")
+                        fk = f"{_data_root}/{bare}" if _data_root else f.format_key(k)
+                        if fk in f:
                             available.append(k)
                     except Exception:
                         pass
@@ -1153,12 +1175,27 @@ def build_interface() -> "gr.Blocks":
                     _disable_run,
                     gr.update(choices=_DATA_KEYS),
                 )
-            names, paths = _list_dataset_files(path)
+            errors: list[Exception] = []
+            names, paths = _list_dataset_files(path, _errors=errors)
             auto_val = paths[0] if len(paths) == 1 else None
             file_update = gr.update(
                 choices=list(zip(names, paths)), value=auto_val, interactive=bool(paths)
             )
             _reset_key = gr.update(choices=_DATA_KEYS, value=None, interactive=False)
+
+            if not names:
+                if errors:
+                    short = _enrich_error(errors[0]).split("\n\n")[0]
+                    gr.Warning(f"Cannot open dataset: {short}")
+                    meta_html = _html_fail("Cannot open dataset", errors[0])
+                else:
+                    gr.Warning("No HDF5 files found at this path.")
+                    meta_html = _html_warn("No HDF5 files found at this path.")
+            else:
+                meta_html = ""
+
+            config_prefill = f"{path.rstrip('/')}/config.yaml" if _is_hf(path) else None
+
             if not _is_hf(path):
                 return (
                     gr.update(),
@@ -1167,13 +1204,27 @@ def build_interface() -> "gr.Blocks":
                     paths,
                     gr.update(visible=False),
                     [],
-                    "",
+                    meta_html,
                     _disable_run,
                     _reset_key,
                 )
+
+            if errors:
+                # Repo inaccessible — don't waste a network call on revisions.
+                return (
+                    gr.update(value=config_prefill),
+                    gr.update(interactive=False, choices=["main"], value=None),
+                    file_update,
+                    paths,
+                    gr.update(visible=False),
+                    [],
+                    meta_html,
+                    _disable_run,
+                    _reset_key,
+                )
+
             revisions = _fetch_hf_revisions(path)
             default = "main" if "main" in revisions else (revisions[0] if revisions else "main")
-            config_prefill = f"{path.rstrip('/')}/config.yaml"
             return (
                 gr.update(value=config_prefill),
                 gr.update(interactive=True, choices=revisions, value=default),
@@ -1181,7 +1232,7 @@ def build_interface() -> "gr.Blocks":
                 paths,
                 gr.update(visible=False),
                 [],
-                "",
+                meta_html,
                 _disable_run,
                 _reset_key,
             )
@@ -1202,14 +1253,43 @@ def build_interface() -> "gr.Blocks":
             ],
         )
 
-        # Config blur → fetch revisions
+        # Config blur → validate path + fetch revisions
         def _on_config_blur(path):
             path = (path or "").strip()
-            if not _is_hf(path):
+            if not path:
                 return gr.update(interactive=False, choices=["main"], value=None)
-            revisions = _fetch_hf_revisions(path)
-            default = "main" if "main" in revisions else (revisions[0] if revisions else "main")
-            return gr.update(interactive=True, choices=revisions, value=default)
+            if not _is_hf(path):
+                p = Path(path)
+                if not p.exists():
+                    gr.Warning(f"Config file not found: {path}")
+                elif p.suffix.lower() not in (".yaml", ".yml"):
+                    suffix = p.suffix or "(no extension)"
+                    gr.Warning(f"Config path should be a .yaml file, got: {suffix}")
+                return gr.update(interactive=False, choices=["main"], value=None)
+            # HF path — check repo + specific file, then fetch revisions
+            try:
+                from huggingface_hub import file_exists, list_repo_refs
+
+                parts = path.removeprefix("hf://").strip("/").split("/")
+                if len(parts) < 2 or not parts[1]:
+                    gr.Warning("Invalid Hugging Face path: expected hf://owner/repo-name/…")
+                    return gr.update(interactive=False, choices=["main"], value=None)
+                repo_id = "/".join(parts[:2])
+                filepath = "/".join(parts[2:]) if len(parts) > 2 else ""
+                refs = list_repo_refs(repo_id, repo_type="dataset")
+                branches = [b.name for b in refs.branches]
+                tags = [t.name for t in refs.tags]
+                revisions = branches + tags or ["main"]
+                default = "main" if "main" in revisions else revisions[0]
+                if filepath and not file_exists(
+                    repo_id, filepath, repo_type="dataset", revision=default
+                ):
+                    gr.Warning(f"Config file not found in repo: {filepath}")
+                return gr.update(interactive=True, choices=revisions, value=default)
+            except Exception as exc:
+                short = _enrich_error(exc).split("\n\n")[0]
+                gr.Warning(f"Cannot access config: {short}")
+                return gr.update(interactive=False, choices=["main"], value=None)
 
         config_input.blur(_on_config_blur, [config_input], [config_rev_input])
 
@@ -1235,18 +1315,25 @@ def build_interface() -> "gr.Blocks":
                 yield _clear
                 return
 
-            names, fpaths = _list_dataset_files(path, rev or None)
+            errors: list[Exception] = []
+            names, fpaths = _list_dataset_files(path, rev or None, _errors=errors)
             new_val = current_file if (current_file and current_file in fpaths) else None
             file_upd = gr.update(
                 choices=list(zip(names, fpaths)), value=new_val, interactive=bool(fpaths)
             )
 
             if not new_val:
+                if not fpaths and errors:
+                    meta_html = _html_fail("Cannot open dataset", errors[0])
+                elif not fpaths:
+                    meta_html = _html_warn("No HDF5 files found at this path.")
+                else:
+                    meta_html = ""
                 yield (
                     cfg_upd,
                     file_upd,
                     fpaths,
-                    "",
+                    meta_html,
                     gr.update(visible=False),
                     [],
                     gr.update(interactive=False),
@@ -1433,11 +1520,12 @@ def build_interface() -> "gr.Blocks":
                         gr.update(maximum=n - 1, value=0, interactive=True),
                         gr.update(maximum=n, value=1, interactive=True),
                     )
-                # Single (or zero) frame: also reset the maxima so they don't
-                # retain a previous long track's range.
+                # Single or zero-frame track — disable sliders without setting
+                # maximum=0: Gradio requires minimum < maximum strictly, and
+                # start_frame_input has minimum=0, so maximum=0 would crash.
                 return (
-                    gr.update(maximum=0, value=0, interactive=n > 0),
-                    gr.update(maximum=1, value=1, interactive=n > 0),
+                    gr.update(value=0, interactive=False),
+                    gr.update(value=1, interactive=False),
                 )
             except Exception:
                 return gr.update(), gr.update()
