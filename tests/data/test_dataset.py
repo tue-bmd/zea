@@ -228,7 +228,7 @@ def test_dataset_lazy_hf_defers_download(tmp_path):
     generate_example_dataset(f1)
     generate_example_dataset(f2)
 
-    hf_files = ["file1.hdf5", "file2.hdf5"]
+    hf_files = [("file1.hdf5", 1024), ("file2.hdf5", 2048)]
 
     with (
         patch("zea.data.datasets._hf_list_h5_files", return_value=hf_files),

@@ -1,27 +1,13 @@
 """Huggingface hub (hf) tooling."""
 
-import os
 from pathlib import Path, PurePosixPath
 
-from huggingface_hub import HfApi, login, snapshot_download
+from huggingface_hub import HfApi, snapshot_download
 
 from zea import log
-from zea.internal.preset_utils import _hf_list_files, _hf_parse_path
+from zea.internal.preset_utils import _hf_list_files, _hf_login, _hf_parse_path
 
 HF_PREFIX = "hf://"
-
-
-def _hf_login() -> None:
-    """Authenticate using a token from the environment, if available.
-
-    Reads ``HF_TOKEN`` (or ``HUGGING_FACE_HUB_TOKEN``) and only logs in when a
-    token is present. This avoids ``login()`` falling back to an interactive
-    prompt in headless environments; cached credentials or anonymous access are
-    used when no token is set.
-    """
-    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-    if token:
-        login(token=token, skip_if_logged_in=True)
 
 
 def load_model_from_hf(repo_id, revision="main", verbose=True):

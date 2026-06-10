@@ -131,7 +131,6 @@ TOPLEVEL_API_ALIASES = {
     "zea.config.Config": "zea.Config",
     "zea.data.dataloader.Dataloader": "zea.Dataloader",
     "zea.data.datasets.Dataset": "zea.Dataset",
-    "zea.data.datasets.Folder": "zea.Folder",
     "zea.data.file.File": "zea.File",
     "zea.ops.pipeline.Pipeline": "zea.Pipeline",
     "zea.probes.Probe": "zea.Probe",

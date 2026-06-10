@@ -493,14 +493,16 @@ class Dataset(H5FileHandleCache):
         if self.revision is not None:
             hf_kwargs["revision"] = self.revision
 
-        hf_files = _hf_list_h5_files(hf_path, **hf_kwargs)
+        hf_files = _hf_list_h5_files(hf_path, **hf_kwargs)  # [(filename, size_bytes), ...]
 
         if not hf_files:
             raise FileNotFoundError(f"No HDF5 files found in {hf_path}")
 
         if len(hf_files) > 10 and not self.lazy:
+            total_gb = sum(size for _, size in hf_files) / 1e9
             msg = (
-                f"About to download {len(hf_files)} files from '{hf_path}'. This may take a while."
+                f"About to download {len(hf_files)} files ({total_gb:.1f} GB) "
+                f"from '{hf_path}'. This may take a while."
             )
             if self._suggest_lazy:
                 msg += (
@@ -510,7 +512,7 @@ class Dataset(H5FileHandleCache):
             log.warning(msg)
 
         if self.lazy:
-            return [f"{HF_PREFIX}{repo_id}/{f}" for f in hf_files]
+            return [f"{HF_PREFIX}{repo_id}/{f}" for f, _ in hf_files]
 
         resolved = _hf_resolve_path(hf_path, **hf_kwargs)
         if resolved.is_dir():

@@ -17,7 +17,6 @@ zea
    Dataloader
    Dataset
    File
-   Folder
    Parameters
    Pipeline
    Probe
