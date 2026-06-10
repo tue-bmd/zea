@@ -459,7 +459,8 @@ class Dataset(H5FileHandleCache):
                 between 0 and 1, with the same length as the number of file_paths given.
                 If none, all files in file_paths are used.
             revision (str, optional): HuggingFace revision (branch, tag, or commit hash).
-                Only used when ``file_paths`` contains ``hf://`` paths. Defaults to ``None``.
+                Only used when file_paths contains ``hf://`` paths. Defaults to ``None``
+                (uses HuggingFace Hub default, i.e. the ``main`` branch).
             lazy (bool, optional): If True, ``hf://`` files are not downloaded at init — each
                 file is downloaded on first access. ``len(ds)`` returns the number of files
                 (not total frames). Defaults to False.
@@ -468,8 +469,6 @@ class Dataset(H5FileHandleCache):
         super().__init__(**kwargs)
         self.validate = validate
         self.revision = revision
-        self.lazy = lazy
-        self._suggest_lazy = _suggest_lazy
         self.file_paths = self.find_files(file_paths)
 
         if directory_splits is not None:
@@ -553,7 +552,7 @@ class Dataset(H5FileHandleCache):
                 del folder
             elif file_path.is_file():
                 file_paths.append(str(file_path))
-                with File(file_path) as file:
+                with File(file_path, revision=self.revision) as file:
                     if self.validate:
                         file.validate()
 
