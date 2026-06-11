@@ -148,7 +148,7 @@ directly using an ``hf://`` URI, without manually downloading any files:
 
 .. doctest::
 
-    >>> pipeline = Pipeline.from_path("hf://zeahub/picmus/config_iq.yaml")
+    >>> pipeline = Pipeline.from_path("hf://zeahub/picmus/config_iq.yaml", revision="v0.1.0")
     >>> print(pipeline)
     Beamform(PatchedGrid(TOFCorrection -> DelayAndSum) -> ReshapeGrid) -> EnvelopeDetect -> Normalize -> LogCompress
 
@@ -260,8 +260,8 @@ from .ultrasound import (
     ReshapeGrid,
     ScanConvert,
     Simulate,
-    TOFCorrection,
     TissueSuppression,
+    TOFCorrection,
     UpMix,
 )
 
