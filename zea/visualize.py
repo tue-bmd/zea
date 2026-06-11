@@ -735,7 +735,7 @@ def plot_rectangle_from_mask(ax, mask, **kwargs):
     return ax.add_patch(rect)
 
 
-def plot_shape_from_mask(ax, mask, **kwargs):
+def plot_shape_from_mask(ax, mask, extent=None, **kwargs):
     """Plots a shape to axis from mask array.
 
     Is useful for displaying irregular shapes such as segmentations
@@ -773,10 +773,18 @@ def plot_shape_from_mask(ax, mask, **kwargs):
     padded_mask = np.pad(mask, pad_width=1, mode="constant", constant_values=0)
     contours = measure.find_contours(padded_mask, 0.5)
     patches = []
+    h, w = mask.shape
     for contour in contours:
         # Remove padding offset
         contour -= 1
-        path = pltPath(contour[:, ::-1])
+        if extent is not None:
+            # Map pixel (row, col) → data coordinates given extent=[left, right, bottom, top]
+            x = extent[0] + contour[:, 1] * (extent[1] - extent[0]) / w
+            y = extent[3] + contour[:, 0] * (extent[2] - extent[3]) / h
+            coords = np.stack([x, y], axis=1)
+        else:
+            coords = contour[:, ::-1]
+        path = pltPath(coords)
         patch = PathPatch(path, **kwargs)
         patches.append(ax.add_patch(patch))
     return patches
