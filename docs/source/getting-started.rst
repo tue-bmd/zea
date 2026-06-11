@@ -158,7 +158,7 @@ A full list of available pretrained models can be found in the :doc:`models` pag
 
 .. seealso::
 
-   For a more detailed walkthrough of this example please refero to the :doc:`notebooks/models/speckle2self_despeckling_example` notebook.
+   For a more detailed walkthrough of this example please refer to the :doc:`notebooks/models/speckle2self_despeckling_example` notebook.
 
 ``zea`` also provides a simple command line interface (CLI) to quickly visualize a ``zea`` data file. For more information on the CLI, please refer to the :doc:`cli` page or run ``zea --help`` in your terminal.
 

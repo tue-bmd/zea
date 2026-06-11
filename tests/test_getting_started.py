@@ -59,5 +59,7 @@ def _extract_python_blocks(path):
 def test_getting_started_snippets():
     """Execute the first two Python code blocks from getting-started.rst together."""
     blocks = _extract_python_blocks(RST_PATH)
+    assert len(blocks) >= 2, "Expected at least two Python code blocks in getting-started.rst"
     combined = "\n\n".join(blocks[:2])
+    assert combined.strip(), "Extracted Python snippets are empty"
     exec(combined, {})  # noqa: S102
