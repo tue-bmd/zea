@@ -148,9 +148,9 @@ directly using an ``hf://`` URI, without manually downloading any files:
 
 .. doctest::
 
-    >>> pipeline = Pipeline.from_path("hf://zeahub/picmus/config_iq.yaml")
+    >>> pipeline = Pipeline.from_path("hf://zeahub/picmus/config_iq.yaml", revision="v0.1.0")
     >>> print(pipeline)
-    Cast -> Demodulate -> Beamform(PatchedGrid(TOFCorrection -> DelayAndSum) -> ReshapeGrid) -> EnvelopeDetect -> Normalize -> LogCompress
+    Beamform(PatchedGrid(TOFCorrection -> DelayAndSum) -> ReshapeGrid) -> EnvelopeDetect -> Normalize -> LogCompress
 
 The YAML format is human-readable and straightforward to edit by hand. A typical B-mode
 pipeline looks like this:
