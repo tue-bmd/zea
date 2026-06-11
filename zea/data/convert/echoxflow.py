@@ -276,9 +276,11 @@ def convert_echoxflow(args):
 
     log.info(f"Done. converted={converted} skipped={skipped} failed={failed}")
 
-    if converted == 0:
+    # Skipped files already exist on disk from a previous run, so they still
+    # count towards a complete dataset that can be carded and uploaded.
+    if converted == 0 and skipped == 0:
         if getattr(args, "upload", False):
-            log.error("No files were converted successfully; skipping upload.")
+            log.error("No converted files exist; skipping upload.")
         return
 
     write_dataset_card(dest_root, make_dataset_card(hf_repo_id))
