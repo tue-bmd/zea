@@ -44,9 +44,15 @@ class File(h5py.File):
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
 
+        # Extract HF-only kwargs so they never reach h5py
+        hf_kwargs = {}
+        for key in ("revision", "repo_type", "cache_dir"):
+            if key in kwargs:
+                hf_kwargs[key] = kwargs.pop(key)
+
         # Resolve huggingface path
         if str(name).startswith(HF_PREFIX):
-            name = _hf_resolve_path(str(name))
+            name = _hf_resolve_path(str(name), **hf_kwargs)
 
         # Disable locking for read mode by default
         if "locking" not in kwargs and mode == "r":
@@ -137,9 +143,8 @@ class File(h5py.File):
         if "data/" not in key:
             key = "data/" + key
 
-        assert key in self.keys(), (
-            f"Key {key} not found in file. Available keys: {list(self['data'].keys())}"
-        )
+        available = list(self["data"].keys()) if "data" in self else list(self.keys())
+        assert key in self.keys(), f"Key {key} not found in file. Available keys: {available}"
 
         return key
 
