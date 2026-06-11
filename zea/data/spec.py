@@ -1141,8 +1141,9 @@ class ScanSpec(Spec):
             shape (n_tx, 3). This is the (x, y, z) position from which the beam
             is transmitted.
         polar_angles: The polar angles in radians of the transmit beams of shape (n_tx,).
-        time_to_next_transmit: The time in s between subsequent transmit events
-            of shape (n_frames, n_tx).
+        time_to_next_transmit: The time in s between subsequent transmit events.
+            Shape is either (n_frames, n_tx), or flat (n_timing_intervals,)
+            where n_timing_intervals is n_frames * n_tx or one fewer.
         azimuth_angles: The azimuthal angles in radians of the transmit beams of
             shape (n_tx,).
         sound_speed: The speed of sound in meters per second.
@@ -1183,7 +1184,10 @@ class ScanSpec(Spec):
         "focus_distances": {"dtype": np.float32, "shape": ("n_tx",)},
         "transmit_origins": {"dtype": np.float32, "shape": ("n_tx", 3)},
         "polar_angles": {"dtype": np.float32, "shape": ("n_tx",)},
-        "time_to_next_transmit": {"dtype": np.float32, "shape": ("n_frames", "n_tx")},
+        "time_to_next_transmit": {
+            "dtype": np.float32,
+            "shape": (("n_frames", "n_tx"), ("n_timing_intervals",)),
+        },
         "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
         "sound_speed": {"dtype": np.float32, "shape": ()},
         "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
@@ -2021,6 +2025,8 @@ class FileSpec(Spec):
                     f"got min={self.track_schedule.min()}, max={self.track_schedule.max()}"
                 )
 
+        self._validate_time_to_next_transmit_lengths()
+
         # Warn if multi-track frame counts differ without a schedule
         if len(self.tracks) > 1 and self.track_schedule is None:
             frame_counts = []
@@ -2054,6 +2060,26 @@ class FileSpec(Spec):
                         field_sizes = {**meta_dim_field_sizes[dim], **track_dim_field_sizes[dim]}
                         if len(set(field_sizes.values())) > 1:
                             raise ValueError(self._format_inconsistent_dimension(dim, field_sizes))
+
+    def _validate_time_to_next_transmit_lengths(self) -> None:
+        """Validate flat timing arrays against the number of transmit events."""
+        for i, track in enumerate(self.tracks):
+            raw_data = track.data.raw_data
+            t2nt = track.scan.time_to_next_transmit if track.scan is not None else None
+            if raw_data is None or t2nt is None:
+                continue
+
+            n_events = raw_data.shape[0] * raw_data.shape[1]
+            expected_counts = {n_events, max(n_events - 1, 0)}
+            n_intervals = np.asarray(t2nt).size
+            if n_intervals not in expected_counts:
+                expected_counts_str = ", ".join(str(count) for count in sorted(expected_counts))
+                raise ValueError(
+                    f"tracks[{i}].scan.time_to_next_transmit has {n_intervals} values, "
+                    f"expected one of {{{expected_counts_str}}}. "
+                    "Provide either one interval per transmit event or omit the final "
+                    "unused interval."
+                )
 
     def to_dict(self) -> dict:
         """Return this spec as a nested dictionary.
