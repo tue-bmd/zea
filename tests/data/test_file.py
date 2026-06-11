@@ -1548,14 +1548,14 @@ class TestMultiTrackFile:
         expected = np.array([[0.0, 0.1], [0.3, 0.6]], dtype=np.float32)
         np.testing.assert_allclose(timestamps, expected, atol=1e-6)
 
-    def test_time_to_next_transmit_invalid_short_shape_raises(self, tmp_path):
-        """A 2D short timing array must still contain the right interval count."""
+    def test_time_to_next_transmit_invalid_flat_length_raises(self, tmp_path):
+        """A flat timing array must have n_events or n_events - 1 values."""
         n_frames, n_tx, n_el, n_ax = 2, 2, 4, 8
         raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
         scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
-        scan["time_to_next_transmit"] = np.ones((n_frames - 1, n_tx), dtype=np.float32)
+        scan["time_to_next_transmit"] = np.ones((n_frames * n_tx - 2,), dtype=np.float32)
 
-        with pytest.raises(ValueError, match="time_to_next_transmit"):
+        with pytest.raises(ValueError, match="expected one of"):
             FileSpec(
                 tracks=[{"data": {"raw_data": raw}, "scan": scan}],
                 track_schedule=np.zeros(n_frames * n_tx, dtype=np.int32),
