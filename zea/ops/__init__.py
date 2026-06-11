@@ -150,7 +150,7 @@ directly using an ``hf://`` URI, without manually downloading any files:
 
     >>> pipeline = Pipeline.from_path("hf://zeahub/picmus/config_iq.yaml")
     >>> print(pipeline)
-    Beamform(PatchedGrid(TOFCorrection -> DelayAndSum) -> ReshapeGrid) -> EnvelopeDetect -> Normalize -> LogCompress
+    Cast -> Demodulate -> Beamform(PatchedGrid(TOFCorrection -> DelayAndSum) -> ReshapeGrid) -> EnvelopeDetect -> Normalize -> LogCompress
 
 The YAML format is human-readable and straightforward to edit by hand. A typical B-mode
 pipeline looks like this:
@@ -260,8 +260,8 @@ from .ultrasound import (
     ReshapeGrid,
     ScanConvert,
     Simulate,
-    TOFCorrection,
     TissueSuppression,
+    TOFCorrection,
     UpMix,
 )
 
