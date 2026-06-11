@@ -469,6 +469,8 @@ class Dataset(H5FileHandleCache):
         super().__init__(**kwargs)
         self.validate = validate
         self.revision = revision
+        self.lazy = lazy
+        self._suggest_lazy = _suggest_lazy
         self.file_paths = self.find_files(file_paths)
 
         if directory_splits is not None:

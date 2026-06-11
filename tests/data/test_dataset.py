@@ -262,3 +262,46 @@ def test_dataloader_rejects_lazy():
 
     with pytest.raises(ValueError, match="lazy=True is not supported"):
         H5DataSource("nonexistent_path", lazy=True)
+
+
+def test_dataset_hf_large_warns_about_gb_size(tmp_path):
+    """_find_hf_files logs a warning with GB size when >10 non-lazy files are found."""
+    f = tmp_path / "file00.hdf5"
+    generate_example_dataset(f)
+
+    # 12 files × 100 MB each = 1.2 GB
+    hf_files = [(f"file{i:02d}.hdf5", 100_000_000) for i in range(12)]
+
+    with (
+        patch("zea.data.datasets._hf_list_h5_files", return_value=hf_files),
+        patch("zea.data.datasets._hf_resolve_path", return_value=tmp_path),
+        patch("zea.data.datasets.search_file_tree", return_value=[f]),
+        patch("zea.data.datasets.log") as mock_log,
+    ):
+        ds = Dataset("hf://org/myrepo", lazy=False, _suggest_lazy=True)
+
+    msgs = [str(c.args[0]) for c in mock_log.warning.call_args_list]
+    assert any("GB" in m for m in msgs), "expected GB size in warning"
+    assert any("lazy=True" in m for m in msgs), "expected lazy suggestion in warning"
+    ds.close()
+
+
+def test_dataset_hf_large_no_lazy_suggestion(tmp_path):
+    """_find_hf_files omits the lazy hint when _suggest_lazy=False."""
+    f = tmp_path / "file00.hdf5"
+    generate_example_dataset(f)
+
+    hf_files = [(f"file{i:02d}.hdf5", 50_000_000) for i in range(12)]  # 12 × 50 MB
+
+    with (
+        patch("zea.data.datasets._hf_list_h5_files", return_value=hf_files),
+        patch("zea.data.datasets._hf_resolve_path", return_value=tmp_path),
+        patch("zea.data.datasets.search_file_tree", return_value=[f]),
+        patch("zea.data.datasets.log") as mock_log,
+    ):
+        ds = Dataset("hf://org/myrepo", lazy=False, _suggest_lazy=False)
+
+    msgs = [str(c.args[0]) for c in mock_log.warning.call_args_list]
+    assert any("GB" in m for m in msgs)
+    assert not any("lazy=True" in m for m in msgs)
+    ds.close()
