@@ -1457,22 +1457,26 @@ class Subject(Spec):
 
 @dataclass
 class Signal(Spec):
-    """Base class for additional signals with timing and sampling-frequency metadata.
+    """Base class for additional signals with timing metadata.
 
     Args:
         start_time_offset: Time offset in seconds between the first transmit event
             of the ultrasound acquisition and sample 0 of this data. Negative
             means this data starts before the first transmit event; positive
             means it starts after.
-        sampling_frequency: Sampling frequency in Hz for the additional signal samples.
+        sampling_frequency: Sampling frequency in Hz for uniformly sampled data.
+        timestamps: Explicit sample timestamps in seconds of shape (T,), relative
+            to sample 0. Must start at 0.
     """
 
     start_time_offset: np.ndarray | float
-    sampling_frequency: np.ndarray | float
+    sampling_frequency: np.ndarray | float | None = field(default=None, kw_only=True)
+    timestamps: np.ndarray | None = field(default=None, kw_only=True)
 
     SCHEMA = {
         "start_time_offset": {"dtype": np.float32, "shape": ()},
         "sampling_frequency": {"dtype": np.float32, "shape": ()},
+        "timestamps": {"dtype": np.float32, "shape": ("T",)},
     }
 
     FIELD_METADATA = {
@@ -1486,13 +1490,29 @@ class Signal(Spec):
             ),
         },
         "sampling_frequency": {"unit": "Hz", "description": "Sampling frequency."},
+        "timestamps": {
+            "unit": "s",
+            "description": "Explicit sample timestamps relative to sample 0.",
+        },
     }
 
     def __post_init__(self):
         super().__post_init__()
 
-        if self.sampling_frequency <= 0:
+        if (self.sampling_frequency is None) == (self.timestamps is None):
+            raise ValueError("Provide exactly one of 'sampling_frequency' or 'timestamps'.")
+        if self.sampling_frequency is not None and self.sampling_frequency <= 0:
             raise ValueError(f"Sampling frequency must be positive, got {self.sampling_frequency}")
+        if self.timestamps is not None:
+            signal_samples = getattr(self, "samples", None)
+            if signal_samples is None:
+                signal_samples = getattr(self, "translation", None)
+            if signal_samples is not None and self.timestamps.shape[0] != signal_samples.shape[0]:
+                raise ValueError("Timestamps must have the same length as the signal samples.")
+            if not np.isclose(self.timestamps[0], 0.0):
+                raise ValueError("Sample timestamps must start at 0.")
+            if np.any(np.diff(self.timestamps) <= 0):
+                raise ValueError("Sample timestamps must be strictly increasing.")
 
 
 @dataclass
@@ -1512,6 +1532,8 @@ class ProbePose(Signal):
         start_time_offset: Time offset in seconds between the first transmit event
             of the ultrasound acquisition and sample 0 of this data.
         sampling_frequency: Sampling frequency in Hz for probe pose samples.
+        timestamps: Explicit probe pose timestamps in seconds of shape (T,),
+            relative to sample 0.
     """
 
     translation: np.ndarray
@@ -1588,6 +1610,8 @@ class Signal1D(Signal):
         start_time_offset: Time offset in seconds between the first transmit event
             of the ultrasound acquisition and sample 0 of this data.
         sampling_frequency: Sampling frequency in Hz for signal samples.
+        timestamps: Explicit signal timestamps in seconds of shape (T,), relative
+            to sample 0.
     """
 
     samples: np.ndarray
@@ -1612,6 +1636,8 @@ class SignalND(Signal):
         start_time_offset: Time offset in seconds between the first transmit event
             of the ultrasound acquisition and sample 0 of this data.
         sampling_frequency: Sampling frequency in Hz for signal samples.
+        timestamps: Explicit signal timestamps in seconds of shape (T,), relative
+            to sample 0.
     """
 
     samples: np.ndarray
