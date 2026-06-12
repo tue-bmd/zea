@@ -823,7 +823,6 @@ class File(h5py.File):
 
         .. doctest::
 
-            >>> import os, tempfile
             >>> from datetime import datetime, timezone
             >>> import numpy as np
             >>> from zea import File
@@ -844,9 +843,8 @@ class File(h5py.File):
             ...     "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
             ... }
 
-            >>> _, path = tempfile.mkstemp(suffix=".hdf5")
             >>> File.create(
-            ...     path,
+            ...     "example.hdf5",
             ...     data={"raw_data": raw},
             ...     scan=scan,
             ...     probe={"name": "verasonics_l11_4v", "probe_geometry": probe_geometry},
@@ -857,7 +855,7 @@ class File(h5py.File):
         .. testcleanup::
 
             import os
-            os.unlink(path)
+            os.unlink("example.hdf5")
         """
         if tracks is not None and (data is not None or scan is not None):
             raise ValueError("Provide either 'tracks' or 'data'/'scan', not both.")
