@@ -1528,7 +1528,7 @@ class TestMultiTrackFile:
         np.testing.assert_allclose(ts_b, expected_b, atol=1e-6)
 
     def test_track_timestamps_accepts_flat_interval_stream(self, tmp_path):
-        """A flat interval stream can represent n_events - 1 intervals."""
+        """A flat interval stream is padded and stored as an (n_frames, n_tx) matrix."""
         n_frames, n_tx, n_el, n_ax = 2, 2, 4, 8
         raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
         scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
@@ -1544,18 +1544,24 @@ class TestMultiTrackFile:
 
         with File(path) as f:
             timestamps = f.tracks[0].timestamps
+            time_to_next_transmit = f.tracks[0].scan.time_to_next_transmit
 
         expected = np.array([[0.0, 0.1], [0.3, 0.6]], dtype=np.float32)
         np.testing.assert_allclose(timestamps, expected, atol=1e-6)
+        np.testing.assert_allclose(
+            time_to_next_transmit,
+            np.array([[0.1, 0.2], [0.3, 0.0]], dtype=np.float32),
+            atol=1e-6,
+        )
 
     def test_time_to_next_transmit_invalid_flat_length_raises(self, tmp_path):
-        """A flat timing array must have n_events or n_events - 1 values."""
+        """A flat timing array must have exactly n_events - 1 values."""
         n_frames, n_tx, n_el, n_ax = 2, 2, 4, 8
         raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
         scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
-        scan["time_to_next_transmit"] = np.ones((n_frames * n_tx - 2,), dtype=np.float32)
+        scan["time_to_next_transmit"] = np.ones((n_frames * n_tx,), dtype=np.float32)
 
-        with pytest.raises(ValueError, match="expected one of"):
+        with pytest.raises(ValueError, match="flat length"):
             FileSpec(
                 tracks=[{"data": {"raw_data": raw}, "scan": scan}],
                 track_schedule=np.zeros(n_frames * n_tx, dtype=np.int32),

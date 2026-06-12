@@ -368,7 +368,7 @@ def _compute_all_track_timestamps(
 
     Walks the schedule once, keeping a single scalar cumulative timestamp and
     a per-track ``[frame_idx, tx_idx]`` counter to index into each track's
-    timestamp matrix.  The schedule must cover exactly
+    ``time_to_next_transmit`` array.  The schedule must cover exactly
     ``sum(n_frames_t * n_tx_t)`` events across all tracks.
 
     Args:
@@ -384,7 +384,7 @@ def _compute_all_track_timestamps(
     t2nts: list[np.ndarray] = []
 
     # pre-load time_to_next_transmit for each track,
-    # validating that it's present
+    # validating that it's present and has the right shape
     for track in tracks:
         t2nt = track.scan.time_to_next_transmit
         if t2nt is None:
@@ -393,29 +393,24 @@ def _compute_all_track_timestamps(
                 " cannot compute track timestamps."
             )
             return [None] * n_tracks
-        t2nts.append(np.asarray(t2nt, dtype=np.float32).reshape(-1))
+        t2nts.append(np.asarray(t2nt, dtype=np.float32))
 
-    n_frames_per_track = [track.n_frames for track in tracks]
-    n_tx_per_frame_per_track = [track.n_tx for track in tracks]
+    n_frames_per_track = [t2nt.shape[0] for t2nt in t2nts]
+    n_tx_per_frame_per_track = [t2nt.shape[1] for t2nt in t2nts]
 
     # results will be stored here as we walk the schedule
-    timestamp_matrices_per_track = [
-        np.zeros((n_frames, n_tx), dtype=np.float32)
-        for n_frames, n_tx in zip(n_frames_per_track, n_tx_per_frame_per_track)
-    ]
-    # counters to keep track of where we are in each track's timestamp matrix
+    timestamp_matrices_per_track = [np.zeros_like(t2nt) for t2nt in t2nts]
+    # counters to keep track of where we are in each track's
+    # timestamp matrix.
     track_counters = [[0, 0] for _ in tracks]  # [frame_idx, tx_idx] per track
 
     cumulative_timestamp = 0.0
 
     # walk through the schedule, filling in the timestamp matrices as we go
-    for global_event_idx, track_idx in enumerate(schedule):
+    for track_idx in schedule:
         frame_idx, tx_idx = track_counters[track_idx]
         timestamp_matrices_per_track[track_idx][frame_idx, tx_idx] = cumulative_timestamp
-
-        if global_event_idx < len(schedule) - 1:
-            interval_idx = frame_idx * n_tx_per_frame_per_track[track_idx] + tx_idx
-            cumulative_timestamp += float(t2nts[track_idx][interval_idx])
+        cumulative_timestamp += float(t2nts[track_idx][frame_idx, tx_idx])
 
         # update the counters keeping track of where we are in this track's timestamp matrix
         tx_idx += 1
