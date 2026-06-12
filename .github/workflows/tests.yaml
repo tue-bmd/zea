@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - openh-rf
 
 env:
   REGISTRY: ghcr.io
@@ -79,11 +78,10 @@ jobs:
             echo "Image-relevant files changed — building locally"
           fi
 
-      # Free disk space before any docker build. Runs for same-repo builds and fork PRs
-      # that need a local build; skipped for fork PRs reusing the base-branch image.
+      # Free disk space before any docker build. Skipped for fork PRs reusing the base-branch image.
       - name: Free up disk space
         if: >
-          github.event_name != 'pull_request'
+          github.event_name == 'push'
           || github.event.pull_request.head.repo.full_name == github.repository
           || steps.image-check.outputs.changed == 'true'
         run: |
@@ -91,7 +89,7 @@ jobs:
 
       - name: Build and push CI Docker image
         id: build
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -102,10 +100,7 @@ jobs:
             INSTALL_TF=cpu
             DEV=true
           push: true
-          tags: |
-            ${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}
-            ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('{0}:latest', env.BASE_IMAGE) || '' }}
-            ${{ github.event_name == 'push' && format('{0}:{1}', env.BASE_IMAGE, github.ref_name) || '' }}
+          tags: ${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}
           cache-from: type=registry,ref=ghcr.io/tue-bmd/zea/build-cache:all-cpu
           cache-to: type=registry,ref=ghcr.io/tue-bmd/zea/build-cache:all-cpu,mode=max
 
