@@ -2061,7 +2061,7 @@ class FileSpec(Spec):
                             raise ValueError(self._format_inconsistent_dimension(dim, field_sizes))
 
     def _normalize_time_to_next_transmit(self) -> None:
-        """Pad flat timing arrays and reshape to (n_frames * n_tx) by padding last frame with a zero."""
+        """Pad flat timing arrays to the canonical matrix shape."""
         for i, track in enumerate(self.tracks):
             raw_data = track.data.raw_data
             scan = track.scan
