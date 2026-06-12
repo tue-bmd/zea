@@ -1,5 +1,6 @@
 from collections import defaultdict
 from dataclasses import MISSING, dataclass, field, fields
+from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _get_pkg_version
 from pathlib import Path
@@ -1874,6 +1875,7 @@ class FileSpec(Spec):
     Example:
         .. doctest::
 
+            >>> from datetime import datetime, timezone
             >>> from zea.data.spec import FileSpec
             >>> import numpy as np
 
@@ -1893,9 +1895,12 @@ class FileSpec(Spec):
             ...         "polar_angles": np.zeros(4, dtype=np.float32),
             ...     },
             ...     probe={"name": "test_probe", "probe_geometry": np.zeros((8, 3))},
+            ...     acquisition_time=datetime.now(timezone.utc).isoformat(),
             ... )
             >>> dataset.data.raw_data.shape
             (2, 4, 64, 8, 1)
+            >>> dataset.acquisition_time is not None
+            True
     """
 
     # NOTE: data and scan are intentionally NOT dataclass fields — they are
@@ -1908,6 +1913,7 @@ class FileSpec(Spec):
     probe: ProbeSpec | dict | None = None
     us_machine: str | None = None
     description: str | None = None
+    acquisition_time: str | None = None
 
     # tells the SCHEMA ↔ fields consistency test that 'tracks' is intentionally
     # absent from SCHEMA (list[TrackSpec] doesn't fit the standard SCHEMA patterns)
@@ -1920,6 +1926,17 @@ class FileSpec(Spec):
         "probe": {"spec": ProbeSpec},
         "us_machine": {"dtype": str, "shape": ()},
         "description": {"dtype": str, "shape": ()},
+        "acquisition_time": {"dtype": str, "shape": ()},
+    }
+
+    FIELD_METADATA = {
+        "acquisition_time": {
+            "description": (
+                "UTC acquisition timestamp in ISO 8601 format "
+                "(e.g. '2026-06-12T14:30:00+00:00'). "
+                "Auto-set to the moment of saving for non-human subjects."
+            ),
+        },
     }
 
     def __init__(
@@ -1934,6 +1951,7 @@ class FileSpec(Spec):
         probe: "ProbeSpec | dict | None" = None,
         us_machine: "str | None" = None,
         description: "str | None" = None,
+        acquisition_time: "str | None" = None,
     ):
         if data is not None or scan is not None:
             if tracks:
@@ -1958,6 +1976,7 @@ class FileSpec(Spec):
         self.probe = probe
         self.us_machine = us_machine
         self.description = description
+        self.acquisition_time = acquisition_time
 
         self.__post_init__(_implicit_track)
 
@@ -2156,6 +2175,33 @@ class FileSpec(Spec):
 
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+
+        subject_type = None
+        if isinstance(self.metadata, MetadataSpec):
+            subject = self.metadata.subject
+            if isinstance(subject, Subject) and subject.type is not None:
+                subject_type = str(subject.type).strip().casefold()
+
+        is_human = subject_type == "human"
+
+        if self.acquisition_time is not None:
+            try:
+                dt = datetime.fromisoformat(self.acquisition_time)
+            except ValueError as e:
+                raise ValueError(f"Invalid acquisition_time: {e}") from e
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            self.acquisition_time = dt.astimezone(timezone.utc).isoformat()
+            if is_human:
+                log.warning(
+                    "PHI WARNING: 'acquisition_time' is set for a human subject. "
+                    "Recording acquisition timestamps for human data constitutes "
+                    "Protected Health Information (PHI) under HIPAA and similar "
+                    "regulations. Ensure you have appropriate authorization and "
+                    "de-identification measures in place before sharing this file."
+                )
+        elif not is_human:
+            self.acquisition_time = datetime.now(timezone.utc).isoformat()
 
         with File(str(path), "w") as f:
             f.attrs["zea_version"] = _zea_version

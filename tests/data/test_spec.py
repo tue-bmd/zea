@@ -675,6 +675,108 @@ def test_subject_id_warning_includes_field_metadata_description(tmp_path):
     assert any("subject-wise splits" in m for m in messages)
 
 
+def test_acquisition_time_auto_set_for_non_human(tmp_path):
+    from datetime import datetime, timezone
+
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    path = tmp_path / "acq_time_non_human.hdf5"
+    File.create(
+        path,
+        data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
+        metadata={"subject": {"type": "phantom"}},
+        overwrite=True,
+    )
+    with File(path) as f:
+        ts = f.acquisition_time
+    assert ts is not None
+    assert ts.tzinfo is not None
+    assert ts.tzinfo == timezone.utc or ts.utcoffset().total_seconds() == 0
+    assert isinstance(ts, datetime)
+
+
+def test_acquisition_time_not_set_for_human(tmp_path):
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    path = tmp_path / "acq_time_human_no_stamp.hdf5"
+    File.create(
+        path,
+        data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
+        metadata={"subject": {"type": "human"}},
+        overwrite=True,
+    )
+    with File(path) as f:
+        assert f.acquisition_time is None
+
+
+def test_acquisition_time_explicit_human_emits_phi_warning(tmp_path):
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    path = tmp_path / "acq_time_human_explicit.hdf5"
+    with patch("zea.log.warning") as mock_warn:
+        File.create(
+            path,
+            data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
+            metadata={"subject": {"type": "human"}},
+            acquisition_time="2026-06-12T14:30:00+00:00",
+            overwrite=True,
+        )
+    messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+    assert any("PHI" in m for m in messages)
+    assert any("Protected Health Information" in m for m in messages)
+
+
+def test_acquisition_time_naive_string_assumed_utc(tmp_path):
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    path = tmp_path / "acq_time_naive.hdf5"
+    File.create(
+        path,
+        data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
+        acquisition_time="2026-06-12T14:30:00",  # no tzinfo
+        overwrite=True,
+    )
+    with File(path) as f:
+        ts = f.acquisition_time
+    assert ts.utcoffset().total_seconds() == 0
+    assert ts.year == 2026 and ts.hour == 14
+
+
+def test_acquisition_time_malformed_raises(tmp_path):
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    path = tmp_path / "acq_time_bad.hdf5"
+    with pytest.raises(ValueError, match="Invalid acquisition_time"):
+        File.create(
+            path,
+            data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
+            acquisition_time="not-a-date",
+            overwrite=True,
+        )
+
+
+def test_acquisition_time_human_type_whitespace_and_case(tmp_path):
+    """' HUMAN ' and 'Human' should both suppress auto-stamp."""
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    for subject_type in (" HUMAN ", "Human", "HUMAN"):
+        path = tmp_path / f"acq_time_{subject_type.strip()}.hdf5"
+        File.create(
+            path,
+            data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
+            metadata={"subject": {"type": subject_type.strip()}},
+            overwrite=True,
+        )
+        with File(path) as f:
+            assert f.acquisition_time is None, f"expected no stamp for type={subject_type!r}"
+
+
 class TestScanValidationErrors:
     """TypeError / ValueError raised by Scan spec validation."""
 
