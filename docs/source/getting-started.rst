@@ -49,21 +49,39 @@ scan and probe information from the file to compute all parameters needed for be
 ④ Pass data and parameters to the pipeline for processing.
 ⑤ Visualise your outputs.
 
+An example of this workflow in code is shown below. In this example, we load a config file and a data file from Hugging Face (PICMUS dataset), but you can also load local files.
+
 .. code-block:: python
 
+   import matplotlib.pyplot as plt
+
    import zea
+
    # setting up cpu / gpu usage
    zea.init_device()
+   # plotting style
+   zea.visualize.set_mpl_style()
 
    # loading a config file from Hugging Face, but can also load a local config file
-   config = zea.Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml")
+   config = zea.Config.from_path("hf://zeahub/picmus/config_iq.yaml", revision="v0.1.0")
 
-   path = config.data.dataset_folder + "/" + config.data.file_path
-   with zea.File(path) as file:
+   path = (
+      "hf://zeahub/picmus/in_vivo/carotid_cross/"
+      "carotid_cross_expe_dataset_iq/carotid_cross_expe_dataset_iq.hdf5"
+   )
+   with zea.File(path, revision="v0.1.0") as file:
       data = file.data.raw_data[0]
-      # load the merged probe + scan parameters and apply config overrides
+      # load the merged probe + scan parameters
       parameters = file.load_parameters()
-      parameters.update(**config.parameters)
+
+   # update parameters with manual settings from the config file
+   parameters.update(**config.parameters)
+
+   # or manually set some parameters
+   parameters.zlims = (0, 0.04)
+   parameters.grid_size_x = 500
+   parameters.grid_size_z = 800
+   parameters.dynamic_range = (-50, 0)
 
    # using the pipeline as specified in the config file
    pipeline = zea.Pipeline.from_config(
@@ -76,56 +94,77 @@ scan and probe information from the file to compute all parameters needed for be
    # running the pipeline!
    image = pipeline(data=data, **inputs)["data"]
 
-   # show the image
-   image = zea.display.to_8bit(image)
-   image.show()
+   xlims_mm = [v * 1e3 for v in parameters.xlims]
+   zlims_mm = [v * 1e3 for v in parameters.zlims]
+   extent = [xlims_mm[0], xlims_mm[1], zlims_mm[1], zlims_mm[0]]
 
-Similarly, we can easily load one of the pretrained models from the :mod:`zea.models` module and use it for inference.
+   # plot figure
+   fig = plt.figure()
+   plt.imshow(image, cmap="gray", extent=extent)
+   plt.title("B-Mode")
+   plt.xlabel("X (mm)")
+   plt.ylabel("Z (mm)")
+   plt.show()
+
+.. raw:: html
+
+   <div style="display: flex; flex-direction: column; align-items: center; margin: 2em 0;">
+     <img src="_static/carotid_dark.png" alt="B-mode carotid image" style="display: none; width: 60%;" class="only-dark" />
+     <img src="_static/carotid_light.png" alt="B-mode carotid image" style="display: none; width: 60%;" class="only-light" />
+     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
+       B-mode image of a carotid cross-section produced by the pipeline above.
+     </div>
+   </div>
+
+Similarly, we can easily load one of the pretrained models from the :mod:`zea.models` module and use it for inference. Let's load a pretrained despeckling model and apply it to the B-mode image we just generated.
 
 .. code-block:: python
 
    import keras
+   import numpy as np
 
    import zea
-   from zea.models.lv_segmentation import AugmentedCamusSeg
+   from zea.models.speckle2self import Speckle2Self
 
-   zea.init_device()
+   model = Speckle2Self.from_preset("hf://zeahub/speckle2self-invivo")
 
-   # NOTE: for this model you need: `pip install onnxruntime`
-   model = AugmentedCamusSeg.from_preset("augmented_camus_seg")
+   # Run despeckling (Speckle2Self) model inference
+   despeckled = model(image[None, ..., None])
+   despeckled = keras.ops.convert_to_numpy(despeckled)
+   despeckled = despeckled.squeeze()
 
-   with zea.Dataset("hf://zeahub/camus-sample/") as dataset:
-      file = dataset[0]
-      image = file.data.image_sc[0]
+   # gamma correction for better visualization
+   despeckled_viz = np.power(despeckled, 1.3)
 
-   # Resize to 256x256 and normalize to [-1, 1] as expected by the model
-   image = keras.ops.image.resize(image[None, ..., None], (256, 256))[0, ..., 0]
-   image = zea.func.translate(image, range_to=[-1, 1])
+   # plot figure
+   fig = plt.figure()
+   plt.imshow(despeckled_viz, cmap="gray", extent=extent)
+   plt.title("Despeckled B-Mode (Speckle2Self)")
+   plt.xlabel("X (mm)")
+   plt.ylabel("Z (mm)")
+   plt.show()
 
-   # Run model: expects NCHW format (batch, channels, height, width)
-   image = keras.ops.convert_to_numpy(image)
-   predictions = model(image[None, None])  # (1, N, H, W)
+.. raw:: html
 
-   # Compute class assignments via argmax to get mutually exclusive masks
-   class_map = predictions[0].argmax(axis=0)  # (H, W) — each pixel assigned to one class
-   # Derive specific masks: class 1 = LV, class 2 = myocardium
-   lv_mask = class_map == 1
-   myo_mask = class_map == 2
+   <div style="display: flex; flex-direction: column; align-items: center; margin: 2em 0;">
+     <img src="_static/carotid_despeckled_dark.png" alt="Despeckled B-mode carotid image" style="display: none; width: 60%;" class="only-dark" />
+     <img src="_static/carotid_despeckled_light.png" alt="Despeckled B-mode carotid image" style="display: none; width: 60%;" class="only-light" />
+     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
+       Despeckled B-mode carotid image after applying the Speckle2Self model.
+     </div>
+   </div>
 
-   image = zea.display.to_8bit(image, dynamic_range=(-1, 1))
-   masks = [
-      zea.display.to_8bit(lv_mask, dynamic_range=(0, 1)),
-      zea.display.to_8bit(myo_mask, dynamic_range=(0, 1)),
-   ]
+A full list of available pretrained models can be found in the :doc:`models` page.
 
-   result = zea.display.overlay_masks(image, masks, alpha=0.5)
-   result.show()
+.. seealso::
 
-``zea`` also provides a simple command line interface (CLI) to quickly visualize a ``zea`` data file.
+   For a more detailed walkthrough of this example please refer to the :doc:`notebooks/models/speckle2self_despeckling_example` notebook.
+
+``zea`` also provides a simple command line interface (CLI) to quickly visualize a ``zea`` data file. For more information on the CLI, please refer to the :doc:`cli` page or run ``zea --help`` in your terminal.
 
 .. code-block:: shell
 
-   zea --config configs/config_picmus_rf.yaml
+   zea process --dataset hf://zeahub/picmus/ --config configs/config_picmus_rf.yaml
 
 Installation
 ------------
