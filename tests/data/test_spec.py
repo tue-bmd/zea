@@ -682,6 +682,54 @@ def test_acquisition_time_explicit_human_emits_phi_warning(tmp_path):
     assert any("Protected Health Information" in m for m in messages)
 
 
+def test_acquisition_time_naive_string_assumed_utc(tmp_path):
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    path = tmp_path / "acq_time_naive.hdf5"
+    File.create(
+        path,
+        data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
+        acquisition_time="2026-06-12T14:30:00",  # no tzinfo
+        overwrite=True,
+    )
+    with File(path) as f:
+        ts = f.acquisition_time
+    assert ts.utcoffset().total_seconds() == 0
+    assert ts.year == 2026 and ts.hour == 14
+
+
+def test_acquisition_time_malformed_raises(tmp_path):
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    path = tmp_path / "acq_time_bad.hdf5"
+    with pytest.raises(ValueError, match="Invalid acquisition_time"):
+        File.create(
+            path,
+            data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
+            acquisition_time="not-a-date",
+            overwrite=True,
+        )
+
+
+def test_acquisition_time_human_type_whitespace_and_case(tmp_path):
+    """' HUMAN ' and 'Human' should both suppress auto-stamp."""
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    for subject_type in (" HUMAN ", "Human", "HUMAN"):
+        path = tmp_path / f"acq_time_{subject_type.strip()}.hdf5"
+        File.create(
+            path,
+            data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
+            metadata={"subject": {"type": subject_type.strip()}},
+            overwrite=True,
+        )
+        with File(path) as f:
+            assert f.acquisition_time is None, f"expected no stamp for type={subject_type!r}"
+
+
 class TestScanValidationErrors:
     """TypeError / ValueError raised by Scan spec validation."""
 

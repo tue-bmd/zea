@@ -2105,21 +2105,28 @@ class FileSpec(Spec):
         if isinstance(self.metadata, MetadataSpec):
             subject = self.metadata.subject
             if isinstance(subject, Subject) and subject.type is not None:
-                subject_type = str(subject.type).lower()
+                subject_type = str(subject.type).strip().casefold()
 
         is_human = subject_type == "human"
 
-        if self.acquisition_time is None:
-            if not is_human:
-                self.acquisition_time = datetime.now(timezone.utc).isoformat()
-        elif is_human:
-            log.warning(
-                "PHI WARNING: 'acquisition_time' is set for a human subject. "
-                "Recording acquisition timestamps for human data constitutes "
-                "Protected Health Information (PHI) under HIPAA and similar "
-                "regulations. Ensure you have appropriate authorization and "
-                "de-identification measures in place before sharing this file."
-            )
+        if self.acquisition_time is not None:
+            try:
+                dt = datetime.fromisoformat(self.acquisition_time)
+            except ValueError as e:
+                raise ValueError(f"Invalid acquisition_time: {e}") from e
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            self.acquisition_time = dt.astimezone(timezone.utc).isoformat()
+            if is_human:
+                log.warning(
+                    "PHI WARNING: 'acquisition_time' is set for a human subject. "
+                    "Recording acquisition timestamps for human data constitutes "
+                    "Protected Health Information (PHI) under HIPAA and similar "
+                    "regulations. Ensure you have appropriate authorization and "
+                    "de-identification measures in place before sharing this file."
+                )
+        elif not is_human:
+            self.acquisition_time = datetime.now(timezone.utc).isoformat()
 
         with File(str(path), "w") as f:
             f.attrs["zea_version"] = _zea_version
