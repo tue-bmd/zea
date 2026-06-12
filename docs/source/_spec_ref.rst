@@ -68,17 +68,17 @@ Stored as HDF5 root-level attributes (not groups).
    * - ``description``
      - ``str``
      - Free-text description of the acquisition.
-     -
+     - e.g. ``"Carotid artery scan with Doppler."``
      - |badge-opt|
    * - ``zea_version``
      - ``str``
      - Version of zea that wrote this file (set automatically).
-     -
+     - e.g. ``"0.1.0"``
      - |badge-opt|
    * - ``acquisition_time``
      - ``str``
      - Timestamp (UTC) of acquisition in ISO 8601 format.
-     -
+     - e.g. ``"2024-01-30T15:45:00Z"``
      - |badge-opt|
 
 
