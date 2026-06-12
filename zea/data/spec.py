@@ -1467,6 +1467,8 @@ class Signal(Spec):
         sampling_frequency: Sampling frequency in Hz for uniformly sampled data.
         timestamps: Explicit sample timestamps in seconds of shape (T,), relative
             to sample 0. Must start at 0.
+
+    Exactly one of ``sampling_frequency`` or ``timestamps`` must be provided.
     """
 
     start_time_offset: np.ndarray | float
@@ -1612,6 +1614,8 @@ class Signal1D(Signal):
         sampling_frequency: Sampling frequency in Hz for signal samples.
         timestamps: Explicit signal timestamps in seconds of shape (T,), relative
             to sample 0.
+
+    Exactly one of ``sampling_frequency`` or ``timestamps`` must be provided.
     """
 
     samples: np.ndarray
@@ -1638,6 +1642,8 @@ class SignalND(Signal):
         sampling_frequency: Sampling frequency in Hz for signal samples.
         timestamps: Explicit signal timestamps in seconds of shape (T,), relative
             to sample 0.
+
+    Exactly one of ``sampling_frequency`` or ``timestamps`` must be provided.
     """
 
     samples: np.ndarray

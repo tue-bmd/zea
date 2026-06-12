@@ -1006,7 +1006,13 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Hz
               - Sampling frequency.
-              - |badge-req|
+              - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (T)
+              - s
+              - Explicit sample timestamps relative to sample 0.
+              - |badge-opt|
 
 
       .. dropdown:: ``ecg / voice_narration`` — Signal1D
@@ -1040,7 +1046,13 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Hz
               - Sampling frequency.
-              - |badge-req|
+              - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (T)
+              - s
+              - Explicit sample timestamps relative to sample 0.
+              - |badge-opt|
 
 
    .. tab-item:: metrics

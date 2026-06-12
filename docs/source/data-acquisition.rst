@@ -414,7 +414,7 @@ metadata argument.
 
 Custom signal keys (anything beyond the standard names) are accepted and stored as
 :class:`~zea.data.spec.SignalND` entries: a dict with ``samples``, ``start_time_offset``, and
-``sampling_frequency``:
+exactly one of ``sampling_frequency`` or ``timestamps``:
 
 .. code-block:: python
 
