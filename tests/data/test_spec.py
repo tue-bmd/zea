@@ -312,6 +312,53 @@ def test_signal_nd_accepts_variable_trailing_dimensions_with_ellipsis():
     assert signal.samples.shape == (10, 3, 4, 5)
 
 
+def test_signal_1d_accepts_explicit_timestamps():
+    signal = Signal1D(
+        samples=np.zeros(10, dtype=np.float32),
+        start_time_offset=np.float32(0.0),
+        timestamps=np.linspace(0.0, 0.9, 10, dtype=np.float32),
+    )
+
+    assert signal.timestamps.shape == (10,)
+
+
+def test_signal_1d_rejects_timestamp_length_mismatch():
+    with pytest.raises(ValueError, match="same length"):
+        Signal1D(
+            samples=np.zeros(10, dtype=np.float32),
+            start_time_offset=np.float32(0.0),
+            timestamps=np.linspace(0.0, 0.8, 9, dtype=np.float32),
+        )
+
+
+def test_signal_1d_rejects_non_monotonic_timestamps():
+    with pytest.raises(ValueError, match="strictly increasing"):
+        Signal1D(
+            samples=np.zeros(3, dtype=np.float32),
+            start_time_offset=np.float32(0.0),
+            timestamps=np.array([0.0, 0.2, 0.1], dtype=np.float32),
+        )
+
+
+def test_signal_1d_rejects_timestamps_not_starting_at_zero():
+    with pytest.raises(ValueError, match="start at 0"):
+        Signal1D(
+            samples=np.zeros(3, dtype=np.float32),
+            start_time_offset=np.float32(0.0),
+            timestamps=np.array([0.1, 0.2, 0.3], dtype=np.float32),
+        )
+
+
+def test_signal_1d_rejects_sampling_frequency_and_timestamps():
+    with pytest.raises(ValueError, match="exactly one"):
+        Signal1D(
+            samples=np.zeros(3, dtype=np.float32),
+            start_time_offset=np.float32(0.0),
+            sampling_frequency=np.float32(1000.0),
+            timestamps=np.array([0.0, 0.1, 0.2], dtype=np.float32),
+        )
+
+
 def test_signal_nd_rejects_missing_time_dimension_for_ellipsis_shape():
     with pytest.raises(ValueError, match=r"samples has shape \(\), expected one of"):
         SignalND(
@@ -804,8 +851,8 @@ class TestMetadataAndMetricsValidationErrors:
             Subject(age="forty two")
 
     def test_signal_missing_required_field_raises(self):
-        """Signal1D requires both start_time_offset and sampling_frequency."""
-        with pytest.raises(TypeError, match="sampling_frequency"):
+        """Signal1D requires either sampling_frequency or timestamps."""
+        with pytest.raises(ValueError, match="sampling_frequency|timestamps"):
             Signal1D(samples=np.zeros(100, dtype=np.float32), start_time_offset=np.float32(0.0))
 
     def test_metrics_wrong_shape_raises(self):
