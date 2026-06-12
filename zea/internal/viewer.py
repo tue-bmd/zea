@@ -6,8 +6,6 @@ import sys
 from collections import deque
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from tkinter import Tk
-from tkinter.filedialog import askopenfilename
 from typing import Callable, Optional
 
 import matplotlib
@@ -41,6 +39,17 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     """
     if filetypes is None:
         filetypes = (("all files", "*.*"),)
+
+    try:
+        from tkinter import Tk
+        from tkinter.filedialog import askopenfilename
+    except ImportError as error:
+        raise ImportError(
+            "The file dialog window features in zea require Python's native Tkinter GUI toolkit. "
+            "Tkinter was not found in your current Python environment. Please ensure that "
+            "your Python distribution includes Tkinter or install your system's corresponding "
+            "python-tk package."
+        ) from error
 
     try:
         root = Tk()
