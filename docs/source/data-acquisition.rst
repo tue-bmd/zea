@@ -83,6 +83,7 @@ disk.
     ...    data={"raw_data": raw_data},
     ...    scan=scan,
     ...    probe=probe,
+    ...    overwrite=True,
     ... )
 
 **Save from a Parameters object**
@@ -115,10 +116,11 @@ field-by-field reconstruction is needed:
             "polar_angles":           np.zeros(n_tx, dtype=np.float32),
             "time_to_next_transmit":  np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
     }
+    probe = {"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))}
     File.create(
         "source.hdf5",
         data={"raw_data": raw},
-        probe={"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))},
+        probe=probe,
         scan=scan, overwrite=True,
     )
 
@@ -158,8 +160,8 @@ these sequences contain parameters that may not be expressed by a single ``ScanS
    dimension of the raw data would differ between the two pulse types, and thus could not
    be represented by a single ``DataSpec``, which expects a non-ragged tensor for ``raw_data``.
 
-Rather than splitting these into separate files, ``zea`` can store them as **Tracks**: 
-self-contained bundles of raw data and scan parameters in a single HDF5 file, 
+Rather than splitting these into separate files, ``zea`` can store them as **Tracks**:
+self-contained bundles of raw data and scan parameters in a single HDF5 file,
 with a shared :class:`~zea.Probe` and metadata. Each track exposes its own :class:`~zea.Parameters` object (via
 ``track.load_parameters()``), containing the parameters
 necessary to beamform the raw data in that track. This allows us to specify a :class:`~zea.Pipeline`
@@ -347,41 +349,49 @@ A custom map is a named entry in the ``data`` group that associates a pixel arra
 per-pixel Cartesian coordinate grid.  Each map is then a function from Cartesian space to
 some real values.  Pass it as a sub-dict under the key you want:
 
-.. code-block:: python
+.. doctest::
 
-    import numpy as np
-    from zea import File
-    from zea.beamform.pixelgrid import cartesian_pixel_grid
+    >>> import numpy as np
+    >>> from zea import File
 
-    n_frames = 2
-    values = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)   # (frames, z, x[, channels])
+    >>> n_frames, n_tx, n_el, n_ax = 2, 1, 4, 8
+    >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+    >>> scan = {
+    ...     "sampling_frequency": np.float32(40e6),
+    ...     "center_frequency": np.float32(7e6),
+    ...     "demodulation_frequency": np.float32(7e6),
+    ...     "initial_times": np.zeros(n_tx, dtype=np.float32),
+    ...     "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+    ...     "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+    ...     "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+    ...     "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+    ...     "polar_angles": np.zeros(n_tx, dtype=np.float32),
+    ...     "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+    ... }
+    >>> probe = {"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))}
 
-    # Build a coordinate grid matching the values spatial shape.
-    # cartesian_pixel_grid returns shape (nz, nx, 3); broadcast to add the frame dimension.
-    coords_2d = cartesian_pixel_grid(
-        xlims=(-0.02, 0.02), zlims=(-0.03, 0.0), grid_size_x=64, grid_size_z=64
-    )  # shape (64, 64, 3), last axis = [x, y, z] in metres
-    coordinates = np.broadcast_to(coords_2d, (n_frames, 64, 64, 3)).copy()
-    # For a simple placeholder without a real grid:
-    # coordinates = np.zeros((n_frames, 64, 64, 3), dtype=np.float32)
+    >>> values = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)   # (frames, z, x[, channels])
+    >>> # Minimal coordinate placeholder; use cartesian_pixel_grid for real grids (see note below).
+    >>> coordinates = np.zeros((n_frames, 64, 64, 3), dtype=np.float32)
 
-    File.create(
-        "my_acquisition.hdf5",
-        data={
-            "raw_data": raw,
-            "my_overlay": {          # <-- Example of a custom field not in the zea spec
-                "values":      values,
-                "coordinates": coordinates,  # shape (*spatial_dims, 3)
-                # optional: "labels", "description", "unit"
-            },
-        },
-        scan=scan,
-    )
+    >>> File.create(
+    ...     "my_acquisition.hdf5",
+    ...     data={
+    ...         "raw_data": raw,
+    ...         "my_overlay": {          # custom field not in the zea spec
+    ...             "values":      values,
+    ...             "coordinates": coordinates,  # shape (*spatial_dims, 3)
+    ...             # optional: "labels", "description", "unit"
+    ...         },
+    ...     },
+    ...     scan=scan,
+    ...     probe=probe,
+    ...     overwrite=True,
+    ... )
 
-    # Reading back
-    with File("my_acquisition.hdf5") as f:
-        overlay_values      = f.data.my_overlay.values[:]
-        overlay_coordinates = f.data.my_overlay.coordinates[:]
+    >>> with File("my_acquisition.hdf5") as f:
+    ...     overlay_values      = f.data.my_overlay.values[:]
+    ...     overlay_coordinates = f.data.my_overlay.coordinates[:]
 
 .. note::
 
@@ -397,52 +407,57 @@ Standard metadata fields (``credit``, ``annotations``, ``text_report``, ``subjec
 are validated by :class:`~zea.data.spec.MetadataSpec`.  Pass a plain dict to ``File.create``
 metadata argument.
 
-.. code-block:: python
+.. doctest::
 
-    File.create(
-        "my_acquisition.hdf5",
-        data={"raw_data": raw},
-        scan=scan,
-        metadata={
-            "credit": "My Lab, 2024",
-            "text_report": "Normal acquisition, no pathology.",
-            "annotations": {
-                "label": np.array(["healthy", "healthy"]),
-            },
-        },
-    )
+    >>> File.create(
+    ...     "my_acquisition.hdf5",
+    ...     data={"raw_data": raw},
+    ...     scan=scan,
+    ...     probe=probe,
+    ...     metadata={
+    ...         "credit": "My Lab, 2024",
+    ...         "text_report": "Normal acquisition, no pathology.",
+    ...         "annotations": {
+    ...             "label": np.array(["healthy", "healthy"]),
+    ...         },
+    ...     },
+    ...     overwrite=True,
+    ... )
 
 Custom signal keys (anything beyond the standard names) are accepted and stored as
 :class:`~zea.data.spec.SignalND` entries: a dict with ``samples``, ``start_time_offset``, and
 exactly one of ``sampling_frequency`` or ``timestamps``:
 
-.. code-block:: python
+.. doctest::
 
-    import numpy as np
-    from zea import File
+    >>> n_samples = 500
+    >>> respiratory_signal = {
+    ...     "samples":            np.sin(np.linspace(0, 2 * np.pi, n_samples)).astype(np.float32),
+    ...     "start_time_offset":  np.float32(-0.5),   # seconds before first transmit
+    ...     "sampling_frequency": np.float32(10.0),   # Hz
+    ... }
 
-    n_samples = 500
-    respiratory_signal = {
-        "samples":            np.sin(np.linspace(0, 2 * np.pi, n_samples)).astype(np.float32),
-        "start_time_offset":  np.float32(-0.5),   # seconds before first transmit
-        "sampling_frequency": np.float32(10.0),   # Hz
-    }
+    >>> File.create(
+    ...     "my_acquisition.hdf5",
+    ...     data={"raw_data": raw},
+    ...     scan=scan,
+    ...     probe=probe,
+    ...     metadata={
+    ...         "credit": "My Lab, 2024",
+    ...         "respiratory_signal": respiratory_signal,   # custom SignalND field
+    ...     },
+    ...     overwrite=True,
+    ... )
 
-    File.create(
-        "my_acquisition.hdf5",
-        data={"raw_data": raw},
-        scan=scan,
-        metadata={
-            "credit": "My Lab, 2024",
-            "respiratory_signal": respiratory_signal,   # <-- custom SignalND field
-        },
-    )
+    >>> with File("my_acquisition.hdf5") as f:
+    ...     meta = f.metadata
+    ...     samples = meta.respiratory_signal.samples        # numpy array
+    ...     fs = meta.respiratory_signal.sampling_frequency
 
-    # Reading back
-    with File("my_acquisition.hdf5") as f:
-        meta = f.metadata()
-        samples = meta.respiratory_signal.samples        # numpy array
-        fs      = meta.respiratory_signal.sampling_frequency
+.. testcleanup::
+
+    import os
+    os.remove("my_acquisition.hdf5")
 
 See :class:`~zea.data.spec.MetadataSpec` for the full list of supported standard fields.
 

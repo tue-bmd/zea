@@ -770,7 +770,7 @@ def test_acquisition_time_human_type_whitespace_and_case(tmp_path):
             data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             probe=_probe_minimal(n_el=n_el),
-            metadata={"subject": {"type": subject_type.strip()}},
+            metadata={"subject": {"type": subject_type}},
             overwrite=True,
         )
         with File(path) as f:

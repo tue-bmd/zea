@@ -241,6 +241,8 @@ def test_dataset_lazy_hf_defers_download(tmp_path):
         assert len(ds) == 2
         assert ds.file_paths[0] == "hf://org/myrepo/file1.hdf5"
         assert ds.file_paths[1] == "hf://org/myrepo/file2.hdf5"
+        # __len__ and file_paths must not trigger resolution
+        mock_resolve.assert_not_called()
 
         # First access triggers download of that file only
         _ = ds[0]

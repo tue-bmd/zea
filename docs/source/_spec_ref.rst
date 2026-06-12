@@ -13,7 +13,7 @@ Every ``zea`` HDF5 file follows the layout shown below.
 
 .. code-block:: text
 
-   data_file.hdf5         (attrs: us_machine, description, zea_version)
+   data_file.hdf5         (attrs: us_machine, description, zea_version, acquisition_time)
    ├── data/
    │   ├── raw_data                  float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
    │   ├── aligned_data/             group (AlignedData)
@@ -73,6 +73,11 @@ Stored as HDF5 root-level attributes (not groups).
    * - ``zea_version``
      - ``str``
      - Version of zea that wrote this file (set automatically).
+     -
+     - |badge-opt|
+   * - ``acquisition_time``
+     - ``str``
+     - Timestamp (UTC) of acquisition in ISO 8601 format.
      -
      - |badge-opt|
 

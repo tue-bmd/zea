@@ -226,7 +226,7 @@ def rst_dropdown(cls, title, base_indent=0, open_=False, compact=False) -> str:
 FILE_TREE = """\
 .. code-block:: text
 
-   data_file.hdf5         (attrs: us_machine, description, zea_version)
+   data_file.hdf5         (attrs: us_machine, description, zea_version, acquisition_time)
    \u251c\u2500\u2500 data/
    \u2502   \u251c\u2500\u2500 raw_data                  float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
    \u2502   \u251c\u2500\u2500 aligned_data/             group (AlignedData)
@@ -282,6 +282,11 @@ ROOT_ATTRS_TABLE = """\
    * - ``zea_version``
      - ``str``
      - Version of zea that wrote this file (set automatically).
+     -
+     - |badge-opt|
+   * - ``acquisition_time``
+     - ``str``
+     - Timestamp (UTC) of acquisition in ISO 8601 format.
      -
      - |badge-opt|
 """
