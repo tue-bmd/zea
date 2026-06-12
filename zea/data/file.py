@@ -1,6 +1,7 @@
 """zea data file (HDF5)."""
 
 import enum
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Tuple, Union
 
@@ -764,6 +765,7 @@ class File(h5py.File):
         probe: "ProbeSpec | dict | None" = None,
         us_machine: str | None = None,
         description: str | None = None,
+        acquisition_time: str | None = None,
         compression: str = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
         overwrite: bool = False,
@@ -800,6 +802,14 @@ class File(h5py.File):
                 plain dict accepted by :class:`~zea.data.spec.ProbeSpec`.
             us_machine: Name of the ultrasound machine.
             description: Free-text description of the acquisition.
+            acquisition_time: UTC acquisition timestamp as an ISO 8601 string
+                (e.g. ``"2026-06-12T14:30:00+00:00"``). When *None* (default) the
+                current UTC time is recorded automatically, **unless** the subject
+                type is ``"human"`` — in that case no timestamp is saved by default
+                (recording timestamps for human subjects may constitute Protected
+                Health Information / PHI). To capture the current moment explicitly,
+                pass ``datetime.now(timezone.utc).isoformat()`` (requires
+                ``from datetime import datetime, timezone``).
             compression: HDF5 compression filter (default ``"lzf"``).
             chunk_frames: If *True*, use frame-wise chunking for all datasets containing
                 a "frames" dimension. Dataset will be stored with HDF5 chunking enabled,
@@ -814,6 +824,7 @@ class File(h5py.File):
         .. doctest::
 
             >>> import os, tempfile
+            >>> from datetime import datetime, timezone
             >>> import numpy as np
             >>> from zea import File
 
@@ -839,9 +850,14 @@ class File(h5py.File):
             ...     data={"raw_data": raw},
             ...     scan=scan,
             ...     probe={"name": "verasonics_l11_4v", "probe_geometry": probe_geometry},
+            ...     acquisition_time=datetime.now(timezone.utc).isoformat(),
             ...     overwrite=True,
             ... )
-            >>> os.unlink(path)
+
+        .. testcleanup::
+
+            import os
+            os.unlink(path)
         """
         if tracks is not None and (data is not None or scan is not None):
             raise ValueError("Provide either 'tracks' or 'data'/'scan', not both.")
@@ -882,6 +898,8 @@ class File(h5py.File):
             kwargs["us_machine"] = us_machine
         if description is not None:
             kwargs["description"] = description
+        if acquisition_time is not None:
+            kwargs["acquisition_time"] = acquisition_time
 
         _warn_custom_keys(kwargs.get("data", {}), kwargs.get("metadata", {}))
         spec = FileSpec(**kwargs)
@@ -1130,6 +1148,23 @@ class File(h5py.File):
         )
         description = self.attrs["description"]
         return description
+
+    @property
+    def acquisition_time(self) -> datetime | None:
+        """Return the acquisition timestamp as a timezone-aware UTC :class:`datetime`.
+
+        Returns *None* when no timestamp was stored (e.g. human-subject files
+        saved without an explicit ``acquisition_time``).
+        """
+        if "acquisition_time" not in self.attrs:
+            return None
+        raw = self.attrs["acquisition_time"]
+        if isinstance(raw, bytes):
+            raw = raw.decode()
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
 
     def get_scan_parameters(self):
         """Returns a dictionary of parameters to initialize a scan
@@ -1425,6 +1460,8 @@ class File(h5py.File):
             kwargs["us_machine"] = self.attrs["us_machine"]
         if "description" in self.attrs:
             kwargs["description"] = self.attrs["description"]
+        if "acquisition_time" in self.attrs:
+            kwargs["acquisition_time"] = self.attrs["acquisition_time"]
 
         return FileSpec(**kwargs)
 
