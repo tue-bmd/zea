@@ -1141,8 +1141,8 @@ class ScanSpec(Spec):
             shape (n_tx, 3). This is the (x, y, z) position from which the beam
             is transmitted.
         polar_angles: The polar angles in radians of the transmit beams of shape (n_tx,).
-        time_to_next_transmit: The time in s between subsequent transmit events
-            of shape (n_frames, n_tx).
+        time_to_next_transmit: The time in s between subsequent transmit events.
+            Shape is either (n_frames, n_tx) or flat (n_frames * n_tx - 1,).
         azimuth_angles: The azimuthal angles in radians of the transmit beams of
             shape (n_tx,).
         sound_speed: The speed of sound in meters per second.
@@ -1183,7 +1183,10 @@ class ScanSpec(Spec):
         "focus_distances": {"dtype": np.float32, "shape": ("n_tx",)},
         "transmit_origins": {"dtype": np.float32, "shape": ("n_tx", 3)},
         "polar_angles": {"dtype": np.float32, "shape": ("n_tx",)},
-        "time_to_next_transmit": {"dtype": np.float32, "shape": ("n_frames", "n_tx")},
+        "time_to_next_transmit": {
+            "dtype": np.float32,
+            "shape": (("n_frames", "n_tx"), ("n_timing_intervals",)),
+        },
         "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
         "sound_speed": {"dtype": np.float32, "shape": ()},
         "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
@@ -2053,6 +2056,8 @@ class FileSpec(Spec):
                     f"got min={self.track_schedule.min()}, max={self.track_schedule.max()}"
                 )
 
+        self._normalize_time_to_next_transmit()
+
         # Warn if multi-track frame counts differ without a schedule
         if len(self.tracks) > 1 and self.track_schedule is None:
             frame_counts = []
@@ -2086,6 +2091,44 @@ class FileSpec(Spec):
                         field_sizes = {**meta_dim_field_sizes[dim], **track_dim_field_sizes[dim]}
                         if len(set(field_sizes.values())) > 1:
                             raise ValueError(self._format_inconsistent_dimension(dim, field_sizes))
+
+    def _normalize_time_to_next_transmit(self) -> None:
+        """Pad flat timing arrays and reshape to (n_frames * n_tx) by padding last
+        frame with a zero."""
+        for i, track in enumerate(self.tracks):
+            raw_data = track.data.raw_data
+            scan = track.scan
+            if raw_data is None or scan is None or scan.time_to_next_transmit is None:
+                continue
+
+            matrix_shape = raw_data.shape[:2]
+            expected_flat_count = max(int(np.prod(matrix_shape)) - 1, 0)
+            expected_flat_shape = (expected_flat_count,)
+            t2nt = np.asarray(scan.time_to_next_transmit, dtype=np.float32)
+
+            if t2nt.shape == matrix_shape:
+                scan.time_to_next_transmit = t2nt
+                continue
+
+            if t2nt.shape != expected_flat_shape:
+                raise ValueError(
+                    f"tracks[{i}].scan.time_to_next_transmit has shape {t2nt.shape}, "
+                    f"expected {matrix_shape} or flat length {expected_flat_count}."
+                )
+
+            if (
+                len(self.tracks) > 1
+                and self.track_schedule is not None
+                and len(self.track_schedule) > 0
+                and int(self.track_schedule[-1]) != i
+            ):
+                raise ValueError(
+                    f"tracks[{i}].scan.time_to_next_transmit omits the final interval, "
+                    "but this track is not the final track in track_schedule. "
+                    f"Provide a full {matrix_shape} matrix for this track."
+                )
+
+            scan.time_to_next_transmit = np.pad(t2nt, (0, 1)).reshape(matrix_shape)
 
     def to_dict(self) -> dict:
         """Return this spec as a nested dictionary.

@@ -720,7 +720,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - |badge-req|
          * - ``time_to_next_transmit``
            - ``float32``
-           - (n_frames, n_tx)
+           - (n_frames, n_tx) or (n_timing_intervals)
            - s
            - Time between transmit events.
            - |badge-opt|
