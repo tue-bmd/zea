@@ -505,6 +505,77 @@ def cartesian_to_polar_matrix(
     return polar_matrix
 
 
+def cartesian_indices_to_polar_indices(
+    cart_indices,
+    cartesian_shape: tuple[int, int],
+    scan,
+):
+    """Vectorized Cartesian→polar index lookup using keras.ops (VMAP-friendly).
+
+    Args:
+        cart_indices: Tensor of shape (..., P, 2) or (P, 2) with (row, col) image indices.
+            Supports leading batch dims for vmapped use.
+        cartesian_shape: (rows, cols) of the Cartesian image the indices came from.
+        scan: ``Scan`` with a *polar* grid; ``scan.grid`` must be shape (n_r, n_theta, 3).
+
+    Returns:
+        dict with tensors shaped (..., P, 2) and (..., P, 3):
+            - "polar_idx": (r_idx, theta_idx) nearest to each input point
+            - "world_m": Cartesian coordinates (x, y, z) in meters at that polar pixel
+
+    Notes:
+        - Uses nearest-neighbor lookup in the polar grid (no interpolation).
+        - Assumes Cartesian indices span scan.xlims (lateral) and scan.zlims (axial).
+    """
+
+    if scan.grid_type != "polar":
+        raise ValueError("cartesian_indices_to_polar_indices expects scan.grid_type == 'polar'.")
+
+    cart_rows, cart_cols = cartesian_shape
+    x_min, x_max = scan.xlims
+    z_min, z_max = scan.zlims
+
+    orig_shape = ops.shape(cart_indices)
+    if len(orig_shape) == 2:
+        batch_shape = (1,)
+        P = orig_shape[0]
+        flat = ops.reshape(cart_indices, (P, 2))
+    else:
+        batch_shape = orig_shape[:-2]
+        P = orig_shape[-2]
+        flat = ops.reshape(cart_indices, (-1, 2))
+
+    rows = flat[:, 0]
+    cols = flat[:, 1]
+    z = z_min + (z_max - z_min) * (rows / ops.maximum(cart_rows - 1, 1))
+    x = x_min + (x_max - x_min) * (cols / ops.maximum(cart_cols - 1, 1))
+    flat_xz = ops.stack([x, z], axis=-1)  # (B_flat, 2)
+
+    grid = ops.convert_to_tensor(scan.grid)
+    grid_xz = ops.stack([grid[..., 0], grid[..., 2]], axis=-1)  # (n_r, n_theta, 2)
+    n_r, n_theta = ops.shape(grid_xz)[0], ops.shape(grid_xz)[1]
+    grid_flat_world = ops.reshape(grid, (-1, 3))
+
+    diff = grid_xz[None, ...] - flat_xz[:, None, None, :]
+    dist2 = ops.sum(diff * diff, axis=-1)  # (B_flat, n_r, n_theta)
+    dist2_flat = ops.reshape(dist2, (-1, n_r * n_theta))
+    argmin = ops.argmin(dist2_flat, axis=-1)  # (B_flat,)
+
+    theta_count = ops.cast(n_theta, ops.dtype(argmin))
+    r_idx = ops.cast(ops.floor(argmin / theta_count), "int32")
+    theta_idx = ops.cast(argmin - ops.cast(r_idx, ops.dtype(argmin)) * theta_count, "int32")
+    world = ops.take(grid_flat_world, argmin, axis=0)  # (B_flat, 3)
+
+    polar_idx = ops.stack([r_idx, theta_idx], axis=-1)
+    out_shape = (*batch_shape, P, 2) if len(orig_shape) > 2 else (P, 2)
+    world_shape = (*batch_shape, P, 3) if len(orig_shape) > 2 else (P, 3)
+
+    polar_idx = ops.reshape(polar_idx, out_shape)
+    world = ops.reshape(world, world_shape)
+
+    return {"polar_idx": polar_idx, "world_m": world}
+
+
 def inverse_scan_convert_2d(
     cartesian_image,
     fill_value=0.0,
