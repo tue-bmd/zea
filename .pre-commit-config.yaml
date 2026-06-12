@@ -36,11 +36,10 @@ repos:
   - id: detect-private-key
     description: Detects the presence of private keys
 
-- repo: https://github.com/python-poetry/poetry
-  rev: 2.1.3
+- repo: https://github.com/astral-sh/uv-pre-commit
+  rev: 0.8.17
   hooks:
-  - id: poetry-check
-  - id: poetry-lock
+  - id: uv-lock
 
 - repo: local
   hooks:
@@ -53,7 +52,7 @@ repos:
     name: Generate Keras Operations
     entry: python -m zea.internal._generate_keras_ops
     language: system
-    files: ^(.*/)?(poetry\.lock|pyproject\.toml|zea/internal/_generate_keras_ops\.py)$
+    files: ^(.*/)?(uv\.lock|pyproject\.toml|zea/internal/_generate_keras_ops\.py)$
     pass_filenames: false
   - id: notebook-clean-and-check
     name: Notebook Clean and Check
