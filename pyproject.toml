@@ -1,6 +1,6 @@
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling>=1.30,<2"]
+build-backend = "hatchling.build"
 
 [project]
 name = "zea"
@@ -139,6 +139,9 @@ Repository = "https://github.com/tue-bmd/zea/"
 
 [project.scripts]
 zea = "zea.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["zea"]
 
 [tool.ruff]
 # We use ruff to lint and auto-format code

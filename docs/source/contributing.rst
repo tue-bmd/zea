@@ -51,17 +51,51 @@ Check out a new branch for your changes.
    cd zea
    git checkout -b <your_feature_branch_name>
 
-Set up your development environment. We recommend using Docker as described in the :doc:`installation` guide. This ensures consistency and avoids dependency issues. If you prefer to work without Docker, you can set up a local environment using `conda` or `pip`. For example, to set up a conda environment, you can run:
+We recommend using Docker for development as it ensures consistency and avoids
+dependency issues — the images ship with the backends pre-installed. If you prefer
+a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
-.. code-block:: shell
+.. tab-set::
 
-   conda create -n zea python=3.12
-   conda activate zea
-   conda install pip
-   pip install -e .[dev]
-   pre-commit install
+    .. tab-item:: Docker
 
-Now install the backend(s). If you use the Docker image, the backends are already installed. If you use a local environment, you need to install one of the supported machine learning backends: JAX, PyTorch or TensorFlow. For more information on how to install the backends, see the :ref:`backend installation <backend-installation>`.` guide.
+         See the :ref:`Docker <docker-information>` section of the installation guide
+         for build and run instructions. Once inside the container, install the dev
+         dependencies:
+
+         .. code-block:: shell
+
+               pip install -e .[dev]
+               pre-commit install
+
+    .. tab-item:: uv
+
+         From the repository root run:
+
+         .. code-block:: shell
+
+               uv sync --extra dev
+               uv run pre-commit install
+
+         This creates a ``.venv`` with the exact locked dependencies and installs
+         ``zea`` itself in **editable** mode, so your changes to the source take
+         effect immediately without reinstalling. Prefix commands with ``uv run``
+         (e.g. ``uv run pytest``) or activate the environment with
+         ``source .venv/bin/activate``.
+
+    .. tab-item:: pip
+
+         Install into any existing environment (``venv``, ``conda``, ...) with plain
+         ``pip``. The ``-e`` flag makes the install editable:
+
+         .. code-block:: shell
+
+               pip install -e .[dev]
+               pre-commit install
+
+For local environments (uv or pip), you also need to install a machine learning
+backend: JAX, PyTorch, or TensorFlow. See the
+:ref:`backend installation <backend-installation>` guide.
 
 4. Make your changes
 ~~~~~~~~~~~~~~~~~~~~
