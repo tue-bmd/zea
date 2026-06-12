@@ -53,7 +53,7 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
             ...     fill_value=np.nan,
             ... )
             >>> image = zea.display.to_8bit(image, dynamic_range=(-60, 0))
-            >>> image.save("image.png")  # DOCTEST: +SKIP
+            >>> image.save("image.png")  # doctest: +SKIP
 
     """
     if dynamic_range is None:
