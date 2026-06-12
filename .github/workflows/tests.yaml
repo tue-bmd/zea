@@ -62,7 +62,7 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           git fetch origin "$BASE_REF"
-          if git diff --quiet "origin/$BASE_REF" -- Dockerfile pyproject.toml poetry.lock; then
+          if git diff --quiet "origin/$BASE_REF" -- Dockerfile pyproject.toml uv.lock; then
             # Verify the branch-tagged image actually exists before deciding to reuse it.
             # It may be absent on first run after this workflow feature was introduced.
             BASE_TAG="${{ env.BASE_IMAGE }}:${{ github.event.pull_request.base.ref }}"
