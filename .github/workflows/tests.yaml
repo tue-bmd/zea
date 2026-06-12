@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - openh-rf
 
 env:
   REGISTRY: ghcr.io
@@ -28,6 +29,7 @@ jobs:
       packages: write
     outputs:
       docker_image: ${{ steps.set-image.outputs.docker_image }}
+      needs_artifact: ${{ steps.set-image.outputs.needs_artifact }}
     steps:
       - name: Debug repository context
         run: |
@@ -39,23 +41,10 @@ jobs:
           echo "PR base repo: ${{ github.event.pull_request.base.repo.full_name }}"
           echo "Is fork PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}"
 
-      - name: Free up disk space
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          echo "Disk space before cleanup:"
-          df -h
-          sudo rm -rf "/usr/local/share/boost"
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          sudo rm -rf /opt/hostedtoolcache
-          echo "Disk space after cleanup:"
-          df -h
-
       - name: Checkout repository
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
@@ -65,6 +54,40 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Fork PRs: reuse the base-branch image when only code changed, not deps/Dockerfile.
+      - name: Check if image needs rebuilding (fork PR)
+        id: image-check
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git fetch origin "$BASE_REF"
+          if git diff --quiet "origin/$BASE_REF" -- Dockerfile pyproject.toml poetry.lock; then
+            # Verify the branch-tagged image actually exists before deciding to reuse it.
+            # It may be absent on first run after this workflow feature was introduced.
+            BASE_TAG="${{ env.BASE_IMAGE }}:${{ github.event.pull_request.base.ref }}"
+            if docker manifest inspect "$BASE_TAG" > /dev/null 2>&1; then
+              echo "changed=false" >> $GITHUB_OUTPUT
+              echo "No image-relevant files changed — reusing $BASE_TAG"
+            else
+              echo "changed=true" >> $GITHUB_OUTPUT
+              echo "Branch image $BASE_TAG not found — building locally"
+            fi
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Image-relevant files changed — building locally"
+          fi
+
+      # Free disk space before any docker build. Runs for same-repo builds and fork PRs
+      # that need a local build; skipped for fork PRs reusing the base-branch image.
+      - name: Free up disk space
+        if: >
+          github.event_name != 'pull_request'
+          || github.event.pull_request.head.repo.full_name == github.repository
+          || steps.image-check.outputs.changed == 'true'
+        run: |
+          sudo rm -rf "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY" /opt/hostedtoolcache
 
       - name: Build and push CI Docker image
         id: build
@@ -82,23 +105,57 @@ jobs:
           tags: |
             ${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}
             ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('{0}:latest', env.BASE_IMAGE) || '' }}
-          cache-from: type=gha
+            ${{ github.event_name == 'push' && format('{0}:{1}', env.BASE_IMAGE, github.ref_name) || '' }}
+          cache-from: type=registry,ref=ghcr.io/tue-bmd/zea/build-cache:all-cpu
+          cache-to: type=registry,ref=ghcr.io/tue-bmd/zea/build-cache:all-cpu,mode=max
+
+      # Fork PR local build — no push. Reads registry cache (public, no auth required).
+      # GHA cache write covers repeated commits to the same fork PR branch.
+      - name: Build CI Docker image (fork PR)
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && steps.image-check.outputs.changed == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          build-args: |
+            INSTALL_JAX=cpu
+            INSTALL_TORCH=cpu
+            INSTALL_TF=cpu
+            DEV=true
+          push: false
+          tags: zea-fork:local
+          outputs: type=docker,dest=/tmp/fork-image.tar
+          cache-from: type=registry,ref=ghcr.io/tue-bmd/zea/build-cache:all-cpu
           cache-to: type=gha,mode=max
+
+      - name: Upload fork PR image artifact
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && steps.image-check.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-pr-image
+          path: /tmp/fork-image.tar
+          retention-days: 1
 
       - name: Set Docker image for tests
         id: set-image
         run: |
-          # Check if this is a fork PR or main repo
           if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
-            # Fork PR - use latest public image
-            DOCKER_IMAGE="${{ env.BASE_IMAGE }}:latest"
-            echo "✅ Fork PR: Using latest public image: $DOCKER_IMAGE"
+            if [ "${{ steps.image-check.outputs.changed }}" = "true" ]; then
+              DOCKER_IMAGE="zea-fork:local"
+              NEEDS_ARTIFACT="true"
+              echo "✅ Fork PR (image changed): using locally built image"
+            else
+              DOCKER_IMAGE="${{ env.BASE_IMAGE }}:${{ github.event.pull_request.base.ref }}"
+              NEEDS_ARTIFACT="false"
+              echo "✅ Fork PR (no image change): reusing $DOCKER_IMAGE"
+            fi
           else
-            # Main repo (push or PR from same repo) - use newly built tagged image
             DOCKER_IMAGE="${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}"
-            echo "✅ Main repo: Using newly built tagged image: $DOCKER_IMAGE"
+            NEEDS_ARTIFACT="false"
+            echo "✅ Main repo: using $DOCKER_IMAGE"
           fi
           echo "docker_image=$DOCKER_IMAGE" >> $GITHUB_OUTPUT
+          echo "needs_artifact=$NEEDS_ARTIFACT" >> $GITHUB_OUTPUT
 
   tests:
     needs: [image]
@@ -110,6 +167,10 @@ jobs:
 
       - name: Set up Git
         run: git config --global safe.directory $GITHUB_WORKSPACE
+
+      - uses: ./.github/actions/load-image
+        with:
+          needs_artifact: ${{ needs.image.outputs.needs_artifact }}
 
       - name: Run Pytest in container
         run: |
@@ -136,6 +197,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - uses: ./.github/actions/load-image
+        with:
+          needs_artifact: ${{ needs.image.outputs.needs_artifact }}
 
       - name: Run heavy tests
         run: |
@@ -185,6 +250,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - uses: ./.github/actions/load-image
+        with:
+          needs_artifact: ${{ needs.image.outputs.needs_artifact }}
+
       - name: Run ${{ matrix.name }} notebook tests
         run: |
           DIRS_ARGS=$(echo "${{ matrix.dirs }}" | tr ' ' '\n' | sed 's/^/--notebook-dir /' | tr '\n' ' ')
@@ -210,6 +279,10 @@ jobs:
       - name: Set up Git
         run: git config --global safe.directory $GITHUB_WORKSPACE
 
+      - uses: ./.github/actions/load-image
+        with:
+          needs_artifact: ${{ needs.image.outputs.needs_artifact }}
+
       - name: Build documentation with Sphinx (fails on warnings)
         run: |
           docker run --rm \
@@ -217,8 +290,6 @@ jobs:
             -w /zea/docs \
             ${{ needs.image.outputs.docker_image }} \
             sh -c "\
-              sudo apt-get update && \
-              sudo apt-get install -y pandoc && \
               pip install -e ..[docs] && \
               export PATH=\"/tmp/.local/bin:\$PATH\" && \
               export ZEA_LOG_LEVEL=ERROR && \
