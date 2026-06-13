@@ -308,7 +308,7 @@ class Parameters(BaseParameters):
                 self.distance_to_apex,
             )
         elif self.grid_type == "cartesian":
-            return cartesian_pixel_grid(
+            grid = cartesian_pixel_grid(
                 self.xlims,
                 self.zlims,
                 self.ylims,
@@ -316,6 +316,12 @@ class Parameters(BaseParameters):
                 grid_size_x=self.grid_size_x,
                 grid_size_y=self.grid_size_y,
             )
+            try:
+                check_for_aliasing(self)
+            except MissingDependencyError:
+                # No wavelength (e.g. missing center frequency); cannot assess aliasing.
+                pass
+            return grid
         else:
             raise ValueError(
                 f"Unsupported grid type: {self.grid_type}. Supported types are "
@@ -615,9 +621,6 @@ class Parameters(BaseParameters):
             ]  # Convert numpy integers to Python ints
             self._invalidate("selected_transmits")
             return self
-
-        # Aliasing check
-        check_for_aliasing(self)
 
         raise ValueError(f"Unsupported selection type: {type(selection)}")
 

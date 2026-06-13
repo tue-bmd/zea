@@ -1,6 +1,7 @@
 """Tests for the Parameters class."""
 
 import pickle
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -175,6 +176,50 @@ def test_scan_erroneous_set_transmits():
 
     with pytest.raises(ValueError):
         parameters.set_transmits("invalid_string")
+
+
+def test_grid_warns_on_aliasing():
+    """An under-sized cartesian grid (pixel pitch > wavelength/2) warns about aliasing."""
+    # scan_args sets grid_size_x=64, grid_size_z=128, which under-sample the imaging region.
+    parameters = Parameters(**scan_args)
+    with patch("zea.beamform.pixelgrid.log.warning") as mock_warn:
+        _ = parameters.grid
+    msgs = " ".join(str(c.args[0]) for c in mock_warn.call_args_list)
+    assert "wavelength/2" in msgs
+
+
+def test_grid_no_aliasing_warning_when_well_sampled():
+    """A sufficiently dense cartesian grid does not warn."""
+    args = scan_args.copy()
+    args["grid_size_x"] = 512
+    args["grid_size_z"] = 512
+    parameters = Parameters(**args)
+    with patch("zea.beamform.pixelgrid.log.warning") as mock_warn:
+        _ = parameters.grid
+    assert mock_warn.call_count == 0
+
+
+def test_polar_grid_no_aliasing_warning():
+    """The cartesian aliasing check is not applied to polar grids."""
+    parameters = Parameters(**scan_args, grid_type="polar")
+    with patch("zea.beamform.pixelgrid.log.warning") as mock_warn:
+        _ = parameters.grid
+    assert mock_warn.call_count == 0
+
+
+def test_set_transmits_focused_excludes_plane_waves():
+    """'focused' must select only finite-focus transmits, not plane waves (inf)."""
+    local_scan_args = scan_args.copy()
+    # Mix focused (finite > 0) and plane-wave (inf) transmits.
+    focus = np.full(scan_args["n_tx"], np.inf)
+    focus[: scan_args["n_tx"] // 2] = 0.04
+    local_scan_args["focus_distances"] = focus
+
+    parameters = Parameters(**local_scan_args)
+    parameters.set_transmits("focused")
+
+    assert list(parameters.selected_transmits) == list(range(scan_args["n_tx"] // 2))
+    assert np.all(np.isfinite(parameters.focus_distances))
 
 
 def test_initialization():
