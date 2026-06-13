@@ -197,9 +197,9 @@ def test_color_palette(tmp_path):
     assert loaded_with_palette_gif.shape == (n_frames, height, width)
 
 
-def test_animate_images_scan_without_extent(tmp_path):
-    """animate_images must not raise AttributeError when the scan object has
-    no extent_imshow attribute (e.g. a minimal or mock Scan object)."""
+def test_animate_images_parameters_without_extent(tmp_path):
+    """animate_images must not raise AttributeError when the parameters object has
+    no extent_imshow attribute (e.g. a minimal or mock Parameters object)."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -208,10 +208,10 @@ def test_animate_images_scan_without_extent(tmp_path):
     images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(3)]
     path = tmp_path / "anim.gif"
 
-    class MinimalScan:
+    class MinimalParameters:
         pass
 
     try:
-        animate_images(images, path=str(path), scan=MinimalScan(), interval=100)
+        animate_images(images, path=str(path), parameters=MinimalParameters(), interval=100)
     except AttributeError as e:
         pytest.fail(f"animate_images raised AttributeError: {e}")
