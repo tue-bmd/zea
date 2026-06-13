@@ -118,7 +118,7 @@ docs = [
     "IPython",
 ]
 jax = [
-    "jax[cuda12_pip]>=0.4.26"
+    "jax[cuda12-pip]>=0.4.26"
 ]
 display = [
     "opencv-python>=4",
