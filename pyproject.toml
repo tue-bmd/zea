@@ -268,6 +268,12 @@ filterwarnings = [
     "ignore:.*os\\.fork\\(\\) was called.*:RuntimeWarning",
 ]
 
+[tool.coverage.run]
+branch = true
+parallel = true
+concurrency = ["multiprocessing", "thread"]
+sigterm = true
+
 [tool.coverage.report]
 omit = [
     "zea/ops/keras_ops.py",

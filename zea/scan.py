@@ -546,7 +546,8 @@ class Parameters(BaseParameters):
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select focused transmits")
-            idx = np.where(value > 0)[0].tolist()
+            # Plane waves use inf (or 0); a finite positive focus marks a focused transmit.
+            idx = np.where((value > 0) & np.isfinite(value))[0].tolist()
             if len(idx) == 0:
                 raise ValueError("No focused transmits found.")
             self._params["selected_transmits"] = idx

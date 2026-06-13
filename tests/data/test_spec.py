@@ -1610,3 +1610,32 @@ class TestProbeSpec:
         with File(path) as f:
             assert f.probe.name == "my_probe"
             assert "probe" in f
+
+
+def _all_spec_subclasses(cls=Spec):
+    """Recursively collect every Spec subclass defined in the module."""
+    subclasses = set()
+    for sub in cls.__subclasses__():
+        subclasses.add(sub)
+        subclasses |= _all_spec_subclasses(sub)
+    return subclasses
+
+
+def test_field_metadata_units_are_defined():
+    """Every unit referenced in a spec's FIELD_METADATA must be defined in UNITS.
+
+    Guards against typos and undocumented unit symbols (the doc generator renders
+    UNITS as the units legend, so an undefined unit would appear without a meaning).
+    """
+    undefined = []
+    for cls in _all_spec_subclasses():
+        field_metadata = getattr(cls, "FIELD_METADATA", {})
+        for field_name, meta in field_metadata.items():
+            unit = meta.get("unit")
+            if unit is not None and unit not in spec_module.UNITS:
+                undefined.append(f"{cls.__name__}.{field_name}: {unit!r}")
+    assert not undefined, (
+        "Found units in FIELD_METADATA not defined in zea.data.spec.UNITS: "
+        + ", ".join(sorted(undefined))
+        + ". Add the symbol to UNITS (it is the source of truth rendered in the docs)."
+    )

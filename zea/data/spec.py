@@ -18,6 +18,7 @@ UNITS = {
     "m": "meters",
     "Hz": "Hertz",
     "s": "seconds",
+    "V": "volts",
     "-": "unitless",
     "rad": "radians",
     "dB": "decibels",
@@ -753,8 +754,8 @@ class Image(Map):
         "values": {
             "dtype": (np.float32, np.uint8),
             "shape": (
-                ("n_frames", "x", "z", "y"),
-                ("n_frames", "x", "z"),
+                ("n_frames", "z", "x", "y"),
+                ("n_frames", "z", "x"),
             ),
         },
     }
@@ -857,7 +858,7 @@ class EnvelopeData(FloatMap):
     """Envelope-detected data with per-pixel Cartesian coordinates.
 
     Args:
-        values: The envelope data of shape ``(n_frames, x, z)`` or
+        values: The envelope data of shape ``(n_frames, z, x)`` or
             ``(n_frames, z, x, y)`` and type float32.
         coordinates: Per-pixel Cartesian positions in metres, shape ``(*values.shape, 3)``.
             The leading frame axis may be omitted to broadcast one coordinate grid
@@ -950,7 +951,7 @@ class TissueDopplerMap(FloatMap):
         super().__post_init__()
 
         if self.unit is not None and self.unit != "m/s":
-            raise ValueError(f"SWE map unit should be 'm/s', got '{self.unit}'")
+            raise ValueError(f"Tissue Doppler map unit should be 'm/s', got '{self.unit}'")
 
 
 @dataclass
@@ -969,7 +970,7 @@ class ColorDopplerMap(FloatMap):
         super().__post_init__()
 
         if self.unit is not None and self.unit != "m/s":
-            raise ValueError(f"SWE map unit should be 'm/s', got '{self.unit}'")
+            raise ValueError(f"Color Doppler map unit should be 'm/s', got '{self.unit}'")
 
 
 @dataclass(init=False)
@@ -1424,7 +1425,7 @@ class Subject(Spec):
         type: Subject type, e.g. human, phantom, animal.
         age: Subject age in years.
         sex: Subject sex.
-        fat: Subject fat percentage.
+        fat_percentage: Subject fat percentage.
     """
 
     id: str | None = None
