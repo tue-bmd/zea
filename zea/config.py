@@ -47,10 +47,16 @@ import copy
 import difflib
 import inspect
 import json
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Union
+from typing import TYPE_CHECKING, Any, Union
 
 import yaml
+
+if TYPE_CHECKING:
+    # Protocol describing the mapping-like first argument of ``dict.update``;
+    # only needed for typing, so imported lazily to avoid a runtime dependency.
+    from _typeshed import SupportsKeysAndGetItem
 
 from zea import log
 from zea.internal.config.validation import validate_config
@@ -157,13 +163,22 @@ class Config(dict):
             self[key] = default
         return self[key]
 
-    def update(self, dictionary: dict | None = None, **kwargs):
-        """Updates the config with the specified key-value pairs"""
-        # Use __setitem__ to set values
-        if dictionary is None:
-            dictionary = {}
-        dictionary.update(kwargs)
-        for key, value in dictionary.items():
+    def update(
+        self,
+        dictionary: "SupportsKeysAndGetItem[str, Any] | Iterable[tuple[str, Any]] | None" = None,
+        /,
+        **kwargs,
+    ) -> None:
+        """Updates the config with the specified key-value pairs.
+
+        Mirrors :meth:`dict.update` (accepting a mapping or an iterable of
+        key/value pairs and/or keyword arguments) but routes every assignment
+        through :meth:`__setitem__` so nested dictionaries are converted to
+        :class:`Config` objects.
+        """
+        merged: dict = dict(dictionary) if dictionary is not None else {}
+        merged.update(kwargs)
+        for key, value in merged.items():
             self[key] = value
 
     def update_recursive(self, dictionary: dict | None = None, **kwargs):

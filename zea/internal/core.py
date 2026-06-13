@@ -60,6 +60,9 @@ class classproperty(property):
     """Define a class level property."""
 
     def __get__(self, _, owner_cls):
+        # ``property.fget`` is typed as optional, but a ``classproperty`` is only
+        # ever constructed as a decorator, so the getter is always present.
+        assert self.fget is not None
         return self.fget(owner_cls)
 
 
@@ -171,7 +174,7 @@ def _skip_to_tensor(value):
     return isinstance(value, str) or callable(value) or isinstance(value, bytes)
 
 
-def dict_to_tensor(dictionary, keep_as_is=None):
+def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
     """Convert an object to a dictionary of tensors."""
     snapshot = {}
 
@@ -197,7 +200,7 @@ def dict_to_tensor(dictionary, keep_as_is=None):
     return snapshot
 
 
-def _to_tensor(key, val, keep_as_is: list = None):
+def _to_tensor(key: str, val, keep_as_is: list | None = None):
     if keep_as_is is None:
         keep_as_is = []
 

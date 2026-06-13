@@ -559,7 +559,7 @@ def create_new_user(user_config_path: str = None, local: bool = None):
     return data_paths
 
 
-def format_data_path(path: str, user: Config = None) -> Path:
+def format_data_path(path: str, user: "Config | None" = None) -> Path:
     """If the path is not absolute, prepend the data_root to it."""
     if Path(path).is_absolute():
         return Path(path)

@@ -223,7 +223,7 @@ class Pipeline:
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
         """
-        operations = [Cast(dtype="float32")]
+        operations: List[Union[Operation, "Pipeline"]] = [Cast(dtype="float32")]
 
         # Add the demodulate operation
         if not baseband:
@@ -625,7 +625,7 @@ class Pipeline:
         return pipeline_from_config(Config(config), **kwargs)
 
     @classmethod
-    def from_path(cls, file_path: str, revision: str = None, **kwargs) -> "Pipeline":
+    def from_path(cls, file_path: str, revision: str | None = None, **kwargs) -> "Pipeline":
         """Create a pipeline from a YAML/config file path.
 
         Args:
@@ -721,7 +721,7 @@ class Pipeline:
 
     def prepare_parameters(
         self,
-        parameters: "Parameters" = None,
+        parameters: Union["Parameters", None] = None,
         device: Union[str, None] = None,
         **overrides,
     ):
@@ -768,7 +768,7 @@ class Pipeline:
             needs_keys = self.needs_keys - override_keys
             with backend.device(_device):
                 params_dict = parameters.to_tensor(
-                    include=needs_keys, keep_as_is=self.static_params
+                    include=list(needs_keys), keep_as_is=self.static_params
                 )
 
         # Convert all overrides to tensors

@@ -144,6 +144,14 @@ class Track:
 
     __slots__ = ("_index", "_group", "_timestamps", "_label", "_probe")
 
+    # Declared for type checkers only: the values live in the slots above and
+    # are populated in __init__ via ``object.__setattr__`` (Track is immutable).
+    _index: int
+    _group: "h5py.Group"
+    _timestamps: "np.ndarray | None"
+    _label: "str | None"
+    _probe: "dict | None"
+
     def __init__(
         self,
         index: int,
@@ -309,7 +317,7 @@ def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
     return ans
 
 
-def _get_data_array_shape(data_group: "h5py.Group") -> "tuple | None":
+def _get_data_array_shape(data_group: "h5py.Group") -> "tuple[tuple | None, bool]":
     """Return the shape one of the data arrays in *data_group*.
 
     Checks flat datasets first (e.g., ``raw_data``).
@@ -400,7 +408,9 @@ def _compute_all_track_timestamps(
     n_tx_per_frame_per_track = [t2nt.shape[1] for t2nt in t2nts]
 
     # results will be stored here as we walk the schedule
-    timestamp_matrices_per_track = [np.zeros_like(t2nt) for t2nt in t2nts]
+    timestamp_matrices_per_track: "list[np.ndarray | None]" = [
+        np.zeros_like(t2nt) for t2nt in t2nts
+    ]
     # counters to keep track of where we are in each track's
     # timestamp matrix.
     track_counters = [[0, 0] for _ in tracks]  # [frame_idx, tx_idx] per track
@@ -544,23 +554,23 @@ class File(h5py.File):
             return False
         return False
 
-    def __getitem__(self, key):
+    def __getitem__(self, name):
         """Open an object in the file.
 
         Extends the h5py default to redirect ``"data"`` and ``"scan"`` (and
         sub-paths like ``"data/segmentation"``) to the tracks layout for
         single-track new-format files.  Multi-track files raise :exc:`AttributeError`.
         """
-        parts = key.split("/", 1)
-        if parts[0] in ("data", "scan") and not super().__contains__(key):
+        parts = name.split("/", 1)
+        if parts[0] in ("data", "scan") and not super().__contains__(name):
             n = self._n_tracks
             if n > 1:
                 raise AttributeError(
                     f"This file has {n} tracks; use file.tracks to access each one."
                 )
             if n == 1:
-                return super().__getitem__(f"tracks/track_0/{key}")
-        return super().__getitem__(key)
+                return super().__getitem__(f"tracks/track_0/{name}")
+        return super().__getitem__(name)
 
     @property
     def path(self):
@@ -1075,7 +1085,7 @@ class File(h5py.File):
     def load_data(
         self,
         data_type,
-        indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
+        indices: Tuple[Union[list, slice, int], ...] | List[int] | int | slice | None = None,
     ) -> np.ndarray:
         """Load data from the file.
 
@@ -1564,8 +1574,11 @@ class File(h5py.File):
 
         # Copy scan data if requested
         if "scan" in self and "scan" not in dst:
-            # Use the actual HDF5 path (not our overridden key) for h5py.copy
-            scan_path = self._scan_h5_group.name.lstrip("/")
+            # Use the actual HDF5 path (not our overridden key) for h5py.copy.
+            # The group is guaranteed to exist here because ``"scan" in self``.
+            scan_group = self._scan_h5_group
+            assert scan_group is not None
+            scan_path = scan_group.name.lstrip("/")
             self.copy(scan_path, dst, name="scan")
 
     def summary(self):
@@ -1575,8 +1588,8 @@ class File(h5py.File):
 
 def load_file_all_data_types(
     path,
-    indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
-    scan_kwargs: dict = None,
+    indices: Tuple[Union[list, slice, int], ...] | List[int] | int | slice | None = None,
+    scan_kwargs: dict | None = None,
 ):
     """Loads a zea data files (h5py file).
 
@@ -1679,8 +1692,8 @@ def load_file_all_data_types(
 def load_file(
     path,
     data_type="raw_data",
-    indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
-    scan_kwargs: dict = None,
+    indices: Tuple[Union[list, slice, int], ...] | List[int] | int | slice | None = None,
+    scan_kwargs: dict | None = None,
 ) -> Tuple[np.ndarray, "Parameters"]:
     """Loads a zea data files (h5py file).
 
@@ -1774,7 +1787,7 @@ def _print_hdf5_attrs(hdf5_obj, prefix=""):
             _print_hdf5_attrs(hdf5_obj[key], new_prefix)
 
 
-def validate_file(path: str = None, file: File = None):
+def validate_file(path: str | None = None, file: "File | None" = None):
     """Validate the structure and data of a zea HDF5 file.
 
     For files created with zea v0.1.0 and later this runs the full
@@ -1804,6 +1817,7 @@ def validate_file(path: str = None, file: File = None):
         with File(path, "r") as _file:
             _validate_file_impl(_file)
     else:
+        assert file is not None  # guaranteed by the xor assertion above
         _validate_file_impl(file)
 
     return {"status": "success"}

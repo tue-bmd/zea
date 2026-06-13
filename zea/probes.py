@@ -251,7 +251,7 @@ class Probe(ProbeSpec):
     def kerf(self) -> float | None:
         """Gap between elements in metres, derived from :attr:`element_width` and :attr:`pitch`."""
         if self.element_width is not None and self.pitch is not None:
-            return self.pitch - self.element_width
+            return float(self.pitch - self.element_width)
         return None
 
 

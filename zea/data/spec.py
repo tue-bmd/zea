@@ -10,6 +10,7 @@ import h5py
 import numpy as np
 
 from zea import log
+from zea.internal.typing import Scalar
 
 CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch", "n_spatial_ch"}
 
@@ -1316,13 +1317,13 @@ class ProbeSpec(Spec):
 
     name: str | None = None
     type: str | None = None
-    probe_center_frequency: np.float32 | None = None
-    probe_bandwidth_percent: np.float32 | None = None
+    probe_center_frequency: Scalar | None = None
+    probe_bandwidth_percent: Scalar | None = None
     probe_geometry: np.ndarray | None = None
-    element_width: np.float32 | None = None
-    element_height: np.float32 | None = None
-    lens_sound_speed: np.float32 | None = None
-    lens_thickness: np.float32 | None = None
+    element_width: Scalar | None = None
+    element_height: Scalar | None = None
+    lens_sound_speed: Scalar | None = None
+    lens_thickness: Scalar | None = None
 
     SCHEMA = {
         "name": {"dtype": str, "shape": ()},

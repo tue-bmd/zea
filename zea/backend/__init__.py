@@ -159,7 +159,7 @@ class device:
             output = pipeline(device="gpu:0", data=data)
     """
 
-    def __init__(self, device: str):
+    def __init__(self, device: str | None):
         if device is None:
             self._context = nullcontext()
         else:

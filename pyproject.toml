@@ -65,6 +65,7 @@ dev = [
     "ipywidgets",
     "pre-commit",
     "ruff==0.15.16",
+    "ty==0.0.49",
     "pytest-cov",
     # docs
     "sphinx",
@@ -98,6 +99,7 @@ tests = [
     "ipywidgets",
     "pre-commit",
     "ruff==0.15.16",
+    "ty==0.0.49",
     "pytest-cov",
     "gradio>=6.0",
 ]
@@ -248,6 +250,66 @@ docstring-code-format = true
 # This only has an effect when the `docstring-code-format` setting is
 # enabled.
 docstring-code-line-length = "dynamic"
+
+[tool.ty]
+# We use ty (https://github.com/astral-sh/ty) for static type checking.
+#
+# Type checking is being rolled out gradually. The "core" building blocks listed
+# in the override below are fully annotated and checked strictly (any error fails
+# CI). Every other module is still un- or partially-annotated, so the noisy
+# inference rules are downgraded there to keep the build green. A module
+# "graduates" to strict checking by being removed from the override's `exclude`
+# list once it has been properly annotated.
+
+[tool.ty.environment]
+# Minimum supported Python version (see `requires-python`).
+python-version = "3.10"
+
+[tool.ty.rules]
+# zea is multi-backend: jax / torch / tensorflow are optional and usually not
+# all installed in the (lightweight) type-checking environment, so their
+# conditional `import` statements would otherwise be flagged. Keep this visible
+# as a warning rather than a hard error so it never blocks CI.
+unresolved-import = "warn"
+
+[tool.ty.src]
+include = ["zea"]
+exclude = ["zea/ops/keras_ops.py"]  # generated file (see _generate_keras_ops)
+
+[[tool.ty.overrides]]
+# Not-yet-annotated modules: relax the rules that fire on un-typed code so they
+# do not fail CI. Remove a path from `exclude` (so this override stops applying)
+# once it is properly annotated and should be checked strictly.
+include = ["zea/**/*.py"]
+exclude = [
+    "zea/config.py",
+    "zea/scan.py",
+    "zea/probes.py",
+    "zea/ops/base.py",
+    "zea/utils.py",
+    "zea/internal/core.py",
+    "zea/internal/parameters.py",
+    "zea/data/file.py",
+    "zea/data/datasets.py",
+    "zea/data/dataloader.py",
+]
+
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+invalid-assignment = "ignore"
+invalid-parameter-default = "ignore"
+unresolved-attribute = "ignore"
+unresolved-import = "ignore"
+unresolved-global = "ignore"
+unsupported-operator = "ignore"
+not-subscriptable = "ignore"
+not-iterable = "ignore"
+invalid-method-override = "ignore"
+invalid-return-type = "ignore"
+no-matching-overload = "ignore"
+invalid-type-form = "ignore"
+call-non-callable = "ignore"
+possibly-missing-submodule = "ignore"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

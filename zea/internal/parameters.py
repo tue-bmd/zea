@@ -11,6 +11,7 @@ See the BaseParameters class docstring for details on features and usage.
 import functools
 import inspect
 from copy import deepcopy
+from typing import Any, ClassVar
 
 import numpy as np
 
@@ -176,13 +177,16 @@ class BaseParameters(ZeaObject):
 
     """
 
-    VALID_PARAMS = None
+    # Maps each valid parameter name to its spec, e.g.
+    # ``{"sound_speed": {"dtype": np.float32, "default": 1540.0}}``.
+    # Subclasses must populate this; an empty mapping means "not defined".
+    VALID_PARAMS: ClassVar[dict[str, dict[str, Any]]] = {}
 
     def __init__(self, **kwargs):
         super().__init__()
 
         # Check if VALID_PARAMS is defined
-        if self.VALID_PARAMS is None:
+        if not self.VALID_PARAMS:
             raise NotImplementedError("VALID_PARAMS must be defined in subclasses of Parameters.")
 
         # Check if the definition of the class has circular dependencies
@@ -327,47 +331,47 @@ class BaseParameters(ZeaObject):
         # Attribute not found
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
 
-    def __setattr__(self, key, value):
+    def __setattr__(self, name: str, value):
         # Give clear error message on assignment to methods
-        class_attr = getattr(self.__class__, key, None)
+        class_attr = getattr(self.__class__, name, None)
         if callable(class_attr):
             raise AttributeError(
-                f"Cannot assign to method '{key}'. "
-                f"'{key}' is a method, not an attribute. "
-                f"To use it, call it as a function, e.g.: '{self.__class__.__name__}.{key}(...)'"
+                f"Cannot assign to method '{name}'. "
+                f"'{name}' is a method, not an attribute. "
+                f"To use it, call it as a function, e.g.: '{self.__class__.__name__}.{name}(...)'"
             )
 
         # Allow setting private attributes
-        if key.startswith("_"):
-            return super().__setattr__(key, value)
+        if name.startswith("_"):
+            return super().__setattr__(name, value)
 
         # Give clear error message on assignment to computed properties
-        if self._is_property_with_dependencies(key) and key not in self.VALID_PARAMS:
-            leaf_params = sorted(self._find_leaf_params(key))
+        if self._is_property_with_dependencies(name) and name not in self.VALID_PARAMS:
+            leaf_params = sorted(self._find_leaf_params(name))
             raise ValueError(
-                f"Cannot set computed property '{key}'. Only leaf parameters can be set. "
-                f"To change '{key}', set one or more of its leaf parameters: {leaf_params}"
+                f"Cannot set computed property '{name}'. Only leaf parameters can be set. "
+                f"To change '{name}', set one or more of its leaf parameters: {leaf_params}"
             )
 
         # Give clear error message on assignment to read-only (plain) properties
-        if isinstance(class_attr, property) and key not in self.VALID_PARAMS:
-            raise AttributeError(f"Cannot set read-only property '{key}'.")
+        if isinstance(class_attr, property) and name not in self.VALID_PARAMS:
+            raise AttributeError(f"Cannot set read-only property '{name}'.")
 
         # Any key not in VALID_PARAMS is stored as a custom (passthrough) parameter.
         # Custom params are never type-checked and never participate in derivation.
-        if key not in self.VALID_PARAMS:
-            self._custom_params[key] = value
+        if name not in self.VALID_PARAMS:
+            self._custom_params[name] = value
             self._serialized = None  # see core object
             return
 
         # Validate new value
-        value = self._validate_parameter(key, value)
+        value = self._validate_parameter(name, value)
 
         # Set the parameter
-        self._params[key] = value
+        self._params[name] = value
 
         # Invalidate cache for this parameter if it is also a computed property
-        self._invalidate(key)
+        self._invalidate(name)
 
     def update(self, params=None, *, force=False, **kwargs):
         """Update parameters from a mapping and/or keyword arguments.
@@ -548,7 +552,12 @@ class BaseParameters(ZeaObject):
         """Get all properties of the class that have dependencies."""
         return [name for name in cls.get_properties() if cls._is_property_with_dependencies(name)]
 
-    def to_tensor(self, include=None, exclude=None, keep_as_is: list = None):
+    def to_tensor(
+        self,
+        include: str | list | None = None,
+        exclude: list | None = None,
+        keep_as_is: list | None = None,
+    ):
         """
         Convert parameters and computed properties to tensors.
 

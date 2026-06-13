@@ -116,7 +116,7 @@ class H5FileHandleCache:
 
     def close(self):
         """Close all cached file handles."""
-        cache: OrderedDict = getattr(self, "_file_handle_cache", None)
+        cache: OrderedDict | None = getattr(self, "_file_handle_cache", None)
         if not cache:
             return
 
@@ -441,7 +441,7 @@ class Dataset(H5FileHandleCache):
 
     def __init__(
         self,
-        file_paths: List[str] | str,
+        file_paths: List[str] | str | Path,
         validate: bool = False,
         directory_splits: list | None = None,
         revision: str | None = None,
