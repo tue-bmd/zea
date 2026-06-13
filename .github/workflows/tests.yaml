@@ -62,7 +62,10 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           git fetch origin "$BASE_REF"
-          if git diff --quiet "origin/$BASE_REF" -- Dockerfile pyproject.toml uv.lock; then
+          # Compare against the just-fetched tip (FETCH_HEAD). On the shallow
+          # checkout used here the remote-tracking ref origin/$BASE_REF is not
+          # updated by `git fetch origin "$BASE_REF"` and may be stale or absent.
+          if git diff --quiet FETCH_HEAD -- Dockerfile pyproject.toml uv.lock; then
             # Verify the branch-tagged image actually exists before deciding to reuse it.
             # It may be absent on first run after this workflow feature was introduced.
             BASE_TAG="${{ env.BASE_IMAGE }}:${{ github.event.pull_request.base.ref }}"
@@ -166,6 +169,7 @@ jobs:
       - uses: ./.github/actions/load-image
         with:
           needs_artifact: ${{ needs.image.outputs.needs_artifact }}
+          docker_image: ${{ needs.image.outputs.docker_image }}
 
       - name: Run Pytest in container
         run: |
@@ -196,6 +200,7 @@ jobs:
       - uses: ./.github/actions/load-image
         with:
           needs_artifact: ${{ needs.image.outputs.needs_artifact }}
+          docker_image: ${{ needs.image.outputs.docker_image }}
 
       - name: Run heavy tests
         run: |
@@ -248,6 +253,7 @@ jobs:
       - uses: ./.github/actions/load-image
         with:
           needs_artifact: ${{ needs.image.outputs.needs_artifact }}
+          docker_image: ${{ needs.image.outputs.docker_image }}
 
       - name: Run ${{ matrix.name }} notebook tests
         run: |
@@ -277,6 +283,7 @@ jobs:
       - uses: ./.github/actions/load-image
         with:
           needs_artifact: ${{ needs.image.outputs.needs_artifact }}
+          docker_image: ${{ needs.image.outputs.docker_image }}
 
       - name: Build documentation with Sphinx (fails on warnings)
         run: |
