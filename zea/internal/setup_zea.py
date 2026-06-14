@@ -103,8 +103,8 @@ def set_backend(backend: str):
 
 
 def setup(
-    config_path: str = None,
-    user_config: Union[str, dict] = None,
+    config_path: str | None = None,
+    user_config: Union[str, dict, None] = None,
     verbose: bool = True,
     disable_config_check: bool = False,
     loader=yaml.FullLoader,
@@ -159,7 +159,7 @@ def setup(
 
 
 def setup_config(
-    config_path: str = None,
+    config_path: str | None = None,
     verbose: bool = True,
     disable_config_check: bool = False,
     loader=yaml.FullLoader,
@@ -190,10 +190,12 @@ def setup_config(
         # if no argument is provided resort to UI window
         filetype = "yaml"
         try:
-            config_path = filename_from_window_dialog(
-                f"Choose .{filetype} file",
-                filetypes=((filetype, "*." + filetype),),
-                initialdir="./configs",
+            config_path = str(
+                filename_from_window_dialog(
+                    f"Choose .{filetype} file",
+                    filetypes=((filetype, "*." + filetype),),
+                    initialdir="./configs",
+                )
             )
         except Exception as e:
             raise ValueError(

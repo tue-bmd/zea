@@ -58,6 +58,10 @@ if TYPE_CHECKING:
     # only needed for typing, so imported lazily to avoid a runtime dependency.
     from _typeshed import SupportsKeysAndGetItem
 
+    # ``Self`` lives in ``typing`` only from 3.11; import from typing_extensions
+    # under TYPE_CHECKING so the 3.10 floor stays runtime-clean.
+    from typing_extensions import Self
+
 from zea import log
 from zea.internal.config.validation import validate_config
 from zea.internal.core import dict_to_tensor
@@ -469,7 +473,7 @@ class Config(dict):
                         v._recursive_setattr(set_key, set_value)
 
     @classmethod
-    def from_path(cls, path, loader=yaml.FullLoader, **kwargs):
+    def from_path(cls, path, loader=yaml.FullLoader, **kwargs) -> "Self":
         """Load config object from a file path.
 
         Args:
@@ -499,7 +503,7 @@ class Config(dict):
 
     @classmethod
     @deprecated(replacement="Config.from_path")
-    def from_hf(cls, repo_id, path, **kwargs):
+    def from_hf(cls, repo_id, path, **kwargs) -> "Self":
         """Load config object from huggingface hub.
 
         Args:

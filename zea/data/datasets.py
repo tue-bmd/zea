@@ -35,7 +35,7 @@ import multiprocessing
 import os
 from collections import OrderedDict
 from pathlib import Path
-from typing import List
+from typing import TYPE_CHECKING, List, Sequence
 
 import numpy as np
 import tqdm
@@ -57,6 +57,11 @@ from zea.internal.utils import calculate_file_hash, reduce_to_signature
 from zea.io_lib import search_file_tree
 from zea.tools.hf import HFPath
 from zea.utils import date_string_to_readable, get_date_string
+
+if TYPE_CHECKING:
+    # ``Self`` is in ``typing`` only from 3.11; import lazily to keep the
+    # 3.10 floor runtime-clean.
+    from typing_extensions import Self
 
 _CHECK_MAX_DATASET_SIZE = 10000
 _VALIDATED_FLAG_FILE = "validated.flag"
@@ -441,7 +446,7 @@ class Dataset(H5FileHandleCache):
 
     def __init__(
         self,
-        file_paths: List[str] | str | Path,
+        file_paths: Sequence[str | Path] | str | Path,
         validate: bool = False,
         directory_splits: list | None = None,
         revision: str | None = None,
@@ -561,11 +566,11 @@ class Dataset(H5FileHandleCache):
         return file_paths
 
     @classmethod
-    def from_config(cls, path, user=None, **kwargs):
+    def from_config(cls, path, user=None, **kwargs) -> "Self":
         """Creates a Dataset from a config file."""
         resolved = format_data_path(path, user)
         reduced_params = reduce_to_signature(cls.__init__, kwargs)
-        return cls(resolved, **reduced_params)
+        return cls(str(resolved), **reduced_params)
 
     def __len__(self):
         """Returns the number of files in the dataset."""

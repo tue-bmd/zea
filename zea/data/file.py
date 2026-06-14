@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import TYPE_CHECKING, List, Tuple, Union, cast
 
 import h5py
 import numpy as np
@@ -26,6 +26,10 @@ from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.utils import deprecated
 
 if TYPE_CHECKING:
+    # ``Self`` is in ``typing`` only from 3.11; import lazily to keep the
+    # 3.10 floor runtime-clean.
+    from typing_extensions import Self
+
     from zea.probes import Probe
     from zea.scan import Parameters
 
@@ -126,6 +130,62 @@ def assert_key(file: h5py.File, key: str):
         raise KeyError(f"{key} not found in file")
 
 
+if TYPE_CHECKING:
+    from typing import Iterator
+
+    class _NdArrayDataset:
+        """TYPE_CHECKING stub for h5py.Dataset that exposes np.ndarray on indexing.
+
+        At runtime these are plain ``h5py.Dataset`` objects; this stub exists so
+        the type checker knows that ``dataset[()]`` / ``dataset[0]`` returns
+        ``np.ndarray`` rather than ``Unknown`` (h5py ships no PEP 561 stubs).
+        """
+
+        shape: tuple[int, ...]
+        dtype: np.dtype
+        ndim: int
+        size: int
+
+        def __getitem__(self, args: object) -> np.ndarray: ...
+        def __len__(self) -> int: ...
+        def __iter__(self) -> Iterator[np.ndarray]: ...
+
+    class _SpatialMapProxy(_GroupProxy):
+        """TYPE_CHECKING view of an HDF5 spatial-map group (values + optional metadata).
+
+        Exposed via ``File.data.<map_name>`` (e.g. ``f.data.image``,
+        ``f.data.segmentation``).  At runtime these are plain ``_GroupProxy``
+        objects; this class exists solely so the IDE resolves leaf datasets.
+        """
+
+        values: _NdArrayDataset
+        coordinates: _NdArrayDataset
+        labels: _StringDataset
+        description: _NdArrayDataset
+        unit: _NdArrayDataset
+
+    class _DataProxy(_GroupProxy):
+        """TYPE_CHECKING view of the HDF5 ``data/`` group in a :class:`File`.
+
+        All known :class:`~zea.data.spec.DataSpec` fields are declared here so
+        that ``f.data.raw_data``, ``f.data.segmentation.values``, etc. resolve
+        to concrete types.  At runtime ``File.data`` returns a plain
+        ``_GroupProxy``; this class exists only for the IDE/type checker.
+        """
+
+        raw_data: _NdArrayDataset
+        aligned_data: _SpatialMapProxy
+        beamformed_data: _SpatialMapProxy
+        envelope_data: _SpatialMapProxy
+        image: _SpatialMapProxy
+        segmentation: _SpatialMapProxy
+        sos_map: _SpatialMapProxy
+        strain_percentage_map: _SpatialMapProxy
+        shear_wave_elastography_map: _SpatialMapProxy
+        tissue_doppler: _SpatialMapProxy
+        color_doppler: _SpatialMapProxy
+
+
 class Track:
     """A single acquisition track within a :class:`File`.
 
@@ -167,14 +227,14 @@ class Track:
         object.__setattr__(self, "_probe", probe)
 
     @property
-    def data(self) -> _GroupProxy:
+    def data(self) -> "_DataProxy":
         """Lazy proxy for this track's ``data`` group."""
         if "data" not in self._group:
             raise KeyError(
                 f"Track {self._index} has no 'data' group. "
                 f"Available keys: {list(self._group.keys())}"
             )
-        return _GroupProxy(self._group["data"])
+        return cast("_DataProxy", _GroupProxy(self._group["data"]))
 
     @property
     def scan(self) -> "ScanSpec":
@@ -530,6 +590,16 @@ class File(h5py.File):
         if mode in ("r", "r+"):
             _warn_if_legacy_file(self)
 
+    def __enter__(self) -> "Self":
+        """Enter the context manager, returning this :class:`File` instance.
+
+        Overrides ``h5py.File.__enter__`` purely to narrow the return type so
+        that ``with File(...) as f:`` binds ``f`` to :class:`File` (preserving
+        access to zea-specific properties like :attr:`data`, :attr:`metadata`
+        and :meth:`load_parameters`) rather than the base ``h5py`` type.
+        """
+        return self
+
     def __contains__(self, key):
         """Check whether *key* exists in the file.
 
@@ -776,7 +846,7 @@ class File(h5py.File):
         us_machine: str | None = None,
         description: str | None = None,
         acquisition_time: str | None = None,
-        compression: str = DEFAULT_COMPRESSION,
+        compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
         overwrite: bool = False,
     ):
@@ -919,7 +989,7 @@ class File(h5py.File):
         )
 
     @property
-    def data(self) -> _GroupProxy:
+    def data(self) -> "_DataProxy":
         """Lazy proxy for the ``data`` group of a single-track file.
 
         Supports both the new ``tracks/track_0/data/`` layout and the
@@ -947,10 +1017,10 @@ class File(h5py.File):
         if "tracks" in self:
             track0 = self["tracks"].get("track_0")
             if track0 is not None and "data" in track0:
-                return _GroupProxy(track0["data"])
+                return cast("_DataProxy", _GroupProxy(track0["data"]))
         # Flat layout (no tracks group): root-level data/ group
         if super().__contains__("data"):
-            return _GroupProxy(self["data"])
+            return cast("_DataProxy", _GroupProxy(self["data"]))
         raise KeyError("No 'data' group found in this file.")
 
     @property

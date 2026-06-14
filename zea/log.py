@@ -25,8 +25,8 @@ import sys
 from pathlib import Path
 
 # The logger to use
-logger = None
-file_logger = None
+logger: logging.Logger
+file_logger: logging.Logger | None = None
 
 LOG_DIR = Path("log")
 
@@ -34,7 +34,7 @@ ZEA_LOG_LEVEL = os.getenv("ZEA_LOG_LEVEL", "DEBUG").upper()
 
 DEPRECATED_LEVEL_NUM = logging.WARNING + 5
 logging.addLevelName(DEPRECATED_LEVEL_NUM, "DEPRECATED")
-logging.DEPRECATED = DEPRECATED_LEVEL_NUM
+logging.DEPRECATED = DEPRECATED_LEVEL_NUM  # ty: ignore[unresolved-attribute]
 
 
 def get_format_fn(name_format):
@@ -142,7 +142,7 @@ class CustomFormatter(logging.Formatter):
             logging.DEBUG: logging.Formatter(
                 ("".join([name, yellow_fn("%(levelname)s"), " %(message)s"]))
             ),
-            logging.DEPRECATED: logging.Formatter(
+            DEPRECATED_LEVEL_NUM: logging.Formatter(
                 ("".join([name, orange_fn("%(levelname)s"), " %(message)s"]))
             ),
             "DEFAULT": logging.Formatter(
@@ -155,7 +155,9 @@ class CustomFormatter(logging.Formatter):
         return formatter.format(record)
 
 
-def configure_console_logger(level="INFO", name=None, color=True, name_color="darkgreen"):
+def configure_console_logger(
+    level="INFO", name=None, color=True, name_color="darkgreen"
+) -> logging.Logger:
     """
     Configures a simple console logger with the givel level.
     A usecase is to change the formatting of the default handler of the root logger
@@ -185,7 +187,7 @@ def configure_console_logger(level="INFO", name=None, color=True, name_color="da
     return new_logger
 
 
-def configure_file_logger(level="INFO"):
+def configure_file_logger(level="INFO") -> logging.Logger:
     """
     Configures a simple console logger with the givel level.
     A usecase is to change the formatting of the default handler of the root logger
@@ -322,6 +324,7 @@ def set_file_logger_directory(directory):
     global LOG_DIR, file_logger
     LOG_DIR = directory
     # Remove all handlers from the file logger
+    assert file_logger is not None, "File logging not enabled; call enable_file_logging() first."
     for handler in file_logger.handlers:
         file_logger.removeHandler(handler)
 

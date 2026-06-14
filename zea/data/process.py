@@ -33,7 +33,7 @@ try:
 
     SUPPORTED_FORMATS += ["nii.gz"]
 except ImportError:
-    sitk = None
+    sitk = None  # ty: ignore[invalid-assignment]
 
 
 def get_parser(add_help: bool = True) -> argparse.ArgumentParser:
@@ -414,7 +414,7 @@ def run_processing(
             # slice to selected transmits (transmit axis = 0 when insert_frame_axis=False)
             frame = frame[selected_transmits]
 
-            output = pipeline_call(data=frame, **params)
+            output = pipeline_call(data=frame, **params)  # ty: ignore[invalid-argument-type]
             processed_frame = output["data"]
 
             if not keep_dynamic_range:
@@ -427,7 +427,7 @@ def run_processing(
 
             for keep_key in keep_keys:
                 if keep_key in output:
-                    params[keep_key] = output[keep_key]
+                    params[keep_key] = output[keep_key]  # ty: ignore[invalid-assignment]
 
             if timings:
                 for tname in timer.timings.keys():

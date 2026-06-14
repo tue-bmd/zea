@@ -197,7 +197,7 @@ class Probe(ProbeSpec):
         return dict_to_tensor(self.get_parameters(), keep_as_is=keep_as_is)
 
     @staticmethod
-    def get_pitch(probe_geometry: np.ndarray) -> float | None:
+    def get_pitch(probe_geometry: np.ndarray) -> float:
         """Compute the pitch (centre-to-centre element spacing) in metres from
         the probe geometry.
 

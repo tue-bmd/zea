@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _get_pkg_version
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, ClassVar, List, NoReturn, Sequence, Tuple, cast
 
 import h5py
 import numpy as np
@@ -109,7 +109,7 @@ def match_shape(value: Any, expected_shape: tuple) -> bool:
     return True
 
 
-def find_matched_shape(value: Any, expected_shapes: List[tuple]) -> tuple | None:
+def find_matched_shape(value: Any, expected_shapes: Sequence[tuple]) -> tuple | None:
     """Find the first expected shape specification that matches the shape of the value."""
     for expected_shape in expected_shapes:
         if match_shape(value, expected_shape):
@@ -125,7 +125,9 @@ class Spec:
     including checking that dimensions with the same name have consistent sizes across fields.
     """
 
-    SCHEMA: dict
+    SCHEMA: dict[str, Any]
+    FIELD_METADATA: ClassVar[dict[str, Any]]
+    __dataclass_fields__: ClassVar[dict[str, Any]]
 
     @staticmethod
     def _is_optional_dataclass_field(field_def: Any) -> bool:
@@ -192,14 +194,14 @@ class Spec:
     @staticmethod
     def _raise_if_shape_mismatch(
         field_name: str, value: Any, expected_shapes: tuple[tuple, ...]
-    ) -> None:
+    ) -> NoReturn:
         allowed_shapes = ", ".join(str(shape) for shape in expected_shapes)
         raise ValueError(
             f"{field_name} has shape {value_shape(value)}, expected one of: {allowed_shapes}"
         )
 
     def _validate_nested_field(
-        self, field_name: str, nested_spec: "Spec", field_value: Any
+        self, field_name: str, nested_spec: "type[Spec]", field_value: Any
     ) -> "Spec":
         """Validate a nested spec field, recursively validating its contents."""
         if isinstance(field_value, dict):
@@ -422,7 +424,7 @@ class Spec:
         group: h5py.Group,
         field_name: str,
         value: Any,
-        compression: str = DEFAULT_COMPRESSION,
+        compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
     ) -> None:
         """Create a dataset in the given group for the specified field and value,
@@ -452,7 +454,7 @@ class Spec:
     def store_in_group(
         self,
         group: h5py.Group,
-        compression: str = DEFAULT_COMPRESSION,
+        compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
     ) -> None:
         """Store the data in the given group (e.g. hdf5 group)."""
@@ -1078,10 +1080,10 @@ class DataSpec(Spec):
         # Add custom extra maps to the schema as generic Map specs, so they get validated.
         self._extra_map_keys = tuple(extra_maps.keys())
         if getattr(self, "_extra_map_keys", ()):
-            self.SCHEMA = {
-                **self.SCHEMA,
-                **{key: {"spec": Map} for key in self._extra_map_keys},
-            }
+            self.SCHEMA = cast(
+                "dict[str, Any]",
+                {**self.SCHEMA, **{str(key): {"spec": Map} for key in self._extra_map_keys}},
+            )
 
         self.__post_init__()
 
@@ -1161,16 +1163,16 @@ class ScanSpec(Spec):
     """
 
     sampling_frequency: np.ndarray | float
-    center_frequency: np.ndarray | float
-    demodulation_frequency: np.ndarray | float
+    center_frequency: np.ndarray[Any, np.dtype[Any]] | float
+    demodulation_frequency: np.ndarray[Any, np.dtype[Any]] | float
     initial_times: np.ndarray
     t0_delays: np.ndarray
     tx_apodizations: np.ndarray
     focus_distances: np.ndarray
     transmit_origins: np.ndarray
     polar_angles: np.ndarray
-    time_to_next_transmit: np.ndarray = None
-    azimuth_angles: np.ndarray = None
+    time_to_next_transmit: np.ndarray | None = None
+    azimuth_angles: np.ndarray | None = None
     sound_speed: np.ndarray | float | None = None
     tgc_gain_curve: np.ndarray | None = None
     waveforms_one_way: np.ndarray | None = None
@@ -1280,14 +1282,16 @@ class ScanSpec(Spec):
         # Try to simplify the data by squeezing out any singleton dimensions,
         # e.g. if center_frequency is an array with all the same value
         if isinstance(self.center_frequency, np.ndarray) and self.center_frequency.ndim == 1:
-            if np.all(self.center_frequency == self.center_frequency[0]):
-                self.center_frequency = self.center_frequency[0]
+            cf = cast("np.ndarray[Any, np.dtype[Any]]", self.center_frequency)
+            if np.all(cf == cf[0]):
+                self.center_frequency = cf[0]
         if (
             isinstance(self.demodulation_frequency, np.ndarray)
             and self.demodulation_frequency.ndim == 1
         ):
-            if np.all(self.demodulation_frequency == self.demodulation_frequency[0]):
-                self.demodulation_frequency = self.demodulation_frequency[0]
+            df = cast("np.ndarray[Any, np.dtype[Any]]", self.demodulation_frequency)
+            if np.all(df == df[0]):
+                self.demodulation_frequency = df[0]
 
 
 @dataclass
@@ -1693,7 +1697,7 @@ class Annotations(Spec):
 class MetadataSpec(Spec):
     """Metadata group with subject, acquisition context, annotations, and extra signals."""
 
-    subject: Subject | dict = field(default_factory=Subject)
+    subject: Subject | dict | None = field(default_factory=Subject)
     credit: str | None = None
     probe_pose: ProbePose | dict | None = None
     voice_narration: Signal1D | dict | None = None
@@ -1758,10 +1762,8 @@ class MetadataSpec(Spec):
         # Add custom extra signals to the schema as generic SignalND specs, so they get validated.
         self._extra_signal_keys = tuple(extra_signals.keys())
         if getattr(self, "_extra_signal_keys", ()):
-            self.SCHEMA = {
-                **self.SCHEMA,
-                **{key: {"spec": SignalND} for key in self._extra_signal_keys},
-            }
+            extra = {str(key): {"spec": SignalND} for key in self._extra_signal_keys}
+            self.SCHEMA = cast("dict[str, Any]", {**self.SCHEMA, **extra})
 
         self.__post_init__()
 
@@ -1842,7 +1844,7 @@ class TrackSpec(Spec):
     def store_in_group(
         self,
         group: "h5py.Group",
-        compression: str = DEFAULT_COMPRESSION,
+        compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
     ) -> None:
         """Store data, scan, and label in the HDF5 group."""
@@ -2163,7 +2165,7 @@ class FileSpec(Spec):
     def save(
         self,
         path: str,
-        compression: str = DEFAULT_COMPRESSION,
+        compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
     ) -> None:
         """Save the dataset to the specified path."""
@@ -2175,8 +2177,8 @@ class FileSpec(Spec):
         except PackageNotFoundError:
             _zea_version = "dev"
 
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        _path = Path(path)
+        _path.parent.mkdir(parents=True, exist_ok=True)
 
         subject_type = None
         if isinstance(self.metadata, MetadataSpec):
@@ -2205,7 +2207,7 @@ class FileSpec(Spec):
         elif not is_human:
             self.acquisition_time = datetime.now(timezone.utc).isoformat()
 
-        with File(str(path), "w") as f:
+        with File(str(_path), "w") as f:
             f.attrs["zea_version"] = _zea_version
 
             # Write scalar/array metadata fields (metadata, metrics, probe_name, etc.)

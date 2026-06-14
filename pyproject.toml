@@ -253,13 +253,6 @@ docstring-code-line-length = "dynamic"
 
 [tool.ty]
 # We use ty (https://github.com/astral-sh/ty) for static type checking.
-#
-# Type checking is being rolled out gradually. The "core" building blocks listed
-# in the override below are fully annotated and checked strictly (any error fails
-# CI). Every other module is still un- or partially-annotated, so the noisy
-# inference rules are downgraded there to keep the build green. A module
-# "graduates" to strict checking by being removed from the override's `exclude`
-# list once it has been properly annotated.
 
 [tool.ty.environment]
 # Minimum supported Python version (see `requires-python`).
@@ -276,40 +269,14 @@ unresolved-import = "warn"
 include = ["zea"]
 exclude = ["zea/ops/keras_ops.py"]  # generated file (see _generate_keras_ops)
 
+# Keras Layer subclasses deliberately override `call` with domain-specific
+# signatures; Keras dispatches through __call__ and never calls .call()
+# polymorphically, so this override pattern is intentional and safe.
 [[tool.ty.overrides]]
-# Not-yet-annotated modules: relax the rules that fire on un-typed code so they
-# do not fail CI. Remove a path from `exclude` (so this override stops applying)
-# once it is properly annotated and should be checked strictly.
-include = ["zea/**/*.py"]
-exclude = [
-    "zea/config.py",
-    "zea/scan.py",
-    "zea/probes.py",
-    "zea/ops/base.py",
-    "zea/utils.py",
-    "zea/internal/core.py",
-    "zea/internal/parameters.py",
-    "zea/data/file.py",
-    "zea/data/datasets.py",
-    "zea/data/dataloader.py",
-]
-
+include = ["zea/ops/**/*.py", "zea/models/**/*.py", "zea/data/layers.py"]
 [tool.ty.overrides.rules]
-invalid-argument-type = "ignore"
-invalid-assignment = "ignore"
-invalid-parameter-default = "ignore"
-unresolved-attribute = "ignore"
-unresolved-import = "ignore"
-unresolved-global = "ignore"
-unsupported-operator = "ignore"
-not-subscriptable = "ignore"
-not-iterable = "ignore"
-invalid-method-override = "ignore"
-invalid-return-type = "ignore"
-no-matching-overload = "ignore"
-invalid-type-form = "ignore"
-call-non-callable = "ignore"
-possibly-missing-submodule = "ignore"
+invalid-method-override = "warn"
+
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

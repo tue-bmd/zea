@@ -207,8 +207,8 @@ def compute_scan_convert_2d_coordinates(
 
 def scan_convert_2d(
     image,
-    rho_range: Tuple[float, float] = None,
-    theta_range: Tuple[float, float] = None,
+    rho_range: Tuple[float, float] | None = None,
+    theta_range: Tuple[float, float] | None = None,
     resolution: Union[float, None] = None,
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,
@@ -256,6 +256,9 @@ def scan_convert_2d(
 
     parameters = {}
     if coordinates is None:
+        assert rho_range is not None and theta_range is not None, (
+            "rho_range and theta_range are required when coordinates is not provided."
+        )
         coordinates, parameters = compute_scan_convert_2d_coordinates(
             image.shape,
             rho_range,
@@ -352,9 +355,9 @@ def compute_scan_convert_3d_coordinates(
 
 def scan_convert_3d(
     image,
-    rho_range: Tuple[float, float] = None,
-    theta_range: Tuple[float, float] = None,
-    phi_range: Tuple[float, float] = None,
+    rho_range: Tuple[float, float] | None = None,
+    theta_range: Tuple[float, float] | None = None,
+    phi_range: Tuple[float, float] | None = None,
     resolution: Union[float, None] = None,
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,
@@ -399,6 +402,9 @@ def scan_convert_3d(
 
     parameters = {}
     if coordinates is None:
+        assert rho_range is not None and theta_range is not None and phi_range is not None, (
+            "rho_range, theta_range, and phi_range are required when coordinates is not provided."
+        )
         coordinates, parameters = compute_scan_convert_3d_coordinates(
             image.shape,
             rho_range,
@@ -417,9 +423,9 @@ def scan_convert_3d(
 
 def scan_convert(
     image,
-    rho_range: Tuple[float, float] = None,
-    theta_range: Tuple[float, float] = None,
-    phi_range: Tuple[float, float] = None,
+    rho_range: Tuple[float, float] | None = None,
+    theta_range: Tuple[float, float] | None = None,
+    phi_range: Tuple[float, float] | None = None,
     resolution: Union[float, None] = None,
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,

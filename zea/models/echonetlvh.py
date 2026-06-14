@@ -252,7 +252,13 @@ class EchoNetLVH(BaseModel):
 
                 # Create line mask
                 line_mask = np.zeros(image.shape[:2], dtype=np.uint8)
-                cv2.line(line_mask, pt1, pt2, color=1, thickness=2)
+                cv2.line(
+                    line_mask,
+                    pt1,
+                    pt2,
+                    color=1,
+                    thickness=2,
+                )  # ty: ignore[no-matching-overload]
 
                 # Apply line to overlay
                 for c in range(3):

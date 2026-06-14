@@ -1,5 +1,3 @@
-from typing import Tuple
-
 import keras
 import numpy as np
 from keras import ops
@@ -671,7 +669,7 @@ class LeeFilter(Filter):
         mode: str = "symmetric",
         cval: float | None = None,
         truncate: float = 4.0,
-        axes: Tuple[int] = (-3, -2),
+        axes: tuple[int, ...] = (-3, -2),
         **kwargs,
     ):
         """
@@ -1156,7 +1154,7 @@ class CommonMidpointPhaseError(Operation):
         reshape_grid=True,
         **kwargs,
     ):
-        super()._init_(
+        super()._init_(  # ty: ignore[unresolved-attribute]
             input_data_type=None,
             # DataTypes.IMAGE, because we have an image of the phase map
             output_data_type=DataTypes.IMAGE,
