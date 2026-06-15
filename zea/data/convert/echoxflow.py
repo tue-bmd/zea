@@ -85,18 +85,6 @@ def sector_coordinates(geometry, height: int, width: int) -> np.ndarray | None:
     return np.asarray(grid, dtype=np.float32)
 
 
-def implied_rate_hz(stream) -> float | None:
-    """Best-effort sampling rate for a stream: prefer ``sample_rate_hz`` then timestamps."""
-    if stream.sample_rate_hz is not None:
-        return float(stream.sample_rate_hz)
-    ts = stream.timestamps
-    if ts is not None and len(ts) > 1:
-        dt = float(np.median(np.diff(ts)))
-        if dt > 0:
-            return 1.0 / dt
-    return None
-
-
 def build_metadata(record, bmode_stream, store) -> dict:
     """Collect EchoXFlow metadata that maps onto zea's MetadataSpec.
 
@@ -109,26 +97,30 @@ def build_metadata(record, bmode_stream, store) -> dict:
     if record.has_array_path("data/ecg"):
         try:
             ecg = store.load_stream("ecg")
-            rate = implied_rate_hz(ecg)
-            if rate is not None:
-                samples = np.asarray(ecg.data, dtype=np.float32).reshape(-1)
+            samples = np.asarray(ecg.data, dtype=np.float32).reshape(-1)
+            ecg_meta: dict = {"samples": samples}
+            if ecg.sample_rate_hz is not None:
                 start = float(ecg.timestamps[0]) if ecg.timestamps is not None else 0.0
-                metadata["ecg"] = {
-                    "samples": samples,
-                    "sampling_frequency": np.float32(rate),
-                    "start_time_offset": np.float32(start),
-                }
+                ecg_meta["sampling_frequency"] = np.float32(ecg.sample_rate_hz)
+                ecg_meta["start_time_offset"] = np.float32(start)
+            elif ecg.timestamps is not None and len(ecg.timestamps) >= 1:
+                ts_ecg = np.asarray(ecg.timestamps, dtype=np.float32)
+                ecg_meta["timestamps"] = ts_ecg - ts_ecg[0]
+                ecg_meta["start_time_offset"] = np.float32(ts_ecg[0])
+            if "sampling_frequency" in ecg_meta or "timestamps" in ecg_meta:
+                metadata["ecg"] = ecg_meta
         except Exception:  # noqa: BLE001 - ECG is optional; skip if it won't load
             pass
 
     # Per-frame B-mode timestamps as a generic sampled signal (custom SignalND key).
+    # EchoXFlow uses irregular frame timing, so store exact timestamps rather than
+    # an implied uniform rate.
     if bmode_stream.timestamps is not None:
-        rate = implied_rate_hz(bmode_stream)
-        if rate is not None:
-            ts = np.asarray(bmode_stream.timestamps, dtype=np.float32).reshape(-1)
+        ts = np.asarray(bmode_stream.timestamps, dtype=np.float32).reshape(-1)
+        if len(ts) >= 1:
             metadata["bmode_timestamps"] = {
                 "samples": ts,
-                "sampling_frequency": np.float32(rate),
+                "timestamps": ts - ts[0],
                 "start_time_offset": np.float32(ts[0]),
             }
 
