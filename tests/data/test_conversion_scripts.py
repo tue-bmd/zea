@@ -705,6 +705,7 @@ def verify_converted_echonetlvh_test_data(dst):
                 frame_idx = 0
                 image_float = image[frame_idx].astype(np.float32)
                 image_polar_float = image_polar[frame_idx].astype(np.float32)
+                image_polar_float = np.squeeze(image_polar_float, axis=-1)
                 back_cartesian = LVHProcessor.scan_convert(
                     image_polar_float, cone_params[h5_file.stem + ".avi"], image_float.shape
                 )
