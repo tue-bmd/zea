@@ -413,8 +413,6 @@ class LVHProcessor:
         """
         Scan convert the 'image_polar' to cartesian coordinates to exactly
         match the cropped original (i.e. the 'image' in the file.), using the cone parameters.
-
-        Not used in this script, but useful for reference.
         """
         # Match crop_and_center_cone, which crops with int()-truncated boundaries.
         crop_left = int(cone_params["crop_left"])

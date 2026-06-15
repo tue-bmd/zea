@@ -87,7 +87,7 @@ def unzip(src: str | Path, dataset: str) -> Path:
     Args:
         src (str | Path): The source directory containing the zip file or unzipped folder.
         dataset (str): The name of the dataset to unzip.
-            Options are "picmus", "camus", "echonet", "echonetlvh".
+            Options are "picmus", "camus", "echonet".
 
     Returns:
         Path: The path to the unzipped dataset directory.
@@ -105,23 +105,10 @@ def unzip(src: str | Path, dataset: str) -> Path:
         zip_name = "EchoNet-Dynamic.zip"
         folder_name = "EchoNet-Dynamic"
         unzip_dir = src / folder_name / "Videos"
-    elif dataset == "echonetlvh":
-        zip_name = "EchoNet-LVH.zip"
-        folder_name = "Batch1"
-        unzip_dir = src
     else:
         raise ValueError(f"Dataset {dataset} not recognized for unzip.")
 
     if (src / folder_name).exists():
-        if dataset == "echonetlvh":
-            # EchoNetLVH dataset unzips into four folders. Check they all exist.
-            assert (src / "Batch2").exists(), f"Missing Batch2 folder in {src}."
-            assert (src / "Batch3").exists(), f"Missing Batch3 folder in {src}."
-            assert (src / "Batch4").exists(), f"Missing Batch4 folder in {src}."
-            assert (src / "MeasurementsList.csv").exists(), (
-                f"Missing MeasurementsList.csv in {src}."
-            )
-            log.info(f"Found Batch1, Batch2, Batch3, Batch4 and MeasurementsList.csv in {src}.")
         return unzip_dir
 
     # CAMUS special cases: Girder download produces a database_nifti sub-folder,
