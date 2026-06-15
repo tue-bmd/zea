@@ -26,11 +26,11 @@ Example Usage
     >>> config = Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml")
 
     >>> # Access attributes with dot notation
-    >>> print(config.data.dtype)
-    raw_data
+    >>> print(config.data.local)
+    False
 
     >>> # Update recursively
-    >>> config.update_recursive({"data": {"dtype": "raw_data"}})
+    >>> config.update_recursive({"data": {"local": False}})
 
     >>> # Save to YAML
     >>> config.to_yaml("new_config.yaml")
@@ -53,7 +53,7 @@ from typing import Union
 import yaml
 
 from zea import log
-from zea.internal.config.validation import config_schema
+from zea.internal.config.validation import validate_config
 from zea.internal.core import dict_to_tensor
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.utils import deprecated
@@ -103,6 +103,11 @@ class Config(dict):
         super().__setattr__("__accessed__", {})
         super().__setattr__("__parent__", __parent__)
 
+        if isinstance(dictionary, (str, Path)):
+            raise TypeError(
+                f"Config() expects a dict, not {type(dictionary).__name__!r}. "
+                "To load from a file use Config.from_path()."
+            )
         if dictionary is None:
             dictionary = {}
         if kwargs:
@@ -251,8 +256,14 @@ class Config(dict):
         if isinstance(value, tuple):
             value = list(value)
 
+        # Pipeline ``operations`` are kept as plain ``str``/``dict`` entries rather
+        # than nested Config objects (see ``_compact_operation``), so that
+        # ``config.pipeline.operations`` reads as e.g.
+        # ``['demodulate', {'name': 'downsample', 'params': {'factor': 4}}]``.
+        if name == "operations" and isinstance(value, list):
+            value = [_compact_operation(x) for x in value]
         # Ensures lists and tuples of dictionaries are converted to Config objects as well
-        if isinstance(value, list):
+        elif isinstance(value, list):
             value = [
                 self.__class__(x, __parent__=self) if isinstance(x, dict) else x for x in value
             ]
@@ -508,7 +519,7 @@ def check_config(config: Union[dict, Config], verbose: bool = False):
 
     def _try_validate_config(config):
         try:
-            config = config_schema.validate(config)
+            config = validate_config(config)
             return config
         except Exception as e:
             log.error(f"Config is not valid: {e}")
@@ -566,6 +577,30 @@ def _migrate_legacy_config(dictionary: dict) -> dict:
         )
         dictionary["parameters"] = dictionary.pop("scan")
     return dictionary
+
+
+def _compact_operation(operation):
+    """Return the compact representation of a single pipeline operation.
+
+    Pipeline ``operations`` are stored as plain ``str``/``dict`` entries instead
+    of nested :class:`Config` objects: an operation that only carries a ``name``
+    collapses to that bare name string, while an operation with ``params`` stays
+    a plain dict. This keeps ``config.pipeline.operations`` readable, round-trips
+    cleanly to YAML, and is still accepted as-is by
+    :func:`zea.ops.make_operation_chain`. Anything that is not a name-only
+    mapping (strings, dicts with params, nested pipelines, already-built
+    ``Operation`` instances) is returned unchanged, only unwrapped to plain
+    Python types.
+    """
+    if isinstance(operation, Config):
+        operation = operation.as_dict()
+    if isinstance(operation, dict):
+        if isinstance(operation.get("params"), Config):
+            operation = {**operation, "params": operation["params"].as_dict()}
+        keys = set(operation)
+        if keys == {"name"} or (keys == {"name", "params"} and not operation["params"]):
+            return operation["name"]
+    return operation
 
 
 def _path_to_str(path):

@@ -466,7 +466,7 @@ def upload_dataset_to_hf(  # pragma: no cover
         log.info("Upload cancelled.")
         return
 
-    login(new_session=False)
+    login()
     api = HfApi()
 
     # Check if the revision (branch) exists; if not, prompt to create it.

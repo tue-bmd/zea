@@ -730,14 +730,60 @@ def test_band_pass_filter():
     data = rng.standard_normal((2, 1, 128, 16, 1)).astype("float32")
     data = keras.ops.convert_to_tensor(data)
 
+    operation = ops.BandPassFilter(
+        axis=-3,
+        with_batch_dim=True,
+        passband=(3.5e6, 6.5e6),
+    )
+
+    # Uses init-time passband.
+    result_init_passband = operation(
+        data=data,
+        sampling_frequency=40e6,
+    )["data"]
+
+    # Call-time passband should override init-time passband.
+    result_call_passband = operation(
+        data=data,
+        sampling_frequency=40e6,
+        passband=(4e6, 6e6),
+    )["data"]
+
+    # With init-time passband set, demod/bandwidth should not override it.
+    result_demod_frequency = operation(
+        data=data,
+        sampling_frequency=40e6,
+        demodulation_frequency=5e6,
+        bandwidth=2e6,
+    )["data"]
+
+    # Test the frequency/bandwidth input mode when no fixed passband is set.
     operation = ops.BandPassFilter(axis=-3, with_batch_dim=True)
-    result = operation(
+    result_default = operation(
         data=data,
         sampling_frequency=40e6,
         demodulation_frequency=5e6,
         bandwidth=3e6,
     )["data"]
-    return result
+
+    rtol, atol = 1e-5, 1e-6
+    result_init_passband = keras.ops.convert_to_numpy(result_init_passband)
+    result_call_passband = keras.ops.convert_to_numpy(result_call_passband)
+    result_demod_frequency = keras.ops.convert_to_numpy(result_demod_frequency)
+
+    # Compare the three passband-related modes.
+    assert np.allclose(result_init_passband, result_demod_frequency, rtol=rtol, atol=atol)
+    assert not np.allclose(result_init_passband, result_call_passband, rtol=rtol, atol=atol)
+    assert not np.allclose(result_demod_frequency, result_call_passband, rtol=rtol, atol=atol)
+
+    with pytest.raises(ValueError, match="passband must be an iterable of two numeric values"):
+        operation(
+            data=data,
+            sampling_frequency=40e6,
+            passband=(4e6,),
+        )
+
+    return result_default
 
 
 def test_make_tgc_curve():
@@ -962,3 +1008,46 @@ def test_common_midpoint_phase_error_coherent_data():
     assert phase_error.shape == (n_pix,), f"Expected shape ({n_pix},), got {phase_error.shape}"
 
     return phase_error
+
+
+@backend_equality_check(decimal=4)
+def test_tissue_suppression():
+    """Test that TissueSuppression reduces stationary tissue component."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    n_frames, n_tx, n_ax, n_ch = 10, 4, 32, 8
+    shape = (n_frames, n_tx, n_ax, n_ch)
+
+    # Stationary tissue: same signal repeated across all frames
+
+    gradient = np.linspace(0, 1, n_ax).reshape(1, 1, n_ax, 1)
+    tissue = np.ones(shape) * gradient
+
+    # Blood component: random per frame
+    blood = rng.standard_normal(shape) * 0.1
+
+    data = (tissue + blood).astype(np.float32)
+
+    cutoff = 3
+    op = ops.TissueSuppression(cutoff=cutoff)
+    data_tensor = keras.ops.convert_to_tensor(data)
+    output = keras.ops.convert_to_numpy(op(data=data_tensor)["data"])
+
+    assert output.shape == shape, f"Expected shape {shape}, got {output.shape}"
+    assert output.dtype == data.dtype, f"Expected dtype {data.dtype}, got {output.dtype}"
+
+    # After suppression, energy should be lower than the original tissue-dominated signal
+    assert np.mean(output**2) < np.mean(data**2), "Tissue suppression should reduce signal energy"
+
+    correlation_across_frames = np.corrcoef(output.reshape(n_frames, -1))
+    # The correlation across frames should be reduced after tissue suppression
+    assert np.mean(correlation_across_frames) < 0.5, (
+        "Tissue suppression should reduce correlation across frames, got mean correlation: "
+        f"{np.mean(correlation_across_frames)}"
+    )
+
+    return output

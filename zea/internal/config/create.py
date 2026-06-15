@@ -3,69 +3,73 @@
 import sys
 from pathlib import Path
 
-import schema
+import yaml
 
-from zea.config import Config
+from zea.config import Config, check_config
 from zea.internal.config.parameters import PARAMETER_DESCRIPTIONS
-from zea.internal.config.validation import check_config, config_schema
+from zea.internal.config.validation import ConfigSchema
 from zea.log import green, red
 from zea.utils import get_date_string, strtobool
 
 
-def _get_input_value(config, schema_key, schema_value, descriptions):
+def _get_input_value(config, key, validator, descriptions):
+    """Prompt for a value for ``key``, parse it as YAML, and validate it."""
     while True:
-        input_val = input(f"Enter a value for {schema_key}: ")
-        if not isinstance(schema_key, str):
-            _key = schema_key.key
-        else:
-            _key = schema_key
+        input_val = input(f"Enter a value for {key}: ")
         if input_val == "help":
-            if _key not in descriptions:
-                print(red(f"No description available for {_key}"))
-                continue
-            print("\t" + green(descriptions[_key]))
+            desc = descriptions.get(key) if isinstance(descriptions, dict) else None
+            if not desc:
+                print(red(f"No description available for {key}"))
+            else:
+                print("\t" + green(desc))
             continue
         try:
-            config[_key] = input_val
-            if isinstance(schema_value, schema.And):
-                for _type in schema_value.args:
-                    try:
-                        config[_key] = _type(config[_key])
-                        break
-                    except Exception:
-                        pass
-                schema_value.validate(config[_key])
-            else:
-                schema_value(config[_key])
+            # YAML parsing mirrors how config files are actually loaded, so e.g.
+            # "5" -> int, "true" -> bool, "[1, 2]" -> list, "all" -> str.
+            parsed = yaml.safe_load(input_val)
+            if validator is not None:
+                validator(parsed)
+            config[key] = parsed
             break
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - report any parse/validation error and retry
             print(f"Invalid input: {red(e)}")
     return config
+
+
+def _resolve_spec_field(keys):
+    """Resolve a (slash separated) key path to its validator and descriptions.
+
+    Unknown sections/keys resolve to ``None`` validator (extra keys are allowed).
+    """
+    spec_cls = ConfigSchema
+    descriptions = PARAMETER_DESCRIPTIONS
+    for k in keys[:-1]:
+        spec_cls = spec_cls.NESTED.get(k) if spec_cls is not None else None
+        if isinstance(descriptions, dict):
+            descriptions = descriptions.get(k, {})
+    validator = spec_cls.VALIDATORS.get(keys[-1]) if spec_cls is not None else None
+    return validator, descriptions
 
 
 def create_config():
     """Create a new config file by asking the user for input."""
 
-    def _ask_user_input(config, schema_obj, descriptions):
-        for key, value in schema_obj.schema.items():
-            if isinstance(value, schema.Schema):
-                if not isinstance(key, str):
-                    _key = key.key
-                else:
-                    _key = key
-                if isinstance(key, schema.Optional):
-                    # skip optional keys
-                    continue
-                config[_key] = _ask_user_input(
-                    config.setdefault(_key, {}), value, descriptions[_key]
-                )
-            elif not isinstance(key, schema.Optional):
-                config = _get_input_value(config, key, value, descriptions)
-
+    def _ask_user_input(config, spec_cls, descriptions):
+        for name in spec_cls.required_fields():
+            nested = spec_cls.NESTED.get(name)
+            if nested is not None:
+                sub_desc = descriptions.get(name, {}) if isinstance(descriptions, dict) else {}
+                config[name] = _ask_user_input(config.setdefault(name, {}), nested, sub_desc)
+            else:
+                validator = spec_cls.VALIDATORS.get(name)
+                config = _get_input_value(config, name, validator, descriptions)
         return config
 
     config = {}
-    _ask_user_input(config, config_schema, PARAMETER_DESCRIPTIONS)
+    _ask_user_input(config, ConfigSchema, PARAMETER_DESCRIPTIONS)
+
+    # Sections that are validated nested specs (cannot be set as a single value).
+    base_schemas = list(ConfigSchema.NESTED)
 
     # Ask user if they want to change any optional keys
     while True:
@@ -75,52 +79,27 @@ def create_config():
             change_optional = strtobool(input_val)
 
             if change_optional:
-                key = input("Enter the key name (e.g., 'model/beamformer/param'): ")
+                key = input("Enter the key name (e.g., 'parameters/grid_size_x'): ")
                 keys = key.split("/")
-                base_schemas = [
-                    "data",
-                    "plot",
-                    "model",
-                    "preprocess",
-                    "postprocess",
-                    "scan",
-                ]
 
-                if len(keys) > 1:
-                    if keys[0] not in base_schemas:
-                        print(red(f"Invalid key {key}, please try again."))
-                        continue
-
-                if len(keys) == 1:
-                    if keys[0] in base_schemas:
-                        print(
-                            red(
-                                f"Invalid key, cannot be part of base keys {base_schemas} "
-                                "please try again."
-                            )
+                if len(keys) > 1 and keys[0] not in base_schemas:
+                    print(red(f"Invalid key {key}, please try again."))
+                    continue
+                if len(keys) == 1 and keys[0] in base_schemas:
+                    print(
+                        red(
+                            f"Invalid key, cannot be part of base keys {base_schemas} "
+                            "please try again."
                         )
-                        continue
+                    )
+                    continue
 
                 nested_dict = config
                 for k in keys[:-1]:
                     nested_dict = nested_dict.setdefault(k, {})
 
-                # retrieve schema value from the nested key
-                schema_obj = config_schema
-                for k in keys:
-                    sub_keys = [
-                        s.key if not isinstance(s, str) else s for s in schema_obj.schema.keys()
-                    ]
-
-                    schema_key = list(schema_obj.schema.keys())[sub_keys.index(k)]
-
-                    schema_obj = schema_obj.schema[schema_key]
-
-                descriptions = PARAMETER_DESCRIPTIONS
-                for k in keys[:-1]:
-                    descriptions = descriptions[k]
-
-                nested_dict = _get_input_value(nested_dict, keys[-1], schema_obj, descriptions)
+                validator, descriptions = _resolve_spec_field(keys)
+                nested_dict = _get_input_value(nested_dict, keys[-1], validator, descriptions)
             else:
                 print("No optional keys will be changed.")
                 break

@@ -1,63 +1,136 @@
-"""Main entry point for zea
+"""Entry point for the zea toolbox.
 
-Run as `zea --config path/to/config.yaml` to start the zea interface.
-Or do not pass a config file to open a file dialog to choose a config file.
+Usage::
+
+    zea process --dataset <path> --config <config.yaml> [options]  # batch beamform a dataset
+    zea app [--share] [--server-port PORT]                         # launch the Gradio visualizer
 
 """
 
 import argparse
-import sys
-from pathlib import Path
+import warnings
+from dataclasses import dataclass
+from typing import Annotated, Union
 
-from zea.visualize import set_mpl_style
+import tyro
+
+from zea.cli_args import ProcessArgs
 
 
-def get_parser():
-    """Command line argument parser"""
+@dataclass
+class AppArgs:
+    """Arguments for the interactive Gradio dataset visualizer."""
+
+    share: bool = False
+    server_port: int | None = None
+    device: Annotated[
+        str,
+        tyro.conf.arg(help="Compute device passed to init_device (e.g. 'cpu', 'auto:1')."),
+    ] = "auto:1"
+
+
+def get_parser() -> argparse.ArgumentParser:
+    """Return the top-level argument parser with ``process`` and ``app`` subcommands.
+
+    Kept as plain argparse for ``sphinxcontrib-autoprogram`` doc generation and tests.
+    The interactive ``main()`` uses :func:`tyro.cli` for richer help output.
+    """
     parser = argparse.ArgumentParser(
-        description="Load and process ultrasound data based on a configuration file."
+        prog="zea",
+        description="zea ultrasound toolbox.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("-c", "--config", type=str, default=None, help="path to the config file.")
-    parser.add_argument(
-        "-t",
-        "--task",
-        default="view",
-        choices=["view"],
-        type=str,
-        help="Which task to run. Currently only 'view' is supported.",
+    subparsers = parser.add_subparsers(dest="command", metavar="command")
+    subparsers.required = True
+
+    # ── process ──────────────────────────────────────────────────────────────
+    from zea.data.process import get_parser as _process_parser
+
+    subparsers.add_parser(
+        "process",
+        help="Beamform a zea dataset using a pipeline YAML config.",
+        parents=[_process_parser(add_help=False)],
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
-        "--skip_validate_file",
-        default=False,
+
+    # ── app ──────────────────────────────────────────────────────────────────
+    app_p = subparsers.add_parser(
+        "app",
+        help="Launch the interactive Gradio dataset visualizer.",
+    )
+    app_p.add_argument(
+        "--share",
         action="store_true",
-        help="Skip zea file integrity checks. Use with caution.",
+        help="Create a public Gradio share link.",
     )
+    app_p.add_argument(
+        "--server-port",
+        dest="server_port",
+        type=int,
+        default=None,
+        help="Port for the Gradio server to listen on. Defaults to 7860.",
+    )
+    app_p.add_argument(
+        "--device",
+        type=str,
+        default="auto:1",
+        help="Compute device passed to init_device (e.g. 'cpu', 'auto:1').",
+    )
+
     return parser
 
 
-def main():
-    """main entrypoint for zea"""
-    args = get_parser().parse_args()
+def main() -> None:
+    """Dispatch to the requested subcommand using tyro for rich help output."""
+    SubCmd = Union[
+        Annotated[ProcessArgs, tyro.conf.subcommand("process")],
+        Annotated[AppArgs, tyro.conf.subcommand("app")],
+    ]
 
-    set_mpl_style()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        args = tyro.cli(SubCmd)
 
-    wd = Path(__file__).parent.resolve()
-    sys.path.append(str(wd))
+    from zea.internal.device import init_device
 
-    from zea.interface import Interface
-    from zea.internal.setup_zea import setup
+    init_device(args.device)
 
-    config = setup(args.config)
+    if isinstance(args, ProcessArgs):
+        from zea.data.process import run_processing
 
-    if args.task == "view":
-        cli = Interface(
-            config,
-            validate_file=not args.skip_validate_file,
+        run_processing(
+            args.dataset,
+            args.config,
+            args.key,
+            args.n_frames,
+            args.save_dir,
+            args.save_as,
+            args.keep_keys,
+            args.timings,
+            args.num_threads,
+            args.overwrite,
+            args.keep_dynamic_range,
+            args.revision,
+            args.config_revision,
         )
 
-        cli.run(plot=True)
-    else:
-        raise ValueError(f"Unknown task {args.task}, see `zea --help` for available tasks.")
+    elif isinstance(args, AppArgs):
+        try:
+            import gradio as gr
+        except ImportError as exc:
+            raise ImportError(
+                "gradio is required for the zea app. Install with: pip install 'zea[app]'"
+            ) from exc
+
+        from zea.data.app import CSS, build_interface
+
+        demo = build_interface()
+        demo.launch(
+            share=args.share,
+            server_port=args.server_port,
+            theme=gr.themes.Soft(primary_hue="violet", secondary_hue="yellow"),
+            css=CSS,
+        )
 
 
 if __name__ == "__main__":

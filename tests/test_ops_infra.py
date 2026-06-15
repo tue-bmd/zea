@@ -624,8 +624,10 @@ def test_compact_output_omits_defaults():
     pipeline = pipeline_from_config(config)
 
     compact = pipeline.to_config()
-    beamform_dict = compact["pipeline"]["operations"][0]
-    assert beamform_dict == {"name": "beamform"}
+    # With all params at their defaults the operation compacts to a bare name
+    # string (name-only operations are not kept as dicts/Config objects).
+    beamform_op = compact["pipeline"]["operations"][0]
+    assert beamform_op == "beamform"
 
     full = pipeline.to_config(compact=False)
     beamform_dict = full["pipeline"]["operations"][0]

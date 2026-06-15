@@ -11,6 +11,7 @@ from zea.visualize import (
     plot_frustum_vertices,
     plot_image_grid,
     plot_quadrants,
+    plot_shape_from_mask,
     set_mpl_style,
     visualize_matrix,
 )
@@ -222,3 +223,28 @@ def test_visualize_matrix_variants(matrix, kwargs):
 def test_pad_or_crop_extent_variants(image, extent, target_extent, shape_cmp):
     result = pad_or_crop_extent(image, extent, target_extent)
     assert shape_cmp(result, image)
+
+
+@pytest.mark.parametrize(
+    "extent",
+    [
+        None,
+        [-50, 50, -50, 50],
+    ],
+)
+def test_plot_shape_from_mask(extent):
+    y, x = np.ogrid[-50:50, -50:50]
+    mask = (x**2 + y**2) <= 30**2
+    fig, ax = plt.subplots()
+    patches = plot_shape_from_mask(ax, mask, extent=extent, edgecolor="red", facecolor="none")
+    assert isinstance(patches, list)
+    assert len(patches) >= 1
+    plt.close(fig)
+
+
+def test_plot_shape_from_mask_empty_mask():
+    mask = np.zeros((20, 20), dtype=bool)
+    fig, ax = plt.subplots()
+    patches = plot_shape_from_mask(ax, mask)
+    assert patches == []
+    plt.close(fig)

@@ -6,7 +6,18 @@ Example of saving the entire workspace to a .mat file (MATLAB):
 
         >> setup_script;
         >> VSX;
-        >> save_raw('C:/path/to/raw_data.mat');
+        >> save('C:/path/to/raw_data.mat', '-v7.3');
+
+.. important::
+
+    The ``.mat`` file **must** be saved in HDF5 format (MATLAB v7.3 or later).
+    Older ``.mat`` files are not HDF5-compatible and cannot be opened by this converter.
+    To save in the correct format from MATLAB, use the ``-v7.3`` flag:
+
+.. note::
+
+    We also have a `save_raw` function (not available in zea at the moment)
+    which saves all relevant variables from the workspace only. This results in a smaller file size and faster conversion.
 
 Then convert the saved `raw_data.mat` file to zea format using the following code (Python):
 
@@ -40,6 +51,7 @@ The data is stored in the ``data`` group and the scan parameters are stored in t
 """  # noqa: E501
 
 import os
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -48,7 +60,6 @@ import h5py
 import numpy as np
 import yaml
 from keras import ops
-from schema import And, Optional, Or, Regex, Schema
 
 from zea import log
 from zea.data.convert.utils import (
@@ -69,22 +80,64 @@ _VERASONICS_TO_ZEA_PROBE_NAMES = {
 }
 
 
-_CONVERT_YAML_SCHEMA = Schema(
-    {
-        "files": [
-            {
-                "name": str,
-                Optional("first_frame"): And(int, lambda x: x >= 0),
-                Optional("frames"): Or(
-                    "all",
-                    And(str, Regex(r"^\d+(-\d+)?$")),  # Matches "30-99" or single number like "5"
-                    [And(int, lambda x: x >= 0)],  # List of non-negative integers
-                ),
-                Optional("transmits"): Or("all", [And(int, lambda x: x >= 0)]),
-            }
-        ]
-    }
-)
+_FRAMES_RANGE_RE = re.compile(r"^\d+(-\d+)?$")
+
+
+def _validate_convert_config(data):
+    """Validate the structure of a convert.yaml config dict.
+
+    Expected shape::
+
+        files:
+          - name: <str>
+            first_frame: <int >= 0>          # optional
+            frames: all | "N" | "N-M" | [N, ...] # optional
+            transmits: all | [N, ...]         # optional
+    """
+    if not isinstance(data, dict) or "files" not in data:
+        raise ValueError("convert.yaml must have a top-level 'files' key")
+    if not isinstance(data["files"], list):
+        raise ValueError("'files' must be a list")
+    for entry in data["files"]:
+        if not isinstance(entry, dict):
+            raise ValueError(f"each entry in 'files' must be a dict, got {type(entry).__name__}")
+        if not isinstance(entry.get("name"), str):
+            raise ValueError(f"each file entry must have a string 'name', got {entry!r}")
+        if "first_frame" in entry:
+            ff = entry["first_frame"]
+            if not isinstance(ff, int) or isinstance(ff, bool) or ff < 0:
+                raise ValueError(f"'first_frame' must be a non-negative int, got {ff!r}")
+        if "frames" in entry:
+            fr = entry["frames"]
+            if isinstance(fr, str) and _FRAMES_RANGE_RE.fullmatch(fr) and "-" in fr:
+                start, end = map(int, fr.split("-"))
+                if start > end:
+                    raise ValueError(f"'frames' range must be ascending (start <= end), got {fr!r}")
+            if not (
+                fr == "all"
+                or (isinstance(fr, str) and _FRAMES_RANGE_RE.fullmatch(fr))
+                or (
+                    isinstance(fr, list)
+                    and all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in fr)
+                )
+            ):
+                raise ValueError(
+                    f"'frames' must be 'all', a range string like '30-99', or a list of "
+                    f"non-negative ints, got {fr!r}"
+                )
+        if "transmits" in entry:
+            tr = entry["transmits"]
+            if not (
+                tr == "all"
+                or (
+                    isinstance(tr, list)
+                    and all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in tr)
+                )
+            ):
+                raise ValueError(
+                    f"'transmits' must be 'all' or a list of non-negative ints, got {tr!r}"
+                )
+    return data
 
 
 class VerasonicsFile(h5py.File):
@@ -92,7 +145,24 @@ class VerasonicsFile(h5py.File):
 
     This class extends the h5py.File class to handle Verasonics-specific
     data structures and conventions.
+
+    .. note::
+
+        The ``.mat`` file must be saved in HDF5 format (MATLAB v7.3).
+        Use ``save('file.mat', '-v7.3')`` in MATLAB before converting.
     """
+
+    def __init__(self, name, mode="r", **kwargs):
+        try:
+            super().__init__(name, mode, **kwargs)
+        except OSError as e:
+            raise OSError(
+                f"Cannot open '{name}' as an HDF5 file.\n\n"
+                "This usually means the .mat file was not saved in HDF5 format.\n"
+                "MATLAB saves in HDF5 format only when you use the '-v7.3' flag:\n\n"
+                "    save('C:/path/to/raw_data.mat', '-v7.3')\n\n"
+                "Re-save the workspace in MATLAB with this flag and try again."
+            ) from e
 
     def dereference_index(self, dataset, index):
         """Get the element at the given index from the dataset, dereferencing it if
@@ -278,8 +348,8 @@ class VerasonicsFile(h5py.File):
         Read the t0 delays and apodization from the file.
 
         Returns:
-            t0_delays (np.ndarray): The t0 delays of shape (n_tx, n_el).
-            apod (np.ndarray): The apodization of shape (n_el,).
+            tuple: ``(t0_delays, apodizations)`` — t0 delays of shape ``(n_tx, n_el)``
+            and transmit apodizations of shape ``(n_tx, n_el)``.
         """
 
         t0_delays_list = []
@@ -452,7 +522,7 @@ class VerasonicsFile(h5py.File):
                 data = yaml.load(file, Loader=yaml.FullLoader)
 
             # Validate the YAML structure
-            validated_data = _CONVERT_YAML_SCHEMA.validate(data)
+            validated_data = _validate_convert_config(data)
 
             files = validated_data["files"]
             filenames = [file["name"] for file in files]
@@ -624,7 +694,7 @@ class VerasonicsFile(h5py.File):
             wavelength (float): The wavelength of the probe.
 
         Returns:
-            initial_times (np.ndarray): The initial times of shape (n_rcv,).
+            np.ndarray: The initial times of shape ``(n_rcv,)``.
         """
         initial_times = []
         for n in rcv_order:
@@ -646,7 +716,7 @@ class VerasonicsFile(h5py.File):
             tx_order (list): The order in which the transmits appear in the events.
 
         Returns:
-            focus_distances (list): The focus distances of shape (n_tx,) in meters.
+            np.ndarray: The focus distances of shape ``(n_tx,)`` in meters.
         """
         focus_distances = []
         for n in tx_order:
@@ -1496,9 +1566,9 @@ def convert_verasonics(args):
     # Write the dataset card next to the converted output: in the output
     # directory for a directory conversion, or alongside the file for a single
     # file. The card is required for the upload ownership check below.
-    if selected_path_is_directory:
+    if selected_path_is_directory and args.hf_repo_id:
         write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
-    elif getattr(args, "upload", False):
+    elif getattr(args, "upload", False) and args.hf_repo_id:
         write_dataset_card(output_path.parent, make_dataset_card(args.hf_repo_id))
 
     if getattr(args, "upload", False):

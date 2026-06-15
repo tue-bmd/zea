@@ -21,6 +21,8 @@ from .. import DEFAULT_TEST_SEED
 
 CAMUS_DATASET_PATH = HFPath("hf://zeahub/camus-sample")
 CAMUS_FILE = CAMUS_DATASET_PATH / "val/patient0401/patient0401_4CH_half_sequence.hdf5"
+CAMUS_REVISION = "v0.1.0"
+CAMUS_KEY = "data/image/values"
 DUMMY_IMAGE_SHAPE = (28, 28)
 DUMMY_N_FRAMES = 100
 
@@ -78,7 +80,7 @@ def camus_file():
     return CAMUS_FILE
 
 
-def _get_h5_data_source(file_path, key, n_frames, insert_frame_axis, validate=True):
+def _get_h5_data_source(file_path, key, n_frames, insert_frame_axis, validate=True, revision=None):
     file_paths = [file_path]
 
     generator = H5DataSource(
@@ -87,6 +89,7 @@ def _get_h5_data_source(file_path, key, n_frames, insert_frame_axis, validate=Tr
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
         validate=validate,
+        revision=revision,
     )
     return generator
 
@@ -98,21 +101,27 @@ def _get_h5_data_source(file_path, key, n_frames, insert_frame_axis, validate=Tr
         ("dummy_hdf5", "data", 3, True),
         ("dummy_hdf5", "data", 1, False),
         ("dummy_hdf5", "data", 3, False),
-        ("camus_file", "data/image_sc", 1, True),
-        ("camus_file", "data/image_sc", 3, True),
-        ("camus_file", "data/image_sc", 1, False),
-        ("camus_file", "data/image_sc", 3, False),
-        ("camus_file", "data/image_sc", 15, False),
+        ("camus_file", CAMUS_KEY, 1, True),
+        ("camus_file", CAMUS_KEY, 3, True),
+        ("camus_file", CAMUS_KEY, 1, False),
+        ("camus_file", CAMUS_KEY, 3, False),
+        ("camus_file", CAMUS_KEY, 15, False),
     ],
 )
 def test_h5_data_source(file_path, key, n_frames, insert_frame_axis, request):
     """Test the H5DataSource class"""
 
-    validate = file_path != "dummy_hdf5"
+    is_camus = file_path == "camus_file"
+    validate = not (file_path == "dummy_hdf5")
     file_path = request.getfixturevalue(file_path)
 
     data_source = _get_h5_data_source(
-        file_path, key, n_frames, insert_frame_axis, validate=validate
+        file_path,
+        key,
+        n_frames,
+        insert_frame_axis,
+        validate=validate,
+        revision=CAMUS_REVISION if is_camus else None,
     )
 
     batch_shape = data_source[0].shape
@@ -131,9 +140,9 @@ def test_h5_data_source(file_path, key, n_frames, insert_frame_axis, request):
 @pytest.mark.parametrize(
     "directory, key, n_frames, insert_frame_axis, num_files, total_samples",
     [
-        ("camus_dataset", "data/image_sc", 1, True, 6, 101),
+        ("camus_dataset", CAMUS_KEY, 1, True, 6, 101),
         ("fake_directory", "data", 1, True, 3, 9 * 3),
-        ("camus_dataset", "data/image_sc", 5, False, 6, 101),
+        ("camus_dataset", CAMUS_KEY, 5, False, 6, 101),
         ("fake_directory", "data", 5, False, 3, 9 * 3),
     ],
 )
@@ -150,6 +159,7 @@ def test_dataloader(
     """Test the dataloader.
     Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    revision = None
     if directory == "fake_directory":
         # create a fake directory with some dummy data
         for i in range(num_files):
@@ -161,10 +171,11 @@ def test_dataloader(
     elif directory == "camus_dataset":
         directory = request.getfixturevalue(directory)
         image_range = (-60, 0)
+        revision = CAMUS_REVISION
     else:
         raise ValueError("Invalid directory for testing")
 
-    with Dataset(directory) as dataset_test:
+    with Dataset(directory, revision=revision) as dataset_test:
         file_lengths = [len(file[key]) for file in dataset_test]
 
     expected_len_dataset = sum(
@@ -180,6 +191,7 @@ def test_dataloader(
         shuffle=True,
         seed=DEFAULT_TEST_SEED,
         image_range=image_range,
+        revision=revision,
     )
     batch_shape = next(iter(dataset)).shape
 
@@ -220,9 +232,9 @@ def test_dataloader(
 @pytest.mark.parametrize(
     "directory, key, n_frames, insert_frame_axis, image_size, batch_size",
     [
-        ("camus_dataset", "data/image_sc", 1, True, (20, 20), 2),
+        ("camus_dataset", CAMUS_KEY, 1, True, (20, 20), 2),
         ("dummy_hdf5", "data", 1, True, (20, 20), 2),
-        ("camus_dataset", "data/image_sc", 5, False, (20, 20), 1),
+        ("camus_dataset", CAMUS_KEY, 5, False, (20, 20), 1),
         ("dummy_hdf5", "data", 5, False, (20, 20), 1),
     ],
 )
@@ -237,6 +249,7 @@ def test_h5_dataset_return_filename(
 ):
     """Test the dataloader with return_filename=True."""
 
+    is_camus = directory == "camus_dataset"
     validate = directory != "dummy_hdf5"
     directory = request.getfixturevalue(directory)
 
@@ -253,6 +266,7 @@ def test_h5_dataset_return_filename(
         resize_type="resize",
         batch_size=batch_size,
         validate=validate,
+        revision=CAMUS_REVISION if is_camus else None,
     )
 
     batch = next(iter(dataset))
@@ -291,11 +305,11 @@ def test_h5_dataset_return_filename(
 @pytest.mark.parametrize(
     "directory, key, image_size, resize_type, batch_size",
     [
-        ("camus_dataset", "data/image_sc", (20, 23), "resize", 1),
+        ("camus_dataset", CAMUS_KEY, (20, 23), "resize", 1),
         ("dummy_hdf5", "data", (20, 23), "resize", 1),
         (
             "camus_dataset",
-            "data/image_sc",
+            CAMUS_KEY,
             (20, 23),
             "resize",
             1,
@@ -310,6 +324,7 @@ def test_h5_dataset_return_filename(
 def test_h5_dataset_resize_types(directory, key, image_size, resize_type, batch_size, request):
     """Test the dataloader with different resize types."""
 
+    is_camus = directory == "camus_dataset"
     validate = directory != "dummy_hdf5"
     directory = request.getfixturevalue(directory)
 
@@ -325,6 +340,7 @@ def test_h5_dataset_resize_types(directory, key, image_size, resize_type, batch_
         resize_type=resize_type,
         assert_image_range=False,
         validate=validate,
+        revision=CAMUS_REVISION if is_camus else None,
     )
 
     images = next(iter(dataset))

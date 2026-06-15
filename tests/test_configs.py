@@ -5,9 +5,8 @@ from pathlib import Path
 
 import pytest
 import yaml
-from schema import SchemaError
 
-from zea.config import Config, check_config
+from zea.config import Config, _compact_operation, check_config
 from zea.internal.setup_zea import setup_config
 
 wd = Path(__file__).parent.parent
@@ -70,11 +69,17 @@ def test_all_configs_valid(file):
         configuration = check_config(configuration)
         # check another time, since defaults are now set, which are not
         # checked by the first check_config. Basically this checks if the
-        # config_validation.py entries are correct.
+        # validation.py entries are correct.
         check_config(configuration)
 
-    except SchemaError as se:
-        raise ValueError(f"Error in config {file}") from se
+    except ValueError as ve:
+        raise ValueError(f"Error in config {file}") from ve
+
+
+def test_config_rejects_string_path():
+    """Config(path) must raise TypeError — use Config.from_path() instead."""
+    with pytest.raises(TypeError, match="Config.from_path"):
+        Config("configs/config_picmus_rf.yaml")
 
 
 def test_dot_indexing():
@@ -319,6 +324,100 @@ def test_config_repr():
     assert r.startswith("Config(")
     assert r.endswith(")")
     assert "<" not in r
+
+
+def test_pipeline_operations_compact_form():
+    """``pipeline`` and ``parameters`` stay Config objects, but the individual
+    ``pipeline.operations`` entries are kept as plain ``str``/``dict`` rather
+    than nested Config objects: a name-only operation collapses to its bare
+    name string, while an operation with ``params`` stays a plain dict.
+    """
+    config = Config(
+        {
+            "parameters": {"grid_size_x": 400},
+            "pipeline": {
+                "operations": [
+                    {"name": "demodulate"},
+                    {"name": "downsample", "params": {"factor": 4}},
+                    {"name": "normalize", "params": {}},
+                    "log_compress",
+                ],
+            },
+        }
+    )
+
+    # Nested mappings are still Config objects ...
+    assert isinstance(config.pipeline, Config)
+    assert isinstance(config.parameters, Config)
+
+    # ... but operations are plain str/dict, never Config.
+    operations = config.pipeline.operations
+    assert operations == [
+        "demodulate",
+        {"name": "downsample", "params": {"factor": 4}},
+        "normalize",
+        "log_compress",
+    ]
+    for operation in operations:
+        assert isinstance(operation, (str, dict))
+        assert not isinstance(operation, Config)
+
+
+def test_compact_operation_helper():
+    """``_compact_operation`` correctly handles all input shapes, including
+    a plain dict whose ``params`` value is a nested Config object (the fix
+    added in config.py lines 598-599)."""
+    # bare string passes through unchanged
+    assert _compact_operation("demodulate") == "demodulate"
+
+    # name-only dict collapses to bare string
+    assert _compact_operation({"name": "demodulate"}) == "demodulate"
+
+    # name-only Config collapses to bare string
+    assert _compact_operation(Config({"name": "demodulate"})) == "demodulate"
+
+    # dict with params stays a plain dict, params value already plain
+    assert _compact_operation({"name": "downsample", "params": {"factor": 4}}) == {
+        "name": "downsample",
+        "params": {"factor": 4},
+    }
+
+    # dict whose "params" is a Config — must be unwrapped to a plain dict
+    op_with_config_params = {"name": "downsample", "params": Config({"factor": 4})}
+    result = _compact_operation(op_with_config_params)
+    assert result == {"name": "downsample", "params": {"factor": 4}}
+    assert not isinstance(result["params"], Config)
+
+    # Config whose "params" is itself a Config — same unwrap must happen
+    op_config = Config({"name": "beamform", "params": Config({"num_patches": 200})})
+    result = _compact_operation(op_config)
+    assert result == {"name": "beamform", "params": {"num_patches": 200}}
+    assert not isinstance(result["params"], Config)
+
+    # empty params dict collapses to bare string (name-only semantics)
+    assert _compact_operation({"name": "normalize", "params": {}}) == "normalize"
+
+
+def test_pipeline_operations_compact_after_check_config():
+    """``check_config`` re-wraps the validated dict into a Config; operations
+    must remain in the compact str/dict form afterwards (regression test for
+    operations being turned back into a list of Config objects)."""
+    config = Config(
+        {
+            "pipeline": {
+                "operations": [
+                    {"name": "demodulate"},
+                    {"name": "downsample", "params": {"factor": 4}},
+                ]
+            },
+        }
+    )
+    config = check_config(config)
+    assert config.pipeline.operations == [
+        "demodulate",
+        {"name": "downsample", "params": {"factor": 4}},
+    ]
+    assert not any(isinstance(op, Config) for op in config.pipeline.operations)
 
 
 def test_config_pickle():

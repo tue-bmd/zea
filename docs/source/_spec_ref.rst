@@ -13,7 +13,7 @@ Every ``zea`` HDF5 file follows the layout shown below.
 
 .. code-block:: text
 
-   data_file.hdf5         (attrs: us_machine, description, zea_version)
+   data_file.hdf5         (attrs: us_machine, description, zea_version, acquisition_time)
    ├── data/
    │   ├── raw_data                  float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
    │   ├── aligned_data/             group (AlignedData)
@@ -30,6 +30,12 @@ Every ``zea`` HDF5 file follows the layout shown below.
    │   ├── sampling_frequency        float32  scalar
    │   ├── center_frequency          float32  scalar | (n_tx,)
    │   ├── t0_delays                 float32  (n_tx, n_el)
+   │   └── …
+   ├── probe/
+   │   ├── name                      str
+   │   ├── type                      str
+   │   ├── probe_geometry            float32  (n_el, 3)
+   │   ├── probe_center_frequency    float32  scalar
    │   └── …
    ├── metadata/
    │   ├── subject/                  group (Subject)
@@ -62,14 +68,21 @@ Stored as HDF5 root-level attributes (not groups).
    * - ``description``
      - ``str``
      - Free-text description of the acquisition.
-     -
+     - e.g. ``"Carotid artery scan with Doppler."``
      - |badge-opt|
    * - ``zea_version``
      - ``str``
      - Version of zea that wrote this file (set automatically).
-     -
+     - e.g. ``"0.1.0"``
+     - |badge-opt|
+   * - ``acquisition_time``
+     - ``str``
+     - Timestamp (UTC) of acquisition in ISO 8601 format.
+     - e.g. ``"2024-01-30T15:45:00Z"``
      - |badge-opt|
 
+
+.. _group-reference:
 
 Group reference
 ~~~~~~~~~~~~~~~
@@ -712,7 +725,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - |badge-req|
          * - ``time_to_next_transmit``
            - ``float32``
-           - (n_frames, n_tx)
+           - (n_frames, n_tx) or (n_timing_intervals)
            - s
            - Time between transmit events.
            - |badge-opt|
@@ -998,7 +1011,13 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Hz
               - Sampling frequency.
-              - |badge-req|
+              - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (T)
+              - s
+              - Explicit sample timestamps relative to sample 0.
+              - |badge-opt|
 
 
       .. dropdown:: ``ecg / voice_narration`` — Signal1D
@@ -1032,7 +1051,13 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Hz
               - Sampling frequency.
-              - |badge-req|
+              - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (T)
+              - s
+              - Explicit sample timestamps relative to sample 0.
+              - |badge-opt|
 
 
    .. tab-item:: metrics

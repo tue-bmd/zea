@@ -444,7 +444,7 @@ def _load_pth_into_keras_net(keras_net, state_dict):  # pragma: no cover
 class Speckle2Self(BaseModel):
     """Self-supervised speckle reduction model for ultrasound images.
 
-    Native Keras 3 implementation of the SpeckleReductionNet
+    Native Keras 3 implementation of the Speckle2Self architecture
     (Li et al., Medical Image Analysis, 2025).
 
     .. note::

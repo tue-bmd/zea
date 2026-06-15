@@ -226,7 +226,7 @@ def rst_dropdown(cls, title, base_indent=0, open_=False, compact=False) -> str:
 FILE_TREE = """\
 .. code-block:: text
 
-   data_file.hdf5         (attrs: us_machine, description, zea_version)
+   data_file.hdf5         (attrs: us_machine, description, zea_version, acquisition_time)
    \u251c\u2500\u2500 data/
    \u2502   \u251c\u2500\u2500 raw_data                  float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
    \u2502   \u251c\u2500\u2500 aligned_data/             group (AlignedData)
@@ -243,6 +243,12 @@ FILE_TREE = """\
    \u2502   \u251c\u2500\u2500 sampling_frequency        float32  scalar
    \u2502   \u251c\u2500\u2500 center_frequency          float32  scalar | (n_tx,)
    \u2502   \u251c\u2500\u2500 t0_delays                 float32  (n_tx, n_el)
+   \u2502   \u2514\u2500\u2500 \u2026
+   \u251c\u2500\u2500 probe/
+   \u2502   \u251c\u2500\u2500 name                      str
+   \u2502   \u251c\u2500\u2500 type                      str
+   \u2502   \u251c\u2500\u2500 probe_geometry            float32  (n_el, 3)
+   \u2502   \u251c\u2500\u2500 probe_center_frequency    float32  scalar
    \u2502   \u2514\u2500\u2500 \u2026
    \u251c\u2500\u2500 metadata/
    \u2502   \u251c\u2500\u2500 subject/                  group (Subject)
@@ -271,12 +277,17 @@ ROOT_ATTRS_TABLE = """\
    * - ``description``
      - ``str``
      - Free-text description of the acquisition.
-     -
+     - e.g. ``"Carotid artery scan with Doppler."``
      - |badge-opt|
    * - ``zea_version``
      - ``str``
      - Version of zea that wrote this file (set automatically).
-     -
+     - e.g. ``"0.1.0"``
+     - |badge-opt|
+   * - ``acquisition_time``
+     - ``str``
+     - Timestamp (UTC) of acquisition in ISO 8601 format.
+     - e.g. ``"2024-01-30T15:45:00Z"``
      - |badge-opt|
 """
 
@@ -327,6 +338,8 @@ def generate() -> str:
 
     # --- Group reference tabs -------------------------------------------------
     lines += [
+        ".. _group-reference:",
+        "",
         "Group reference",
         "~~~~~~~~~~~~~~~",
         "",
