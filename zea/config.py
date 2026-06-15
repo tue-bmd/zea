@@ -49,18 +49,9 @@ import inspect
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
+from typing import Any, Union
 
 import yaml
-
-if TYPE_CHECKING:
-    # Protocol describing the mapping-like first argument of ``dict.update``;
-    # only needed for typing, so imported lazily to avoid a runtime dependency.
-    from _typeshed import SupportsKeysAndGetItem
-
-    # ``Self`` lives in ``typing`` only from 3.11; import from typing_extensions
-    # under TYPE_CHECKING so the 3.10 floor stays runtime-clean.
-    from typing_extensions import Self
 
 from zea import log
 from zea.internal.config.validation import validate_config
@@ -169,7 +160,7 @@ class Config(dict):
 
     def update(
         self,
-        dictionary: "SupportsKeysAndGetItem[str, Any] | Iterable[tuple[str, Any]] | None" = None,
+        dictionary: dict | Iterable[tuple[str, Any]] | None = None,
         /,
         **kwargs,
     ) -> None:
@@ -473,7 +464,7 @@ class Config(dict):
                         v._recursive_setattr(set_key, set_value)
 
     @classmethod
-    def from_path(cls, path, loader=yaml.FullLoader, **kwargs) -> "Self":
+    def from_path(cls, path, loader=yaml.FullLoader, **kwargs) -> "Config":
         """Load config object from a file path.
 
         Args:
@@ -503,7 +494,7 @@ class Config(dict):
 
     @classmethod
     @deprecated(replacement="Config.from_path")
-    def from_hf(cls, repo_id, path, **kwargs) -> "Self":
+    def from_hf(cls, repo_id, path, **kwargs) -> "Config":
         """Load config object from huggingface hub.
 
         Args:
