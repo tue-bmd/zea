@@ -317,7 +317,9 @@ class Parameters(BaseParameters):
                 grid_size_y=self.grid_size_y,
             )
             try:
-                check_for_aliasing(self)
+                check_for_aliasing(
+                    self.xlims, self.zlims, self.wavelength, self.grid_size_x, self.grid_size_z
+                )
             except MissingDependencyError:
                 # No wavelength (e.g. missing center frequency); cannot assess aliasing.
                 pass
@@ -327,9 +329,6 @@ class Parameters(BaseParameters):
                 f"Unsupported grid type: {self.grid_type}. Supported types are "
                 "'cartesian' and 'polar'."
             )
-        check_for_aliasing(
-            self.xlims, self.zlims, self.wavelength, self.grid_size_x, self.grid_size_z
-        )
         return grid
 
     @cache_with_dependencies("xlims", "wavelength", "pixels_per_wavelength")
