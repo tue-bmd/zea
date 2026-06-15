@@ -640,6 +640,14 @@ class File(h5py.File):
             i += 1
 
         schedule = self.track_schedule
+        if schedule is None and len(tracks) == 1:
+            # For single-track files without an explicit schedule every transmit
+            # event belongs to track 0, so synthesise the schedule on the fly.
+            try:
+                n_events = tracks[0].n_frames * tracks[0].n_tx
+                schedule = np.zeros(n_events, dtype=np.int32)
+            except (TypeError, KeyError):
+                schedule = None
         if schedule is not None:
             all_timestamps = _compute_all_track_timestamps(schedule, tracks)
             for track, ts in zip(tracks, all_timestamps):
@@ -725,6 +733,56 @@ class File(h5py.File):
         if "track_schedule" not in self:
             return None
         return self["track_schedule"][()].astype(np.int32)
+
+    @property
+    def timestamps(self) -> "np.ndarray | None":
+        """Global transmit timestamps in acquisition order, shape ``(n_total_tx,)``.
+
+        Returns a 1-D ``float32`` array whose ``i``-th entry is the absolute
+        start time of the ``i``-th transmit event across **all** tracks, in the
+        order defined by :attr:`track_schedule`.  This is the flattened view
+        complementary to the per-track ``(n_frames, n_tx)`` matrices returned
+        by :attr:`Track.timestamps`.
+
+        Returns ``None`` when timestamps cannot be computed (missing
+        ``time_to_next_transmit`` on any track, or the file uses the legacy
+        flat layout with no tracks group).
+
+        Example::
+
+            with File("multi_track.hdf5") as f:
+                ts = f.timestamps  # shape (n_total_tx,)
+        """
+        try:
+            tracks = self.tracks
+        except AttributeError:
+            return None
+
+        if not tracks or any(t.timestamps is None for t in tracks):
+            return None
+
+        schedule = self.track_schedule
+        if schedule is None and len(tracks) == 1:
+            n_events = tracks[0].n_frames * tracks[0].n_tx
+            schedule = np.zeros(n_events, dtype=np.int32)
+        if schedule is None:
+            return None
+
+        ts_matrices = [np.asarray(t.timestamps, dtype=np.float32) for t in tracks]
+        n_tx_per_track = [m.shape[1] for m in ts_matrices]
+        track_counters = [[0, 0] for _ in tracks]
+
+        global_timestamps = np.empty(len(schedule), dtype=np.float32)
+        for event_idx, track_idx in enumerate(schedule):
+            frame_idx, tx_idx = track_counters[track_idx]
+            global_timestamps[event_idx] = ts_matrices[track_idx][frame_idx, tx_idx]
+            tx_idx += 1
+            if tx_idx >= n_tx_per_track[track_idx]:
+                tx_idx = 0
+                frame_idx += 1
+            track_counters[track_idx] = [frame_idx, tx_idx]
+
+        return global_timestamps
 
     @property
     def _scan_h5_group(self) -> "h5py.Group | None":
