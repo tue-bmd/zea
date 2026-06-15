@@ -817,7 +817,8 @@ class File(h5py.File):
             overwrite: If *False* (default), raise if the file exists.
 
         Returns:
-            File: An open read-only :class:`File` handle.
+            None. The validated file is written to ``path``; open it with
+            ``File(path)`` to read it back.
 
         Single-track example:
 

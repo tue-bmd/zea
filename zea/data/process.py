@@ -425,9 +425,9 @@ def run_processing(
             data_output.append(processed_frame)
             pbar.add(1)
 
-            for key in keep_keys:
-                if key in output:
-                    params[key] = output[key]
+            for keep_key in keep_keys:
+                if keep_key in output:
+                    params[keep_key] = output[keep_key]
 
             if timings:
                 for tname in timer.timings.keys():

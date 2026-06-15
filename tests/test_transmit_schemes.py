@@ -7,7 +7,7 @@ import pytest
 from zea import ops
 from zea.beamform.phantoms import fibonacci, fish, golden_ratio, lissajous, rose
 from zea.internal.core import DEFAULT_DYNAMIC_RANGE
-from zea.internal.dummy_scan import _get_probe, _get_scan
+from zea.internal.dummy_scan import _get_parameters, _get_probe
 
 
 def _get_flatgrid(extent, shape):
@@ -140,7 +140,7 @@ def test_transmit_schemes(
     """Tests the default ultrasound pipeline."""
 
     probe = _get_probe(probe_kind)
-    parameters = _get_scan(probe, scan_kind)
+    parameters = _get_parameters(probe, scan_kind)
 
     inputs = default_pipeline.prepare_parameters(parameters)
 
@@ -174,7 +174,7 @@ def test_transmit_schemes(
 
     # Additional test for planewave: verify focus_distance=0 gives same result
     if scan_kind == "planewave":
-        parameters_zero_focus = _get_scan(
+        parameters_zero_focus = _get_parameters(
             probe, scan_kind, focus_distances=np.zeros(parameters.n_tx)
         )
         inputs_zero = default_pipeline.prepare_parameters(parameters_zero_focus)
@@ -202,7 +202,7 @@ def test_transmit_schemes(
 def test_polar_grid(default_pipeline: ops.Pipeline, ultrasound_scatterers):
     """Tests the polar grid generation."""
     probe = _get_probe("linear")
-    parameters = _get_scan(probe, "focused", grid_type="polar")
+    parameters = _get_parameters(probe, "focused", grid_type="polar")
 
     # Check if the grid type is set correctly
     assert parameters.grid_type == "polar"

@@ -82,6 +82,41 @@ Stored as HDF5 root-level attributes (not groups).
      - |badge-opt|
 
 
+.. _data-spec-units:
+
+Units
+~~~~~
+
+Unit symbols used in the ``Unit`` column of the field tables below.
+A unit of ``-`` denotes a unitless (dimensionless) quantity.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Symbol
+     - Meaning
+   * - ``m/s``
+     - meters per second
+   * - ``m``
+     - meters
+   * - ``Hz``
+     - Hertz
+   * - ``s``
+     - seconds
+   * - ``V``
+     - volts
+   * - ``-``
+     - unitless
+   * - ``rad``
+     - radians
+   * - ``dB``
+     - decibels
+   * - ``#``
+     - count
+   * - ``%``
+     - percent
+
 .. _group-reference:
 
 Group reference
@@ -326,7 +361,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32`` | ``uint8``
-              - (n_frames, x, z, y) or (n_frames, x, z)
+              - (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``coordinates``
