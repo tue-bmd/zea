@@ -316,11 +316,13 @@ def _find_map_length(args, in_axes) -> int:
     raise ValueError("At least one in_axes must be non-None to determine map length.")
 
 
-def _repeat_int_to_tuple(value, length) -> Tuple[Union[int, None], ...]:
+def _repeat_int_to_tuple(value, length: int) -> Tuple[Union[int, None], ...]:
     """Convert an int or None to a tuple of length `length`."""
     if isinstance(value, int) or value is None:
         return (value,) * length
     elif isinstance(value, (tuple, list)):
+        if len(value) != length:
+            raise ValueError(f"Expected sequence of length {length}, got {len(value)}.")
         return tuple(value)
     raise ValueError("Value must be an int, None, or a tuple or list.")
 

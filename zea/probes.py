@@ -201,11 +201,9 @@ class Probe(ProbeSpec):
         """Compute the pitch (centre-to-centre element spacing) in metres from
         the probe geometry.
 
-        Returns ``None`` when the pitch is not defined for the geometry (fewer
-        than 2 elements, or not a 1-D / linear array). Raises :class:`ValueError`
-        when the array looks like a ULA but the element positions are not
-        uniformly spaced, to surface likely data errors rather than silently
-        returning ``None``.
+        Raises :class:`ValueError` when the probe has fewer than 2 elements,
+        the geometry is not a 1-D (linear) array, or the element positions are
+        not uniformly spaced.
         """
 
         n_el = probe_geometry.shape[0]

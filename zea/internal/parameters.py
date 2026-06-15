@@ -11,7 +11,7 @@ See the BaseParameters class docstring for details on features and usage.
 import functools
 import inspect
 from copy import deepcopy
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import numpy as np
 
@@ -554,9 +554,9 @@ class BaseParameters(ZeaObject):
 
     def to_tensor(
         self,
-        include: str | list | None = None,
-        exclude: list | None = None,
-        keep_as_is: list | None = None,
+        include: Literal["all"] | list[str] | None = None,
+        exclude: list[str] | None = None,
+        keep_as_is: list[str] | None = None,
     ):
         """
         Convert parameters and computed properties to tensors.

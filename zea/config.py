@@ -172,7 +172,6 @@ class Config(dict):
     def update(
         self,
         dictionary: _SupportsKeysAndGetItem | Iterable[tuple[str, Any]] | None = None,
-        /,
         **kwargs: Any,
     ) -> None:
         """Updates the config with the specified key-value pairs.

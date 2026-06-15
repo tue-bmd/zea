@@ -324,8 +324,9 @@ def set_file_logger_directory(directory):
     global LOG_DIR, file_logger
     LOG_DIR = directory
     # Remove all handlers from the file logger
-    assert file_logger is not None, "File logging not enabled; call enable_file_logging() first."
-    for handler in file_logger.handlers:
+    if file_logger is None:
+        raise RuntimeError("File logging not enabled; call enable_file_logging() first.")
+    for handler in list(file_logger.handlers):
         file_logger.removeHandler(handler)
 
     # Add file handler

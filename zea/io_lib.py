@@ -277,7 +277,7 @@ def search_file_tree(
     Args:
         directory (str or Path): The root directory to start the search.
         filetypes (list of str, optional): List of file extensions to match.
-            If None, file types supported by `zea` are matched. Defaults to None.
+            If None, all files are matched. Defaults to None.
         verbose (bool, optional): If True, logs the search process. Defaults to True.
         relative (bool, optional): If True, yields file paths relative to the
             root directory. Defaults to False.

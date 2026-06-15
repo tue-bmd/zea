@@ -179,9 +179,12 @@ def plot_image_grid(
     for i, _ax in enumerate(axes):  # ty: ignore[invalid-argument-type]
         ax = cast(MplAxes, _ax)
         image = images_padded[i]
+        if image is None:
+            ax.set_visible(False)
+            continue
         if fig_contents[i] is None:
             im = ax.imshow(
-                image,  # ty: ignore[invalid-argument-type]
+                image,
                 cmap=cmap_list[i],
                 vmin=vmin_list[i],
                 vmax=vmax_list[i],

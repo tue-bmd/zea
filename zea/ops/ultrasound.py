@@ -1149,12 +1149,12 @@ class CommonMidpointPhaseError(Operation):
 
     """  # noqa: E501
 
-    def _init_(
+    def __init__(
         self,
         reshape_grid=True,
         **kwargs,
     ):
-        super()._init_(  # ty: ignore[unresolved-attribute]
+        super().__init__(
             input_data_type=None,
             # DataTypes.IMAGE, because we have an image of the phase map
             output_data_type=DataTypes.IMAGE,

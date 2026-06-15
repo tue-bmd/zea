@@ -436,11 +436,11 @@ def _check_for_comments_yaml_file(path_str):
         return any("#" in line for line in lines)
 
 
-def create_new_user(user_config_path: Union[str, dict, None] = None, local: bool | None = None):
+def create_new_user(user_config_path: str | None = None, local: bool | None = None):
     """Creates a new user profile in `users.yaml` if one does not already exist.
 
     Args:
-        user_config (str): Path that points to yaml file with user info.
+        user_config_path (str, optional): Path that points to yaml file with user info.
             Defaults to None. In that case `./users.yaml` is taken
         local (bool): Use local dataset or get from remote (NAS).
             Per machine, the data_root can be set to a local or remote path.

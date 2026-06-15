@@ -214,7 +214,7 @@ def _to_tensor(key: str, val, keep_as_is: list | None = None):
         return None
     # Recursively handle dicts
     if isinstance(val, dict):
-        return {k: _to_tensor(k, v) for k, v in val.items()}
+        return {k: _to_tensor(k, v, keep_as_is=keep_as_is) for k, v in val.items()}
     # Use float precision for all floats (including np.float32/64)
     if isinstance(val, float) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, float)):
         dtype = BASE_FLOAT_PRECISION

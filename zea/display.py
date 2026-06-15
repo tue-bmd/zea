@@ -256,9 +256,10 @@ def scan_convert_2d(
 
     parameters = {}
     if coordinates is None:
-        assert rho_range is not None and theta_range is not None, (
-            "rho_range and theta_range are required when coordinates is not provided."
-        )
+        if rho_range is None or theta_range is None:
+            raise ValueError(
+                "rho_range and theta_range are required when coordinates is not provided."
+            )
         coordinates, parameters = compute_scan_convert_2d_coordinates(
             image.shape,
             rho_range,
@@ -402,9 +403,11 @@ def scan_convert_3d(
 
     parameters = {}
     if coordinates is None:
-        assert rho_range is not None and theta_range is not None and phi_range is not None, (
-            "rho_range, theta_range, and phi_range are required when coordinates is not provided."
-        )
+        if rho_range is None or theta_range is None or phi_range is None:
+            raise ValueError(
+                "rho_range, theta_range, and phi_range are required "
+                "when coordinates is not provided."
+            )
         coordinates, parameters = compute_scan_convert_3d_coordinates(
             image.shape,
             rho_range,

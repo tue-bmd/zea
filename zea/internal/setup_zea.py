@@ -142,7 +142,7 @@ def setup(
     )
 
     # Prompt user to enter datapath information
-    if create_user:
+    if create_user and not isinstance(user_config, dict):
         create_new_user(user_config, local=config.data.local)
 
     # Set data paths
