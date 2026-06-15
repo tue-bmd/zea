@@ -92,15 +92,18 @@ def cartesian_pixel_grid(
 
     # Build coordinate vectors
     if sizes_provided:
+        assert grid_size_x is not None and grid_size_y is not None and grid_size_z is not None
         x = np.linspace(xlims[0], xlims[1] + eps, grid_size_x)
         y = np.linspace(ylims[0], ylims[1] + eps, grid_size_y)
         z = np.linspace(zlims[0], zlims[1] + eps, grid_size_z)
     else:
+        assert dx is not None and dz is not None
         sign_x = np.sign(xlims[1] - xlims[0]) if xlims[1] != xlims[0] else 1.0
         sign_z = np.sign(zlims[1] - zlims[0]) if zlims[1] != zlims[0] else 1.0
         x = np.arange(xlims[0], xlims[1] + sign_x * eps, sign_x * dx)
         z = np.arange(zlims[0], zlims[1] + sign_z * eps, sign_z * dz)
         if is_3d:
+            assert dy is not None
             sign_y = np.sign(ylims[1] - ylims[0]) if ylims[1] != ylims[0] else 1.0
             y = np.arange(ylims[0], ylims[1] + sign_y * eps, sign_y * dy)
         else:
@@ -180,7 +183,7 @@ def polar_pixel_grid(
 
     oris = np.array([0, 0, -distance_to_apex])
     oris = np.tile(oris, (num_polar_pixels, 1))
-    dirs_az = np.linspace(*polar_limits, num_polar_pixels)
+    dirs_az = np.linspace(*polar_limits, num_polar_pixels)  # ty: ignore[no-matching-overload]
 
     dirs_el = np.zeros(num_polar_pixels)
     dirs = np.vstack((dirs_az, dirs_el)).T

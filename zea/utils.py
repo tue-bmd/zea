@@ -74,7 +74,7 @@ def update_dictionary(dict1: dict, dict2: dict, keep_none: bool = False) -> dict
     return dict_out
 
 
-def get_date_string(string: str = None):
+def get_date_string(string: str | None = None):
     """Generate a date string for current time, according to format specified by
     `string`. Refer to the documentation of the datetime module for more information
     on the formatting options.

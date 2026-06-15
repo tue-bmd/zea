@@ -90,7 +90,7 @@ def demodulate_not_jitable(
             bandwidth = demodulation_frequency * Wn
         else:
             assert np.isscalar(bandwidth), "The signal bandwidth (in %) must be a scalar."
-            assert (bandwidth > 0) & (bandwidth <= 200), (
+            assert (bandwidth > 0) & (bandwidth <= 200), (  # ty: ignore[unsupported-operator]
                 "The signal bandwidth (in %) must be within the interval of ]0,200]."
             )
             # bandwidth in Hz
@@ -325,7 +325,7 @@ def channels_to_complex(data):
     return data[..., 0] + 1j * data[..., 1]
 
 
-def hilbert(x, N: int = None, axis=-1):
+def hilbert(x, N: int | None = None, axis=-1):
     """Implementation of the Hilbert transform function that computes the analytical signal.
 
     Operates in the Fourier domain by applying a filter that zeros out negative frequencies

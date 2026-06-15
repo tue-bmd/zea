@@ -25,7 +25,7 @@ class GaussianBlur(Filter):
         mode: str = "symmetric",
         cval: float | None = None,
         truncate: float = 4.0,
-        axes: Tuple[int] = (-3, -2),
+        axes: Tuple[int, int] = (-3, -2),
         **kwargs,
     ):
         """
@@ -172,9 +172,9 @@ class Pad(Operation, DataLayer):
         self,
         target_shape: list | tuple,
         uniform: bool = True,
-        axis: Union[int, List[int]] = None,
+        axis: Union[int, List[int], None] = None,
         fail_on_bigger_shape: bool = True,
-        pad_kwargs: dict = None,
+        pad_kwargs: dict | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -204,7 +204,7 @@ class Pad(Operation, DataLayer):
         z,
         target_shape: list | tuple,
         uniform: bool = True,
-        axis: Union[int, List[int]] = None,
+        axis: Union[int, List[int], None] = None,
         fail_on_bigger_shape: bool = True,
         **kwargs,
     ):

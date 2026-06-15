@@ -197,15 +197,13 @@ class Probe(ProbeSpec):
         return dict_to_tensor(self.get_parameters(), keep_as_is=keep_as_is)
 
     @staticmethod
-    def get_pitch(probe_geometry: np.ndarray) -> float | None:
+    def get_pitch(probe_geometry: np.ndarray) -> float:
         """Compute the pitch (centre-to-centre element spacing) in metres from
         the probe geometry.
 
-        Returns ``None`` when the pitch is not defined for the geometry (fewer
-        than 2 elements, or not a 1-D / linear array). Raises :class:`ValueError`
-        when the array looks like a ULA but the element positions are not
-        uniformly spaced, to surface likely data errors rather than silently
-        returning ``None``.
+        Raises :class:`ValueError` when the probe has fewer than 2 elements,
+        the geometry is not a 1-D (linear) array, or the element positions are
+        not uniformly spaced.
         """
 
         n_el = probe_geometry.shape[0]
@@ -251,7 +249,7 @@ class Probe(ProbeSpec):
     def kerf(self) -> float | None:
         """Gap between elements in metres, derived from :attr:`element_width` and :attr:`pitch`."""
         if self.element_width is not None and self.pitch is not None:
-            return self.pitch - self.element_width
+            return float(self.pitch - self.element_width)
         return None
 
 

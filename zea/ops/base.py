@@ -138,7 +138,7 @@ class Operation(keras.Operation):
         self,
         input_data_type: Union[DataTypes, None] = None,
         output_data_type: Union[DataTypes, None] = None,
-        key: Union[str, None] = "data",
+        key: str = "data",
         output_key: Union[str, None] = None,
         cache_inputs: bool = False,
         cache_outputs: bool = False,
@@ -146,7 +146,7 @@ class Operation(keras.Operation):
         with_batch_dim: bool = True,
         jit_kwargs: dict | None = None,
         jittable: bool = True,
-        additional_output_keys: List[str] = None,
+        additional_output_keys: List[str] | None = None,
         **kwargs,
     ):
         """
@@ -183,9 +183,8 @@ class Operation(keras.Operation):
         self.output_data_type = output_data_type
 
         self.key = key  # Key for input data
-        self.output_key = output_key  # Key for output data
-        if self.output_key is None:
-            self.output_key = self.key
+        # Key for output data; defaults to the input key when not given.
+        self.output_key: str = output_key if output_key is not None else key
         if additional_output_keys is None:
             additional_output_keys = getattr(self.__class__, "ADD_OUTPUT_KEYS", [])
         self.additional_output_keys = (
