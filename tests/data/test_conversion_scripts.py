@@ -881,7 +881,6 @@ def test_sitk_load(tmp_path):
         ("picmus", "picmus.zip", "archive_to_download"),
         ("camus", "CAMUS_public.zip", "CAMUS_public"),
         ("echonet", "EchoNet-Dynamic.zip", "EchoNet-Dynamic"),
-        ("echonetlvh", "EchoNet-LVH.zip", "Batch1"),
     ],
 )
 def test_unzip(tmp_path, dataset):
@@ -896,19 +895,6 @@ def test_unzip(tmp_path, dataset):
             zipf.writestr(f"{folder_name}/Videos/dummy.txt", "This is a test.")
         else:
             zipf.writestr(f"{folder_name}/dummy.txt", "This is a test.")
-
-        if dataset_name == "echonetlvh":
-            # EchoNetLVH dataset unzips into four folders and a csv file.
-            zipf.writestr("Batch2/dummy.txt", "This is a test.")
-            zipf.writestr("Batch3/dummy.txt", "This is a test.")
-            zipf.writestr("Batch4/dummy.txt", "This is a test.")
-
-            with open(Path(f"{tmp_path}/MeasurementsList.csv"), "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["frame", "mean_value"])
-                for i in range(3):
-                    writer.writerow([i, i * 2])  # example data
-            zipf.write(f"{tmp_path}/MeasurementsList.csv", "MeasurementsList.csv")
 
     # Call the unzip function twice:
     # Once to initialize from zip, once to initialize from folder

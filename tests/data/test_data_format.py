@@ -154,7 +154,14 @@ def test_omit_required_scan_key(key, tmp_hdf5_path):
 @pytest.mark.parametrize("chunk_frames", [True, False])
 def test_chunk_frames(chunk_frames, tmp_hdf5_path):
     """Tests that chunk_frames stores data datasets with one frame per chunk."""
-    File.create(path=tmp_hdf5_path, chunk_frames=chunk_frames, data=DATA, scan=SCAN)
+
+    File.create(
+        path=tmp_hdf5_path,
+        chunk_frames=chunk_frames,
+        data=DATA,
+        scan=SCAN,
+        probe=PROBE,
+    )
 
     validate_file(tmp_hdf5_path)
 
