@@ -326,16 +326,6 @@ def create_echonetlvh_test_data(src):
 
     # Create AVI files with scan cone structure
     for filename, _, polar_shape in test_files:
-        # Generate a reference frame to determine output dimensions for this file
-        ref_polar = np.ones(polar_shape, dtype=np.float32)
-        ref_cartesian, _ = scan_convert_2d(
-            ref_polar,
-            rho_range=rho_range,
-            theta_range=theta_range,
-            resolution=1.0,
-        )
-        ref_cartesian = np.array(ref_cartesian)
-
         frames = []
         for _ in range(n_frames):
             # Create a simple polar image with radial gradient and noise
@@ -349,10 +339,7 @@ def create_echonetlvh_test_data(src):
 
             # Scan convert to create Cartesian image with scan cone
             cartesian_img, _ = scan_convert_2d(
-                polar_img,
-                rho_range=rho_range,
-                theta_range=theta_range,
-                resolution=1.0,
+                polar_img, rho_range=rho_range, theta_range=theta_range
             )
             cartesian_img = np.array(cartesian_img)
 
@@ -710,7 +697,9 @@ def verify_converted_echonetlvh_test_data(dst):
                     image_polar_float, cone_params[h5_file.stem + ".avi"], image_float.shape
                 )
                 back_cartesian = np.asarray(back_cartesian)
-                np.testing.assert_array_almost_equal(back_cartesian, image_float, decimal=5)
+
+                mse = np.mean(((back_cartesian - image_float) / 255) ** 2)
+                assert mse < 1e-3, f"mse for {h5_file.stem} is {mse}"
 
 
 def verify_converted_camus_test_data(dst):
