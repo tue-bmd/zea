@@ -149,15 +149,13 @@ class GreedyEntropy(LinesActionModel):
         For more details see Section 4 here: https://arxiv.org/abs/2406.14388
 
         Args:
-            particles (Tensor): Particles of shape (batch_size, n_particles, ...)
-                where ... represents the pixel dimensions.
+            particles (Tensor): Particles of shape (batch_size, n_particles, ...pixels)
             entropy_sigma (float, optional): The standard deviation of the Gaussian
                 Mixture components used to approximate the posterior. Defaults to 1.0.
 
         Returns:
             Tensor: batch of pixelwise pairwise Gaussian errors,
-            of shape (batch_size, n_particles, n_particles, ...)
-                where ... represents the pixel dimensions.
+            of shape (batch_size, n_particles, n_particles, ...pixels)
         """
         assert particles.shape[1] > 1, "The entropy cannot be approximated using a single particle."
 
@@ -178,14 +176,12 @@ class GreedyEntropy(LinesActionModel):
         For more details see Section VI. B here: https://arxiv.org/pdf/2410.13310
 
         Args:
-            particles (Tensor): Particles of shape (batch_size, n_particles, ...)
-                where ... represents the pixel dimensions.
+            particles (Tensor): Particles of shape (batch_size, n_particles, ...pixels)
             entropy_sigma (float, optional): The standard deviation of the Gaussian
                 Mixture components used to approximate the posterior. Defaults to 1.0.
 
         Returns:
-            Tensor: batch of entropies per pixel, of shape (batch_size, ...),
-            where ... represents the pixel dimensions.
+            Tensor: batch of entropies per pixel, of shape (batch_size, ...pixels)
         """
         n_particles = ops.shape(particles)[1]
         gaussian_error_per_pixel_stacked = GreedyEntropy.compute_pairwise_pixel_gaussian_error(

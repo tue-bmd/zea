@@ -53,8 +53,7 @@ def _make_calculate_delays_inputs(probe_geometry, flatgrid, n_tx=3):
     tx_apodizations = np.ones((n_tx, n_el), dtype=np.float32)
     initial_times = np.zeros(n_tx, dtype=np.float32)
     focus_distances = np.zeros(n_tx, dtype=np.float32)
-    t_peak = np.zeros(1, dtype=np.float32)
-    tx_waveform_indices = np.zeros(n_tx, dtype=np.int32)
+    t_peak = np.zeros(n_tx, dtype=np.float32)
     transmit_origins = np.zeros((n_tx, 3), dtype=np.float32)
     return dict(
         grid=flatgrid,
@@ -67,7 +66,6 @@ def _make_calculate_delays_inputs(probe_geometry, flatgrid, n_tx=3):
         focus_distances=focus_distances,
         polar_angles=polar_angles,
         t_peak=t_peak,
-        tx_waveform_indices=tx_waveform_indices,
         transmit_origins=transmit_origins,
     )
 
@@ -83,8 +81,7 @@ def _make_tof_inputs(probe_geometry, flatgrid, n_tx=3, n_ax=64, n_ch=1):
     tx_apodizations = np.ones((n_tx, n_el), dtype=np.float32)
     initial_times = np.zeros(n_tx, dtype=np.float32)
     focus_distances = np.zeros(n_tx, dtype=np.float32)
-    t_peak = np.zeros(1, dtype=np.float32)
-    tx_waveform_indices = np.zeros(n_tx, dtype=np.int32)
+    t_peak = np.zeros(n_tx, dtype=np.float32)
     transmit_origins = np.zeros((n_tx, 3), dtype=np.float32)
     return dict(
         data=data,
@@ -100,7 +97,6 @@ def _make_tof_inputs(probe_geometry, flatgrid, n_tx=3, n_ax=64, n_ch=1):
         polar_angles=polar_angles,
         focus_distances=focus_distances,
         t_peak=t_peak,
-        tx_waveform_indices=tx_waveform_indices,
         transmit_origins=transmit_origins,
     )
 
@@ -118,8 +114,7 @@ def _make_multistatic_inputs(probe_geometry, flatgrid, n_ax=128):
     tx_apodizations = np.ones((n_tx, n_el), dtype=np.float32)
     initial_times = np.zeros(n_tx, dtype=np.float32)
     focus_distances = np.zeros(n_tx, dtype=np.float32)
-    t_peak = np.zeros(1, dtype=np.float32)
-    tx_waveform_indices = np.zeros(n_tx, dtype=np.int32)
+    t_peak = np.zeros(n_tx, dtype=np.float32)
     transmit_origins = np.zeros((n_tx, 3), dtype=np.float32)
 
     nx_sos, nz_sos = 16, 16
@@ -141,7 +136,6 @@ def _make_multistatic_inputs(probe_geometry, flatgrid, n_ax=128):
         polar_angles=polar_angles,
         focus_distances=focus_distances,
         t_peak=t_peak,
-        tx_waveform_indices=tx_waveform_indices,
         transmit_origins=transmit_origins,
         sos_map=sos_map,
         sos_grid_x=sos_grid_x,

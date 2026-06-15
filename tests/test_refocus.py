@@ -10,6 +10,7 @@ N_TX = 5  # number of transmit events
 N_AX = 64  # number of axial samples
 SAMPLING_FREQ = np.float32(40e6)  # Hz
 SOUND_SPEED = 1540.0  # m/s
+T_PEAK = np.float32(5e-7)  # transmit-waveform peak time (s)
 
 
 @pytest.fixture
@@ -54,6 +55,7 @@ def _call_refocus(op, data_np, probe_geometry_np, plane_wave_delays_np):
         sampling_frequency=SAMPLING_FREQ,
         probe_geometry=keras.ops.convert_to_tensor(probe_geometry_np),
         initial_times=np.zeros(N_TX, dtype=np.float32),
+        t_peak=keras.ops.convert_to_tensor(np.full(N_TX, T_PEAK, dtype=np.float32)),
     )
 
 
@@ -78,6 +80,7 @@ def test_valid_methods_construct():
 def test_output_shape_rf(method, probe_geometry, plane_wave_delays, rf_data):
     """Decoded RF output must have shape (n_el, n_ax, n_el, 1)."""
     import keras
+
     from zea.ops import Refocus
 
     op = Refocus(method=method, with_batch_dim=False)
@@ -92,6 +95,7 @@ def test_output_shape_rf(method, probe_geometry, plane_wave_delays, rf_data):
 def test_output_shape_iq(method, probe_geometry, plane_wave_delays, iq_data):
     """Decoded IQ output must have shape (n_el, n_ax, n_el, 2)."""
     import keras
+
     from zea.ops import Refocus
 
     op = Refocus(method=method, with_batch_dim=False)
@@ -105,6 +109,7 @@ def test_output_shape_iq(method, probe_geometry, plane_wave_delays, iq_data):
 def test_sa_parameter_outputs(probe_geometry, plane_wave_delays, rf_data):
     """After decoding, synthetic-aperture parameters must have correct shapes and values."""
     import keras
+
     from zea.ops import Refocus
 
     op = Refocus(with_batch_dim=False)
@@ -135,10 +140,10 @@ def test_sa_parameter_outputs(probe_geometry, plane_wave_delays, rf_data):
     assert it.shape == (N_EL,)
     np.testing.assert_array_equal(it, np.zeros(N_EL, dtype=np.float32))
 
-    # tx_waveform_indices: zeros int32 (n_el,)
-    wi = keras.ops.convert_to_numpy(result["tx_waveform_indices"])
-    assert wi.shape == (N_EL,)
-    np.testing.assert_array_equal(wi, np.zeros(N_EL, dtype=np.int32))
+    # t_peak: shared transmit-waveform peak time, broadcast to (n_el,)
+    tp = keras.ops.convert_to_numpy(result["t_peak"])
+    assert tp.shape == (N_EL,)
+    np.testing.assert_array_equal(tp, np.full(N_EL, T_PEAK, dtype=np.float32))
 
     # transmit_origins: equal to probe_geometry (n_el, 3)
     to = keras.ops.convert_to_numpy(result["transmit_origins"])
@@ -151,6 +156,7 @@ def test_sa_parameter_outputs(probe_geometry, plane_wave_delays, rf_data):
 def test_default_apodization_matches_explicit_ones(probe_geometry, plane_wave_delays, rf_data):
     """Passing tx_apodizations=None must produce the same result as all-ones."""
     import keras
+
     from zea.ops import Refocus
 
     op = Refocus(with_batch_dim=False)
@@ -185,6 +191,7 @@ def test_default_apodization_matches_explicit_ones(probe_geometry, plane_wave_de
 def test_adjoint_ramp_filter_differs_from_no_ramp(probe_geometry, plane_wave_delays, rf_data):
     """param=None (ramp) and param=0 (no ramp) must produce different outputs."""
     import keras
+
     from zea.ops import Refocus
 
     op_ramp = Refocus(method="adjoint", param=None, with_batch_dim=False)
@@ -209,6 +216,7 @@ def test_adjoint_ramp_filter_differs_from_no_ramp(probe_geometry, plane_wave_del
 def test_output_shape_with_batch_dim(probe_geometry, plane_wave_delays):
     """Refocus with with_batch_dim=True must handle a leading batch axis."""
     import keras
+
     from zea.ops import Refocus
 
     op = Refocus(with_batch_dim=True)
@@ -232,6 +240,7 @@ def test_output_shape_with_batch_dim(probe_geometry, plane_wave_delays):
 def test_output_dtype_is_float32(probe_geometry, plane_wave_delays, rf_data):
     """Decoded output must always be float32 regardless of method."""
     import keras
+
     from zea.ops import Refocus
 
     for method in ("adjoint", "tikhonov", "rsvd", "tsvd"):

@@ -1,0 +1,5 @@
+figure figcaption p {
+  font-style: italic;
+  color: var(--color-foreground-secondary, #666);
+  text-align: center;
+}

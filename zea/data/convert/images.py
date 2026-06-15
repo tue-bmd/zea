@@ -10,7 +10,8 @@ from pathlib import Path
 
 import numpy as np
 
-from zea.data.data_format import generate_zea_dataset
+from zea import log
+from zea.data.file import File
 from zea.io_lib import _SUPPORTED_IMG_TYPES, load_image
 
 
@@ -24,7 +25,7 @@ def _img_dir_to_h5_dir(
     sort_pattern=None,
 ):
     """Internal function to convert a directory of images to hdf5 format.
-    This function is intended to be used as a subroutine by ``convert_image_to_dataset``,
+    This function is intended to be used as a subroutine by ``convert_image_dataset``,
     see below for details.
 
     Args:
@@ -68,10 +69,23 @@ def _img_dir_to_h5_dir(
         )
 
         new_h5_file_path = new_dir_path / f"{group_id}.hdf5"
-        generate_zea_dataset(
+        if frames.dtype != np.uint8:
+            raise ValueError(
+                f"Expected image frames to have dtype uint8 (values in [0, 255]), "
+                f"but got dtype {frames.dtype}. Please convert before saving."
+            )
+        if frames.ndim == 3:
+            values = np.expand_dims(frames, axis=-1)  # (n_frames, H, W) → (n_frames, H, W, 1)
+        elif frames.ndim == 4:
+            values = frames  # already (n_frames, H, W, C) — e.g. RGB
+        else:
+            raise ValueError(
+                f"Unexpected frames shape {frames.shape}; expected 3-D (grayscale) or 4-D (color)."
+            )
+        File.create(
             path=new_h5_file_path,
-            image=frames,
-            probe_name="generic",
+            data={"image": {"values": values}},
+            probe={"name": "generic"},
             description=f"{dataset_name or 'image'} dataset converted to zea format",
         )
 
@@ -123,7 +137,7 @@ def convert_image_dataset(
     )
 
     for current_dir, _, files in os.walk(existing_dataset_root):
-        print(f"Mapping {current_dir}")
+        log.info(f"Mapping {current_dir}")
         _img_dir_to_h5_dir(
             existing_dataset_root,
             new_dataset_root,

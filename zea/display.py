@@ -48,7 +48,7 @@ def to_8bit(image, dynamic_range: Tuple[float, float], output_to: str = "numpy")
             ... )
 
             >>> with zea.File(file_path, mode="r") as file:
-            ...     data = file.load_data("image", indices=0)
+            ...     data = file.data.image[0]
 
             >>> image, _ = zea.display.scan_convert(
             ...     data,
@@ -57,7 +57,7 @@ def to_8bit(image, dynamic_range: Tuple[float, float], output_to: str = "numpy")
             ...     fill_value=np.nan,
             ... )
             >>> image = zea.display.to_8bit(image, dynamic_range=(-60, 0), output_to="pillow")
-            >>> image.save("image.png")  # DOCTEST: +SKIP
+            >>> image.save("image.png")  # doctest: +SKIP
 
     """
     if output_to in ("numpy", "pillow"):

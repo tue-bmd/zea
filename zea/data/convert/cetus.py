@@ -1,47 +1,68 @@
-"""Functionality to convert the CETUS dataset to the zea format.
+"""Convert the CETUS dataset to the zea format.
 
 .. note::
-    Requires SimpleITK to be installed: ``pip install SimpleITK``.
 
-The CETUS (Challenge on Endocardial Three-dimensional Ultrasound Segmentation)
-dataset contains 3D echocardiographic volumes from 45 patients. Each patient has
-end-diastolic (ED) and end-systolic (ES) B-mode volumes with corresponding
-ground truth left ventricle segmentation masks. The volumes are stored in NIfTI
-(.nii.gz) format with isotropic voxel spacing.
+   Requires SimpleITK: ``pip install SimpleITK``.
 
-**License**: `CC BY-NC-SA 4.0 <https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode>`_
+CETUS (Challenge on Endocardial Three-dimensional Ultrasound Segmentation) is a
+public MICCAI 2014 challenge dataset.  It contains 3-D echocardiographic volumes
+from 45 patients with ground-truth left-ventricle segmentation masks at
+end-diastole (ED) and end-systole (ES).  Volumes are stored as NIfTI
+(``.nii.gz``) files with isotropic voxel spacing.
 
-The CETUS dataset is available free of charge strictly for non-commercial
-scientific research purposes only.
+Dataset splits:
 
-**Citation** (required for any use of the CETUS database):
+* **Train** - patients 1-30
+* **Validation** - patients 31-38
+* **Test** - patients 39-45
 
-    O. Bernard, et al.
-    "Standardized Evaluation System for Left Ventricular Segmentation Algorithms
-    in 3D Echocardiography"
-    IEEE Transactions on Medical Imaging, vol. 35, no. 4, pp. 967-977, April 2016.
-    `DOI: 10.1109/tmi.2015.2503890 <https://doi.org/10.1109/tmi.2015.2503890>`_
+.. admonition:: License
 
-**Links**:
+   CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
 
-- `MICCAI 2014 CETUS Challenge <https://www.creatis.insa-lyon.fr/Challenge/CETUS/>`_
-- `Original dataset <https://humanheart-project.creatis.insa-lyon.fr/database/#collection/62eb991b73e9f0048c3a6c45>`_
+   The CETUS dataset is available free of charge strictly for non-commercial
+   scientific research purposes only.
+
+.. admonition:: Reference
+
+   O. Bernard, et al.
+   *Standardized Evaluation System for Left Ventricular Segmentation Algorithms
+   in 3D Echocardiography.*
+   IEEE Transactions on Medical Imaging, vol. 35, no. 4, pp. 967-977, April 2016.
+   `DOI: 10.1109/tmi.2015.2503890 <https://doi.org/10.1109/tmi.2015.2503890>`_
+
+.. rubric:: Links
+
+* `MICCAI 2014 CETUS Challenge <https://www.creatis.insa-lyon.fr/Challenge/CETUS/>`_
+* `Original dataset <https://humanheart-project.creatis.insa-lyon.fr/database/#collection/62eb991b73e9f0048c3a6c45>`_
+* `Dataset on Hugging Face <https://huggingface.co/datasets/zeahub/cetus-miccai-2014>`_
+
+.. rubric:: Usage
+
+.. code-block:: console
+
+   python -m zea.data.convert cetus ./raw ./output --download
 
 """
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-import h5py
 import numpy as np
 from tqdm import tqdm
 
 from zea import log
-from zea.data.convert.utils import download_from_girder, sitk_load
-from zea.data.data_format import DatasetElement, generate_zea_dataset
+from zea.data.convert.utils import (
+    check_output_dir_ownership,
+    download_from_girder,
+    require_output_dir_ownership,
+    sitk_load,
+    upload_dataset_to_hf,
+    write_dataset_card,
+)
+from zea.data.file import File
 
 # Citation text for inclusion in every converted file
 CETUS_CITATION = (
@@ -108,12 +129,14 @@ def _detect_background_level(volume: np.ndarray) -> float:
 def process_cetus(source_path, output_path, overwrite=False):
     """Convert a single CETUS patient time-point to a zea HDF5 file.
 
-    Each file stores the 3D B-mode volume as ``image_sc`` (scan-converted image).
-    If a corresponding ground truth segmentation file exists, it is stored as an
-    additional element under ``non_standard_elements/segmentation``.
+    Each file stores the 3D B-mode volume as ``image`` (scan-converted image).
+    If a corresponding ground truth segmentation file exists, it is stored as a
+    ``Segmentation`` map under ``data/segmentation``. Both maps share a
+    per-voxel coordinate grid (shape ``(D, H, W, 3)``) derived from the NIfTI
+    voxel spacing.
 
-    The voxel spacing from the NIfTI header is stored as ``non_standard_elements/voxel_spacing``
-    (in meters). License and citation information is embedded in the file description.
+    Patient ID and citation are stored in the ``metadata`` group.
+    License information is embedded in the file description.
 
     Args:
         source_path (str or Path): Path to the source ``.nii.gz`` B-mode file.
@@ -127,9 +150,9 @@ def process_cetus(source_path, output_path, overwrite=False):
     # Check if output file already exists
     if output_path.exists():
         if overwrite:
-            os.remove(output_path)
+            output_path.unlink()
         else:
-            log.info(f"Output file {output_path} already exists. Skipping.")
+            log.info("Output file %s already exists. Skipping.", log.yellow(output_path))
             return
 
     # Load B-mode volume
@@ -157,84 +180,41 @@ def process_cetus(source_path, output_path, overwrite=False):
     # Check for corresponding ground truth segmentation
     gt_path = source_path.with_name(source_path.name.replace(".nii.gz", "_gt.nii.gz"))
 
-    additional_elements = []
-
-    # Store voxel spacing
-    additional_elements.append(
-        DatasetElement(
-            dataset_name="voxel_spacing",
-            data=voxel_spacing,
-            description=(
-                "Voxel spacing in meters for each dimension (x, y, z) "
-                "as provided in the NIfTI header."
-            ),
-            unit="m",
-        )
-    )
-
-    # Store citation
-    additional_elements.append(
-        DatasetElement(
-            dataset_name="citation",
-            data=np.array(CETUS_CITATION, dtype=h5py.string_dtype()),
-            description="Required citation for any use of the CETUS database.",
-            unit="unitless",
-        )
-    )
-
-    # Store license
-    additional_elements.append(
-        DatasetElement(
-            dataset_name="license",
-            data=np.array(CETUS_LICENSE, dtype=h5py.string_dtype()),
-            description="License of the CETUS dataset.",
-            unit="unitless",
-        )
-    )
-
-    # Store time point info (ED or ES)
+    # Extract patient and time-point info from filename
     stem = source_path.stem  # e.g. "patient01_ED.nii" -> stem is "patient01_ED"
     if stem.endswith(".nii"):
         stem = stem[:-4]  # remove .nii if present from double suffix
     time_point = stem.split("_")[-1]  # "ED" or "ES"
-    additional_elements.append(
-        DatasetElement(
-            dataset_name="time_point",
-            data=np.array(time_point, dtype=h5py.string_dtype()),
-            description="Cardiac time point: ED (end-diastole) or ES (end-systole).",
-            unit="unitless",
-        )
-    )
-
-    # Store patient ID
     patient_name = stem.split("_")[0]  # e.g. "patient01"
-    patient_id = int(patient_name.removeprefix("patient"))
-    additional_elements.append(
-        DatasetElement(
-            dataset_name="patient_id",
-            data=np.array(patient_id, dtype=np.int64),
-            description="Patient ID number.",
-            unit="unitless",
-        )
-    )
+
+    # Build data dict
+    D, H, W = volume.shape
+
+    # Build per-voxel coordinate grid from voxel spacing.
+    # Shape: (1, D, H, W, 3) — valid for both image_sc (1,D,H,W) and segmentation (1,D,H,W,1).
+    d_range = np.arange(D, dtype=np.float32) * voxel_spacing[0]
+    h_range = np.arange(H, dtype=np.float32) * voxel_spacing[1]
+    w_range = np.arange(W, dtype=np.float32) * voxel_spacing[2]
+    d_grid, h_grid, w_grid = np.meshgrid(d_range, h_range, w_range, indexing="ij")
+    coordinates = np.stack([d_grid, h_grid, w_grid], axis=-1)  # (D, H, W, 3)
+
+    data = {
+        "image": {
+            "values": image_sc.astype(np.float32),
+            "coordinates": coordinates,
+        }
+    }
 
     if gt_path.exists():
         gt_volume, _ = sitk_load(gt_path)
-        # GT is binary: 0 or 255 -> normalize to 0/1
-        gt_volume = (gt_volume > 0).astype(np.float32)
-        gt_volume = gt_volume[np.newaxis, ...]  # (1, D, H, W)
-        additional_elements.append(
-            DatasetElement(
-                dataset_name="segmentation",
-                data=gt_volume,
-                description=(
-                    "Ground truth left ventricle segmentation mask. "
-                    "Binary: 1 = endocardium, 0 = background. "
-                    "Shape: (n_frames, depth, height, width)."
-                ),
-                unit="unitless",
-            )
-        )
+        # GT is binary: 0 or 255 -> bool mask, shape (1, D, H, W, 1)
+        seg_mask = (gt_volume > 0)[np.newaxis, ..., np.newaxis]
+
+        data["segmentation"] = {
+            "values": seg_mask,
+            "coordinates": coordinates,
+            "labels": np.array(["endocardium"]),
+        }
 
     # Build description for this file
     file_description = (
@@ -245,13 +225,21 @@ def process_cetus(source_path, output_path, overwrite=False):
         f"Citation: {CETUS_CITATION}"
     )
 
-    generate_zea_dataset(
+    File.create(
         path=output_path,
-        image_sc=image_sc,
-        probe_name="generic",
+        data=data,
+        metadata={
+            "subject": {"id": patient_name},
+            "credit": CETUS_CITATION,
+            "annotations": {"label": np.array([time_point])},
+        },
+        probe={"name": "Unspecified mix of GE 4V, Philips X5-1, Siemens 4Z1c"},
+        us_machine="Unspecified mix of GE Vivid E9, Philips iE33, Siemens SC2000",
+        # includes files from both:
+        # - GE system refered as Vivid E9, using a 4V probe;
+        # - Philips system refered as iE33, using a X5-1 probe;
+        # - Siemens system refered as SC2000, using 4Z1c probe.
         description=file_description,
-        additional_elements=additional_elements,
-        cast_to_float=True,
         overwrite=overwrite,
     )
 
@@ -271,7 +259,7 @@ def _process_task(task):
     try:
         process_cetus(source_file, output_file, overwrite=False)
     except Exception:
-        log.error("Error processing %s", source_file)
+        log.error("Error processing %s", log.yellow(source_file))
         raise
 
 
@@ -328,6 +316,8 @@ def convert_cetus(args):
     cetus_source_folder = Path(args.src)
     cetus_output_folder = Path(args.dst)
 
+    check_output_dir_ownership(cetus_output_folder, _HF_REPO_ID)
+
     # Optionally download the dataset
     if getattr(args, "download", False):
         cetus_source_folder = download_cetus(cetus_source_folder)
@@ -343,7 +333,8 @@ def convert_cetus(args):
         split_dir = cetus_output_folder / split
         if split_dir.exists():
             log.warning(
-                f"Output folder {split_dir} already exists. Existing files will be skipped."
+                "Output folder %s already exists. Existing files will be skipped.",
+                log.yellow(split_dir),
             )
 
     # Find all B-mode NIfTI files (exclude ground truth files ending with _gt.nii.gz)
@@ -380,11 +371,17 @@ def convert_cetus(args):
             try:
                 _process_task(t)
             except Exception as exc:
-                log.error(f"Failed to process {t[0]}: {exc}")
-        log.info(f"Processing finished for {len(tasks)} files (serial)")
+                log.error("Failed to process %s: %s", log.yellow(t[0]), exc)
+        log.info(
+            "Conversion complete. %d files written to %s",
+            len(tasks),
+            log.yellow(cetus_output_folder),
+        )
+
+        write_dataset_card(cetus_output_folder, _DATASET_CARD)
 
         if getattr(args, "upload", False):
-            upload_cetus(cetus_output_folder)
+            upload_cetus(cetus_output_folder, revision=args.revision)
         return
 
     # Parallel processing
@@ -394,11 +391,37 @@ def convert_cetus(args):
             try:
                 future.result()
             except Exception as exc:
-                log.error(f"Failed to process a file: {exc}")
-    log.info(f"Processing finished for {len(tasks)} files")
+                log.error("Failed to process a file: %s", exc)
+    log.info(
+        "Conversion complete. %d files written to %s",
+        len(tasks),
+        log.yellow(cetus_output_folder),
+    )
+
+    write_dataset_card(cetus_output_folder, _DATASET_CARD)
 
     if getattr(args, "upload", False):
-        upload_cetus(cetus_output_folder)
+        upload_cetus(cetus_output_folder, revision=args.revision)
+
+
+def upload_cetus(output_folder: str | Path, revision: str) -> None:  # pragma: no cover
+    """Upload the converted CETUS dataset to a HuggingFace Hub revision branch.
+
+    Only for zea maintainers with push access to the repository.  Upload to
+    ``main`` is blocked; merge the revision branch into ``main`` manually after
+    verifying the upload.
+
+    Args:
+        output_folder: Root folder containing the train/val/test splits.
+        revision: Target branch name on the Hub (must not be ``"main"``).
+    """
+    require_output_dir_ownership(output_folder, _HF_REPO_ID)
+    upload_dataset_to_hf(
+        folder=output_folder,
+        repo_id=_HF_REPO_ID,
+        revision=revision,
+        commit_message=f"Upload CETUS dataset (zea format) to {revision}",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -410,6 +433,7 @@ _HF_REPO_ID = "zeahub/cetus-miccai-2014"
 _DATASET_CARD = """\
 ---
 license: cc-by-nc-sa-4.0
+zea_repo_id: zeahub/cetus-miccai-2014
 task_categories:
   - image-segmentation
 tags:
@@ -465,10 +489,12 @@ test/
 Each HDF5 file follows the
 [zea data format](https://github.com/tue-bmd/zea) and contains:
 
-- `data/image_sc` - B-mode volume in dB, shape `(1, depth, height, width)`
-- `non_standard_elements/segmentation` - binary LV mask, same shape
-- `non_standard_elements/voxel_spacing` - `(x, y, z)` in metres
-- `non_standard_elements/patient_id`, `time_point`, `citation`, `license`
+- `data/image/values` - B-mode volume in dB, shape `(1, depth, height, width)`
+- `data/image/coordinates` - voxel positions in metres, shape `(depth, height, width, 3)`
+- `data/segmentation/values` - binary LV endocardium mask, shape `(1, depth, height, width, 1)`
+- `data/segmentation/labels` - `["endocardium"]`
+- `metadata/subject/id` - patient name (e.g. `patient01`)
+- `metadata/annotations/label` - time point: `["ED"]` or `["ES"]`
 
 ## License
 
@@ -505,72 +531,3 @@ If you use this dataset, please cite the original CETUS paper:
 - **zea toolkit**: <https://github.com/tue-bmd/zea>
 
 """
-
-
-def _write_dataset_card(folder: Path) -> Path:  # pragma: no cover
-    """Write the HuggingFace dataset card (README.md) into *folder*."""
-    card_path = folder / "README.md"
-    card_path.write_text(_DATASET_CARD)
-    return card_path
-
-
-def upload_cetus(output_folder: str | Path) -> None:  # pragma: no cover
-    """Upload the converted CETUS dataset to HuggingFace Hub.
-
-    Only for zea maintainers with push access to the repository.
-
-    Writes a dataset card, prints an upload summary, and asks for
-    confirmation before pushing.
-
-    Args:
-        output_folder: Root folder containing the train/val/test splits.
-    """
-    from huggingface_hub import HfApi, login
-
-    output_folder = Path(output_folder)
-
-    # Collect files to upload
-    hdf5_files = sorted(output_folder.rglob("*.hdf5"))
-    if not hdf5_files:
-        raise FileNotFoundError(f"No HDF5 files found in {output_folder}")
-
-    total_size_mb = sum(f.stat().st_size for f in hdf5_files) / 1e6
-    split_counts = {}
-    for f in hdf5_files:
-        split = f.relative_to(output_folder).parts[0]
-        split_counts[split] = split_counts.get(split, 0) + 1
-
-    # Write dataset card
-    _write_dataset_card(output_folder)
-
-    # Print summary and ask for confirmation
-    log.info("")
-    log.info("=" * 60)
-    log.info("  CETUS upload summary")
-    log.info("=" * 60)
-    log.info(f"  Repository : {_HF_REPO_ID}")
-    log.info(f"  Source     : {output_folder}")
-    log.info(f"  Files      : {len(hdf5_files)} HDF5 + README.md")
-    for split, count in sorted(split_counts.items()):
-        log.info(f"    {split:>5s}: {count} files")
-    log.info(f"  Total size : {total_size_mb:.1f} MB")
-    log.info(f"  License    : {CETUS_LICENSE}")
-    log.info("=" * 60)
-    log.info("")
-
-    answer = input("Proceed with upload? [y/N] ").strip().lower()
-    if answer != "y":
-        log.info("Upload cancelled.")
-        return
-
-    login(new_session=False)
-    api = HfApi()
-
-    api.upload_folder(
-        folder_path=str(output_folder),
-        repo_id=_HF_REPO_ID,
-        repo_type="dataset",
-        commit_message="Upload CETUS dataset (zea format)",
-    )
-
-    log.info(f"Dataset uploaded to https://huggingface.co/datasets/{_HF_REPO_ID}")

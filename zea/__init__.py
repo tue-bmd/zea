@@ -3,6 +3,7 @@
 import importlib
 import importlib.util
 import os
+import sys
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
@@ -28,15 +29,14 @@ if TYPE_CHECKING:
     from .backend import device
     from .config import Config
     from .data.dataloader import Dataloader
-    from .data.datasets import Dataset, Folder
+    from .data.datasets import Dataset
     from .data.file import File, load_file
     from .datapaths import set_data_paths
-    from .interface import Interface
     from .internal.device import init_device
     from .internal.setup_zea import setup, setup_config
     from .ops import Pipeline
     from .probes import Probe
-    from .scan import Scan
+    from .scan import Parameters
 
 try:
     # dynamically add __version__ attribute (see pyproject.toml)
@@ -48,6 +48,10 @@ except PackageNotFoundError:
 
 def _bootstrap_backend():
     """Setup function to initialize the zea package."""
+
+    # No printing when using --help flag
+    if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
+        return
 
     def _check_backend_installed():
         """Verify that the required ML backend is installed.
@@ -147,16 +151,16 @@ _LAZY_ATTRS = {
     "Config": ("zea.config", "Config"),
     "Dataloader": ("zea.data.dataloader", "Dataloader"),
     "Dataset": ("zea.data.datasets", "Dataset"),
-    "Folder": ("zea.data.datasets", "Folder"),
     "File": ("zea.data.file", "File"),
     "load_file": ("zea.data.file", "load_file"),
     "set_data_paths": ("zea.datapaths", "set_data_paths"),
-    "Interface": ("zea.interface", "Interface"),
     "init_device": ("zea.internal.device", "init_device"),
     "setup": ("zea.internal.setup_zea", "setup"),
     "setup_config": ("zea.internal.setup_zea", "setup_config"),
     "Pipeline": ("zea.ops", "Pipeline"),
     "Probe": ("zea.probes", "Probe"),
+    "Parameters": ("zea.scan", "Parameters"),
+    # Deprecated alias for Parameters (emits a DeprecationWarning when used).
     "Scan": ("zea.scan", "Scan"),
 }
 

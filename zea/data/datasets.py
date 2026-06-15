@@ -42,16 +42,17 @@ import tqdm
 
 from zea import log
 from zea.data.file import File
+from zea.datapaths import format_data_path
+from zea.internal.cache import cache_output
+from zea.internal.core import hash_elements
 from zea.internal.preset_utils import (
     HF_DATASETS_DIR,
     HF_PREFIX,
     _hf_list_files,
+    _hf_list_h5_files,
     _hf_parse_path,
     _hf_resolve_path,
 )
-from zea.datapaths import format_data_path
-from zea.internal.cache import cache_output
-from zea.internal.core import hash_elements
 from zea.internal.utils import calculate_file_hash, reduce_to_signature
 from zea.io_lib import search_file_tree
 from zea.tools.hf import HFPath
@@ -193,8 +194,9 @@ class Folder:
     def __init__(
         self,
         folder_path: str | Path | HFPath,
-        validate: bool = True,
+        validate: bool = False,
         hf_cache_dir: str = HF_DATASETS_DIR,
+        revision: str | None = None,
     ):
         single_file_error_msg = (
             f"Folder class requires a directory path, but got a single file: {str(folder_path)}. "
@@ -209,15 +211,18 @@ class Folder:
         # Hugging Face support
         folder_path_str = str(folder_path)
         if folder_path_str.startswith(HF_PREFIX):
+            hf_kwargs = {}
+            if revision is not None:
+                hf_kwargs["revision"] = revision
             repo_id, subpath = _hf_parse_path(folder_path_str)
-            files = _hf_list_files(repo_id)
+            files = _hf_list_files(repo_id, **hf_kwargs)
 
             # Check if it's a single file (not a directory)
             if subpath and any(f == subpath for f in files):
                 raise ValueError(single_file_error_msg)
 
             # It's a directory, resolve to local cache
-            folder_path = _hf_resolve_path(folder_path_str, cache_dir=hf_cache_dir)
+            folder_path = _hf_resolve_path(folder_path_str, cache_dir=hf_cache_dir, **hf_kwargs)
 
         # Check if the resolved path is a directory
         self.folder_path = Path(folder_path)
@@ -342,10 +347,7 @@ class Folder:
     def get_data_types(file_path):
         """Get data types from file."""
         with File(file_path) as file:
-            if "data" in file:
-                data_types = list(file["data"].keys())
-            else:
-                data_types = list(file["event_0"]["data"].keys())
+            data_types = list(file["data"].keys())
         return data_types
 
     def _write_validation_file(self, path, num_frames_per_file):
@@ -379,10 +381,7 @@ class Folder:
             log.warning(f"Unable to write validation flag: {e}")
 
     def __repr__(self):
-        return (
-            f"<zea.data.datasets.Folder at 0x{id(self):x}: "
-            f"{self.n_files} files, folder='{self.folder_path}'>"
-        )
+        return f"Folder(n_files={self.n_files}, folder='{self.folder_path}')"
 
     def __str__(self):
         return f"Folder with {self.n_files} files in '{self.folder_path}'"
@@ -443,8 +442,11 @@ class Dataset(H5FileHandleCache):
     def __init__(
         self,
         file_paths: List[str] | str,
-        validate: bool = True,
+        validate: bool = False,
         directory_splits: list | None = None,
+        revision: str | None = None,
+        lazy: bool = False,
+        _suggest_lazy: bool = True,
         **kwargs,
     ):
         """Initializes the Dataset.
@@ -456,10 +458,19 @@ class Dataset(H5FileHandleCache):
             directory_splits (list, optional): List of directory split by. Is a list of floats
                 between 0 and 1, with the same length as the number of file_paths given.
                 If none, all files in file_paths are used.
+            revision (str, optional): HuggingFace revision (branch, tag, or commit hash).
+                Only used when file_paths contains ``hf://`` paths. Defaults to ``None``
+                (uses HuggingFace Hub default, i.e. the ``main`` branch).
+            lazy (bool, optional): If True, ``hf://`` files are not downloaded at init — each
+                file is downloaded on first access. ``len(ds)`` returns the number of files
+                (not total frames). Defaults to False.
 
         """
         super().__init__(**kwargs)
         self.validate = validate
+        self.revision = revision
+        self.lazy = lazy
+        self._suggest_lazy = _suggest_lazy
         self.file_paths = self.find_files(file_paths)
 
         if directory_splits is not None:
@@ -476,9 +487,50 @@ class Dataset(H5FileHandleCache):
         """Load the shapes of the datasets in each file."""
         return _find_h5_file_shapes(self.file_paths, key, _file_hash(self.file_paths))
 
+    def _find_hf_files(self, hf_path: str) -> List[str]:
+        """Resolve an HF path to a list of local paths (or HF strings if lazy)."""
+        repo_id, _ = _hf_parse_path(hf_path)
+        hf_kwargs = {}
+        if self.revision is not None:
+            hf_kwargs["revision"] = self.revision
+
+        hf_files = _hf_list_h5_files(hf_path, **hf_kwargs)  # [(filename, size_bytes), ...]
+
+        if not hf_files:
+            raise FileNotFoundError(f"No HDF5 files found in {hf_path}")
+
+        if len(hf_files) > 10 and not self.lazy:
+            total_gb = sum(size for _, size in hf_files) / 1e9
+            msg = (
+                f"About to download {len(hf_files)} files ({total_gb:.1f} GB) "
+                f"from '{hf_path}'. This may take a while."
+            )
+            if self._suggest_lazy:
+                msg += (
+                    f" Use {type(self).__name__}(..., lazy=True) to defer "
+                    "downloads until each file is first accessed."
+                )
+            log.warning(msg)
+
+        if self.lazy:
+            return [f"{HF_PREFIX}{repo_id}/{f}" for f, _ in hf_files]
+
+        resolved = _hf_resolve_path(hf_path, **hf_kwargs)
+        if resolved.is_dir():
+            paths = sorted(str(fp) for fp in search_file_tree(resolved, filetypes=FILE_TYPES))
+            if self.validate:
+                for p in paths:
+                    with File(p) as f:
+                        f.validate()
+            return paths
+        else:
+            if self.validate:
+                with File(resolved) as f:
+                    f.validate()
+            return [str(resolved)]
+
     def find_files(self, paths) -> List[str]:
         """Find files and optionally validate folders and files."""
-        # Initialize file paths and shapes
         file_paths = []
 
         if not isinstance(paths, (list, tuple)):
@@ -486,41 +538,34 @@ class Dataset(H5FileHandleCache):
 
         for file_path in paths:
             if isinstance(file_path, (list, tuple)):
-                # If the path is a list, recursively call find_files
                 file_paths += self.find_files(file_path)
                 continue
 
             file_path = str(file_path)
-            if file_path.startswith(HF_PREFIX):
-                file_path = HFPath(file_path)
-            else:
-                file_path = Path(file_path)
 
+            if file_path.startswith(HF_PREFIX):
+                file_paths += self._find_hf_files(file_path)
+                continue
+
+            file_path = Path(file_path)
             if file_path.is_dir():
-                folder = Folder(file_path, self.validate)
+                folder = Folder(file_path, self.validate, revision=self.revision)
                 file_paths += folder.file_paths
                 del folder
             elif file_path.is_file():
                 file_paths.append(str(file_path))
-                with File(file_path) as file:
+                with File(file_path, revision=self.revision) as file:
                     if self.validate:
                         file.validate()
 
         return file_paths
 
     @classmethod
-    def from_config(cls, dataset_folder, user=None, **kwargs):
+    def from_config(cls, path, user=None, **kwargs):
         """Creates a Dataset from a config file."""
-        path = format_data_path(dataset_folder, user)
-
-        if "file_path" in kwargs:
-            log.warning(
-                "Found 'file_path' in config, this will be ignored since a Dataset is "
-                + "always multiple files."
-            )
-
+        resolved = format_data_path(path, user)
         reduced_params = reduce_to_signature(cls.__init__, kwargs)
-        return cls(path, **reduced_params)
+        return cls(resolved, **reduced_params)
 
     def __len__(self):
         """Returns the number of files in the dataset."""
@@ -533,8 +578,15 @@ class Dataset(H5FileHandleCache):
 
     def __getitem__(self, index) -> File:
         """Retrieves an item from the dataset."""
-        file = self.get_file(self.file_paths[index])
-        return file
+        path = self.file_paths[index]
+        if path.startswith(HF_PREFIX):
+            hf_kwargs = {}
+            if self.revision is not None:
+                hf_kwargs["revision"] = self.revision
+            local_path = str(_hf_resolve_path(path, **hf_kwargs))
+            self.file_paths[index] = local_path
+            path = local_path
+        return self.get_file(path)
 
     def __iter__(self):
         """
@@ -552,7 +604,7 @@ class Dataset(H5FileHandleCache):
         return sum(self.get_file(file_path).n_frames for file_path in self.file_paths)
 
     def __repr__(self):
-        return f"<zea.data.datasets.Dataset at 0x{id(self):x}: {self.n_files} files>"
+        return f"Dataset(n_files={self.n_files})"
 
     def __str__(self):
         return f"Dataset with {self.n_files} files"

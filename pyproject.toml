@@ -1,10 +1,10 @@
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling>=1.30,<2"]
+build-backend = "hatchling.build"
 
 [project]
 name = "zea"
-version = "0.0.13"
+version = "0.1.0a3"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
     { name = "Tristan Stevens", email = "t.s.w.stevens@tue.nl" },
@@ -40,11 +40,11 @@ dependencies = [
     "matplotlib >=3.8",
     "scipy >=1.13",
     "pillow >=12.2.0",
-    "schema >=0.7",
     "tqdm >=4",
     "pyyaml >=6",
     "decorator >=5",
     "huggingface_hub >=0.26",
+    "tyro >=0.9",
     "wandb >=0.18",
     "wget >=3.2",
     "imageio[ffmpeg] >=2.0",
@@ -64,7 +64,7 @@ dev = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff==0.15.12",
+    "ruff==0.15.16",
     "pytest-cov",
     # docs
     "sphinx",
@@ -85,6 +85,8 @@ dev = [
     "opencv-python-headless>=4",
     # models
     "onnxruntime>=1.15",
+    # app
+    "gradio>=6.0",
 ]
 
 tests = [
@@ -95,8 +97,9 @@ tests = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff==0.15.12",
+    "ruff==0.15.16",
     "pytest-cov",
+    "gradio>=6.0",
 ]
 docs = [
     "sphinx",
@@ -115,7 +118,7 @@ docs = [
     "IPython",
 ]
 jax = [
-    "jax[cuda12_pip]>=0.4.26"
+    "jax[cuda12-pip]>=0.4.26"
 ]
 display = [
     "opencv-python>=4",
@@ -128,6 +131,9 @@ display-headless = [
 models = [
     "onnxruntime>=1.15",
 ]
+app = [
+    "gradio>=6.0",
+]
 # these are just here for .readthedocs.yaml
 # please for proper install (with GPU support)
 # install manually
@@ -139,6 +145,9 @@ Repository = "https://github.com/tue-bmd/zea/"
 
 [project.scripts]
 zea = "zea.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["zea"]
 
 [tool.ruff]
 # We use ruff to lint and auto-format code
@@ -250,9 +259,20 @@ markers = [
     "gpu: marks tests that exercise real GPU hardware (most meaningful offline; in CI CUDA_VISIBLE_DEVICES=\"\" forces CPU)",
 ]
 filterwarnings = [
+    "ignore:.*SwigPyPacked.*:DeprecationWarning",
+    "ignore:.*SwigPyObject.*:DeprecationWarning",
+    "ignore:.*swigvarlink.*:DeprecationWarning",
     "ignore::DeprecationWarning:jupyter_client.*",
     "ignore::DeprecationWarning:papermill.*",
+    "ignore:.*__array__ implementation doesn't accept a copy keyword.*:DeprecationWarning",
+    "ignore:.*os\\.fork\\(\\) was called.*:RuntimeWarning",
 ]
+
+[tool.coverage.run]
+branch = true
+parallel = true
+concurrency = ["multiprocessing", "thread"]
+sigterm = true
 
 [tool.coverage.report]
 omit = [

@@ -124,6 +124,16 @@ def unzip(src: str | Path, dataset: str) -> Path:
             log.info(f"Found Batch1, Batch2, Batch3, Batch4 and MeasurementsList.csv in {src}.")
         return unzip_dir
 
+    # CAMUS special cases: Girder download produces a database_nifti sub-folder,
+    # or the user may have extracted patient* folders directly into src.
+    if dataset == "camus":
+        if (src / "database_nifti").exists():
+            log.info(f"Found database_nifti folder in {src}.")
+            return src / "database_nifti"
+        if any(src.glob("patient*")):
+            log.info(f"Found patient folders directly in {src}.")
+            return src
+
     zip_path = src / zip_name
     if not zip_path.exists():
         raise FileNotFoundError(f"Could not find {zip_name} or {folder_name} folder in {src}.")
@@ -134,6 +144,69 @@ def unzip(src: str | Path, dataset: str) -> Path:
     log.info("Unzipping completed.")
     log.info(f"Starting conversion from {src / folder_name}.")
     return unzip_dir
+
+
+def download_file(url: str, destination: str | Path) -> Path:  # pragma: no cover
+    """Download a file from a URL to a local path.
+
+    Skips the download if the file already exists at *destination*.
+    Shows a :mod:`tqdm` progress bar based on the ``content-length``
+    header when available.
+
+    Uses the ``ZEA_DOWNLOAD_TIMEOUT`` environment variable (default 600 s)
+    as the socket timeout.
+
+    Args:
+        url: URL to download from.
+        destination: Full file path where the downloaded content will be saved.
+            The parent directory is created if it does not exist.
+
+    Returns:
+        Path to the (possibly pre-existing) downloaded file.
+    """
+    destination = Path(destination)
+    if destination.exists():
+        log.info(f"File already exists: {destination.name}. Skipping download.")
+        return destination
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    timeout = int(os.getenv("ZEA_DOWNLOAD_TIMEOUT", "600"))
+    filename = destination.name
+    temp_path = destination.with_name(f"{destination.name}.part")
+
+    if temp_path.exists():
+        temp_path.unlink()
+
+    log.info(f"Downloading {filename} ...")
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            total_header = response.headers.get("content-length")
+            total = int(total_header) if total_header is not None else None
+            bytes_written = 0
+            with (
+                open(temp_path, "wb") as f,
+                tqdm(total=total or None, unit="B", unit_scale=True, desc=filename) as progress,
+            ):
+                while chunk := response.read(8192):
+                    f.write(chunk)
+                    bytes_written += len(chunk)
+                    progress.update(len(chunk))
+                f.flush()
+                os.fsync(f.fileno())
+
+        if total is not None and bytes_written != total:
+            raise IOError(
+                f"Downloaded size mismatch for {filename}: "
+                f"expected {total} bytes, got {bytes_written}."
+            )
+
+        temp_path.replace(destination)
+    finally:
+        if temp_path.exists() and not destination.exists():
+            temp_path.unlink(missing_ok=True)
+
+    log.info(f"Downloaded {filename} to {destination.parent}")
+    return destination
 
 
 def download_from_girder(  # pragma: no cover
@@ -231,3 +304,197 @@ def download_from_girder(  # pragma: no cover
 
     log.info(f"{dataset_name} dataset downloaded to {destination}")
     return destination
+
+
+# ---------------------------------------------------------------------------
+# HuggingFace Hub helpers
+# ---------------------------------------------------------------------------
+
+
+def check_output_dir_ownership(folder: "str | Path", repo_id: str) -> None:
+    """Raise if *folder* already contains data from a different dataset.
+
+    The check is based on the ``zea_repo_id`` field written into the dataset
+    card (``README.md``) by each converter.  A directory is considered *owned*
+    by a specific dataset when its README.md contains ``zea_repo_id: <repo_id>``.
+
+    * **Empty or non-existent directory** → passes (first-time run).
+    * **Directory with matching README.md** → passes (re-run of same dataset).
+    * **Directory with mismatched README.md** → raises :class:`FileExistsError`.
+    * **Directory with HDF5 files but no README.md** → raises :class:`FileExistsError`.
+
+    Args:
+        folder: Output directory to inspect.
+        repo_id: Expected dataset repository ID, e.g. ``"zeahub/picmus"``.
+
+    Raises:
+        FileExistsError: If the directory belongs to a different dataset.
+    """
+    folder = Path(folder)
+    readme = folder / "README.md"
+
+    if not folder.exists():
+        return  # fresh directory — OK
+
+    if readme.exists():
+        if f"zea_repo_id: {repo_id}" not in readme.read_text():
+            raise FileExistsError(
+                f"Output directory '{folder}' already contains data from a different dataset "
+                f"(README.md does not declare 'zea_repo_id: {repo_id}'). "
+                "Use a separate output directory for each dataset."
+            )
+        return  # correct dataset — OK (re-run)
+
+    # No README.md yet — fail only if HDF5 files are present (stale/foreign data)
+    if any(folder.rglob("*.hdf5")):
+        raise FileExistsError(
+            f"Output directory '{folder}' already contains HDF5 files but no dataset "
+            "README.md.  Use a separate, empty output directory for each dataset, "
+            "or delete this directory to start fresh."
+        )
+
+
+def require_output_dir_ownership(folder: "str | Path", repo_id: str) -> None:
+    """Raise if *folder* does not contain a verified dataset card for *repo_id*.
+
+    Used as a pre-flight check before uploading to HuggingFace Hub to prevent
+    accidentally uploading files from a different dataset.
+
+    Args:
+        folder: Directory to check.
+        repo_id: Expected dataset repository ID, e.g. ``"zeahub/picmus"``.
+
+    Raises:
+        FileNotFoundError: If no README.md is found.
+        ValueError: If the README.md does not match *repo_id*.
+    """
+    folder = Path(folder)
+    readme = folder / "README.md"
+
+    if not readme.exists():
+        raise FileNotFoundError(
+            f"No README.md found in '{folder}'. Run the conversion step before uploading."
+        )
+    if f"zea_repo_id: {repo_id}" not in readme.read_text():
+        raise ValueError(
+            f"'{folder}/README.md' does not declare 'zea_repo_id: {repo_id}'. "
+            f"This directory does not appear to contain the '{repo_id}' dataset. "
+            "Make sure you are uploading the correct directory."
+        )
+
+
+def write_dataset_card(folder: str | Path, card_content: str) -> Path:  # pragma: no cover
+    """Write a HuggingFace dataset card (``README.md``) into *folder*.
+
+    Args:
+        folder: Directory where ``README.md`` will be written.
+        card_content: Markdown content for the dataset card.
+
+    Returns:
+        Path to the written ``README.md`` file.
+    """
+    folder = Path(folder)
+    card_path = folder / "README.md"
+    card_path.write_text(card_content)
+    return card_path
+
+
+def upload_dataset_to_hf(  # pragma: no cover
+    folder: str | Path,
+    repo_id: str,
+    revision: str,
+    file_glob: str = "*.hdf5",
+    commit_message: str | None = None,
+    allow_patterns: "list[str] | None" = None,
+) -> None:
+    """Upload a converted dataset to a HuggingFace Hub revision branch.
+
+    Upload to the ``main`` branch is intentionally blocked.  After uploading
+    to a named revision branch, verify the data manually and then merge the
+    branch into ``main`` on the Hugging Face Hub.
+
+    Args:
+        folder: Root folder containing the files to upload.
+        repo_id: Hugging Face Hub repository ID (e.g. ``"zeahub/picmus"``).
+        revision: Target branch name.  Must not be ``"main"``.
+        file_glob: Glob pattern for files to include in the size summary.
+            Defaults to ``"*.hdf5"``.
+        commit_message: Commit message.  Defaults to
+            ``"Upload <repo_id> (zea format) to <revision>"``.
+        allow_patterns: Optional list of glob patterns limiting which files in
+            *folder* are uploaded.  When ``None`` (default) the whole folder is
+            uploaded.  Use this to scope an upload to specific files.
+
+    Raises:
+        ValueError: If *revision* is ``"main"``.
+        FileNotFoundError: If no files matching *file_glob* are found
+            under *folder*.
+    """
+    from huggingface_hub import HfApi, login
+
+    if revision == "main":
+        raise ValueError(
+            "Upload to 'main' is intentionally blocked. "
+            "Upload to a named revision branch instead, then merge into main "
+            "manually after verifying the upload on the Hub."
+        )
+
+    folder = Path(folder)
+    files = sorted(folder.rglob(file_glob))
+    if not files:
+        raise FileNotFoundError(f"No files matching '{file_glob}' found in {folder}")
+
+    total_size_mb = sum(f.stat().st_size for f in files) / 1e6
+
+    if commit_message is None:
+        commit_message = f"Upload {repo_id} (zea format) to {revision}"
+
+    log.info("")
+    log.info("=" * 60)
+    log.info("  HuggingFace upload summary")
+    log.info("=" * 60)
+    log.info(f"  Repository : {repo_id}")
+    log.info(f"  Branch     : {revision}")
+    log.info(f"  Source     : {folder}")
+    log.info(f"  Files      : {len(files)}")
+    log.info(f"  Total size : {total_size_mb:.1f} MB")
+    log.info("=" * 60)
+    log.info("")
+
+    answer = input("Proceed with upload? [y/N] ").strip().lower()
+    if answer != "y":
+        log.info("Upload cancelled.")
+        return
+
+    login()
+    api = HfApi()
+
+    # Check if the revision (branch) exists; if not, prompt to create it.
+    try:
+        refs = api.list_repo_refs(repo_id=repo_id, repo_type="dataset")
+        branch_names = {b.name for b in refs.branches}
+        if revision not in branch_names:
+            create = (
+                input(
+                    f"Revision (branch) '{revision}' does not exist on {repo_id}. Create it? [y/N] "
+                )
+                .strip()
+                .lower()
+            )
+            if create != "y":
+                log.info("Upload cancelled — revision not created.")
+                return
+            api.create_branch(repo_id=repo_id, branch=revision, repo_type="dataset")
+            log.info("Created branch '%s' on %s.", revision, repo_id)
+    except Exception as exc:
+        log.warning("Could not verify revision existence: %s", exc)
+
+    api.upload_folder(
+        folder_path=str(folder),
+        repo_id=repo_id,
+        repo_type="dataset",
+        revision=revision,
+        commit_message=commit_message,
+        allow_patterns=allow_patterns,
+    )
+    log.info(f"Uploaded to https://huggingface.co/datasets/{repo_id}/tree/{revision}")

@@ -7,6 +7,20 @@ zea
 
 .. automodule:: zea
 
+.. rubric:: Classes
+
+
+.. autosummary::
+   :toctree:
+
+   Config
+   Dataloader
+   Dataset
+   File
+   Parameters
+   Pipeline
+   Probe
+
 .. rubric:: Functions
 
 .. autosummary::
@@ -34,7 +48,6 @@ zea
    display
    doppler
    func
-   interface
    io_lib
    log
    metrics

@@ -57,6 +57,28 @@ def _add_parser_args_camus(subparsers):
         action="store_true",
         help="Disable hyperthreading for multiprocessing",
     )
+    camus_parser.add_argument(
+        "--upload",
+        action="store_true",
+        help=(
+            "Upload the converted dataset to HuggingFace Hub (zeahub/camus or zeahub/camus-sample)"
+        ),
+    )
+    camus_parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help=(
+            "Revision branch to upload to on HuggingFace Hub. "
+            "Required when --upload is set. Upload to 'main' is not allowed."
+        ),
+    )
+    camus_parser.add_argument(
+        "--reduced-dataset",
+        dest="reduced_dataset",
+        action="store_true",
+        help="Only convert and upload a small hardcoded sample subset (camus-sample).",
+    )
 
 
 def _add_parser_args_echonetlvh(subparsers):
@@ -107,8 +129,39 @@ def _add_parser_args_echonetlvh(subparsers):
 def _add_parser_args_picmus(subparsers):
     """Add PICMUS specific arguments to the parser."""
     picmus_parser = subparsers.add_parser("picmus", help="Convert PICMUS dataset")
-    picmus_parser.add_argument("src", type=str, help="Source folder path")
+    picmus_parser.add_argument(
+        "src",
+        type=str,
+        help=(
+            "Source folder path. Should contain either a manually downloaded and "
+            "extracted archive (archive_to_download/ or picmus.zip) or will be used "
+            "as the download target when --download is given. An 'in_vivo/' "
+            "sub-directory, if present, is automatically included."
+        ),
+    )
     picmus_parser.add_argument("dst", type=str, help="Destination folder path")
+    picmus_parser.add_argument(
+        "--download",
+        action="store_true",
+        help=(
+            "Download both the main PICMUS dataset and the in-vivo partition "
+            "from the PICMUS challenge website before converting."
+        ),
+    )
+    picmus_parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload the converted dataset to HuggingFace Hub (zeahub/picmus).",
+    )
+    picmus_parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help=(
+            "Revision branch to upload to on HuggingFace Hub. "
+            "Required when --upload is set. Upload to 'main' is not allowed."
+        ),
+    )
 
 
 def _add_parser_args_cetus(subparsers):
@@ -136,7 +189,16 @@ def _add_parser_args_cetus(subparsers):
     cetus_parser.add_argument(
         "--upload",
         action="store_true",
-        help="Upload the converted dataset to HuggingFace Hub (zeahub/cetus-miccai-2014)",
+        help="Upload the converted dataset to HuggingFace Hub (zeahub/cetus-miccai-2014).",
+    )
+    cetus_parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help=(
+            "Revision branch to upload to on HuggingFace Hub. "
+            "Required when --upload is set. Upload to 'main' is not allowed."
+        ),
     )
 
 
@@ -175,6 +237,25 @@ def _add_parser_args_verasonics(subparsers):
         action="store_true",
         help="Disable compression when saving the zea dataset. By default, compression is "
         "enabled, which reduces disk space at the cost of increased conversion time.",
+    )
+    verasonics_parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload the converted dataset to HuggingFace Hub after conversion. "
+        "Only for zea maintainers with push access to the repository.",
+    )
+    verasonics_parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help="Required when --upload is set. Upload to 'main' is not allowed.",
+    )
+    verasonics_parser.add_argument(
+        "--hf_repo_id",
+        type=str,
+        default="",
+        help="HuggingFace repo ID for ownership checks and optional upload. "
+        "Required if --upload is set.",
     )
 
 
