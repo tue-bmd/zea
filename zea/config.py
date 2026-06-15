@@ -49,10 +49,7 @@ import inspect
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
-
-if TYPE_CHECKING:
-    from _typeshed import SupportsKeysAndGetItem
+from typing import Any, Protocol, Union
 
 import yaml
 
@@ -61,6 +58,17 @@ from zea.internal.config.validation import validate_config
 from zea.internal.core import dict_to_tensor
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.utils import deprecated
+
+
+class _SupportsKeysAndGetItem(Protocol):
+    """Protocol for dict.update()-style mappings that expose keys() and item lookup.
+
+    Mirrors ``_typeshed.SupportsKeysAndGetItem`` without depending on the
+    typeshed-internal ``_typeshed`` module (which is not importable at runtime).
+    """
+
+    def keys(self) -> Iterable[str]: ...
+    def __getitem__(self, key: str, /) -> Any: ...
 
 
 class Config(dict):
@@ -163,7 +171,7 @@ class Config(dict):
 
     def update(
         self,
-        dictionary: "SupportsKeysAndGetItem[str, Any] | Iterable[tuple[str, Any]] | None" = None,
+        dictionary: _SupportsKeysAndGetItem | Iterable[tuple[str, Any]] | None = None,
         /,
         **kwargs: Any,
     ) -> None:
