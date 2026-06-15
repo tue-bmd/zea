@@ -201,27 +201,15 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
         and isinstance(data_dict["image"], dict)
         and data_dict["image"]["values"].dtype == np.uint8
     )
-    image_sc_is_uint8 = (
-        data_dict["image_sc"] is not None
-        and isinstance(data_dict["image_sc"], dict)
-        and data_dict["image_sc"]["values"].dtype == np.uint8
-    )
     image_is_float32 = (
         data_dict["image"] is not None
         and isinstance(data_dict["image"], dict)
         and data_dict["image"]["values"].dtype == np.float32
     )
-    image_sc_is_float32 = (
-        data_dict["image_sc"] is not None
-        and isinstance(data_dict["image_sc"], dict)
-        and data_dict["image_sc"]["values"].dtype == np.float32
-    )
 
     # Cast to float32 to avoid overflow
     if image_is_uint8:
         data_dict["image"]["values"] = data_dict["image"]["values"].astype(np.float32)
-    if image_sc_is_uint8:
-        data_dict["image_sc"]["values"] = data_dict["image_sc"]["values"].astype(np.float32)
 
     for file in input_paths[1:]:
         new_data, new_parameters = load_file_all_data_types(file)
@@ -267,23 +255,6 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
             else:
                 raise ValueError("image values must be uint8 or float32")
 
-        if data_dict["image_sc"] is not None:
-            _assert_shapes_equal(
-                data_dict["image_sc"]["values"],
-                new_data["image_sc"]["values"],
-                "image_sc",
-            )
-            if image_sc_is_float32:
-                data_dict["image_sc"]["values"] = np.log(
-                    np.exp(new_data["image_sc"]["values"]) + np.exp(data_dict["image_sc"]["values"])
-                )
-            elif image_sc_is_uint8:
-                data_dict["image_sc"]["values"] = (
-                    new_data["image_sc"]["values"] + data_dict["image_sc"]["values"]
-                )
-            else:
-                raise ValueError("image_sc values must be uint8 or float32")
-
         assert parameters == new_parameters, "Scan parameters do not match."
 
     # Divide to get the mean; for uint8, keep float precision then clip and cast back
@@ -294,14 +265,6 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     if image_is_float32:
         data_dict["image"]["values"] = np.minimum(
             data_dict["image"]["values"] - np.log(len(input_paths)), 0.0
-        )
-    if image_sc_is_uint8:
-        data_dict["image_sc"]["values"] = np.clip(
-            data_dict["image_sc"]["values"] / len(input_paths), 0, 255
-        ).astype(np.uint8)
-    if image_sc_is_float32:
-        data_dict["image_sc"]["values"] = np.minimum(
-            data_dict["image_sc"]["values"] - np.log(len(input_paths)), 0.0
         )
 
     if overwrite:
@@ -340,7 +303,10 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
 
     # Assuming the first dimension is the frame dimension
 
-    # Map-based data types store values in a dict; these need special handling
+    # Map-based data types store values in a dict; these need special handling.
+    # "image_sc" is a deprecated, legacy-only data type: it is still handled here so
+    # that legacy files containing it can be processed without crashing, but it is
+    # dropped on save (save_file / File.create no longer write it).
     _MAP_KEYS = {"aligned_data", "beamformed_data", "envelope_data", "image_sc", "image"}
     _LOG_COMPOUND_KEYS = {"image", "image_sc"}
 

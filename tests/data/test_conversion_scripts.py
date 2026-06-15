@@ -943,6 +943,95 @@ def test_echonet_polar_float32_stored(tmp_path):
     assert np.any(result < 0), "negative dB values must be preserved"
 
 
+def test_echonet_processor_writes_image_not_image_sc(tmp_path):
+    """H5Processor must store scan-converted frames under the modern ``image`` key,
+    never the deprecated ``image_sc``.
+
+    Accepted sequences store the polar representation (4D: F, H, W, 1); rejected
+    sequences have no polar representation and store the Cartesian frames (3D:
+    F, H, W).  This drives ``__call__`` in-process so coverage tools see it (the
+    full conversion script runs in a ``ProcessPoolExecutor`` subprocess otherwise).
+    """
+    from multiprocessing import Value
+
+    from zea.data.convert.echonet import H5Processor, count_init
+
+    src = tmp_path / "src"
+    src.mkdir()
+    create_echonet_test_data(src)
+    videos = sorted((src / "EchoNet-Dynamic" / "Videos").glob("*.avi"))
+
+    out = tmp_path / "out"
+    processor = H5Processor(path_out_h5=out)
+    count_init(Value("i", 0))
+    for video in videos:
+        processor(video)
+
+    h5_files = list(out.rglob("*.hdf5"))
+    assert h5_files, "no hdf5 files were produced"
+
+    accepted = [f for split in ("train", "val", "test") for f in (out / split).glob("*.hdf5")]
+    rejected = list((out / "rejected").glob("*.hdf5"))
+    assert accepted, "expected at least one accepted file"
+    assert rejected, "expected at least one rejected file"
+
+    for h5_file in h5_files:
+        with File(h5_file, "r") as f:
+            assert "image" in f["data"], f"missing 'image' in {h5_file}"
+            assert "image_sc" not in f["data"], f"unexpected legacy 'image_sc' in {h5_file}"
+
+    with File(accepted[0], "r") as f:
+        assert f.data.image.values.ndim == 4, "accepted file should store the 4D polar image"
+
+    with File(rejected[0], "r") as f:
+        assert f.data.image.values.ndim == 3, "rejected file should store the 3D Cartesian image"
+
+
+def test_camus_build_polar_image_in_process(tmp_path):
+    """_build_polar_image runs in-process (the camus conversion otherwise only runs
+    in a subprocess) and returns matching polar values and coordinate grids."""
+    from zea.data.convert.camus import _build_polar_image
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    # Background dB frame with a brighter sector-shaped foreground so the sector
+    # detection finds at least two foreground columns.
+    frame = np.full((40, 32), -60.0, dtype=np.float32)
+    frame[5:35, 8:24] = rng.uniform(-30.0, 0.0, (30, 16)).astype(np.float32)
+
+    n_r, n_theta = 24, 20
+    values, coords = _build_polar_image(frame, x_step=2e-4, z_step=2e-4, n_r=n_r, n_theta=n_theta)
+
+    assert values.shape == (n_r, n_theta)
+    assert coords.shape == (n_r, n_theta, 3)
+    assert values.dtype == np.float32
+
+
+def test_cetus_process_writes_image_not_image_sc(tmp_path):
+    """process_cetus stores the 3D B-mode volume under ``image`` (not ``image_sc``).
+
+    Runs the converter in-process; the full conversion script otherwise runs in a
+    subprocess that coverage tools do not observe.
+    """
+    from zea.data.convert.cetus import process_cetus
+
+    vol = np.full((16, 16, 16), 10.0, dtype=np.float32)
+    vol[4:12, 4:12, 4:12] = 200.0
+    image = sitk.GetImageFromArray(vol)
+    image.SetSpacing((0.0005763, 0.0005763, 0.0005763))
+
+    source = tmp_path / "patient01_ED.nii.gz"
+    sitk.WriteImage(image, str(source))
+    output = tmp_path / "patient01_ED.hdf5"
+
+    process_cetus(source, output)
+
+    with File(output, "r") as f:
+        assert "image" in f["data"], "missing 'image'"
+        assert "image_sc" not in f["data"], "unexpected legacy 'image_sc'"
+        assert f.data.image.values.ndim == 4, "volume should be stored as (1, D, H, W)"
+
+
 def test_images_non_uint8_raises():
     """images.py convert path must raise ValueError for non-uint8 input
     instead of silently casting with potential data loss."""

@@ -204,7 +204,7 @@ def cartesian_to_polar_matrix(
 
     Args:
         - cartesian_matrix (2d array): (rows, cols) matrix containing time sequence
-            of image_sc data.
+            of scan-converted (Cartesian) image data.
         - tip (tuple, optional): coordinates (in indices) of the tip of the cone.
             Defaults to (61, 7).
         - r_max (int, optional): expected radius of the cone. Defaults to 107.
@@ -432,13 +432,17 @@ class H5Processor:
         assert sequence.min() >= self._process_range[0], sequence.min()
         assert sequence.max() <= self._process_range[1], sequence.max()
 
-        image_sc_values = self._translate(sequence)
-        data = {"image_sc": {"values": image_sc_values}}
         if accepted:
+            # Store the polar (pre-scan-conversion) representation as the image.
             polar_db = self._translate(polar_im_set)
             polar_float32 = polar_db.astype(np.float32)
             polar_float32 = np.expand_dims(polar_float32, axis=-1)  # add y dim
-            data["image"] = {"values": polar_float32}
+            data = {"image": {"values": polar_float32}}
+        else:
+            # Rejected sequences have no polar representation; store the original
+            # scan-converted (Cartesian) frames as the image instead.
+            cartesian_db = self._translate(sequence).astype(np.float32)
+            data = {"image": {"values": cartesian_db}}
 
         File.create(
             path=out_h5,

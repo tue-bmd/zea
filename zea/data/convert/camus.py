@@ -280,7 +280,7 @@ def process_camus(source_path, output_path, overwrite=False):
 
 
 def _build_polar_image(
-    image_sc: np.ndarray,
+    scan_converted: np.ndarray,
     x_step: float,
     z_step: float,
     n_r: int,
@@ -300,7 +300,7 @@ def _build_polar_image(
     corners are background padding).
 
     Args:
-        image_sc: Scan-converted frame, shape ``(H, W)``, float32 dB.
+        scan_converted: Scan-converted frame, shape ``(H, W)``, float32 dB.
         x_step: Lateral pixel spacing in metres.
         z_step: Axial pixel spacing in metres.
         n_r: Number of radial (depth) samples in the output.
@@ -314,14 +314,14 @@ def _build_polar_image(
     """
     from scipy.ndimage import map_coordinates
 
-    H, W = image_sc.shape
+    H, W = scan_converted.shape
 
     # Detect the actual sector half-angle and radius from the image content.
     # The scan-converted image is wider than the fan; the image corners are
     # background padding.  The widest non-background row sits at the arc boundary
     # of the sector (r = R_max), giving the most accurate theta_max estimate.
-    bg_val = float(image_sc.min())
-    fg = image_sc > bg_val + 0.5
+    bg_val = float(scan_converted.min())
+    fg = scan_converted > bg_val + 0.5
     row_widths = fg.sum(axis=1)
     widest_row = int(np.argmax(row_widths))
     fg_cols = np.where(fg[widest_row])[0]
@@ -352,11 +352,11 @@ def _build_polar_image(
     row_coords = z_polar / z_step
 
     polar_values = map_coordinates(
-        image_sc,
+        scan_converted,
         [row_coords, col_coords],
         order=1,
         mode="constant",
-        cval=float(image_sc.min()),
+        cval=float(scan_converted.min()),
     ).astype(np.float32)
 
     return polar_values, polar_coords

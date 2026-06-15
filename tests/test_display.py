@@ -69,6 +69,39 @@ def test_scan_conversion(size, resolution, order):
     return out
 
 
+def test_scan_convert_in_process_smoke():
+    """In-process smoke test for scan_convert_2d / scan_convert_3d.
+
+    The parametrized ``test_scan_conversion`` runs inside per-backend subprocesses
+    (via ``backend_equality_check``), which coverage tooling does not observe, so
+    this plain in-process test ensures the scan-conversion code paths are covered.
+    """
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    img2d = rng.standard_normal((32, 16)).astype(np.float32)
+    out2d, params2d = display.scan_convert_2d(img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5))
+    assert isinstance(params2d, dict)
+    assert np.asarray(out2d).ndim == 2
+
+    # Exercise the alternative interpolation branches: order > 1 (scipy/CPU path)
+    # and vectorize=False (ops.map path), in addition to the default vectorized path.
+    out2d_order2, _ = display.scan_convert_2d(
+        img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5), order=2
+    )
+    assert np.asarray(out2d_order2).ndim == 2
+    out2d_novec, _ = display.scan_convert_2d(
+        img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5), vectorize=False
+    )
+    assert np.asarray(out2d_novec).ndim == 2
+
+    vol3d = rng.standard_normal((16, 10, 10)).astype(np.float32)
+    out3d, params3d = display.scan_convert_3d(
+        vol3d, rho_range=(0, 1), theta_range=(-0.4, 0.4), phi_range=(-0.4, 0.4)
+    )
+    assert isinstance(params3d, dict)
+    assert np.asarray(out3d).ndim == 3
+
+
 def create_radial_pattern(size):
     """Creates a radial pattern for testing scan conversion."""
     x, y = np.meshgrid(np.linspace(-1, 1, size[0]), np.linspace(-1, 1, size[1]))

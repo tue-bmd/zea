@@ -36,8 +36,12 @@ class DataTypes(enum.Enum):
                         center frequency is removed from the signal.
     image           --> After log compression of the envelope data, the
                         image is formed.
-    image_sc        --> (DEPRECATED) The scan converted image is transformed to cartesian
-                        (x, y) format to account for possible curved arrays.
+    image_sc        --> (DEPRECATED, legacy read-only) The scan converted image is
+                        transformed to cartesian (x, y) format to account for possible
+                        curved arrays. This data type is retained only so that legacy
+                        files containing it can still be read; new files should store
+                        the (polar) ``image`` together with per-pixel coordinates and
+                        rely on :func:`zea.display.scan_convert` for scan conversion.
     """
 
     RAW_DATA = "raw_data"
