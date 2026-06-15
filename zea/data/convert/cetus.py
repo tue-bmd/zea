@@ -173,9 +173,9 @@ def process_cetus(source_path, output_path, overwrite=False):
     volume_db = (volume / 255.0) * 60.0 - 60.0
     volume_db[bg_mask] = -60.0
 
-    # Store as image_sc with shape (n_frames, depth, height, width).
+    # Store as image with shape (n_frames, depth, height, width).
     # For 3D volumes, n_frames=1 (single time point: ED or ES).
-    image_sc = volume_db[np.newaxis, ...]  # (1, D, H, W)
+    image_values = volume_db[np.newaxis, ...]  # (1, D, H, W)
 
     # Check for corresponding ground truth segmentation
     gt_path = source_path.with_name(source_path.name.replace(".nii.gz", "_gt.nii.gz"))
@@ -191,7 +191,7 @@ def process_cetus(source_path, output_path, overwrite=False):
     D, H, W = volume.shape
 
     # Build per-voxel coordinate grid from voxel spacing.
-    # Shape: (1, D, H, W, 3) — valid for both image_sc (1,D,H,W) and segmentation (1,D,H,W,1).
+    # Shape: (1, D, H, W, 3) — valid for both image (1,D,H,W) and segmentation (1,D,H,W,1).
     d_range = np.arange(D, dtype=np.float32) * voxel_spacing[0]
     h_range = np.arange(H, dtype=np.float32) * voxel_spacing[1]
     w_range = np.arange(W, dtype=np.float32) * voxel_spacing[2]
@@ -200,7 +200,7 @@ def process_cetus(source_path, output_path, overwrite=False):
 
     data = {
         "image": {
-            "values": image_sc.astype(np.float32),
+            "values": image_values.astype(np.float32),
             "coordinates": coordinates,
         }
     }
