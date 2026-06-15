@@ -1656,6 +1656,186 @@ class TestMultiTrackFile:
         np.testing.assert_allclose(ts_b, expected_b, atol=1e-6)
 
 
+class TestSingleTrackImplicitSchedule:
+    """Single-track files without an explicit track_schedule still get timestamps."""
+
+    def test_timestamps_available_without_explicit_schedule(self, tmp_path):
+        """File.create(data=…, scan=…) with t2nt set → timestamps available on track."""
+        n_frames, n_tx, n_el, n_ax = 2, 3, 4, 8
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+        scan["time_to_next_transmit"] = np.full((n_frames, n_tx), 0.1, dtype=np.float32)
+
+        path = tmp_path / "implicit.hdf5"
+        File.create(path, data={"raw_data": raw}, scan=scan, probe=_probe_minimal(n_el=n_el))
+
+        with File(path) as f:
+            assert f.track_schedule is None, "no schedule should be stored on disk"
+            ts = f.tracks[0].timestamps
+            assert ts is not None
+            assert ts.shape == (n_frames, n_tx)
+
+    def test_timestamps_values_implicit_schedule(self, tmp_path):
+        """Implicit all-zeros schedule produces the same timestamps as an explicit one."""
+        n_frames, n_tx, n_el, n_ax = 1, 3, 4, 8
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        dt = np.array([[0.1, 0.2, 0.3]], dtype=np.float32)
+        scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+        scan["time_to_next_transmit"] = dt
+
+        path = tmp_path / "implicit_vals.hdf5"
+        File.create(path, data={"raw_data": raw}, scan=scan, probe=_probe_minimal(n_el=n_el))
+
+        with File(path) as f:
+            ts = f.tracks[0].timestamps  # shape (1, 3)
+
+        # cumulative sum starting at 0: [0, 0.1, 0.3]
+        expected = np.array([[0.0, 0.1, 0.3]], dtype=np.float32)
+        np.testing.assert_allclose(ts, expected, atol=1e-6)
+
+    def test_timestamps_none_without_t2nt_no_schedule(self, tmp_path):
+        """Single-track file with no t2nt and no schedule → timestamps is None (no crash)."""
+        n_frames, n_tx, n_el, n_ax = 2, 3, 4, 8
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+        del scan["time_to_next_transmit"]
+
+        path = tmp_path / "no_t2nt.hdf5"
+        File.create(path, data={"raw_data": raw}, scan=scan, probe=_probe_minimal(n_el=n_el))
+
+        with File(path) as f:
+            assert f.tracks[0].timestamps is None
+
+    def test_explicit_schedule_still_works_single_track(self, tmp_path):
+        """Explicitly stored all-zeros schedule still produces the same timestamps."""
+        n_frames, n_tx, n_el, n_ax = 2, 3, 4, 8
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+        scan["time_to_next_transmit"] = np.full((n_frames, n_tx), 0.1, dtype=np.float32)
+        schedule = np.zeros(n_frames * n_tx, dtype=np.int32)
+
+        path_implicit = tmp_path / "implicit.hdf5"
+        path_explicit = tmp_path / "explicit.hdf5"
+        File.create(
+            path_implicit, data={"raw_data": raw}, scan=scan, probe=_probe_minimal(n_el=n_el)
+        )
+        File.create(
+            path_explicit,
+            tracks=[{"data": {"raw_data": raw}, "scan": scan}],
+            track_schedule=schedule,
+            probe=_probe_minimal(n_el=n_el),
+        )
+
+        with File(path_implicit) as f:
+            ts_implicit = f.tracks[0].timestamps
+        with File(path_explicit) as f:
+            ts_explicit = f.tracks[0].timestamps
+
+        np.testing.assert_array_equal(ts_implicit, ts_explicit)
+
+
+class TestFileTimestamps:
+    """Tests for File.timestamps — the global flat timestamp array."""
+
+    def test_single_track_timestamps_shape_and_values(self, tmp_path):
+        """File.timestamps returns shape (n_frames*n_tx,) with correct cumulative values."""
+        n_frames, n_tx, n_el, n_ax = 1, 3, 4, 8
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+        scan["time_to_next_transmit"] = np.array([[0.1, 0.2, 0.3]], dtype=np.float32)
+
+        path = tmp_path / "single.hdf5"
+        File.create(path, data={"raw_data": raw}, scan=scan, probe=_probe_minimal(n_el=n_el))
+
+        with File(path) as f:
+            ts = f.timestamps
+
+        assert ts is not None
+        assert ts.shape == (n_frames * n_tx,)
+        np.testing.assert_allclose(ts, [0.0, 0.1, 0.3], atol=1e-6)
+
+    def test_single_track_file_timestamps_none_without_t2nt(self, tmp_path):
+        """File.timestamps is None when time_to_next_transmit is absent."""
+        n_frames, n_tx, n_el, n_ax = 2, 3, 4, 8
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+        del scan["time_to_next_transmit"]
+
+        path = tmp_path / "no_t2nt.hdf5"
+        File.create(path, data={"raw_data": raw}, scan=scan, probe=_probe_minimal(n_el=n_el))
+
+        with File(path) as f:
+            assert f.timestamps is None
+
+    def test_multi_track_timestamps_interleaved(self, tmp_path):
+        """File.timestamps follows the schedule order across tracks.
+
+        Schedule [0, 1, 0, 1, 0] with dt_a=0.1, dt_b=0.05:
+          global events:  0     1      2      3      4
+          cumtime:        0  +0.1  +0.05  +0.1  +0.05
+          → [0, 0.1, 0.15, 0.25, 0.30]
+        """
+        n_frames, n_tx_a, n_tx_b, n_el, n_ax = 1, 3, 2, 4, 8
+        raw_a = np.zeros((n_frames, n_tx_a, n_ax, n_el, 1), dtype=np.float32)
+        raw_b = np.zeros((n_frames, n_tx_b, n_ax, n_el, 1), dtype=np.float32)
+        scan_a = _scan_minimal(n_frames=n_frames, n_tx=n_tx_a, n_el=n_el)
+        scan_a["time_to_next_transmit"] = np.full((n_frames, n_tx_a), 0.1, dtype=np.float32)
+        scan_b = _scan_minimal(n_frames=n_frames, n_tx=n_tx_b, n_el=n_el)
+        scan_b["time_to_next_transmit"] = np.full((n_frames, n_tx_b), 0.05, dtype=np.float32)
+        schedule = np.array([0, 1, 0, 1, 0], dtype=np.int32)
+
+        path = tmp_path / "multi.hdf5"
+        File.create(
+            path,
+            tracks=[
+                {"data": {"raw_data": raw_a}, "scan": scan_a, "label": "a"},
+                {"data": {"raw_data": raw_b}, "scan": scan_b, "label": "b"},
+            ],
+            track_schedule=schedule,
+            probe=_probe_minimal(n_el=n_el),
+        )
+
+        with File(path) as f:
+            ts = f.timestamps
+
+        assert ts is not None
+        assert ts.shape == (5,)
+        np.testing.assert_allclose(ts, [0.0, 0.1, 0.15, 0.25, 0.30], atol=1e-6)
+
+    def test_file_timestamps_consistent_with_track_timestamps(self, tmp_path):
+        """File.timestamps values appear in each track's per-frame matrix."""
+        n_frames, n_tx_a, n_tx_b, n_el, n_ax = 1, 3, 2, 4, 8
+        raw_a = np.zeros((n_frames, n_tx_a, n_ax, n_el, 1), dtype=np.float32)
+        raw_b = np.zeros((n_frames, n_tx_b, n_ax, n_el, 1), dtype=np.float32)
+        scan_a = _scan_minimal(n_frames=n_frames, n_tx=n_tx_a, n_el=n_el)
+        scan_a["time_to_next_transmit"] = np.full((n_frames, n_tx_a), 0.1, dtype=np.float32)
+        scan_b = _scan_minimal(n_frames=n_frames, n_tx=n_tx_b, n_el=n_el)
+        scan_b["time_to_next_transmit"] = np.full((n_frames, n_tx_b), 0.05, dtype=np.float32)
+        schedule = np.array([0, 1, 0, 1, 0], dtype=np.int32)
+
+        path = tmp_path / "consistent.hdf5"
+        File.create(
+            path,
+            tracks=[
+                {"data": {"raw_data": raw_a}, "scan": scan_a, "label": "a"},
+                {"data": {"raw_data": raw_b}, "scan": scan_b, "label": "b"},
+            ],
+            track_schedule=schedule,
+            probe=_probe_minimal(n_el=n_el),
+        )
+
+        with File(path) as f:
+            global_ts = f.timestamps
+            track_ts_a = f.tracks[0].timestamps.ravel()
+            track_ts_b = f.tracks[1].timestamps.ravel()
+
+        # Every per-track timestamp must appear somewhere in the global array
+        for t in track_ts_a:
+            assert np.any(np.isclose(global_ts, t, atol=1e-6))
+        for t in track_ts_b:
+            assert np.any(np.isclose(global_ts, t, atol=1e-6))
+
+
 class TestLegacyFileLoading:
     """Integration tests: legacy files written with generate_zea_dataset load correctly."""
 
