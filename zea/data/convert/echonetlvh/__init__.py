@@ -375,7 +375,9 @@ def crop_sequence_with_params(sequence, cone_params):
 class LVHProcessor:
     """Processor for EchoNet-LVH dataset."""
 
-    def __init__(self, path_out_h5: str, splits: dict, cone_params: dict, polar_shape=(600, 600)):
+    def __init__(
+        self, path_out_h5: str | Path, splits: dict, cone_params: dict, polar_shape=(600, 600)
+    ):
         self.path_out_h5 = Path(path_out_h5)
         self.splits = splits
         self.cone_parameters = cone_params or {}

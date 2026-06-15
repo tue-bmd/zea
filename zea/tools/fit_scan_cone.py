@@ -305,7 +305,7 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     }
 
 
-def crop_and_center_cone(image, cone_params, backend: np = np):
+def crop_and_center_cone(image, cone_params, backend=np):
     """
     Crop the image to the sector bounding box and pad as needed to center the apex.
 
