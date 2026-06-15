@@ -134,9 +134,8 @@ def plot_image_grid(
     elif cmap is None:
         cmap_list = [None] * len(images_padded)
     else:
-        assert len(cmap) == len(images_padded), (
-            "cmap must be a string or list of strings of length"
-            f" {len(images_padded)}, but got {cmap}"
+        assert len(cmap) == len(images), (
+            f"cmap must be a string or list of strings of length {len(images)}, but got {cmap}"
         )
         cmap_list = list(cmap)
 
@@ -146,8 +145,8 @@ def plot_image_grid(
     elif vmin is None:
         vmin_list = [None] * len(images_padded)
     else:
-        assert len(vmin) == len(images_padded), (
-            f"vmin must be a float or list of floats of length {len(images_padded)}, but got {vmin}"
+        assert len(vmin) == len(images), (
+            f"vmin must be a float or list of floats of length {len(images)}, but got {vmin}"
         )
         vmin_list = list(vmin)
 
@@ -157,8 +156,8 @@ def plot_image_grid(
     elif vmax is None:
         vmax_list = [None] * len(images_padded)
     else:
-        assert len(vmax) == len(images_padded), (
-            f"vmax must be a float or list of floats of length {len(images_padded)}, but got {vmax}"
+        assert len(vmax) == len(images), (
+            f"vmax must be a float or list of floats of length {len(images)}, but got {vmax}"
         )
         vmax_list = list(vmax)
 
@@ -168,9 +167,9 @@ def plot_image_grid(
     elif aspect is None:
         aspect_list = [None] * len(images_padded)
     else:
-        assert len(aspect) == len(images_padded), (
+        assert len(aspect) == len(images), (
             "aspect must be a float, int, str, or list of these "
-            f"of length {len(images_padded)}, but got {aspect}"
+            f"of length {len(images)}, but got {aspect}"
         )
         aspect_list = list(aspect)
 

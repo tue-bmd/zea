@@ -483,13 +483,14 @@ class Pipeline:
     def set_params(self, **params):
         """Set parameters for the operations in the pipeline by adding them to the cache."""
         for operation in self.operations:
-            if not isinstance(operation, Operation):
-                continue
-            operation_params = {
-                key: value for key, value in params.items() if key in operation.valid_keys
-            }
-            if operation_params:
-                operation.set_input_cache(operation_params)
+            if isinstance(operation, Pipeline):
+                operation.set_params(**params)
+            elif isinstance(operation, Operation):
+                operation_params = {
+                    key: value for key, value in params.items() if key in operation.valid_keys
+                }
+                if operation_params:
+                    operation.set_input_cache(operation_params)
 
     def get_params(self, per_operation: bool = False):
         """Get a snapshot of the current parameters of the operations in the pipeline.
@@ -499,15 +500,19 @@ class Pipeline:
                                   If False, return a single dictionary with all parameters combined.
         """
         if per_operation:
-            return [
-                operation._input_cache.copy()
-                for operation in self.operations
-                if isinstance(operation, Operation)
-            ]
+            result = []
+            for operation in self.operations:
+                if isinstance(operation, Pipeline):
+                    result.extend(operation.get_params(per_operation=True))
+                elif isinstance(operation, Operation):
+                    result.append(operation._input_cache.copy())
+            return result
         else:
             params = {}
             for operation in self.operations:
-                if isinstance(operation, Operation):
+                if isinstance(operation, Pipeline):
+                    params.update(operation.get_params(per_operation=False))
+                elif isinstance(operation, Operation):
                     params.update(operation._input_cache)
             return params
 
