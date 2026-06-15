@@ -218,9 +218,9 @@ def precompute_cone_parameters(
                     or full_cone_params["crop_right"] > first_frame.shape[1]
                 ):
                     raise ValueError(
-                        "Computed crop exceeds frame dimensions, meaning that either cone detection"
-                        "failed, due to e.g. DICOM artifacts present in the frame, or the full scan"
-                        "cone is not visible in the frame."
+                        "Computed crop exceeds frame dimensions, meaning that either cone "
+                        "detection failed, due to e.g. DICOM artifacts present in the frame, "
+                        "or the full scan cone is not visible in the frame."
                     )
 
                 # Extract only the essential parameters
