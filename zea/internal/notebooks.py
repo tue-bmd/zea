@@ -7,7 +7,7 @@ from zea.scan import Parameters
 
 
 def animate_images(
-    images, path, scan: Parameters = None, interval=100, cmap="gray", figsize=(5, 4.6), dpi=80
+    images, path, parameters: Parameters = None, interval=100, cmap="gray", figsize=(5, 4.6), dpi=80
 ):
     """Helper function to animate a list of images."""
     if interval <= 0:
@@ -15,9 +15,11 @@ def animate_images(
     if len(images) == 0:
         raise ValueError("images must be a non-empty sequence.")
     fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-    if scan is not None:
+    if parameters is not None:
         extent = (
-            scan.extent_imshow * 1e3 if getattr(scan, "extent_imshow", None) is not None else None
+            parameters.extent_imshow * 1e3
+            if getattr(parameters, "extent_imshow", None) is not None
+            else None
         )
     else:
         extent = None

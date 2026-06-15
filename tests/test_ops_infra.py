@@ -750,8 +750,8 @@ def ultrasound_probe():
     return get_probe()
 
 
-def get_scan(ultrasound_probe, grid_size_x=None, grid_size_z=None):
-    """Returns a scan for ultrasound simulation tests.
+def get_parameters(ultrasound_probe, grid_size_x=None, grid_size_z=None):
+    """Returns a Parameters object for ultrasound simulation tests.
 
     Note these parameters are not really realistic, but are used for testing purposes.
     """
@@ -798,8 +798,8 @@ def get_scan(ultrasound_probe, grid_size_x=None, grid_size_z=None):
 
 @pytest.fixture
 def ultrasound_parameters(ultrasound_probe):
-    """Returns a scan for ultrasound simulation tests."""
-    return get_scan(ultrasound_probe, grid_size_x=20, grid_size_z=20)
+    """Returns a Parameters object for ultrasound simulation tests."""
+    return get_parameters(ultrasound_probe, grid_size_x=20, grid_size_z=20)
 
 
 def get_scatterers():

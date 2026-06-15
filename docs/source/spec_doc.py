@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import numpy as np
 
 from zea.data.spec import (
+    UNITS,
     AlignedData,
     Annotations,
     BeamformedData,
@@ -306,6 +307,28 @@ MAP_DESCRIPTIONS = {
 }
 
 
+def rst_units_table() -> str:
+    """Render the :data:`zea.data.spec.UNITS` mapping as a reference table.
+
+    Keeps the documented unit symbols in sync with the single source of truth
+    in ``spec.py`` — every ``unit`` shown in the field tables below is defined here.
+    """
+    lines = [
+        ".. list-table::",
+        "   :header-rows: 1",
+        "   :widths: 20 80",
+        "",
+        "   * - Symbol",
+        "     - Meaning",
+    ]
+    for symbol, meaning in UNITS.items():
+        lines += [
+            f"   * - ``{symbol}``",
+            f"     - {meaning}",
+        ]
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # generate
 # ---------------------------------------------------------------------------
@@ -333,6 +356,20 @@ def generate() -> str:
         "Stored as HDF5 root-level attributes (not groups).",
         "",
         ROOT_ATTRS_TABLE,
+        "",
+    ]
+
+    # --- Units legend ---------------------------------------------------------
+    lines += [
+        ".. _data-spec-units:",
+        "",
+        "Units",
+        "~~~~~",
+        "",
+        "Unit symbols used in the ``Unit`` column of the field tables below.",
+        "A unit of ``-`` denotes a unitless (dimensionless) quantity.",
+        "",
+        rst_units_table(),
         "",
     ]
 
