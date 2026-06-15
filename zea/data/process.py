@@ -33,7 +33,7 @@ try:
 
     SUPPORTED_FORMATS += ["nii.gz"]
 except ImportError:
-    sitk = None  # ty: ignore[invalid-assignment]
+    sitk = None
 
 
 def get_parser(add_help: bool = True) -> argparse.ArgumentParser:
@@ -365,6 +365,7 @@ def run_processing(
                 overwrite=overwrite,
             )
         elif save_as == "nii.gz":
+            assert sitk is not None, "SimpleITK must be installed to save as nii.gz"
             sitk.WriteImage(sitk.GetImageFromArray(video), str(save_path))
             log.info(f"Saved NIfTI to {log.yellow(save_path)}")
 
