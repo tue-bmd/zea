@@ -49,7 +49,10 @@ import inspect
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Union
+from typing import TYPE_CHECKING, Any, Union
+
+if TYPE_CHECKING:
+    from _typeshed import SupportsKeysAndGetItem
 
 import yaml
 
@@ -160,9 +163,9 @@ class Config(dict):
 
     def update(
         self,
-        dictionary: dict | Iterable[tuple[str, Any]] | None = None,
+        dictionary: "SupportsKeysAndGetItem[str, Any] | Iterable[tuple[str, Any]] | None" = None,
         /,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Updates the config with the specified key-value pairs.
 

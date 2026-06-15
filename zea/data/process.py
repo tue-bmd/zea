@@ -6,6 +6,7 @@ Usage:
 
 import argparse
 import re
+import types
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
@@ -28,12 +29,14 @@ from zea.utils import FunctionTimer
 
 SUPPORTED_FORMATS = ["gif", "mp4", "hdf5"]
 
+sitk: types.ModuleType | None = None
 try:
-    import SimpleITK as sitk
+    import SimpleITK as _sitk
 
+    sitk = _sitk
     SUPPORTED_FORMATS += ["nii.gz"]
 except ImportError:
-    sitk = None
+    pass
 
 
 def get_parser(add_help: bool = True) -> argparse.ArgumentParser:
