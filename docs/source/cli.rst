@@ -30,13 +30,6 @@ Both ``--dataset`` / ``-d`` and ``--config`` / ``-c`` are required; ``--save-dir
    :prog: python -m zea.data.process
 
 -------------------------------
-Process dataset to videos
--------------------------------
-
-.. autoprogram:: zea.data.process:get_parser()
-   :prog: python -m zea.data.process
-
--------------------------------
 Convert datasets
 -------------------------------
 

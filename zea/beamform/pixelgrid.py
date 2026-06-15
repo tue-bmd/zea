@@ -8,7 +8,7 @@ eps = 1e-10
 
 
 def check_for_aliasing(xlims, zlims, wavelength, grid_size_x, grid_size_z):
-    """Checks if the scan class parameters will cause spatial aliasing due to a too low pixel
+    """Checks if the arguments will cause spatial aliasing due to a too low pixel
     density. If so, a warning is printed with a suggestion to increase the pixel density by either
     increasing the number of pixels, or decreasing the pixel spacing, depending on which parameter
     was set by the user."""
