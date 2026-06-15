@@ -729,7 +729,7 @@ def inverse_scan_convert_2d(
 
     if find_scan_cone:
         assert image_range is not None, "image_range must be provided when find_scan_cone is True"
-        cartesian_image = fit_and_crop_around_scan_cone(cartesian_image, image_range)
+        cartesian_image, _ = fit_and_crop_around_scan_cone(cartesian_image, image_range)
 
     polar_image = cartesian_to_polar_matrix(
         cartesian_image,

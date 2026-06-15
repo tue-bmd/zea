@@ -73,7 +73,7 @@ def filter_edge_points_by_boundary(edge_points, is_left=True, min_cone_half_angl
     return np.array(filtered_points) if filtered_points else np.zeros((0, 2))
 
 
-def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
+def detect_cone_parameters(image, image_range, min_cone_half_angle_deg=20, threshold=15):
     """Detect the ultrasound cone parameters from a grayscale image.
 
     This function performs the following steps:
@@ -85,8 +85,10 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
 
     Args:
         image: 2D numpy array (grayscale image)
+        image_range: Tuple (vmin, vmax) for display scaling
         min_cone_half_angle_deg: Minimum expected half-angle of the cone in degrees
-        threshold: Threshold for binary image (pixels above this are considered data)
+        threshold: Threshold for binary image (pixels above this are considered data),
+            on a scale of 0-255
 
     Returns:
         Dictionary containing cone parameters including:
@@ -105,6 +107,8 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     if len(image.shape) != 2:
         raise ValueError("Input image must be 2D (grayscale)")
 
+    threshold = translate(threshold, range_from=(0, 255), range_to=image_range)
+
     h, w = image.shape
 
     # Apply threshold
@@ -113,7 +117,10 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     # Find non-zero pixel bounds
     non_zero_indices = np.argwhere(thresh > 0)
     if len(non_zero_indices) == 0:
-        return None
+        raise ValueError(
+            f"Failed to detect ultrasound cone: no pixels above threshold ({threshold:.4g}). "
+            "The image may be empty or the threshold too high."
+        )
 
     min_y = np.min(non_zero_indices[:, 0])
     max_y = np.max(non_zero_indices[:, 0])
@@ -133,7 +140,10 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
                 right_edge_points.append([non_zero_x[-1], y])
 
     if len(left_edge_points) < 10:
-        return None
+        raise ValueError(
+            f"Failed to detect ultrasound cone: only {len(left_edge_points)} row(s) wide enough "
+            "to be cone edges (need at least 10). The thresholded region is too small or too noisy."
+        )
 
     left_edge_points = np.array(left_edge_points, dtype=np.float32)
     right_edge_points = np.array(right_edge_points, dtype=np.float32)
@@ -149,7 +159,12 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     )
 
     if len(filtered_left_points) < 3 or len(filtered_right_points) < 3:
-        return None
+        raise ValueError(
+            "Failed to detect ultrasound cone: too few boundary points after filtering "
+            f"(left={len(filtered_left_points)}, right={len(filtered_right_points)}, need at "
+            "least 3 each). The cone edges may not be straight or the half-angle constraint "
+            f"(min_cone_half_angle_deg={min_cone_half_angle_deg}) may be too strict."
+        )
 
     # Fit lines using least squares: x = a + b*y
     # Left line
@@ -164,7 +179,10 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
 
     # Calculate apex as intersection of fitted lines
     if np.abs(left_b - right_b) < 1e-6:  # Lines are parallel
-        return None
+        raise ValueError(
+            "Failed to detect ultrasound cone: the fitted left and right edges are parallel "
+            "(no apex intersection). The region may be rectangular rather than cone-shaped."
+        )
 
     apex_y = (right_a - left_a) / (left_b - right_b)
     apex_x = left_a + left_b * apex_y
@@ -205,7 +223,10 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
 
         discriminant = B**2 - 4 * A * C
         if discriminant < 0:
-            return None
+            raise ValueError(
+                "Failed to detect ultrasound cone: a fitted edge line does not intersect the "
+                "bottom-boundary circle. The cone geometry is inconsistent (bad edge/radius fit)."
+            )
 
         # Two solutions
         y1 = (-B + np.sqrt(discriminant)) / (2 * A)
@@ -368,7 +389,7 @@ def crop_and_center_cone(image, cone_params, backend=np):
 
 
 def fit_and_crop_around_scan_cone(
-    image, image_range=(0, 255), min_cone_half_angle_deg=20, threshold=15, return_params=False
+    image, image_range=(0, 255), min_cone_half_angle_deg=20, threshold=15
 ):
     """
     Detect scan cone in ultrasound image and return cropped/padded image with centered apex.
@@ -379,37 +400,25 @@ def fit_and_crop_around_scan_cone(
         min_cone_half_angle_deg: Minimum expected half-angle of the cone in degrees (default: 20)
         threshold: Threshold for binary image - pixels above this are considered data.
             This is always on a scale of 0-255 (default: 15).
-        return_params: If True, also return cone parameters (default: False)
 
     Returns:
-        - If return_params is False: numpy array (cropped and padded image with apex at center)
-        - If return_params is True: Tuple of (cropped_array, cone_parameters_dict)
+        Tuple of (cropped_array, cone_parameters_dict)
 
     Raises:
         ValueError: If cone detection fails or image is not 2D
     """
-    # Ensure image is 2D
-    if len(image.shape) != 2:
-        raise ValueError(f"Input must be 2D grayscale image, got shape {image.shape}")
 
-    # Detect cone parameters
-    threshold = translate(threshold, range_from=(0, 255), range_to=image_range)
     cone_params = detect_cone_parameters(
         image,
+        image_range=image_range,
         min_cone_half_angle_deg=min_cone_half_angle_deg,
         threshold=threshold,
     )
 
-    if cone_params is None:
-        raise ValueError("Failed to detect ultrasound cone in image")
-
     # Crop and center the image
     cropped_image = crop_and_center_cone(image, cone_params)
 
-    if return_params:
-        return cropped_image, cone_params
-    else:
-        return cropped_image
+    return cropped_image, cone_params
 
 
 def visualize_scan_cone(image, cone_params, output_dir="output"):
@@ -618,12 +627,8 @@ def main(avi_path):
 
     try:
         # Fit scan cone
-        _, cone_params = fit_and_crop_around_scan_cone(
-            frame,
-            image_range=(0, 255),
-            min_cone_half_angle_deg=20,
-            threshold=15,
-            return_params=True,
+        cone_params = detect_cone_parameters(
+            frame, image_range=(0, 255), min_cone_half_angle_deg=20, threshold=15
         )
 
         # Create visualization

@@ -99,12 +99,6 @@ def _add_parser_args_echonetlvh(subparsers):
         help="Path to custom rejection txt file (defaults to `manual_rejections.txt` from zea)",
     )
     echonetlvh_parser.add_argument(
-        "--batch",
-        type=str,
-        default=None,
-        help="Specify which BatchX directory to process, e.g. --batch=Batch2",
-    )
-    echonetlvh_parser.add_argument(
         "--convert_measurements",
         action="store_true",
         help="Only convert measurements CSV file",
@@ -314,7 +308,6 @@ def main():
             args.dst,
             args.no_rejection,
             args.rejection_path,
-            args.batch,
             args.convert_measurements,
             args.convert_images,
             args.max_files,

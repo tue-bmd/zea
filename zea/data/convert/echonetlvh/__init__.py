@@ -33,7 +33,8 @@ from zea.func.tensor import vmap
 from zea.tools.fit_scan_cone import (
     _load_first_frame,
     crop_and_center_cone,
-    fit_and_crop_around_scan_cone,
+    detect_cone_parameters,
+    visualize_scan_cone,
 )
 
 
@@ -89,14 +90,13 @@ def load_shapes(csv_path: str | Path):
     return shapes
 
 
-def find_avi_file(source_dir: Path, hashed_filename: str, batch=None):
+def find_avi_file(source_dir: Path, hashed_filename: str):
     """
-    Find AVI file in the specified batch directory or any batch if not specified.
+    Find AVI file in the source EchoNet-LVH dataset.
 
     Args:
         source_dir: Source directory containing BatchX subdirectories
         hashed_filename: Hashed filename (with or without .avi extension)
-        batch: Specific batch directory to search in (e.g., "Batch2"), or None to search all batches
 
     Returns:
         Path to the AVI file if found, else None
@@ -105,15 +105,14 @@ def find_avi_file(source_dir: Path, hashed_filename: str, batch=None):
     if hashed_filename.endswith(".avi"):
         hashed_filename = hashed_filename[:-4]
 
-    dirs = [source_dir / batch] if batch else source_dir.glob("Batch*")
-    for batch_dir in dirs:
+    for batch_dir in source_dir.glob("Batch*"):
         avi_path = batch_dir / f"{hashed_filename}.avi"
         if avi_path.exists():
             return avi_path
-    return None
+    raise FileNotFoundError(f"Could not find AVI file for {hashed_filename}")
 
 
-def _find_avi_files(src: Path, splits: dict, batch):
+def _find_avi_files(src: Path, splits: dict):
     # Collect and de-extension all filenames across splits
     base_filenames = [
         avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
@@ -125,24 +124,16 @@ def _find_avi_files(src: Path, splits: dict, batch):
     files_to_process = []
     with ThreadPoolExecutor() as executor:
         results = executor.map(
-            lambda name: (name, find_avi_file(src, name, batch=batch)),
+            lambda name: find_avi_file(src, name),
             base_filenames,
         )
-        for base_filename, avi_file in tqdm(
-            results, total=len(base_filenames), desc="Finding AVI files"
-        ):
-            if avi_file:
-                files_to_process.append(avi_file)
-            else:
-                log.warning(
-                    f"Warning: Could not find AVI file for {base_filename} in batch "
-                    f"{batch if batch else 'any'}"
-                )
+        for avi_file in tqdm(results, total=len(base_filenames), desc="Finding AVI files"):
+            files_to_process.append(avi_file)
     return files_to_process
 
 
 def precompute_cone_parameters(
-    source_path: Path, measurements_csv: str | Path, cone_params_csv: Path, batch, max_files, force
+    source_path: Path, measurements_csv: str | Path, cone_params_csv: Path, max_files, force
 ):
     """
     Precompute and save cone parameters for all AVI files.
@@ -155,7 +146,6 @@ def precompute_cone_parameters(
         source_path: Source directory containing EchoNet-LVH data
         measurements_csv: Path to the MeasurementsList.csv file
         cone_params_csv: Path to the output CSV file
-        batch: Specific batch to process (e.g., "Batch2") or None for all
         max_files: Maximum number of files to process (or None for all)
         force: Whether to recompute parameters if they already exist
     Returns:
@@ -169,7 +159,7 @@ def precompute_cone_parameters(
 
     # Get list of files to process
     splits = load_splits(measurements_csv)
-    files_to_process = _find_avi_files(source_path, splits, batch)
+    files_to_process = _find_avi_files(source_path, splits)
 
     # Limit files if max_files is specified
     if max_files is not None:
@@ -211,12 +201,13 @@ def precompute_cone_parameters(
                 first_frame = _load_first_frame(avi_file)
 
                 # Detect cone parameters
-                _, full_cone_params = fit_and_crop_around_scan_cone(first_frame, return_params=True)
+                full_cone_params = detect_cone_parameters(first_frame, image_range=(0, 255))
 
                 if (
                     full_cone_params["crop_left"] < 0
                     or full_cone_params["crop_right"] > first_frame.shape[1]
                 ):
+                    visualize_scan_cone(first_frame, full_cone_params)
                     raise ValueError(
                         "Computed crop exceeds frame dimensions, meaning that either cone "
                         "detection failed, due to e.g. DICOM artifacts present in the frame, "
@@ -695,7 +686,6 @@ def convert_echonetlvh(
     dst: Path,
     no_rejection,
     rejection_path,
-    batch,
     convert_measurements,
     convert_images,
     max_files,
@@ -730,9 +720,30 @@ def convert_echonetlvh(
     if not no_rejection:
         overwrite_splits(measurements_csv, rejection_path)
 
+    # There are some mistakes for the bad_hash file, so fix them here
+    bad_hash = "0XBD41EBF599F7EE4F"
+    h, w = _load_first_frame(find_avi_file(src, bad_hash)).shape
+    with open(measurements_csv, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        assert reader.fieldnames is not None, "MeasurementsList.csv has no header row"
+        fieldnames = reader.fieldnames
+        rows = list(reader)
+    for row in rows:
+        if row["HashedFileName"] == bad_hash:
+            fps = row["Width"]
+            n_frames = row["FPS"]
+            row["Width"] = w
+            row["Height"] = h
+            row["FPS"] = fps
+            row["Frames"] = n_frames
+    with open(measurements_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
     # Precompute cone parameters if needed
     cone_params_csv = dst / "cone_parameters.csv"
-    precompute_cone_parameters(src, measurements_csv, cone_params_csv, batch, max_files, force)
+    precompute_cone_parameters(src, measurements_csv, cone_params_csv, max_files, force)
 
     # If no specific conversion is requested, convert both
     if not (convert_measurements or convert_images):
@@ -747,7 +758,7 @@ def convert_echonetlvh(
         cone_parameters = load_cone_parameters(cone_params_csv)
         log.info(f"Loaded cone parameters for {len(cone_parameters)} files")
 
-        files_to_process = _find_avi_files(src, splits, batch)
+        files_to_process = _find_avi_files(src, splits)
 
         # List files that have already been processed (set for O(1) membership)
         files_done = {
