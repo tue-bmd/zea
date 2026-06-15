@@ -883,13 +883,12 @@ class File(h5py.File):
             us_machine: Name of the ultrasound machine.
             description: Free-text description of the acquisition.
             acquisition_time: UTC acquisition timestamp as an ISO 8601 string
-                (e.g. ``"2026-06-12T14:30:00+00:00"``). When *None* (default) the
-                current UTC time is recorded automatically, **unless** the subject
-                type is ``"human"`` — in that case no timestamp is saved by default
-                (recording timestamps for human subjects may constitute Protected
-                Health Information / PHI). To capture the current moment explicitly,
-                pass ``datetime.now(timezone.utc).isoformat()`` (requires
-                ``from datetime import datetime, timezone``).
+                (e.g. ``"2026-06-12T14:30:00+00:00"``). When *None* (default) no
+                timestamp is recorded. To capture the current moment, pass
+                ``datetime.now(timezone.utc).isoformat()`` (requires
+                ``from datetime import datetime, timezone``). Note: recording
+                timestamps for human subjects may constitute Protected Health
+                Information (PHI) under HIPAA and similar regulations.
             compression: HDF5 compression filter (default ``"lzf"``).
             chunk_frames: If *True*, use frame-wise chunking for all datasets containing
                 a "frames" dimension. Dataset will be stored with HDF5 chunking enabled,
