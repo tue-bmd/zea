@@ -738,7 +738,7 @@ class File(h5py.File):
     def timestamps(self) -> "np.ndarray | None":
         """Global transmit timestamps in acquisition order, shape ``(n_total_tx,)``.
 
-        Returns a 1-D ``float32`` array whose ``i``-th entry is the absolute
+        Returns a 1-D ``float32`` array whose ``i``-th entry is the
         start time of the ``i``-th transmit event across **all** tracks, in the
         order defined by :attr:`track_schedule`.  This is the flattened view
         complementary to the per-track ``(n_frames, n_tx)`` matrices returned
