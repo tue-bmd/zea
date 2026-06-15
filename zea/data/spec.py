@@ -1938,7 +1938,7 @@ class FileSpec(Spec):
             "description": (
                 "UTC acquisition timestamp in ISO 8601 format "
                 "(e.g. '2026-06-12T14:30:00+00:00'). "
-                "Auto-set to the moment of saving for non-human subjects."
+                "Optional — not recorded when omitted."
             ),
         },
     }
@@ -2204,9 +2204,6 @@ class FileSpec(Spec):
                     "regulations. Ensure you have appropriate authorization and "
                     "de-identification measures in place before sharing this file."
                 )
-        elif not is_human:
-            self.acquisition_time = datetime.now(timezone.utc).isoformat()
-
         with File(str(_path), "w") as f:
             f.attrs["zea_version"] = _zea_version
 

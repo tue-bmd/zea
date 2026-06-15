@@ -675,9 +675,7 @@ def test_subject_id_warning_includes_field_metadata_description(tmp_path):
     assert any("subject-wise splits" in m for m in messages)
 
 
-def test_acquisition_time_auto_set_for_non_human(tmp_path):
-    from datetime import datetime, timezone
-
+def test_acquisition_time_not_auto_set_for_non_human(tmp_path):
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
     path = tmp_path / "acq_time_non_human.hdf5"
     File.create(
@@ -689,11 +687,7 @@ def test_acquisition_time_auto_set_for_non_human(tmp_path):
         overwrite=True,
     )
     with File(path) as f:
-        ts = f.acquisition_time
-    assert ts is not None
-    assert ts.tzinfo is not None
-    assert ts.tzinfo == timezone.utc or ts.utcoffset().total_seconds() == 0
-    assert isinstance(ts, datetime)
+        assert f.acquisition_time is None
 
 
 def test_acquisition_time_not_set_for_human(tmp_path):
