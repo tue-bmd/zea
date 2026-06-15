@@ -545,9 +545,11 @@ def transform_measurement_coordinates_with_cone_params(row, cone_params):
     new_row["X1"] = new_row["X1"] + left_padding
     new_row["X2"] = new_row["X2"] + left_padding
 
-    # Check if coordinates are within the final image bounds
+    # Update Width and Height to reflect the cropped image dimensions
     final_width = cone_params["new_width"]
     final_height = cone_params["new_height"]
+    new_row["Width"] = int(final_width)
+    new_row["Height"] = int(final_height)
 
     # Check if coordinates are out of bounds
     is_out_of_bounds = (
