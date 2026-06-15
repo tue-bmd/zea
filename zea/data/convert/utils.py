@@ -71,7 +71,7 @@ def load_avi(file_path, mode="L"):
     """
     frames = []
     with imageio.get_reader(file_path) as reader:
-        for frame in reader:
+        for frame in reader:  # ty: ignore[not-iterable]
             img = Image.fromarray(frame)
             img = img.convert(mode)
             img = np.array(img)

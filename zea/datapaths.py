@@ -229,7 +229,7 @@ def _load_users_yaml(user_config, local, username, hostname):
 
 
 def set_data_paths(
-    user_config: Union[str, dict] = None, local: bool = True, verify: bool = True
+    user_config: Union[str, dict, None] = None, local: bool | None = True, verify: bool = True
 ) -> dict:
     """Get data paths (absolute paths to location of data).
 
@@ -332,7 +332,7 @@ def set_data_paths(
 ## Helper functions for handling user input
 
 
-def _build_user_profile_string(data_paths, local: bool = None):
+def _build_user_profile_string(data_paths, local: bool | None = None):
     """Builds a string that can be written to users.yaml to create a new user profile."""
     tab = "    "  # 4 spaces required in yaml
     base_string = (
@@ -436,11 +436,11 @@ def _check_for_comments_yaml_file(path_str):
         return any("#" in line for line in lines)
 
 
-def create_new_user(user_config_path: str = None, local: bool = None):
+def create_new_user(user_config_path: str | None = None, local: bool | None = None):
     """Creates a new user profile in `users.yaml` if one does not already exist.
 
     Args:
-        user_config (str): Path that points to yaml file with user info.
+        user_config_path (str, optional): Path that points to yaml file with user info.
             Defaults to None. In that case `./users.yaml` is taken
         local (bool): Use local dataset or get from remote (NAS).
             Per machine, the data_root can be set to a local or remote path.
@@ -559,7 +559,7 @@ def create_new_user(user_config_path: str = None, local: bool = None):
     return data_paths
 
 
-def format_data_path(path: str, user: Config = None) -> Path:
+def format_data_path(path: str, user: "Config | None" = None) -> "Path | HFPath":
     """If the path is not absolute, prepend the data_root to it."""
     if Path(path).is_absolute():
         return Path(path)

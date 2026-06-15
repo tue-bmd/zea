@@ -1,5 +1,5 @@
 import json
-from typing import TYPE_CHECKING, Any, Dict, List, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Sequence, Union, cast
 
 import keras
 import numpy as np
@@ -41,7 +41,7 @@ class Pipeline:
 
     def __init__(
         self,
-        operations: List[Operation],
+        operations: Sequence[Union[Operation, "Pipeline"]],
         with_batch_dim: bool = True,
         jit_options: Union[str, None] = "ops",
         jit_kwargs: dict | None = None,
@@ -86,7 +86,7 @@ class Pipeline:
         self._call_pipeline = self.call
         self.name = name
 
-        self._pipeline_layers = operations
+        self._pipeline_layers: List[Union[Operation, "Pipeline"]] = list(operations)
 
         if jit_options not in ["pipeline", "ops", None]:
             raise ValueError("jit_options must be 'pipeline', 'ops', or None")
@@ -223,7 +223,7 @@ class Pipeline:
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
         """
-        operations = [Cast(dtype="float32")]
+        operations: List[Union[Operation, "Pipeline"]] = [Cast(dtype="float32")]
 
         # Add the demodulate operation
         if not baseband:
@@ -483,11 +483,14 @@ class Pipeline:
     def set_params(self, **params):
         """Set parameters for the operations in the pipeline by adding them to the cache."""
         for operation in self.operations:
-            operation_params = {
-                key: value for key, value in params.items() if key in operation.valid_keys
-            }
-            if operation_params:
-                operation.set_input_cache(operation_params)
+            if isinstance(operation, Pipeline):
+                operation.set_params(**params)
+            elif isinstance(operation, Operation):
+                operation_params = {
+                    key: value for key, value in params.items() if key in operation.valid_keys
+                }
+                if operation_params:
+                    operation.set_input_cache(operation_params)
 
     def get_params(self, per_operation: bool = False):
         """Get a snapshot of the current parameters of the operations in the pipeline.
@@ -497,11 +500,20 @@ class Pipeline:
                                   If False, return a single dictionary with all parameters combined.
         """
         if per_operation:
-            return [operation._input_cache.copy() for operation in self.operations]
+            result = []
+            for operation in self.operations:
+                if isinstance(operation, Pipeline):
+                    result.extend(operation.get_params(per_operation=True))
+                elif isinstance(operation, Operation):
+                    result.append(operation._input_cache.copy())
+            return result
         else:
             params = {}
             for operation in self.operations:
-                params.update(operation._input_cache)
+                if isinstance(operation, Pipeline):
+                    params.update(operation.get_params(per_operation=False))
+                elif isinstance(operation, Operation):
+                    params.update(operation._input_cache)
             return params
 
     def __str__(self):
@@ -625,7 +637,7 @@ class Pipeline:
         return pipeline_from_config(Config(config), **kwargs)
 
     @classmethod
-    def from_path(cls, file_path: str, revision: str = None, **kwargs) -> "Pipeline":
+    def from_path(cls, file_path: str, revision: str | None = None, **kwargs) -> "Pipeline":
         """Create a pipeline from a YAML/config file path.
 
         Args:
@@ -721,10 +733,10 @@ class Pipeline:
 
     def prepare_parameters(
         self,
-        parameters: "Parameters" = None,
+        parameters: Union["Parameters", None] = None,
         device: Union[str, None] = None,
         **overrides,
-    ):
+    ) -> Dict[str, Any]:
         """Prepare a :class:`~zea.Parameters` object for the pipeline.
 
         Converts the (validated and derived) parameters needed by this
@@ -768,7 +780,7 @@ class Pipeline:
             needs_keys = self.needs_keys - override_keys
             with backend.device(_device):
                 params_dict = parameters.to_tensor(
-                    include=needs_keys, keep_as_is=self.static_params
+                    include=list(needs_keys), keep_as_is=self.static_params
                 )
 
         # Convert all overrides to tensors
@@ -1064,7 +1076,7 @@ class Beamform(Pipeline):
             )
 
         # Get beamforming ops
-        beamforming = [
+        beamforming: List[Operation] = [
             TOFCorrection(),
             # PfieldWeighting(),  # Inserted conditionally
             beamformer_registry[self.beamformer_type](),
@@ -1075,13 +1087,10 @@ class Beamform(Pipeline):
 
         # Optionally add patching
         if self.num_patches > 1:
-            beamforming = [
-                PatchedGrid(
-                    operations=beamforming,
-                    num_patches=self.num_patches,
-                    **kwargs,
-                )
-            ]
+            beamforming = cast(  # type: ignore[assignment]
+                List[Operation],
+                [PatchedGrid(operations=beamforming, num_patches=self.num_patches, **kwargs)],
+            )
 
         # Reshape the grid to image shape
         beamforming.append(ReshapeGrid())
@@ -1683,7 +1692,7 @@ class Refocus(Operation):
             apod = tx_apodizations
 
         if self.with_batch_dim:
-            decoded = vmap(self._decode, in_axes=(0, None, None))(data, delays_samples, apod)
+            decoded = vmap(self._decode, in_axes=[0, None, None])(data, delays_samples, apod)
         else:
             decoded = self._decode(data, delays_samples, apod)
 
@@ -1718,8 +1727,8 @@ class Refocus(Operation):
 
 
 def make_operation_chain(
-    operation_chain: List[Union[str, Dict, Config, Operation, Pipeline]],
-) -> List[Operation]:
+    operation_chain: List[Union[str, Dict, Config, Operation, "Pipeline"]],
+) -> List[Union[Operation, "Pipeline"]]:
     """Make an operation chain from a custom list of operations.
 
     Args:
@@ -1766,6 +1775,8 @@ def make_operation_chain(
 
             params = operation.get("params", {})
             op_name = operation.get("name")
+            if op_name is None:
+                raise ValueError(f"Operation dict is missing a 'name' key: {operation}")
             operation_cls = get_ops(op_name)
 
             # Check for nested operations at the same level as params

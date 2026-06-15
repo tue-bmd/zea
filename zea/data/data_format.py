@@ -9,6 +9,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 from keras.utils import pad_sequences
+from numpy.typing import ArrayLike
 
 from zea import log
 from zea.data.file import File, validate_file
@@ -118,7 +119,7 @@ def _write_datasets(
     def _add_dataset(
         group_name: str,
         name: str,
-        data: np.ndarray,
+        data: ArrayLike | None,
         description: str,
         unit: str,
         chunk_per_frame: bool = False,
@@ -673,7 +674,7 @@ def generate_zea_dataset(
             **data_and_parameters,
         )
 
-    validate_file(path)
+    validate_file(str(path))
     log.info(f"zea dataset written to {log.yellow(path)}")
 
 

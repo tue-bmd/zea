@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -22,10 +24,37 @@ jobs:
       - name: Install Ruff
         run: |
           pip install -U pip setuptools wheel
-          pip install ruff==0.15.10
+          pip install ruff==0.15.16
 
       - name: Run Linter
         run: ruff check --config pyproject.toml --verbose
 
       - name: Run Formatter
         run: ruff format --config pyproject.toml --check --verbose
+
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      # ty needs zea's dependencies importable to resolve types (no false
+      # positives from unresolved imports). Install the package itself; the
+      # heavy ML backends (jax/torch/tensorflow) are intentionally left out and
+      # their conditional imports are downgraded to warnings in [tool.ty].
+      - name: Install package and ty
+        run: |
+          pip install -U pip setuptools wheel
+          pip install -e .
+          pip install ty==0.0.49
+
+      - name: Run Type Checker
+        run: ty check

@@ -344,6 +344,40 @@ def test_pipeline_get_params_per_operation():
     assert params[1]["y"] == 3
 
 
+def test_nested_pipeline_set_params():
+    """set_params must propagate into nested Pipeline operations."""
+    inner = ops.Pipeline([MultiplyOperation(), AddOperation()], jit_options=None)
+    outer = ops.Pipeline([inner, AddTransmitsOperation()], jit_options=None)
+
+    outer.set_params(x=5, y=3, n_tx=10)
+
+    # Inner operations must have received their params
+    assert inner.operations[0]._input_cache.get("x") == 5
+    assert inner.operations[1]._input_cache.get("y") == 3
+    # Outer-level operation must have received its param
+    assert outer.operations[1]._input_cache.get("n_tx") == 10
+
+
+def test_nested_pipeline_get_params():
+    """get_params must collect parameters from nested Pipeline operations."""
+    inner = ops.Pipeline([MultiplyOperation(), AddOperation()], jit_options=None)
+    outer = ops.Pipeline([inner, AddTransmitsOperation()], jit_options=None)
+
+    outer.set_params(x=5, y=3, n_tx=10)
+
+    flat = outer.get_params()
+    assert flat["x"] == 5
+    assert flat["y"] == 3
+    assert flat["n_tx"] == 10
+
+    per_op = outer.get_params(per_operation=True)
+    # inner contributes 2 dicts (one per inner operation), outer adds 1
+    assert len(per_op) == 3
+    assert per_op[0].get("x") == 5
+    assert per_op[1].get("y") == 3
+    assert per_op[2].get("n_tx") == 10
+
+
 def test_pipeline_validation():
     """Tests the validation of the Pipeline."""
     operations = [

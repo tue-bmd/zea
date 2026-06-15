@@ -4,6 +4,7 @@ This module provides the `BaseModel` class for all zea Keras models.
 """
 
 import importlib
+from typing import TYPE_CHECKING
 
 import keras
 from keras.src.saving.serialization_lib import record_object_after_deserialization
@@ -11,6 +12,11 @@ from keras.src.saving.serialization_lib import record_object_after_deserializati
 from zea import log
 from zea.internal.core import classproperty
 from zea.models.preset_utils import builtin_presets, get_preset_loader, get_preset_saver
+
+if TYPE_CHECKING:
+    # ``Self`` is in ``typing`` only from 3.11; import lazily to keep the
+    # 3.10 floor runtime-clean.
+    from typing_extensions import Self
 
 
 class BaseModel(keras.models.Model):
@@ -20,7 +26,7 @@ class BaseModel(keras.models.Model):
     """
 
     @classmethod
-    def from_config(cls, config):
+    def from_config(cls, config, custom_objects=None) -> "Self":
         """Create a model instance from a configuration dictionary.
 
         The default ``from_config()`` for functional models will return a
@@ -28,12 +34,14 @@ class BaseModel(keras.models.Model):
 
         Args:
             config (dict): Configuration dictionary.
+            custom_objects (dict, optional): Custom objects for deserialization.
+                Passed to super() for compatibility with keras loading utilities.
 
         Returns:
             BaseModel: An instance of the model subclass.
 
         """
-        return cls(**config)
+        return super().from_config(config, custom_objects=custom_objects)
 
     @classproperty
     def presets(cls):
@@ -50,7 +58,7 @@ class BaseModel(keras.models.Model):
         preset,
         load_weights=True,
         **kwargs,
-    ):
+    ) -> "Self":
         """Instantiate a model from a preset.
 
         A preset is a directory of configs, weights, and other file assets used
