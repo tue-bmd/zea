@@ -6,22 +6,53 @@ Besides installation through `PyPI <https://pypi.org/project/zea>`_, we also pro
 
 .. tab-set::
 
-    .. tab-item:: Conda / Pip
+    .. tab-item:: uv
+
+         Add ``zea`` to your project with `uv <https://docs.astral.sh/uv/>`_, which
+         manages the environment and lockfile for you (run ``uv init`` first if you
+         don't have a project yet):
 
          .. code-block:: shell
 
-               conda create -n zea python=3.12 # 3.10, 3.11, or 3.12
+               uv add zea
+
+         Or install it into a plain environment, like ``pip``:
+
+         .. code-block:: shell
+
+               uv venv
+               uv pip install zea
+
+    .. tab-item:: pip
+
+         .. code-block:: shell
+
+               pip install zea
+
+    .. tab-item:: conda
+
+         Use `conda <https://docs.conda.io/>`_ to create and manage the environment.
+
+         .. code-block:: shell
+
+               conda create -n zea python=3.12  # 3.10 - 3.13
                conda activate zea
                pip install zea
-               # ! note, you still need to install a backend
-               # see below for details
 
     .. tab-item:: Docker
+
+         Pre-built images ship with the backends already installed (see :ref:`Docker <docker-information>`).
 
          .. code-block:: shell
 
                docker pull zeahub/all:latest
                docker run --gpus 'all' -it zeahub/all:latest
+
+.. note::
+
+   When installing from PyPI you still need a machine learning backend (JAX, PyTorch,
+   or TensorFlow). See :ref:`Backend <backend-installation>` below. The Docker images
+   already include the backends.
 
 
 .. _backend-installation:

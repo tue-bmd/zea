@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - openh-rf
 
 env:
   REGISTRY: ghcr.io
@@ -63,7 +62,10 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           git fetch origin "$BASE_REF"
-          if git diff --quiet "origin/$BASE_REF" -- Dockerfile pyproject.toml poetry.lock; then
+          # Compare against the just-fetched tip (FETCH_HEAD). On the shallow
+          # checkout used here the remote-tracking ref origin/$BASE_REF is not
+          # updated by `git fetch origin "$BASE_REF"` and may be stale or absent.
+          if git diff --quiet FETCH_HEAD -- Dockerfile pyproject.toml uv.lock; then
             # Verify the branch-tagged image actually exists before deciding to reuse it.
             # It may be absent on first run after this workflow feature was introduced.
             BASE_TAG="${{ env.BASE_IMAGE }}:${{ github.event.pull_request.base.ref }}"
@@ -79,11 +81,10 @@ jobs:
             echo "Image-relevant files changed — building locally"
           fi
 
-      # Free disk space before any docker build. Runs for same-repo builds and fork PRs
-      # that need a local build; skipped for fork PRs reusing the base-branch image.
+      # Free disk space before any docker build. Skipped for fork PRs reusing the base-branch image.
       - name: Free up disk space
         if: >
-          github.event_name != 'pull_request'
+          github.event_name == 'push'
           || github.event.pull_request.head.repo.full_name == github.repository
           || steps.image-check.outputs.changed == 'true'
         run: |
@@ -91,7 +92,7 @@ jobs:
 
       - name: Build and push CI Docker image
         id: build
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -102,10 +103,7 @@ jobs:
             INSTALL_TF=cpu
             DEV=true
           push: true
-          tags: |
-            ${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}
-            ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('{0}:latest', env.BASE_IMAGE) || '' }}
-            ${{ github.event_name == 'push' && format('{0}:{1}', env.BASE_IMAGE, github.ref_name) || '' }}
+          tags: ${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}
           cache-from: type=registry,ref=ghcr.io/tue-bmd/zea/build-cache:all-cpu
           cache-to: type=registry,ref=ghcr.io/tue-bmd/zea/build-cache:all-cpu,mode=max
 
@@ -171,6 +169,7 @@ jobs:
       - uses: ./.github/actions/load-image
         with:
           needs_artifact: ${{ needs.image.outputs.needs_artifact }}
+          docker_image: ${{ needs.image.outputs.docker_image }}
 
       - name: Run Pytest in container
         run: |
@@ -181,7 +180,7 @@ jobs:
             sh -c "pip install -e .[tests] && pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
 
       - name: Upload results to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ env.MAIN_REPO }}
@@ -201,6 +200,7 @@ jobs:
       - uses: ./.github/actions/load-image
         with:
           needs_artifact: ${{ needs.image.outputs.needs_artifact }}
+          docker_image: ${{ needs.image.outputs.docker_image }}
 
       - name: Run heavy tests
         run: |
@@ -216,7 +216,7 @@ jobs:
             sh -lc "pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'heavy' ./tests"
 
       - name: Upload heavy test results to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ env.MAIN_REPO }}
@@ -253,6 +253,7 @@ jobs:
       - uses: ./.github/actions/load-image
         with:
           needs_artifact: ${{ needs.image.outputs.needs_artifact }}
+          docker_image: ${{ needs.image.outputs.docker_image }}
 
       - name: Run ${{ matrix.name }} notebook tests
         run: |
@@ -282,6 +283,7 @@ jobs:
       - uses: ./.github/actions/load-image
         with:
           needs_artifact: ${{ needs.image.outputs.needs_artifact }}
+          docker_image: ${{ needs.image.outputs.docker_image }}
 
       - name: Build documentation with Sphinx (fails on warnings)
         run: |

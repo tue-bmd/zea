@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import numpy as np
 
 from zea.data.spec import (
+    UNITS,
     AlignedData,
     Annotations,
     BeamformedData,
@@ -226,7 +227,7 @@ def rst_dropdown(cls, title, base_indent=0, open_=False, compact=False) -> str:
 FILE_TREE = """\
 .. code-block:: text
 
-   data_file.hdf5         (attrs: us_machine, description, zea_version)
+   data_file.hdf5         (attrs: us_machine, description, zea_version, acquisition_time)
    \u251c\u2500\u2500 data/
    \u2502   \u251c\u2500\u2500 raw_data                  float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
    \u2502   \u251c\u2500\u2500 aligned_data/             group (AlignedData)
@@ -277,12 +278,17 @@ ROOT_ATTRS_TABLE = """\
    * - ``description``
      - ``str``
      - Free-text description of the acquisition.
-     -
+     - e.g. ``"Carotid artery scan with Doppler."``
      - |badge-opt|
    * - ``zea_version``
      - ``str``
      - Version of zea that wrote this file (set automatically).
-     -
+     - e.g. ``"0.1.0"``
+     - |badge-opt|
+   * - ``acquisition_time``
+     - ``str``
+     - Timestamp (UTC) of acquisition in ISO 8601 format.
+     - e.g. ``"2024-01-30T15:45:00Z"``
      - |badge-opt|
 """
 
@@ -299,6 +305,28 @@ MAP_DESCRIPTIONS = {
     "tissue_doppler": "Tissue Doppler velocity map in m/s. Values are ``float32``.",
     "color_doppler": "Color Doppler velocity map in m/s. Positive = towards probe. Values are ``float32``.",  # noqa: E501
 }
+
+
+def rst_units_table() -> str:
+    """Render the :data:`zea.data.spec.UNITS` mapping as a reference table.
+
+    Keeps the documented unit symbols in sync with the single source of truth
+    in ``spec.py`` — every ``unit`` shown in the field tables below is defined here.
+    """
+    lines = [
+        ".. list-table::",
+        "   :header-rows: 1",
+        "   :widths: 20 80",
+        "",
+        "   * - Symbol",
+        "     - Meaning",
+    ]
+    for symbol, meaning in UNITS.items():
+        lines += [
+            f"   * - ``{symbol}``",
+            f"     - {meaning}",
+        ]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +356,20 @@ def generate() -> str:
         "Stored as HDF5 root-level attributes (not groups).",
         "",
         ROOT_ATTRS_TABLE,
+        "",
+    ]
+
+    # --- Units legend ---------------------------------------------------------
+    lines += [
+        ".. _data-spec-units:",
+        "",
+        "Units",
+        "~~~~~",
+        "",
+        "Unit symbols used in the ``Unit`` column of the field tables below.",
+        "A unit of ``-`` denotes a unitless (dimensionless) quantity.",
+        "",
+        rst_units_table(),
         "",
     ]
 

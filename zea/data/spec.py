@@ -1,5 +1,6 @@
 from collections import defaultdict
 from dataclasses import MISSING, dataclass, field, fields
+from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _get_pkg_version
 from pathlib import Path
@@ -17,6 +18,7 @@ UNITS = {
     "m": "meters",
     "Hz": "Hertz",
     "s": "seconds",
+    "V": "volts",
     "-": "unitless",
     "rad": "radians",
     "dB": "decibels",
@@ -752,8 +754,8 @@ class Image(Map):
         "values": {
             "dtype": (np.float32, np.uint8),
             "shape": (
-                ("n_frames", "x", "z", "y"),
-                ("n_frames", "x", "z"),
+                ("n_frames", "z", "x", "y"),
+                ("n_frames", "z", "x"),
             ),
         },
     }
@@ -856,7 +858,7 @@ class EnvelopeData(FloatMap):
     """Envelope-detected data with per-pixel Cartesian coordinates.
 
     Args:
-        values: The envelope data of shape ``(n_frames, x, z)`` or
+        values: The envelope data of shape ``(n_frames, z, x)`` or
             ``(n_frames, z, x, y)`` and type float32.
         coordinates: Per-pixel Cartesian positions in metres, shape ``(*values.shape, 3)``.
             The leading frame axis may be omitted to broadcast one coordinate grid
@@ -949,7 +951,7 @@ class TissueDopplerMap(FloatMap):
         super().__post_init__()
 
         if self.unit is not None and self.unit != "m/s":
-            raise ValueError(f"SWE map unit should be 'm/s', got '{self.unit}'")
+            raise ValueError(f"Tissue Doppler map unit should be 'm/s', got '{self.unit}'")
 
 
 @dataclass
@@ -968,7 +970,7 @@ class ColorDopplerMap(FloatMap):
         super().__post_init__()
 
         if self.unit is not None and self.unit != "m/s":
-            raise ValueError(f"SWE map unit should be 'm/s', got '{self.unit}'")
+            raise ValueError(f"Color Doppler map unit should be 'm/s', got '{self.unit}'")
 
 
 @dataclass(init=False)
@@ -1141,8 +1143,8 @@ class ScanSpec(Spec):
             shape (n_tx, 3). This is the (x, y, z) position from which the beam
             is transmitted.
         polar_angles: The polar angles in radians of the transmit beams of shape (n_tx,).
-        time_to_next_transmit: The time in s between subsequent transmit events
-            of shape (n_frames, n_tx).
+        time_to_next_transmit: The time in s between subsequent transmit events.
+            Shape is either (n_frames, n_tx) or flat (n_frames * n_tx - 1,).
         azimuth_angles: The azimuthal angles in radians of the transmit beams of
             shape (n_tx,).
         sound_speed: The speed of sound in meters per second.
@@ -1183,7 +1185,10 @@ class ScanSpec(Spec):
         "focus_distances": {"dtype": np.float32, "shape": ("n_tx",)},
         "transmit_origins": {"dtype": np.float32, "shape": ("n_tx", 3)},
         "polar_angles": {"dtype": np.float32, "shape": ("n_tx",)},
-        "time_to_next_transmit": {"dtype": np.float32, "shape": ("n_frames", "n_tx")},
+        "time_to_next_transmit": {
+            "dtype": np.float32,
+            "shape": (("n_frames", "n_tx"), ("n_timing_intervals",)),
+        },
         "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
         "sound_speed": {"dtype": np.float32, "shape": ()},
         "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
@@ -1420,7 +1425,7 @@ class Subject(Spec):
         type: Subject type, e.g. human, phantom, animal.
         age: Subject age in years.
         sex: Subject sex.
-        fat: Subject fat percentage.
+        fat_percentage: Subject fat percentage.
     """
 
     id: str | None = None
@@ -1457,22 +1462,28 @@ class Subject(Spec):
 
 @dataclass
 class Signal(Spec):
-    """Base class for additional signals with timing and sampling-frequency metadata.
+    """Base class for additional signals with timing metadata.
 
     Args:
         start_time_offset: Time offset in seconds between the first transmit event
             of the ultrasound acquisition and sample 0 of this data. Negative
             means this data starts before the first transmit event; positive
             means it starts after.
-        sampling_frequency: Sampling frequency in Hz for the additional signal samples.
+        sampling_frequency: Sampling frequency in Hz for uniformly sampled data.
+        timestamps: Explicit sample timestamps in seconds of shape (T,), relative
+            to sample 0. Must start at 0.
+
+    Exactly one of ``sampling_frequency`` or ``timestamps`` must be provided.
     """
 
     start_time_offset: np.ndarray | float
-    sampling_frequency: np.ndarray | float
+    sampling_frequency: np.ndarray | float | None = field(default=None, kw_only=True)
+    timestamps: np.ndarray | None = field(default=None, kw_only=True)
 
     SCHEMA = {
         "start_time_offset": {"dtype": np.float32, "shape": ()},
         "sampling_frequency": {"dtype": np.float32, "shape": ()},
+        "timestamps": {"dtype": np.float32, "shape": ("T",)},
     }
 
     FIELD_METADATA = {
@@ -1486,13 +1497,29 @@ class Signal(Spec):
             ),
         },
         "sampling_frequency": {"unit": "Hz", "description": "Sampling frequency."},
+        "timestamps": {
+            "unit": "s",
+            "description": "Explicit sample timestamps relative to sample 0.",
+        },
     }
 
     def __post_init__(self):
         super().__post_init__()
 
-        if self.sampling_frequency <= 0:
+        if (self.sampling_frequency is None) == (self.timestamps is None):
+            raise ValueError("Provide exactly one of 'sampling_frequency' or 'timestamps'.")
+        if self.sampling_frequency is not None and self.sampling_frequency <= 0:
             raise ValueError(f"Sampling frequency must be positive, got {self.sampling_frequency}")
+        if self.timestamps is not None:
+            signal_samples = getattr(self, "samples", None)
+            if signal_samples is None:
+                signal_samples = getattr(self, "translation", None)
+            if signal_samples is not None and self.timestamps.shape[0] != signal_samples.shape[0]:
+                raise ValueError("Timestamps must have the same length as the signal samples.")
+            if not np.isclose(self.timestamps[0], 0.0):
+                raise ValueError("Sample timestamps must start at 0.")
+            if np.any(np.diff(self.timestamps) <= 0):
+                raise ValueError("Sample timestamps must be strictly increasing.")
 
 
 @dataclass
@@ -1512,6 +1539,8 @@ class ProbePose(Signal):
         start_time_offset: Time offset in seconds between the first transmit event
             of the ultrasound acquisition and sample 0 of this data.
         sampling_frequency: Sampling frequency in Hz for probe pose samples.
+        timestamps: Explicit probe pose timestamps in seconds of shape (T,),
+            relative to sample 0.
     """
 
     translation: np.ndarray
@@ -1588,6 +1617,10 @@ class Signal1D(Signal):
         start_time_offset: Time offset in seconds between the first transmit event
             of the ultrasound acquisition and sample 0 of this data.
         sampling_frequency: Sampling frequency in Hz for signal samples.
+        timestamps: Explicit signal timestamps in seconds of shape (T,), relative
+            to sample 0.
+
+    Exactly one of ``sampling_frequency`` or ``timestamps`` must be provided.
     """
 
     samples: np.ndarray
@@ -1612,6 +1645,10 @@ class SignalND(Signal):
         start_time_offset: Time offset in seconds between the first transmit event
             of the ultrasound acquisition and sample 0 of this data.
         sampling_frequency: Sampling frequency in Hz for signal samples.
+        timestamps: Explicit signal timestamps in seconds of shape (T,), relative
+            to sample 0.
+
+    Exactly one of ``sampling_frequency`` or ``timestamps`` must be provided.
     """
 
     samples: np.ndarray
@@ -1839,6 +1876,7 @@ class FileSpec(Spec):
     Example:
         .. doctest::
 
+            >>> from datetime import datetime, timezone
             >>> from zea.data.spec import FileSpec
             >>> import numpy as np
 
@@ -1858,9 +1896,12 @@ class FileSpec(Spec):
             ...         "polar_angles": np.zeros(4, dtype=np.float32),
             ...     },
             ...     probe={"name": "test_probe", "probe_geometry": np.zeros((8, 3))},
+            ...     acquisition_time=datetime.now(timezone.utc).isoformat(),
             ... )
             >>> dataset.data.raw_data.shape
             (2, 4, 64, 8, 1)
+            >>> dataset.acquisition_time is not None
+            True
     """
 
     # NOTE: data and scan are intentionally NOT dataclass fields — they are
@@ -1873,6 +1914,7 @@ class FileSpec(Spec):
     probe: ProbeSpec | dict | None = None
     us_machine: str | None = None
     description: str | None = None
+    acquisition_time: str | None = None
 
     # tells the SCHEMA ↔ fields consistency test that 'tracks' is intentionally
     # absent from SCHEMA (list[TrackSpec] doesn't fit the standard SCHEMA patterns)
@@ -1885,6 +1927,17 @@ class FileSpec(Spec):
         "probe": {"spec": ProbeSpec},
         "us_machine": {"dtype": str, "shape": ()},
         "description": {"dtype": str, "shape": ()},
+        "acquisition_time": {"dtype": str, "shape": ()},
+    }
+
+    FIELD_METADATA = {
+        "acquisition_time": {
+            "description": (
+                "UTC acquisition timestamp in ISO 8601 format "
+                "(e.g. '2026-06-12T14:30:00+00:00'). "
+                "Auto-set to the moment of saving for non-human subjects."
+            ),
+        },
     }
 
     def __init__(
@@ -1899,6 +1952,7 @@ class FileSpec(Spec):
         probe: "ProbeSpec | dict | None" = None,
         us_machine: "str | None" = None,
         description: "str | None" = None,
+        acquisition_time: "str | None" = None,
     ):
         if data is not None or scan is not None:
             if tracks:
@@ -1923,6 +1977,7 @@ class FileSpec(Spec):
         self.probe = probe
         self.us_machine = us_machine
         self.description = description
+        self.acquisition_time = acquisition_time
 
         self.__post_init__(_implicit_track)
 
@@ -2021,6 +2076,8 @@ class FileSpec(Spec):
                     f"got min={self.track_schedule.min()}, max={self.track_schedule.max()}"
                 )
 
+        self._normalize_time_to_next_transmit()
+
         # Warn if multi-track frame counts differ without a schedule
         if len(self.tracks) > 1 and self.track_schedule is None:
             frame_counts = []
@@ -2055,6 +2112,44 @@ class FileSpec(Spec):
                         if len(set(field_sizes.values())) > 1:
                             raise ValueError(self._format_inconsistent_dimension(dim, field_sizes))
 
+    def _normalize_time_to_next_transmit(self) -> None:
+        """Pad flat timing arrays and reshape to (n_frames * n_tx) by padding last
+        frame with a zero."""
+        for i, track in enumerate(self.tracks):
+            raw_data = track.data.raw_data
+            scan = track.scan
+            if raw_data is None or scan is None or scan.time_to_next_transmit is None:
+                continue
+
+            matrix_shape = raw_data.shape[:2]
+            expected_flat_count = max(int(np.prod(matrix_shape)) - 1, 0)
+            expected_flat_shape = (expected_flat_count,)
+            t2nt = np.asarray(scan.time_to_next_transmit, dtype=np.float32)
+
+            if t2nt.shape == matrix_shape:
+                scan.time_to_next_transmit = t2nt
+                continue
+
+            if t2nt.shape != expected_flat_shape:
+                raise ValueError(
+                    f"tracks[{i}].scan.time_to_next_transmit has shape {t2nt.shape}, "
+                    f"expected {matrix_shape} or flat length {expected_flat_count}."
+                )
+
+            if (
+                len(self.tracks) > 1
+                and self.track_schedule is not None
+                and len(self.track_schedule) > 0
+                and int(self.track_schedule[-1]) != i
+            ):
+                raise ValueError(
+                    f"tracks[{i}].scan.time_to_next_transmit omits the final interval, "
+                    "but this track is not the final track in track_schedule. "
+                    f"Provide a full {matrix_shape} matrix for this track."
+                )
+
+            scan.time_to_next_transmit = np.pad(t2nt, (0, 1)).reshape(matrix_shape)
+
     def to_dict(self) -> dict:
         """Return this spec as a nested dictionary.
 
@@ -2081,6 +2176,33 @@ class FileSpec(Spec):
 
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+
+        subject_type = None
+        if isinstance(self.metadata, MetadataSpec):
+            subject = self.metadata.subject
+            if isinstance(subject, Subject) and subject.type is not None:
+                subject_type = str(subject.type).strip().casefold()
+
+        is_human = subject_type == "human"
+
+        if self.acquisition_time is not None:
+            try:
+                dt = datetime.fromisoformat(self.acquisition_time)
+            except ValueError as e:
+                raise ValueError(f"Invalid acquisition_time: {e}") from e
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            self.acquisition_time = dt.astimezone(timezone.utc).isoformat()
+            if is_human:
+                log.warning(
+                    "PHI WARNING: 'acquisition_time' is set for a human subject. "
+                    "Recording acquisition timestamps for human data constitutes "
+                    "Protected Health Information (PHI) under HIPAA and similar "
+                    "regulations. Ensure you have appropriate authorization and "
+                    "de-identification measures in place before sharing this file."
+                )
+        elif not is_human:
+            self.acquisition_time = datetime.now(timezone.utc).isoformat()
 
         with File(str(path), "w") as f:
             f.attrs["zea_version"] = _zea_version

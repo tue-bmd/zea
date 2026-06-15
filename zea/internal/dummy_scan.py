@@ -1,4 +1,4 @@
-"""Module to create dummy Parameters objects for testing and simulation purposes."""
+"""Module to create dummy :class:`~zea.Parameters` objects for testing and simulation."""
 
 import numpy as np
 
@@ -67,7 +67,7 @@ def _get_probe(kind) -> Probe:
         raise ValueError(f"Unknown probe kind: {kind}")
 
 
-def _get_constant_scan_kwargs():
+def _get_constant_parameters_kwargs():
     return {
         "lens_sound_speed": 1000,
         "lens_thickness": 1e-3,
@@ -91,9 +91,9 @@ def _get_lims_and_gridsize(center_frequency, sound_speed):
     return {"xlims": xlims, "zlims": zlims, "grid_size_x": gridsize[0], "grid_size_z": gridsize[1]}
 
 
-def _get_planewave_scan(ultrasound_probe, grid_type, **kwargs):
-    """Returns a scan for ultrasound simulation tests."""
-    constant_scan_kwargs = _get_constant_scan_kwargs()
+def _get_planewave_parameters(ultrasound_probe, grid_type, **kwargs):
+    """Returns plane-wave Parameters for simulation tests."""
+    constant_scan_kwargs = _get_constant_parameters_kwargs()
     n_el = ultrasound_probe.n_el
     n_tx = 8
 
@@ -130,7 +130,7 @@ def _get_planewave_scan(ultrasound_probe, grid_type, **kwargs):
     )
 
 
-def _get_multistatic_scan(ultrasound_probe, grid_type, **kwargs):
+def _get_multistatic_parameters(ultrasound_probe, grid_type, **kwargs):
     n_el = ultrasound_probe.n_el
     n_tx = 8
 
@@ -142,7 +142,7 @@ def _get_multistatic_scan(ultrasound_probe, grid_type, **kwargs):
     focus_distances = np.zeros(n_tx)
     t0_delays = np.zeros((n_tx, n_el))
 
-    constant_scan_kwargs = _get_constant_scan_kwargs()
+    constant_scan_kwargs = _get_constant_parameters_kwargs()
 
     return Parameters(
         n_tx=n_tx,
@@ -166,9 +166,9 @@ def _get_multistatic_scan(ultrasound_probe, grid_type, **kwargs):
     )
 
 
-def _get_diverging_scan(ultrasound_probe, grid_type, **kwargs):
-    """Returns a scan for ultrasound simulation tests."""
-    constant_scan_kwargs = _get_constant_scan_kwargs()
+def _get_diverging_parameters(ultrasound_probe, grid_type, **kwargs):
+    """Returns diverging-wave Parameters for simulation tests."""
+    constant_scan_kwargs = _get_constant_parameters_kwargs()
     n_el = ultrasound_probe.n_el
     n_tx = 8
 
@@ -211,9 +211,9 @@ def _get_diverging_scan(ultrasound_probe, grid_type, **kwargs):
     )
 
 
-def _get_focused_scan(ultrasound_probe, grid_type, **kwargs):
-    """Returns a scan for ultrasound simulation tests."""
-    constant_scan_kwargs = _get_constant_scan_kwargs()
+def _get_focused_parameters(ultrasound_probe, grid_type, **kwargs):
+    """Returns focused-transmit Parameters for simulation tests."""
+    constant_scan_kwargs = _get_constant_parameters_kwargs()
     n_el = ultrasound_probe.n_el
     n_tx = 8
 
@@ -256,9 +256,9 @@ def _get_focused_scan(ultrasound_probe, grid_type, **kwargs):
     )
 
 
-def _get_linescan_scan(ultrasound_probe, grid_type, **kwargs):
-    """Returns a scan for ultrasound simulation tests."""
-    constant_scan_kwargs = _get_constant_scan_kwargs()
+def _get_linescan_parameters(ultrasound_probe, grid_type, **kwargs):
+    """Returns line-scan Parameters for simulation tests."""
+    constant_scan_kwargs = _get_constant_parameters_kwargs()
     n_el = ultrasound_probe.n_el
     n_tx = 8
 
@@ -314,22 +314,27 @@ def _get_linescan_scan(ultrasound_probe, grid_type, **kwargs):
     )
 
 
-def _get_scan(ultrasound_probe, kind, grid_type="cartesian", **kwargs) -> Parameters:
+def _get_parameters(ultrasound_probe, kind, grid_type="cartesian", **kwargs) -> Parameters:
     if kind == "planewave":
-        return _get_planewave_scan(ultrasound_probe, grid_type, **kwargs)
+        return _get_planewave_parameters(ultrasound_probe, grid_type, **kwargs)
     elif kind == "multistatic":
-        return _get_multistatic_scan(ultrasound_probe, grid_type, **kwargs)
+        return _get_multistatic_parameters(ultrasound_probe, grid_type, **kwargs)
     elif kind == "diverging":
-        return _get_diverging_scan(ultrasound_probe, grid_type, **kwargs)
+        return _get_diverging_parameters(ultrasound_probe, grid_type, **kwargs)
     elif kind == "focused":
-        return _get_focused_scan(ultrasound_probe, grid_type, **kwargs)
+        return _get_focused_parameters(ultrasound_probe, grid_type, **kwargs)
     elif kind == "linescan":
-        return _get_linescan_scan(ultrasound_probe, grid_type, **kwargs)
+        return _get_linescan_parameters(ultrasound_probe, grid_type, **kwargs)
     else:
         raise ValueError(f"Unknown scan kind: {kind}")
 
 
-def get_scan(kind="planewave", probe_kind="linear", grid_type="cartesian", **kwargs) -> Parameters:
-    """Returns a scan for ultrasound simulation tests."""
+def get_parameters(
+    kind="planewave",
+    probe_kind="linear",
+    grid_type="cartesian",
+    **kwargs,
+) -> Parameters:
+    """Returns a dummy :class:`~zea.Parameters` object for testing and simulation."""
     ultrasound_probe = _get_probe(probe_kind)
-    return _get_scan(ultrasound_probe, kind, grid_type, **kwargs)
+    return _get_parameters(ultrasound_probe, kind, grid_type, **kwargs)

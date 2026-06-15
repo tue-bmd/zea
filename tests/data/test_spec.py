@@ -312,6 +312,53 @@ def test_signal_nd_accepts_variable_trailing_dimensions_with_ellipsis():
     assert signal.samples.shape == (10, 3, 4, 5)
 
 
+def test_signal_1d_accepts_explicit_timestamps():
+    signal = Signal1D(
+        samples=np.zeros(10, dtype=np.float32),
+        start_time_offset=np.float32(0.0),
+        timestamps=np.linspace(0.0, 0.9, 10, dtype=np.float32),
+    )
+
+    assert signal.timestamps.shape == (10,)
+
+
+def test_signal_1d_rejects_timestamp_length_mismatch():
+    with pytest.raises(ValueError, match="same length"):
+        Signal1D(
+            samples=np.zeros(10, dtype=np.float32),
+            start_time_offset=np.float32(0.0),
+            timestamps=np.linspace(0.0, 0.8, 9, dtype=np.float32),
+        )
+
+
+def test_signal_1d_rejects_non_monotonic_timestamps():
+    with pytest.raises(ValueError, match="strictly increasing"):
+        Signal1D(
+            samples=np.zeros(3, dtype=np.float32),
+            start_time_offset=np.float32(0.0),
+            timestamps=np.array([0.0, 0.2, 0.1], dtype=np.float32),
+        )
+
+
+def test_signal_1d_rejects_timestamps_not_starting_at_zero():
+    with pytest.raises(ValueError, match="start at 0"):
+        Signal1D(
+            samples=np.zeros(3, dtype=np.float32),
+            start_time_offset=np.float32(0.0),
+            timestamps=np.array([0.1, 0.2, 0.3], dtype=np.float32),
+        )
+
+
+def test_signal_1d_rejects_sampling_frequency_and_timestamps():
+    with pytest.raises(ValueError, match="exactly one"):
+        Signal1D(
+            samples=np.zeros(3, dtype=np.float32),
+            start_time_offset=np.float32(0.0),
+            sampling_frequency=np.float32(1000.0),
+            timestamps=np.array([0.0, 0.1, 0.2], dtype=np.float32),
+        )
+
+
 def test_signal_nd_rejects_missing_time_dimension_for_ellipsis_shape():
     with pytest.raises(ValueError, match=r"samples has shape \(\), expected one of"):
         SignalND(
@@ -628,6 +675,108 @@ def test_subject_id_warning_includes_field_metadata_description(tmp_path):
     assert any("subject-wise splits" in m for m in messages)
 
 
+def test_acquisition_time_auto_set_for_non_human(tmp_path):
+    from datetime import datetime, timezone
+
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    path = tmp_path / "acq_time_non_human.hdf5"
+    File.create(
+        path,
+        data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
+        metadata={"subject": {"type": "phantom"}},
+        overwrite=True,
+    )
+    with File(path) as f:
+        ts = f.acquisition_time
+    assert ts is not None
+    assert ts.tzinfo is not None
+    assert ts.tzinfo == timezone.utc or ts.utcoffset().total_seconds() == 0
+    assert isinstance(ts, datetime)
+
+
+def test_acquisition_time_not_set_for_human(tmp_path):
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    path = tmp_path / "acq_time_human_no_stamp.hdf5"
+    File.create(
+        path,
+        data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
+        metadata={"subject": {"type": "human"}},
+        overwrite=True,
+    )
+    with File(path) as f:
+        assert f.acquisition_time is None
+
+
+def test_acquisition_time_explicit_human_emits_phi_warning(tmp_path):
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    path = tmp_path / "acq_time_human_explicit.hdf5"
+    with patch("zea.log.warning") as mock_warn:
+        File.create(
+            path,
+            data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
+            metadata={"subject": {"type": "human"}},
+            acquisition_time="2026-06-12T14:30:00+00:00",
+            overwrite=True,
+        )
+    messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+    assert any("PHI" in m for m in messages)
+    assert any("Protected Health Information" in m for m in messages)
+
+
+def test_acquisition_time_naive_string_assumed_utc(tmp_path):
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    path = tmp_path / "acq_time_naive.hdf5"
+    File.create(
+        path,
+        data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        probe=_probe_minimal(n_el=n_el),
+        acquisition_time="2026-06-12T14:30:00",  # no tzinfo
+        overwrite=True,
+    )
+    with File(path) as f:
+        ts = f.acquisition_time
+    assert ts.utcoffset().total_seconds() == 0
+    assert ts.year == 2026 and ts.hour == 14
+
+
+def test_acquisition_time_malformed_raises(tmp_path):
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    path = tmp_path / "acq_time_bad.hdf5"
+    with pytest.raises(ValueError, match="Invalid acquisition_time"):
+        File.create(
+            path,
+            data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
+            acquisition_time="not-a-date",
+            overwrite=True,
+        )
+
+
+def test_acquisition_time_human_type_whitespace_and_case(tmp_path):
+    """' HUMAN ' and 'Human' should both suppress auto-stamp."""
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    for subject_type in (" HUMAN ", "Human", "HUMAN"):
+        path = tmp_path / f"acq_time_{subject_type.strip()}.hdf5"
+        File.create(
+            path,
+            data=_example_data(n_frames, n_tx, n_el, n_ax, n_ch),
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal(n_el=n_el),
+            metadata={"subject": {"type": subject_type}},
+            overwrite=True,
+        )
+        with File(path) as f:
+            assert f.acquisition_time is None, f"expected no stamp for type={subject_type!r}"
+
+
 class TestScanValidationErrors:
     """TypeError / ValueError raised by Scan spec validation."""
 
@@ -804,8 +953,8 @@ class TestMetadataAndMetricsValidationErrors:
             Subject(age="forty two")
 
     def test_signal_missing_required_field_raises(self):
-        """Signal1D requires both start_time_offset and sampling_frequency."""
-        with pytest.raises(TypeError, match="sampling_frequency"):
+        """Signal1D requires either sampling_frequency or timestamps."""
+        with pytest.raises(ValueError, match="sampling_frequency|timestamps"):
             Signal1D(samples=np.zeros(100, dtype=np.float32), start_time_offset=np.float32(0.0))
 
     def test_metrics_wrong_shape_raises(self):
@@ -1461,3 +1610,32 @@ class TestProbeSpec:
         with File(path) as f:
             assert f.probe.name == "my_probe"
             assert "probe" in f
+
+
+def _all_spec_subclasses(cls=Spec):
+    """Recursively collect every Spec subclass defined in the module."""
+    subclasses = set()
+    for sub in cls.__subclasses__():
+        subclasses.add(sub)
+        subclasses |= _all_spec_subclasses(sub)
+    return subclasses
+
+
+def test_field_metadata_units_are_defined():
+    """Every unit referenced in a spec's FIELD_METADATA must be defined in UNITS.
+
+    Guards against typos and undocumented unit symbols (the doc generator renders
+    UNITS as the units legend, so an undefined unit would appear without a meaning).
+    """
+    undefined = []
+    for cls in _all_spec_subclasses():
+        field_metadata = getattr(cls, "FIELD_METADATA", {})
+        for field_name, meta in field_metadata.items():
+            unit = meta.get("unit")
+            if unit is not None and unit not in spec_module.UNITS:
+                undefined.append(f"{cls.__name__}.{field_name}: {unit!r}")
+    assert not undefined, (
+        "Found units in FIELD_METADATA not defined in zea.data.spec.UNITS: "
+        + ", ".join(sorted(undefined))
+        + ". Add the symbol to UNITS (it is the source of truth rendered in the docs)."
+    )

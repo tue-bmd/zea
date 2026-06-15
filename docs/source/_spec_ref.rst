@@ -13,7 +13,7 @@ Every ``zea`` HDF5 file follows the layout shown below.
 
 .. code-block:: text
 
-   data_file.hdf5         (attrs: us_machine, description, zea_version)
+   data_file.hdf5         (attrs: us_machine, description, zea_version, acquisition_time)
    ├── data/
    │   ├── raw_data                  float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
    │   ├── aligned_data/             group (AlignedData)
@@ -68,14 +68,54 @@ Stored as HDF5 root-level attributes (not groups).
    * - ``description``
      - ``str``
      - Free-text description of the acquisition.
-     -
+     - e.g. ``"Carotid artery scan with Doppler."``
      - |badge-opt|
    * - ``zea_version``
      - ``str``
      - Version of zea that wrote this file (set automatically).
-     -
+     - e.g. ``"0.1.0"``
+     - |badge-opt|
+   * - ``acquisition_time``
+     - ``str``
+     - Timestamp (UTC) of acquisition in ISO 8601 format.
+     - e.g. ``"2024-01-30T15:45:00Z"``
      - |badge-opt|
 
+
+.. _data-spec-units:
+
+Units
+~~~~~
+
+Unit symbols used in the ``Unit`` column of the field tables below.
+A unit of ``-`` denotes a unitless (dimensionless) quantity.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Symbol
+     - Meaning
+   * - ``m/s``
+     - meters per second
+   * - ``m``
+     - meters
+   * - ``Hz``
+     - Hertz
+   * - ``s``
+     - seconds
+   * - ``V``
+     - volts
+   * - ``-``
+     - unitless
+   * - ``rad``
+     - radians
+   * - ``dB``
+     - decibels
+   * - ``#``
+     - count
+   * - ``%``
+     - percent
 
 .. _group-reference:
 
@@ -321,7 +361,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32`` | ``uint8``
-              - (n_frames, x, z, y) or (n_frames, x, z)
+              - (n_frames, z, x, y) or (n_frames, z, x)
               - –
               - |badge-req|
             * - ``coordinates``
@@ -720,7 +760,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - |badge-req|
          * - ``time_to_next_transmit``
            - ``float32``
-           - (n_frames, n_tx)
+           - (n_frames, n_tx) or (n_timing_intervals)
            - s
            - Time between transmit events.
            - |badge-opt|
@@ -1006,7 +1046,13 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Hz
               - Sampling frequency.
-              - |badge-req|
+              - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (T)
+              - s
+              - Explicit sample timestamps relative to sample 0.
+              - |badge-opt|
 
 
       .. dropdown:: ``ecg / voice_narration`` — Signal1D
@@ -1040,7 +1086,13 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Hz
               - Sampling frequency.
-              - |badge-req|
+              - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (T)
+              - s
+              - Explicit sample timestamps relative to sample 0.
+              - |badge-opt|
 
 
    .. tab-item:: metrics

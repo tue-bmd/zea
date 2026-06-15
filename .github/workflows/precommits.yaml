@@ -30,7 +30,7 @@ jobs:
           pre-commit run check-yaml --all-files
           pre-commit run check-merge-conflict --all-files
           pre-commit run detect-private-key --all-files
-          pre-commit run poetry-check --all-files
+          pre-commit run uv-lock --all-files
           pre-commit run notebook-clean-and-check --all-files
         continue-on-error: true
 
