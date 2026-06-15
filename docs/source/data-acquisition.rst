@@ -308,11 +308,15 @@ the full timing of the acquisition.
     ...     # access the global timing information for the planewave track:
     ...     planewave_track.timestamps
     ...     # ... process with e.g. a plane-wave Doppler pipeline
+    ...     # access global timestamps for all transmit events in the file:
+    ...     f.timestamps
     ['focused_bmode', 'planewave_doppler']
     array([[0.    , 0.0001, 0.0002],
            [0.0007, 0.0008, 0.0009]], dtype=float32)
     array([[0.0003, 0.0005],
            [0.001 , 0.0012]], dtype=float32)
+    array([0.    , 0.0001, 0.0002, 0.0003, 0.0005, 0.0007, 0.0008, 0.0009,
+           0.001 , 0.0012], dtype=float32)
 
 .. testcleanup::
 
