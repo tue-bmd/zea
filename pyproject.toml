@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zea"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
     { name = "Tristan Stevens", email = "t.s.w.stevens@tue.nl" },
@@ -120,7 +120,7 @@ docs = [
     "IPython",
 ]
 jax = [
-    "jax[cuda12-pip]>=0.4.26"
+    "jax[cuda12]>=0.4.26"
 ]
 display = [
     "opencv-python>=4",
