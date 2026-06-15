@@ -297,7 +297,9 @@ def main():
 
     assert args.src.exists(), f"Source path {args.src} does not exist."
     assert args.dst.exists(), f"Destination path {args.dst} does not exist."
-    assert args.src.is_dir(), f"Source path {args.src} is not a directory."
+    assert args.src.is_dir() or args.src.suffix == ".zip", (
+        f"Source path {args.src} is not a directory or `.zip` file"
+    )
     assert args.dst.is_dir(), f"Destination path {args.dst} is not a directory."
 
     if args.dataset == "echonet":

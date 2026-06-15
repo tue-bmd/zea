@@ -644,12 +644,44 @@ def transform_measurements_csv(csv_path, cone_params_csv=None):
 
 
 def unzip(src: Path, dst: Path) -> Path:
-    assert src.exists(), f"Source path {src} does not exist."
+    """Unzips a .zip file to a directory.
+
+    Will check if the unzip has already been fully completed by checking for a file named
+    ".fully_unzipped" in the destination directory.
+
+    Args:
+        src (Path): Path to the .zip file to unzip.
+        dst (Path): Path to the directory where the files will be unzipped.
+
+    Returns:
+        Path: Path to the unzipped directory.
+    """
+
+    already_unzipped_filepath = dst / ".fully_unzipped"
+
+    if already_unzipped_filepath.exists():
+        log.info("Files already fully unzipped. Skipping unzipping.")
+        return dst
+
+    if dst.exists() and dst.is_dir() and len(list(dst.iterdir())) > 0:
+        raise ValueError(
+            f"Destination directory {dst} is not empty, but the file {already_unzipped_filepath} "
+            "does not exist. Maybe the previous unzip attempt failed. Please remove the directory "
+            "and try again."
+        )
+
+    if not src.exists():
+        raise FileNotFoundError(f"Source file {src} does not exist.")
 
     log.info(f"Unzipping {src} to {dst}...")
     with zipfile.ZipFile(src, "r") as zip_ref:
-        zip_ref.extractall(dst)
+        for member in tqdm(zip_ref.namelist(), desc="Extracting files"):
+            zip_ref.extract(member, dst)
     log.info("Unzipping completed.")
+
+    # Create file to indicate all files have been unzipped
+    already_unzipped_filepath.touch()
+
     return dst
 
 
@@ -677,8 +709,8 @@ def convert_echonetlvh(
     # Check if unzip is needed
     if src.suffix == ".zip":
         tmp_dir = dst / "unzipped_original_files"
-        tmp_dir.mkdir()
-        src = unzip(src, tmp_dir, "echonetlvh")
+        tmp_dir.mkdir(exist_ok=True)
+        src = unzip(src, tmp_dir)
 
     # Check the required files exist
     for folder in ["Batch1", "Batch2", "Batch3", "Batch4"]:
