@@ -24,7 +24,8 @@ import re
 import threading
 from itertools import product
 from pathlib import Path
-from typing import List
+from collections.abc import Callable
+from typing import Any, List
 
 import grain
 import keras
@@ -95,9 +96,10 @@ def generate_h5_indices(
             ]
     """
     if limit_n_frames is None:
-        limit_n_frames = np.inf
+        frame_limit: float = np.inf
     else:
         assert limit_n_frames > 0, f"limit_n_frames must be > 0, got {limit_n_frames}"
+        frame_limit = float(limit_n_frames)
 
     assert len(file_paths) == len(file_shapes), "file_paths and file_shapes must have same length"
 
@@ -136,7 +138,7 @@ def generate_h5_indices(
         for shape in file_shapes:
             n_frames_in_file = shape[initial_frame_axis]
             # Optionally limit frames to load from each file
-            n_frames_in_file = min(n_frames_in_file, limit_n_frames)
+            n_frames_in_file = int(min(n_frames_in_file, frame_limit))
             indices = [
                 slice(i, i + block_size, frame_index_stride)
                 for i in range(0, n_frames_in_file - block_size + 1, block_step_size)
@@ -492,7 +494,7 @@ class Dataloader:
         additional_axes_iter: tuple | None = None,
         sort_files: bool = True,
         overlapping_blocks: bool = False,
-        augmentation: callable = None,
+        augmentation: Callable | None = None,
         initial_frame_axis: int = 0,
         insert_frame_axis: bool = True,
         frame_index_stride: int = 1,
@@ -556,7 +558,7 @@ class Dataloader:
         )
 
         # ── Store pipeline config for rebuilding per epoch ────────────
-        self._pipeline_cfg = dict(
+        self._pipeline_cfg: dict[str, Any] = dict(
             num_shards=num_shards,
             shard_index=shard_index,
             clip_image_range=clip_image_range,
@@ -578,6 +580,9 @@ class Dataloader:
                     "Resizing only works with frame_axis = -1. Alternatively, "
                     "you can specify resize_axes."
                 )
+            assert image_size is not None, (
+                "image_size must be provided when resizing (resize_type is set)."
+            )
             self._pipeline_cfg["resizer"] = Resizer(
                 image_size=image_size,
                 resize_type=resize_type,

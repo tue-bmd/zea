@@ -67,6 +67,7 @@ def overwrite_splits(source_dir, rejection_path=None):
             temp_path.open("w", encoding="utf-8", newline="") as outfile,
         ):
             reader = csv.DictReader(infile)
+            assert reader.fieldnames is not None, "CSV file has no header row"
             writer = csv.DictWriter(outfile, fieldnames=reader.fieldnames)
             writer.writeheader()
             for row in reader:
@@ -247,7 +248,7 @@ class LVHProcessor(H5Processor):
         self.cone_parameters = cone_params or {}
         self.range_to = (0, 255)  # overwrite range_to to use uint8 range to save memory.
 
-    def get_split(self, avi_file: str, sequence):
+    def get_split(self, avi_file: str, sequence):  # ty: ignore[invalid-method-override]
         """
         Get the split (train/val/test) for a given AVI file.
 
@@ -261,6 +262,7 @@ class LVHProcessor(H5Processor):
         # Extract base filename without extension
         filename = Path(avi_file).stem + ".avi"
 
+        assert self.splits is not None, "splits not loaded; call load_splits() first"
         for split, files in self.splits.items():
             if filename in files:
                 return split
@@ -403,6 +405,7 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
             reader = csv.DictReader(csvfile)
             rows = list(reader)
             fieldnames = reader.fieldnames
+            assert fieldnames is not None, "CSV file has no header row"
 
         # Load cone parameters if available
         cone_parameters = {}

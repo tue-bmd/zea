@@ -61,7 +61,9 @@ class LinesActionModel(MaskActionModel):
         self.img_height = img_height
 
         stack_n_cols = self.img_width / self.n_possible_actions
-        assert stack_n_cols.is_integer(), "Image width must be divisible by n_possible_actions."
+        assert float(stack_n_cols).is_integer(), (
+            "Image width must be divisible by n_possible_actions."
+        )
         self.stack_n_cols = int(stack_n_cols)
 
     def lines_to_im_size(self, lines):

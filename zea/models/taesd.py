@@ -145,7 +145,9 @@ class TinyBase(BaseModel):
             inputs = ops.zeros(input_shape)
             from zea.backend import tf2jax
 
-            jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
+            jax_func, jax_params = tf2jax.convert(  # ty: ignore[unresolved-attribute]
+                tf.function(self.network), inputs
+            )
 
             def call_fn(params, state, rng, inputs, training):
                 return jax_func(state, inputs)
@@ -232,7 +234,7 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
 
     def _resize_nearest_neighbor(proto):
         """Parse a ResizeNearestNeighbor op."""
-        tf2jax._src.ops._check_attrs(proto, {"T", "align_corners", "half_pixel_centers"})
+        tf2jax._src.ops._check_attrs(proto, {"T", "align_corners", "half_pixel_centers"})  # ty: ignore[unresolved-attribute]  # fmt: skip
 
         def _func(images: jnp.ndarray, size: jnp.ndarray) -> jnp.ndarray:
             if len(images.shape) != 4:
@@ -253,7 +255,7 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
         return _func
 
     # hack to allow align_corners=True and half_pixel_centers=True
-    tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = _resize_nearest_neighbor
+    tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = _resize_nearest_neighbor  # ty: ignore[unresolved-attribute]  # fmt: skip # noqa: E501
 
 
 register_presets(taesdxl_presets, TinyAutoencoder)

@@ -6,6 +6,7 @@ Usage:
 
 import argparse
 import re
+import types
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
@@ -28,12 +29,14 @@ from zea.utils import FunctionTimer
 
 SUPPORTED_FORMATS = ["gif", "mp4", "hdf5"]
 
+sitk: types.ModuleType | None = None
 try:
-    import SimpleITK as sitk
+    import SimpleITK as _sitk
 
+    sitk = _sitk
     SUPPORTED_FORMATS += ["nii.gz"]
 except ImportError:
-    sitk = None
+    pass
 
 
 def get_parser(add_help: bool = True) -> argparse.ArgumentParser:
@@ -365,6 +368,7 @@ def run_processing(
                 overwrite=overwrite,
             )
         elif save_as == "nii.gz":
+            assert sitk is not None, "SimpleITK must be installed to save as nii.gz"
             sitk.WriteImage(sitk.GetImageFromArray(video), str(save_path))
             log.info(f"Saved NIfTI to {log.yellow(save_path)}")
 
@@ -414,7 +418,7 @@ def run_processing(
             # slice to selected transmits (transmit axis = 0 when insert_frame_axis=False)
             frame = frame[selected_transmits]
 
-            output = pipeline_call(data=frame, **params)
+            output = pipeline_call(data=frame, **params)  # ty: ignore[invalid-argument-type]
             processed_frame = output["data"]
 
             if not keep_dynamic_range:
@@ -427,7 +431,7 @@ def run_processing(
 
             for keep_key in keep_keys:
                 if keep_key in output:
-                    params[keep_key] = output[keep_key]
+                    params[keep_key] = output[keep_key]  # ty: ignore[invalid-assignment]
 
             if timings:
                 for tname in timer.timings.keys():

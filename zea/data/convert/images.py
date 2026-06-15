@@ -56,8 +56,24 @@ def _img_dir_to_h5_dir(
     )
 
     # Group and sort the frames, if patterns are present
-    get_group = lambda path: group_pattern.match(path)[1]
-    get_rank = lambda path: int(sort_pattern.match(path)[1]) if sort_pattern is not None else 0
+    def get_group(path: str) -> str:
+        m = group_pattern.match(path)
+        if m is None:
+            raise ValueError(
+                f"File path {path!r} did not match group_pattern {group_pattern.pattern!r}"
+            )
+        return m[1]
+
+    def get_rank(path: str) -> int:
+        if sort_pattern is None:
+            return 0
+        m = sort_pattern.match(path)
+        if m is None:
+            raise ValueError(
+                f"File path {path!r} did not match sort_pattern {sort_pattern.pattern!r}"
+            )
+        return int(m[1])
+
     grouped_sorted_files = [
         (parent, sorted(child, key=get_rank)) for parent, child in groupby(img_files, key=get_group)
     ]

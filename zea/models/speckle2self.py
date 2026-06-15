@@ -241,7 +241,7 @@ def convert_to_onnx(pth_path, onnx_path, input_size=(1, 1, 512, 512)):  # pragma
     dummy = torch.zeros(*input_size)
     torch.onnx.export(
         wrapper,
-        dummy,
+        dummy,  # ty: ignore[invalid-argument-type]
         onnx_path,
         opset_version=11,
         input_names=["input"],

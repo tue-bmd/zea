@@ -104,10 +104,14 @@ class EchoNetDynamic(BaseModel):
 
             inputs = ops.zeros([1, INFERENCE_SIZE, INFERENCE_SIZE, 3])
 
-            jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
+            jax_func, jax_params = tf2jax.convert(  # ty: ignore[unresolved-attribute]
+                tf.function(self.network), inputs
+            )
 
             def call_fn(params, state, rng, inputs, training):
-                with tf2jax.override_config("strict_shape_check", False):
+                with tf2jax.override_config(  # ty: ignore[unresolved-attribute]
+                    "strict_shape_check", False
+                ):
                     return jax_func(state, inputs)
 
             self.network = keras.layers.JaxLayer(call_fn, state=jax_params)

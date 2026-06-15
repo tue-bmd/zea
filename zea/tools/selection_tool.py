@@ -36,6 +36,8 @@ from pathlib import Path
 from typing import Union
 
 import matplotlib
+import matplotlib.axes
+import matplotlib.image
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
@@ -63,10 +65,10 @@ def crop_array(array, value=None):
     """Crop an array to remove all rows and columns containing only a given value."""
     array = np.array(array)
     assert array.ndim == 2, f"Array must be 2D, not {array.ndim}D."
-    mask = np.all(np.equal(array, value), axis=1)
+    mask = np.all(np.equal(array, value), axis=1)  # ty: ignore[no-matching-overload]
     array = array[~mask]
 
-    mask = np.all(np.equal(array, value), axis=0)
+    mask = np.all(np.equal(array, value), axis=0)  # ty: ignore[no-matching-overload]
     array = array[:, ~mask]
     return array
 
@@ -75,9 +77,9 @@ def interactive_selector(
     data,
     ax,
     selector: str = "rectangle",
-    extent: list = None,
+    extent: list | None = None,
     verbose: bool = True,
-    num_selections: int = None,
+    num_selections: int | None = None,
     confirm_selection: bool = True,
 ) -> tuple:
     """Interactively select part of an array displayed as an image with matplotlib.
@@ -148,7 +150,7 @@ def interactive_selector(
         mask.flat[ind] = False
 
     name_to_selector = {"lasso": LassoSelector, "rectangle": RectangleSelector}
-    selector = name_to_selector[selector]
+    selector_cls = name_to_selector[selector]
     onselect_dict = {
         LassoSelector: _onselect_lasso,
         RectangleSelector: _onselect_rectangle,
@@ -156,7 +158,11 @@ def interactive_selector(
     kwargs_dict = {LassoSelector: {}, RectangleSelector: {"interactive": True}}
 
     def _execute_selector():
-        lasso = selector(ax, onselect_dict[selector], **kwargs_dict[selector])
+        lasso = selector_cls(
+            ax,
+            onselect_dict[selector_cls],  # ty: ignore[invalid-argument-type]
+            **kwargs_dict[selector_cls],  # ty: ignore[invalid-argument-type]
+        )
 
         if num_selections:
             if verbose:

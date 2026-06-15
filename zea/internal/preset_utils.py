@@ -82,7 +82,7 @@ def _get_snapshot_dir_from_downloaded_file(downloaded_file_path: str | Path) -> 
 def _download_files_in_path(
     repo_id: str,
     files: list,
-    path_filter: str = None,
+    path_filter: str | None = None,
     cache_dir=HF_DATASETS_DIR,
     repo_type="dataset",
     **kwargs,
