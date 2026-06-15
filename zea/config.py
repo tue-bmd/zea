@@ -47,8 +47,9 @@ import copy
 import difflib
 import inspect
 import json
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Union
+from typing import Any, Protocol, Union
 
 import yaml
 
@@ -57,6 +58,17 @@ from zea.internal.config.validation import validate_config
 from zea.internal.core import dict_to_tensor
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.utils import deprecated
+
+
+class _SupportsKeysAndGetItem(Protocol):
+    """Protocol for dict.update()-style mappings that expose keys() and item lookup.
+
+    Mirrors ``_typeshed.SupportsKeysAndGetItem`` without depending on the
+    typeshed-internal ``_typeshed`` module (which is not importable at runtime).
+    """
+
+    def keys(self) -> Iterable[str]: ...
+    def __getitem__(self, key: str, /) -> Any: ...
 
 
 class Config(dict):
@@ -157,13 +169,21 @@ class Config(dict):
             self[key] = default
         return self[key]
 
-    def update(self, dictionary: dict | None = None, **kwargs):
-        """Updates the config with the specified key-value pairs"""
-        # Use __setitem__ to set values
-        if dictionary is None:
-            dictionary = {}
-        dictionary.update(kwargs)
-        for key, value in dictionary.items():
+    def update(
+        self,
+        dictionary: _SupportsKeysAndGetItem | Iterable[tuple[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Updates the config with the specified key-value pairs.
+
+        Mirrors :meth:`dict.update` (accepting a mapping or an iterable of
+        key/value pairs and/or keyword arguments) but routes every assignment
+        through :meth:`__setitem__` so nested dictionaries are converted to
+        :class:`Config` objects.
+        """
+        merged: dict = dict(dictionary) if dictionary is not None else {}
+        merged.update(kwargs)
+        for key, value in merged.items():
             self[key] = value
 
     def update_recursive(self, dictionary: dict | None = None, **kwargs):
@@ -454,7 +474,7 @@ class Config(dict):
                         v._recursive_setattr(set_key, set_value)
 
     @classmethod
-    def from_path(cls, path, loader=yaml.FullLoader, **kwargs):
+    def from_path(cls, path, loader=yaml.FullLoader, **kwargs) -> "Config":
         """Load config object from a file path.
 
         Args:
@@ -484,7 +504,7 @@ class Config(dict):
 
     @classmethod
     @deprecated(replacement="Config.from_path")
-    def from_hf(cls, repo_id, path, **kwargs):
+    def from_hf(cls, repo_id, path, **kwargs) -> "Config":
         """Load config object from huggingface hub.
 
         Args:

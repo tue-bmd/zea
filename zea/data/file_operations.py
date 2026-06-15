@@ -36,11 +36,11 @@ OPERATION_NAMES = [
 def save_file(
     path,
     parameters: Parameters,
-    raw_data: np.ndarray = None,
-    aligned_data: dict = None,
-    beamformed_data: dict = None,
-    envelope_data: dict = None,
-    image: dict = None,
+    raw_data: np.ndarray | None = None,
+    aligned_data: dict | None = None,
+    beamformed_data: dict | None = None,
+    envelope_data: dict | None = None,
+    image: dict | None = None,
     description=None,
     custom_maps: dict | None = None,
     metadata: dict | None = None,
@@ -365,7 +365,7 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
         parameters=parameters,
         additional_elements=additional_elements,
         description=description,
-        **compounded_data,
+        **compounded_data,  # ty: ignore[invalid-argument-type]
     )
 
 

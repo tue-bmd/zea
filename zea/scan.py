@@ -98,6 +98,7 @@ Example Usage
 """
 
 from copy import deepcopy
+from typing import Any, ClassVar
 
 import numpy as np
 from keras import ops
@@ -217,7 +218,7 @@ class Parameters(BaseParameters):
 
     # Valid parameters are derived from the scan and probe specs + a few
     # beamforming-only parameters.
-    VALID_PARAMS = {
+    VALID_PARAMS: ClassVar[dict[str, dict[str, Any]]] = {
         **scan_schema,
         **probe_schema,
         "grid_size_x": {"dtype": np.int32},
@@ -956,12 +957,12 @@ class Parameters(BaseParameters):
             if field in self._params and self._params[field] is not None
         }
 
-    def __setattr__(self, key, value):
-        if key == "selected_transmits":
+    def __setattr__(self, name: str, value):
+        if name == "selected_transmits":
             # If setting selected_transmits, call set_transmits to handle logic
             self.set_transmits(value)
         else:
-            return super().__setattr__(key, value)
+            return super().__setattr__(name, value)
 
 
 class Scan(Parameters):

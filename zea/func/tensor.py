@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Tuple, Union
+from typing import Any, Callable, Sequence, Tuple, Union
 
 import keras
 import numpy as np
@@ -316,13 +316,15 @@ def _find_map_length(args, in_axes) -> int:
     raise ValueError("At least one in_axes must be non-None to determine map length.")
 
 
-def _repeat_int_to_tuple(value, length) -> Tuple[Union[int, None], ...]:
+def _repeat_int_to_tuple(value, length: int) -> Tuple[Union[int, None], ...]:
     """Convert an int or None to a tuple of length `length`."""
     if isinstance(value, int) or value is None:
         return (value,) * length
-    elif not isinstance(value, tuple):
-        raise ValueError("Value must be an int, None, or a tuple.")
-    return value
+    elif isinstance(value, (tuple, list)):
+        if len(value) != length:
+            raise ValueError(f"Expected sequence of length {length}, got {len(value)}.")
+        return tuple(value)
+    raise ValueError("Value must be an int, None, or a tuple or list.")
 
 
 def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
@@ -386,7 +388,7 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
                 )
         return tuple(new_args)
 
-    def _partial_at(func, idx, value) -> callable:
+    def _partial_at(func, idx, value) -> Callable[..., Any]:
         """Return a new function with value inserted at index idx in args."""
 
         def wrapper(*args, **kwargs):
@@ -433,9 +435,9 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
 
 
 def vmap(
-    fun: callable,
-    in_axes: List[Union[int, None]] | int = 0,
-    out_axes: List[Union[int, None]] | int = 0,
+    fun: Callable[..., Any],
+    in_axes: Sequence[int | None] | int = 0,
+    out_axes: Sequence[int | None] | int = 0,
     chunks: int | None = None,
     batch_size: int | None = None,
     fn_supports_batch: bool = False,
@@ -998,7 +1000,9 @@ def compute_required_patch_shape(image_shape, patch_shape, overlap):
 
 
 def check_patches_fit(
-    image_shape: tuple, patch_shape: tuple, overlap: Union[int, Tuple[int, int]]
+    image_shape: Sequence[int],
+    patch_shape: Sequence[int],
+    overlap: Union[int, Tuple[int, int], None],
 ) -> tuple:
     """Checks if patches with overlap fit an integer amount in the original image.
 
@@ -1065,7 +1069,7 @@ def check_patches_fit(
 def images_to_patches(
     images: keras.KerasTensor,
     patch_shape: Union[int, Tuple[int, int]],
-    overlap: Union[int, Tuple[int, int]] = None,
+    overlap: Union[int, Tuple[int, int], None] = None,
 ) -> keras.KerasTensor:
     """Creates patches from images.
 
@@ -1148,7 +1152,7 @@ def images_to_patches(
 def patches_to_images(
     patches: keras.KerasTensor,
     image_shape: tuple,
-    overlap: Union[int, Tuple[int, int]] = None,
+    overlap: Union[int, Tuple[int, int], None] = None,
     window_type="average",
 ) -> keras.KerasTensor:
     """Reconstructs images from patches.
@@ -1356,7 +1360,7 @@ def gaussian_filter(
     mode: str = "symmetric",
     cval: float | None = None,
     truncate: float = 4.0,
-    axes: Tuple[int] = None,
+    axes: Tuple[int, ...] | None = None,
 ):
     """Multidimensional Gaussian filter.
 
@@ -1385,19 +1389,19 @@ def gaussian_filter(
             sigma, order, mode and/or radius must match the length of axes. The ith entry in
             any of these tuples corresponds to the ith entry in axes.
     """
-    axes = _ni_support._check_axes(axes, array.ndim)
-    num_axes = len(axes)
+    _axes = _ni_support._check_axes(axes, array.ndim)
+    num_axes = len(_axes)
     orders = _ni_support._normalize_sequence(order, num_axes)
     sigmas = _ni_support._normalize_sequence(sigma, num_axes)
     modes = _ni_support._normalize_sequence(mode, num_axes)
-    axes = [(axes[ii], sigmas[ii], orders[ii], modes[ii]) for ii in range(num_axes)]
-    if len(axes) > 0:
+    axis_params = [(_axes[ii], sigmas[ii], orders[ii], modes[ii]) for ii in range(num_axes)]
+    if len(axis_params) > 0:
         for (
             axis,
             sigma,
             order,
             mode,
-        ) in axes:
+        ) in axis_params:
             output = gaussian_filter1d(array, sigma, axis, order, mode, truncate, cval)
             array = output
     else:

@@ -12,6 +12,7 @@ import keras
 from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 
 import zea
+import zea.models.base
 from zea.internal.cache import ZEA_CACHE_DIR
 from zea.internal.preset_utils import _hf_login, _hf_parse_path
 from zea.internal.registry import model_registry

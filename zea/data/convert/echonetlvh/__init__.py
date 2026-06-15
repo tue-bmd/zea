@@ -308,6 +308,7 @@ def overwrite_splits(csv_path, rejection_path=None):
             temp_path.open("w", encoding="utf-8", newline="") as outfile,
         ):
             reader = csv.DictReader(infile)
+            assert reader.fieldnames is not None, "CSV file has no header row"
             writer = csv.DictWriter(outfile, fieldnames=reader.fieldnames)
             writer.writeheader()
             for row in reader:
@@ -403,6 +404,7 @@ class LVHProcessor:
         # Extract base filename without extension
         filename = avi_file.name
 
+        assert self.splits is not None, "splits not loaded; call load_splits() first"
         for split, files in self.splits.items():
             if filename in files:
                 return split
@@ -586,6 +588,7 @@ def transform_measurements_csv(csv_path, cone_params_csv=None):
             reader = csv.DictReader(csvfile)
             rows = list(reader)
             fieldnames = reader.fieldnames
+            assert fieldnames is not None, "CSV file has no header row"
 
         # Load cone parameters if available
         cone_parameters = {}

@@ -289,7 +289,7 @@ def convert(source_path, output_path, overwrite=False):
 
     # Build per-file description and metadata
     subject_type = _infer_subject_type(source_path)
-    metadata = {"credit": PICMUS_CITATION}
+    metadata: dict[str, object] = {"credit": PICMUS_CITATION}
     if subject_type is not None:
         metadata["subject"] = {"type": subject_type}
 

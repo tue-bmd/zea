@@ -436,7 +436,7 @@ def set_memory_growth_tf():
 def init_device(
     device: Union[str, int, list] = "auto:1",
     backend: Union[str, None] = "auto",
-    hide_devices: Union[int, list] = None,
+    hide_devices: Union[int, list, None] = None,
     hide_others: bool = True,
     allow_preallocate: bool = True,
     verbose: bool = True,

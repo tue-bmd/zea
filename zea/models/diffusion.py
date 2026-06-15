@@ -1270,7 +1270,7 @@ class DDS(DiffusionGuidance):
             noise_rates,
             signal_rates,
             n_inner,
-            eps,
+            eps,  # ty: ignore[invalid-argument-type]
             verbose,
             **op_kwargs,
         )
@@ -1503,6 +1503,7 @@ class NuclearDiffusion(DPS):
         pred_noises_foreground = ops.swapaxes(denoised["pred_noises"], 0, 1)  # [B, S, H, W, C]
         pred_images_foreground = ops.swapaxes(denoised["pred_images"], 0, 1)  # [B, S, H, W, C]
 
+        assert step is not None and total_steps is not None
         alpha = ops.clip(
             (step - initial_step) / (total_steps - initial_step), 0.0, max_alpha
         )  # linear after initial_step

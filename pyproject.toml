@@ -65,6 +65,7 @@ dev = [
     "ipywidgets",
     "pre-commit",
     "ruff==0.15.16",
+    "ty==0.0.49",
     "pytest-cov",
     # docs
     "sphinx",
@@ -98,6 +99,7 @@ tests = [
     "ipywidgets",
     "pre-commit",
     "ruff==0.15.16",
+    "ty==0.0.49",
     "pytest-cov",
     "gradio>=6.0",
 ]
@@ -238,6 +240,33 @@ docstring-code-format = true
 # This only has an effect when the `docstring-code-format` setting is
 # enabled.
 docstring-code-line-length = "dynamic"
+
+[tool.ty]
+# We use ty (https://github.com/astral-sh/ty) for static type checking.
+
+[tool.ty.environment]
+# Minimum supported Python version (see `requires-python`).
+python-version = "3.10"
+
+[tool.ty.rules]
+# zea is multi-backend: jax / torch / tensorflow are optional and usually not
+# all installed in the (lightweight) type-checking environment, so their
+# conditional `import` statements would otherwise be flagged. Keep this visible
+# as a warning rather than a hard error so it never blocks CI.
+unresolved-import = "warn"
+
+[tool.ty.src]
+include = ["zea"]
+exclude = ["zea/ops/keras_ops.py"]  # generated file (see _generate_keras_ops)
+
+# Keras Layer subclasses deliberately override `call` with domain-specific
+# signatures; Keras dispatches through __call__ and never calls .call()
+# polymorphically, so this override pattern is intentional and safe.
+[[tool.ty.overrides]]
+include = ["zea/ops/**/*.py", "zea/models/**/*.py", "zea/data/layers.py"]
+[tool.ty.overrides.rules]
+invalid-method-override = "warn"
+
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

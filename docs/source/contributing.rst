@@ -116,7 +116,7 @@ A few things to keep in mind when making changes:
 
 - Make sure to write backend-agnostic code. This means that your code should work with all supported backends. This can be achieved by using the ``keras.ops`` API (see the `Keras ops documentation <https://keras.io/api/ops/>`_), instead of using backend-specific functions. For example, use ``keras.ops.squeeze`` instead of ``jax.numpy.squeeze`` or ``torch.squeeze``. Also, when converting tensors to numpy arrays, use the ``keras.ops.convert_to_numpy`` function (instead of ``my_tensor.numpy()``) to ensure compatibility with all backends.
 
-- The code is autoformatted using `ruff <https://pypi.org/project/ruff/>`_. You can run the pre-commit hooks to automatically format and check your code using:
+- The code is autoformatted using `ruff <https://pypi.org/project/ruff/>`_ and type-checked with `ty <https://github.com/astral-sh/ty>`_. You can run the pre-commit hooks to automatically format, lint, and type-check your code using:
 
 .. code-block:: shell
 

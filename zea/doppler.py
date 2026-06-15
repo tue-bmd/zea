@@ -50,7 +50,10 @@ def color_doppler(
     if hamming_size is None:
         hamming_size = np.array([1, 1], dtype=int)
     elif np.isscalar(hamming_size):
-        hamming_size = np.array([int(hamming_size), int(hamming_size)], dtype=int)
+        hamming_size = np.array(
+            [int(hamming_size), int(hamming_size)],  # ty: ignore[invalid-argument-type]
+            dtype=int,
+        )
     else:
         assert len(hamming_size) == 2, "hamming_size must be an integer or a tuple of two integers"
         hamming_size = np.array(hamming_size, dtype=int)

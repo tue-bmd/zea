@@ -7,7 +7,13 @@ from zea.scan import Parameters
 
 
 def animate_images(
-    images, path, parameters: Parameters = None, interval=100, cmap="gray", figsize=(5, 4.6), dpi=80
+    images,
+    path,
+    parameters: Parameters | None = None,
+    interval=100,
+    cmap="gray",
+    figsize=(5, 4.6),
+    dpi=80,
 ):
     """Helper function to animate a list of images."""
     if interval <= 0:
