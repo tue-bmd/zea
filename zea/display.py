@@ -558,9 +558,10 @@ def cartesian_to_polar_matrix(
             1 = linear, 2+ = spline). Matches the convention of `scipy.ndimage.map_coordinates`.
 
     Returns:
-        polar_matrix (Array): The image re-sampled in polar coordinates with shape `polar_shape`,
-        coordinates (Array): The Cartesian coordinates corresponding to each pixel in the
-            polar output.
+        polar_matrix (Array): The image re-sampled in polar coordinates with shape
+            `polar_shape`.
+        coordinates (Array): The Cartesian coordinates corresponding to each pixel in
+            the polar output.
     """
     assert "float" in ops.dtype(cartesian_matrix), "Input image must be float type"
 
