@@ -320,9 +320,9 @@ def _repeat_int_to_tuple(value, length) -> Tuple[Union[int, None], ...]:
     """Convert an int or None to a tuple of length `length`."""
     if isinstance(value, int) or value is None:
         return (value,) * length
-    elif not isinstance(value, tuple):
-        raise ValueError("Value must be an int, None, or a tuple.")
-    return value
+    elif isinstance(value, (tuple, list)):
+        return tuple(value)
+    raise ValueError("Value must be an int, None, or a tuple or list.")
 
 
 def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
