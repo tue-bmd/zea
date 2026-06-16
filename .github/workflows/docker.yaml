@@ -17,7 +17,7 @@ jobs:
 
   build-production-images:
     needs: [tag]
-    runs-on: self-hosted
+    runs-on: self-hosted-build
     timeout-minutes: 200
     strategy:
       max-parallel: 1
