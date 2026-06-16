@@ -27,7 +27,7 @@ from tqdm import tqdm
 
 from zea import File, log
 from zea.backend import jit
-from zea.data.convert.utils import load_avi
+from zea.data.convert.utils import load_avi, unzip
 from zea.display import cartesian_to_polar_matrix, polar_to_cartesian_matrix
 from zea.func.tensor import vmap
 from zea.tools.fit_scan_cone import (
@@ -697,48 +697,6 @@ def transform_measurements_csv(csv_path, cone_params_csv=None):
     log.info(f"Converted measurements saved to {csv_path}")
 
 
-def unzip(src: Path, dst: Path) -> Path:
-    """Unzips a .zip file to a directory.
-
-    Will check if the unzip has already been fully completed by checking for a file named
-    ".fully_unzipped" in the destination directory.
-
-    Args:
-        src (Path): Path to the .zip file to unzip.
-        dst (Path): Path to the directory where the files will be unzipped.
-
-    Returns:
-        Path: Path to the unzipped directory.
-    """
-
-    already_unzipped_filepath = dst / ".fully_unzipped"
-
-    if already_unzipped_filepath.exists():
-        log.info("Files already fully unzipped. Skipping unzipping.")
-        return dst
-
-    if dst.exists() and dst.is_dir() and len(list(dst.iterdir())) > 0:
-        raise ValueError(
-            f"Destination directory {dst} is not empty, but the file {already_unzipped_filepath} "
-            "does not exist. Maybe the previous unzip attempt failed. Please remove the directory "
-            "and try again."
-        )
-
-    if not src.exists():
-        raise FileNotFoundError(f"Source file {src} does not exist.")
-
-    log.info(f"Unzipping {src} to {dst}...")
-    with zipfile.ZipFile(src, "r") as zip_ref:
-        for member in tqdm(zip_ref.namelist(), desc="Extracting files"):
-            zip_ref.extract(member, dst)
-    log.info("Unzipping completed.")
-
-    # Create file to indicate all files have been unzipped
-    already_unzipped_filepath.touch()
-
-    return dst
-
-
 def _fix_faulty_entry(measurements_csv, src):
     # Read rows
     with open(measurements_csv, newline="", encoding="utf-8") as f:
@@ -816,6 +774,13 @@ def convert_echonetlvh(
     and converts images and/or measurements to zea format and saves dataset.
     Is called with argparse arguments through zea/zea/data/convert/__main__.py
     """
+
+    assert src.exists(), f"Source path {src} does not exist."
+    assert dst.exists(), f"Destination path {dst} does not exist."
+    assert src.is_dir() or src.suffix == ".zip", (
+        f"Source path {src} is not a directory or `.zip` file"
+    )
+    assert dst.is_dir(), f"Destination path {dst} is not a directory."
 
     if keras.backend.backend() != "jax":
         log.warning("We recommend using jax for speed in the EchoNet-LVH conversion.")

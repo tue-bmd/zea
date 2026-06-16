@@ -22,11 +22,11 @@ from zea.internal.device import init_device
 def _add_parser_args_echonet(subparsers):
     """Add Echonet specific arguments to the parser."""
     echonet_parser = subparsers.add_parser("echonet", help="Convert Echonet dataset")
-    echonet_parser.add_argument("src", type=str, help="Source folder path")
-    echonet_parser.add_argument("dst", type=str, help="Destination folder path")
+    echonet_parser.add_argument("src", type=Path, help="Source folder path")
+    echonet_parser.add_argument("dst", type=Path, help="Destination folder path")
     echonet_parser.add_argument(
         "--split_path",
-        type=str,
+        type=Path,
         help="Path to the split.yaml file containing the dataset split if a split should be copied",
     )
     echonet_parser.add_argument(
@@ -41,13 +41,13 @@ def _add_parser_args_camus(subparsers):
     camus_parser = subparsers.add_parser("camus", help="Convert CAMUS dataset")
     camus_parser.add_argument(
         "src",
-        type=str,
+        type=Path,
         help=(
             "Source folder path, should contain either manually downloaded dataset "
             "or will be target location for automated download with the --download flag"
         ),
     )
-    camus_parser.add_argument("dst", type=str, help="Destination folder path")
+    camus_parser.add_argument("dst", type=Path, help="Destination folder path")
     camus_parser.add_argument(
         "--download",
         action="store_true",
@@ -85,8 +85,8 @@ def _add_parser_args_camus(subparsers):
 def _add_parser_args_echonetlvh(subparsers):
     """Add EchonetLVH specific arguments to the parser."""
     echonetlvh_parser = subparsers.add_parser("echonetlvh", help="Convert EchonetLVH dataset")
-    echonetlvh_parser.add_argument("src", type=str, help="Source folder path")
-    echonetlvh_parser.add_argument("dst", type=str, help="Destination folder path")
+    echonetlvh_parser.add_argument("src", type=Path, help="Source folder path")
+    echonetlvh_parser.add_argument("dst", type=Path, help="Destination folder path")
     echonetlvh_parser.add_argument(
         "--no_rejection",
         action="store_true",
@@ -94,7 +94,7 @@ def _add_parser_args_echonetlvh(subparsers):
     )
     echonetlvh_parser.add_argument(
         "--rejection_path",
-        type=str,
+        type=Path,
         default=None,
         help="Path to custom rejection txt file (defaults to `manual_rejections.txt` from zea)",
     )
@@ -132,7 +132,7 @@ def _add_parser_args_picmus(subparsers):
     picmus_parser = subparsers.add_parser("picmus", help="Convert PICMUS dataset")
     picmus_parser.add_argument(
         "src",
-        type=str,
+        type=Path,
         help=(
             "Source folder path. Should contain either a manually downloaded and "
             "extracted archive (archive_to_download/ or picmus.zip) or will be used "
@@ -140,7 +140,7 @@ def _add_parser_args_picmus(subparsers):
             "sub-directory, if present, is automatically included."
         ),
     )
-    picmus_parser.add_argument("dst", type=str, help="Destination folder path")
+    picmus_parser.add_argument("dst", type=Path, help="Destination folder path")
     picmus_parser.add_argument(
         "--download",
         action="store_true",
@@ -170,13 +170,13 @@ def _add_parser_args_cetus(subparsers):
     cetus_parser = subparsers.add_parser("cetus", help="Convert CETUS dataset")
     cetus_parser.add_argument(
         "src",
-        type=str,
+        type=Path,
         help=(
             "Source folder path, should contain either manually downloaded dataset "
             "or will be target location for automated download with the --download flag"
         ),
     )
-    cetus_parser.add_argument("dst", type=str, help="Destination folder path")
+    cetus_parser.add_argument("dst", type=Path, help="Destination folder path")
     cetus_parser.add_argument(
         "--download",
         action="store_true",
@@ -207,8 +207,8 @@ def _add_parser_args_verasonics(subparsers):
     verasonics_parser = subparsers.add_parser(
         "verasonics", help="Convert Verasonics data to zea dataset"
     )
-    verasonics_parser.add_argument("src", type=str, help="Source folder path")
-    verasonics_parser.add_argument("dst", type=str, help="Destination folder path")
+    verasonics_parser.add_argument("src", type=Path, help="Source folder path")
+    verasonics_parser.add_argument("dst", type=Path, help="Destination folder path")
     verasonics_parser.add_argument(
         "--frames",
         type=str,
@@ -291,16 +291,6 @@ def main():
     """
     parser = get_parser()
     args = parser.parse_args()
-
-    args.src = Path(args.src)
-    args.dst = Path(args.dst)
-
-    assert args.src.exists(), f"Source path {args.src} does not exist."
-    assert args.dst.exists(), f"Destination path {args.dst} does not exist."
-    assert args.src.is_dir() or args.src.suffix == ".zip", (
-        f"Source path {args.src} is not a directory or `.zip` file"
-    )
-    assert args.dst.is_dir(), f"Destination path {args.dst} is not a directory."
 
     if args.dataset == "echonet":
         from zea.data.convert.echonet import convert_echonet

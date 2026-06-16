@@ -315,6 +315,18 @@ def convert(source_path, output_path, overwrite=False):
     )
 
 
+def _resolve_path(src: str | Path) -> Path:
+    src = Path(src)
+    zip_name = "picmus.zip"
+    folder_name = "archive_to_download"
+    unzip_dir = src / folder_name
+
+    if (src / folder_name).exists():
+        return unzip_dir
+
+    return unzip(src / zip_name, src)
+
+
 def convert_picmus(args):
     """Convert PICMUS HDF5 files to the zea dataset format.
 
@@ -372,7 +384,7 @@ def convert_picmus(args):
                 f"Source directory {base_dir} does not exist. "
                 "Use --download to download the PICMUS dataset automatically."
             )
-        main_dir = unzip(base_dir, "picmus")
+        main_dir = _resolve_path(base_dir)
         source_entries.append((main_dir, main_dir))
 
         # Include in-vivo data when an 'in_vivo' sub-directory is present

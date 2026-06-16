@@ -438,6 +438,30 @@ def download_camus(  # pragma: no cover
     )
 
 
+def _resolve_path(src: str | Path) -> Path:
+    src = Path(src)
+
+    zip_name = "CAMUS_public.zip"
+    folder_name = "CAMUS_public"
+    unzip_dir = src / folder_name
+
+    if (src / folder_name).exists():
+        return unzip_dir
+
+    # Girder download produces a database_nifti sub-folder,
+    # or the user may have extracted patient* folders directly into src.
+    if (src / "database_nifti").exists():
+        log.info(f"Found database_nifti folder in {src}.")
+        return src / "database_nifti"
+    if any(src.glob("patient*")):
+        log.info(f"Found patient folders directly in {src}.")
+        return src
+
+    zip_path = src / zip_name
+
+    return unzip(zip_path, src)
+
+
 def convert_camus(args):
     """Convert the CAMUS dataset into zea HDF5 files across dataset splits.
 
@@ -483,7 +507,7 @@ def convert_camus(args):
         )
     else:
         # Look for either CAMUS_public.zip or folders database_nifti, database_split
-        camus_source_folder = unzip(camus_source_folder, "camus")
+        camus_source_folder = _resolve_path(camus_source_folder)
 
     # check if output folders already exist
     for split in splits:

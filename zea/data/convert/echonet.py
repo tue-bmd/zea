@@ -452,6 +452,19 @@ class H5Processor:
         )
 
 
+def _resolve_path(src: str | Path) -> Path:
+    src = Path(src)
+
+    zip_name = "EchoNet-Dynamic.zip"
+    folder_name = "EchoNet-Dynamic"
+    unzip_dir = src / folder_name / "Videos"
+
+    if (src / folder_name).exists():
+        return unzip_dir
+
+    return unzip(src / zip_name, src)
+
+
 def convert_echonet(args):
     """
     Convert an EchoNet dataset into zea files, organizing results
@@ -478,7 +491,7 @@ def convert_echonet(args):
         - Asserts that split.yaml exists at split_path when split reproduction is requested.
     """
     # Check if unzip is needed
-    src = unzip(args.src, "echonet")
+    src = _resolve_path(args.src)
 
     if args.split_path is not None:
         # Reproduce a previous split...

@@ -79,58 +79,48 @@ def load_avi(file_path, mode="L"):
     return np.stack(frames)
 
 
-def unzip(src: str | Path, dataset: str) -> Path:
-    """
-    Checks if data folder exist in src.
-    Otherwise, unzip dataset.zip in src.
+def unzip(src: Path, dst: Path) -> Path:
+    """Unzips a .zip file to a directory.
+
+    Will check if the unzip has already been fully completed by checking for a file named
+    ".fully_unzipped" in the destination directory.
 
     Args:
-        src (str | Path): The source directory containing the zip file or unzipped folder.
-        dataset (str): The name of the dataset to unzip.
-            Options are "picmus", "camus", "echonet".
+        src (Path): Path to the .zip file to unzip.
+        dst (Path): Path to the directory where the files will be unzipped.
 
     Returns:
-        Path: The path to the unzipped dataset directory.
+        Path: Path to the unzipped directory.
     """
-    src = Path(src)
-    if dataset == "picmus":
-        zip_name = "picmus.zip"
-        folder_name = "archive_to_download"
-        unzip_dir = src / folder_name
-    elif dataset == "camus":
-        zip_name = "CAMUS_public.zip"
-        folder_name = "CAMUS_public"
-        unzip_dir = src / folder_name
-    elif dataset == "echonet":
-        zip_name = "EchoNet-Dynamic.zip"
-        folder_name = "EchoNet-Dynamic"
-        unzip_dir = src / folder_name / "Videos"
-    else:
-        raise ValueError(f"Dataset {dataset} not recognized for unzip.")
 
-    if (src / folder_name).exists():
-        return unzip_dir
+    assert src.suffix == ".zip", f"Source path {src} is not a .zip file."
 
-    # CAMUS special cases: Girder download produces a database_nifti sub-folder,
-    # or the user may have extracted patient* folders directly into src.
-    if dataset == "camus":
-        if (src / "database_nifti").exists():
-            log.info(f"Found database_nifti folder in {src}.")
-            return src / "database_nifti"
-        if any(src.glob("patient*")):
-            log.info(f"Found patient folders directly in {src}.")
-            return src
+    already_unzipped_filepath = dst / ".fully_unzipped"
 
-    zip_path = src / zip_name
-    if not zip_path.exists():
-        raise FileNotFoundError(f"Could not find {zip_name} or {folder_name} folder in {src}.")
+    if already_unzipped_filepath.exists():
+        log.info("Files already fully unzipped. Skipping unzipping.")
+        return dst
 
-    log.info(f"Unzipping {zip_path} to {src}...")
-    with zipfile.ZipFile(zip_path, "r") as zip_ref:
-        zip_ref.extractall(src)
+    if dst.exists() and dst.is_dir() and len(list(dst.iterdir())) > 0:
+        raise ValueError(
+            f"Destination directory {dst} is not empty, but the file {already_unzipped_filepath} "
+            "does not exist. Maybe the previous unzip attempt failed. Please remove the directory "
+            "and try again."
+        )
+
+    if not src.exists():
+        raise FileNotFoundError(f"Zip file {src} does not exist.")
+
+    log.info(f"Unzipping {src} to {dst}...")
+    with zipfile.ZipFile(src, "r") as zip_ref:
+        for member in tqdm(zip_ref.namelist(), desc="Extracting files"):
+            zip_ref.extract(member, dst)
     log.info("Unzipping completed.")
-    log.info(f"Starting conversion from {src / folder_name}.")
-    return unzip_dir
+
+    # Create file to indicate all files have been unzipped
+    already_unzipped_filepath.touch()
+
+    return dst
 
 
 def download_file(url: str, destination: str | Path) -> Path:  # pragma: no cover

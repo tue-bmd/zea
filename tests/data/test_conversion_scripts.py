@@ -875,40 +875,53 @@ def test_sitk_load(tmp_path):
     assert arr_sq.shape == arr.shape
 
 
-@pytest.mark.parametrize(
-    "dataset",
-    [
-        ("picmus", "picmus.zip", "archive_to_download"),
-        ("camus", "CAMUS_public.zip", "CAMUS_public"),
-        ("echonet", "EchoNet-Dynamic.zip", "EchoNet-Dynamic"),
-    ],
-)
-def test_unzip(tmp_path, dataset):
-    """Test the unzip function from zea.data.convert.utils for all dataset-name pairs"""
-    dataset_name, zip_filename, folder_name = dataset
+def test_unzip(tmp_path):
+    """Test the unzip function from zea.data.convert.utils."""
     # Create a dummy zip file
-    zip_path = tmp_path / zip_filename
-    with zipfile.ZipFile(zip_path, "w") as zipf:
-        # Add a dummy file to the zip
-        if dataset_name == "echonet":
-            # Match unzip()’s expected structure: EchoNet-Dynamic/Videos/...
-            zipf.writestr(f"{folder_name}/Videos/dummy.txt", "This is a test.")
-        else:
-            zipf.writestr(f"{folder_name}/dummy.txt", "This is a test.")
+    src = tmp_path / "archive.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("dummy.txt", "This is a test.")
 
-    # Call the unzip function twice:
-    # Once to initialize from zip, once to initialize from folder
-    unzip(tmp_path, dataset_name)
-    unzip(tmp_path, dataset_name)
+    dst = tmp_path / "extracted"
 
-    # Verify that the folder was created and contains the dummy file
-    if dataset_name == "echonet":
-        extracted_folder = tmp_path / folder_name / "Videos"
-    else:
-        extracted_folder = tmp_path / folder_name
+    # First call extracts the archive and creates the marker file.
+    result = unzip(src, dst)
+    assert result == dst
+    assert (dst / "dummy.txt").exists()
+    assert (dst / ".fully_unzipped").exists()
 
-    assert extracted_folder.exists()
-    assert (extracted_folder / "dummy.txt").exists()
+    # Second call detects the marker and skips re-extraction.
+    result = unzip(src, dst)
+    assert result == dst
+    assert (dst / "dummy.txt").exists()
+
+
+def test_unzip_requires_zip_suffix(tmp_path):
+    """unzip should reject sources that are not .zip files."""
+    src = tmp_path / "archive.tar"
+    src.touch()
+    with pytest.raises(AssertionError):
+        unzip(src, tmp_path / "extracted")
+
+
+def test_unzip_missing_src(tmp_path):
+    """unzip should raise if the zip file does not exist."""
+    with pytest.raises(FileNotFoundError):
+        unzip(tmp_path / "missing.zip", tmp_path / "extracted")
+
+
+def test_unzip_non_empty_dst_without_marker(tmp_path):
+    """unzip should refuse to extract into a non-empty directory lacking the marker."""
+    src = tmp_path / "archive.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("dummy.txt", "This is a test.")
+
+    dst = tmp_path / "extracted"
+    dst.mkdir()
+    (dst / "leftover.txt").touch()
+
+    with pytest.raises(ValueError):
+        unzip(src, dst)
 
 
 def test_camus_db_not_cast_to_uint8():
