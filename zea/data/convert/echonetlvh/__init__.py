@@ -174,7 +174,7 @@ def _compute_cone_params_for_file(avi_file, fieldnames):
         }
 
     except Exception as e:
-        log.error(f"Error processing {avi_file}: {str(e)}")
+        log.error(f"Processing {avi_file} failed: {str(e)}")
 
         # Build failure record, filling missing fields with None
         failure_record = {
@@ -333,6 +333,8 @@ def overwrite_splits(csv_path, rejection_path=None):
 def load_cone_parameters(csv_path):
     """
     Load cone parameters from CSV file into a dictionary.
+
+    Only loads the rows with status "success".
 
     Args:
         csv_path: Path to the CSV file containing cone parameters
@@ -497,16 +499,13 @@ class LVHProcessor:
         image_sc_np = np.asarray(sequence_processed_uint8)
         polar_np = np.asarray(polar_im_set_uint8)
 
-        # Image spec requires (n_frames, x, z, y) — add y=1 dimension
-        polar_4d = polar_np[:, :, :, np.newaxis]
-
         # TODO: would be cool if we could store all the information of
         # 'MeasurementsList.csv' and 'cone_parameters.csv' in the metadata
         File.create(
             out_h5,
             data={
                 "image": {"values": image_sc_np},
-                "image_polar": {"values": polar_4d, "unit": "pixels"},
+                "image_polar": {"values": polar_np, "unit": "pixels"},
             },
             metadata={
                 "annotations": {"anatomy": "heart", "view": "PLAX"},
@@ -697,21 +696,25 @@ def unzip(src: Path, dst: Path) -> Path:
 
 
 def _fix_faulty_entry(measurements_csv, src):
-    bad_hash = "0XBD41EBF599F7EE4F"
-    h, w = _load_first_frame(find_avi_file(src, bad_hash)).shape
+    # Read rows
     with open(measurements_csv, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         assert reader.fieldnames is not None, "MeasurementsList.csv has no header row"
         fieldnames = reader.fieldnames
         rows = list(reader)
-    for row in rows:
-        if row["HashedFileName"] == bad_hash:
-            fps = row["Width"]
-            n_frames = row["FPS"]
-            row["Width"] = w
-            row["Height"] = h
-            row["FPS"] = fps
-            row["Frames"] = n_frames
+
+    for bad_hash in ["0XBD41EBF599F7EE4F", "0X2061669A27571EA3", "0XA26FCACCC289023E"]:
+        h, w = _load_first_frame(find_avi_file(src, bad_hash)).shape
+        for row in rows:
+            if row["HashedFileName"] == bad_hash:
+                fps = row["Width"]
+                n_frames = row["FPS"]
+                row["Width"] = w
+                row["Height"] = h
+                row["FPS"] = fps
+                row["Frames"] = n_frames
+
+    # Write back
     with open(measurements_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -794,6 +797,9 @@ def convert_echonetlvh(
         # Filter out already processed files
         files_to_process = [f for f in files_to_process if f.stem not in files_done]
 
+        # Filter out files without cone parameters
+        files_to_process = [f for f in files_to_process if f.name in cone_parameters]
+
         # Limit files if max_files is specified
         if max_files is not None:
             files_to_process = files_to_process[:max_files]
@@ -814,7 +820,7 @@ def convert_echonetlvh(
             try:
                 processor(file)
             except Exception as e:
-                log.error(f"Error processing {file}: {str(e)}")
+                log.error(f"Processing {file} failed: {str(e)}")
 
         log.info("All image conversion tasks are completed.")
 
