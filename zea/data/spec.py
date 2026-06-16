@@ -2214,15 +2214,9 @@ class FileSpec(Spec):
                     "de-identification measures in place before sharing this file."
                 )
         # Write to a temporary file in the destination directory, then atomically
-        # rename it into place. This guarantees that an interrupted write (Ctrl-C,
-        # crash, power loss) never leaves a partial/corrupt file at `path`: either
-        # the fully-written file is there, or nothing is. The temp file shares the
-        # destination's filesystem, so os.replace is a cheap metadata-only rename
-        # (no data copy), independent of file size.
-        # Suffix must stay .hdf5: File() rejects other extensions. The leading dot
-        # keeps the temp hidden; it is renamed away on success and removed on error.
+        # rename it into place.
         fd, tmp_name = tempfile.mkstemp(
-            dir=str(_path.parent), prefix=f".{_path.name}.tmp", suffix=".hdf5"
+            dir=str(_path.parent), prefix=f".{_path.stem}.tmp-", suffix=".hdf5"
         )
         os.close(fd)
         tmp_path = Path(tmp_name)
