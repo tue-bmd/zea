@@ -36,10 +36,10 @@ jobs:
           # Container IP (for context only).
           CONTAINER_IP=""
           if command -v hostname >/dev/null 2>&1; then
-            CONTAINER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+            CONTAINER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
           fi
           if [ -z "$CONTAINER_IP" ] && command -v ip >/dev/null 2>&1; then
-            CONTAINER_IP="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+            CONTAINER_IP="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)"
           fi
 
           # Host IP candidates from inside container.
@@ -47,12 +47,12 @@ jobs:
 
           # Common Docker hostname (works in many environments, including Docker Desktop).
           if [ -z "$HOST_IP" ] && command -v getent >/dev/null 2>&1; then
-            HOST_IP="$(getent hosts host.docker.internal 2>/dev/null | awk '{print $1; exit}')"
+            HOST_IP="$(getent hosts host.docker.internal 2>/dev/null | awk '{print $1; exit}' || true)"
           fi
 
           # Default gateway is often the host-side bridge address in Linux containerized runners.
           if [ -z "$HOST_IP" ] && command -v ip >/dev/null 2>&1; then
-            HOST_IP="$(ip route 2>/dev/null | awk '/default/ {print $3; exit}')"
+            HOST_IP="$(ip route 2>/dev/null | awk '/default/ {print $3; exit}' || true)"
           fi
 
           if [ -n "$CONTAINER_IP" ]; then
