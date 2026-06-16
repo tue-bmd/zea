@@ -446,10 +446,12 @@ class LVHProcessor:
         )
 
     def load(self, avi_file: Path):
-        """Stage 1 (I/O, thread-safe): read+decode the AVI and fetch cone params.
+        """Stage 1 (I/O + host preprocessing, thread-safe): read+decode the AVI, fetch
+        cone params, frame-pad, and build the cropped cartesian view (image_sc).
 
         Runs no GPU/JAX work, so it is safe to call from worker threads. Returns a
-        payload dict consumed by :meth:`compute`, or raises on missing params.
+        payload dict consumed by :meth:`compute`, or raises on missing params or an
+        all-zero cropped sequence.
         """
         avi_file = avi_file.with_suffix(".avi")
 
@@ -467,16 +469,22 @@ class LVHProcessor:
         if padded_len != n_frames:
             sequence_np = np.pad(sequence_np, [[0, padded_len - n_frames], [0, 0], [0, 0]])
 
+        image_sc_np = crop_and_center_cone(sequence_np[:n_frames], cone_params)
+        image_sc_np = np.floor(image_sc_np + 0.5).astype(np.uint8)
+        if not image_sc_np.any():
+            raise ValueError(f"Processed sequence is all zeros for file {avi_file}")
+
         return {
             "avi_file": avi_file,
             "cone_params": cone_params,
             "sequence_np": sequence_np,
+            "image_sc_np": image_sc_np,
             "n_frames": n_frames,
             "out_h5": out_h5,
         }
 
     def compute(self, payload: dict):
-        """Stage 2 (GPU, main thread only): polar + cropped cartesian conversion.
+        """Stage 2 (GPU, main thread only): polar conversion.
 
         Takes a payload from :meth:`load` and returns the host-side arrays and
         metadata for :meth:`save`. Keep this on the main thread: there is a single
@@ -485,10 +493,10 @@ class LVHProcessor:
         avi_file = payload["avi_file"]
         cone_params = payload["cone_params"]
         n_frames = payload["n_frames"]
-        sequence_np = payload["sequence_np"]
+        image_sc_np = payload["image_sc_np"]
         # Already padded to a multiple of frame_bucket on the host in :meth:`load`, so
         # every device op below sees only a handful of clip-length shapes.
-        sequence_processed = ops.convert_to_tensor(sequence_np)
+        sequence_processed = ops.convert_to_tensor(payload["sequence_np"])
 
         # Polar conversion runs on the uncropped frame using apex coordinates in
         # original-image space; theta_min/theta_max come from the fitted slopes
@@ -505,12 +513,6 @@ class LVHProcessor:
 
         polar_im_set = ops.cast(ops.floor(polar_im_set + 0.5), "uint8")
 
-        # Cropped + centered cartesian view is only needed for image_sc.
-        image_sc_np = crop_and_center_cone(sequence_np[:n_frames], cone_params)
-        image_sc_np = np.floor(image_sc_np + 0.5).astype(np.uint8)
-
-        if not image_sc_np.any():
-            raise ValueError(f"Processed sequence is all zeros for file {avi_file}")
         polar_np = np.asarray(polar_im_set)[:n_frames]
         if not polar_np.any():
             raise ValueError(f"Polar sequence is all zeros for file {avi_file}")
@@ -779,7 +781,7 @@ def _bounded_map(executor, fn, items, max_in_flight):
 
 
 def _run_conversion_pipeline(
-    processor, files, load_workers: int = 8, save_workers: int = 8, prefetch: int = 8
+    processor, files, load_workers: int = 4, save_workers: int = 4, prefetch: int = 12
 ):
     """Drive ``processor`` over ``files`` as an overlapped load -> compute -> save
     pipeline so the GPU is not stalled on disk I/O.
@@ -796,21 +798,14 @@ def _run_conversion_pipeline(
         for file, load_future in tqdm(
             _bounded_map(loaders, processor.load, files, prefetch), total=len(files)
         ):
-            try:
-                payload = load_future.result()  # surfaces load errors
-                result = processor.compute(payload)  # GPU, main thread
-            except Exception as e:
-                log.error(f"Processing {file} failed: {str(e)}")
-                continue
+            payload = load_future.result()  # surfaces load errors
+            result = processor.compute(payload)  # GPU, main thread
             # result is (out_h5, image_sc_np, polar_np, metadata)
             save_futures[savers.submit(processor.save, *result)] = result[0]
 
         # Drain pending writes, surfacing any save errors
         for future in as_completed(save_futures):
-            try:
-                future.result()
-            except Exception as e:
-                log.error(f"Saving {save_futures[future]} failed: {str(e)}")
+            future.result()
 
 
 def convert_echonetlvh(
