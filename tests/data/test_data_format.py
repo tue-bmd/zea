@@ -205,21 +205,21 @@ def test_overwrite(tmp_hdf5_path):
 
 
 def test_image_only(tmp_hdf5_path):
-    """Tests creating a file with only image_sc data (no scan)."""
-    image_sc = {
+    """Tests creating a file with only image data (no scan)."""
+    image = {
         "values": np.zeros((n_frames, 256, 256), dtype=np.uint8),
         "coordinates": np.zeros((n_frames, 256, 256, 3), dtype=np.float32),
     }
     File.create(
         tmp_hdf5_path,
-        data={"image_sc": image_sc},
+        data={"image": image},
         probe=PROBE,
         description="Image-only dataset",
         overwrite=True,
     )
 
     with File(tmp_hdf5_path) as dataset:
-        assert dataset.data.image_sc.values.shape == (n_frames, 256, 256)
+        assert dataset.data.image.values.shape == (n_frames, 256, 256)
 
 
 def test_custom_map(tmp_hdf5_path):

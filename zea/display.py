@@ -290,12 +290,12 @@ def scan_convert_2d(
             distance_to_apex=distance_to_apex,
         )
 
-    images_sc = _interpolate_batch(image, coordinates, fill_value, order=order, **kwargs)
+    scan_converted = _interpolate_batch(image, coordinates, fill_value, order=order, **kwargs)
 
     # swap axis to match z, x
-    images_sc = ops.swapaxes(images_sc, -1, -2)
+    scan_converted = ops.swapaxes(scan_converted, -1, -2)
 
-    return images_sc, parameters
+    return scan_converted, parameters
 
 
 def compute_scan_convert_3d_coordinates(
@@ -438,11 +438,11 @@ def scan_convert_3d(
             dtype=image.dtype,
         )
 
-    images_sc = _interpolate_batch(image, coordinates, fill_value, order=order)
+    scan_converted = _interpolate_batch(image, coordinates, fill_value, order=order)
 
     # swap axis to match z, x, y
-    images_sc = ops.swapaxes(images_sc, -2, -3)
-    return images_sc, parameters
+    scan_converted = ops.swapaxes(scan_converted, -2, -3)
+    return scan_converted, parameters
 
 
 def scan_convert(
@@ -525,18 +525,18 @@ def _interpolate_batch(images, coordinates, fill_value=0.0, order=1, vectorize=T
 
     if order > 1:
         # cpu bound
-        images_sc = ops.stack(list(map(map_coordinates_fn, images)))
+        scan_converted = ops.stack(list(map(map_coordinates_fn, images)))
     elif not vectorize:
-        images_sc = ops.map(map_coordinates_fn, images)
+        scan_converted = ops.map(map_coordinates_fn, images)
     else:
         # gpu bound
-        images_sc = ops.vectorized_map(map_coordinates_fn, images)
+        scan_converted = ops.vectorized_map(map_coordinates_fn, images)
 
     # ignore batch dim to get image shape
-    image_sc_shape = ops.shape(images_sc)[1:]
-    images_sc = ops.reshape(images_sc, (*batch_dims, *image_sc_shape))
+    scan_converted_shape = ops.shape(scan_converted)[1:]
+    scan_converted = ops.reshape(scan_converted, (*batch_dims, *scan_converted_shape))
 
-    return images_sc
+    return scan_converted
 
 
 def cartesian_to_polar_matrix(

@@ -589,7 +589,7 @@ class TestAllPipelineDataTypes:
             },
             "beamformed_data": _make_map(np.zeros((n_frames, 16, 12, n_ch), dtype=np.float32)),
             "envelope_data": _make_map(np.zeros((n_frames, 16, 12), dtype=np.float32)),
-            "image_sc": _make_map(np.zeros((n_frames, 32, 24), dtype=np.uint8)),
+            "image": _make_map(np.zeros((n_frames, 32, 24), dtype=np.uint8)),
         }
         fspec = FileSpec(
             data=data_dict,
@@ -605,7 +605,7 @@ class TestAllPipelineDataTypes:
             assert loaded.data.aligned_data is not None
             assert loaded.data.beamformed_data is not None
             assert loaded.data.envelope_data is not None
-            assert loaded.data.image_sc is not None
+            assert loaded.data.image is not None
 
 
 class TestSlicing:

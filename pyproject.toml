@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zea"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
     { name = "Tristan Stevens", email = "t.s.w.stevens@tue.nl" },
@@ -119,7 +119,7 @@ docs = [
     "PyStemmer",
     "IPython",
 ]
-jax = ["jax[cuda12-pip]>=0.4.26"]
+jax = ["jax[cuda12]>=0.4.26"]
 display = ["opencv-python>=4"]
 display-headless = ["opencv-python-headless>=4"]
 # most models don't needs these optional dependencies
@@ -257,7 +257,7 @@ unresolved-import = "warn"
 
 [tool.ty.src]
 include = ["zea"]
-exclude = ["zea/ops/keras_ops.py"]  # generated file (see _generate_keras_ops)
+exclude = ["zea/ops/keras_ops.py"] # generated file (see _generate_keras_ops)
 
 # Keras Layer subclasses deliberately override `call` with domain-specific
 # signatures; Keras dispatches through __call__ and never calls .call()
