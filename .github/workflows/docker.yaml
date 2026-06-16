@@ -27,44 +27,48 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Print runner IP address (non-fatal)
+      - name: Print runner IP report (non-fatal)
         shell: bash
         continue-on-error: true
         run: |
-          echo "Attempting to detect host IP from runner container context..."
+          set +e
+          set +o pipefail
 
-          # Container IP (for context only).
-          CONTAINER_IP=""
-          if command -v hostname >/dev/null 2>&1; then
-            CONTAINER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
-          fi
-          if [ -z "$CONTAINER_IP" ] && command -v ip >/dev/null 2>&1; then
-            CONTAINER_IP="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)"
-          fi
+          echo "Attempting to detect IP information from runner container context..."
 
-          # Host IP candidates from inside container.
-          HOST_IP=""
+          echo "Hostname:"
+          hostname 2>/dev/null || echo "unavailable"
 
-          # Common Docker hostname (works in many environments, including Docker Desktop).
-          if [ -z "$HOST_IP" ] && command -v getent >/dev/null 2>&1; then
-            HOST_IP="$(getent hosts host.docker.internal 2>/dev/null | awk '{print $1; exit}' || true)"
-          fi
+          echo "Primary container IP (hostname -I):"
+          hostname -I 2>/dev/null | awk '{print $1}' || echo "unavailable"
 
-          # Default gateway is often the host-side bridge address in Linux containerized runners.
-          if [ -z "$HOST_IP" ] && command -v ip >/dev/null 2>&1; then
-            HOST_IP="$(ip route 2>/dev/null | awk '/default/ {print $3; exit}' || true)"
-          fi
-
-          if [ -n "$CONTAINER_IP" ]; then
-            echo "Runner container IP: $CONTAINER_IP"
+          echo "All container IPv4 addresses:"
+          if command -v ip >/dev/null 2>&1; then
+            ip -4 -o addr show scope global 2>/dev/null | awk '{print $2 ": " $4}' || echo "unavailable"
           else
-            echo "Runner container IP: unavailable"
+            echo "ip command unavailable"
           fi
 
-          if [ -n "$HOST_IP" ]; then
-            echo "Host IP candidate: $HOST_IP"
+          echo "Host IP candidate via host.docker.internal:"
+          if command -v getent >/dev/null 2>&1; then
+            getent hosts host.docker.internal 2>/dev/null | awk '{print $1}' | head -n1 || echo "unavailable"
           else
-            echo "Host IP candidate: unavailable (non-fatal)"
+            echo "getent unavailable"
+          fi
+
+          echo "Host IP candidate via default gateway:"
+          if command -v ip >/dev/null 2>&1; then
+            ip route 2>/dev/null | awk '/default/ {print $3; exit}' || echo "unavailable"
+          else
+            echo "ip command unavailable"
+          fi
+
+          echo "Public egress IPv4:"
+          if command -v curl >/dev/null 2>&1; then
+            curl -4 -s --max-time 5 https://api.ipify.org || echo "unavailable"
+            echo
+          else
+            echo "curl unavailable"
           fi
 
       - name: Set up Docker Buildx
