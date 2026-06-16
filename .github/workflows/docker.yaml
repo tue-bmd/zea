@@ -27,6 +27,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Print runner IP address (non-fatal)
+        shell: bash
+        continue-on-error: true
+        run: |
+          echo "Attempting to detect runner IP address..."
+          RUNNER_IP=""
+
+          if command -v hostname >/dev/null 2>&1; then
+            RUNNER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+          fi
+
+          if [ -z "$RUNNER_IP" ] && command -v ip >/dev/null 2>&1; then
+            RUNNER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i = 1; i <= NF; i++) if ($i == "src") {print $(i+1); exit}}')"
+          fi
+
+          if [ -z "$RUNNER_IP" ] && command -v ifconfig >/dev/null 2>&1; then
+            RUNNER_IP="$(ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')"
+          fi
+
+          if [ -n "$RUNNER_IP" ]; then
+            echo "Runner IP address: $RUNNER_IP"
+          else
+            echo "Runner IP address: unavailable (non-fatal)"
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
