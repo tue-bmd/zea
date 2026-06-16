@@ -550,6 +550,31 @@ class LVHProcessor:
         """
         self.save(*self.compute(self.load(avi_file)))
 
+    def run(self, files, load_workers: int = 4, save_workers: int = 4, prefetch: int = 12):
+        """Drive ``processor`` over ``files`` as an overlapped load -> compute -> save
+        pipeline so the GPU is not stalled on disk I/O.
+
+        Loads (decode) and saves (HDF5 write) run on thread pools — both release the
+        GIL — while GPU compute stays on the main thread.
+        """
+        with (
+            ThreadPoolExecutor(max_workers=load_workers) as loaders,
+            ThreadPoolExecutor(max_workers=save_workers) as savers,
+        ):
+            save_futures = {}
+
+            for file, load_future in tqdm(
+                _bounded_map(loaders, self.load, files, prefetch), total=len(files)
+            ):
+                payload = load_future.result()  # surfaces load errors
+                result = self.compute(payload)  # GPU, main thread
+                # result is (out_h5, image_sc_np, polar_np, metadata)
+                save_futures[savers.submit(self.save, *result)] = result[0]
+
+            # Drain pending writes, surfacing any save errors
+            for future in as_completed(save_futures):
+                future.result()
+
 
 def transform_measurement_coordinates_with_cone_params(row, cone_params):
     """Transform measurement coordinates using cone parameters from fit_scan_cone.
@@ -780,34 +805,6 @@ def _bounded_map(executor, fn, items, max_in_flight):
         yield item, future
 
 
-def _run_conversion_pipeline(
-    processor, files, load_workers: int = 4, save_workers: int = 4, prefetch: int = 12
-):
-    """Drive ``processor`` over ``files`` as an overlapped load -> compute -> save
-    pipeline so the GPU is not stalled on disk I/O.
-
-    Loads (decode) and saves (HDF5 write) run on thread pools — both release the
-    GIL — while GPU compute stays on the main thread.
-    """
-    with (
-        ThreadPoolExecutor(max_workers=load_workers) as loaders,
-        ThreadPoolExecutor(max_workers=save_workers) as savers,
-    ):
-        save_futures = {}
-
-        for file, load_future in tqdm(
-            _bounded_map(loaders, processor.load, files, prefetch), total=len(files)
-        ):
-            payload = load_future.result()  # surfaces load errors
-            result = processor.compute(payload)  # GPU, main thread
-            # result is (out_h5, image_sc_np, polar_np, metadata)
-            save_futures[savers.submit(processor.save, *result)] = result[0]
-
-        # Drain pending writes, surfacing any save errors
-        for future in as_completed(save_futures):
-            future.result()
-
-
 def convert_echonetlvh(
     src: Path,
     dst: Path,
@@ -903,7 +900,7 @@ def convert_echonetlvh(
 
         log.info("Starting the conversion process.")
 
-        _run_conversion_pipeline(processor, files_to_process)
+        processor.run(files_to_process)
 
         log.info("All image conversion tasks are completed.")
 
