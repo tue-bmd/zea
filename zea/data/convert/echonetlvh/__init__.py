@@ -748,7 +748,15 @@ def _fix_faulty_entry(measurements_csv, src):
         rows = list(reader)
 
     for bad_hash in ["0XBD41EBF599F7EE4F", "0X2061669A27571EA3", "0XA26FCACCC289023E"]:
-        h, w = _load_first_frame(find_avi_file(src, bad_hash)).shape
+        try:
+            avi_path = find_avi_file(src, bad_hash)
+            h, w = _load_first_frame(avi_path).shape
+        except FileNotFoundError:
+            log.warning(
+                f"Trying to fix faulty entry for {bad_hash}, but file not found. "
+                "You can ignore this when running on a subset of the dataset."
+            )
+            continue
         for row in rows:
             if row["HashedFileName"] == bad_hash:
                 fps = row["Width"]
