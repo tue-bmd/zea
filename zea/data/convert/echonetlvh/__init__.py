@@ -16,7 +16,7 @@ import os
 import shutil
 import tempfile
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path
 
@@ -34,7 +34,6 @@ from zea.tools.fit_scan_cone import (
     _load_first_frame,
     crop_and_center_cone,
     detect_cone_parameters,
-    visualize_scan_cone,
 )
 
 
@@ -132,8 +131,67 @@ def _find_avi_files(src: Path, splits: dict):
     return files_to_process
 
 
+def _compute_cone_params_for_file(avi_file, fieldnames):
+    """Compute cone parameters for a single AVI file.
+
+    Pure worker function with no shared state, safe to run in a thread pool.
+    Returns a row dict (with ``status`` either ``"success"`` or ``"error: ..."``)
+    matching ``fieldnames``.
+    """
+    try:
+        # Load only the first frame of video using OpenCV directly
+        first_frame = _load_first_frame(avi_file)
+
+        # Detect cone parameters
+        full_cone_params = detect_cone_parameters(first_frame, image_range=(0, 255))
+
+        if (
+            full_cone_params["crop_left"] < 0
+            or full_cone_params["crop_right"] > first_frame.shape[1]
+        ):
+            raise ValueError(
+                "Computed crop exceeds frame dimensions, meaning that either cone "
+                "detection failed, due to e.g. DICOM artifacts present in the frame, "
+                "or the full scan cone is not visible in the frame."
+            )
+
+        # Extract only the essential parameters
+        return {
+            "avi_filename": avi_file.name,
+            "crop_left": full_cone_params["crop_left"],
+            "crop_right": full_cone_params["crop_right"],
+            "crop_top": full_cone_params["crop_top"],
+            "crop_bottom": full_cone_params["crop_bottom"],
+            "apex_x": full_cone_params["apex_x"],
+            "apex_y": full_cone_params["apex_y"],
+            "circle_radius": full_cone_params["circle_radius"],
+            "left_slope": full_cone_params["left_slope"],
+            "right_slope": full_cone_params["right_slope"],
+            "new_width": full_cone_params["new_width"],
+            "new_height": full_cone_params["new_height"],
+            "opening_angle": full_cone_params["opening_angle"],
+            "status": "success",
+        }
+
+    except Exception as e:
+        log.error(f"Error processing {avi_file}: {str(e)}")
+
+        # Build failure record, filling missing fields with None
+        failure_record = {
+            "avi_filename": avi_file.name,
+            "status": f"error: {str(e)}",
+        }
+        for field in fieldnames:
+            failure_record.setdefault(field, None)
+        return failure_record
+
+
 def precompute_cone_parameters(
-    source_path: Path, measurements_csv: str | Path, cone_params_csv: Path, max_files, force
+    source_path: Path,
+    measurements_csv: str | Path,
+    cone_params_csv: Path,
+    max_files,
+    max_workers: int = 8,
 ):
     """
     Precompute and save cone parameters for all AVI files.
@@ -147,15 +205,10 @@ def precompute_cone_parameters(
         measurements_csv: Path to the MeasurementsList.csv file
         cone_params_csv: Path to the output CSV file
         max_files: Maximum number of files to process (or None for all)
-        force: Whether to recompute parameters if they already exist
+        max_workers: Number of worker threads used to process files in parallel
     Returns:
         Path to the CSV file containing cone parameters
     """
-
-    # Check if parameters already exist
-    if cone_params_csv.exists() and not force:
-        log.warning(f"Parameters already exist at {cone_params_csv}. Use --force to recompute.")
-        return cone_params_csv
 
     # Get list of files to process
     splits = load_splits(measurements_csv)
@@ -189,70 +242,32 @@ def precompute_cone_parameters(
         "status",
     ]
 
-    # Open CSV file for writing
+    # Open CSV file for writing. Files are processed in parallel worker threads
+    # (OpenCV / NumPy release the GIL), but the csv writer and the shared dict are
+    # only ever touched from this main thread.
     with open(cone_params_csv, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
-        # Process each file
-        for avi_file in tqdm(files_to_process, desc="Computing cone parameters"):
-            try:
-                # Load only the first frame of video using OpenCV directly
-                first_frame = _load_first_frame(avi_file)
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_compute_cone_params_for_file, avi_file, fieldnames): avi_file
+                for avi_file in files_to_process
+            }
 
-                # Detect cone parameters
-                full_cone_params = detect_cone_parameters(first_frame, image_range=(0, 255))
-
-                if (
-                    full_cone_params["crop_left"] < 0
-                    or full_cone_params["crop_right"] > first_frame.shape[1]
-                ):
-                    visualize_scan_cone(first_frame, full_cone_params)
-                    raise ValueError(
-                        "Computed crop exceeds frame dimensions, meaning that either cone "
-                        "detection failed, due to e.g. DICOM artifacts present in the frame, "
-                        "or the full scan cone is not visible in the frame."
-                    )
-
-                # Extract only the essential parameters
-                essential_params = {
-                    "avi_filename": avi_file.name,
-                    "crop_left": full_cone_params["crop_left"],
-                    "crop_right": full_cone_params["crop_right"],
-                    "crop_top": full_cone_params["crop_top"],
-                    "crop_bottom": full_cone_params["crop_bottom"],
-                    "apex_x": full_cone_params["apex_x"],
-                    "apex_y": full_cone_params["apex_y"],
-                    "circle_radius": full_cone_params["circle_radius"],
-                    "left_slope": full_cone_params["left_slope"],
-                    "right_slope": full_cone_params["right_slope"],
-                    "new_width": full_cone_params["new_width"],
-                    "new_height": full_cone_params["new_height"],
-                    "opening_angle": full_cone_params["opening_angle"],
-                    "status": "success",
-                }
+            for future in tqdm(
+                as_completed(futures),
+                total=len(futures),
+                desc="Computing cone parameters",
+            ):
+                result = future.result()
 
                 # Save to output CSV
-                writer.writerow(essential_params)
+                writer.writerow(result)
 
-                # Store in dictionary
-                all_cone_params[avi_file.name] = essential_params
-
-            except Exception as e:
-                log.error(f"Error processing {avi_file}: {str(e)}")
-
-                # Write failure record
-                failure_record = {
-                    "avi_filename": avi_file.name,
-                    "status": f"error: {str(e)}",
-                }
-
-                # Fill missing fields with None
-                for field in fieldnames:
-                    if field not in failure_record:
-                        failure_record[field] = None
-
-                writer.writerow(failure_record)
+                # Store successful results in dictionary
+                if result["status"] == "success":
+                    all_cone_params[result["avi_filename"]] = result
 
     # Also save as JSON for easier programmatic access
     cone_params_json = cone_params_csv.with_suffix(".json")
@@ -681,6 +696,28 @@ def unzip(src: Path, dst: Path) -> Path:
     return dst
 
 
+def _fix_faulty_entry(measurements_csv, src):
+    bad_hash = "0XBD41EBF599F7EE4F"
+    h, w = _load_first_frame(find_avi_file(src, bad_hash)).shape
+    with open(measurements_csv, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        assert reader.fieldnames is not None, "MeasurementsList.csv has no header row"
+        fieldnames = reader.fieldnames
+        rows = list(reader)
+    for row in rows:
+        if row["HashedFileName"] == bad_hash:
+            fps = row["Width"]
+            n_frames = row["FPS"]
+            row["Width"] = w
+            row["Height"] = h
+            row["FPS"] = fps
+            row["Frames"] = n_frames
+    with open(measurements_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def convert_echonetlvh(
     src: Path,
     dst: Path,
@@ -690,6 +727,7 @@ def convert_echonetlvh(
     convert_images,
     max_files,
     force,
+    max_workers: int = 8,
 ):
     """
     Conversion script for the EchoNet-LVH dataset.
@@ -720,30 +758,15 @@ def convert_echonetlvh(
     if not no_rejection:
         overwrite_splits(measurements_csv, rejection_path)
 
-    # There are some mistakes for the bad_hash file, so fix them here
-    bad_hash = "0XBD41EBF599F7EE4F"
-    h, w = _load_first_frame(find_avi_file(src, bad_hash)).shape
-    with open(measurements_csv, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        assert reader.fieldnames is not None, "MeasurementsList.csv has no header row"
-        fieldnames = reader.fieldnames
-        rows = list(reader)
-    for row in rows:
-        if row["HashedFileName"] == bad_hash:
-            fps = row["Width"]
-            n_frames = row["FPS"]
-            row["Width"] = w
-            row["Height"] = h
-            row["FPS"] = fps
-            row["Frames"] = n_frames
-    with open(measurements_csv, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    # There are some mistakes in the csv file, so fix them here
+    _fix_faulty_entry(measurements_csv, src)
 
     # Precompute cone parameters if needed
     cone_params_csv = dst / "cone_parameters.csv"
-    precompute_cone_parameters(src, measurements_csv, cone_params_csv, max_files, force)
+    if cone_params_csv.exists() and not force:
+        log.warning(f"Parameters already exist at {cone_params_csv}. Use --force to recompute.")
+    else:
+        precompute_cone_parameters(src, measurements_csv, cone_params_csv, max_files, max_workers)
 
     # If no specific conversion is requested, convert both
     if not (convert_measurements or convert_images):

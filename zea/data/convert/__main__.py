@@ -119,6 +119,12 @@ def _add_parser_args_echonetlvh(subparsers):
         action="store_true",
         help="Force recomputation even if parameters already exist",
     )
+    echonetlvh_parser.add_argument(
+        "--max_workers",
+        type=int,
+        default=8,
+        help="Maximum number of workers to use for precomputing cone parameters",
+    )
 
 
 def _add_parser_args_picmus(subparsers):
@@ -312,6 +318,7 @@ def main():
             args.convert_images,
             args.max_files,
             args.force,
+            args.max_workers,
         )
     elif args.dataset == "camus":
         from zea.data.convert.camus import convert_camus
