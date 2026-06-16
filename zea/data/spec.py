@@ -1,3 +1,5 @@
+import os
+import tempfile
 from collections import defaultdict
 from dataclasses import MISSING, dataclass, field, fields
 from datetime import datetime, timezone
@@ -2179,9 +2181,6 @@ class FileSpec(Spec):
         warn_missing_optional_fields: bool = True,
     ) -> None:
         """Save the dataset to the specified path."""
-        # Lazy import to avoid circular dependency (spec.py is imported by file.py)
-        from zea import File
-
         try:
             _zea_version = _get_pkg_version("zea")
         except PackageNotFoundError:
@@ -2214,8 +2213,45 @@ class FileSpec(Spec):
                     "regulations. Ensure you have appropriate authorization and "
                     "de-identification measures in place before sharing this file."
                 )
-        with File(str(_path), "w") as f:
-            f.attrs["zea_version"] = _zea_version
+        # Write to a temporary file in the destination directory, then atomically
+        # rename it into place. This guarantees that an interrupted write (Ctrl-C,
+        # crash, power loss) never leaves a partial/corrupt file at `path`: either
+        # the fully-written file is there, or nothing is. The temp file shares the
+        # destination's filesystem, so os.replace is a cheap metadata-only rename
+        # (no data copy), independent of file size.
+        # Suffix must stay .hdf5: File() rejects other extensions. The leading dot
+        # keeps the temp hidden; it is renamed away on success and removed on error.
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(_path.parent), prefix=f".{_path.name}.tmp", suffix=".hdf5"
+        )
+        os.close(fd)
+        tmp_path = Path(tmp_name)
+        try:
+            self._write_hdf5(
+                tmp_path, _zea_version, compression, chunk_frames, warn_missing_optional_fields
+            )
+            os.replace(tmp_path, _path)
+        except BaseException:
+            # Includes KeyboardInterrupt/SystemExit: clean up the partial temp file.
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+        log.info(f"File saved to {log.yellow(path)}")
+
+    def _write_hdf5(
+        self,
+        path: Path,
+        zea_version: str,
+        compression: str | None,
+        chunk_frames: bool,
+        warn_missing_optional_fields: bool,
+    ) -> None:
+        """Write all groups/datasets of this spec to a fresh HDF5 file at ``path``."""
+        # Lazy import to avoid circular dependency (spec.py is imported by file.py)
+        from zea import File
+
+        with File(str(path), "w") as f:
+            f.attrs["zea_version"] = zea_version
 
             # Write scalar/array metadata fields (metadata, metrics, probe_name, etc.)
             for group_name, schema in self.SCHEMA.items():
@@ -2248,5 +2284,3 @@ class FileSpec(Spec):
                     chunk_frames=chunk_frames,
                     warn_missing_optional_fields=warn_missing_optional_fields,
                 )
-
-        log.info(f"File saved to {log.yellow(path)}")
