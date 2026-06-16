@@ -16,6 +16,7 @@ import os
 import shutil
 import tempfile
 import zipfile
+from collections import deque
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path
@@ -365,40 +366,37 @@ def load_cone_parameters(csv_path):
     return cone_params
 
 
-def crop_sequence_with_params(sequence, cone_params):
-    """
-    Apply cropping to a sequence of frames using predetermined parameters.
-
-    Args:
-        sequence: Input sequence as numpy array of shape (frames, height, width)
-        cone_params: Dictionary containing cropping parameters
-
-    Returns:
-        Cropped and padded sequence
-    """
-    crop_sequence = vmap(lambda frame: crop_and_center_cone(frame, cone_params, backend=ops))
-    return crop_sequence(sequence)
-
-
 class LVHProcessor:
     """Processor for EchoNet-LVH dataset."""
 
     def __init__(
-        self, path_out_h5: str | Path, splits: dict, cone_params: dict, polar_shape=(600, 600)
+        self,
+        path_out_h5: str | Path,
+        splits: dict,
+        cone_params: dict,
+        polar_shape=(600, 600),
+        frame_bucket: int = 128,
     ):
         self.path_out_h5 = Path(path_out_h5)
         self.splits = splits
         self.cone_parameters = cone_params or {}
+        # Clip lengths vary per file, which is the leading (batch) dim of every GPU
+        # op here. Padding it up to a multiple of `frame_bucket` collapses the many
+        # distinct shapes into a handful, so XLA compiles each kernel only a few
+        # times instead of once per unique frame count.
+        self.frame_bucket = frame_bucket
 
-        self.cart2pol_jit = jit(partial(cartesian_to_polar_matrix, polar_shape=polar_shape))
-        self.cart2pol_batched = vmap(
-            lambda matrix, tip_x, tip_y, r_max, theta_min, theta_max: self.cart2pol_jit(
-                matrix,
-                tip=(tip_x, tip_y),
-                r_max=r_max,
-                theta_range=(theta_min, theta_max),
-            ),
-            in_axes=(0, None, None, None, None, None),
+        self.cart2pol_batched = jit(
+            vmap(
+                lambda matrix, tip_x, tip_y, r_max, theta_min, theta_max: cartesian_to_polar_matrix(
+                    matrix,
+                    tip=(tip_x, tip_y),
+                    r_max=r_max,
+                    theta_range=(theta_min, theta_max),
+                    polar_shape=polar_shape,  # fixed
+                ),
+                in_axes=(0, None, None, None, None, None),
+            )
         )
 
     def get_split(self, avi_file: Path):
@@ -447,26 +445,50 @@ class LVHProcessor:
             image_polar, cartesian_shape, tip, r_max, theta_range, order=order
         )
 
-    def __call__(self, avi_file: Path):
-        """Takes a single avi_file and generates a zea dataset
+    def load(self, avi_file: Path):
+        """Stage 1 (I/O, thread-safe): read+decode the AVI and fetch cone params.
 
-        Args:
-            avi_file: Path to avi_file to be processed
-
-        Returns:
-            zea dataset
+        Runs no GPU/JAX work, so it is safe to call from worker threads. Returns a
+        payload dict consumed by :meth:`compute`, or raises on missing params.
         """
         avi_file = avi_file.with_suffix(".avi")
-        sequence_np = load_avi(avi_file)
-        sequence_np = sequence_np.astype(np.float32)
-        sequence_processed = ops.convert_to_numpy(sequence_np)
+
         # Get pre-computed cone parameters for this file
         cone_params = self.cone_parameters.get(avi_file.name)
         if cone_params is None:
             raise UserWarning(f"No cone parameters for {avi_file.name}")
 
-        split = self.get_split(avi_file)
-        out_h5 = self.path_out_h5 / split / (avi_file.stem + ".hdf5")
+        sequence_np = load_avi(avi_file).astype(np.float32)
+        out_h5 = self.path_out_h5 / self.get_split(avi_file) / (avi_file.stem + ".hdf5")
+
+        # Pad the frame (leading/batch) dimension up to a multiple of frame_bucket
+        n_frames = sequence_np.shape[0]
+        padded_len = math.ceil(n_frames / self.frame_bucket) * self.frame_bucket
+        if padded_len != n_frames:
+            sequence_np = np.pad(sequence_np, [[0, padded_len - n_frames], [0, 0], [0, 0]])
+
+        return {
+            "avi_file": avi_file,
+            "cone_params": cone_params,
+            "sequence_np": sequence_np,
+            "n_frames": n_frames,
+            "out_h5": out_h5,
+        }
+
+    def compute(self, payload: dict):
+        """Stage 2 (GPU, main thread only): polar + cropped cartesian conversion.
+
+        Takes a payload from :meth:`load` and returns the host-side arrays and
+        metadata for :meth:`save`. Keep this on the main thread: there is a single
+        device and concurrent tracing is not safe.
+        """
+        avi_file = payload["avi_file"]
+        cone_params = payload["cone_params"]
+        n_frames = payload["n_frames"]
+        sequence_np = payload["sequence_np"]
+        # Already padded to a multiple of frame_bucket on the host in :meth:`load`, so
+        # every device op below sees only a handful of clip-length shapes.
+        sequence_processed = ops.convert_to_tensor(sequence_np)
 
         # Polar conversion runs on the uncropped frame using apex coordinates in
         # original-image space; theta_min/theta_max come from the fitted slopes
@@ -474,48 +496,57 @@ class LVHProcessor:
         # cartesian_to_polar_matrix, so right_slope → theta_min).
         polar_im_set = self.cart2pol_batched(
             sequence_processed,
-            cone_params["apex_x"],
-            cone_params["apex_y"],
-            cone_params["circle_radius"],
-            -math.atan(cone_params["right_slope"]),
-            -math.atan(cone_params["left_slope"]),
+            ops.convert_to_tensor(cone_params["apex_x"]),
+            ops.convert_to_tensor(cone_params["apex_y"]),
+            ops.convert_to_tensor(cone_params["circle_radius"]),
+            ops.convert_to_tensor(-math.atan(cone_params["right_slope"])),
+            ops.convert_to_tensor(-math.atan(cone_params["left_slope"])),
         )
 
-        polar_im_set_uint8 = ops.cast(ops.floor(polar_im_set + 0.5), "uint8")
-        del polar_im_set
+        polar_im_set = ops.cast(ops.floor(polar_im_set + 0.5), "uint8")
 
-        # Cropped + centered cartesian view is only needed for image_sc
-        sequence_processed = crop_sequence_with_params(sequence_processed, cone_params)
-        sequence_processed_uint8 = ops.cast(ops.floor(sequence_processed + 0.5), "uint8")
-        del sequence_processed
+        # Cropped + centered cartesian view is only needed for image_sc.
+        image_sc_np = crop_and_center_cone(sequence_np[:n_frames], cone_params)
+        image_sc_np = np.floor(image_sc_np + 0.5).astype(np.uint8)
 
-        if ops.all(sequence_processed_uint8 == 0):
+        if not image_sc_np.any():
             raise ValueError(f"Processed sequence is all zeros for file {avi_file}")
-
-        if ops.all(polar_im_set_uint8 == 0):
+        polar_np = np.asarray(polar_im_set)[:n_frames]
+        if not polar_np.any():
             raise ValueError(f"Polar sequence is all zeros for file {avi_file}")
-
-        # Convert JAX arrays to numpy for File.create / spec validation
-        image_sc_np = np.asarray(sequence_processed_uint8)
-        polar_np = np.asarray(polar_im_set_uint8)
 
         # TODO: would be cool if we could store all the information of
         # 'MeasurementsList.csv' and 'cone_parameters.csv' in the metadata
+        metadata = {
+            "annotations": {"anatomy": "heart", "view": "PLAX"},
+            "subject": {"id": avi_file.name, "type": "human"},
+        }
+        return payload["out_h5"], image_sc_np, polar_np, metadata
+
+    @staticmethod
+    def save(out_h5: Path, image_sc_np, polar_np, metadata: dict):
+        """Stage 3 (I/O, thread-safe): write the zea HDF5 file."""
         File.create(
             out_h5,
             data={
                 "image": {"values": image_sc_np},
                 "image_polar": {"values": polar_np, "unit": "pixels"},
             },
-            metadata={
-                "annotations": {"anatomy": "heart", "view": "PLAX"},
-                "subject": {
-                    "id": avi_file.name,
-                    "type": "human",
-                },
-            },
+            metadata=metadata,
             description="EchoNet-LVH dataset converted to zea format",
+            warn_missing_optional_fields=False,
         )
+
+    def __call__(self, avi_file: Path):
+        """Takes a single avi_file and generates a zea dataset.
+
+        Sequential convenience wrapper around :meth:`load`, :meth:`compute` and
+        :meth:`save`; the parallel pipeline drives those stages directly.
+
+        Args:
+            avi_file: Path to avi_file to be processed
+        """
+        self.save(*self.compute(self.load(avi_file)))
 
 
 def transform_measurement_coordinates_with_cone_params(row, cone_params):
@@ -721,6 +752,67 @@ def _fix_faulty_entry(measurements_csv, src):
         writer.writerows(rows)
 
 
+def _bounded_map(executor, fn, items, max_in_flight):
+    """Lazily submit ``fn(item)`` to ``executor`` keeping at most ``max_in_flight``
+    futures pending, yielding ``(item, future)`` pairs in input order.
+
+    Order is preserved (so shape-sorting still avoids JIT retracing) while the
+    look-ahead bound keeps only a handful of decoded videos in memory at once.
+    """
+    items = iter(items)
+    pending = deque()
+
+    def _submit_next():
+        try:
+            item = next(items)
+        except StopIteration:
+            return
+        pending.append((item, executor.submit(fn, item)))
+
+    for _ in range(max_in_flight):
+        _submit_next()
+
+    while pending:
+        item, future = pending.popleft()
+        _submit_next()  # refill the window before handing this one back
+        yield item, future
+
+
+def _run_conversion_pipeline(
+    processor, files, load_workers: int = 8, save_workers: int = 8, prefetch: int = 8
+):
+    """Drive ``processor`` over ``files`` as an overlapped load -> compute -> save
+    pipeline so the GPU is not stalled on disk I/O.
+
+    Loads (decode) and saves (HDF5 write) run on thread pools — both release the
+    GIL — while GPU compute stays on the main thread.
+    """
+    with (
+        ThreadPoolExecutor(max_workers=load_workers) as loaders,
+        ThreadPoolExecutor(max_workers=save_workers) as savers,
+    ):
+        save_futures = {}
+
+        for file, load_future in tqdm(
+            _bounded_map(loaders, processor.load, files, prefetch), total=len(files)
+        ):
+            try:
+                payload = load_future.result()  # surfaces load errors
+                result = processor.compute(payload)  # GPU, main thread
+            except Exception as e:
+                log.error(f"Processing {file} failed: {str(e)}")
+                continue
+            # result is (out_h5, image_sc_np, polar_np, metadata)
+            save_futures[savers.submit(processor.save, *result)] = result[0]
+
+        # Drain pending writes, surfacing any save errors
+        for future in as_completed(save_futures):
+            try:
+                future.result()
+            except Exception as e:
+                log.error(f"Saving {save_futures[future]} failed: {str(e)}")
+
+
 def convert_echonetlvh(
     src: Path,
     dst: Path,
@@ -816,11 +908,7 @@ def convert_echonetlvh(
 
         log.info("Starting the conversion process.")
 
-        for file in tqdm(files_to_process):
-            try:
-                processor(file)
-            except Exception as e:
-                log.error(f"Processing {file} failed: {str(e)}")
+        _run_conversion_pipeline(processor, files_to_process)
 
         log.info("All image conversion tasks are completed.")
 

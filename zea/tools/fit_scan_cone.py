@@ -326,7 +326,7 @@ def detect_cone_parameters(image, image_range, min_cone_half_angle_deg=20, thres
     }
 
 
-def crop_and_center_cone(image, cone_params, backend=np):
+def crop_and_center_cone(image, cone_params):
     """
     Crop the image to the sector bounding box and pad as needed to center the apex.
 
@@ -336,13 +336,14 @@ def crop_and_center_cone(image, cone_params, backend=np):
     3. Centers the apex horizontally in the final image
 
     Args:
-        image: 2D array (grayscale image)
+        image: 3D array (batched grayscale images) of shape (B, H, W)
         cone_params: Dictionary of cone parameters from detect_cone_parameters()
         backend: Numpy backend to use for padding and cropping. Defaults to numpy.
             Can be set to ``jax.numpy``, ``keras.ops`` or ``numpy``.
 
     Returns:
-        array of the cropped and centered image with the cone apex at the top center
+        array of the cropped and centered image with the cone apex at the top center,
+        shape (B, H', W')
     """
     # Get crop boundaries
     crop_left = int(cone_params["crop_left"])
@@ -352,18 +353,20 @@ def crop_and_center_cone(image, cone_params, backend=np):
 
     # Crop the image (handle negative crop_top)
     if crop_top < 0:
-        cropped = image[0:crop_bottom, crop_left:crop_right]
+        cropped = image[:, 0:crop_bottom, crop_left:crop_right]
         # Add top padding
         top_padding = -crop_top
-        top_pad = backend.zeros((top_padding, cropped.shape[1]), dtype=cropped.dtype)
-        cropped = backend.concatenate([top_pad, cropped], axis=0)
+        batch_size = cropped.shape[0]
+        top_pad = np.zeros((batch_size, top_padding, cropped.shape[2]), dtype=cropped.dtype)
+        cropped = np.concatenate([top_pad, cropped], axis=1)
     else:
-        cropped = image[crop_top:crop_bottom, crop_left:crop_right]
+        cropped = image[:, crop_top:crop_bottom, crop_left:crop_right]
 
     # Now handle horizontal centering
     # Calculate where the apex is in the cropped image
     apex_x_in_crop = cone_params["apex_x"] - crop_left
-    cropped_height, cropped_width = cropped.shape
+    cropped_height, cropped_width = cropped.shape[1], cropped.shape[2]
+    batch_size = cropped.shape[0]
 
     # Calculate the target center position
     target_center_x = cropped_width / 2
@@ -378,12 +381,12 @@ def crop_and_center_cone(image, cone_params, backend=np):
     # Apply horizontal padding if needed
     if left_padding > 0 or right_padding > 0:
         if left_padding > 0:
-            left_pad = backend.zeros((cropped_height, left_padding), dtype=cropped.dtype)
-            cropped = backend.concatenate([left_pad, cropped], axis=1)
+            left_pad = np.zeros((batch_size, cropped_height, left_padding), dtype=cropped.dtype)
+            cropped = np.concatenate([left_pad, cropped], axis=2)
 
         if right_padding > 0:
-            right_pad = backend.zeros((cropped_height, right_padding), dtype=cropped.dtype)
-            cropped = backend.concatenate([cropped, right_pad], axis=1)
+            right_pad = np.zeros((batch_size, cropped_height, right_padding), dtype=cropped.dtype)
+            cropped = np.concatenate([cropped, right_pad], axis=2)
 
     return cropped
 
@@ -416,7 +419,8 @@ def fit_and_crop_around_scan_cone(
     )
 
     # Crop and center the image
-    cropped_image = crop_and_center_cone(image, cone_params)
+    cropped_image = crop_and_center_cone(image[None], cone_params)
+    cropped_image = np.squeeze(cropped_image, axis=0)
 
     return cropped_image, cone_params
 

@@ -456,13 +456,15 @@ class Spec:
         group: h5py.Group,
         compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
+        warn_missing_optional_fields: bool = True,
     ) -> None:
         """Store the data in the given group (e.g. hdf5 group)."""
 
         assert isinstance(group, h5py.Group), "group must be an h5py Group"
 
         # Optional fields should only warn when persisting to disk, not on load.
-        self.warn_missing_optional_fields()
+        if warn_missing_optional_fields:
+            self.warn_missing_optional_fields()
 
         field_metadata = getattr(self, "FIELD_METADATA", {})
 
@@ -480,6 +482,7 @@ class Spec:
                     subgroup,
                     compression=compression,
                     chunk_frames=chunk_frames,
+                    warn_missing_optional_fields=warn_missing_optional_fields,
                 )
             else:
                 self.create_dataset(
@@ -1846,9 +1849,15 @@ class TrackSpec(Spec):
         group: "h5py.Group",
         compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
+        warn_missing_optional_fields: bool = True,
     ) -> None:
         """Store data, scan, and label in the HDF5 group."""
-        super().store_in_group(group, compression=compression, chunk_frames=chunk_frames)
+        super().store_in_group(
+            group,
+            compression=compression,
+            chunk_frames=chunk_frames,
+            warn_missing_optional_fields=warn_missing_optional_fields,
+        )
 
 
 @dataclass
@@ -2167,6 +2176,7 @@ class FileSpec(Spec):
         path: str,
         compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
+        warn_missing_optional_fields: bool = True,
     ) -> None:
         """Save the dataset to the specified path."""
         # Lazy import to avoid circular dependency (spec.py is imported by file.py)
@@ -2214,7 +2224,11 @@ class FileSpec(Spec):
                     if value is None:
                         continue
                     group = f.create_group(group_name)
-                    value.store_in_group(group, compression=compression)
+                    value.store_in_group(
+                        group,
+                        compression=compression,
+                        warn_missing_optional_fields=warn_missing_optional_fields,
+                    )
                 else:
                     value = getattr(self, group_name)
                     if value is not None:
@@ -2232,6 +2246,7 @@ class FileSpec(Spec):
                     track_group,
                     compression=compression,
                     chunk_frames=chunk_frames,
+                    warn_missing_optional_fields=warn_missing_optional_fields,
                 )
 
         log.info(f"File saved to {log.yellow(path)}")
