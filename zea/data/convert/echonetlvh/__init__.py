@@ -18,7 +18,6 @@ import tempfile
 import zipfile
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-from functools import partial
 from pathlib import Path
 
 import keras
@@ -207,6 +206,7 @@ def precompute_cone_parameters(
         cone_params_csv: Path to the output CSV file
         max_files: Maximum number of files to process (or None for all)
         max_workers: Number of worker threads used to process files in parallel
+
     Returns:
         Path to the CSV file containing cone parameters
     """
@@ -279,7 +279,7 @@ def precompute_cone_parameters(
     return cone_params_csv
 
 
-def overwrite_splits(csv_path, rejection_path=None):
+def overwrite_splits(csv_path: Path, rejection_path=None):
     """
     Overwrite splits in a MeasurementsList.csv based on manual_rejections.txt
     or another txt file specifying which hashes to reject.
@@ -290,7 +290,6 @@ def overwrite_splits(csv_path, rejection_path=None):
     Returns:
         None
     """
-    csv_path = Path(csv_path)
     current_dir = os.path.dirname(os.path.abspath(__file__))
     if rejection_path is None:
         rejection_path = os.path.join(current_dir, "manual_rejections.txt")
@@ -299,12 +298,13 @@ def overwrite_splits(csv_path, rejection_path=None):
         # unknown number of rejections for custom rejection file.
         # NOTE: this is used for testing, where we want to use a dummy rejections file
         expected_num_rejections = -1
-    try:
-        with open(rejection_path) as f:
-            rejected_hashes = [line.strip() for line in f]
-    except FileNotFoundError:
+
+    if not Path(rejection_path).exists():
         log.warning(f"{rejection_path} not found, skipping rejections.")
         return
+
+    with open(rejection_path) as f:
+        rejected_hashes = [line.strip() for line in f]
 
     # Write to a temp dir on the same filesystem so the final replace is atomic.
     with tempfile.TemporaryDirectory(dir=csv_path.parent) as tmp_dir:
@@ -348,20 +348,22 @@ def load_cone_parameters(csv_path):
     with open(csv_path, "r", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
-            if row["status"] == "success":
-                # Convert string values to appropriate types
-                params = {}
-                for key, value in row.items():
-                    if key in ("avi_filename", "status"):
-                        params[key] = value
-                    elif key == "apex_above_image":
-                        params[key] = value.lower() == "true"
-                    elif value is not None and value != "":
-                        params[key] = float(value)
-                    else:
-                        params[key] = None
+            if row["status"] != "success":
+                continue
 
-                cone_params[row["avi_filename"]] = params
+            # Convert string values to appropriate types
+            params = {}
+            for key, value in row.items():
+                if key in ("avi_filename", "status"):
+                    params[key] = value
+                elif key == "apex_above_image":
+                    params[key] = value.lower() == "true"
+                elif value is not None and value != "":
+                    params[key] = float(value)
+                else:
+                    params[key] = None
+
+            cone_params[row["avi_filename"]] = params
 
     return cone_params
 
@@ -400,16 +402,7 @@ class LVHProcessor:
         )
 
     def get_split(self, avi_file: Path):
-        """
-        Get the split (train/val/test) for a given AVI file.
-
-        Args:
-            avi_file: Path to the AVI file
-
-        Returns:
-            String indicating the split ('train', 'val', or 'test')
-        """
-        # Extract base filename without extension
+        """Get the split (train/val/test) for a given AVI file."""
         filename = avi_file.name
 
         assert self.splits is not None, "splits not loaded; call load_splits() first"
@@ -551,7 +544,7 @@ class LVHProcessor:
         self.save(*self.compute(self.load(avi_file)))
 
     def run(self, files, load_workers: int = 4, save_workers: int = 4, prefetch: int = 12):
-        """Drive ``processor`` over ``files`` as an overlapped load -> compute -> save
+        """Run over ``files`` as an overlapped load -> compute -> save
         pipeline so the GPU is not stalled on disk I/O.
 
         Loads (decode) and saves (HDF5 write) run on thread pools — both release the
@@ -647,68 +640,61 @@ def transform_measurements_csv(csv_path, cone_params_csv=None):
         csv_path: Path to the CSV file to transform in place
         cone_params_csv: Path to CSV file with cone parameters
     """
-    try:
-        # Read the CSV file
-        with open(csv_path, newline="", encoding="utf-8") as csvfile:
-            reader = csv.DictReader(csvfile)
-            rows = list(reader)
-            fieldnames = reader.fieldnames
-            assert fieldnames is not None, "CSV file has no header row"
+    # Read the CSV file
+    with open(csv_path, newline="", encoding="utf-8") as csvfile:
+        reader = csv.DictReader(csvfile)
+        rows = list(reader)
+        fieldnames = reader.fieldnames
+        assert fieldnames is not None, "CSV file has no header row"
 
-        # Load cone parameters if available
-        cone_parameters = {}
-        if cone_params_csv and Path(cone_params_csv).exists():
-            cone_parameters = load_cone_parameters(cone_params_csv)
-        else:
-            log.warning("No cone parameters file found. Measurements will not be transformed.")
+    # Load cone parameters if available
+    cone_parameters = {}
+    if cone_params_csv and Path(cone_params_csv).exists():
+        cone_parameters = load_cone_parameters(cone_params_csv)
+    else:
+        log.warning("No cone parameters file found. Measurements will not be transformed.")
 
-        # Apply coordinate transformation and track skipped rows
-        transformed_rows = []
-        skipped_files = set()
+    # Apply coordinate transformation and track skipped rows
+    transformed_rows = []
+    skipped_files = set()
 
-        for row in rows:
-            try:
-                avi_filename = row["HashedFileName"] + ".avi"
-                cone_params = cone_parameters.get(avi_filename, None)
-                transformed_row = transform_measurement_coordinates_with_cone_params(
-                    row, cone_params
-                )
-                if transformed_row is not None:
-                    transformed_rows.append(transformed_row)
-                else:
-                    skipped_files.add(row["HashedFileName"])
-            except Exception as e:
-                log.error(f"Error processing row for file {row['HashedFileName']}: {str(e)}")
+    for row in rows:
+        try:
+            avi_filename = row["HashedFileName"] + ".avi"
+            cone_params = cone_parameters.get(avi_filename, None)
+            transformed_row = transform_measurement_coordinates_with_cone_params(row, cone_params)
+            if transformed_row is not None:
+                transformed_rows.append(transformed_row)
+            else:
                 skipped_files.add(row["HashedFileName"])
+        except Exception as e:
+            log.error(f"Error processing row for file {row['HashedFileName']}: {str(e)}")
+            skipped_files.add(row["HashedFileName"])
 
-        # Save back to the CSV file
-        if transformed_rows:
-            # Use keys from first row as fieldnames
-            out_fieldnames = list(transformed_rows[0].keys())
-            with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=out_fieldnames)
-                writer.writeheader()
-                writer.writerows(transformed_rows)
-        else:
-            # Write header only if no rows
-            with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
+    # Save back to the CSV file
+    if transformed_rows:
+        # Use keys from first row as fieldnames
+        out_fieldnames = list(transformed_rows[0].keys())
+        with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=out_fieldnames)
+            writer.writeheader()
+            writer.writerows(transformed_rows)
+    else:
+        # Write header only if no rows
+        with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
 
-        # Print summary
-        log.info("Conversion Summary:")
-        log.info(f"Total rows processed: {len(rows)}")
-        log.info(f"Rows successfully converted: {len(transformed_rows)}")
-        log.info(f"Rows skipped: {len(rows) - len(transformed_rows)}")
-        if skipped_files:
-            log.info("Skipped files:")
-            for filename in sorted(skipped_files):
-                log.info(f"  - {filename}")
-        log.info(f"Converted measurements saved to {csv_path}")
-
-    except Exception as e:
-        log.error(f"Error processing CSV file: {str(e)}")
-        raise
+    # Print summary
+    log.info("Conversion Summary:")
+    log.info(f"Total rows processed: {len(rows)}")
+    log.info(f"Rows successfully converted: {len(transformed_rows)}")
+    log.info(f"Rows skipped: {len(rows) - len(transformed_rows)}")
+    if skipped_files:
+        log.info("Skipped files:")
+        for filename in sorted(skipped_files):
+            log.info(f"  - {filename}")
+    log.info(f"Converted measurements saved to {csv_path}")
 
 
 def unzip(src: Path, dst: Path) -> Path:
@@ -900,7 +886,12 @@ def convert_echonetlvh(
 
         log.info("Starting the conversion process.")
 
-        processor.run(files_to_process)
+        processor.run(
+            files_to_process,
+            load_workers=max_workers,
+            save_workers=max_workers,
+            prefetch=int(max_workers * 2),
+        )
 
         log.info("All image conversion tasks are completed.")
 

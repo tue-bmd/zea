@@ -122,7 +122,7 @@ def _add_parser_args_echonetlvh(subparsers):
     echonetlvh_parser.add_argument(
         "--max_workers",
         type=int,
-        default=8,
+        default=4,
         help="Maximum number of workers to use for precomputing cone parameters",
     )
 
