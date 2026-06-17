@@ -31,8 +31,8 @@ from zea.utils import FunctionTimer
 
 if TYPE_CHECKING:
     # Imported lazily at runtime (inside prepare_parameters) to avoid a circular
-    # import: zea.scan imports the data specs, which can pull in this module.
-    from zea.scan import Parameters
+    # import: zea.parameters imports the data specs, which can pull in this module.
+    from zea.parameters import Parameters
 
 
 @ops_registry("pipeline")
@@ -764,7 +764,7 @@ class Pipeline:
                 inputs = pipeline.prepare_parameters(parameters, **config.parameters)
                 outputs = pipeline(data=raw_data, **inputs)
         """
-        from zea.scan import Parameters
+        from zea.parameters import Parameters
 
         _device = device if device is not None else self.device
 

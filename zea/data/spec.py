@@ -151,12 +151,18 @@ class Spec:
         return tuple(f.name for f in fields(cls) if cls._is_optional_dataclass_field(f))
 
     def warn_missing_optional_fields(self):
-        """Warn about optional fields that were not provided."""
+        """Warn about optional fields that were not provided.
+
+        Fields flagged as ``"rare"`` in ``FIELD_METADATA`` are skipped: they are
+        almost never set, so warning about them on every write is just noise.
+        """
         _optional_fields = self.optional_fields()
         for field_name in self.SCHEMA.keys():
             if field_name in _optional_fields and getattr(self, field_name) is None:
                 if hasattr(self, "FIELD_METADATA"):
                     meta = self.FIELD_METADATA.get(field_name, {})
+                    if meta.get("rare"):
+                        continue
                     description = meta.get("description", _DEFAULT_FIELD_DESCRIPTION)
                 else:
                     description = _DEFAULT_FIELD_DESCRIPTION
@@ -1717,10 +1723,18 @@ class MetadataSpec(Spec):
 
     FIELD_METADATA = {
         "credit": {"unit": "-", "description": "Credit or attribution for the dataset."},
-        "probe_pose": {"unit": "-", "description": "Sampled probe pose at the transducer tip."},
-        "voice_narration": {"unit": "-", "description": "Voice narration signal."},
-        "ecg": {"unit": "-", "description": "Electrocardiogram signal."},
-        "text_report": {"unit": "-", "description": "Free-text report associated with the study."},
+        "probe_pose": {
+            "unit": "-",
+            "description": "Sampled probe pose at the transducer tip.",
+            "rare": True,
+        },
+        "voice_narration": {"unit": "-", "description": "Voice narration signal.", "rare": True},
+        "ecg": {"unit": "-", "description": "Electrocardiogram signal.", "rare": True},
+        "text_report": {
+            "unit": "-",
+            "description": "Free-text report associated with the study.",
+            "rare": True,
+        },
         "annotations": {"unit": "-", "description": "Frame-level annotations."},
     }
 

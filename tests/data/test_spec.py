@@ -1339,7 +1339,11 @@ class TestMetadataSpecFieldWarnings:
 
     @pytest.mark.parametrize(
         "field",
-        [f.name for f in fields(MetadataSpec) if f.default is None],
+        [
+            f.name
+            for f in fields(MetadataSpec)
+            if f.default is None and not MetadataSpec.FIELD_METADATA.get(f.name, {}).get("rare")
+        ],
     )
     def test_optional_metadata_field_missing_warns_on_save(self, field, tmp_path):
         path = tmp_path / "metadata_save_warns.hdf5"
@@ -1353,6 +1357,28 @@ class TestMetadataSpecFieldWarnings:
             )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any(f"Optional MetadataSpec field '{field}' is not set" in m for m in messages)
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            f.name
+            for f in fields(MetadataSpec)
+            if f.default is None and MetadataSpec.FIELD_METADATA.get(f.name, {}).get("rare")
+        ],
+    )
+    def test_rare_metadata_field_missing_does_not_warn_on_save(self, field, tmp_path):
+        """Rarely-used metadata fields (e.g. voice_narration, ecg) never warn on save."""
+        path = tmp_path / "metadata_save_rare.hdf5"
+        with patch("zea.log.warning") as mock_warn:
+            File.create(
+                path,
+                data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=2, n_tx=2, n_el=4),
+                probe=_probe_minimal(n_el=4),
+                metadata={},
+            )
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any(f"Optional MetadataSpec field '{field}' is not set" in m for m in messages)
 
     def test_no_warning_when_field_is_provided(self):
         with patch("zea.log.warning") as mock_warn:

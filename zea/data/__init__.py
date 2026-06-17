@@ -54,7 +54,6 @@ Example usage
 from .convert.camus import sitk_load
 from .data_format import (
     DatasetElement,
-    generate_zea_dataset,  # deprecated, kept for backwards compatibility
     validate_input_data,
 )
 from .dataloader import Dataloader

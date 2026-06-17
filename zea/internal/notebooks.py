@@ -3,7 +3,7 @@ import numpy as np
 from matplotlib import animation
 
 from zea.io_lib import save_to_gif
-from zea.scan import Parameters
+from zea.parameters import Parameters
 
 
 def animate_images(

@@ -21,7 +21,7 @@ from zea.func.ultrasound import (
     make_tgc_curve,
 )
 from zea.ops import Pipeline, Simulate, beamformer_registry
-from zea.scan import Parameters
+from zea.parameters import Parameters
 
 from . import DEFAULT_TEST_SEED, backend_equality_check
 

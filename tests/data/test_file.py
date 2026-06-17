@@ -8,12 +8,11 @@ import numpy as np
 import pytest
 
 import zea
-from zea.data.data_format import generate_zea_dataset
 from zea.data.file import File, Track, _GroupProxy, _StringDataset, load_file
 from zea.data.legacy_file import dict_to_sorted_list
 from zea.data.spec import FileSpec, Image, ScanSpec, Segmentation
 from zea.probes import Probe
-from zea.scan import Parameters
+from zea.parameters import Parameters
 
 from . import generate_example_dataset
 
@@ -1836,64 +1835,52 @@ class TestFileTimestamps:
             assert np.any(np.isclose(global_ts, t, atol=1e-6))
 
 
+# A real legacy-format file (written before zea stamped a ``zea_version`` attribute),
+# hosted on the ``legacy`` branch of the picmus dataset in the Hugging Face zeahub org.
+_LEGACY_PICMUS_PATH = (
+    "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+    "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+)
+_LEGACY_PICMUS_REVISION = "legacy"
+
+
 class TestLegacyFileLoading:
-    """Integration tests: legacy files written with generate_zea_dataset load correctly."""
+    """Integration tests: legacy zea files (pre-v0.1.0) load correctly.
+
+    Uses a real legacy-format file pulled from the picmus dataset on the
+    Hugging Face ``zeahub`` org (``legacy`` branch), replacing the removed
+    ``generate_zea_dataset`` writer.
+    """
 
     @pytest.fixture()
-    def legacy_file(self, tmp_path):
-        """Create a minimal legacy file using the deprecated writer."""
-        n_frames, n_tx, n_el, n_ax = 2, 4, 16, 64
-        raw = np.random.randn(n_frames, n_tx, n_ax, n_el, 1).astype(np.float32)
-        # uint8 is the typical legacy scan-converted image format
-        image_sc = np.random.randint(0, 256, (n_frames, 128, 96), dtype=np.uint8)
-        path = tmp_path / "legacy.hdf5"
-        generate_zea_dataset(
-            path=str(path),
-            raw_data=raw,
-            image_sc=image_sc,
-            probe_geometry=np.zeros((n_el, 3), dtype=np.float32),
-            sampling_frequency=np.float32(40e6),
-            center_frequency=np.float32(7e6),
-            demodulation_frequency=np.float32(7e6),
-            initial_times=np.zeros(n_tx, dtype=np.float32),
-            t0_delays=np.zeros((n_tx, n_el), dtype=np.float32),
-            tx_apodizations=np.ones((n_tx, n_el), dtype=np.float32),
-            focus_distances=np.zeros(n_tx, dtype=np.float32),
-            transmit_origins=np.zeros((n_tx, 3), dtype=np.float32),
-            polar_angles=np.zeros(n_tx, dtype=np.float32),
-            probe_name="legacy_probe",
-            cast_to_float=False,
-        )
-        return path, raw, image_sc
+    def legacy_file(self):
+        """Path to the real legacy picmus file on zeahub."""
+        return _LEGACY_PICMUS_PATH
 
     def test_legacy_warning_fires(self, legacy_file):
         """Opening a legacy file emits the version warning."""
-        path, *_ = legacy_file
         zea.log._warned_locations.clear()
         with patch("zea.data.file.log.warning") as mock_warn:
-            with File(path):
+            with File(legacy_file, revision=_LEGACY_PICMUS_REVISION):
                 pass
-        mock_warn.assert_called_once()
-        assert "legacy" in mock_warn.call_args.args[0].lower()
+        assert mock_warn.called
+        assert any("legacy" in str(call.args[0]).lower() for call in mock_warn.call_args_list)
 
     def test_probe_name_mapped(self, legacy_file):
         """probe_name is resolved from the legacy 'probe' root attribute."""
-        path, *_ = legacy_file
-        with File(path) as f:
-            assert f.probe.name == "legacy_probe"
+        with File(legacy_file, revision=_LEGACY_PICMUS_REVISION) as f:
+            assert f.probe.name == "verasonics_l11_4v"
             spec = f.validate_spec()
-        assert spec.probe.name == "legacy_probe"
+        assert spec.probe.name == "verasonics_l11_4v"
 
     def test_raw_data_loaded(self, legacy_file):
-        """raw_data array is loaded with the correct shape."""
-        path, raw, _ = legacy_file
-        with File(path) as f:
+        """raw_data array is loaded from the legacy file with the expected shape."""
+        with File(legacy_file, revision=_LEGACY_PICMUS_REVISION) as f:
             spec = f.validate_spec()
-        assert spec.data.raw_data.shape == raw.shape
+        assert spec.data.raw_data.shape == (1, 75, 832, 128, 2)
 
     def test_scalar_scan_fields_ignored(self, legacy_file):
         """Redundant scalar scan fields (n_frames, n_tx, etc.) are silently filtered."""
-        path, *_ = legacy_file
-        with File(path) as f:
+        with File(legacy_file, revision=_LEGACY_PICMUS_REVISION) as f:
             spec = f.validate_spec()  # would raise if scalars caused unexpected-kwarg errors
         assert spec.scan is not None

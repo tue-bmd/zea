@@ -341,7 +341,7 @@ def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
         warnings.append(message)
         return message
 
-    monkeypatch.setattr("zea.scan.log.warning", _capture_warning)
+    monkeypatch.setattr("zea.parameters.log.warning", _capture_warning)
 
     # Nothing should be warned at initialization, only on-demand when fallback
     # properties are actually accessed.
@@ -379,7 +379,7 @@ def test_missing_defaults_warn_once_per_scan_instance(monkeypatch):
         warnings.append(message)
         return message
 
-    monkeypatch.setattr("zea.scan.log.warning", _capture_warning)
+    monkeypatch.setattr("zea.parameters.log.warning", _capture_warning)
 
     parameters1 = Parameters(**local_scan_args)
     parameters2 = Parameters(**local_scan_args)
