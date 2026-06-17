@@ -221,6 +221,7 @@ def test_scan_conversion_and_inverse_padded(size, pattern_creator, allowed_error
     return cartesian_data_inv
 
 
+@backend_equality_check()
 def test_polar_to_cartesian_matrix_roundtrip():
     """polar_to_cartesian_matrix is a faithful inverse of cartesian_to_polar_matrix.
 
@@ -268,6 +269,8 @@ def test_polar_to_cartesian_matrix_roundtrip():
     # The off-centre marker returns to its location (an angular shift would move it).
     by, bx = np.unravel_index(np.argmax(back), back.shape)
     assert abs(by - 150) < 12 and abs(bx - 150) < 12
+
+    return back
 
 
 @pytest.mark.parametrize(
