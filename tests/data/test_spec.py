@@ -496,7 +496,7 @@ def test_metadata_accepts_custom_signal_nd_keys_and_warns(tmp_path):
             metadata=metadata,
         )
     messages = [str(c.args[0]) for c in mock_warn.call_args_list]
-    assert any("Custom signal key(s) added to 'metadata'" in m for m in messages)
+    assert any("Custom key(s) added to 'metadata'" in m for m in messages)
 
 
 def test_metadata_custom_key_requires_signal_nd_spec():
@@ -541,7 +541,7 @@ def test_data_accepts_custom_map_keys_and_warns(tmp_path):
             probe=_probe_minimal(n_el=n_el),
         )
     messages = [str(c.args[0]) for c in mock_warn.call_args_list]
-    assert any("Custom spatial map key(s) added to 'data'" in m for m in messages)
+    assert any("Custom key(s) added to 'data'" in m for m in messages)
 
 
 def test_data_custom_key_requires_map_spec():
@@ -1252,7 +1252,7 @@ class TestScanSpecSaveWarnings:
                 probe=_probe_minimal(n_el=n_el),
             )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
-        assert any("Custom spatial map key(s) added to 'data'" in m for m in messages)
+        assert any("Custom key(s) added to 'data'" in m for m in messages)
 
     def test_custom_metadata_signal_key_warns(self, tmp_path):
         n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
@@ -1272,7 +1272,7 @@ class TestScanSpecSaveWarnings:
                 metadata=metadata,
             )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
-        assert any("Custom signal key(s) added to 'metadata'" in m for m in messages)
+        assert any("Custom key(s) added to 'metadata'" in m for m in messages)
 
     def test_subject_id_missing_warns(self):
         n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
