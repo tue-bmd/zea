@@ -459,7 +459,8 @@ def _resolve_path(src: str | Path) -> Path:
 
     zip_path = src / zip_name
 
-    return unzip(zip_path, src)
+    unzipped_path = unzip(zip_path, src)
+    return unzipped_path / "database_nifti"
 
 
 def convert_camus(args):

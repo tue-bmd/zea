@@ -923,6 +923,21 @@ def test_unzip_non_empty_dst_without_marker(tmp_path):
         unzip(src, dst)
 
 
+def test_unzip_rejects_path_traversal(tmp_path):
+    """unzip should refuse archive members that escape the destination directory."""
+    src = tmp_path / "malicious.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("../evil.txt", "pwned")
+
+    dst = tmp_path / "extracted"
+
+    with pytest.raises(ValueError, match="Unsafe path"):
+        unzip(src, dst)
+
+    # Nothing should have been written outside the destination directory.
+    assert not (tmp_path / "evil.txt").exists()
+
+
 def test_camus_db_not_cast_to_uint8():
     """translate() to [-60, 0] dB produces negative floats; casting to uint8
     wraps them (e.g. -60 → 196). The fix removes the .astype(np.uint8) call."""

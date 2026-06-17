@@ -462,7 +462,8 @@ def _resolve_path(src: str | Path) -> Path:
     if (src / folder_name).exists():
         return unzip_dir
 
-    return unzip(src / zip_name, src)
+    unzipped_path = unzip(src / zip_name, src)
+    return unzipped_path / folder_name / "Videos"
 
 
 def convert_echonet(args):

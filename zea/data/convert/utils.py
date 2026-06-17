@@ -112,8 +112,12 @@ def unzip(src: Path, dst: Path) -> Path:
         raise FileNotFoundError(f"Zip file {src} does not exist.")
 
     log.info(f"Unzipping {src} to {dst}...")
+    dst_root = os.path.realpath(dst)
     with zipfile.ZipFile(src, "r") as zip_ref:
         for member in tqdm(zip_ref.namelist(), desc="Extracting files"):
+            target = os.path.realpath(os.path.join(dst_root, member))
+            if os.path.commonpath([dst_root, target]) != dst_root:
+                raise ValueError(f"Unsafe path in zip archive: {member}")
             zip_ref.extract(member, dst)
     log.info("Unzipping completed.")
 
