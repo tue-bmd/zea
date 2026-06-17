@@ -1,4 +1,35 @@
-"""Lens corrected delay computation for ultrasound beamforming."""
+r"""Lens-corrected delay computation for ultrasound beamforming.
+
+The acoustic lens fitted over most ultrasound probes has a higher speed of
+sound than the surrounding medium (tissue / water), which shortens the travel
+time near the face of the transducer and alters the effective focus.
+
+The corrected one-way travel time from each transducer element to each image
+pixel is computed by finding the lateral crossing point :math:`x_l` on the
+lens surface that minimises total travel time (Fermat's principle):
+
+.. math::
+
+    T(x_l) = \frac{\sqrt{(x_l - x_e)^2 + z_l^2}}{c_\text{lens}}
+            + \frac{\sqrt{(x_l - x_s)^2 + (z_l - z_s)^2}}{c_\text{medium}}
+
+where :math:`(x_e, 0)` is the element position, :math:`(x_s, z_s)` is the
+pixel position, and :math:`z_l` is the lens thickness.  Setting
+:math:`\partial T / \partial x_l = 0` recovers Snell's law:
+
+.. math::
+
+    \frac{\sin\theta_\text{lens}}{c_\text{lens}}
+    = \frac{\sin\theta_\text{medium}}{c_\text{medium}}
+
+The root is found iteratively via Newton-Raphson.
+
+.. note::
+
+    This is more physically accurate than the scalar ``lensCorrection`` field
+    used by Verasonics, which adds a single constant delay offset uniformly
+    across all elements and ignores angle-dependent refraction.
+"""
 
 from keras import ops
 
