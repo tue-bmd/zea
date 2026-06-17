@@ -63,7 +63,20 @@ class OperationList(list):
         return reg_name.rsplit(".", 1)[-1] if "." in reg_name else reg_name
 
     def _get_by_name(self, name):
-        # Resolve optional numeric suffix: "normalize_1" -> base="normalize", index=1
+        # Exact match first: ops whose registered name ends in _N are reachable
+        # without being confused for a disambiguated duplicate.
+        exact = [op for op in self if self._get_op_name(op) == name]
+        if len(exact) == 1:
+            return exact[0]
+        if len(exact) > 1:
+            numbered = [f"'{name}_{i}'" for i in range(len(exact))]
+            raise KeyError(
+                f"Ambiguous: {len(exact)} operations named '{name}'. "
+                f"Use a numbered form to be specific: {', '.join(numbered)}."
+            )
+
+        # No exact match — resolve optional numeric suffix:
+        # "normalize_1" -> base="normalize", index=1
         base, sep, suffix = name.rpartition("_")
         if sep and suffix.isdigit():
             base_name, index = base, int(suffix)
@@ -74,8 +87,8 @@ class OperationList(list):
 
         if not matches:
             available = self.keys()
-            msg = f"No operation named '{base_name}' found."
-            closest = difflib.get_close_matches(base_name, available, n=1, cutoff=0.6)
+            msg = f"No operation named '{name}' found."
+            closest = difflib.get_close_matches(name, available, n=1, cutoff=0.6)
             if closest:
                 msg += f" Did you mean '{closest[0]}'?"
             msg += f" Available operations: {available}"
