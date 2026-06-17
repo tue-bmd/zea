@@ -56,6 +56,7 @@ import yaml
 from zea import log
 from zea.internal.config.validation import validate_config
 from zea.internal.core import dict_to_tensor
+from zea.internal.ops_list import OperationList
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.utils import deprecated
 
@@ -281,7 +282,7 @@ class Config(dict):
         # ``config.pipeline.operations`` reads as e.g.
         # ``['demodulate', {'name': 'downsample', 'params': {'factor': 4}}]``.
         if name == "operations" and isinstance(value, list):
-            value = [_compact_operation(x) for x in value]
+            value = OperationList([_compact_operation(x) for x in value])
         # Ensures lists and tuples of dictionaries are converted to Config objects as well
         elif isinstance(value, list):
             value = [
