@@ -4,9 +4,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-import imageio
 import numpy as np
-from PIL import Image
 from tqdm import tqdm
 
 from zea import log
@@ -61,21 +59,52 @@ def sitk_load(filepath: str | Path, squeeze: bool = False):
 def load_avi(file_path, mode="L"):
     """Load a .avi file and return a numpy array of frames.
 
+    Decoding and colour conversion are done with OpenCV, which releases the GIL,
+    so calling this from a thread pool actually parallelises across files (unlike a
+    per-frame PIL loop, which is GIL-bound). The "L"/"RGB" conversions use the same
+    ITU-R 601 luma coefficients as PIL, so results match to within rounding.
+
     Args:
-        filename (str): The path to the video file.
+        file_path (str | Path): The path to the video file.
         mode (str, optional): Color mode: "L" (grayscale) or "RGB".
             Defaults to "L".
 
     Returns:
         numpy.ndarray: Array of frames (num_frames, H, W) or (num_frames, H, W, C)
     """
+    try:
+        import cv2
+    except ImportError as exc:
+        raise ImportError(
+            "OpenCV is required for loading video files. "
+            "Please install it with 'pip install opencv-python' or "
+            "'pip install opencv-python-headless'."
+        ) from exc
+
+    if mode not in ("L", "RGB"):
+        raise ValueError(f"Unsupported mode {mode!r}, expected 'L' or 'RGB'.")
+
+    cap = cv2.VideoCapture(str(file_path))
+    if not cap.isOpened():
+        raise OSError(f"Could not open video file {file_path}")
+
     frames = []
-    with imageio.get_reader(file_path) as reader:
-        for frame in reader:  # ty: ignore[not-iterable]
-            img = Image.fromarray(frame)
-            img = img.convert(mode)
-            img = np.array(img)
-            frames.append(img)
+    try:
+        while True:
+            ok, frame = cap.read()  # OpenCV decodes to BGR
+            if not ok:
+                break
+            if mode == "L":
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            else:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append(frame)
+    finally:
+        cap.release()
+
+    if not frames:
+        raise OSError(f"No frames decoded from video file {file_path}")
+
     return np.stack(frames)
 
 

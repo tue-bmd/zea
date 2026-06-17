@@ -17,7 +17,13 @@ import shutil
 import tempfile
 import zipfile
 from collections import deque
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+    wait,
+)
 from pathlib import Path
 
 import keras
@@ -381,6 +387,11 @@ class LVHProcessor:
     ):
         self.path_out_h5 = Path(path_out_h5)
         self.splits = splits
+        # Flatten to a filename -> split lookup so get_split is O(1) instead of a
+        # linear scan over every split list on each of the (many) files.
+        self.split_by_filename = {
+            filename: split for split, files in (splits or {}).items() for filename in files
+        }
         self.cone_parameters = cone_params or {}
         # Clip lengths vary per file, which is the leading (batch) dim of every GPU
         # op here. Padding it up to a multiple of `frame_bucket` collapses the many
@@ -403,13 +414,11 @@ class LVHProcessor:
 
     def get_split(self, avi_file: Path):
         """Get the split (train/val/test) for a given AVI file."""
-        filename = avi_file.name
-
         assert self.splits is not None, "splits not loaded; call load_splits() first"
-        for split, files in self.splits.items():
-            if filename in files:
-                return split
-        raise UserWarning("Unknown split for file: " + filename)
+        split = self.split_by_filename.get(avi_file.name)
+        if split is None:
+            raise UserWarning("Unknown split for file: " + avi_file.name)
+        return split
 
     @staticmethod
     def scan_convert(image_polar, cone_params, cartesian_shape, order=1):
@@ -506,9 +515,11 @@ class LVHProcessor:
 
         polar_im_set = ops.cast(ops.floor(polar_im_set + 0.5), "uint8")
 
-        polar_np = np.asarray(polar_im_set)[:n_frames]
-        if not polar_np.any():
-            raise ValueError(f"Polar sequence is all zeros for file {avi_file}")
+        # Drop the padding frames on-device, but do NOT materialise here: the
+        # device->host copy is the only blocking step, so we defer it to the saver
+        # thread (see :meth:`save`). That lets the main loop dispatch the next
+        # file's GPU work immediately instead of parking on the transfer.
+        polar_im_set = polar_im_set[:n_frames]
 
         # TODO: would be cool if we could store all the information of
         # 'MeasurementsList.csv' and 'cone_parameters.csv' in the metadata
@@ -516,11 +527,20 @@ class LVHProcessor:
             "annotations": {"anatomy": "heart", "view": "PLAX"},
             "subject": {"id": avi_file.name, "type": "human"},
         }
-        return payload["out_h5"], image_sc_np, polar_np, metadata
+        return payload["out_h5"], image_sc_np, polar_im_set, metadata
 
     @staticmethod
-    def save(out_h5: Path, image_sc_np, polar_np, metadata: dict):
-        """Stage 3 (I/O, thread-safe): write the zea HDF5 file."""
+    def save(out_h5: Path, image_sc_np, polar, metadata: dict):
+        """Stage 3 (I/O, thread-safe): write the zea HDF5 file.
+
+        ``polar`` may still be an unmaterialised device array from :meth:`compute`;
+        the blocking device->host copy happens here, off the main thread, so it
+        overlaps with the next file's GPU compute. No tracing is involved, so
+        materialising it from a worker thread is safe.
+        """
+        polar_np = np.asarray(polar)
+        if not polar_np.any():
+            raise ValueError(f"Polar sequence is all zeros for file {out_h5}")
         File.create(
             out_h5,
             data={
@@ -543,13 +563,52 @@ class LVHProcessor:
         """
         self.save(*self.compute(self.load(avi_file)))
 
-    def run(self, files, load_workers: int = 4, save_workers: int = 4, prefetch: int = 12):
+    def run(
+        self,
+        files,
+        load_workers: int = 8,
+        save_workers: int = 2,
+        max_pending_saves: int | None = None,
+    ):
         """Run over ``files`` as an overlapped load -> compute -> save
         pipeline so the GPU is not stalled on disk I/O.
 
-        Loads (decode) and saves (HDF5 write) run on thread pools — both release the
-        GIL — while GPU compute stays on the main thread.
+        Loads (decode) run on a thread pool, GPU compute stays on the main thread,
+        and writes go to a small saver pool. A single bad file is logged and
+        skipped rather than aborting the whole (multi-hour) run.
+
+        The in-flight save queue is bounded (``max_pending_saves``): each pending
+        save pins a decoded volume in memory, so without a cap a transient write
+        slowdown would let memory grow until the process is OOM-killed. h5py
+        serialises its writes through a global lock, so a couple of save workers is
+        enough to overlap the write with GPU compute; more just adds memory pressure.
         """
+        if max_pending_saves is None:
+            max_pending_saves = max(2 * save_workers, 4)
+
+        prefetch = int(load_workers * 2)
+
+        failures = 0
+
+        def drain_saves(save_futures, block):
+            """Reap finished save futures, logging (not raising) per-file errors so
+            one failed write does not tear down the run. With ``block`` wait for at
+            least one to finish; otherwise only reap those already done."""
+            nonlocal failures
+            if not save_futures:
+                return
+            if block:
+                done, _ = wait(save_futures, return_when=FIRST_COMPLETED)
+            else:
+                done = [f for f in save_futures if f.done()]
+            for future in done:
+                out_h5 = save_futures.pop(future)
+                try:
+                    future.result()
+                except Exception as e:
+                    failures += 1
+                    log.error(f"Saving {out_h5} failed: {e}")
+
         with (
             ThreadPoolExecutor(max_workers=load_workers) as loaders,
             ThreadPoolExecutor(max_workers=save_workers) as savers,
@@ -559,14 +618,29 @@ class LVHProcessor:
             for file, load_future in tqdm(
                 _bounded_map(loaders, self.load, files, prefetch), total=len(files)
             ):
-                payload = load_future.result()  # surfaces load errors
-                result = self.compute(payload)  # GPU, main thread
+                try:
+                    payload = load_future.result()  # surfaces load errors
+                    result = self.compute(payload)  # GPU, main thread
+                except Exception as e:
+                    failures += 1
+                    log.error(f"Processing {file} failed: {e}")
+                    continue
+
+                # Backpressure: block until the save queue has room before
+                # submitting another decoded volume.
+                while len(save_futures) >= max_pending_saves:
+                    drain_saves(save_futures, block=True)
+
                 # result is (out_h5, image_sc_np, polar_np, metadata)
                 save_futures[savers.submit(self.save, *result)] = result[0]
+                drain_saves(save_futures, block=False)
 
-            # Drain pending writes, surfacing any save errors
-            for future in as_completed(save_futures):
-                future.result()
+            # Drain remaining writes
+            while save_futures:
+                drain_saves(save_futures, block=True)
+
+        if failures:
+            log.warning(f"Conversion completed with {failures} file(s) skipped due to errors.")
 
 
 def transform_measurement_coordinates_with_cone_params(row, cone_params):
@@ -859,12 +933,7 @@ def convert_echonetlvh(
 
         log.info("Starting the conversion process.")
 
-        processor.run(
-            files_to_process,
-            load_workers=max_workers,
-            save_workers=max_workers,
-            prefetch=int(max_workers * 2),
-        )
+        processor.run(files_to_process)
 
         log.info("All image conversion tasks are completed.")
 
