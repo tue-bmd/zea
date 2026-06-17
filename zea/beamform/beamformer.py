@@ -150,7 +150,9 @@ def tof_correction(
             ``(n_tx, 3)``.
         apply_lens_correction (bool, optional): Apply acoustic-lens correction
             to the receive travel times (slower but more accurate in the
-            near-field).  Defaults to ``False``.
+            near-field). Computed using Newton-Raphson to find
+            the shortest refracted path per element-pixel pair. Assumes a flat
+            array geometry. Defaults to ``False``.
         lens_thickness (float, optional): Lens thickness in meters.
             Defaults to ``1e-3``.
         lens_sound_speed (float, optional): Speed of sound inside the lens in
@@ -365,6 +367,7 @@ def calculate_delays(
             ``(n_tx, 3)``.
         apply_lens_correction (bool, optional): Apply acoustic-lens
             correction (slower but more accurate in the near-field).
+            Uses Fermat's principle (Newton-Raphson).
             Defaults to ``False``.
         lens_thickness (float, optional): Lens thickness in meters.
         lens_sound_speed (float, optional): Speed of sound in the lens in
