@@ -1,8 +1,10 @@
 r"""Lens-corrected delay computation for ultrasound beamforming.
 
-The acoustic lens fitted over most ultrasound probes has a higher speed of
-sound than the surrounding medium (tissue / water), which shortens the travel
-time near the face of the transducer and alters the effective focus.
+The acoustic lens fitted over most ultrasound probes has a lower speed of
+sound than the surrounding medium (tissue / water), ~1000 m/s versus 1540 m/s,
+which shortens the travel time near the face of the transducer and alters
+the effective focus. We assume a flat lens with uniform thickness and
+speed of sound.
 
 The corrected one-way travel time from each transducer element to each image
 pixel is computed by finding the lateral crossing point :math:`x_l` on the
@@ -38,6 +40,10 @@ def compute_lens_corrected_travel_times(
     element_pos, pixel_pos, lens_thickness, c_lens, c_medium, n_iter=1
 ):
     """Compute the travel time of the shortest path between the element and the pixel.
+
+    .. note::
+
+        This function assumes a flat array geometry.
 
     Args:
         element_pos (ndarray): The position of the element of shape (n_el, 3).
