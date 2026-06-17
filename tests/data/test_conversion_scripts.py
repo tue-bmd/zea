@@ -960,7 +960,7 @@ def verify_converted_echoxflow_test_data(dst, expected):
             with File(h5_file, "r") as f:
                 assert "data/image" in f, f"Missing 'data/image' in {h5_file}"
                 image = f.data.image.values[:]
-                assert image.ndim == 4, f"Expected (F, H, W, 1) image, got {image.shape}"
+                assert image.ndim == 3, f"Expected (F, H, W) image, got {image.shape}"
                 assert image.dtype == np.uint8, f"Expected uint8 image in {h5_file}"
                 # subject.id is mapped from exam_id and enables subject-wise splits.
                 assert "metadata/subject" in f, f"Missing 'metadata/subject' in {h5_file}"

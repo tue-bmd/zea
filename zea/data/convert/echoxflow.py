@@ -88,9 +88,8 @@ def sector_coordinates(geometry, height: int, width: int) -> np.ndarray | None:
 def build_metadata(record, bmode_stream, store) -> dict:
     """Collect EchoXFlow metadata that maps onto zea's MetadataSpec.
 
-    - subject.id        <- exam_id (enables subject-wise splits)
-    - ecg               <- the recording's ECG signal, if present (Signal1D)
-    - bmode_timestamps  <- per-frame acquisition times as a custom SignalND
+    - subject.id  <- exam_id (enables subject-wise splits)
+    - ecg         <- the recording's ECG signal, if present (Signal1D)
     """
     metadata: dict = {"subject": {"id": record.exam_id, "type": "human"}}
 
@@ -111,18 +110,6 @@ def build_metadata(record, bmode_stream, store) -> dict:
                 metadata["ecg"] = ecg_meta
         except Exception:  # noqa: BLE001 - ECG is optional; skip if it won't load
             pass
-
-    # Per-frame B-mode timestamps as a generic sampled signal (custom SignalND key).
-    # EchoXFlow uses irregular frame timing, so store exact timestamps rather than
-    # an implied uniform rate.
-    if bmode_stream.timestamps is not None:
-        ts = np.asarray(bmode_stream.timestamps, dtype=np.float32).reshape(-1)
-        if len(ts) >= 1:
-            metadata["bmode_timestamps"] = {
-                "samples": ts,
-                "timestamps": ts - ts[0],
-                "start_time_offset": np.float32(ts[0]),
-            }
 
     return metadata
 
@@ -241,14 +228,14 @@ def convert_echoxflow(args):
             frames = np.asarray(stream.data)  # (n_frames, H, W), uint8
             if frames.dtype != np.uint8:
                 frames = frames.astype(np.uint8)
-            if frames.ndim == 3:
-                frames = np.expand_dims(frames, -1)  # -> (n_frames, H, W, 1)
 
             height, width = int(frames.shape[1]), int(frames.shape[2])
             image: dict = {"values": frames, "unit": "-"}
             coords = sector_coordinates(stream.metadata.geometry, height, width)
             if coords is not None:
                 image["coordinates"] = coords  # (H, W, 3), broadcast across frames
+            if stream.timestamps is not None:
+                image["timestamps"] = np.asarray(stream.timestamps, dtype=np.float32).reshape(-1)
 
             metadata = build_metadata(record, stream, store)
 

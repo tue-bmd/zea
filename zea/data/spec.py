@@ -563,6 +563,10 @@ class Map(Spec):
             the shape is ``(*values.shape[:-1], 3)``.  The last axis holds ``[x, y, z]``.
             The leading ``n_frames`` axis may be omitted to broadcast one coordinate grid
             across all frames.
+        timestamps: Optional per-frame acquisition timestamps in seconds, shape ``(n_frames,)``.
+            Use this to record the time of each frame when the sampling is irregular or when
+            absolute timing is needed.  No constraints are placed on the values beyond length
+            matching ``values.shape[0]``.
         labels: The labels corresponding to the ``n_ch`` channels in the values.
             This is required when values have an n_ch dimension, and should be None otherwise.
             For IQ data, this would typically be ``["I", "Q"]``.
@@ -575,6 +579,7 @@ class Map(Spec):
 
     values: np.ndarray
     coordinates: np.ndarray | None = None
+    timestamps: np.ndarray | None = None
     labels: np.ndarray | None = None
     description: str | None = None
     unit: str | None = None
@@ -592,6 +597,7 @@ class Map(Spec):
             ),
         },
         "coordinates": {"dtype": np.float32, "shape": ("...", 3)},
+        "timestamps": {"dtype": np.float32, "shape": ("n_frames",)},
         "labels": {"dtype": np.str_, "shape": ("n_spatial_ch",)},
         "description": {"dtype": str, "shape": ()},
         "unit": {"dtype": str, "shape": ()},
