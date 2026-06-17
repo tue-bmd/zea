@@ -462,7 +462,7 @@ class LVHProcessor:
         if cone_params is None:
             raise UserWarning(f"No cone parameters for {avi_file.name}")
 
-        sequence_np = load_avi(avi_file).astype(np.float32)
+        sequence_np = load_avi(avi_file)
         out_h5 = self.path_out_h5 / self.get_split(avi_file) / (avi_file.stem + ".hdf5")
 
         # Pad the frame (leading/batch) dimension up to a multiple of frame_bucket
@@ -472,7 +472,6 @@ class LVHProcessor:
             sequence_np = np.pad(sequence_np, [[0, padded_len - n_frames], [0, 0], [0, 0]])
 
         image_sc_np = crop_and_center_cone(sequence_np[:n_frames], cone_params)
-        image_sc_np = np.floor(image_sc_np + 0.5).astype(np.uint8)
         if not image_sc_np.any():
             raise ValueError(f"Processed sequence is all zeros for file {avi_file}")
 
@@ -498,7 +497,7 @@ class LVHProcessor:
         image_sc_np = payload["image_sc_np"]
         # Already padded to a multiple of frame_bucket on the host in :meth:`load`, so
         # every device op below sees only a handful of clip-length shapes.
-        sequence_processed = ops.convert_to_tensor(payload["sequence_np"])
+        sequence_processed = ops.cast(ops.convert_to_tensor(payload["sequence_np"]), "float32")
 
         # Polar conversion runs on the uncropped frame using apex coordinates in
         # original-image space; theta_min/theta_max come from the fitted slopes
@@ -933,7 +932,7 @@ def convert_echonetlvh(
 
         log.info("Starting the conversion process.")
 
-        processor.run(files_to_process)
+        processor.run(files_to_process, load_workers=max_workers)
 
         log.info("All image conversion tasks are completed.")
 
