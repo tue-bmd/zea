@@ -1022,9 +1022,12 @@ class VerasonicsFile(h5py.File):
                 dataset_name="lens_correction",
                 data=self.probe.lens_correction,
                 description=(
-                    "The lens correction value used by Verasonics. This value is the "
-                    "additional path length in wavelength that the lens introduces. "
-                    "(This disregards refraction.)"
+                    "The lens correction value used by Verasonics. This value is a "
+                    "scalar one-way delay offset in wavelengths applied uniformly across "
+                    "all elements (disregards refraction). "
+                    "This is not directly compatible with zea's lens correction, which "
+                    "uses Fermat's principle (Newton-Raphson) to find the shortest "
+                    "refracted path per element-pixel pair."
                 ),
                 unit="wavelengths",
             )
@@ -1285,7 +1288,13 @@ class VerasonicsProbe:
 
     @property
     def lens_correction(self):
-        """The lens correction: 1 way delay in wavelengths thru lens"""
+        """The lens correction: 1 way delay in wavelengths through lens.
+
+        This is the Verasonics scalar offset added uniformly to all element delays.
+        It is not equivalent to zea's lens correction, which uses Fermat's principle
+        (solved via Newton-Raphson) to find the shortest refracted path through the
+        lens geometry per element-pixel pair.
+        """
 
         if "lensCorrection" in self.trans_obj.keys():
             return self.trans_obj["lensCorrection"][:].item()
