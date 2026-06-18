@@ -24,7 +24,7 @@ from zea.ops.pipeline import (
     pipeline_to_yaml,
 )
 from zea.probes import Probe
-from zea.scan import Parameters
+from zea.parameters import Parameters
 
 from . import DEFAULT_TEST_SEED
 

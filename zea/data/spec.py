@@ -153,12 +153,18 @@ class Spec:
         return tuple(f.name for f in fields(cls) if cls._is_optional_dataclass_field(f))
 
     def warn_missing_optional_fields(self):
-        """Warn about optional fields that were not provided."""
+        """Warn about optional fields that were not provided.
+
+        Fields flagged as ``"rare"`` in ``FIELD_METADATA`` are skipped: they are
+        almost never set, so warning about them on every write is just noise.
+        """
         _optional_fields = self.optional_fields()
         for field_name in self.SCHEMA.keys():
             if field_name in _optional_fields and getattr(self, field_name) is None:
                 if hasattr(self, "FIELD_METADATA"):
                     meta = self.FIELD_METADATA.get(field_name, {})
+                    if meta.get("rare"):
+                        continue
                     description = meta.get("description", _DEFAULT_FIELD_DESCRIPTION)
                 else:
                     description = _DEFAULT_FIELD_DESCRIPTION
@@ -617,6 +623,11 @@ class Map(Spec):
     }
 
     FIELD_METADATA = {
+        "values": {"unit": "-", "description": "Map pixel values."},
+        "coordinates": {
+            "unit": "m",
+            "description": "Per-pixel Cartesian positions (x, y, z) in metres.",
+        },
         "timestamps": {
             "unit": "s",
             "description": "Per-frame acquisition timestamps relative to frame 0.",
@@ -630,6 +641,11 @@ class Map(Spec):
                 "acquired after."
             ),
         },
+        "labels": {"unit": "-", "description": "Labels for each channel in values."},
+        "description": {"unit": "-", "description": "Free-text description of the map contents."},
+        "unit": {"unit": "-", "description": "Physical unit of the map values, e.g. 'm/s', '%'."},
+        "min": {"unit": "-", "description": "Minimum value of the map."},
+        "max": {"unit": "-", "description": "Maximum value of the map."},
     }
 
     def __post_init__(self):
@@ -835,6 +851,11 @@ class AlignedData(Spec):
             "shape": ("n_frames", "n_tx", "n_ax", "n_el", "n_ch"),
         },
         "labels": {"dtype": np.str_, "shape": ("n_ch",)},
+    }
+
+    FIELD_METADATA = {
+        "values": {"unit": "-", "description": "Time-of-flight corrected channel data."},
+        "labels": {"unit": "-", "description": "Channel labels, e.g. 'RF' or ['I', 'Q']."},
     }
 
     def __post_init__(self):
@@ -1076,6 +1097,19 @@ class DataSpec(Spec):
 
     FIELD_METADATA = {
         "raw_data": {"unit": "-", "description": "Raw channel data."},
+        "aligned_data": {"description": "Time-of-flight corrected data.", "rare": True},
+        "beamformed_data": {"description": "Beamformed data.", "rare": True},
+        "envelope_data": {"description": "Envelope-detected data.", "rare": True},
+        "image": {"description": "Reconstructed image data.", "rare": True},
+        "segmentation": {"description": "Segmentation data.", "rare": True},
+        "sos_map": {"description": "Speed-of-sound map data.", "rare": True},
+        "strain_percentage_map": {"description": "Strain map data.", "rare": True},
+        "shear_wave_elastography_map": {
+            "description": "Shear-wave elastography data.",
+            "rare": True,
+        },
+        "tissue_doppler": {"description": "Tissue Doppler data.", "rare": True},
+        "color_doppler": {"description": "Color Doppler velocity data.", "rare": True},
     }
 
     def __init__(
@@ -1262,9 +1296,21 @@ class ScanSpec(Spec):
         "time_to_next_transmit": {"unit": "s", "description": "Time between transmit events."},
         "azimuth_angles": {"unit": "rad", "description": "Azimuthal angles of transmit beams."},
         "sound_speed": {"unit": "m/s", "description": "Speed of sound."},
-        "tgc_gain_curve": {"unit": "-", "description": "Time-gain-compensation curve."},
-        "waveforms_one_way": {"unit": "V", "description": "One-way transmit waveforms."},
-        "waveforms_two_way": {"unit": "V", "description": "Two-way transmit waveforms."},
+        "tgc_gain_curve": {
+            "unit": "-",
+            "description": "Time-gain-compensation curve.",
+            "rare": True,
+        },
+        "waveforms_one_way": {
+            "unit": "V",
+            "description": "One-way transmit waveforms.",
+            "rare": True,
+        },
+        "waveforms_two_way": {
+            "unit": "V",
+            "description": "Two-way transmit waveforms.",
+            "rare": True,
+        },
     }
 
     @property
@@ -1404,14 +1450,17 @@ class ProbeSpec(Spec):
         "element_height": {
             "unit": "m",
             "description": "Height (elevation aperture) of a single transducer element.",
+            "rare": True,
         },
         "lens_sound_speed": {
             "unit": "m/s",
             "description": "Speed of sound in the acoustic lens.",
+            "rare": True,
         },
         "lens_thickness": {
             "unit": "m",
             "description": "Thickness of the acoustic lens.",
+            "rare": True,
         },
     }
 
@@ -1489,7 +1538,11 @@ class Subject(Spec):
     }
 
     FIELD_METADATA = {
-        "id": {"description": "Subject ID. Needed for subject-wise splits."},
+        "id": {"unit": "-", "description": "Subject ID. Needed for subject-wise splits."},
+        "type": {"unit": "-", "description": "Subject type, e.g. human, phantom, animal."},
+        "age": {"unit": "-", "description": "Subject age in years.", "rare": True},
+        "sex": {"unit": "-", "description": "Subject sex.", "rare": True},
+        "fat_percentage": {"unit": "%", "description": "Subject fat percentage.", "rare": True},
     }
 
     def __post_init__(self):
@@ -1733,6 +1786,13 @@ class Annotations(Spec):
         "image_quality": {"dtype": np.str_, "shape": (("n_frames",), ())},
     }
 
+    FIELD_METADATA = {
+        "anatomy": {"unit": "-", "description": "Anatomy label."},
+        "view": {"unit": "-", "description": "View label."},
+        "label": {"unit": "-", "description": "Pathology or classification label."},
+        "image_quality": {"unit": "-", "description": "Image quality label.", "rare": True},
+    }
+
 
 @dataclass(init=False)
 class MetadataSpec(Spec):
@@ -1757,12 +1817,21 @@ class MetadataSpec(Spec):
     }
 
     FIELD_METADATA = {
+        "subject": {"unit": "-", "description": "Subject associated with the study."},
         "credit": {"unit": "-", "description": "Credit or attribution for the dataset."},
-        "probe_pose": {"unit": "-", "description": "Sampled probe pose at the transducer tip."},
-        "voice_narration": {"unit": "-", "description": "Voice narration signal."},
-        "ecg": {"unit": "-", "description": "Electrocardiogram signal."},
-        "text_report": {"unit": "-", "description": "Free-text report associated with the study."},
-        "annotations": {"unit": "-", "description": "Frame-level annotations."},
+        "probe_pose": {
+            "unit": "-",
+            "description": "Sampled probe pose at the transducer tip.",
+            "rare": True,
+        },
+        "voice_narration": {"unit": "-", "description": "Voice narration signal.", "rare": True},
+        "ecg": {"unit": "-", "description": "Electrocardiogram signal.", "rare": True},
+        "text_report": {
+            "unit": "-",
+            "description": "Free-text report associated with the study.",
+            "rare": True,
+        },
+        "annotations": {"unit": "-", "description": "Frame-level annotations.", "rare": True},
     }
 
     def __init__(
@@ -1833,6 +1902,19 @@ class MetricsSpec(Spec):
         "coherence_factor": {"dtype": np.float32, "shape": ("n_frames",)},
     }
 
+    FIELD_METADATA = {
+        "common_midpoint_phase_error": {
+            "unit": "rad",
+            "description": "Common midpoint phase error.",
+            "rare": True,
+        },
+        "coherence_factor": {
+            "unit": "-",
+            "description": "Coherence factor; ratio of coherent to incoherent energy (0-1).",
+            "rare": True,
+        },
+    }
+
 
 @dataclass
 class TrackSpec(Spec):
@@ -1865,6 +1947,12 @@ class TrackSpec(Spec):
         "data": {"spec": DataSpec},
         "scan": {"spec": ScanSpec},
         "label": {"dtype": str, "shape": ()},
+    }
+
+    FIELD_METADATA = {
+        # label is enforced by FileSpec for multi-track (ValueError), and legitimately
+        # absent for single-track files — warning here is never useful.
+        "label": {"unit": "-", "description": "Short human-readable track name.", "rare": True},
     }
 
     def __post_init__(self):

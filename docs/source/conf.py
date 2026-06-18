@@ -136,7 +136,7 @@ TOPLEVEL_API_ALIASES = {
     "zea.data.file.File": "zea.File",
     "zea.ops.pipeline.Pipeline": "zea.Pipeline",
     "zea.probes.Probe": "zea.Probe",
-    "zea.scan.Parameters": "zea.Parameters",
+    "zea.parameters.Parameters": "zea.Parameters",
 }
 
 _REEXPORTED_CANONICALS = set(TOPLEVEL_API_ALIASES)
@@ -180,7 +180,7 @@ def _skip_reexported_members(app, what, name, obj, skip, options):
             return True
 
     # Resolve the bare attribute name from whatever form ``name`` takes.
-    # Sphinx 8.x: full dotted path  (``zea.scan.Parameters.focus_distances``)
+    # Sphinx 8.x: full dotted path  (``zea.parameters.Parameters.focus_distances``)
     # Sphinx 9.x: bare member name  (``focus_distances``)
     attr_name = name.rsplit(".", 1)[-1]
 
@@ -207,6 +207,13 @@ def _skip_reexported_members(app, what, name, obj, skip, options):
             return True
 
     return None
+
+
+doctest_global_setup = """
+import os
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["HF_HUB_VERBOSITY"] = "error"
+"""
 
 
 def setup(app):

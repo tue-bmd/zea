@@ -1,5 +1,6 @@
 """zea data file (HDF5)."""
 
+import contextlib
 import difflib
 import enum
 from datetime import datetime, timezone
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
     from zea.probes import Probe
-    from zea.scan import Parameters
+    from zea.parameters import Parameters
 
 
 class _StringDataset:
@@ -308,7 +309,7 @@ class Track:
         Returns:
             Parameters: Initialised parameters object for this track.
         """
-        from zea.scan import Parameters
+        from zea.parameters import Parameters
 
         if "scan" not in self._group:
             raise KeyError(
@@ -931,6 +932,7 @@ class File(h5py.File):
         compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
         overwrite: bool = False,
+        ignore_warnings: bool = False,
         warn_missing_optional_fields: bool = True,
     ):
         """Create a new zea HDF5 file from data, scan, and optional metadata.
@@ -977,6 +979,13 @@ class File(h5py.File):
                 a "frames" dimension. Dataset will be stored with HDF5 chunking enabled,
                 using a single frame (a single slice along the first dimension) per chunk.
             overwrite: If *False* (default), raise if the file exists.
+            ignore_warnings: If *True*, suppress all warnings emitted while
+                creating the file (missing optional metadata fields, custom keys,
+                PHI timestamp warning, etc.). Defaults to *False*. Note that some
+                rarely-used metadata fields (e.g. ``voice_narration``, ``ecg``) are
+                never warned about regardless of this flag.
+            warn_missing_optional_fields: If *True* (default), warn when optional
+                fields are missing from the saved spec.
 
         Returns:
             None. The validated file is written to ``path``; open it with
@@ -1062,14 +1071,16 @@ class File(h5py.File):
         if acquisition_time is not None:
             kwargs["acquisition_time"] = acquisition_time
 
-        _warn_custom_keys(kwargs.get("data", {}), kwargs.get("metadata", {}))
-        spec = FileSpec(**kwargs)
-        spec.save(
-            str(path),
-            compression=compression,
-            chunk_frames=chunk_frames,
-            warn_missing_optional_fields=warn_missing_optional_fields,
-        )
+        warn_ctx = log.suppress_warnings() if ignore_warnings else contextlib.nullcontext()
+        with warn_ctx:
+            _warn_custom_keys(kwargs.get("data", {}), kwargs.get("metadata", {}))
+            spec = FileSpec(**kwargs)
+            spec.save(
+                str(path),
+                compression=compression,
+                chunk_frames=chunk_frames,
+                warn_missing_optional_fields=warn_missing_optional_fields,
+            )
 
     @property
     def data(self) -> "_DataProxy":
@@ -1417,7 +1428,7 @@ class File(h5py.File):
             >>> type(parameters).__name__
             'Parameters'
         """
-        from zea.scan import Parameters
+        from zea.parameters import Parameters
 
         n = self._n_tracks
         if n > 1:
