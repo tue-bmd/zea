@@ -624,8 +624,14 @@ def verify_converted_echonetlvh_test_data(dst):
             row["avi_filename"] for row in cone_rows if row.get("status") == "success"
         ]
 
+        # Per-file failures are recorded in-band as status="error: <msg>" (the
+        # converter swallows them in ProcessPoolExecutor workers, so the message
+        # is unreliable to recover from pytest's captured output). Surface them.
+        statuses = {row["avi_filename"]: row.get("status") for row in cone_rows}
         for expected_file in expected_avi_files:
-            assert expected_file in successful_files, f"Missing cone parameters for {expected_file}"
+            assert expected_file in successful_files, (
+                f"Missing cone parameters for {expected_file}. Per-file statuses: {statuses}"
+            )
 
         # Verify cone parameter fields are present and valid
         for row in cone_rows:

@@ -37,7 +37,7 @@ dependencies = [
     "keras >=3.12.1",
     "h5py >=3.11",
     "numpy >= 1.24",
-    "matplotlib >=3.8",
+    "matplotlib >=3.10",
     "scipy >=1.13",
     "pillow >=12.2.0",
     "tqdm >=4",
@@ -48,8 +48,8 @@ dependencies = [
     "wandb >=0.18",
     "wget >=3.2",
     "imageio[ffmpeg] >=2.0",
-    "grain >= 0.2",
-    "protobuf >=3.20, <6.0.0",
+    "grain >= 0.2.8",
+    "protobuf >=3.20, <6.0.0", # https://github.com/tue-bmd/zea/pull/332
     # can we make these optional or remove?
     "scikit-image >=0.23",
     "scikit-learn >=1.4",
@@ -119,7 +119,7 @@ docs = [
     "PyStemmer",
     "IPython",
 ]
-jax = ["jax[cuda12]>=0.4.26"]
+jax = ["jax[cuda12]>=0.4.35"]
 display = ["opencv-python>=4"]
 display-headless = ["opencv-python-headless>=4"]
 # most models don't needs these optional dependencies
@@ -129,7 +129,7 @@ app = ["gradio>=6.0"]
 # these are just here for .readthedocs.yaml
 # please for proper install (with GPU support)
 # install manually
-backends = ["jax", "tensorflow>=2.12.1", "torch"]
+backends = ["jax>=0.4.35", "tensorflow>=2.12.1", "torch"]
 
 [project.urls]
 Homepage = "https://github.com/tue-bmd/zea/"
