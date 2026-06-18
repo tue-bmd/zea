@@ -401,7 +401,7 @@ def generate() -> str:
         "",
         "      **Data fields**",
         "",
-        rst_full_table(DataSpec, base_indent=2),
+        rst_no_unit_table(DataSpec, base_indent=2),
         "",
         "      **Grouped data products**",
         "",
