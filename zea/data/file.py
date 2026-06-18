@@ -3,7 +3,6 @@
 import contextlib
 import difflib
 import enum
-import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Tuple, Union, cast
@@ -1072,7 +1071,7 @@ class File(h5py.File):
         if acquisition_time is not None:
             kwargs["acquisition_time"] = acquisition_time
 
-        warn_ctx = log.set_level(logging.ERROR) if ignore_warnings else contextlib.nullcontext()
+        warn_ctx = log.suppress_warnings() if ignore_warnings else contextlib.nullcontext()
         with warn_ctx:
             _warn_custom_keys(kwargs.get("data", {}), kwargs.get("metadata", {}))
             spec = FileSpec(**kwargs)

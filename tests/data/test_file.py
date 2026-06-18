@@ -1841,7 +1841,9 @@ _LEGACY_PICMUS_PATH = (
     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
 )
-_LEGACY_PICMUS_REVISION = "legacy"
+# Pin to an immutable commit SHA (the tip of the ``legacy`` branch at the time of
+# writing) so these integration tests stay deterministic even if the branch moves.
+_LEGACY_PICMUS_REVISION = "07fe825b53c92b1d423fadb1dfa104ed2a38aa4a"
 
 
 class TestLegacyFileLoading:
