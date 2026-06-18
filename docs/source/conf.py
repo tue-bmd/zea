@@ -209,5 +209,12 @@ def _skip_reexported_members(app, what, name, obj, skip, options):
     return None
 
 
+doctest_global_setup = """
+import os
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["HF_HUB_VERBOSITY"] = "error"
+"""
+
+
 def setup(app):
     app.connect("autodoc-skip-member", _skip_reexported_members)
