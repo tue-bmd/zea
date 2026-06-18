@@ -563,10 +563,14 @@ class Map(Spec):
             the shape is ``(*values.shape[:-1], 3)``.  The last axis holds ``[x, y, z]``.
             The leading ``n_frames`` axis may be omitted to broadcast one coordinate grid
             across all frames.
-        timestamps: Optional per-frame acquisition timestamps in seconds, shape ``(n_frames,)``.
-            Use this to record the time of each frame when the sampling is irregular or when
-            absolute timing is needed.  No constraints are placed on the values beyond length
-            matching ``values.shape[0]``.
+        timestamps: Optional per-frame acquisition timestamps in seconds, shape ``(n_frames,)``,
+            relative to frame 0.  Use this to record the time of each frame when the sampling
+            is irregular.  Must start at 0 and be strictly increasing.  Requires
+            ``start_time_offset`` to also be provided.
+        start_time_offset: Time offset in seconds between the first transmit event of the
+            ultrasound acquisition and frame 0 of this map.  Negative means frame 0 was
+            acquired before the first transmit event; positive means it was acquired after.
+            Required when ``timestamps`` is provided.
         labels: The labels corresponding to the ``n_ch`` channels in the values.
             This is required when values have an n_ch dimension, and should be None otherwise.
             For IQ data, this would typically be ``["I", "Q"]``.
@@ -580,6 +584,7 @@ class Map(Spec):
     values: np.ndarray
     coordinates: np.ndarray | None = None
     timestamps: np.ndarray | None = None
+    start_time_offset: np.ndarray | float | None = None
     labels: np.ndarray | None = None
     description: str | None = None
     unit: str | None = None
@@ -598,6 +603,7 @@ class Map(Spec):
         },
         "coordinates": {"dtype": np.float32, "shape": ("...", 3)},
         "timestamps": {"dtype": np.float32, "shape": ("n_frames",)},
+        "start_time_offset": {"dtype": np.float32, "shape": ()},
         "labels": {"dtype": np.str_, "shape": ("n_spatial_ch",)},
         "description": {"dtype": str, "shape": ()},
         "unit": {"dtype": str, "shape": ()},
@@ -605,8 +611,32 @@ class Map(Spec):
         "max": {"dtype": np.float32, "shape": ()},
     }
 
+    FIELD_METADATA = {
+        "timestamps": {
+            "unit": "s",
+            "description": "Per-frame acquisition timestamps relative to frame 0.",
+        },
+        "start_time_offset": {
+            "unit": "s",
+            "description": (
+                "Time offset between the first transmit event of the ultrasound "
+                "acquisition and frame 0 of this map. Negative means frame 0 was "
+                "acquired before the first transmit event; positive means it was "
+                "acquired after."
+            ),
+        },
+    }
+
     def __post_init__(self):
         super().__post_init__()
+
+        if (self.timestamps is None) != (self.start_time_offset is None):
+            raise ValueError("Map.timestamps and Map.start_time_offset must be provided together.")
+        if self.timestamps is not None:
+            if not np.isclose(self.timestamps[0], 0.0):
+                raise ValueError("Map.timestamps must start at 0.")
+            if len(self.timestamps) > 1 and np.any(np.diff(self.timestamps) <= 0):
+                raise ValueError("Map.timestamps must be strictly increasing.")
 
         if self.values.ndim == 5:
             assert self.labels is not None, (

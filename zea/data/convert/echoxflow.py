@@ -235,7 +235,9 @@ def convert_echoxflow(args):
             if coords is not None:
                 image["coordinates"] = coords  # (H, W, 3), broadcast across frames
             if stream.timestamps is not None:
-                image["timestamps"] = np.asarray(stream.timestamps, dtype=np.float32).reshape(-1)
+                ts = np.asarray(stream.timestamps, dtype=np.float32).reshape(-1)
+                image["timestamps"] = ts - ts[0]
+                image["start_time_offset"] = ts[0]
 
             metadata = build_metadata(record, stream, store)
 
