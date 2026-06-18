@@ -1423,14 +1423,17 @@ class ProbeSpec(Spec):
         "element_height": {
             "unit": "m",
             "description": "Height (elevation aperture) of a single transducer element.",
+            "rare": True,
         },
         "lens_sound_speed": {
             "unit": "m/s",
             "description": "Speed of sound in the acoustic lens.",
+            "rare": True,
         },
         "lens_thickness": {
             "unit": "m",
             "description": "Thickness of the acoustic lens.",
+            "rare": True,
         },
     }
 
@@ -1792,7 +1795,7 @@ class MetadataSpec(Spec):
             "description": "Free-text report associated with the study.",
             "rare": True,
         },
-        "annotations": {"unit": "-", "description": "Frame-level annotations."},
+        "annotations": {"unit": "-", "description": "Frame-level annotations.", "rare": True},
     }
 
     def __init__(
