@@ -7598,7 +7598,7 @@ requires-dist = [
     { name = "gradio", marker = "extra == 'tests'", specifier = ">=6.0" },
     { name = "grain", specifier = ">=0.2" },
     { name = "h5py", specifier = ">=3.11" },
-    { name = "huggingface-hub", specifier = ">=0.26" },
+    { name = "huggingface-hub", specifier = ">=1.2" },
     { name = "imageio", extras = ["ffmpeg"], specifier = ">=2.0" },
     { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=6.29.5" },
     { name = "ipykernel", marker = "extra == 'tests'", specifier = ">=6.29.5" },

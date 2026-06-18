@@ -931,6 +931,7 @@ class File(h5py.File):
         compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
         overwrite: bool = False,
+        warn_missing_optional_fields: bool = True,
     ):
         """Create a new zea HDF5 file from data, scan, and optional metadata.
 
@@ -1067,6 +1068,7 @@ class File(h5py.File):
             str(path),
             compression=compression,
             chunk_frames=chunk_frames,
+            warn_missing_optional_fields=warn_missing_optional_fields,
         )
 
     @property

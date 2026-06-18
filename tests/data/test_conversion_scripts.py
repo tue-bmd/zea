@@ -63,6 +63,7 @@ def test_conversion_script(tmp_path_factory, dataset):
     dst = base / "dst"
 
     extra_args = create_test_data_for_dataset(dataset, src)
+    dst.mkdir()
 
     run_subprocess(
         [sys.executable, "-m", "zea.data.convert", dataset, str(src), str(dst), *extra_args],
@@ -317,8 +318,8 @@ def create_echonetlvh_test_data(src):
                         "Y2": float(y2),
                         "Frames": n_frames,
                         "FPS": fps,
-                        "Width": float(final_width),
-                        "Height": final_height,
+                        "Width": int(final_width),
+                        "Height": int(final_height),
                         "split": split,
                     }
                 )
@@ -326,16 +327,6 @@ def create_echonetlvh_test_data(src):
 
     # Create AVI files with scan cone structure
     for filename, _, polar_shape in test_files:
-        # Generate a reference frame to determine output dimensions for this file
-        ref_polar = np.ones(polar_shape, dtype=np.float32)
-        ref_cartesian, _ = scan_convert_2d(
-            ref_polar,
-            rho_range=rho_range,
-            theta_range=theta_range,
-            resolution=1.0,
-        )
-        ref_cartesian = np.array(ref_cartesian)
-
         frames = []
         for _ in range(n_frames):
             # Create a simple polar image with radial gradient and noise
@@ -349,10 +340,7 @@ def create_echonetlvh_test_data(src):
 
             # Scan convert to create Cartesian image with scan cone
             cartesian_img, _ = scan_convert_2d(
-                polar_img,
-                rho_range=rho_range,
-                theta_range=theta_range,
-                resolution=1.0,
+                polar_img, rho_range=rho_range, theta_range=theta_range
             )
             cartesian_img = np.array(cartesian_img)
 
@@ -595,12 +583,16 @@ def verify_converted_echonetlvh_test_data(dst):
 
     Checks:
     - HDF5 files exist in train/val/test directories
-    - Files contain required datasets (scan, image, image_sc)
+    - Files contain required datasets (scan, image, image_polar)
     - Cone parameters CSV was generated with valid crop bounds
 
     Args:
         dst (Path): path to the destination directory where converted test data is located.
     """
+    from zea.data.convert.echonetlvh import LVHProcessor, load_cone_parameters
+
+    cone_params_csv = dst / "cone_parameters.csv"
+
     # Expected files per split
     expected_splits = {
         "train": [
@@ -611,42 +603,7 @@ def verify_converted_echonetlvh_test_data(dst):
         "test": ["0X4444444444444444.hdf5"],
     }
 
-    # Verify HDF5 files exist in correct splits
-    for split, expected_files in expected_splits.items():
-        split_dir = dst / split
-        assert split_dir.exists(), f"Missing directory: {split_dir}"
-
-        h5_files = list(split_dir.rglob("*.hdf5"))
-        h5_filenames = [f.name for f in h5_files]
-
-        assert set(h5_filenames) == set(expected_files), (
-            f"Mismatch in converted hdf5 files for split {split}. "
-            f"Expected: {expected_files}, Got: {h5_filenames}"
-        )
-
-        # Verify each HDF5 file has required content
-        for h5_file in h5_files:
-            with File(h5_file, "r") as f:
-                assert "data" in f, f"Missing 'data' in {h5_file}"
-                assert "image" in f["data"], f"Missing 'image' (polar) in {h5_file}"
-                assert "image_sc" in f["data"], f"Missing 'image_sc' (scan converted) in {h5_file}"
-
-                # image is now a Map group with values and extent subfields
-                image_values = f.data.image.values[:]
-                image_sc = f.data.image_sc.values[:]
-
-                assert image_values.ndim == 4, (
-                    f"Polar image should be of shape (F, H, W, 1) in {h5_file}"
-                )
-                assert image_sc.ndim == 3, (
-                    f"Scan converted image should be of shape (F, H, W) in {h5_file}"
-                )
-
-                # Validate the file
-                f.validate()
-
     # Verify cone parameters CSV was generated
-    cone_params_csv = dst / "cone_parameters.csv"
     assert cone_params_csv.exists(), "Missing cone_parameters.csv"
 
     # Verify cone parameters content
@@ -693,6 +650,56 @@ def verify_converted_echonetlvh_test_data(dst):
                 assert row.get("status").startswith("error"), (
                     "Expected error status for 0X5555555555555555.avi due to crop overshoot"
                 )
+
+    cone_params = load_cone_parameters(cone_params_csv)
+
+    # Verify HDF5 files exist in correct splits
+    for split, expected_files in expected_splits.items():
+        split_dir = dst / split
+        assert split_dir.exists(), f"Missing directory: {split_dir}"
+
+        h5_files = list(split_dir.rglob("*.hdf5"))
+        h5_filenames = [f.name for f in h5_files]
+
+        assert set(h5_filenames) == set(expected_files), (
+            f"Mismatch in converted hdf5 files for split {split}. "
+            f"Expected: {expected_files}, Got: {h5_filenames}"
+        )
+
+        # Verify each HDF5 file has required content
+        for h5_file in h5_files:
+            with File(h5_file, "r") as f:
+                assert "data" in f, f"Missing 'data' in {h5_file}"
+                assert "image" in f["data"], f"Missing 'image' in {h5_file}"
+                assert "image_polar" in f["data"], (
+                    f"Missing 'image_polar' (scan converted) in {h5_file}"
+                )
+
+                # image is now a Map group with values and extent subfields
+                image = f.data.image.values[:]
+                image_polar = f.data.image_polar.values[:]
+
+                assert image_polar.ndim == 3, (
+                    f"Polar image should be of shape (F, H, W) in {h5_file}"
+                )
+                assert image.ndim == 3, (
+                    f"Scan converted image should be of shape (F, H, W) in {h5_file}"
+                )
+
+                # Validate the file
+                f.validate()
+
+                # Convert polar to cartesian
+                frame_idx = 0
+                image_float = image[frame_idx].astype(np.float32)
+                image_polar_float = image_polar[frame_idx].astype(np.float32)
+                back_cartesian = LVHProcessor.scan_convert(
+                    image_polar_float, cone_params[h5_file.stem + ".avi"], image_float.shape
+                )
+                back_cartesian = np.asarray(back_cartesian)
+
+                mse = np.mean(((back_cartesian - image_float) / 255) ** 2)
+                assert mse < 1e-3, f"mse for {h5_file.stem} is {mse}"
 
 
 def verify_converted_camus_test_data(dst):
@@ -1116,54 +1123,68 @@ def test_sitk_load(tmp_path):
     assert arr_sq.shape == arr.shape
 
 
-@pytest.mark.parametrize(
-    "dataset",
-    [
-        ("picmus", "picmus.zip", "archive_to_download"),
-        ("camus", "CAMUS_public.zip", "CAMUS_public"),
-        ("echonet", "EchoNet-Dynamic.zip", "EchoNet-Dynamic"),
-        ("echonetlvh", "EchoNet-LVH.zip", "Batch1"),
-    ],
-)
-def test_unzip(tmp_path, dataset):
-    """Test the unzip function from zea.data.convert.utils for all dataset-name pairs"""
-    dataset_name, zip_filename, folder_name = dataset
+def test_unzip(tmp_path):
+    """Test the unzip function from zea.data.convert.utils."""
     # Create a dummy zip file
-    zip_path = tmp_path / zip_filename
-    with zipfile.ZipFile(zip_path, "w") as zipf:
-        # Add a dummy file to the zip
-        if dataset_name == "echonet":
-            # Match unzip()’s expected structure: EchoNet-Dynamic/Videos/...
-            zipf.writestr(f"{folder_name}/Videos/dummy.txt", "This is a test.")
-        else:
-            zipf.writestr(f"{folder_name}/dummy.txt", "This is a test.")
+    src = tmp_path / "archive.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("dummy.txt", "This is a test.")
 
-        if dataset_name == "echonetlvh":
-            # EchoNetLVH dataset unzips into four folders and a csv file.
-            zipf.writestr("Batch2/dummy.txt", "This is a test.")
-            zipf.writestr("Batch3/dummy.txt", "This is a test.")
-            zipf.writestr("Batch4/dummy.txt", "This is a test.")
+    dst = tmp_path / "extracted"
 
-            with open(Path(f"{tmp_path}/MeasurementsList.csv"), "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["frame", "mean_value"])
-                for i in range(3):
-                    writer.writerow([i, i * 2])  # example data
-            zipf.write(f"{tmp_path}/MeasurementsList.csv", "MeasurementsList.csv")
+    # First call extracts the archive and creates the marker file.
+    result = unzip(src, dst)
+    assert result == dst
+    assert (dst / "dummy.txt").exists()
+    assert (dst / ".fully_unzipped").exists()
 
-    # Call the unzip function twice:
-    # Once to initialize from zip, once to initialize from folder
-    unzip(tmp_path, dataset_name)
-    unzip(tmp_path, dataset_name)
+    # Second call detects the marker and skips re-extraction.
+    result = unzip(src, dst)
+    assert result == dst
+    assert (dst / "dummy.txt").exists()
 
-    # Verify that the folder was created and contains the dummy file
-    if dataset_name == "echonet":
-        extracted_folder = tmp_path / folder_name / "Videos"
-    else:
-        extracted_folder = tmp_path / folder_name
 
-    assert extracted_folder.exists()
-    assert (extracted_folder / "dummy.txt").exists()
+def test_unzip_requires_zip_suffix(tmp_path):
+    """unzip should reject sources that are not .zip files."""
+    src = tmp_path / "archive.tar"
+    src.touch()
+    with pytest.raises(AssertionError):
+        unzip(src, tmp_path / "extracted")
+
+
+def test_unzip_missing_src(tmp_path):
+    """unzip should raise if the zip file does not exist."""
+    with pytest.raises(FileNotFoundError):
+        unzip(tmp_path / "missing.zip", tmp_path / "extracted")
+
+
+def test_unzip_non_empty_dst_without_marker(tmp_path):
+    """unzip should refuse to extract into a non-empty directory lacking the marker."""
+    src = tmp_path / "archive.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("dummy.txt", "This is a test.")
+
+    dst = tmp_path / "extracted"
+    dst.mkdir()
+    (dst / "leftover.txt").touch()
+
+    with pytest.raises(ValueError):
+        unzip(src, dst)
+
+
+def test_unzip_rejects_path_traversal(tmp_path):
+    """unzip should refuse archive members that escape the destination directory."""
+    src = tmp_path / "malicious.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("../evil.txt", "pwned")
+
+    dst = tmp_path / "extracted"
+
+    with pytest.raises(ValueError, match="Unsafe path"):
+        unzip(src, dst)
+
+    # Nothing should have been written outside the destination directory.
+    assert not (tmp_path / "evil.txt").exists()
 
 
 def test_camus_db_not_cast_to_uint8():
