@@ -4,7 +4,7 @@ import numpy as np
 
 from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
 from zea.probes import Probe
-from zea.scan import Parameters
+from zea.parameters import Parameters
 
 
 def _get_linear_probe():

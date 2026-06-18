@@ -17,6 +17,7 @@ Example usage
 """
 
 import contextlib
+import contextvars
 import inspect
 import logging
 import os
@@ -247,9 +248,35 @@ def success(message):
 # Track locations that have already emitted a once-only warning
 _warned_locations: set = set()
 
+# Call-scoped flag to suppress warnings. Implemented with a ContextVar so the
+# suppression is local to the current thread / async task: setting it does not
+# mutate the shared logger level, so concurrent callers are unaffected.
+_warnings_suppressed: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "zea_warnings_suppressed", default=False
+)
+
+
+@contextlib.contextmanager
+def suppress_warnings():
+    """Context manager to suppress ``warning``/``warning_once``/``deprecated`` output.
+
+    Unlike :func:`set_level`, this does not mutate the shared logger level, so it is
+    safe to use from one thread without suppressing warnings emitted by others.
+
+    Yields:
+        None
+    """
+    token = _warnings_suppressed.set(True)
+    try:
+        yield
+    finally:
+        _warnings_suppressed.reset(token)
+
 
 def warning(message, *args, **kwargs):
     """Prints a message with log level warning."""
+    if _warnings_suppressed.get():
+        return message
     logger.warning(message, *args, **kwargs)
     if file_logger:
         file_logger.warning(remove_color_escape_codes(message), *args, **kwargs)
@@ -262,6 +289,8 @@ def warning_once(message, *args, key=None, **kwargs):
     By default, deduplication is per call location. A custom ``key`` can be
     provided to scope once-only behavior (for example, per object instance).
     """
+    if _warnings_suppressed.get():
+        return message
     frame = inspect.stack()[1]
     location_key = f"{frame.filename}:{frame.lineno}"
     dedupe_key = location_key if key is None else (location_key, key)
@@ -273,6 +302,8 @@ def warning_once(message, *args, key=None, **kwargs):
 
 def deprecated(message, *args, **kwargs):
     """Prints a message with custom log level DEPRECATED."""
+    if _warnings_suppressed.get():
+        return message
     logger.log(DEPRECATED_LEVEL_NUM, message, *args, **kwargs)
     if file_logger:
         file_logger.log(DEPRECATED_LEVEL_NUM, remove_color_escape_codes(message), *args, **kwargs)

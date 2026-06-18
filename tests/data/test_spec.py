@@ -1174,7 +1174,9 @@ class TestScanSpecSaveWarnings:
         [
             f.name
             for f in fields(ScanSpec)
-            if f.default is None and f.name in ScanSpec.FIELD_METADATA
+            if f.default is None
+            and f.name in ScanSpec.FIELD_METADATA
+            and not ScanSpec.FIELD_METADATA[f.name].get("rare")
         ],
     )
     def test_optional_scan_field_missing_warns_on_save(self, field, tmp_path):
@@ -1297,7 +1299,10 @@ class TestSubjectFieldWarnings:
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert not any(f"Optional Subject field '{field}' is not set" in m for m in messages)
 
-    @pytest.mark.parametrize("field", list(Subject.SCHEMA))
+    @pytest.mark.parametrize(
+        "field",
+        [f for f in Subject.SCHEMA if not Subject.FIELD_METADATA.get(f, {}).get("rare")],
+    )
     def test_optional_subject_field_missing_warns_on_save(self, field, tmp_path):
         path = tmp_path / "subject_save_warns.hdf5"
         with patch("zea.log.warning") as mock_warn:
@@ -1310,6 +1315,24 @@ class TestSubjectFieldWarnings:
             )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any(f"Optional Subject field '{field}' is not set" in m for m in messages)
+
+    @pytest.mark.parametrize(
+        "field",
+        [f for f in Subject.SCHEMA if Subject.FIELD_METADATA.get(f, {}).get("rare")],
+    )
+    def test_rare_subject_field_missing_does_not_warn_on_save(self, field, tmp_path):
+        """Rarely-recorded subject fields (e.g. age, sex, fat_percentage) never warn on save."""
+        path = tmp_path / "subject_save_rare.hdf5"
+        with patch("zea.log.warning") as mock_warn:
+            File.create(
+                path,
+                data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=2, n_tx=2, n_el=4),
+                probe=_probe_minimal(n_el=4),
+                metadata={"subject": {}},
+            )
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any(f"Optional Subject field '{field}' is not set" in m for m in messages)
 
     def test_no_warning_when_all_fields_provided(self):
         with patch("zea.log.warning") as mock_warn:
@@ -1339,7 +1362,11 @@ class TestMetadataSpecFieldWarnings:
 
     @pytest.mark.parametrize(
         "field",
-        [f.name for f in fields(MetadataSpec) if f.default is None],
+        [
+            f.name
+            for f in fields(MetadataSpec)
+            if f.default is None and not MetadataSpec.FIELD_METADATA.get(f.name, {}).get("rare")
+        ],
     )
     def test_optional_metadata_field_missing_warns_on_save(self, field, tmp_path):
         path = tmp_path / "metadata_save_warns.hdf5"
@@ -1354,11 +1381,72 @@ class TestMetadataSpecFieldWarnings:
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any(f"Optional MetadataSpec field '{field}' is not set" in m for m in messages)
 
+    @pytest.mark.parametrize(
+        "field",
+        [
+            f.name
+            for f in fields(MetadataSpec)
+            if f.default is None and MetadataSpec.FIELD_METADATA.get(f.name, {}).get("rare")
+        ],
+    )
+    def test_rare_metadata_field_missing_does_not_warn_on_save(self, field, tmp_path):
+        """Rarely-used metadata fields (e.g. voice_narration, ecg) never warn on save."""
+        path = tmp_path / "metadata_save_rare.hdf5"
+        with patch("zea.log.warning") as mock_warn:
+            File.create(
+                path,
+                data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=2, n_tx=2, n_el=4),
+                probe=_probe_minimal(n_el=4),
+                metadata={},
+            )
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any(f"Optional MetadataSpec field '{field}' is not set" in m for m in messages)
+
     def test_no_warning_when_field_is_provided(self):
         with patch("zea.log.warning") as mock_warn:
             MetadataSpec(credit="Doe et al.")
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert not any("Optional MetadataSpec field 'credit'" in m for m in messages)
+
+
+class TestDataSpecFieldWarnings:
+    """DataSpec optional-field warning behavior."""
+
+    @pytest.mark.parametrize(
+        "field",
+        [f for f in DataSpec.SCHEMA if DataSpec.FIELD_METADATA.get(f, {}).get("rare")],
+    )
+    def test_rare_spatial_map_missing_does_not_warn_on_save(self, field, tmp_path):
+        """Spatial maps / derived data products never warn when not set."""
+        path = tmp_path / "data_save_rare.hdf5"
+        with patch("zea.log.warning") as mock_warn:
+            File.create(
+                path,
+                data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=2, n_tx=2, n_el=4),
+                probe=_probe_minimal(n_el=4),
+            )
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any(f"Optional DataSpec field '{field}' is not set" in m for m in messages)
+
+
+class TestMetricsSpecFieldWarnings:
+    """MetricsSpec optional-field warning behavior."""
+
+    @pytest.mark.parametrize("field", list(MetricsSpec.SCHEMA))
+    def test_metric_missing_does_not_warn_on_save(self, field, tmp_path):
+        """Metrics are usually absent, so missing ones never warn on save."""
+        path = tmp_path / "metrics_save_rare.hdf5"
+        with patch("zea.log.warning") as mock_warn:
+            File.create(
+                path,
+                data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=2, n_tx=2, n_el=4),
+                probe=_probe_minimal(n_el=4),
+            )
+        messages = [str(c.args[0]) for c in mock_warn.call_args_list]
+        assert not any(f"Optional MetricsSpec field '{field}' is not set" in m for m in messages)
 
 
 class TestLoadingWarnings:

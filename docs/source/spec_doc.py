@@ -153,8 +153,8 @@ def rst_full_table(cls, base_indent: int = 0) -> str:
     return "\n".join(lines)
 
 
-def rst_compact_table(cls, base_indent: int = 0) -> str:
-    """Render a spec class as a compact table without a description column."""
+def rst_no_unit_table(cls, base_indent: int = 0) -> str:
+    """Render a spec class as a table with description but no unit column."""
     schema = cls.SCHEMA
     meta = getattr(cls, "FIELD_METADATA", {})
     p = _IND * base_indent
@@ -162,7 +162,7 @@ def rst_compact_table(cls, base_indent: int = 0) -> str:
     rows = []
     for fname, fspec in schema.items():
         fm = meta.get(fname, {})
-        unit = fm.get("unit", "\u2013")
+        desc = fm.get("description", "")
 
         if "spec" in fspec:
             sub = fspec["spec"]
@@ -174,32 +174,35 @@ def rst_compact_table(cls, base_indent: int = 0) -> str:
 
         opt = _is_optional(cls, fname)
         badge = "|badge-opt|" if opt else "|badge-req|"
-        rows.append((fname, type_s, shape_s, unit, badge))
+        rows.append((fname, type_s, shape_s, desc, badge))
 
     lines = [
         f"{p}.. list-table::",
         f"{p}   :header-rows: 1",
-        f"{p}   :widths: 22 20 28 10 10",
+        f"{p}   :widths: 22 16 22 30 10",
         f"{p}",
         f"{p}   * - Field",
         f"{p}     - Type",
         f"{p}     - Shape",
-        f"{p}     - Unit",
+        f"{p}     - Description",
         f"{p}     - ",
     ]
-    for fname, type_s, shape_s, unit, badge in rows:
+    for fname, type_s, shape_s, desc, badge in rows:
         lines += [
             f"{p}   * - ``{fname}``",
             f"{p}     - {type_s}",
             f"{p}     - {shape_s}",
-            f"{p}     - {unit}",
+            f"{p}     - {desc}",
             f"{p}     - {badge}",
         ]
     return "\n".join(lines)
 
 
-def rst_dropdown(cls, title, base_indent=0, open_=False, compact=False) -> str:
-    """Render a spec class as a sphinx-design dropdown."""
+def rst_dropdown(cls, title, base_indent=0, open_=False, style="full") -> str:
+    """Render a spec class as a sphinx-design dropdown.
+
+    style: "full" = unit + description, "no_unit" = description only.
+    """
     p = _IND * base_indent
     pi = _IND * (base_indent + 1)
 
@@ -213,7 +216,7 @@ def rst_dropdown(cls, title, base_indent=0, open_=False, compact=False) -> str:
         parts.append(f"{pi}{doc_line}")
         parts.append("")
 
-    table_fn = rst_compact_table if compact else rst_full_table
+    table_fn = rst_no_unit_table if style == "no_unit" else rst_full_table
     parts.append(table_fn(cls, base_indent=base_indent + 1))
     parts.append("")
 
@@ -398,7 +401,7 @@ def generate() -> str:
         "",
         "      **Data fields**",
         "",
-        rst_full_table(DataSpec, base_indent=2),
+        rst_no_unit_table(DataSpec, base_indent=2),
         "",
         "      **Grouped data products**",
         "",
@@ -435,7 +438,7 @@ def generate() -> str:
             "",
             f"{p3}{desc}",
             "",
-            rst_compact_table(cls, base_indent=3),
+            rst_no_unit_table(cls, base_indent=3),
             "",
         ]
 
@@ -475,18 +478,18 @@ def generate() -> str:
         "",
     ]
     meta_subs = [
-        ("subject", Subject, True),
-        ("annotations", Annotations, True),
-        ("probe_pose", ProbePose, False),
-        ("ecg / voice_narration", Signal1D, False),
+        ("subject", Subject, "no_unit"),
+        ("annotations", Annotations, "no_unit"),
+        ("probe_pose", ProbePose, "full"),
+        ("ecg / voice_narration", Signal1D, "full"),
     ]
-    for label, cls, compact in meta_subs:
+    for label, cls, style in meta_subs:
         lines += [
             rst_dropdown(
                 cls,
                 f"``{label}`` \u2014 {cls.__name__}",
                 base_indent=2,
-                compact=compact,
+                style=style,
             ),
             "",
         ]
