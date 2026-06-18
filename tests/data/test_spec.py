@@ -1174,7 +1174,9 @@ class TestScanSpecSaveWarnings:
         [
             f.name
             for f in fields(ScanSpec)
-            if f.default is None and f.name in ScanSpec.FIELD_METADATA
+            if f.default is None
+            and f.name in ScanSpec.FIELD_METADATA
+            and not ScanSpec.FIELD_METADATA[f.name].get("rare")
         ],
     )
     def test_optional_scan_field_missing_warns_on_save(self, field, tmp_path):
