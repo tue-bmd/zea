@@ -54,7 +54,7 @@ zea
    models
    ops
    probes
-   scan
+   parameters
    simulator
    tools
    tracking
