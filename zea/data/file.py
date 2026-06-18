@@ -1,6 +1,7 @@
 """zea data file (HDF5)."""
 
 import contextlib
+import difflib
 import enum
 import logging
 from datetime import datetime, timezone
@@ -26,6 +27,8 @@ from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.utils import deprecated
+
+_ZEA_ISSUES_URL = "https://github.com/tue-bmd/zea/issues"
 
 if TYPE_CHECKING:
     # ``Self`` is in ``typing`` only from 3.11; import lazily to keep the
@@ -523,24 +526,45 @@ def _warn_if_legacy_file(file: "File") -> None:
 
 def _warn_custom_keys(data: dict, metadata: dict):
     """Warn about custom keys in data/metadata dicts when saving."""
+    known_map_keys = [k for k, v in DataSpec.SCHEMA.items() if "spec" in v]
     custom_maps = [k for k in data if k not in DataSpec.SCHEMA]
     if custom_maps:
-        supported = ", ".join(k for k, v in DataSpec.SCHEMA.items() if "spec" in v)
-        log.warning(
-            f"Custom spatial map key(s) added to 'data': {', '.join(sorted(custom_maps))}. "
-            "These are validated as generic Map specs. "
-            "If your data matches an existing type, prefer one of the supported "
-            f"spatial maps: {supported}."
+        parts = [
+            f"Custom key(s) added to 'data' and validated as generic Map specs: "
+            f"{', '.join(sorted(custom_maps))}."
+        ]
+        for key in sorted(custom_maps):
+            close = difflib.get_close_matches(key, known_map_keys, n=1, cutoff=0.6)
+            if close:
+                parts.append(
+                    f"  '{key}' closely resembles the built-in field '{close[0]}' — "
+                    f"did you mean '{close[0]}'?"
+                )
+        parts.append(f"Supported data fields: {', '.join(known_map_keys)}.")
+        parts.append(
+            f"Think one of your keys should be a recognized field? Open an issue: {_ZEA_ISSUES_URL}"
         )
+        log.warning("\n".join(parts))
+
+    known_signal_keys = [k for k, v in MetadataSpec.SCHEMA.items() if "spec" in v]
     custom_signals = [k for k in metadata if k not in MetadataSpec.SCHEMA]
     if custom_signals:
-        supported = ", ".join(k for k, v in MetadataSpec.SCHEMA.items() if "spec" in v)
-        log.warning(
-            f"Custom signal key(s) added to 'metadata': {', '.join(sorted(custom_signals))}. "
-            "These are validated as generic SignalND specs. "
-            "If your signal matches an existing type, prefer one of the supported "
-            f"signal fields: {supported}."
+        parts = [
+            f"Custom key(s) added to 'metadata' and validated as generic SignalND specs: "
+            f"{', '.join(sorted(custom_signals))}."
+        ]
+        for key in sorted(custom_signals):
+            close = difflib.get_close_matches(key, known_signal_keys, n=1, cutoff=0.6)
+            if close:
+                parts.append(
+                    f"  '{key}' closely resembles the built-in field '{close[0]}' — "
+                    f"did you mean '{close[0]}'?"
+                )
+        parts.append(f"Supported metadata fields: {', '.join(known_signal_keys)}.")
+        parts.append(
+            f"Think one of your keys should be a recognized field? Open an issue: {_ZEA_ISSUES_URL}"
         )
+        log.warning("\n".join(parts))
 
 
 class File(h5py.File):
@@ -910,6 +934,7 @@ class File(h5py.File):
         chunk_frames: bool = False,
         overwrite: bool = False,
         ignore_warnings: bool = False,
+        warn_missing_optional_fields: bool = True,
     ):
         """Create a new zea HDF5 file from data, scan, and optional metadata.
 
@@ -960,6 +985,8 @@ class File(h5py.File):
                 PHI timestamp warning, etc.). Defaults to *False*. Note that some
                 rarely-used metadata fields (e.g. ``voice_narration``, ``ecg``) are
                 never warned about regardless of this flag.
+            warn_missing_optional_fields: If *True* (default), warn when optional
+                fields are missing from the saved spec.
 
         Returns:
             None. The validated file is written to ``path``; open it with
@@ -1053,6 +1080,7 @@ class File(h5py.File):
                 str(path),
                 compression=compression,
                 chunk_frames=chunk_frames,
+                warn_missing_optional_fields=warn_missing_optional_fields,
             )
 
     @property

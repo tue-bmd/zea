@@ -43,7 +43,7 @@ dependencies = [
     "tqdm >=4",
     "pyyaml >=6",
     "decorator >=5",
-    "huggingface_hub >=0.26",
+    "huggingface_hub >=1.2",
     "tyro >=0.9",
     "wandb >=0.18",
     "wget >=3.2",
@@ -119,23 +119,13 @@ docs = [
     "PyStemmer",
     "IPython",
 ]
-jax = [
-    "jax[cuda12]>=0.4.26"
-]
-display = [
-    "opencv-python>=4",
-]
-display-headless = [
-    "opencv-python-headless>=4",
-]
+jax = ["jax[cuda12]>=0.4.26"]
+display = ["opencv-python>=4"]
+display-headless = ["opencv-python-headless>=4"]
 # most models don't needs these optional dependencies
 # but some do, so we list them here
-models = [
-    "onnxruntime>=1.15",
-]
-app = [
-    "gradio>=6.0",
-]
+models = ["onnxruntime>=1.15"]
+app = ["gradio>=6.0"]
 # these are just here for .readthedocs.yaml
 # please for proper install (with GPU support)
 # install manually
@@ -182,7 +172,7 @@ exclude = [
     "node_modules",
     "site-packages",
     "venv",
-    "keras_ops.py"
+    "keras_ops.py",
 ]
 
 # more lenient line width than Black
@@ -198,7 +188,7 @@ target-version = "py310"
 # McCabe complexity (`C901`) by default.
 select = ["E", "F"]
 ignore = [
-    "E731",  # Ignore ambiguous variable name globally
+    "E731", # Ignore ambiguous variable name globally
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
@@ -211,17 +201,17 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 [tool.ruff.lint.per-file-ignores]
 
 "__init__.py" = [
-    "F401",  # unused imports
-    "E501",  # line too long
-    "E402",  # module level import not at top of file
+    "F401", # unused imports
+    "E501", # line too long
+    "E402", # module level import not at top of file
 ]
 
 "tests/**/__init__.py" = [
-    "F403",  # * imports
+    "F403", # * imports
 ]
 
 "docs/source/parameters_doc.py" = [
-    "E501",  # line too long
+    "E501", # line too long
 ]
 
 [tool.ruff.format]
@@ -267,7 +257,7 @@ unresolved-import = "warn"
 
 [tool.ty.src]
 include = ["zea"]
-exclude = ["zea/ops/keras_ops.py"]  # generated file (see _generate_keras_ops)
+exclude = ["zea/ops/keras_ops.py"] # generated file (see _generate_keras_ops)
 
 # Keras Layer subclasses deliberately override `call` with domain-specific
 # signatures; Keras dispatches through __call__ and never calls .call()
@@ -304,6 +294,4 @@ concurrency = ["multiprocessing", "thread"]
 sigterm = true
 
 [tool.coverage.report]
-omit = [
-    "zea/ops/keras_ops.py",
-]
+omit = ["zea/ops/keras_ops.py"]

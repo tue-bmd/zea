@@ -110,7 +110,7 @@ from zea.beamform.pixelgrid import (
     check_for_aliasing,
     polar_pixel_grid,
 )
-from zea.data.spec import ScanSpec, ProbeSpec
+from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated

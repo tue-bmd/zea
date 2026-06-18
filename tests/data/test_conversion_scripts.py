@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import types
 import zipfile
 from pathlib import Path
 
@@ -62,6 +63,7 @@ def test_conversion_script(tmp_path_factory, dataset):
     dst = base / "dst"
 
     extra_args = create_test_data_for_dataset(dataset, src)
+    dst.mkdir()
 
     run_subprocess(
         [sys.executable, "-m", "zea.data.convert", dataset, str(src), str(dst), *extra_args],
@@ -316,8 +318,8 @@ def create_echonetlvh_test_data(src):
                         "Y2": float(y2),
                         "Frames": n_frames,
                         "FPS": fps,
-                        "Width": float(final_width),
-                        "Height": final_height,
+                        "Width": int(final_width),
+                        "Height": int(final_height),
                         "split": split,
                     }
                 )
@@ -325,16 +327,6 @@ def create_echonetlvh_test_data(src):
 
     # Create AVI files with scan cone structure
     for filename, _, polar_shape in test_files:
-        # Generate a reference frame to determine output dimensions for this file
-        ref_polar = np.ones(polar_shape, dtype=np.float32)
-        ref_cartesian, _ = scan_convert_2d(
-            ref_polar,
-            rho_range=rho_range,
-            theta_range=theta_range,
-            resolution=1.0,
-        )
-        ref_cartesian = np.array(ref_cartesian)
-
         frames = []
         for _ in range(n_frames):
             # Create a simple polar image with radial gradient and noise
@@ -348,10 +340,7 @@ def create_echonetlvh_test_data(src):
 
             # Scan convert to create Cartesian image with scan cone
             cartesian_img, _ = scan_convert_2d(
-                polar_img,
-                rho_range=rho_range,
-                theta_range=theta_range,
-                resolution=1.0,
+                polar_img, rho_range=rho_range, theta_range=theta_range
             )
             cartesian_img = np.array(cartesian_img)
 
@@ -594,12 +583,16 @@ def verify_converted_echonetlvh_test_data(dst):
 
     Checks:
     - HDF5 files exist in train/val/test directories
-    - Files contain required datasets (scan, image, image_sc)
+    - Files contain required datasets (scan, image, image_polar)
     - Cone parameters CSV was generated with valid crop bounds
 
     Args:
         dst (Path): path to the destination directory where converted test data is located.
     """
+    from zea.data.convert.echonetlvh import LVHProcessor, load_cone_parameters
+
+    cone_params_csv = dst / "cone_parameters.csv"
+
     # Expected files per split
     expected_splits = {
         "train": [
@@ -610,42 +603,7 @@ def verify_converted_echonetlvh_test_data(dst):
         "test": ["0X4444444444444444.hdf5"],
     }
 
-    # Verify HDF5 files exist in correct splits
-    for split, expected_files in expected_splits.items():
-        split_dir = dst / split
-        assert split_dir.exists(), f"Missing directory: {split_dir}"
-
-        h5_files = list(split_dir.rglob("*.hdf5"))
-        h5_filenames = [f.name for f in h5_files]
-
-        assert set(h5_filenames) == set(expected_files), (
-            f"Mismatch in converted hdf5 files for split {split}. "
-            f"Expected: {expected_files}, Got: {h5_filenames}"
-        )
-
-        # Verify each HDF5 file has required content
-        for h5_file in h5_files:
-            with File(h5_file, "r") as f:
-                assert "data" in f, f"Missing 'data' in {h5_file}"
-                assert "image" in f["data"], f"Missing 'image' (polar) in {h5_file}"
-                assert "image_sc" in f["data"], f"Missing 'image_sc' (scan converted) in {h5_file}"
-
-                # image is now a Map group with values and extent subfields
-                image_values = f.data.image.values[:]
-                image_sc = f.data.image_sc.values[:]
-
-                assert image_values.ndim == 4, (
-                    f"Polar image should be of shape (F, H, W, 1) in {h5_file}"
-                )
-                assert image_sc.ndim == 3, (
-                    f"Scan converted image should be of shape (F, H, W) in {h5_file}"
-                )
-
-                # Validate the file
-                f.validate()
-
     # Verify cone parameters CSV was generated
-    cone_params_csv = dst / "cone_parameters.csv"
     assert cone_params_csv.exists(), "Missing cone_parameters.csv"
 
     # Verify cone parameters content
@@ -692,6 +650,56 @@ def verify_converted_echonetlvh_test_data(dst):
                 assert row.get("status").startswith("error"), (
                     "Expected error status for 0X5555555555555555.avi due to crop overshoot"
                 )
+
+    cone_params = load_cone_parameters(cone_params_csv)
+
+    # Verify HDF5 files exist in correct splits
+    for split, expected_files in expected_splits.items():
+        split_dir = dst / split
+        assert split_dir.exists(), f"Missing directory: {split_dir}"
+
+        h5_files = list(split_dir.rglob("*.hdf5"))
+        h5_filenames = [f.name for f in h5_files]
+
+        assert set(h5_filenames) == set(expected_files), (
+            f"Mismatch in converted hdf5 files for split {split}. "
+            f"Expected: {expected_files}, Got: {h5_filenames}"
+        )
+
+        # Verify each HDF5 file has required content
+        for h5_file in h5_files:
+            with File(h5_file, "r") as f:
+                assert "data" in f, f"Missing 'data' in {h5_file}"
+                assert "image" in f["data"], f"Missing 'image' in {h5_file}"
+                assert "image_polar" in f["data"], (
+                    f"Missing 'image_polar' (scan converted) in {h5_file}"
+                )
+
+                # image is now a Map group with values and extent subfields
+                image = f.data.image.values[:]
+                image_polar = f.data.image_polar.values[:]
+
+                assert image_polar.ndim == 3, (
+                    f"Polar image should be of shape (F, H, W) in {h5_file}"
+                )
+                assert image.ndim == 3, (
+                    f"Scan converted image should be of shape (F, H, W) in {h5_file}"
+                )
+
+                # Validate the file
+                f.validate()
+
+                # Convert polar to cartesian
+                frame_idx = 0
+                image_float = image[frame_idx].astype(np.float32)
+                image_polar_float = image_polar[frame_idx].astype(np.float32)
+                back_cartesian = LVHProcessor.scan_convert(
+                    image_polar_float, cone_params[h5_file.stem + ".avi"], image_float.shape
+                )
+                back_cartesian = np.asarray(back_cartesian)
+
+                mse = np.mean(((back_cartesian - image_float) / 255) ** 2)
+                assert mse < 1e-3, f"mse for {h5_file.stem} is {mse}"
 
 
 def verify_converted_camus_test_data(dst):
@@ -794,6 +802,254 @@ def verify_converted_verasonics_test_data(src, dst):
         f.validate()
 
 
+def _install_fake_echoxflow(monkeypatch, src, recordings):
+    """Install a fake ``echoxflow`` module so convert_echoxflow can run end-to-end.
+
+    The real EchoXFlow reader is a separate, optional third-party package
+    (installed from GitHub, see ``zea.data.convert.echoxflow``) that parses a
+    ``croissant.json`` catalog into record/store/stream objects.  It is not a
+    dependency of zea, so to test the converter against data shaped like the
+    real dataset we replicate that small API surface with fakes backed by
+    synthetic numpy frames.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture (used to inject ``sys.modules``).
+        src (Path): EchoXFlow data root; a ``croissant.json`` placeholder is
+            written here so the converter's default catalog path exists.
+        recordings (list[dict]): One dict per recording with keys ``exam_id``,
+            ``recording_id``, ``frames`` (uint8, shape (F, H, W)), ``fps``,
+            ``geometry`` (object or None) and ``ecg`` (1-D float array or None).
+    """
+    MODALITY = "2d_brightness_mode"
+
+    class FakeGeometry:
+        def __init__(self):
+            self.angle_start_rad = -np.pi / 4
+            self.angle_end_rad = np.pi / 4
+            self.depth_start_m = 0.0
+            self.depth_end_m = 0.08
+
+    class FakeStream:
+        def __init__(self, data, fps, geometry):
+            self.data = data
+            self.sample_rate_hz = fps
+            self.timestamps = np.arange(len(data), dtype=np.float32) / fps
+            self.metadata = types.SimpleNamespace(geometry=geometry)
+
+    class FakeEcg:
+        def __init__(self, samples, fps):
+            self.data = samples
+            self.sample_rate_hz = fps
+            self.timestamps = np.arange(len(samples), dtype=np.float32) / fps
+
+    class FakeStore:
+        def __init__(self, spec):
+            self._spec = spec
+
+        def load_stream(self, name):
+            if name == MODALITY:
+                return FakeStream(self._spec["frames"], self._spec["fps"], self._spec["geometry"])
+            if name == "ecg" and self._spec["ecg"] is not None:
+                return FakeEcg(self._spec["ecg"], self._spec["fps"])
+            raise KeyError(name)
+
+    class FakeRecord:
+        def __init__(self, spec):
+            self._spec = spec
+            self.exam_id = spec["exam_id"]
+            self.recording_id = spec["recording_id"]
+
+        def sample_rate_hz(self, _modality):
+            return self._spec["fps"]
+
+        def has_array_path(self, path):
+            return path == "data/ecg" and self._spec["ecg"] is not None
+
+    catalog = types.SimpleNamespace(recordings=[FakeRecord(r) for r in recordings])
+
+    def load_croissant(_path):
+        return catalog
+
+    def find_recordings(croissant, min_frame_counts, predicate, **_kwargs):
+        min_frames = min_frame_counts[MODALITY]
+        return [
+            rec
+            for rec in croissant.recordings
+            if len(rec._spec["frames"]) >= min_frames and predicate(rec)
+        ]
+
+    def open_recording(record, root):  # noqa: ARG001 - root unused by the fake
+        return FakeStore(record._spec)
+
+    fake_module = types.ModuleType("echoxflow")
+    fake_module.load_croissant = load_croissant
+    fake_module.find_recordings = find_recordings
+    fake_module.open_recording = open_recording
+    monkeypatch.setitem(sys.modules, "echoxflow", fake_module)
+
+    (src / "croissant.json").write_text("{}")
+
+
+def create_echoxflow_test_data(src, monkeypatch):
+    """Create EchoXFlow-like synthetic recordings and install the fake reader.
+
+    Produces three recordings:
+    - two qualifying B-mode recordings (one with ECG + geometry, one without
+      either) that should be converted, and
+    - one short recording that falls below ``--min-frames`` and is filtered out
+      by ``find_recordings`` (so we also exercise the frame-count predicate).
+
+    Args:
+        src (Path): source directory (EchoXFlow data root).
+        monkeypatch: pytest monkeypatch fixture, forwarded to install the fake.
+
+    Returns:
+        dict: the expected ``{exam_id: [recording_id, ...]}`` of converted files.
+    """
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    class _Geometry:
+        angle_start_rad = -np.pi / 4
+        angle_end_rad = np.pi / 4
+        depth_start_m = 0.0
+        depth_end_m = 0.08
+
+    recordings = [
+        {
+            "exam_id": "exam_A",
+            "recording_id": "rec_0",
+            "frames": rng.integers(0, 256, (12, 48, 32), dtype=np.uint8),
+            "fps": 50.0,
+            "geometry": _Geometry(),
+            "ecg": rng.normal(size=200).astype(np.float32),
+        },
+        {
+            "exam_id": "exam_B",
+            "recording_id": "rec_1",
+            "frames": rng.integers(0, 256, (15, 40, 28), dtype=np.uint8),
+            "fps": 45.0,
+            "geometry": None,  # exercises the no-coordinates path
+            "ecg": None,  # exercises the no-ecg path
+        },
+        {
+            "exam_id": "exam_B",
+            "recording_id": "rec_too_short",
+            "frames": rng.integers(0, 256, (3, 40, 28), dtype=np.uint8),
+            "fps": 45.0,
+            "geometry": None,
+            "ecg": None,
+        },
+    ]
+
+    _install_fake_echoxflow(monkeypatch, src, recordings)
+
+    # rec_too_short has only 3 frames (< default --min-frames=10) so it is filtered out.
+    return {"exam_A": ["rec_0"], "exam_B": ["rec_1"]}
+
+
+def verify_converted_echoxflow_test_data(dst, expected):
+    """Verify EchoXFlow conversion produced valid per-recording HDF5 files.
+
+    Args:
+        dst (Path): destination directory of converted files.
+        expected (dict): ``{exam_id: [recording_id, ...]}`` of expected outputs.
+    """
+    produced = {p.name for p in dst.rglob("*.hdf5")}
+    expected_names = {f"{rec}.hdf5" for recs in expected.values() for rec in recs}
+    assert produced == expected_names, (
+        f"Mismatch in converted hdf5 files. Expected {expected_names}, got {produced}"
+    )
+
+    for exam_id, recs in expected.items():
+        for rec in recs:
+            h5_file = dst / exam_id / f"{rec}.hdf5"
+            assert h5_file.exists(), f"Missing converted file: {h5_file}"
+            with File(h5_file, "r") as f:
+                assert "data/image" in f, f"Missing 'data/image' in {h5_file}"
+                image = f.data.image.values[:]
+                assert image.ndim == 3, f"Expected (F, H, W) image, got {image.shape}"
+                assert image.dtype == np.uint8, f"Expected uint8 image in {h5_file}"
+                # subject.id is mapped from exam_id and enables subject-wise splits.
+                assert "metadata/subject" in f, f"Missing 'metadata/subject' in {h5_file}"
+                f.validate()
+
+    # exam_A/rec_0 has geometry + ecg -> coordinates and an ecg signal must be present.
+    with File(dst / "exam_A" / "rec_0.hdf5", "r") as f:
+        assert "coordinates" in f["data/image"], "Expected per-pixel coordinates for rec_0"
+        assert "metadata/ecg" in f, "Expected ecg metadata for rec_0"
+
+    # exam_B/rec_1 has neither -> no coordinates, no ecg.
+    with File(dst / "exam_B" / "rec_1.hdf5", "r") as f:
+        assert "coordinates" not in f["data/image"], "rec_1 should have no coordinates"
+        assert "metadata/ecg" not in f, "rec_1 should have no ecg metadata"
+
+    # The conversion writes a dataset card stamped with the default zeahub repo id.
+    readme = dst / "README.md"
+    assert readme.exists(), "Missing dataset card README.md"
+    assert "zea_repo_id: zeahub/echoxflow" in readme.read_text(), (
+        "Dataset card must declare the default zea_repo_id"
+    )
+
+
+@pytest.mark.heavy
+def test_echoxflow_conversion_script(tmp_path_factory, monkeypatch):
+    """Convert EchoXFlow-like data end-to-end through convert_echoxflow.
+
+    EchoXFlow's reader is the optional third-party ``echoxflow`` package, which
+    is not installed in CI, so this case cannot use the subprocess CLI path used
+    by the other datasets.  Instead we inject a fake ``echoxflow`` module that
+    produces synthetic recordings shaped like the real dataset and call the
+    converter in-process.
+    """
+    from zea.data.convert.echoxflow import convert_echoxflow
+
+    base = tmp_path_factory.mktemp("echoxflow_base")
+    src = base / "src"
+    dst = base / "dst"
+    src.mkdir()
+
+    expected = create_echoxflow_test_data(src, monkeypatch)
+
+    args = argparse.Namespace(
+        src=str(src),
+        dst=str(dst),
+        croissant=None,
+        min_frames=10,
+        min_fps=30.0,
+        limit=None,
+        overwrite=False,
+        upload=False,
+        revision=None,
+        hf_repo_id="",
+    )
+    convert_echoxflow(args)
+
+    verify_converted_echoxflow_test_data(dst, expected)
+
+
+def test_echoxflow_missing_package_raises(monkeypatch):
+    """convert_echoxflow must raise a clear ImportError when echoxflow is absent."""
+    from zea.data.convert.echoxflow import convert_echoxflow
+
+    # Ensure importing echoxflow fails even if it ever gets installed.
+    monkeypatch.setitem(sys.modules, "echoxflow", None)
+
+    args = argparse.Namespace(
+        src="/tmp/echoxflow_src",
+        dst="/tmp/echoxflow_dst",
+        croissant=None,
+        min_frames=10,
+        min_fps=30.0,
+        limit=None,
+        overwrite=False,
+        upload=False,
+        revision=None,
+        hf_repo_id="",
+    )
+    with pytest.raises(ImportError, match="Install it from GitHub"):
+        convert_echoxflow(args)
+
+
 @pytest.mark.parametrize("image_type", _SUPPORTED_IMG_TYPES)
 def test_convert_image_dataset(tmp_path_factory, image_type):
     """Test the convert_image_dataset function from zea.data.convert.images"""
@@ -867,54 +1123,68 @@ def test_sitk_load(tmp_path):
     assert arr_sq.shape == arr.shape
 
 
-@pytest.mark.parametrize(
-    "dataset",
-    [
-        ("picmus", "picmus.zip", "archive_to_download"),
-        ("camus", "CAMUS_public.zip", "CAMUS_public"),
-        ("echonet", "EchoNet-Dynamic.zip", "EchoNet-Dynamic"),
-        ("echonetlvh", "EchoNet-LVH.zip", "Batch1"),
-    ],
-)
-def test_unzip(tmp_path, dataset):
-    """Test the unzip function from zea.data.convert.utils for all dataset-name pairs"""
-    dataset_name, zip_filename, folder_name = dataset
+def test_unzip(tmp_path):
+    """Test the unzip function from zea.data.convert.utils."""
     # Create a dummy zip file
-    zip_path = tmp_path / zip_filename
-    with zipfile.ZipFile(zip_path, "w") as zipf:
-        # Add a dummy file to the zip
-        if dataset_name == "echonet":
-            # Match unzip()’s expected structure: EchoNet-Dynamic/Videos/...
-            zipf.writestr(f"{folder_name}/Videos/dummy.txt", "This is a test.")
-        else:
-            zipf.writestr(f"{folder_name}/dummy.txt", "This is a test.")
+    src = tmp_path / "archive.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("dummy.txt", "This is a test.")
 
-        if dataset_name == "echonetlvh":
-            # EchoNetLVH dataset unzips into four folders and a csv file.
-            zipf.writestr("Batch2/dummy.txt", "This is a test.")
-            zipf.writestr("Batch3/dummy.txt", "This is a test.")
-            zipf.writestr("Batch4/dummy.txt", "This is a test.")
+    dst = tmp_path / "extracted"
 
-            with open(Path(f"{tmp_path}/MeasurementsList.csv"), "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["frame", "mean_value"])
-                for i in range(3):
-                    writer.writerow([i, i * 2])  # example data
-            zipf.write(f"{tmp_path}/MeasurementsList.csv", "MeasurementsList.csv")
+    # First call extracts the archive and creates the marker file.
+    result = unzip(src, dst)
+    assert result == dst
+    assert (dst / "dummy.txt").exists()
+    assert (dst / ".fully_unzipped").exists()
 
-    # Call the unzip function twice:
-    # Once to initialize from zip, once to initialize from folder
-    unzip(tmp_path, dataset_name)
-    unzip(tmp_path, dataset_name)
+    # Second call detects the marker and skips re-extraction.
+    result = unzip(src, dst)
+    assert result == dst
+    assert (dst / "dummy.txt").exists()
 
-    # Verify that the folder was created and contains the dummy file
-    if dataset_name == "echonet":
-        extracted_folder = tmp_path / folder_name / "Videos"
-    else:
-        extracted_folder = tmp_path / folder_name
 
-    assert extracted_folder.exists()
-    assert (extracted_folder / "dummy.txt").exists()
+def test_unzip_requires_zip_suffix(tmp_path):
+    """unzip should reject sources that are not .zip files."""
+    src = tmp_path / "archive.tar"
+    src.touch()
+    with pytest.raises(AssertionError):
+        unzip(src, tmp_path / "extracted")
+
+
+def test_unzip_missing_src(tmp_path):
+    """unzip should raise if the zip file does not exist."""
+    with pytest.raises(FileNotFoundError):
+        unzip(tmp_path / "missing.zip", tmp_path / "extracted")
+
+
+def test_unzip_non_empty_dst_without_marker(tmp_path):
+    """unzip should refuse to extract into a non-empty directory lacking the marker."""
+    src = tmp_path / "archive.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("dummy.txt", "This is a test.")
+
+    dst = tmp_path / "extracted"
+    dst.mkdir()
+    (dst / "leftover.txt").touch()
+
+    with pytest.raises(ValueError):
+        unzip(src, dst)
+
+
+def test_unzip_rejects_path_traversal(tmp_path):
+    """unzip should refuse archive members that escape the destination directory."""
+    src = tmp_path / "malicious.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("../evil.txt", "pwned")
+
+    dst = tmp_path / "extracted"
+
+    with pytest.raises(ValueError, match="Unsafe path"):
+        unzip(src, dst)
+
+    # Nothing should have been written outside the destination directory.
+    assert not (tmp_path / "evil.txt").exists()
 
 
 def test_camus_db_not_cast_to_uint8():

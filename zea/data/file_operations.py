@@ -20,7 +20,6 @@ from zea.data.file import File, load_file_all_data_types
 from zea.data.spec import DEFAULT_COMPRESSION
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
-from zea.internal.parameters import MissingDependencyError
 from zea.log import logger
 
 ALL_DATA_TYPES_EXCEPT_RAW = set(_IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES) - {"raw_data"}
@@ -32,14 +31,6 @@ OPERATION_NAMES = [
     "resave",
     "extract",
 ]
-
-
-def _safe_getattr(obj, name):
-    """Get ``obj.name``, returning ``None`` if it is missing or has unmet dependencies."""
-    try:
-        return getattr(obj, name, None)
-    except MissingDependencyError:
-        return None
 
 
 def save_file(

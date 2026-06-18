@@ -266,7 +266,7 @@ def save_to_mp4(images, filename, fps=20, shared_color_palette=False):
     finally:
         writer.close()
 
-    return log.success(f"Successfully saved MP4 to -> {filename}")
+    return log.success(f"Successfully saved MP4 to -> {log.yellow(filename)}")
 
 
 def search_file_tree(

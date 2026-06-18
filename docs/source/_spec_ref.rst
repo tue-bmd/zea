@@ -271,6 +271,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (..., 3)
               - –
               - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (n_frames)
+              - s
+              - |badge-opt|
+            * - ``start_time_offset``
+              - ``float32``
+              - scalar
+              - s
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_ch)
@@ -319,6 +329,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (..., 3)
               - –
+              - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (n_frames)
+              - s
+              - |badge-opt|
+            * - ``start_time_offset``
+              - ``float32``
+              - scalar
+              - s
               - |badge-opt|
             * - ``labels``
               - ``str``
@@ -369,6 +389,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (..., 3)
               - –
               - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (n_frames)
+              - s
+              - |badge-opt|
+            * - ``start_time_offset``
+              - ``float32``
+              - scalar
+              - s
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
@@ -417,6 +447,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (..., 3)
               - –
+              - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (n_frames)
+              - s
+              - |badge-opt|
+            * - ``start_time_offset``
+              - ``float32``
+              - scalar
+              - s
               - |badge-opt|
             * - ``labels``
               - ``str``
@@ -467,6 +507,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (..., 3)
               - –
               - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (n_frames)
+              - s
+              - |badge-opt|
+            * - ``start_time_offset``
+              - ``float32``
+              - scalar
+              - s
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
@@ -515,6 +565,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (..., 3)
               - –
+              - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (n_frames)
+              - s
+              - |badge-opt|
+            * - ``start_time_offset``
+              - ``float32``
+              - scalar
+              - s
               - |badge-opt|
             * - ``labels``
               - ``str``
@@ -565,6 +625,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (..., 3)
               - –
               - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (n_frames)
+              - s
+              - |badge-opt|
+            * - ``start_time_offset``
+              - ``float32``
+              - scalar
+              - s
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
@@ -614,6 +684,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (..., 3)
               - –
               - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (n_frames)
+              - s
+              - |badge-opt|
+            * - ``start_time_offset``
+              - ``float32``
+              - scalar
+              - s
+              - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
@@ -662,6 +742,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - (..., 3)
               - –
+              - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (n_frames)
+              - s
+              - |badge-opt|
+            * - ``start_time_offset``
+              - ``float32``
+              - scalar
+              - s
               - |badge-opt|
             * - ``labels``
               - ``str``

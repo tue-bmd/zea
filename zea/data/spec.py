@@ -1,3 +1,5 @@
+import os
+import tempfile
 from collections import defaultdict
 from dataclasses import MISSING, dataclass, field, fields
 from datetime import datetime, timezone
@@ -462,13 +464,15 @@ class Spec:
         group: h5py.Group,
         compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
+        warn_missing_optional_fields: bool = True,
     ) -> None:
         """Store the data in the given group (e.g. hdf5 group)."""
 
         assert isinstance(group, h5py.Group), "group must be an h5py Group"
 
         # Optional fields should only warn when persisting to disk, not on load.
-        self.warn_missing_optional_fields()
+        if warn_missing_optional_fields:
+            self.warn_missing_optional_fields()
 
         field_metadata = getattr(self, "FIELD_METADATA", {})
 
@@ -486,6 +490,7 @@ class Spec:
                     subgroup,
                     compression=compression,
                     chunk_frames=chunk_frames,
+                    warn_missing_optional_fields=warn_missing_optional_fields,
                 )
             else:
                 self.create_dataset(
@@ -569,6 +574,14 @@ class Map(Spec):
             the shape is ``(*values.shape[:-1], 3)``.  The last axis holds ``[x, y, z]``.
             The leading ``n_frames`` axis may be omitted to broadcast one coordinate grid
             across all frames.
+        timestamps: Optional per-frame acquisition timestamps in seconds, shape ``(n_frames,)``,
+            relative to frame 0.  Use this to record the time of each frame when the sampling
+            is irregular.  Must start at 0 and be strictly increasing.  Requires
+            ``start_time_offset`` to also be provided.
+        start_time_offset: Time offset in seconds between the first transmit event of the
+            ultrasound acquisition and frame 0 of this map.  Negative means frame 0 was
+            acquired before the first transmit event; positive means it was acquired after.
+            Required when ``timestamps`` is provided.
         labels: The labels corresponding to the ``n_ch`` channels in the values.
             This is required when values have an n_ch dimension, and should be None otherwise.
             For IQ data, this would typically be ``["I", "Q"]``.
@@ -581,6 +594,8 @@ class Map(Spec):
 
     values: np.ndarray
     coordinates: np.ndarray | None = None
+    timestamps: np.ndarray | None = None
+    start_time_offset: np.ndarray | float | None = None
     labels: np.ndarray | None = None
     description: str | None = None
     unit: str | None = None
@@ -598,6 +613,8 @@ class Map(Spec):
             ),
         },
         "coordinates": {"dtype": np.float32, "shape": ("...", 3)},
+        "timestamps": {"dtype": np.float32, "shape": ("n_frames",)},
+        "start_time_offset": {"dtype": np.float32, "shape": ()},
         "labels": {"dtype": np.str_, "shape": ("n_spatial_ch",)},
         "description": {"dtype": str, "shape": ()},
         "unit": {"dtype": str, "shape": ()},
@@ -605,8 +622,32 @@ class Map(Spec):
         "max": {"dtype": np.float32, "shape": ()},
     }
 
+    FIELD_METADATA = {
+        "timestamps": {
+            "unit": "s",
+            "description": "Per-frame acquisition timestamps relative to frame 0.",
+        },
+        "start_time_offset": {
+            "unit": "s",
+            "description": (
+                "Time offset between the first transmit event of the ultrasound "
+                "acquisition and frame 0 of this map. Negative means frame 0 was "
+                "acquired before the first transmit event; positive means it was "
+                "acquired after."
+            ),
+        },
+    }
+
     def __post_init__(self):
         super().__post_init__()
+
+        if (self.timestamps is None) != (self.start_time_offset is None):
+            raise ValueError("Map.timestamps and Map.start_time_offset must be provided together.")
+        if self.timestamps is not None:
+            if not np.isclose(self.timestamps[0], 0.0):
+                raise ValueError("Map.timestamps must start at 0.")
+            if len(self.timestamps) > 1 and np.any(np.diff(self.timestamps) <= 0):
+                raise ValueError("Map.timestamps must be strictly increasing.")
 
         if self.values.ndim == 5:
             assert self.labels is not None, (
@@ -1860,9 +1901,15 @@ class TrackSpec(Spec):
         group: "h5py.Group",
         compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
+        warn_missing_optional_fields: bool = True,
     ) -> None:
         """Store data, scan, and label in the HDF5 group."""
-        super().store_in_group(group, compression=compression, chunk_frames=chunk_frames)
+        super().store_in_group(
+            group,
+            compression=compression,
+            chunk_frames=chunk_frames,
+            warn_missing_optional_fields=warn_missing_optional_fields,
+        )
 
 
 @dataclass
@@ -2181,11 +2228,9 @@ class FileSpec(Spec):
         path: str,
         compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
+        warn_missing_optional_fields: bool = True,
     ) -> None:
         """Save the dataset to the specified path."""
-        # Lazy import to avoid circular dependency (spec.py is imported by file.py)
-        from zea import File
-
         try:
             _zea_version = _get_pkg_version("zea")
         except PackageNotFoundError:
@@ -2218,8 +2263,39 @@ class FileSpec(Spec):
                     "regulations. Ensure you have appropriate authorization and "
                     "de-identification measures in place before sharing this file."
                 )
-        with File(str(_path), "w") as f:
-            f.attrs["zea_version"] = _zea_version
+        # Write to a temporary file in the destination directory, then atomically
+        # rename it into place.
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(_path.parent), prefix=f".{_path.stem}.tmp-", suffix=".hdf5"
+        )
+        os.close(fd)
+        tmp_path = Path(tmp_name)
+        try:
+            self._write_hdf5(
+                tmp_path, _zea_version, compression, chunk_frames, warn_missing_optional_fields
+            )
+            os.replace(tmp_path, _path)
+        except BaseException:
+            # Includes KeyboardInterrupt/SystemExit: clean up the partial temp file.
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+        log.info(f"File saved to {log.yellow(path)}")
+
+    def _write_hdf5(
+        self,
+        path: Path,
+        zea_version: str,
+        compression: str | None,
+        chunk_frames: bool,
+        warn_missing_optional_fields: bool,
+    ) -> None:
+        """Write all groups/datasets of this spec to a fresh HDF5 file at ``path``."""
+        # Lazy import to avoid circular dependency (spec.py is imported by file.py)
+        from zea import File
+
+        with File(str(path), "w") as f:
+            f.attrs["zea_version"] = zea_version
 
             # Write scalar/array metadata fields (metadata, metrics, probe_name, etc.)
             for group_name, schema in self.SCHEMA.items():
@@ -2228,7 +2304,11 @@ class FileSpec(Spec):
                     if value is None:
                         continue
                     group = f.create_group(group_name)
-                    value.store_in_group(group, compression=compression)
+                    value.store_in_group(
+                        group,
+                        compression=compression,
+                        warn_missing_optional_fields=warn_missing_optional_fields,
+                    )
                 else:
                     value = getattr(self, group_name)
                     if value is not None:
@@ -2246,6 +2326,5 @@ class FileSpec(Spec):
                     track_group,
                     compression=compression,
                     chunk_frames=chunk_frames,
+                    warn_missing_optional_fields=warn_missing_optional_fields,
                 )
-
-        log.info(f"File saved to {log.yellow(path)}")

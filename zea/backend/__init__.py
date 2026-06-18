@@ -104,6 +104,25 @@ def jit(func=None, jax=True, tensorflow=True, **kwargs):
         return _jit_compile(func, jax=jax, tensorflow=tensorflow, **kwargs)
 
 
+_jit_not_supported_warned = False
+
+
+def _warn_jit_not_supported(backend_name: str) -> None:
+    """Emit the 'JIT not supported' warning at most once, and only when it will
+    actually be shown (i.e. not when suppressed by log.set_level("ERROR"))."""
+    global _jit_not_supported_warned
+    import logging
+
+    if not _jit_not_supported_warned and log.logger.isEnabledFor(logging.WARNING):
+        _jit_not_supported_warned = True
+        log.warning(
+            f"JIT compilation not currently supported for backend {backend_name}. "
+            "Supported backends are 'tensorflow' and 'jax'. "
+            "Initialize zea.Pipeline with jit_options=None to suppress this warning. "
+            "Falling back to non-compiled mode."
+        )
+
+
 def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
     backend = keras.backend.backend()
 
@@ -121,12 +140,7 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
     elif backend == "jax" and not jax:
         return func
     else:
-        log.warning(
-            f"JIT compilation not currently supported for backend {backend}. "
-            "Supported backends are 'tensorflow' and 'jax'."
-        )
-        log.warning("Initialize zea.Pipeline with jit_options=None to suppress this warning.")
-        log.warning("Falling back to non-compiled mode.")
+        _warn_jit_not_supported(backend)
         return func
 
 
