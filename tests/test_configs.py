@@ -420,6 +420,98 @@ def test_pipeline_operations_compact_after_check_config():
     assert not any(isinstance(op, Config) for op in config.pipeline.operations)
 
 
+def test_config_operations_string_indexing():
+    """config.pipeline.operations supports name-based string indexing."""
+    config = Config(
+        {
+            "pipeline": {
+                "operations": [
+                    "demodulate",
+                    {"name": "normalize", "params": {"output_range": [0, 1]}},
+                ],
+            }
+        }
+    )
+
+    assert config.pipeline.operations["demodulate"] == "demodulate"
+    result = config.pipeline.operations["normalize"]
+    assert result == {"name": "normalize", "params": {"output_range": [0, 1]}}
+
+
+def test_config_operations_int_indexing_unchanged():
+    """Integer indexing on config.pipeline.operations is unaffected."""
+    config = Config({"pipeline": {"operations": ["demodulate", "normalize"]}})
+
+    assert config.pipeline.operations[0] == "demodulate"
+    assert config.pipeline.operations[1] == "normalize"
+
+
+def test_config_operations_is_list():
+    """config.pipeline.operations is still a list (backward compat)."""
+    from zea.internal.ops_list import OperationList
+
+    config = Config({"pipeline": {"operations": ["demodulate"]}})
+    assert isinstance(config.pipeline.operations, list)
+    assert isinstance(config.pipeline.operations, OperationList)
+
+
+def test_config_operations_not_found():
+    """KeyError lists available names when key is missing."""
+    config = Config({"pipeline": {"operations": ["demodulate"]}})
+
+    with pytest.raises(KeyError, match="Available"):
+        config.pipeline.operations["nonexistent"]
+
+
+def test_config_operations_close_match():
+    """KeyError suggests a close match when the name is slightly wrong."""
+    config = Config({"pipeline": {"operations": ["demodulate"]}})
+
+    with pytest.raises(KeyError, match="demodulate"):
+        config.pipeline.operations["demoulate"]  # intentional typo
+
+
+def test_config_operations_duplicate_raises():
+    """Ambiguous bare name raises with numbered hints when duplicates exist."""
+    config = Config({"pipeline": {"operations": ["normalize", "normalize"]}})
+
+    with pytest.raises(KeyError, match="normalize_0"):
+        config.pipeline.operations["normalize"]
+
+
+def test_config_operations_numbered_suffix():
+    """Numbered suffix resolves duplicate operations in a config."""
+    config = Config(
+        {
+            "pipeline": {
+                "operations": [
+                    {"name": "normalize", "params": {"output_range": [0, 1]}},
+                    {"name": "normalize", "params": {"output_range": [-1, 1]}},
+                ]
+            }
+        }
+    )
+
+    assert config.pipeline.operations["normalize_0"]["params"]["output_range"] == [0, 1]
+    assert config.pipeline.operations["normalize_1"]["params"]["output_range"] == [-1, 1]
+
+
+def test_config_operations_mutate_via_index():
+    """Modifying the returned dict mutates the entry in-place."""
+    config = Config(
+        {
+            "pipeline": {
+                "operations": [
+                    {"name": "beamform", "params": {"enable_pfield": False}},
+                ]
+            }
+        }
+    )
+
+    config.pipeline.operations["beamform"]["params"]["enable_pfield"] = True
+    assert config.pipeline.operations["beamform"]["params"]["enable_pfield"] is True
+
+
 def test_config_pickle():
     """Tests if the config can be pickled and unpickled without changing its contents."""
     import pickle

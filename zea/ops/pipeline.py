@@ -13,6 +13,7 @@ from zea.func.tensor import vmap
 from zea.func.ultrasound import channels_to_complex, complex_to_channels
 from zea.internal.core import DataTypes, ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
 from zea.internal.core import Object as ZEAObject
+from zea.internal.ops_list import OperationList
 from zea.internal.registry import beamformer_registry, ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Operation, get_ops
@@ -275,18 +276,31 @@ class Pipeline:
             device=self.device,
         )
 
+    @staticmethod
+    def _check_op_is_instance(operation):
+        """Raise a clear TypeError when a class is passed instead of an instance."""
+        if isinstance(operation, type):
+            raise TypeError(
+                f"Expected an Operation instance, got class {operation.__name__!r}. "
+                f"Did you forget the parentheses? "
+                f"Use {operation.__name__}() instead of {operation.__name__}."
+            )
+
     def prepend(self, operation: Operation):
         """Prepend an operation to the pipeline."""
+        self._check_op_is_instance(operation)
         self._pipeline_layers.insert(0, operation)
         self.reinitialize()
 
     def append(self, operation: Operation):
         """Append an operation to the pipeline."""
+        self._check_op_is_instance(operation)
         self._pipeline_layers.append(operation)
         self.reinitialize()
 
     def insert(self, index: int, operation: Operation):
         """Insert an operation at a specific index in the pipeline."""
+        self._check_op_is_instance(operation)
         if index < 0 or index > len(self._pipeline_layers):
             raise IndexError("Index out of bounds for inserting operation.")
         self._pipeline_layers.insert(index, operation)
@@ -296,6 +310,29 @@ class Pipeline:
     def operations(self) -> List[Union[Operation, "Pipeline"]]:
         """Alias for self.layers to match the zea naming convention"""
         return self._pipeline_layers
+
+    def __getitem__(self, key: str):
+        """Look up an operation by name.
+
+        Allows chaining directly on the pipeline object::
+
+            pipeline["beamform"]["tof_correction"]
+
+        Use :meth:`keys` to see available names.
+        Duplicate operation names are disambiguated with a ``_N`` suffix,
+        e.g. ``pipeline["normalize_0"]``.
+        """
+        return OperationList(self._pipeline_layers)[key]
+
+    def keys(self):
+        """Return the string keys that can be used with ``pipeline[key]``.
+
+        Example::
+
+            pipeline.keys()
+            # ['cast', 'apply_window', 'demodulate', 'beamform', ...]
+        """
+        return OperationList(self._pipeline_layers).keys()
 
     def reset_timer(self):
         """Reset the timer for timed operations."""
@@ -467,6 +504,14 @@ class Pipeline:
     def validate(self):
         """Validate the pipeline by checking the compatibility of the operations."""
         operations = self.operations
+        for i, op in enumerate(operations):
+            if isinstance(op, type):
+                raise TypeError(
+                    f"Pipeline operation at index {i} is a class ({op.__name__!r}), "
+                    "not an instance. "
+                    f"Did you forget the parentheses? "
+                    f"Use {op.__name__}() instead of {op.__name__}."
+                )
         for i in range(len(operations) - 1):
             if operations[i].output_data_type is None:
                 continue
