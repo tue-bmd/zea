@@ -409,9 +409,11 @@ def upload_dataset_to_hf(  # pragma: no cover
 ) -> None:
     """Upload a converted dataset to a HuggingFace Hub revision branch.
 
-    Upload to the ``main`` branch is intentionally blocked.  After uploading
-    to a named revision branch, verify the data manually and then merge the
-    branch into ``main`` on the Hugging Face Hub.
+    Uses :meth:`huggingface_hub.HfApi.upload_large_folder`, the resumable,
+    chunked, multi-commit uploader meant for large datasets (many or large
+    files).  Upload to the ``main`` branch is intentionally blocked.  After
+    uploading to a named revision branch, verify the data manually and then
+    merge the branch into ``main`` on the Hugging Face Hub.
 
     Args:
         folder: Root folder containing the files to upload.
@@ -419,8 +421,9 @@ def upload_dataset_to_hf(  # pragma: no cover
         revision: Target branch name.  Must not be ``"main"``.
         file_glob: Glob pattern for files to include in the size summary.
             Defaults to ``"*.hdf5"``.
-        commit_message: Commit message.  Defaults to
-            ``"Upload <repo_id> (zea format) to <revision>"``.
+        commit_message: Message used only when creating the *revision* branch
+            (``upload_large_folder`` generates its own per-commit messages).
+            Defaults to ``"Upload <repo_id> (zea format) to <revision>"``.
         allow_patterns: Optional list of glob patterns limiting which files in
             *folder* are uploaded.  When ``None`` (default) the whole folder is
             uploaded.  Use this to scope an upload to specific files.
@@ -489,12 +492,14 @@ def upload_dataset_to_hf(  # pragma: no cover
     except Exception as exc:
         log.warning("Could not verify revision existence: %s", exc)
 
-    api.upload_folder(
+    # upload_large_folder is the resumable, chunked, multi-commit uploader meant
+    # for big datasets (many/large files). It manages its own commit messages, so
+    # commit_message only affects the branch-creation path above, not the upload.
+    api.upload_large_folder(
         folder_path=str(folder),
         repo_id=repo_id,
         repo_type="dataset",
         revision=revision,
-        commit_message=commit_message,
         allow_patterns=allow_patterns,
     )
     log.info(f"Uploaded to https://huggingface.co/datasets/{repo_id}/tree/{revision}")
