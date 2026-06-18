@@ -9,6 +9,7 @@ Examples::
     python -m zea.data.convert camus ./raw ./output --download
     python -m zea.data.convert cetus ./raw ./output --download
     python -m zea.data.convert echonet ./raw ./output
+    python -m zea.data.convert echoxflow ./raw ./output
 
 Run ``python -m zea.data.convert --help`` for all options.
 """
@@ -260,6 +261,52 @@ def _add_parser_args_verasonics(subparsers):
     )
 
 
+def _add_parser_args_echoxflow(subparsers):
+    """Add EchoXFlow specific arguments to the parser."""
+    echoxflow_parser = subparsers.add_parser("echoxflow", help="Convert EchoXFlow dataset")
+    echoxflow_parser.add_argument(
+        "src", type=str, help="EchoXFlow data root, e.g. /data/EchoXFlow/data"
+    )
+    echoxflow_parser.add_argument("dst", type=str, help="Destination folder path")
+    echoxflow_parser.add_argument(
+        "--croissant",
+        type=str,
+        default=None,
+        help="Path to croissant.json (default: <src>/croissant.json).",
+    )
+    echoxflow_parser.add_argument(
+        "--min-frames", type=int, default=10, help="Minimum B-mode frame count."
+    )
+    echoxflow_parser.add_argument(
+        "--min-fps", type=float, default=30.0, help="Minimum frame rate (Hz)."
+    )
+    echoxflow_parser.add_argument(
+        "--limit", type=int, default=None, help="Convert at most N recordings."
+    )
+    echoxflow_parser.add_argument(
+        "--overwrite", action="store_true", help="Overwrite existing output files."
+    )
+    echoxflow_parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload the converted dataset to HuggingFace Hub (zeahub/echoxflow).",
+    )
+    echoxflow_parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help="Target branch on the Hub. Required when --upload is set; upload to 'main' "
+        "is blocked.",
+    )
+    echoxflow_parser.add_argument(
+        "--hf_repo_id",
+        type=str,
+        default="",
+        help="HuggingFace repo id for ownership checks and optional upload "
+        "(default: zeahub/echoxflow).",
+    )
+
+
 def get_parser():
     """Build and parse command-line arguments for converting raw datasets to a zea dataset."""
     parser = argparse.ArgumentParser(description="Convert raw data to a zea dataset.")
@@ -270,6 +317,7 @@ def get_parser():
     _add_parser_args_cetus(subparsers)
     _add_parser_args_picmus(subparsers)
     _add_parser_args_verasonics(subparsers)
+    _add_parser_args_echoxflow(subparsers)
     return parser
 
 
@@ -286,6 +334,7 @@ def main():
     - cetus
     - picmus
     - verasonics
+    - echoxflow
 
     Raises a ValueError if args.dataset is not one of the supported choices.
     """
@@ -326,6 +375,10 @@ def main():
         from zea.data.convert.verasonics import convert_verasonics
 
         convert_verasonics(args)
+    elif args.dataset == "echoxflow":
+        from zea.data.convert.echoxflow import convert_echoxflow
+
+        convert_echoxflow(args)
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 

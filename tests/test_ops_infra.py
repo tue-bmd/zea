@@ -272,6 +272,100 @@ def test_string_representation(verbose=False):
 """Pipeline Class Tests"""
 
 
+def test_pipeline_operations_int_indexing_unchanged():
+    """Existing integer indexing on pipeline.operations is unaffected."""
+    m_op = MultiplyOperation()
+    a_op = AddOperation()
+    pipeline = ops.Pipeline(operations=[m_op, a_op], jit_options=None)
+
+    assert pipeline.operations[0] is m_op
+    assert pipeline.operations[-1] is a_op
+
+
+def test_pipeline_operations_is_plain_list():
+    """pipeline.operations is a plain list; string lookup goes via pipeline[key]."""
+    from zea.internal.ops_list import OperationList
+
+    pipeline = ops.Pipeline(operations=[MultiplyOperation()], jit_options=None)
+    assert isinstance(pipeline.operations, list)
+    assert not isinstance(pipeline.operations, OperationList)
+
+
+def test_pipeline_getitem_by_name():
+    """pipeline[name] looks up an operation by registry name."""
+    m_op = MultiplyOperation()
+    a_op = AddOperation()
+    pipeline = ops.Pipeline(operations=[m_op, a_op], jit_options=None)
+
+    assert pipeline["multiply"] is m_op
+    assert pipeline["add"] is a_op
+
+
+def test_pipeline_getitem_not_found():
+    """KeyError lists available names when the name is not found."""
+    pipeline = ops.Pipeline(operations=[MultiplyOperation()], jit_options=None)
+
+    with pytest.raises(KeyError, match="Available"):
+        pipeline["nonexistent"]
+
+
+def test_pipeline_getitem_close_match():
+    """KeyError suggests a close match when the name is slightly wrong."""
+    pipeline = ops.Pipeline(operations=[MultiplyOperation()], jit_options=None)
+
+    with pytest.raises(KeyError, match="multiply"):
+        pipeline["multipy"]  # intentional typo
+
+
+def test_pipeline_getitem_duplicate_raises():
+    """Ambiguous bare name raises with numbered hints when duplicates exist."""
+    pipeline = ops.Pipeline(
+        operations=[MultiplyOperation(), MultiplyOperation()],
+        jit_options=None,
+        validate=False,
+    )
+
+    with pytest.raises(KeyError, match="multiply_0"):
+        pipeline["multiply"]
+
+
+def test_pipeline_getitem_numbered_suffix():
+    """Numbered suffix 'name_N' resolves to the Nth duplicate."""
+    m0 = MultiplyOperation()
+    m1 = MultiplyOperation()
+    pipeline = ops.Pipeline(operations=[m0, m1], jit_options=None, validate=False)
+
+    assert pipeline["multiply_0"] is m0
+    assert pipeline["multiply_1"] is m1
+
+
+def test_pipeline_getitem_numbered_out_of_range():
+    """Numbered index beyond available matches raises a KeyError."""
+    pipeline = ops.Pipeline(operations=[MultiplyOperation()], jit_options=None)
+
+    with pytest.raises(KeyError, match="out of range"):
+        pipeline["multiply_5"]
+
+
+def test_pipeline_keys():
+    """pipeline.keys() returns the list of indexable string names."""
+    pipeline = ops.Pipeline(operations=[MultiplyOperation(), AddOperation()], jit_options=None)
+
+    assert pipeline.keys() == ["multiply", "add"]
+
+
+def test_pipeline_dotted_registry_name():
+    """Operations with dotted registry names (e.g. keras built-ins) are reachable
+    by their short last-component name."""
+    from zea.ops.pipeline import Pipeline
+    from zea.ops.keras_ops import Cast
+
+    pipeline = Pipeline.from_default(jit_options=None)
+    # Cast is registered as "keras.ops.cast" but must be addressable as "cast"
+    assert isinstance(pipeline["cast"], Cast)
+    assert "cast" in pipeline.keys()
+
+
 def test_pipeline_initialization():
     """Tests initialization of a Pipeline."""
     operations = [MultiplyOperation(), AddOperation()]
