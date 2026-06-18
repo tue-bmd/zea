@@ -1082,6 +1082,19 @@ class DataSpec(Spec):
 
     FIELD_METADATA = {
         "raw_data": {"unit": "-", "description": "Raw channel data."},
+        "aligned_data": {"description": "Time-of-flight corrected data.", "rare": True},
+        "beamformed_data": {"description": "Beamformed data.", "rare": True},
+        "envelope_data": {"description": "Envelope-detected data.", "rare": True},
+        "image": {"description": "Reconstructed image data.", "rare": True},
+        "segmentation": {"description": "Segmentation data.", "rare": True},
+        "sos_map": {"description": "Speed-of-sound map data.", "rare": True},
+        "strain_percentage_map": {"description": "Strain map data.", "rare": True},
+        "shear_wave_elastography_map": {
+            "description": "Shear-wave elastography data.",
+            "rare": True,
+        },
+        "tissue_doppler": {"description": "Tissue Doppler data.", "rare": True},
+        "color_doppler": {"description": "Color Doppler velocity data.", "rare": True},
     }
 
     def __init__(
@@ -1496,6 +1509,9 @@ class Subject(Spec):
 
     FIELD_METADATA = {
         "id": {"description": "Subject ID. Needed for subject-wise splits."},
+        "age": {"description": "Subject age in years.", "rare": True},
+        "sex": {"description": "Subject sex.", "rare": True},
+        "fat_percentage": {"description": "Subject fat percentage.", "rare": True},
     }
 
     def __post_init__(self):
@@ -1845,6 +1861,14 @@ class MetricsSpec(Spec):
             "shape": ("n_frames",),
         },
         "coherence_factor": {"dtype": np.float32, "shape": ("n_frames",)},
+    }
+
+    FIELD_METADATA = {
+        "common_midpoint_phase_error": {
+            "description": "Common midpoint phase error in radians.",
+            "rare": True,
+        },
+        "coherence_factor": {"description": "Coherence factor.", "rare": True},
     }
 
 
