@@ -156,61 +156,61 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - :class:`~zea.data.spec.AlignedData`
            - group
            - –
-           - 
+           - Time-of-flight corrected data.
            - |badge-opt|
          * - ``beamformed_data``
            - :class:`~zea.data.spec.BeamformedData`
            - group
            - –
-           - 
+           - Beamformed data.
            - |badge-opt|
          * - ``envelope_data``
            - :class:`~zea.data.spec.EnvelopeData`
            - group
            - –
-           - 
+           - Envelope-detected data.
            - |badge-opt|
          * - ``image``
            - :class:`~zea.data.spec.Image`
            - group
            - –
-           - 
+           - Reconstructed image data.
            - |badge-opt|
          * - ``segmentation``
            - :class:`~zea.data.spec.Segmentation`
            - group
            - –
-           - 
+           - Segmentation data.
            - |badge-opt|
          * - ``sos_map``
            - :class:`~zea.data.spec.SosMap`
            - group
            - –
-           - 
+           - Speed-of-sound map data.
            - |badge-opt|
          * - ``strain_percentage_map``
            - :class:`~zea.data.spec.StrainPercentageMap`
            - group
            - –
-           - 
+           - Strain map data.
            - |badge-opt|
          * - ``shear_wave_elastography_map``
            - :class:`~zea.data.spec.ShearWaveElastographyMap`
            - group
            - –
-           - 
+           - Shear-wave elastography data.
            - |badge-opt|
          * - ``tissue_doppler``
            - :class:`~zea.data.spec.TissueDopplerMap`
            - group
            - –
-           - 
+           - Tissue Doppler data.
            - |badge-opt|
          * - ``color_doppler``
            - :class:`~zea.data.spec.ColorDopplerMap`
            - group
            - –
-           - 
+           - Color Doppler velocity data.
            - |badge-opt|
 
       **Grouped data products**
@@ -1204,12 +1204,12 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - ``float32``
            - (n_frames)
            - –
-           - 
+           - Common midpoint phase error in radians.
            - |badge-opt|
          * - ``coherence_factor``
            - ``float32``
            - (n_frames)
            - –
-           - 
+           - Coherence factor.
            - |badge-opt|
 
