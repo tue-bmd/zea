@@ -771,7 +771,7 @@ def transform_measurements_csv(csv_path, cone_params_csv=None):
 
 
 def _fix_faulty_entry(measurements_csv, src):
-    # Read rows
+    """Some entries in the MeasurementsList.csv are faulty, so we fix them here."""
     with open(measurements_csv, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         assert reader.fieldnames is not None, "MeasurementsList.csv has no header row"
@@ -791,6 +791,13 @@ def _fix_faulty_entry(measurements_csv, src):
         for row in rows:
             if row["HashedFileName"] == bad_hash:
                 fps = row["Width"]
+
+                # If they ever update the csv, this will trigger since the FPS is never 500,
+                # and the width is always atleast 800.
+                if float(fps) > 500:
+                    log.warning("Seems like the faulty entries were already fixed.")
+                    break
+
                 n_frames = row["FPS"]
                 row["Width"] = w
                 row["Height"] = h
