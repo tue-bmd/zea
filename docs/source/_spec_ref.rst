@@ -1074,22 +1074,22 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
             * - ``anatomy``
               - ``str``
               - (n_frames) or scalar
-              - –
+              - -
               - |badge-opt|
             * - ``view``
               - ``str``
               - (n_frames) or scalar
-              - –
+              - -
               - |badge-opt|
             * - ``label``
               - ``str``
               - (n_frames) or scalar
-              - –
+              - -
               - |badge-opt|
             * - ``image_quality``
               - ``str``
               - (n_frames) or scalar
-              - –
+              - -
               - |badge-opt|
 
 

@@ -1281,9 +1281,21 @@ class ScanSpec(Spec):
         "time_to_next_transmit": {"unit": "s", "description": "Time between transmit events."},
         "azimuth_angles": {"unit": "rad", "description": "Azimuthal angles of transmit beams."},
         "sound_speed": {"unit": "m/s", "description": "Speed of sound."},
-        "tgc_gain_curve": {"unit": "-", "description": "Time-gain-compensation curve."},
-        "waveforms_one_way": {"unit": "V", "description": "One-way transmit waveforms."},
-        "waveforms_two_way": {"unit": "V", "description": "Two-way transmit waveforms."},
+        "tgc_gain_curve": {
+            "unit": "-",
+            "description": "Time-gain-compensation curve.",
+            "rare": True,
+        },
+        "waveforms_one_way": {
+            "unit": "V",
+            "description": "One-way transmit waveforms.",
+            "rare": True,
+        },
+        "waveforms_two_way": {
+            "unit": "V",
+            "description": "Two-way transmit waveforms.",
+            "rare": True,
+        },
     }
 
     @property
@@ -1756,6 +1768,13 @@ class Annotations(Spec):
         "view": {"dtype": np.str_, "shape": (("n_frames",), ())},
         "label": {"dtype": np.str_, "shape": (("n_frames",), ())},
         "image_quality": {"dtype": np.str_, "shape": (("n_frames",), ())},
+    }
+
+    FIELD_METADATA = {
+        "anatomy": {"unit": "-", "description": "Anatomy label."},
+        "view": {"unit": "-", "description": "View label."},
+        "label": {"unit": "-", "description": "Pathology or classification label."},
+        "image_quality": {"unit": "-", "description": "Image quality label.", "rare": True},
     }
 
 
