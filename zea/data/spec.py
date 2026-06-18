@@ -623,6 +623,11 @@ class Map(Spec):
     }
 
     FIELD_METADATA = {
+        "values": {"unit": "-", "description": "Map pixel values."},
+        "coordinates": {
+            "unit": "m",
+            "description": "Per-pixel Cartesian positions (x, y, z) in metres.",
+        },
         "timestamps": {
             "unit": "s",
             "description": "Per-frame acquisition timestamps relative to frame 0.",
@@ -636,6 +641,11 @@ class Map(Spec):
                 "acquired after."
             ),
         },
+        "labels": {"unit": "-", "description": "Labels for each channel in values."},
+        "description": {"unit": "-", "description": "Free-text description of the map contents."},
+        "unit": {"unit": "-", "description": "Physical unit of the map values, e.g. 'm/s', '%'."},
+        "min": {"unit": "-", "description": "Minimum value of the map."},
+        "max": {"unit": "-", "description": "Maximum value of the map."},
     }
 
     def __post_init__(self):
@@ -841,6 +851,11 @@ class AlignedData(Spec):
             "shape": ("n_frames", "n_tx", "n_ax", "n_el", "n_ch"),
         },
         "labels": {"dtype": np.str_, "shape": ("n_ch",)},
+    }
+
+    FIELD_METADATA = {
+        "values": {"unit": "-", "description": "Time-of-flight corrected channel data."},
+        "labels": {"unit": "-", "description": "Channel labels, e.g. 'RF' or ['I', 'Q']."},
     }
 
     def __post_init__(self):
@@ -1523,10 +1538,11 @@ class Subject(Spec):
     }
 
     FIELD_METADATA = {
-        "id": {"description": "Subject ID. Needed for subject-wise splits."},
-        "age": {"description": "Subject age in years.", "rare": True},
-        "sex": {"description": "Subject sex.", "rare": True},
-        "fat_percentage": {"description": "Subject fat percentage.", "rare": True},
+        "id": {"unit": "-", "description": "Subject ID. Needed for subject-wise splits."},
+        "type": {"unit": "-", "description": "Subject type, e.g. human, phantom, animal."},
+        "age": {"unit": "-", "description": "Subject age in years.", "rare": True},
+        "sex": {"unit": "-", "description": "Subject sex.", "rare": True},
+        "fat_percentage": {"unit": "%", "description": "Subject fat percentage.", "rare": True},
     }
 
     def __post_init__(self):
@@ -1801,6 +1817,7 @@ class MetadataSpec(Spec):
     }
 
     FIELD_METADATA = {
+        "subject": {"unit": "-", "description": "Subject associated with the study."},
         "credit": {"unit": "-", "description": "Credit or attribution for the dataset."},
         "probe_pose": {
             "unit": "-",
@@ -1887,10 +1904,15 @@ class MetricsSpec(Spec):
 
     FIELD_METADATA = {
         "common_midpoint_phase_error": {
-            "description": "Common midpoint phase error in radians.",
+            "unit": "rad",
+            "description": "Common midpoint phase error.",
             "rare": True,
         },
-        "coherence_factor": {"description": "Coherence factor.", "rare": True},
+        "coherence_factor": {
+            "unit": "-",
+            "description": "Coherence factor; ratio of coherent to incoherent energy (0-1).",
+            "rare": True,
+        },
     }
 
 
@@ -1925,6 +1947,12 @@ class TrackSpec(Spec):
         "data": {"spec": DataSpec},
         "scan": {"spec": ScanSpec},
         "label": {"dtype": str, "shape": ()},
+    }
+
+    FIELD_METADATA = {
+        # label is enforced by FileSpec for multi-track (ValueError), and legitimately
+        # absent for single-track files — warning here is never useful.
+        "label": {"unit": "-", "description": "Short human-readable track name.", "rare": True},
     }
 
     def __post_init__(self):

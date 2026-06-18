@@ -230,22 +230,22 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 22 30 10
          
             * - Field
               - Type
               - Shape
-              - Unit
+              - Description
               - 
             * - ``values``
               - ``float32`` | ``int16``
               - (n_frames, n_tx, n_ax, n_el, n_ch)
-              - –
+              - Time-of-flight corrected channel data.
               - |badge-req|
             * - ``labels``
               - ``str``
               - (n_ch)
-              - –
+              - Channel labels, e.g. 'RF' or ['I', 'Q'].
               - |badge-opt|
 
       .. dropdown:: ``beamformed_data``
@@ -254,57 +254,57 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 22 30 10
          
             * - Field
               - Type
               - Shape
-              - Unit
+              - Description
               - 
             * - ``values``
               - ``float32``
               - (n_frames, z, x, y, n_ch) or (n_frames, z, x, n_ch)
-              - –
+              - Map pixel values.
               - |badge-req|
             * - ``coordinates``
               - ``float32``
               - (..., 3)
-              - –
+              - Per-pixel Cartesian positions (x, y, z) in metres.
               - |badge-opt|
             * - ``timestamps``
               - ``float32``
               - (n_frames)
-              - s
+              - Per-frame acquisition timestamps relative to frame 0.
               - |badge-opt|
             * - ``start_time_offset``
               - ``float32``
               - scalar
-              - s
+              - Time offset between the first transmit event of the ultrasound acquisition and frame 0 of this map. Negative means frame 0 was acquired before the first transmit event; positive means it was acquired after.
               - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_ch)
-              - –
+              - Labels for each channel in values.
               - |badge-opt|
             * - ``description``
               - ``str``
               - scalar
-              - –
+              - Free-text description of the map contents.
               - |badge-opt|
             * - ``unit``
               - ``str``
               - scalar
-              - –
+              - Physical unit of the map values, e.g. 'm/s', '%'.
               - |badge-opt|
             * - ``min``
               - ``float32``
               - scalar
-              - –
+              - Minimum value of the map.
               - |badge-opt|
             * - ``max``
               - ``float32``
               - scalar
-              - –
+              - Maximum value of the map.
               - |badge-opt|
 
       .. dropdown:: ``envelope_data``
@@ -313,57 +313,57 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 22 30 10
          
             * - Field
               - Type
               - Shape
-              - Unit
+              - Description
               - 
             * - ``values``
               - ``float32``
               - (n_frames, z, x, y) or (n_frames, z, x)
-              - –
+              - Map pixel values.
               - |badge-req|
             * - ``coordinates``
               - ``float32``
               - (..., 3)
-              - –
+              - Per-pixel Cartesian positions (x, y, z) in metres.
               - |badge-opt|
             * - ``timestamps``
               - ``float32``
               - (n_frames)
-              - s
+              - Per-frame acquisition timestamps relative to frame 0.
               - |badge-opt|
             * - ``start_time_offset``
               - ``float32``
               - scalar
-              - s
+              - Time offset between the first transmit event of the ultrasound acquisition and frame 0 of this map. Negative means frame 0 was acquired before the first transmit event; positive means it was acquired after.
               - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
-              - –
+              - Labels for each channel in values.
               - |badge-opt|
             * - ``description``
               - ``str``
               - scalar
-              - –
+              - Free-text description of the map contents.
               - |badge-opt|
             * - ``unit``
               - ``str``
               - scalar
-              - –
+              - Physical unit of the map values, e.g. 'm/s', '%'.
               - |badge-opt|
             * - ``min``
               - ``float32``
               - scalar
-              - –
+              - Minimum value of the map.
               - |badge-opt|
             * - ``max``
               - ``float32``
               - scalar
-              - –
+              - Maximum value of the map.
               - |badge-opt|
 
       .. dropdown:: ``image``
@@ -372,57 +372,57 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 22 30 10
          
             * - Field
               - Type
               - Shape
-              - Unit
+              - Description
               - 
             * - ``values``
               - ``float32`` | ``uint8``
               - (n_frames, z, x, y) or (n_frames, z, x)
-              - –
+              - Map pixel values.
               - |badge-req|
             * - ``coordinates``
               - ``float32``
               - (..., 3)
-              - –
+              - Per-pixel Cartesian positions (x, y, z) in metres.
               - |badge-opt|
             * - ``timestamps``
               - ``float32``
               - (n_frames)
-              - s
+              - Per-frame acquisition timestamps relative to frame 0.
               - |badge-opt|
             * - ``start_time_offset``
               - ``float32``
               - scalar
-              - s
+              - Time offset between the first transmit event of the ultrasound acquisition and frame 0 of this map. Negative means frame 0 was acquired before the first transmit event; positive means it was acquired after.
               - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
-              - –
+              - Labels for each channel in values.
               - |badge-opt|
             * - ``description``
               - ``str``
               - scalar
-              - –
+              - Free-text description of the map contents.
               - |badge-opt|
             * - ``unit``
               - ``str``
               - scalar
-              - –
+              - Physical unit of the map values, e.g. 'm/s', '%'.
               - |badge-opt|
             * - ``min``
               - ``float32``
               - scalar
-              - –
+              - Minimum value of the map.
               - |badge-opt|
             * - ``max``
               - ``float32``
               - scalar
-              - –
+              - Maximum value of the map.
               - |badge-opt|
 
       .. dropdown:: ``segmentation``
@@ -431,57 +431,57 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 22 30 10
          
             * - Field
               - Type
               - Shape
-              - Unit
+              - Description
               - 
             * - ``values``
               - ``bool``
               - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, n_spatial_ch)
-              - –
+              - Map pixel values.
               - |badge-req|
             * - ``coordinates``
               - ``float32``
               - (..., 3)
-              - –
+              - Per-pixel Cartesian positions (x, y, z) in metres.
               - |badge-opt|
             * - ``timestamps``
               - ``float32``
               - (n_frames)
-              - s
+              - Per-frame acquisition timestamps relative to frame 0.
               - |badge-opt|
             * - ``start_time_offset``
               - ``float32``
               - scalar
-              - s
+              - Time offset between the first transmit event of the ultrasound acquisition and frame 0 of this map. Negative means frame 0 was acquired before the first transmit event; positive means it was acquired after.
               - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
-              - –
+              - Labels for each channel in values.
               - |badge-opt|
             * - ``description``
               - ``str``
               - scalar
-              - –
+              - Free-text description of the map contents.
               - |badge-opt|
             * - ``unit``
               - ``str``
               - scalar
-              - –
+              - Physical unit of the map values, e.g. 'm/s', '%'.
               - |badge-opt|
             * - ``min``
               - ``float32``
               - scalar
-              - –
+              - Minimum value of the map.
               - |badge-opt|
             * - ``max``
               - ``float32``
               - scalar
-              - –
+              - Maximum value of the map.
               - |badge-opt|
 
       .. dropdown:: ``sos_map``
@@ -490,57 +490,57 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 22 30 10
          
             * - Field
               - Type
               - Shape
-              - Unit
+              - Description
               - 
             * - ``values``
               - ``float32``
               - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x, n_spatial_ch) or (n_frames, z, x)
-              - –
+              - Map pixel values.
               - |badge-req|
             * - ``coordinates``
               - ``float32``
               - (..., 3)
-              - –
+              - Per-pixel Cartesian positions (x, y, z) in metres.
               - |badge-opt|
             * - ``timestamps``
               - ``float32``
               - (n_frames)
-              - s
+              - Per-frame acquisition timestamps relative to frame 0.
               - |badge-opt|
             * - ``start_time_offset``
               - ``float32``
               - scalar
-              - s
+              - Time offset between the first transmit event of the ultrasound acquisition and frame 0 of this map. Negative means frame 0 was acquired before the first transmit event; positive means it was acquired after.
               - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
-              - –
+              - Labels for each channel in values.
               - |badge-opt|
             * - ``description``
               - ``str``
               - scalar
-              - –
+              - Free-text description of the map contents.
               - |badge-opt|
             * - ``unit``
               - ``str``
               - scalar
-              - –
+              - Physical unit of the map values, e.g. 'm/s', '%'.
               - |badge-opt|
             * - ``min``
               - ``float32``
               - scalar
-              - –
+              - Minimum value of the map.
               - |badge-opt|
             * - ``max``
               - ``float32``
               - scalar
-              - –
+              - Maximum value of the map.
               - |badge-opt|
 
       .. dropdown:: ``strain_percentage_map``
@@ -549,57 +549,57 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 22 30 10
          
             * - Field
               - Type
               - Shape
-              - Unit
+              - Description
               - 
             * - ``values``
               - ``float32``
               - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x, n_spatial_ch) or (n_frames, z, x)
-              - –
+              - Map pixel values.
               - |badge-req|
             * - ``coordinates``
               - ``float32``
               - (..., 3)
-              - –
+              - Per-pixel Cartesian positions (x, y, z) in metres.
               - |badge-opt|
             * - ``timestamps``
               - ``float32``
               - (n_frames)
-              - s
+              - Per-frame acquisition timestamps relative to frame 0.
               - |badge-opt|
             * - ``start_time_offset``
               - ``float32``
               - scalar
-              - s
+              - Time offset between the first transmit event of the ultrasound acquisition and frame 0 of this map. Negative means frame 0 was acquired before the first transmit event; positive means it was acquired after.
               - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
-              - –
+              - Labels for each channel in values.
               - |badge-opt|
             * - ``description``
               - ``str``
               - scalar
-              - –
+              - Free-text description of the map contents.
               - |badge-opt|
             * - ``unit``
               - ``str``
               - scalar
-              - –
+              - Physical unit of the map values, e.g. 'm/s', '%'.
               - |badge-opt|
             * - ``min``
               - ``float32``
               - scalar
-              - –
+              - Minimum value of the map.
               - |badge-opt|
             * - ``max``
               - ``float32``
               - scalar
-              - –
+              - Maximum value of the map.
               - |badge-opt|
 
       .. dropdown:: ``shear_wave_elastography_map``
@@ -608,57 +608,57 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 22 30 10
          
             * - Field
               - Type
               - Shape
-              - Unit
+              - Description
               - 
             * - ``values``
               - ``float32``
               - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x, n_spatial_ch) or (n_frames, z, x)
-              - –
+              - Map pixel values.
               - |badge-req|
             * - ``coordinates``
               - ``float32``
               - (..., 3)
-              - –
+              - Per-pixel Cartesian positions (x, y, z) in metres.
               - |badge-opt|
             * - ``timestamps``
               - ``float32``
               - (n_frames)
-              - s
+              - Per-frame acquisition timestamps relative to frame 0.
               - |badge-opt|
             * - ``start_time_offset``
               - ``float32``
               - scalar
-              - s
+              - Time offset between the first transmit event of the ultrasound acquisition and frame 0 of this map. Negative means frame 0 was acquired before the first transmit event; positive means it was acquired after.
               - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
-              - –
+              - Labels for each channel in values.
               - |badge-opt|
             * - ``description``
               - ``str``
               - scalar
-              - –
+              - Free-text description of the map contents.
               - |badge-opt|
             * - ``unit``
               - ``str``
               - scalar
-              - –
+              - Physical unit of the map values, e.g. 'm/s', '%'.
               - |badge-opt|
             * - ``min``
               - ``float32``
               - scalar
-              - –
+              - Minimum value of the map.
               - |badge-opt|
             * - ``max``
               - ``float32``
               - scalar
-              - –
+              - Maximum value of the map.
               - |badge-opt|
 
       .. dropdown:: ``tissue_doppler``
@@ -667,57 +667,57 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 22 30 10
          
             * - Field
               - Type
               - Shape
-              - Unit
+              - Description
               - 
             * - ``values``
               - ``float32``
               - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x, n_spatial_ch) or (n_frames, z, x)
-              - –
+              - Map pixel values.
               - |badge-req|
             * - ``coordinates``
               - ``float32``
               - (..., 3)
-              - –
+              - Per-pixel Cartesian positions (x, y, z) in metres.
               - |badge-opt|
             * - ``timestamps``
               - ``float32``
               - (n_frames)
-              - s
+              - Per-frame acquisition timestamps relative to frame 0.
               - |badge-opt|
             * - ``start_time_offset``
               - ``float32``
               - scalar
-              - s
+              - Time offset between the first transmit event of the ultrasound acquisition and frame 0 of this map. Negative means frame 0 was acquired before the first transmit event; positive means it was acquired after.
               - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
-              - –
+              - Labels for each channel in values.
               - |badge-opt|
             * - ``description``
               - ``str``
               - scalar
-              - –
+              - Free-text description of the map contents.
               - |badge-opt|
             * - ``unit``
               - ``str``
               - scalar
-              - –
+              - Physical unit of the map values, e.g. 'm/s', '%'.
               - |badge-opt|
             * - ``min``
               - ``float32``
               - scalar
-              - –
+              - Minimum value of the map.
               - |badge-opt|
             * - ``max``
               - ``float32``
               - scalar
-              - –
+              - Maximum value of the map.
               - |badge-opt|
 
       .. dropdown:: ``color_doppler``
@@ -726,57 +726,57 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 22 30 10
          
             * - Field
               - Type
               - Shape
-              - Unit
+              - Description
               - 
             * - ``values``
               - ``float32``
               - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x, n_spatial_ch) or (n_frames, z, x)
-              - –
+              - Map pixel values.
               - |badge-req|
             * - ``coordinates``
               - ``float32``
               - (..., 3)
-              - –
+              - Per-pixel Cartesian positions (x, y, z) in metres.
               - |badge-opt|
             * - ``timestamps``
               - ``float32``
               - (n_frames)
-              - s
+              - Per-frame acquisition timestamps relative to frame 0.
               - |badge-opt|
             * - ``start_time_offset``
               - ``float32``
               - scalar
-              - s
+              - Time offset between the first transmit event of the ultrasound acquisition and frame 0 of this map. Negative means frame 0 was acquired before the first transmit event; positive means it was acquired after.
               - |badge-opt|
             * - ``labels``
               - ``str``
               - (n_spatial_ch)
-              - –
+              - Labels for each channel in values.
               - |badge-opt|
             * - ``description``
               - ``str``
               - scalar
-              - –
+              - Free-text description of the map contents.
               - |badge-opt|
             * - ``unit``
               - ``str``
               - scalar
-              - –
+              - Physical unit of the map values, e.g. 'm/s', '%'.
               - |badge-opt|
             * - ``min``
               - ``float32``
               - scalar
-              - –
+              - Minimum value of the map.
               - |badge-opt|
             * - ``max``
               - ``float32``
               - scalar
-              - –
+              - Maximum value of the map.
               - |badge-opt|
 
    .. tab-item:: scan
@@ -976,8 +976,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
          * - ``subject``
            - :class:`~zea.data.spec.Subject`
            - group
-           - –
-           - 
+           - -
+           - Subject associated with the study.
            - |badge-opt|
          * - ``credit``
            - ``str``
@@ -1024,37 +1024,37 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 22 30 10
          
             * - Field
               - Type
               - Shape
-              - Unit
+              - Description
               - 
             * - ``id``
               - ``str``
               - scalar
-              - –
+              - Subject ID. Needed for subject-wise splits.
               - |badge-opt|
             * - ``type``
               - ``str``
               - scalar
-              - –
+              - Subject type, e.g. human, phantom, animal.
               - |badge-opt|
             * - ``age``
               - ``uint8``
               - scalar
-              - –
+              - Subject age in years.
               - |badge-opt|
             * - ``sex``
               - ``str``
               - scalar
-              - –
+              - Subject sex.
               - |badge-opt|
             * - ``fat_percentage``
               - ``float32``
               - scalar
-              - –
+              - Subject fat percentage.
               - |badge-opt|
 
 
@@ -1064,32 +1064,32 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
          .. list-table::
             :header-rows: 1
-            :widths: 22 20 28 10 10
+            :widths: 22 16 22 30 10
          
             * - Field
               - Type
               - Shape
-              - Unit
+              - Description
               - 
             * - ``anatomy``
               - ``str``
               - (n_frames) or scalar
-              - -
+              - Anatomy label.
               - |badge-opt|
             * - ``view``
               - ``str``
               - (n_frames) or scalar
-              - -
+              - View label.
               - |badge-opt|
             * - ``label``
               - ``str``
               - (n_frames) or scalar
-              - -
+              - Pathology or classification label.
               - |badge-opt|
             * - ``image_quality``
               - ``str``
               - (n_frames) or scalar
-              - -
+              - Image quality label.
               - |badge-opt|
 
 
@@ -1203,13 +1203,13 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
          * - ``common_midpoint_phase_error``
            - ``float32``
            - (n_frames)
-           - –
-           - Common midpoint phase error in radians.
+           - rad
+           - Common midpoint phase error.
            - |badge-opt|
          * - ``coherence_factor``
            - ``float32``
            - (n_frames)
-           - –
-           - Coherence factor.
+           - -
+           - Coherence factor; ratio of coherent to incoherent energy (0-1).
            - |badge-opt|
 
