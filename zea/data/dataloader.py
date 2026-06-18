@@ -51,6 +51,7 @@ def generate_h5_indices(
     sort_files: bool = True,
     overlapping_blocks: bool = False,
     limit_n_frames: int | None = None,
+    pad_incomplete_blocks: bool = False,
 ):
     """Generate indices for h5 files.
 
@@ -72,6 +73,9 @@ def generate_h5_indices(
         limit_n_frames (int, optional): Limit the number of frames to load from each file. This
             means n_frames per data file will be used. These will be the first frames in the file.
             Defaults to None.
+        pad_incomplete_blocks (bool, optional): Keep files that are too short to fill a full block
+            by emitting a single partial block with the available frames. The loader zeropads these
+            samples to n_frames. Defaults to False.
 
     Returns:
         list: List of tuples with indices to extract images from hdf5 files.
@@ -141,6 +145,8 @@ def generate_h5_indices(
                 slice(i, i + block_size, frame_index_stride)
                 for i in range(0, n_frames_in_file - block_size + 1, block_step_size)
             ]
+            if not indices and pad_incomplete_blocks and n_frames_in_file > 0:
+                indices = [slice(0, int(n_frames_in_file), frame_index_stride)]
             yield [indices]
 
     indices = []
@@ -221,11 +227,13 @@ class H5DataSource:
         return_filename: bool = False,
         cache: bool = False,
         validate: bool = True,
+        pad_incomplete_blocks: bool = False,
         **kwargs,
     ):
         self.return_filename = return_filename
         self.cache = cache
         self._data_cache = {}
+        self.pad_incomplete_blocks = pad_incomplete_blocks
 
         self.key = key
         self.n_frames = int(n_frames)
@@ -260,6 +268,7 @@ class H5DataSource:
             sort_files=sort_files,
             overlapping_blocks=overlapping_blocks,
             limit_n_frames=limit_n_frames,
+            pad_incomplete_blocks=pad_incomplete_blocks,
         )
 
         if limit_n_samples is not None:
@@ -298,6 +307,13 @@ class H5DataSource:
             images = np.moveaxis(images, initial, self.frame_axis)
         else:
             images = np.concatenate(images, axis=self.frame_axis)
+
+        if self.pad_incomplete_blocks:
+            n_loaded = images.shape[self.frame_axis]
+            if n_loaded < self.n_frames:
+                pad_width = [(0, 0)] * images.ndim
+                pad_width[self.frame_axis] = (0, self.n_frames - n_loaded)
+                images = np.pad(images, pad_width)
 
         if self.return_filename:
             file_data = {
@@ -410,6 +426,8 @@ class Dataloader:
         sort_files: Sort files numerically before indexing. Default is ``True``.
         overlapping_blocks: If ``True``, frame blocks overlap by ``n_frames - 1``.
             Has no effect when ``n_frames == 1``. Default is ``False``.
+        pad_incomplete_blocks: If ``True``, keep files shorter than a full block and zeropad
+            their samples up to ``n_frames``. Default is ``False``.
         augmentation: Callable applied to each batch after normalization.
             Default is ``None``.
         initial_frame_axis: Axis in file data that represents frames.
@@ -479,6 +497,7 @@ class Dataloader:
         additional_axes_iter: tuple | None = None,
         sort_files: bool = True,
         overlapping_blocks: bool = False,
+        pad_incomplete_blocks: bool = False,
         augmentation: callable = None,
         initial_frame_axis: int = 0,
         insert_frame_axis: bool = True,
@@ -537,6 +556,7 @@ class Dataloader:
             return_filename=return_filename,
             cache=cache,
             validate=validate,
+            pad_incomplete_blocks=pad_incomplete_blocks,
             **kwargs,
         )
 
