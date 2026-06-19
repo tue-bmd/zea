@@ -18,12 +18,14 @@ import numpy as np
 import tyro
 from keras import ops
 
-from zea import display, io_lib, log
+from zea import io_lib, log
+from zea.backend import jit
 from zea.cli_args import ProcessArgs
 from zea.config import Config
 from zea.data.dataloader import Dataloader
 from zea.data.datasets import Dataset
 from zea.data.file import File
+from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
 from zea.internal.device import init_device
 from zea.ops.pipeline import Pipeline
@@ -356,6 +358,14 @@ def run_processing(
 
     pbar = keras.utils.Progbar(total_batches)
 
+    @jit
+    def to_8bit(image, dynamic_range):
+        image = ops.nan_to_num(image, nan=dynamic_range[0])
+        image = translate(image, dynamic_range, (0, 255))
+        image = ops.clip(image, 0, 255)
+        image = ops.cast(image, "uint8")
+        return image
+
     with ThreadPoolExecutor(max_workers=1) as executor:
         save_future = None
         for i in range(total_batches + 1):
@@ -367,7 +377,7 @@ def run_processing(
 
             if file_path != prev_file_path:
                 if prev_file_path is not None:
-                    video = np.stack([ops.convert_to_numpy(f) for f in data_output], axis=0)
+                    video = ops.convert_to_numpy(data_output)
                     save_path = save_dir / f"{filestem}.{save_as}"
                     if save_future is not None:
                         save_future.result()
@@ -402,7 +412,7 @@ def run_processing(
             if not keep_dynamic_range:
                 dr = getattr(parameters, "dynamic_range", None)
                 dynamic_range = tuple(dr) if dr is not None else (-60, 0)
-                processed_frame = display.to_8bit(processed_frame, dynamic_range, pillow=False)
+                processed_frame = to_8bit(processed_frame, dynamic_range)
 
             data_output.append(processed_frame)
             pbar.add(1)
