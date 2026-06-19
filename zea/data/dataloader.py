@@ -41,6 +41,42 @@ from zea.utils import canonicalize_axis, map_negative_indices
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
 
 
+def _normalize_axis_selections(
+    axis_selections: dict,
+    num_dims: int,
+    reserved_axes: set[int],
+) -> dict[int, list[int] | slice]:
+    """Validate and normalize ``axis_selections`` into a canonical form.
+
+    Converts raw axis keys to non-negative indices, checks for conflicts with
+    reserved axes (frame axis / additional_axes_iter), and validates that list
+    selections are 1-D, non-empty, and strictly increasing (required by h5py).
+    """
+    normalized: dict[int, list[int] | slice] = {}
+    for raw_axis, sel in axis_selections.items():
+        axis = canonicalize_axis(int(raw_axis), num_dims)
+        if axis in reserved_axes:
+            raise ValueError(
+                f"axis_selections axis {raw_axis} conflicts with initial_frame_axis "
+                "or additional_axes_iter"
+            )
+        if isinstance(sel, slice):
+            normalized[axis] = sel
+        else:
+            arr = np.asarray(sel, dtype=np.intp)
+            if arr.ndim != 1 or arr.size == 0:
+                raise ValueError(
+                    f"axis_selections[{raw_axis}] must be a 1-D non-empty list of ints"
+                )
+            if np.any(np.diff(arr) <= 0):
+                raise ValueError(
+                    f"axis_selections[{raw_axis}] must be strictly increasing "
+                    "(h5py requires sorted, unique indices)"
+                )
+            normalized[axis] = arr.tolist()
+    return normalized
+
+
 def generate_h5_indices(
     file_paths: List[str],
     file_shapes: list,
@@ -53,6 +89,7 @@ def generate_h5_indices(
     overlapping_blocks: bool = False,
     limit_n_frames: int | None = None,
     pad_incomplete_blocks: bool = False,
+    axis_selections: dict | None = None,
 ):
     """Generate indices for h5 files.
 
@@ -169,6 +206,9 @@ def generate_h5_indices(
             full_indices = [slice(size) for size in shape]
             for i, axis in enumerate([initial_frame_axis] + list(additional_axes_iter)):
                 full_indices[axis] = axis_index[i]
+            if axis_selections:
+                for axis, sel in axis_selections.items():
+                    full_indices[axis] = sel
             indices.append((file, key, tuple(full_indices)))
 
     if skipped_files > 0:
@@ -232,6 +272,7 @@ class H5DataSource:
         validate: bool = True,
         revision: str | None = None,
         pad_incomplete_blocks: bool = False,
+        axis_selections: dict | None = None,
         **kwargs,
     ):
         self.return_filename = return_filename
@@ -265,9 +306,17 @@ class H5DataSource:
         self.file_shapes = _dataset.load_file_shapes(key)
         _dataset.close()
 
-        num_dims = len(self.file_shapes[0])
+        num_dims = len(self.file_shapes[0]) if self.file_shapes else 0
         self.initial_frame_axis = canonicalize_axis(int(initial_frame_axis), num_dims)
         self.additional_axes_iter = map_negative_indices(list(additional_axes_iter or []), num_dims)
+
+        # Validate and normalize axis_selections
+        reserved_axes = {self.initial_frame_axis} | set(self.additional_axes_iter)
+        self.normalized_axis_selections = (
+            _normalize_axis_selections(axis_selections, num_dims, reserved_axes)
+            if axis_selections and num_dims > 0
+            else {}
+        )
 
         # Compute per-sample index table
         self.indices = generate_h5_indices(
@@ -282,6 +331,7 @@ class H5DataSource:
             overlapping_blocks=overlapping_blocks,
             limit_n_frames=limit_n_frames,
             pad_incomplete_blocks=pad_incomplete_blocks,
+            axis_selections=self.normalized_axis_selections or None,
         )
 
         if limit_n_samples is not None:
@@ -380,6 +430,8 @@ class Dataloader:
         - Load the data from each file using the specified key
         - Apply the following transformations in order (if specified):
 
+            - limit_n_frames
+            - limit_n_samples
             - shuffle
             - shard
             - add channel dim
@@ -407,7 +459,9 @@ class Dataloader:
         seed: Random seed used for dataloader (e.g. shuffling). Default is ``None``.
             If ``None`` a random seed is generated.
         limit_n_samples: Limit total number of samples (useful for debugging).
-            Default is ``None`` (no limit).
+            Default is ``None`` (no limit). Note that this is not the same as files.
+            A file can have multiple samples, i.e. multiple frames. Note that this happens
+            before shuffle!
         limit_n_frames: Limit frames loaded per file to the first N frames.
             Default is ``None`` (no limit).
         drop_remainder: Drop the final incomplete batch. Default is ``False``.
@@ -527,6 +581,7 @@ class Dataloader:
         prefetch_buffer_size: int = 500,
         reshuffle_each_epoch: bool = True,
         convert_to_tensor: bool = True,
+        axis_selections: dict | None = None,
         **kwargs,
     ):
         # ── Validation ────────────────────────────────────────────────
@@ -574,6 +629,7 @@ class Dataloader:
             validate=validate,
             revision=revision,
             pad_incomplete_blocks=pad_incomplete_blocks,
+            axis_selections=axis_selections,
             **kwargs,
         )
 

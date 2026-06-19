@@ -14,6 +14,7 @@ import io
 import os
 import tempfile
 import threading
+import warnings
 from pathlib import Path
 
 os.environ.setdefault("KERAS_BACKEND", "jax")
@@ -24,6 +25,7 @@ from keras import ops
 
 from zea import display, io_lib
 from zea.config import Config
+from zea.data.datasets import Dataset
 from zea.data.file import File
 from zea.data.process import _get_config_parameters, _key_requires_pipeline
 from zea.internal.device import init_device
@@ -35,6 +37,13 @@ except ImportError as exc:
     raise ImportError(
         "gradio is required for the zea app. Install with: pip install 'zea[app]'"
     ) from exc
+
+# Starlette renamed HTTP_422_UNPROCESSABLE_ENTITY → HTTP_422_UNPROCESSABLE_CONTENT;
+# gradio hasn't updated yet, so filter the noise until a gradio release catches up.
+warnings.filterwarnings(
+    "ignore",
+    message=r"'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated",
+)
 
 
 # ── Logo ───────────────────────────────────────────────────────────────────────
@@ -238,8 +247,8 @@ def _list_dataset_files(
 ) -> tuple[list[str], list[str]]:
     """List HDF5 files in a dataset without downloading any data.
 
-    For HF paths this queries the repo file listing API (fast, no download).
-    For local paths it scans the directory tree.
+    Uses Dataset with lazy=True so HF files are listed via the API but not
+    downloaded. For local paths it scans the directory tree.
     Returns (display_names, full_paths).
 
     If *_errors* is provided (a list), any exception encountered is appended to
@@ -248,72 +257,27 @@ def _list_dataset_files(
     path = (path or "").strip()
     if not path:
         return [], []
-
-    if _is_hf(path):
-        try:
-            from zea.internal.preset_utils import _hf_list_files, _hf_parse_path
-
-            repo_id, subpath = _hf_parse_path(path)
-            hf_kwargs = {"revision": revision} if revision else {}
-            all_files = list(_hf_list_files(repo_id, **hf_kwargs))
-            hdf5s = [f for f in all_files if f.lower().endswith((".hdf5", ".h5"))]
-            if subpath:
-                prefix = subpath.rstrip("/") + "/"
-                hdf5s = [f for f in hdf5s if f.startswith(prefix)]
-            hdf5s.sort()
-            hf_paths = [f"hf://{repo_id}/{f}" for f in hdf5s]
-            names = [Path(f).name for f in hdf5s]
-            return names, hf_paths
-        except Exception as exc:
-            if _errors is not None:
-                _errors.append(exc)
-            return [], []
-    else:
-        p = Path(path)
-        if p.is_file() and p.suffix.lower() in (".hdf5", ".h5"):
-            return [p.name], [str(p)]
-        if not p.exists():
-            if _errors is not None:
-                _errors.append(FileNotFoundError(f"Path not found: {path}"))
-            return [], []
-        if not p.is_dir():
-            if _errors is not None:
-                _errors.append(ValueError(f"Not a directory or HDF5 file: {path}"))
-            return [], []
-        files = sorted(list(p.rglob("*.hdf5")) + list(p.rglob("*.h5")))
-        return [f.name for f in files], [str(f) for f in files]
-
-
-def _resolve_file_path(path: str, revision: str | None = None) -> str:
-    """For hf:// paths download at the given revision; return the local cache path."""
-    if not _is_hf(path) or not revision:
-        return path
     try:
-        from huggingface_hub import hf_hub_download
-
-        from zea.internal.preset_utils import _hf_parse_path
-
-        repo_id, subpath = _hf_parse_path(path)
-        if subpath:
-            return hf_hub_download(
-                repo_id=repo_id,
-                filename=subpath,
-                repo_type="dataset",
-                revision=revision,
-            )
-    except Exception:
-        pass
-    return path
+        ds = Dataset(path, lazy=True, revision=revision, _suggest_lazy=False)
+        file_paths = sorted(ds.file_paths)
+        ds.close()
+        names = [Path(p).name for p in file_paths]
+        return names, file_paths
+    except Exception as exc:
+        if _errors is not None:
+            _errors.append(exc)
+        return [], []
 
 
 # ── File metadata ─────────────────────────────────────────────────────────────
 
 
-def _read_file_info(file_path: str) -> dict:
+def _read_file_info(file_path: str, revision: str | None = None) -> dict:
     """Open an HDF5 file and read metadata/shape without loading data arrays."""
     info: dict = {}
+    hf_kwargs = {"revision": revision} if revision and _is_hf(file_path) else {}
     try:
-        with File(file_path) as f:
+        with File(file_path, **hf_kwargs) as f:
             # zea version
             info["zea_version"] = f.zea_version
 
@@ -591,8 +555,7 @@ def _file_load_updates(fpath: str, revision: str | None, key: str) -> tuple:
     Returns: (start_frame_upd, n_frames_upd, meta_html, track_upd, track_labels,
                run_btn_upd, key_input_upd)
     """
-    local = _resolve_file_path(fpath, revision)
-    info = _read_file_info(local)
+    info = _read_file_info(fpath, revision)
 
     n_frames_list = info.get("n_frames_per_track", [])
     n_tracks = info.get("n_tracks", 1)
@@ -637,11 +600,13 @@ def _file_load_updates(fpath: str, revision: str | None, key: str) -> tuple:
     )
 
 
-_LOADING_META_HTML = (
-    '<div style="border-left:3px solid #4b5563;border-radius:4px;'
-    'padding:5px 10px;margin-bottom:4px;font-size:0.83em;color:#9ca3af">'
-    "&#8987;&nbsp;Downloading file…</div>"
-)
+def _loading_meta_html(size_bytes: int | None = None) -> str:
+    size_str = f" · {size_bytes / 1e9:.2f} GB" if size_bytes else ""
+    return (
+        f'<p style="margin:2px 0;color:{_YELLOW}">&#8987;&nbsp;'
+        f"<b>Downloading file{size_str}…</b> This may take a while (see terminal).</p>"
+    )
+
 
 # ── Config loader ─────────────────────────────────────────────────────────────
 
@@ -729,15 +694,17 @@ def run_checks(
                 "Private repos will fail and downloads may be rate-limited."
             )
 
-    # 1. List dataset files (fast — no download)
+    # 1. List dataset files (lazy — no download) and resolve selected file
     _src = "from HF" if _is_hf(dataset_path) else "from disk"
     yield _emit(_html_info(f"Opening dataset {_src}…"))
     try:
-        names, paths = _list_dataset_files(dataset_path, dataset_revision or None)
-        if not names:
+        ds = Dataset(
+            dataset_path, lazy=True, revision=dataset_revision or None, _suggest_lazy=False
+        )
+        num_files = len(ds)
+        if not num_files:
             yield _replace_last(_html_fail("Open dataset", "No HDF5 files found."))
             return
-        num_files = len(names)
         if file_index >= num_files:
             yield _replace_last(
                 _html_fail(
@@ -746,7 +713,8 @@ def run_checks(
                 )
             )
             return
-        file_path = _resolve_file_path(paths[file_index], dataset_revision or None)
+        file_path = ds.file_paths[file_index]
+        ds.close()
     except Exception as exc:
         yield _replace_last(_html_fail("Open dataset", exc))
         return
@@ -811,11 +779,15 @@ def run_checks(
         )
         return
 
-    # 4. Open file — resolve data key and total frame count
+    # 4 – 6: Open file once — resolve key, load parameters, process all frames
     _data_key: str | None = None
     parameters = None
+    processed_frames: list[np.ndarray] = []
+
+    hf_kwargs = {"revision": dataset_revision} if dataset_revision and _is_hf(file_path) else {}
     try:
-        with File(file_path) as f:
+        with File(file_path, **hf_kwargs) as f:
+            # 4. Resolve data key and load parameters
             if pipeline is not None:
                 n_tracks = f._n_tracks
                 if n_tracks > 1:
@@ -830,99 +802,123 @@ def run_checks(
                     _data_key = f.format_key(key)
             else:
                 _data_key = f.format_key(key)
+
+            # Stem for output file naming; fps for GIF output
+            _file_stem = f.stem
+            _fps_params = parameters  # already loaded for pipeline path
+            if _fps_params is None:
+                try:
+                    _fps_params = _run_quiet(f.load_parameters)
+                except Exception:
+                    pass
+            fps = 20
+            if _fps_params is not None:
+                try:
+                    fps = int(round(_fps_params.frames_per_second))
+                except (ValueError, AttributeError):
+                    pass
+
             total_frames = f[_data_key].shape[0]
+
+            if start_frame >= total_frames:
+                yield _emit(
+                    _html_fail(
+                        "Frame index out of range",
+                        f"Start frame {start_frame} >= {total_frames} frames in file.",
+                    )
+                )
+                return
+
+            end_frame = min(start_frame + n_frames, total_frames)
+            actual_n = end_frame - start_frame
+            if actual_n < n_frames:
+                yield _emit(
+                    _html_warn(
+                        f"Requested {n_frames} frames but only {actual_n} available "
+                        f"(frames {start_frame}–{end_frame - 1})."
+                    )
+                )
+
+            if pipeline is not None:
+                # Show frame + transmit counts; transmits only exist for raw/aligned data.
+                _tx = getattr(parameters, "selected_transmits", None)
+                if _tx is not None:
+                    yield _emit(
+                        _html_pass(f"Data loaded — {total_frames} frame(s), {len(_tx)} transmit(s)")
+                    )
+                else:
+                    yield _emit(_html_pass(f"Data loaded — {total_frames} frame(s)"))
+                if _stopped():
+                    return
+
+                yield _emit(_html_pass("Parameters loaded"))
+                if _stopped():
+                    return
+
+                # 5. Prepare pipeline parameters
+                try:
+                    params = _run_quiet(pipeline.prepare_parameters, parameters, **config_params)
+                except Exception as exc:
+                    yield _emit(_html_fail("Prepare parameters", exc))
+                    return
+                if _stopped():
+                    return
+
+            # 6. Process frames (pipeline path or raw fallback)
+            if pipeline is not None:
+                selected_transmits = np.array([int(t) for t in parameters.selected_transmits])
+                dr = getattr(parameters, "dynamic_range", None)
+                dynamic_range = tuple(dr) if dr is not None else (-60, 0)
+
+            for i, frame_idx in enumerate(range(start_frame, end_frame)):
+                try:
+                    frame = np.asarray(f[_data_key][frame_idx])
+                    if pipeline is not None:
+                        frame = frame[selected_transmits]
+                        output = _run_quiet(pipeline, data=frame, **params)
+                        processed = ops.convert_to_numpy(output["data"])
+                        for k in keep_keys:
+                            if k in output:
+                                params[k] = output[k]
+                    else:
+                        # Raw fallback: reduce to 2D
+                        while frame.ndim > 2:
+                            if frame.shape[0] == 1:
+                                frame = frame[0]
+                            elif frame.shape[-1] == 1:
+                                frame = frame[..., 0]
+                            elif frame.ndim == 3:
+                                # Multi-channel last dim (e.g. segmentation one-hot)
+                                frame = np.argmax(frame, axis=-1)
+                            else:
+                                frame = frame[0]
+                        if frame.ndim < 2:
+                            yield _emit(
+                                _html_fail(
+                                    "Cannot display",
+                                    f"Data shape {frame.shape} after indexing — need at least 2D.",
+                                )
+                            )
+                            return
+                        processed = frame
+                except Exception as exc:
+                    yield _emit(_html_fail(f"Process frame {frame_idx}", exc))
+                    return
+
+                processed_frames.append(processed)
+
+                pbar = _html_progress(i + 1, actual_n)
+                if i == 0:
+                    yield _emit(pbar)
+                else:
+                    yield _replace_last(pbar)
+
+                if _stopped():
+                    return
+
     except Exception as exc:
         yield _emit(_html_fail("Open file", exc))
         return
-
-    if start_frame >= total_frames:
-        yield _emit(
-            _html_fail(
-                "Frame index out of range",
-                f"Start frame {start_frame} >= {total_frames} frames in file.",
-            )
-        )
-        return
-
-    end_frame = min(start_frame + n_frames, total_frames)
-    actual_n = end_frame - start_frame
-    if actual_n < n_frames:
-        yield _emit(
-            _html_warn(
-                f"Requested {n_frames} frames but only {actual_n} available "
-                f"(frames {start_frame}–{end_frame - 1})."
-            )
-        )
-    if pipeline is not None:
-        yield _emit(_html_pass(f"Parameters loaded — {total_frames} frame(s) in file"))
-        if _stopped():
-            return
-
-        # 5. Prepare pipeline parameters
-        try:
-            params = _run_quiet(pipeline.prepare_parameters, parameters, **config_params)
-        except Exception as exc:
-            yield _emit(_html_fail("Prepare parameters", exc))
-            return
-        yield _emit(_html_pass("Parameters prepared"))
-        if _stopped():
-            return
-
-    # 6. Process frames (pipeline path or raw fallback)
-    if pipeline is not None:
-        selected_transmits = np.array(
-            [int(t) for t in parameters.selected_transmits]  # ty: ignore[unresolved-attribute]
-        )
-        dr = getattr(parameters, "dynamic_range", None)
-        dynamic_range = tuple(dr) if dr is not None else (-60, 0)
-
-    processed_frames: list[np.ndarray] = []
-    for i, frame_idx in enumerate(range(start_frame, end_frame)):
-        try:
-            with File(file_path) as f:
-                frame = np.asarray(f[_data_key][frame_idx])
-            if pipeline is not None:
-                frame = frame[selected_transmits]
-                output = _run_quiet(pipeline, data=frame, **params)
-                processed = ops.convert_to_numpy(output["data"])
-                for k in keep_keys:
-                    if k in output:
-                        params[k] = output[k]
-            else:
-                # Raw fallback: reduce to 2D
-                while frame.ndim > 2:
-                    if frame.shape[0] == 1:
-                        frame = frame[0]
-                    elif frame.shape[-1] == 1:
-                        frame = frame[..., 0]
-                    elif frame.ndim == 3:
-                        # Multi-channel last dim (e.g. segmentation one-hot): argmax → class map
-                        frame = np.argmax(frame, axis=-1)
-                    else:
-                        frame = frame[0]
-                if frame.ndim < 2:
-                    yield _emit(
-                        _html_fail(
-                            "Cannot display",
-                            f"Data shape {frame.shape} after indexing — need at least 2D.",
-                        )
-                    )
-                    return
-                processed = frame
-        except Exception as exc:
-            yield _emit(_html_fail(f"Process frame {frame_idx}", exc))
-            return
-
-        processed_frames.append(processed)
-
-        pbar = _html_progress(i + 1, actual_n)
-        if i == 0:
-            yield _emit(pbar)
-        else:
-            yield _replace_last(pbar)
-
-        if _stopped():
-            return
 
     # 7. Convert to image / GIF
     try:
@@ -947,11 +943,7 @@ def run_checks(
         else:
             frames_u8 = [to_u8(f) for f in processed_frames]
             video = np.stack(frames_u8, axis=0)
-            try:
-                fps = int(round(parameters.frames_per_second)) if parameters else 20
-            except (ValueError, AttributeError):
-                fps = 20
-            tmp = tempfile.NamedTemporaryFile(suffix=".gif", delete=False)
+            tmp = tempfile.NamedTemporaryFile(prefix=f"{_file_stem}_", suffix=".gif", delete=False)
             io_lib.save_video(video, Path(tmp.name), fps=fps)
             result_image = tmp.name
     except Exception as exc:
@@ -1093,14 +1085,12 @@ def build_interface() -> "gr.Blocks":
                             interactive=False,
                         )
 
-                        # Track selector — disabled for single-track, interactive for multi-track
                         track_selector = gr.Dropdown(
                             label="Track",
-                            choices=[],
-                            value=None,
+                            choices=[("Track 0", 0)],
+                            value=0,
                             interactive=False,
-                            visible=False,
-                            info="Select a track (disabled for single-track files).",
+                            visible=True,
                         )
 
                         with gr.Row():
@@ -1163,6 +1153,8 @@ def build_interface() -> "gr.Blocks":
         dataset_input.change(_rev_toggle, [dataset_input], [dataset_rev_input])
         config_input.change(_rev_toggle, [config_input], [config_rev_input])
 
+        _TRACK_RESET = gr.update(choices=[("Track 0", 0)], value=0, visible=True, interactive=False)
+
         # Dataset blur → fetch revisions + file list (no download)
         def _on_dataset_blur(path):
             path = (path or "").strip()
@@ -1173,7 +1165,7 @@ def build_interface() -> "gr.Blocks":
                     gr.update(),
                     gr.update(),
                     [],
-                    gr.update(visible=False),
+                    _TRACK_RESET,
                     [],
                     "",
                     _disable_run,
@@ -1206,7 +1198,7 @@ def build_interface() -> "gr.Blocks":
                     gr.update(interactive=False, choices=["main"], value=None),
                     file_update,
                     paths,
-                    gr.update(visible=False),
+                    _TRACK_RESET,
                     [],
                     meta_html,
                     _disable_run,
@@ -1220,7 +1212,7 @@ def build_interface() -> "gr.Blocks":
                     gr.update(interactive=False, choices=["main"], value=None),
                     file_update,
                     paths,
-                    gr.update(visible=False),
+                    _TRACK_RESET,
                     [],
                     meta_html,
                     _disable_run,
@@ -1234,7 +1226,7 @@ def build_interface() -> "gr.Blocks":
                 gr.update(interactive=True, choices=revisions, value=default),
                 file_update,
                 paths,
-                gr.update(visible=False),
+                _TRACK_RESET,
                 [],
                 meta_html,
                 _disable_run,
@@ -1307,7 +1299,7 @@ def build_interface() -> "gr.Blocks":
                 gr.update(),
                 [],
                 "",
-                gr.update(visible=False),
+                _TRACK_RESET,
                 [],
                 gr.update(interactive=False),
                 _reset_key,
@@ -1338,7 +1330,7 @@ def build_interface() -> "gr.Blocks":
                     file_upd,
                     fpaths,
                     meta_html,
-                    gr.update(visible=False),
+                    _TRACK_RESET,
                     [],
                     gr.update(interactive=False),
                     _reset_key,
@@ -1352,8 +1344,8 @@ def build_interface() -> "gr.Blocks":
                 cfg_upd,
                 file_upd,
                 fpaths,
-                _LOADING_META_HTML,
-                gr.update(visible=False),
+                _loading_meta_html(),
+                _TRACK_RESET,
                 [],
                 gr.update(interactive=False),
                 _reset_key,
@@ -1418,7 +1410,7 @@ def build_interface() -> "gr.Blocks":
                 ),  # key_input — pre-filled from preset but locked until file is loaded
                 gr.update(choices=list(zip(names, paths)), value=None, interactive=bool(paths)),
                 paths,
-                gr.update(visible=False, choices=[], value=None),  # track_selector
+                _TRACK_RESET,  # track_selector
                 [],  # track_labels_state
                 gr.update(value=None),  # image_output clear
                 "",  # meta_card clear
@@ -1446,45 +1438,92 @@ def build_interface() -> "gr.Blocks":
         )
 
         # File selected → load file (may download HF), show metadata + update sliders
+        # 8 primary outputs + 7 lock outputs (stop_btn, file_selector, preset_selector,
+        # dataset_input, dataset_rev_input, config_input, config_rev_input)
         _NO_FILE = (
             gr.update(interactive=False),  # start_frame_input
             gr.update(interactive=False),  # n_frames_input
             "",  # meta_card
-            gr.update(visible=False),  # track_selector
+            _TRACK_RESET,  # track_selector
             [],  # track_labels_state
             gr.update(interactive=False),  # run_btn
             gr.update(choices=_DATA_KEYS, value=None, interactive=False),  # key_input
             gr.update(value=None),  # image_output
+            gr.update(),  # stop_btn — no change
+            gr.update(),  # file_selector — no change
+            gr.update(),  # preset_selector — no change
+            gr.update(),  # dataset_input — no change
+            gr.update(),  # dataset_rev_input — no change
+            gr.update(),  # config_input — no change
+            gr.update(),  # config_rev_input — no change
         )
 
-        def _on_file_select_gen(selected_name, file_paths, key, ds_revision):
+        def _on_file_select_gen(selected_name, file_paths, key, ds_revision, config_path):
             # selected_name is the full path (dropdown value), not the basename.
             if not selected_name or not file_paths or selected_name not in file_paths:
                 yield _NO_FILE
                 return
             fpath = selected_name
 
-            # Step 1: clear image + show loading indicator, disable run until load completes
+            # For HF paths, look up size so the loading indicator is informative.
+            # list_repo_tree is cached by HF Hub, so this is usually a fast local hit.
+            size_bytes: int | None = None
+            if _is_hf(fpath):
+                try:
+                    from zea.internal.preset_utils import _hf_list_h5_files
+
+                    hf_size_kwargs = {"revision": ds_revision} if ds_revision else {}
+                    _hits = _hf_list_h5_files(fpath, **hf_size_kwargs)
+                    size_bytes = _hits[0][1] if _hits else None
+                except Exception:
+                    pass
+
+            # Step 1: disable ALL inputs including stop — download cannot be interrupted.
             yield (
-                gr.update(interactive=False),
-                gr.update(interactive=False),
-                _LOADING_META_HTML,
-                gr.update(visible=False),
-                [],
-                gr.update(interactive=False),
-                gr.update(),
+                gr.update(interactive=False),  # start_frame_input
+                gr.update(interactive=False),  # n_frames_input
+                _loading_meta_html(size_bytes),  # meta_card
+                _TRACK_RESET,  # track_selector
+                [],  # track_labels_state
+                gr.update(interactive=False),  # run_btn
+                gr.update(interactive=False),  # key_input
                 gr.update(value=None),  # image_output — clear previous result
+                gr.update(interactive=False),  # stop_btn — keep disabled; can't cancel download
+                gr.update(interactive=False),  # file_selector — prevent switching files
+                gr.update(interactive=False),  # preset_selector
+                gr.update(interactive=False),  # dataset_input
+                gr.update(interactive=False),  # dataset_rev_input
+                gr.update(interactive=False),  # config_input
+                gr.update(interactive=False),  # config_rev_input
             )
 
             # Step 2: download at correct revision + read metadata
             sf, nf, meta, trk, tlbls, run_upd, key_upd = _file_load_updates(
                 fpath, ds_revision or None, key
             )
-            yield sf, nf, meta, trk, tlbls, run_upd, key_upd, gr.update()
+            if _is_hf(fpath) and meta:
+                meta = _html_info("Download complete · press Run to display") + meta
+            yield (
+                sf,
+                nf,
+                meta,
+                trk,
+                tlbls,
+                run_upd,
+                key_upd,
+                gr.update(),  # image_output — no change
+                gr.update(interactive=False),  # stop_btn — disable again
+                gr.update(interactive=True),  # file_selector — re-enable
+                gr.update(interactive=True),  # preset_selector
+                gr.update(interactive=True),  # dataset_input
+                gr.update(interactive=_is_hf(fpath)),  # dataset_rev_input
+                gr.update(interactive=True),  # config_input
+                gr.update(interactive=_is_hf(config_path or "")),  # config_rev_input
+            )
 
         file_select_event = file_selector.change(
             _on_file_select_gen,
-            inputs=[file_selector, file_paths_state, key_input, dataset_rev_input],
+            inputs=[file_selector, file_paths_state, key_input, dataset_rev_input, config_input],
             outputs=[
                 start_frame_input,
                 n_frames_input,
@@ -1494,6 +1533,13 @@ def build_interface() -> "gr.Blocks":
                 run_btn,
                 key_input,
                 image_output,
+                stop_btn,
+                file_selector,
+                preset_selector,
+                dataset_input,
+                dataset_rev_input,
+                config_input,
+                config_rev_input,
             ],
         )
 
@@ -1516,8 +1562,9 @@ def build_interface() -> "gr.Blocks":
             ):
                 return gr.update(), gr.update()
             try:
-                local = _resolve_file_path(selected_file, ds_revision or None)
-                with File(local) as f:
+                is_hf = _is_hf(selected_file)
+                hf_kwargs = {"revision": ds_revision} if ds_revision and is_hf else {}
+                with File(selected_file, **hf_kwargs) as f:
                     n = f.tracks[int(track_id)].n_frames
                 if n > 1:
                     return (
@@ -1626,6 +1673,42 @@ def build_interface() -> "gr.Blocks":
             if track_name is not None and track_labels:
                 track_index = int(track_name)
 
+            # Shared restore tuple for run_event extra outputs (12 components after
+            # status_output and image_output). Intermediate yields use no-ops; the
+            # first/last yields use explicit enable/disable values.
+            _noop_extras = (gr.update(),) * 12
+            _lock_extras = (
+                gr.update(interactive=True),  # stop_btn — enable
+                gr.update(interactive=False),  # run_btn
+                gr.update(interactive=False),  # file_selector
+                gr.update(interactive=False),  # preset_selector
+                gr.update(interactive=False),  # dataset_input
+                gr.update(interactive=False),  # dataset_rev_input
+                gr.update(interactive=False),  # config_input
+                gr.update(interactive=False),  # config_rev_input
+                gr.update(interactive=False),  # key_input
+                gr.update(interactive=False),  # start_frame_input
+                gr.update(interactive=False),  # n_frames_input
+                gr.update(interactive=False),  # track_selector
+            )
+            _unlock_extras = (
+                gr.update(interactive=False),  # stop_btn — disable
+                gr.update(interactive=True),  # run_btn
+                gr.update(interactive=True),  # file_selector
+                gr.update(interactive=True),  # preset_selector
+                gr.update(interactive=True),  # dataset_input
+                gr.update(interactive=_is_hf(dataset)),  # dataset_rev_input
+                gr.update(interactive=True),  # config_input
+                gr.update(interactive=_is_hf(config)),  # config_rev_input
+                gr.update(interactive=True),  # key_input
+                gr.update(interactive=True),  # start_frame_input
+                gr.update(interactive=True),  # n_frames_input
+                gr.update(),  # track_selector — keep
+            )
+
+            # Lock all inputs before starting; enable stop button.
+            yield gr.update(), gr.update(), *_lock_extras
+
             try:
                 for html, img in run_checks(
                     dataset,
@@ -1640,13 +1723,15 @@ def build_interface() -> "gr.Blocks":
                     track_index=track_index,
                 ):
                     if img is None:
-                        yield html, None
+                        yield html, None, *_noop_extras
                     elif isinstance(img, str):
-                        yield html, img
+                        yield html, img, *_noop_extras
                     else:
                         tmp_png = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
                         img.save(tmp_png.name)
-                        yield html, tmp_png.name
+                        yield html, tmp_png.name, *_noop_extras
+                # Normal completion — restore UI.
+                yield gr.update(), gr.update(), *_unlock_extras
             except Exception as exc:
                 import traceback as _tb
 
@@ -1655,8 +1740,12 @@ def build_interface() -> "gr.Blocks":
                     + f'<pre style="font-size:0.75em;color:#6b7280;white-space:pre-wrap">'
                     f"{_tb.format_exc()}</pre>",
                     None,
+                    *_noop_extras,
                 )
+                # Restore UI after error.
+                yield gr.update(), gr.update(), *_unlock_extras
             finally:
+                # Cleanup only — no yield here; yielding after GeneratorExit raises RuntimeError.
                 if tmp_cfg is not None:
                     try:
                         os.unlink(tmp_cfg.name)
@@ -1680,14 +1769,65 @@ def build_interface() -> "gr.Blocks":
                 config_editor,
                 editor_override_active,
             ],
-            outputs=[status_output, image_output],
+            outputs=[
+                status_output,
+                image_output,
+                stop_btn,
+                run_btn,
+                file_selector,
+                preset_selector,
+                dataset_input,
+                dataset_rev_input,
+                config_input,
+                config_rev_input,
+                key_input,
+                start_frame_input,
+                n_frames_input,
+                track_selector,
+            ],
         )
 
-        def _on_stop():
+        def _on_stop(current_key):
             _stop_event.set()
+            # Explicitly restore the UI since cancelled generators' finally yields
+            # may not reach the client.
+            return (
+                gr.update(interactive=False),  # stop_btn
+                gr.update(interactive=bool(current_key)),  # run_btn
+                gr.update(interactive=True),  # file_selector
+                gr.update(interactive=True),  # preset_selector
+                gr.update(interactive=True),  # dataset_input
+                gr.update(),  # dataset_rev_input — keep
+                gr.update(interactive=True),  # config_input
+                gr.update(),  # config_rev_input — keep
+                gr.update(interactive=bool(current_key)),  # key_input
+                gr.update(interactive=True),  # start_frame_input
+                gr.update(interactive=True),  # n_frames_input
+                _TRACK_RESET,  # track_selector
+                "",  # meta_card — clear loading msg
+            )
 
-        # Stop button cancels both run and file-loading events
-        stop_btn.click(_on_stop, cancels=[run_event, file_select_event])
+        # Stop cancels both run and file-loading events, and restores UI directly.
+        stop_btn.click(
+            _on_stop,
+            inputs=[key_input],
+            outputs=[
+                stop_btn,
+                run_btn,
+                file_selector,
+                preset_selector,
+                dataset_input,
+                dataset_rev_input,
+                config_input,
+                config_rev_input,
+                key_input,
+                start_frame_input,
+                n_frames_input,
+                track_selector,
+                meta_card,
+            ],
+            cancels=[run_event, file_select_event],
+        )
 
         status_output.change(fn=None, js=_SCROLL_JS)
         demo.load(_load_config_text, inputs=[config_input], outputs=[config_editor])

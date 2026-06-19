@@ -8,9 +8,12 @@ Usage::
 """
 
 import argparse
+import os
 import warnings
 from dataclasses import dataclass
 from typing import Annotated, Union
+
+os.environ.setdefault("ZEA_LOG_LEVEL", "WARNING")
 
 import tyro
 
