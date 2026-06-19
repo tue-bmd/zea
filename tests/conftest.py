@@ -1,15 +1,22 @@
 """This file contains fixtures that are used by all tests in the tests directory."""
 
+import os
 from collections import defaultdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pytest
 
-from zea.internal.device import backend_cuda_available
+from zea.internal.device import backend_cuda_available, init_device
 
-# Capture GPU availability NOW, before tests/__init__.py sets CUDA_VISIBLE_DEVICES=""
-_GPU_AVAILABLE = any(backend_cuda_available(b) for b in ["torch", "tensorflow", "jax"])
+# Device setup for the test session. Kept here (and not in tests/__init__.py) on purpose:
+# init_device imports tensorflow -> keras, which locks the keras backend. The spawned
+# BackendEqualityCheck workers re-import the `tests` package but never load conftest, so
+# they remain free to select their own backend. See tests/__init__.py for details.
+device = init_device(allow_preallocate=False)
+
+_GPU_AVAILABLE = backend_cuda_available(os.environ.get("KERAS_BACKEND"))
+
 
 from . import (  # noqa: E402
     DUMMY_DATASET_GRID_SIZE_X,

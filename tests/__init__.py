@@ -8,9 +8,6 @@ os.environ["KERAS_BACKEND"] = DEFAULT_TEST_BACKEND
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 os.environ["ZEA_FIND_H5_SHAPES_PARALLEL"] = "0"
 
-from zea.internal.device import init_device
-
-init_device(allow_preallocate=False)
 
 # Initializing the backend workers for `backend_equality_check` and `run_in_backend`.
 # Note that these workers only have CPU access!
