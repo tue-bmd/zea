@@ -6,6 +6,7 @@ correct backend.
 """
 
 import math
+import os
 
 import keras
 import numpy as np
@@ -1008,6 +1009,61 @@ def test_common_midpoint_phase_error_coherent_data():
     assert phase_error.shape == (n_pix,), f"Expected shape ({n_pix},), got {phase_error.shape}"
 
     return phase_error
+
+
+@backend_equality_check(decimal=2)
+def test_prepare_parameters_pfield_all_backends():
+    """pipeline.prepare_parameters must work on all backends when pfield is enabled.
+
+    Regression: Parameters stores n_el with dtype=np.int32. The torch backend's
+    torch.zeros rejects a numpy scalar as the size argument, causing a TypeError
+    inside compute_pfield when reached via prepare_parameters → to_tensor → flat_pfield.
+    """
+
+    import keras
+
+    from zea.beamform.delays import compute_t0_delays_planewave
+    from zea.ops import Pipeline
+    from zea.parameters import Parameters
+
+    # Disable the on-disk result cache so ops are actually executed in each backend
+    # subprocess (the cache would serve a stale pickle and hide crashes).
+    os.environ["ZEA_DISABLE_CACHE"] = "1"
+
+    n_el = 8
+    n_tx = 2
+    pitch = 3e-4
+    probe_geometry = np.stack(
+        [
+            np.arange(n_el) * pitch - (n_el - 1) * pitch / 2,
+            np.zeros(n_el),
+            np.zeros(n_el),
+        ],
+        axis=-1,
+    ).astype(np.float32)
+    angles = np.linspace(-5, 5, n_tx) * np.pi / 180
+    t0_delays = compute_t0_delays_planewave(probe_geometry, angles)
+    tx_apodizations = np.ones((n_tx, n_el), dtype=np.float32)
+
+    parameters = Parameters(
+        probe_geometry=probe_geometry,
+        n_tx=n_tx,
+        n_el=n_el,
+        xlims=(-5e-3, 5e-3),
+        zlims=(5e-3, 20e-3),
+        n_ax=64,
+        sampling_frequency=5e6 * 4,
+        center_frequency=5e6,
+        polar_angles=angles,
+        t0_delays=t0_delays,
+        tx_apodizations=tx_apodizations,
+    )
+    parameters.grid_size_x = 8
+    parameters.grid_size_z = 8
+
+    pipeline = Pipeline.from_default(enable_pfield=True)
+    inputs = pipeline.prepare_parameters(parameters)
+    return keras.ops.convert_to_numpy(inputs["flat_pfield"])
 
 
 @backend_equality_check(decimal=4)
