@@ -236,7 +236,8 @@ class Folder:
 
         # Find all hdf5 files in the folder
         self.file_paths = self.find_h5_files()
-        assert self.n_files > 0, f"No files in folder: {folder_path}"
+        if self.n_files == 0:
+            raise ValueError(f"No HDF5 files found in folder: {folder_path}")
 
         if validate:
             self.validate_folder()

@@ -4,8 +4,8 @@ import numpy as np
 
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.ops import Pipeline
-from zea.probes import Verasonics_l11_4v
 from zea.parameters import Parameters
+from zea.probes import Verasonics_l11_4v
 
 
 def test_pfield():

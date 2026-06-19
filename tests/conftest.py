@@ -40,11 +40,23 @@ def pytest_addoption(parser):
     )
 
 
-def pytest_sessionstart(session):
-    notebooks_dir = Path("docs/source/notebooks")
-    notebooks = list(notebooks_dir.rglob("*.ipynb"))
-    if notebooks:
-        print(f"📚 Preparing to test {len(notebooks)} notebooks from {notebooks_dir}")
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip ``@pytest.mark.gpu`` tests when no CUDA GPU is accessible.
+    Also announce notebook count only when notebook tests are actually collected.
+    """
+    has_notebooks = any("notebook" in item.nodeid for item in items)
+    if has_notebooks:
+        notebooks_dir = Path("docs/source/notebooks")
+        notebooks = list(notebooks_dir.rglob("*.ipynb"))
+        if notebooks:
+            print(f"\n📚 Preparing to test {len(notebooks)} notebooks from {notebooks_dir}")
+
+    if _GPU_AVAILABLE:
+        return
+    skip_gpu = pytest.mark.skip(reason="No CUDA GPU available at runtime")
+    for item in items:
+        if "gpu" in item.keywords:
+            item.add_marker(skip_gpu)
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -76,16 +88,6 @@ def pytest_sessionfinish(session, exitstatus):
     grand_str = f"{int(grand_mins)}m {grand_secs:.1f}s" if grand_mins else f"{grand_secs:.1f}s"
     print(f"  {'TOTAL':<{col_w}}  {grand_str:>8}")
     print("=" * (col_w + 20) + "\n")
-
-
-def pytest_collection_modifyitems(config, items):
-    """Auto-skip ``@pytest.mark.gpu`` tests when no CUDA GPU is accessible."""
-    if _GPU_AVAILABLE:
-        return
-    skip_gpu = pytest.mark.skip(reason="No CUDA GPU available at runtime")
-    for item in items:
-        if "gpu" in item.keywords:
-            item.add_marker(skip_gpu)
 
 
 @pytest.fixture(scope="session", autouse=True)

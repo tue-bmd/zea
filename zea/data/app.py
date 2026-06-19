@@ -866,6 +866,7 @@ def run_checks(
 
             # 6. Process frames (pipeline path or raw fallback)
             if pipeline is not None:
+                assert parameters is not None
                 selected_transmits = np.array([int(t) for t in parameters.selected_transmits])
                 dr = getattr(parameters, "dynamic_range", None)
                 dynamic_range = tuple(dr) if dr is not None else (-60, 0)
