@@ -13,7 +13,10 @@ import warnings
 from dataclasses import dataclass
 from typing import Annotated, Union
 
-os.environ.setdefault("ZEA_LOG_LEVEL", "WARNING")
+import zea
+
+if "ZEA_LOG_LEVEL" not in os.environ:
+    zea.log.set_level("WARNING")
 
 import tyro
 

@@ -17,17 +17,19 @@ import threading
 import warnings
 from pathlib import Path
 
-os.environ.setdefault("KERAS_BACKEND", "jax")
-os.environ.setdefault("ZEA_LOG_LEVEL", "WARNING")
-
 import numpy as np
 from keras import ops
 
 from zea import display, io_lib
 from zea.config import Config
+from zea.data.dataloader import Dataloader
 from zea.data.datasets import Dataset
 from zea.data.file import File
-from zea.data.process import _get_config_parameters, _key_requires_pipeline
+from zea.data.process import (
+    _axis_selections_from_params,
+    _get_config_parameters,
+    _key_requires_pipeline,
+)
 from zea.internal.device import init_device
 from zea.ops.pipeline import Pipeline
 
@@ -779,9 +781,12 @@ def run_checks(
         )
         return
 
-    # 4 – 6: Open file once — resolve key, load parameters, process all frames
+    # 4 – 5: Open file once — resolve key and load parameters
     _data_key: str | None = None
     parameters = None
+    params: dict = {}
+    end_frame = start_frame + n_frames
+    actual_n = n_frames
     processed_frames: list[np.ndarray] = []
 
     hf_kwargs = {"revision": dataset_revision} if dataset_revision and _is_hf(file_path) else {}
@@ -864,62 +869,79 @@ def run_checks(
                 if _stopped():
                     return
 
-            # 6. Process frames (pipeline path or raw fallback)
-            if pipeline is not None:
-                assert parameters is not None
-                selected_transmits = np.array([int(t) for t in parameters.selected_transmits])
-                dr = getattr(parameters, "dynamic_range", None)
-                dynamic_range = tuple(dr) if dr is not None else (-60, 0)
-
-            for i, frame_idx in enumerate(range(start_frame, end_frame)):
-                try:
-                    frame = np.asarray(f[_data_key][frame_idx])
-                    if pipeline is not None:
-                        frame = frame[selected_transmits]
-                        output = _run_quiet(pipeline, data=frame, **params)
-                        processed = ops.convert_to_numpy(output["data"])
-                        for k in keep_keys:
-                            if k in output:
-                                params[k] = output[k]
-                    else:
-                        # Raw fallback: reduce to 2D
-                        while frame.ndim > 2:
-                            if frame.shape[0] == 1:
-                                frame = frame[0]
-                            elif frame.shape[-1] == 1:
-                                frame = frame[..., 0]
-                            elif frame.ndim == 3:
-                                # Multi-channel last dim (e.g. segmentation one-hot)
-                                frame = np.argmax(frame, axis=-1)
-                            else:
-                                frame = frame[0]
-                        if frame.ndim < 2:
-                            yield _emit(
-                                _html_fail(
-                                    "Cannot display",
-                                    f"Data shape {frame.shape} after indexing — need at least 2D.",
-                                )
-                            )
-                            return
-                        processed = frame
-                except Exception as exc:
-                    yield _emit(_html_fail(f"Process frame {frame_idx}", exc))
-                    return
-
-                processed_frames.append(processed)
-
-                pbar = _html_progress(i + 1, actual_n)
-                if i == 0:
-                    yield _emit(pbar)
-                else:
-                    yield _replace_last(pbar)
-
-                if _stopped():
-                    return
-
     except Exception as exc:
         yield _emit(_html_fail("Open file", exc))
         return
+
+    # 6. Process frames — Dataloader provides prefetching and HDF5-level transmit
+    # pre-filtering (axis_selections), matching the optimisations in zea process.
+    _axis_sel = _axis_selections_from_params(parameters) if pipeline is not None else None
+    _dl_revision = dataset_revision if _is_hf(str(file_path)) else None
+    try:
+        _dataloader = Dataloader(
+            str(file_path),
+            key=_data_key,
+            batch_size=None,
+            shuffle=False,
+            return_filename=False,
+            offset_n_frames=start_frame,
+            limit_n_frames=actual_n,
+            n_frames=1,
+            num_threads=4,
+            insert_frame_axis=False,
+            sort_files=False,
+            axis_selections=_axis_sel,
+            validate=False,
+            revision=_dl_revision,
+        )
+    except Exception as exc:
+        yield _emit(_html_fail("Open file", exc))
+        return
+
+    for i, frame in enumerate(_dataloader):
+        try:
+            frame = np.asarray(frame)
+            if pipeline is not None:
+                output = _run_quiet(pipeline, data=frame, **params)
+                processed = ops.convert_to_numpy(output["data"])
+                for k in keep_keys:
+                    if k in output:
+                        params[k] = output[k]
+            else:
+                # Raw fallback: reduce to 2D
+                while frame.ndim > 2:
+                    if frame.shape[0] == 1:
+                        frame = frame[0]
+                    elif frame.shape[-1] == 1:
+                        frame = frame[..., 0]
+                    elif frame.ndim == 3:
+                        # Multi-channel last dim (e.g. segmentation one-hot)
+                        frame = np.argmax(frame, axis=-1)
+                    else:
+                        frame = frame[0]
+                if frame.ndim < 2:
+                    yield _emit(
+                        _html_fail(
+                            "Cannot display",
+                            f"Data shape {frame.shape} after indexing — need at least 2D.",
+                        )
+                    )
+                    return
+                processed = frame
+        except Exception as exc:
+            yield _emit(_html_fail(f"Process frame {start_frame + i}", exc))
+            return
+
+        processed_frames.append(processed)
+
+        pbar = _html_progress(i + 1, actual_n)
+        if i == 0:
+            yield _emit(pbar)
+        else:
+            yield _replace_last(pbar)
+
+        if _stopped():
+            return
 
     # 7. Convert to image / GIF
     try:

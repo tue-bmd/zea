@@ -90,6 +90,7 @@ def generate_h5_indices(
     limit_n_frames: int | None = None,
     pad_incomplete_blocks: bool = False,
     axis_selections: dict | None = None,
+    offset_n_frames: int = 0,
 ):
     """Generate indices for h5 files.
 
@@ -108,12 +109,17 @@ def generate_h5_indices(
         sort_files (bool, optional): Sort files by number. Defaults to True.
         overlapping_blocks (bool, optional): Will take n_frames from sequence, then move by 1.
             Defaults to False.
-        limit_n_frames (int, optional): Limit the number of frames to load from each file. This
-            means n_frames per data file will be used. These will be the first frames in the file.
-            Defaults to None.
+        limit_n_frames (int, optional): Maximum number of frames to load per file, counted from
+            ``offset_n_frames``. Defaults to None (no limit).
         pad_incomplete_blocks (bool, optional): Keep files that are too short to fill a full block
             by emitting a single partial block with the available frames. The loader zeropads these
             samples to n_frames. Defaults to False.
+        axis_selections (dict, optional): Map of ``{axis: indices}`` applied at HDF5 read time to
+            pre-filter non-frame axes. For example ``{1: [0, 2, 5]}`` loads only those indices
+            along axis 1, avoiding reading unused data from disk. Defaults to None.
+        offset_n_frames (int, optional): Frame index to start iteration from within each file.
+            Combined with ``limit_n_frames`` this selects the half-open range
+            ``[offset_n_frames, offset_n_frames + limit_n_frames)``. Defaults to 0.
 
     Returns:
         list: List of tuples with indices to extract images from hdf5 files.
@@ -177,15 +183,14 @@ def generate_h5_indices(
     def axis_indices_files():
         # For every file
         for shape in file_shapes:
-            n_frames_in_file = shape[initial_frame_axis]
-            # Optionally limit frames to load from each file
-            n_frames_in_file = int(min(n_frames_in_file, frame_limit))
+            total_frames_in_file = shape[initial_frame_axis]
+            effective_end = int(min(total_frames_in_file, offset_n_frames + frame_limit))
             indices = [
                 slice(i, i + block_size, frame_index_stride)
-                for i in range(0, n_frames_in_file - block_size + 1, block_step_size)
+                for i in range(offset_n_frames, effective_end - block_size + 1, block_step_size)
             ]
-            if not indices and pad_incomplete_blocks and n_frames_in_file > 0:
-                indices = [slice(0, int(n_frames_in_file), frame_index_stride)]
+            if not indices and pad_incomplete_blocks and effective_end > offset_n_frames:
+                indices = [slice(offset_n_frames, effective_end, frame_index_stride)]
             yield [indices]
 
     indices = []
@@ -267,6 +272,7 @@ class H5DataSource:
         overlapping_blocks: bool = False,
         limit_n_samples: int | None = None,
         limit_n_frames: int | None = None,
+        offset_n_frames: int = 0,
         return_filename: bool = False,
         cache: bool = False,
         validate: bool = True,
@@ -332,6 +338,7 @@ class H5DataSource:
             limit_n_frames=limit_n_frames,
             pad_incomplete_blocks=pad_incomplete_blocks,
             axis_selections=self.normalized_axis_selections or None,
+            offset_n_frames=offset_n_frames,
         )
 
         if limit_n_samples is not None:
@@ -430,6 +437,7 @@ class Dataloader:
         - Load the data from each file using the specified key
         - Apply the following transformations in order (if specified):
 
+            - offset_n_frames / axis_selections (applied at HDF5 read time)
             - limit_n_frames
             - limit_n_samples
             - shuffle
@@ -462,8 +470,11 @@ class Dataloader:
             Default is ``None`` (no limit). Note that this is not the same as files.
             A file can have multiple samples, i.e. multiple frames. Note that this happens
             before shuffle!
-        limit_n_frames: Limit frames loaded per file to the first N frames.
-            Default is ``None`` (no limit).
+        limit_n_frames: Maximum number of frames to load per file, counted from
+            ``offset_n_frames``. Default is ``None`` (no limit).
+        offset_n_frames: Frame index to start iteration from within each file.
+            Combined with ``limit_n_frames`` this selects the half-open range
+            ``[offset_n_frames, offset_n_frames + limit_n_frames)``. Default is ``0``.
         drop_remainder: Drop the final incomplete batch. Default is ``False``.
         image_size: Target ``(height, width)``. Default is ``None`` (no resizing).
         resize_type: Resize strategy. One of ``"resize"``, ``"center_crop"``,
@@ -525,6 +536,9 @@ class Dataloader:
             ``False``. Or when you want to use a persistent iterator between epochs, using
             ``dataset_repetitions`` to specify the number of epochs.
         convert_to_tensor: Whether to convert the data to a tensor (on cpu). Default is ``True``.
+        axis_selections: Map of ``{axis: indices}`` applied at HDF5 read time to pre-filter
+            non-frame axes. For example ``{1: [0, 2, 5]}`` loads only those indices along axis 1,
+            avoiding reading unused data from disk. Default is ``None``.
 
     Example:
         .. code-block:: python
@@ -552,6 +566,7 @@ class Dataloader:
         seed: int | None = None,
         limit_n_samples: int | None = None,
         limit_n_frames: int | None = None,
+        offset_n_frames: int = 0,
         drop_remainder: bool = False,
         image_size: tuple | None = None,
         resize_type: str | None = None,
@@ -624,6 +639,7 @@ class Dataloader:
             overlapping_blocks=overlapping_blocks,
             limit_n_samples=limit_n_samples,
             limit_n_frames=limit_n_frames,
+            offset_n_frames=offset_n_frames,
             return_filename=return_filename,
             cache=cache,
             validate=validate,

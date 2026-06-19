@@ -5,13 +5,10 @@ Usage:
 """
 
 import argparse
-import os
 import re
 import types
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-
-os.environ.setdefault("ZEA_LOG_LEVEL", "WARNING")
 
 import keras
 import numpy as np
@@ -32,6 +29,15 @@ from zea.ops.pipeline import Pipeline
 from zea.utils import FunctionTimer
 
 SUPPORTED_FORMATS = ["gif", "mp4", "hdf5"]
+
+
+def _axis_selections_from_params(parameters) -> dict | None:
+    """Return HDF5 axis_selections for transmit-axis pre-filtering, or None."""
+    _tx = getattr(parameters, "selected_transmits", None)
+    if _tx is not None:
+        return {1: sorted(int(t) for t in _tx)}
+    return None
+
 
 sitk: types.ModuleType | None = None
 try:
@@ -286,10 +292,7 @@ def run_processing(
                 with File(_first_path) as _peek_f:
                     _peek_params = _peek_f.load_parameters()
                 _peek_params.update(config_params)
-                _tx = getattr(_peek_params, "selected_transmits", None)
-                if _tx is not None:
-                    _tx_sorted = sorted(int(t) for t in _tx)
-                    axis_selections = {1: _tx_sorted}
+                axis_selections = _axis_selections_from_params(_peek_params)
         except Exception:
             pass  # fall back to runtime slicing if peek fails
 
