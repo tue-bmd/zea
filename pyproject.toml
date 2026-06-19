@@ -294,4 +294,4 @@ concurrency = ["multiprocessing", "thread"]
 sigterm = true
 
 [tool.coverage.report]
-omit = ["zea/ops/keras_ops.py"]
+omit = ["zea/ops/keras_ops.py", "zea/data/app.py"]
