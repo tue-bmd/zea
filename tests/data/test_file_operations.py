@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from zea import Parameters
-from zea.data.file import File, load_file_all_data_types, validate_file
+from zea.data.file import CustomElement, File, load_file_all_data_types, validate_file
 from zea.data.file_operations import (
     compound_frames,
     compound_transmits,
@@ -345,6 +345,72 @@ def test_file_operations_folder_sum(tmp_path):
     with File(output_path) as f:
         raw_data = f["data/raw_data"][:]
         assert raw_data[0, 0, 0, 0, 0] == data0[0, 0, 0, 0, 0] + data1[0, 0, 0, 0, 0]
+
+
+def _create_dataset_with_custom(path, n_frames=2, n_tx=4, n_el=8, n_ax=64):
+    """Create a small zea file containing a couple of custom elements."""
+    raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+    probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
+    custom = [
+        CustomElement(
+            name="lens_correction",
+            data=np.float32(1.5),
+            description="scalar offset",
+            unit="wavelengths",
+        ),
+        CustomElement(
+            name="profile",
+            data=np.arange(5, dtype=np.float32),
+            description="per-element profile",
+            unit="-",
+            group_name="lens",
+        ),
+    ]
+    File.create(
+        path,
+        data={"raw_data": raw},
+        scan=generate_dummy_scan(n_tx=n_tx, n_el=n_el),
+        probe={"name": "generic", "probe_geometry": probe_geometry},
+        description="custom elements test",
+        custom=custom,
+        overwrite=True,
+    )
+    return custom
+
+
+def _assert_custom_elements_match(path, expected: list):
+    """Assert the custom elements stored at ``path`` match ``expected`` by content."""
+    with File(path) as f:
+        loaded = {e.name: e for e in f.custom}
+    assert set(loaded) == {e.name for e in expected}
+    for exp in expected:
+        got = loaded[exp.name]
+        np.testing.assert_array_equal(np.asarray(got.data), np.asarray(exp.data))
+        assert got.unit == exp.unit
+        assert got.description == exp.description
+        assert got.group_name == exp.group_name
+
+
+def test_resave_preserves_custom_elements(tmp_hdf5_path):
+    """resave round-trips custom elements with their data and metadata intact."""
+    input_path = tmp_hdf5_path.parent / "custom_in.hdf5"
+    output_path = tmp_hdf5_path.parent / "custom_out.hdf5"
+    custom = _create_dataset_with_custom(input_path)
+
+    resave(input_path, output_path)
+
+    _assert_custom_elements_match(output_path, custom)
+
+
+def test_extract_preserves_custom_elements(tmp_hdf5_path):
+    """extract_frames_transmits keeps custom elements (not tied to frames/transmits)."""
+    input_path = tmp_hdf5_path.parent / "custom_in.hdf5"
+    output_path = tmp_hdf5_path.parent / "custom_out.hdf5"
+    custom = _create_dataset_with_custom(input_path)
+
+    extract_frames_transmits(input_path, output_path, frame_indices=[0])
+
+    _assert_custom_elements_match(output_path, custom)
 
 
 def _load_description_and_custom_elements(path: Path):
