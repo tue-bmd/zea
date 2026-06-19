@@ -3,7 +3,6 @@ example due to missing dependencies in the pyproject.toml file."""
 
 import builtins
 import contextlib
-import glob
 import importlib
 import inspect
 import os
@@ -12,7 +11,6 @@ import subprocess
 import sys
 import textwrap
 import traceback
-from pathlib import Path
 
 import pytest
 
@@ -60,33 +58,40 @@ def no_ml_lib_import(backends: list = None, allow_keras_backend=False):
         builtins.__import__ = original_import_func
 
 
-@pytest.mark.parametrize("directory", [Path(__file__).parent.parent])
-def test_check_imports_errors(directory, verbose=False):
-    """Check all Python files in a directory for import errors."""
-    python_files = glob.glob(f"{directory}/**/*.py", recursive=True)
+def test_all_zea_modules_importable():
+    """Import every submodule of ``zea`` and fail on any import-time error.
 
-    for python_file in python_files:
-        if verbose:
-            print(python_file)
+    ``zea`` lazily imports its public API (see the ``__getattr__`` in
+    ``zea/__init__.py``), so a bare ``import zea`` only loads a small subset of
+    the package.
+    """
 
-    success = True
-    for python_file in python_files:
+    # Optional wrappers that raise at import time when their optional, undeclared
+    # dependency is missing -- not a failure of zea's declared dependencies.
+    EXCLUDED = {"zea.backend.tf2jax"}
+
+    failures = {}
+
+    def record_failure(name):
+        # Called both for our own import attempts and by walk_packages when it
+        # fails to import a package while recursing into it.
+        if name not in EXCLUDED:
+            failures[name] = traceback.format_exc()
+
+    for module_info in pkgutil.walk_packages(
+        zea.__path__, prefix=f"{zea.__name__}.", onerror=record_failure
+    ):
+        name = module_info.name
+        if name in EXCLUDED:
+            continue
         try:
-            # Attempt to compile the Python file (checks for import errors)
-            with open(python_file, "rb") as file:
-                compile(file.read(), python_file, "exec")
-        except SyntaxError as e:
-            print(f"Syntax error in {python_file}:\n{e}")
-            success = False
-        except ImportError as e:
-            print(f"Import error in {python_file}:\n{e}")
-            success = False
-        except Exception as e:
-            print(f"Error in {python_file}:\n{e}")
-            traceback.print_exc()
-            success = False
+            importlib.import_module(name)
+        except Exception:  # noqa: BLE001 -- report every failing module, not just the first
+            record_failure(name)
 
-    assert success, "Import errors found in one or more Python files."
+    assert not failures, "Failed to import the following zea submodules:\n" + "\n".join(
+        f"\n--- {name} ---\n{tb}" for name, tb in failures.items()
+    )
 
 
 @run_in_subprocess
