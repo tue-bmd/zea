@@ -7659,7 +7659,7 @@ requires-dist = [
     { name = "sphinxcontrib-bibtex", marker = "extra == 'dev'", specifier = ">=2.6.5" },
     { name = "sphinxcontrib-bibtex", marker = "extra == 'docs'", specifier = ">=2.6.5" },
     { name = "tensorflow", marker = "extra == 'backends'", specifier = ">=2.12.1" },
-    { name = "torch", marker = "extra == 'backends'" },
+    { name = "torch", marker = "extra == 'backends'", specifier = ">=2.2" },
     { name = "tqdm", specifier = ">=4" },
     { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.49" },
     { name = "ty", marker = "extra == 'tests'", specifier = "==0.0.49" },

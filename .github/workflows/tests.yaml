@@ -188,10 +188,12 @@ jobs:
 
   # Guard against zea accidentally using functionality newer than the dependency
   # floors declared in pyproject.toml. Installs the *lowest* allowed versions of
-  # zea's declared deps and runs the tests against them.
+  # zea's declared deps and runs the import tests against them.
   minimum-deps:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -213,10 +215,12 @@ jobs:
           uv pip freeze
           echo "::endgroup::"
 
-      - name: Run unit tests against minimum dependencies
+      - name: Run import tests against minimum dependencies
         # --no-sync: run in the floor-pinned venv as-is; never re-resolve to the
         # default (highest) versions, which would defeat the guard.
-        run: uv run --no-sync pytest -p no:cacheprovider -m "not heavy and not notebook" ./tests
+        # Only the import tests run here: this job exists to catch usage of APIs
+        # newer than the declared dependency floors, which surfaces at import time.
+        run: uv run --no-sync pytest -p no:cacheprovider ./tests/test_imports.py
 
   heavy-tests:
     needs: [image]

@@ -129,7 +129,7 @@ app = ["gradio>=6.0"]
 # these are just here for .readthedocs.yaml
 # please for proper install (with GPU support)
 # install manually
-backends = ["jax>=0.4.35", "tensorflow>=2.12.1", "torch"]
+backends = ["jax>=0.4.35", "tensorflow>=2.12.1", "torch>=2.2"]
 
 [project.urls]
 Homepage = "https://github.com/tue-bmd/zea/"
