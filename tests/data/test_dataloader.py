@@ -128,6 +128,37 @@ def test_h5_data_source(file_path, key, n_frames, insert_frame_axis, request):
         )
 
 
+def test_pad_incomplete_blocks(dummy_hdf5):
+    """Files shorter than a block are skipped by default and padded when enabled."""
+    n_frames = DUMMY_N_FRAMES + 50
+
+    skipped = H5DataSource(
+        file_paths=[dummy_hdf5],
+        key="data",
+        n_frames=n_frames,
+        validate=False,
+        pad_incomplete_blocks=False,
+    )
+    assert len(skipped) == 0
+
+    padded = H5DataSource(
+        file_paths=[dummy_hdf5],
+        key="data",
+        n_frames=n_frames,
+        validate=False,
+        pad_incomplete_blocks=True,
+    )
+    assert len(padded) == 1
+
+    sample = padded[0]
+    assert sample.shape[-1] == n_frames
+
+    per_frame_sum = np.abs(sample).sum(axis=tuple(range(sample.ndim - 1)))
+    valid_frames = int(np.count_nonzero(per_frame_sum))
+    assert valid_frames == DUMMY_N_FRAMES
+    assert np.all(per_frame_sum[DUMMY_N_FRAMES:] == 0)
+
+
 @pytest.mark.parametrize(
     "directory, key, n_frames, insert_frame_axis, num_files, total_samples",
     [
