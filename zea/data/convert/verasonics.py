@@ -67,8 +67,7 @@ from zea.data.convert.utils import (
     upload_dataset_to_hf,
     write_dataset_card,
 )
-from zea.data.data_format import DatasetElement
-from zea.data.file import File
+from zea.data.file import CustomElement, File
 from zea.data.spec import DEFAULT_COMPRESSION
 from zea.func import log_compress, normalize
 from zea.internal.device import init_device
@@ -974,17 +973,14 @@ class VerasonicsFile(h5py.File):
 
     def read_verasonics_file(
         self,
-        additional_functions=None,
         frames=None,
         allow_accumulate=False,
         buffer_index=0,
+        additional_functions=None,
     ):
         """Reads data from a .mat Verasonics output file.
 
         Args:
-            additional_functions (list, optional): A list of functions that read additional
-                data from the file. Each function should take the file as input and return a
-                `DatasetElement`. Defaults to None.
             frames (str or list of int, optional): The frames to add to the file. This can be
                 a list of integers, a range of integers (e.g. 4-8), or 'all'. Defaults to
                 None, which means all frames, unless specified in a `convert.yaml` file.
@@ -993,6 +989,9 @@ class VerasonicsFile(h5py.File):
                 In this case, the mode in the Receive structure is set to 1 (accumulate).
                 If this flag is set to False, an error is raised when such a mode is detected.
             buffer_index (int, optional): The buffer index to read from. Defaults to 0.
+            additional_functions (list, optional): A list of functions that read additional
+                data from the file. Each function should take the file as input and return a
+                `CustomElement`. Defaults to None.
         """
 
         if additional_functions is None:
@@ -1015,11 +1014,11 @@ class VerasonicsFile(h5py.File):
             first_frame_idx=convert_config.get("first_frame", None),
         )
 
-        additional_elements = []
+        custom_elements = []
 
         if self.probe.lens_correction is not None:
-            el_lens_correction = DatasetElement(
-                dataset_name="lens_correction",
+            el_lens_correction = CustomElement(
+                name="lens_correction",
                 data=self.probe.lens_correction,
                 description=(
                     "The lens correction value used by Verasonics. This value is a "
@@ -1031,17 +1030,17 @@ class VerasonicsFile(h5py.File):
                 ),
                 unit="wavelengths",
             )
-            additional_elements.append(el_lens_correction)
+            custom_elements.append(el_lens_correction)
 
         # Add additional elements from user-defined functions
         for additional_function in additional_functions:
-            additional_elements.append(additional_function(self))
+            custom_elements.append(additional_function(self))
 
         # Add Verasonics ImgDataP buffer to additional elements
         try:
             verasonics_image_buffer = self.read_image_data_p(frames=frames)
-            verasonics_image_buffer = DatasetElement(
-                dataset_name="verasonics_image_buffer",
+            verasonics_image_buffer = CustomElement(
+                name="verasonics_image_buffer",
                 data=verasonics_image_buffer,
                 description=(
                     "The Verasonics ImgDataP buffer. "
@@ -1050,11 +1049,11 @@ class VerasonicsFile(h5py.File):
                 ),
                 unit="unitless",
             )
-            additional_elements.append(verasonics_image_buffer)
+            custom_elements.append(verasonics_image_buffer)
         except Exception as e:
             log.error(f"Could not read Verasonics ImgDataP buffer: {e}, skipping.")
 
-        return {"raw_data": raw_data}, scan_dict, additional_elements
+        return {"raw_data": raw_data}, scan_dict, custom_elements
 
     def _parse_frames_argument(self, frames, n_frames):
         value_error = ValueError(
@@ -1118,18 +1117,15 @@ class VerasonicsFile(h5py.File):
     def to_zea(
         self,
         output_path,
-        additional_functions=None,
         frames=None,
         allow_accumulate=False,
         enable_compression=True,
+        additional_functions=None,
     ):
         """Converts the Verasonics file to the zea format.
 
         Args:
             output_path (str): The path to the output file (.hdf5 file).
-            additional_functions (list, optional): A list of functions that read additional
-                data from the file. Each function should take the file as input and return a
-                `DatasetElement`. Defaults to None.
             frames (str or list of int, optional): The frames to add to the file. This can be
                 a list of integers, a range of integers (e.g. 4-8), or 'all'. Defaults to
                 None, which means all frames are used, unless specified otherwise in a
@@ -1141,13 +1137,16 @@ class VerasonicsFile(h5py.File):
                 Defaults to False.
             enable_compression (bool, optional): Whether to enable compression when saving
                 the zea file. Defaults to True.
+            additional_functions (list, optional): A list of functions that read additional
+                data from the file. Each function should take the file as input and return a
+                `CustomElement`. Defaults to None.
         """
         # Here we call all the functions to read the data from the file
         log.info("Reading Verasonics file...")
-        data_dict, scan_dict, additional_elements = self.read_verasonics_file(
-            additional_functions=additional_functions,
+        data_dict, scan_dict, custom_elements = self.read_verasonics_file(
             frames=frames,
             allow_accumulate=allow_accumulate,
+            additional_functions=additional_functions,
         )
 
         # Generate the zea dataset
@@ -1159,11 +1158,9 @@ class VerasonicsFile(h5py.File):
             scan=scan_dict,
             probe=self.probe.to_probe_spec(),
             description="Verasonics data",
+            custom=custom_elements,
             compression=compression,
         )
-
-        if additional_elements:
-            _write_user_additional_elements_to_file(output_path, additional_elements)
 
 
 class VerasonicsProbe:
@@ -1315,47 +1312,6 @@ class VerasonicsProbe:
             "probe_geometry": self.geometry,
             "element_width": self.element_width,
         }
-
-
-def _write_user_additional_elements(h5file, additional_elements, prefix=""):
-    """Write user-provided DatasetElement objects into an HDF5 file.
-
-    Args:
-        h5file: Open h5py.File in write/append mode.
-        additional_elements: List of DatasetElement objects from user-defined functions.
-        prefix: Path prefix for element group names.
-    """
-    if not additional_elements:
-        return
-
-    nse_path = f"{prefix}/non_standard_elements" if prefix else "non_standard_elements"
-    if nse_path not in h5file:
-        nse = h5file.create_group(nse_path)
-        nse.attrs["description"] = (
-            "This group contains non-standard elements that can be added by the user."
-        )
-
-    for element in additional_elements:
-        group_path = nse_path
-        if element.group_name:
-            group_path = f"{nse_path}/{element.group_name}"
-            if group_path not in h5file:
-                h5file.create_group(group_path)
-
-        data = np.asarray(element.data)
-        is_scalar = np.isscalar(data) or data.ndim == 0
-        compression = DEFAULT_COMPRESSION if not is_scalar else None
-        ds = h5file[group_path].create_dataset(
-            element.dataset_name, data=data, compression=compression
-        )
-        ds.attrs["description"] = element.description
-        ds.attrs["unit"] = element.unit
-
-
-def _write_user_additional_elements_to_file(path, additional_elements):
-    """Write user-provided additional elements into an existing HDF5 file."""
-    with h5py.File(str(path), "a") as f:
-        _write_user_additional_elements(f, additional_elements)
 
 
 def _zea_from_verasonics_workspace(input_path, output_path, **kwargs):

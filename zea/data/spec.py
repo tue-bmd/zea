@@ -2010,6 +2010,9 @@ class FileSpec(Spec):
             to read it back from an HDF5 file.
         us_machine: The ultrasound machine used to acquire the data.
         description: Free-text description.
+        custom: Optional list of :class:`~zea.data.file.CustomElement` objects holding
+            data that does not fit the zea format.  These are written to a ``custom``
+            group and read back via :attr:`zea.File.custom`.
 
     Example:
         .. doctest::
@@ -2053,10 +2056,11 @@ class FileSpec(Spec):
     us_machine: str | None = None
     description: str | None = None
     acquisition_time: str | None = None
+    custom: list = field(default_factory=list)
 
-    # tells the SCHEMA ↔ fields consistency test that 'tracks' is intentionally
-    # absent from SCHEMA (list[TrackSpec] doesn't fit the standard SCHEMA patterns)
-    _SCHEMA_EXCLUDED_FIELDS = frozenset({"tracks"})
+    # tells the SCHEMA ↔ fields consistency test that 'tracks' and 'custom' are
+    # intentionally absent from SCHEMA (list types don't fit the standard SCHEMA patterns)
+    _SCHEMA_EXCLUDED_FIELDS = frozenset({"tracks", "custom"})
 
     SCHEMA = {
         "track_schedule": {"dtype": np.int32, "shape": ("n_total_tx",)},
@@ -2091,6 +2095,7 @@ class FileSpec(Spec):
         us_machine: "str | None" = None,
         description: "str | None" = None,
         acquisition_time: "str | None" = None,
+        custom: "list | None" = None,
     ):
         if data is not None or scan is not None:
             if tracks:
@@ -2116,6 +2121,7 @@ class FileSpec(Spec):
         self.us_machine = us_machine
         self.description = description
         self.acquisition_time = acquisition_time
+        self.custom = list(custom) if custom else []
 
         self.__post_init__(_implicit_track)
 
@@ -2249,6 +2255,17 @@ class FileSpec(Spec):
                         field_sizes = {**meta_dim_field_sizes[dim], **track_dim_field_sizes[dim]}
                         if len(set(field_sizes.values())) > 1:
                             raise ValueError(self._format_inconsistent_dimension(dim, field_sizes))
+
+        # Validate custom elements are CustomElement instances (lazy import to
+        # avoid a circular dependency with zea.data.file).
+        if self.custom:
+            from zea.data.file import CustomElement
+
+            for i, element in enumerate(self.custom):
+                if not isinstance(element, CustomElement):
+                    raise TypeError(
+                        f"custom[{i}] must be a CustomElement, got {type(element).__name__}."
+                    )
 
     def _normalize_time_to_next_transmit(self) -> None:
         """Pad flat timing arrays and reshape to (n_frames * n_tx) by padding last
@@ -2402,3 +2419,9 @@ class FileSpec(Spec):
                     chunk_frames=chunk_frames,
                     warn_missing_optional_fields=warn_missing_optional_fields,
                 )
+
+            # Write any custom (non-spec) elements into the 'custom' group.
+            if self.custom:
+                from zea.data.file import _write_custom_elements
+
+                _write_custom_elements(f, self.custom)

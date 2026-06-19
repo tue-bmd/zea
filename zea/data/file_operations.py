@@ -14,7 +14,6 @@ import numpy as np
 from tqdm import tqdm
 
 from zea import Parameters
-from zea.data.data_format import load_additional_elements, load_description
 from zea.data.datasets import Dataset
 from zea.data.file import File, load_file_all_data_types
 from zea.data.spec import DEFAULT_COMPRESSION
@@ -43,6 +42,7 @@ def save_file(
     image: dict | None = None,
     description=None,
     custom_maps: dict | None = None,
+    custom_elements: list | None = None,
     metadata: dict | None = None,
     compression: str = DEFAULT_COMPRESSION,
     chunk_frames=False,
@@ -75,6 +75,9 @@ def save_file(
                         "coordinates": coords_array, # (n_frames, z, x, 3), float32
                     }
                 }
+        custom_elements (list, optional): List of :class:`~zea.data.file.CustomElement`
+            objects holding data that does not fit the zea format. Stored in a ``custom``
+            group and read back via :attr:`zea.File.custom`.
         metadata (dict, optional): Metadata to store in the ``metadata`` group, validated against
             :class:`~zea.data.spec.MetadataSpec`.  Standard keys include ``"subject"``,
             ``"credit"``, ``"annotations"``, ``"text_report"``, ``"ecg"``,
@@ -112,6 +115,7 @@ def save_file(
         metadata=metadata,
         probe=parameters.to_probe_dict(),
         description=description,
+        custom=custom_elements,
         compression=compression,
         chunk_frames=chunk_frames,
         overwrite=True,
@@ -184,8 +188,9 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
         input_paths = [file.path for file in dataset]
 
     data_dict, parameters = load_file_all_data_types(input_paths[0])
-    description = load_description(input_paths[0])
-    additional_elements = load_additional_elements(input_paths[0])
+    with File(input_paths[0]) as f:
+        description = f.description
+        custom_elements = f.custom
 
     image_is_uint8 = (
         data_dict["image"] is not None
@@ -264,7 +269,7 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     save_file(
         path=output_path,
         parameters=parameters,
-        additional_elements=additional_elements,
+        custom_elements=custom_elements,
         description=description,
         **data_dict,
     )
@@ -289,8 +294,9 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
     """
 
     data_dict, parameters = load_file_all_data_types(input_path)
-    additional_elements = load_additional_elements(input_path)
-    description = load_description(input_path)
+    with File(input_path) as f:
+        description = f.description
+        custom_elements = f.custom
 
     # Assuming the first dimension is the frame dimension
 
@@ -329,7 +335,7 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
     save_file(
         path=output_path,
         parameters=parameters,
-        additional_elements=additional_elements,
+        custom_elements=custom_elements,
         description=description,
         **compounded_data,  # ty: ignore[invalid-argument-type]
     )
@@ -353,8 +359,9 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
     """
 
     data_dict, parameters = load_file_all_data_types(input_path)
-    additional_elements = load_additional_elements(input_path)
-    description = load_description(input_path)
+    with File(input_path) as f:
+        description = f.description
+        custom_elements = f.custom
 
     if not _all_tx_are_identical(parameters):
         logger.warning(
@@ -377,7 +384,7 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
     save_file(
         path=output_path,
         parameters=parameters,
-        additional_elements=additional_elements,
+        custom_elements=custom_elements,
         description=description,
         **data_dict,
     )
@@ -430,8 +437,9 @@ def resave(
     """
 
     data_dict, parameters = load_file_all_data_types(input_path)
-    additional_elements = load_additional_elements(input_path)
-    description = load_description(input_path)
+    with File(input_path) as f:
+        description = f.description
+        custom_elements = f.custom
     parameters.set_transmits("all")
 
     if overwrite:
@@ -440,7 +448,7 @@ def resave(
         path=output_path,
         **data_dict,
         parameters=parameters,
-        additional_elements=additional_elements,
+        custom_elements=custom_elements,
         description=description,
         enable_compression=enable_compression,
         chunk_frames=chunk_frames,
@@ -474,8 +482,9 @@ def extract_frames_transmits(
     indices = (frame_indices, transmit_indices)
     data_dict, parameters = load_file_all_data_types(input_path, indices=indices)
 
-    additional_elements = load_additional_elements(input_path)
-    description = load_description(input_path)
+    with File(input_path) as f:
+        description = f.description
+        custom_elements = f.custom
 
     parameters = _scan_reduce_frames(parameters, frame_indices)
 
@@ -486,7 +495,7 @@ def extract_frames_transmits(
         path=output_path,
         **data_dict,
         parameters=parameters,
-        additional_elements=additional_elements,
+        custom_elements=custom_elements,
         description=description,
     )
 

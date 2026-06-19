@@ -10,10 +10,6 @@ import numpy as np
 import pytest
 
 from zea import Parameters
-from zea.data.data_format import (
-    load_additional_elements,
-    load_description,
-)
 from zea.data.file import File, load_file_all_data_types, validate_file
 from zea.data.file_operations import (
     compound_frames,
@@ -53,7 +49,7 @@ def test_file_operations_sum(tmp_hdf5_path):
 
     sum_data([input_path1, input_path2], output_path)
 
-    _assert_descriptions_and_additional_elements_equal(input_path1, output_path)
+    _assert_descriptions_and_custom_elements_equal(input_path1, output_path)
 
     # Load the summed dataset and check if the data is correct
     with File(output_path) as f:
@@ -77,7 +73,7 @@ def test_file_operations_extract(tmp_hdf5_path):
     data_dict, parameters = load_file_all_data_types(output_path)
     data_dict = SimpleNamespace(**data_dict)
 
-    _assert_descriptions_and_additional_elements_equal(input_path, output_path)
+    _assert_descriptions_and_custom_elements_equal(input_path, output_path)
 
     assert data_dict.raw_data.shape[0] == 1
     assert data_dict.raw_data.shape[1] == 2
@@ -86,7 +82,7 @@ def test_file_operations_extract(tmp_hdf5_path):
     assert data_dict.beamformed_data["values"].shape[0] == 1
 
     _assert_beamformed_data_still_exists(output_path)
-    _assert_descriptions_and_additional_elements_equal(input_path, output_path)
+    _assert_descriptions_and_custom_elements_equal(input_path, output_path)
 
 
 def test_file_operations_resave(tmp_hdf5_path):
@@ -101,7 +97,7 @@ def test_file_operations_resave(tmp_hdf5_path):
 
     resave(input_path, output_path)
 
-    _assert_descriptions_and_additional_elements_equal(input_path, output_path)
+    _assert_descriptions_and_custom_elements_equal(input_path, output_path)
 
     # Validate the resaved dataset
     validate_file(output_path)
@@ -119,7 +115,7 @@ def test_file_operations_compound_frames(tmp_hdf5_path):
 
     compound_frames(input_path, output_path)
 
-    _assert_descriptions_and_additional_elements_equal(input_path, output_path)
+    _assert_descriptions_and_custom_elements_equal(input_path, output_path)
 
     data_dict, parameters = load_file_all_data_types(output_path)
     data_dict = SimpleNamespace(**data_dict)
@@ -142,7 +138,7 @@ def test_file_operations_compound_transmits(tmp_hdf5_path):
 
     compound_transmits(input_path, output_path)
 
-    _assert_descriptions_and_additional_elements_equal(input_path, output_path)
+    _assert_descriptions_and_custom_elements_equal(input_path, output_path)
 
     with File(output_path) as f:
         data = f["data/raw_data"][:]
@@ -302,7 +298,7 @@ def test_file_operations_folder_resave(tmp_path):
         output_path = output_folder / input_path.relative_to(input_folder)
         assert output_path.is_file()
         validate_file(output_path)
-        _assert_descriptions_and_additional_elements_equal(input_path, output_path)
+        _assert_descriptions_and_custom_elements_equal(input_path, output_path)
 
 
 def test_file_operations_folder_compound_frames(tmp_path):
@@ -351,19 +347,16 @@ def test_file_operations_folder_sum(tmp_path):
         assert raw_data[0, 0, 0, 0, 0] == data0[0, 0, 0, 0, 0] + data1[0, 0, 0, 0, 0]
 
 
-def _load_description_and_additional_elements(path: Path):
-    description = load_description(path)
-    additional_elements = load_additional_elements(path)
-    return description, additional_elements
+def _load_description_and_custom_elements(path: Path):
+    with File(path) as f:
+        return f.description, f.custom
 
 
-def _assert_descriptions_and_additional_elements_equal(path, other_path: Path):
-    description, additional_elements = _load_description_and_additional_elements(path)
-    other_description, other_additional_elements = _load_description_and_additional_elements(
-        other_path
-    )
+def _assert_descriptions_and_custom_elements_equal(path, other_path: Path):
+    description, custom_elements = _load_description_and_custom_elements(path)
+    other_description, other_custom_elements = _load_description_and_custom_elements(other_path)
     assert description == other_description
-    assert len(additional_elements) == len(other_additional_elements)
+    assert len(custom_elements) == len(other_custom_elements)
 
 
 def _assert_beamformed_data_still_exists(path: Path):

@@ -308,13 +308,3 @@ def test_save_file_custom_metadata(tmp_hdf5_path, _parameters):
     with File(tmp_hdf5_path) as f:
         assert "metadata" in f
         assert f["metadata/credit"][()] == b"Test Lab, 2024"
-
-
-def test_validate_input_data_docstring():
-    """The docstring of validate_input_data must not mention dict as an accepted
-    type; only ndarray inputs are supported on the deprecated path."""
-    from zea.data.data_format import validate_input_data
-
-    doc = validate_input_data.__doc__
-    assert "If a dict" not in doc, "docstring must not advertise dict support"
-    assert "ndarray" in doc, "docstring must say ndarray"

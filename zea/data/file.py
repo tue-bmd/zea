@@ -3,6 +3,7 @@
 import contextlib
 import difflib
 import enum
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Tuple, Union, cast
@@ -34,8 +35,86 @@ if TYPE_CHECKING:
     # 3.10 floor runtime-clean.
     from typing_extensions import Self
 
-    from zea.probes import Probe
     from zea.parameters import Parameters
+    from zea.probes import Probe
+
+
+@dataclass
+class CustomElement:
+    """Class to store **custom** dataset elements with a name, data, description and unit in the
+    zea format."""
+
+    # The name of the dataset. This will be the key in the group.
+    name: str
+    # The data to store in the dataset.
+    data: np.ndarray
+    description: str
+    unit: str
+    # The group name to store the dataset under. This can be a nested group, e.g.
+    # "lens/profiles"
+    group_name: str = ""
+
+
+def _load_dataset_element_from_group(file, path: str) -> CustomElement:
+    """Loads a specific dataset element from a group.
+
+    Args:
+        file (h5py.File): The HDF5 file object.
+        path (str): The full path to the dataset element.
+            e.g., "non_standard_elements/lens/lens_profile"
+
+    Returns:
+        CustomElement: The loaded dataset element.
+    """
+
+    dataset = file[path]
+    description = dataset.attrs.get("description", "")
+    unit = dataset.attrs.get("unit", "")
+    data = dataset[()]
+
+    path_parts = path.split("/")
+
+    return CustomElement(
+        name=path_parts[-1],
+        data=data,
+        description=description,
+        unit=unit,
+        group_name="/".join(path_parts[1:-1]),
+    )
+
+
+def _load_custom_elements_from_group(file, path: str) -> List[CustomElement]:
+    """Recursively loads additional dataset elements from a group."""
+    elements = []
+    for name, item in file[path].items():
+        if isinstance(item, h5py.Dataset):
+            elements.append(_load_dataset_element_from_group(file, f"{path}/{name}"))
+        elif isinstance(item, h5py.Group):
+            elements.extend(_load_custom_elements_from_group(file, f"{path}/{name}"))
+    return elements
+
+
+def _write_custom_elements(file: "File", custom_elements: List[CustomElement]):
+    """Write :class:`CustomElement` objects into the ``custom`` group of *file*."""
+    if "custom" not in file:
+        custom_group = file.create_group("custom")
+        custom_group.attrs["description"] = (
+            "This group contains custom elements not in the zea format, added by the user."
+        )
+
+    for element in custom_elements:
+        group_path = "custom"
+        if element.group_name:
+            group_path = f"custom/{element.group_name}"
+            if group_path not in file:
+                file.create_group(group_path)
+
+        data = np.asarray(element.data)
+        is_scalar = np.isscalar(data) or data.ndim == 0
+        compression = DEFAULT_COMPRESSION if not is_scalar else None
+        ds = file[group_path].create_dataset(element.name, data=data, compression=compression)
+        ds.attrs["description"] = element.description
+        ds.attrs["unit"] = element.unit
 
 
 class _StringDataset:
@@ -929,6 +1008,7 @@ class File(h5py.File):
         us_machine: str | None = None,
         description: str | None = None,
         acquisition_time: str | None = None,
+        custom=None,
         compression: str | None = DEFAULT_COMPRESSION,
         chunk_frames: bool = False,
         overwrite: bool = False,
@@ -974,6 +1054,9 @@ class File(h5py.File):
                 ``from datetime import datetime, timezone``). Note: recording
                 timestamps for human subjects may constitute Protected Health
                 Information (PHI) under HIPAA and similar regulations.
+            custom: Optional list of :class:`CustomElement` objects holding data that
+                does not fit the zea format. They are stored in a ``custom`` group and
+                read back via :attr:`File.custom`.
             compression: HDF5 compression filter (default ``"lzf"``).
             chunk_frames: If *True*, use frame-wise chunking for all datasets containing
                 a "frames" dimension. Dataset will be stored with HDF5 chunking enabled,
@@ -1070,6 +1153,8 @@ class File(h5py.File):
             kwargs["description"] = description
         if acquisition_time is not None:
             kwargs["acquisition_time"] = acquisition_time
+        if custom is not None:
+            kwargs["custom"] = custom
 
         warn_ctx = log.suppress_warnings() if ignore_warnings else contextlib.nullcontext()
         with warn_ctx:
@@ -1116,6 +1201,23 @@ class File(h5py.File):
         if super().__contains__("data"):
             return cast("_DataProxy", _GroupProxy(self["data"]))
         raise KeyError("No 'data' group found in this file.")
+
+    @property
+    def _is_legacy_file(self) -> bool:
+        return _is_legacy_file(self)
+
+    @property
+    def custom(self) -> List[CustomElement]:
+        """Custom data elements."""
+
+        if self._is_legacy_file:
+            if "non_standard_elements" not in self:
+                return []
+            return _load_custom_elements_from_group(self, "non_standard_elements")
+
+        if "custom" not in self:
+            return []
+        return _load_custom_elements_from_group(self, "custom")
 
     @property
     def name(self):
