@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 import zea
-from zea.data.file import File, Track, _GroupProxy, _StringDataset, load_file
+from zea.data.file import CustomElement, File, Track, _GroupProxy, _StringDataset, load_file
 from zea.data.legacy_file import dict_to_sorted_list
 from zea.data.spec import FileSpec, Image, ScanSpec, Segmentation
 from zea.probes import Probe
@@ -1886,3 +1886,106 @@ class TestLegacyFileLoading:
         with File(legacy_file, revision=_LEGACY_PICMUS_REVISION) as f:
             spec = f.validate_spec()  # would raise if scalars caused unexpected-kwarg errors
         assert spec.scan is not None
+
+
+class TestCustomElements:
+    """Tests for storing/loading :class:`CustomElement` objects via the ``custom`` key."""
+
+    @staticmethod
+    def _create_with_custom(path, custom, n_frames=2, n_tx=2, n_el=4, n_ax=8):
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        File.create(
+            path,
+            data={"raw_data": raw},
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe=_probe_minimal("test_probe", n_el=n_el),
+            description="custom elements test",
+            custom=custom,
+            overwrite=True,
+        )
+
+    def test_custom_absent_returns_empty_list(self, tmp_path):
+        """A file created without custom elements exposes an empty ``custom`` list."""
+        path = tmp_path / "no_custom.hdf5"
+        self._create_with_custom(path, custom=None)
+        with File(path) as f:
+            assert f.custom == []
+            assert "custom" not in f
+
+    def test_custom_round_trip(self, tmp_path):
+        """Scalar, array and nested-group custom elements round-trip with metadata."""
+        path = tmp_path / "custom.hdf5"
+        custom = [
+            CustomElement(
+                name="lens_correction",
+                data=np.float32(1.5),
+                description="scalar offset",
+                unit="wavelengths",
+            ),
+            CustomElement(
+                name="profile",
+                data=np.arange(5, dtype=np.float32),
+                description="per-element profile",
+                unit="-",
+                group_name="lens/profiles",
+            ),
+        ]
+        self._create_with_custom(path, custom=custom)
+
+        with File(path) as f:
+            assert "custom" in f
+            elements = {e.name: e for e in f.custom}
+
+        assert set(elements) == {"lens_correction", "profile"}
+
+        scalar = elements["lens_correction"]
+        assert float(scalar.data) == 1.5
+        assert scalar.unit == "wavelengths"
+        assert scalar.description == "scalar offset"
+        assert scalar.group_name == ""
+
+        nested = elements["profile"]
+        np.testing.assert_array_equal(nested.data, np.arange(5, dtype=np.float32))
+        assert nested.group_name == "lens/profiles"
+        assert nested.unit == "-"
+
+    def test_custom_group_has_description_attr(self, tmp_path):
+        """The ``custom`` group itself carries an explanatory description attribute."""
+        path = tmp_path / "custom_attr.hdf5"
+        self._create_with_custom(
+            path,
+            custom=[
+                CustomElement(name="foo", data=np.zeros(3, np.float32), description="d", unit="-")
+            ],
+        )
+        with File(path) as f:
+            assert "description" in f["custom"].attrs
+
+    def test_custom_validation_rejects_non_custom_element(self, tmp_path):
+        """Passing a non-:class:`CustomElement` raises a clear ``TypeError``."""
+        with pytest.raises(TypeError, match="custom\\[0\\] must be a CustomElement"):
+            FileSpec(
+                data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+                scan=_scan_minimal(n_frames=2, n_tx=2, n_el=4),
+                probe=_probe_minimal("test_probe", n_el=4),
+                custom=[123],
+            )
+
+    def test_legacy_non_standard_elements_loaded(self, tmp_path):
+        """Legacy files store custom data under ``non_standard_elements``; still readable."""
+        path = tmp_path / "legacy_custom.hdf5"
+        # A legacy file is one without a ``zea_version`` attribute.
+        with h5py.File(path, "w") as f:
+            group = f.create_group("non_standard_elements")
+            ds = group.create_dataset("lens_correction", data=np.float32(2.0))
+            ds.attrs["description"] = "legacy scalar"
+            ds.attrs["unit"] = "wavelengths"
+
+        with File(path) as f:
+            assert f._is_legacy_file
+            elements = f.custom
+
+        assert len(elements) == 1
+        assert elements[0].name == "lens_correction"
+        assert float(elements[0].data) == 2.0
+        assert elements[0].unit == "wavelengths"
