@@ -142,6 +142,21 @@ def legacy_scan(scan_parameters: dict):
     scan_parameters.pop("n_ch", None)
     scan_parameters.pop("n_frames", None)
     scan_parameters.pop("bandwidth_percent", None)
+    scan_parameters.pop("element_width", None)
+    tx_waveform_indices = scan_parameters.pop("tx_waveform_indices", None)
+
+    if "waveforms_one_way" in scan_parameters:
+        waveforms_one_way_list = scan_parameters["waveforms_one_way"]
+        scan_parameters["waveforms_one_way"] = np.stack(
+            [waveforms_one_way_list[i] for i in tx_waveform_indices]
+        )
+
+    if "waveforms_two_way" in scan_parameters:
+        waveforms_two_way_list = scan_parameters["waveforms_two_way"]
+        scan_parameters["waveforms_two_way"] = np.stack(
+            [waveforms_two_way_list[i] for i in tx_waveform_indices]
+        )
+        np.stack([waveforms_one_way_list[i] for i in tx_waveform_indices])
 
     if "demodulation_frequency" not in scan_parameters:
         if "center_frequency" in scan_parameters:
@@ -176,6 +191,8 @@ def legacy_probe(scan_parameters: dict):
     probe_parameters = {}
     if "probe_geometry" in scan_parameters:
         probe_parameters["probe_geometry"] = scan_parameters["probe_geometry"]
+    if "element_width" in scan_parameters:
+        probe_parameters["element_width"] = scan_parameters["element_width"]
 
     return probe_parameters
 
