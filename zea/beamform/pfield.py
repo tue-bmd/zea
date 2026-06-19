@@ -90,6 +90,8 @@ def compute_pfield(
     attenuation_coef = attenuation_coef / 8.686  # convert to Np/cm/MHz
     attenuation_coef = attenuation_coef / 1e6 / 1e2  # convert to Np/m/Hz
 
+    n_el = int(n_el)
+
     # cast to float32
     sound_speed = ops.cast(sound_speed, "float32")
     center_frequency = ops.cast(center_frequency, "float32")
