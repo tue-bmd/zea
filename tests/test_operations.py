@@ -6,7 +6,6 @@ correct backend.
 """
 
 import math
-import os
 
 import keras
 import numpy as np
@@ -1026,9 +1025,7 @@ def test_prepare_parameters_pfield_all_backends():
     from zea.ops import Pipeline
     from zea.parameters import Parameters
 
-    # Disable the on-disk result cache so ops are actually executed in each backend
-    # subprocess (the cache would serve a stale pickle and hide crashes).
-    os.environ["ZEA_DISABLE_CACHE"] = "1"
+    from zea.internal.cache import cache_disabled
 
     n_el = 8
     n_tx = 2
@@ -1061,9 +1058,12 @@ def test_prepare_parameters_pfield_all_backends():
     parameters.grid_size_x = 8
     parameters.grid_size_z = 8
 
-    pipeline = Pipeline.from_default(enable_pfield=True)
-    inputs = pipeline.prepare_parameters(parameters)
-    return keras.ops.convert_to_numpy(inputs["flat_pfield"])
+    # Disable the on-disk result cache so ops are actually executed in each backend
+    # subprocess (the cache would serve a stale pickle and hide crashes).
+    with cache_disabled():
+        pipeline = Pipeline.from_default(enable_pfield=True)
+        inputs = pipeline.prepare_parameters(parameters)
+        return keras.ops.convert_to_numpy(inputs["flat_pfield"])
 
 
 @backend_equality_check(decimal=4)
