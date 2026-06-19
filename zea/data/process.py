@@ -8,7 +8,6 @@ import argparse
 import re
 import types
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
 import keras
@@ -16,18 +15,29 @@ import numpy as np
 import tyro
 from keras import ops
 
-from zea import display, io_lib, log
+from zea import io_lib, log
+from zea.backend import jit
 from zea.cli_args import ProcessArgs
 from zea.config import Config
 from zea.data.dataloader import Dataloader
 from zea.data.datasets import Dataset
 from zea.data.file import File
-from zea.data.spec import ScanSpec
+from zea.func import translate
+from zea.internal.checks import _NON_IMAGE_DATA_TYPES
 from zea.internal.device import init_device
 from zea.ops.pipeline import Pipeline
 from zea.utils import FunctionTimer
 
 SUPPORTED_FORMATS = ["gif", "mp4", "hdf5"]
+
+
+def _axis_selections_from_params(parameters) -> dict | None:
+    """Return HDF5 axis_selections for transmit-axis pre-filtering, or None."""
+    _tx = getattr(parameters, "selected_transmits", None)
+    if _tx is not None:
+        return {1: sorted(int(t) for t in _tx)}
+    return None
+
 
 sitk: types.ModuleType | None = None
 try:
@@ -164,44 +174,15 @@ def _get_config_parameters(config: Config) -> dict:
     return params.as_dict() if hasattr(params, "as_dict") else dict(params)
 
 
-# Keys that carry raw RF / pre-beamformed data and always require a pipeline.
-_PIPELINE_REQUIRED_KEYS = frozenset({"data/raw_data", "data/aligned_data/values"})
-
-
 def _key_requires_pipeline(key: str) -> bool:
     """Return True if ``key`` holds raw RF/pre-beamformed data that needs a pipeline.
 
-    Normalizes the key the same way :meth:`File.format_key` does (strip a
-    ``tracks/track_N/`` prefix and add a leading ``data/``) so aliases like
-    ``raw_data`` are classified the same as ``data/raw_data``.
+    Normalizes the key so aliases like ``raw_data`` match ``_NON_IMAGE_DATA_TYPES``.
     """
     normalized = (key or "").strip()
     normalized = re.sub(r"^tracks/track_\d+/", "", normalized)
-    if normalized and not normalized.startswith("data/"):
-        normalized = "data/" + normalized
-    return normalized in _PIPELINE_REQUIRED_KEYS
-
-
-def _build_probe_dict(probe) -> dict:
-    """Build a minimal probe dict for File.create() from a Probe object."""
-    probe_dict = {}
-    if getattr(probe, "name", None):
-        probe_dict["name"] = probe.name
-    if getattr(probe, "probe_geometry", None) is not None:
-        probe_dict["probe_geometry"] = probe.probe_geometry
-    for attr in (
-        "type",
-        "probe_center_frequency",
-        "probe_bandwidth_percent",
-        "element_width",
-        "element_height",
-        "lens_sound_speed",
-        "lens_thickness",
-    ):
-        val = getattr(probe, attr, None)
-        if val is not None:
-            probe_dict[attr] = val
-    return probe_dict
+    normalized = normalized.removeprefix("data/").removesuffix("/values")
+    return normalized in _NON_IMAGE_DATA_TYPES
 
 
 def _run_passthrough(
@@ -218,42 +199,39 @@ def _run_passthrough(
         raise ValueError(f"Passthrough mode only supports gif/mp4/hdf5, got {save_as!r}")
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    ds = Dataset(dataset_path, validate=False, **hf_kwargs)
-    file_paths = list(ds.file_paths)
-    ds.close()
-
-    pbar = keras.utils.Progbar(len(file_paths))
-    for file_path in file_paths:
-        with File(file_path) as f:
+    with Dataset(dataset_path, validate=False, lazy=True, _suggest_lazy=False, **hf_kwargs) as ds:
+        pbar = keras.utils.Progbar(len(ds))
+        for i in range(len(ds)):
+            f = ds[i]  # lazy download for hf:// paths; returns cached File handle
             data_key = f.format_key(key)
             arr = np.asarray(f[data_key][:n_frames] if n_frames is not None else f[data_key][:])
             filestem = f.stem
 
-        # Ensure (N, H, W) — squeeze any leading single-element dims
-        while arr.ndim > 3 and arr.shape[0] == 1:
-            arr = arr[0]
-        if arr.ndim == 2:
-            arr = arr[np.newaxis]  # add frame axis
+            # Ensure (N, H, W) — squeeze any leading single-element dims
+            while arr.ndim > 3 and arr.shape[0] == 1:
+                arr = arr[0]
+            if arr.ndim == 2:
+                arr = arr[np.newaxis]  # add frame axis
 
-        if arr.dtype != np.uint8:
-            lo, hi = float(arr.min()), float(arr.max())
-            arr = (
-                ((arr - lo) / (hi - lo) * 255).astype(np.uint8)
-                if hi > lo
-                else np.zeros_like(arr, dtype=np.uint8)
-            )
+            if arr.dtype != np.uint8:
+                lo, hi = float(arr.min()), float(arr.max())
+                arr = (
+                    ((arr - lo) / (hi - lo) * 255).astype(np.uint8)
+                    if hi > lo
+                    else np.zeros_like(arr, dtype=np.uint8)
+                )
 
-        save_path = save_dir / f"{filestem}.{save_as}"
-        if save_path.exists() and not overwrite:
-            log.warning(f"File {save_path} already exists. Use --overwrite to replace it.")
-        else:
-            if save_as in ("gif", "mp4"):
-                io_lib.save_video(arr, save_path, fps=20)
-            elif save_as == "hdf5":
-                File.create(save_path, data={"image": {"values": arr}}, overwrite=overwrite)
-            log.info(f"Saved {log.yellow(save_path)}")
+            save_path = save_dir / f"{filestem}.{save_as}"
+            if save_path.exists() and not overwrite:
+                log.warning(f"File {save_path} already exists. Use --overwrite to replace it.")
+            else:
+                if save_as in ("gif", "mp4"):
+                    io_lib.save_video(arr, save_path, fps=20)
+                elif save_as == "hdf5":
+                    File.create(save_path, data={"image": {"values": arr}}, overwrite=overwrite)
+                log.info(f"Saved {log.yellow(save_path)}")
 
-        pbar.add(1)
+            pbar.add(1)
 
 
 def run_processing(
@@ -303,7 +281,21 @@ def run_processing(
 
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    dataset_files = Dataset(dataset_path, validate=False, **dataset_hf_kwargs)
+    # Peek at the first file to get selected_transmits so the dataloader can
+    # pre-filter the transmit axis at HDF5 read time (avoids reading unused data).
+    axis_selections: dict | None = None
+    if _key_requires_pipeline(key):
+        try:
+            with Dataset(dataset_path, validate=False, **dataset_hf_kwargs) as _peek_ds:
+                _first_path = _peek_ds.file_paths[0] if _peek_ds.file_paths else None
+            if _first_path:
+                with File(_first_path) as _peek_f:
+                    _peek_params = _peek_f.load_parameters()
+                _peek_params.update(config_params)
+                axis_selections = _axis_selections_from_params(_peek_params)
+        except Exception:
+            pass  # fall back to runtime slicing if peek fails
+
     dataloader = Dataloader(
         dataset_path,
         key=key,
@@ -315,9 +307,9 @@ def run_processing(
         num_threads=num_threads,
         insert_frame_axis=False,
         sort_files=True,
+        axis_selections=axis_selections,
         **dataset_hf_kwargs,
     )
-    dataset_files.close()
 
     iterator = iter(dataloader)
     total_batches = len(dataloader)
@@ -333,20 +325,18 @@ def run_processing(
         pipeline_call = timer(pipeline_call, name="pipeline")
 
     _DEFAULT_FPS = 20
-    _scan_spec_fields = {f.name for f in dataclass_fields(ScanSpec)}
 
     prev_file_path = None
     data_output = []
     filestem = None
     parameters = None
-    selected_transmits = None
     params = None
     fps = _DEFAULT_FPS
 
     def save_video_worker(
         video: np.ndarray,
         save_path: Path,
-        src_file_path: str,
+        parameters,
         fps: int,
     ):
         if save_path.exists() and not overwrite:
@@ -355,16 +345,13 @@ def run_processing(
         if save_as in ["mp4", "gif"]:
             io_lib.save_video(video, save_path, fps=fps)
         elif save_as == "hdf5":
-            with File(src_file_path) as src:
-                scan_dict = {
-                    k: v for k, v in src.get_scan_parameters().items() if k in _scan_spec_fields
-                }
-                probe_dict = _build_probe_dict(src.probe)
+            scan_dict = parameters.to_scan_dict()
+            probe_dict = parameters.to_probe_dict()
             File.create(
                 save_path,
                 data={"image": {"values": video}},
-                scan=scan_dict if scan_dict else None,
-                probe=probe_dict if probe_dict else None,
+                scan=scan_dict or None,
+                probe=probe_dict or None,
                 overwrite=overwrite,
             )
         elif save_as == "nii.gz":
@@ -373,6 +360,14 @@ def run_processing(
             log.info(f"Saved NIfTI to {log.yellow(save_path)}")
 
     pbar = keras.utils.Progbar(total_batches)
+
+    @jit
+    def to_8bit(image, dynamic_range):
+        image = ops.nan_to_num(image, nan=dynamic_range[0])
+        image = translate(image, dynamic_range, (0, 255))
+        image = ops.clip(image, 0, 255)
+        image = ops.cast(image, "uint8")
+        return image
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         save_future = None
@@ -385,12 +380,12 @@ def run_processing(
 
             if file_path != prev_file_path:
                 if prev_file_path is not None:
-                    video = np.stack([ops.convert_to_numpy(f) for f in data_output], axis=0)
+                    video = ops.convert_to_numpy(data_output)
                     save_path = save_dir / f"{filestem}.{save_as}"
                     if save_future is not None:
                         save_future.result()
                     save_future = executor.submit(
-                        save_video_worker, video, save_path, prev_file_path, fps
+                        save_video_worker, video, save_path, parameters, fps
                     )
                     data_output = []
                     if file_path is None:
@@ -402,7 +397,6 @@ def run_processing(
                     parameters = f.load_parameters()
                 parameters.update(config_params)
 
-                selected_transmits = np.array([int(t) for t in parameters.selected_transmits])
                 try:
                     fps = int(round(parameters.frames_per_second))
                 except (ValueError, AttributeError):
@@ -415,16 +409,13 @@ def run_processing(
             if file_path is None:
                 break
 
-            # slice to selected transmits (transmit axis = 0 when insert_frame_axis=False)
-            frame = frame[selected_transmits]
-
             output = pipeline_call(data=frame, **params)  # ty: ignore[invalid-argument-type]
             processed_frame = output["data"]
 
             if not keep_dynamic_range:
                 dr = getattr(parameters, "dynamic_range", None)
                 dynamic_range = tuple(dr) if dr is not None else (-60, 0)
-                processed_frame = display.to_8bit(processed_frame, dynamic_range, pillow=False)
+                processed_frame = to_8bit(processed_frame, dynamic_range)
 
             data_output.append(processed_frame)
             pbar.add(1)

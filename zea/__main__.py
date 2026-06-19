@@ -8,9 +8,15 @@ Usage::
 """
 
 import argparse
+import os
 import warnings
 from dataclasses import dataclass
 from typing import Annotated, Union
+
+import zea
+
+if "ZEA_LOG_LEVEL" not in os.environ:
+    zea.log.set_level("WARNING")
 
 import tyro
 

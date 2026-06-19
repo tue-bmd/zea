@@ -422,7 +422,7 @@ def _assert_descriptions_and_custom_elements_equal(path, other_path: Path):
     description, custom_elements = _load_description_and_custom_elements(path)
     other_description, other_custom_elements = _load_description_and_custom_elements(other_path)
     assert description == other_description
-    assert len(custom_elements) == len(other_custom_elements)
+    assert custom_elements == other_custom_elements
 
 
 def _assert_beamformed_data_still_exists(path: Path):

@@ -41,6 +41,42 @@ from zea.utils import canonicalize_axis, map_negative_indices
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
 
 
+def _normalize_axis_selections(
+    axis_selections: dict,
+    num_dims: int,
+    reserved_axes: set[int],
+) -> dict[int, list[int] | slice]:
+    """Validate and normalize ``axis_selections`` into a canonical form.
+
+    Converts raw axis keys to non-negative indices, checks for conflicts with
+    reserved axes (frame axis / additional_axes_iter), and validates that list
+    selections are 1-D, non-empty, and strictly increasing (required by h5py).
+    """
+    normalized: dict[int, list[int] | slice] = {}
+    for raw_axis, sel in axis_selections.items():
+        axis = canonicalize_axis(int(raw_axis), num_dims)
+        if axis in reserved_axes:
+            raise ValueError(
+                f"axis_selections axis {raw_axis} conflicts with initial_frame_axis "
+                "or additional_axes_iter"
+            )
+        if isinstance(sel, slice):
+            normalized[axis] = sel
+        else:
+            arr = np.asarray(sel, dtype=np.intp)
+            if arr.ndim != 1 or arr.size == 0:
+                raise ValueError(
+                    f"axis_selections[{raw_axis}] must be a 1-D non-empty list of ints"
+                )
+            if np.any(np.diff(arr) <= 0):
+                raise ValueError(
+                    f"axis_selections[{raw_axis}] must be strictly increasing "
+                    "(h5py requires sorted, unique indices)"
+                )
+            normalized[axis] = arr.tolist()
+    return normalized
+
+
 def generate_h5_indices(
     file_paths: List[str],
     file_shapes: list,
@@ -53,6 +89,8 @@ def generate_h5_indices(
     overlapping_blocks: bool = False,
     limit_n_frames: int | None = None,
     pad_incomplete_blocks: bool = False,
+    axis_selections: dict | None = None,
+    offset_n_frames: int = 0,
 ):
     """Generate indices for h5 files.
 
@@ -71,12 +109,17 @@ def generate_h5_indices(
         sort_files (bool, optional): Sort files by number. Defaults to True.
         overlapping_blocks (bool, optional): Will take n_frames from sequence, then move by 1.
             Defaults to False.
-        limit_n_frames (int, optional): Limit the number of frames to load from each file. This
-            means n_frames per data file will be used. These will be the first frames in the file.
-            Defaults to None.
+        limit_n_frames (int, optional): Maximum number of frames to load per file, counted from
+            ``offset_n_frames``. Defaults to None (no limit).
         pad_incomplete_blocks (bool, optional): Keep files that are too short to fill a full block
             by emitting a single partial block with the available frames. The loader zeropads these
             samples to n_frames. Defaults to False.
+        axis_selections (dict, optional): Map of ``{axis: indices}`` applied at HDF5 read time to
+            pre-filter non-frame axes. For example ``{1: [0, 2, 5]}`` loads only those indices
+            along axis 1, avoiding reading unused data from disk. Defaults to None.
+        offset_n_frames (int, optional): Frame index to start iteration from within each file.
+            Combined with ``limit_n_frames`` this selects the half-open range
+            ``[offset_n_frames, offset_n_frames + limit_n_frames)``. Defaults to 0.
 
     Returns:
         list: List of tuples with indices to extract images from hdf5 files.
@@ -140,15 +183,14 @@ def generate_h5_indices(
     def axis_indices_files():
         # For every file
         for shape in file_shapes:
-            n_frames_in_file = shape[initial_frame_axis]
-            # Optionally limit frames to load from each file
-            n_frames_in_file = int(min(n_frames_in_file, frame_limit))
+            total_frames_in_file = shape[initial_frame_axis]
+            effective_end = int(min(total_frames_in_file, offset_n_frames + frame_limit))
             indices = [
                 slice(i, i + block_size, frame_index_stride)
-                for i in range(0, n_frames_in_file - block_size + 1, block_step_size)
+                for i in range(offset_n_frames, effective_end - block_size + 1, block_step_size)
             ]
-            if not indices and pad_incomplete_blocks and n_frames_in_file > 0:
-                indices = [slice(0, int(n_frames_in_file), frame_index_stride)]
+            if not indices and pad_incomplete_blocks and effective_end > offset_n_frames:
+                indices = [slice(offset_n_frames, effective_end, frame_index_stride)]
             yield [indices]
 
     indices = []
@@ -169,6 +211,9 @@ def generate_h5_indices(
             full_indices = [slice(size) for size in shape]
             for i, axis in enumerate([initial_frame_axis] + list(additional_axes_iter)):
                 full_indices[axis] = axis_index[i]
+            if axis_selections:
+                for axis, sel in axis_selections.items():
+                    full_indices[axis] = sel
             indices.append((file, key, tuple(full_indices)))
 
     if skipped_files > 0:
@@ -227,11 +272,13 @@ class H5DataSource:
         overlapping_blocks: bool = False,
         limit_n_samples: int | None = None,
         limit_n_frames: int | None = None,
+        offset_n_frames: int = 0,
         return_filename: bool = False,
         cache: bool = False,
         validate: bool = True,
         revision: str | None = None,
         pad_incomplete_blocks: bool = False,
+        axis_selections: dict | None = None,
         **kwargs,
     ):
         self.return_filename = return_filename
@@ -265,9 +312,17 @@ class H5DataSource:
         self.file_shapes = _dataset.load_file_shapes(key)
         _dataset.close()
 
-        num_dims = len(self.file_shapes[0])
+        num_dims = len(self.file_shapes[0]) if self.file_shapes else 0
         self.initial_frame_axis = canonicalize_axis(int(initial_frame_axis), num_dims)
         self.additional_axes_iter = map_negative_indices(list(additional_axes_iter or []), num_dims)
+
+        # Validate and normalize axis_selections
+        reserved_axes = {self.initial_frame_axis} | set(self.additional_axes_iter)
+        self.normalized_axis_selections = (
+            _normalize_axis_selections(axis_selections, num_dims, reserved_axes)
+            if axis_selections and num_dims > 0
+            else {}
+        )
 
         # Compute per-sample index table
         self.indices = generate_h5_indices(
@@ -282,6 +337,8 @@ class H5DataSource:
             overlapping_blocks=overlapping_blocks,
             limit_n_frames=limit_n_frames,
             pad_incomplete_blocks=pad_incomplete_blocks,
+            axis_selections=self.normalized_axis_selections or None,
+            offset_n_frames=offset_n_frames,
         )
 
         if limit_n_samples is not None:
@@ -380,6 +437,9 @@ class Dataloader:
         - Load the data from each file using the specified key
         - Apply the following transformations in order (if specified):
 
+            - offset_n_frames / axis_selections (applied at HDF5 read time)
+            - limit_n_frames
+            - limit_n_samples
             - shuffle
             - shard
             - add channel dim
@@ -407,9 +467,14 @@ class Dataloader:
         seed: Random seed used for dataloader (e.g. shuffling). Default is ``None``.
             If ``None`` a random seed is generated.
         limit_n_samples: Limit total number of samples (useful for debugging).
-            Default is ``None`` (no limit).
-        limit_n_frames: Limit frames loaded per file to the first N frames.
-            Default is ``None`` (no limit).
+            Default is ``None`` (no limit). Note that this is not the same as files.
+            A file can have multiple samples, i.e. multiple frames. Note that this happens
+            before shuffle!
+        limit_n_frames: Maximum number of frames to load per file, counted from
+            ``offset_n_frames``. Default is ``None`` (no limit).
+        offset_n_frames: Frame index to start iteration from within each file.
+            Combined with ``limit_n_frames`` this selects the half-open range
+            ``[offset_n_frames, offset_n_frames + limit_n_frames)``. Default is ``0``.
         drop_remainder: Drop the final incomplete batch. Default is ``False``.
         image_size: Target ``(height, width)``. Default is ``None`` (no resizing).
         resize_type: Resize strategy. One of ``"resize"``, ``"center_crop"``,
@@ -471,6 +536,9 @@ class Dataloader:
             ``False``. Or when you want to use a persistent iterator between epochs, using
             ``dataset_repetitions`` to specify the number of epochs.
         convert_to_tensor: Whether to convert the data to a tensor (on cpu). Default is ``True``.
+        axis_selections: Map of ``{axis: indices}`` applied at HDF5 read time to pre-filter
+            non-frame axes. For example ``{1: [0, 2, 5]}`` loads only those indices along axis 1,
+            avoiding reading unused data from disk. Default is ``None``.
 
     Example:
         .. code-block:: python
@@ -498,6 +566,7 @@ class Dataloader:
         seed: int | None = None,
         limit_n_samples: int | None = None,
         limit_n_frames: int | None = None,
+        offset_n_frames: int = 0,
         drop_remainder: bool = False,
         image_size: tuple | None = None,
         resize_type: str | None = None,
@@ -527,6 +596,7 @@ class Dataloader:
         prefetch_buffer_size: int = 500,
         reshuffle_each_epoch: bool = True,
         convert_to_tensor: bool = True,
+        axis_selections: dict | None = None,
         **kwargs,
     ):
         # ── Validation ────────────────────────────────────────────────
@@ -569,11 +639,13 @@ class Dataloader:
             overlapping_blocks=overlapping_blocks,
             limit_n_samples=limit_n_samples,
             limit_n_frames=limit_n_frames,
+            offset_n_frames=offset_n_frames,
             return_filename=return_filename,
             cache=cache,
             validate=validate,
             revision=revision,
             pad_incomplete_blocks=pad_incomplete_blocks,
+            axis_selections=axis_selections,
             **kwargs,
         )
 

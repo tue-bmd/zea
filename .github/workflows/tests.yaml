@@ -210,7 +210,7 @@ jobs:
         run: |
           uv venv
           uv pip install --resolution lowest-direct -e ".[tests]" \
-            "tensorflow-cpu>=2.16" "jax[cpu]>=0.4.35" "torch>=2.2"
+            "tensorflow-cpu>=2.12.1" "jax[cpu]>=0.4.35" "torch>=2.2"
           echo "::group::Resolved dependency versions"
           uv pip freeze
           echo "::endgroup::"

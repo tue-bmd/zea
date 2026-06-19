@@ -799,3 +799,127 @@ def test_empty_dataloader_raises(monkeypatch):
                 "and that the filters/transforms do not discard all items."
             )
         dl._shape = dl._map_dataset[0].shape
+
+
+@pytest.fixture
+def axis_selections_hdf5(tmp_path):
+    """Dummy file shaped like zea raw_data: (frames, transmits, elems, samples, ch)."""
+    file_path = tmp_path / "axsel_0_0.hdf5"
+    data = np.arange(4 * 8 * 5 * 6 * 1, dtype=np.float32).reshape(4, 8, 5, 6, 1)
+    with h5py.File(file_path, "w") as f:
+        f.create_dataset("data/raw_data", data=data)
+    return file_path, data
+
+
+def test_axis_selections_list_prefilters_disk_read(axis_selections_hdf5):
+    """Passing a list of ints on a non-frame axis reads only those indices from disk."""
+    file_path, data = axis_selections_hdf5
+    selection = [0, 2, 4, 7]
+
+    source = H5DataSource(
+        file_paths=[str(file_path)],
+        key="data/raw_data",
+        n_frames=1,
+        insert_frame_axis=False,
+        validate=False,
+        axis_selections={1: selection},
+    )
+    assert len(source) == data.shape[0]
+    sample = source[0]
+    # insert_frame_axis=False concatenates the single frame axis away, so the
+    # remaining shape is (selected_transmits, elems, samples, ch).
+    assert sample.shape == (len(selection), 5, 6, 1)
+    np.testing.assert_array_equal(sample, data[0, selection])
+
+
+def test_axis_selections_slice(axis_selections_hdf5):
+    """Slice selections are forwarded unchanged."""
+    file_path, data = axis_selections_hdf5
+    source = H5DataSource(
+        file_paths=[str(file_path)],
+        key="data/raw_data",
+        n_frames=1,
+        insert_frame_axis=False,
+        validate=False,
+        axis_selections={1: slice(1, 6, 2)},
+    )
+    sample = source[0]
+    np.testing.assert_array_equal(sample, data[0, 1:6:2])
+
+
+def test_axis_selections_negative_axis(axis_selections_hdf5):
+    """Negative axes are canonicalized correctly."""
+    file_path, data = axis_selections_hdf5
+    # axis -2 on (frames, transmits, elems, samples, ch) is "samples" (= axis 3)
+    source = H5DataSource(
+        file_paths=[str(file_path)],
+        key="data/raw_data",
+        n_frames=1,
+        insert_frame_axis=False,
+        validate=False,
+        axis_selections={-2: [0, 3]},
+    )
+    sample = source[0]
+    # Index in two steps to avoid numpy's mixed-advanced-basic axis reordering.
+    expected = data[0][:, :, [0, 3]]
+    np.testing.assert_array_equal(sample, expected)
+
+
+def test_axis_selections_non_monotonic_raises(axis_selections_hdf5):
+    """h5py requires strictly increasing indices; we raise at construction time."""
+    file_path, _ = axis_selections_hdf5
+    with pytest.raises(ValueError, match="strictly increasing"):
+        H5DataSource(
+            file_paths=[str(file_path)],
+            key="data/raw_data",
+            n_frames=1,
+            insert_frame_axis=False,
+            validate=False,
+            axis_selections={1: [2, 0, 4]},
+        )
+
+
+def test_axis_selections_duplicate_raises(axis_selections_hdf5):
+    """Duplicate indices also break the strictly-increasing requirement."""
+    file_path, _ = axis_selections_hdf5
+    with pytest.raises(ValueError, match="strictly increasing"):
+        H5DataSource(
+            file_paths=[str(file_path)],
+            key="data/raw_data",
+            n_frames=1,
+            insert_frame_axis=False,
+            validate=False,
+            axis_selections={1: [0, 2, 2, 4]},
+        )
+
+
+def test_axis_selections_conflict_with_frame_axis_raises(axis_selections_hdf5):
+    """axis_selections must not target initial_frame_axis."""
+    file_path, _ = axis_selections_hdf5
+    with pytest.raises(ValueError, match="conflicts with initial_frame_axis"):
+        H5DataSource(
+            file_paths=[str(file_path)],
+            key="data/raw_data",
+            n_frames=1,
+            insert_frame_axis=False,
+            validate=False,
+            axis_selections={0: [0, 1]},
+        )
+
+
+def test_axis_selections_via_dataloader(axis_selections_hdf5):
+    """End-to-end: Dataloader forwards axis_selections to the underlying source."""
+    file_path, data = axis_selections_hdf5
+    selection = [1, 3, 5]
+    loader = Dataloader(
+        str(file_path),
+        key="data/raw_data",
+        batch_size=None,
+        shuffle=False,
+        n_frames=1,
+        insert_frame_axis=False,
+        validate=False,
+        axis_selections={1: selection},
+    )
+    sample = np.asarray(next(iter(loader)))
+    np.testing.assert_array_equal(sample, data[0, selection])
