@@ -52,10 +52,6 @@ Example usage
 """  # noqa: E501
 
 from .convert.camus import sitk_load
-from .data_format import (
-    DatasetElement,
-    validate_input_data,
-)
 from .dataloader import Dataloader
 from .datasets import Dataset, Folder
-from .file import File, load_file
+from .file import CustomElement, File, load_file
