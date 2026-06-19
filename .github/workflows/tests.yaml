@@ -186,6 +186,42 @@ jobs:
           slug: ${{ env.MAIN_REPO }}
           flags: unit
 
+  # Guard against zea accidentally using functionality newer than the dependency
+  # floors declared in pyproject.toml. Installs the *lowest* allowed versions of
+  # zea's declared deps and runs the import tests against them.
+  minimum-deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          # Lowest Python we support (see requires-python in pyproject.toml).
+          python-version: "3.10"
+
+      - name: Install zea at lowest declared dependency versions
+        env:
+          UV_TORCH_BACKEND: cpu
+        run: |
+          uv venv
+          uv pip install --resolution lowest-direct -e ".[tests]" \
+            "tensorflow-cpu>=2.16" "jax[cpu]>=0.4.35" "torch>=2.2"
+          echo "::group::Resolved dependency versions"
+          uv pip freeze
+          echo "::endgroup::"
+
+      - name: Run import tests against minimum dependencies
+        # --no-sync: run in the floor-pinned venv as-is; never re-resolve to the
+        # default (highest) versions, which would defeat the guard.
+        # Only the import tests run here: this job exists to catch usage of APIs
+        # newer than the declared dependency floors, which surfaces at import time.
+        run: uv run --no-sync pytest -p no:cacheprovider ./tests/test_imports.py
+
   heavy-tests:
     needs: [image]
     runs-on: self-hosted
