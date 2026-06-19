@@ -465,6 +465,58 @@ exactly one of ``sampling_frequency`` or ``timestamps``:
 
 See :class:`~zea.data.spec.MetadataSpec` for the full list of supported standard fields.
 
+
+**Custom elements** (``custom`` group)
+
+Sometimes you need to store data that does not fit the zea spec at all — neither a spatial map
+nor a metadata signal. Use :class:`~zea.data.CustomElement` for this: a named array (or
+scalar) with a ``description`` and ``unit``, optionally nested under a ``group_name``.  Pass a
+list of them to the ``custom`` argument of :meth:`~zea.File.create`; they are written to a
+dedicated ``custom`` group and read back via :attr:`~zea.File.custom`.
+
+.. doctest::
+
+    >>> from zea.data import CustomElement
+
+    >>> custom = [
+    ...     CustomElement(
+    ...         name="lens_correction",
+    ...         data=1.5,
+    ...         description="Scalar one-way delay offset.",
+    ...         unit="wavelengths",
+    ...     ),
+    ...     CustomElement(
+    ...         name="profile",
+    ...         data=np.arange(4, dtype=np.float32),
+    ...         description="Per-element lens profile.",
+    ...         unit="-",
+    ...         group_name="lens",  # optional (nested) sub-group
+    ...     ),
+    ... ]
+
+    >>> File.create(
+    ...     "custom_elements.hdf5",
+    ...     data={"raw_data": raw},
+    ...     scan=scan,
+    ...     probe=probe,
+    ...     custom=custom,
+    ...     overwrite=True,
+    ... )
+
+    >>> with File("custom_elements.hdf5") as f:
+    ...     elements = {e.name: e for e in f.custom}
+    >>> sorted(elements)
+    ['lens_correction', 'profile']
+    >>> float(elements["lens_correction"].data)
+    1.5
+    >>> elements["profile"].group_name
+    'lens'
+
+.. testcleanup::
+
+    import os
+    os.remove("custom_elements.hdf5")
+
 -------------------------------
 Supported datasets & conversion
 -------------------------------
