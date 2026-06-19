@@ -24,6 +24,7 @@ Public API
     Backend-agnostic automatic differentiation wrapper.
 """
 
+import functools
 from contextlib import nullcontext
 
 import keras
@@ -140,8 +141,18 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
     elif backend == "jax" and not jax:
         return func
     else:
-        _warn_jit_not_supported(backend)
-        return func
+        # Return a lazy wrapper that warns only on first invocation.
+        # Deferring to call-time lets outer pipelines propagate jit_options=None
+        # and replace this wrapper before it is ever executed, so no warning
+        # fires when the user correctly suppresses JIT at the outer level.
+        _backend = backend
+
+        @functools.wraps(func)
+        def _warn_on_first_call(*args, **kw):
+            _warn_jit_not_supported(_backend)
+            return func(*args, **kw)
+
+        return _warn_on_first_call
 
 
 class device:
