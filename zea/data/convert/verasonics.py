@@ -990,8 +990,8 @@ class VerasonicsFile(h5py.File):
                 If this flag is set to False, an error is raised when such a mode is detected.
             buffer_index (int, optional): The buffer index to read from. Defaults to 0.
             additional_functions (list, optional): A list of functions that read additional
-                data from the file. Each function should take the file as input and return a
-                `CustomElement`. Defaults to None.
+                data from the file. Each function should take the `VerasonicsFile` as input
+                and return a `CustomElement`. Defaults to None.
         """
 
         if additional_functions is None:
@@ -1138,8 +1138,8 @@ class VerasonicsFile(h5py.File):
             enable_compression (bool, optional): Whether to enable compression when saving
                 the zea file. Defaults to True.
             additional_functions (list, optional): A list of functions that read additional
-                data from the file. Each function should take the file as input and return a
-                `CustomElement`. Defaults to None.
+                data from the file. Each function should take the `VerasonicsFile` as input
+                and return a `CustomElement`. Defaults to None.
         """
         # Here we call all the functions to read the data from the file
         log.info("Reading Verasonics file...")

@@ -94,29 +94,6 @@ def _load_custom_elements_from_group(file, path: str) -> List[CustomElement]:
     return elements
 
 
-def _write_custom_elements(file: "File", custom_elements: List[CustomElement]):
-    """Write :class:`CustomElement` objects into the ``custom`` group of *file*."""
-    if "custom" not in file:
-        custom_group = file.create_group("custom")
-        custom_group.attrs["description"] = (
-            "This group contains custom elements not in the zea format, added by the user."
-        )
-
-    for element in custom_elements:
-        group_path = "custom"
-        if element.group_name:
-            group_path = f"custom/{element.group_name}"
-            if group_path not in file:
-                file.create_group(group_path)
-
-        data = np.asarray(element.data)
-        is_scalar = np.isscalar(data) or data.ndim == 0
-        compression = DEFAULT_COMPRESSION if not is_scalar else None
-        ds = file[group_path].create_dataset(element.name, data=data, compression=compression)
-        ds.attrs["description"] = element.description
-        ds.attrs["unit"] = element.unit
-
-
 class _StringDataset:
     """Thin wrapper around an h5py string Dataset that auto-decodes bytes on read.
 

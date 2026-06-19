@@ -2420,8 +2420,21 @@ class FileSpec(Spec):
                     warn_missing_optional_fields=warn_missing_optional_fields,
                 )
 
-            # Write any custom (non-spec) elements into the 'custom' group.
+            # Write any custom (non-spec) elements into the 'custom' group, reusing the
+            # standard Spec dataset-writing logic (scalar/string/compression handling).
             if self.custom:
-                from zea.data.file import _write_custom_elements
-
-                _write_custom_elements(f, self.custom)
+                custom_group = f.create_group("custom")
+                custom_group.attrs["description"] = (
+                    "This group contains custom elements not in the zea format, added by the user."
+                )
+                for element in self.custom:
+                    group = (
+                        custom_group.require_group(element.group_name)
+                        if element.group_name
+                        else custom_group
+                    )
+                    self.create_dataset(
+                        group, element.name, np.asarray(element.data), compression=compression
+                    )
+                    group[element.name].attrs["description"] = element.description
+                    group[element.name].attrs["unit"] = element.unit
