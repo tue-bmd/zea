@@ -433,25 +433,25 @@ class Dataloader:
 
     Does the following in order to load a dataset:
 
-        - Find all .hdf5 files in the director(ies)
-        - Load the data from each file using the specified key
-        - Apply the following transformations in order (if specified):
+    - Find all .hdf5 files in the director(ies)
+    - Load the data from each file using the specified key
+    - Apply the following transformations in order (if specified):
 
-            - offset_n_frames / axis_selections (applied at HDF5 read time)
-            - limit_n_frames
-            - limit_n_samples
-            - shuffle
-            - shard
-            - add channel dim
-            - clip image range
-            - assert image range
-            - resize
-            - repeat
-            - batch
-            - cast to float32
-            - normalize
-            - augmentation
-            - convert_to_tensor
+      - offset_n_frames / axis_selections (applied at HDF5 read time)
+      - limit_n_frames
+      - limit_n_samples
+      - shuffle
+      - shard
+      - add channel dim
+      - clip image range
+      - assert image range
+      - resize
+      - repeat
+      - batch
+      - cast to float32
+      - normalize
+      - augmentation
+      - convert_to_tensor
 
 
     Args:
