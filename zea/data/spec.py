@@ -22,7 +22,7 @@ UNITS = {
     "Hz": "Hertz",
     "s": "seconds",
     "V": "volts",
-    "-": "unitless",
+    "–": "unitless",
     "rad": "radians",
     "dB": "decibels",
     "#": "count",
@@ -33,7 +33,7 @@ DEFAULT_COMPRESSION = "lzf"
 
 # Default unit/description for every SCHEMA leaf field.  Subclasses may
 # override by defining their own FIELD_METADATA dict.
-_DEFAULT_FIELD_UNIT = "-"
+_DEFAULT_FIELD_UNIT = "–"
 _DEFAULT_FIELD_DESCRIPTION = ""
 
 
@@ -623,7 +623,7 @@ class Map(Spec):
     }
 
     FIELD_METADATA = {
-        "values": {"unit": "-", "description": "Map pixel values."},
+        "values": {"unit": "–", "description": "Map pixel values."},
         "coordinates": {
             "unit": "m",
             "description": "Per-pixel Cartesian positions (x, y, z) in metres.",
@@ -641,11 +641,11 @@ class Map(Spec):
                 "acquired after."
             ),
         },
-        "labels": {"unit": "-", "description": "Labels for each channel in values."},
-        "description": {"unit": "-", "description": "Free-text description of the map contents."},
-        "unit": {"unit": "-", "description": "Physical unit of the map values, e.g. 'm/s', '%'."},
-        "min": {"unit": "-", "description": "Minimum value of the map."},
-        "max": {"unit": "-", "description": "Maximum value of the map."},
+        "labels": {"unit": "–", "description": "Labels for each channel in values."},
+        "description": {"unit": "–", "description": "Free-text description of the map contents."},
+        "unit": {"unit": "–", "description": "Physical unit of the map values, e.g. 'm/s', '%'."},
+        "min": {"unit": "–", "description": "Minimum value of the map."},
+        "max": {"unit": "–", "description": "Maximum value of the map."},
     }
 
     def __post_init__(self):
@@ -854,8 +854,8 @@ class AlignedData(Spec):
     }
 
     FIELD_METADATA = {
-        "values": {"unit": "-", "description": "Time-of-flight corrected channel data."},
-        "labels": {"unit": "-", "description": "Channel labels, e.g. 'RF' or ['I', 'Q']."},
+        "values": {"unit": "–", "description": "Time-of-flight corrected channel data."},
+        "labels": {"unit": "–", "description": "Channel labels, e.g. 'RF' or ['I', 'Q']."},
     }
 
     def __post_init__(self):
@@ -1096,7 +1096,7 @@ class DataSpec(Spec):
     }
 
     FIELD_METADATA = {
-        "raw_data": {"unit": "-", "description": "Raw channel data."},
+        "raw_data": {"unit": "–", "description": "Raw channel data."},
         "aligned_data": {"description": "Time-of-flight corrected data.", "rare": True},
         "beamformed_data": {"description": "Beamformed data.", "rare": True},
         "envelope_data": {"description": "Envelope-detected data.", "rare": True},
@@ -1289,7 +1289,7 @@ class ScanSpec(Spec):
         "demodulation_frequency": {"unit": "Hz", "description": "Demodulation frequency."},
         "initial_times": {"unit": "s", "description": "A/D converter start times per transmit."},
         "t0_delays": {"unit": "s", "description": "Transmit delays per element."},
-        "tx_apodizations": {"unit": "-", "description": "Transmit apodization per element."},
+        "tx_apodizations": {"unit": "–", "description": "Transmit apodization per element."},
         "focus_distances": {"unit": "m", "description": "Transmit focus distances."},
         "transmit_origins": {"unit": "m", "description": "Transmit beam origins (x, y, z)."},
         "polar_angles": {"unit": "rad", "description": "Polar angles of transmit beams."},
@@ -1297,7 +1297,7 @@ class ScanSpec(Spec):
         "azimuth_angles": {"unit": "rad", "description": "Azimuthal angles of transmit beams."},
         "sound_speed": {"unit": "m/s", "description": "Speed of sound."},
         "tgc_gain_curve": {
-            "unit": "-",
+            "unit": "–",
             "description": "Time-gain-compensation curve.",
             "rare": True,
         },
@@ -1538,10 +1538,10 @@ class Subject(Spec):
     }
 
     FIELD_METADATA = {
-        "id": {"unit": "-", "description": "Subject ID. Needed for subject-wise splits."},
-        "type": {"unit": "-", "description": "Subject type, e.g. human, phantom, animal."},
-        "age": {"unit": "-", "description": "Subject age in years.", "rare": True},
-        "sex": {"unit": "-", "description": "Subject sex.", "rare": True},
+        "id": {"unit": "–", "description": "Subject ID. Needed for subject-wise splits."},
+        "type": {"unit": "–", "description": "Subject type, e.g. human, phantom, animal."},
+        "age": {"unit": "–", "description": "Subject age in years.", "rare": True},
+        "sex": {"unit": "–", "description": "Subject sex.", "rare": True},
         "fat_percentage": {"unit": "%", "description": "Subject fat percentage.", "rare": True},
     }
 
@@ -1663,7 +1663,7 @@ class ProbePose(Signal):
             ),
         },
         "rotation": {
-            "unit": "-",
+            "unit": "–",
             "description": (
                 "Orientation associated with the transducer-tip pose in the "
                 "x-lateral, y-elevation, z-axial coordinate convention, interpreted "
@@ -1671,7 +1671,7 @@ class ProbePose(Signal):
             ),
         },
         "rotation_representation": {
-            "unit": "-",
+            "unit": "–",
             "description": (
                 "Rotation parameterization: one of euler_xyz, quaternion_wxyz, or quaternion_xyzw."
             ),
@@ -1730,7 +1730,7 @@ class Signal1D(Signal):
     }
 
     FIELD_METADATA = {
-        "samples": {"unit": "-", "description": "Signal samples."},
+        "samples": {"unit": "–", "description": "Signal samples."},
         **Signal.FIELD_METADATA,
     }
 
@@ -1758,7 +1758,7 @@ class SignalND(Signal):
     }
 
     FIELD_METADATA = {
-        "samples": {"unit": "-", "description": "Signal samples."},
+        "samples": {"unit": "–", "description": "Signal samples."},
         **Signal.FIELD_METADATA,
     }
 
@@ -1787,10 +1787,10 @@ class Annotations(Spec):
     }
 
     FIELD_METADATA = {
-        "anatomy": {"unit": "-", "description": "Anatomy label."},
-        "view": {"unit": "-", "description": "View label."},
-        "label": {"unit": "-", "description": "Pathology or classification label."},
-        "image_quality": {"unit": "-", "description": "Image quality label.", "rare": True},
+        "anatomy": {"unit": "–", "description": "Anatomy label."},
+        "view": {"unit": "–", "description": "View label."},
+        "label": {"unit": "–", "description": "Pathology or classification label."},
+        "image_quality": {"unit": "–", "description": "Image quality label.", "rare": True},
     }
 
 
@@ -1817,21 +1817,21 @@ class MetadataSpec(Spec):
     }
 
     FIELD_METADATA = {
-        "subject": {"unit": "-", "description": "Subject associated with the study."},
-        "credit": {"unit": "-", "description": "Credit or attribution for the dataset."},
+        "subject": {"unit": "–", "description": "Subject associated with the study."},
+        "credit": {"unit": "–", "description": "Credit or attribution for the dataset."},
         "probe_pose": {
-            "unit": "-",
+            "unit": "–",
             "description": "Sampled probe pose at the transducer tip.",
             "rare": True,
         },
-        "voice_narration": {"unit": "-", "description": "Voice narration signal.", "rare": True},
-        "ecg": {"unit": "-", "description": "Electrocardiogram signal.", "rare": True},
+        "voice_narration": {"unit": "–", "description": "Voice narration signal.", "rare": True},
+        "ecg": {"unit": "–", "description": "Electrocardiogram signal.", "rare": True},
         "text_report": {
-            "unit": "-",
+            "unit": "–",
             "description": "Free-text report associated with the study.",
             "rare": True,
         },
-        "annotations": {"unit": "-", "description": "Frame-level annotations.", "rare": True},
+        "annotations": {"unit": "–", "description": "Frame-level annotations.", "rare": True},
     }
 
     def __init__(
@@ -1909,7 +1909,7 @@ class MetricsSpec(Spec):
             "rare": True,
         },
         "coherence_factor": {
-            "unit": "-",
+            "unit": "–",
             "description": "Coherence factor; ratio of coherent to incoherent energy (0-1).",
             "rare": True,
         },
@@ -1952,7 +1952,7 @@ class TrackSpec(Spec):
     FIELD_METADATA = {
         # label is enforced by FileSpec for multi-track (ValueError), and legitimately
         # absent for single-track files — warning here is never useful.
-        "label": {"unit": "-", "description": "Short human-readable track name.", "rare": True},
+        "label": {"unit": "–", "description": "Short human-readable track name.", "rare": True},
     }
 
     def __post_init__(self):

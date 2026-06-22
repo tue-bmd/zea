@@ -88,7 +88,7 @@ Units
 ~~~~~
 
 Unit symbols used in the ``Unit`` column of the field tables below.
-A unit of ``-`` denotes a unitless (dimensionless) quantity.
+A unit of ``–`` denotes a unitless (dimensionless) quantity.
 
 .. list-table::
    :header-rows: 1
@@ -106,7 +106,7 @@ A unit of ``-`` denotes a unitless (dimensionless) quantity.
      - seconds
    * - ``V``
      - volts
-   * - ``-``
+   * - ``–``
      - unitless
    * - ``rad``
      - radians
@@ -815,7 +815,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
          * - ``tx_apodizations``
            - ``float32``
            - (n_tx, n_el)
-           - -
+           - –
            - Transmit apodization per element.
            - |badge-req|
          * - ``focus_distances``
@@ -857,7 +857,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
          * - ``tgc_gain_curve``
            - ``float32``
            - (n_ax)
-           - -
+           - –
            - Time-gain-compensation curve.
            - |badge-opt|
          * - ``waveforms_one_way``
@@ -964,43 +964,43 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
          * - ``subject``
            - :class:`~zea.data.spec.Subject`
            - group
-           - -
+           - –
            - Subject associated with the study.
            - |badge-opt|
          * - ``credit``
            - ``str``
            - scalar
-           - -
+           - –
            - Credit or attribution for the dataset.
            - |badge-opt|
          * - ``probe_pose``
            - :class:`~zea.data.spec.ProbePose`
            - group
-           - -
+           - –
            - Sampled probe pose at the transducer tip.
            - |badge-opt|
          * - ``voice_narration``
            - :class:`~zea.data.spec.Signal1D`
            - group
-           - -
+           - –
            - Voice narration signal.
            - |badge-opt|
          * - ``ecg``
            - :class:`~zea.data.spec.Signal1D`
            - group
-           - -
+           - –
            - Electrocardiogram signal.
            - |badge-opt|
          * - ``text_report``
            - ``str``
            - scalar
-           - -
+           - –
            - Free-text report associated with the study.
            - |badge-opt|
          * - ``annotations``
            - :class:`~zea.data.spec.Annotations`
            - group
-           - -
+           - –
            - Frame-level annotations.
            - |badge-opt|
 
@@ -1104,13 +1104,13 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
             * - ``rotation``
               - ``float32``
               - (T, 3) or (T, 4)
-              - -
+              - –
               - Orientation associated with the transducer-tip pose in the x-lateral, y-elevation, z-axial coordinate convention, interpreted according to rotation_representation.
               - |badge-req|
             * - ``rotation_representation``
               - ``str``
               - scalar
-              - -
+              - –
               - Rotation parameterization: one of euler_xyz, quaternion_wxyz, or quaternion_xyzw.
               - |badge-req|
             * - ``start_time_offset``
@@ -1150,7 +1150,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
             * - ``samples``
               - ``uint8`` | ``float32`` | ``int16`` | ``complex64``
               - (T)
-              - -
+              - –
               - Signal samples.
               - |badge-req|
             * - ``start_time_offset``
@@ -1197,7 +1197,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
          * - ``coherence_factor``
            - ``float32``
            - (n_frames)
-           - -
+           - –
            - Coherence factor; ratio of coherent to incoherent energy (0-1).
            - |badge-opt|
 

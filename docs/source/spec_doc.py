@@ -370,7 +370,7 @@ def generate() -> str:
         "~~~~~",
         "",
         "Unit symbols used in the ``Unit`` column of the field tables below.",
-        "A unit of ``-`` denotes a unitless (dimensionless) quantity.",
+        "A unit of ``–`` denotes a unitless (dimensionless) quantity.",
         "",
         rst_units_table(),
         "",
