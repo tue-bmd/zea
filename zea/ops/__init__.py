@@ -148,7 +148,7 @@ directly using an ``hf://`` URI, without manually downloading any files:
 
 .. doctest::
 
-    >>> pipeline = Pipeline.from_path("hf://zeahub/picmus/config_iq.yaml", revision="v0.1.0")
+    >>> pipeline = Pipeline.from_path("hf://zeahub/picmus/config_iq.yaml")
     >>> print(pipeline)
     Beamform(PatchedGrid(TOFCorrection -> DelayAndSum) -> ReshapeGrid) -> EnvelopeDetect -> Normalize -> LogCompress
 

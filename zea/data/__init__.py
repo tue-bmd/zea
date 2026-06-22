@@ -26,7 +26,7 @@ Example usage
     ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
     ... )
 
-    >>> with File(path_to_file, revision="v0.1.0", mode="r") as file:
+    >>> with File(path_to_file, mode="r") as file:
     ...     data = file.data.raw_data[0]  # first frame
     ...     params = file.load_parameters()
 

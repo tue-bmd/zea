@@ -63,13 +63,13 @@ An example of this workflow in code is shown below. In this example, we load a c
    zea.visualize.set_mpl_style()
 
    # loading a config file from Hugging Face, but can also load a local config file
-   config = zea.Config.from_path("hf://zeahub/picmus/config_iq.yaml", revision="v0.1.0")
+   config = zea.Config.from_path("hf://zeahub/picmus/config_iq.yaml")
 
    path = (
       "hf://zeahub/picmus/in_vivo/carotid_cross/"
       "carotid_cross_expe_dataset_iq/carotid_cross_expe_dataset_iq.hdf5"
    )
-   with zea.File(path, revision="v0.1.0") as file:
+   with zea.File(path) as file:
       data = file.data.raw_data[0]
       # load the merged probe + scan parameters
       parameters = file.load_parameters()
