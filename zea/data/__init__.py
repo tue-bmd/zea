@@ -40,7 +40,7 @@ Example usage
     >>> # Use a dataloader for training
     >>> dataloader = Dataloader(
     ...     "hf://zeahub/camus-sample/",
-    ...     key="data/image",
+    ...     key="data/image/values",
     ...     batch_size=4,
     ...     image_size=(256, 256),
     ...     shuffle=True,
