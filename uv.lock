@@ -7455,7 +7455,7 @@ wheels = [
 
 [[package]]
 name = "zea"
-version = "0.1.0a5"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "decorator" },
