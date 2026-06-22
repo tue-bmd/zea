@@ -10,6 +10,7 @@ File hierarchy
 --------------
 
 Every ``zea`` HDF5 file follows the layout shown below.
+See the :ref:`group reference <group-reference>` for a full description of each group's fields.
 
 .. code-block:: text
 
@@ -42,8 +43,12 @@ Every ``zea`` HDF5 file follows the layout shown below.
    │   ├── annotations/              group (Annotations)
    │   ├── ecg/                      group (Signal1D)
    │   └── …
-   └── metrics/
-       └── …
+   ├── metrics/
+   │   └── …
+   └── custom/
+       ├── <name>                    any dtype  (CustomElement)
+       └── <group>/
+           └── <name>                any dtype  (nested CustomElement)
 
 
 Root attributes
@@ -82,41 +87,6 @@ Stored as HDF5 root-level attributes (not groups).
      - |badge-opt|
 
 
-.. _data-spec-units:
-
-Units
-~~~~~
-
-Unit symbols used in the ``Unit`` column of the field tables below.
-A unit of ``–`` denotes a unitless (dimensionless) quantity.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-
-   * - Symbol
-     - Meaning
-   * - ``m/s``
-     - meters per second
-   * - ``m``
-     - meters
-   * - ``Hz``
-     - Hertz
-   * - ``s``
-     - seconds
-   * - ``V``
-     - volts
-   * - ``–``
-     - unitless
-   * - ``rad``
-     - radians
-   * - ``dB``
-     - decibels
-   * - ``#``
-     - count
-   * - ``%``
-     - percent
-
 .. _group-reference:
 
 Group reference
@@ -150,52 +120,52 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - (n_frames, n_tx, n_ax, n_el, n_ch)
            - Raw channel data.
            - |badge-opt|
-         * - ``aligned_data``
+         * - ``aligned_data`` :ref:`↓ <spec-data-aligned-data>`
            - :class:`~zea.data.spec.AlignedData`
            - group
            - Time-of-flight corrected data.
            - |badge-opt|
-         * - ``beamformed_data``
+         * - ``beamformed_data`` :ref:`↓ <spec-data-beamformed-data>`
            - :class:`~zea.data.spec.BeamformedData`
            - group
            - Beamformed data.
            - |badge-opt|
-         * - ``envelope_data``
+         * - ``envelope_data`` :ref:`↓ <spec-data-envelope-data>`
            - :class:`~zea.data.spec.EnvelopeData`
            - group
            - Envelope-detected data.
            - |badge-opt|
-         * - ``image``
+         * - ``image`` :ref:`↓ <spec-data-image>`
            - :class:`~zea.data.spec.Image`
            - group
            - Reconstructed image data.
            - |badge-opt|
-         * - ``segmentation``
+         * - ``segmentation`` :ref:`↓ <spec-data-segmentation>`
            - :class:`~zea.data.spec.Segmentation`
            - group
            - Segmentation data.
            - |badge-opt|
-         * - ``sos_map``
+         * - ``sos_map`` :ref:`↓ <spec-data-sos-map>`
            - :class:`~zea.data.spec.SosMap`
            - group
            - Speed-of-sound map data.
            - |badge-opt|
-         * - ``strain_percentage_map``
+         * - ``strain_percentage_map`` :ref:`↓ <spec-data-strain-percentage-map>`
            - :class:`~zea.data.spec.StrainPercentageMap`
            - group
            - Strain map data.
            - |badge-opt|
-         * - ``shear_wave_elastography_map``
+         * - ``shear_wave_elastography_map`` :ref:`↓ <spec-data-shear-wave-elastography-map>`
            - :class:`~zea.data.spec.ShearWaveElastographyMap`
            - group
            - Shear-wave elastography data.
            - |badge-opt|
-         * - ``tissue_doppler``
+         * - ``tissue_doppler`` :ref:`↓ <spec-data-tissue-doppler>`
            - :class:`~zea.data.spec.TissueDopplerMap`
            - group
            - Tissue Doppler data.
            - |badge-opt|
-         * - ``color_doppler``
+         * - ``color_doppler`` :ref:`↓ <spec-data-color-doppler>`
            - :class:`~zea.data.spec.ColorDopplerMap`
            - group
            - Color Doppler velocity data.
@@ -211,6 +181,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
       Custom spatial maps are also accepted — any extra key passed to
       :class:`~zea.data.spec.DataSpec` is validated as a generic
       :class:`~zea.data.spec.Map` sub-group.
+
+      .. _spec-data-aligned-data:
 
       .. dropdown:: ``aligned_data``
 
@@ -235,6 +207,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - (n_ch)
               - Channel labels, e.g. 'RF' or ['I', 'Q'].
               - |badge-opt|
+
+      .. _spec-data-beamformed-data:
 
       .. dropdown:: ``beamformed_data``
 
@@ -295,6 +269,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Maximum value of the map.
               - |badge-opt|
 
+      .. _spec-data-envelope-data:
+
       .. dropdown:: ``envelope_data``
 
          Envelope-detected data. Values are ``float32`` in (n_frames, z, x) or (n_frames, z, x, y).
@@ -353,6 +329,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Maximum value of the map.
               - |badge-opt|
+
+      .. _spec-data-image:
 
       .. dropdown:: ``image``
 
@@ -413,6 +391,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Maximum value of the map.
               - |badge-opt|
 
+      .. _spec-data-segmentation:
+
       .. dropdown:: ``segmentation``
 
          Semantic segmentation mask. Values are ``bool`` in (n_frames, z, x, y, n_labels); ``labels`` names each channel.
@@ -471,6 +451,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Maximum value of the map.
               - |badge-opt|
+
+      .. _spec-data-sos-map:
 
       .. dropdown:: ``sos_map``
 
@@ -531,6 +513,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Maximum value of the map.
               - |badge-opt|
 
+      .. _spec-data-strain-percentage-map:
+
       .. dropdown:: ``strain_percentage_map``
 
          Strain map in %. Values are ``float32``.
@@ -589,6 +573,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Maximum value of the map.
               - |badge-opt|
+
+      .. _spec-data-shear-wave-elastography-map:
 
       .. dropdown:: ``shear_wave_elastography_map``
 
@@ -649,6 +635,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Maximum value of the map.
               - |badge-opt|
 
+      .. _spec-data-tissue-doppler:
+
       .. dropdown:: ``tissue_doppler``
 
          Tissue Doppler velocity map in m/s. Values are ``float32``.
@@ -707,6 +695,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Maximum value of the map.
               - |badge-opt|
+
+      .. _spec-data-color-doppler:
 
       .. dropdown:: ``color_doppler``
 
@@ -953,58 +943,52 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. list-table::
          :header-rows: 1
-         :widths: 22 16 18 7 27 10
+         :widths: 22 16 22 30 10
       
          * - Field
            - Type
            - Shape
-           - Unit
            - Description
            - 
-         * - ``subject``
+         * - ``subject`` :ref:`↓ <spec-meta-subject>`
            - :class:`~zea.data.spec.Subject`
            - group
-           - –
            - Subject associated with the study.
            - |badge-opt|
          * - ``credit``
            - ``str``
            - scalar
-           - –
            - Credit or attribution for the dataset.
            - |badge-opt|
-         * - ``probe_pose``
+         * - ``probe_pose`` :ref:`↓ <spec-meta-probe-pose>`
            - :class:`~zea.data.spec.ProbePose`
            - group
-           - –
            - Sampled probe pose at the transducer tip.
            - |badge-opt|
-         * - ``voice_narration``
+         * - ``voice_narration`` :ref:`↓ <spec-meta-ecg-voice-narration>`
            - :class:`~zea.data.spec.Signal1D`
            - group
-           - –
            - Voice narration signal.
            - |badge-opt|
-         * - ``ecg``
+         * - ``ecg`` :ref:`↓ <spec-meta-ecg-voice-narration>`
            - :class:`~zea.data.spec.Signal1D`
            - group
-           - –
            - Electrocardiogram signal.
            - |badge-opt|
          * - ``text_report``
            - ``str``
            - scalar
-           - –
            - Free-text report associated with the study.
            - |badge-opt|
-         * - ``annotations``
+         * - ``annotations`` :ref:`↓ <spec-meta-annotations>`
            - :class:`~zea.data.spec.Annotations`
            - group
-           - –
            - Frame-level annotations.
            - |badge-opt|
 
       **Sub-groups**
+
+      .. _spec-meta-subject:
 
       .. dropdown:: ``subject`` — Subject
 
@@ -1046,6 +1030,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - |badge-opt|
 
 
+      .. _spec-meta-annotations:
+
       .. dropdown:: ``annotations`` — Annotations
 
          Frame-level annotations, either per frame or broadcast labels.
@@ -1080,6 +1066,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Image quality label.
               - |badge-opt|
 
+
+      .. _spec-meta-probe-pose:
 
       .. dropdown:: ``probe_pose`` — ProbePose
 
@@ -1132,6 +1120,8 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - Explicit sample timestamps relative to sample 0.
               - |badge-opt|
 
+
+      .. _spec-meta-ecg-voice-narration:
 
       .. dropdown:: ``ecg / voice_narration`` — Signal1D
 

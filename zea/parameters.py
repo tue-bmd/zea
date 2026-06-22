@@ -118,7 +118,7 @@ from zea.probes import Probe
 
 
 class Parameters(BaseParameters):
-    """Represents a full ultrasound acquisition configuration with computed properties.
+    """Contains and computes all parameters relevant to an ultrasound acquisition.
 
     A :class:`Parameters` object holds **all** parameters relevant to an
     acquisition — merged probe and scan parameters — and computes derived

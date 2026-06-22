@@ -38,7 +38,9 @@ if TYPE_CHECKING:
 
 @ops_registry("pipeline")
 class Pipeline:
-    """Pipeline class for processing ultrasound data through a series of operations."""
+    """Pipeline class for processing ultrasound data through a series of
+    :class:`~zea.ops.base.Operation`s.
+    """
 
     def __init__(
         self,

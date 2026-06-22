@@ -73,7 +73,7 @@ class _SupportsKeysAndGetItem(Protocol):
 
 
 class Config(dict):
-    """Config class.
+    """Config object for managing configuration settings.
 
     This Config class extends a normal dictionary with dot notation access.
 

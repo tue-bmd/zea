@@ -44,9 +44,10 @@ exclude_patterns = [
     "_build",
     "Thumbs.db",
     ".DS_Store",
-    # Included verbatim by data-acquisition.rst; excluded as a standalone
-    # document so its labels (e.g. ``group-reference``) are not defined twice.
+    # Included verbatim by data-acquisition.rst; excluded as standalone
+    # documents so their labels are not defined twice.
     "_spec_ref.rst",
+    "_units_ref.rst",
     "_autosummary/zea.backend.tf2jax.rst",
     # Exclude internal implementation modules from documentation
     "_autosummary/zea.func.tensor.rst",
@@ -97,6 +98,11 @@ html_theme_options = {
 }
 html_static_path = ["../_static"]
 html_css_files = ["custom.css"]
+html_js_files = ["open-anchor-dropdown.js"]
+
+# Strip >>> / ... prompts when copying doctest blocks; leave other blocks intact.
+copybutton_prompt_text = r">>> |\.\.\. "
+copybutton_prompt_is_regexp = True
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
