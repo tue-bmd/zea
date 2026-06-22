@@ -11,8 +11,8 @@ import zea
 from zea.data.file import CustomElement, File, Track, _GroupProxy, _StringDataset, load_file
 from zea.data.legacy_file import dict_to_sorted_list
 from zea.data.spec import FileSpec, Image, ScanSpec, Segmentation
-from zea.probes import Probe
 from zea.parameters import Parameters
+from zea.probes import Probe
 
 from . import generate_example_dataset
 
@@ -189,11 +189,18 @@ def _scan_minimal(n_frames=3, n_tx=2, n_el=4):
         "polar_angles": np.zeros((n_tx,), dtype=np.float32),
         "azimuth_angles": np.zeros((n_tx,), dtype=np.float32),
         "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32),
+        "sound_speed": np.float32(1540.0),
     }
 
 
 def _probe_minimal(name=None, n_el=4):
-    probe = {"probe_geometry": np.zeros((n_el, 3), dtype=np.float32)}
+    probe = {
+        "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
+        "type": "linear",
+        "probe_center_frequency": np.float32(5e6),
+        "probe_bandwidth_percent": np.float32(70.0),
+        "element_width": np.float32(3e-4),
+    }
     if name is not None:
         probe["name"] = name
     return probe

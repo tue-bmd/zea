@@ -285,6 +285,7 @@ filterwarnings = [
     "ignore::DeprecationWarning:papermill.*",
     "ignore:.*__array__ implementation doesn't accept a copy keyword.*:DeprecationWarning",
     "ignore:.*os\\.fork\\(\\) was called.*:RuntimeWarning",
+    "ignore:.*hf_xet.*:DeprecationWarning",
 ]
 
 [tool.coverage.run]
@@ -292,6 +293,7 @@ branch = true
 parallel = true
 concurrency = ["multiprocessing", "thread"]
 sigterm = true
+omit = ["/tmp/__autograph_generated_file*.py"]
 
 [tool.coverage.report]
 omit = ["zea/ops/keras_ops.py", "zea/data/app.py"]

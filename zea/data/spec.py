@@ -631,6 +631,7 @@ class Map(Spec):
         "timestamps": {
             "unit": "s",
             "description": "Per-frame acquisition timestamps relative to frame 0.",
+            "rare": True,
         },
         "start_time_offset": {
             "unit": "s",
@@ -640,12 +641,21 @@ class Map(Spec):
                 "acquired before the first transmit event; positive means it was "
                 "acquired after."
             ),
+            "rare": True,
         },
-        "labels": {"unit": "–", "description": "Labels for each channel in values."},
-        "description": {"unit": "–", "description": "Free-text description of the map contents."},
-        "unit": {"unit": "–", "description": "Physical unit of the map values, e.g. 'm/s', '%'."},
-        "min": {"unit": "–", "description": "Minimum value of the map."},
-        "max": {"unit": "–", "description": "Maximum value of the map."},
+        "labels": {"unit": "–", "description": "Labels for each channel in values.", "rare": True},
+        "description": {
+            "unit": "–",
+            "description": "Free-text description of the map contents.",
+            "rare": True,
+        },
+        "unit": {
+            "unit": "–",
+            "description": "Physical unit of the map values, e.g. 'm/s', '%'.",
+            "rare": True,
+        },
+        "min": {"unit": "–", "description": "Minimum value of the map.", "rare": True},
+        "max": {"unit": "–", "description": "Maximum value of the map.", "rare": True},
     }
 
     def __post_init__(self):
