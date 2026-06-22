@@ -46,6 +46,7 @@ AUTOGEN_HEADER = """\
 """
 
 OUT_PATH = Path(__file__).parent / "_spec_ref.rst"
+UNITS_PATH = Path(__file__).parent / "_units_ref.rst"
 
 _IND = "   "  # 3-space RST indent unit
 
@@ -153,8 +154,12 @@ def rst_full_table(cls, base_indent: int = 0) -> str:
     return "\n".join(lines)
 
 
-def rst_no_unit_table(cls, base_indent: int = 0) -> str:
-    """Render a spec class as a table with description but no unit column."""
+def rst_no_unit_table(cls, base_indent: int = 0, subgroup_anchors: dict = None) -> str:
+    """Render a spec class as a table with description but no unit column.
+
+    subgroup_anchors: optional mapping of field name → RST label; when
+    present, subgroup field names become ref-links to their dropdowns.
+    """
     schema = cls.SCHEMA
     meta = getattr(cls, "FIELD_METADATA", {})
     p = _IND * base_indent
@@ -188,8 +193,12 @@ def rst_no_unit_table(cls, base_indent: int = 0) -> str:
         f"{p}     - ",
     ]
     for fname, type_s, shape_s, desc, badge in rows:
+        if subgroup_anchors and fname in subgroup_anchors:
+            field_cell = f"``{fname}`` :ref:`↓ <{subgroup_anchors[fname]}>`"
+        else:
+            field_cell = f"``{fname}``"
         lines += [
-            f"{p}   * - ``{fname}``",
+            f"{p}   * - {field_cell}",
             f"{p}     - {type_s}",
             f"{p}     - {shape_s}",
             f"{p}     - {desc}",
@@ -259,8 +268,12 @@ FILE_TREE = """\
    \u2502   \u251c\u2500\u2500 annotations/              group (Annotations)
    \u2502   \u251c\u2500\u2500 ecg/                      group (Signal1D)
    \u2502   \u2514\u2500\u2500 \u2026
-   \u2514\u2500\u2500 metrics/
-       \u2514\u2500\u2500 \u2026
+   \u251c\u2500\u2500 metrics/
+   \u2502   \u2514\u2500\u2500 \u2026
+   \u2514\u2500\u2500 custom/
+       \u251c\u2500\u2500 <name>                    any dtype  (CustomElement)
+       \u2514\u2500\u2500 <group>/
+           \u2514\u2500\u2500 <name>                any dtype  (nested CustomElement)
 """  # noqa: E501
 
 ROOT_ATTRS_TABLE = """\
@@ -294,6 +307,28 @@ ROOT_ATTRS_TABLE = """\
      - e.g. ``"2024-01-30T15:45:00Z"``
      - |badge-opt|
 """
+
+# RST anchor labels for subgroup dropdowns
+DATA_SUBGROUP_ANCHORS = {
+    "aligned_data": "spec-data-aligned-data",
+    "beamformed_data": "spec-data-beamformed-data",
+    "envelope_data": "spec-data-envelope-data",
+    "image": "spec-data-image",
+    "segmentation": "spec-data-segmentation",
+    "sos_map": "spec-data-sos-map",
+    "strain_percentage_map": "spec-data-strain-percentage-map",
+    "shear_wave_elastography_map": "spec-data-shear-wave-elastography-map",
+    "tissue_doppler": "spec-data-tissue-doppler",
+    "color_doppler": "spec-data-color-doppler",
+}
+
+META_SUBGROUP_ANCHORS = {
+    "subject": "spec-meta-subject",
+    "annotations": "spec-meta-annotations",
+    "probe_pose": "spec-meta-probe-pose",
+    "ecg": "spec-meta-ecg-voice-narration",
+    "voice_narration": "spec-meta-ecg-voice-narration",
+}
 
 # Short descriptions for each grouped data type
 MAP_DESCRIPTIONS = {
@@ -346,6 +381,7 @@ def generate() -> str:
         "--------------",
         "",
         "Every ``zea`` HDF5 file follows the layout shown below.",
+        "See the :ref:`group reference <group-reference>` for a full description of each group's fields.",  # noqa: E501
         "",
         FILE_TREE,
         "",
@@ -359,20 +395,6 @@ def generate() -> str:
         "Stored as HDF5 root-level attributes (not groups).",
         "",
         ROOT_ATTRS_TABLE,
-        "",
-    ]
-
-    # --- Units legend ---------------------------------------------------------
-    lines += [
-        ".. _data-spec-units:",
-        "",
-        "Units",
-        "~~~~~",
-        "",
-        "Unit symbols used in the ``Unit`` column of the field tables below.",
-        "A unit of ``–`` denotes a unitless (dimensionless) quantity.",
-        "",
-        rst_units_table(),
         "",
     ]
 
@@ -401,7 +423,7 @@ def generate() -> str:
         "",
         "      **Data fields**",
         "",
-        rst_no_unit_table(DataSpec, base_indent=2),
+        rst_no_unit_table(DataSpec, base_indent=2, subgroup_anchors=DATA_SUBGROUP_ANCHORS),
         "",
         "      **Grouped data products**",
         "",
@@ -431,9 +453,12 @@ def generate() -> str:
 
     for fname, cls in map_classes:
         desc = MAP_DESCRIPTIONS.get(fname, _first_sentence(cls.__doc__))
+        anchor = DATA_SUBGROUP_ANCHORS[fname]
         p2 = _IND * 2
         p3 = _IND * 3
         lines += [
+            f"{p2}.. _{anchor}:",
+            "",
             f"{p2}.. dropdown:: ``{fname}``",
             "",
             f"{p3}{desc}",
@@ -472,19 +497,22 @@ def generate() -> str:
         "      Extra signal keys are accepted and validated as",
         "      :class:`~zea.data.spec.SignalND` sub-groups.",
         "",
-        rst_full_table(MetadataSpec, base_indent=2),
+        rst_no_unit_table(MetadataSpec, base_indent=2, subgroup_anchors=META_SUBGROUP_ANCHORS),
         "",
         "      **Sub-groups**",
         "",
     ]
     meta_subs = [
-        ("subject", Subject, "no_unit"),
-        ("annotations", Annotations, "no_unit"),
-        ("probe_pose", ProbePose, "full"),
-        ("ecg / voice_narration", Signal1D, "full"),
+        ("subject", Subject, "no_unit", META_SUBGROUP_ANCHORS["subject"]),
+        ("annotations", Annotations, "no_unit", META_SUBGROUP_ANCHORS["annotations"]),
+        ("probe_pose", ProbePose, "full", META_SUBGROUP_ANCHORS["probe_pose"]),
+        ("ecg / voice_narration", Signal1D, "full", META_SUBGROUP_ANCHORS["ecg"]),
     ]
-    for label, cls, style in meta_subs:
+    for label, cls, style, anchor in meta_subs:
+        p2 = _IND * 2
         lines += [
+            f"{p2}.. _{anchor}:",
+            "",
             rst_dropdown(
                 cls,
                 f"``{label}`` \u2014 {cls.__name__}",
@@ -508,7 +536,29 @@ def generate() -> str:
     return "\n".join(lines) + "\n"
 
 
+def generate_units() -> str:
+    lines = [AUTOGEN_HEADER, ""]
+    lines += [
+        ".. _data-spec-units:",
+        "",
+        "-------------------------------",
+        "Units",
+        "-------------------------------",
+        "",
+        "Unit symbols used in the ``Unit`` column of the :ref:`group reference <group-reference>`.",
+        "A unit of ``–`` denotes a unitless (dimensionless) quantity.",
+        "",
+        rst_units_table(),
+        "",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 if __name__ == "__main__":
     content = generate()
     OUT_PATH.write_text(content)
     print(f"Written: {OUT_PATH}")
+
+    units_content = generate_units()
+    UNITS_PATH.write_text(units_content)
+    print(f"Written: {UNITS_PATH}")

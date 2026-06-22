@@ -146,6 +146,17 @@ def create_probe_geometry(n_el, pitch):
 
 
 class Probe(ProbeSpec):
+    """Probe class which is a container for ultrasound transducer parameters.
+
+    These parameters differentiate from the scan parameters, which might very
+    per :class:`~zea.data.spec.TrackSpec`. Per definition, probe parameters are constant
+    for the duration of an acquisition, while scan parameters may vary per frame
+    or per transmit event. This is the reason they are stored in separate groups
+    in a :class:`~zea.data.file.File` object. Upon loading parameters, it is recommended
+    to use the `~zea.parameters.Parameters` class. This allows you to use a single
+    interface to access both probe and scan parameters.
+    """
+
     # These are not converted to Parameters object
     _NON_PARAMETERS = ("name", "type")
 

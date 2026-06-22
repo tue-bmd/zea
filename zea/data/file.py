@@ -623,7 +623,7 @@ def _warn_custom_keys(data: dict, metadata: dict):
 
 
 class File(h5py.File):
-    """h5py.File in zea format."""
+    """File handler for ``zea`` formatted ultrasound files. Extends the h5py.File class."""
 
     def __init__(self, name, mode="r", *args, **kwargs):
         """Initialize the file.

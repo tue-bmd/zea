@@ -222,106 +222,106 @@ the full timing of the acquisition.
             ├── data/
             └── scan/
 
-**Write — create a file with multiple tracks**
+.. dropdown:: Write — create a file with multiple tracks
 
-.. doctest::
+   .. doctest::
 
-    >>> import numpy as np
-    >>> from zea import File
-    >>> from zea.probes import create_probe_geometry
+       >>> import numpy as np
+       >>> from zea import File
+       >>> from zea.probes import create_probe_geometry
 
-    >>> n_frames, n_ax, n_el = 2, 512, 128
-    >>> n_tx_focused, n_tx_pw = 3, 2
-    >>> pitch = 0.0003
+       >>> n_frames, n_ax, n_el = 2, 512, 128
+       >>> n_tx_focused, n_tx_pw = 3, 2
+       >>> pitch = 0.0003
 
-    >>> probe_geometry = create_probe_geometry(n_el, pitch)
+       >>> probe_geometry = create_probe_geometry(n_el, pitch)
 
-    >>> # One track index per global transmit event across all frames
-    >>> track_schedule = np.tile(
-    ...     [0] * n_tx_focused + [1] * n_tx_pw, n_frames
-    ... ).astype(np.int32)
+       >>> # One track index per global transmit event across all frames
+       >>> track_schedule = np.tile(
+       ...     [0] * n_tx_focused + [1] * n_tx_pw, n_frames
+       ... ).astype(np.int32)
 
-    >>> File.create(
-    ...     "acquisition.hdf5",
-    ...     tracks=[
-    ...         # Track 0: focused B-mode
-    ...         {
-    ...             "label": "focused_bmode",
-    ...             "data": {"raw_data": np.zeros((n_frames, n_tx_focused, n_ax, n_el, 1))},
-    ...             "scan": {
-    ...                 "sampling_frequency":     40e6,
-    ...                 "center_frequency":       7e6,
-    ...                 "demodulation_frequency": 7e6,
-    ...                 "initial_times":          np.zeros(n_tx_focused),
-    ...                 "t0_delays":              np.zeros((n_tx_focused, n_el)),
-    ...                 "tx_apodizations":        np.ones((n_tx_focused, n_el)),
-    ...                 "focus_distances":        np.full(n_tx_focused, np.inf),
-    ...                 "transmit_origins":       np.zeros((n_tx_focused, 3)),
-    ...                 "polar_angles":           np.zeros(n_tx_focused),
-    ...                 "time_to_next_transmit": np.ones((n_frames, n_tx_focused)) * 1e-4,
-    ...             },
-    ...         },
-    ...         # Track 1: plane-wave Doppler
-    ...         {
-    ...             "label": "planewave_doppler",
-    ...             "data": {"raw_data": np.zeros((n_frames, n_tx_pw, n_ax, n_el, 1))},
-    ...             "scan": {
-    ...                 "sampling_frequency":     40e6,
-    ...                 "center_frequency":       7e6,
-    ...                 "demodulation_frequency": 7e6,
-    ...                 "initial_times":          np.zeros(n_tx_pw),
-    ...                 "t0_delays":              np.zeros((n_tx_pw, n_el)),
-    ...                 "tx_apodizations":        np.ones((n_tx_pw, n_el)),
-    ...                 "focus_distances":        np.full(n_tx_pw, np.inf),
-    ...                 "transmit_origins":       np.zeros((n_tx_pw, 3)),
-    ...                 "polar_angles":           np.zeros(n_tx_pw),
-    ...                 "time_to_next_transmit": np.ones((n_frames, n_tx_pw)) * 2e-4,
-    ...             },
-    ...         },
-    ...     ],
-    ...     probe={"name": "L11-4v", "probe_geometry": probe_geometry},
-    ...     track_schedule=track_schedule,
-    ...     overwrite=True,
-    ... )
+       >>> File.create(
+       ...     "acquisition.hdf5",
+       ...     tracks=[
+       ...         # Track 0: focused B-mode
+       ...         {
+       ...             "label": "focused_bmode",
+       ...             "data": {"raw_data": np.zeros((n_frames, n_tx_focused, n_ax, n_el, 1))},
+       ...             "scan": {
+       ...                 "sampling_frequency":     40e6,
+       ...                 "center_frequency":       7e6,
+       ...                 "demodulation_frequency": 7e6,
+       ...                 "initial_times":          np.zeros(n_tx_focused),
+       ...                 "t0_delays":              np.zeros((n_tx_focused, n_el)),
+       ...                 "tx_apodizations":        np.ones((n_tx_focused, n_el)),
+       ...                 "focus_distances":        np.full(n_tx_focused, np.inf),
+       ...                 "transmit_origins":       np.zeros((n_tx_focused, 3)),
+       ...                 "polar_angles":           np.zeros(n_tx_focused),
+       ...                 "time_to_next_transmit": np.ones((n_frames, n_tx_focused)) * 1e-4,
+       ...             },
+       ...         },
+       ...         # Track 1: plane-wave Doppler
+       ...         {
+       ...             "label": "planewave_doppler",
+       ...             "data": {"raw_data": np.zeros((n_frames, n_tx_pw, n_ax, n_el, 1))},
+       ...             "scan": {
+       ...                 "sampling_frequency":     40e6,
+       ...                 "center_frequency":       7e6,
+       ...                 "demodulation_frequency": 7e6,
+       ...                 "initial_times":          np.zeros(n_tx_pw),
+       ...                 "t0_delays":              np.zeros((n_tx_pw, n_el)),
+       ...                 "tx_apodizations":        np.ones((n_tx_pw, n_el)),
+       ...                 "focus_distances":        np.full(n_tx_pw, np.inf),
+       ...                 "transmit_origins":       np.zeros((n_tx_pw, 3)),
+       ...                 "polar_angles":           np.zeros(n_tx_pw),
+       ...                 "time_to_next_transmit": np.ones((n_frames, n_tx_pw)) * 2e-4,
+       ...             },
+       ...         },
+       ...     ],
+       ...     probe={"name": "L11-4v", "probe_geometry": probe_geometry},
+       ...     track_schedule=track_schedule,
+       ...     overwrite=True,
+       ... )
 
-**Read — unpack multiple tracks from a file**
+.. dropdown:: Read — unpack multiple tracks from a file
 
-.. doctest::
+   .. doctest::
 
-    >>> import zea
+       >>> import zea
 
-    >>> with zea.File("acquisition.hdf5") as f:
-    ...     probe = f.probe             # probe is shared across all tracks
-    ...     # See track labels:
-    ...     print(f.track_labels)          # ['focused_bmode', 'planewave_doppler']
-    ...     # Unpack in the same order as track_labels — always safe:
-    ...     focused_track, planewave_track = f.tracks
-    ...     # Or fetch a specific track by name:
-    ...     focused_track = f.get_track("focused_bmode")
-    ...     focused_parameters = focused_track.load_parameters()
-    ...     focused_raw  = focused_track.data.raw_data[:]
-    ...     # access the global timing information for the focused track:
-    ...     focused_track.timestamps
-    ...     # ... process with e.g. a focused B-mode pipeline
-    ...     planewave_parameters = planewave_track.load_parameters()
-    ...     planewave_raw  = planewave_track.data.raw_data[:]
-    ...     # access the global timing information for the planewave track:
-    ...     planewave_track.timestamps
-    ...     # ... process with e.g. a plane-wave Doppler pipeline
-    ...     # access global timestamps for all transmit events in the file:
-    ...     f.timestamps
-    ['focused_bmode', 'planewave_doppler']
-    array([[0.    , 0.0001, 0.0002],
-           [0.0007, 0.0008, 0.0009]], dtype=float32)
-    array([[0.0003, 0.0005],
-           [0.001 , 0.0012]], dtype=float32)
-    array([0.    , 0.0001, 0.0002, 0.0003, 0.0005, 0.0007, 0.0008, 0.0009,
-           0.001 , 0.0012], dtype=float32)
+       >>> with zea.File("acquisition.hdf5") as f:
+       ...     probe = f.probe             # probe is shared across all tracks
+       ...     # See track labels:
+       ...     print(f.track_labels)          # ['focused_bmode', 'planewave_doppler']
+       ...     # Unpack in the same order as track_labels — always safe:
+       ...     focused_track, planewave_track = f.tracks
+       ...     # Or fetch a specific track by name:
+       ...     focused_track = f.get_track("focused_bmode")
+       ...     focused_parameters = focused_track.load_parameters()
+       ...     focused_raw  = focused_track.data.raw_data[:]
+       ...     # access the global timing information for the focused track:
+       ...     focused_track.timestamps
+       ...     # ... process with e.g. a focused B-mode pipeline
+       ...     planewave_parameters = planewave_track.load_parameters()
+       ...     planewave_raw  = planewave_track.data.raw_data[:]
+       ...     # access the global timing information for the planewave track:
+       ...     planewave_track.timestamps
+       ...     # ... process with e.g. a plane-wave Doppler pipeline
+       ...     # access global timestamps for all transmit events in the file:
+       ...     f.timestamps
+       ['focused_bmode', 'planewave_doppler']
+       array([[0.    , 0.0001, 0.0002],
+              [0.0007, 0.0008, 0.0009]], dtype=float32)
+       array([[0.0003, 0.0005],
+              [0.001 , 0.0012]], dtype=float32)
+       array([0.    , 0.0001, 0.0002, 0.0003, 0.0005, 0.0007, 0.0008, 0.0009,
+              0.001 , 0.0012], dtype=float32)
 
-.. testcleanup::
+   .. testcleanup::
 
-    import os
-    os.remove("acquisition.hdf5")
+       import os
+       os.remove("acquisition.hdf5")
 
 -------------------------------
 ``zea`` data format reference
@@ -345,204 +345,253 @@ Custom fields
 -------------------------------
 
 Beyond the standard data types (``raw_data``, ``beamformed_data``, …), you can attach arbitrary
-**custom spatial maps** and **custom metadata** to any zea file.
+**custom spatial maps** and **custom metadata** to any zea file. Lastly, any custom parameters
+that do not fit the standard scan and probe fields can be stored as **custom elements**. For examples
+see below:
 
-**Custom spatial maps** (``data`` group)
+.. dropdown:: Custom spatial maps (``data`` group)
 
-A custom map is a named entry in the ``data`` group that associates a pixel array with a
-per-pixel Cartesian coordinate grid.  Each map is then a function from Cartesian space to
-some real values.  Pass it as a sub-dict under the key you want:
+   A custom map is a named entry in the ``data`` group that associates a pixel array with a
+   per-pixel Cartesian coordinate grid.  Each map is then a function from Cartesian space to
+   some real values.  Pass it as a sub-dict under the key you want:
 
-.. doctest::
+   .. doctest::
 
-    >>> import numpy as np
-    >>> from zea import File
+       >>> import numpy as np
+       >>> from zea import File
 
-    >>> n_frames, n_tx, n_el, n_ax = 2, 1, 4, 8
-    >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
-    >>> scan = {
-    ...     "sampling_frequency": np.float32(40e6),
-    ...     "center_frequency": np.float32(7e6),
-    ...     "demodulation_frequency": np.float32(7e6),
-    ...     "initial_times": np.zeros(n_tx, dtype=np.float32),
-    ...     "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
-    ...     "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
-    ...     "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
-    ...     "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
-    ...     "polar_angles": np.zeros(n_tx, dtype=np.float32),
-    ...     "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
-    ... }
-    >>> probe = {"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))}
+       >>> n_frames, n_tx, n_el, n_ax = 2, 1, 4, 8
+       >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+       >>> scan = {
+       ...     "sampling_frequency": np.float32(40e6),
+       ...     "center_frequency": np.float32(7e6),
+       ...     "demodulation_frequency": np.float32(7e6),
+       ...     "initial_times": np.zeros(n_tx, dtype=np.float32),
+       ...     "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+       ...     "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+       ...     "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+       ...     "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+       ...     "polar_angles": np.zeros(n_tx, dtype=np.float32),
+       ...     "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+       ... }
+       >>> probe = {"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))}
 
-    >>> values = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)   # (frames, z, x[, channels])
-    >>> # Minimal coordinate placeholder; use cartesian_pixel_grid for real grids (see note below).
-    >>> coordinates = np.zeros((n_frames, 64, 64, 3), dtype=np.float32)
+       >>> values = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)   # (frames, z, x[, channels])
+       >>> # Minimal coordinate placeholder; use cartesian_pixel_grid for real grids (see note below).
+       >>> coordinates = np.zeros((n_frames, 64, 64, 3), dtype=np.float32)
 
-    >>> File.create(
-    ...     "my_acquisition.hdf5",
-    ...     data={
-    ...         "raw_data": raw,
-    ...         "my_overlay": {          # custom field not in the zea spec
-    ...             "values":      values,
-    ...             "coordinates": coordinates,  # shape (*spatial_dims, 3)
-    ...             # optional: "labels", "description", "unit"
-    ...         },
-    ...     },
-    ...     scan=scan,
-    ...     probe=probe,
-    ...     overwrite=True,
-    ... )
+       >>> File.create(
+       ...     "my_acquisition.hdf5",
+       ...     data={
+       ...         "raw_data": raw,
+       ...         "my_overlay": {          # custom field not in the zea spec
+       ...             "values":      values,
+       ...             "coordinates": coordinates,  # shape (*spatial_dims, 3)
+       ...             # optional: "labels", "description", "unit"
+       ...         },
+       ...     },
+       ...     scan=scan,
+       ...     probe=probe,
+       ...     overwrite=True,
+       ... )
 
-    >>> with File("my_acquisition.hdf5") as f:
-    ...     overlay_values      = f.data.my_overlay.values[:]
-    ...     overlay_coordinates = f.data.my_overlay.coordinates[:]
+       >>> with File("my_acquisition.hdf5") as f:
+       ...     overlay_values      = f.data.my_overlay.values[:]
+       ...     overlay_coordinates = f.data.my_overlay.coordinates[:]
 
-.. note::
+   .. note::
 
-   :func:`~zea.beamform.pixelgrid.cartesian_pixel_grid` and
-   :func:`~zea.beamform.pixelgrid.polar_pixel_grid` are convenient helpers for
-   constructing coordinate grids that match typical beamformed images.  See their
-   docstrings for full details.
+      :func:`~zea.beamform.pixelgrid.cartesian_pixel_grid` and
+      :func:`~zea.beamform.pixelgrid.polar_pixel_grid` are convenient helpers for
+      constructing coordinate grids that match typical beamformed images.  See their
+      docstrings for full details.
 
+.. dropdown:: Custom metadata (``metadata`` group)
 
-**Custom metadata** (``metadata`` group)
+   Standard metadata fields (``credit``, ``annotations``, ``text_report``, ``subject``, ``ecg``, …)
+   are validated by :class:`~zea.data.spec.MetadataSpec`.  Pass a plain dict to ``File.create``'s
+   ``metadata`` argument.
 
-Standard metadata fields (``credit``, ``annotations``, ``text_report``, ``subject``, ``ecg``, …)
-are validated by :class:`~zea.data.spec.MetadataSpec`.  Pass a plain dict to ``File.create``
-metadata argument.
+   .. doctest::
 
-.. doctest::
+       >>> import numpy as np
+       >>> from zea import File
 
-    >>> File.create(
-    ...     "my_acquisition.hdf5",
-    ...     data={"raw_data": raw},
-    ...     scan=scan,
-    ...     probe=probe,
-    ...     metadata={
-    ...         "credit": "My Lab, 2024",
-    ...         "text_report": "Normal acquisition, no pathology.",
-    ...         "annotations": {
-    ...             "label": np.array(["healthy", "healthy"]),
-    ...         },
-    ...     },
-    ...     overwrite=True,
-    ... )
+       >>> n_frames, n_tx, n_el, n_ax = 2, 1, 4, 8
+       >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+       >>> scan = {
+       ...     "sampling_frequency": np.float32(40e6),
+       ...     "center_frequency": np.float32(7e6),
+       ...     "demodulation_frequency": np.float32(7e6),
+       ...     "initial_times": np.zeros(n_tx, dtype=np.float32),
+       ...     "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+       ...     "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+       ...     "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+       ...     "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+       ...     "polar_angles": np.zeros(n_tx, dtype=np.float32),
+       ...     "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+       ... }
+       >>> probe = {"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))}
 
-Custom signal keys (anything beyond the standard names) are accepted and stored as
-:class:`~zea.data.spec.SignalND` entries: a dict with ``samples``, ``start_time_offset``, and
-exactly one of ``sampling_frequency`` or ``timestamps``:
+       >>> File.create(
+       ...     "my_acquisition.hdf5",
+       ...     data={"raw_data": raw},
+       ...     scan=scan,
+       ...     probe=probe,
+       ...     metadata={
+       ...         "credit": "My Lab, 2024",
+       ...         "text_report": "Normal acquisition, no pathology.",
+       ...         "annotations": {
+       ...             "label": np.array(["healthy", "healthy"]),
+       ...         },
+       ...     },
+       ...     overwrite=True,
+       ... )
 
-.. doctest::
+   Custom signal keys (anything beyond the standard names) are accepted and stored as
+   :class:`~zea.data.spec.SignalND` entries: a dict with ``samples``, ``start_time_offset``, and
+   exactly one of ``sampling_frequency`` or ``timestamps``:
 
-    >>> n_samples = 500
-    >>> respiratory_signal = {
-    ...     "samples":            np.sin(np.linspace(0, 2 * np.pi, n_samples)).astype(np.float32),
-    ...     "start_time_offset":  np.float32(-0.5),   # seconds before first transmit
-    ...     "sampling_frequency": np.float32(10.0),   # Hz
-    ... }
+   .. doctest::
 
-    >>> File.create(
-    ...     "my_acquisition.hdf5",
-    ...     data={"raw_data": raw},
-    ...     scan=scan,
-    ...     probe=probe,
-    ...     metadata={
-    ...         "credit": "My Lab, 2024",
-    ...         "respiratory_signal": respiratory_signal,   # custom SignalND field
-    ...     },
-    ...     overwrite=True,
-    ... )
+       >>> n_samples = 500
+       >>> respiratory_signal = {
+       ...     "samples":            np.sin(np.linspace(0, 2 * np.pi, n_samples)).astype(np.float32),
+       ...     "start_time_offset":  np.float32(-0.5),   # seconds before first transmit
+       ...     "sampling_frequency": np.float32(10.0),   # Hz
+       ... }
 
-    >>> with File("my_acquisition.hdf5") as f:
-    ...     meta = f.metadata
-    ...     samples = meta.respiratory_signal.samples        # numpy array
-    ...     fs = meta.respiratory_signal.sampling_frequency
+       >>> File.create(
+       ...     "my_acquisition.hdf5",
+       ...     data={"raw_data": raw},
+       ...     scan=scan,
+       ...     probe=probe,
+       ...     metadata={
+       ...         "credit": "My Lab, 2024",
+       ...         "respiratory_signal": respiratory_signal,   # custom SignalND field
+       ...     },
+       ...     overwrite=True,
+       ... )
 
-.. testcleanup::
+       >>> with File("my_acquisition.hdf5") as f:
+       ...     meta = f.metadata
+       ...     samples = meta.respiratory_signal.samples        # numpy array
+       ...     fs = meta.respiratory_signal.sampling_frequency
 
-    import os
-    os.remove("my_acquisition.hdf5")
+   .. testcleanup::
 
-See :class:`~zea.data.spec.MetadataSpec` for the full list of supported standard fields.
+       import os
+       os.remove("my_acquisition.hdf5")
 
+   See :class:`~zea.data.spec.MetadataSpec` for the full list of supported standard fields.
 
-**Custom elements** (``custom`` group)
+.. dropdown:: Custom elements (``custom`` group)
 
-Sometimes you need to store data that does not fit the zea spec at all — neither a spatial map
-nor a metadata signal. Use :class:`~zea.data.CustomElement` for this: a named array (or
-scalar) with a ``description`` and ``unit``, optionally nested under a ``group_name``.  Pass a
-list of them to the ``custom`` argument of :meth:`~zea.File.create`; they are written to a
-dedicated ``custom`` group and read back via :attr:`~zea.File.custom`.
+   Sometimes you need to store data that does not fit the zea spec at all — neither a spatial map
+   nor a metadata signal. Use :class:`~zea.data.CustomElement` for this: a named array (or
+   scalar) with a ``description`` and ``unit``, optionally nested under a ``group_name``.  Pass a
+   list of them to the ``custom`` argument of :meth:`~zea.File.create`; they are written to a
+   dedicated ``custom`` group and read back via :attr:`~zea.File.custom`.
 
-.. doctest::
+   .. doctest::
 
-    >>> from zea.data import CustomElement
+       >>> import numpy as np
+       >>> from zea import File
+       >>> from zea.data import CustomElement
 
-    >>> custom = [
-    ...     CustomElement(
-    ...         name="lens_correction",
-    ...         data=1.5,
-    ...         description="Scalar one-way delay offset.",
-    ...         unit="wavelengths",
-    ...     ),
-    ...     CustomElement(
-    ...         name="profile",
-    ...         data=np.arange(4, dtype=np.float32),
-    ...         description="Per-element lens profile.",
-    ...         unit="-",
-    ...         group_name="lens",  # optional (nested) sub-group
-    ...     ),
-    ... ]
+       >>> n_frames, n_tx, n_el, n_ax = 2, 1, 4, 8
+       >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+       >>> scan = {
+       ...     "sampling_frequency": np.float32(40e6),
+       ...     "center_frequency": np.float32(7e6),
+       ...     "demodulation_frequency": np.float32(7e6),
+       ...     "initial_times": np.zeros(n_tx, dtype=np.float32),
+       ...     "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+       ...     "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+       ...     "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+       ...     "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+       ...     "polar_angles": np.zeros(n_tx, dtype=np.float32),
+       ...     "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+       ... }
+       >>> probe = {"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))}
 
-    >>> File.create(
-    ...     "custom_elements.hdf5",
-    ...     data={"raw_data": raw},
-    ...     scan=scan,
-    ...     probe=probe,
-    ...     custom=custom,
-    ...     overwrite=True,
-    ... )
+       >>> custom = [
+       ...     CustomElement(
+       ...         name="lens_correction",
+       ...         data=1.5,
+       ...         description="Scalar one-way delay offset.",
+       ...         unit="wavelengths",
+       ...     ),
+       ...     CustomElement(
+       ...         name="profile",
+       ...         data=np.arange(4, dtype=np.float32),
+       ...         description="Per-element lens profile.",
+       ...         unit="-",
+       ...         group_name="lens",  # optional (nested) sub-group
+       ...     ),
+       ... ]
 
-    >>> with File("custom_elements.hdf5") as f:
-    ...     elements = {e.name: e for e in f.custom}
-    >>> sorted(elements)
-    ['lens_correction', 'profile']
-    >>> float(elements["lens_correction"].data)
-    1.5
-    >>> elements["profile"].group_name
-    'lens'
+       >>> File.create(
+       ...     "custom_elements.hdf5",
+       ...     data={"raw_data": raw},
+       ...     scan=scan,
+       ...     probe=probe,
+       ...     custom=custom,
+       ...     overwrite=True,
+       ... )
 
-.. testcleanup::
+       >>> with File("custom_elements.hdf5") as f:
+       ...     elements = {e.name: e for e in f.custom}
+       >>> sorted(elements)
+       ['lens_correction', 'profile']
+       >>> float(elements["lens_correction"].data)
+       1.5
+       >>> elements["profile"].group_name
+       'lens'
 
-    import os
-    os.remove("custom_elements.hdf5")
+   .. testcleanup::
+
+       import os
+       os.remove("custom_elements.hdf5")
+
+.. include:: _units_ref.rst
 
 -------------------------------
 Supported datasets & conversion
 -------------------------------
 
-The ``zea`` toolbox supports several public and research ultrasound datasets.
-Conversion scripts live in
-`zea/data/convert/ <https://github.com/tue-bmd/zea/tree/main/zea/data/convert/>`__
-and can be invoked as:
+The ``zea`` toolbox includes conversion scripts for several public ultrasound datasets,
+available in :mod:`zea.data.convert`
+(`source on GitHub <https://github.com/tue-bmd/zea/tree/main/zea/data/convert/>`__).
+They are invoked as subcommands of ``python -m zea.data.convert``
+(see the full :doc:`CLI reference <cli>` for all options):
 
 .. code-block:: shell
 
-    python -m zea.data.convert --dataset "echonet"  --src <src> --dst <dst>
-    python -m zea.data.convert --dataset "camus"    --src <src> --dst <dst>
-    python -m zea.data.convert --dataset "picmus"   --src <src> --dst <dst>
+    python -m zea.data.convert echonet    <src> <dst>
+    python -m zea.data.convert echonetlvh <src> <dst>
+    python -m zea.data.convert camus      <src> <dst>
+    python -m zea.data.convert cetus      <src> <dst>
+    python -m zea.data.convert picmus     <src> <dst>
+    python -m zea.data.convert echoxflow  <src> <dst>
+    python -m zea.data.convert verasonics <src> <dst>
 
 **Supported datasets:**
 
-- **EchoNet-Dynamic** — large-scale cardiac ultrasound.
-- **EchoNet-LVH** — cardiac dataset for left ventricular hypertrophy.
-- **CAMUS** — Cardiac Acquisitions for Multi-structure Ultrasound Segmentation.
-- **PICMUS** — Plane-wave Imaging Challenge in Medical Ultrasound.
-- **Custom** — any dataset can be converted by following the layout described above.
+- :mod:`~zea.data.convert.echonet` — **EchoNet-Dynamic**: large-scale cardiac ultrasound video dataset.
+- :mod:`~zea.data.convert.echonetlvh` — **EchoNet-LVH**: cardiac dataset for left ventricular hypertrophy detection.
+- :mod:`~zea.data.convert.camus` — **CAMUS**: Cardiac Acquisitions for Multi-structure Ultrasound Segmentation.
+- :mod:`~zea.data.convert.cetus` — **CETUS**: Challenge on Endocardial Three-dimensional Ultrasound Segmentation (3-D echocardiography).
+- :mod:`~zea.data.convert.picmus` — **PICMUS**: Plane-wave Imaging Challenge in Medical Ultrasound.
+- :mod:`~zea.data.convert.echoxflow` — **EchoXFlow**: large-scale echocardiography dataset from Oslo University Hospital.
+- :mod:`~zea.data.convert.images` — **Custom images**: convert any folder of images or image sequences.
+- **Custom** — any dataset can be converted by following the layout described in the :ref:`data format reference <data-spec>`.
 
 -------------------------------
 Data acquisition platforms
 -------------------------------
+
+Besides supported existing public datasets, you can also convert your own acquisitions from various platforms to the zea format.  This typically involves writing a short conversion script that reads the raw data and parameters from your acquisition system, and then uses :meth:`zea.File.create` to write a zea file.  The exact details will depend on your acquisition system and data format. We currently provide conversion utilities for the following platforms:
 
 **Verasonics**
 
@@ -550,8 +599,10 @@ Record data with your Verasonics script, save the workspace to ``.mat``, then co
 
 .. code-block:: shell
 
-    python -m zea.data.convert --dataset "verasonics" --src <src> --dst <dst>
+    python -m zea.data.convert verasonics <src> <dst>
 
 See :mod:`zea.data.convert.verasonics` for details.
 
-**us4us** — to be added in a future release.
+**us4us**
+
+To be added in a future release. See ongoing issue `#448 <https://github.com/tue-bmd/zea/issues/448>`__.

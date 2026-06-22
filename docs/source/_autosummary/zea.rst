@@ -27,7 +27,6 @@ zea
    :toctree:
 
    init_device
-   load_file
    device
    set_data_paths
    setup

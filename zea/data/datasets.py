@@ -443,7 +443,7 @@ class Folder:
 
 
 class Dataset(H5FileHandleCache):
-    """Iterate over File(s) and Folder(s)."""
+    """Dataset class managing multiple :class:`~zea.data.file.File` objects."""
 
     def __init__(
         self,
