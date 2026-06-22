@@ -510,7 +510,7 @@ class TestFieldMetadataAttrs:
 
         with File(path) as f:
             rd_ds = f.data.raw_data
-            assert rd_ds.attrs["unit"] == "-"
+            assert rd_ds.attrs["unit"] == "–"
             assert rd_ds.attrs["description"] != ""
 
             # Check scan field metadata (t0_delays is always present)
