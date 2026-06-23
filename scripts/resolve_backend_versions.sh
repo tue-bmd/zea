@@ -9,8 +9,8 @@
 # grabbing a newer CUDA generation and doubling the install. Nothing is installed here.
 #
 # Usage:
-#   ./resolve_backend_versions.sh            # derive the CUDA backend from jax/tf
-#   ./resolve_backend_versions.sh cu126      # or force a specific torch CUDA backend
+#   ./scripts/resolve_backend_versions.sh            # derive the CUDA backend from jax/tf
+#   ./scripts/resolve_backend_versions.sh cu126      # or force a specific torch CUDA backend
 #
 # After running, copy the printed ENV block into the Dockerfile, and set the CU_BACKEND
 # build-arg default there to the same tag.

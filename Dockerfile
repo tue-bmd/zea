@@ -20,7 +20,7 @@ ARG DEV=true
 ##############################
 FROM python:3.12-slim-bullseye AS builder
 
-# Backend versions, to re-resolve to newer versions, run ./resolve_backend_versions.sh 
+# Backend versions, to re-resolve to newer versions, run ./scripts/resolve_backend_versions.sh
 # and paste its output here.
 ENV JAX_VERSION=0.10.2 \
     TORCH_VERSION=2.12.1 \
@@ -139,7 +139,7 @@ RUN echo 'export KERAS_BACKEND=$( \
     >> /etc/bash.bashrc
 
 # Source working/installation directory and add motd (message of the day)
-COPY motd.sh /etc/motd.sh
+COPY scripts/motd.sh /etc/motd.sh
 RUN chmod +x /etc/motd.sh
 
 CMD ["/bin/bash"]
