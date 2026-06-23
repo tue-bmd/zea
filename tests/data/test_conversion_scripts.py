@@ -1559,6 +1559,14 @@ class TestEstimateLensProbeParams:
         with pytest.raises(ValueError, match="lens_correction"):
             estimate_lens_probe_params(-0.5, 7e6)
 
+    def test_invalid_lens_correction_nan(self):
+        with pytest.raises(ValueError, match="lens_correction"):
+            estimate_lens_probe_params(float("nan"), 7e6)
+
+    def test_invalid_lens_correction_inf(self):
+        with pytest.raises(ValueError, match="lens_correction"):
+            estimate_lens_probe_params(float("inf"), 7e6)
+
 
 class TestBs100bwToIq:
     def _make_data(self, n_frames=2, n_tx=3, n_ax=8, n_el=4):

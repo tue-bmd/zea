@@ -119,8 +119,10 @@ def estimate_lens_probe_params(
         raise ValueError(f"lens_sound_speed must be finite and positive, got {lens_sound_speed!r}")
     if not (np.isfinite(center_frequency) and center_frequency > 0):
         raise ValueError(f"center_frequency must be finite and positive, got {center_frequency!r}")
-    if lens_correction < 0:
-        raise ValueError(f"lens_correction must be non-negative, got {lens_correction!r}")
+    if not (np.isfinite(lens_correction) and lens_correction >= 0):
+        raise ValueError(
+            f"lens_correction must be finite and non-negative, got {lens_correction!r}"
+        )
     lens_thickness = np.float32(float(lens_correction) * lens_sound_speed / center_frequency)
     log.info(
         f"Lens: {float(lens_correction):.3f} wl → {float(lens_thickness) * 1e3:.3f} mm "
