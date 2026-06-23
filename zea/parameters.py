@@ -513,11 +513,17 @@ class Parameters(BaseParameters):
         Returns:
             The current instance for method chaining.
         """
-        idx = self.find_transmits(selection)
-        if len(idx) == 0:
-            log.warning(f"No transmits found for selection '{selection}'.")
+        if selection is None and self._params.get("n_tx") is None:
+            # n_tx not yet known (e.g. file with image-only data); store as-is.
+            idx = None
+        else:
+            idx = self.find_transmits(selection)
+            if len(idx) == 0:
+                log.warning(f"No transmits found for selection '{selection}'.")
+
         self._params["selected_transmits"] = idx
         self._invalidate("selected_transmits")
+
         return self
 
     def find_transmits(self, selection) -> list:
@@ -545,18 +551,13 @@ class Parameters(BaseParameters):
         """
         n_tx_total = self._params.get("n_tx")
         if n_tx_total is None:
-            if selection is None:
-                # n_tx not yet known (e.g. file with image-only data); store as-is.
-                self._params["selected_transmits"] = None
-                self._invalidate("selected_transmits")
-                return self
             raise ValueError("n_tx must be set.")
 
         # Handle array-like - convert to list of indices
         if isinstance(selection, np.ndarray):
             if len(selection.shape) == 0:
                 # Handle scalar numpy array
-                return int(selection)
+                selection = int(selection)
             elif len(selection.shape) == 1:
                 selection = selection.tolist()
             else:
