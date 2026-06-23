@@ -25,9 +25,13 @@ from zea.data.convert.utils import (
     sitk_load,
     unzip,
 )
-from zea.data.convert.verasonics import VerasonicsFile, convert_verasonics
+from zea.data.convert.verasonics import (
+    VerasonicsFile,
+    bs100bw_to_iq,
+    convert_verasonics,
+    estimate_lens_probe_params,
+)
 from zea.data.file import File
-from zea.data.spec import DEFAULT_COMPRESSION
 from zea.func.tensor import translate
 from zea.internal.preset_utils import _hf_resolve_path
 from zea.io_lib import _SUPPORTED_IMG_TYPES
@@ -1339,16 +1343,7 @@ def test_images_uint8_passes(tmp_path):
 
 
 def test_verasonics_compression_flag_respected(tmp_path):
-    """When enable_compression=False the File.create call must use
-    compression=None, not force 'lzf'."""
-    enable_compression = False
-    compression = DEFAULT_COMPRESSION if enable_compression else None
-
-    assert (compression or DEFAULT_COMPRESSION) == DEFAULT_COMPRESSION, (
-        "old code always used default compression"
-    )
-    assert compression is None, "fixed code uses None when compression is disabled"
-
+    """When enable_compression=False the File.create call must use compression=None."""
     n_tx, n_el = 4, 16
     scan = {
         "sampling_frequency": np.float32(40e6),
@@ -1518,3 +1513,88 @@ def test_require_output_dir_ownership_mismatched_readme(tmp_path):
     # Should raise ValueError when repo_id doesn't match
     with pytest.raises(ValueError, match="does not declare 'zea_repo_id"):
         require_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+class TestEstimateLensProbeParams:
+    def test_none_returns_empty_dict(self):
+        assert estimate_lens_probe_params(None, 7e6) == {}
+
+    def test_known_values(self):
+        result = estimate_lens_probe_params(1.0, 7e6, lens_sound_speed=1000.0)
+        expected_thickness = np.float32(1.0 * 1000.0 / 7e6)
+        assert result["lens_sound_speed"] == np.float32(1000.0)
+        assert result["lens_thickness"] == pytest.approx(expected_thickness, rel=1e-5)
+
+    def test_invalid_lens_sound_speed_zero(self):
+        with pytest.raises(ValueError, match="lens_sound_speed"):
+            estimate_lens_probe_params(1.0, 7e6, lens_sound_speed=0.0)
+
+    def test_invalid_lens_sound_speed_negative(self):
+        with pytest.raises(ValueError, match="lens_sound_speed"):
+            estimate_lens_probe_params(1.0, 7e6, lens_sound_speed=-500.0)
+
+    def test_invalid_lens_sound_speed_nan(self):
+        with pytest.raises(ValueError, match="lens_sound_speed"):
+            estimate_lens_probe_params(1.0, 7e6, lens_sound_speed=float("nan"))
+
+    def test_invalid_center_frequency_zero(self):
+        with pytest.raises(ValueError, match="center_frequency"):
+            estimate_lens_probe_params(1.0, 0.0)
+
+    def test_invalid_center_frequency_inf(self):
+        with pytest.raises(ValueError, match="center_frequency"):
+            estimate_lens_probe_params(1.0, float("inf"))
+
+    def test_invalid_lens_correction_negative(self):
+        with pytest.raises(ValueError, match="lens_correction"):
+            estimate_lens_probe_params(-0.5, 7e6)
+
+    def test_invalid_lens_correction_nan(self):
+        with pytest.raises(ValueError, match="lens_correction"):
+            estimate_lens_probe_params(float("nan"), 7e6)
+
+    def test_invalid_lens_correction_inf(self):
+        with pytest.raises(ValueError, match="lens_correction"):
+            estimate_lens_probe_params(float("inf"), 7e6)
+
+
+class TestBs100bwToIq:
+    def _make_data(self, n_frames=2, n_tx=3, n_ax=8, n_el=4):
+        return np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+
+    def test_output_shape(self):
+        data = self._make_data()
+        out = bs100bw_to_iq(data)
+        assert out.shape == (2, 3, 4, 4, 2)
+
+    def test_i_samples_are_even_rows(self):
+        data = np.zeros((1, 1, 4, 1, 1), dtype=np.float32)
+        data[0, 0, 0, 0, 0] = 5.0  # even index → I
+        data[0, 0, 2, 0, 0] = 7.0  # even index → I
+        out = bs100bw_to_iq(data)
+        np.testing.assert_array_equal(out[0, 0, :, 0, 0], [5.0, 7.0])  # I channel
+
+    def test_q_samples_are_negated_odd_rows(self):
+        data = np.zeros((1, 1, 4, 1, 1), dtype=np.float32)
+        data[0, 0, 1, 0, 0] = 3.0  # odd index → Q (negated)
+        out = bs100bw_to_iq(data)
+        assert out[0, 0, 0, 0, 1] == -3.0  # Q channel negated
+
+    def test_wrong_ndim_raises(self):
+        with pytest.raises(ValueError, match="Expected shape"):
+            bs100bw_to_iq(np.zeros((2, 3, 8, 4)))
+
+    def test_wrong_last_dim_raises(self):
+        with pytest.raises(ValueError, match="Expected shape"):
+            bs100bw_to_iq(np.zeros((2, 3, 8, 4, 2)))
+
+    def test_odd_axial_dim_raises(self):
+        with pytest.raises(ValueError, match="Axial dimension must be even"):
+            bs100bw_to_iq(np.zeros((2, 3, 7, 4, 1), dtype=np.float32))
+
+    def test_int16_saturation_no_overflow(self):
+        data = np.full((1, 1, 2, 1, 1), -32768, dtype=np.int16)
+        out = bs100bw_to_iq(data)
+        # Q channel negation of -32768 would overflow in int16; must be 32768.0
+        assert out[0, 0, 0, 0, 1] == 32768.0
+        assert out.dtype == np.float32
