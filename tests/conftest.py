@@ -13,7 +13,8 @@ from zea.internal.device import backend_cuda_available, init_device
 # init_device imports tensorflow -> keras, which locks the keras backend. The spawned
 # BackendEqualityCheck workers re-import the `tests` package but never load conftest, so
 # they remain free to select their own backend. See tests/__init__.py for details.
-device = init_device(allow_preallocate=False)
+device = os.environ.get("ZEA_TEST_DEVICE", "auto:1")
+device = init_device(device=device, allow_preallocate=False)
 
 _GPU_AVAILABLE = backend_cuda_available(os.environ.get("KERAS_BACKEND"))
 
