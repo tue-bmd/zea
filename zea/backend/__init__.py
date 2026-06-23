@@ -71,9 +71,11 @@ def _get_backend():
         return None
 
 
-tf_mod = _import_tf()
-jax_mod = _import_jax()
 backend = _get_backend()
+if backend == "tensorflow":
+    tf_mod = _import_tf()
+elif backend == "jax":
+    jax_mod = _import_jax()
 
 
 def tf_function(func=None, jit_compile=False, **kwargs):
