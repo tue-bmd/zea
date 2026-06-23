@@ -588,7 +588,7 @@ class Parameters(BaseParameters):
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select plane wave transmits")
-            return np.concatenate([np.where(value == 0)[0], np.where(np.isinf(value))[0]]).tolist()
+            return np.where((value == 0) | np.isinf(value))[0].tolist()
 
         # Handle integer - select evenly spaced transmits
         if isinstance(selection, (int, np.integer)):
