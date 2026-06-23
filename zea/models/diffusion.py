@@ -198,6 +198,9 @@ class DiffusionModel(DeepGenerativeModel):
     def call(self, inputs, training: bool = False, network=None, **kwargs):
         """Call the score network.
 
+        If network is not provided, will use the exponential moving
+        average network if training is False, otherwise the regular network.
+
         Args:
             inputs: A list ``[noisy_images, noise_rates_squared]`` as
                 expected by the underlying time-conditional network.
@@ -253,8 +256,9 @@ class DiffusionModel(DeepGenerativeModel):
         """Sample from the posterior distribution given measurements.
 
         Args:
-            measurements: Input measurements. Typically of shape
-                ``(batch_size, *input_shape)``.
+            measurements: Input measurements, typically of shape `(*self.input_shape)`, but can also
+                be of shape `(n_samples, *self.input_shape)` if you want to provide different
+                measurements for each sample.
             n_samples: Number of posterior samples to generate.
                 Will generate ``n_samples`` samples for each measurement
                 in the ``measurements`` batch.
@@ -274,39 +278,25 @@ class DiffusionModel(DeepGenerativeModel):
                 These ``initial_samples`` can be initial guesses such as solutions
                 of previous frames (for sequences), see for instance
                 `SeqDiff <https://arxiv.org/abs/2409.05399>`_.
-                Must be of shape ``(batch_size, n_samples, *input_shape)``.
+                Must be of shape ``(n_samples, *input_shape)``.
             seed: Random seed generator.
-            **kwargs: Additional arguments passed to
-                :meth:`reverse_conditional_diffusion`.
+            **kwargs: Additional arguments to pass to the guidance function and the operator.
+                Examples are omega, mask, etc.
 
         Returns:
-            Posterior samples ``p(x|y)`` of shape
-            ``(batch_size, n_samples, *input_shape)``.
+            Posterior samples p(x|y) of shape `(n_samples, *input_shape)`.
 
         """
-        batch_size = ops.shape(measurements)[0]
-        shape = (batch_size, n_samples, *self.input_shape)
-
-        def _tile_with_sample_dim(tensor):
-            """Tile the tensor with an additional sample dimension."""
-            shape = ops.shape(tensor)
-            tensor = ops.repeat(tensor[:, None], n_samples, axis=1)  # (batch, n_samples, ...)
-            return ops.reshape(tensor, (-1, *shape[1:]))
-
-        measurements = _tile_with_sample_dim(measurements)
-        if initial_samples is not None:
-            initial_samples = ops.reshape(initial_samples, (-1, *self.input_shape))
-        if "mask" in kwargs:
-            kwargs["mask"] = _tile_with_sample_dim(kwargs["mask"])
-
         seed1, seed2 = split_seed(seed, 2)
 
         initial_noise = keras.random.normal(
-            shape=(batch_size * n_samples, *self.input_shape),
+            shape=(n_samples, *self.input_shape),
             seed=seed1,
         )
 
-        out = self.reverse_conditional_diffusion(
+        measurements = ops.broadcast_to(measurements, (n_samples, *measurements.shape))
+
+        return self.reverse_conditional_diffusion(
             measurements=measurements,
             initial_noise=initial_noise,
             diffusion_steps=n_steps,
@@ -314,9 +304,7 @@ class DiffusionModel(DeepGenerativeModel):
             initial_step=initial_step,
             seed=seed2,
             **kwargs,
-        )  # ( batch_size * n_samples, *self.input_shape)
-
-        return ops.reshape(out, shape)  # (batch_size, n_samples, *input_shape)
+        )
 
     def log_likelihood(self, data, **kwargs):
         """Approximate log-likelihood of the data under the model.
