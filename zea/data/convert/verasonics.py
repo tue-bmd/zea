@@ -82,6 +82,79 @@ _VERASONICS_TO_ZEA_PROBE_NAMES = {
 _FRAMES_RANGE_RE = re.compile(r"^\d+(-\d+)?$")
 
 
+def estimate_lens_probe_params(
+    lens_correction: float | None,
+    center_frequency: float,
+    lens_sound_speed: float = 1000.0,
+) -> dict:
+    """Return ProbeSpec lens fields derived from the Verasonics lens correction.
+
+    Converts the Verasonics one-way scalar delay (wavelengths) to a physical
+    ``(lens_thickness, lens_sound_speed)`` pair::
+
+        t_one_way = lens_correction / f_c  =  lens_thickness / lens_sound_speed
+        → lens_thickness = lens_correction × lens_sound_speed / f_c
+
+    The raw Verasonics value (``Trans.lensCorrection``) is a scalar one-way
+    delay offset in wavelengths applied uniformly across all elements.  It is
+    not directly compatible with zea's Fermat-based model, which solves the
+    refracted path per element–pixel pair via Newton-Raphson.
+
+    Args:
+        lens_correction (float or None): One-way delay through the lens in
+            wavelengths (``Trans.lensCorrection``).  Returns an empty dict
+            when ``None``.
+        center_frequency (float): Center frequency in Hz.
+        lens_sound_speed (float, optional): Speed of sound in the lens
+            material in m/s. Defaults to 1000.0.
+
+    Returns:
+        dict: ``{"lens_sound_speed": ..., "lens_thickness": ...}`` ready to
+        merge into a ProbeSpec dict, or ``{}`` when ``lens_correction`` is
+        ``None``.
+    """
+    if lens_correction is None:
+        return {}
+    if not (np.isfinite(lens_sound_speed) and lens_sound_speed > 0):
+        raise ValueError(f"lens_sound_speed must be finite and positive, got {lens_sound_speed!r}")
+    if not (np.isfinite(center_frequency) and center_frequency > 0):
+        raise ValueError(f"center_frequency must be finite and positive, got {center_frequency!r}")
+    if not (np.isfinite(lens_correction) and lens_correction >= 0):
+        raise ValueError(
+            f"lens_correction must be finite and non-negative, got {lens_correction!r}"
+        )
+    lens_thickness = np.float32(float(lens_correction) * lens_sound_speed / center_frequency)
+    log.info(
+        f"Lens: {float(lens_correction):.3f} wl → {float(lens_thickness) * 1e3:.3f} mm "
+        f"(c_lens = {lens_sound_speed:.0f} m/s)"
+    )
+    return {
+        "lens_sound_speed": np.float32(lens_sound_speed),
+        "lens_thickness": lens_thickness,
+    }
+
+
+def bs100bw_to_iq(data: np.ndarray) -> np.ndarray:
+    """Convert BS100BW/BS50BW interleaved data to IQ format.
+
+    Both Verasonics baseband modes (BS100BW and BS50BW) interleave I and Q
+    samples along the axial axis: even samples are I, odd samples are Q
+    (negated).
+
+    Args:
+        data: Input array of shape ``(n_frames, n_tx, n_ax_raw, n_el, 1)``.
+
+    Returns:
+        IQ array of shape ``(n_frames, n_tx, n_ax, n_el, 2)``.
+    """
+    if data.ndim != 5 or data.shape[-1] != 1:
+        raise ValueError(f"Expected shape (n_frames, n_tx, n_ax_raw, n_el, 1), got {data.shape}")
+    if data.shape[2] % 2 != 0:
+        raise ValueError(f"Axial dimension must be even for IQ deinterleaving, got {data.shape[2]}")
+    d = data.astype(np.float32)
+    return np.stack([d[:, :, 0::2, :, 0], -d[:, :, 1::2, :, 0]], axis=-1)
+
+
 def _validate_convert_config(data):
     """Validate the structure of a convert.yaml config dict.
 
@@ -626,16 +699,8 @@ class VerasonicsFile(h5py.File):
         # Add channel dimension
         raw_data = raw_data[..., None]
 
-        # If the data is captured in BS100BW mode or BS50BW mode, the data is stored in
-        # as complex IQ data.
         if self.is_baseband_mode:
-            raw_data = np.concatenate(
-                (
-                    raw_data[:, :, 0::2, :, :],
-                    -raw_data[:, :, 1::2, :, :],
-                ),
-                axis=-1,
-            )
+            raw_data = bs100bw_to_iq(raw_data)
 
         return raw_data
 
@@ -977,6 +1042,7 @@ class VerasonicsFile(h5py.File):
         allow_accumulate=False,
         buffer_index=0,
         additional_functions=None,
+        lens_sound_speed: float = 1000.0,
     ):
         """Reads data from a .mat Verasonics output file.
 
@@ -992,6 +1058,11 @@ class VerasonicsFile(h5py.File):
             additional_functions (list, optional): A list of functions that read additional
                 data from the file. Each function should take the `VerasonicsFile` as input
                 and return a `CustomElement`. Defaults to None.
+            lens_sound_speed (float, optional): Speed of sound in the lens material in m/s.
+                Used to convert the Verasonics scalar lens correction (one-way delay in
+                wavelengths) into ``lens_thickness`` and ``lens_sound_speed`` fields on the
+                probe dict.  Only applied when the file contains a ``lensCorrection`` field.
+                Defaults to 1000.0.
         """
 
         if additional_functions is None:
@@ -1053,7 +1124,13 @@ class VerasonicsFile(h5py.File):
         except Exception as e:
             log.error(f"Could not read Verasonics ImgDataP buffer: {e}, skipping.")
 
-        return {"raw_data": raw_data}, scan_dict, custom_elements
+        probe_dict = self.probe.to_probe_spec()
+        f_c = self.probe.center_frequency
+        probe_dict.update(
+            estimate_lens_probe_params(self.probe.lens_correction, f_c, lens_sound_speed)
+        )
+
+        return {"raw_data": raw_data}, scan_dict, probe_dict, custom_elements
 
     def _parse_frames_argument(self, frames, n_frames):
         value_error = ValueError(
@@ -1121,6 +1198,7 @@ class VerasonicsFile(h5py.File):
         allow_accumulate=False,
         enable_compression=True,
         additional_functions=None,
+        lens_sound_speed: float = 1000.0,
     ):
         """Converts the Verasonics file to the zea format.
 
@@ -1140,13 +1218,18 @@ class VerasonicsFile(h5py.File):
             additional_functions (list, optional): A list of functions that read additional
                 data from the file. Each function should take the `VerasonicsFile` as input
                 and return a `CustomElement`. Defaults to None.
+            lens_sound_speed (float, optional): Speed of sound in the lens material in m/s.
+                Used to convert ``Trans.lensCorrection`` (wavelengths) into
+                ``lens_thickness`` and ``lens_sound_speed`` fields on the probe. Defaults
+                to 1000.0.
         """
         # Here we call all the functions to read the data from the file
         log.info("Reading Verasonics file...")
-        data_dict, scan_dict, custom_elements = self.read_verasonics_file(
+        data_dict, scan_dict, probe_dict, custom_elements = self.read_verasonics_file(
             frames=frames,
             allow_accumulate=allow_accumulate,
             additional_functions=additional_functions,
+            lens_sound_speed=lens_sound_speed,
         )
 
         # Generate the zea dataset
@@ -1156,7 +1239,7 @@ class VerasonicsFile(h5py.File):
             path=output_path,
             data=data_dict,
             scan=scan_dict,
-            probe=self.probe.to_probe_spec(),
+            probe=probe_dict,
             description="Verasonics data",
             custom=custom_elements,
             compression=compression,
