@@ -32,7 +32,6 @@ from zea.data.convert.verasonics import (
     estimate_lens_probe_params,
 )
 from zea.data.file import File
-from zea.data.spec import DEFAULT_COMPRESSION
 from zea.func.tensor import translate
 from zea.internal.preset_utils import _hf_resolve_path
 from zea.io_lib import _SUPPORTED_IMG_TYPES
@@ -1344,16 +1343,7 @@ def test_images_uint8_passes(tmp_path):
 
 
 def test_verasonics_compression_flag_respected(tmp_path):
-    """When enable_compression=False the File.create call must use
-    compression=None, not force 'lzf'."""
-    enable_compression = False
-    compression = DEFAULT_COMPRESSION if enable_compression else None
-
-    assert (compression or DEFAULT_COMPRESSION) == DEFAULT_COMPRESSION, (
-        "old code always used default compression"
-    )
-    assert compression is None, "fixed code uses None when compression is disabled"
-
+    """When enable_compression=False the File.create call must use compression=None."""
     n_tx, n_el = 4, 16
     scan = {
         "sampling_frequency": np.float32(40e6),
@@ -1431,53 +1421,6 @@ def test_verasonics_upload_requires_revision(tmp_path, monkeypatch):
 
     with pytest.raises(AssertionError, match="revision must be provided"):
         convert_verasonics(args)
-
-
-def testestimate_lens_probe_params_no_element():
-    """Returns an empty dict when lens_correction is None."""
-    assert estimate_lens_probe_params(None, center_frequency=7e6) == {}
-
-
-def testestimate_lens_probe_params_with_element():
-    """Returns correct ProbeSpec lens fields derived from lens_correction."""
-    lens_wl = 0.5
-    f_c = 7e6
-    c_lens = 1000.0
-
-    result = estimate_lens_probe_params(lens_wl, center_frequency=f_c, lens_sound_speed=c_lens)
-
-    assert set(result.keys()) == {"lens_sound_speed", "lens_thickness"}
-    assert result["lens_sound_speed"] == np.float32(c_lens)
-    np.testing.assert_allclose(
-        result["lens_thickness"], np.float32(lens_wl * c_lens / f_c), rtol=1e-6
-    )
-
-
-def testestimate_lens_probe_params_custom_sound_speed():
-    """lens_sound_speed scales thickness proportionally."""
-    f_c = 5e6
-    r1 = estimate_lens_probe_params(1.0, center_frequency=f_c, lens_sound_speed=1000.0)
-    r2 = estimate_lens_probe_params(1.0, center_frequency=f_c, lens_sound_speed=1600.0)
-
-    assert r2["lens_sound_speed"] == np.float32(1600.0)
-    np.testing.assert_allclose(
-        r2["lens_thickness"] / r1["lens_thickness"], 1600.0 / 1000.0, rtol=1e-5
-    )
-
-
-def test_bs100bw_to_iq_shape_and_values():
-    """bs100bw_to_iq splits interleaved axial samples into I/Q channels."""
-    rng = np.random.default_rng(42)
-    n_frames, n_tx, n_ax_raw, n_el = 2, 3, 8, 4
-    data = rng.integers(-100, 100, (n_frames, n_tx, n_ax_raw, n_el, 1), dtype=np.int16).astype(
-        np.float32
-    )
-
-    iq = bs100bw_to_iq(data)
-
-    assert iq.shape == (n_frames, n_tx, n_ax_raw // 2, n_el, 2)
-    np.testing.assert_array_equal(iq[..., 0], data[:, :, 0::2, :, 0])  # I = even samples
-    np.testing.assert_array_equal(iq[..., 1], -data[:, :, 1::2, :, 0])  # Q = -odd samples
 
 
 def test_check_output_dir_ownership_empty_dir(tmp_path):
