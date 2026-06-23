@@ -5,13 +5,13 @@
 
 ZEA_VERSION=$(pip show zea 2>/dev/null | awk '/^Version/{print $2}')
 ZEA_VERSION=${ZEA_VERSION:-dev}
-DEV_STATUS=No; [ "$DEV" = "true" ] && DEV_STATUS=Yes
+DEV_STATUS=no; [ "$DEV" = "true" ] && DEV_STATUS=yes
 
 # ── palette ───────────────────────────────────────────────────────────────────
 OR=$'\e[38;5;214m'   # brand orange  (#fbb53e)
 GY=$'\e[38;5;245m'   # gray (secondary text)
 CY=$'\e[36m'         # cyan  (values)
-MA=$'\e[35m'         # magenta (flags)
+PU=$'\e[38;5;55m'    # purple (flags)
 RD=$'\e[38;5;203m'   # red-orange (version)
 BD=$'\e[1m'
 DM=$'\e[2m'
@@ -25,7 +25,7 @@ OT=$'\e[38;5;214m▀▀\e[0m'   # brand orange  (#fbb53e)
 PT=$'\e[38;5;55m▀▀\e[0m'    # brand purple  (#593c5e)
 ET='  '                       # empty slot (no tile)
 
-yn() { [ "$1" = "true" ] && printf '%s' "${MA}yes${RS}" || printf '%s' "${GY}no ${RS}"; }
+yn() { [ -n "$1" ] && [ "$1" != "false" ] && printf '%s' "${PU}${1}${RS}" || printf '%s' "${GY}no ${RS}"; }
 
 # ── grid (4 cols × 7 rows, mirroring the transducer-array logo motif) ─────────
 # O=orange  P=purple  .=empty
@@ -48,13 +48,13 @@ printf '%s %s %s %s%s%szea%s  %sv%s%s  %sTU/e · BM/d%s\n' \
 printf '%s %s %s %s%s%s%s%s\n' \
     "$OT" "$PT" "$OT" "$OT"  "$G"  "$GY" "$sep" "$RS"
 printf '%s %s %s %s%sKERAS_BACKEND  %s%s%s\n' \
-    "$OT" "$OT" "$OT" "$OT"  "$G"  "$CY" "$KERAS_BACKEND" "$RS"
-printf '%s %s %s %s%sDev mode       %s%s%s\n' \
-    "$PT" "$OT" "$OT" "$PT"  "$G"  "$MA" "$DEV_STATUS" "$RS"
-printf '%s %s %s %s%sJAX            %s\n' \
+    "$OT" "$OT" "$OT" "$OT"  "$G"  "$OR" "$KERAS_BACKEND" "$RS"
+printf '%s %s %s %s%sdev mode       %s%s%s\n' \
+    "$PT" "$OT" "$OT" "$PT"  "$G"  "$OR" "$DEV_STATUS" "$RS"
+printf '%s %s %s %s%sjax            %s\n' \
     "$OT" "$OT" "$PT" "$OT"  "$G"  "$(yn "${INSTALL_JAX}")"
-printf '%s %s %s %s%sPyTorch        %s\n' \
+printf '%s %s %s %s%storch          %s\n' \
     "$OT" "$OT" "$OT" "$PT"  "$G"  "$(yn "${INSTALL_TORCH}")"
-printf '%s %s %s %s%sTensorFlow     %s\n' \
+printf '%s %s %s %s%stensorflow     %s\n' \
     "$ET" "$OT" "$OT" "$ET"  "$G"  "$(yn "${INSTALL_TF}")"
 printf '\n'
