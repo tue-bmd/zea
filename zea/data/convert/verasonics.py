@@ -6,7 +6,18 @@ Example of saving the entire workspace to a .mat file (MATLAB):
 
         >> setup_script;
         >> VSX;
-        >> save_raw('C:/path/to/raw_data.mat');
+        >> save('C:/path/to/raw_data.mat', '-v7.3');
+
+.. important::
+
+    The ``.mat`` file **must** be saved in HDF5 format (MATLAB v7.3 or later).
+    Older ``.mat`` files are not HDF5-compatible and cannot be opened by this converter.
+    To save in the correct format from MATLAB, use the ``-v7.3`` flag:
+
+.. note::
+
+    We also have a `save_raw` function (not available in zea at the moment)
+    which saves all relevant variables from the workspace only. This results in a smaller file size and faster conversion.
 
 Then convert the saved `raw_data.mat` file to zea format using the following code (Python):
 
@@ -25,7 +36,6 @@ Or alternatively, use the script below to convert all .mat files in a directory:
 or without the directory argument, the script will prompt you to select a directory
 using a file dialog.
 
-Event structure
 ---------------
 
 By default the zea dataformat saves all the data to an hdf5 file with the following structure:
@@ -38,66 +48,10 @@ By default the zea dataformat saves all the data to an hdf5 file with the follow
           └── center_frequency: 1MHz
 
 The data is stored in the ``data`` group and the scan parameters are stored in the ``scan``.
-However, when we do an adaptive acquisition, some scanning parameters might change. These
-blocks of data with consistent scanning parameters we call events. In the case we have multiple
-events, we store the data in the following structure:
-
-.. code-block:: text
-
-    zea_dataset.hdf5
-    ├── event_0
-    │   ├── data
-    │   └── scan
-    │       └── center_frequency: 1MHz
-    ├── event_1
-    │   ├── data
-    │   └── scan
-    │       └── center_frequency: 2MHz
-    ├── event_2
-    │   ├── data
-    │   └── scan
-    └── event_3
-        ├── data
-        └── scan
-
-This structure is supported by the zea toolbox. The way we can save the data in this structure
-from the Verasonics, is by changing the setup script to keep track of the TX struct at each event.
-
-The way this is done is still in development, an example of such an acquisition script that is
-compatible with saving event structures is found here:
-`setup_agent.m <https://github.com/tue-bmd/needle-tracking/blob/ius2024-demo-nc/verasonics/setup_agent.m>`_
-
-Adding additional elements
---------------------------
-
-You can add additional elements to the dataset by defining a function that reads the
-data from the file and returns a ``DatasetElement``. Then pass the function to the
-``to_zea`` method as a list.
-
-.. code-block:: python
-
-    def read_max_high_voltage(file):
-        lens_correction = file["Trans"]["lensCorrection"][:].item()
-        return lens_correction
-
-
-    def read_high_voltage_func(file):
-        return DatasetElement(
-            group_name="scan",
-            dataset_name="max_high_voltage",
-            data=read_max_high_voltage(file),
-            description="The maximum high voltage used by the Verasonics system.",
-            unit="V",
-        )
-
-
-    VerasonicsFile("C:/path/to/raw_data.mat").to_zea(
-        "C:/path/to/output.hdf5",
-        [read_high_voltage_func],
-    )
 """  # noqa: E501
 
 import os
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -106,10 +60,15 @@ import h5py
 import numpy as np
 import yaml
 from keras import ops
-from schema import And, Optional, Or, Regex, Schema
 
 from zea import log
-from zea.data.data_format import DatasetElement, generate_zea_dataset
+from zea.data.convert.utils import (
+    require_output_dir_ownership,
+    upload_dataset_to_hf,
+    write_dataset_card,
+)
+from zea.data.file import CustomElement, File
+from zea.data.spec import DEFAULT_COMPRESSION
 from zea.func import log_compress, normalize
 from zea.internal.device import init_device
 from zea.utils import strtobool
@@ -120,22 +79,64 @@ _VERASONICS_TO_ZEA_PROBE_NAMES = {
 }
 
 
-_CONVERT_YAML_SCHEMA = Schema(
-    {
-        "files": [
-            {
-                "name": str,
-                Optional("first_frame"): And(int, lambda x: x >= 0),
-                Optional("frames"): Or(
-                    "all",
-                    And(str, Regex(r"^\d+(-\d+)?$")),  # Matches "30-99" or single number like "5"
-                    [And(int, lambda x: x >= 0)],  # List of non-negative integers
-                ),
-                Optional("transmits"): Or("all", [And(int, lambda x: x >= 0)]),
-            }
-        ]
-    }
-)
+_FRAMES_RANGE_RE = re.compile(r"^\d+(-\d+)?$")
+
+
+def _validate_convert_config(data):
+    """Validate the structure of a convert.yaml config dict.
+
+    Expected shape::
+
+        files:
+          - name: <str>
+            first_frame: <int >= 0>          # optional
+            frames: all | "N" | "N-M" | [N, ...] # optional
+            transmits: all | [N, ...]         # optional
+    """
+    if not isinstance(data, dict) or "files" not in data:
+        raise ValueError("convert.yaml must have a top-level 'files' key")
+    if not isinstance(data["files"], list):
+        raise ValueError("'files' must be a list")
+    for entry in data["files"]:
+        if not isinstance(entry, dict):
+            raise ValueError(f"each entry in 'files' must be a dict, got {type(entry).__name__}")
+        if not isinstance(entry.get("name"), str):
+            raise ValueError(f"each file entry must have a string 'name', got {entry!r}")
+        if "first_frame" in entry:
+            ff = entry["first_frame"]
+            if not isinstance(ff, int) or isinstance(ff, bool) or ff < 0:
+                raise ValueError(f"'first_frame' must be a non-negative int, got {ff!r}")
+        if "frames" in entry:
+            fr = entry["frames"]
+            if isinstance(fr, str) and _FRAMES_RANGE_RE.fullmatch(fr) and "-" in fr:
+                start, end = map(int, fr.split("-"))
+                if start > end:
+                    raise ValueError(f"'frames' range must be ascending (start <= end), got {fr!r}")
+            if not (
+                fr == "all"
+                or (isinstance(fr, str) and _FRAMES_RANGE_RE.fullmatch(fr))
+                or (
+                    isinstance(fr, list)
+                    and all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in fr)
+                )
+            ):
+                raise ValueError(
+                    f"'frames' must be 'all', a range string like '30-99', or a list of "
+                    f"non-negative ints, got {fr!r}"
+                )
+        if "transmits" in entry:
+            tr = entry["transmits"]
+            if not (
+                tr == "all"
+                or (
+                    isinstance(tr, list)
+                    and all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in tr)
+                )
+            ):
+                raise ValueError(
+                    f"'transmits' must be 'all' or a list of non-negative ints, got {tr!r}"
+                )
+    return data
 
 
 class VerasonicsFile(h5py.File):
@@ -143,9 +144,26 @@ class VerasonicsFile(h5py.File):
 
     This class extends the h5py.File class to handle Verasonics-specific
     data structures and conventions.
+
+    .. note::
+
+        The ``.mat`` file must be saved in HDF5 format (MATLAB v7.3).
+        Use ``save('file.mat', '-v7.3')`` in MATLAB before converting.
     """
 
-    def dereference_index(self, dataset, index, event=None, subindex=None):
+    def __init__(self, name, mode="r", **kwargs):
+        try:
+            super().__init__(name, mode, **kwargs)
+        except OSError as e:
+            raise OSError(
+                f"Cannot open '{name}' as an HDF5 file.\n\n"
+                "This usually means the .mat file was not saved in HDF5 format.\n"
+                "MATLAB saves in HDF5 format only when you use the '-v7.3' flag:\n\n"
+                "    save('C:/path/to/raw_data.mat', '-v7.3')\n\n"
+                "Re-save the workspace in MATLAB with this flag and try again."
+            ) from e
+
+    def dereference_index(self, dataset, index):
         """Get the element at the given index from the dataset, dereferencing it if
         necessary.
 
@@ -159,22 +177,10 @@ class VerasonicsFile(h5py.File):
         Args:
             dataset (h5py.Dataset): The dataset to read the element from.
             index (int): The index of the element to read.
-            event (int, optional): The event index. Usually we store each event in the
-                second dimension of the dataset. Defaults to None in this case we assume
-                that there is only a single event.
-            subindex (slice, optional): The subindex of the element to read after
-                referencing the actual data. Defaults to None. In this case, all the data
-                is returned.
         """
         if isinstance(dataset.fillvalue, h5py.h5r.Reference):
-            if event is not None:
-                reference = dataset[index, event]
-            else:
-                reference = dataset[index].item()
-            if subindex is None:
-                return self[reference][:]
-            else:
-                return self[reference][subindex]
+            reference = dataset[index].item()
+            return self[reference][:]
         else:
             return dataset
 
@@ -215,46 +221,16 @@ class VerasonicsFile(h5py.File):
         return int(dataset[:].item())
 
     @property
-    def probe_unit(self):
-        """The unit the probe dimensions are defined in."""
-        _ALLOWED_UNITS = {"wavelengths", "mm"}
-        unit = self.decode_string(self["Trans"]["units"][:])
-        assert unit in {"wavelengths", "mm"}, (
-            f"Unexpected unit '{unit}' in file, must be one of {_ALLOWED_UNITS}"
-        )
-        return unit
-
-    @property
-    def probe_geometry(self):
-        """The probe geometry of shape (n_el, 3)."""
-        # Read the probe geometry from the file
-        probe_geometry = self["Trans"]["ElementPos"][:3, :]
-
-        # Transpose the probe geometry to have the shape (n_el, 3)
-        probe_geometry = probe_geometry.T
-
-        # Convert the probe geometry to meters
-        if self.probe_unit == "mm":
-            probe_geometry = probe_geometry / 1000
-        else:
-            probe_geometry = probe_geometry * self.wavelength
-
-        return probe_geometry
-
-    @property
     def wavelength(self):
         """Wavelength of the probe from the file in meters."""
 
-        return self.sound_speed / self.probe_center_frequency
+        return self.sound_speed / self.probe.center_frequency
 
-    def read_transmit_events(
-        self, event=None, frames="all", allow_accumulate=False, buffer_index=0
-    ):
+    def read_transmit_events(self, frames="all", allow_accumulate=False, buffer_index=0):
         """Read the events from the file and finds the order in which transmits and receives
         appear in the events.
 
         Args:
-            event (int, optional): The event index. Defaults to None.
             frames (str or list, optional): The frames to read. Defaults to "all".
             allow_accumulate (bool, optional): Sometimes, some transmits are already accumulated
                 on the Verasonics system (e.g. harmonic imaging through pulse inversion).
@@ -362,21 +338,17 @@ class VerasonicsFile(h5py.File):
             time_to_next_acq = None
 
         if time_to_next_acq is not None:
-            if event is not None:
-                time_to_next_acq = time_to_next_acq[event]
-                time_to_next_acq = np.expand_dims(time_to_next_acq, axis=0)
-
             time_to_next_acq = time_to_next_acq[frame_indices]
 
         return tx_order, rcv_order, time_to_next_acq
 
-    def read_t0_delays_apod(self, tx_order, event=None):
+    def read_t0_delays_apod(self, tx_order):
         """
         Read the t0 delays and apodization from the file.
 
         Returns:
-            t0_delays (np.ndarray): The t0 delays of shape (n_tx, n_el).
-            apod (np.ndarray): The apodization of shape (n_el,).
+            tuple: ``(t0_delays, apodizations)`` — t0 delays of shape ``(n_tx, n_el)``
+            and transmit apodizations of shape ``(n_tx, n_el)``.
         """
 
         t0_delays_list = []
@@ -384,20 +356,14 @@ class VerasonicsFile(h5py.File):
 
         for n in tx_order:
             # Get column vector of t0_delays
-            if event is None:
-                t0_delays = self.dereference_index(self["TX"]["Delay"], n)
-            else:
-                t0_delays = self.dereference_index(self["TX_Agent"]["Delay"], n, event)
+            t0_delays = self.dereference_index(self["TX"]["Delay"], n)
             # Turn into 1d array
             t0_delays = t0_delays[:, 0]
 
             t0_delays_list.append(t0_delays)
 
             # Get column vector of apodizations
-            if event is None:
-                tx_apodizations = self.dereference_index(self["TX"]["Apod"], n)
-            else:
-                tx_apodizations = self.dereference_index(self["TX_Agent"]["Apod"], n, event)
+            tx_apodizations = self.dereference_index(self["TX"]["Apod"], n)
             # Turn into 1d array
             tx_apodizations = tx_apodizations[:, 0]
             tx_apodizations_list.append(tx_apodizations)
@@ -434,13 +400,20 @@ class VerasonicsFile(h5py.File):
 
         return sampling_frequency
 
-    def read_waveforms(self, tx_order, event=None):
-        """
-        Read the waveforms from the file.
+    def read_tx_waveform_indices(self, tx_order):
+        tx_waveform_indices = []
+        for n in tx_order:
+            # Read the waveform
+            waveform_index = self.dereference_index(self["TX"]["waveform"], n)[:]
+            # Subtract one to make the indices 0-based
+            waveform_index -= 1
+            # Turn into integer
+            waveform_index = int(waveform_index.item())
+            tx_waveform_indices.append(waveform_index)
+        return tx_waveform_indices
 
-        Returns:
-            waveforms (np.ndarray): The waveforms of shape (n_tx, n_samples).
-        """
+    def read_waveforms(self):
+        """Read the waveforms from the file."""
         waveforms_one_way_list = []
         waveforms_two_way_list = []
 
@@ -460,23 +433,9 @@ class VerasonicsFile(h5py.File):
             waveforms_one_way_list.append(waveform_one_way)
             waveforms_two_way_list.append(waveform_two_way)
 
-        tx_waveform_indices = []
+        return waveforms_one_way_list, waveforms_two_way_list
 
-        for n in tx_order:
-            # Read the waveform
-            if event is None:
-                waveform_index = self.dereference_index(self["TX"]["waveform"], n)[:]
-            else:
-                waveform_index = self.dereference_index(self["TX_Agent"]["waveform"], n, event)[:]
-            # Subtract one to make the indices 0-based
-            waveform_index -= 1
-            # Turn into integer
-            waveform_index = int(waveform_index.item())
-            tx_waveform_indices.append(waveform_index)
-
-        return tx_waveform_indices, waveforms_one_way_list, waveforms_two_way_list
-
-    def read_beamsteering_angles(self, tx_order, event=None):
+    def read_beamsteering_angles(self, tx_order):
         """Beam steering angles in radians (theta, alpha) for each transmit.
 
         Returns:
@@ -486,10 +445,7 @@ class VerasonicsFile(h5py.File):
 
         for n in tx_order:
             # Read the polar angle
-            if event is None:
-                angle = self.dereference_index(self["TX"]["Steer"], n)[:]
-            else:
-                angle = self.dereference_index(self["TX_Agent"]["Steer"], n, event)[:]
+            angle = self.dereference_index(self["TX"]["Steer"], n)[:]
 
             angles_list.append(angle)
         angles = np.stack(angles_list, axis=0)
@@ -500,13 +456,13 @@ class VerasonicsFile(h5py.File):
         )
         return angles
 
-    def read_polar_angles(self, tx_order, event=None):
+    def read_polar_angles(self, tx_order):
         """Read the polar angles  of shape (n_tx,) from the file."""
-        return self.read_beamsteering_angles(tx_order, event)[:, 0]
+        return self.read_beamsteering_angles(tx_order)[:, 0]
 
-    def read_azimuth_angles(self, tx_order, event=None):
+    def read_azimuth_angles(self, tx_order):
         """Read the azimuth angles of shape (n_tx,) from the file."""
-        return self.read_beamsteering_angles(tx_order, event)[:, 1]
+        return self.read_beamsteering_angles(tx_order)[:, 1]
 
     @property
     def end_samples(self):
@@ -529,15 +485,6 @@ class VerasonicsFile(h5py.File):
                 "We do not support this case yet."
             )
         return n_ax.item()
-
-    @property
-    def probe_connector(self):
-        """Probe connector indices."""
-        probe_connector = self["Trans"]["ConnectorES"][:]
-        probe_connector = np.squeeze(probe_connector, axis=0)
-        probe_connector = probe_connector.astype(np.int32)
-        probe_connector = probe_connector - 1  # make 0-based
-        return probe_connector
 
     @property
     def is_new_save_raw_format(self):
@@ -574,7 +521,7 @@ class VerasonicsFile(h5py.File):
                 data = yaml.load(file, Loader=yaml.FullLoader)
 
             # Validate the YAML structure
-            validated_data = _CONVERT_YAML_SCHEMA.validate(data)
+            validated_data = _validate_convert_config(data)
 
             files = validated_data["files"]
             filenames = [file["name"] for file in files]
@@ -616,7 +563,7 @@ class VerasonicsFile(h5py.File):
 
         return self.get_indices_to_reorder(first_frame, n_frames)
 
-    def read_raw_data(self, event=None, frames="all", buffer_index=0, first_frame_idx=None):
+    def read_raw_data(self, frames="all", buffer_index=0, first_frame_idx=None):
         """
         Read the raw data from the file.
 
@@ -625,19 +572,23 @@ class VerasonicsFile(h5py.File):
         """
 
         # Read the raw data from the file
-        if event is None:
-            raw_data = self.dereference_index(self["RcvData"], buffer_index)
-        else:
-            # for now we only index frames as events
-            raw_data = self.dereference_index(self["RcvData"], buffer_index, subindex=event)
-            raw_data = np.expand_dims(raw_data, axis=0)
+        raw_data = self.dereference_index(self["RcvData"], buffer_index)
 
         # Convert the raw data to a numpy array to allow out-of-order indexing later
         raw_data = np.asarray(raw_data, dtype=np.int16)
 
+        # Add n_frames dimension if it is missing
+        if raw_data.ndim == 2:
+            raw_data = np.expand_dims(raw_data, axis=0)
+
+        assert raw_data.ndim == 3, (
+            "Expected raw data to have 3 dimensions at this point "
+            f"(n_frames, n_channels, n_samples), but got {raw_data.shape}."
+        )
+
         # Reorder and select channels based on probe elements
         if self.is_new_save_raw_format:
-            raw_data = raw_data[:, self.probe_connector, :]
+            raw_data = raw_data[:, self.probe.connector, :]
         else:
             log.warning(
                 "Data was not saved using the updated `save_raw` function (version >= 1.0). "
@@ -688,12 +639,6 @@ class VerasonicsFile(h5py.File):
 
         return raw_data
 
-    @property
-    def probe_center_frequency(self):
-        """Center frequency of the probe from the file in Hz."""
-
-        return self["Trans"]["frequency"][:].item() * 1e6
-
     def read_center_frequency(self, waveform_index):
         """Center frequency of the transmit from the file in Hz."""
 
@@ -719,14 +664,7 @@ class VerasonicsFile(h5py.File):
             center_frequency = self.read_center_frequency(waveform_index)
             center_frequencies.append(center_frequency)
 
-        center_frequencies = np.stack(center_frequencies)
-        center_frequencies = np.unique(center_frequencies)
-        if center_frequencies.size != 1:
-            raise ValueError(
-                "Multiple center frequencies found in file: "
-                f"{center_frequencies}. We do not support this case at the moment."
-            )
-        return center_frequencies.item()
+        return np.stack(center_frequencies)
 
     @property
     def demodulation_frequency(self):
@@ -755,7 +693,7 @@ class VerasonicsFile(h5py.File):
             wavelength (float): The wavelength of the probe.
 
         Returns:
-            initial_times (np.ndarray): The initial times of shape (n_rcv,).
+            np.ndarray: The initial times of shape ``(n_rcv,)``.
         """
         initial_times = []
         for n in rcv_order:
@@ -766,42 +704,22 @@ class VerasonicsFile(h5py.File):
         return np.stack(initial_times).astype(np.float32)
 
     @property
-    def probe_name(self):
-        """The name of the probe from the file."""
-        probe_name = self["Trans"]["name"][:]
-        probe_name = self.decode_string(probe_name)
-        # Translates between verasonics probe names and zea probe names
-        if probe_name in _VERASONICS_TO_ZEA_PROBE_NAMES:
-            probe_name = _VERASONICS_TO_ZEA_PROBE_NAMES[probe_name]
-        else:
-            log.warning(
-                f"Probe name '{probe_name}' is not in the list of known probes. "
-                "Please add it to the _VERASONICS_TO_ZEA_PROBE_NAMES dictionary. "
-                "Falling back to generic probe."
-            )
-            probe_name = "generic"
+    def probe(self) -> "VerasonicsProbe":
+        """The probe object from the file."""
+        return VerasonicsProbe(self)
 
-        return probe_name
-
-    def read_focus_distances(self, tx_order, event=None):
+    def read_focus_distances(self, tx_order):
         """Reads the focus distances from the file.
 
         Args:
             tx_order (list): The order in which the transmits appear in the events.
 
         Returns:
-            focus_distances (list): The focus distances of shape (n_tx,) in meters.
+            np.ndarray: The focus distances of shape ``(n_tx,)`` in meters.
         """
         focus_distances = []
         for n in tx_order:
-            if event is None:
-                focus_distance = self.dereference_index(self["TX"]["focus"], n)[:].item()
-            else:
-                focus_distance = self.dereference_index(
-                    self["TX_Agent"]["focus"],
-                    n,
-                    event,
-                )[:].item()
+            focus_distance = self.dereference_index(self["TX"]["focus"], n)[:].item()
             focus_distances.append(focus_distance)
 
         # Convert focus distances from wavelengths to meters
@@ -809,7 +727,7 @@ class VerasonicsFile(h5py.File):
 
         return focus_distances
 
-    def read_transmit_origins(self, tx_order, event=None):
+    def read_transmit_origins(self, tx_order):
         """Reads the transmit origins from the file.
 
         Args:
@@ -820,22 +738,13 @@ class VerasonicsFile(h5py.File):
         """
         origins = []
         for n in tx_order:
-            if event is None:
-                origin = self.dereference_index(self["TX"]["Origin"], n)
-            else:
-                origin = self.dereference_index(self["TX_Agent"]["Origin"], n, event)
+            origin = self.dereference_index(self["TX"]["Origin"], n)
             origins.append(origin.squeeze())
 
         # Convert origins from wavelengths to meters
         origins = np.stack(origins) * self.wavelength
 
         return origins
-
-    @property
-    def _probe_geometry_is_ordered_ula(self):
-        """Checks if the probe geometry is ordered as a uniform linear array (ULA)."""
-        diff_vec = self.probe_geometry[1:] - self.probe_geometry[:-1]
-        return np.isclose(diff_vec, diff_vec[0]).all()
 
     def planewave_focal_distance_to_inf(self, focus_distances, t0_delays, tx_apodizations):
         """Detects plane wave transmits and sets the focus distance to infinity.
@@ -849,10 +758,10 @@ class VerasonicsFile(h5py.File):
             focus_distances (np.ndarray): The focus distances of shape (n_tx,).
 
         Note:
-            This function assumes that the probe_geometry is a 1d uniform linear array.
+            This function assumes that the probe geometry is a 1d uniform linear array.
             If not it will warn and return.
         """
-        if not self._probe_geometry_is_ordered_ula:
+        if not self.probe._probe_geometry_is_ordered_ula:
             log.warning(
                 "The probe geometry is not ordered as a uniform linear array. "
                 "Focal distances are not set to infinity for plane waves."
@@ -872,29 +781,26 @@ class VerasonicsFile(h5py.File):
         return focus_distances
 
     @property
-    def bandwidth_percent(self):
+    def sample_mode(self):
         """Receive bandwidth as a percentage of center frequency."""
         SUPPORTED_SAMPLE_MODES = ["NS200BW", "BS100BW", "BS67BW", "BS50BW"]
 
         # For all unique sample modes
-        bandwidth_percent = self.dereference_all(
-            self["Receive"]["sampleMode"], func=self.decode_string
-        )
-        bandwidth_percent = set(bandwidth_percent)
+        sample_mode = self.dereference_all(self["Receive"]["sampleMode"], func=self.decode_string)
+        sample_mode = set(sample_mode)
 
-        # Ensure only a single bandwidth mode is used
-        assert len(bandwidth_percent) == 1, (
-            f"Multiple bandwidth modes found in file: {bandwidth_percent}. "
-            "We do not support this case."
+        # Ensure only a single sample mode is used
+        assert len(sample_mode) == 1, (
+            f"Multiple sample modes found in file: {sample_mode}. We do not support this case."
         )
-        bandwidth_percent = bandwidth_percent.pop()
+        sample_mode = sample_mode.pop()
 
-        # Check if the bandwidth mode is supported, and extract the percentage
-        assert bandwidth_percent in SUPPORTED_SAMPLE_MODES, (
-            f"Unexpected bandwidth mode '{bandwidth_percent}' in file."
+        # Check if the sample mode is supported, and extract the percentage
+        assert sample_mode in SUPPORTED_SAMPLE_MODES, (
+            f"Unexpected sample mode '{sample_mode}' in file."
             f"Expected one of {SUPPORTED_SAMPLE_MODES}"
         )
-        return int(bandwidth_percent[2:-2])
+        return int(sample_mode[2:-2])
 
     @property
     def is_baseband_mode(self):
@@ -905,13 +811,7 @@ class VerasonicsFile(h5py.File):
         - Two sequential samples are interpreted as a single complex sample.
           Therefore, we need to halve the sampling frequency.
         """
-        return self.bandwidth_percent in (50, 100)
-
-    @property
-    def lens_correction(self):
-        """The lens correction: 1 way delay in wavelengths thru lens"""
-
-        return self["Trans"]["lensCorrection"][:].item()
+        return self.sample_mode in (50, 100)
 
     @property
     def tgc_gain_curve(self):
@@ -975,7 +875,7 @@ class VerasonicsFile(h5py.File):
             )
             return np.arange(n_frames)
 
-    def read_image_data_p(self, event=None, frames="all", buffer_index=0):
+    def read_image_data_p(self, frames="all", buffer_index=0):
         """Reads the image data from the file.
 
         Uses the ``ImgDataP`` buffer, which is used for spatial filtering
@@ -994,11 +894,7 @@ class VerasonicsFile(h5py.File):
         # Get the dataset reference
         image_data_ref = self["ImgDataP"][:].squeeze()[buffer_index]
         # Dereference the dataset
-        if event is None:
-            image_data = self[image_data_ref][:]
-        else:
-            image_data = self[image_data_ref][event]
-            image_data = np.expand_dims(image_data, axis=0)
+        image_data = self[image_data_ref][:]
 
         # Re-order images such that sequence is correct
         indices = self.get_image_data_p_frame_order(buffer_index)
@@ -1015,35 +911,10 @@ class VerasonicsFile(h5py.File):
 
         return image_data
 
-    @property
-    def element_width(self):
-        """The element width in meters from the file."""
-        element_width = self["Trans"]["elementWidth"][:].item()
-
-        # Convert the probe element width to meters
-        if self.probe_unit == "mm":
-            element_width = element_width / 1000
-        else:
-            element_width = element_width * self.wavelength
-
-        return element_width
-
-    def read_verasonics_file(
-        self,
-        event=None,
-        additional_functions=None,
-        frames=None,
-        allow_accumulate=False,
-        buffer_index=0,
-    ):
-        """Reads data from a .mat Verasonics output file.
+    def read_scan(self, frames=None, allow_accumulate=False, buffer_index=0) -> dict:
+        """Reads all scan parameters from the file and returns them in a dictionary.
 
         Args:
-            event (int, optional): The event index. Defaults to None in this case we assume
-                the data file is stored without event structure.
-            additional_functions (list, optional): A list of functions that read additional
-                data from the file. Each function should take the file as input and return a
-                `DatasetElement`. Defaults to None.
             frames (str or list of int, optional): The frames to add to the file. This can be
                 a list of integers, a range of integers (e.g. 4-8), or 'all'. Defaults to
                 None, which means all frames, unless specified in a `convert.yaml` file.
@@ -1054,6 +925,75 @@ class VerasonicsFile(h5py.File):
             buffer_index (int, optional): The buffer index to read from. Defaults to 0.
         """
 
+        convert_config = self.load_convert_config()
+
+        if frames is None:
+            frames = convert_config.get("frames", "all")
+
+        tx_order, rcv_order, time_to_next_transmit = self.read_transmit_events(
+            frames=frames, allow_accumulate=allow_accumulate, buffer_index=buffer_index
+        )
+        initial_times = self.read_initial_times(rcv_order)
+
+        polar_angles = self.read_polar_angles(tx_order)
+        azimuth_angles = self.read_azimuth_angles(tx_order)
+        t0_delays, tx_apodizations = self.read_t0_delays_apod(tx_order)
+        focus_distances = self.read_focus_distances(tx_order)
+        transmit_origins = self.read_transmit_origins(tx_order)
+
+        waveforms_one_way_list, waveforms_two_way_list = self.read_waveforms()
+        tx_waveform_indices = self.read_tx_waveform_indices(tx_order)
+
+        # stack waveforms to (n_tx, n_samples) using the tx_waveform_indices
+        waveforms_one_way = np.stack([waveforms_one_way_list[i] for i in tx_waveform_indices])
+        waveforms_two_way = np.stack([waveforms_two_way_list[i] for i in tx_waveform_indices])
+
+        center_frequency = self.read_center_frequencies(tx_waveform_indices)
+        focus_distances = self.planewave_focal_distance_to_inf(
+            focus_distances, t0_delays, tx_apodizations
+        )
+
+        return {
+            "time_to_next_transmit": time_to_next_transmit,
+            "t0_delays": t0_delays,
+            "tx_apodizations": tx_apodizations,
+            "sampling_frequency": self.sampling_frequency,
+            "polar_angles": polar_angles,
+            "azimuth_angles": azimuth_angles,
+            "center_frequency": center_frequency,
+            "demodulation_frequency": self.demodulation_frequency,
+            "sound_speed": self.sound_speed,
+            "initial_times": initial_times,
+            "focus_distances": focus_distances,
+            "transmit_origins": transmit_origins,
+            "waveforms_one_way": waveforms_one_way,
+            "waveforms_two_way": waveforms_two_way,
+            "tgc_gain_curve": self.tgc_gain_curve,
+        }
+
+    def read_verasonics_file(
+        self,
+        frames=None,
+        allow_accumulate=False,
+        buffer_index=0,
+        additional_functions=None,
+    ):
+        """Reads data from a .mat Verasonics output file.
+
+        Args:
+            frames (str or list of int, optional): The frames to add to the file. This can be
+                a list of integers, a range of integers (e.g. 4-8), or 'all'. Defaults to
+                None, which means all frames, unless specified in a `convert.yaml` file.
+            allow_accumulate (bool, optional): Sometimes, some transmits are already accumulated
+                on the Verasonics system (e.g. harmonic imaging through pulse inversion).
+                In this case, the mode in the Receive structure is set to 1 (accumulate).
+                If this flag is set to False, an error is raised when such a mode is detected.
+            buffer_index (int, optional): The buffer index to read from. Defaults to 0.
+            additional_functions (list, optional): A list of functions that read additional
+                data from the file. Each function should take the `VerasonicsFile` as input
+                and return a `CustomElement`. Defaults to None.
+        """
+
         if additional_functions is None:
             additional_functions = []
 
@@ -1062,56 +1002,45 @@ class VerasonicsFile(h5py.File):
         if frames is None:
             frames = convert_config.get("frames", "all")
 
-        first_frame_idx = convert_config.get("first_frame", None)
-
-        tx_order, rcv_order, time_to_next_transmit = self.read_transmit_events(
-            frames=frames, allow_accumulate=allow_accumulate, buffer_index=buffer_index
-        )
-        initial_times = self.read_initial_times(rcv_order)
-
-        # these are capable of handling multiple events
-        raw_data = self.read_raw_data(event, frames=frames, first_frame_idx=first_frame_idx)
-
-        polar_angles = self.read_polar_angles(tx_order, event)
-        azimuth_angles = self.read_azimuth_angles(tx_order, event)
-        t0_delays, tx_apodizations = self.read_t0_delays_apod(tx_order, event)
-        focus_distances = self.read_focus_distances(tx_order, event)
-        transmit_origins = self.read_transmit_origins(tx_order, event)
-
-        tx_waveform_indices, waveforms_one_way_list, waveforms_two_way_list = self.read_waveforms(
-            tx_order, event
-        )
-        center_frequency = self.read_center_frequencies(tx_waveform_indices)
-        focus_distances = self.planewave_focal_distance_to_inf(
-            focus_distances, t0_delays, tx_apodizations
+        scan_dict = self.read_scan(
+            frames=frames,
+            allow_accumulate=allow_accumulate,
+            buffer_index=buffer_index,
         )
 
-        if event is None:
-            group_name = "scan"
-        else:
-            group_name = f"event_{event}/scan"
-
-        additional_elements = []
-
-        # Add Verasonics lens correction to additional elements
-        el_lens_correction = DatasetElement(
-            group_name=group_name,
-            dataset_name="lens_correction",
-            data=self.lens_correction,
-            description=(
-                "The lens correction value used by Verasonics. This value is the "
-                "additional path length in wavelength that the lens introduces. "
-                "(This disregards refraction.)"
-            ),
-            unit="wavelengths",
+        raw_data = self.read_raw_data(
+            frames=frames,
+            buffer_index=buffer_index,
+            first_frame_idx=convert_config.get("first_frame", None),
         )
-        additional_elements.append(el_lens_correction)
+
+        custom_elements = []
+
+        if self.probe.lens_correction is not None:
+            el_lens_correction = CustomElement(
+                name="lens_correction",
+                data=self.probe.lens_correction,
+                description=(
+                    "The lens correction value used by Verasonics. This value is a "
+                    "scalar one-way delay offset in wavelengths applied uniformly across "
+                    "all elements (disregards refraction). "
+                    "This is not directly compatible with zea's lens correction, which "
+                    "uses Fermat's principle (Newton-Raphson) to find the shortest "
+                    "refracted path per element-pixel pair."
+                ),
+                unit="wavelengths",
+            )
+            custom_elements.append(el_lens_correction)
+
+        # Add additional elements from user-defined functions
+        for additional_function in additional_functions:
+            custom_elements.append(additional_function(self))
 
         # Add Verasonics ImgDataP buffer to additional elements
         try:
-            verasonics_image_buffer = self.read_image_data_p(event, frames=frames)
-            verasonics_image_buffer = DatasetElement(
-                dataset_name="verasonics_image_buffer",
+            verasonics_image_buffer = self.read_image_data_p(frames=frames)
+            verasonics_image_buffer = CustomElement(
+                name="verasonics_image_buffer",
                 data=verasonics_image_buffer,
                 description=(
                     "The Verasonics ImgDataP buffer. "
@@ -1120,40 +1049,11 @@ class VerasonicsFile(h5py.File):
                 ),
                 unit="unitless",
             )
-            additional_elements.append(verasonics_image_buffer)
+            custom_elements.append(verasonics_image_buffer)
         except Exception as e:
             log.error(f"Could not read Verasonics ImgDataP buffer: {e}, skipping.")
 
-        # Add additional elements from user-defined functions
-        for additional_function in additional_functions:
-            additional_elements.append(additional_function(self))
-
-        data = {
-            "probe_geometry": self.probe_geometry,
-            "time_to_next_transmit": time_to_next_transmit,
-            "t0_delays": t0_delays,
-            "tx_apodizations": tx_apodizations,
-            "sampling_frequency": self.sampling_frequency,
-            "polar_angles": polar_angles,
-            "azimuth_angles": azimuth_angles,
-            "bandwidth_percent": self.bandwidth_percent,
-            "raw_data": raw_data,
-            "center_frequency": center_frequency,
-            "demodulation_frequency": self.demodulation_frequency,
-            "sound_speed": self.sound_speed,
-            "initial_times": initial_times,
-            "probe_name": self.probe_name,
-            "focus_distances": focus_distances,
-            "transmit_origins": transmit_origins,
-            "tx_waveform_indices": tx_waveform_indices,
-            "waveforms_one_way": waveforms_one_way_list,
-            "waveforms_two_way": waveforms_two_way_list,
-            "tgc_gain_curve": self.tgc_gain_curve,
-            "element_width": self.element_width,
-            "additional_elements": additional_elements,
-        }
-
-        return data
+        return {"raw_data": raw_data}, scan_dict, custom_elements
 
     def _parse_frames_argument(self, frames, n_frames):
         value_error = ValueError(
@@ -1217,18 +1117,15 @@ class VerasonicsFile(h5py.File):
     def to_zea(
         self,
         output_path,
-        additional_functions=None,
         frames=None,
         allow_accumulate=False,
         enable_compression=True,
+        additional_functions=None,
     ):
         """Converts the Verasonics file to the zea format.
 
         Args:
             output_path (str): The path to the output file (.hdf5 file).
-            additional_functions (list, optional): A list of functions that read additional
-                data from the file. Each function should take the file as input and return a
-                `DatasetElement`. Defaults to None.
             frames (str or list of int, optional): The frames to add to the file. This can be
                 a list of integers, a range of integers (e.g. 4-8), or 'all'. Defaults to
                 None, which means all frames are used, unless specified otherwise in a
@@ -1240,58 +1137,181 @@ class VerasonicsFile(h5py.File):
                 Defaults to False.
             enable_compression (bool, optional): Whether to enable compression when saving
                 the zea file. Defaults to True.
+            additional_functions (list, optional): A list of functions that read additional
+                data from the file. Each function should take the `VerasonicsFile` as input
+                and return a `CustomElement`. Defaults to None.
         """
-        if "TX_Agent" in self:
-            active_keys = self["TX_Agent"].keys()
-            log.info(
-                f"Found active imaging data with {len(active_keys)} events. "
-                "Will convert and save all parameters for each event separately."
-            )
-            num_events = set(self["TX_Agent"][key].shape[-1] for key in active_keys)
-            assert len(num_events) == 1, (
-                "All TX_Agent entries should have the same number of events."
-            )
-            num_events = num_events.pop()
+        # Here we call all the functions to read the data from the file
+        log.info("Reading Verasonics file...")
+        data_dict, scan_dict, custom_elements = self.read_verasonics_file(
+            frames=frames,
+            allow_accumulate=allow_accumulate,
+            additional_functions=additional_functions,
+        )
 
-            # loop over TX_Agent entries and overwrite TX each time
-            data = {}
-            for event in range(num_events):
-                data[event] = self.read_verasonics_file(
-                    event=event,
-                    additional_functions=additional_functions,
-                    allow_accumulate=allow_accumulate,
-                )
+        # Generate the zea dataset
+        log.info("Generating zea dataset...")
+        compression = DEFAULT_COMPRESSION if enable_compression else None
+        File.create(
+            path=output_path,
+            data=data_dict,
+            scan=scan_dict,
+            probe=self.probe.to_probe_spec(),
+            description="Verasonics data",
+            custom=custom_elements,
+            compression=compression,
+        )
 
-            # convert dict of events to dict of lists
-            data = {key: [data[event][key] for event in data] for key in data[0]}
-            description = ["Verasonics data with multiple events"] * num_events
 
-            # Generate the zea dataset
-            generate_zea_dataset(
-                path=output_path,
-                **data,
-                event_structure=True,
-                description=description,
-                enable_compression=enable_compression,
-            )
+class VerasonicsProbe:
+    def __init__(self, file: VerasonicsFile):
+        self._file = file
+        self.trans_obj = file["Trans"]
 
+    @property
+    def wavelength(self):
+        """The wavelength of the probe in meters."""
+        return self._file.wavelength
+
+    @property
+    def name(self):
+        """The name of the probe from the file."""
+        name = self.trans_obj["name"][:]
+        name = self._file.decode_string(name)
+        # Translates between verasonics probe names and zea probe names
+        if name in _VERASONICS_TO_ZEA_PROBE_NAMES:
+            name = _VERASONICS_TO_ZEA_PROBE_NAMES[name]
         else:
-            # Here we call al the functions to read the data from the file
-            log.info("Reading Verasonics file...")
-            data = self.read_verasonics_file(
-                additional_functions=additional_functions,
-                frames=frames,
-                allow_accumulate=allow_accumulate,
+            log.warning(
+                f"Probe name '{name}' is not in the list of known probes. "
+                "Please add it to the _VERASONICS_TO_ZEA_PROBE_NAMES dictionary. "
+                "Falling back to generic probe."
             )
+            name = "generic"
 
-            # Generate the zea dataset
-            log.info("Generating zea dataset...")
-            generate_zea_dataset(
-                path=output_path,
-                **data,
-                description="Verasonics data",
-                enable_compression=enable_compression,
-            )
+        return name
+
+    @property
+    def unit(self):
+        """The unit some probe dimensions are defined in.
+
+        This concerns ElementPos, elementWidth and lensCorrection.
+        """
+        _ALLOWED_UNITS = {"wavelengths", "mm"}
+        unit = self._file.decode_string(self.trans_obj["units"][:])
+        assert unit in {"wavelengths", "mm"}, (
+            f"Unexpected unit '{unit}' in file, must be one of {_ALLOWED_UNITS}"
+        )
+        return unit
+
+    @property
+    def center_frequency(self):
+        """Center frequency of the probe from the file in Hz."""
+
+        return self.trans_obj["frequency"][:].item() * 1e6
+
+    @property
+    def geometry(self):
+        """The probe geometry of shape (n_el, 3)."""
+        # Read the probe geometry from the file
+        geometry = self.trans_obj["ElementPos"][:3, :]
+
+        # Transpose the probe geometry to have the shape (n_el, 3)
+        geometry = geometry.T
+
+        # Convert the probe geometry to meters
+        if self.unit == "mm":
+            geometry = geometry / 1000
+        else:
+            geometry = geometry * self.wavelength
+
+        return geometry
+
+    @property
+    def bandwidth(self):
+        """Bandwidth of the probe: -6dB lower and upper cutoff pts in Hz."""
+        if "Bandwidth" in self.trans_obj.keys():
+            return self.trans_obj["Bandwidth"][:].squeeze() * 1e6
+
+    @property
+    def bandwidth_percent(self):
+        """Bandwidth of the probe as a percentage of the center frequency."""
+        if self.bandwidth is not None:
+            assert self.bandwidth[1] > self.bandwidth[0], "Bandwidth must be positive"
+            diff = self.bandwidth[1] - self.bandwidth[0]
+            return 100 * (diff / self.center_frequency)
+
+    @property
+    def type(self):
+        """The type of the probe from the file."""
+        if "type" in self.trans_obj.keys():
+            _id_to_str = {
+                0: "linear",
+                1: "curved",
+                2: "2D-array",
+                3: "annular",
+                4: "row-column",
+            }
+            probe_type_id = int(self.trans_obj["type"][:].item())
+            return _id_to_str.get(probe_type_id)
+
+    @property
+    def element_width(self):
+        """The element width in meters from the file."""
+        element_width = self.trans_obj["elementWidth"][:].item()
+
+        # Convert the probe element width to meters
+        if self.unit == "mm":
+            element_width = element_width / 1000  # mm -> m
+        else:
+            element_width = element_width * self.wavelength  # wavelengths -> m
+
+        return element_width
+
+    @property
+    def element_length(self):
+        """Element length for row-column probes in meters."""
+        if "ElementLength" in self.trans_obj.keys():
+            return self.trans_obj["ElementLength"][:].item() / 1000  # mm -> m
+
+    @property
+    def connector(self):
+        """Probe connector indices."""
+        connector = self.trans_obj["ConnectorES"][:]
+        connector = np.squeeze(connector, axis=0)
+        connector = connector.astype(np.int32)
+        connector = connector - 1  # make 0-based
+        return connector
+
+    @property
+    def lens_correction(self):
+        """The lens correction: 1 way delay in wavelengths through lens.
+
+        This is the Verasonics scalar offset added uniformly to all element delays.
+        It is not equivalent to zea's lens correction, which uses Fermat's principle
+        (solved via Newton-Raphson) to find the shortest refracted path through the
+        lens geometry per element-pixel pair.
+        """
+
+        if "lensCorrection" in self.trans_obj.keys():
+            return self.trans_obj["lensCorrection"][:].item()
+
+    @property
+    def _probe_geometry_is_ordered_ula(self):
+        """Checks if the probe geometry is ordered as a uniform linear array (ULA)."""
+        diff_vec = self.geometry[1:] - self.geometry[:-1]
+        return np.isclose(diff_vec, diff_vec[0]).all()
+
+    def to_probe_spec(self):
+        """Convert the probe to a dict compatible with :class:`~zea.data.spec.ProbeSpec`."""
+        return {
+            "name": self.name,
+            "type": self.type,
+            "probe_center_frequency": self.center_frequency,
+            "probe_bandwidth_percent": self.bandwidth_percent,
+            "probe_geometry": self.geometry,
+            "element_width": self.element_width,
+        }
 
 
 def _zea_from_verasonics_workspace(input_path, output_path, **kwargs):
@@ -1337,6 +1357,19 @@ def get_answer(prompt, additional_options=None):
         log.warning("Invalid input.")
 
 
+def make_dataset_card(repo_id):
+    return f"""\
+---
+zea_repo_id: {repo_id}
+---
+
+# Verasonics ultrasound data (zea format)
+
+This dataset contains raw ultrasound data acquired with Verasonics systems,
+converted to the [zea](https://github.com/tue-bmd/zea) HDF5 format.
+"""
+
+
 def convert_verasonics(args):
     """
     Converts a Verasonics MATLAB workspace file (.mat) or a directory containing multiple
@@ -1351,6 +1384,10 @@ def convert_verasonics(args):
             - allow_accumulate (bool): Whether to allow accumulate mode.
             - device (str): Device to use for processing.
     """
+
+    if getattr(args, "upload", False):
+        assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
+        assert args.revision, "revision must be provided when --upload is True."
 
     init_device(args.device)
 
@@ -1419,31 +1456,10 @@ def convert_verasonics(args):
 
     log.info(f"Selected path: {log.yellow(selected_path)}")
 
-    # Do the conversion of a single file
-    if not selected_path_is_directory:
-        if output_path.is_file():
-            answer = get_answer(
-                f"File {log.yellow(output_path)} exists. Overwrite?"
-                "\n\ty\t - Overwrite"
-                "\n\tn\t - Skip"
-                "\nAnswer: "
-            )
-            if answer is True:
-                log.warning(f"{selected_path} exists. Deleting...")
-                output_path.unlink(missing_ok=False)
-            else:
-                log.info("Aborting...")
-                sys.exit()
-        _zea_from_verasonics_workspace(
-            selected_path,
-            output_path,
-            frames=args.frames,
-            allow_accumulate=args.allow_accumulate,
-            enable_compression=not args.no_compression,
-        )
-    else:
-        # Continue with the rest of your code...
-        for root, dirs, files in os.walk(selected_path):
+    # Build the list of (input, output) file pairs to convert
+    if selected_path_is_directory:
+        file_pairs = []
+        for root, _dirs, files in os.walk(selected_path):
             for mat_file in files:
                 # Skip non-mat files
                 if not mat_file.endswith(".mat"):
@@ -1451,53 +1467,122 @@ def convert_verasonics(args):
 
                 log.info(f"Found raw data file {log.yellow(mat_file)}")
 
-                # Convert the file to a Path object
-                mat_file = Path(mat_file)
-
-                # Construct the output path
-                relative_path = (Path(root) / Path(mat_file)).relative_to(selected_path)
-                file_output_path = output_path / (relative_path.with_suffix(".hdf5"))
-
-                full_path = selected_path / relative_path
-
-                # Handle existing files
-                if file_output_path.is_file():
-                    if existing_file_policy is None:
-                        answer = get_answer(
-                            f"File {log.yellow(file_output_path)} exists. Overwrite?"
-                            "\n\ty\t - Overwrite"
-                            "\n\tn\t - Skip"
-                            "\n\tya\t - Overwrite all existing files"
-                            "\n\tna\t - Skip all existing files"
-                            "\nAnswer: ",
-                            additional_options=("ya", "na"),
-                        )
-                        if answer == "ya":
-                            existing_file_policy = "overwrite"
-                        elif answer == "na":
-                            existing_file_policy = "skip"
-                            continue
-
-                    if existing_file_policy == "skip" or answer is False:
-                        log.info("Skipping...")
-                        continue
-
-                    if existing_file_policy == "overwrite" or answer is True:
-                        log.warning(f"{log.yellow(file_output_path)} exists. Deleting...")
-                        file_output_path.unlink(missing_ok=False)
-
-                try:
-                    _zea_from_verasonics_workspace(
-                        full_path,
-                        file_output_path,
-                        frames=args.frames,
-                        allow_accumulate=args.allow_accumulate,
-                        enable_compression=not args.no_compression,
+                relative_path = (Path(root) / mat_file).relative_to(selected_path)
+                file_pairs.append(
+                    (
+                        selected_path / relative_path,
+                        output_path / relative_path.with_suffix(".hdf5"),
                     )
-                except Exception:
-                    # Print error message without raising it
-                    log.error(f"Failed to convert {mat_file}")
-                    # Print stacktrace
-                    traceback.print_exc()
+                )
+    else:
+        file_pairs = [(selected_path, output_path)]
 
+    num_converted = 0
+    for full_path, file_output_path in file_pairs:
+        # Handle existing files
+        if file_output_path.is_file():
+            if existing_file_policy is None:
+                answer = get_answer(
+                    f"File {log.yellow(file_output_path)} exists. Overwrite?"
+                    "\n\ty\t - Overwrite"
+                    "\n\tn\t - Skip"
+                    "\n\tya\t - Overwrite all existing files"
+                    "\n\tna\t - Skip all existing files"
+                    "\nAnswer: ",
+                    additional_options=("ya", "na"),
+                )
+                if answer == "ya":
+                    existing_file_policy = "overwrite"
+                elif answer == "na":
+                    existing_file_policy = "skip"
                     continue
+
+            if existing_file_policy == "skip" or answer is False:
+                log.info("Skipping...")
+                continue
+
+            if existing_file_policy == "overwrite" or answer is True:
+                log.warning(f"{log.yellow(file_output_path)} exists. Deleting...")
+                file_output_path.unlink(missing_ok=False)
+
+        try:
+            _zea_from_verasonics_workspace(
+                full_path,
+                file_output_path,
+                frames=args.frames,
+                allow_accumulate=args.allow_accumulate,
+                enable_compression=not args.no_compression,
+            )
+            num_converted += 1
+        except Exception:
+            # Print error message without raising it
+            log.error(f"Failed to convert {full_path.name}")
+            # Print stacktrace
+            traceback.print_exc()
+
+            continue
+
+    # Do not write a dataset card or upload anything when nothing was converted
+    # (e.g. all files failed or were skipped).
+    if getattr(args, "upload", False) and num_converted == 0:
+        log.error("No files were converted successfully; skipping upload.")
+        return
+
+    # Write the dataset card next to the converted output: in the output
+    # directory for a directory conversion, or alongside the file for a single
+    # file. The card is required for the upload ownership check below.
+    if selected_path_is_directory and args.hf_repo_id:
+        write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
+    elif getattr(args, "upload", False) and args.hf_repo_id:
+        write_dataset_card(output_path.parent, make_dataset_card(args.hf_repo_id))
+
+    if getattr(args, "upload", False):
+        assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
+        assert args.revision, "revision must be provided when --upload is True."
+        upload_verasonics(
+            output_path,
+            revision=args.revision,
+            repo_id=args.hf_repo_id,
+        )
+
+
+def upload_verasonics(
+    output_path: str | Path, revision: str, repo_id: str
+) -> None:  # pragma: no cover
+    """Upload a converted Verasonics dataset to a HuggingFace Hub revision branch.
+
+    Accepts either a directory of converted HDF5 files or a single converted
+    HDF5 file.  For a single file only that file (and its dataset card) is
+    uploaded, leaving any sibling files in the same directory untouched.
+
+    Only for zea maintainers with push access to the repository.  Upload to
+    ``main`` is blocked; merge the revision branch into ``main`` manually after
+    verifying the upload.
+
+    Args:
+        output_path: Directory containing the converted HDF5 files, or a single
+            converted HDF5 file.
+        revision: Target branch name on the Hub (must not be ``"main"``).
+        repo_id: Target HuggingFace repository ID.
+    """
+    output_path = Path(output_path)
+    if output_path.is_dir():
+        folder = output_path
+        file_glob = "*.hdf5"
+        allow_patterns = None
+    else:
+        # Single file: upload only this file plus its dataset card, scoped via
+        # allow_patterns so sibling files in the directory are not uploaded.
+        folder = output_path.parent
+        file_glob = output_path.name
+        allow_patterns = [output_path.name, "README.md"]
+
+    require_output_dir_ownership(folder, repo_id)
+    upload_dataset_to_hf(
+        folder=folder,
+        repo_id=repo_id,
+        revision=revision,
+        file_glob=file_glob,
+        allow_patterns=allow_patterns,
+        commit_message=f"Upload Verasonics dataset (zea format) to {revision}",
+    )

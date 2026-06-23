@@ -28,37 +28,34 @@ ENV JAX_VERSION=0.5.2 \
     TF_VERSION=2.19.0
 
 ARG DEBIAN_FRONTEND=noninteractive
+# Install non-backend dependencies into the system environment (/usr/local) with uv,
+# so they can be copied to the runtime stage just like before. UV_PROJECT_ENVIRONMENT
+# points uv at the system interpreter instead of creating a separate .venv.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     LC_ALL=C \
-    POETRY_VERSION=2.1.3 \
-    POETRY_VENV=/opt/poetry-venv \
-    POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_CREATE=0 \
-    POETRY_VIRTUALENVS_IN_PROJECT=0 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
+    UV_PROJECT_ENVIRONMENT=/usr/local \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_NO_CACHE=1
 
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools
 
-# Install Poetry in its own venv (but disable venv for project deps)
-RUN python3 -m venv $POETRY_VENV \
- && $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
-
-ENV PATH="${PATH}:${POETRY_VENV}/bin"
+# Install uv from the official image
+COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /usr/local/bin/uv
 
 WORKDIR /zea
 
-COPY pyproject.toml poetry.lock ./
+COPY pyproject.toml uv.lock README.md ./
 
-# Install all non-backend dependencies, installing dev extras only if DEV is true.
+# Install all non-backend dependencies from the lockfile, installing dev extras only
+# if DEV is true. --no-install-project skips installing zea itself (added later as an
+# editable install), and --inexact keeps pip/setuptools available for the backend wheels.
 ARG DEV
 RUN if [ "$DEV" = "true" ]; then \
-      poetry install --no-root --compile -E dev; \
+      uv sync --frozen --no-install-project --inexact --extra dev; \
     else \
-      poetry install --no-root --compile; \
+      uv sync --frozen --no-install-project --inexact; \
     fi
-
-# If DEV is not true, clear out the contents of the poetry venv but keep the directory
-RUN if [ "$DEV" != "true" ]; then find $POETRY_VENV -mindepth 1 -delete; fi
 
 ##############################
 # 2) JAX variants
@@ -175,11 +172,6 @@ COPY --from=builder-backends /usr/local/share/jupyter /usr/local/share/jupyter
 
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools
 
-# Copy the poetry virtual environment
-COPY --from=builder-base /opt/poetry-venv /opt/poetry-venv
-# Set up the PATH to include the poetry venv
-ENV PATH="${PATH}:/opt/poetry-venv/bin"
-
 # preserve runtime flags
 ARG INSTALL_JAX
 ARG INSTALL_TORCH
@@ -191,19 +183,13 @@ ENV INSTALL_JAX=${INSTALL_JAX} \
     DEV=${DEV}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    LC_ALL=C \
-    POETRY_VERSION=2.1.3 \
-    POETRY_VENV=/opt/poetry-venv \
-    POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_CREATE=0 \
-    POETRY_VIRTUALENVS_IN_PROJECT=0 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
+    LC_ALL=C
 
 # Install zea
 
 # Copy source code to /zea (needed for editable install)
 COPY . .
-# in editable mode WITHOUT installing dependencies (which are already installed by Poetry)
+# in editable mode WITHOUT installing dependencies (which are already installed by uv)
 RUN pip install --no-deps -e .
 
 # Set KERAS_BACKEND in bashrc before motd.sh is called

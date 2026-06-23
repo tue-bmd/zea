@@ -92,6 +92,27 @@ def simulate_rf(
 
     n_tx = t0_delays.shape[0]
 
+    if element_width is None:
+        if ops.is_tensor(probe_geometry):
+            raise ValueError(
+                "Element width is not provided, and automatic inference is not available for "
+                "traced/symbolic probe geometry (for example under JAX JIT or TensorFlow graph "
+                "mode). Please provide `element_width` explicitly in the scan/probe parameters."
+            )
+
+        try:
+            from zea.probes import Probe
+
+            pitch = Probe.get_pitch(probe_geometry)
+        except ValueError as exc:
+            raise ValueError(
+                "Element width is not provided and automatic estimation failed from probe "
+                "geometry. Please provide `element_width` explicitly or ensure the probe "
+                "geometry is a 1-D uniformly spaced linear array. "
+                f"Details: {exc}"
+            ) from exc
+        element_width = pitch * 0.9  # 90% of the pitch
+
     pulse_spectrum_fn = get_pulse_spectrum_fn(center_frequency, n_period=4)
 
     if not apply_lens_correction:
@@ -212,6 +233,10 @@ def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
     Returns:
         array-like: The directivity of the element.
     """
+
+    if element_width is None:
+        response = ops.ones_like(theta)
+        return response
 
     wavelength = sound_speed / f
 

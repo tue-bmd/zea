@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, List, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Sequence, Union, cast
 
 import keras
 import numpy as np
@@ -13,9 +13,11 @@ from zea.func.tensor import vmap
 from zea.func.ultrasound import channels_to_complex, complex_to_channels
 from zea.internal.core import DataTypes, ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
 from zea.internal.core import Object as ZEAObject
+from zea.internal.ops_list import OperationList
 from zea.internal.registry import beamformer_registry, ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Operation, get_ops
+from zea.ops.keras_ops import Cast
 from zea.ops.tensor import Normalize
 from zea.ops.ultrasound import (
     ApplyWindow,
@@ -26,18 +28,23 @@ from zea.ops.ultrasound import (
     ReshapeGrid,
     TOFCorrection,
 )
-from zea.probes import Probe
-from zea.scan import Scan
 from zea.utils import FunctionTimer
+
+if TYPE_CHECKING:
+    # Imported lazily at runtime (inside prepare_parameters) to avoid a circular
+    # import: zea.parameters imports the data specs, which can pull in this module.
+    from zea.parameters import Parameters
 
 
 @ops_registry("pipeline")
 class Pipeline:
-    """Pipeline class for processing ultrasound data through a series of operations."""
+    """Pipeline class for processing ultrasound data through a series of
+    :class:`~zea.ops.base.Operation` objects.
+    """
 
     def __init__(
         self,
-        operations: List[Operation],
+        operations: Sequence[Union[Operation, "Pipeline"]],
         with_batch_dim: bool = True,
         jit_options: Union[str, None] = "ops",
         jit_kwargs: dict | None = None,
@@ -82,7 +89,7 @@ class Pipeline:
         self._call_pipeline = self.call
         self.name = name
 
-        self._pipeline_layers = operations
+        self._pipeline_layers: List[Union[Operation, "Pipeline"]] = list(operations)
 
         if jit_options not in ["pipeline", "ops", None]:
             raise ValueError("jit_options must be 'pipeline', 'ops', or None")
@@ -219,7 +226,7 @@ class Pipeline:
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
         """
-        operations = []
+        operations: List[Union[Operation, "Pipeline"]] = [Cast(dtype="float32")]
 
         # Add the demodulate operation
         if not baseband:
@@ -271,18 +278,31 @@ class Pipeline:
             device=self.device,
         )
 
+    @staticmethod
+    def _check_op_is_instance(operation):
+        """Raise a clear TypeError when a class is passed instead of an instance."""
+        if isinstance(operation, type):
+            raise TypeError(
+                f"Expected an Operation instance, got class {operation.__name__!r}. "
+                f"Did you forget the parentheses? "
+                f"Use {operation.__name__}() instead of {operation.__name__}."
+            )
+
     def prepend(self, operation: Operation):
         """Prepend an operation to the pipeline."""
+        self._check_op_is_instance(operation)
         self._pipeline_layers.insert(0, operation)
         self.reinitialize()
 
     def append(self, operation: Operation):
         """Append an operation to the pipeline."""
+        self._check_op_is_instance(operation)
         self._pipeline_layers.append(operation)
         self.reinitialize()
 
     def insert(self, index: int, operation: Operation):
         """Insert an operation at a specific index in the pipeline."""
+        self._check_op_is_instance(operation)
         if index < 0 or index > len(self._pipeline_layers):
             raise IndexError("Index out of bounds for inserting operation.")
         self._pipeline_layers.insert(index, operation)
@@ -292,6 +312,29 @@ class Pipeline:
     def operations(self) -> List[Union[Operation, "Pipeline"]]:
         """Alias for self.layers to match the zea naming convention"""
         return self._pipeline_layers
+
+    def __getitem__(self, key: str):
+        """Look up an operation by name.
+
+        Allows chaining directly on the pipeline object::
+
+            pipeline["beamform"]["tof_correction"]
+
+        Use :meth:`keys` to see available names.
+        Duplicate operation names are disambiguated with a ``_N`` suffix,
+        e.g. ``pipeline["normalize_0"]``.
+        """
+        return OperationList(self._pipeline_layers)[key]
+
+    def keys(self):
+        """Return the string keys that can be used with ``pipeline[key]``.
+
+        Example::
+
+            pipeline.keys()
+            # ['cast', 'apply_window', 'demodulate', 'beamform', ...]
+        """
+        return OperationList(self._pipeline_layers).keys()
 
     def reset_timer(self):
         """Reset the timer for timed operations."""
@@ -309,6 +352,7 @@ class Pipeline:
 
     def call(self, **inputs) -> Dict[str, Any]:
         """Process input data through the pipeline."""
+
         for operation in self._callable_layers:
             try:
                 outputs = operation(**inputs)
@@ -317,7 +361,7 @@ class Pipeline:
                     f"[zea.Pipeline] Operation '{operation.__class__.__name__}' "
                     f"requires input key '{exc.args[0]}', "
                     "but it was not provided in the inputs.\n"
-                    "Check whether the objects (such as `zea.Scan`) passed to "
+                    "Check whether the objects (such as `zea.Parameters`) passed to "
                     "`pipeline.prepare_parameters()` contain all required keys.\n"
                     f"Current list of all passed keys: {list(inputs.keys())}\n"
                     f"Valid keys for this pipeline: {self.valid_keys}"
@@ -346,13 +390,13 @@ class Pipeline:
             **inputs: Tensor inputs forwarded to the operations.
         """
 
-        if any(key in inputs for key in ["probe", "scan", "config"]) or any(
+        if any(key in inputs for key in ["probe", "scan", "config", "parameters"]) or any(
             isinstance(arg, ZEAObject) for arg in inputs.values()
         ):
             raise ValueError(
-                "Probe, Scan and Config objects should be first processed with "
+                "Parameters (and Probe/Config) objects should be first processed with "
                 "`Pipeline.prepare_parameters` before calling the pipeline. "
-                "e.g. inputs = Pipeline.prepare_parameters(probe, scan, config)"
+                "e.g. inputs = pipeline.prepare_parameters(parameters, **overrides)"
             )
 
         if any(isinstance(arg, str) for arg in inputs.values()):
@@ -392,34 +436,38 @@ class Pipeline:
         """Get the jit_options property of the pipeline."""
         return self._jit_options
 
+    def set_jit(self, value: bool):
+        """Set the JIT compilation for the pipeline."""
+        if value:
+            self._jit()
+        else:
+            self._unjit()
+
     @jit_options.setter
     def jit_options(self, value: Union[str, None]):
         """Set the jit_options property of the pipeline."""
-        self._jit_options = value
-        if value == "pipeline":
-            assert self.jittable, log.error(
-                "jit_options 'pipeline' cannot be used as the entire pipeline is not jittable. "
-                "The following operations are not jittable: "
-                f"{self.unjitable_ops}. "
-                "Try setting jit_options to 'ops' or None."
-            )
-            self.jit()
-            return
-        else:
-            self.unjit()
 
+        assert value in ["pipeline", "ops", None], "jit_options must be 'pipeline', 'ops', or None"
+
+        self._jit_options = value
+        self.set_jit(value == "pipeline")
         for operation in self.operations:
             if isinstance(operation, Pipeline):
                 operation.jit_options = value
             else:
-                if operation.jittable and operation._jit_compile:
-                    operation.set_jit(value == "ops")
+                operation.set_jit(value == "ops")
 
-    def jit(self):
+    def _jit(self):
         """JIT compile the pipeline."""
+        if not self.jittable:
+            raise ValueError(
+                "Cannot JIT compile the pipeline because not all operations are jittable. "
+                f"The following operations are not jittable: {self.unjitable_ops}"
+                "Try setting jit_options to 'ops' or None."
+            )
         self._call_pipeline = jit(self.call, **self.jit_kwargs)
 
-    def unjit(self):
+    def _unjit(self):
         """Un-JIT compile the pipeline."""
         self._call_pipeline = self.call
 
@@ -458,6 +506,14 @@ class Pipeline:
     def validate(self):
         """Validate the pipeline by checking the compatibility of the operations."""
         operations = self.operations
+        for i, op in enumerate(operations):
+            if isinstance(op, type):
+                raise TypeError(
+                    f"Pipeline operation at index {i} is a class ({op.__name__!r}), "
+                    "not an instance. "
+                    f"Did you forget the parentheses? "
+                    f"Use {op.__name__}() instead of {op.__name__}."
+                )
         for i in range(len(operations) - 1):
             if operations[i].output_data_type is None:
                 continue
@@ -474,11 +530,14 @@ class Pipeline:
     def set_params(self, **params):
         """Set parameters for the operations in the pipeline by adding them to the cache."""
         for operation in self.operations:
-            operation_params = {
-                key: value for key, value in params.items() if key in operation.valid_keys
-            }
-            if operation_params:
-                operation.set_input_cache(operation_params)
+            if isinstance(operation, Pipeline):
+                operation.set_params(**params)
+            elif isinstance(operation, Operation):
+                operation_params = {
+                    key: value for key, value in params.items() if key in operation.valid_keys
+                }
+                if operation_params:
+                    operation.set_input_cache(operation_params)
 
     def get_params(self, per_operation: bool = False):
         """Get a snapshot of the current parameters of the operations in the pipeline.
@@ -488,11 +547,20 @@ class Pipeline:
                                   If False, return a single dictionary with all parameters combined.
         """
         if per_operation:
-            return [operation._input_cache.copy() for operation in self.operations]
+            result = []
+            for operation in self.operations:
+                if isinstance(operation, Pipeline):
+                    result.extend(operation.get_params(per_operation=True))
+                elif isinstance(operation, Operation):
+                    result.append(operation._input_cache.copy())
+            return result
         else:
             params = {}
             for operation in self.operations:
-                params.update(operation._input_cache)
+                if isinstance(operation, Pipeline):
+                    params.update(operation.get_params(per_operation=False))
+                elif isinstance(operation, Operation):
+                    params.update(operation._input_cache)
             return params
 
     def __str__(self):
@@ -514,7 +582,7 @@ class Pipeline:
                 operations.append(repr(operation))
             else:
                 operations.append(operation.__class__.__name__)
-        return f"<Pipeline {self.name}=({', '.join(operations)})>"
+        return f"Pipeline(name={self.name!r}, operations=[{', '.join(operations)}])"
 
     @classmethod
     def load(cls, file_path: str, **kwargs) -> "Pipeline":
@@ -616,12 +684,13 @@ class Pipeline:
         return pipeline_from_config(Config(config), **kwargs)
 
     @classmethod
-    def from_path(cls, file_path: str, **kwargs) -> "Pipeline":
+    def from_path(cls, file_path: str, revision: str | None = None, **kwargs) -> "Pipeline":
         """Create a pipeline from a YAML/config file path.
 
         Args:
             file_path (str): Path to the config file (local or ``hf://`` URI).
                 Must have a ``pipeline`` key with a subkey ``operations``.
+            revision (str, optional): Revision of the config file (for Hugging Face ``hf://`` URIs).
             **kwargs: Additional keyword arguments to be passed to the pipeline.
 
         Example:
@@ -639,8 +708,14 @@ class Pipeline:
                 ... )
                 >>> config.to_yaml("pipeline.yaml")
                 >>> pipeline = Pipeline.from_path("pipeline.yaml")
+
+            .. testcleanup::
+
+                import os
+                os.remove("pipeline.yaml")
+
         """
-        config = Config.from_path(file_path)
+        config = Config.from_path(file_path, revision=revision)
         return pipeline_from_config(config, **kwargs)
 
     @classmethod
@@ -705,74 +780,62 @@ class Pipeline:
 
     def prepare_parameters(
         self,
-        probe: Probe = None,
-        scan: Scan = None,
-        config: Config = None,
+        parameters: Union["Parameters", None] = None,
         device: Union[str, None] = None,
-        **kwargs,
-    ):
-        """Prepare Probe, Scan and Config objects for the pipeline.
+        **overrides,
+    ) -> Dict[str, Any]:
+        """Prepare a :class:`~zea.Parameters` object for the pipeline.
 
-        Serializes `zea.core.Object` instances and converts them to
-        dictionary of tensors.
+        Converts the (validated and derived) parameters needed by this
+        pipeline's operations into a dictionary of tensors, then overlays any
+        manually supplied overrides (e.g. ``config.parameters`` or ad-hoc
+        keyword arguments). Overrides take priority over the values in
+        ``parameters``.
 
         Args:
-            probe: Probe object.
-            scan: Scan object.
-            config: Config object.
-            **kwargs: Additional keyword arguments to be included in the inputs.
+            parameters: :class:`~zea.Parameters` object. Only the keys
+                this pipeline ``needs`` (and that are not overridden) are
+                converted, so derivation is lazy and minimal.
+            device: Device to place the tensors on. Defaults to the pipeline
+                device.
+            **overrides: Additional parameters to include in the inputs
+                (converted to tensors). These overwrite values taken from
+                ``parameters``.
 
         Returns:
             dict: Dictionary of inputs with all values as tensors.
+
+        Example:
+            .. code-block:: python
+
+                inputs = pipeline.prepare_parameters(parameters, **config.parameters)
+                outputs = pipeline(data=raw_data, **inputs)
         """
+        from zea.parameters import Parameters
+
         _device = device if device is not None else self.device
 
-        # Initialize dictionaries for probe, scan, and config
-        probe_dict, scan_dict, config_dict = {}, {}, {}
+        params_dict = {}
+        override_keys = set(overrides.keys())
 
-        config_keys, kwargs_keys = set(), set()
-        if config is not None:
-            config_keys = set(config.keys())
-        kwargs_keys = set(kwargs.keys())
-
-        # Process args to extract Probe, Scan, and Config objects
-        if probe is not None:
-            assert isinstance(probe, Probe), (
-                f"Expected an instance of `zea.probes.Probe`, got {type(probe)}"
+        if parameters is not None:
+            assert isinstance(parameters, Parameters), (
+                f"Expected an instance of `zea.Parameters`, got {type(parameters)}"
             )
+            # Only convert keys the pipeline needs and that are not overridden,
+            # so we avoid deriving unnecessary parameters.
+            needs_keys = self.needs_keys - override_keys
             with backend.device(_device):
-                probe_dict = probe.to_tensor(keep_as_is=self.static_params)
+                params_dict = parameters.to_tensor(
+                    include=list(needs_keys), keep_as_is=self.static_params
+                )
 
-        if scan is not None:
-            assert isinstance(scan, Scan), (
-                f"Expected an instance of `zea.scan.Scan`, got {type(scan)}"
-            )
-            needs_keys = self.needs_keys - config_keys - kwargs_keys
-            with backend.device(_device):
-                scan_dict = scan.to_tensor(include=needs_keys, keep_as_is=self.static_params)
-
-        if config is not None:
-            assert isinstance(config, Config), (
-                f"Expected an instance of `zea.config.Config`, got {type(config)}"
-            )
-            with backend.device(_device):
-                config_dict.update(config.to_tensor(keep_as_is=self.static_params))
-
-        # Convert all kwargs to tensors
+        # Convert all overrides to tensors
         with backend.device(_device):
-            tensor_kwargs = dict_to_tensor(kwargs, keep_as_is=self.static_params)
+            tensor_overrides = dict_to_tensor(overrides, keep_as_is=self.static_params)
 
-        # combine probe, scan, config and kwargs
-        # explicitly so we know which keys overwrite which
-        # kwargs > config > scan > probe
-        inputs = {
-            **probe_dict,
-            **scan_dict,
-            **config_dict,
-            **tensor_kwargs,
-        }
-
-        return inputs
+        # Overrides overwrite values taken from the parameters object.
+        return {**params_dict, **tensor_overrides}
 
 
 @ops_registry("map")
@@ -876,33 +939,31 @@ class Map(Pipeline):
                 "Consider setting one of them to process data in chunks or batches."
             )
 
-        def call_item(**inputs):
-            """Process data in patches."""
-            mapped_args = []
-            for argname in argnames:
-                mapped_args.append(inputs.pop(argname, None))
+    def call_item(self, **inputs):
+        """Process data in patches."""
+        mapped_args = []
+        for argname in self.argnames:
+            mapped_args.append(inputs.pop(argname, None))
 
-            def patched_call(*args):
-                mapped_kwargs = [(k, v) for k, v in zip(argnames, args)]
-                out = super(Map, self).call(**dict(mapped_kwargs), **inputs)
+        def patched_call(*args):
+            mapped_kwargs = [(k, v) for k, v in zip(self.argnames, args)]
+            out = super(Map, self).call(**dict(mapped_kwargs), **inputs)
 
-                # TODO: maybe it is possible to output everything?
-                # e.g. prepend a empty dimension to all inputs and just map over everything?
-                return out[self.output_key]
+            # TODO: maybe it is possible to output everything?
+            # e.g. prepend a empty dimension to all inputs and just map over everything?
+            return out[self.output_key]
 
-            out = vmap(
-                patched_call,
-                in_axes=in_axes,
-                out_axes=out_axes,
-                chunks=chunks,
-                batch_size=batch_size,
-                fn_supports_batch=True,
-                disable_jit=not bool(self.jit_options),
-            )(*mapped_args)
+        out = vmap(
+            patched_call,
+            in_axes=self.in_axes,
+            out_axes=self.out_axes,
+            chunks=self.chunks,
+            batch_size=self.batch_size,
+            fn_supports_batch=True,
+            disable_jit=not bool(self.jit_options),
+        )(*mapped_args)
 
-            return out
-
-        self.call_item = call_item
+        return out
 
     @property
     def jit_options(self):
@@ -910,22 +971,26 @@ class Map(Pipeline):
         return self._jit_options
 
     @jit_options.setter
-    def jit_options(self, value):
+    def jit_options(self, value: Union[str, None]):
         """Set the jit_options property of the pipeline."""
-        self._jit_options = value
-        if value in ["pipeline", "ops"]:
-            self.jit()
-        else:
-            self.unjit()
 
-    def jit(self):
+        assert value in ["pipeline", "ops", None], "jit_options must be 'pipeline', 'ops', or None"
+
+        self._jit_options = value
+        self.set_jit(value == "pipeline" or value == "ops")
+        for operation in self.operations:
+            if isinstance(operation, Pipeline):
+                operation.jit_options = None
+            else:
+                operation.set_jit(False)
+
+    def _jit(self):
         """JIT compile the pipeline."""
         self._jittable_call = jit(self.jittable_call, **self.jit_kwargs)
 
-    def unjit(self):
+    def _unjit(self):
         """Un-JIT compile the pipeline."""
         self._jittable_call = self.jittable_call
-        self._call_pipeline = self.call
 
     @property
     def with_batch_dim(self):
@@ -1033,7 +1098,6 @@ class Beamform(Pipeline):
             num_patches (int): Number of patches to split the grid into for patch-wise
                 beamforming. If 1, no patching is performed.
             enable_pfield (bool): Whether to include pressure field weighting in the beamforming.
-
         """
 
         self.beamformer_type = beamformer
@@ -1059,7 +1123,7 @@ class Beamform(Pipeline):
             )
 
         # Get beamforming ops
-        beamforming = [
+        beamforming: List[Operation] = [
             TOFCorrection(),
             # PfieldWeighting(),  # Inserted conditionally
             beamformer_registry[self.beamformer_type](),
@@ -1070,13 +1134,10 @@ class Beamform(Pipeline):
 
         # Optionally add patching
         if self.num_patches > 1:
-            beamforming = [
-                PatchedGrid(
-                    operations=beamforming,
-                    num_patches=self.num_patches,
-                    **kwargs,
-                )
-            ]
+            beamforming = cast(  # type: ignore[assignment]
+                List[Operation],
+                [PatchedGrid(operations=beamforming, num_patches=self.num_patches, **kwargs)],
+            )
 
         # Reshape the grid to image shape
         beamforming.append(ReshapeGrid())
@@ -1095,7 +1156,7 @@ class Beamform(Pipeline):
                 operations.append(repr(operation))
             else:
                 operations.append(operation.__class__.__name__)
-        return f"<Beamform {self.name}=({', '.join(operations)})>"
+        return f"Beamform(name={self.name!r}, operations=[{', '.join(operations)}])"
 
     def get_dict(self, compact=True) -> dict:
         """Convert the pipeline to a dictionary.
@@ -1662,7 +1723,7 @@ class Refocus(Operation):
             * ``"focus_distances"`` — zeros ``(n_el,)`` (no focus).
             * ``"transmit_origins"`` — element positions ``(n_el, 3)``.
             * ``"initial_times"`` — zeros ``(n_el,)``.
-            * ``"tx_waveform_indices"`` — zeros ``(n_el,)``.
+            * ``"t_peak"`` — shared transmit-waveform peak time ``(n_el,)``.
             * ``"flat_pfield"`` — ``None`` (resets pfield so downstream
               :class:`PfieldWeighting` becomes a no-op).
         """
@@ -1678,7 +1739,7 @@ class Refocus(Operation):
             apod = tx_apodizations
 
         if self.with_batch_dim:
-            decoded = vmap(self._decode, in_axes=(0, None, None))(data, delays_samples, apod)
+            decoded = vmap(self._decode, in_axes=[0, None, None])(data, delays_samples, apod)
         else:
             decoded = self._decode(data, delays_samples, apod)
 
@@ -1691,7 +1752,13 @@ class Refocus(Operation):
         sa_polar_angles = ops.zeros((n_el,), dtype=dtype)
         sa_focus_distances = ops.zeros((n_el,), dtype=dtype)
         sa_initial_times = ops.zeros((n_el,), dtype=dtype)
-        sa_tx_waveform_indices = ops.zeros((n_el,), dtype="int32")
+
+        t_peak = kwargs.get("t_peak")
+        if t_peak is not None:
+            t_peak_flat = ops.reshape(ops.cast(t_peak, dtype), (-1,))
+            sa_t_peak = ops.broadcast_to(t_peak_flat[:1], (n_el,))
+        else:
+            sa_t_peak = ops.zeros((n_el,), dtype=dtype)
 
         return {
             self.output_key: decoded,
@@ -1701,14 +1768,14 @@ class Refocus(Operation):
             "focus_distances": sa_focus_distances,
             "transmit_origins": probe_geometry,
             "initial_times": sa_initial_times,
-            "tx_waveform_indices": sa_tx_waveform_indices,
+            "t_peak": sa_t_peak,
             "flat_pfield": None,
         }
 
 
 def make_operation_chain(
-    operation_chain: List[Union[str, Dict, Config, Operation, Pipeline]],
-) -> List[Operation]:
+    operation_chain: List[Union[str, Dict, Config, Operation, "Pipeline"]],
+) -> List[Union[Operation, "Pipeline"]]:
     """Make an operation chain from a custom list of operations.
 
     Args:
@@ -1755,6 +1822,8 @@ def make_operation_chain(
 
             params = operation.get("params", {})
             op_name = operation.get("name")
+            if op_name is None:
+                raise ValueError(f"Operation dict is missing a 'name' key: {operation}")
             operation_cls = get_ops(op_name)
 
             # Check for nested operations at the same level as params

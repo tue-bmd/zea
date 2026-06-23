@@ -84,7 +84,7 @@ class Resizer(DataLayer):
                 [
                     Pad(
                         image_size,
-                        axis=(-3, -2),
+                        axis=(-3, -2),  # ty: ignore[invalid-argument-type]
                         uniform=True,
                         fail_on_bigger_shape=False,
                         **pad_kwargs,

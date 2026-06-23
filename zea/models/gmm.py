@@ -146,7 +146,8 @@ class GaussianMixtureModel(GenerativeModel):
 
     def sample(self, n_samples=1, seed=None, **kwargs):
         # Sample component indices
-        comp_idx = keras.random.categorical(ops.log(self.pi[None, :]), n_samples, seed=seed)
+        logits = ops.log(self.pi[None, :])  # ty: ignore[not-subscriptable]
+        comp_idx = keras.random.categorical(logits, n_samples, seed=seed)
         comp_idx = ops.squeeze(comp_idx, axis=0)
         means = ops.take(self.means, comp_idx, axis=0)
         vars_ = ops.take(self.vars, comp_idx, axis=0)

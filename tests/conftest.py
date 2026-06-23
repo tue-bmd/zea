@@ -6,11 +6,21 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pytest
-from zea.data.data_format import generate_example_dataset  # noqa: E402
-from zea.internal.device import backend_cuda_available  # noqa: E402
+
+from .data import generate_example_dataset
+from zea.internal.device import backend_cuda_available
 
 # must be before importing anything that may call init_device()
 _GPU_AVAILABLE = any(backend_cuda_available(b) for b in ["torch", "tensorflow", "jax"])
+
+# Device setup for the test session. Kept here (and not in tests/__init__.py) on purpose:
+# init_device imports tensorflow -> keras, which locks the keras backend. The spawned
+# BackendEqualityCheck workers re-import the `tests` package but never load conftest, so
+# they remain free to select their own backend. See tests/__init__.py for details.
+from zea.internal.device import init_device  # noqa: E402
+
+device = init_device(allow_preallocate=False)
+
 
 from .backend_utils import (  # noqa: E402
     ML_BACKENDS,
@@ -108,13 +118,6 @@ def pytest_configure(config):
         )
 
 
-def pytest_sessionstart(session):
-    notebooks_dir = Path("docs/source/notebooks")
-    notebooks = list(notebooks_dir.rglob("*.ipynb"))
-    if notebooks:
-        print(f"📚 Preparing to test {len(notebooks)} notebooks from {notebooks_dir}")
-
-
 def pytest_sessionfinish(session, exitstatus):
     from . import _notebook_timings
 
@@ -149,6 +152,16 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def pytest_collection_modifyitems(config, items):
+    """Auto-skip ``@pytest.mark.gpu`` tests when no CUDA GPU is accessible.
+    Also announce notebook count only when notebook tests are actually collected.
+    """
+    has_notebooks = any("notebook" in item.nodeid for item in items)
+    if has_notebooks:
+        notebooks_dir = Path("docs/source/notebooks")
+        notebooks = list(notebooks_dir.rglob("*.ipynb"))
+        if notebooks:
+            print(f"\n📚 Preparing to test {len(notebooks)} notebooks from {notebooks_dir}")
+
     for item in items:
         if "gpu" in item.keywords and not _GPU_AVAILABLE:
             skip_gpu = pytest.mark.skip(reason="No CUDA GPU available at runtime")
