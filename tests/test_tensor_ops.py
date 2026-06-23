@@ -922,6 +922,8 @@ def test_split_into_windows_invalid_inputs(window_size, stride, match):
         [np.array([0, 0, 0]), 2, -1],
         # 2D input -> one index array per dimension
         [np.array([[0, 1], [1, 0]]), 2, -1],
+        # size exceeds total elements -> extra entries padded with fill_value
+        [np.array([1, 0, 1]), 5, -1],
     ],
 )
 @backend_equality_check()

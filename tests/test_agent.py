@@ -54,6 +54,14 @@ def test_k_hot_to_indices():
     assert ops.shape(indices) == (2, 2)
     assert ops.all(indices == np.array([[0, 2], [1, 3]]))
 
+    # Two leading dimensions: (..., n_possible_actions) works for any number of leading dims
+    k_hot = np.array(
+        [[[1, 0, 1, 0], [0, 1, 0, 1]], [[1, 1, 0, 0], [0, 0, 1, 1]]]
+    )  # shape (2, 2, 4)
+    indices = masks.k_hot_to_indices(k_hot, n_actions=2)
+    assert ops.shape(indices) == (2, 2, 2)
+    assert ops.all(indices == np.array([[[0, 2], [1, 3]], [[0, 1], [2, 3]]]))
+
 
 def test_indices_k_hot_round_trip():
     """indices_to_k_hot and k_hot_to_indices should be inverses for sorted indices."""
@@ -80,6 +88,15 @@ def test_lines_to_im_size():
     assert ops.shape(mask) == (2, 2, 4)
     assert ops.all(mask[0] == np.array([[1, 1, 0, 0], [1, 1, 0, 0]]))
     assert ops.all(mask[1] == np.array([[0, 0, 1, 1], [0, 0, 1, 1]]))
+
+    # Two leading dimensions: (..., n_possible_actions) works for any number of leading dims
+    lines = np.array([[[1, 0], [0, 1]], [[1, 1], [0, 0]]])  # shape (2, 2, 2)
+    mask = masks.lines_to_im_size(lines, img_size=(2, 4))
+    assert ops.shape(mask) == (2, 2, 2, 4)
+    assert ops.all(mask[0, 0] == np.array([[1, 1, 0, 0], [1, 1, 0, 0]]))
+    assert ops.all(mask[0, 1] == np.array([[0, 0, 1, 1], [0, 0, 1, 1]]))
+    assert ops.all(mask[1, 0] == np.array([[1, 1, 1, 1], [1, 1, 1, 1]]))
+    assert ops.all(mask[1, 1] == np.array([[0, 0, 0, 0], [0, 0, 0, 0]]))
 
 
 def test_lines_to_im_size_assertion():

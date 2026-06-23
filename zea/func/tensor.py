@@ -219,12 +219,13 @@ def nonzero(x, size=None, fill_value=None):
     flat_mask = ops.reshape(mask, (-1,))
     n_elements = flat_mask.shape[0]
 
-    # Use each position as its sort key when nonzero, otherwise push it past the valid
-    # range so it sorts to the end. Sorting then yields the nonzero flat indices in
-    # ascending order, followed by the (out-of-range) padding keys.
-    positions = ops.arange(n_elements, dtype="int32")
-    keys = ops.where(flat_mask, positions, n_elements)
-    flat_indices = ops.sort(keys)[:size]
+    # Mirror jax.numpy.nonzero: cumsum over the boolean mask gives each position
+    # a 1-indexed nonzero count; bincount turns that into per-slot occupancy;
+    # cumsum of occupancy yields flat indices of the nonzero elements.
+    # bincount with minlength=size guarantees ≥ size bins; [:size] truncates to
+    # exactly size, so flat_indices always has the correct static length.
+    cumsum_mask = ops.cast(ops.cumsum(flat_mask), "int32")
+    flat_indices = ops.cumsum(ops.bincount(cumsum_mask, minlength=size)[:size])
 
     # Entries that did not correspond to a real nonzero element get fill_value.
     valid = flat_indices < n_elements
