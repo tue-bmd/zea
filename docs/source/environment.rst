@@ -42,5 +42,5 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
    * - ``ZEA_TEST_DEVICE``
      - Can be used to only run the tests with a particular device.
      - ``auto:1``
-     - Any valid device name as accepted by :func:`zea.init_device`. For example, ``cpu``, 
-     ``cuda:0``, ``auto:1``, etc.
+     - Any valid device name as accepted by :func:`zea.init_device`. For example, ``cpu``,
+       ``cuda:0``, ``auto:1``, etc.
