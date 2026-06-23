@@ -21,11 +21,26 @@ ARG DEV=true
 FROM python:3.12-slim-bullseye AS builder-base
 
 # Backend versions
-ENV JAX_VERSION=0.5.2 \
-    TORCH_VERSION=2.6.0 \
-    TORCHVISION_VERSION=0.21.0 \
-    TORCHAUDIO_VERSION=2.6.0 \
-    TF_VERSION=2.19.0
+#
+# These are a mutually-compatible set resolved by uv on a shared CUDA 12.9 stack
+# (torch uses the cu129 PyTorch index below; jax[cuda12] and tensorflow[and-cuda]
+# pull matching nvidia-*-cu12 wheels, so all three share one cuDNN/cuBLAS).
+#
+# To re-resolve to newer versions in the future, run uv's resolver and read the
+# pins off the output (no install needed):
+#
+#   printf 'jax[cuda12]\ntensorflow[and-cuda]\ntorch\ntorchvision\ntorchaudio\n' > backends.in
+#   uv pip compile backends.in --python-version 3.12 --torch-backend=cu129 -o backends.lock
+#   grep -iE '^(jax|tensorflow|torch|torchvision|torchaudio)==' backends.lock
+#
+# Then copy the resulting versions here. If torch's CUDA generation moves, update
+# the --torch-backend=cuXXX flag and the cuXXX in the GPU torch index-url below to
+# match (omitting the flag lets uv pick the latest, which may mix CUDA versions).
+ENV JAX_VERSION=0.10.2 \
+    TORCH_VERSION=2.12.1 \
+    TORCHVISION_VERSION=0.27.1 \
+    TORCHAUDIO_VERSION=2.11.0 \
+    TF_VERSION=2.21.0
 
 ARG DEBIAN_FRONTEND=noninteractive
 # Install non-backend dependencies into the system environment (/usr/local) with uv,
@@ -84,7 +99,7 @@ FROM builder-base AS builder-torch-gpu
 WORKDIR /wheels
 RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
       torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION} \
-      --index-url https://download.pytorch.org/whl/cu124
+      --index-url https://download.pytorch.org/whl/cu129
 
 FROM builder-base AS builder-torch-false
 RUN mkdir /wheels
@@ -142,7 +157,7 @@ RUN set -e; \
         $( [ "$INSTALL_JAX" = "cpu" ] && echo "jax==${JAX_VERSION}" ) \
         $( [ "$INSTALL_JAX" = "gpu" ] && echo "jax[cuda12]==${JAX_VERSION}" ); \
     do \
-        pip install --no-cache-dir --no-index --find-links=/wheels $pkg; \
+        uv pip install --system --no-cache --no-index --find-links=/wheels $pkg; \
     done
 
 ##############################
@@ -190,7 +205,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Copy source code to /zea (needed for editable install)
 COPY . .
 # in editable mode WITHOUT installing dependencies (which are already installed by uv)
-RUN pip install --no-deps -e .
+RUN uv pip install --system --no-cache --no-deps -e .
 
 # Set KERAS_BACKEND in bashrc before motd.sh is called
 RUN echo 'export KERAS_BACKEND=$( \
