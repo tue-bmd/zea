@@ -95,7 +95,7 @@ def main() -> None:
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        args = tyro.cli(SubCmd)
+        args = tyro.cli(SubCmd)  # ty: ignore[no-matching-overload]
 
     from zea.internal.device import init_device
 
