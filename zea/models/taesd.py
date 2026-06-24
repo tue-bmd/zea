@@ -138,7 +138,7 @@ class TinyBase(BaseModel):
         """Builds the network."""
         self.maybe_convert_to_jax(input_shape)
 
-    def maybe_convert_to_jax(self, input_shape):
+    def maybe_convert_to_jax(self, input_shape):  # pragma: no cover
         """Converts the network to Jax if backend is Jax."""
         if backend.backend() == "jax":
             inputs = ops.zeros(input_shape)
@@ -155,7 +155,7 @@ class TinyBase(BaseModel):
 
             self.network = keras.layers.JaxLayer(call_fn, state=jax_params)
 
-    def _load_layer(self, path: Path | str):
+    def _load_layer(self, path: Path | str):  # pragma: no cover
         if backend.backend() == "tensorflow":
             return keras.layers.TFSMLayer(path, call_endpoint="serving_default")
         elif backend.backend() == "jax":

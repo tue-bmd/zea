@@ -154,7 +154,7 @@ class EchoNetDynamic(BaseModel):
 
         return output
 
-    def _load_layer(self, path: Path | str):
+    def _load_layer(self, path: Path | str):  # pragma: no cover
         if backend.backend() == "tensorflow":
             return keras.layers.TFSMLayer(path, call_endpoint="serving_default")
         elif backend.backend() == "jax":
