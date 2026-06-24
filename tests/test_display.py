@@ -18,7 +18,7 @@ from . import DEFAULT_TEST_SEED, backend_equality_check
         ((112, 112), None, 3),  # will use scipy ndimage for order > 1
     ],
 )
-@backend_equality_check(decimal=[0, 2, 0], backends=["torch", "jax", "tensorflow"])
+@backend_equality_check(decimal=0, backends=["torch", "jax", "tensorflow"])
 def test_scan_conversion(size, resolution, order):
     """Tests the scan_conversion function with random data."""
     import keras

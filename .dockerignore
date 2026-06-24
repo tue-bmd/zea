@@ -166,3 +166,9 @@ dmypy.json
 /.git/
 /.gitattributes
 /.gitignore
+
+/docs
+/output
+
+**/.cache
+**/__pycache__
