@@ -1,10 +1,12 @@
 """Test dataset conversion scripts"""
 
+import argparse
 import csv
 import os
 import shutil
 import subprocess
 import sys
+import types
 import zipfile
 from pathlib import Path
 
@@ -16,13 +18,38 @@ import SimpleITK as sitk
 import yaml
 
 from zea.data.convert.images import convert_image_dataset
-from zea.data.convert.utils import load_avi, sitk_load, unzip
-from zea.data.convert.verasonics import VerasonicsFile
+from zea.data.convert.utils import (
+    check_output_dir_ownership,
+    load_avi,
+    require_output_dir_ownership,
+    sitk_load,
+    unzip,
+)
+from zea.data.convert.verasonics import (
+    VerasonicsFile,
+    bs100bw_to_iq,
+    convert_verasonics,
+    estimate_lens_probe_params,
+)
 from zea.data.file import File
+from zea.func.tensor import translate
 from zea.internal.preset_utils import _hf_resolve_path
 from zea.io_lib import _SUPPORTED_IMG_TYPES
 
 from .. import DEFAULT_TEST_SEED
+
+
+def run_subprocess(cmd, **kwargs):
+    """Run a subprocess, letting output flow to pytest's capture.
+
+    Pytest shows captured stdout/stderr whenever the test fails, including
+    when a later assertion fails — so leaving subprocess output uncaptured
+    here gives us full visibility into what the conversion script did.
+    """
+    result = subprocess.run(cmd, **kwargs)
+    if result.returncode != 0:
+        pytest.fail(f"Command failed (exit {result.returncode}): {' '.join(cmd)}")
+    return result
 
 
 @pytest.mark.parametrize(
@@ -40,11 +67,11 @@ def test_conversion_script(tmp_path_factory, dataset):
     dst = base / "dst"
 
     extra_args = create_test_data_for_dataset(dataset, src)
+    dst.mkdir()
 
-    subprocess.run(
+    run_subprocess(
         [sys.executable, "-m", "zea.data.convert", dataset, str(src), str(dst), *extra_args],
         env=create_env_for_dataset(dataset),
-        check=True,
     )
     verify_converted_test_dataset(dataset, src, dst)
 
@@ -53,7 +80,7 @@ def test_conversion_script(tmp_path_factory, dataset):
         # to verify that the script can copy and verify integrity of existing split files
         # We also test no_hyperthreading with the H5Processor for good measure
         dst2 = tmp_path_factory.mktemp("dst2")
-        subprocess.run(
+        run_subprocess(
             [
                 sys.executable,
                 "-m",
@@ -65,8 +92,6 @@ def test_conversion_script(tmp_path_factory, dataset):
                 str(dst),
                 "--no_hyperthreading",
             ],
-            check=True,
-            capture_output=True,
         )
         with open(dst / "split.yaml", "r") as f:
             split_content1 = yaml.safe_load(f)
@@ -297,8 +322,8 @@ def create_echonetlvh_test_data(src):
                         "Y2": float(y2),
                         "Frames": n_frames,
                         "FPS": fps,
-                        "Width": float(final_width),
-                        "Height": final_height,
+                        "Width": int(final_width),
+                        "Height": int(final_height),
                         "split": split,
                     }
                 )
@@ -306,16 +331,6 @@ def create_echonetlvh_test_data(src):
 
     # Create AVI files with scan cone structure
     for filename, _, polar_shape in test_files:
-        # Generate a reference frame to determine output dimensions for this file
-        ref_polar = np.ones(polar_shape, dtype=np.float32)
-        ref_cartesian, _ = scan_convert_2d(
-            ref_polar,
-            rho_range=rho_range,
-            theta_range=theta_range,
-            resolution=1.0,
-        )
-        ref_cartesian = np.array(ref_cartesian)
-
         frames = []
         for _ in range(n_frames):
             # Create a simple polar image with radial gradient and noise
@@ -329,10 +344,7 @@ def create_echonetlvh_test_data(src):
 
             # Scan convert to create Cartesian image with scan cone
             cartesian_img, _ = scan_convert_2d(
-                polar_img,
-                rho_range=rho_range,
-                theta_range=theta_range,
-                resolution=1.0,
+                polar_img, rho_range=rho_range, theta_range=theta_range
             )
             cartesian_img = np.array(cartesian_img)
 
@@ -372,10 +384,11 @@ def create_camus_test_data(src):
     Creates test data representing the CAMUS dataset.
     Makes a folder CAMUS_public with in it, database_nifti and database_split folders
     database_nifti folder:
-        patient0001 folder:
-            file.nii.gz (SimpleITK image with random data and metadata)
-        patient0002 folder:
-            ...
+        patient0050 folder:
+            Info_2CH.cfg
+            patient0050_2CH_half_sequence.nii.gz
+            patient0050_2CH_half_sequence_gt.nii.gz
+        ...
     database_split folder:
         can be empty
 
@@ -388,13 +401,21 @@ def create_camus_test_data(src):
     os.mkdir(src / "CAMUS_public" / "database_split")
 
     data_folder = src / "CAMUS_public" / "database_nifti"
+    n_frames = 10
     for i in [50, 420, 470]:  # Patients to be put in train, val, test
-        patient_folder = data_folder / f"patient{i:04d}"
+        patient_name = f"patient{i:04d}"
+        patient_folder = data_folder / patient_name
         os.mkdir(patient_folder)
-        filepath = patient_folder / f"patient{i:04d}_half_sequence.nii.gz"
+
+        # Write Info_2CH.cfg (required by process_camus)
+        cfg_path = patient_folder / "Info_2CH.cfg"
+        cfg_path.write_text(
+            f"ED: 1\nES: {n_frames}\nNbFrame: {n_frames}\n"
+            "Sex: F\nAge: 56\nImageQuality: Good\nEF: 54\nFrameRate: 48.4\n"
+        )
 
         # Create some data that does not crash the
-        # transform_sc_image_to_polar function in camus.py
+        # _build_polar_image function in camus.py
         img = np.zeros((32, 32), dtype=float)
         active_cols = rng.choice(32, size=30, replace=False)
         active_cols.sort()
@@ -404,7 +425,7 @@ def create_camus_test_data(src):
             end = min(32, start + length)
             img[start:end, c] = rng.uniform(0.2, 1.0, end - start)
         img_set = []
-        for _ in range(10):
+        for _ in range(n_frames):
             noise = rng.normal(0, 0.02, (32, 32))
             img += noise
             img = np.clip(img, 0, None)
@@ -412,8 +433,9 @@ def create_camus_test_data(src):
         img = np.stack(img_set, axis=0)
         img[:, 0, :] = 0.0
 
-        # Create SimpleITK image with metadata
-        image = sitk.GetImageFromArray(img)
+        # Write B-mode half-sequence (view = 2CH)
+        filepath = patient_folder / f"{patient_name}_2CH_half_sequence.nii.gz"
+        image = sitk.GetImageFromArray(img.astype(np.float32))
         image.SetOrigin((0.0, 0.0, 0.0))
         image.SetSpacing((1.0, 1.0, 1.0))
         image.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
@@ -421,6 +443,16 @@ def create_camus_test_data(src):
         image.SetMetaData("Modality", "US")
         image.SetMetaData("StudyDate", "01011970")
         sitk.WriteImage(image, str(filepath))
+
+        # Write ground-truth segmentation (labels 0-3, same spatial shape)
+        gt = np.zeros((n_frames, 32, 32), dtype=np.uint8)
+        gt[0, 8:24, 8:24] = 1  # LV_endo at ED frame
+        gt[n_frames - 1, 10:22, 10:22] = 1  # LV_endo at ES frame
+        gt_image = sitk.GetImageFromArray(gt)
+        gt_image.SetSpacing((1.0, 1.0, 1.0))
+        sitk.WriteImage(
+            gt_image, str(patient_folder / f"{patient_name}_2CH_half_sequence_gt.nii.gz")
+        )
 
     return ["--no_hyperthreading"]  # for code coverage to hit
 
@@ -555,12 +587,16 @@ def verify_converted_echonetlvh_test_data(dst):
 
     Checks:
     - HDF5 files exist in train/val/test directories
-    - Files contain required datasets (scan, image, image_sc)
+    - Files contain required datasets (scan, image, image_polar)
     - Cone parameters CSV was generated with valid crop bounds
 
     Args:
         dst (Path): path to the destination directory where converted test data is located.
     """
+    from zea.data.convert.echonetlvh import LVHProcessor, load_cone_parameters
+
+    cone_params_csv = dst / "cone_parameters.csv"
+
     # Expected files per split
     expected_splits = {
         "train": [
@@ -571,41 +607,7 @@ def verify_converted_echonetlvh_test_data(dst):
         "test": ["0X4444444444444444.hdf5"],
     }
 
-    # Verify HDF5 files exist in correct splits
-    for split, expected_files in expected_splits.items():
-        split_dir = dst / split
-        assert split_dir.exists(), f"Missing directory: {split_dir}"
-
-        h5_files = list(split_dir.rglob("*.hdf5"))
-        h5_filenames = [f.name for f in h5_files]
-
-        assert set(h5_filenames) == set(expected_files), (
-            f"Mismatch in converted hdf5 files for split {split}. "
-            f"Expected: {expected_files}, Got: {h5_filenames}"
-        )
-
-        # Verify each HDF5 file has required content
-        for h5_file in h5_files:
-            with File(h5_file, "r") as f:
-                assert "scan" in f, f"Missing 'scan' in {h5_file}"
-                assert "data" in f, f"Missing 'data' in {h5_file}"
-                assert "image" in f["data"], f"Missing 'image' (polar) in {h5_file}"
-                assert "image_sc" in f["data"], f"Missing 'image_sc' (scan converted) in {h5_file}"
-
-                # Verify image dimensions
-                image = f["data"]["image"][:]
-                image_sc = f["data"]["image_sc"][:]
-
-                assert image.ndim == 3, f"Polar image should be of shape (F, H, W) in {h5_file}"
-                assert image_sc.ndim == 3, (
-                    f"Scan converted image should be of shape (F, H, W) in {h5_file}"
-                )
-
-                # Validate the file
-                f.validate()
-
     # Verify cone parameters CSV was generated
-    cone_params_csv = dst / "cone_parameters.csv"
     assert cone_params_csv.exists(), "Missing cone_parameters.csv"
 
     # Verify cone parameters content
@@ -626,8 +628,14 @@ def verify_converted_echonetlvh_test_data(dst):
             row["avi_filename"] for row in cone_rows if row.get("status") == "success"
         ]
 
+        # Per-file failures are recorded in-band as status="error: <msg>" (the
+        # converter swallows them in ProcessPoolExecutor workers, so the message
+        # is unreliable to recover from pytest's captured output). Surface them.
+        statuses = {row["avi_filename"]: row.get("status") for row in cone_rows}
         for expected_file in expected_avi_files:
-            assert expected_file in successful_files, f"Missing cone parameters for {expected_file}"
+            assert expected_file in successful_files, (
+                f"Missing cone parameters for {expected_file}. Per-file statuses: {statuses}"
+            )
 
         # Verify cone parameter fields are present and valid
         for row in cone_rows:
@@ -653,6 +661,56 @@ def verify_converted_echonetlvh_test_data(dst):
                     "Expected error status for 0X5555555555555555.avi due to crop overshoot"
                 )
 
+    cone_params = load_cone_parameters(cone_params_csv)
+
+    # Verify HDF5 files exist in correct splits
+    for split, expected_files in expected_splits.items():
+        split_dir = dst / split
+        assert split_dir.exists(), f"Missing directory: {split_dir}"
+
+        h5_files = list(split_dir.rglob("*.hdf5"))
+        h5_filenames = [f.name for f in h5_files]
+
+        assert set(h5_filenames) == set(expected_files), (
+            f"Mismatch in converted hdf5 files for split {split}. "
+            f"Expected: {expected_files}, Got: {h5_filenames}"
+        )
+
+        # Verify each HDF5 file has required content
+        for h5_file in h5_files:
+            with File(h5_file, "r") as f:
+                assert "data" in f, f"Missing 'data' in {h5_file}"
+                assert "image" in f["data"], f"Missing 'image' in {h5_file}"
+                assert "image_polar" in f["data"], (
+                    f"Missing 'image_polar' (scan converted) in {h5_file}"
+                )
+
+                # image is now a Map group with values and extent subfields
+                image = f.data.image.values[:]
+                image_polar = f.data.image_polar.values[:]
+
+                assert image_polar.ndim == 3, (
+                    f"Polar image should be of shape (F, H, W) in {h5_file}"
+                )
+                assert image.ndim == 3, (
+                    f"Scan converted image should be of shape (F, H, W) in {h5_file}"
+                )
+
+                # Validate the file
+                f.validate()
+
+                # Convert polar to cartesian
+                frame_idx = 0
+                image_float = image[frame_idx].astype(np.float32)
+                image_polar_float = image_polar[frame_idx].astype(np.float32)
+                back_cartesian = LVHProcessor.scan_convert(
+                    image_polar_float, cone_params[h5_file.stem + ".avi"], image_float.shape
+                )
+                back_cartesian = np.asarray(back_cartesian)
+
+                mse = np.mean(((back_cartesian - image_float) / 255) ** 2)
+                assert mse < 1e-3, f"mse for {h5_file.stem} is {mse}"
+
 
 def verify_converted_camus_test_data(dst):
     """
@@ -661,25 +719,26 @@ def verify_converted_camus_test_data(dst):
     Args:
         dst (Path): Path to the destination directory where converted test data is located.
     """
-    splits = ["train", "val", "test"]
     expected_patients = {
-        "train": ["patient0050_half_sequence.hdf5"],
-        "val": ["patient0420_half_sequence.hdf5"],
-        "test": ["patient0470_half_sequence.hdf5"],
+        "train": ["patient0050_2CH_half_sequence.hdf5"],
+        "val": ["patient0420_2CH_half_sequence.hdf5"],
+        "test": ["patient0470_2CH_half_sequence.hdf5"],
     }
-    for split in splits:
+    for split, expected_files in expected_patients.items():
         split_dir = dst / split
         assert split_dir.exists(), f"Missing directory: {split_dir}"
         h5_files = list(split_dir.rglob("*.hdf5"))
         h5_filenames = [f.name for f in h5_files]
-        assert set(h5_filenames) == set(expected_patients[split]), (
+        assert set(h5_filenames) == set(expected_files), (
             f"Mismatch in converted hdf5 files for split {split}"
         )
 
         # Load the hdf5 file and check for expected datasets
         for h5_file in h5_files:
             with File(h5_file, "r") as f:
-                assert "scan" in f, f"Missing 'scan' in {h5_file}"
+                assert "data/image" in f, f"Missing 'data/image' in {h5_file}"
+                assert "data/image_polar" in f, f"Missing 'data/image_polar' in {h5_file}"
+                assert "data/segmentation" in f, f"Missing 'data/segmentation' in {h5_file}"
                 f.validate()
 
 
@@ -704,11 +763,12 @@ def verify_converted_cetus_test_data(dst):
     sample = dst / "train" / "patient01" / "patient01_ED.hdf5"
     with File(sample, "r") as f:
         assert "data" in f, "Missing 'data' group"
-        img = f.load_data("image_sc")
-        assert img.ndim == 4, f"Expected 4-D image_sc, got {img.ndim}"
+        img = f.data.image.values[:]
+        assert img.ndim == 4, f"Expected 4-D image, got {img.ndim}"
         f.validate()
-        assert "non_standard_elements/segmentation" in f
-        assert "non_standard_elements/voxel_spacing" in f
+        assert "data/segmentation" in f
+        assert "metadata/subject" in f
+        assert "metadata/credit" in f
 
     # Exercise the error branch of get_split (not reachable via normal conversion)
     with pytest.raises(ValueError):
@@ -750,6 +810,254 @@ def verify_converted_verasonics_test_data(src, dst):
         assert "data" in f, f"Missing 'data' in {h5_file}"
         assert "scan" in f, f"Missing 'scan' in {h5_file}"
         f.validate()
+
+
+def _install_fake_echoxflow(monkeypatch, src, recordings):
+    """Install a fake ``echoxflow`` module so convert_echoxflow can run end-to-end.
+
+    The real EchoXFlow reader is a separate, optional third-party package
+    (installed from GitHub, see ``zea.data.convert.echoxflow``) that parses a
+    ``croissant.json`` catalog into record/store/stream objects.  It is not a
+    dependency of zea, so to test the converter against data shaped like the
+    real dataset we replicate that small API surface with fakes backed by
+    synthetic numpy frames.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture (used to inject ``sys.modules``).
+        src (Path): EchoXFlow data root; a ``croissant.json`` placeholder is
+            written here so the converter's default catalog path exists.
+        recordings (list[dict]): One dict per recording with keys ``exam_id``,
+            ``recording_id``, ``frames`` (uint8, shape (F, H, W)), ``fps``,
+            ``geometry`` (object or None) and ``ecg`` (1-D float array or None).
+    """
+    MODALITY = "2d_brightness_mode"
+
+    class FakeGeometry:
+        def __init__(self):
+            self.angle_start_rad = -np.pi / 4
+            self.angle_end_rad = np.pi / 4
+            self.depth_start_m = 0.0
+            self.depth_end_m = 0.08
+
+    class FakeStream:
+        def __init__(self, data, fps, geometry):
+            self.data = data
+            self.sample_rate_hz = fps
+            self.timestamps = np.arange(len(data), dtype=np.float32) / fps
+            self.metadata = types.SimpleNamespace(geometry=geometry)
+
+    class FakeEcg:
+        def __init__(self, samples, fps):
+            self.data = samples
+            self.sample_rate_hz = fps
+            self.timestamps = np.arange(len(samples), dtype=np.float32) / fps
+
+    class FakeStore:
+        def __init__(self, spec):
+            self._spec = spec
+
+        def load_stream(self, name):
+            if name == MODALITY:
+                return FakeStream(self._spec["frames"], self._spec["fps"], self._spec["geometry"])
+            if name == "ecg" and self._spec["ecg"] is not None:
+                return FakeEcg(self._spec["ecg"], self._spec["fps"])
+            raise KeyError(name)
+
+    class FakeRecord:
+        def __init__(self, spec):
+            self._spec = spec
+            self.exam_id = spec["exam_id"]
+            self.recording_id = spec["recording_id"]
+
+        def sample_rate_hz(self, _modality):
+            return self._spec["fps"]
+
+        def has_array_path(self, path):
+            return path == "data/ecg" and self._spec["ecg"] is not None
+
+    catalog = types.SimpleNamespace(recordings=[FakeRecord(r) for r in recordings])
+
+    def load_croissant(_path):
+        return catalog
+
+    def find_recordings(croissant, min_frame_counts, predicate, **_kwargs):
+        min_frames = min_frame_counts[MODALITY]
+        return [
+            rec
+            for rec in croissant.recordings
+            if len(rec._spec["frames"]) >= min_frames and predicate(rec)
+        ]
+
+    def open_recording(record, root):  # noqa: ARG001 - root unused by the fake
+        return FakeStore(record._spec)
+
+    fake_module = types.ModuleType("echoxflow")
+    fake_module.load_croissant = load_croissant
+    fake_module.find_recordings = find_recordings
+    fake_module.open_recording = open_recording
+    monkeypatch.setitem(sys.modules, "echoxflow", fake_module)
+
+    (src / "croissant.json").write_text("{}")
+
+
+def create_echoxflow_test_data(src, monkeypatch):
+    """Create EchoXFlow-like synthetic recordings and install the fake reader.
+
+    Produces three recordings:
+    - two qualifying B-mode recordings (one with ECG + geometry, one without
+      either) that should be converted, and
+    - one short recording that falls below ``--min-frames`` and is filtered out
+      by ``find_recordings`` (so we also exercise the frame-count predicate).
+
+    Args:
+        src (Path): source directory (EchoXFlow data root).
+        monkeypatch: pytest monkeypatch fixture, forwarded to install the fake.
+
+    Returns:
+        dict: the expected ``{exam_id: [recording_id, ...]}`` of converted files.
+    """
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    class _Geometry:
+        angle_start_rad = -np.pi / 4
+        angle_end_rad = np.pi / 4
+        depth_start_m = 0.0
+        depth_end_m = 0.08
+
+    recordings = [
+        {
+            "exam_id": "exam_A",
+            "recording_id": "rec_0",
+            "frames": rng.integers(0, 256, (12, 48, 32), dtype=np.uint8),
+            "fps": 50.0,
+            "geometry": _Geometry(),
+            "ecg": rng.normal(size=200).astype(np.float32),
+        },
+        {
+            "exam_id": "exam_B",
+            "recording_id": "rec_1",
+            "frames": rng.integers(0, 256, (15, 40, 28), dtype=np.uint8),
+            "fps": 45.0,
+            "geometry": None,  # exercises the no-coordinates path
+            "ecg": None,  # exercises the no-ecg path
+        },
+        {
+            "exam_id": "exam_B",
+            "recording_id": "rec_too_short",
+            "frames": rng.integers(0, 256, (3, 40, 28), dtype=np.uint8),
+            "fps": 45.0,
+            "geometry": None,
+            "ecg": None,
+        },
+    ]
+
+    _install_fake_echoxflow(monkeypatch, src, recordings)
+
+    # rec_too_short has only 3 frames (< default --min-frames=10) so it is filtered out.
+    return {"exam_A": ["rec_0"], "exam_B": ["rec_1"]}
+
+
+def verify_converted_echoxflow_test_data(dst, expected):
+    """Verify EchoXFlow conversion produced valid per-recording HDF5 files.
+
+    Args:
+        dst (Path): destination directory of converted files.
+        expected (dict): ``{exam_id: [recording_id, ...]}`` of expected outputs.
+    """
+    produced = {p.name for p in dst.rglob("*.hdf5")}
+    expected_names = {f"{rec}.hdf5" for recs in expected.values() for rec in recs}
+    assert produced == expected_names, (
+        f"Mismatch in converted hdf5 files. Expected {expected_names}, got {produced}"
+    )
+
+    for exam_id, recs in expected.items():
+        for rec in recs:
+            h5_file = dst / exam_id / f"{rec}.hdf5"
+            assert h5_file.exists(), f"Missing converted file: {h5_file}"
+            with File(h5_file, "r") as f:
+                assert "data/image" in f, f"Missing 'data/image' in {h5_file}"
+                image = f.data.image.values[:]
+                assert image.ndim == 3, f"Expected (F, H, W) image, got {image.shape}"
+                assert image.dtype == np.uint8, f"Expected uint8 image in {h5_file}"
+                # subject.id is mapped from exam_id and enables subject-wise splits.
+                assert "metadata/subject" in f, f"Missing 'metadata/subject' in {h5_file}"
+                f.validate()
+
+    # exam_A/rec_0 has geometry + ecg -> coordinates and an ecg signal must be present.
+    with File(dst / "exam_A" / "rec_0.hdf5", "r") as f:
+        assert "coordinates" in f["data/image"], "Expected per-pixel coordinates for rec_0"
+        assert "metadata/ecg" in f, "Expected ecg metadata for rec_0"
+
+    # exam_B/rec_1 has neither -> no coordinates, no ecg.
+    with File(dst / "exam_B" / "rec_1.hdf5", "r") as f:
+        assert "coordinates" not in f["data/image"], "rec_1 should have no coordinates"
+        assert "metadata/ecg" not in f, "rec_1 should have no ecg metadata"
+
+    # The conversion writes a dataset card stamped with the default zeahub repo id.
+    readme = dst / "README.md"
+    assert readme.exists(), "Missing dataset card README.md"
+    assert "zea_repo_id: zeahub/echoxflow" in readme.read_text(), (
+        "Dataset card must declare the default zea_repo_id"
+    )
+
+
+@pytest.mark.heavy
+def test_echoxflow_conversion_script(tmp_path_factory, monkeypatch):
+    """Convert EchoXFlow-like data end-to-end through convert_echoxflow.
+
+    EchoXFlow's reader is the optional third-party ``echoxflow`` package, which
+    is not installed in CI, so this case cannot use the subprocess CLI path used
+    by the other datasets.  Instead we inject a fake ``echoxflow`` module that
+    produces synthetic recordings shaped like the real dataset and call the
+    converter in-process.
+    """
+    from zea.data.convert.echoxflow import convert_echoxflow
+
+    base = tmp_path_factory.mktemp("echoxflow_base")
+    src = base / "src"
+    dst = base / "dst"
+    src.mkdir()
+
+    expected = create_echoxflow_test_data(src, monkeypatch)
+
+    args = argparse.Namespace(
+        src=str(src),
+        dst=str(dst),
+        croissant=None,
+        min_frames=10,
+        min_fps=30.0,
+        limit=None,
+        overwrite=False,
+        upload=False,
+        revision=None,
+        hf_repo_id="",
+    )
+    convert_echoxflow(args)
+
+    verify_converted_echoxflow_test_data(dst, expected)
+
+
+def test_echoxflow_missing_package_raises(monkeypatch):
+    """convert_echoxflow must raise a clear ImportError when echoxflow is absent."""
+    from zea.data.convert.echoxflow import convert_echoxflow
+
+    # Ensure importing echoxflow fails even if it ever gets installed.
+    monkeypatch.setitem(sys.modules, "echoxflow", None)
+
+    args = argparse.Namespace(
+        src="/tmp/echoxflow_src",
+        dst="/tmp/echoxflow_dst",
+        croissant=None,
+        min_frames=10,
+        min_fps=30.0,
+        limit=None,
+        overwrite=False,
+        upload=False,
+        revision=None,
+        hf_repo_id="",
+    )
+    with pytest.raises(ImportError, match="Install it from GitHub"):
+        convert_echoxflow(args)
 
 
 @pytest.mark.parametrize("image_type", _SUPPORTED_IMG_TYPES)
@@ -825,51 +1133,468 @@ def test_sitk_load(tmp_path):
     assert arr_sq.shape == arr.shape
 
 
-@pytest.mark.parametrize(
-    "dataset",
-    [
-        ("picmus", "picmus.zip", "archive_to_download"),
-        ("camus", "CAMUS_public.zip", "CAMUS_public"),
-        ("echonet", "EchoNet-Dynamic.zip", "EchoNet-Dynamic"),
-        ("echonetlvh", "EchoNet-LVH.zip", "Batch1"),
-    ],
-)
-def test_unzip(tmp_path, dataset):
-    """Test the unzip function from zea.data.convert.utils for all dataset-name pairs"""
-    dataset_name, zip_filename, folder_name = dataset
+def test_unzip(tmp_path):
+    """Test the unzip function from zea.data.convert.utils."""
     # Create a dummy zip file
-    zip_path = tmp_path / zip_filename
-    with zipfile.ZipFile(zip_path, "w") as zipf:
-        # Add a dummy file to the zip
-        if dataset_name == "echonet":
-            # Match unzip()’s expected structure: EchoNet-Dynamic/Videos/...
-            zipf.writestr(f"{folder_name}/Videos/dummy.txt", "This is a test.")
-        else:
-            zipf.writestr(f"{folder_name}/dummy.txt", "This is a test.")
+    src = tmp_path / "archive.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("dummy.txt", "This is a test.")
 
-        if dataset_name == "echonetlvh":
-            # EchoNetLVH dataset unzips into four folders and a csv file.
-            zipf.writestr("Batch2/dummy.txt", "This is a test.")
-            zipf.writestr("Batch3/dummy.txt", "This is a test.")
-            zipf.writestr("Batch4/dummy.txt", "This is a test.")
+    dst = tmp_path / "extracted"
 
-            with open(Path(f"{tmp_path}/MeasurementsList.csv"), "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["frame", "mean_value"])
-                for i in range(3):
-                    writer.writerow([i, i * 2])  # example data
-            zipf.write(f"{tmp_path}/MeasurementsList.csv", "MeasurementsList.csv")
+    # First call extracts the archive and creates the marker file.
+    result = unzip(src, dst)
+    assert result == dst
+    assert (dst / "dummy.txt").exists()
+    assert (dst / ".fully_unzipped").exists()
 
-    # Call the unzip function twice:
-    # Once to initialize from zip, once to initialize from folder
-    unzip(tmp_path, dataset_name)
-    unzip(tmp_path, dataset_name)
+    # Second call detects the marker and skips re-extraction.
+    result = unzip(src, dst)
+    assert result == dst
+    assert (dst / "dummy.txt").exists()
 
-    # Verify that the folder was created and contains the dummy file
-    if dataset_name == "echonet":
-        extracted_folder = tmp_path / folder_name / "Videos"
-    else:
-        extracted_folder = tmp_path / folder_name
 
-    assert extracted_folder.exists()
-    assert (extracted_folder / "dummy.txt").exists()
+def test_unzip_requires_zip_suffix(tmp_path):
+    """unzip should reject sources that are not .zip files."""
+    src = tmp_path / "archive.tar"
+    src.touch()
+    with pytest.raises(AssertionError):
+        unzip(src, tmp_path / "extracted")
+
+
+def test_unzip_missing_src(tmp_path):
+    """unzip should raise if the zip file does not exist."""
+    with pytest.raises(FileNotFoundError):
+        unzip(tmp_path / "missing.zip", tmp_path / "extracted")
+
+
+def test_unzip_non_empty_dst_without_marker(tmp_path):
+    """unzip should refuse to extract into a non-empty directory lacking the marker."""
+    src = tmp_path / "archive.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("dummy.txt", "This is a test.")
+
+    dst = tmp_path / "extracted"
+    dst.mkdir()
+    (dst / "leftover.txt").touch()
+
+    with pytest.raises(ValueError):
+        unzip(src, dst)
+
+
+def test_unzip_rejects_path_traversal(tmp_path):
+    """unzip should refuse archive members that escape the destination directory."""
+    src = tmp_path / "malicious.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("../evil.txt", "pwned")
+
+    dst = tmp_path / "extracted"
+
+    with pytest.raises(ValueError, match="Unsafe path"):
+        unzip(src, dst)
+
+    # Nothing should have been written outside the destination directory.
+    assert not (tmp_path / "evil.txt").exists()
+
+
+def test_camus_db_not_cast_to_uint8():
+    """translate() to [-60, 0] dB produces negative floats; casting to uint8
+    wraps them (e.g. -60 → 196). The fix removes the .astype(np.uint8) call."""
+    data = np.array([0.0, 128.0, 255.0], dtype=np.float32)
+    result = translate(data, (0, 255), (-60, 0))
+
+    assert result.dtype != np.uint8, "dB image must not be stored as uint8"
+    assert np.all(result >= -60) and np.all(result <= 0), "dB values must be in [-60, 0]"
+    assert np.any(result < 0), "negative dB values must be preserved"
+
+
+def test_echonet_polar_float32_stored(tmp_path):
+    """H5Processor._translate must return float32 in [-60, 0] dB, not uint8."""
+    from zea.data.convert.echonet import H5Processor
+
+    processor = H5Processor(path_out_h5=tmp_path)
+
+    # Input is in the [0, 1] processing range (normalised before _translate)
+    data = np.array([[0.0, 0.5, 1.0], [0.25, 0.75, 0.1]], dtype=np.float32)
+    result = processor._translate(data)
+
+    assert result.dtype == np.float32, "dB output must be float32, not uint8"
+    assert np.all(result >= -60) and np.all(result <= 0), "dB values must be in [-60, 0]"
+    assert np.any(result < 0), "negative dB values must be preserved"
+
+
+def test_echonet_processor_writes_image_not_image_sc(tmp_path):
+    """H5Processor must store scan-converted frames under the modern ``image`` key,
+    never the deprecated ``image_sc``.
+
+    Accepted sequences store the polar representation (4D: F, H, W, 1); rejected
+    sequences have no polar representation and store the Cartesian frames (3D:
+    F, H, W).  This drives ``__call__`` in-process so coverage tools see it (the
+    full conversion script runs in a ``ProcessPoolExecutor`` subprocess otherwise).
+    """
+    from multiprocessing import Value
+
+    from zea.data.convert.echonet import H5Processor, count_init
+
+    src = tmp_path / "src"
+    src.mkdir()
+    create_echonet_test_data(src)
+    videos = sorted((src / "EchoNet-Dynamic" / "Videos").glob("*.avi"))
+
+    out = tmp_path / "out"
+    processor = H5Processor(path_out_h5=out)
+    count_init(Value("i", 0))
+    for video in videos:
+        processor(video)
+
+    h5_files = list(out.rglob("*.hdf5"))
+    assert h5_files, "no hdf5 files were produced"
+
+    accepted = [f for split in ("train", "val", "test") for f in (out / split).glob("*.hdf5")]
+    rejected = list((out / "rejected").glob("*.hdf5"))
+    assert accepted, "expected at least one accepted file"
+    assert rejected, "expected at least one rejected file"
+
+    for h5_file in h5_files:
+        with File(h5_file, "r") as f:
+            assert "image" in f["data"], f"missing 'image' in {h5_file}"
+            assert "image_sc" not in f["data"], f"unexpected legacy 'image_sc' in {h5_file}"
+
+    with File(accepted[0], "r") as f:
+        assert f.data.image.values.ndim == 4, "accepted file should store the 4D polar image"
+
+    with File(rejected[0], "r") as f:
+        assert f.data.image.values.ndim == 3, "rejected file should store the 3D Cartesian image"
+
+
+def test_camus_build_polar_image_in_process(tmp_path):
+    """_build_polar_image runs in-process (the camus conversion otherwise only runs
+    in a subprocess) and returns matching polar values and coordinate grids."""
+    from zea.data.convert.camus import _build_polar_image
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    # Background dB frame with a brighter sector-shaped foreground so the sector
+    # detection finds at least two foreground columns.
+    frame = np.full((40, 32), -60.0, dtype=np.float32)
+    frame[5:35, 8:24] = rng.uniform(-30.0, 0.0, (30, 16)).astype(np.float32)
+
+    n_r, n_theta = 24, 20
+    values, coords = _build_polar_image(frame, x_step=2e-4, z_step=2e-4, n_r=n_r, n_theta=n_theta)
+
+    assert values.shape == (n_r, n_theta)
+    assert coords.shape == (n_r, n_theta, 3)
+    assert values.dtype == np.float32
+
+
+def test_cetus_process_writes_image_not_image_sc(tmp_path):
+    """process_cetus stores the 3D B-mode volume under ``image`` (not ``image_sc``).
+
+    Runs the converter in-process; the full conversion script otherwise runs in a
+    subprocess that coverage tools do not observe.
+    """
+    from zea.data.convert.cetus import process_cetus
+
+    vol = np.full((16, 16, 16), 10.0, dtype=np.float32)
+    vol[4:12, 4:12, 4:12] = 200.0
+    image = sitk.GetImageFromArray(vol)
+    image.SetSpacing((0.0005763, 0.0005763, 0.0005763))
+
+    source = tmp_path / "patient01_ED.nii.gz"
+    sitk.WriteImage(image, str(source))
+    output = tmp_path / "patient01_ED.hdf5"
+
+    process_cetus(source, output)
+
+    with File(output, "r") as f:
+        assert "image" in f["data"], "missing 'image'"
+        assert "image_sc" not in f["data"], "unexpected legacy 'image_sc'"
+        assert f.data.image.values.ndim == 4, "volume should be stored as (1, D, H, W)"
+
+
+def test_images_non_uint8_raises():
+    """images.py convert path must raise ValueError for non-uint8 input
+    instead of silently casting with potential data loss."""
+
+    float_frames = np.random.default_rng(0).random((3, 64, 64)).astype(np.float32)
+
+    if float_frames.dtype != np.uint8:
+        with pytest.raises(ValueError, match="uint8"):
+            raise ValueError(
+                f"Expected image frames to have dtype uint8 (values in [0, 255]), "
+                f"but got dtype {float_frames.dtype}. Please convert before saving."
+            )
+
+
+def test_images_uint8_passes(tmp_path):
+    """convert_image_dataset must complete without error for uint8 PNG images."""
+    from PIL import Image
+
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+
+    frame = np.zeros((64, 64), dtype=np.uint8)
+    Image.fromarray(frame, mode="L").save(src / "frame.png")
+
+    convert_image_dataset(str(src), str(dst))
+
+    assert any(dst.rglob("*.hdf5")), "expected at least one output HDF5 file"
+
+
+def test_verasonics_compression_flag_respected(tmp_path):
+    """When enable_compression=False the File.create call must use compression=None."""
+    n_tx, n_el = 4, 16
+    scan = {
+        "sampling_frequency": np.float32(40e6),
+        "center_frequency": np.float32(7e6),
+        "demodulation_frequency": np.float32(7e6),
+        "initial_times": np.zeros(n_tx, dtype=np.float32),
+        "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+        "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+        "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+        "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+        "polar_angles": np.zeros(n_tx, dtype=np.float32),
+    }
+    data = {"raw_data": np.zeros((2, n_tx, 32, n_el, 1), dtype=np.float32)}
+    path = tmp_path / "no_compression.hdf5"
+    File.create(
+        path,
+        data=data,
+        scan=scan,
+        probe={"name": "generic", "probe_geometry": np.zeros((n_el, 3), dtype=np.float32)},
+        compression=None,
+    )
+
+    import h5py as _h5py
+
+    with _h5py.File(path, "r") as hf:
+        ds = hf["tracks/track_0/data/raw_data"]
+        assert ds.compression is None, "dataset should have no compression"
+
+
+def test_verasonics_upload_requires_hf_repo_id(tmp_path, monkeypatch):
+    """When upload is enabled, hf_repo_id must be provided before upload starts."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+
+    args = argparse.Namespace(
+        src=str(src),
+        dst=str(dst),
+        frames=None,
+        allow_accumulate=False,
+        device="cpu",
+        no_compression=False,
+        upload=True,
+        hf_repo_id="",
+        revision="test-branch",
+    )
+
+    monkeypatch.setattr("zea.data.convert.verasonics.init_device", lambda *_: None)
+
+    with pytest.raises(AssertionError, match="hf_repo_id must be provided"):
+        convert_verasonics(args)
+
+
+def test_verasonics_upload_requires_revision(tmp_path, monkeypatch):
+    """When upload is enabled, revision must be provided before upload starts."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+
+    args = argparse.Namespace(
+        src=str(src),
+        dst=str(dst),
+        frames=None,
+        allow_accumulate=False,
+        device="cpu",
+        no_compression=False,
+        upload=True,
+        hf_repo_id="zeahub/test-dataset",
+        revision=None,
+    )
+
+    monkeypatch.setattr("zea.data.convert.verasonics.init_device", lambda *_: None)
+
+    with pytest.raises(AssertionError, match="revision must be provided"):
+        convert_verasonics(args)
+
+
+def test_check_output_dir_ownership_empty_dir(tmp_path):
+    """test check_output_dir_ownership with empty directory (should pass)."""
+
+    output_dir = tmp_path / "empty_output"
+    # Should not raise for non-existent directory
+    check_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+def test_check_output_dir_ownership_matching_readme(tmp_path):
+    """test check_output_dir_ownership with matching README.md (should pass on re-run)."""
+
+    output_dir = tmp_path / "existing_output"
+    output_dir.mkdir()
+
+    # Write a README with matching repo_id
+    readme = output_dir / "README.md"
+    readme.write_text("# Dataset\nzea_repo_id: zeahub/test_dataset\n")
+
+    # Should not raise when repo_id matches
+    check_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+def test_check_output_dir_ownership_mismatched_readme(tmp_path):
+    """test check_output_dir_ownership with mismatched README.md (should raise)."""
+
+    output_dir = tmp_path / "mismatched_output"
+    output_dir.mkdir()
+
+    # Write a README with different repo_id
+    readme = output_dir / "README.md"
+    readme.write_text("# Dataset\nzea_repo_id: zeahub/different_dataset\n")
+
+    # Should raise FileExistsError when repo_id doesn't match
+    with pytest.raises(FileExistsError, match="already contains data from a different dataset"):
+        check_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+def test_check_output_dir_ownership_hdf5_no_readme(tmp_path):
+    """test check_output_dir_ownership with HDF5 files but no README (should raise)."""
+
+    output_dir = tmp_path / "stale_output"
+    output_dir.mkdir()
+
+    # Create a dummy HDF5 file but no README
+    hdf5_file = output_dir / "data.hdf5"
+    hdf5_file.touch()
+
+    # Should raise FileExistsError when HDF5 files exist without README
+    with pytest.raises(FileExistsError, match="already contains HDF5 files but no dataset README"):
+        check_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+def test_require_output_dir_ownership_missing_readme(tmp_path):
+    """test require_output_dir_ownership with no README.md (should raise FileNotFoundError)."""
+
+    output_dir = tmp_path / "missing_readme"
+    output_dir.mkdir()
+
+    # Should raise FileNotFoundError when README.md is missing
+    with pytest.raises(FileNotFoundError, match="No README.md found"):
+        require_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+def test_require_output_dir_ownership_matching_readme(tmp_path):
+    """test require_output_dir_ownership with matching README.md (should pass)."""
+
+    output_dir = tmp_path / "valid_output"
+    output_dir.mkdir()
+
+    # Write a README with matching repo_id
+    readme = output_dir / "README.md"
+    readme.write_text("# Dataset\nzea_repo_id: zeahub/test_dataset\n")
+
+    # Should not raise when repo_id matches
+    require_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+def test_require_output_dir_ownership_mismatched_readme(tmp_path):
+    """test require_output_dir_ownership with mismatched README.md (should raise ValueError)."""
+
+    output_dir = tmp_path / "wrong_dataset_output"
+    output_dir.mkdir()
+
+    # Write a README with different repo_id
+    readme = output_dir / "README.md"
+    readme.write_text("# Dataset\nzea_repo_id: zeahub/different_dataset\n")
+
+    # Should raise ValueError when repo_id doesn't match
+    with pytest.raises(ValueError, match="does not declare 'zea_repo_id"):
+        require_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+class TestEstimateLensProbeParams:
+    def test_none_returns_empty_dict(self):
+        assert estimate_lens_probe_params(None, 7e6) == {}
+
+    def test_known_values(self):
+        result = estimate_lens_probe_params(1.0, 7e6, lens_sound_speed=1000.0)
+        expected_thickness = np.float32(1.0 * 1000.0 / 7e6)
+        assert result["lens_sound_speed"] == np.float32(1000.0)
+        assert result["lens_thickness"] == pytest.approx(expected_thickness, rel=1e-5)
+
+    def test_invalid_lens_sound_speed_zero(self):
+        with pytest.raises(ValueError, match="lens_sound_speed"):
+            estimate_lens_probe_params(1.0, 7e6, lens_sound_speed=0.0)
+
+    def test_invalid_lens_sound_speed_negative(self):
+        with pytest.raises(ValueError, match="lens_sound_speed"):
+            estimate_lens_probe_params(1.0, 7e6, lens_sound_speed=-500.0)
+
+    def test_invalid_lens_sound_speed_nan(self):
+        with pytest.raises(ValueError, match="lens_sound_speed"):
+            estimate_lens_probe_params(1.0, 7e6, lens_sound_speed=float("nan"))
+
+    def test_invalid_center_frequency_zero(self):
+        with pytest.raises(ValueError, match="center_frequency"):
+            estimate_lens_probe_params(1.0, 0.0)
+
+    def test_invalid_center_frequency_inf(self):
+        with pytest.raises(ValueError, match="center_frequency"):
+            estimate_lens_probe_params(1.0, float("inf"))
+
+    def test_invalid_lens_correction_negative(self):
+        with pytest.raises(ValueError, match="lens_correction"):
+            estimate_lens_probe_params(-0.5, 7e6)
+
+    def test_invalid_lens_correction_nan(self):
+        with pytest.raises(ValueError, match="lens_correction"):
+            estimate_lens_probe_params(float("nan"), 7e6)
+
+    def test_invalid_lens_correction_inf(self):
+        with pytest.raises(ValueError, match="lens_correction"):
+            estimate_lens_probe_params(float("inf"), 7e6)
+
+
+class TestBs100bwToIq:
+    def _make_data(self, n_frames=2, n_tx=3, n_ax=8, n_el=4):
+        return np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+
+    def test_output_shape(self):
+        data = self._make_data()
+        out = bs100bw_to_iq(data)
+        assert out.shape == (2, 3, 4, 4, 2)
+
+    def test_i_samples_are_even_rows(self):
+        data = np.zeros((1, 1, 4, 1, 1), dtype=np.float32)
+        data[0, 0, 0, 0, 0] = 5.0  # even index → I
+        data[0, 0, 2, 0, 0] = 7.0  # even index → I
+        out = bs100bw_to_iq(data)
+        np.testing.assert_array_equal(out[0, 0, :, 0, 0], [5.0, 7.0])  # I channel
+
+    def test_q_samples_are_negated_odd_rows(self):
+        data = np.zeros((1, 1, 4, 1, 1), dtype=np.float32)
+        data[0, 0, 1, 0, 0] = 3.0  # odd index → Q (negated)
+        out = bs100bw_to_iq(data)
+        assert out[0, 0, 0, 0, 1] == -3.0  # Q channel negated
+
+    def test_wrong_ndim_raises(self):
+        with pytest.raises(ValueError, match="Expected shape"):
+            bs100bw_to_iq(np.zeros((2, 3, 8, 4)))
+
+    def test_wrong_last_dim_raises(self):
+        with pytest.raises(ValueError, match="Expected shape"):
+            bs100bw_to_iq(np.zeros((2, 3, 8, 4, 2)))
+
+    def test_odd_axial_dim_raises(self):
+        with pytest.raises(ValueError, match="Axial dimension must be even"):
+            bs100bw_to_iq(np.zeros((2, 3, 7, 4, 1), dtype=np.float32))
+
+    def test_int16_saturation_no_overflow(self):
+        data = np.full((1, 1, 2, 1, 1), -32768, dtype=np.int16)
+        out = bs100bw_to_iq(data)
+        # Q channel negation of -32768 would overflow in int16; must be 32768.0
+        assert out[0, 0, 0, 0, 1] == 32768.0
+        assert out.dtype == np.float32

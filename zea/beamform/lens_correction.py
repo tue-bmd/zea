@@ -1,4 +1,37 @@
-"""Lens corrected delay computation for ultrasound beamforming."""
+r"""Lens-corrected delay computation for ultrasound beamforming.
+
+The acoustic lens fitted over most ultrasound probes has a lower speed of
+sound than the surrounding medium (tissue / water), ~1000 m/s versus 1540 m/s,
+which shortens the travel time near the face of the transducer and alters
+the effective focus. We assume a flat lens with uniform thickness and
+speed of sound.
+
+The corrected one-way travel time from each transducer element to each image
+pixel is computed by finding the lateral crossing point :math:`x_l` on the
+lens surface that minimises total travel time (Fermat's principle):
+
+.. math::
+
+    T(x_l) = \frac{\sqrt{(x_l - x_e)^2 + z_l^2}}{c_\text{lens}}
+            + \frac{\sqrt{(x_l - x_s)^2 + (z_l - z_s)^2}}{c_\text{medium}}
+
+where :math:`(x_e, 0)` is the element position, :math:`(x_s, z_s)` is the
+pixel position, and :math:`z_l` is the lens thickness.  Setting
+:math:`\partial T / \partial x_l = 0` recovers Snell's law:
+
+.. math::
+
+    \frac{\sin\theta_\text{lens}}{c_\text{lens}}
+    = \frac{\sin\theta_\text{medium}}{c_\text{medium}}
+
+The root is found iteratively via Newton-Raphson.
+
+.. note::
+
+    This is more physically accurate than the scalar ``lensCorrection`` field
+    used by Verasonics, which adds a single constant delay offset uniformly
+    across all elements and ignores angle-dependent refraction.
+"""
 
 from keras import ops
 
@@ -8,8 +41,12 @@ def compute_lens_corrected_travel_times(
 ):
     """Compute the travel time of the shortest path between the element and the pixel.
 
+    .. note::
+
+        This function assumes a flat array geometry.
+
     Args:
-        element_pos (ndarray): The position of the element of shape (n_elements, 3).
+        element_pos (ndarray): The position of the element of shape (n_el, 3).
         pixel_pos (ndarray): The position of the pixel of shape (n_pixels, 3).
         lens_thickness (float): The thickness of the lens in meters.
         c_lens (float): The speed of sound in the lens in m/s.
@@ -17,7 +54,7 @@ def compute_lens_corrected_travel_times(
         n_iter (int): The number of iterations to run the Newton-Raphson method.
 
     Returns:
-        ndarray: The travel times of shape (n_pixels, n_elements).
+        ndarray: The travel times of shape (n_pixels, n_el).
     """
 
     pixel_pos = pixel_pos[:, None] - element_pos[None]

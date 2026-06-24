@@ -1,246 +1,602 @@
 .. _data-acquisition:
 
 Data
-================================
+====
 
-This page provides a comprehensive overview of how ultrasound data is acquired, structured, and managed within the ``zea`` toolbox.
-
-For a quick start, see :doc:`Getting Started <getting-started>`.
-For a full reference of all config parameters, see :doc:`Parameters <parameters>`. Lastly, some example notebooks on data handling can be found in :doc:`Examples <examples>`.
-
--------------------------------
-``zea`` data handling
--------------------------------
-
-For information on how to handle data in the ``zea`` toolbox, see the :mod:`zea.data` module documentation.
-
--------------------------------
-``zea`` data format
--------------------------------
-
-The ``zea`` toolbox uses a custom data format based on the HDF5 standard to store ultrasound data. It is convenient as it allows for efficient storage and retrieval of large datasets, with easy indexing that does not require loading the entire dataset into memory.
-
-**Key Features:**
-- All data and metadata are stored in a single `.hdf5` file per sequence.
-- The format is designed to be extensible and self-describing.
-- Data is organized into logical groups: `data` and `scan` (custom parameters allowed in `scan`).
-
-**File Structure Overview:**
-
-.. code-block:: text
-
-    data_file.hdf5
-    ├── data
-    │    ├── raw_data
-    │    ├── aligned_data
-    │    ├── envelope_data
-    │    ├── beamformed_data
-    │    ├── image
-    │    └── image_sc
-    └── scan
-         ├── n_ax
-         ├── n_el
-         ├── n_tx
-         ├── n_ch
-         ├── n_frames
-         ├── sound_speed
-         ├── probe_geometry
-         ├── sampling_frequency
-         ├── center_frequency
-         ├── demodulation_frequency
-         ├── initial_times
-         ├── t0_delays
-         ├── tx_apodizations
-         ├── focus_distances
-         ├── transmit_origins
-         ├── polar_angles
-         ├── azimuth_angles
-         ├── bandwidth_percent
-         ├── time_to_next_transmit
-         ├── tgc_gain_curve
-         ├── element_width
-         ├── tx_waveform_indices
-         ├── waveforms_one_way
-         ├── waveforms_two_way
-         ├── lens_correction
-         └── ... (custom parameters allowed)
-
-**Parameter Descriptions:**
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-
-   * - **Entry**
-     - **Description**
-   * - ``data/raw_data``
-     - Raw channel data as acquired from the ultrasound system. Shape: [n_frames, n_tx, n_ax, n_el, n_ch]
-   * - ``data/aligned_data``
-     - Time-of-flight corrected data. Shape: [n_frames, n_tx, n_ax, n_el, n_ch]
-   * - ``data/envelope_data``
-     - Envelope-detected data. Shape: [n_frames, grid_size_z, grid_size_x]
-   * - ``data/beamformed_data``
-     - Data after beamforming. Shape: [n_frames, grid_size_z, grid_size_x]
-   * - ``data/image``
-     - Log-compressed image (in dB). Shape: [n_frames, grid_size_z, grid_size_x]
-   * - ``data/image_sc``
-     - Scan-converted image (in dB). Shape: [n_frames, output_size_z, output_size_x]
-   * - ``scan/n_ax``
-     - Number of axial (depth) samples per transmit.
-   * - ``scan/n_el``
-     - Number of elements in the transducer array.
-   * - ``scan/n_tx``
-     - Number of transmit events per frame.
-   * - ``scan/n_ch``
-     - Number of channels in the data (typically 1 for RF, 2 for IQ).
-   * - ``scan/n_frames``
-     - Number of frames in the dataset (temporal dimension).
-   * - ``scan/sound_speed``
-     - Speed of sound in m/s.
-   * - ``scan/probe_geometry``
-     - 3D coordinates (in meters) of each transducer element, shape [n_el, 3].
-   * - ``scan/sampling_frequency``
-     - Sampling frequency of the data acquisition (in Hz).
-   * - ``scan/center_frequency``
-     - Center frequency of the transmit waveform in Hz.
-   * - ``scan/demodulation_frequency``
-     - The demodulation frequency of the data in Hz. This is the assumed center frequency of the transmit waveform used to demodulate the rf data to iq data.
-   * - ``scan/initial_times``
-     - Time (in seconds) when the A/D converter starts sampling for each transmit, shape [n_tx].
-   * - ``scan/t0_delays``
-     - Time delays (in seconds) applied to each element for each transmit, shape [n_tx, n_el].
-   * - ``scan/tx_apodizations``
-     - Transmit apodization values, shape [n_tx, n_el].
-   * - ``scan/focus_distances``
-     - Distance from the origin point on the transducer to where the beam comes to focus for each transmit, in meters, shape [n_tx].
-   * - ``scan/transmit_origins``
-     - 3D coordinates (in meters) of the origin point for each transmit, shape [n_tx, 3].
-   * - ``scan/polar_angles``
-     - Polar angles of transmit beams in radians, shape [n_tx].
-   * - ``scan/azimuth_angles``
-     - Azimuthal angles of transmit beams in radians, shape [n_tx].
-   * - ``scan/bandwidth_percent``
-     - Receive bandwidth as a percentage of center frequency.
-   * - ``scan/time_to_next_transmit``
-     - Time interval (in seconds) between subsequent transmit events, shape [n_frames, n_tx].
-   * - ``scan/tgc_gain_curve``
-     - Time-gain-compensation curve, shape [n_ax].
-   * - ``scan/element_width``
-     - Width of the elements in the probe (meters).
-   * - ``scan/tx_waveform_indices``
-     - Indices for transmit waveforms, shape [n_tx].
-   * - ``scan/waveforms_one_way``
-     - List of one-way waveforms (simulated, 250MHz).
-   * - ``scan/waveforms_two_way``
-     - List of two-way waveforms (simulated, 250MHz).
-   * - ``scan/lens_correction``
-     - Lens correction parameter (optional).
-   * - ``scan/...``
-     - Any additional custom parameters.
+This page covers the ``zea`` data format, how files are structured, how to create and
+read files, and where to get existing datasets. More detail data handling classes can
+be found in :mod:`zea.data` module documentation.
 
 .. note::
+   For the configuration system (model, pipeline, and scan parameters in YAML), see
+   :doc:`Config <config>`.  Example notebooks on data handling live in :doc:`Examples <examples>`.
 
-  All datasets in the `scan` group should have `unit` and `description` attributes.
-  Custom parameters can be added directly to the `scan` group as needed.
+The philosophy behind the zea data format is to store data alongside all necessary parameters to
+process it (e.g. :class:`~zea.Parameters`), and additional metadata (e.g. acquisition conditions, patient info, etc.)
+in a single file. This makes it easy to manage and share data, and ensures that all necessary information
+is always available when loading a file.
+
+Additionally, to support the :doc:`cognitive ultrasound framework <about>`, the zea data format is designed to
+allow for flexible and efficient access to a part of the data (e.g. a single frame or transmit) without the need
+to load the entire file into memory.
 
 -------------------------------
-How to Generate a zea Dataset
+Working with zea data files
 -------------------------------
 
-Here is a minimal example of how to generate and save a zea dataset:
+``zea`` stores each acquisition as a single HDF5 file following the :ref:`schema <data-spec>`.  The primary API is :class:`zea.File`. It operates similarly to `h5py.File <https://docs.h5py.org/en/latest/high/file.html>`_, but with an additional interface of parsing parameters into a :class:`~zea.Parameters` object (the merged probe + scan parameters, via :meth:`~zea.File.load_parameters`), and validating the file against the zea data spec.
 
-.. doctest::
+**Open and read an existing file**
 
-  >>> import numpy as np
-  >>> from zea.data.data_format import DatasetElement, generate_zea_dataset
+.. code-block:: python
 
-  >>> # Example data (replace with your actual data)
-  >>> raw_data = np.random.randn(2, 11, 2048, 128, 1)
-  >>> image = np.random.randn(2, 512, 512)
-  >>> probe_geometry = np.zeros((128, 3))
-  >>> t0_delays = np.zeros((11, 128))
-  >>> initial_times = np.zeros((11,))
-  >>> sampling_frequency = 40e6
-  >>> center_frequency = 7e6
+    from zea import File
 
-  >>> # Optionally define a custom dataset element
-  >>> custom_dataset_element = DatasetElement(
-  ...    group_name="scan",
-  ...    dataset_name="custom_element",
-  ...    data=np.random.rand(10, 10),
-  ...    description="custom description",
-  ...    unit="m",
-  ... )
+    with File("my_acquisition.hdf5") as f:
+        raw   = f.data.raw_data[:]        # all frames
+        raw0  = f.data.raw_data[0]        # first frame only
+        parameters = f.load_parameters()  # returns zea.Parameters (merged probe + scan)
+        scan  = f.scan                    # returns zea.data.spec.ScanSpec (bare scan group)
+        probe = f.probe                   # returns zea.Probe
 
-  >>> # Save the dataset to disk
-  >>> generate_zea_dataset(
-  ...    "output_file.hdf5",
-  ...    raw_data=raw_data,
-  ...    image=image,
-  ...    probe_geometry=probe_geometry,
-  ...    t0_delays=t0_delays,
-  ...    initial_times=initial_times,
-  ...    sampling_frequency=sampling_frequency,
-  ...    center_frequency=center_frequency,
-  ...    sound_speed=1540,
-  ...    probe_name="generic",
-  ...    description="Example dataset",
-  ...    additional_elements=[custom_dataset_element],
-  ...    overwrite=True,
-  ... )
+    # For remote files (Hugging Face Hub):
+    with File("hf://zeahub/picmus/.../contrast_speckle.hdf5") as f:
+        raw0 = f.data.raw_data[0]         # first frame
+
+See :class:`zea.File` for the full API reference.
+
+**Create a new file**
+
+Use :meth:`zea.File.create` to build a validated file from NumPy arrays.
+All inputs are checked against the full schema before anything is written to
+disk.
+
+.. testcode::
+
+    import numpy as np
+    from zea import File
+
+    n_frames, n_tx, n_el, n_ax = 2, 32, 128, 512
+    raw_data = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+    probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
+
+    scan = {
+       "sampling_frequency": np.float32(40e6),
+       "center_frequency":   np.float32(7e6),
+       "demodulation_frequency": np.float32(7e6),
+       "initial_times":      np.zeros(n_tx, dtype=np.float32),
+       "t0_delays":          np.zeros((n_tx, n_el), dtype=np.float32),
+       "tx_apodizations":    np.ones((n_tx, n_el),  dtype=np.float32),
+       "focus_distances":    np.full(n_tx, np.inf,  dtype=np.float32),
+       "transmit_origins":   np.zeros((n_tx, 3),    dtype=np.float32),
+       "polar_angles":       np.zeros(n_tx, dtype=np.float32),
+       "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+    }
+
+    probe = {
+       "name": "verasonics_l11_4v",
+       "probe_geometry": probe_geometry,
+    }
+
+    File.create(
+       "my_acquisition.hdf5",
+       data={"raw_data": raw_data},
+       scan=scan,
+       probe=probe,
+       overwrite=True,
+    )
+
+**Save from a Parameters object**
+
+When you already hold a :class:`~zea.Parameters` object — e.g. loaded from an
+existing file — you can round-trip it back to a new file using
+:meth:`~zea.Parameters.to_scan_dict` and :meth:`~zea.Parameters.to_probe_dict`
+to reconstruct the dicts that :meth:`~zea.File.create` expects.  No manual
+field-by-field reconstruction is needed:
+
+.. testsetup::
+
+    import numpy as np
+    from zea import File
+
+    import numpy as np
+    from zea import File
+
+    n_frames, n_tx, n_el, n_ax = 2, 4, 8, 64
+    raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+    scan = {
+            "sampling_frequency":     np.float32(40e6),
+            "center_frequency":       np.float32(7e6),
+            "demodulation_frequency": np.float32(7e6),
+            "initial_times":          np.zeros(n_tx, dtype=np.float32),
+            "t0_delays":              np.zeros((n_tx, n_el), dtype=np.float32),
+            "tx_apodizations":        np.ones((n_tx, n_el), dtype=np.float32),
+            "focus_distances":        np.full(n_tx, np.inf, dtype=np.float32),
+            "transmit_origins":       np.zeros((n_tx, 3), dtype=np.float32),
+            "polar_angles":           np.zeros(n_tx, dtype=np.float32),
+            "time_to_next_transmit":  np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+    }
+    probe = {"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))}
+    File.create(
+        "source.hdf5",
+        data={"raw_data": raw},
+        probe=probe,
+        scan=scan, overwrite=True,
+    )
+
+.. testcode::
+
+    # load parameters from any file
+    with File("source.hdf5") as f:
+        parameters = f.load_parameters() # returns a `zea.Parameters` object
+        raw_data = f.data.raw_data[:]
+
+    # save those parameters to a new file, without manually reconstructing the scan and probe dicts
+    File.create(
+        "output.hdf5",
+        data={"raw_data": raw_data},
+        scan=parameters.to_scan_dict(),
+        probe=parameters.to_probe_dict() or None,
+        overwrite=True,
+    )
 
 .. testcleanup::
 
     import os
-
-    os.remove("output_file.hdf5")
-
-For more advanced usage, see :py:func:`zea.data.data_format.generate_zea_dataset`.
+    os.remove("source.hdf5")
+    os.remove("output.hdf5")
 
 -------------------------------
-Supported Datasets & Conversion
+Multi-track files
 -------------------------------
 
-The ``zea`` toolbox supports several public and research ultrasound datasets. For each, we provide scripts to download and convert the data into the ``zea`` format for integration with the toolbox. In general any dataset can be converted to the ``zea`` format by following the structure outlined above.
+Some acquisitions interleave multiple transmit sequences in a single recording. Sometimes
+these sequences contain parameters that may not be expressed by a single ``ScanSpec`` + ``DataSpec`` pair.
 
-**Supported Datasets:**
+.. admonition:: Example
 
-- **EchoNet-Dynamic**: Large-scale cardiac ultrasound dataset.
-- **EchoNet-LVH**: Large-scale cardiac dataset for left ventricular hypertrophy detection.
-- **CAMUS**: Cardiac Acquisitions for Multi-structure Ultrasound Segmentation.
-- **PICMUS**: Plane-wave Imaging Challenge in Medical Ultrasound.
-- **Custom Datasets**: You can add your own datasets by following the ``zea`` format.
+   Imagine an acquisition that alternates between B-mode and Doppler pulses, where
+   a different number of axial samples is recorded for each type. In this case, the ``n_ax``
+   dimension of the raw data would differ between the two pulse types, and thus could not
+   be represented by a single ``DataSpec``, which expects a non-ragged tensor for ``raw_data``.
 
-**Conversion Scripts:**
+Rather than splitting these into separate files, ``zea`` can store them as **Tracks**:
+self-contained bundles of raw data and scan parameters in a single HDF5 file,
+with a shared :class:`~zea.Probe` and metadata. Each track exposes its own :class:`~zea.Parameters` object (via
+``track.load_parameters()``), containing the parameters
+necessary to beamform the raw data in that track. This allows us to specify a :class:`~zea.Pipeline`
+*per-track*, which can be applied independently to each frame in that track. Taking the example above,
+we could specify a B-mode pipeline to apply to the B-mode track, and a Doppler pipeline to apply to the Doppler track.
+Global timing information can be stored in the optional ``track_schedule`` parameter, which
+indicates which track each transmit event belongs to. Provided the
+``time_to_next_transmit`` for each transmit event, this allows us to reconstruct
+the full timing of the acquisition.
 
-- Scripts are provided in the `zea/data/convert/ <https://github.com/tue-bmd/zea/tree/main/zea/data/convert/>`__ directory to automate downloading and conversion.
-- Example usage:
+.. raw:: html
 
-  .. code-block:: shell
+   <div style="display: flex; flex-direction: column; align-items: center; margin: 3em 0;">
+     <!-- Dark mode image -->
+     <img
+       src="_static/tracks-Dark.svg"
+       alt="zea data acquisition with multiple tracks"
+       style="display: none; width: 60%; padding-bottom: 1em;"
+       class="only-dark"
+     />
+     <!-- Light mode image -->
+     <img
+       src="_static/tracks-Light.svg"
+       alt="zea data acquisition with multiple tracks"
+       style="display: none; width: 60%; padding-bottom: 1em;"
+       class="only-light"
+     />
+     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
+        Illustrative example of a zea file with two tracks.
+     </div>
+   </div>
+   <style>
+     @media (prefers-color-scheme: dark) {
+       .only-dark { display: block !important; }
+     }
+     @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
+       .only-light { display: block !important; }
+     }
+   </style>
 
-      python -m zea.data.convert --dataset "echonet" --src <source_folder> --dst <destination_folder>
-      python -m zea.data.convert --dataset "camus" --src <source_folder> --dst <destination_folder>
-      python -m zea.data.convert --dataset "picmus" --src <source_folder> --dst <destination_folder>
+**HDF5 layout**
 
-- These scripts will fetch the raw data, process it, and store it in the standardized ``zea`` format.
+.. code-block:: text
+
+    acquisition.hdf5
+    ├── attrs:  us_machine, description, zea_version
+    ├── probe/                  # probe_geometry, probe_center_frequency, …
+    ├── metadata/               # credit, annotations, subject, …
+    ├── metrics/                # optional evaluation metrics
+    ├── track_schedule          # optional int32[n_total_tx]
+    └── tracks/
+        ├── track_0/
+        │   ├── attrs:  label="focused_bmode"
+        │   ├── data/           # raw_data, image, …
+        │   └── scan/           # focus_distances, t0_delays, …
+        └── track_1/
+            ├── attrs:  label="planewave_doppler"
+            ├── data/
+            └── scan/
+
+.. dropdown:: Write — create a file with multiple tracks
+
+   .. testcode::
+
+       import numpy as np
+       from zea import File
+       from zea.probes import create_probe_geometry
+
+       n_frames, n_ax, n_el = 2, 512, 128
+       n_tx_focused, n_tx_pw = 3, 2
+       pitch = 0.0003
+
+       probe_geometry = create_probe_geometry(n_el, pitch)
+
+       # One track index per global transmit event across all frames
+       track_schedule = np.tile(
+           [0] * n_tx_focused + [1] * n_tx_pw, n_frames
+       ).astype(np.int32)
+
+       File.create(
+           "acquisition.hdf5",
+           tracks=[
+               # Track 0: focused B-mode
+               {
+                   "label": "focused_bmode",
+                   "data": {"raw_data": np.zeros((n_frames, n_tx_focused, n_ax, n_el, 1))},
+                   "scan": {
+                       "sampling_frequency":     40e6,
+                       "center_frequency":       7e6,
+                       "demodulation_frequency": 7e6,
+                       "initial_times":          np.zeros(n_tx_focused),
+                       "t0_delays":              np.zeros((n_tx_focused, n_el)),
+                       "tx_apodizations":        np.ones((n_tx_focused, n_el)),
+                       "focus_distances":        np.full(n_tx_focused, np.inf),
+                       "transmit_origins":       np.zeros((n_tx_focused, 3)),
+                       "polar_angles":           np.zeros(n_tx_focused),
+                       "time_to_next_transmit": np.ones((n_frames, n_tx_focused)) * 1e-4,
+                   },
+               },
+               # Track 1: plane-wave Doppler
+               {
+                   "label": "planewave_doppler",
+                   "data": {"raw_data": np.zeros((n_frames, n_tx_pw, n_ax, n_el, 1))},
+                   "scan": {
+                       "sampling_frequency":     40e6,
+                       "center_frequency":       7e6,
+                       "demodulation_frequency": 7e6,
+                       "initial_times":          np.zeros(n_tx_pw),
+                       "t0_delays":              np.zeros((n_tx_pw, n_el)),
+                       "tx_apodizations":        np.ones((n_tx_pw, n_el)),
+                       "focus_distances":        np.full(n_tx_pw, np.inf),
+                       "transmit_origins":       np.zeros((n_tx_pw, 3)),
+                       "polar_angles":           np.zeros(n_tx_pw),
+                       "time_to_next_transmit": np.ones((n_frames, n_tx_pw)) * 2e-4,
+                   },
+               },
+           ],
+           probe={"name": "L11-4v", "probe_geometry": probe_geometry},
+           track_schedule=track_schedule,
+           overwrite=True,
+       )
+
+.. dropdown:: Read — unpack multiple tracks from a file
+
+   .. doctest::
+
+       >>> import zea
+
+       >>> with zea.File("acquisition.hdf5") as f:
+       ...     probe = f.probe             # probe is shared across all tracks
+       ...     # See track labels:
+       ...     print(f.track_labels)          # ['focused_bmode', 'planewave_doppler']
+       ...     # Unpack in the same order as track_labels — always safe:
+       ...     focused_track, planewave_track = f.tracks
+       ...     # Or fetch a specific track by name:
+       ...     focused_track = f.get_track("focused_bmode")
+       ...     focused_parameters = focused_track.load_parameters()
+       ...     focused_raw  = focused_track.data.raw_data[:]
+       ...     # access the global timing information for the focused track:
+       ...     focused_track.timestamps
+       ...     # ... process with e.g. a focused B-mode pipeline
+       ...     planewave_parameters = planewave_track.load_parameters()
+       ...     planewave_raw  = planewave_track.data.raw_data[:]
+       ...     # access the global timing information for the planewave track:
+       ...     planewave_track.timestamps
+       ...     # ... process with e.g. a plane-wave Doppler pipeline
+       ...     # access global timestamps for all transmit events in the file:
+       ...     f.timestamps
+       ['focused_bmode', 'planewave_doppler']
+       array([[0.    , 0.0001, 0.0002],
+              [0.0007, 0.0008, 0.0009]], dtype=float32)
+       array([[0.0003, 0.0005],
+              [0.001 , 0.0012]], dtype=float32)
+       array([0.    , 0.0001, 0.0002, 0.0003, 0.0005, 0.0007, 0.0008, 0.0009,
+              0.001 , 0.0012], dtype=float32)
+
+   .. testcleanup::
+
+       import os
+       os.remove("acquisition.hdf5")
 
 -------------------------------
-Data Acquisition Platforms
+``zea`` data format reference
 -------------------------------
 
-One can also acquire data using various ultrasound platforms and convert it to the ``zea`` format. Of course this can be done manually, using a similar snippet as above, but we try to provide scripts for popular ultrasound systems to automate this process. Note that this is still a work in progress, and we will add more information in the future.
+Files created with zea 0.1.0 and later are fully described by the
+:class:`~zea.data.spec.FileSpec` class.
+
+.. note::
+
+   The spec is the single source of truth.  The documentation below is
+   **automatically generated** from :mod:`zea.data.spec`.
+   Run ``python docs/source/spec_doc.py`` to refresh it after spec changes.
+
+.. _data-spec:
+
+.. include:: _spec_ref.rst
+
+-------------------------------
+Custom fields
+-------------------------------
+
+Beyond the standard data types (``raw_data``, ``beamformed_data``, …), you can attach arbitrary
+**custom spatial maps** and **custom metadata** to any zea file. Lastly, any custom parameters
+that do not fit the standard scan and probe fields can be stored as **custom elements**. For examples
+see below:
+
+.. dropdown:: Custom spatial maps (``data`` group)
+
+   A custom map is a named entry in the ``data`` group that associates a pixel array with a
+   per-pixel Cartesian coordinate grid.  Each map is then a function from Cartesian space to
+   some real values.  Pass it as a sub-dict under the key you want:
+
+   .. testcode::
+
+       import numpy as np
+       from zea import File
+
+       n_frames, n_tx, n_el, n_ax = 2, 1, 4, 8
+       raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+       scan = {
+           "sampling_frequency": np.float32(40e6),
+           "center_frequency": np.float32(7e6),
+           "demodulation_frequency": np.float32(7e6),
+           "initial_times": np.zeros(n_tx, dtype=np.float32),
+           "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+           "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+           "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+           "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+           "polar_angles": np.zeros(n_tx, dtype=np.float32),
+           "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+       }
+       probe = {"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))}
+
+       values = np.zeros((n_frames, 64, 64, 1), dtype=np.uint8)   # (frames, z, x[, channels])
+       # Minimal coordinate placeholder; use cartesian_pixel_grid for real grids (see note below).
+       coordinates = np.zeros((n_frames, 64, 64, 3), dtype=np.float32)
+
+       File.create(
+           "my_acquisition.hdf5",
+           data={
+               "raw_data": raw,
+               "my_overlay": {          # custom field not in the zea spec
+                   "values":      values,
+                   "coordinates": coordinates,  # shape (*spatial_dims, 3)
+                   # optional: "labels", "description", "unit"
+               },
+           },
+           scan=scan,
+           probe=probe,
+           overwrite=True,
+       )
+
+       with File("my_acquisition.hdf5") as f:
+           overlay_values      = f.data.my_overlay.values[:]
+           overlay_coordinates = f.data.my_overlay.coordinates[:]
+
+   .. note::
+
+      :func:`~zea.beamform.pixelgrid.cartesian_pixel_grid` and
+      :func:`~zea.beamform.pixelgrid.polar_pixel_grid` are convenient helpers for
+      constructing coordinate grids that match typical beamformed images.  See their
+      docstrings for full details.
+
+.. dropdown:: Custom metadata (``metadata`` group)
+
+   Standard metadata fields (``credit``, ``annotations``, ``text_report``, ``subject``, ``ecg``, …)
+   are validated by :class:`~zea.data.spec.MetadataSpec`.  Pass a plain dict to ``File.create``'s
+   ``metadata`` argument.
+
+   .. testcode::
+
+       import numpy as np
+       from zea import File
+
+       n_frames, n_tx, n_el, n_ax = 2, 1, 4, 8
+       raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+       scan = {
+           "sampling_frequency": np.float32(40e6),
+           "center_frequency": np.float32(7e6),
+           "demodulation_frequency": np.float32(7e6),
+           "initial_times": np.zeros(n_tx, dtype=np.float32),
+           "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+           "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+           "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+           "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+           "polar_angles": np.zeros(n_tx, dtype=np.float32),
+           "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+       }
+       probe = {"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))}
+
+       File.create(
+           "my_acquisition.hdf5",
+           data={"raw_data": raw},
+           scan=scan,
+           probe=probe,
+           metadata={
+               "credit": "My Lab, 2024",
+               "text_report": "Normal acquisition, no pathology.",
+               "annotations": {
+                   "label": np.array(["healthy", "healthy"]),
+               },
+           },
+           overwrite=True,
+       )
+
+   Custom signal keys (anything beyond the standard names) are accepted and stored as
+   :class:`~zea.data.spec.SignalND` entries: a dict with ``samples``, ``start_time_offset``, and
+   exactly one of ``sampling_frequency`` or ``timestamps``:
+
+   .. testcode::
+
+       n_samples = 500
+       respiratory_signal = {
+           "samples":            np.sin(np.linspace(0, 2 * np.pi, n_samples)).astype(np.float32),
+           "start_time_offset":  np.float32(-0.5),   # seconds before first transmit
+           "sampling_frequency": np.float32(10.0),   # Hz
+       }
+
+       File.create(
+           "my_acquisition.hdf5",
+           data={"raw_data": raw},
+           scan=scan,
+           probe=probe,
+           metadata={
+               "credit": "My Lab, 2024",
+               "respiratory_signal": respiratory_signal,   # custom SignalND field
+           },
+           overwrite=True,
+       )
+
+       with File("my_acquisition.hdf5") as f:
+           meta = f.metadata
+           samples = meta.respiratory_signal.samples        # numpy array
+           fs = meta.respiratory_signal.sampling_frequency
+
+   .. testcleanup::
+
+       import os
+       os.remove("my_acquisition.hdf5")
+
+   See :class:`~zea.data.spec.MetadataSpec` for the full list of supported standard fields.
+
+.. dropdown:: Custom elements (``custom`` group)
+
+   Sometimes you need to store data that does not fit the zea spec at all — neither a spatial map
+   nor a metadata signal. Use :class:`~zea.data.CustomElement` for this: a named array (or
+   scalar) with a ``description`` and ``unit``, optionally nested under a ``group_name``.  Pass a
+   list of them to the ``custom`` argument of :meth:`~zea.File.create`; they are written to a
+   dedicated ``custom`` group and read back via :attr:`~zea.File.custom`.
+
+   .. doctest::
+
+       >>> import numpy as np
+       >>> from zea import File
+       >>> from zea.data import CustomElement
+
+       >>> n_frames, n_tx, n_el, n_ax = 2, 1, 4, 8
+       >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+       >>> scan = {
+       ...     "sampling_frequency": np.float32(40e6),
+       ...     "center_frequency": np.float32(7e6),
+       ...     "demodulation_frequency": np.float32(7e6),
+       ...     "initial_times": np.zeros(n_tx, dtype=np.float32),
+       ...     "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+       ...     "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+       ...     "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+       ...     "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+       ...     "polar_angles": np.zeros(n_tx, dtype=np.float32),
+       ...     "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+       ... }
+       >>> probe = {"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))}
+
+       >>> custom = [
+       ...     CustomElement(
+       ...         name="lens_correction",
+       ...         data=1.5,
+       ...         description="Scalar one-way delay offset.",
+       ...         unit="wavelengths",
+       ...     ),
+       ...     CustomElement(
+       ...         name="profile",
+       ...         data=np.arange(4, dtype=np.float32),
+       ...         description="Per-element lens profile.",
+       ...         unit="-",
+       ...         group_name="lens",  # optional (nested) sub-group
+       ...     ),
+       ... ]
+
+       >>> File.create(
+       ...     "custom_elements.hdf5",
+       ...     data={"raw_data": raw},
+       ...     scan=scan,
+       ...     probe=probe,
+       ...     custom=custom,
+       ...     overwrite=True,
+       ... )
+
+       >>> with File("custom_elements.hdf5") as f:
+       ...     elements = {e.name: e for e in f.custom}
+       >>> sorted(elements)
+       ['lens_correction', 'profile']
+       >>> float(elements["lens_correction"].data)
+       1.5
+       >>> elements["profile"].group_name
+       'lens'
+
+   .. testcleanup::
+
+       import os
+       os.remove("custom_elements.hdf5")
+
+.. include:: _units_ref.rst
+
+-------------------------------
+Supported datasets & conversion
+-------------------------------
+
+The ``zea`` toolbox includes conversion scripts for several public ultrasound datasets,
+available in :mod:`zea.data.convert`
+(`source on GitHub <https://github.com/tue-bmd/zea/tree/main/zea/data/convert/>`__).
+They are invoked as subcommands of ``python -m zea.data.convert``
+(see the full :doc:`CLI reference <cli>` for all options):
+
+.. code-block:: shell
+
+    python -m zea.data.convert <dataset> <source> <destination>
+
+**Supported datasets:**
+
+- :mod:`~zea.data.convert.echonet` — **EchoNet-Dynamic**: large-scale cardiac ultrasound video dataset.
+- :mod:`~zea.data.convert.echonetlvh` — **EchoNet-LVH**: cardiac dataset for left ventricular hypertrophy detection.
+- :mod:`~zea.data.convert.camus` — **CAMUS**: Cardiac Acquisitions for Multi-structure Ultrasound Segmentation.
+- :mod:`~zea.data.convert.cetus` — **CETUS**: Challenge on Endocardial Three-dimensional Ultrasound Segmentation (3-D echocardiography).
+- :mod:`~zea.data.convert.picmus` — **PICMUS**: Plane-wave Imaging Challenge in Medical Ultrasound.
+- :mod:`~zea.data.convert.echoxflow` — **EchoXFlow**: large-scale echocardiography dataset from Oslo University Hospital.
+- :mod:`~zea.data.convert.images` — **Custom images**: convert any folder of images or image sequences.
+- **Custom** — any dataset can be converted by following the layout described in the :ref:`data format reference <data-spec>`.
+
+-------------------------------
+Data acquisition platforms
+-------------------------------
+
+Besides supported existing public datasets, you can also convert your own acquisitions from various platforms to the zea format.  This typically involves writing a short conversion script that reads the raw data and parameters from your acquisition system, and then uses :meth:`zea.File.create` to write a zea file.  The exact details will depend on your acquisition system and data format. We currently provide conversion utilities for the following platforms:
 
 **Verasonics**
 
-- Record data using your preferred Verasonics script.
-- Save entire workspace to a `.mat` file.
-- Use the ``--dataset "verasonics"`` flag to convert the MATLAB workspace files to ``zea`` format. More info can be found in the :mod:`zea.data.convert.verasonics` module documentation.
-- Example:
+Record data with your Verasonics script, save the workspace to ``.mat``, then convert:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    python -m zea.data.convert --dataset "verasonics" --src <source_folder> --dst <destination_folder>
+    python -m zea.data.convert verasonics <src> <dst>
+
+See :mod:`zea.data.convert.verasonics` for details.
 
 **us4us**
 
-- To be added in a future release.
+To be added in a future release. See ongoing issue `#448 <https://github.com/tue-bmd/zea/issues/448>`__.

@@ -6,6 +6,8 @@
 
 """
 
+from collections.abc import Callable
+
 from keras import ops
 
 from zea.func.tensor import find_contour
@@ -30,20 +32,20 @@ class SegmentationTracker(BaseTracker):
     def __init__(
         self,
         model,
-        preprocess_fn: callable = None,
-        postprocess_fn: callable = None,
+        preprocess_fn: Callable | None = None,
+        postprocess_fn: Callable | None = None,
     ):
         """Initialize segmentation-based tracker."""
         super().__init__(ndim=2)
         self.model = model
-        self.preprocess_fn = preprocess_fn
-        self.postprocess_fn = postprocess_fn
 
-        if self.preprocess_fn is None:
-            self.preprocess_fn = lambda frame: frame
-
-        if self.postprocess_fn is None:
+        if preprocess_fn is None:
+            preprocess_fn = lambda frame: frame  # noqa: E731
+        if postprocess_fn is None:
             raise ValueError("A postprocess_fn must be provided to extract binary masks.")
+
+        self.preprocess_fn: Callable = preprocess_fn
+        self.postprocess_fn: Callable = postprocess_fn
 
     def track(
         self,

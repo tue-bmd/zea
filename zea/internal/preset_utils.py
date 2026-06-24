@@ -3,9 +3,10 @@
 See https://huggingface.co/zeahub/
 """
 
+import os
 from pathlib import Path
 
-from huggingface_hub import hf_hub_download, list_repo_files, login
+from huggingface_hub import RepoFile, hf_hub_download, list_repo_files, list_repo_tree, login
 from huggingface_hub.utils import (
     EntryNotFoundError,
     HFValidationError,
@@ -19,6 +20,19 @@ HF_DATASETS_DIR.mkdir(parents=True, exist_ok=True)
 
 HF_SCHEME = "hf"
 HF_PREFIX = "hf://"
+
+
+def _hf_login() -> None:
+    """Authenticate using a token from the environment, if available.
+
+    Reads ``HF_TOKEN`` (or ``HUGGING_FACE_HUB_TOKEN``) and only logs in when a
+    token is present. This avoids ``login()`` falling back to an interactive
+    prompt in headless environments; cached credentials or anonymous access are
+    used when no token is set.
+    """
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    if token:
+        login(token=token, skip_if_logged_in=True)
 
 
 def _hf_parse_path(hf_path: str):
@@ -36,7 +50,7 @@ def _hf_list_files(repo_id, repo_type="dataset", **kwargs):
     try:
         files = list_repo_files(repo_id, repo_type=repo_type, **kwargs)
     except (RepositoryNotFoundError, HFValidationError, EntryNotFoundError):
-        login(new_session=False)
+        _hf_login()
         files = list_repo_files(repo_id, repo_type=repo_type, **kwargs)
     return files
 
@@ -68,7 +82,7 @@ def _get_snapshot_dir_from_downloaded_file(downloaded_file_path: str | Path) -> 
 def _download_files_in_path(
     repo_id: str,
     files: list,
-    path_filter: str = None,
+    path_filter: str | None = None,
     cache_dir=HF_DATASETS_DIR,
     repo_type="dataset",
     **kwargs,
@@ -87,6 +101,48 @@ def _download_files_in_path(
             downloaded_files.append(downloaded_path)
 
     return downloaded_files
+
+
+_HF_H5_EXTENSIONS = (".hdf5", ".h5")
+
+
+def _hf_list_h5_files(hf_path: str, **kwargs) -> list[tuple[str, int]]:
+    """List HDF5 files with sizes for an HF path (no download).
+
+    Returns a list of ``(filename_relative_to_repo_root, size_bytes)`` tuples.
+    Only .h5 / .hdf5 files are included; other repo files are ignored.
+
+    Handles:
+    - hf://org/repo           — all .h5/.hdf5 files in the repo
+    - hf://org/repo/subdir    — all .h5/.hdf5 files under subdir/
+    - hf://org/repo/file.h5   — [(file.h5, size)] if it exists as a single file
+    """
+    repo_id, subpath = _hf_parse_path(hf_path)
+    try:
+        entries = {
+            e.path: e.size
+            for e in list_repo_tree(repo_id, recursive=True, repo_type="dataset", **kwargs)
+            if isinstance(e, RepoFile)
+        }
+    except (RepositoryNotFoundError, HFValidationError, EntryNotFoundError):
+        _hf_login()
+        entries = {
+            e.path: e.size
+            for e in list_repo_tree(repo_id, recursive=True, repo_type="dataset", **kwargs)
+            if isinstance(e, RepoFile)
+        }
+
+    all_files = list(entries)
+
+    if subpath and any(f == subpath for f in all_files):
+        matched = [subpath]
+    elif subpath:
+        prefix = subpath.rstrip("/") + "/"
+        matched = [f for f in all_files if f.startswith(prefix) and f.endswith(_HF_H5_EXTENSIONS)]
+    else:
+        matched = [f for f in all_files if f.endswith(_HF_H5_EXTENSIONS)]
+
+    return [(f, entries[f]) for f in matched]
 
 
 def _hf_resolve_path(

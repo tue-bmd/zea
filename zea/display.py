@@ -44,7 +44,7 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
             ... )
 
             >>> with zea.File(file_path, mode="r") as file:
-            ...     data = file.load_data("image", indices=0)
+            ...     data = file.data.image.values[0]
 
             >>> image, _ = zea.display.scan_convert(
             ...     data,
@@ -53,7 +53,7 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
             ...     fill_value=np.nan,
             ... )
             >>> image = zea.display.to_8bit(image, dynamic_range=(-60, 0))
-            >>> image.save("image.png")  # DOCTEST: +SKIP
+            >>> image.save("image.png")  # doctest: +SKIP
 
     """
     if dynamic_range is None:
@@ -144,6 +144,39 @@ def overlay_masks(
     return result
 
 
+def _polar_sampling_coordinates(x_vec, z_vec, rho, theta):
+    """Map an explicit Cartesian (x, z) output grid onto fractional (rho, theta) indices
+    into a polar image, using the frustum convention.
+
+    Args:
+        x_vec, z_vec: 1D Cartesian output axes (x is lateral, z is depth).
+        rho, theta: 1D polar axes of the input image (``rho`` radial, ``theta`` angular).
+            Their lengths set the polar image dimensions the indices address.
+
+    Returns:
+        coordinates (Array): ``(2, len(x_vec), len(z_vec))`` stack of ``[rho_idx, theta_idx]``
+        ready for :func:`map_coordinates`.
+    """
+    # The index mapping is endpoint-based (rho[0]/rho[-1], theta[0]/theta[-1]), so the *order*
+    # of the axes is preserved: a descending ``theta`` maps the angular axis in reverse. The
+    # masking limits, by contrast, are sorted so out-of-cone pixels are dropped regardless of
+    # axis direction.
+    rho_start, rho_end = rho[0], rho[-1]
+    theta_start, theta_end = theta[0], theta[-1]
+    theta_min = ops.minimum(theta_start, theta_end)
+    theta_max = ops.maximum(theta_start, theta_end)
+
+    z_grid, x_grid = ops.meshgrid(z_vec, x_vec)
+    rho_grid_interp, theta_grid_interp = frustum_convert_xz2rt(
+        x_grid, z_grid, theta_limits=[theta_min, theta_max]
+    )
+
+    n_rho, n_theta = ops.shape(rho)[0], ops.shape(theta)[0]
+    rho_idx = (rho_grid_interp - rho_start) / (rho_end - rho_start) * (n_rho - 1)
+    theta_idx = (theta_grid_interp - theta_start) / (theta_end - theta_start) * (n_theta - 1)
+    return ops.stack([rho_idx, theta_idx], axis=0)
+
+
 def compute_scan_convert_2d_coordinates(
     image_shape,
     rho_range: Tuple[float, float],
@@ -179,19 +212,7 @@ def compute_scan_convert_2d_coordinates(
     x_vec = ops.arange(x_lim[0], x_lim[1], resolution)
     z_vec = ops.arange(z_lim[0] + distance_to_apex, z_lim[1], resolution)
 
-    z_grid, x_grid = ops.meshgrid(z_vec, x_vec)
-
-    rho_grid_interp, theta_grid_interp = frustum_convert_xz2rt(
-        x_grid, z_grid, theta_limits=[theta[0], theta[-1]]
-    )
-
-    # Map rho and theta interpolation points to grid indices
-    rho_min, rho_max = ops.min(rho), ops.max(rho)
-    theta_min, theta_max = ops.min(theta), ops.max(theta)
-    rho_idx = (rho_grid_interp - rho_min) / (rho_max - rho_min) * (image_shape[-2] - 1)
-    theta_idx = (theta_grid_interp - theta_min) / (theta_max - theta_min) * (image_shape[-1] - 1)
-    # Stack coordinates as required for map_coordinates
-    coordinates = ops.stack([rho_idx, theta_idx], axis=0)
+    coordinates = _polar_sampling_coordinates(x_vec, z_vec, rho, theta)
     parameters = {
         "resolution": resolution,
         "x_lim": x_lim,
@@ -207,8 +228,8 @@ def compute_scan_convert_2d_coordinates(
 
 def scan_convert_2d(
     image,
-    rho_range: Tuple[float, float] = None,
-    theta_range: Tuple[float, float] = None,
+    rho_range: Tuple[float, float] | None = None,
+    theta_range: Tuple[float, float] | None = None,
     resolution: Union[float, None] = None,
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,
@@ -256,6 +277,10 @@ def scan_convert_2d(
 
     parameters = {}
     if coordinates is None:
+        if rho_range is None or theta_range is None:
+            raise ValueError(
+                "rho_range and theta_range are required when coordinates is not provided."
+            )
         coordinates, parameters = compute_scan_convert_2d_coordinates(
             image.shape,
             rho_range,
@@ -265,12 +290,12 @@ def scan_convert_2d(
             distance_to_apex=distance_to_apex,
         )
 
-    images_sc = _interpolate_batch(image, coordinates, fill_value, order=order, **kwargs)
+    scan_converted = _interpolate_batch(image, coordinates, fill_value, order=order, **kwargs)
 
     # swap axis to match z, x
-    images_sc = ops.swapaxes(images_sc, -1, -2)
+    scan_converted = ops.swapaxes(scan_converted, -1, -2)
 
-    return images_sc, parameters
+    return scan_converted, parameters
 
 
 def compute_scan_convert_3d_coordinates(
@@ -352,9 +377,9 @@ def compute_scan_convert_3d_coordinates(
 
 def scan_convert_3d(
     image,
-    rho_range: Tuple[float, float] = None,
-    theta_range: Tuple[float, float] = None,
-    phi_range: Tuple[float, float] = None,
+    rho_range: Tuple[float, float] | None = None,
+    theta_range: Tuple[float, float] | None = None,
+    phi_range: Tuple[float, float] | None = None,
     resolution: Union[float, None] = None,
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,
@@ -399,6 +424,11 @@ def scan_convert_3d(
 
     parameters = {}
     if coordinates is None:
+        if rho_range is None or theta_range is None or phi_range is None:
+            raise ValueError(
+                "rho_range, theta_range, and phi_range are required "
+                "when coordinates is not provided."
+            )
         coordinates, parameters = compute_scan_convert_3d_coordinates(
             image.shape,
             rho_range,
@@ -408,18 +438,18 @@ def scan_convert_3d(
             dtype=image.dtype,
         )
 
-    images_sc = _interpolate_batch(image, coordinates, fill_value, order=order)
+    scan_converted = _interpolate_batch(image, coordinates, fill_value, order=order)
 
     # swap axis to match z, x, y
-    images_sc = ops.swapaxes(images_sc, -2, -3)
-    return images_sc, parameters
+    scan_converted = ops.swapaxes(scan_converted, -2, -3)
+    return scan_converted, parameters
 
 
 def scan_convert(
     image,
-    rho_range: Tuple[float, float] = None,
-    theta_range: Tuple[float, float] = None,
-    phi_range: Tuple[float, float] = None,
+    rho_range: Tuple[float, float] | None = None,
+    theta_range: Tuple[float, float] | None = None,
+    phi_range: Tuple[float, float] | None = None,
     resolution: Union[float, None] = None,
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,
@@ -495,38 +525,18 @@ def _interpolate_batch(images, coordinates, fill_value=0.0, order=1, vectorize=T
 
     if order > 1:
         # cpu bound
-        images_sc = ops.stack(list(map(map_coordinates_fn, images)))
+        scan_converted = ops.stack(list(map(map_coordinates_fn, images)))
     elif not vectorize:
-        images_sc = ops.map(map_coordinates_fn, images)
+        scan_converted = ops.map(map_coordinates_fn, images)
     else:
         # gpu bound
-        images_sc = ops.vectorized_map(map_coordinates_fn, images)
+        scan_converted = ops.vectorized_map(map_coordinates_fn, images)
 
     # ignore batch dim to get image shape
-    image_sc_shape = ops.shape(images_sc)[1:]
-    images_sc = ops.reshape(images_sc, (*batch_dims, *image_sc_shape))
+    scan_converted_shape = ops.shape(scan_converted)[1:]
+    scan_converted = ops.reshape(scan_converted, (*batch_dims, *scan_converted_shape))
 
-    return images_sc
-
-
-def cart2pol(x, y):
-    """Convert x, y cartesian coordinates to polar coordinates theta, rho."""
-    theta = ops.mod(ops.arctan2(x, -y), np.pi * 2)
-    rho = ops.sqrt(x**2 + y**2)
-    return (theta, rho)
-
-
-def rotate_coordinates(coords, angle_deg):
-    """Rotate (x, y) coordinates by a given angle in degrees."""
-    angle_rad = np.deg2rad(angle_deg)
-    rotation_matrix = ops.array(
-        [
-            [ops.cos(angle_rad), -ops.sin(angle_rad)],
-            [ops.sin(angle_rad), ops.cos(angle_rad)],
-        ],
-        dtype=coords.dtype,
-    )
-    return coords @ ops.transpose(rotation_matrix)
+    return scan_converted
 
 
 def cartesian_to_polar_matrix(
@@ -535,7 +545,7 @@ def cartesian_to_polar_matrix(
     polar_shape=None,
     tip=None,
     r_max=None,
-    angle=None,
+    theta_range=None,
     interpolation_order=1,
 ):
     """
@@ -550,19 +560,24 @@ def cartesian_to_polar_matrix(
             transformation (typically the probe tip). Defaults to the center-top of the image.
         r_max (float, optional): Maximum radius to consider in the polar transform.
             Defaults to the height of the input image.
-        angle (float, optional): Total angular field of view (in radians) centered at 0.
-            The polar grid spans from -angle to +angle. Defaults to π/4 radians (45 degrees).
+        theta_range (tuple, optional): ``(theta_min, theta_max)`` angular extent of the polar
+            grid in radians, allowing asymmetric cones. Use this when the left and right
+            cone boundaries do not have equal half-angles. Defaults to (-45, 45) degrees.
         interpolation_order (int): Order of interpolation to use (0 = nearest-neighbor,
             1 = linear, 2+ = spline). Matches the convention of `scipy.ndimage.map_coordinates`.
 
     Returns:
-        polar_matrix (Array): The image re-sampled in polar coordinates with shape `polar_shape`.
+        polar_matrix (Array): The image re-sampled in polar coordinates with shape
+            `polar_shape`.
+        coordinates (Array): The Cartesian coordinates corresponding to each pixel in
+            the polar output.
     """
     assert "float" in ops.dtype(cartesian_matrix), "Input image must be float type"
 
-    # Default angle to π/4 radians (45 degrees)
-    if angle is None:
-        angle = np.deg2rad(45)
+    if theta_range is None:
+        theta_min, theta_max = -np.deg2rad(45), np.deg2rad(45)
+    else:
+        theta_min, theta_max = theta_range
 
     # Assume that polar grid is same shape as cartesian grid unless specified
     cartesian_rows, cartesian_cols = ops.shape(cartesian_matrix)
@@ -583,23 +598,18 @@ def cartesian_to_polar_matrix(
 
     center_x, center_y = tip
 
-    # Interpolation grid in polar coordinates
+    # Polar sampling grid: rows are radius (0..r_max), columns are angle. The columns run from
+    # theta_max down to theta_min so the lateral axis of the polar image keeps the same
+    # left-right orientation as the Cartesian image.
     r = ops.linspace(0, r_max, polar_rows, dtype="float32")
-    theta = ops.linspace(-angle, angle, polar_cols, dtype="float32")
-    r_grid, theta_grid = ops.meshgrid(r, theta)
+    theta = ops.linspace(theta_max, theta_min, polar_cols, dtype="float32")
+    r_grid, theta_grid = ops.meshgrid(r, theta, indexing="ij")
 
-    # convert discretized radii and angle intervals to polar coordinates
-    x_polar = r_grid * ops.cos(theta_grid)
-    y_polar = r_grid * ops.sin(theta_grid)
-
-    # Inverse rotation to match original orientation
-    polar_coords = ops.stack([ops.ravel(x_polar), ops.ravel(y_polar)], axis=0)
-    polar_coords_rotated = ops.transpose(rotate_coordinates(ops.transpose(polar_coords), 90))
-
-    # Shift to image indices
-    yq = polar_coords_rotated[1, :] + center_y
-    xq = polar_coords_rotated[0, :] + center_x
-    coords_for_interp = ops.stack([yq, xq])
+    # Cartesian pixel each (r, theta) samples from. The probe images "downwards" (+depth = +y),
+    # so depth = center_y + r cos(theta) and lateral = center_x - r sin(theta).
+    xq = center_x - r_grid * ops.sin(theta_grid)
+    yq = center_y + r_grid * ops.cos(theta_grid)
+    coords_for_interp = ops.stack([ops.ravel(yq), ops.ravel(xq)])
 
     polar_values = map_coordinates(
         cartesian_matrix,
@@ -609,14 +619,81 @@ def cartesian_to_polar_matrix(
         fill_value=fill_value,
     )
 
-    polar_matrix = ops.rot90(ops.reshape(polar_values, (polar_cols, polar_rows)), k=-1)
+    polar_matrix = ops.reshape(polar_values, (polar_rows, polar_cols))
     return polar_matrix
+
+
+def polar_to_cartesian_matrix(
+    polar_matrix,
+    cartesian_shape: Tuple[int, int],
+    tip: Union[Tuple[float, float], None] = None,
+    r_max: Union[float, None] = None,
+    theta_range: Union[Tuple[float, float], None] = None,
+    pitch: float = 1.0,
+    fill_value: float = 0.0,
+    order: int = 1,
+):
+    """Resample a polar image onto a fixed Cartesian canvas with the apex at a chosen pixel.
+
+    Faithful inverse of :func:`cartesian_to_polar_matrix`. Where :func:`scan_convert_2d`
+    fits the cone bounding box into the output (losing absolute position and scale), this
+    pins the cone apex at pixel ``tip`` on a canvas of shape ``cartesian_shape`` and samples
+    at ``pitch`` units per pixel, so a forward/inverse round-trip reproduces the original
+    frame. Both share the :func:`_polar_sampling_coordinates` core; they differ only in how
+    the output grid is built.
+
+    Args:
+        polar_matrix (tensor): Input polar image of shape ``(n_rho, n_theta)``, float type.
+        cartesian_shape (tuple): Output ``(rows, cols)`` = ``(n_z, n_x)``.
+        tip (tuple, optional): ``(col, row)`` pixel location of the cone apex in the output.
+            Defaults to the centre-top ``(cols / 2, 0)``.
+        r_max (float, optional): Radius spanned by the polar image, in the same units as
+            ``pitch`` (pixels by default). Defaults to ``rows``.
+        theta_range (tuple, optional): angular extent in radians. The *order* is significant:
+            it must match the column order of ``polar_matrix``. :func:`cartesian_to_polar_matrix`
+            lays its columns out from the larger to the smaller angle, so to invert it pass the
+            range reversed, i.e. ``(theta_max, theta_min)`` -- which is exactly what
+            :func:`polar_geometry_from_coords_for_interp` returns. Defaults to (45, -45) degrees.
+        pitch (float, optional): Output units per pixel (radial units of ``r_max``).
+            Defaults to 1.0, i.e. ``tip`` and ``r_max`` are in pixels.
+        fill_value (float, optional): Value for pixels outside the polar domain.
+        order (int, optional): Spline interpolation order. Defaults to 1.
+
+    Returns:
+        cartesian_matrix (Array): The polar image resampled onto the Cartesian canvas, with
+            shape ``cartesian_shape``.
+    """
+    assert "float" in ops.dtype(polar_matrix), "Input image must be float type"
+
+    cart_rows, cart_cols = cartesian_shape
+    if tip is None:
+        tip = (cart_cols / 2, 0.0)
+    if r_max is None:
+        r_max = cart_rows
+    if theta_range is None:
+        theta_range = (np.deg2rad(45), -np.deg2rad(45))
+
+    tip_x, tip_y = tip
+    dtype = ops.dtype(polar_matrix)
+    n_rho, n_theta = ops.shape(polar_matrix)[-2], ops.shape(polar_matrix)[-1]
+
+    rho = ops.linspace(0.0, r_max, n_rho, dtype=dtype)
+    theta = ops.linspace(theta_range[0], theta_range[1], n_theta, dtype=dtype)
+
+    x_vec = (tip_x - ops.cast(ops.arange(cart_cols), dtype)) * pitch
+    z_vec = (ops.cast(ops.arange(cart_rows), dtype) - tip_y) * pitch
+
+    coordinates = _polar_sampling_coordinates(x_vec, z_vec, rho, theta)
+    cartesian, _ = scan_convert_2d(
+        polar_matrix, coordinates=coordinates, fill_value=fill_value, order=order
+    )
+    return cartesian
 
 
 def inverse_scan_convert_2d(
     cartesian_image,
     fill_value=0.0,
-    angle=None,
+    theta_range=None,
     output_size=None,
     interpolation_order=1,
     find_scan_cone=True,
@@ -633,9 +710,8 @@ def inverse_scan_convert_2d(
         cartesian_image (tensor): 2D image array in Cartesian coordinates of type float.
         fill_value (float): Value used to fill regions outside the original image
             during interpolation.
-        angle (float, optional): Angular field of view (in radians) used for the polar
-            transformation. The polar output will span from -angle to +angle.
-            Defaults to π/4 radians (45 degrees).
+        theta_range (tuple, optional): ``(theta_min, theta_max)`` angular extent of the polar
+            grid in radians, allowing asymmetric cones. Defaults to (-45, 45) degrees.
         output_size (tuple, optional): Shape (rows, cols) of the resulting polar image.
             If None, the shape of the input image is used.
         interpolation_order (int): Order of interpolation used in resampling
@@ -653,12 +729,12 @@ def inverse_scan_convert_2d(
 
     if find_scan_cone:
         assert image_range is not None, "image_range must be provided when find_scan_cone is True"
-        cartesian_image = fit_and_crop_around_scan_cone(cartesian_image, image_range)
+        cartesian_image, _ = fit_and_crop_around_scan_cone(cartesian_image, image_range)
 
     polar_image = cartesian_to_polar_matrix(
         cartesian_image,
         fill_value=fill_value,
-        angle=angle,
+        theta_range=theta_range,
         polar_shape=output_size,
         interpolation_order=interpolation_order,
     )

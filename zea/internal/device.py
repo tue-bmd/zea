@@ -436,7 +436,7 @@ def set_memory_growth_tf():
 def init_device(
     device: Union[str, int, list] = "auto:1",
     backend: Union[str, None] = "auto",
-    hide_devices: Union[int, list] = None,
+    hide_devices: Union[int, list, None] = None,
     hide_others: bool = True,
     allow_preallocate: bool = True,
     verbose: bool = True,
@@ -487,6 +487,8 @@ def init_device(
     # Get backend from environment variable
     if backend == "auto":
         backend = os.environ.get("KERAS_BACKEND")
+        if backend is not None:
+            backend = backend.lower()
 
     if backend in ["jax", "tensorflow", "torch"]:
         selected_gpu_ids = get_device(
@@ -505,7 +507,8 @@ def init_device(
     # Set if jax and tensorflow should preallocate memory
     if not allow_preallocate:
         os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-        set_memory_growth_tf()
+        if backend == "tensorflow":
+            set_memory_growth_tf()
 
     # Check if the selected backend is installed with CUDA support
     # -> Run this last because it will mess up the hiding of GPUs!

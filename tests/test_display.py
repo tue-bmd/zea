@@ -69,6 +69,39 @@ def test_scan_conversion(size, resolution, order):
     return out
 
 
+def test_scan_convert_in_process_smoke():
+    """In-process smoke test for scan_convert_2d / scan_convert_3d.
+
+    The parametrized ``test_scan_conversion`` runs inside per-backend subprocesses
+    (via ``backend_equality_check``), which coverage tooling does not observe, so
+    this plain in-process test ensures the scan-conversion code paths are covered.
+    """
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    img2d = rng.standard_normal((32, 16)).astype(np.float32)
+    out2d, params2d = display.scan_convert_2d(img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5))
+    assert isinstance(params2d, dict)
+    assert np.asarray(out2d).ndim == 2
+
+    # Exercise the alternative interpolation branches: order > 1 (scipy/CPU path)
+    # and vectorize=False (ops.map path), in addition to the default vectorized path.
+    out2d_order2, _ = display.scan_convert_2d(
+        img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5), order=2
+    )
+    assert np.asarray(out2d_order2).ndim == 2
+    out2d_novec, _ = display.scan_convert_2d(
+        img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5), vectorize=False
+    )
+    assert np.asarray(out2d_novec).ndim == 2
+
+    vol3d = rng.standard_normal((16, 10, 10)).astype(np.float32)
+    out3d, params3d = display.scan_convert_3d(
+        vol3d, rho_range=(0, 1), theta_range=(-0.4, 0.4), phi_range=(-0.4, 0.4)
+    )
+    assert isinstance(params3d, dict)
+    assert np.asarray(out3d).ndim == 3
+
+
 def create_radial_pattern(size):
     """Creates a radial pattern for testing scan conversion."""
     x, y = np.meshgrid(np.linspace(-1, 1, size[0]), np.linspace(-1, 1, size[1]))
@@ -118,17 +151,17 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error, angle
 
     rho_range = (0, 100)
 
-    if angle is None:
-        theta_range = np.deg2rad((-45, 45))
-    else:
-        theta_range = (-angle, angle)
+    theta_range = np.deg2rad((-45, 45))
 
     # Scan convert
     cartesian_data, _ = display.scan_convert_2d(polar_data, rho_range, theta_range)
 
     # Inverse scan convert
     cartesian_data_inv = display.inverse_scan_convert_2d(
-        cartesian_data, output_size=polar_data.shape, find_scan_cone=False, angle=angle
+        cartesian_data,
+        output_size=polar_data.shape,
+        find_scan_cone=False,
+        theta_range=theta_range,
     )
     cartesian_data_inv = ops.convert_to_numpy(cartesian_data_inv)
 
@@ -186,6 +219,58 @@ def test_scan_conversion_and_inverse_padded(size, pattern_creator, allowed_error
     assert mean_squared_error < allowed_error, f"MSE is too high: {mean_squared_error:.4f}"
 
     return cartesian_data_inv
+
+
+@backend_equality_check()
+def test_polar_to_cartesian_matrix_roundtrip():
+    """polar_to_cartesian_matrix is a faithful inverse of cartesian_to_polar_matrix.
+
+    Unlike scan_convert_2d (which fits the cone bounding box into the output), it pins the
+    apex at ``tip`` on a full-size canvas, so a forward/inverse round-trip reconstructs the
+    original frame at its original position and scale. Uses an *asymmetric* theta_range to
+    guard against an angular shift: the inverse is obtained by passing theta_range in the
+    reversed order (matching cartesian_to_polar_matrix's rot90 column ordering, which is what
+    polar_geometry_from_coords_for_interp returns).
+    """
+    from keras import ops
+
+    from zea import display
+
+    height, width = 220, 300
+    yy, xx = np.meshgrid(np.arange(height), np.arange(width), indexing="ij")
+    apex_x, apex_y = 170.0, 30.0
+    # cartesian_to_polar_matrix convention: theta = arctan2(-(x - apex_x), y - apex_y).
+    r = np.sqrt((xx - apex_x) ** 2 + (yy - apex_y) ** 2)
+    theta = np.arctan2(-(xx - apex_x), yy - apex_y)
+    theta_min, theta_max = -0.3, 0.6  # asymmetric cone
+    mask = (theta > theta_min) & (theta < theta_max) & (r < 180)
+    blob = np.exp(-(((xx - 150) / 12) ** 2 + ((yy - 150) / 12) ** 2))  # off-centre marker
+    image = np.where(mask, 0.3 + blob, 0.0).astype("float32")
+
+    polar = display.cartesian_to_polar_matrix(
+        ops.convert_to_tensor(image),
+        tip=(apex_x, apex_y),
+        r_max=180.0,
+        theta_range=(theta_min, theta_max),
+    )
+    # Invert: theta_range reversed to match the polar image's column order.
+    back = display.polar_to_cartesian_matrix(
+        polar,
+        (height, width),
+        tip=(apex_x, apex_y),
+        r_max=180.0,
+        theta_range=(theta_max, theta_min),
+    )
+    back = np.nan_to_num(ops.convert_to_numpy(back))
+
+    assert back.shape == (height, width)
+    # Faithful reconstruction inside the cone (residual is double-resampling blur).
+    assert np.abs(back - image)[mask].mean() < 0.1
+    # The off-centre marker returns to its location (an angular shift would move it).
+    by, bx = np.unravel_index(np.argmax(back), back.shape)
+    assert abs(by - 150) < 12 and abs(bx - 150) < 12
+
+    return back
 
 
 @pytest.mark.parametrize(

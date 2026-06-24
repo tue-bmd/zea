@@ -17,6 +17,8 @@ Example usage
 """
 
 import contextlib
+import contextvars
+import inspect
 import logging
 import os
 import re
@@ -24,8 +26,8 @@ import sys
 from pathlib import Path
 
 # The logger to use
-logger = None
-file_logger = None
+logger: logging.Logger
+file_logger: logging.Logger | None = None
 
 LOG_DIR = Path("log")
 
@@ -33,7 +35,7 @@ ZEA_LOG_LEVEL = os.getenv("ZEA_LOG_LEVEL", "DEBUG").upper()
 
 DEPRECATED_LEVEL_NUM = logging.WARNING + 5
 logging.addLevelName(DEPRECATED_LEVEL_NUM, "DEPRECATED")
-logging.DEPRECATED = DEPRECATED_LEVEL_NUM
+logging.DEPRECATED = DEPRECATED_LEVEL_NUM  # ty: ignore[unresolved-attribute]
 
 
 def get_format_fn(name_format):
@@ -141,7 +143,7 @@ class CustomFormatter(logging.Formatter):
             logging.DEBUG: logging.Formatter(
                 ("".join([name, yellow_fn("%(levelname)s"), " %(message)s"]))
             ),
-            logging.DEPRECATED: logging.Formatter(
+            DEPRECATED_LEVEL_NUM: logging.Formatter(
                 ("".join([name, orange_fn("%(levelname)s"), " %(message)s"]))
             ),
             "DEFAULT": logging.Formatter(
@@ -154,7 +156,9 @@ class CustomFormatter(logging.Formatter):
         return formatter.format(record)
 
 
-def configure_console_logger(level="INFO", name=None, color=True, name_color="darkgreen"):
+def configure_console_logger(
+    level="INFO", name=None, color=True, name_color="darkgreen"
+) -> logging.Logger:
     """
     Configures a simple console logger with the givel level.
     A usecase is to change the formatting of the default handler of the root logger
@@ -184,7 +188,7 @@ def configure_console_logger(level="INFO", name=None, color=True, name_color="da
     return new_logger
 
 
-def configure_file_logger(level="INFO"):
+def configure_file_logger(level="INFO") -> logging.Logger:
     """
     Configures a simple console logger with the givel level.
     A usecase is to change the formatting of the default handler of the root logger
@@ -241,16 +245,65 @@ def success(message):
     return message
 
 
+# Track locations that have already emitted a once-only warning
+_warned_locations: set = set()
+
+# Call-scoped flag to suppress warnings. Implemented with a ContextVar so the
+# suppression is local to the current thread / async task: setting it does not
+# mutate the shared logger level, so concurrent callers are unaffected.
+_warnings_suppressed: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "zea_warnings_suppressed", default=False
+)
+
+
+@contextlib.contextmanager
+def suppress_warnings():
+    """Context manager to suppress ``warning``/``warning_once``/``deprecated`` output.
+
+    Unlike :func:`set_level`, this does not mutate the shared logger level, so it is
+    safe to use from one thread without suppressing warnings emitted by others.
+
+    Yields:
+        None
+    """
+    token = _warnings_suppressed.set(True)
+    try:
+        yield
+    finally:
+        _warnings_suppressed.reset(token)
+
+
 def warning(message, *args, **kwargs):
     """Prints a message with log level warning."""
+    if _warnings_suppressed.get():
+        return message
     logger.warning(message, *args, **kwargs)
     if file_logger:
         file_logger.warning(remove_color_escape_codes(message), *args, **kwargs)
     return message
 
 
+def warning_once(message, *args, key=None, **kwargs):
+    """Prints a warning message only once for a dedupe key.
+
+    By default, deduplication is per call location. A custom ``key`` can be
+    provided to scope once-only behavior (for example, per object instance).
+    """
+    if _warnings_suppressed.get():
+        return message
+    frame = inspect.stack()[1]
+    location_key = f"{frame.filename}:{frame.lineno}"
+    dedupe_key = location_key if key is None else (location_key, key)
+    if dedupe_key not in _warned_locations:
+        _warned_locations.add(dedupe_key)
+        warning(message, *args, **kwargs)
+    return message
+
+
 def deprecated(message, *args, **kwargs):
     """Prints a message with custom log level DEPRECATED."""
+    if _warnings_suppressed.get():
+        return message
     logger.log(DEPRECATED_LEVEL_NUM, message, *args, **kwargs)
     if file_logger:
         file_logger.log(DEPRECATED_LEVEL_NUM, remove_color_escape_codes(message), *args, **kwargs)
@@ -302,7 +355,9 @@ def set_file_logger_directory(directory):
     global LOG_DIR, file_logger
     LOG_DIR = directory
     # Remove all handlers from the file logger
-    for handler in file_logger.handlers:
+    if file_logger is None:
+        raise RuntimeError("File logging not enabled; call enable_file_logging() first.")
+    for handler in list(file_logger.handlers):
         file_logger.removeHandler(handler)
 
     # Add file handler

@@ -69,7 +69,7 @@ def random_uniform_lines(
     n_actions: int,
     n_possible_actions: int,
     n_masks: int,
-    seed: int | keras.random.SeedGenerator = None,
+    seed: int | keras.random.SeedGenerator | None = None,
     dtype=_DEFAULT_DTYPE,
 ):
     """Will generate a mask with random lines.

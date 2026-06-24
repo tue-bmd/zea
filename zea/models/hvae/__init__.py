@@ -114,7 +114,7 @@ class HierarchicalVAE(DeepGenerativeModel):
             n_samples (int): Number of samples to generate.
 
         Returns:
-            samples (tensor): Generated samples of shape (n_samples, 256, 256, 3) in [-1, 1].
+            tensor: Generated samples of shape ``(n_samples, 256, 256, 3)`` in ``[-1, 1]``.
         """
         logits = self.network.decoder.call_uncond(n_samples, **kwargs)
         # Returns a 100 channel mixture of logistic functions (logits).

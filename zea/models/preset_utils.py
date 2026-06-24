@@ -12,8 +12,9 @@ import keras
 from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 
 import zea
+import zea.models.base
 from zea.internal.cache import ZEA_CACHE_DIR
-from zea.internal.preset_utils import _hf_parse_path
+from zea.internal.preset_utils import _hf_login, _hf_parse_path
 from zea.internal.registry import model_registry
 
 HF_PREFIX = "hf://"
@@ -97,8 +98,9 @@ def get_file(preset, path):
             # Try without login first
             return _download_from_hf(repo_id, filename)
         except huggingface_hub.utils.RepositoryNotFoundError:
-            # Try to login and retry download
-            huggingface_hub.login(new_session=False)
+            # Retry after login; _hf_login is a no-op when no token is available
+            # and never prompts interactively, so re-raise if login didn't help.
+            _hf_login()
             return _download_from_hf(repo_id, filename)
         except HFValidationError as e:
             raise ValueError(

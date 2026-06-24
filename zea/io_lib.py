@@ -55,7 +55,10 @@ def load_video(filename, mode="L"):
     elif ext == ".mp4":
         # Use imageio with FFMPEG format for MP4 files
         try:
-            reader = imageio.get_reader(filename, format="FFMPEG")
+            reader = imageio.get_reader(
+                filename,
+                format="FFMPEG",  # ty: ignore[invalid-argument-type]
+            )
         except (ImportError, ValueError) as exc:
             raise ImportError(
                 "FFMPEG plugin is required to load MP4 files. "
@@ -63,7 +66,7 @@ def load_video(filename, mode="L"):
             ) from exc
 
         try:
-            for frame in reader:
+            for frame in reader:  # ty: ignore[not-iterable]
                 img = Image.fromarray(frame)
                 frames.append(_convert_image_mode(img, mode=mode))
         finally:
@@ -176,7 +179,7 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=True):
         pillow_imgs = [
             img.convert("RGB").quantize(
                 palette=global_palette,
-                dither=Image.NONE,
+                dither=Image.NONE,  # ty: ignore[unresolved-attribute]
             )
             for img in pillow_imgs
         ]
@@ -232,7 +235,11 @@ def save_to_mp4(images, filename, fps=20, shared_color_palette=False):
     # Use imageio with FFMPEG format for MP4 files
     try:
         writer = imageio.get_writer(
-            filename, fps=fps, format="FFMPEG", codec="libx264", pixelformat="yuv420p"
+            filename,
+            fps=fps,
+            format="FFMPEG",  # ty: ignore[invalid-argument-type]
+            codec="libx264",
+            pixelformat="yuv420p",
         )
     except (ImportError, ValueError) as exc:
         raise ImportError(
@@ -249,7 +256,7 @@ def save_to_mp4(images, filename, fps=20, shared_color_palette=False):
             for img in pillow_imgs:
                 paletted_img = img.convert("RGB").quantize(
                     palette=global_palette,
-                    dither=Image.NONE,
+                    dither=Image.NONE,  # ty: ignore[unresolved-attribute]
                 )
                 writer.append_data(np.array(paletted_img.convert("RGB")))
         else:
@@ -259,16 +266,18 @@ def save_to_mp4(images, filename, fps=20, shared_color_palette=False):
     finally:
         writer.close()
 
-    return log.success(f"Successfully saved MP4 to -> {filename}")
+    return log.success(f"Successfully saved MP4 to -> {log.yellow(filename)}")
 
 
-def search_file_tree(directory, filetypes=None, verbose=True, relative=False) -> Generator:
+def search_file_tree(
+    directory, filetypes: list[str] | None = None, verbose=True, relative=False
+) -> Generator:
     """Traverse a directory tree and yield file paths matching specified file types.
 
     Args:
         directory (str or Path): The root directory to start the search.
         filetypes (list of str, optional): List of file extensions to match.
-            If None, file types supported by `zea` are matched. Defaults to None.
+            If None, all files are matched. Defaults to None.
         verbose (bool, optional): If True, logs the search process. Defaults to True.
         relative (bool, optional): If True, yields file paths relative to the
             root directory. Defaults to False.
@@ -283,7 +292,7 @@ def search_file_tree(directory, filetypes=None, verbose=True, relative=False) ->
     for dirpath, _, filenames in os.walk(directory):
         for file in filenames:
             # Append to file_paths if it is a filetype file
-            if Path(file).suffix in filetypes:
+            if filetypes is None or Path(file).suffix in filetypes:
                 file_path = Path(dirpath) / file
                 if relative:
                     file_path = file_path.relative_to(directory)
