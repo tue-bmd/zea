@@ -18,7 +18,7 @@ See the following dropdown for a list of available models:
 
 Presets for these models can be found in :mod:`zea.models.presets`.
 
-To use these models, you can import them directly from the :mod:`zea.models` module and load the pretrained weights using the :meth:`from_preset` method. For example:
+To use these models, you can import them directly from the :mod:`zea.models` module and load the pretrained weights using the :meth:`~zea.models.base.BaseModel.from_preset` method. For example:
 
 .. doctest::
 
@@ -39,13 +39,13 @@ You can list all available presets using the :attr:`presets` attribute:
 zea generative models
 =======================
 
-In addition to models, zea provides both classical and deep generative models for tasks such as image generation, inpainting, and denoising. These models inherit from :class:`zea.models.generative.GenerativeModel` or :class:`zea.models.deepgenerative.DeepGenerativeModel`.
+In addition to models, zea provides both classical and deep generative models for tasks such as image generation, inpainting, and denoising. These models inherit from :class:`zea.models.generative.GenerativeModel` or :class:`zea.models.generative.DeepGenerativeModel`.
 Typically, these models have some additional methods, such as:
 
-- :meth:`fit` for training the model on data
-- :meth:`sample` for generating new samples from the learned distribution
-- :meth:`posterior_sample` for drawing samples from the posterior given measurements
-- :meth:`log_density` for computing the log-probability of data under the model
+- :meth:`~zea.models.generative.GenerativeModel.fit` for training the model on data
+- :meth:`~zea.models.generative.GenerativeModel.sample` for generating new samples from the learned distribution
+- :meth:`~zea.models.generative.GenerativeModel.posterior_sample` for drawing samples from the posterior given measurements
+- :meth:`~zea.models.generative.GenerativeModel.log_density` for computing the log-probability of data under the model
 
 See the following dropdown for a list of available *generative* models:
 
@@ -66,23 +66,35 @@ An example of how to use the :class:`zea.models.diffusion.DiffusionModel` is sho
     >>> samples = model.sample(n_samples=4)  # doctest: +SKIP
 
 
-Contributing and adding new models
-==================================
+.. _adding-models:
 
-Please follow the guidelines in the :ref:`contributing` page if you would like to contribute a new model to zea.
+Adding a new model
+==================
 
-The following steps are recommended when adding a new model:
+New models are welcome! Please follow the :ref:`contributing` guide for the general
+workflow (forking, branches, pull requests, etc.). The steps below walk you through
+what is specific to adding a model.
 
-1. Create a new module in the :mod:`zea.models` package for your model: ``zea.models.mymodel``.
-2. Add a model class that inherits from :class:`zea.models.base.Model`. For generative models, inherit from :class:`zea.models.generative.GenerativeModel` or :class:`zea.models.deepgenerative.DeepGenerativeModel` as appropriate. Make sure you implement the :meth:`call` method.
-3. Upload the pretrained model weights to `our Hugging Face <https://huggingface.co/zeahub>`_. Should be a ``config.json`` and a ``model.weights.h5`` file. See `Keras documentation <https://keras.io/guides/serialization_and_saving/>`_ how those can be saved from your model. Simply drag and drop the files to the Hugging Face website to upload them.
+1. Create a new file in ``zea/models/`` for your model, e.g. ``zea/models/mymodel.py``.
+2. Add a model class that inherits from :class:`zea.models.base.BaseModel`. For generative
+   models, use :class:`zea.models.generative.GenerativeModel` or
+   :class:`zea.models.generative.DeepGenerativeModel` as the base class. Implement
+   the ``call`` method.
+3. Upload the pretrained weights to `our Hugging Face <https://huggingface.co/zeahub>`_.
+   The expected files are a ``config.json`` and a ``model.weights.h5``. See the
+   `Keras documentation <https://keras.io/guides/serialization_and_saving/>`_ for how
+   to save these. You can drag and drop the files directly on the Hugging Face website.
 
    .. tip::
-      It is recommended to use the mentioned saving procedure. However, alternate saving methods are also possible, see the :class:`zea.models.echonet.EchoNet` module for an example. You do now have to implement a :meth:`custom_load_weights` method in your model class.
+      Alternate saving methods are also possible. See :class:`zea.models.echonet.EchoNet`
+      for an example — in that case you need to implement a ``custom_load_weights``
+      method in your model class.
 
-4. Add a preset for the model in :mod:`zea.models.presets`. This basically allows you to have multiple weights presets for a given model architecture.
-5. Make sure to register the presets in your model module by importing the presets module and calling ``register_presets`` with the model class as an argument.
-6. Lastly, add the model to the :mod:`zea.models` package by importing it in the :file:`__init__.py` file.
+4. Add a preset for your model in :mod:`zea.models.presets`. Presets let you register
+   multiple sets of weights for the same model architecture.
+5. In your model file, import the presets module and call ``register_presets`` with your
+   model class to activate the presets.
+6. Import your model in ``zea/models/__init__.py`` to make it part of the package.
 
 Adding non-Keras (custom) models
 ----------------------------------
