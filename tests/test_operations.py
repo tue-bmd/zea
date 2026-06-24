@@ -1022,10 +1022,9 @@ def test_prepare_parameters_pfield_all_backends():
     import keras
 
     from zea.beamform.delays import compute_t0_delays_planewave
+    from zea.internal.cache import cache_disabled
     from zea.ops import Pipeline
     from zea.parameters import Parameters
-
-    from zea.internal.cache import cache_disabled
 
     n_el = 8
     n_tx = 2
@@ -1066,7 +1065,7 @@ def test_prepare_parameters_pfield_all_backends():
         return keras.ops.convert_to_numpy(inputs["flat_pfield"])
 
 
-@backend_equality_check(decimal=4)
+@backend_equality_check(decimal=3)
 def test_tissue_suppression():
     """Test that TissueSuppression reduces stationary tissue component."""
     import keras

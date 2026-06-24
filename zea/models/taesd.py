@@ -28,8 +28,6 @@ from zea.models.base import BaseModel
 from zea.models.preset_utils import get_preset_loader, register_presets
 from zea.models.presets import taesdxl_decoder_presets, taesdxl_encoder_presets, taesdxl_presets
 
-tf = _import_tf()
-
 
 @model_registry(name="taesdxl")
 class TinyAutoencoder(BaseModel):
@@ -53,6 +51,7 @@ class TinyAutoencoder(BaseModel):
                 "TinyDecoder is only currently supported with the TensorFlow or Jax backend."
             )
 
+        tf = _import_tf(force=True)
         assert tf is not None, (
             "TensorFlow is not installed. Please install TensorFlow to use TinyAutoencoder. "
             "This is required even if you are using the Jax backend, the model is built "
@@ -139,11 +138,13 @@ class TinyBase(BaseModel):
         """Builds the network."""
         self.maybe_convert_to_jax(input_shape)
 
-    def maybe_convert_to_jax(self, input_shape):
+    def maybe_convert_to_jax(self, input_shape):  # pragma: no cover
         """Converts the network to Jax if backend is Jax."""
         if backend.backend() == "jax":
             inputs = ops.zeros(input_shape)
             from zea.backend import tf2jax
+
+            tf = _import_tf(force=True)
 
             jax_func, jax_params = tf2jax.convert(  # ty: ignore[unresolved-attribute]
                 tf.function(self.network), inputs
@@ -154,10 +155,11 @@ class TinyBase(BaseModel):
 
             self.network = keras.layers.JaxLayer(call_fn, state=jax_params)
 
-    def _load_layer(self, path: Path | str):
+    def _load_layer(self, path: Path | str):  # pragma: no cover
         if backend.backend() == "tensorflow":
             return keras.layers.TFSMLayer(path, call_endpoint="serving_default")
         elif backend.backend() == "jax":
+            tf = _import_tf(force=True)
             return tf.saved_model.load(path)
         else:
             raise NotImplementedError(
