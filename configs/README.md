@@ -16,7 +16,7 @@ This repository contains configuration files for [zea](https://github.com/tue-bm
 Configuration files are automatically synchronized from the main zea repository:
 
 - **Main branch**: Latest config files from the `main` branch
-- **Release tags**: Config files compatible with specific zea releases (e.g., `v0.0.1`, `v0.0.2`)
+- **Release tags**: Config files compatible with specific zea releases (e.g., `v0.0.10`, `v0.0.11`)
 
 ## Usage
 
@@ -24,10 +24,10 @@ Configuration files are automatically synchronized from the main zea repository:
 import zea
 
 # Load a specific config file
-config = zea.Config.from_hf("zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset")
+config = zea.Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml")
 
 # Load from a specific release
-config = zea.Config.from_hf("zeahub/configs", "config_camus.yaml", repo_type="dataset", revision="v0.0.2")
+config = zea.Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml", revision="v0.0.11")
 ```
 
 ## Documentation

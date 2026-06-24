@@ -22,6 +22,28 @@ repos:
     # Run the formatter.
     - id: ruff-format
 
+# ty (type checker) is run as a *local* hook using the `ty` from the active
+# environment rather than the upstream astral-sh/ty-pre-commit hook. The upstream
+# hook type-checks inside an isolated environment that does not contain zea's
+# dependencies (keras, numpy, h5py, ...), which makes ty unable to resolve them
+# and produces many false positives. Running `ty` from the active environment
+# (the dev container, or a local `.venv` with `pip install -e .[dev]`) gives it
+# access to the installed dependencies. `ty` is pinned via the `dev`/`tests`
+# extras in pyproject.toml.
+- repo: local
+  hooks:
+    - id: ty
+      name: ty
+      description: "Run 'ty' for fast Python type checking"
+      entry: ty check
+      language: system
+      types_or: [python, pyi]
+      # ty reads its file selection from [tool.ty] in pyproject.toml; changes in
+      # one file can surface diagnostics in another, so check the whole project.
+      pass_filenames: false
+      always_run: true
+      require_serial: true
+
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v5.0.0
   hooks:
@@ -48,6 +70,12 @@ repos:
     entry: python docs/source/parameters_doc.py
     language: system
     files: ^docs/source/parameters_doc\.py$
+  - id: run-spec-doc
+    name: Run spec_doc.py
+    entry: python docs/source/spec_doc.py
+    language: system
+    files: ^(docs/source/spec_doc\.py|zea/data/spec\.py)$
+    pass_filenames: false
   - id: generate-keras-ops
     name: Generate Keras Operations
     entry: python -m zea.internal._generate_keras_ops

@@ -21,6 +21,7 @@
 
 import ast
 import atexit
+import contextlib
 import inspect
 import os
 import shutil
@@ -49,6 +50,20 @@ def is_cache_disabled():
     """Check if caching is disabled via environment variable."""
     val = os.environ.get("ZEA_DISABLE_CACHE", "0").strip().lower()
     return val in ("1", "true", "yes")
+
+
+@contextlib.contextmanager
+def cache_disabled():
+    """Context manager that temporarily disables the zea cache."""
+    orig = os.environ.get("ZEA_DISABLE_CACHE")
+    os.environ["ZEA_DISABLE_CACHE"] = "1"
+    try:
+        yield
+    finally:
+        if orig is None:
+            os.environ.pop("ZEA_DISABLE_CACHE", None)
+        else:
+            os.environ["ZEA_DISABLE_CACHE"] = orig
 
 
 def _make_cache_dir(path: Path):

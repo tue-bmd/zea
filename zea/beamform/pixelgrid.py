@@ -7,26 +7,28 @@ from zea import log
 eps = 1e-10
 
 
-def check_for_aliasing(scan):
-    """Checks if the scan class parameters will cause spatial aliasing due to a too low pixel
+def check_for_aliasing(parameters):
+    """Checks if the :class:`~zea.Parameters` will cause spatial aliasing due to a too low pixel
     density. If so, a warning is printed with a suggestion to increase the pixel density by either
     increasing the number of pixels, or decreasing the pixel spacing, depending on which parameter
     was set by the user."""
-    width = scan.xlims[1] - scan.xlims[0]
-    depth = scan.zlims[1] - scan.zlims[0]
-    wvln = scan.wavelength
+    width = parameters.xlims[1] - parameters.xlims[0]
+    depth = parameters.zlims[1] - parameters.zlims[0]
+    wvln = parameters.wavelength
 
-    if width / scan.grid_size_x > wvln / 2:
+    if width / parameters.grid_size_x > wvln / 2:
         log.warning(
-            f"width/grid_size_x = {width / scan.grid_size_x:.7f} < wavelength/2 = {wvln / 2}. "
-            f"Consider either increasing scan.grid_size_x to {int(np.ceil(width / (wvln / 2)))} "
-            "or more, or increasing scan.pixels_per_wavelength to 2 or more."
+            f"width/grid_size_x = {width / parameters.grid_size_x:.7f} > "
+            f"wavelength/2 = {wvln / 2:.7f}. "
+            f"Consider increasing grid_size_x to {int(np.ceil(width / (wvln / 2)))} "
+            "or more, or unsetting it to size the grid automatically."
         )
-    if depth / scan.grid_size_z > wvln / 2:
+    if depth / parameters.grid_size_z > wvln / 2:
         log.warning(
-            f"depth/grid_size_z = {depth / scan.grid_size_z:.7f} < wavelength/2 = {wvln / 2:.7f}. "
-            f"Consider either increasing scan.grid_size_z to {int(np.ceil(depth / (wvln / 2)))} "
-            "or more, or increasing scan.pixels_per_wavelength to 2 or more."
+            f"depth/grid_size_z = {depth / parameters.grid_size_z:.7f} > "
+            f"wavelength/2 = {wvln / 2:.7f}. "
+            f"Consider increasing grid_size_z to {int(np.ceil(depth / (wvln / 2)))} "
+            "or more, or unsetting it to size the grid automatically."
         )
 
 
@@ -90,15 +92,18 @@ def cartesian_pixel_grid(
 
     # Build coordinate vectors
     if sizes_provided:
+        assert grid_size_x is not None and grid_size_y is not None and grid_size_z is not None
         x = np.linspace(xlims[0], xlims[1] + eps, grid_size_x)
         y = np.linspace(ylims[0], ylims[1] + eps, grid_size_y)
         z = np.linspace(zlims[0], zlims[1] + eps, grid_size_z)
     else:
+        assert dx is not None and dz is not None
         sign_x = np.sign(xlims[1] - xlims[0]) if xlims[1] != xlims[0] else 1.0
         sign_z = np.sign(zlims[1] - zlims[0]) if zlims[1] != zlims[0] else 1.0
         x = np.arange(xlims[0], xlims[1] + sign_x * eps, sign_x * dx)
         z = np.arange(zlims[0], zlims[1] + sign_z * eps, sign_z * dz)
         if is_3d:
+            assert dy is not None
             sign_y = np.sign(ylims[1] - ylims[0]) if ylims[1] != ylims[0] else 1.0
             y = np.arange(ylims[0], ylims[1] + sign_y * eps, sign_y * dy)
         else:
@@ -178,7 +183,7 @@ def polar_pixel_grid(
 
     oris = np.array([0, 0, -distance_to_apex])
     oris = np.tile(oris, (num_polar_pixels, 1))
-    dirs_az = np.linspace(*polar_limits, num_polar_pixels)
+    dirs_az = np.linspace(*polar_limits, num_polar_pixels)  # ty: ignore[no-matching-overload]
 
     dirs_el = np.zeros(num_polar_pixels)
     dirs = np.vstack((dirs_az, dirs_el)).T

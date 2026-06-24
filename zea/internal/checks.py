@@ -29,7 +29,7 @@ _REQUIRED_SCAN_KEYS = [
     "n_frames",
 ]
 
-_IMAGE_DATA_TYPES = ["image", "image_sc", "envelope_data", "beamformed_data"]
+_IMAGE_DATA_TYPES = ["image", "envelope_data", "beamformed_data"]
 
 _NON_IMAGE_DATA_TYPES = ["raw_data", "aligned_data"]
 
@@ -70,9 +70,9 @@ def _check_raw_data(data=None, shape=None, with_batch_dim=None):
         AssertionError: if data does not have expected shape
         AssertionError: if data does not have expected number of channels
     """
-    assert data is not None or shape is not None, "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
+    assert shape is not None, "Either data or shape must be provided."
 
     if with_batch_dim is None:
         with_batch_dim = len(shape) == 5
@@ -110,9 +110,9 @@ def _check_aligned_data(data=None, shape=None, with_batch_dim=None):
         AssertionError: if data does not have expected shape
         AssertionError: if data does not have expected number of channels
     """
-    assert data is not None or shape is not None, "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
+    assert shape is not None, "Either data or shape must be provided."
 
     if with_batch_dim is None:
         with_batch_dim = len(shape) == 5
@@ -151,9 +151,9 @@ def _check_beamformed_data(data=None, shape=None, with_batch_dim=None):
         AssertionError: if data does not have expected shape
         AssertionError: if data does not have expected number of channels
     """
-    assert data is not None or shape is not None, "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
+    assert shape is not None, "Either data or shape must be provided."
 
     if with_batch_dim is None:
         with_batch_dim = len(shape) == 4
@@ -192,9 +192,9 @@ def _check_envelope_data(data=None, shape=None, with_batch_dim=None):
     Raises:
         AssertionError: if data does not have expected shape
     """
-    assert data is not None or shape is not None, "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
+    assert shape is not None, "Either data or shape must be provided."
 
     if with_batch_dim is None:
         with_batch_dim = len(shape) == 3
@@ -233,9 +233,9 @@ def _check_image(data=None, shape=None, with_batch_dim=None):
     Raises:
         AssertionError: if data does not have expected shape.
     """
-    assert data is not None or shape is not None, "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
+    assert shape is not None, "Either data or shape must be provided."
 
     if with_batch_dim is None:
         with_batch_dim = len(shape) in (3, 4)
@@ -277,9 +277,9 @@ def _check_image_sc(data=None, shape=None, with_batch_dim=None):
     Raises:
         AssertionError: if data does not have expected shape.
     """
-    assert data is not None or shape is not None, "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
+    assert shape is not None, "Either data or shape must be provided."
 
     if with_batch_dim is None:
         with_batch_dim = len(shape) in (3, 4)

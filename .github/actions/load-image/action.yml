@@ -1,0 +1,36 @@
+name: Load CI image
+description: >
+  Makes the CI Docker image available locally. When a fork PR changed image
+  dependencies, the locally-built image is loaded from the uploaded artifact.
+  Otherwise the image is pulled from the registry so that self-hosted runners
+  refresh mutable tags (e.g. the base-branch tag) instead of reusing a stale
+  cached image.
+inputs:
+  needs_artifact:
+    description: Whether to load from artifact ('true'/'false')
+    required: true
+  docker_image:
+    description: >
+      Registry reference to pull when needs_artifact is 'false'. Required in
+      that case; ignored when loading from an artifact.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v4
+      if: inputs.needs_artifact == 'true'
+      with:
+        name: fork-pr-image
+    - if: inputs.needs_artifact == 'true'
+      shell: bash
+      run: docker load < fork-image.tar
+    # Reused registry image: pull so self-hosted runners don't run a stale tag.
+    - if: inputs.needs_artifact != 'true'
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.docker_image }}" ]; then
+          echo "load-image: 'docker_image' input is required when needs_artifact='false'" >&2
+          exit 1
+        fi
+        docker pull "${{ inputs.docker_image }}"

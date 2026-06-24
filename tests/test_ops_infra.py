@@ -10,6 +10,7 @@ import pytest
 from zea import func, ops
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.config import Config
+from zea.data.file import File
 from zea.internal.core import DEFAULT_DYNAMIC_RANGE, DataTypes
 from zea.internal.registry import ops_registry
 from zea.ops.keras_ops import Squeeze
@@ -23,7 +24,7 @@ from zea.ops.pipeline import (
     pipeline_to_yaml,
 )
 from zea.probes import Probe
-from zea.scan import Scan
+from zea.parameters import Parameters
 
 from . import DEFAULT_TEST_SEED
 
@@ -271,6 +272,100 @@ def test_string_representation(verbose=False):
 """Pipeline Class Tests"""
 
 
+def test_pipeline_operations_int_indexing_unchanged():
+    """Existing integer indexing on pipeline.operations is unaffected."""
+    m_op = MultiplyOperation()
+    a_op = AddOperation()
+    pipeline = ops.Pipeline(operations=[m_op, a_op], jit_options=None)
+
+    assert pipeline.operations[0] is m_op
+    assert pipeline.operations[-1] is a_op
+
+
+def test_pipeline_operations_is_plain_list():
+    """pipeline.operations is a plain list; string lookup goes via pipeline[key]."""
+    from zea.internal.ops_list import OperationList
+
+    pipeline = ops.Pipeline(operations=[MultiplyOperation()], jit_options=None)
+    assert isinstance(pipeline.operations, list)
+    assert not isinstance(pipeline.operations, OperationList)
+
+
+def test_pipeline_getitem_by_name():
+    """pipeline[name] looks up an operation by registry name."""
+    m_op = MultiplyOperation()
+    a_op = AddOperation()
+    pipeline = ops.Pipeline(operations=[m_op, a_op], jit_options=None)
+
+    assert pipeline["multiply"] is m_op
+    assert pipeline["add"] is a_op
+
+
+def test_pipeline_getitem_not_found():
+    """KeyError lists available names when the name is not found."""
+    pipeline = ops.Pipeline(operations=[MultiplyOperation()], jit_options=None)
+
+    with pytest.raises(KeyError, match="Available"):
+        pipeline["nonexistent"]
+
+
+def test_pipeline_getitem_close_match():
+    """KeyError suggests a close match when the name is slightly wrong."""
+    pipeline = ops.Pipeline(operations=[MultiplyOperation()], jit_options=None)
+
+    with pytest.raises(KeyError, match="multiply"):
+        pipeline["multipy"]  # intentional typo
+
+
+def test_pipeline_getitem_duplicate_raises():
+    """Ambiguous bare name raises with numbered hints when duplicates exist."""
+    pipeline = ops.Pipeline(
+        operations=[MultiplyOperation(), MultiplyOperation()],
+        jit_options=None,
+        validate=False,
+    )
+
+    with pytest.raises(KeyError, match="multiply_0"):
+        pipeline["multiply"]
+
+
+def test_pipeline_getitem_numbered_suffix():
+    """Numbered suffix 'name_N' resolves to the Nth duplicate."""
+    m0 = MultiplyOperation()
+    m1 = MultiplyOperation()
+    pipeline = ops.Pipeline(operations=[m0, m1], jit_options=None, validate=False)
+
+    assert pipeline["multiply_0"] is m0
+    assert pipeline["multiply_1"] is m1
+
+
+def test_pipeline_getitem_numbered_out_of_range():
+    """Numbered index beyond available matches raises a KeyError."""
+    pipeline = ops.Pipeline(operations=[MultiplyOperation()], jit_options=None)
+
+    with pytest.raises(KeyError, match="out of range"):
+        pipeline["multiply_5"]
+
+
+def test_pipeline_keys():
+    """pipeline.keys() returns the list of indexable string names."""
+    pipeline = ops.Pipeline(operations=[MultiplyOperation(), AddOperation()], jit_options=None)
+
+    assert pipeline.keys() == ["multiply", "add"]
+
+
+def test_pipeline_dotted_registry_name():
+    """Operations with dotted registry names (e.g. keras built-ins) are reachable
+    by their short last-component name."""
+    from zea.ops.pipeline import Pipeline
+    from zea.ops.keras_ops import Cast
+
+    pipeline = Pipeline.from_default(jit_options=None)
+    # Cast is registered as "keras.ops.cast" but must be addressable as "cast"
+    assert isinstance(pipeline["cast"], Cast)
+    assert "cast" in pipeline.keys()
+
+
 def test_pipeline_initialization():
     """Tests initialization of a Pipeline."""
     operations = [MultiplyOperation(), AddOperation()]
@@ -343,6 +438,40 @@ def test_pipeline_get_params_per_operation():
     assert params[1]["y"] == 3
 
 
+def test_nested_pipeline_set_params():
+    """set_params must propagate into nested Pipeline operations."""
+    inner = ops.Pipeline([MultiplyOperation(), AddOperation()], jit_options=None)
+    outer = ops.Pipeline([inner, AddTransmitsOperation()], jit_options=None)
+
+    outer.set_params(x=5, y=3, n_tx=10)
+
+    # Inner operations must have received their params
+    assert inner.operations[0]._input_cache.get("x") == 5
+    assert inner.operations[1]._input_cache.get("y") == 3
+    # Outer-level operation must have received its param
+    assert outer.operations[1]._input_cache.get("n_tx") == 10
+
+
+def test_nested_pipeline_get_params():
+    """get_params must collect parameters from nested Pipeline operations."""
+    inner = ops.Pipeline([MultiplyOperation(), AddOperation()], jit_options=None)
+    outer = ops.Pipeline([inner, AddTransmitsOperation()], jit_options=None)
+
+    outer.set_params(x=5, y=3, n_tx=10)
+
+    flat = outer.get_params()
+    assert flat["x"] == 5
+    assert flat["y"] == 3
+    assert flat["n_tx"] == 10
+
+    per_op = outer.get_params(per_operation=True)
+    # inner contributes 2 dicts (one per inner operation), outer adds 1
+    assert len(per_op) == 3
+    assert per_op[0].get("x") == 5
+    assert per_op[1].get("y") == 3
+    assert per_op[2].get("n_tx") == 10
+
+
 def test_pipeline_validation():
     """Tests the validation of the Pipeline."""
     operations = [
@@ -359,11 +488,15 @@ def test_pipeline_validation():
         _ = ops.Pipeline(operations=operations)
 
 
-def test_pipeline_with_scan_probe_config():
-    """Tests the Pipeline with Scan, Probe, and Config objects as inputs."""
+def test_pipeline_with_parameters():
+    """Tests the Pipeline with a Parameters object as input.
 
-    probe = Probe.from_name("generic")
-    scan = Scan(
+    ``prepare_parameters`` only converts the keys a pipeline ``needs`` (plus any
+    manually supplied params), so parameters that no operation requires are not
+    forwarded.
+    """
+
+    parameters = Parameters(
         n_tx=128,
         n_ax=256,
         n_el=128,
@@ -371,25 +504,27 @@ def test_pipeline_with_scan_probe_config():
         center_frequency=5.0,
         sampling_frequency=5.0,
         xlims=(-2e-3, 2e-3),
+        probe_geometry=np.zeros((128, 3)),
     )
 
     operations = [MultiplyOperation(), AddOperation()]
     pipeline = ops.Pipeline(operations=operations)
 
-    parameters = pipeline.prepare_parameters(probe, scan)
-    result = pipeline(**parameters, x=2, y=3)
+    inputs = pipeline.prepare_parameters(parameters)
+    result = pipeline(**inputs, x=2, y=3)
 
     assert "z" in result
-    assert "probe_geometry" in result  # Check if we parsed the probe object correctly
-    assert "n_tx" not in result  # n_tx is not needed in the pipeline
+    # n_tx and probe_geometry are not needed by these operations, so they are
+    # not forwarded by prepare_parameters.
+    assert "n_tx" not in result
+    assert "probe_geometry" not in result
 
     # Now let's use n_tx, such that it has to be in the pipeline
     pipeline.append(AddTransmitsOperation())
-    parameters = pipeline.prepare_parameters(probe, scan)
-    result = pipeline(**parameters, x=2, y=3)
+    inputs = pipeline.prepare_parameters(parameters)
+    result = pipeline(**inputs, x=2, y=3)
 
     assert "z" in result
-    assert "probe_geometry" in result  # Check if we parsed the probe object correctly
     assert "n_tx" in result  # now we actually need to have n_tx in the result
 
 
@@ -617,8 +752,10 @@ def test_compact_output_omits_defaults():
     pipeline = pipeline_from_config(config)
 
     compact = pipeline.to_config()
-    beamform_dict = compact["pipeline"]["operations"][0]
-    assert beamform_dict == {"name": "beamform"}
+    # With all params at their defaults the operation compacts to a bare name
+    # string (name-only operations are not kept as dicts/Config objects).
+    beamform_op = compact["pipeline"]["operations"][0]
+    assert beamform_op == "beamform"
 
     full = pipeline.to_config(compact=False)
     beamform_dict = full["pipeline"]["operations"][0]
@@ -731,8 +868,7 @@ def get_probe():
 
     return Probe(
         probe_geometry=probe_geometry,
-        center_frequency=3.125e6,
-        sampling_frequency=12.5e6,
+        probe_center_frequency=3.125e6,
     )
 
 
@@ -742,8 +878,8 @@ def ultrasound_probe():
     return get_probe()
 
 
-def get_scan(ultrasound_probe, grid_size_x=None, grid_size_z=None):
-    """Returns a scan for ultrasound simulation tests.
+def get_parameters(ultrasound_probe, grid_size_x=None, grid_size_z=None):
+    """Returns a Parameters object for ultrasound simulation tests.
 
     Note these parameters are not really realistic, but are used for testing purposes.
     """
@@ -761,14 +897,14 @@ def get_scan(ultrasound_probe, grid_size_x=None, grid_size_z=None):
         probe_geometry=probe_geometry, polar_angles=angles, sound_speed=sound_speed
     )
 
-    return Scan(
+    return Parameters(
         grid_size_x=grid_size_x,
         grid_size_z=grid_size_z,
         n_tx=n_tx,
         n_ax=n_ax,
         n_el=n_el,
-        center_frequency=ultrasound_probe.center_frequency / 100,
-        sampling_frequency=ultrasound_probe.sampling_frequency / 100,
+        center_frequency=ultrasound_probe.probe_center_frequency / 100,
+        sampling_frequency=12.5e6 / 100,
         probe_geometry=probe_geometry,
         t0_delays=t0_delays,
         tx_apodizations=tx_apodizations,
@@ -789,9 +925,9 @@ def get_scan(ultrasound_probe, grid_size_x=None, grid_size_z=None):
 
 
 @pytest.fixture
-def ultrasound_scan(ultrasound_probe):
-    """Returns a scan for ultrasound simulation tests."""
-    return get_scan(ultrasound_probe, grid_size_x=20, grid_size_z=20)
+def ultrasound_parameters(ultrasound_probe):
+    """Returns a Parameters object for ultrasound simulation tests."""
+    return get_parameters(ultrasound_probe, grid_size_x=20, grid_size_z=20)
 
 
 def get_scatterers():
@@ -832,10 +968,10 @@ def ultrasound_scatterers():
     "with_batch_dim",
     [False, True],
 )
-def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers, with_batch_dim):
+def test_simulator(ultrasound_probe, ultrasound_parameters, ultrasound_scatterers, with_batch_dim):
     """Tests the simulator operation."""
     pipeline = ops.Pipeline([ops.Simulate()], with_batch_dim=with_batch_dim)
-    parameters = pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+    inputs = pipeline.prepare_parameters(ultrasound_parameters)
 
     if not with_batch_dim:
         # remove batch_dim of scatterers for pipeline without batch dimension
@@ -843,12 +979,17 @@ def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers, wit
         ultrasound_scatterers["magnitudes"] = ultrasound_scatterers["magnitudes"][0]
 
     output = pipeline(
-        **parameters,
+        **inputs,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
     # assert output shape with batch dimension if with_batch_dim else without
-    expected_shape = (ultrasound_scan.n_tx, ultrasound_scan.n_ax, ultrasound_scan.n_el, 1)
+    expected_shape = (
+        ultrasound_parameters.n_tx,
+        ultrasound_parameters.n_ax,
+        ultrasound_parameters.n_el,
+        1,
+    )
     expected_shape = (1,) + expected_shape if with_batch_dim else expected_shape
     assert output["data"].shape == expected_shape
 
@@ -858,23 +999,23 @@ def test_default_ultrasound_pipeline(
     default_pipeline,
     patched_pipeline,
     ultrasound_probe,
-    ultrasound_scan,
+    ultrasound_parameters,
     ultrasound_scatterers,
 ):
     """Tests the default ultrasound pipeline."""
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
-    parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+    inputs = default_pipeline.prepare_parameters(ultrasound_parameters)
     output_default = default_pipeline(
-        **parameters,
+        **inputs,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
 
-    parameters = patched_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+    inputs = patched_pipeline.prepare_parameters(ultrasound_parameters)
 
     output_patched = patched_pipeline(
-        **parameters,
+        **inputs,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
@@ -895,20 +1036,60 @@ def test_default_ultrasound_pipeline(
     )
 
 
-def test_pipeline_parameter_tracing(ultrasound_scan: Scan):
+def test_pipeline_parameter_tracing(ultrasound_parameters: Parameters):
     """Tests that the pipeline can run without parameters that are not needed as input because they
     are computed inside the pipeline."""
 
     pipeline = ops.Pipeline([ops.Demodulate(), ops.TOFCorrection()])
-    ultrasound_scan._params.pop("n_ch", None)  # remove a parameter that is not needed
-    ultrasound_scan._params.pop("demodulation_frequency", None)
-    params = pipeline.prepare_parameters(scan=ultrasound_scan)
+    ultrasound_parameters._params.pop("n_ch", None)  # remove a parameter that is not needed
+    ultrasound_parameters._params.pop("demodulation_frequency", None)
+    inputs = pipeline.prepare_parameters(ultrasound_parameters)
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     data = rng.standard_normal(
-        (1, ultrasound_scan.n_tx, ultrasound_scan.n_ax, ultrasound_scan.n_el, 1)
+        (1, ultrasound_parameters.n_tx, ultrasound_parameters.n_ax, ultrasound_parameters.n_el, 1)
     )
-    output = pipeline(data=data, **params)
+    output = pipeline(data=data, **inputs)
     assert "demodulation_frequency" in output
+
+
+def test_demodulate_int16_requires_cast():
+    """Demodulate should raise a clear error for int16 raw input."""
+    data = np.zeros((1, 4, 8, 2, 1), dtype=np.int16)
+    op = ops.Demodulate(jit_compile=False)
+
+    with pytest.raises(ValueError, match=r"Cast\(dtype='float32'\)"):
+        op(data=data, demodulation_frequency=1e6, sampling_frequency=20e6)
+
+
+def test_demodulate_int16_from_hdf5_requires_cast(tmp_path):
+    """Demodulate should raise a clear cast error for int16 raw_data loaded from HDF5."""
+    n_frames, n_tx, n_ax = 1, 2, 8
+    probe = Probe.from_name("verasonics_l11_4v")
+    n_el = probe.n_el
+    path = tmp_path / "int16_raw_data.hdf5"
+
+    scan = {
+        "sampling_frequency": np.float32(20e6),
+        "center_frequency": np.float32(5e6),
+        "demodulation_frequency": np.float32(5e6),
+        "initial_times": np.zeros(n_tx, dtype=np.float32),
+        "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+        "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+        "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+        "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+        "polar_angles": np.zeros(n_tx, dtype=np.float32),
+        "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+    }
+    raw_data = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.int16)
+
+    File.create(path, data={"raw_data": raw_data}, scan=scan, probe=probe)
+
+    with File(path, "r") as f_read:
+        loaded = f_read.data.raw_data[:]
+
+    op = ops.Demodulate(jit_compile=False)
+    with pytest.raises(ValueError, match=r"Cast\(dtype='float32'\)"):
+        op(data=loaded, demodulation_frequency=5e6, sampling_frequency=20e6)
 
 
 def test_ops_pass_positional_arg():
@@ -1058,16 +1239,23 @@ def test_all_functions_exported():
 
 
 def test_pipeline_repr():
-    """Test Pipeline.__repr__ output format."""
+    """Pipeline repr is constructor-style with no angle brackets."""
     pipeline = ops.Pipeline([MultiplyOperation(), AddOperation()], name="test_pipe")
     r = repr(pipeline)
-    assert r == "<Pipeline test_pipe=(MultiplyOperation, AddOperation)>"
+    assert r.startswith("Pipeline(")
+    assert r.endswith(")")
+    assert "<" not in r
+    assert "name='test_pipe'" in r
+    assert "operations=[" in r
+    assert "MultiplyOperation" in r
+    assert "AddOperation" in r
 
     # Nested pipeline repr
     inner = ops.Pipeline([AddOperation()], name="inner")
     outer = ops.Pipeline([MultiplyOperation(), inner], name="outer")
     r2 = repr(outer)
-    assert "Pipeline inner" in r2
+    assert "Pipeline(" in r2
+    assert "inner" in r2
 
 
 def test_pipeline_eq():
@@ -1080,7 +1268,7 @@ def test_pipeline_eq():
     assert p1 != p3
 
     # Also checks arguments to operations etc...
-    p4 = ops.Pipeline([MultiplyOperation(), AddOperation(jittable=False)], jit_options=None)
+    p4 = ops.Pipeline([MultiplyOperation(), AddOperation(output_key="test")], jit_options=None)
     assert p1 != p4
 
     # Non-Pipeline comparison
@@ -1211,11 +1399,13 @@ def test_patched_grid_get_dict():
 
 
 def test_beamform_repr():
-    """Test Beamform.__repr__ returns the expected format."""
+    """Test Beamform.__repr__ returns constructor-style format."""
 
     b = Beamform(num_patches=1, jit_options=None)
     r = repr(b)
-    assert r.startswith("<Beamform")
+    assert r.startswith("Beamform(")
+    assert r.endswith(")")
+    assert "<" not in r
     assert "TOFCorrection" in r
 
 
@@ -1346,3 +1536,21 @@ def test_pipeline_jax_jit_kwargs_merge_preserves_user_keys(monkeypatch):
 
     assert pipeline.jit_kwargs["donate_argnums"] == (0,)
     assert set(pipeline.jit_kwargs["static_argnames"]) == {"user_static", "my_static"}
+
+
+def test_default_pipeline_jit_options_none():
+    """Default pipeline jit_options should be None."""
+    pipeline = ops.Pipeline.from_default(jit_options=None)
+
+    assert pipeline.jit_options is None, "Default pipeline jit_options should be None"
+
+    def _assert_not_jitted(pipeline):
+        """Assert that the pipeline is not JIT compiled."""
+        for operation in pipeline.operations:
+            if isinstance(operation, Pipeline):
+                assert operation.jit_options is None, "Nested pipeline should not have jit_options"
+                _assert_not_jitted(operation)
+            else:
+                assert operation.jit_compile is False
+
+    _assert_not_jitted(pipeline)

@@ -116,7 +116,7 @@ A few things to keep in mind when making changes:
 
 - Make sure to write backend-agnostic code. This means that your code should work with all supported backends. This can be achieved by using the ``keras.ops`` API (see the `Keras ops documentation <https://keras.io/api/ops/>`_), instead of using backend-specific functions. For example, use ``keras.ops.squeeze`` instead of ``jax.numpy.squeeze`` or ``torch.squeeze``. Also, when converting tensors to numpy arrays, use the ``keras.ops.convert_to_numpy`` function (instead of ``my_tensor.numpy()``) to ensure compatibility with all backends.
 
-- The code is autoformatted using `ruff <https://pypi.org/project/ruff/>`_. You can run the pre-commit hooks to automatically format and check your code using:
+- The code is autoformatted using `ruff <https://pypi.org/project/ruff/>`_ and type-checked with `ty <https://github.com/astral-sh/ty>`_. You can run the pre-commit hooks to automatically format, lint, and type-check your code using:
 
 .. code-block:: shell
 
@@ -150,9 +150,23 @@ The documentation uses `Sphinx <https://www.sphinx-doc.org/>`_ and generally is 
             ValueError: If param1 is negative.
 
          Example:
+            Use ``.. doctest::`` with ``>>>`` prompts when you want to show
+            interactive input/output inline:
+
             .. doctest::
 
                >>> example_function(5, "test")
+               True
+
+            Alternatively use ``.. testcode::`` for blocks that don't fit
+            the interactive format:
+
+            .. testcode::
+
+               print(example_function(5, "test"))
+
+            .. testoutput::
+
                True
          """
          if param1 < 0:
@@ -211,10 +225,20 @@ Thank you for contributing to zea!
 Contributing topics
 -------------------
 
+Beyond the general contribution workflow above, there are a few specific areas
+where we especially welcome contributions. Browse the
+`open issues <https://github.com/tue-bmd/zea/issues>`_ to see what is being
+worked on, or open a new one to propose something new.
+
 Adding notebooks
 ~~~~~~~~~~~~~~~~
 
-New tutorial or example notebooks are always welcome! Please add them to the `docs/source/notebooks` directory. Make sure to follow the naming conventions and structure of existing notebooks. If you are adding a new tutorial, please also update the `examples.rst` file in the `docs/source` directory to check if your notebook is included.
+New tutorial or example notebooks are always welcome! Please add them to the
+`docs/source/notebooks <https://github.com/tue-bmd/zea/tree/main/docs/source/notebooks>`_
+directory. Make sure to follow the naming conventions and structure of existing
+notebooks. If you are adding a new tutorial, please also update the
+``examples.rst`` file in the ``docs/source`` directory to check if your notebook
+is included.
 
 Adding to ``zea.models``
 ~~~~~~~~~~~~~~~~~~~~~~~~

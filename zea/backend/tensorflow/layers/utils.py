@@ -17,7 +17,7 @@ def antirect(x):
     return tf.nn.crelu(x)
 
 
-def get_activation(activation: str = None):
+def get_activation(activation: str | None = None):
     """Get activation function given string.
 
     Args:
@@ -30,7 +30,9 @@ def get_activation(activation: str = None):
     Returns:
         Tensorflow activation function
     """
-    if activation.lower() == "relu":
+    if activation is None:
+        return Lambda(lambda x: x)
+    elif activation.lower() == "relu":
         return ReLU()
     elif activation.lower() == "leakyrelu":
         return LeakyReLU()
@@ -38,8 +40,6 @@ def get_activation(activation: str = None):
         return Lambda(lambda x: keras.activations.swish(x))
     elif activation.lower() == "sigmoid":
         return Lambda(lambda x: keras.activations.sigmoid(x))
-    elif activation is None:
-        return Lambda(lambda x: x)
     else:
         raise ValueError("Unknown activation function.")
 

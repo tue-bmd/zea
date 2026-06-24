@@ -21,7 +21,12 @@ def color_doppler(
             n_frames corresponds to the ensemble length used to compute
             the Doppler signal.
         center_frequency (float): Transmit center frequency in Hz.
-        pulse_repetition_frequency (float): Pulse repetition frequency in Hz.
+        pulse_repetition_frequency (float): Slow-time (Doppler) pulse repetition
+            frequency in Hz, i.e. the rate at which consecutive frames along
+            ``axis=0`` of ``data`` were acquired. In a standard acquisition each
+            frame is one pulse, so this equals the transmit PRF. If each frame is
+            built from multiple transmits (e.g. angular compounding of N angles),
+            pass the effective frame rate (transmit PRF / N) instead.
         sound_speed (float): Speed of sound in the medium in m/s.
         hamming_size (int or tuple, optional): Size of the Hamming window to apply
             for spatial averaging. If None, no window is applied.
@@ -45,7 +50,10 @@ def color_doppler(
     if hamming_size is None:
         hamming_size = np.array([1, 1], dtype=int)
     elif np.isscalar(hamming_size):
-        hamming_size = np.array([int(hamming_size), int(hamming_size)], dtype=int)
+        hamming_size = np.array(
+            [int(hamming_size), int(hamming_size)],  # ty: ignore[invalid-argument-type]
+            dtype=int,
+        )
     else:
         assert len(hamming_size) == 2, "hamming_size must be an integer or a tuple of two integers"
         hamming_size = np.array(hamming_size, dtype=int)

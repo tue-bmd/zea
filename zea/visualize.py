@@ -1,23 +1,25 @@
 """Visualization functions for 2D and 3D ultrasound data."""
 
 import importlib.resources
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 from keras.ops.image import crop_images
+from matplotlib.axes import Axes as MplAxes
 from matplotlib.patches import PathPatch, Rectangle
 from matplotlib.path import Path as pltPath
 from mpl_toolkits.axes_grid1 import ImageGrid
+from mpl_toolkits.mplot3d.axes3d import Axes3D
 from scipy.ndimage import zoom
 from skimage import measure
 
 from zea.display import frustum_convert_rtp2xyz
 
-DEFAULT_STYLE = importlib.resources.files("zea") / "zea_darkmode.mplstyle"
+DEFAULT_STYLE: str = str(importlib.resources.files("zea") / "zea_darkmode.mplstyle")
 
 
-def set_mpl_style(style: str = None) -> None:
+def set_mpl_style(style: str | None = None) -> None:
     """Set the matplotlib style.
 
     Args:
@@ -26,9 +28,7 @@ def set_mpl_style(style: str = None) -> None:
         darkmode style used throughout the zea toolbox.
 
     """
-    if style is None:
-        style = DEFAULT_STYLE
-    plt.style.use(style)
+    plt.style.use(style if style is not None else DEFAULT_STYLE)
 
 
 def plot_image_grid(
@@ -102,7 +102,9 @@ def plot_image_grid(
         factors = [i for i in range(1, len(images) + 1) if len(images) % i == 0]
         ncols = factors[len(factors) // 2] if len(factors) else len(images) // 4 + 1
     nrows = int(len(images) / ncols) + int(len(images) % ncols)
-    images = [images[i] if len(images) > i else None for i in range(nrows * ncols)]
+    images_padded: list[np.ndarray | None] = [
+        images[i] if len(images) > i else None for i in range(nrows * ncols)
+    ]
 
     aspect_ratio = images[0].shape[1] / images[0].shape[0]
     if figsize is None:
@@ -124,56 +126,68 @@ def plot_image_grid(
             fig.patch.set_facecolor(background_color)
         fig.set_layout_engine("tight", pad=0.1)
     else:
-        axes = fig.axes[: len(images)]
+        axes = fig.axes[: len(images_padded)]
 
+    cmap_list: list[str | None]
     if isinstance(cmap, str):
-        cmap = [cmap] * len(images)
+        cmap_list = [cmap] * len(images_padded)
+    elif cmap is None:
+        cmap_list = [None] * len(images_padded)
     else:
-        if cmap is None:
-            cmap = [None] * len(images)
         assert len(cmap) == len(images), (
             f"cmap must be a string or list of strings of length {len(images)}, but got {cmap}"
         )
+        cmap_list = list(cmap)
 
+    vmin_list: list[int | float | None]
     if isinstance(vmin, (int, float)):
-        vmin = [vmin] * len(images)
+        vmin_list = [vmin] * len(images_padded)
+    elif vmin is None:
+        vmin_list = [None] * len(images_padded)
     else:
-        if vmin is None:
-            vmin = [None] * len(images)
         assert len(vmin) == len(images), (
             f"vmin must be a float or list of floats of length {len(images)}, but got {vmin}"
         )
+        vmin_list = list(vmin)
 
+    vmax_list: list[int | float | None]
     if isinstance(vmax, (int, float)):
-        vmax = [vmax] * len(images)
+        vmax_list = [vmax] * len(images_padded)
+    elif vmax is None:
+        vmax_list = [None] * len(images_padded)
     else:
-        if vmax is None:
-            vmax = [None] * len(images)
         assert len(vmax) == len(images), (
             f"vmax must be a float or list of floats of length {len(images)}, but got {vmax}"
         )
+        vmax_list = list(vmax)
 
+    aspect_list: list[str | int | float | None]
     if isinstance(aspect, (int, float, str)):
-        aspect = [aspect] * len(images)
+        aspect_list = [aspect] * len(images_padded)
+    elif aspect is None:
+        aspect_list = [None] * len(images_padded)
     else:
-        if aspect is None:
-            aspect = [None] * len(images)
         assert len(aspect) == len(images), (
             "aspect must be a float, int, str, or list of these "
             f"of length {len(images)}, but got {aspect}"
         )
+        aspect_list = list(aspect)
 
     if fig_contents is None:
-        fig_contents = [None for _ in range(len(images))]
-    for i, ax in enumerate(axes):
-        image = images[i]
+        fig_contents = [None for _ in range(len(images_padded))]
+    for i, _ax in enumerate(axes):  # ty: ignore[invalid-argument-type]
+        ax = cast(MplAxes, _ax)
+        image = images_padded[i]
+        if image is None:
+            ax.set_visible(False)
+            continue
         if fig_contents[i] is None:
             im = ax.imshow(
                 image,
-                cmap=cmap[i],
-                vmin=vmin[i],
-                vmax=vmax[i],
-                aspect=aspect[i],
+                cmap=cmap_list[i],
+                vmin=vmin_list[i],
+                vmax=vmax_list[i],
+                aspect=aspect_list[i],  # ty: ignore[invalid-argument-type]
                 interpolation=interpolation,
             )
             fig_contents[i] = im
@@ -375,39 +389,47 @@ def plot_biplanes(
     if fig is None:
         fig = plt.figure()
     if ax is None:
-        ax = fig.add_subplot(projection="3d")
-        ax.set_box_aspect(volume.shape)
+        ax3d: Axes3D = cast(Axes3D, fig.add_subplot(projection="3d"))
+        ax3d.set_box_aspect(volume.shape)
         # Remove background and axes faces
-        ax.grid(False)
-        ax.xaxis.pane.fill = False
-        ax.yaxis.pane.fill = False
-        ax.zaxis.pane.fill = False
+        ax3d.grid(False)
+        ax3d.xaxis.pane.fill = False  # ty: ignore[unresolved-attribute]
+        ax3d.yaxis.pane.fill = False  # ty: ignore[unresolved-attribute]
+        ax3d.zaxis.pane.fill = False
+    else:
+        ax3d = cast(Axes3D, ax)
 
     if slice_x is not None:
-        plot_quadrants(ax, volume, "x", cmap=cmap, slice_index=slice_x, stride=stride, **kwargs)
+        plot_quadrants(ax3d, volume, "x", cmap=cmap, slice_index=slice_x, stride=stride, **kwargs)
     if slice_y is not None:
-        plot_quadrants(ax, volume, "y", cmap=cmap, slice_index=slice_y, stride=stride, **kwargs)
+        plot_quadrants(ax3d, volume, "y", cmap=cmap, slice_index=slice_y, stride=stride, **kwargs)
     if slice_z is not None:
-        plot_quadrants(ax, volume, "z", cmap=cmap, slice_index=slice_z, stride=stride, **kwargs)
+        plot_quadrants(ax3d, volume, "z", cmap=cmap, slice_index=slice_z, stride=stride, **kwargs)
 
     # Optionally show axes
     if show_axes:
-        ax.set_xlabel(show_axes.get("x", ""))
-        ax.set_ylabel(show_axes.get("y", ""))
-        ax.set_zlabel(show_axes.get("z", ""))
+        ax3d.set_xlabel(show_axes.get("x", ""))
+        ax3d.set_ylabel(show_axes.get("y", ""))
+        ax3d.set_zlabel(show_axes.get("z", ""))
         if "x_extent" in show_axes:
-            ax.set_xticks(np.linspace(0, volume.shape[0], len(show_axes["x_extent"])))
-            ax.set_xticklabels(show_axes["x_extent"])
+            ax3d.set_xticks(np.linspace(0, volume.shape[0], len(show_axes["x_extent"])))
+            ax3d.set_xticklabels(show_axes["x_extent"])
         if "y_extent" in show_axes:
-            ax.set_yticks(np.linspace(0, volume.shape[1], len(show_axes["y_extent"])))
-            ax.set_yticklabels(show_axes["y_extent"])
+            ax3d.set_yticks(np.linspace(0, volume.shape[1], len(show_axes["y_extent"])))
+            ax3d.set_yticklabels(show_axes["y_extent"])
         if "z_extent" in show_axes:
-            ax.set_zticks(np.linspace(0, volume.shape[2], len(show_axes["z_extent"])))
-            ax.set_zticklabels(show_axes["z_extent"])
+            ax3d.set_zticks(  # ty: ignore[call-non-callable]
+                np.linspace(
+                    0,
+                    volume.shape[2],
+                    len(show_axes["z_extent"]),
+                )
+            )
+            ax3d.set_zticklabels(show_axes["z_extent"])  # ty: ignore[call-non-callable]
     else:
-        ax.set_axis_off()
+        ax3d.set_axis_off()
 
-    return fig, ax
+    return fig, ax3d
 
 
 def plot_frustum_vertices(
@@ -543,13 +565,15 @@ def plot_frustum_vertices(
     if fig is None:
         fig = plt.figure()
     if ax is None:
-        ax = fig.add_subplot(111, projection="3d")
+        ax3d: Axes3D = cast(Axes3D, fig.add_subplot(111, projection="3d"))
+    else:
+        ax3d = cast(Axes3D, ax)
 
     def _plot_edges(edges, **kwargs):
         for edge in edges:
             rho_pts, theta_pts, phi_pts = generate_edge_points(edge[0], edge[1], num_points)
             x, y, z = frustum_convert_rtp2xyz(rho_pts, theta_pts, phi_pts)
-            ax.plot(x, y, -z, **kwargs)
+            ax3d.plot(x, y, -z, **kwargs)
 
     # Plot frustum edges
     _plot_edges(edges, **frustum_style)
@@ -628,16 +652,16 @@ def plot_frustum_vertices(
                 _plot_edges(plane_edges, **style_dict)
 
     # Set axes properties
-    ax.set_xlim([x_min, x_max])
-    ax.set_ylim([y_min, y_max])
-    ax.set_zlim([z_min, z_max])
-    ax.set_axis_off()
-    ax.grid(False)
-    ax.xaxis.pane.fill = False
-    ax.yaxis.pane.fill = False
-    ax.zaxis.pane.fill = False
+    ax3d.set_xlim((x_min, x_max))
+    ax3d.set_ylim((y_min, y_max))
+    ax3d.set_zlim((z_min, z_max))
+    ax3d.set_axis_off()
+    ax3d.grid(False)
+    ax3d.xaxis.pane.fill = False  # ty: ignore[unresolved-attribute]
+    ax3d.yaxis.pane.fill = False  # ty: ignore[unresolved-attribute]
+    ax3d.zaxis.pane.fill = False
 
-    return fig, ax
+    return fig, ax3d
 
 
 def visualize_matrix(matrix, font_color="white", **kwargs):
@@ -735,7 +759,7 @@ def plot_rectangle_from_mask(ax, mask, **kwargs):
     return ax.add_patch(rect)
 
 
-def plot_shape_from_mask(ax, mask, **kwargs):
+def plot_shape_from_mask(ax, mask, extent=None, **kwargs):
     """Plots a shape to axis from mask array.
 
     Is useful for displaying irregular shapes such as segmentations
@@ -773,10 +797,18 @@ def plot_shape_from_mask(ax, mask, **kwargs):
     padded_mask = np.pad(mask, pad_width=1, mode="constant", constant_values=0)
     contours = measure.find_contours(padded_mask, 0.5)
     patches = []
+    h, w = mask.shape
     for contour in contours:
         # Remove padding offset
         contour -= 1
-        path = pltPath(contour[:, ::-1])
+        if extent is not None:
+            # Map pixel (row, col) → data coordinates given extent=[left, right, bottom, top]
+            x = extent[0] + contour[:, 1] * (extent[1] - extent[0]) / w
+            y = extent[3] + contour[:, 0] * (extent[2] - extent[3]) / h
+            coords = np.stack([x, y], axis=1)
+        else:
+            coords = contour[:, ::-1]
+        path = pltPath(coords)
         patch = PathPatch(path, **kwargs)
         patches.append(ax.add_patch(patch))
     return patches

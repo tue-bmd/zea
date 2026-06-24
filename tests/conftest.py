@@ -1,16 +1,22 @@
 """This file contains fixtures that are used by all tests in the tests directory."""
 
+import os
 from collections import defaultdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pytest
 
-from zea.data.data_format import generate_example_dataset  # noqa: E402
-from zea.internal.device import backend_cuda_available  # noqa: E402
+from zea.internal.device import backend_cuda_available, init_device
 
-# Capture GPU availability NOW, before tests/__init__.py sets CUDA_VISIBLE_DEVICES=""
-_GPU_AVAILABLE = any(backend_cuda_available(b) for b in ["torch", "tensorflow", "jax"])
+# Device setup for the test session. Kept here (and not in tests/__init__.py) on purpose:
+# init_device imports tensorflow -> keras, which locks the keras backend. The spawned
+# BackendEqualityCheck workers re-import the `tests` package but never load conftest, so
+# they remain free to select their own backend. See tests/__init__.py for details.
+device = init_device(allow_preallocate=False)
+
+_GPU_AVAILABLE = backend_cuda_available(os.environ.get("KERAS_BACKEND"))
+
 
 from . import (  # noqa: E402
     DUMMY_DATASET_GRID_SIZE_X,
@@ -19,6 +25,7 @@ from . import (  # noqa: E402
     _notebook_timings,
     backend_workers,
 )
+from .data import generate_example_dataset  # noqa: E402
 
 plt.rcParams["backend"] = "agg"
 
@@ -40,11 +47,23 @@ def pytest_addoption(parser):
     )
 
 
-def pytest_sessionstart(session):
-    notebooks_dir = Path("docs/source/notebooks")
-    notebooks = list(notebooks_dir.rglob("*.ipynb"))
-    if notebooks:
-        print(f"📚 Preparing to test {len(notebooks)} notebooks from {notebooks_dir}")
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip ``@pytest.mark.gpu`` tests when no CUDA GPU is accessible.
+    Also announce notebook count only when notebook tests are actually collected.
+    """
+    has_notebooks = any("notebook" in item.nodeid for item in items)
+    if has_notebooks:
+        notebooks_dir = Path("docs/source/notebooks")
+        notebooks = list(notebooks_dir.rglob("*.ipynb"))
+        if notebooks:
+            print(f"\n📚 Preparing to test {len(notebooks)} notebooks from {notebooks_dir}")
+
+    if _GPU_AVAILABLE:
+        return
+    skip_gpu = pytest.mark.skip(reason="No CUDA GPU available at runtime")
+    for item in items:
+        if "gpu" in item.keywords:
+            item.add_marker(skip_gpu)
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -76,16 +95,6 @@ def pytest_sessionfinish(session, exitstatus):
     grand_str = f"{int(grand_mins)}m {grand_secs:.1f}s" if grand_mins else f"{grand_secs:.1f}s"
     print(f"  {'TOTAL':<{col_w}}  {grand_str:>8}")
     print("=" * (col_w + 20) + "\n")
-
-
-def pytest_collection_modifyitems(config, items):
-    """Auto-skip ``@pytest.mark.gpu`` tests when no CUDA GPU is accessible."""
-    if _GPU_AVAILABLE:
-        return
-    skip_gpu = pytest.mark.skip(reason="No CUDA GPU available at runtime")
-    for item in items:
-        if "gpu" in item.keywords:
-            item.add_marker(skip_gpu)
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -36,9 +36,12 @@ class DataTypes(enum.Enum):
                         center frequency is removed from the signal.
     image           --> After log compression of the envelope data, the
                         image is formed.
-    image_sc        --> The scan converted image is transformed to cartesian
-                        (x, y) format to account for possible curved arrays.
-
+    image_sc        --> (DEPRECATED, legacy read-only) The scan converted image is
+                        transformed to cartesian (x, y) format to account for possible
+                        curved arrays. This data type is retained only so that legacy
+                        files containing it can still be read; new files should store
+                        the (polar) ``image`` together with per-pixel coordinates and
+                        rely on :func:`zea.display.scan_convert` for scan conversion.
     """
 
     RAW_DATA = "raw_data"
@@ -61,6 +64,9 @@ class classproperty(property):
     """Define a class level property."""
 
     def __get__(self, _, owner_cls):
+        # ``property.fget`` is typed as optional, but a ``classproperty`` is only
+        # ever constructed as a decorator, so the getter is always present.
+        assert self.fget is not None
         return self.fget(owner_cls)
 
 
@@ -172,7 +178,7 @@ def _skip_to_tensor(value):
     return isinstance(value, str) or callable(value) or isinstance(value, bytes)
 
 
-def dict_to_tensor(dictionary, keep_as_is=None):
+def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
     """Convert an object to a dictionary of tensors."""
     snapshot = {}
 
@@ -198,7 +204,7 @@ def dict_to_tensor(dictionary, keep_as_is=None):
     return snapshot
 
 
-def _to_tensor(key, val, keep_as_is: list = None):
+def _to_tensor(key: str, val, keep_as_is: list | None = None):
     if keep_as_is is None:
         keep_as_is = []
 
@@ -212,7 +218,7 @@ def _to_tensor(key, val, keep_as_is: list = None):
         return None
     # Recursively handle dicts
     if isinstance(val, dict):
-        return {k: _to_tensor(k, v) for k, v in val.items()}
+        return {k: _to_tensor(k, v, keep_as_is=keep_as_is) for k, v in val.items()}
     # Use float precision for all floats (including np.float32/64)
     if isinstance(val, float) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, float)):
         dtype = BASE_FLOAT_PRECISION
