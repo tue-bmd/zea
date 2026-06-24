@@ -23,10 +23,10 @@ from zea.ops.pipeline import (
     pipeline_from_json,
     pipeline_to_yaml,
 )
-from zea.probes import Probe
 from zea.parameters import Parameters
+from zea.probes import Probe
 
-from . import DEFAULT_TEST_SEED
+from . import DEFAULT_TEST_SEED, run_in_backend
 
 """Some operations for testing"""
 
@@ -357,8 +357,8 @@ def test_pipeline_keys():
 def test_pipeline_dotted_registry_name():
     """Operations with dotted registry names (e.g. keras built-ins) are reachable
     by their short last-component name."""
-    from zea.ops.pipeline import Pipeline
     from zea.ops.keras_ops import Cast
+    from zea.ops.pipeline import Pipeline
 
     pipeline = Pipeline.from_default(jit_options=None)
     # Cast is registered as "keras.ops.cast" but must be addressable as "cast"
@@ -1516,7 +1516,8 @@ def test_pipeline_yaml_is_portable_no_python_tuple_tag(tmp_path):
     assert "!!python/tuple" not in content
 
 
-def test_pipeline_jax_jit_kwargs_merge_preserves_user_keys(monkeypatch):
+@run_in_backend("jax")
+def test_pipeline_jax_jit_kwargs_merge_preserves_user_keys():
     """When backend is JAX, static_argnames should merge with existing jit_kwargs."""
 
     @ops_registry("static_param_test_op")
@@ -1525,8 +1526,6 @@ def test_pipeline_jax_jit_kwargs_merge_preserves_user_keys(monkeypatch):
 
         def call(self, **kwargs):
             return {}
-
-    monkeypatch.setattr(keras.backend, "backend", lambda: "jax")
 
     pipeline = Pipeline(
         operations=[StaticParamTestOp()],

@@ -32,7 +32,9 @@ import keras
 from zea import log
 
 
-def _import_tf():
+def _import_tf(force=False):
+    if not force and keras.backend.backend() != "tensorflow":
+        return None
     try:
         import tensorflow as tf
 
@@ -41,7 +43,9 @@ def _import_tf():
         return None
 
 
-def _import_jax():
+def _import_jax(force=False):
+    if not force and keras.backend.backend() != "jax":
+        return None
     try:
         import jax
 
@@ -50,7 +54,9 @@ def _import_jax():
         return None
 
 
-def _import_torch():
+def _import_torch(force=False):
+    if not force and keras.backend.backend() != "torch":
+        return None
     try:
         import torch
 
@@ -71,9 +77,9 @@ def _get_backend():
         return None
 
 
+backend = _get_backend()
 tf_mod = _import_tf()
 jax_mod = _import_jax()
-backend = _get_backend()
 
 
 def tf_function(func=None, jit_compile=False, **kwargs):
