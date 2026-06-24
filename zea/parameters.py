@@ -496,7 +496,38 @@ class Parameters(BaseParameters):
         return len(self.selected_transmits)
 
     def set_transmits(self, selection):
-        """Select which transmit events to use.
+        """Set the selected transmits based on a selection.
+
+        Args:
+            selection: Specifies which transmits to select:
+                - None: Use all transmits
+                - "all": Use all transmits
+                - "center": Use only the center transmit
+                - "focused": Use only focused transmits
+                - "diverging": Use only diverging transmits
+                - "plane": Use only plane wave transmits
+                - int: Select this many evenly spaced transmits
+                - list/array: Use these specific transmit indices
+                - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2))
+
+        Returns:
+            The current instance for method chaining.
+        """
+        if selection is None and self._params.get("n_tx") is None:
+            # n_tx not yet known (e.g. file with image-only data); store as-is.
+            idx = None
+        else:
+            idx = self.find_transmits(selection)
+            if len(idx) == 0:
+                log.warning(f"No transmits found for selection '{selection}'.")
+
+        self._params["selected_transmits"] = idx
+        self._invalidate("selected_transmits")
+
+        return self
+
+    def find_transmits(self, selection) -> list:
+        """Find transmit events based on a selection.
 
         This method provides flexible ways to select transmit events:
 
@@ -513,25 +544,20 @@ class Parameters(BaseParameters):
                 - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2))
 
         Returns:
-            The current instance for method chaining.
+            The selected transmit indices.
 
         Raises:
             ValueError: If the selection is invalid or incompatible with the scan.
         """
         n_tx_total = self._params.get("n_tx")
         if n_tx_total is None:
-            if selection is None:
-                # n_tx not yet known (e.g. file with image-only data); store as-is.
-                self._params["selected_transmits"] = None
-                self._invalidate("selected_transmits")
-                return self
-            raise ValueError("n_tx must be set before calling set_transmits")
+            raise ValueError("n_tx must be set.")
 
         # Handle array-like - convert to list of indices
         if isinstance(selection, np.ndarray):
             if len(selection.shape) == 0:
                 # Handle scalar numpy array
-                return self.set_transmits(int(selection))
+                selection = int(selection)
             elif len(selection.shape) == 1:
                 selection = selection.tolist()
             else:
@@ -539,49 +565,30 @@ class Parameters(BaseParameters):
 
         # Handle None and "all" - use all transmits
         if selection is None or selection == "all":
-            self._params["selected_transmits"] = list(range(n_tx_total))
-            self._invalidate("selected_transmits")
-            return self
+            return list(range(n_tx_total))
 
         # Handle "center" - use center transmit
         if selection == "center":
-            self._params["selected_transmits"] = [n_tx_total // 2]
-            self._invalidate("selected_transmits")
-            return self
+            return [n_tx_total // 2]
 
         if selection == "focused":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select focused transmits")
             # Plane waves use inf (or 0); a finite positive focus marks a focused transmit.
-            idx = np.where((value > 0) & np.isfinite(value))[0].tolist()
-            if len(idx) == 0:
-                raise ValueError("No focused transmits found.")
-            self._params["selected_transmits"] = idx
-            self._invalidate("selected_transmits")
-            return self
+            return np.where((value > 0) & np.isfinite(value))[0].tolist()
 
         if selection == "diverging":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select diverging transmits")
-            idx = np.where(value < 0)[0].tolist()
-            if len(idx) == 0:
-                raise ValueError("No diverging transmits found.")
-            self._params["selected_transmits"] = idx
-            self._invalidate("selected_transmits")
-            return self
+            return np.where(value < 0)[0].tolist()
 
         if selection == "plane":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select plane wave transmits")
-            idx = np.concatenate([np.where(value == 0)[0], np.where(np.isinf(value))[0]]).tolist()
-            if len(idx) == 0:
-                raise ValueError("No plane wave transmits found.")
-            self._params["selected_transmits"] = idx
-            self._invalidate("selected_transmits")
-            return self
+            return np.where((value == 0) | np.isinf(value))[0].tolist()
 
         # Handle integer - select evenly spaced transmits
         if isinstance(selection, (int, np.integer)):
@@ -595,14 +602,11 @@ class Parameters(BaseParameters):
                 )
 
             if selection == 1:
-                self._params["selected_transmits"] = [n_tx_total // 2]
+                return [n_tx_total // 2]
             else:
                 # Compute evenly spaced indices
                 tx_indices = np.linspace(0, n_tx_total - 1, selection)
-                self._params["selected_transmits"] = list(np.rint(tx_indices).astype(int))
-
-            self._invalidate("selected_transmits")
-            return self
+                return list(np.rint(tx_indices).astype(int))
 
         # Handle slice - convert to list of indices
         if isinstance(selection, slice):
@@ -617,11 +621,8 @@ class Parameters(BaseParameters):
             if any(i < 0 or i >= n_tx_total for i in selection):
                 raise ValueError(f"Transmit indices must be between 0 and {n_tx_total - 1}")
 
-            self._params["selected_transmits"] = [
-                int(i) for i in selection
-            ]  # Convert numpy integers to Python ints
-            self._invalidate("selected_transmits")
-            return self
+            # Convert numpy integers to Python ints
+            return [int(i) for i in selection]
 
         raise ValueError(f"Unsupported selection type: {type(selection)}")
 
