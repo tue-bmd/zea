@@ -100,6 +100,7 @@ def test_conversion_script(tmp_path_factory, dataset):
                 str(dst),
                 "--no_hyperthreading",
             ],
+            env=create_env_for_dataset(dataset),
         )
         with open(dst / "split.yaml", "r") as f:
             split_content1 = yaml.safe_load(f)
