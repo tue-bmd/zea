@@ -36,12 +36,8 @@ def _gpu_available() -> bool:
 # must be before importing anything that may call init_device()
 _GPU_AVAILABLE = _gpu_available()
 
-# Warm up jax's GPU backend once, while all GPUs are still visible, so its
-# process-global CUDA client is created healthy. jax initialises this client
-# lazily on first use and caches it for the whole process; if the first init
-# happens while a test has hidden the GPUs (CUDA_VISIBLE_DEVICES=""), jax
-# permanently falls back to CPU (cuInit -> CUDA_ERROR_NO_DEVICE) and every later
-# GPU check in the process returns False. See test_multi_gpu_returns_list.
+# Warm up jax's GPU backend while all GPUs are still visible. If the first init happens when
+# a test has hidden the GPUs, jax permanently falls back to CPU.
 if _GPU_AVAILABLE:
     try:
         import jax as _jax
