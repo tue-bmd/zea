@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib.util
 from collections import Counter
 
-import keras
 from zea import log
 
 ML_BACKENDS = ("tensorflow", "torch", "jax")
@@ -80,6 +79,8 @@ def runs_on(*backends) -> bool:
     """Return whether the current test backend is one of the requested backends.
     Misses are counted so pytest can report how many backend-guarded blocks were skipped.
     """
+    import keras
+
     active_backend = keras.backend.backend()
     if active_backend in backends:
         return True
@@ -91,6 +92,8 @@ def runs_not_on(*backends) -> bool:
     """Return whether the current test backend is not one of the excluded backends.
     Misses are counted so pytest can report how many backend-guarded blocks were skipped.
     """
+    import keras
+
     active_backend = keras.backend.backend()
     if active_backend not in backends:
         return True
