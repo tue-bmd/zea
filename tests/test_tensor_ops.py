@@ -12,7 +12,7 @@ from scipy.ndimage import gaussian_filter
 
 import zea
 
-from . import DEFAULT_TEST_SEED, backend_equality_check
+from . import DEFAULT_TEST_SEED, backend_equality_check, run_in_backend
 
 
 @pytest.mark.parametrize(
@@ -951,3 +951,85 @@ def test_nonzero(array, size, fill_value):
 
     # Returned for the cross-backend equality check.
     return np.stack(out_np)
+
+
+def test_split_seed_none_returns_list_of_none():
+    """split_seed(None, n) returns a list of n None values (any backend)."""
+    from zea.func.tensor import split_seed
+
+    result = split_seed(None, 4)
+    assert result == [None, None, None, None]
+
+
+@run_in_backend("jax")
+def test_split_seed_jax_returns_split_keys():
+    """split_seed with a JAX key returns n independent JAX keys."""
+    import jax
+
+    from zea.func.tensor import split_seed
+
+    key = jax.random.PRNGKey(42)
+    result = split_seed(key, 3)
+    assert len(result) == 3
+    assert all(isinstance(r, jax.Array) for r in result)
+
+
+def test_split_seed_seed_generator_returns_duplicated_refs():
+    """split_seed with a SeedGenerator returns n references to the same object (non-JAX)."""
+    import keras
+    import pytest
+
+    from zea.func.tensor import split_seed
+
+    if keras.backend.backend() == "jax":
+        pytest.skip("SeedGenerator branch only applies to non-JAX backends")
+    sg = keras.random.SeedGenerator(7)
+    result = split_seed(sg, 3)
+    assert len(result) == 3
+    assert all(r is sg for r in result)
+
+
+@run_in_backend("jax")
+def test_is_jax_prng_key_true_for_valid_key():
+    """Returns True for a jax.random.PRNGKey (shape (2,), dtype uint32)."""
+    import jax
+
+    from zea.func.tensor import is_jax_prng_key
+
+    key = jax.random.PRNGKey(0)
+    assert is_jax_prng_key(key)
+
+
+@run_in_backend("jax")
+def test_is_jax_prng_key_false_for_wrong_shape():
+    """Returns False for a JAX array that doesn't match PRNGKey shape."""
+    import jax.numpy as jnp
+
+    from zea.func.tensor import is_jax_prng_key
+
+    arr = jnp.array([1, 2, 3], dtype=jnp.uint32)  # shape (3,), not (2,)
+    assert not is_jax_prng_key(arr)
+
+
+@run_in_backend("jax")
+def test_is_jax_prng_key_false_for_wrong_dtype():
+    """Returns False for a JAX array with correct shape but wrong dtype."""
+    import jax.numpy as jnp
+
+    from zea.func.tensor import is_jax_prng_key
+
+    arr = jnp.array([1, 2], dtype=jnp.float32)  # shape (2,) but float32
+    assert not is_jax_prng_key(arr)
+
+
+def test_is_jax_prng_key_false_on_non_jax_backend():
+    """Returns False unconditionally when the active backend is not JAX."""
+    import keras
+    import pytest
+
+    from zea.func.tensor import is_jax_prng_key
+
+    if keras.backend.backend() == "jax":
+        pytest.skip("Test verifies non-JAX short-circuit path")
+    assert not is_jax_prng_key(None)
+    assert not is_jax_prng_key(42)
