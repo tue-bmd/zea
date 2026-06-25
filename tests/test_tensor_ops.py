@@ -953,83 +953,79 @@ def test_nonzero(array, size, fill_value):
     return np.stack(out_np)
 
 
-def test_split_seed_none_returns_list_of_none():
-    """split_seed(None, n) returns a list of n None values (any backend)."""
+def _draw_per_seed(seeds):
+    """Draw an independent uniform vector for each seed, as a list of numpy arrays."""
+    from keras import random as keras_random
+
+    return [ops.convert_to_numpy(keras_random.uniform((6,), seed=s)) for s in seeds]
+
+
+def test_split_seed_none_drives_unseeded_randomness():
+    """None flows through split_seed and still drives random ops."""
+    from keras import random as keras_random
+
     from zea.func.tensor import split_seed
 
-    result = split_seed(None, 4)
-    assert result == [None, None, None, None]
+    seeds = split_seed(None, 3)
+    assert seeds == [None, None, None]
+
+    # Unseeded draws must still run and produce the right shape on any backend.
+    draws = [keras_random.uniform((4,), seed=s) for s in seeds]
+    assert all(ops.shape(d) == (4,) for d in draws)
 
 
 @run_in_backend("jax")
-def test_split_seed_jax_returns_split_keys():
-    """split_seed with a JAX key returns n independent JAX keys."""
+def test_split_seed_typed_jax_key_splits_into_independent_keys():
+    """A typed jax.random.key() is split into usable, independent keys."""
     import jax
 
     from zea.func.tensor import split_seed
 
-    key = jax.random.PRNGKey(42)
-    result = split_seed(key, 3)
-    assert len(result) == 3
-    assert all(isinstance(r, jax.Array) for r in result)
+    key = jax.random.key(0)
+    splits_a = split_seed(key, 3)
+    splits_b = split_seed(key, 3)
+    assert len(splits_a) == 3
+
+    draws_a = [np.asarray(jax.random.uniform(s, (6,))) for s in splits_a]
+    draws_b = [np.asarray(jax.random.uniform(s, (6,))) for s in splits_b]
+
+    # Splitting the same key is deterministic, and the splits are independent.
+    for a, b in zip(draws_a, draws_b):
+        np.testing.assert_allclose(a, b)
+    assert not np.allclose(draws_a[0], draws_a[1])
 
 
-def test_split_seed_seed_generator_returns_duplicated_refs():
-    """split_seed with a SeedGenerator returns n references to the same object (non-JAX)."""
-    import keras
-    import pytest
+@run_in_backend("tensorflow")
+def test_split_seed_existing_seed_generator_reused_on_non_jax():
+    """A pre-built SeedGenerator passes through unchanged and is reused for each draw."""
+    from keras import random as keras_random
 
     from zea.func.tensor import split_seed
 
-    if keras.backend.backend() == "jax":
-        pytest.skip("SeedGenerator branch only applies to non-JAX backends")
-    sg = keras.random.SeedGenerator(7)
-    result = split_seed(sg, 3)
-    assert len(result) == 3
-    assert all(r is sg for r in result)
+    sg = keras_random.SeedGenerator(11)
+    splits = split_seed(sg, 3)
+    # Passthrough: the same stateful generator is reused for every split.
+    assert all(s is sg for s in splits)
+
+    draws = _draw_per_seed(splits)
+    assert not np.allclose(draws[0], draws[1])
 
 
 @run_in_backend("jax")
-def test_is_jax_prng_key_true_for_valid_key():
-    """Returns True for a jax.random.PRNGKey (shape (2,), dtype uint32)."""
-    import jax
-
-    from zea.func.tensor import is_jax_prng_key
-
-    key = jax.random.PRNGKey(0)
-    assert is_jax_prng_key(key)
-
-
-@run_in_backend("jax")
-def test_is_jax_prng_key_false_for_wrong_shape():
-    """Returns False for a JAX array that doesn't match PRNGKey shape."""
+def test_split_seed_rejects_plain_jax_array():
+    """A plain (non-key) JAX array is not mistaken for a key and is rejected."""
     import jax.numpy as jnp
 
-    from zea.func.tensor import is_jax_prng_key
+    from zea.func.tensor import split_seed
 
-    arr = jnp.array([1, 2, 3], dtype=jnp.uint32)  # shape (3,), not (2,)
-    assert not is_jax_prng_key(arr)
-
-
-@run_in_backend("jax")
-def test_is_jax_prng_key_false_for_wrong_dtype():
-    """Returns False for a JAX array with correct shape but wrong dtype."""
-    import jax.numpy as jnp
-
-    from zea.func.tensor import is_jax_prng_key
-
-    arr = jnp.array([1, 2], dtype=jnp.float32)  # shape (2,) but float32
-    assert not is_jax_prng_key(arr)
+    arr = jnp.array([1.0, 2.0], dtype=jnp.float32)
+    with pytest.raises(TypeError):
+        split_seed(arr, 2)
 
 
-def test_is_jax_prng_key_false_on_non_jax_backend():
-    """Returns False unconditionally when the active backend is not JAX."""
-    import keras
-    import pytest
+def test_split_seed_rejects_unknown_seed_type():
+    """An unsupported seed type is rejected on any backend."""
+    from zea.func.tensor import split_seed
 
-    from zea.func.tensor import is_jax_prng_key
-
-    if keras.backend.backend() == "jax":
-        pytest.skip("Test verifies non-JAX short-circuit path")
-    assert not is_jax_prng_key(None)
-    assert not is_jax_prng_key(42)
+    with pytest.raises((TypeError, AssertionError)):
+        split_seed("not-a-seed", 2)
