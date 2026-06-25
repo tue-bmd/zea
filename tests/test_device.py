@@ -32,6 +32,14 @@ from . import DEFAULT_TEST_SEED, backend_equality_check
 _DEVICES = ["cpu", "gpu:0", "cuda:0", "auto:-1", "auto:1"]
 _BACKENDS = ["tensorflow", "torch", "jax", "auto", "numpy"]
 
+# Skip multi-GPU tests if not at least this much free memory on 2 GPUs
+_MIN_GPU_FREE_MIB = 8192
+
+
+def _gpus_with_free_memory(min_free_mib: int = _MIN_GPU_FREE_MIB) -> int:
+    """Number of GPUs reporting at least ``min_free_mib`` MiB of free memory."""
+    return sum(free >= min_free_mib for free in get_gpu_memory(verbose=False))
+
 
 def _tensor_device_name(tensor) -> str:
     """Return a lowercase device string for a tensor (e.g. ``'cpu'``, ``'cuda:0'``)."""
@@ -135,8 +143,8 @@ class TestInitDevice:
     def test_multi_gpu_returns_list(self, monkeypatch, backend):  # pragma: no cover
         """``init_device('auto:2')`` returns a list of two device strings."""
         monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
-        if len(get_gpu_memory(verbose=False)) < 2:
-            pytest.skip("Requires at least 2 GPUs")
+        if _gpus_with_free_memory() < 2:
+            pytest.skip(f"Requires at least 2 GPUs with >= {_MIN_GPU_FREE_MIB} MiB free")
         devices = init_device(device="auto:2", backend=backend, verbose=False)
         assert isinstance(devices, list), f"Expected list, got {type(devices)}"
         assert len(devices) == 2
@@ -161,8 +169,8 @@ class TestInitDevice:
         monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
 
         all_memories = get_gpu_memory(verbose=False)
-        if len(all_memories) < 2:
-            pytest.skip("Requires at least 2 physical GPUs")
+        if sum(free >= _MIN_GPU_FREE_MIB for free in all_memories) < 2:
+            pytest.skip(f"Requires at least 2 physical GPUs with >= {_MIN_GPU_FREE_MIB} MiB free")
 
         # Physical IDs of the top-2 GPUs by free memory
         sorted_ids = sorted(range(len(all_memories)), key=lambda i: all_memories[i], reverse=True)

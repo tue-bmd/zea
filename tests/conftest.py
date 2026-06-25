@@ -1,6 +1,8 @@
 """This file contains fixtures that are used by all tests in the tests directory."""
 
 import os
+import subprocess
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -8,10 +10,31 @@ import matplotlib.pyplot as plt
 import pytest
 
 from .data import generate_example_dataset
-from zea.internal.device import backend_cuda_available
+
+
+def _gpu_available() -> bool:
+    """Check in subprocesses so cpu tensorflow installs don't poison the CUDA state."""
+    probe = (
+        "import sys;"
+        "from zea.internal.device import backend_cuda_available;"
+        "sys.exit(0 if backend_cuda_available(sys.argv[1]) else 1)"
+    )
+    for backend in ("torch", "tensorflow", "jax"):
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", probe, backend],
+                capture_output=True,
+                timeout=120,
+            )
+        except Exception:
+            continue
+        if result.returncode == 0:
+            return True
+    return False
+
 
 # must be before importing anything that may call init_device()
-_GPU_AVAILABLE = any(backend_cuda_available(b) for b in ["torch", "tensorflow", "jax"])
+_GPU_AVAILABLE = _gpu_available()
 
 # Device setup for the test session. Kept here (and not in tests/__init__.py) on purpose:
 # init_device imports tensorflow -> keras, which locks the keras backend. The spawned
