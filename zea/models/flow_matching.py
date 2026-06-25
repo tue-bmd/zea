@@ -315,6 +315,9 @@ class FlowMatchingModel(DiffusionModel):
             ``pred_images`` is :math:`\\hat{x}_0`.
         """
         pred_velocities = self([noisy_images, noise_rates], training=training, network=network)
+        # Under mixed precision the network returns bf16/fp16 while the schedule
+        # (noise_rates) and noisy_images are float32; align dtypes before the mul.
+        pred_velocities = ops.cast(pred_velocities, noisy_images.dtype)
         # x̂₀ = x_t - t · v
         pred_images = noisy_images - noise_rates * pred_velocities
         # ε̂  = x̂₀ + v  (since v = ε − x₀  ⟹  ε = x₀ + v)
@@ -419,7 +422,12 @@ class FlowMatchingModel(DiffusionModel):
         batch_size, *input_shape = ops.shape(data)
         n_dims = len(input_shape)
 
-        noises = keras.random.normal(shape=ops.shape(data))
+        # Keep all flow-matching math (schedule, interpolation, loss) in float32;
+        # only the network internals run in bf16/fp16 under a mixed-precision
+        # policy. This avoids dtype clashes between the float32 schedule and the
+        # policy-dtype data/noise.
+        data = ops.cast(data, "float32")
+        noises = keras.random.normal(shape=ops.shape(data), dtype="float32")
 
         diffusion_times = self._sample_diffusion_times(batch_size, n_dims)
         noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
@@ -432,6 +440,7 @@ class FlowMatchingModel(DiffusionModel):
 
         with tf.GradientTape() as tape:
             pred_velocities = self([noisy_data, noise_rates], training=True)
+            pred_velocities = ops.cast(pred_velocities, noisy_data.dtype)
             pred_images = noisy_data - noise_rates * pred_velocities
             velocity_loss = self.loss(target_velocities, pred_velocities)
             image_loss = self.loss(data, pred_images)
@@ -453,7 +462,9 @@ class FlowMatchingModel(DiffusionModel):
         batch_size, *input_shape = ops.shape(data)
         n_dims = len(input_shape)
 
-        noises = keras.random.normal(shape=ops.shape(data))
+        # See train_step: keep flow-matching math in float32 under mixed precision.
+        data = ops.cast(data, "float32")
+        noises = keras.random.normal(shape=ops.shape(data), dtype="float32")
 
         diffusion_times = self._sample_diffusion_times(batch_size, n_dims)
         noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
@@ -462,6 +473,7 @@ class FlowMatchingModel(DiffusionModel):
         target_velocities = noises - data
 
         pred_velocities = self([noisy_data, noise_rates], training=False)
+        pred_velocities = ops.cast(pred_velocities, noisy_data.dtype)
         pred_images = noisy_data - noise_rates * pred_velocities
         velocity_loss = self.loss(target_velocities, pred_velocities)
         image_loss = self.loss(data, pred_images)
