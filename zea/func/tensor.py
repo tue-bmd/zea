@@ -182,28 +182,57 @@ def boolean_mask(tensor, mask, size=None):
         return tensor[mask]
 
 
-if keras.backend.backend() == "jax":
-    import jax.numpy as jnp
+def nonzero(x, size=None, fill_value=None):
+    """Return the indices of the elements that are non-zero.
 
-    def nonzero(x, size=None, fill_value=None):
-        """Return the indices of the elements that are non-zero.
+    Mirrors :func:`jax.numpy.nonzero`. When ``size`` is ``None`` this falls back to
+    :func:`keras.ops.nonzero` (dynamic, data-dependent output shape). When ``size`` is
+    given, the output has a static shape: the nonzero indices are truncated to ``size``
+    entries, or padded with ``fill_value`` if there are fewer than ``size`` of them. The
+    static shape makes the result usable inside tracing/vectorization.
 
-        Args:
-            x (Tensor): Input tensor.
-            size (int, optional): optional static integer specifying the number of nonzero
-                entries to return. If there are more nonzero elements than the specified size,
-                then indices will be truncated at the end. If there are fewer nonzero elements
-                than the specified size, then indices will be padded with fill_value.
-            fill_value (int, optional): Value to fill in case there are not enough
-                non-zero elements. Defaults to None.
-        """
+    Args:
+        x (Tensor): Input tensor.
+        size (int, optional): optional static integer specifying the number of nonzero
+            entries to return. If there are more nonzero elements than the specified size,
+            then indices will be truncated at the end. If there are fewer nonzero elements
+            than the specified size, then indices will be padded with fill_value.
+        fill_value (int, optional): Value to fill in case there are not enough
+            non-zero elements. Defaults to None, which falls back to 0.
+    """
+    # Use ops.nonzero when size is not used
+    if size is None:
+        return ops.nonzero(x)
+
+    # Directly use jnp.nonzero if JAX backend is used
+    if keras.backend.backend() == "jax":
+        import jax.numpy as jnp
+
         return jnp.nonzero(x, size=size, fill_value=fill_value)
 
-else:
+    if fill_value is None:
+        fill_value = 0
 
-    def nonzero(x, size=None, fill_value=None):
-        """Return the indices of the elements that are non-zero."""
-        return ops.nonzero(x)
+    shape = ops.shape(x)
+    # Avoid comparing a boolean tensor against 0 (unsupported on some backends).
+    mask = x if ops.dtype(x) == "bool" else ops.not_equal(x, 0)
+    flat_mask = ops.reshape(mask, (-1,))
+    n_elements = flat_mask.shape[0]
+
+    # Mirror jax.numpy.nonzero: cumsum over the boolean mask gives each position
+    # a 1-indexed nonzero count; bincount turns that into per-slot occupancy;
+    # cumsum of occupancy yields flat indices of the nonzero elements.
+    # bincount with minlength=size guarantees ≥ size bins; [:size] truncates to
+    # exactly size, so flat_indices always has the correct static length.
+    cumsum_mask = ops.cast(ops.cumsum(flat_mask), "int32")
+    flat_indices = ops.cumsum(ops.bincount(cumsum_mask, minlength=size)[:size])
+
+    # Entries that did not correspond to a real nonzero element get fill_value.
+    valid = flat_indices < n_elements
+    safe_indices = ops.where(valid, flat_indices, 0)
+    return tuple(
+        ops.where(valid, coord, fill_value) for coord in ops.unravel_index(safe_indices, shape)
+    )
 
 
 def flatten(tensor, start_dim=0, end_dim=-1):

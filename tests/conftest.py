@@ -19,7 +19,8 @@ _GPU_AVAILABLE = any(backend_cuda_available(b) for b in ["torch", "tensorflow", 
 # they remain free to select their own backend. See tests/__init__.py for details.
 from zea.internal.device import init_device  # noqa: E402
 
-device = init_device(allow_preallocate=False)
+device = os.environ.get("ZEA_TEST_DEVICE", "auto:1")
+device = init_device(device=device, allow_preallocate=False)
 
 
 from .backend_utils import (  # noqa: E402
