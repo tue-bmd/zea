@@ -271,12 +271,9 @@ def test_random_circle_inclusion_with_height_width_ranges():
     assert_circle_pixels(out_np, center_np, 5, 1.0)
 
 
+@pytest.mark.tensorflow
 def test_random_circle_inclusion_symbolic_tensor_randomize():
     """x_is_symbolic_tensor=True + randomize_location_across_batch=True uses ops.map."""
-    import keras
-
-    if keras.backend.backend() != "tensorflow":
-        pytest.skip("Symbolic (dynamic) batch-size shapes require the TensorFlow backend")
     import tensorflow as tf
 
     images = np.zeros((4, 28, 28), dtype=np.float32)
@@ -293,12 +290,9 @@ def test_random_circle_inclusion_symbolic_tensor_randomize():
     assert np.any(np.isclose(out_np, 1.0))
 
 
+@pytest.mark.tensorflow
 def test_random_circle_inclusion_symbolic_tensor_fixed_raises():
     """x_is_symbolic_tensor=True + randomize_location_across_batch=False raises."""
-    import keras
-
-    if keras.backend.backend() != "tensorflow":
-        pytest.skip("Symbolic (dynamic) batch-size shapes require the TensorFlow backend")
     import tensorflow as tf
 
     images = np.zeros((4, 28, 28), dtype=np.float32)
