@@ -16,169 +16,92 @@ ARG INSTALL_TF=false
 ARG DEV=true
 
 ##############################
-# 1) Base builder: non-backend deps
+# 1) Builder: all deps (non-backend + selected backends)
 ##############################
-FROM python:3.12-slim-bullseye AS builder-base
+FROM python:3.12-slim-bullseye AS builder
 
-# Backend versions
-ENV JAX_VERSION=0.5.2 \
-    TORCH_VERSION=2.6.0 \
-    TORCHVISION_VERSION=0.21.0 \
-    TORCHAUDIO_VERSION=2.6.0 \
-    TF_VERSION=2.19.0
+# Backend versions, to re-resolve to newer versions, run ./scripts/resolve_backend_versions.sh
+# and paste its output here.
+ENV JAX_VERSION=0.10.2 \
+    TORCH_VERSION=2.12.1 \
+    TORCHVISION_VERSION=0.27.1 \
+    TORCHAUDIO_VERSION=2.11.0 \
+    TF_VERSION=2.21.0
+
+ARG CU_BACKEND=cu129
 
 ARG DEBIAN_FRONTEND=noninteractive
+# Install into the system env (/usr/local) so the runtime stage can copy it. UV_LINK_MODE=copy
+# lets uv copy out of the --mount=type=cache on each uv RUN (a separate filesystem).
 ENV PYTHONDONTWRITEBYTECODE=1 \
     LC_ALL=C \
-    POETRY_VERSION=2.1.3 \
-    POETRY_VENV=/opt/poetry-venv \
-    POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_CREATE=0 \
-    POETRY_VIRTUALENVS_IN_PROJECT=0 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
+    UV_PROJECT_ENVIRONMENT=/usr/local \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
 
-RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools
-
-# Install Poetry in its own venv (but disable venv for project deps)
-RUN python3 -m venv $POETRY_VENV \
- && $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
-
-ENV PATH="${PATH}:${POETRY_VENV}/bin"
+# Install uv from the official image
+COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /usr/local/bin/uv
 
 WORKDIR /zea
 
-COPY pyproject.toml poetry.lock ./
+COPY pyproject.toml uv.lock README.md ./
 
-# Install all non-backend dependencies, installing dev extras only if DEV is true.
+# Install all non-backend dependencies from the lockfile, installing dev extras only if
+# DEV is true. --no-install-project skips installing zea itself (added later as an
+# editable install), and --inexact keeps pip/setuptools available in the image.
 ARG DEV
-RUN if [ "$DEV" = "true" ]; then \
-      poetry install --no-root --compile -E dev; \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ "$DEV" = "true" ]; then \
+    uv sync --frozen --no-install-project --inexact --extra dev; \
     else \
-      poetry install --no-root --compile; \
+    uv sync --frozen --no-install-project --inexact; \
     fi
 
-# If DEV is not true, clear out the contents of the poetry venv but keep the directory
-RUN if [ "$DEV" != "true" ]; then find $POETRY_VENV -mindepth 1 -delete; fi
-
-##############################
-# 2) JAX variants
-##############################
-FROM builder-base AS builder-jax-cpu
-WORKDIR /wheels
-RUN pip wheel --no-cache-dir --wheel-dir=/wheels jax==${JAX_VERSION}
-
-FROM builder-base AS builder-jax-gpu
-WORKDIR /wheels
-RUN pip wheel --no-cache-dir --wheel-dir=/wheels "jax[cuda12]==${JAX_VERSION}"
-
-FROM builder-base AS builder-jax-false
-RUN mkdir /wheels
-
-##############################
-# 3) PyTorch variants
-##############################
-FROM builder-base AS builder-torch-cpu
-WORKDIR /wheels
-RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
-      torch==${TORCH_VERSION}+cpu torchvision==${TORCHVISION_VERSION}+cpu torchaudio==${TORCHAUDIO_VERSION}+cpu \
-      --index-url https://download.pytorch.org/whl/cpu
-
-FROM builder-base AS builder-torch-gpu
-WORKDIR /wheels
-RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
-      torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION} \
-      --index-url https://download.pytorch.org/whl/cu124
-
-FROM builder-base AS builder-torch-false
-RUN mkdir /wheels
-
-##############################
-# 4) TensorFlow variants
-##############################
-FROM builder-base AS builder-tf-cpu
-WORKDIR /wheels
-RUN pip wheel --no-cache-dir --wheel-dir=/wheels tensorflow==${TF_VERSION}
-
-FROM builder-base AS builder-tf-gpu
-WORKDIR /wheels
-RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
-      --extra-index-url https://pypi.nvidia.com \
-      "tensorflow[and-cuda]==${TF_VERSION}"
-
-FROM builder-base AS builder-tf-false
-RUN mkdir /wheels
-
-##############################
-# 5) Pick the right variant via ARG+FROM
-##############################
+# Install the selected backends in a single resolve. uv's --torch-backend selects the
+# right PyTorch index (CPU vs CUDA), so there is no need for per-variant build stages or
+# manual index URLs / +cpu suffixes. CPU vs GPU is uniform across backends per build.
 ARG INSTALL_JAX
 ARG INSTALL_TORCH
 ARG INSTALL_TF
-
-FROM builder-jax-${INSTALL_JAX}     AS jax-selected
-FROM builder-torch-${INSTALL_TORCH} AS torch-selected
-FROM builder-tf-${INSTALL_TF}       AS tf-selected
-
-##############################
-# 6) Install all wheels in a single layer
-##############################
-FROM builder-base AS builder-backends
-
-# Copy in all wheels from each backend
-COPY --from=jax-selected   /wheels /wheels
-COPY --from=torch-selected /wheels /wheels
-COPY --from=tf-selected    /wheels /wheels
-
-# preserve runtime flags
-ARG INSTALL_JAX
-ARG INSTALL_TORCH
-ARG INSTALL_TF
-
-# Install all wheels at once in a clean Python environment
-# We install jax last to avoid a version conflict with cuda
-RUN set -e; \
-    for pkg in \
-        $( [ "$INSTALL_TORCH" = "cpu" ] && echo "torch==${TORCH_VERSION}+cpu torchvision==${TORCHVISION_VERSION}+cpu torchaudio==${TORCHAUDIO_VERSION}+cpu" ) \
-        $( [ "$INSTALL_TORCH" = "gpu" ] && echo "torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION}" ) \
-        $( [ "$INSTALL_TF" = "cpu" ] && echo "tensorflow==${TF_VERSION}" ) \
-        $( [ "$INSTALL_TF" = "gpu" ] && echo "tensorflow[and-cuda]==${TF_VERSION}" ) \
-        $( [ "$INSTALL_JAX" = "cpu" ] && echo "jax==${JAX_VERSION}" ) \
-        $( [ "$INSTALL_JAX" = "gpu" ] && echo "jax[cuda12]==${JAX_VERSION}" ); \
-    do \
-        pip install --no-cache-dir --no-index --find-links=/wheels $pkg; \
-    done
+RUN --mount=type=cache,target=/root/.cache/uv \
+    set -e; \
+    case "${INSTALL_JAX}${INSTALL_TORCH}${INSTALL_TF}" in \
+    *gpu*) TORCH_BACKEND="${CU_BACKEND}" ;; \
+    *)     TORCH_BACKEND="cpu" ;; \
+    esac; \
+    PKGS=""; \
+    [ "$INSTALL_TORCH" != "false" ] && PKGS="$PKGS torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION}"; \
+    [ "$INSTALL_TF"  = "cpu" ] && PKGS="$PKGS tensorflow==${TF_VERSION}"; \
+    [ "$INSTALL_TF"  = "gpu" ] && PKGS="$PKGS tensorflow[and-cuda]==${TF_VERSION}"; \
+    [ "$INSTALL_JAX" = "cpu" ] && PKGS="$PKGS jax==${JAX_VERSION}"; \
+    [ "$INSTALL_JAX" = "gpu" ] && PKGS="$PKGS jax[cuda12]==${JAX_VERSION}"; \
+    if [ -n "$PKGS" ]; then \
+    uv pip install --system --torch-backend="$TORCH_BACKEND" $PKGS; \
+    fi
 
 ##############################
-# 7) Final runtime image
+# 2) Final runtime image
 ##############################
 FROM python:3.12-slim-bullseye AS runtime
 
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends --fix-missing \
-      python3-tk \
-      ffmpeg imagemagick \
-      make pandoc \
-      openssh-client git sudo && \
-    python3 -m pip install --no-cache-dir --upgrade pip setuptools && \
+    python3-tk \
+    ffmpeg imagemagick \
+    make pandoc \
+    openssh-client git sudo && \
     ln -s /usr/bin/python3 /usr/bin/python && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /zea
 
-# Copy over installed Python packages and entrypoints from builder
-COPY --from=builder-backends /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder-backends /usr/local/bin /usr/local/bin
+# Copy over installed Python packages and entrypoints from builder (includes uv)
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy over Jupyter configuration and kernelspecs
-COPY --from=builder-backends /usr/local/share/jupyter /usr/local/share/jupyter
-
-RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools
-
-# Copy the poetry virtual environment
-COPY --from=builder-base /opt/poetry-venv /opt/poetry-venv
-# Set up the PATH to include the poetry venv
-ENV PATH="${PATH}:/opt/poetry-venv/bin"
+COPY --from=builder /usr/local/share/jupyter /usr/local/share/jupyter
 
 # preserve runtime flags
 ARG INSTALL_JAX
@@ -191,37 +114,32 @@ ENV INSTALL_JAX=${INSTALL_JAX} \
     DEV=${DEV}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    LC_ALL=C \
-    POETRY_VERSION=2.1.3 \
-    POETRY_VENV=/opt/poetry-venv \
-    POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_CREATE=0 \
-    POETRY_VIRTUALENVS_IN_PROJECT=0 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
+    LC_ALL=C
 
 # Install zea
 
 # Copy source code to /zea (needed for editable install)
 COPY . .
-# in editable mode WITHOUT installing dependencies (which are already installed by Poetry)
-RUN pip install --no-deps -e .
+# in editable mode WITHOUT installing dependencies (which are already installed by uv)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --no-deps -e .
 
 # Set KERAS_BACKEND in bashrc before motd.sh is called
 RUN echo 'export KERAS_BACKEND=$( \
     if [ "$INSTALL_JAX" != "false" ]; then \
-        echo jax; \
+    echo jax; \
     elif [ "$INSTALL_TORCH" != "false" ]; then \
-        echo torch; \
+    echo torch; \
     elif [ "$INSTALL_TF" != "false" ]; then \
-        echo tf; \
+    echo tf; \
     else \
-        echo numpy; \
+    echo numpy; \
     fi )' >> /etc/bash.bashrc && \
     echo '[ ! -z "$TERM" -a -r /etc/motd.sh ] && KERAS_BACKEND=$KERAS_BACKEND INSTALL_JAX=$INSTALL_JAX INSTALL_TORCH=$INSTALL_TORCH INSTALL_TF=$INSTALL_TF DEV=$DEV bash /etc/motd.sh' \
     >> /etc/bash.bashrc
 
 # Source working/installation directory and add motd (message of the day)
-COPY motd.sh /etc/motd.sh
+COPY scripts/motd.sh /etc/motd.sh
 RUN chmod +x /etc/motd.sh
 
 CMD ["/bin/bash"]

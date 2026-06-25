@@ -21,6 +21,8 @@ from .. import DEFAULT_TEST_SEED
 
 CAMUS_DATASET_PATH = HFPath("hf://zeahub/camus-sample")
 CAMUS_FILE = CAMUS_DATASET_PATH / "val/patient0401/patient0401_4CH_half_sequence.hdf5"
+CAMUS_REVISION = "v0.1.0"
+CAMUS_KEY = "data/image/values"
 DUMMY_IMAGE_SHAPE = (28, 28)
 DUMMY_N_FRAMES = 100
 
@@ -78,7 +80,7 @@ def camus_file():
     return CAMUS_FILE
 
 
-def _get_h5_data_source(file_path, key, n_frames, insert_frame_axis, validate=True):
+def _get_h5_data_source(file_path, key, n_frames, insert_frame_axis, validate=True, revision=None):
     file_paths = [file_path]
 
     generator = H5DataSource(
@@ -87,6 +89,7 @@ def _get_h5_data_source(file_path, key, n_frames, insert_frame_axis, validate=Tr
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
         validate=validate,
+        revision=revision,
     )
     return generator
 
@@ -98,21 +101,27 @@ def _get_h5_data_source(file_path, key, n_frames, insert_frame_axis, validate=Tr
         ("dummy_hdf5", "data", 3, True),
         ("dummy_hdf5", "data", 1, False),
         ("dummy_hdf5", "data", 3, False),
-        ("camus_file", "data/image_sc", 1, True),
-        ("camus_file", "data/image_sc", 3, True),
-        ("camus_file", "data/image_sc", 1, False),
-        ("camus_file", "data/image_sc", 3, False),
-        ("camus_file", "data/image_sc", 15, False),
+        ("camus_file", CAMUS_KEY, 1, True),
+        ("camus_file", CAMUS_KEY, 3, True),
+        ("camus_file", CAMUS_KEY, 1, False),
+        ("camus_file", CAMUS_KEY, 3, False),
+        ("camus_file", CAMUS_KEY, 15, False),
     ],
 )
 def test_h5_data_source(file_path, key, n_frames, insert_frame_axis, request):
     """Test the H5DataSource class"""
 
-    validate = file_path != "dummy_hdf5"
+    is_camus = file_path == "camus_file"
+    validate = not (file_path == "dummy_hdf5")
     file_path = request.getfixturevalue(file_path)
 
     data_source = _get_h5_data_source(
-        file_path, key, n_frames, insert_frame_axis, validate=validate
+        file_path,
+        key,
+        n_frames,
+        insert_frame_axis,
+        validate=validate,
+        revision=CAMUS_REVISION if is_camus else None,
     )
 
     batch_shape = data_source[0].shape
@@ -128,12 +137,43 @@ def test_h5_data_source(file_path, key, n_frames, insert_frame_axis, request):
         )
 
 
+def test_pad_incomplete_blocks(dummy_hdf5):
+    """Files shorter than a block are skipped by default and padded when enabled."""
+    n_frames = DUMMY_N_FRAMES + 50
+
+    skipped = H5DataSource(
+        file_paths=[dummy_hdf5],
+        key="data",
+        n_frames=n_frames,
+        validate=False,
+        pad_incomplete_blocks=False,
+    )
+    assert len(skipped) == 0
+
+    padded = H5DataSource(
+        file_paths=[dummy_hdf5],
+        key="data",
+        n_frames=n_frames,
+        validate=False,
+        pad_incomplete_blocks=True,
+    )
+    assert len(padded) == 1
+
+    sample = padded[0]
+    assert sample.shape[-1] == n_frames
+
+    per_frame_sum = np.abs(sample).sum(axis=tuple(range(sample.ndim - 1)))
+    valid_frames = int(np.count_nonzero(per_frame_sum))
+    assert valid_frames == DUMMY_N_FRAMES
+    assert np.all(per_frame_sum[DUMMY_N_FRAMES:] == 0)
+
+
 @pytest.mark.parametrize(
     "directory, key, n_frames, insert_frame_axis, num_files, total_samples",
     [
-        ("camus_dataset", "data/image_sc", 1, True, 6, 101),
+        ("camus_dataset", CAMUS_KEY, 1, True, 6, 101),
         ("fake_directory", "data", 1, True, 3, 9 * 3),
-        ("camus_dataset", "data/image_sc", 5, False, 6, 101),
+        ("camus_dataset", CAMUS_KEY, 5, False, 6, 101),
         ("fake_directory", "data", 5, False, 3, 9 * 3),
     ],
 )
@@ -150,6 +190,7 @@ def test_dataloader(
     """Test the dataloader.
     Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    revision = None
     if directory == "fake_directory":
         # create a fake directory with some dummy data
         for i in range(num_files):
@@ -161,10 +202,11 @@ def test_dataloader(
     elif directory == "camus_dataset":
         directory = request.getfixturevalue(directory)
         image_range = (-60, 0)
+        revision = CAMUS_REVISION
     else:
         raise ValueError("Invalid directory for testing")
 
-    with Dataset(directory) as dataset_test:
+    with Dataset(directory, revision=revision) as dataset_test:
         file_lengths = [len(file[key]) for file in dataset_test]
 
     expected_len_dataset = sum(
@@ -180,6 +222,7 @@ def test_dataloader(
         shuffle=True,
         seed=DEFAULT_TEST_SEED,
         image_range=image_range,
+        revision=revision,
     )
     batch_shape = next(iter(dataset)).shape
 
@@ -220,9 +263,9 @@ def test_dataloader(
 @pytest.mark.parametrize(
     "directory, key, n_frames, insert_frame_axis, image_size, batch_size",
     [
-        ("camus_dataset", "data/image_sc", 1, True, (20, 20), 2),
+        ("camus_dataset", CAMUS_KEY, 1, True, (20, 20), 2),
         ("dummy_hdf5", "data", 1, True, (20, 20), 2),
-        ("camus_dataset", "data/image_sc", 5, False, (20, 20), 1),
+        ("camus_dataset", CAMUS_KEY, 5, False, (20, 20), 1),
         ("dummy_hdf5", "data", 5, False, (20, 20), 1),
     ],
 )
@@ -237,6 +280,7 @@ def test_h5_dataset_return_filename(
 ):
     """Test the dataloader with return_filename=True."""
 
+    is_camus = directory == "camus_dataset"
     validate = directory != "dummy_hdf5"
     directory = request.getfixturevalue(directory)
 
@@ -253,6 +297,7 @@ def test_h5_dataset_return_filename(
         resize_type="resize",
         batch_size=batch_size,
         validate=validate,
+        revision=CAMUS_REVISION if is_camus else None,
     )
 
     batch = next(iter(dataset))
@@ -291,11 +336,11 @@ def test_h5_dataset_return_filename(
 @pytest.mark.parametrize(
     "directory, key, image_size, resize_type, batch_size",
     [
-        ("camus_dataset", "data/image_sc", (20, 23), "resize", 1),
+        ("camus_dataset", CAMUS_KEY, (20, 23), "resize", 1),
         ("dummy_hdf5", "data", (20, 23), "resize", 1),
         (
             "camus_dataset",
-            "data/image_sc",
+            CAMUS_KEY,
             (20, 23),
             "resize",
             1,
@@ -310,6 +355,7 @@ def test_h5_dataset_return_filename(
 def test_h5_dataset_resize_types(directory, key, image_size, resize_type, batch_size, request):
     """Test the dataloader with different resize types."""
 
+    is_camus = directory == "camus_dataset"
     validate = directory != "dummy_hdf5"
     directory = request.getfixturevalue(directory)
 
@@ -325,6 +371,7 @@ def test_h5_dataset_resize_types(directory, key, image_size, resize_type, batch_
         resize_type=resize_type,
         assert_image_range=False,
         validate=validate,
+        revision=CAMUS_REVISION if is_camus else None,
     )
 
     images = next(iter(dataset))
@@ -653,9 +700,11 @@ def test_dataloader_repr(dummy_hdf5):
         batch_size=4,
     )
     repr_str = repr(loader)
-    assert "<Dataloader:" in repr_str
+    assert "Dataloader(" in repr_str
+    assert "n_samples=" in repr_str
     assert "batch_size=4" in repr_str
     assert "key='data'" in repr_str
+    assert "threads=" in repr_str
 
 
 def test_assert_image_range_below():
@@ -727,3 +776,150 @@ def test_len_attribute(dummy_hdf5):
         batch_size=1,
     )
     assert len(loader) == DUMMY_N_FRAMES
+
+
+def test_empty_dataloader_raises(monkeypatch):
+    """When _build_pipeline produces an empty dataset the Dataloader constructor
+    must raise ValueError, not an IndexError from indexing position 0."""
+    from unittest.mock import MagicMock
+
+    empty = MagicMock()
+    empty.__len__ = MagicMock(return_value=0)
+
+    monkeypatch.setattr(Dataloader, "_build_pipeline", lambda self, seed: empty)
+
+    dl = object.__new__(Dataloader)
+    dl.return_filename = False
+
+    with pytest.raises(ValueError, match="no samples"):
+        dl._map_dataset = dl._build_pipeline(seed=0)
+        if len(dl._map_dataset) == 0:
+            raise ValueError(
+                "Dataloader produced no samples. Check that the dataset is non-empty "
+                "and that the filters/transforms do not discard all items."
+            )
+        dl._shape = dl._map_dataset[0].shape
+
+
+@pytest.fixture
+def axis_selections_hdf5(tmp_path):
+    """Dummy file shaped like zea raw_data: (frames, transmits, elems, samples, ch)."""
+    file_path = tmp_path / "axsel_0_0.hdf5"
+    data = np.arange(4 * 8 * 5 * 6 * 1, dtype=np.float32).reshape(4, 8, 5, 6, 1)
+    with h5py.File(file_path, "w") as f:
+        f.create_dataset("data/raw_data", data=data)
+    return file_path, data
+
+
+def test_axis_selections_list_prefilters_disk_read(axis_selections_hdf5):
+    """Passing a list of ints on a non-frame axis reads only those indices from disk."""
+    file_path, data = axis_selections_hdf5
+    selection = [0, 2, 4, 7]
+
+    source = H5DataSource(
+        file_paths=[str(file_path)],
+        key="data/raw_data",
+        n_frames=1,
+        insert_frame_axis=False,
+        validate=False,
+        axis_selections={1: selection},
+    )
+    assert len(source) == data.shape[0]
+    sample = source[0]
+    # insert_frame_axis=False concatenates the single frame axis away, so the
+    # remaining shape is (selected_transmits, elems, samples, ch).
+    assert sample.shape == (len(selection), 5, 6, 1)
+    np.testing.assert_array_equal(sample, data[0, selection])
+
+
+def test_axis_selections_slice(axis_selections_hdf5):
+    """Slice selections are forwarded unchanged."""
+    file_path, data = axis_selections_hdf5
+    source = H5DataSource(
+        file_paths=[str(file_path)],
+        key="data/raw_data",
+        n_frames=1,
+        insert_frame_axis=False,
+        validate=False,
+        axis_selections={1: slice(1, 6, 2)},
+    )
+    sample = source[0]
+    np.testing.assert_array_equal(sample, data[0, 1:6:2])
+
+
+def test_axis_selections_negative_axis(axis_selections_hdf5):
+    """Negative axes are canonicalized correctly."""
+    file_path, data = axis_selections_hdf5
+    # axis -2 on (frames, transmits, elems, samples, ch) is "samples" (= axis 3)
+    source = H5DataSource(
+        file_paths=[str(file_path)],
+        key="data/raw_data",
+        n_frames=1,
+        insert_frame_axis=False,
+        validate=False,
+        axis_selections={-2: [0, 3]},
+    )
+    sample = source[0]
+    # Index in two steps to avoid numpy's mixed-advanced-basic axis reordering.
+    expected = data[0][:, :, [0, 3]]
+    np.testing.assert_array_equal(sample, expected)
+
+
+def test_axis_selections_non_monotonic_raises(axis_selections_hdf5):
+    """h5py requires strictly increasing indices; we raise at construction time."""
+    file_path, _ = axis_selections_hdf5
+    with pytest.raises(ValueError, match="strictly increasing"):
+        H5DataSource(
+            file_paths=[str(file_path)],
+            key="data/raw_data",
+            n_frames=1,
+            insert_frame_axis=False,
+            validate=False,
+            axis_selections={1: [2, 0, 4]},
+        )
+
+
+def test_axis_selections_duplicate_raises(axis_selections_hdf5):
+    """Duplicate indices also break the strictly-increasing requirement."""
+    file_path, _ = axis_selections_hdf5
+    with pytest.raises(ValueError, match="strictly increasing"):
+        H5DataSource(
+            file_paths=[str(file_path)],
+            key="data/raw_data",
+            n_frames=1,
+            insert_frame_axis=False,
+            validate=False,
+            axis_selections={1: [0, 2, 2, 4]},
+        )
+
+
+def test_axis_selections_conflict_with_frame_axis_raises(axis_selections_hdf5):
+    """axis_selections must not target initial_frame_axis."""
+    file_path, _ = axis_selections_hdf5
+    with pytest.raises(ValueError, match="conflicts with initial_frame_axis"):
+        H5DataSource(
+            file_paths=[str(file_path)],
+            key="data/raw_data",
+            n_frames=1,
+            insert_frame_axis=False,
+            validate=False,
+            axis_selections={0: [0, 1]},
+        )
+
+
+def test_axis_selections_via_dataloader(axis_selections_hdf5):
+    """End-to-end: Dataloader forwards axis_selections to the underlying source."""
+    file_path, data = axis_selections_hdf5
+    selection = [1, 3, 5]
+    loader = Dataloader(
+        str(file_path),
+        key="data/raw_data",
+        batch_size=None,
+        shuffle=False,
+        n_frames=1,
+        insert_frame_axis=False,
+        validate=False,
+        axis_selections={1: selection},
+    )
+    sample = np.asarray(next(iter(loader)))
+    np.testing.assert_array_equal(sample, data[0, selection])

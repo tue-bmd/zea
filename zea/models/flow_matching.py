@@ -84,6 +84,7 @@ class FlowMatchingModel(DiffusionModel):
         ema_val=0.999,
         min_t=0.0,
         max_t=1.0,
+        solver="heun",
         **kwargs,
     ):
         """Initialize a flow matching model.
@@ -93,7 +94,8 @@ class FlowMatchingModel(DiffusionModel):
                 ``(height, width, channels)`` for images.
             input_range: Range of the input data. Default ``(0, 1)``.
             network_name: Network architecture. One of
-                ``"unet_time_conditional"`` or ``"dense_time_conditional"``.
+                ``"unet_time_conditional"``, ``"dense_time_conditional"``, or
+                ``"dit_time_conditional"`` (Diffusion Transformer).
             network_kwargs: Extra keyword arguments forwarded to the network
                 constructor.
             name: Model name. Default ``"flow_matching_model"``.
@@ -105,9 +107,17 @@ class FlowMatchingModel(DiffusionModel):
                 network weights. Default ``0.999``.
             min_t: Lower bound of the flow time interval. Default ``0.0``.
             max_t: Upper bound of the flow time interval. Default ``1.0``.
+            solver: ODE solver used for (unconditional) sampling. One of
+                ``"heun"`` (second-order Euler–Heun, the default) or
+                ``"euler"`` (first-order). Heun evaluates the velocity field
+                twice per step for higher accuracy and is purely an
+                inference-time choice (no retraining needed). See
+                :meth:`solver_step`.
             **kwargs: Additional arguments forwarded to
                 :class:`~zea.models.diffusion.DiffusionModel`.
         """
+        if solver not in ("euler", "heun"):
+            raise ValueError(f"solver must be one of 'euler' or 'heun', got {solver!r}.")
         # min_signal_rate / max_signal_rate are cosine-schedule parameters
         # that are not used by FlowMatchingModel; pass neutral values so the
         # parent __init__ does not fail.
@@ -127,6 +137,8 @@ class FlowMatchingModel(DiffusionModel):
             **kwargs,
         )
 
+        self.solver = solver
+
         # Replace the noise-loss tracker with a velocity-loss tracker.
         self.velocity_loss_tracker = LossTrackerWrapper("v_loss")
 
@@ -135,7 +147,102 @@ class FlowMatchingModel(DiffusionModel):
         # min/max_signal_rate are meaningless for this model
         config.pop("min_signal_rate", None)
         config.pop("max_signal_rate", None)
+        config["solver"] = self.solver
         return config
+
+    def solver_step(
+        self,
+        noisy_images,
+        noise_rates,
+        signal_rates,
+        next_noise_rates,
+        next_signal_rates,
+        shape,
+        network=None,
+        training: bool = False,
+        seed=None,
+        stochastic_sampling: bool = False,
+    ):
+        r"""Single ODE solver step for the probability-flow ODE.
+
+        Integrates :math:`\frac{dx}{dt} = v_\theta(x_t, t)` backwards by one
+        step using either a first-order Euler update (``solver="euler"``) or a
+        second-order Euler–Heun (improved-Euler) update (``solver="heun"``,
+        the default).
+
+        The Heun update evaluates the velocity field **twice** per step:
+
+        .. math::
+
+            \tilde{x}_{t-\Delta t} &= x_t - \Delta t\, v_\theta(x_t, t)
+                \qquad\text{(Euler predictor)} \\
+            x_{t-\Delta t} &= x_t - \tfrac{\Delta t}{2}\big(
+                v_\theta(x_t, t) + v_\theta(\tilde{x}_{t-\Delta t},\, t-\Delta t)
+                \big) \qquad\text{(trapezoidal corrector)}
+
+        where :math:`\Delta t = t - (t-\Delta t)` equals
+        ``noise_rates - next_noise_rates`` (positive during reverse sampling).
+        Heun's method only changes inference; it reuses the same trained
+        velocity network and requires no retraining.
+
+        Stochastic sampling falls back to the first-order Euler–Maruyama update
+        inherited from :class:`~zea.models.diffusion.DiffusionModel`, since the
+        deterministic Heun corrector does not apply to the Langevin SDE.
+
+        Args:
+            noisy_images: Current noisy images ``x_t``.
+            noise_rates: Flow times ``t`` at the current step.
+            signal_rates: ``1 - t`` at the current step.
+            next_noise_rates: Flow times ``t - Δt`` at the next step.
+            next_signal_rates: ``1 - (t - Δt)`` at the next step.
+            shape: Shape of the image tensor.
+            network: Explicit network to use (``None`` selects based on
+                ``training``).
+            training: Whether to call the network in training mode.
+            seed: Random seed generator (for stochastic sampling).
+            stochastic_sampling: Whether to use stochastic (Langevin) sampling.
+
+        Returns:
+            A ``(next_noisy_images, pred_images)`` tuple where
+            ``next_noisy_images`` is ``x_{t-Δt}`` and ``pred_images`` is the
+            clean-image estimate ``x̂₀`` at the current step.
+        """
+        pred_noises, pred_images = self.denoise(
+            noisy_images, noise_rates, signal_rates, training=training, network=network
+        )
+
+        # Euler predictor (also the full update for the first-order solver).
+        next_noisy_images = self.reverse_diffusion_step(
+            shape=shape,
+            pred_images=pred_images,
+            pred_noises=pred_noises,
+            signal_rates=signal_rates,
+            next_signal_rates=next_signal_rates,
+            next_noise_rates=next_noise_rates,
+            seed=seed,
+            stochastic_sampling=stochastic_sampling,
+        )
+
+        if self.solver == "euler" or stochastic_sampling:
+            return next_noisy_images, pred_images
+
+        # --- Heun corrector (second velocity evaluation) ---
+        # Velocity at the current point: v = ε̂ − x̂₀
+        velocity = pred_noises - pred_images
+        # Velocity at the Euler-predicted point and the next (lower) time.
+        pred_noises_next, pred_images_next = self.denoise(
+            next_noisy_images,
+            next_noise_rates,
+            next_signal_rates,
+            training=training,
+            network=network,
+        )
+        velocity_next = pred_noises_next - pred_images_next
+
+        # Δt = t − (t − Δt) = noise_rates − next_noise_rates  (≥ 0 in reverse)
+        dt = noise_rates - next_noise_rates
+        next_noisy_images = noisy_images - 0.5 * dt * (velocity + velocity_next)
+        return next_noisy_images, pred_images
 
     def diffusion_schedule(self, diffusion_times):
         """Linear flow-matching schedule.

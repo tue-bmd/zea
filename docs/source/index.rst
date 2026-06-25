@@ -44,7 +44,7 @@ Check out the :doc:`about` page for more information and the motivation behind `
 
    _autosummary/zea
    data-acquisition
-   parameters
+   config
    pipeline
    models
    agent

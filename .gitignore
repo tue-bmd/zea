@@ -5,6 +5,8 @@
 /log
 docs/source/_autosummary/*
 !docs/source/_autosummary/zea.rst
+raw*/
+output*/
 
 # Temporary files
 temp/
@@ -29,6 +31,7 @@ __pycache__/
 .DS_Store
 /.ideas
 .devcontainer
+.claude
 
 # C extensions
 *.so
@@ -39,6 +42,8 @@ __pycache__/
 *.npy
 *.npz
 *.mat
+*.gz
+*.nii
 
 # Distribution / packaging
 .Python

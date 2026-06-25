@@ -51,17 +51,53 @@ Check out a new branch for your changes.
    cd zea
    git checkout -b <your_feature_branch_name>
 
-Set up your development environment. We recommend using Docker as described in the :doc:`installation` guide. This ensures consistency and avoids dependency issues. If you prefer to work without Docker, you can set up a local environment using `conda` or `pip`. For example, to set up a conda environment, you can run:
+We recommend using Docker for development as it ensures consistency and avoids
+dependency issues — the images ship with the backends pre-installed. If you prefer
+a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
-.. code-block:: shell
+.. tab-set::
 
-   conda create -n zea python=3.12
-   conda activate zea
-   conda install pip
-   pip install -e .[dev]
-   pre-commit install
+    .. tab-item:: Docker
 
-Now install the backend(s). If you use the Docker image, the backends are already installed. If you use a local environment, you need to install one of the supported machine learning backends: JAX, PyTorch or TensorFlow. For more information on how to install the backends, see the :ref:`backend installation <backend-installation>`.` guide.
+         See the :ref:`Docker <docker-information>` section of the installation guide
+         for build and run instructions. Once inside the container, install the dev
+         dependencies:
+
+         .. code-block:: shell
+
+               pip install -e .[dev]
+               pre-commit install
+
+    .. tab-item:: uv
+
+         From the repository root run:
+
+         .. code-block:: shell
+
+               uv sync --extra dev
+               uv run pre-commit install
+
+         This creates a ``.venv`` with the exact locked dependencies and installs
+         ``zea`` itself in **editable** mode, so your changes to the source take
+         effect immediately without reinstalling. Prefix commands with ``uv run``
+         (e.g. ``uv run pytest``) or activate the environment with
+         ``source .venv/bin/activate``.
+
+    .. tab-item:: pip
+
+         Install into any existing environment (``venv``, ``conda``, ...) with plain
+         ``pip``. The ``-e`` flag makes the install editable:
+
+         .. code-block:: shell
+
+               pip install -e .[dev]
+               pre-commit install
+
+For local environments (uv or pip), you also need to install a machine learning
+backend: JAX, PyTorch, or TensorFlow. See the
+:ref:`backend installation <backend-installation>` guide.
+
+.. _running-tests:
 
 4. Make your changes
 ~~~~~~~~~~~~~~~~~~~~
@@ -82,7 +118,7 @@ A few things to keep in mind when making changes:
 
 - Make sure to write backend-agnostic code. This means that your code should work with all supported backends. This can be achieved by using the ``keras.ops`` API (see the `Keras ops documentation <https://keras.io/api/ops/>`_), instead of using backend-specific functions. For example, use ``keras.ops.squeeze`` instead of ``jax.numpy.squeeze`` or ``torch.squeeze``. Also, when converting tensors to numpy arrays, use the ``keras.ops.convert_to_numpy`` function (instead of ``my_tensor.numpy()``) to ensure compatibility with all backends.
 
-- The code is autoformatted using `ruff <https://pypi.org/project/ruff/>`_. You can run the pre-commit hooks to automatically format and check your code using:
+- The code is autoformatted using `ruff <https://pypi.org/project/ruff/>`_ and type-checked with `ty <https://github.com/astral-sh/ty>`_. You can run the pre-commit hooks to automatically format, lint, and type-check your code using:
 
 .. code-block:: shell
 
@@ -116,9 +152,23 @@ The documentation uses `Sphinx <https://www.sphinx-doc.org/>`_ and generally is 
             ValueError: If param1 is negative.
 
          Example:
+            Use ``.. doctest::`` with ``>>>`` prompts when you want to show
+            interactive input/output inline:
+
             .. doctest::
 
                >>> example_function(5, "test")
+               True
+
+            Alternatively use ``.. testcode::`` for blocks that don't fit
+            the interactive format:
+
+            .. testcode::
+
+               print(example_function(5, "test"))
+
+            .. testoutput::
+
                True
          """
          if param1 < 0:
@@ -177,17 +227,26 @@ Thank you for contributing to zea!
 Contributing topics
 -------------------
 
+Beyond the general contribution workflow above, there are a few specific areas
+where we especially welcome contributions. Browse the
+`open issues <https://github.com/tue-bmd/zea/issues>`_ to see what is being
+worked on, or open a new one to propose something new.
+
 Adding notebooks
 ~~~~~~~~~~~~~~~~
 
-New tutorial or example notebooks are always welcome! Please add them to the `docs/source/notebooks` directory. Make sure to follow the naming conventions and structure of existing notebooks. If you are adding a new tutorial, please also update the `examples.rst` file in the `docs/source` directory to check if your notebook is included.
+New tutorial or example notebooks are always welcome! Please add them to the
+`docs/source/notebooks <https://github.com/tue-bmd/zea/tree/main/docs/source/notebooks>`_
+directory. Make sure to follow the naming conventions and structure of existing
+notebooks. If you are adding a new tutorial, please also update :doc:`examples`
+to check if your notebook is included.
 
 Adding to ``zea.models``
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Please see the :doc:`models` section for more information on how to add new models to ``zea``.
+Please see the :ref:`adding-models` section for more information on how to add new models to ``zea``.
 
 Adding to ``zea.ops``
 ~~~~~~~~~~~~~~~~~~~~~
 
-Please see the :doc:`pipeline` section for more information on how to add new ops to ``zea``.
+Please see the :ref:`adding-ops` section for more information on how to add new ops to ``zea``.

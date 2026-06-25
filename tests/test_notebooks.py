@@ -78,8 +78,8 @@ NOTEBOOK_PARAMETERS = {
         "n_transmits": 2,
     },
     "speckle_tracking_example.ipynb": {
-        "num_frames": 5,
-        "num_points": 10,
+        "n_frames": 5,
+        "n_points": 10,
         "max_iterations": 2,
     },
     "hvae_model_example.ipynb": {

@@ -24,6 +24,7 @@ Public API
     Backend-agnostic automatic differentiation wrapper.
 """
 
+import functools
 from contextlib import nullcontext
 
 import keras
@@ -31,7 +32,9 @@ import keras
 from zea import log
 
 
-def _import_tf():
+def _import_tf(force=False):
+    if not force and keras.backend.backend() != "tensorflow":
+        return None
     try:
         import tensorflow as tf
 
@@ -40,7 +43,9 @@ def _import_tf():
         return None
 
 
-def _import_jax():
+def _import_jax(force=False):
+    if not force and keras.backend.backend() != "jax":
+        return None
     try:
         import jax
 
@@ -49,7 +54,9 @@ def _import_jax():
         return None
 
 
-def _import_torch():
+def _import_torch(force=False):
+    if not force and keras.backend.backend() != "torch":
+        return None
     try:
         import torch
 
@@ -70,9 +77,9 @@ def _get_backend():
         return None
 
 
+backend = _get_backend()
 tf_mod = _import_tf()
 jax_mod = _import_jax()
-backend = _get_backend()
 
 
 def tf_function(func=None, jit_compile=False, **kwargs):
@@ -104,6 +111,25 @@ def jit(func=None, jax=True, tensorflow=True, **kwargs):
         return _jit_compile(func, jax=jax, tensorflow=tensorflow, **kwargs)
 
 
+_jit_not_supported_warned = False
+
+
+def _warn_jit_not_supported(backend_name: str) -> None:
+    """Emit the 'JIT not supported' warning at most once, and only when it will
+    actually be shown (i.e. not when suppressed by log.set_level("ERROR"))."""
+    global _jit_not_supported_warned
+    import logging
+
+    if not _jit_not_supported_warned and log.logger.isEnabledFor(logging.WARNING):
+        _jit_not_supported_warned = True
+        log.warning(
+            f"JIT compilation not currently supported for backend {backend_name}. "
+            "Supported backends are 'tensorflow' and 'jax'. "
+            "Initialize zea.Pipeline with jit_options=None to suppress this warning. "
+            "Falling back to non-compiled mode."
+        )
+
+
 def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
     backend = keras.backend.backend()
 
@@ -121,13 +147,18 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
     elif backend == "jax" and not jax:
         return func
     else:
-        log.warning(
-            f"JIT compilation not currently supported for backend {backend}. "
-            "Supported backends are 'tensorflow' and 'jax'."
-        )
-        log.warning("Initialize zea.Pipeline with jit_options=None to suppress this warning.")
-        log.warning("Falling back to non-compiled mode.")
-        return func
+        # Return a lazy wrapper that warns only on first invocation.
+        # Deferring to call-time lets outer pipelines propagate jit_options=None
+        # and replace this wrapper before it is ever executed, so no warning
+        # fires when the user correctly suppresses JIT at the outer level.
+        _backend = backend
+
+        @functools.wraps(func)
+        def _warn_on_first_call(*args, **kw):
+            _warn_jit_not_supported(_backend)
+            return func(*args, **kw)
+
+        return _warn_on_first_call
 
 
 class device:
@@ -159,7 +190,7 @@ class device:
             output = pipeline(device="gpu:0", data=data)
     """
 
-    def __init__(self, device: str):
+    def __init__(self, device: str | None):
         if device is None:
             self._context = nullcontext()
         else:

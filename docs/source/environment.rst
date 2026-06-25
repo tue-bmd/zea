@@ -39,3 +39,8 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - If set to ``1``, will use parallel processing when searching for HDF5 file shapes.
      - ``1``
      - ``0``, ``1``
+   * - ``ZEA_TEST_DEVICE``
+     - Can be used to only run the tests with a particular device.
+     - ``auto:1``
+     - Any valid device name as accepted by :func:`zea.init_device`. For example, ``cpu``,
+       ``cuda:0``, ``auto:1``, etc.

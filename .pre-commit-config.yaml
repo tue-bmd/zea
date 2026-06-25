@@ -14,13 +14,35 @@
 repos:
 - repo: https://github.com/astral-sh/ruff-pre-commit
   # Ruff version.
-  rev: v0.15.10
+  rev: v0.15.17
   hooks:
     # Run the linter.
     - id: ruff-check
       args: [ --fix ]
     # Run the formatter.
     - id: ruff-format
+
+# ty (type checker) is run as a *local* hook using the `ty` from the active
+# environment rather than the upstream astral-sh/ty-pre-commit hook. The upstream
+# hook type-checks inside an isolated environment that does not contain zea's
+# dependencies (keras, numpy, h5py, ...), which makes ty unable to resolve them
+# and produces many false positives. Running `ty` from the active environment
+# (the dev container, or a local `.venv` with `pip install -e .[dev]`) gives it
+# access to the installed dependencies. `ty` is pinned via the `dev`/`tests`
+# extras in pyproject.toml.
+- repo: local
+  hooks:
+    - id: ty
+      name: ty
+      description: "Run 'ty' for fast Python type checking"
+      entry: ty check
+      language: system
+      types_or: [python, pyi]
+      # ty reads its file selection from [tool.ty] in pyproject.toml; changes in
+      # one file can surface diagnostics in another, so check the whole project.
+      pass_filenames: false
+      always_run: true
+      require_serial: true
 
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v5.0.0
@@ -30,17 +52,16 @@ repos:
     description: Check yaml files for parseable syntax
   - id: check-added-large-files
     description: Prevent large files from being committed
-    exclude: ^docs/source/notebooks/
+    exclude: ^(docs/source/notebooks/|uv\.lock$)
   - id: check-merge-conflict
     description: Check for files that contain merge conflict strings
   - id: detect-private-key
     description: Detects the presence of private keys
 
-- repo: https://github.com/python-poetry/poetry
-  rev: 2.1.3
+- repo: https://github.com/astral-sh/uv-pre-commit
+  rev: 0.8.17
   hooks:
-  - id: poetry-check
-  - id: poetry-lock
+  - id: uv-lock
 
 - repo: local
   hooks:
@@ -49,11 +70,17 @@ repos:
     entry: python docs/source/parameters_doc.py
     language: system
     files: ^docs/source/parameters_doc\.py$
+  - id: run-spec-doc
+    name: Run spec_doc.py
+    entry: python docs/source/spec_doc.py
+    language: system
+    files: ^(docs/source/spec_doc\.py|zea/data/spec\.py)$
+    pass_filenames: false
   - id: generate-keras-ops
     name: Generate Keras Operations
     entry: python -m zea.internal._generate_keras_ops
     language: system
-    files: ^(.*/)?(poetry\.lock|pyproject\.toml|zea/internal/_generate_keras_ops\.py)$
+    files: ^(.*/)?(uv\.lock|pyproject\.toml|zea/internal/_generate_keras_ops\.py)$
     pass_filenames: false
   - id: notebook-clean-and-check
     name: Notebook Clean and Check

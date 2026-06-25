@@ -1,20 +1,22 @@
 """
 Parameter management system for ultrasound imaging.
 
-This module provides the :class:`Parameters` base class, which implements
+This module provides the :class:`BaseParameters` base class, which implements
 dependency-tracked, type-checked, and cacheable parameter logic for scientific
-applications, primarily to support :class:`zea.Scan`.
+applications, primarily to support :class:`zea.Parameters`.
 
-See the Parameters class docstring for details on features and usage.
+See the BaseParameters class docstring for details on features and usage.
 """
 
 import functools
 import inspect
 from copy import deepcopy
+from typing import Any, ClassVar, Literal
 
 import numpy as np
 
 from zea import log
+from zea.data.spec import Spec, check_dtype
 from zea.internal.core import Object as ZeaObject
 from zea.internal.core import _to_tensor, hash_elements, serialize_elements
 
@@ -26,7 +28,7 @@ def cache_with_dependencies(*deps):
         func._dependencies = deps
 
         @functools.wraps(func)
-        def wrapper(self: Parameters):
+        def wrapper(self: "BaseParameters"):
             self._assert_dependencies_met(func.__name__)
 
             if func.__name__ in self._cache:
@@ -80,11 +82,19 @@ class NoDependencyError(ValueError):
         super().__init__(f"'{name}' is not a computed property with dependencies.")
 
 
-class Parameters(ZeaObject):
+class BaseParameters(ZeaObject):
     """Base class for parameters with dependencies.
 
     This class provides a robust parameter management system,
     supporting dependency tracking, lazy evaluation, and type validation.
+
+    **Custom (passthrough) parameters:** any keyword that is *not* listed in
+    ``VALID_PARAMS`` is stored separately in ``self._custom_params``.  Custom
+    parameters are never type-checked, never participate in dependency
+    derivation, and never invalidate cached computed properties.  They are kept
+    as-is so they can be passed through to, for example, a pipeline call.  This
+    lets a :class:`BaseParameters` object double as a container for arbitrary
+    manual parameters alongside the validated, derivable ones.
 
     **Features:**
 
@@ -127,23 +137,22 @@ class Parameters(ZeaObject):
 
     .. doctest::
 
-        >>> class MyParams(Parameters):
+        >>> class MyParams(BaseParameters):
         ...     VALID_PARAMS = {
-        ...         "a": {"type": int, "default": 1},
-        ...         "b": {"type": float, "default": 2.0},
-        ...         "d": {"type": float},  # optional dependency
+        ...         "a": {"dtype": np.int32, "default": 1},
+        ...         "b": {"dtype": np.float32, "default": 2.0},
+        ...         "d": {"dtype": np.float32},  # optional dependency
         ...     }
-
+        ...
         ...     @cache_with_dependencies("a", "b")
         ...     def c(self):
-        ...        return self.a + self.b
-
+        ...         return self.a + self.b
+        ...
         ...     @cache_with_dependencies("a", "b")
         ...     def d(self):
         ...         if self._params.get("d") is not None:
         ...             return self._params["d"]
         ...         return self.a * self.b
-
         >>> p = MyParams(a=3)
         >>> print(p.c)  # Computes and caches c
         5.0
@@ -168,13 +177,16 @@ class Parameters(ZeaObject):
 
     """
 
-    VALID_PARAMS = None
+    # Maps each valid parameter name to its spec, e.g.
+    # ``{"sound_speed": {"dtype": np.float32, "default": 1540.0}}``.
+    # Subclasses must populate this; an empty mapping means "not defined".
+    VALID_PARAMS: ClassVar[dict[str, dict[str, Any]]] = {}
 
     def __init__(self, **kwargs):
         super().__init__()
 
         # Check if VALID_PARAMS is defined
-        if self.VALID_PARAMS is None:
+        if not self.VALID_PARAMS:
             raise NotImplementedError("VALID_PARAMS must be defined in subclasses of Parameters.")
 
         # Check if the definition of the class has circular dependencies
@@ -187,6 +199,9 @@ class Parameters(ZeaObject):
 
         # Internal state
         self._params = {}
+        # Custom (passthrough) parameters that are not part of VALID_PARAMS.
+        # These are stored as-is and ignored by dependency derivation.
+        self._custom_params = {}
         self._properties = self.get_properties()
         self._cache = {}
         self._dependency_versions = {}
@@ -213,52 +228,15 @@ class Parameters(ZeaObject):
                 f"Invalid parameter: {key}. Valid parameters are: {list(cls.VALID_PARAMS.keys())}"
             )
 
-        # Cast the value if needed and possible
-        expected_type = cls.VALID_PARAMS[key]["type"]
-        if expected_type is not None and value is not None and not isinstance(value, expected_type):
-            value = cls._cast(key, value)
-
-        # Check again
-        if expected_type is not None and value is not None and not isinstance(value, expected_type):
-            allowed = cls._human_readable_type(expected_type)
-            raise TypeError(
-                f"Parameter '{key}' expected type {allowed}, got {type(value).__name__}"
-            )
-
-        return value
-
-    @classmethod
-    def _cast(cls, key, value):
-        """Cast parameter to the expected type if 'cast_from' is specified.
-
-        Additionally, int to float conversion is allowed implicitly."""
-        # If the value is a single-element array, convert it to a scalar
-        # If it's a numpy scalar, convert it to a native Python type
-        if (isinstance(value, np.ndarray) and value.size == 1) or isinstance(value, np.generic):
-            value = value.item()
-
-        # Assume the key exists in VALID_PARAMS
-        config = cls.VALID_PARAMS[key]
-
-        if value is None:
-            return value
-
-        cast_to = config["type"]
-        if isinstance(cast_to, tuple):
-            raise ValueError(f"Casting to multiple types is not supported for parameter '{key}'.")
-
-        if "cast_from" not in config:
-            if isinstance(value, int) and cast_to is float:
-                # Allow implicit conversion from int to float
-                return float(value)
-            return value
-
-        cast_types = config["cast_from"]
-        if not isinstance(cast_types, tuple):
-            cast_types = (cast_types,)
-
-        if any(isinstance(value, t) for t in cast_types):
-            value = cast_to(value)
+        # Cast the value if needed and possible, and check dtype
+        expected_dtype = cls.VALID_PARAMS[key]["dtype"]
+        if not isinstance(expected_dtype, (list, tuple)):
+            expected_dtype = [expected_dtype]
+        value = Spec._cast_native_to_numpy(value, expected_dtype)
+        try:
+            check_dtype(value, expected_dtype)
+        except TypeError as e:
+            raise type(e)(f"In field '{key}': {e}") from e
 
         return value
 
@@ -270,14 +248,14 @@ class Parameters(ZeaObject):
         )
 
     def copy(self):
-        """Return a deep copy of the Parameters object."""
-        return self.__class__(**deepcopy(self._params))
+        """Return a deep copy of the parameters object (including custom params)."""
+        return self.__class__(**deepcopy(self._params), **deepcopy(self._custom_params))
 
     @property
     def serialized(self):
         """Compute the checksum of the object only if not already done"""
         if self._serialized is None:
-            self._serialized = serialize_elements([self._params])
+            self._serialized = serialize_elements([self._params, self._custom_params])
         return self._serialized
 
     @classmethod
@@ -323,6 +301,10 @@ class Parameters(ZeaObject):
         # Check for existence of _params to avoid issues during unpickling
         return "_params" in self.__dict__ and name in self._params
 
+    def _has_custom_param(self, name):
+        """Check if a custom (passthrough) parameter is set."""
+        return "_custom_params" in self.__dict__ and name in self._custom_params
+
     def __getattr__(self, item):
         """Handle attribute access for parameters only.
 
@@ -332,6 +314,10 @@ class Parameters(ZeaObject):
         # Return parameter value if it exists
         if self._has_param(item):
             return self._params[item]
+
+        # Return custom (passthrough) parameter value if it exists
+        if self._has_custom_param(item):
+            return self._custom_params[item]
 
         # If a class-level property exists (e.g. a computed property),
         # call its descriptor to compute and return the value. This
@@ -345,50 +331,79 @@ class Parameters(ZeaObject):
         # Attribute not found
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
 
-    def __setattr__(self, key, value):
+    def __setattr__(self, name: str, value):
         # Give clear error message on assignment to methods
-        class_attr = getattr(self.__class__, key, None)
+        class_attr = getattr(self.__class__, name, None)
         if callable(class_attr):
             raise AttributeError(
-                f"Cannot assign to method '{key}'. "
-                f"'{key}' is a method, not an attribute. "
-                f"To use it, call it as a function, e.g.: '{self.__class__.__name__}.{key}(...)'"
+                f"Cannot assign to method '{name}'. "
+                f"'{name}' is a method, not an attribute. "
+                f"To use it, call it as a function, e.g.: '{self.__class__.__name__}.{name}(...)'"
             )
 
         # Allow setting private attributes
-        if key.startswith("_"):
-            return super().__setattr__(key, value)
+        if name.startswith("_"):
+            return super().__setattr__(name, value)
 
         # Give clear error message on assignment to computed properties
-        if self._is_property_with_dependencies(key) and key not in self.VALID_PARAMS:
-            leaf_params = sorted(self._find_leaf_params(key))
+        if self._is_property_with_dependencies(name) and name not in self.VALID_PARAMS:
+            leaf_params = sorted(self._find_leaf_params(name))
             raise ValueError(
-                f"Cannot set computed property '{key}'. Only leaf parameters can be set. "
-                f"To change '{key}', set one or more of its leaf parameters: {leaf_params}"
+                f"Cannot set computed property '{name}'. Only leaf parameters can be set. "
+                f"To change '{name}', set one or more of its leaf parameters: {leaf_params}"
             )
 
+        # Give clear error message on assignment to read-only (plain) properties
+        if isinstance(class_attr, property) and name not in self.VALID_PARAMS:
+            raise AttributeError(f"Cannot set read-only property '{name}'.")
+
+        # Any key not in VALID_PARAMS is stored as a custom (passthrough) parameter.
+        # Custom params are never type-checked and never participate in derivation.
+        if name not in self.VALID_PARAMS:
+            self._custom_params[name] = value
+            self._serialized = None  # see core object
+            return
+
         # Validate new value
-        value = self._validate_parameter(key, value)
+        value = self._validate_parameter(name, value)
 
         # Set the parameter
-        self._params[key] = value
+        self._params[name] = value
 
         # Invalidate cache for this parameter if it is also a computed property
-        self._invalidate(key)
+        self._invalidate(name)
 
-    def update(self, force=False, **kwargs):
-        """Update parameters, skipping values that haven't changed unless forced.
+    def update(self, params=None, *, force=False, **kwargs):
+        """Update parameters from a mapping and/or keyword arguments.
 
-        Only valid parameters (those listed in ``VALID_PARAMS``) are considered;
-        unknown keys are silently ignored.
+        Mirrors ``dict.update``: accepts an optional positional mapping
+        (e.g. ``config.parameters``) and/or keyword arguments. Keyword arguments
+        take precedence over the mapping on key collisions.
+
+        Validated parameters (those listed in ``VALID_PARAMS``) are type-checked
+        and may invalidate cached computed properties.  Any other key is stored
+        as a custom (passthrough) parameter, except names that collide with a
+        method or computed property of the class, which are silently ignored
+        (they cannot be overridden).
 
         Args:
+            params: Optional mapping of parameters to set.
             force: If True, set every parameter unconditionally (triggers cache
                 invalidation even when the value is unchanged).  Default is False,
                 which skips unchanged values.
+            **kwargs: Parameters to set as keyword arguments.
         """
-        for key, new_val in kwargs.items():
+        merged = dict(params) if params else {}
+        merged.update(kwargs)
+        for key, new_val in merged.items():
             if key not in self.VALID_PARAMS:
+                # Cannot override methods or (computed/plain) properties.
+                class_attr = getattr(self.__class__, key, None)
+                if callable(class_attr) or isinstance(class_attr, property):
+                    continue
+                # Genuine custom passthrough parameter.
+                self._custom_params[key] = new_val
+                self._serialized = None
                 continue
 
             if not force:
@@ -423,10 +438,13 @@ class Parameters(ZeaObject):
             setattr(self, key, new_val)
 
     def __delattr__(self, name):
-        # Allow deletion of parameters, but not properties
+        # Allow deletion of parameters and custom params, but not properties
         if name in self._params:
             del self._params[name]
             self._invalidate(name)
+        elif name in self._custom_params:
+            del self._custom_params[name]
+            self._serialized = None
         elif name in self.VALID_PARAMS:
             raise ValueError(f"Cannot delete parameter '{name}' because it is not set.")
         else:
@@ -534,7 +552,12 @@ class Parameters(ZeaObject):
         """Get all properties of the class that have dependencies."""
         return [name for name in cls.get_properties() if cls._is_property_with_dependencies(name)]
 
-    def to_tensor(self, include=None, exclude=None, keep_as_is: list = None):
+    def to_tensor(
+        self,
+        include: Literal["all"] | list[str] | None = None,
+        exclude: list[str] | None = None,
+        keep_as_is: list[str] | None = None,
+    ):
         """
         Convert parameters and computed properties to tensors.
 
@@ -559,7 +582,8 @@ class Parameters(ZeaObject):
         # Determine which keys to include
         param_keys = set(self._params.keys())
         property_keys = set(self._properties)
-        all_keys = param_keys | property_keys
+        custom_keys = set(self._custom_params.keys())
+        all_keys = param_keys | property_keys | custom_keys
 
         if include == "all":
             keys = all_keys
@@ -593,18 +617,31 @@ class Parameters(ZeaObject):
 
         return tensor_dict
 
+    @staticmethod
+    def _fmt_value(k: str, v) -> str:
+        """Format a single parameter value for display."""
+        if isinstance(v, np.ndarray):
+            return f"array({v.dtype} {v.shape})"
+        if isinstance(v, list):
+            if len(v) > 8:
+                head = ", ".join(repr(x) for x in v[:4])
+                tail = ", ".join(repr(x) for x in v[-2:])
+                return f"[{head}, ..., {tail}] (len={len(v)})"
+            return repr(v)
+        # Show Hz-based fields in MHz for readability
+        _freq_keys = {"center_frequency", "sampling_frequency", "demodulation_frequency"}
+        if k in _freq_keys and isinstance(v, (int, float, np.floating, np.integer)):
+            return f"{float(v) / 1e6:.4g} MHz"
+        return repr(v)
+
     def __repr__(self):
         param_lines = []
         for k, v in self._params.items():
             if v is None:
                 continue
-
-            # Handle arrays by showing their shape instead of content
-            if isinstance(v, np.ndarray):
-                param_lines.append(f"{k}=array(shape={v.shape})")
-            else:
-                param_lines.append(f"{k}={repr(v)}")
-
+            param_lines.append(f"{k}={self._fmt_value(k, v)}")
+        for k, v in self._custom_params.items():
+            param_lines.append(f"{k}={self._fmt_value(k, v)}")
         param_str = ", ".join(param_lines)
         return f"{self.__class__.__name__}({param_str})"
 
@@ -613,13 +650,9 @@ class Parameters(ZeaObject):
         for k, v in self._params.items():
             if v is None:
                 continue
-
-            # Handle arrays by showing their shape instead of content
-            if isinstance(v, np.ndarray):
-                param_lines.append(f"    {k}=array(shape={v.shape})")
-            else:
-                param_lines.append(f"    {k}={v}")
-
+            param_lines.append(f"    {k}={self._fmt_value(k, v)}")
+        for k, v in self._custom_params.items():
+            param_lines.append(f"    {k}={self._fmt_value(k, v)}")
         param_str = ",\n".join(param_lines)
         return f"{self.__class__.__name__}(\n{param_str}\n)"
 
@@ -642,3 +675,36 @@ class Parameters(ZeaObject):
         if len(params) == 0:
             log.info(f"Could not find proper scan parameters in {kwargs}.")
         return cls(**params)
+
+    # ------------------------------------------------------------------
+    # Flat dict-like interface
+    # The object behaves as a read-only flat dict over the union of
+    # ``_params`` and ``_custom_params``.  ``__getitem__`` / ``__setitem__``
+    # / ``__delitem__`` are inherited from :class:`~zea.internal.core.Object`.
+    # ------------------------------------------------------------------
+
+    def _flat(self) -> dict:
+        """Merged view of stored params and custom params (the flat dict)."""
+        return {**self._params, **self._custom_params}
+
+    def __len__(self) -> int:
+        return len(self._params) + len(self._custom_params)
+
+    def __iter__(self):
+        yield from self._params
+        yield from self._custom_params
+
+    def __contains__(self, item) -> bool:
+        return item in self._params or item in self._custom_params
+
+    def keys(self):
+        """Return all stored parameter keys (valid + custom)."""
+        return self._flat().keys()
+
+    def values(self):
+        """Return all stored parameter values (valid + custom)."""
+        return self._flat().values()
+
+    def items(self):
+        """Return (key, value) pairs for all stored parameters (valid + custom)."""
+        return self._flat().items()

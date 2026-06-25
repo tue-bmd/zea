@@ -38,8 +38,8 @@ class RandomCircleInclusion(layers.Layer):
         recovery_threshold=0.1,
         randomize_location_across_batch=True,
         seed=None,
-        width_range: tuple[int, int] = None,
-        height_range: tuple[int, int] = None,
+        width_range: tuple[int, int] | None = None,
+        height_range: tuple[int, int] | None = None,
         **kwargs,
     ):
         """

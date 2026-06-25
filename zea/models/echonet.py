@@ -53,8 +53,6 @@ EJECTION_FRACTION_WEIGHTS_URL = (
     "/download/v1.0.0/r2plus1d_18_32_2_pretrained.pt"
 )
 
-tf = _import_tf()
-
 
 @model_registry(name="echonet-dynamic")
 class EchoNetDynamic(BaseModel):
@@ -69,6 +67,7 @@ class EchoNetDynamic(BaseModel):
             raise NotImplementedError(
                 "EchoNetDynamic is only currently supported with the TensorFlow or JAX backend."
             )
+        tf = _import_tf(force=True)
         assert tf is not None, (
             "TensorFlow is not installed. Please install TensorFlow to use EchoNetDynamic. This is "
             "required even if you are using the JAX backend, the model is built using TensorFlow. "
@@ -102,12 +101,18 @@ class EchoNetDynamic(BaseModel):
         if backend.backend() == "jax":
             from zea.backend import tf2jax
 
+            tf = _import_tf(force=True)
+
             inputs = ops.zeros([1, INFERENCE_SIZE, INFERENCE_SIZE, 3])
 
-            jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
+            jax_func, jax_params = tf2jax.convert(  # ty: ignore[unresolved-attribute]
+                tf.function(self.network), inputs
+            )
 
             def call_fn(params, state, rng, inputs, training):
-                with tf2jax.override_config("strict_shape_check", False):
+                with tf2jax.override_config(  # ty: ignore[unresolved-attribute]
+                    "strict_shape_check", False
+                ):
                     return jax_func(state, inputs)
 
             self.network = keras.layers.JaxLayer(call_fn, state=jax_params)
@@ -149,10 +154,11 @@ class EchoNetDynamic(BaseModel):
 
         return output
 
-    def _load_layer(self, path: Path | str):
+    def _load_layer(self, path: Path | str):  # pragma: no cover
         if backend.backend() == "tensorflow":
             return keras.layers.TFSMLayer(path, call_endpoint="serving_default")
         elif backend.backend() == "jax":
+            tf = _import_tf(force=True)
             return tf.saved_model.load(path)
         else:
             raise NotImplementedError(

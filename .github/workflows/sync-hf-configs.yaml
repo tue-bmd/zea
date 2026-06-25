@@ -16,7 +16,7 @@ jobs:
     if: github.repository == 'tue-bmd/zea'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6

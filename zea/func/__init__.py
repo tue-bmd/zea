@@ -59,6 +59,7 @@ from .ultrasound import (
     hilbert,
     log_compress,
     make_tgc_curve,
+    suppress_tissue,
     upmix,
 )
 
@@ -118,4 +119,5 @@ __all__ = [
     "upmix",
     "log_compress",
     "make_tgc_curve",
+    "suppress_tissue",
 ]
