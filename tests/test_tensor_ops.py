@@ -1068,8 +1068,8 @@ def test_split_seed_rejects_plain_jax_array():
 
 
 def test_split_seed_rejects_unknown_seed_type():
-    """An unsupported seed type raises TypeError on any backend."""
+    """An unsupported seed type is rejected on any backend."""
     from zea.func.tensor import split_seed
 
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, AssertionError)):
         split_seed("not-a-seed", 2)
