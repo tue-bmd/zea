@@ -787,12 +787,7 @@ def test_band_pass_filter():
 
 
 def test_band_pass_filter_validates_in_eager_mode():
-    """Frequency validation in BandPassFilter.call must run in eager (non-JIT) mode.
-
-    Previously, validate=not self._jit_compile caused validation to be skipped when
-    jit_compile=True even for eager calls. Now we always pass validate=True; the
-    function's own try/except handles the case where values are traced inside JIT.
-    """
+    """Frequency validation in BandPassFilter.call must run in eager (non-JIT) mode."""
     import keras
 
     from zea import ops

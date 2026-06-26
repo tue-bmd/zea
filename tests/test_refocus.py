@@ -77,12 +77,7 @@ def test_valid_methods_construct():
 
 
 def test_svd_methods_are_non_jittable():
-    """SVD-based Refocus methods must report jittable=False so JIT is skipped everywhere.
-
-    Marking jittable=False (rather than only jit_compile=False) ensures the op is not
-    XLA-compiled even when placed in a jit_options='ops'/'pipeline' pipeline, where the
-    pipeline would otherwise call set_jit(True) and re-enable JIT on the SVD op.
-    """
+    """SVD-based Refocus methods must report jittable=False so JIT is skipped everywhere."""
     from zea import ops
     from zea.ops import Refocus
 

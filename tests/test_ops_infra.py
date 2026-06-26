@@ -494,11 +494,7 @@ def test_inside_outer_jit_propagates_transitively():
 
 
 def test_scan_convert_guard_fires_inside_outer_jit():
-    """ScanConvert must demand explicit coordinates whenever it runs inside a JIT trace.
-
-    The guard previously keyed on self._jit_compile only, so it was silently skipped
-    when the op ran inside a jit_options='pipeline' parent (where _jit_compile is False).
-    """
+    """ScanConvert must demand explicit coordinates whenever it runs inside a JIT trace."""
     img = keras.ops.ones((4, 8), dtype="float32")
 
     # jit_options='pipeline': the op does not self-JIT but runs inside the outer trace.
