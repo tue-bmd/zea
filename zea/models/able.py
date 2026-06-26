@@ -196,11 +196,17 @@ class ABLE(BaseModel):
     def stack_channels(self, x, axis):
         """Reshape input into 4D for use with Conv2D.
 
-        PatchedGrid passes per-pixel data with the spatial dims collapsed:
-        - Rank 2: (pixels, elements)        -> (pixels, 1, 1, elements)
-        - Rank 3: (pixels, elements, n_ch)  -> (pixels, 1, 1, elements*n_ch)
-          (elements and n_ch are merged into a single channel axis, with n_ch
-          varying fastest so that unstack_channels can restore the original layout).
+        PatchedGrid passes per-pixel data with the spatial dimensions collapsed::
+
+            Rank 2: (pixels, elements)
+                -> (pixels, 1, 1, elements)
+
+            Rank 3: (pixels, elements, n_ch)
+                -> (pixels, 1, 1, elements * n_ch)
+
+                Elements and ``n_ch`` are merged into a single channel axis, with
+                ``n_ch`` varying fastest so that :meth:`unstack_channels` can restore
+                the original layout.
         """
         rank = len(x.shape)
         shape = ops.shape(x)
