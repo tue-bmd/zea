@@ -63,6 +63,7 @@ from .backend_utils import (  # noqa: E402
     format_backend_skip_reason,
     format_missing_backend_details,
     missing_required_backends,
+    unavailable_test_backends,
 )
 
 plt.rcParams["backend"] = "agg"
@@ -189,13 +190,30 @@ def pytest_collection_modifyitems(config, items):
     """Auto-skip ``@pytest.mark.gpu`` tests when no CUDA GPU is accessible.
     Also announce notebook count only when notebook tests are actually collected.
     """
+    marker_expr = getattr(config.option, "markexpr", "") or ""
+    if not marker_expr:
+        notebooks_selected = True
+    elif "not notebook" in marker_expr:
+        notebooks_selected = False
+    elif "notebook" in marker_expr:
+        notebooks_selected = True
+    else:
+        notebooks_selected = False
+
     has_notebooks = any("notebook" in item.nodeid for item in items)
-    if has_notebooks:
+    if has_notebooks and notebooks_selected:
         notebooks_dir = Path("docs/source/notebooks")
         notebooks = list(notebooks_dir.rglob("*.ipynb"))
+        notebook_filter = config.getoption("--notebook")
+        notebook_dir_filter = config.getoption("--notebook-dir")
+        if notebook_filter:
+            notebooks = [nb for nb in notebooks if notebook_filter in nb.name]
+        if notebook_dir_filter:
+            notebooks = [nb for nb in notebooks if nb.parent.name in notebook_dir_filter]
         if notebooks:
             print(f"\n📚 Preparing to test {len(notebooks)} notebooks from {notebooks_dir}")
 
+    backend_skip_count = 0
     for item in items:
         if "gpu" in item.keywords and not _GPU_AVAILABLE:
             skip_gpu = pytest.mark.skip(reason="No CUDA GPU available at runtime")
@@ -206,6 +224,20 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(
                     pytest.mark.skip(reason=format_backend_skip_reason(missing_backends))
                 )
+                backend_skip_count += 1
+
+    if _skip_unavailable_backends_enabled(config):
+        unavailable = unavailable_test_backends()
+        if unavailable:
+            missing_str = ", ".join(unavailable)
+            print(
+                f"\n⚠  Missing backends: {missing_str}"
+                + (
+                    f" — {backend_skip_count} test(s) will be skipped."
+                    if backend_skip_count
+                    else "."
+                )
+            )
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
