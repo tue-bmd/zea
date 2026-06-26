@@ -406,16 +406,45 @@ def test_pipeline_with_elementwise_operation():
 def test_pipeline_jit_options():
     """Tests the JIT options for the Pipeline."""
     operations = [MultiplyOperation(), AddOperation()]
+
     pipeline = ops.Pipeline(operations=operations, jit_options="pipeline")
-    assert callable(pipeline.call)
+    # Pipeline itself is JIT-compiled; individual ops are not (they run inside the outer JIT)
+    assert pipeline._call_pipeline is not pipeline.call
+    for operation in pipeline.operations:
+        assert operation._jit_compile is False
 
     pipeline = ops.Pipeline(operations=operations, jit_options="ops")
+    # Pipeline itself is not JIT-compiled; each op is
+    assert pipeline._call_pipeline.__func__ is pipeline.call.__func__
     for operation in pipeline.operations:
         assert operation._jit_compile is True
 
     pipeline = ops.Pipeline(operations=operations, jit_options=None)
+    # Nothing is JIT-compiled
+    assert pipeline._call_pipeline.__func__ is pipeline.call.__func__
     for operation in pipeline.operations:
         assert operation._jit_compile is False
+
+
+def test_pipeline_jit_options_pipeline_does_not_jit_nested_map():
+    """jit_options='pipeline' should JIT only the parent pipeline, not nested pipelines like Map."""
+    inner_map = Map(
+        operations=[AddOperation()],
+        argnames="x",
+        jit_options=None,
+    )
+    pipeline = ops.Pipeline(
+        operations=[MultiplyOperation(), inner_map],
+        jit_options="pipeline",
+    )
+
+    # Parent pipeline should be JIT-compiled (its call wrapper is replaced by a jitted function)
+    assert pipeline._call_pipeline is not pipeline.call
+
+    # Nested Map should NOT be independently JIT-compiled; its jit_options must remain None
+    assert inner_map.jit_options is None
+    # _jittable_call must be the unwrapped method, not a jit-compiled callable
+    assert inner_map._jittable_call.__func__ is inner_map.jittable_call.__func__
 
 
 def test_pipeline_set_params():

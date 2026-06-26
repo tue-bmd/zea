@@ -91,9 +91,6 @@ class Pipeline:
 
         self._pipeline_layers: List[Union[Operation, "Pipeline"]] = list(operations)
 
-        if jit_options not in ["pipeline", "ops", None]:
-            raise ValueError("jit_options must be 'pipeline', 'ops', or None")
-
         self.with_batch_dim = with_batch_dim
         self._validate_flag = validate
 
@@ -447,13 +444,17 @@ class Pipeline:
     def jit_options(self, value: Union[str, None]):
         """Set the jit_options property of the pipeline."""
 
-        assert value in ["pipeline", "ops", None], "jit_options must be 'pipeline', 'ops', or None"
+        if value not in ("pipeline", "ops", None):
+            raise ValueError(f"jit_options must be 'pipeline', 'ops', or None, got {value!r}")
 
         self._jit_options = value
         self.set_jit(value == "pipeline")
+        # When this pipeline is JIT-compiled as a whole, children run inside that JIT
+        # scope and must not add their own JIT. Otherwise propagate the setting unchanged.
+        nested_value = None if value == "pipeline" else value
         for operation in self.operations:
             if isinstance(operation, Pipeline):
-                operation.jit_options = value
+                operation.jit_options = nested_value
             else:
                 operation.set_jit(value == "ops")
 
@@ -974,10 +975,13 @@ class Map(Pipeline):
     def jit_options(self, value: Union[str, None]):
         """Set the jit_options property of the pipeline."""
 
-        assert value in ["pipeline", "ops", None], "jit_options must be 'pipeline', 'ops', or None"
+        if value not in ("pipeline", "ops", None):
+            raise ValueError(f"jit_options must be 'pipeline', 'ops', or None, got {value!r}")
 
         self._jit_options = value
-        self.set_jit(value == "pipeline" or value == "ops")
+        # Map JITs its entire mapped call as a single unit whenever JIT is active.
+        # Inner ops are never independently JIT'd; Map owns that scope.
+        self.set_jit(value is not None)
         for operation in self.operations:
             if isinstance(operation, Pipeline):
                 operation.jit_options = None
