@@ -40,3 +40,27 @@ jobs:
           echo "pre-commit hooks failed; did you forget to set up the pre-commit hooks?"
           echo "see the contributing page for more info: https://zea.readthedocs.io/en/latest/contributing.html"
           exit 1
+
+  dependabot-lockfile:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Regenerate uv.lock
+        run: uv lock
+
+      - name: Commit updated lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git diff --staged --quiet || git commit -m "chore: regenerate uv.lock after Dependabot update" && git push
