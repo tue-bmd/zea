@@ -1,8 +1,12 @@
 """Tests for ``zea.backend``."""
 
+import pytest
+
 from . import run_in_backend
+from .backend_utils import missing_required_backends
 
 
+@pytest.mark.tensorflow
 class TestImportTf:
     """Tests for ``_import_tf``: the lazy TensorFlow import helper in ``zea.backend``.
 
@@ -47,6 +51,7 @@ class TestImportTf:
             assert _import_tf(force=True) is None
 
 
+@pytest.mark.jax
 class TestImportJax:
     """Tests for ``_import_jax``: the lazy JAX import helper in ``zea.backend``."""
 
@@ -87,6 +92,7 @@ class TestImportJax:
             assert _import_jax(force=True) is None
 
 
+@pytest.mark.torch
 class TestImportTorch:
     """Tests for ``_import_torch``: the lazy PyTorch import helper in ``zea.backend``."""
 
@@ -109,10 +115,17 @@ class TestImportTorch:
     @staticmethod
     @run_in_backend("jax")
     def test_force_bypasses_backend_check():
-        """Returns the torch module regardless of the active backend when force=True."""
+        """Returns the torch module when available.
+
+        Regardless of the active backend when force=True.
+        """
         from zea.backend import _import_torch
 
-        assert _import_torch(force=True) is not None
+        result = _import_torch(force=True)
+        if missing_required_backends(["torch"]):
+            assert result is None, "torch not installed, should return None"
+        else:
+            assert result is not None, "torch is installed, should return the module"
 
     @staticmethod
     @run_in_backend("jax")

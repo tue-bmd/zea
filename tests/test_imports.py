@@ -70,19 +70,35 @@ def test_all_zea_modules_importable():
     # dependency is missing -- not a failure of zea's declared dependencies.
     EXCLUDED = {"zea.backend.tf2jax"}
 
+    # Exclude backend subpackages if their dependencies are not available
+    backend_modules = {
+        "torch": "zea.backend.torch",
+        "tensorflow": "zea.backend.tensorflow",
+        "jax": "zea.backend.jax",
+    }
+    excluded_prefixes = []
+    for backend_name, backend_module in backend_modules.items():
+        try:
+            __import__(backend_name)
+        except ImportError:
+            EXCLUDED.add(backend_module)
+            excluded_prefixes.append(backend_module)
+
     failures = {}
 
     def record_failure(name):
         # Called both for our own import attempts and by walk_packages when it
         # fails to import a package while recursing into it.
-        if name not in EXCLUDED:
+        if name not in EXCLUDED and not any(
+            name.startswith(prefix + ".") for prefix in excluded_prefixes
+        ):
             failures[name] = traceback.format_exc()
 
     for module_info in pkgutil.walk_packages(
         zea.__path__, prefix=f"{zea.__name__}.", onerror=record_failure
     ):
         name = module_info.name
-        if name in EXCLUDED:
+        if name in EXCLUDED or any(name.startswith(prefix + ".") for prefix in excluded_prefixes):
             continue
         try:
             importlib.import_module(name)

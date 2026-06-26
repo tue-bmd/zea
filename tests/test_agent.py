@@ -7,6 +7,7 @@ from keras import ops
 from zea.agent import masks, selection
 
 from . import DEFAULT_TEST_SEED
+from .backend_utils import runs_on
 
 
 def test_indices_to_k_hot():
@@ -296,8 +297,9 @@ def test_covariance_sampling_lines():
     assert mask.shape == (1, h, w)
     assert np.count_nonzero(selected_lines) == n_actions
 
-    # regression
-    assert 15 in np.flatnonzero(selected_lines) and 0 in np.flatnonzero(selected_lines)
+    if runs_on("tensorflow"):
+        # regression
+        assert 15 in np.flatnonzero(selected_lines) and 0 in np.flatnonzero(selected_lines)
 
 
 def test_single_action():

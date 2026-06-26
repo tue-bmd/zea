@@ -121,16 +121,37 @@ NOTEBOOK_PARAMETERS = {
     # },
 }
 
+TENSORFLOW_NOTEBOOKS = {
+    "doppler_example.ipynb",
+    "taesd_autoencoder_example.ipynb",
+    "carotid_segmentation_example.ipynb",
+    "left_ventricle_segmentation_example.ipynb",
+    "myocardial_quality_example.ipynb",
+}
+
 _notebook_names = [nb.name for nb in NOTEBOOKS]
-for nbp_name in NOTEBOOK_PARAMETERS.keys():
-    assert nbp_name in _notebook_names, (
-        f"Notebook {nbp_name} not found in {NOTEBOOKS_DIR}. "
+for notebook_name in NOTEBOOK_PARAMETERS:
+    assert notebook_name in _notebook_names, (
+        f"Notebook {notebook_name} not found in {NOTEBOOKS_DIR}. "
         "Wrong definition in NOTEBOOK_PARAMETERS?"
+    )
+for notebook_name in TENSORFLOW_NOTEBOOKS:
+    assert notebook_name in _notebook_names, (
+        f"Notebook {notebook_name} not found in {NOTEBOOKS_DIR}. "
+        "Wrong definition in TENSORFLOW_NOTEBOOKS?"
     )
 
 
+def _notebook_case(notebook):
+    marks = (pytest.mark.tensorflow,) if notebook.name in TENSORFLOW_NOTEBOOKS else ()
+    return pytest.param(notebook, id=notebook.name, marks=marks)
+
+
+NOTEBOOK_CASES = [_notebook_case(notebook) for notebook in NOTEBOOKS]
+
+
 @pytest.mark.notebook
-@pytest.mark.parametrize("notebook", NOTEBOOKS, ids=lambda x: x.name)
+@pytest.mark.parametrize("notebook", NOTEBOOK_CASES)
 def test_notebook_runs(notebook, tmp_path, request):
     # Filter by --notebook CLI option if provided
     notebook_filter = request.config.getoption("--notebook")

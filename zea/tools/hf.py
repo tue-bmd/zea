@@ -152,7 +152,10 @@ class HFPath(PurePosixPath):
     @property
     def subpath(self):
         """Get path inside the repo."""
-        return "/".join(self.parts[3:])
+        repo_id = self.repo_id
+        repo_id_parts = repo_id.split("/")
+        filtered_parts = [p for p in self.parts if p and p != "hf:"]
+        return "/".join(filtered_parts[len(repo_id_parts) :])
 
     def is_file(self):
         """Return True if this HFPath points to a file in the repo."""
