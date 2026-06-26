@@ -46,23 +46,27 @@ def k_hot_to_indices(selected_lines, n_actions: int, fill_value=-1):
     """Convert k-hot encoded lines to indices of selected actions.
 
     Args:
-        selected_lines (Tensor): k-hot encoded lines of shape (batch_size, n_possible_actions).
+        selected_lines (Tensor): k-hot encoded lines of shape (..., n_possible_actions),
+            with any number of leading dimensions (including none).
         n_actions (int): Number of lines selected.
         fill_value (int, optional): Value to fill in case there are not enough selected actions.
             Defaults to -1.
 
     Returns:
-        Tensor: Indices of selected actions of shape (batch_size, n_actions).
+        Tensor: Indices of selected actions of shape (..., n_actions).
             If there are fewer than `n_actions` selected, the remaining indices will be
             filled with `fill_value`.
     """
 
-    # Find nonzero indices for each frame
+    # Find nonzero indices for a single k-hot encoded row
     def get_nonzero(row):
-        return nonzero(row > 0, size=n_actions, fill_value=fill_value)[0]
+        return nonzero(row, size=n_actions, fill_value=fill_value)[0]
 
-    indices = ops.vectorized_map(get_nonzero, selected_lines)
-    return indices
+    # Flatten any number of leading dims into one, map, then restore them
+    *leading_dims, n_possible_actions = ops.shape(selected_lines)
+    flat = ops.reshape(selected_lines, (-1, n_possible_actions))
+    indices = ops.vectorized_map(get_nonzero, flat)
+    return ops.reshape(indices, (*leading_dims, n_actions))
 
 
 def random_uniform_lines(
@@ -152,24 +156,26 @@ def lines_to_im_size(lines, img_size: tuple):
     Convert k-hot-encoded line vectors to image size.
 
     Args:
-        lines (Tensor): shape is (n_masks, n_possible_actions)
+        lines (Tensor): shape is (..., n_possible_actions), with any number of
+            leading dimensions (including none).
         img_size (tuple): (height, width)
 
     Returns:
-        Tensor: Masks of shape (n_masks, img_size, img_size)
+        Tensor: Masks of shape (..., height, width)
     """
     height, width = img_size
 
-    remainder = width % ops.shape(lines)[1]
+    n_possible_actions = ops.shape(lines)[-1]
+    remainder = width % n_possible_actions
     assert remainder == 0, (
         f"Width must be divisible by number of actions. Got remainder: {remainder}."
     )
 
     # Repeat till width of image
-    masks = ops.repeat(lines, width // ops.shape(lines)[1], axis=1)
+    masks = ops.repeat(lines, width // n_possible_actions, axis=-1)
 
     # Repeat till height of image
-    masks = ops.repeat(masks[:, None], height, axis=1)
+    masks = ops.repeat(ops.expand_dims(masks, axis=-2), height, axis=-2)
 
     return masks
 
