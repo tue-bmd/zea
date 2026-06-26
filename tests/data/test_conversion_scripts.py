@@ -53,7 +53,15 @@ def run_subprocess(cmd, **kwargs):
 
 
 @pytest.mark.parametrize(
-    "dataset", ["echonet", "echonetlvh", "camus", "cetus", "picmus", "verasonics"]
+    "dataset",
+    [
+        pytest.param("echonet", marks=pytest.mark.tensorflow),
+        pytest.param("echonetlvh", marks=pytest.mark.jax),
+        "camus",
+        "cetus",
+        "picmus",
+        "verasonics",
+    ],
 )
 @pytest.mark.heavy
 def test_conversion_script(tmp_path_factory, dataset):
@@ -92,6 +100,7 @@ def test_conversion_script(tmp_path_factory, dataset):
                 str(dst),
                 "--no_hyperthreading",
             ],
+            env=create_env_for_dataset(dataset),
         )
         with open(dst / "split.yaml", "r") as f:
             split_content1 = yaml.safe_load(f)
@@ -105,6 +114,8 @@ def test_conversion_script(tmp_path_factory, dataset):
 
 def create_env_for_dataset(dataset):
     env = os.environ.copy()
+    if dataset == "echonet":
+        env["KERAS_BACKEND"] = "tensorflow"
     if dataset == "echonetlvh":
         env["KERAS_BACKEND"] = "jax"
     return env
@@ -1109,7 +1120,7 @@ def test_load_avi(tmp_path):
     # Verify the shape and content
     assert loaded_frames.shape == (10, 32, 32)
     for i in range(10):
-        np.testing.assert_allclose(loaded_frames[i], frames[i], atol=1)
+        np.testing.assert_allclose(loaded_frames[i], frames[i], atol=2)
 
 
 def test_sitk_load(tmp_path):

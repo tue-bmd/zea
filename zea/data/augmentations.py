@@ -4,7 +4,7 @@ import keras
 import numpy as np
 from keras import layers, ops
 
-from zea.func.tensor import is_jax_prng_key, split_seed
+from zea.func.tensor import materialize_seed, split_seed
 
 
 class RandomCircleInclusion(layers.Layer):
@@ -280,25 +280,23 @@ class RandomCircleInclusion(layers.Layer):
             Tensor or tuple: Augmented images, and optionally the circle
                 centers if return_centers is True.
         """
-        if keras.backend.backend() == "jax" and not is_jax_prng_key(seed):
-            if isinstance(seed, keras.random.SeedGenerator):
-                raise ValueError(
-                    "When using JAX backend, please provide a jax.random.PRNGKey as seed, "
-                    "instead of keras.random.SeedGenerator."
-                )
-            else:
-                raise TypeError(
-                    f"When using JAX backend, seed must be a JAX PRNG key (created with "
-                    f"jax.random.PRNGKey()), but got {type(seed)}. Note: jax.random.key() "
-                    f"keys are not currently supported."
-                )
-        seed = seed if seed is not None else self.seed
+        seed = materialize_seed(self.seed if seed is None else seed)
 
         if self.with_batch_dim:
             x_is_symbolic_tensor = not isinstance(ops.shape(x)[0], int)
             if x_is_symbolic_tensor:
                 if self.randomize_location_across_batch:
-                    imgs, centers = ops.map(lambda arg: self._call(arg, seed), x)
+                    if keras.backend.backend() == "jax" and seed is not None:
+                        import jax
+
+                        # Use ops.arange which works with symbolic shapes
+                        indices = ops.arange(ops.shape(x)[0], dtype="int32")
+                        imgs, centers = ops.map(
+                            lambda args: self._call(args[0], jax.random.fold_in(seed, args[1])),
+                            (x, indices),
+                        )
+                    else:
+                        imgs, centers = ops.map(lambda arg: self._call(arg, seed), x)
                 else:
                     raise NotImplementedError(
                         "You cannot fix circle locations across batch while using "

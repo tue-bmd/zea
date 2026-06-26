@@ -27,34 +27,60 @@ def split_seed(seed, n):
     Returns:
         list: List of n seeds (JAX keys, SeedGenerator, or None).
     """
+    seed = materialize_seed(seed)
+
     # If seed is None, return a list of None
     if seed is None:
         return [None for _ in range(n)]
 
-    # If seed is a JAX key, split it into n keys
-    if keras.backend.backend() == "jax":
+    # If seed is a JAX key, split it into n independent keys.
+    if is_jax_key(seed):
         import jax
 
         return jax.random.split(seed, n)
 
-    # For other backends, we have to use Keras SeedGenerator
-    else:
-        assert isinstance(seed, keras.random.SeedGenerator), (
-            "seed must be a SeedGenerator when not using JAX."
-        )
-
-        # Just duplicate the SeedGenerator
+    if isinstance(seed, keras.random.SeedGenerator):
+        # Reuse the same stateful generator so downstream random ops consume
+        # independent draws across repeated calls, regardless of backend.
         return [seed for _ in range(n)]
 
+    raise TypeError("seed must be None, an int, keras.random.SeedGenerator, or a JAX key.")
 
-def is_jax_prng_key(x):
-    """Distinguish between jax.random.PRNGKey() and jax.random.key()"""
-    if keras.backend.backend() == "jax":
-        import jax
 
-        return isinstance(x, jax.Array) and x.shape == (2,) and x.dtype == jax.numpy.uint32
-    else:
+def materialize_seed(seed):
+    """Convert stateful seeds into backend-native explicit seeds when needed.
+
+    On JAX, `keras.random.SeedGenerator` is stateful and cannot be safely used
+    in `ops.map`. This function converts it into an explicit legacy PRNG key outside those traces.
+    Existing JAX keys are returned unchanged.
+    """
+    if seed is None:
+        return None
+
+    if isinstance(seed, int):
+        if keras.backend.backend() == "jax":
+            import jax
+
+            return jax.random.PRNGKey(seed)
+        return keras.random.SeedGenerator(seed)
+
+    if keras.backend.backend() == "jax" and isinstance(seed, keras.random.SeedGenerator):
+        return seed.next()
+
+    return seed
+
+
+def is_jax_key(x):
+    """Return True for both legacy jax.random.PRNGKey() and typed jax.random.key() keys."""
+    if keras.backend.backend() != "jax":
         return False
+    import jax
+
+    if not isinstance(x, jax.Array):
+        return False
+
+    is_legacy_key = x.shape == (2,) and x.dtype == jax.numpy.uint32
+    return is_legacy_key or jax.dtypes.issubdtype(x.dtype, jax.dtypes.prng_key)
 
 
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
@@ -182,28 +208,57 @@ def boolean_mask(tensor, mask, size=None):
         return tensor[mask]
 
 
-if keras.backend.backend() == "jax":
-    import jax.numpy as jnp
+def nonzero(x, size=None, fill_value=None):
+    """Return the indices of the elements that are non-zero.
 
-    def nonzero(x, size=None, fill_value=None):
-        """Return the indices of the elements that are non-zero.
+    Mirrors :func:`jax.numpy.nonzero`. When ``size`` is ``None`` this falls back to
+    :func:`keras.ops.nonzero` (dynamic, data-dependent output shape). When ``size`` is
+    given, the output has a static shape: the nonzero indices are truncated to ``size``
+    entries, or padded with ``fill_value`` if there are fewer than ``size`` of them. The
+    static shape makes the result usable inside tracing/vectorization.
 
-        Args:
-            x (Tensor): Input tensor.
-            size (int, optional): optional static integer specifying the number of nonzero
-                entries to return. If there are more nonzero elements than the specified size,
-                then indices will be truncated at the end. If there are fewer nonzero elements
-                than the specified size, then indices will be padded with fill_value.
-            fill_value (int, optional): Value to fill in case there are not enough
-                non-zero elements. Defaults to None.
-        """
+    Args:
+        x (Tensor): Input tensor.
+        size (int, optional): optional static integer specifying the number of nonzero
+            entries to return. If there are more nonzero elements than the specified size,
+            then indices will be truncated at the end. If there are fewer nonzero elements
+            than the specified size, then indices will be padded with fill_value.
+        fill_value (int, optional): Value to fill in case there are not enough
+            non-zero elements. Defaults to None, which falls back to 0.
+    """
+    # Use ops.nonzero when size is not used
+    if size is None:
+        return ops.nonzero(x)
+
+    # Directly use jnp.nonzero if JAX backend is used
+    if keras.backend.backend() == "jax":
+        import jax.numpy as jnp
+
         return jnp.nonzero(x, size=size, fill_value=fill_value)
 
-else:
+    if fill_value is None:
+        fill_value = 0
 
-    def nonzero(x, size=None, fill_value=None):
-        """Return the indices of the elements that are non-zero."""
-        return ops.nonzero(x)
+    shape = ops.shape(x)
+    # Avoid comparing a boolean tensor against 0 (unsupported on some backends).
+    mask = x if ops.dtype(x) == "bool" else ops.not_equal(x, 0)
+    flat_mask = ops.reshape(mask, (-1,))
+    n_elements = flat_mask.shape[0]
+
+    # Mirror jax.numpy.nonzero: cumsum over the boolean mask gives each position
+    # a 1-indexed nonzero count; bincount turns that into per-slot occupancy;
+    # cumsum of occupancy yields flat indices of the nonzero elements.
+    # bincount with minlength=size guarantees ≥ size bins; [:size] truncates to
+    # exactly size, so flat_indices always has the correct static length.
+    cumsum_mask = ops.cast(ops.cumsum(flat_mask), "int32")
+    flat_indices = ops.cumsum(ops.bincount(cumsum_mask, minlength=size)[:size])
+
+    # Entries that did not correspond to a real nonzero element get fill_value.
+    valid = flat_indices < n_elements
+    safe_indices = ops.where(valid, flat_indices, 0)
+    return tuple(
+        ops.where(valid, coord, fill_value) for coord in ops.unravel_index(safe_indices, shape)
+    )
 
 
 def flatten(tensor, start_dim=0, end_dim=-1):

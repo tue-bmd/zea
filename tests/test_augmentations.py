@@ -1,12 +1,13 @@
 """Tests for RandomCircleInclusion augmentation."""
 
 import numpy as np
+import pytest
 from keras import ops
 from keras import random as keras_random
 
 from zea.data.augmentations import RandomCircleInclusion
 
-from . import DEFAULT_TEST_SEED
+from . import DEFAULT_TEST_SEED, run_in_backend
 
 
 def assert_circle_pixels(image, center, radius, fill_value, tol=1e-5, min_fraction=0.9):
@@ -268,3 +269,48 @@ def test_random_circle_inclusion_with_height_width_ranges():
     assert width_range[0] <= center_np[0] < width_range[1]
     assert height_range[0] <= center_np[1] < height_range[1]
     assert_circle_pixels(out_np, center_np, 5, 1.0)
+
+
+@run_in_backend("tensorflow")
+def test_random_circle_inclusion_symbolic_tensor_randomize():
+    """x_is_symbolic_tensor=True + randomize_location_across_batch=True uses ops.map."""
+    import tensorflow as tf
+
+    images = np.zeros((4, 28, 28), dtype=np.float32)
+    layer = RandomCircleInclusion(radius=5, fill_value=1.0, circle_axes=(1, 2), with_batch_dim=True)
+
+    # input_signature forces a dynamic (None) batch dimension to trigger the symbolic-tensor branch.
+    @tf.function(input_signature=[tf.TensorSpec(shape=(None, 28, 28), dtype=tf.float32)])
+    def run(x):
+        return layer(x)
+
+    out = run(tf.constant(images))
+    out_np = out.numpy()
+    assert out_np.shape == images.shape
+    assert np.any(np.isclose(out_np, 1.0))
+    # Verify randomness: not all batch elements should have identical outputs (same center)
+    assert not np.allclose(out_np[0], out_np[1]) or not np.allclose(out_np[1], out_np[2]), (
+        "Centers should be randomized across batch elements"
+    )
+
+
+@run_in_backend("tensorflow")
+def test_random_circle_inclusion_symbolic_tensor_fixed_raises():
+    """x_is_symbolic_tensor=True + randomize_location_across_batch=False raises."""
+    import tensorflow as tf
+
+    images = np.zeros((4, 28, 28), dtype=np.float32)
+    layer = RandomCircleInclusion(
+        radius=5,
+        fill_value=1.0,
+        circle_axes=(1, 2),
+        with_batch_dim=True,
+        randomize_location_across_batch=False,
+    )
+
+    @tf.function(input_signature=[tf.TensorSpec(shape=(None, 28, 28), dtype=tf.float32)])
+    def run(x):
+        return layer(x)
+
+    with pytest.raises(NotImplementedError):
+        run(tf.constant(images))
