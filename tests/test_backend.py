@@ -1,9 +1,12 @@
 """Tests for ``zea.backend``."""
 
+import pytest
+
 from . import run_in_backend
 from .backend_utils import missing_required_backends
 
 
+@pytest.mark.tensorflow
 class TestImportTf:
     """Tests for ``_import_tf``: the lazy TensorFlow import helper in ``zea.backend``.
 

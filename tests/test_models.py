@@ -34,6 +34,7 @@ def test_speckle2self_call_nchw(speckle2self_model, rng):
     assert out.shape == (BATCH_SIZE, *IMAGE_SHAPE)
 
 
+@pytest.mark.tensorflow
 class TestTinyAutoencoder:
     """Tests for ``TinyAutoencoder`` (TAESD) without pretrained weights."""
 
@@ -61,6 +62,7 @@ class TestTinyAutoencoder:
             model(x)
 
 
+@pytest.mark.tensorflow
 class TestEchoNetDynamic:
     """Tests for ``EchoNetDynamic`` without pretrained weights."""
 
