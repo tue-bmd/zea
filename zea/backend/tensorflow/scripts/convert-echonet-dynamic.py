@@ -28,7 +28,13 @@ flatbuffers>=23.5.26
 
 import os
 
-os.environ["KERAS_BACKEND"] = "tensorflow"
+if os.environ.get("KERAS_BACKEND") is None:
+    os.environ["KERAS_BACKEND"] = "tensorflow"
+elif os.environ["KERAS_BACKEND"] != "tensorflow":
+    raise ValueError(
+        f"KERAS_BACKEND is set to {os.environ['KERAS_BACKEND']}, but it must be set to "
+        "tensorflow for this script. Please unset KERAS_BACKEND or set it to tensorflow."
+    )
 
 import time
 from pathlib import Path
