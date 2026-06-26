@@ -10,14 +10,41 @@ Examples::
     python -m zea.data.convert cetus ./raw ./output --download
     python -m zea.data.convert echonet ./raw ./output
     python -m zea.data.convert echoxflow ./raw ./output
+    python -m zea.data.convert us4us ./data.pkl ./out.hdf5 \
+        --mapping '{"0": "image", "2": "raw_data"}'
 
 Run ``python -m zea.data.convert --help`` for all options.
 """
 
 import argparse
+import json
 from pathlib import Path
 
 from zea.internal.device import init_device
+
+
+def _parse_us4us_mapping(value: str) -> dict:
+    """Parse a JSON string into an ``output_idx -> data_type`` mapping.
+
+    Example: ``'{"0": "image", "2": "raw_data"}'`` →
+    ``{0: "image", 2: "raw_data"}``.
+    """
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Invalid JSON for --mapping: {value!r} ({exc})"
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise argparse.ArgumentTypeError(
+            f"--mapping must decode to a JSON object, got {type(parsed).__name__}"
+        )
+    try:
+        return {int(k): v for k, v in parsed.items()}
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(
+            f"--mapping keys must be integers, got {list(parsed.keys())}"
+        ) from exc
 
 
 def _add_parser_args_echonet(subparsers):
@@ -307,6 +334,26 @@ def _add_parser_args_echoxflow(subparsers):
     )
 
 
+def _add_parser_args_us4us(subparsers):
+    """Add us4us specific arguments to the parser."""
+    us4us_parser = subparsers.add_parser(
+        "us4us", help="Convert us4us (arrus + gui4us) pickle to zea format"
+    )
+    us4us_parser.add_argument("src", type=Path, help="Source .pkl file path")
+    us4us_parser.add_argument("dst", type=Path, help="Destination .hdf5 file path")
+    us4us_parser.add_argument(
+        "--mapping",
+        type=_parse_us4us_mapping,
+        default={0: "image"},
+        help=(
+            "JSON string mapping pipeline output indices to zea data types. "
+            'Example: \'{"0": "image", "2": "raw_data"}\'. '
+            "Supported types: raw_data, image, beamformed_data, envelope_data, "
+            "aligned_data. Defaults to '{\"0\": \"image\"}'."
+        ),
+    )
+
+
 def get_parser():
     """Build and parse command-line arguments for converting raw datasets to a zea dataset."""
     parser = argparse.ArgumentParser(description="Convert raw data to a zea dataset.")
@@ -318,6 +365,7 @@ def get_parser():
     _add_parser_args_picmus(subparsers)
     _add_parser_args_verasonics(subparsers)
     _add_parser_args_echoxflow(subparsers)
+    _add_parser_args_us4us(subparsers)
     return parser
 
 
@@ -335,6 +383,7 @@ def main():
     - picmus
     - verasonics
     - echoxflow
+    - us4us
 
     Raises a ValueError if args.dataset is not one of the supported choices.
     """
@@ -379,6 +428,10 @@ def main():
         from zea.data.convert.echoxflow import convert_echoxflow
 
         convert_echoxflow(args)
+    elif args.dataset == "us4us":
+        from zea.data.convert.us4us import convert_us4us
+
+        convert_us4us(args)
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 

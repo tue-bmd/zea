@@ -1,0 +1,520 @@
+"""Convert us4us (arrus + gui4us) pickle files to the zea format.
+
+The gui4us software (https://us4us.eu) stores acquired ultrasound data as Python
+pickle files containing:
+
+- ``data["data"]``: a list of N frames, each frame is a tuple of M numpy arrays
+  (one per pipeline output, e.g. image, beamformed IQ, raw channel data).
+- ``data["metadata"]``: a tuple of M :class:`ConstMetadata` objects, one per
+  pipeline output, describing the acquisition context, probe model, and sequence.
+
+Example usage::
+
+    from zea.data.convert.us4us import convert_us4us
+    import argparse
+
+    args = argparse.Namespace(
+        src="path/to/data.pkl",
+        dst="path/to/output.hdf5",
+        mapping={0: "image", 2: "raw_data"},
+    )
+    convert_us4us(args)
+
+The ``mapping`` argument maps each output index (position in the per-frame
+tuple) to a zea data type string.  Supported types: ``"raw_data"``,
+``"image"``, ``"beamformed_data"``, ``"envelope_data"``, ``"aligned_data"``.
+Default: ``{0: "image"}``.
+
+Mapping from arrus metadata to zea scan/probe fields:
+
+- ``metadata.context.raw_sequence.ops[j].tx.delays``  →  ``t0_delays``
+- ``metadata.context.raw_sequence.ops[j].tx.aperture``  →  ``tx_apodizations``
+- ``metadata.context.raw_sequence.ops[j].rx.sample_range``  →  ``initial_times``
+- ``metadata.context.raw_sequence.ops[j].pri``  →  ``time_to_next_transmit``
+- ``metadata.context.sequence.tx_focus``  →  ``focus_distances``
+- ``metadata.context.sequence.angles``  →  ``polar_angles``
+- ``metadata.data_description.sampling_frequency``  →  ``sampling_frequency``
+- ``metadata.context.device.probe[0].model``  →  probe geometry / element_width
+- ``metadata.context.medium.speed_of_sound``  →  ``sound_speed``
+"""
+
+import pickle
+from pathlib import Path
+
+import numpy as np
+
+from zea import log
+from zea.data.file import File
+from zea.data.spec import DEFAULT_COMPRESSION
+
+_ZEA_DATA_TYPES = frozenset(
+    {
+        "raw_data",
+        "image",
+        "beamformed_data",
+        "envelope_data",
+        "aligned_data",
+        "segmentation",
+        "sos_map",
+        "strain_percentage_map",
+        "shear_wave_elastography_map",
+        "tissue_doppler",
+        "color_doppler",
+    }
+)
+
+
+# ---------------------------------------------------------------------------
+# Stub unpickler — replaces every arrus class with a plain namespace object
+# The below stub is needed only to give the possibility to deserialize 
+# us4us pickles without the requirements of having arrus Python package 
+# installed.
+# ---------------------------------------------------------------------------
+class _ArrusStub:
+    """Namespace placeholder for any arrus class encountered during unpickling."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+
+class _ArrusUnpickler(pickle.Unpickler):
+    """Unpickler that swaps all arrus classes for :class:`_ArrusStub`."""
+
+    def find_class(self, module, name):
+        if "arrus" in module:
+            return _ArrusStub
+        return super().find_class(module, name)
+
+
+# ---------------------------------------------------------------------------
+# Pickle loading
+# ---------------------------------------------------------------------------
+def _load_us4us_pickle(path: Path) -> dict:
+    """Load an us4us pickle, falling back to the stub unpickler if arrus is absent."""
+    with open(path, "rb") as f:
+        try:
+            return pickle.load(f)
+        except Exception:
+            pass
+
+    log.debug("Standard pickle load failed — retrying with arrus stub unpickler.")
+    with open(path, "rb") as f:
+        return _ArrusUnpickler(f).load()
+
+
+# ---------------------------------------------------------------------------
+# Probe extraction
+# ---------------------------------------------------------------------------
+def _extract_probe_dict(probe_dto, ops) -> dict:
+    """
+    Builds a :class:`~zea.data.spec.ProbeSpec`-compatible dict
+    from an arrus.devices.probe.ProbeDTO stub.
+    """
+    model = probe_dto.model
+    n_el = int(model.n_elements)
+
+    x = np.asarray(model.element_pos_x, dtype=np.float32).ravel()
+    z = np.asarray(model.element_pos_z, dtype=np.float32).ravel()
+    y = np.zeros(n_el, dtype=np.float32)
+    probe_geometry = np.stack([x, y, z], axis=1)  # (n_el, 3)
+
+    probe_dict: dict = {"probe_geometry": probe_geometry}
+
+    if hasattr(model, "pitch") and model.pitch:
+        probe_dict["element_width"] = np.float32(model.pitch)
+
+    # Probe type
+    cr = getattr(model, "curvature_radius", None)
+    if cr is not None:
+        probe_dict["type"] = "linear" if float(cr) == 0.0 else "curved"
+
+    # Name from model_id if available
+    model_id = getattr(model, "model_id", None)
+    probe_dict["name"] = getattr(model_id, "name", "generic") or "generic"
+
+    # Heuristic: center frequency from the TX excitation
+    # TODO: the below heuristic is not the best way to handle that,
+    # and in the future consider using tx_frequency_range (currently not
+    # available in the Python api).
+    if ops:
+        exc = ops[0].tx.excitation
+        cf = getattr(exc, "center_frequency", None)
+        if cf is not None:
+            probe_dict["probe_center_frequency"] = np.float32(cf)
+
+    # Lens parameters
+    lens = getattr(model, "lens", None)
+    if lens is not None:
+        t = getattr(lens, "thickness", None)
+        c = getattr(lens, "speed_of_sound", None)
+        if t and float(t) > 0:
+            probe_dict["lens_thickness"] = np.float32(t)
+        if c and float(c) > 0:
+            probe_dict["lens_sound_speed"] = np.float32(c)
+
+    return probe_dict
+
+
+# ---------------------------------------------------------------------------
+# TX/RX sequence -> scan
+# ---------------------------------------------------------------------------
+def _extract_scan_dict(context, data_char, n_frames: int) -> dict:
+    """
+    Build a :class:`~zea.data.spec.ScanSpec`-compatible dict from arrus context.
+    """
+    raw_seq = context.raw_sequence
+    sequence = context.sequence
+    ops = raw_seq.ops
+    n_tx = len(ops)
+
+    device = context.device
+    model = device.probe[0].model
+    n_el = int(model.n_elements)
+
+    x_pos = np.asarray(model.element_pos_x, dtype=np.float64).ravel()
+    z_pos = np.asarray(model.element_pos_z, dtype=np.float64).ravel()
+
+    sampling_frequency = np.float32(data_char.sampling_frequency)
+
+    # Center / demodulation frequency from TX excitation
+    exc = ops[0].tx.excitation
+    center_frequency = np.float32(getattr(exc, "center_frequency", 0.0))
+    demodulation_frequency = center_frequency
+
+    # -----------------------------------------------------------------------
+    # t0_delays and tx_apodizations — (n_tx, n_el)
+    # -----------------------------------------------------------------------
+    t0_delays = np.zeros((n_tx, n_el), dtype=np.float64)
+    tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
+
+    for i, op in enumerate(ops):
+        aperture = np.asarray(op.tx.aperture, dtype=bool)
+        delays = np.asarray(op.tx.delays, dtype=np.float64)
+        t0_delays[i, aperture] = delays
+        tx_apodizations[i, aperture] = 1.0
+
+    # Shift each transmit so the first active element fires at t = 0, then
+    # clip to suppress floating-point underflow below zero.
+    for i in range(n_tx):
+        active = tx_apodizations[i] > 0
+        if np.any(active):
+            t0_delays[i] -= t0_delays[i, active].min()
+
+    t0_delays = np.clip(t0_delays, 0.0, None).astype(np.float32)
+
+    # -----------------------------------------------------------------------
+    # initial_times — (n_tx,)
+    # -----------------------------------------------------------------------
+    initial_times = np.zeros(n_tx, dtype=np.float32)
+    for i, op in enumerate(ops):
+        sr = getattr(op.rx, "sample_range", None)
+        if sr is not None:
+            initial_times[i] = np.float32(sr[0] / sampling_frequency)
+
+    # -----------------------------------------------------------------------
+    # focus_distances — (n_tx,)
+    # -----------------------------------------------------------------------
+    tx_focus = getattr(sequence, "tx_focus", None)
+    if tx_focus is None:
+        focus_distances = np.full(n_tx, np.inf, dtype=np.float32)
+    else:
+        focus_distances = np.full(n_tx, float(tx_focus), dtype=np.float32)
+
+    # -----------------------------------------------------------------------
+    # transmit_origins — (n_tx, 3): centre of active TX aperture
+    # -----------------------------------------------------------------------
+    transmit_origins = np.zeros((n_tx, 3), dtype=np.float32)
+    for i, op in enumerate(ops):
+        aperture = np.asarray(op.tx.aperture, dtype=bool)
+        if np.any(aperture):
+            transmit_origins[i, 0] = float(x_pos[aperture].mean())
+            transmit_origins[i, 2] = float(z_pos[aperture].mean())
+
+    # -----------------------------------------------------------------------
+    # polar_angles — (n_tx,)
+    # -----------------------------------------------------------------------
+    angles_val = getattr(sequence, "angles", 0.0)
+    angles_arr = np.atleast_1d(np.asarray(angles_val, dtype=np.float32)).ravel()
+    if angles_arr.size == n_tx:
+        polar_angles = angles_arr
+    else:
+        polar_angles = np.full(n_tx, float(angles_arr[0]), dtype=np.float32)
+
+    # -----------------------------------------------------------------------
+    # time_to_next_transmit — (n_frames, n_tx)
+    # -----------------------------------------------------------------------
+    pris = np.array([op.pri for op in ops], dtype=np.float32)
+    time_to_next_transmit = np.tile(pris[np.newaxis, :], (n_frames, 1))
+
+    scan_dict: dict = {
+        "sampling_frequency": sampling_frequency,
+        "center_frequency": center_frequency,
+        "demodulation_frequency": demodulation_frequency,
+        "initial_times": initial_times,
+        "t0_delays": t0_delays,
+        "tx_apodizations": tx_apodizations,
+        "focus_distances": focus_distances,
+        "transmit_origins": transmit_origins,
+        "polar_angles": polar_angles,
+        "time_to_next_transmit": time_to_next_transmit,
+    }
+
+    medium = getattr(context, "medium", None)
+    if medium is not None:
+        sos = getattr(medium, "speed_of_sound", None)
+        if sos is not None:
+            scan_dict["sound_speed"] = np.float32(sos)
+
+    return scan_dict
+
+
+# ---------------------------------------------------------------------------
+# Data (coordinates, etc.)
+# ---------------------------------------------------------------------------
+def _get_image_coordinates(data_char) -> "np.ndarray | None":
+    """
+    Try to extract a (n_z, n_x, 3) coordinate grid from arrus spacing metadata.
+    """
+    spacing = getattr(data_char, "spacing", None)
+    if spacing is None:
+        return None
+    coords = getattr(spacing, "coordinates", None)
+    if coords is None or len(coords) < 2:
+        return None
+    try:
+        z_vals = np.asarray(coords[0], dtype=np.float32).ravel()
+        x_vals = np.asarray(coords[1], dtype=np.float32).ravel()
+        Z, X = np.meshgrid(z_vals, x_vals, indexing="ij")
+        Y = np.zeros_like(Z)
+        return np.stack([X, Y, Z], axis=-1)  # (n_z, n_x, 3)
+    except Exception as exc:
+        log.warning(f"Could not build image coordinates: {exc}")
+        return None
+
+
+def _prepare_output(
+    arrays, output_idx: int, data_type: str, meta_entry, raw_ops=None
+) -> "dict | np.ndarray":
+    """Stack per-frame arrays and reshape into the expected zea format.
+
+    Args:
+        arrays: List of per-frame tuples.
+        output_idx: Index into each tuple.
+        data_type: Target zea data type string.
+        meta_entry: Corresponding :class:`ConstMetadata` stub for this output.
+        raw_ops: Optional list of arrus ``TxRx`` stubs from the raw sequence.
+            When provided, ``raw_data`` arrays are reconstructed from
+            the hardware sub-aperture back to the full-probe element count
+            using ``rx.aperture`` and ``rx.padding``.
+
+    Returns:
+        A numpy array (for ``raw_data``) or a dict with at least a ``"values"``
+        key (for all map-based types).
+    """
+    raw = [frame[output_idx] for frame in arrays]
+    sample = raw[0]
+
+    if data_type == "raw_data":
+        # arrus: (1, n_tx, n_ax, n_rx_hw) → zea: (n_frames, n_tx, n_ax, n_el, 1)
+        stacked = np.stack([a.squeeze(0) for a in raw], axis=0)
+        # stacked: (n_frames, n_tx, n_ax, n_rx_hw)
+
+        if raw_ops is not None:
+            # Scatter hardware receive channels back to full probe aperture.
+            # Each firing i has:
+            #   rx.padding = (left_pad, right_pad) — zeros prepended/appended
+            #   rx.aperture — bool mask over all probe elements; True = active
+            # Channel layout in stacked[..., i, :, :, :]:
+            #   [left_pad zeros] [n_active real samples] [right_pad zeros]
+            n_el_full = len(raw_ops[0].rx.aperture)
+            full = np.zeros((*stacked.shape[:3], n_el_full), dtype=stacked.dtype)
+            for i, op in enumerate(raw_ops):
+                left_pad = int(op.rx.padding[0])
+                rx_aper = np.asarray(op.rx.aperture, dtype=bool)
+                active_idx = np.where(rx_aper)[0]
+                # Assign one element at a time to avoid NumPy's fancy-index
+                # dimension transposition when mixing integer and array indices.
+                for k, el in enumerate(active_idx):
+                    full[:, i, :, int(el)] = stacked[:, i, :, left_pad + k]
+            stacked = full
+
+        return stacked[..., np.newaxis]
+
+    elif data_type == "image":
+        # arrus: a sequence of (n_z, n_x) → zea Image: (n_frames, n_z, n_x) float32 <= 0
+        stacked = np.stack(raw, axis=0).astype(np.float32)
+        # Shift so the maximum value equals 0 (dB scale requirement)
+        max_val = float(stacked.max())
+        if max_val > 0:
+            stacked = stacked - max_val
+        result: dict = {"values": stacked}
+        coords = _get_image_coordinates(meta_entry._data_char)
+        if coords is not None:
+            result["coordinates"] = coords
+        return result
+
+    elif data_type == "beamformed_data":
+        # arrus IQ: a sequence of (1, n_tx, n_ax) complex64
+        # → zea BeamformedData: (n_frames, n_ax, n_tx, 2) = (n_frames, z, x, n_ch)
+        stacked = np.stack([a.squeeze(0) for a in raw], axis=0)  # (n_frames, n_tx, n_ax)
+        stacked = stacked.transpose(0, 2, 1)  # (n_frames, n_ax=z, n_tx=x)
+        iq = np.stack([stacked.real, stacked.imag], axis=-1).astype(np.float32)
+        return {"values": iq, "labels": np.array(["I", "Q"], dtype=np.str_)}
+
+    elif data_type == "envelope_data":
+        # arrus: a sequence of (1, n_tx, n_ax) real
+        # → zea EnvelopeData: (n_frames, n_ax, n_tx)
+        stacked = np.stack([a.squeeze(0) for a in raw], axis=0)
+        if np.iscomplexobj(stacked):
+            stacked = np.abs(stacked)
+        stacked = stacked.transpose(0, 2, 1).astype(np.float32)
+        return {"values": stacked}
+    else:
+        # Generic fallback: squeeze a leading size-1 dim if present, stack frames
+        if sample.ndim > 1 and sample.shape[0] == 1:
+            stacked = np.stack([a.squeeze(0) for a in raw], axis=0)
+        else:
+            stacked = np.stack(raw, axis=0)
+        return {"values": stacked}
+
+
+# ---------------------------------------------------------------------------
+# Metadata selection helper
+# ---------------------------------------------------------------------------
+def _pick_scan_metadata(metadata_tuple, mapping: dict):
+    """Return the best metadata entry for scan parameter extraction.
+
+    Prefers the entry mapped to ``"raw_data"`` (highest ADC fidelity); falls
+    back to the entry with the highest reported sampling frequency, then to the
+    first available entry.
+    """
+    # Prefer raw_data mapping
+    for idx, dtype in mapping.items():
+        if dtype == "raw_data":
+            return metadata_tuple[idx]
+
+    # Fallback: highest sampling frequency → most likely raw ADC data
+    best = metadata_tuple[0]
+    best_fs = getattr(getattr(best, "_data_char", None), "sampling_frequency", 0) or 0
+    for meta in metadata_tuple[1:]:
+        fs = getattr(getattr(meta, "_data_char", None), "sampling_frequency", 0) or 0
+        if fs > best_fs:
+            best_fs = fs
+            best = meta
+
+    return best
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+def convert_us4us(args):
+    """Convert an us4us (arrus) pickle file to the zea HDF5 format.
+
+    Args:
+        args: An object with the following attributes:
+            - **src** (*str | Path*): Path to the source ``.pkl`` file.
+            - **dst** (*str | Path*): Path to the destination ``.hdf5`` file.
+            - **mapping** (*dict*, optional): Maps each output index (integer)
+              in the per-frame tuple to a zea data type string.  For example::
+
+                  {0: "image", 1: "beamformed_data", 2: "raw_data"}
+
+              Supported types: ``"raw_data"``, ``"image"``,
+              ``"beamformed_data"``, ``"envelope_data"``, ``"aligned_data"``.
+              Defaults to ``{0: "image"}``.
+
+    The function is intentionally lenient: arrus does **not** need to be
+    installed.  All arrus classes in the pickle are replaced with lightweight
+    namespace stubs that preserve the original attribute values.
+
+    Raises:
+        FileNotFoundError: If *src* does not exist.
+        ValueError: If a requested *mapping* value is not a known zea data type.
+    """
+    src = Path(args.src)
+    dst = Path(args.dst)
+    mapping: dict = getattr(args, "mapping", {0: "image"})
+
+    if not src.exists():
+        raise FileNotFoundError(f"Source file not found: {src}")
+
+    unknown = set(mapping.values()) - _ZEA_DATA_TYPES
+    if unknown:
+        raise ValueError(
+            f"Unknown zea data type(s) in mapping: {unknown}. "
+            f"Supported types: {sorted(_ZEA_DATA_TYPES)}"
+        )
+
+    log.info(f"Loading us4us pickle: {log.yellow(src)}")
+    data = _load_us4us_pickle(src)
+
+    frames_data = data["data"]        # list[tuple[np.ndarray, ...]]
+    metadata_tuple = data["metadata"]  # tuple[ConstMetadata, ...]
+    n_frames = len(frames_data)
+
+    log.info(f"Frames: {n_frames}, "
+             f"pipeline outputs: {len(metadata_tuple)}, "
+             f"mapping: {mapping}")
+
+    # Scan and probe parameters come from the most informative metadata entry
+    scan_meta = _pick_scan_metadata(metadata_tuple, mapping)
+    context = scan_meta._context
+    data_char = scan_meta._data_char
+
+    probe_dto = context.device.probe[0]
+    probe_dict = _extract_probe_dict(probe_dto, context.raw_sequence.ops)
+    scan_dict = _extract_scan_dict(context, data_char, n_frames)
+
+    # Build per-output data dicts
+    raw_ops = context.raw_sequence.ops
+    outputs: dict[str, dict | np.ndarray] = {}
+    for output_idx, data_type in mapping.items():
+        log.info(f"  output[{output_idx}] → {data_type}")
+        meta_entry = metadata_tuple[output_idx]
+        outputs[data_type] = _prepare_output(
+            frames_data,
+            output_idx,
+            data_type,
+            meta_entry,
+            raw_ops=raw_ops if data_type == "raw_data" else None,
+        )
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    log.info(f"Writing zea file: {log.yellow(dst)}")
+
+    if len(outputs) == 1:
+        # Single output: flat single-track layout
+        data_type, arr = next(iter(outputs.items()))
+        File.create(
+            path=dst,
+            data={data_type: arr},
+            scan=scan_dict,
+            probe=probe_dict,
+            description="us4us (arrus) data converted to zea format",
+            us_machine="us4r",
+            compression=DEFAULT_COMPRESSION,
+            overwrite=True,
+        )
+    else:
+        # Multiple outputs: use one track per data type so dimension constraints
+        # (e.g. n_ch=1 for raw_data vs n_ch=2 for IQ beamformed_data) don't conflict.
+        tracks = [
+            {"data": {data_type: arr}, "scan": scan_dict, "label": data_type}
+            for data_type, arr in outputs.items()
+        ]
+        File.create(
+            path=dst,
+            tracks=tracks,
+            probe=probe_dict,
+            description="us4us (gui4us+arrus) data converted to zea format",
+            us_machine="us4R",
+            compression=DEFAULT_COMPRESSION,
+            overwrite=True,
+        )
+
+    log.success(f"Converted {log.yellow(src)} → {log.yellow(dst)}")
+
