@@ -1497,37 +1497,50 @@ class GeneralizedCoherenceFactor(Operation):
 @beamformer_registry("minimum_variance")
 @ops_registry("minimum_variance")
 class MinimumVariance(Operation):
-    r"""Minimum Variance (MV) / Capon beamformer with spatial smoothing.
+    r"""Minimum Variance (Capon/MVDR) beamformer with spatial smoothing.
 
-    Estimates an :math:`M \times M` sample covariance matrix per pixel by
-    averaging outer products over :math:`L = n\_el - M + 1` overlapping
-    sub-apertures of length *M* (forward spatial smoothing) and over all
-    transmits.  Diagonal loading is applied for numerical stability before
-    inverting the covariance.  The Capon weight vector
+    Estimates a Hermitian sample covariance matrix per pixel using forward
+    spatial smoothing — :math:`L = N_{el} - M + 1` overlapping sub-apertures
+    of length *M* are averaged across all transmit events:
 
     .. math::
 
-        \mathbf{w}(p) = \frac{\hat{\mathbf{R}}(p)^{-1}\,\mathbf{e}}
-        {\mathbf{e}^\mathrm{H}\,\hat{\mathbf{R}}(p)^{-1}\,\mathbf{e}}
+        \hat{\mathbf{R}}(p) = \frac{1}{N_\mathrm{tx}\,L}
+        \sum_{t,l} \mathbf{x}_{l}^*[t,p]\,\mathbf{x}_{l}^T[t,p]
 
-    is then applied to each sub-aperture slice and the outputs are averaged
-    before coherent compounding over transmits.
+    Additive diagonal loading proportional to the covariance trace stabilises
+    the matrix inversion:
+
+    .. math::
+
+        \hat{\mathbf{R}}_\delta = \hat{\mathbf{R}} +
+        \delta\,\mathrm{tr}\!\left(\hat{\mathbf{R}}\right)\mathbf{I}_M
+
+    The Capon weight vector minimising output power subject to a distortionless
+    constraint on the look direction is:
+
+    .. math::
+
+        \mathbf{w}(p) = \frac{\hat{\mathbf{R}}_\delta^{-1}\,\mathbf{e}}
+        {\mathbf{e}^H\,\hat{\mathbf{R}}_\delta^{-1}\,\mathbf{e}}, \quad
+        \mathbf{e} = \mathbf{1}_M
+
+    The linear system :math:`\hat{\mathbf{R}}_\delta\,\mathbf{x} = \mathbf{e}`
+    is solved by LU factorisation (no explicit matrix inverse is formed).
 
     .. admonition:: Reference
 
         Vignon, F. and Burcher, M. R., "Capon beamforming in medical
-        ultrasound imaging with focused beams," *IEEE Transactions on Ultrasonics,
-        Ferroelectrics, and Frequency Control* **55** (3), 2008.
+        ultrasound imaging with focused beams," *IEEE Transactions on
+        Ultrasonics, Ferroelectrics, and Frequency Control* **55** (3), 2008.
         https://doi.org/10.1109/TUFFC.2008.686
 
-
     Args:
-        subarray_size (int or None): Sub-aperture length *M*.  ``None``
-            (default) selects ``M = n_el // 2``.
-        diagonal_loading (float): Relative loading coefficient δ.  The
-            loading added to each pixel's covariance is
-            δ · trace(**R**) / M · **I**\ :sub:`M`.  Larger values push the
-            solution toward DAS.  Default: ``1e-2``.
+        subarray_size (int or None): Sub-aperture length *M*.  ``None`` selects
+            ``M = N_{el} // 2``.
+        diagonal_loading (float): Relative loading coefficient δ — scales with
+            the trace of the covariance so it is signal-power invariant.
+            Larger values push the solution toward DAS.  Default: ``1e-2``.
         **kwargs: Forwarded to :class:`~zea.ops.base.Operation`.
     """
 
@@ -1543,106 +1556,69 @@ class MinimumVariance(Operation):
     def process_image(self, data):
         """Apply MV beamforming with spatial smoothing to one image.
 
-        The covariance matrix is estimated using **real-valued arithmetic**:
-        for IQ data the outer products from both channels are summed, which
-        is equivalent to using |Re(R)| where R is the complex Hermitian
-        covariance (valid for stationary signals where var(I) ≈ var(Q)).
-        This keeps all operations in the real domain so the method works
-        with every backend including TensorFlow/XLA.
-
         Args:
             data (ops.Tensor): TOF-corrected channel data of shape
-                ``(n_tx, n_pix, n_el, n_ch)``.
+                ``(n_tx, n_pix, n_el, 2)`` (I and Q channels).
 
         Returns:
-            ops.Tensor: Beamformed image of shape ``(n_pix, n_ch)``.
+            ops.Tensor: Beamformed image of shape ``(n_pix, 2)``.
         """
-        n_el = data.shape[-2]  # concrete Python int — safe inside JAX traces
-        n_ch = data.shape[-1]
+        n_el = data.shape[-2]
         n_tx = ops.shape(data)[0]
 
-        subarray_len = self.subarray_size if self.subarray_size is not None else max(1, n_el // 2)
-        n_subarrays = n_el - subarray_len + 1  # number of overlapping sub-apertures
+        subarray_length = (
+            self.subarray_size if self.subarray_size is not None else max(1, n_el // 2)
+        )
+        num_subarrays = n_el - subarray_length + 1
 
-        # ── Build sub-apertures for every channel (basic slicing, all backends) ─
-        # sub_apertures[c] has shape (n_tx, n_pix, n_subarrays, subarray_len)
-        sub_apertures = [
-            ops.stack(
-                [data[:, :, idx : idx + subarray_len, c] for idx in range(n_subarrays)],
-                axis=2,
-            )
-            for c in range(n_ch)
-        ]  # each element: (n_tx, n_pix, n_subarrays, subarray_len)  float32
+        # Complex IQ: (n_tx, n_pix, n_el) complex64
+        x_c = ops.cast(data[..., 0], "complex64") + ops.cast(data[..., 1], "complex64") * 1j
 
-        # ── Real-valued covariance averaged over channels, tx, and sub-apertures ─
-        # covariance[p, i, j] = Σ_c Σ_t Σ_k sub_apertures[c][t,p,k,i] · sub_apertures[c][t,p,k,j]
-        #                      / (n_ch · n_subarrays · n_tx)
-        # This equals Re(R_complex) for stationary IQ signals.
-        cov_scale = ops.cast(n_ch * n_subarrays * n_tx, data.dtype)
-        cov_parts = [ops.einsum("tpli,tplj->pij", sub, sub) for sub in sub_apertures]
-        covariance = cov_parts[0]
-        for part in cov_parts[1:]:
-            covariance = covariance + part
-        covariance = covariance / cov_scale  # (n_pix, subarray_len, subarray_len) float32
+        # Sub-apertures: (n_tx, n_pix, num_subarrays, subarray_length) complex64
+        sub_ap = ops.stack(
+            [x_c[:, :, length : length + subarray_length] for length in range(num_subarrays)],
+            axis=2,
+        )
 
-        # ── Eigenvalue-based regularization ────────────────────────────────────
-        # eigh returns eigenvalues in ascending order; λ_{-1} is the largest.
-        # Only eigenvalues below δ·λ_max are floored to prevent inverting near-zero
-        # noise eigenvalues — this avoids the cone artifact caused by naive
-        # diagonal loading which also distorts the dominant signal eigenvalue.
-        eigenvalues, eigenvectors = ops.linalg.eigh(covariance)  # (n_pix,M), (n_pix,M,M)
-        max_eigenvalue = eigenvalues[..., -1:]  # (n_pix, 1)
-        eigenvalue_floor = (
-            self.diagonal_loading * max_eigenvalue + keras.backend.epsilon()
-        )  # (n_pix, 1)
-        eigenvalues_clipped = ops.maximum(eigenvalues, eigenvalue_floor)  # (n_pix, subarray_len)
+        # Hermitian sample covariance: (n_pix, subarray_length, subarray_length) complex64
+        # R[p,i,j] = Σ_t Σ_l sub_ap[t,p,l,i]^* sub_ap[t,p,l,j] / (n_tx * num_subarrays)
+        scale = ops.cast(n_tx * num_subarrays, "complex64")
+        covariance = ops.einsum("tpli,tplj->pij", ops.conj(sub_ap), sub_ap) / scale
 
-        # covariance⁻¹ = V diag(1/λ) Vᵀ  (covariance is real-symmetric so eigh gives V real)
-        inv_eigenvalues = 1.0 / eigenvalues_clipped  # (n_pix, subarray_len)
-        # eigenvectors * inv_eigenvalues[..., None, :] scales each column of V by 1/λ_k
-        cov_inv = ops.matmul(
-            eigenvectors * inv_eigenvalues[..., None, :],  # (n_pix, M, M)
-            ops.swapaxes(eigenvectors, -1, -2),  # (n_pix, M, M)
-        )  # (n_pix, subarray_len, subarray_len)
+        # Additive diagonal loading
+        # trace(R) is an upper bound on λ_max for PSD matrices (exact for rank-1 signals)
+        eye_c = ops.cast(ops.eye(subarray_length), "complex64")
+        # Clamp trace from below so boundary pixels (zero data → zero covariance)
+        trace = ops.maximum(
+            ops.real(ops.einsum("...ii->...", covariance)),
+            keras.backend.epsilon(),
+        )[..., None, None]
+        R_reg = covariance + ops.cast(self.diagonal_loading * trace, "complex64") * eye_c
 
-        # ── Capon weights: w = R⁻¹e / (eᵀ R⁻¹e),  e = ones ──────────────────
-        steering_vec = ops.ones((subarray_len,), dtype=data.dtype)  # (subarray_len,)
-        # (n_pix, M, M) @ (M, 1) → (n_pix, M, 1) → squeeze
-        cov_inv_steering = ops.matmul(cov_inv, steering_vec[:, None])[..., 0]  # (n_pix, M)
-        capon_denom = (
-            ops.sum(cov_inv_steering, axis=-1, keepdims=True) + keras.backend.epsilon()
-        )  # (n_pix, 1)
-        capon_weights = cov_inv_steering / capon_denom  # (n_pix, subarray_len)
+        # Capon weights via batched LU solve: R_reg w = e
+        e_batch = ops.ones_like(R_reg[..., :1])
+        R_inv_e = ops.linalg.solve(R_reg, e_batch)[..., 0]
+        denom = ops.sum(R_inv_e, axis=-1, keepdims=True)
+        capon_weights = R_inv_e / (denom + keras.backend.epsilon())
 
-        # ── Apply weights per channel, compound over tx, average over subarrays ─
-        output_channels = []
-        for sub_ap in sub_apertures:
-            sub_compounded = ops.sum(sub_ap, axis=0)  # (n_pix, n_subarrays, subarray_len)
-            sub_beamformed = ops.einsum("pm,plm->pl", capon_weights, sub_compounded)  # (n_pix, L)
-            output_channels.append(ops.mean(sub_beamformed, axis=-1))  # (n_pix,)
+        # Apply weights: compound over tx, average over subapertures
+        sub_summed = ops.sum(sub_ap, axis=0)
+        y = ops.einsum("pm,plm->p", ops.conj(capon_weights), sub_summed) / ops.cast(
+            n_tx * num_subarrays, "complex64"
+        )
 
-        return ops.stack(output_channels, axis=-1)  # (n_pix, n_ch)
+        return ops.stack([ops.real(y), ops.imag(y)], axis=-1)
 
     def call(self, **kwargs):
-        """Apply MV beamforming to TOF-corrected data.
-
-        Args:
-            tof_corrected_data (ops.Tensor): TOF-corrected input of shape
-                ``(n_tx, n_pix, n_el, n_ch)`` with optional batch dimension.
-
-        Returns:
-            dict: Beamformed data of shape ``(n_pix, n_ch)``.
-        """
+        """Apply MV beamforming to TOF-corrected data."""
         data = kwargs[self.key]
-
         if not self.with_batch_dim:
             beamformed_data = self.process_image(data)
         else:
             beamformed_data = ops.map(self.process_image, data)
-
         return {self.output_key: beamformed_data}
-      
-      
+
+
 @ops_registry("refocus")
 class Refocus(Operation):
     r"""REFoCUS (Retrospective Encoding For Conventional Ultrasound Sequences).
