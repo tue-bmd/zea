@@ -447,6 +447,74 @@ def test_pipeline_jit_options_pipeline_does_not_jit_nested_map():
     assert inner_map._jittable_call.__func__ is inner_map.jittable_call.__func__
 
 
+def test_map_inside_outer_jit_does_not_disable_vmap_jit():
+    """Map nested in a jit_options='pipeline' parent must not disable its internal vmap JIT.
+
+    disable_jit=True causes vmap to fall back to a Python for-loop (simple_map), which
+    unrolls inside the outer JIT trace and is catastrophic for large inputs.
+    """
+    inner_map = Map(
+        operations=[AddOperation()],
+        argnames="x",
+        chunks=4,
+        jit_options=None,
+    )
+    # Standalone with jit_options=None: disable_jit should be True (no JIT anywhere)
+    assert inner_map._inside_outer_jit is False
+
+    ops.Pipeline(
+        operations=[MultiplyOperation(), inner_map],
+        jit_options="pipeline",
+    )
+
+    # Nested inside a "pipeline" parent: disable_jit must be False so that
+    # vmap uses ops.map / jax.vmap rather than the Python-loop fallback.
+    assert inner_map._inside_outer_jit is True
+
+    # A truly standalone Map (never nested) stays out of any outer JIT.
+    standalone = Map(operations=[AddOperation()], argnames="x", chunks=4, jit_options="ops")
+    assert standalone._inside_outer_jit is False
+
+
+def test_inside_outer_jit_propagates_transitively():
+    """jit_options='pipeline' must mark every descendant (any depth) as inside the outer JIT."""
+    leaf_op = AddOperation()
+    deep_map = Map(operations=[leaf_op], argnames="x", chunks=2, jit_options=None)
+    middle = ops.Pipeline(operations=[deep_map], jit_options=None)
+    root = ops.Pipeline(operations=[MultiplyOperation(), middle], jit_options="pipeline")
+
+    # The nested pipeline, the Map two levels down, and the Map's inner op must all
+    # know they run inside the root's JIT trace.
+    assert root.jit_options == "pipeline"
+    assert middle._inside_outer_jit is True
+    assert middle.jit_options is None  # forced off: it must not self-JIT inside the outer trace
+    assert deep_map._inside_outer_jit is True
+    assert leaf_op._inside_outer_jit is True
+    assert leaf_op._is_jitted is True
+
+
+def test_scan_convert_guard_fires_inside_outer_jit():
+    """ScanConvert must demand explicit coordinates whenever it runs inside a JIT trace.
+
+    The guard previously keyed on self._jit_compile only, so it was silently skipped
+    when the op ran inside a jit_options='pipeline' parent (where _jit_compile is False).
+    """
+    img = keras.ops.ones((4, 8), dtype="float32")
+
+    # jit_options='pipeline': the op does not self-JIT but runs inside the outer trace.
+    scan_op = ops.ScanConvert(order=1, with_batch_dim=False)
+    ops.Pipeline(operations=[scan_op], jit_options="pipeline", validate=False)
+    assert scan_op._is_jitted is True
+    with pytest.raises(ValueError, match="coordinates must be provided"):
+        scan_op(data=img, rho_range=(0.0, 1.0), theta_range=(-0.5, 0.5))
+
+    # Eager (no JIT anywhere): coordinates are computed on the fly, no error.
+    eager_op = ops.ScanConvert(order=1, jit_compile=False, with_batch_dim=False)
+    assert eager_op._is_jitted is False
+    out = eager_op(data=img, rho_range=(0.0, 1.0), theta_range=(-0.5, 0.5))
+    assert "data" in out
+
+
 def test_pipeline_set_params():
     """Tests setting parameters for the Pipeline."""
     operations = [MultiplyOperation(), AddOperation()]

@@ -132,6 +132,10 @@ class Pipeline:
             }
 
         self.jit_kwargs = jit_kwargs
+        # True when an enclosing pipeline is JIT-compiled as a whole, so this
+        # pipeline already runs inside that trace. Updated by the parent via
+        # _configure_jit; defaults to False for a standalone/root pipeline.
+        self._inside_outer_jit = False
         self.jit_options = jit_options  # will handle the jit compilation
         self.device = device
 
@@ -443,20 +447,34 @@ class Pipeline:
     @jit_options.setter
     def jit_options(self, value: Union[str, None]):
         """Set the jit_options property of the pipeline."""
+        self._configure_jit(value, inside_outer_jit=self._inside_outer_jit)
 
+    def _configure_jit(self, value: Union[str, None], inside_outer_jit: bool):
+        """Recursively configure JIT for this pipeline and all descendants.
+
+        Args:
+            value: jit_options for this pipeline ("pipeline", "ops", or None).
+            inside_outer_jit: True if an enclosing pipeline is JIT-compiled as a
+                whole, so this pipeline already runs inside a trace.
+        """
         if value not in ("pipeline", "ops", None):
             raise ValueError(f"jit_options must be 'pipeline', 'ops', or None, got {value!r}")
 
         self._jit_options = value
+        self._inside_outer_jit = inside_outer_jit
         self.set_jit(value == "pipeline")
-        # When this pipeline is JIT-compiled as a whole, children run inside that JIT
-        # scope and must not add their own JIT. Otherwise propagate the setting unchanged.
-        nested_value = None if value == "pipeline" else value
+
+        # Children run inside a trace if we compile ourselves as a whole, or we
+        # already do. When that happens they must not add their own JIT, so their
+        # jit_options is forced to None.
+        child_inside_outer_jit = inside_outer_jit or value == "pipeline"
+        child_value = None if child_inside_outer_jit else value
         for operation in self.operations:
             if isinstance(operation, Pipeline):
-                operation.jit_options = nested_value
+                operation._configure_jit(child_value, inside_outer_jit=child_inside_outer_jit)
             else:
-                operation.set_jit(value == "ops")
+                operation.set_jit(child_value == "ops")
+                operation._inside_outer_jit = child_inside_outer_jit
 
     def _jit(self):
         """JIT compile the pipeline."""
@@ -960,32 +978,33 @@ class Map(Pipeline):
             chunks=self.chunks,
             batch_size=self.batch_size,
             fn_supports_batch=True,
-            disable_jit=not bool(self.jit_options),
+            disable_jit=not bool(self.jit_options) and not self._inside_outer_jit,
         )(*mapped_args)
 
         return out
 
-    @property
-    def jit_options(self):
-        """Get the jit_options property of the pipeline."""
-        return self._jit_options
+    def _configure_jit(self, value: Union[str, None], inside_outer_jit: bool):
+        """Configure JIT for this Map and its inner operations.
 
-    @jit_options.setter
-    def jit_options(self, value: Union[str, None]):
-        """Set the jit_options property of the pipeline."""
-
+        Map compiles its entire mapped call as a single unit whenever it self-jits
+        (any non-None ``jit_options``). Its inner operations never JIT themselves;
+        Map owns that scope. See :meth:`Pipeline._configure_jit`.
+        """
         if value not in ("pipeline", "ops", None):
             raise ValueError(f"jit_options must be 'pipeline', 'ops', or None, got {value!r}")
 
         self._jit_options = value
-        # Map JITs its entire mapped call as a single unit whenever JIT is active.
-        # Inner ops are never independently JIT'd; Map owns that scope.
+        self._inside_outer_jit = inside_outer_jit
         self.set_jit(value is not None)
+
+        # Inner ops run inside a trace if Map self-jits or an outer pipeline does.
+        child_inside_outer_jit = value is not None or inside_outer_jit
         for operation in self.operations:
             if isinstance(operation, Pipeline):
-                operation.jit_options = None
+                operation._configure_jit(None, inside_outer_jit=child_inside_outer_jit)
             else:
                 operation.set_jit(False)
+                operation._inside_outer_jit = child_inside_outer_jit
 
     def _jit(self):
         """JIT compile the pipeline."""
