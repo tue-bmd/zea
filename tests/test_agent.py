@@ -9,6 +9,103 @@ from zea.agent import masks, selection
 from . import DEFAULT_TEST_SEED
 
 
+def test_indices_to_k_hot():
+    """Test indices_to_k_hot."""
+    # Single set of indices (no leading dims)
+    indices = np.array([0, 2, 4])
+    k_hot = masks.indices_to_k_hot(indices, n_possible_actions=6)
+    assert ops.shape(k_hot) == (6,)
+    assert ops.all(k_hot == np.array([1, 0, 1, 0, 1, 0]))
+
+    # Duplicate indices should still result in a valid k-hot vector
+    indices = np.array([1, 1, 3])
+    k_hot = masks.indices_to_k_hot(indices, n_possible_actions=4)
+    assert ops.all(k_hot == np.array([0, 1, 0, 1]))
+
+    # dtype is respected
+    k_hot = masks.indices_to_k_hot(np.array([0]), n_possible_actions=3, dtype="float32")
+    assert ops.dtype(k_hot) == "float32"
+
+    # Leading dimensions are preserved: shape (..., n_actions) -> (..., n_possible_actions)
+    indices = np.array([[0, 1], [2, 3]])  # shape (2, 2)
+    k_hot = masks.indices_to_k_hot(indices, n_possible_actions=4)
+    assert ops.shape(k_hot) == (2, 4)
+    assert ops.all(k_hot == np.array([[1, 1, 0, 0], [0, 0, 1, 1]]))
+
+
+def test_k_hot_to_indices():
+    """Test k_hot_to_indices."""
+    # Single k-hot row (no leading dims)
+    k_hot = np.array([1, 0, 1, 0, 1, 0])
+    indices = masks.k_hot_to_indices(k_hot, n_actions=3)
+    assert ops.shape(indices) == (3,)
+    assert ops.all(indices == np.array([0, 2, 4]))
+
+    # Fewer selected than n_actions -> remaining filled with fill_value
+    k_hot = np.array([0, 1, 0, 0])
+    indices = masks.k_hot_to_indices(k_hot, n_actions=3, fill_value=-1)
+    assert ops.shape(indices) == (3,)
+    assert ops.convert_to_numpy(indices)[0] == 1
+    assert ops.all(ops.convert_to_numpy(indices)[1:] == -1)
+
+    # Leading dimensions are preserved: (..., n_possible_actions) -> (..., n_actions)
+    k_hot = np.array([[1, 0, 1, 0], [0, 1, 0, 1]])  # shape (2, 4)
+    indices = masks.k_hot_to_indices(k_hot, n_actions=2)
+    assert ops.shape(indices) == (2, 2)
+    assert ops.all(indices == np.array([[0, 2], [1, 3]]))
+
+    # Two leading dimensions: (..., n_possible_actions) works for any number of leading dims
+    k_hot = np.array(
+        [[[1, 0, 1, 0], [0, 1, 0, 1]], [[1, 1, 0, 0], [0, 0, 1, 1]]]
+    )  # shape (2, 2, 4)
+    indices = masks.k_hot_to_indices(k_hot, n_actions=2)
+    assert ops.shape(indices) == (2, 2, 2)
+    assert ops.all(indices == np.array([[[0, 2], [1, 3]], [[0, 1], [2, 3]]]))
+
+
+def test_indices_k_hot_round_trip():
+    """indices_to_k_hot and k_hot_to_indices should be inverses for sorted indices."""
+    indices = np.array([[0, 3, 5], [1, 2, 4]])
+    k_hot = masks.indices_to_k_hot(indices, n_possible_actions=6)
+    recovered = masks.k_hot_to_indices(k_hot, n_actions=3)
+    assert ops.all(recovered == indices)
+
+
+def test_lines_to_im_size():
+    """Test lines_to_im_size."""
+    # Single line vector with no leading dims
+    lines = np.array([1, 0, 1, 0])
+    mask = masks.lines_to_im_size(lines, img_size=(3, 8))
+    assert ops.shape(mask) == (3, 8)
+    # Each action is repeated width // n_possible_actions = 2 times along the width
+    expected_row = np.array([1, 1, 0, 0, 1, 1, 0, 0])
+    for row in range(3):
+        assert ops.all(mask[row] == expected_row)
+
+    # Leading dimensions are preserved: (..., n_possible_actions) -> (..., height, width)
+    lines = np.array([[1, 0], [0, 1]])  # shape (2, 2)
+    mask = masks.lines_to_im_size(lines, img_size=(2, 4))
+    assert ops.shape(mask) == (2, 2, 4)
+    assert ops.all(mask[0] == np.array([[1, 1, 0, 0], [1, 1, 0, 0]]))
+    assert ops.all(mask[1] == np.array([[0, 0, 1, 1], [0, 0, 1, 1]]))
+
+    # Two leading dimensions: (..., n_possible_actions) works for any number of leading dims
+    lines = np.array([[[1, 0], [0, 1]], [[1, 1], [0, 0]]])  # shape (2, 2, 2)
+    mask = masks.lines_to_im_size(lines, img_size=(2, 4))
+    assert ops.shape(mask) == (2, 2, 2, 4)
+    assert ops.all(mask[0, 0] == np.array([[1, 1, 0, 0], [1, 1, 0, 0]]))
+    assert ops.all(mask[0, 1] == np.array([[0, 0, 1, 1], [0, 0, 1, 1]]))
+    assert ops.all(mask[1, 0] == np.array([[1, 1, 1, 1], [1, 1, 1, 1]]))
+    assert ops.all(mask[1, 1] == np.array([[0, 0, 0, 0], [0, 0, 0, 0]]))
+
+
+def test_lines_to_im_size_assertion():
+    """lines_to_im_size requires width divisible by n_possible_actions."""
+    lines = np.array([1, 0, 1])
+    with pytest.raises(AssertionError):
+        masks.lines_to_im_size(lines, img_size=(4, 8))
+
+
 def test_equispaced_lines():
     """Test equispaced_lines."""
     expected_lines = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])

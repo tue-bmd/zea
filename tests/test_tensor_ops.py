@@ -905,3 +905,43 @@ def test_split_into_windows_invalid_inputs(window_size, stride, match):
     sequence = ops.arange(10, dtype="float32")
     with pytest.raises(ValueError, match=match):
         split_into_windows(sequence, window_size=window_size, stride=stride)
+
+
+@pytest.mark.parametrize(
+    "array, size, fill_value",
+    [
+        # 1D boolean mask
+        [np.array([0, 1, 0, 1, 1], dtype=bool), 3, -1],
+        # 1D float, exactly enough nonzeros
+        [np.array([0.0, 5.0, 0.0, 2.0]), 2, -1],
+        # 1D, fewer nonzeros than size -> padded with fill_value
+        [np.array([0, 1, 0, 0]), 3, -1],
+        # 1D, more nonzeros than size -> truncated
+        [np.array([1, 1, 1, 1]), 2, 0],
+        # 1D, no nonzeros -> all fill_value
+        [np.array([0, 0, 0]), 2, -1],
+        # 2D input -> one index array per dimension
+        [np.array([[0, 1], [1, 0]]), 2, -1],
+        # size exceeds total elements -> extra entries padded with fill_value
+        [np.array([1, 0, 1]), 5, -1],
+    ],
+)
+@backend_equality_check()
+def test_nonzero(array, size, fill_value):
+    """Test `nonzero` with a static `size`, comparing against `jax.numpy.nonzero`."""
+    import jax.numpy as jnp
+    from keras import ops
+
+    from zea.func.tensor import nonzero
+
+    out = nonzero(array, size=size, fill_value=fill_value)
+    out_np = [ops.convert_to_numpy(coord) for coord in out]
+
+    # Reference: jax.numpy.nonzero with identical size/fill_value semantics.
+    expected = jnp.nonzero(array, size=size, fill_value=fill_value)
+    assert len(out_np) == len(expected), "Wrong number of coordinate arrays."
+    for coord, exp in zip(out_np, expected):
+        np.testing.assert_array_equal(coord, np.asarray(exp))
+
+    # Returned for the cross-backend equality check.
+    return np.stack(out_np)

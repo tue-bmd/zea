@@ -97,6 +97,8 @@ For local environments (uv or pip), you also need to install a machine learning
 backend: JAX, PyTorch, or TensorFlow. See the
 :ref:`backend installation <backend-installation>` guide.
 
+.. _running-tests:
+
 4. Make your changes
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -236,16 +238,15 @@ Adding notebooks
 New tutorial or example notebooks are always welcome! Please add them to the
 `docs/source/notebooks <https://github.com/tue-bmd/zea/tree/main/docs/source/notebooks>`_
 directory. Make sure to follow the naming conventions and structure of existing
-notebooks. If you are adding a new tutorial, please also update the
-``examples.rst`` file in the ``docs/source`` directory to check if your notebook
-is included.
+notebooks. If you are adding a new tutorial, please also update :doc:`examples`
+to check if your notebook is included.
 
 Adding to ``zea.models``
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Please see the :doc:`models` section for more information on how to add new models to ``zea``.
+Please see the :ref:`adding-models` section for more information on how to add new models to ``zea``.
 
 Adding to ``zea.ops``
 ~~~~~~~~~~~~~~~~~~~~~
 
-Please see the :doc:`pipeline` section for more information on how to add new ops to ``zea``.
+Please see the :ref:`adding-ops` section for more information on how to add new ops to ``zea``.

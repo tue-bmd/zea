@@ -60,7 +60,7 @@ def k_hot_to_indices(selected_lines, n_actions: int, fill_value=-1):
 
     # Find nonzero indices for a single k-hot encoded row
     def get_nonzero(row):
-        return nonzero(row > 0, size=n_actions, fill_value=fill_value)[0]
+        return nonzero(row, size=n_actions, fill_value=fill_value)[0]
 
     # Flatten any number of leading dims into one, map, then restore them
     *leading_dims, n_possible_actions = ops.shape(selected_lines)

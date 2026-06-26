@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zea"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
     { name = "Tristan Stevens", email = "t.s.w.stevens@tue.nl" },
@@ -49,7 +49,6 @@ dependencies = [
     "wget >=3.2",
     "imageio[ffmpeg] >=2.0",
     "grain >= 0.2.8",
-    "protobuf >=3.20, <6.0.0", # https://github.com/tue-bmd/zea/pull/332
     # can we make these optional or remove?
     "scikit-image >=0.23",
     "scikit-learn >=1.4",
@@ -64,7 +63,7 @@ dev = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff==0.15.16",
+    "ruff==0.15.17",
     "ty==0.0.49",
     "pytest-cov",
     # docs
@@ -98,7 +97,7 @@ tests = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff==0.15.16",
+    "ruff==0.15.17",
     "ty==0.0.49",
     "pytest-cov",
     "gradio>=6.0",
