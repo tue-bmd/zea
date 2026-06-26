@@ -1588,14 +1588,17 @@ class Refocus(Operation):
     def __init__(self, method="adjoint", param=None, **kwargs):
         if method not in self._VALID_METHODS:
             raise ValueError(f"method must be one of {self._VALID_METHODS}, got '{method}'")
-        # SVD is not supported by TF XLA; disable JIT for SVD-based methods.
+        # SVD is not supported by TF XLA, so SVD-based methods cannot be JIT-compiled —
+        # neither individually nor inside a jit_options="ops"/"pipeline" pipeline. Marking
+        # the op non-jittable makes set_jit() skip it and makes pipeline-level JIT raise a
+        # clear error (instead of jit_compile=False, which the pipeline would override).
         if method != "adjoint":
-            if kwargs.get("jit_compile", True):
+            if kwargs.get("jittable", True):
                 log.warning(
                     f"Refocus method='{method}' uses SVD, which is not supported by the XLA "
-                    "JIT compiler. Setting jit_compile=False."
+                    "JIT compiler. Marking this operation as non-jittable."
                 )
-            kwargs["jit_compile"] = False
+            kwargs["jittable"] = False
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
