@@ -960,8 +960,34 @@ def _draw_per_seed(seeds):
     return [ops.convert_to_numpy(keras_random.uniform((6,), seed=s)) for s in seeds]
 
 
+def _assert_int_seed_reproducible_and_independent():
+    """Check if int seed -> split_seed -> random draws are reproducible and diverse."""
+    from zea.func.tensor import split_seed
+
+    draws_a = _draw_per_seed(split_seed(DEFAULT_TEST_SEED, 3))
+    draws_b = _draw_per_seed(split_seed(DEFAULT_TEST_SEED, 3))
+
+    for a, b in zip(draws_a, draws_b):
+        np.testing.assert_allclose(a, b)
+
+    assert not np.allclose(draws_a[0], draws_a[1])
+    assert not np.allclose(draws_a[1], draws_a[2])
+
+
+@run_in_backend("jax")
+def test_split_seed_int_drives_reproducible_randomness_jax():
+    """Int seed -> PRNGKey -> independent split keys -> reproducible JAX draws."""
+    _assert_int_seed_reproducible_and_independent()
+
+
+@run_in_backend("tensorflow")
+def test_split_seed_int_drives_reproducible_randomness_tensorflow():
+    """Int seed -> stateful SeedGenerator -> decorrelated, reproducible TF draws."""
+    _assert_int_seed_reproducible_and_independent()
+
+
 def test_split_seed_none_drives_unseeded_randomness():
-    """None flows through split_seed and still drives random ops."""
+    """None flows through materialize_seed/split_seed and still drives random ops."""
     from keras import random as keras_random
 
     from zea.func.tensor import split_seed
@@ -976,11 +1002,13 @@ def test_split_seed_none_drives_unseeded_randomness():
 
 @run_in_backend("jax")
 def test_split_seed_typed_jax_key_splits_into_independent_keys():
-    """A typed jax.random.key() is split into usable, independent keys."""
+    """A typed jax.random.key() is recognised by is_jax_key and split into usable keys."""
     import jax
 
     from zea.func.tensor import split_seed
 
+    # Typed key exercises the is_jax_key typed-dtype branch and the
+    # materialize_seed passthrough (already a key -> returned unchanged).
     key = jax.random.key(0)
     splits_a = split_seed(key, 3)
     splits_b = split_seed(key, 3)
@@ -993,6 +1021,22 @@ def test_split_seed_typed_jax_key_splits_into_independent_keys():
     for a, b in zip(draws_a, draws_b):
         np.testing.assert_allclose(a, b)
     assert not np.allclose(draws_a[0], draws_a[1])
+
+
+@run_in_backend("jax")
+def test_split_seed_seed_generator_on_jax_materializes_to_keys():
+    """On JAX a SeedGenerator is materialized via .next() into splittable keys."""
+    import jax
+    from keras import random as keras_random
+
+    from zea.func.tensor import split_seed
+
+    sg = keras_random.SeedGenerator(11)
+    splits = split_seed(sg, 3)
+    assert all(isinstance(s, jax.Array) for s in splits)
+
+    draws = [np.asarray(jax.random.uniform(s, (6,))) for s in splits]
+    assert not np.allclose(draws[0], draws[1])
 
 
 @run_in_backend("tensorflow")
