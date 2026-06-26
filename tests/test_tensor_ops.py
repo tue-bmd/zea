@@ -1071,5 +1071,5 @@ def test_split_seed_rejects_unknown_seed_type():
     """An unsupported seed type is rejected on any backend."""
     from zea.func.tensor import split_seed
 
-    with pytest.raises((TypeError, AssertionError)):
+    with pytest.raises(TypeError):
         split_seed("not-a-seed", 2)

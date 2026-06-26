@@ -7,7 +7,7 @@ from keras import random as keras_random
 
 from zea.data.augmentations import RandomCircleInclusion
 
-from . import DEFAULT_TEST_SEED
+from . import DEFAULT_TEST_SEED, run_in_backend
 
 
 def assert_circle_pixels(image, center, radius, fill_value, tol=1e-5, min_fraction=0.9):
@@ -271,7 +271,7 @@ def test_random_circle_inclusion_with_height_width_ranges():
     assert_circle_pixels(out_np, center_np, 5, 1.0)
 
 
-@pytest.mark.tensorflow
+@run_in_backend("tensorflow")
 def test_random_circle_inclusion_symbolic_tensor_randomize():
     """x_is_symbolic_tensor=True + randomize_location_across_batch=True uses ops.map."""
     import tensorflow as tf
@@ -288,9 +288,13 @@ def test_random_circle_inclusion_symbolic_tensor_randomize():
     out_np = out.numpy()
     assert out_np.shape == images.shape
     assert np.any(np.isclose(out_np, 1.0))
+    # Verify randomness: not all batch elements should have identical outputs (same center)
+    assert not np.allclose(out_np[0], out_np[1]) or not np.allclose(out_np[1], out_np[2]), (
+        "Centers should be randomized across batch elements"
+    )
 
 
-@pytest.mark.tensorflow
+@run_in_backend("tensorflow")
 def test_random_circle_inclusion_symbolic_tensor_fixed_raises():
     """x_is_symbolic_tensor=True + randomize_location_across_batch=False raises."""
     import tensorflow as tf

@@ -1,5 +1,6 @@
 """This file contains fixtures that are used by all tests in the tests directory."""
 
+import importlib.util
 import os
 import subprocess
 import sys
@@ -20,12 +21,18 @@ def _gpu_available() -> bool:
         "sys.exit(0 if backend_cuda_available(sys.argv[1]) else 1)"
     )
     for backend in ("torch", "tensorflow", "jax"):
+        # Skip subprocess call for backends that aren't installed
+        if importlib.util.find_spec(backend) is None:
+            continue
+
         try:
-            result = subprocess.run(
+            result: subprocess.CompletedProcess[bytes] = subprocess.run(
                 [sys.executable, "-c", probe, backend],
                 capture_output=True,
-                timeout=120,
+                timeout=10,
             )
+        except subprocess.TimeoutExpired:
+            continue
         except Exception:
             continue
         if result.returncode == 0:

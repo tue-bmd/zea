@@ -51,6 +51,7 @@ class TestImportTf:
             assert _import_tf(force=True) is None
 
 
+@pytest.mark.jax
 class TestImportJax:
     """Tests for ``_import_jax``: the lazy JAX import helper in ``zea.backend``."""
 
@@ -91,6 +92,7 @@ class TestImportJax:
             assert _import_jax(force=True) is None
 
 
+@pytest.mark.torch
 class TestImportTorch:
     """Tests for ``_import_torch``: the lazy PyTorch import helper in ``zea.backend``."""
 

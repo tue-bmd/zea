@@ -67,11 +67,18 @@ def format_backend_skip_reason(missing_backends) -> str:
     return f"Skipping test because required back-end(s) are unavailable: {missing}."
 
 
-def _record_backend_guard_skip(active_backend, required_backends):
-    log.warning(
-        f"Assert skipped. Only available on {required_backends}, "
-        f"currently running on {active_backend}."
-    )
+def _record_backend_guard_skip(active_backend, required_backends, inclusive=True):
+    if inclusive:
+        msg = (
+            f"Assert skipped. Only available on {required_backends}, "
+            f"currently running on {active_backend}."
+        )
+    else:
+        msg = (
+            f"Assert skipped. Not available on {required_backends}, "
+            f"currently running on {active_backend}."
+        )
+    log.warning(msg)
     _backend_guard_skips[(active_backend, tuple(required_backends))] += 1
 
 
@@ -84,7 +91,7 @@ def runs_on(*backends) -> bool:
     active_backend = keras.backend.backend()
     if active_backend in backends:
         return True
-    _record_backend_guard_skip(active_backend, backends)
+    _record_backend_guard_skip(active_backend, backends, inclusive=True)
     return False
 
 
@@ -97,7 +104,7 @@ def runs_not_on(*backends) -> bool:
     active_backend = keras.backend.backend()
     if active_backend not in backends:
         return True
-    _record_backend_guard_skip(active_backend, backends)
+    _record_backend_guard_skip(active_backend, backends, inclusive=False)
     return False
 
 

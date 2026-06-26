@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import sys
 import traceback
+from contextlib import nullcontext
 from queue import Empty
 
 import cloudpickle as pickle
@@ -72,7 +73,10 @@ class BackendEqualityCheck:
         os.environ["KERAS_BACKEND"] = backend
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
         os.environ["JAX_PLATFORMS"] = "cpu"  # only affects jaxs
-        import jax  # must be imported after JAX_PLATFORMS is set
+        try:
+            import jax  # must be imported after JAX_PLATFORMS is set
+        except ImportError:
+            jax = None
         import keras
 
         # start worker
@@ -86,7 +90,11 @@ class BackendEqualityCheck:
                 func = pickle.loads(func_blob)
                 args = pickle.loads(args_blob)
                 kwargs = pickle.loads(kwargs_blob)
-                with jax.disable_jit():
+                if jax is not None:
+                    ctx = jax.disable_jit()
+                else:
+                    ctx = nullcontext()
+                with ctx:
                     keras.utils.set_random_seed(seed)
                     result = func(*args, **kwargs)
                 if result is not None:
