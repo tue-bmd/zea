@@ -270,8 +270,7 @@ class BackendEqualityCheck:
         return _decorate_with_required_backends(decorator.decorator(wrapper), all_backends)
 
     def run_in_backend(self, backend):
-        """
-        Decorator to run a test function in one specific backend.
+        """Decorator to run a test function in one specific backend.
 
         Args:
             backend (str): Backend to run the test in.

@@ -1,6 +1,7 @@
 """Tests for ``zea.backend``."""
 
 from . import run_in_backend
+from .backend_utils import missing_required_backends
 
 
 class TestImportTf:
@@ -109,10 +110,17 @@ class TestImportTorch:
     @staticmethod
     @run_in_backend("jax")
     def test_force_bypasses_backend_check():
-        """Returns the torch module regardless of the active backend when force=True."""
+        """Returns the torch module when available.
+
+        Regardless of the active backend when force=True.
+        """
         from zea.backend import _import_torch
 
-        assert _import_torch(force=True) is not None
+        result = _import_torch(force=True)
+        if missing_required_backends(["torch"]):
+            assert result is None, "torch not installed, should return None"
+        else:
+            assert result is not None, "torch is installed, should return the module"
 
     @staticmethod
     @run_in_backend("jax")

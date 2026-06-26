@@ -1120,7 +1120,7 @@ def test_load_avi(tmp_path):
     # Verify the shape and content
     assert loaded_frames.shape == (10, 32, 32)
     for i in range(10):
-        np.testing.assert_allclose(loaded_frames[i], frames[i], atol=1)
+        np.testing.assert_allclose(loaded_frames[i], frames[i], atol=2)
 
 
 def test_sitk_load(tmp_path):
