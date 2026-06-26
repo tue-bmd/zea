@@ -820,9 +820,8 @@ class Pipeline:
         override_keys = set(overrides.keys())
 
         if parameters is not None:
-            assert isinstance(parameters, Parameters), (
-                f"Expected an instance of `zea.Parameters`, got {type(parameters)}"
-            )
+            if not isinstance(parameters, Parameters):
+                raise TypeError(f"Expected an instance of `zea.Parameters`, got {type(parameters)}")
             # Only convert keys the pipeline needs and that are not overridden,
             # so we avoid deriving unnecessary parameters.
             needs_keys = self.needs_keys - override_keys
@@ -1813,9 +1812,11 @@ def make_operation_chain(
             chain.append(operation)
             continue
 
-        assert isinstance(operation, (str, dict, Config)), (
-            f"Operation {operation} should be a string, dict, Config object, Operation, or Pipeline"
-        )
+        if not isinstance(operation, (str, dict, Config)):
+            raise TypeError(
+                f"Operation {operation} should be a string, dict, Config object, Operation, "
+                "or Pipeline"
+            )
 
         if isinstance(operation, str):
             operation_instance = get_ops(operation)()
