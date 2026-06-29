@@ -23,6 +23,7 @@ See the :ref:`group reference <group-reference>` for a full description of each 
    │   ├── image/                    group (Image)
    │   ├── segmentation/             group (Segmentation)
    │   ├── sos_map/                  group (SosMap)
+   │   ├── attenuation_map/          group (AttenuationMap)
    │   ├── strain_percentage_map/    group (StrainPercentageMap)
    │   ├── tissue_doppler/           group (TissueDopplerMap)
    │   ├── color_doppler/            group (ColorDopplerMap)
@@ -149,6 +150,11 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - :class:`~zea.data.spec.SosMap`
            - group
            - Speed-of-sound map data.
+           - |badge-opt|
+         * - ``attenuation_map`` :ref:`↓ <spec-data-attenuation-map>`
+           - :class:`~zea.data.spec.AttenuationMap`
+           - group
+           - Acoustic attenuation map data.
            - |badge-opt|
          * - ``strain_percentage_map`` :ref:`↓ <spec-data-strain-percentage-map>`
            - :class:`~zea.data.spec.StrainPercentageMap`
@@ -457,6 +463,67 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
       .. dropdown:: ``sos_map``
 
          Speed-of-sound map in m/s. Values are ``float32``.
+
+         .. list-table::
+            :header-rows: 1
+            :widths: 22 16 22 30 10
+         
+            * - Field
+              - Type
+              - Shape
+              - Description
+              - 
+            * - ``values``
+              - ``float32``
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x, n_spatial_ch) or (n_frames, z, x)
+              - Map pixel values.
+              - |badge-req|
+            * - ``coordinates``
+              - ``float32``
+              - (..., 3)
+              - Per-pixel Cartesian positions (x, y, z) in metres.
+              - |badge-opt|
+            * - ``timestamps``
+              - ``float32``
+              - (n_frames)
+              - Per-frame acquisition timestamps relative to frame 0.
+              - |badge-opt|
+            * - ``start_time_offset``
+              - ``float32``
+              - scalar
+              - Time offset between the first transmit event of the ultrasound acquisition and frame 0 of this map. Negative means frame 0 was acquired before the first transmit event; positive means it was acquired after.
+              - |badge-opt|
+            * - ``labels``
+              - ``str``
+              - (n_spatial_ch)
+              - Labels for each channel in values.
+              - |badge-opt|
+            * - ``description``
+              - ``str``
+              - scalar
+              - Free-text description of the map contents.
+              - |badge-opt|
+            * - ``unit``
+              - ``str``
+              - scalar
+              - Physical unit of the map values, e.g. 'm/s', '%'.
+              - |badge-opt|
+            * - ``min``
+              - ``float32``
+              - scalar
+              - Minimum value of the map.
+              - |badge-opt|
+            * - ``max``
+              - ``float32``
+              - scalar
+              - Maximum value of the map.
+              - |badge-opt|
+
+      .. _spec-data-attenuation-map:
+
+      .. dropdown:: ``attenuation_map``
+
+         Acoustic attenuation coefficient map in dB/cm/MHz (frequency-normalized). Values are ``float32``.
 
          .. list-table::
             :header-rows: 1

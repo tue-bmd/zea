@@ -34,6 +34,8 @@ A unit of ``–`` denotes a unitless (dimensionless) quantity.
      - radians
    * - ``dB``
      - decibels
+   * - ``dB/cm/MHz``
+     - decibels per centimeter per megahertz
    * - ``#``
      - count
    * - ``%``

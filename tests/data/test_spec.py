@@ -9,6 +9,7 @@ from zea.data import spec as spec_module
 from zea.data.file import File
 from zea.data.spec import (
     Annotations,
+    AttenuationMap,
     DataSpec,
     FileSpec,
     Image,
@@ -161,6 +162,10 @@ def _example_data(n_frames, n_tx, n_el, n_ax, n_ch):
         },
         "sos_map": {
             "values": np.full((n_frames, 16, 12, 1), 1540.0, dtype=np.float32),
+            "coordinates": coords_3d,
+        },
+        "attenuation_map": {
+            "values": np.full((n_frames, 16, 12, 1), 0.5, dtype=np.float32),
             "coordinates": coords_3d,
         },
         "strain": {
@@ -811,6 +816,33 @@ class TestDataValidationErrors:
                 values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
                 coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
             )
+
+    def test_attenuation_map_rejects_wrong_unit(self):
+        """AttenuationMap enforces a canonical unit of dB/cm/MHz."""
+        with pytest.raises(ValueError, match="Attenuation map unit should be 'dB/cm/MHz'"):
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), 0.5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+                unit="dB/cm",
+            )
+
+    def test_attenuation_map_accepts_canonical_unit(self):
+        """AttenuationMap accepts float32 values with the dB/cm/MHz unit."""
+        att = AttenuationMap(
+            values=np.full((2, 16, 12, 1), 0.7, dtype=np.float32),
+            coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            unit="dB/cm/MHz",
+        )
+        assert att.values.dtype == np.float32
+
+    def test_attenuation_map_warns_on_negative_values(self):
+        """Negative attenuation coefficients are physically unexpected and warn."""
+        with patch.object(spec_module.log, "warning") as mock_warning:
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), -0.5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            )
+        assert any("Attenuation map" in str(c) for c in mock_warning.call_args_list)
 
     def test_image_wrong_pixel_dtype_raises(self):
         """Image is UnsignedIntMap – values must be float32 or uint8, not complex128."""

@@ -25,6 +25,7 @@ UNITS = {
     "–": "unitless",
     "rad": "radians",
     "dB": "decibels",
+    "dB/cm/MHz": "decibels per centimeter per megahertz",
     "#": "count",
     "%": "percent",
     "kg/m²": "kilograms per square meter",
@@ -981,6 +982,40 @@ class SosMap(FloatMap):
 
 
 @dataclass
+class AttenuationMap(FloatMap):
+    """Acoustic attenuation map with per-pixel Cartesian coordinates.
+
+    Holds the frequency-normalized acoustic attenuation coefficient (the
+    "attenuation coefficient slope") in dB/cm/MHz. Acoustic attenuation describes
+    the loss of acoustic energy as the wave propagates through tissue (through
+    absorption and scattering). Because attenuation increases approximately
+    linearly with frequency, it is conventionally reported normalized by frequency
+    so that values are comparable across systems and transmit frequencies.
+
+    Args:
+        values: The attenuation coefficient values in dB/cm/MHz of shape
+            ``(n_frames, z, x, y)`` and type float32.
+        coordinates: Per-pixel Cartesian positions in metres, shape
+            ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.unit is not None and self.unit != "dB/cm/MHz":
+            raise ValueError(f"Attenuation map unit should be 'dB/cm/MHz', got '{self.unit}'")
+
+        # Attenuation coefficients describe energy loss and are therefore non-negative.
+        if np.any(self.values < 0):
+            log.warning(
+                "Attenuation map contains negative values, which is physically unexpected "
+                "for an attenuation coefficient. Please verify the values are in dB/cm/MHz."
+            )
+
+
+@dataclass
 class StrainPercentageMap(FloatMap):
     """Strain map data with per-pixel Cartesian coordinates.
 
@@ -1064,6 +1099,7 @@ class DataSpec(Spec):
         - image: Reconstructed image data and per-pixel coordinates.
         - segmentation: Segmentation data and per-pixel coordinates.
         - sos_map: Speed-of-sound map data and per-pixel coordinates.
+        - attenuation_map: Acoustic attenuation map data and per-pixel coordinates.
         - strain_percentage_map: Strain map data and per-pixel coordinates.
         - shear_wave_elastography_map: Shear-wave elastography data and per-pixel coordinates.
         - tissue_doppler: Tissue Doppler data and per-pixel coordinates.
@@ -1082,6 +1118,7 @@ class DataSpec(Spec):
     image: Image | dict | None = None
     segmentation: Segmentation | dict | None = None
     sos_map: SosMap | dict | None = None
+    attenuation_map: AttenuationMap | dict | None = None
     strain_percentage_map: StrainPercentageMap | dict | None = None
     shear_wave_elastography_map: ShearWaveElastographyMap | dict | None = None
     tissue_doppler: TissueDopplerMap | dict | None = None
@@ -1100,6 +1137,7 @@ class DataSpec(Spec):
         "image": {"spec": Image},
         "segmentation": {"spec": Segmentation},
         "sos_map": {"spec": SosMap},
+        "attenuation_map": {"spec": AttenuationMap},
         "strain_percentage_map": {"spec": StrainPercentageMap},
         "shear_wave_elastography_map": {"spec": ShearWaveElastographyMap},
         "tissue_doppler": {"spec": TissueDopplerMap},
@@ -1114,6 +1152,7 @@ class DataSpec(Spec):
         "image": {"description": "Reconstructed image data.", "rare": True},
         "segmentation": {"description": "Segmentation data.", "rare": True},
         "sos_map": {"description": "Speed-of-sound map data.", "rare": True},
+        "attenuation_map": {"description": "Acoustic attenuation map data.", "rare": True},
         "strain_percentage_map": {"description": "Strain map data.", "rare": True},
         "shear_wave_elastography_map": {
             "description": "Shear-wave elastography data.",
@@ -1132,6 +1171,7 @@ class DataSpec(Spec):
         image: Image | dict | None = None,
         segmentation: Segmentation | dict | None = None,
         sos_map: SosMap | dict | None = None,
+        attenuation_map: AttenuationMap | dict | None = None,
         strain_percentage_map: StrainPercentageMap | dict | None = None,
         shear_wave_elastography_map: ShearWaveElastographyMap | dict | None = None,
         tissue_doppler: TissueDopplerMap | dict | None = None,
@@ -1145,6 +1185,7 @@ class DataSpec(Spec):
         self.image = image
         self.segmentation = segmentation
         self.sos_map = sos_map
+        self.attenuation_map = attenuation_map
         self.strain_percentage_map = strain_percentage_map
         self.shear_wave_elastography_map = shear_wave_elastography_map
         self.tissue_doppler = tissue_doppler
