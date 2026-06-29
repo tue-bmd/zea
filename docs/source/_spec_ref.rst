@@ -1032,6 +1032,11 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Subject fat percentage.
               - |badge-opt|
+            * - ``bmi``
+              - ``float32``
+              - scalar
+              - Subject body mass index.
+              - |badge-opt|
 
 
       .. _spec-meta-annotations:
