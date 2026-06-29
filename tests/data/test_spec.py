@@ -946,6 +946,28 @@ class TestMetadataAndMetricsValidationErrors:
         with pytest.raises(TypeError, match="age"):
             Subject(age="forty two")
 
+    def test_subject_bmi_out_of_range_raises(self):
+        """bmi must be within the physically-possible range (0, 100]."""
+        with pytest.raises(ValueError, match="BMI"):
+            Subject(bmi=np.float32(150.0))
+        with pytest.raises(ValueError, match="BMI"):
+            Subject(bmi=np.float32(0.0))
+        with pytest.raises(ValueError, match="BMI"):
+            Subject(bmi=np.float32(-1.0))
+
+    def test_subject_bmi_valid(self):
+        """A sensible bmi value passes validation without warning."""
+        with patch("zea.log.warning") as mock_warn:
+            subject = Subject(bmi=np.float32(23.4))
+        assert subject.bmi == np.float32(23.4)
+        assert not any("BMI" in str(c.args[0]) for c in mock_warn.call_args_list)
+
+    def test_subject_bmi_unusual_warns(self):
+        """Values outside the typical clinical range warn but do not raise."""
+        with patch("zea.log.warning") as mock_warn:
+            Subject(bmi=np.float32(75.0))
+        assert any("BMI" in str(c.args[0]) for c in mock_warn.call_args_list)
+
     def test_signal_missing_required_field_raises(self):
         """Signal1D requires either sampling_frequency or timestamps."""
         with pytest.raises(ValueError, match="sampling_frequency|timestamps"):
@@ -1342,6 +1364,7 @@ class TestSubjectFieldWarnings:
                 age=np.uint8(42),
                 sex="f",
                 fat_percentage=np.float32(17.5),
+                bmi=np.float32(23.4),
             )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert not any("Optional Subject field" in m for m in messages)
