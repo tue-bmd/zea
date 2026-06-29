@@ -142,7 +142,7 @@ class Parameters(BaseParameters):
     sampling_frequency: float
     """Sampling frequency of the received signal [Hz]."""
 
-    center_frequency: float
+    center_frequency: float | np.ndarray
     """Transmit center frequency [Hz]. Scalar, or shape (n_tx,) per transmit."""
 
     probe_center_frequency: float
@@ -179,18 +179,20 @@ class Parameters(BaseParameters):
     Assigning to this attribute (or calling :meth:`set_transmits`) accepts any of
     the following, which are resolved to concrete indices via :meth:`find_transmits`:
 
-    - ``None`` or ``"all"``: use all transmits.
+    - ``None`` or ``"all"``: use all transmits. If the total transmit count
+      ``n_tx`` is not yet known (image-only files), ``set_transmits(None)`` leaves
+      this as ``None`` until ``n_tx`` is set.
     - ``"center"``: use only the center transmit.
     - ``int``: select this many evenly spaced transmits.
     - ``list``/``np.ndarray``: use these specific transmit indices.
     - ``slice``: use transmits given by the slice (e.g. ``slice(0, 10, 2)``).
     """
 
-    waveforms_one_way: np.ndarray
-    """One-way transmit waveforms, shape (n_tx, n_samples_one_way)."""
+    waveforms_one_way: np.ndarray | None
+    """One-way transmit waveforms, shape (n_tx, n_samples_one_way). None if absent."""
 
-    waveforms_two_way: np.ndarray
-    """Two-way transmit waveforms, shape (n_tx, n_samples_two_way)."""
+    waveforms_two_way: np.ndarray | None
+    """Two-way transmit waveforms, shape (n_tx, n_samples_two_way). None if absent."""
 
     pixels_per_wavelength: int
     """Number of grid pixels per wavelength. Defaults to 4."""
@@ -513,7 +515,9 @@ class Parameters(BaseParameters):
         """The number of currently selected transmits."""
         if self.selected_transmits is None:
             raise ValueError(
-                "No transmits selected. Set `n_tx` or call `set_transmits(...)` first."
+                'No transmits selected. Call `set_transmits(None/"all"/...)` to '
+                "resolve a selection (this requires the total transmit count `n_tx` "
+                "to be set first)."
             )
         return len(self.selected_transmits)
 
