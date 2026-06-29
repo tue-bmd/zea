@@ -526,18 +526,19 @@ class Parameters(BaseParameters):
 
         Args:
             selection: Specifies which transmits to select:
-                - None: Use all transmits
-                - "all": Use all transmits
-                - "center": Use only the center transmit
-                - "focused": Use only focused transmits (positive finite
-                  ``focus_distances``)
-                - "diverging": Use only diverging transmits (negative finite
-                  ``focus_distances``)
-                - "plane": Use only plane wave transmits (``np.inf``, the
-                  preferred marker, or ``0``)
-                - int: Select this many evenly spaced transmits
-                - list/array: Use these specific transmit indices
-                - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2))
+
+            - None: Use all transmits
+            - "all": Use all transmits
+            - "center": Use only the center transmit
+            - "focused": Use only focused transmits (positive finite
+                ``focus_distances``)
+            - "diverging": Use only diverging transmits (negative finite
+                ``focus_distances``)
+            - "plane": Use only plane wave transmits (``np.inf``, the
+                preferred marker, or ``0``)
+            - int: Select this many evenly spaced transmits
+            - list/array: Use these specific transmit indices
+            - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2))
 
         Returns:
             The current instance for method chaining.
@@ -562,18 +563,19 @@ class Parameters(BaseParameters):
 
         Args:
             selection: Specifies which transmits to select:
-                - None: Use all transmits
-                - "all": Use all transmits
-                - "center": Use only the center transmit
-                - "focused": Use only focused transmits (positive finite
-                  ``focus_distances``)
-                - "diverging": Use only diverging transmits (negative finite
-                  ``focus_distances``)
-                - "plane": Use only plane wave transmits (``np.inf``, the
-                  preferred marker, or ``0``)
-                - int: Select this many evenly spaced transmits
-                - list/array: Use these specific transmit indices
-                - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2))
+
+            - None: Use all transmits
+            - "all": Use all transmits
+            - "center": Use only the center transmit
+            - "focused": Use only focused transmits (positive finite
+                ``focus_distances``)
+            - "diverging": Use only diverging transmits (negative finite
+                ``focus_distances``)
+            - "plane": Use only plane wave transmits (``np.inf``, the
+                preferred marker, or ``0``)
+            - int: Select this many evenly spaced transmits
+            - list/array: Use these specific transmit indices
+            - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2))
 
         Returns:
             The selected transmit indices.
