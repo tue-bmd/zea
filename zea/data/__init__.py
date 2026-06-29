@@ -53,5 +53,5 @@ Example usage
 
 from .convert.camus import sitk_load
 from .dataloader import Dataloader
-from .datasets import Dataset, Folder
+from .datasets import EXISTS, Dataset, Folder
 from .file import CustomElement, File, load_file
