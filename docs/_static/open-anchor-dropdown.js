@@ -46,21 +46,28 @@
         }
     }
 
+    function dropdownIn(el) {
+        // Resolve ``el`` to a sphinx-design dropdown: the <details.sd-dropdown>
+        // itself or one wrapped inside it. Plain <details> (or unrelated
+        // elements) are ignored so we never expand non-dropdown content.
+        if (!el) return null;
+        if (el.tagName === 'DETAILS') {
+            return el.classList.contains('sd-dropdown') ? el : null;
+        }
+        return el.querySelector ? el.querySelector('details.sd-dropdown') : null;
+    }
+
     function openDropdown(target) {
-        // The label may resolve to the <details> itself, to a wrapper <div>
-        // containing it, or to a preceding <span> anchor.
-        var details =
-            target.tagName === 'DETAILS' ? target : target.querySelector('details');
+        // The label may resolve to the dropdown's <details> itself or to a
+        // wrapper <div> containing it.
+        var details = dropdownIn(target);
 
         if (!details) {
             // Sphinx sometimes renders the explicit label as a <span id="...">
-            // that precedes the directive container in the DOM.
-            var sib = target.nextElementSibling;
-            while (sib && !details) {
-                details =
-                    sib.tagName === 'DETAILS' ? sib : sib.querySelector('details');
-                sib = sib.nextElementSibling;
-            }
+            // immediately preceding the dropdown's directive container. Only
+            // the adjacent sibling qualifies — walking further could match an
+            // unrelated dropdown later in the document for an ordinary anchor.
+            details = dropdownIn(target.nextElementSibling);
         }
 
         if (details) details.open = true;
