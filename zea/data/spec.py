@@ -1574,6 +1574,8 @@ class Subject(Spec):
             )
 
         if self.bmi is not None:
+            if not np.isfinite(self.bmi):
+                raise ValueError(f"Subject BMI must be finite, got {self.bmi}")
             if self.bmi <= 0 or self.bmi > 100:
                 raise ValueError(f"Subject BMI must be between 0 and 100, got {self.bmi}")
             if self.bmi < 10 or self.bmi > 60:
