@@ -15,7 +15,7 @@ from zea.internal.core import Object
 from . import DEFAULT_TEST_SEED
 
 # Global variable for the expected duration of the expensive operation
-EXPECTED_DURATION = 0.05
+EXPECTED_DURATION = 0.1
 
 
 @cache_output("x")
