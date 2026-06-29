@@ -1005,6 +1005,21 @@ def test_file_filter_callable_presence(metadata_folder):
     assert _kept_names(dataset) == ["a.hdf5", "c.hdf5"]
 
 
+def test_file_filter_callable_raising_excludes_file(metadata_folder):
+    """A predicate that raises for a file excludes it without crashing the scan."""
+
+    def predicate(f):
+        fat = f.metadata.subject.fat_percentage
+        if fat is None:
+            # b.hdf5 has no fat_percentage: raise to exercise the except path.
+            raise RuntimeError("no fat_percentage recorded")
+        return f.metadata.subject.sex == "m"
+
+    dataset = Dataset(metadata_folder, validate=False, file_filter=predicate)
+    # a excluded (sex='f'), b excluded (predicate raised), c kept.
+    assert _kept_names(dataset) == ["c.hdf5"]
+
+
 @pytest.mark.parametrize(
     "file_filter, expected",
     [
@@ -1074,6 +1089,34 @@ def test_file_filter_via_dataloader(metadata_folder):
     # Two files kept (a, c), each contributing FILTER_N_FRAMES samples.
     assert _kept_names(loader.source) == ["a.hdf5", "c.hdf5"]
     assert len(loader.source) == 2 * FILTER_N_FRAMES
+
+
+def test_file_filter_via_dataloader_path_list(tmp_path):
+    """file_filter applies across a list of input directories, not just one dir."""
+    dir_a = tmp_path / "dir_a"
+    dir_b = tmp_path / "dir_b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    _write_zea_file(
+        dir_a / "keep_a.hdf5",
+        metadata={"subject": {"fat_percentage": np.float32(17.5)}},
+    )
+    _write_zea_file(dir_a / "drop_a.hdf5", metadata={"subject": {"sex": "m"}})
+    _write_zea_file(
+        dir_b / "keep_b.hdf5",
+        metadata={"subject": {"fat_percentage": np.float32(30.0)}},
+    )
+    _write_zea_file(dir_b / "drop_b.hdf5", metadata={"subject": {"sex": "f"}})
+
+    loader = Dataloader(
+        [dir_a, dir_b],
+        key=FILTER_KEY,
+        batch_size=None,
+        shuffle=False,
+        validate=False,
+        file_filter={"metadata.subject.fat_percentage": EXISTS},
+    )
+    assert _kept_names(loader.source) == ["keep_a.hdf5", "keep_b.hdf5"]
 
 
 class TestCompileFileFilter:

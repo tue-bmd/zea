@@ -599,12 +599,14 @@ class Dataset(H5FileHandleCache):
         file_filter = self.file_filter
         kept: List[str] = []
         for path in file_paths:
-            try:
-                with File(path, revision=self.revision) as file:
+            # Opening the file is file access, not filtering: let open/download/
+            # permission failures propagate instead of silently dropping the file.
+            with File(path, revision=self.revision) as file:
+                try:
                     keep = file_filter(file)
-            except Exception as e:  # noqa: BLE001 — any failure means "does not match"
-                log.debug(f"file_filter excluded '{path}': {type(e).__name__}: {e}")
-                continue
+                except Exception as e:  # noqa: BLE001 — a predicate failure means "does not match"
+                    log.debug(f"file_filter excluded '{path}': {type(e).__name__}: {e}")
+                    continue
             if keep:
                 kept.append(path)
             else:
