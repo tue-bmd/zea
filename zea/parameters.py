@@ -134,82 +134,102 @@ class Parameters(BaseParameters):
     (e.g. the beamforming grid). They are simply passed through — for example
     to a pipeline call (see :class:`~zea.internal.parameters.BaseParameters`).
 
-    Args:
-        grid_size_x (int): Grid width in pixels. For a cartesian grid, this is the lateral (x)
-            pixels in the grid, set to prevent aliasing if not provided. For a polar grid, this can
-            be thought of as the number for rays in the polar direction.
-        grid_size_z (int): Grid height in pixels. This is the number of axial (z) pixels in the
-            grid, set to prevent aliasing if not provided.
-        sound_speed (float, optional): Speed of sound in the medium in m/s.
-            Defaults to 1540.0.
-        sampling_frequency (float): Sampling frequency in Hz.
-        center_frequency (float): Transmit center frequency in Hz.
-        demodulation_frequency (float, optional): Demodulation frequency in Hz.
-        n_el (int): Number of elements in the transducer array.
-        n_tx (int): Number of transmit events in the dataset.
-        n_ax (int): Number of axial samples in the received signal.
-        n_ch (int, optional): Number of channels (1 for RF, 2 for IQ data).
-        xlims (tuple of float): Lateral (x) limits of the imaging region in
-            meters (min, max).
-        ylims (tuple of float, optional): Elevation (y) limits of the imaging
-            region in meters (min, max).
-        zlims (tuple of float): Axial (z) limits of the imaging region
-            in meters (min, max).
-        probe_geometry (np.ndarray): Element positions as array of shape (n_el, 3).
-        polar_angles (np.ndarray): Polar angles for each transmit event in radians of shape (n_tx,).
-            These angles are often used in 2D imaging.
-        azimuth_angles (np.ndarray): Azimuth angles for each transmit event in radians
-            of shape (n_tx,). These angles are often used in 3D imaging.
-        t0_delays (np.ndarray): Transmit delays in seconds of
-            shape (n_tx, n_el), shifted such that the smallest delay is 0.
-        tx_apodizations (np.ndarray): Transmit apodizations of shape (n_tx, n_el).
-        focus_distances (np.ndarray): Distance from the origin point on the transducer to where the
-            beam comes to focus for each transmit in meters of shape (n_tx,).
-        transmit_origins (np.ndarray): Transmit origins of shape (n_tx, 3).
-        initial_times (np.ndarray): Initial times in seconds for each event of shape (n_tx,).
-        probe_bandwidth_percent (float, optional): Bandwidth as percentage of center
-            frequency. Defaults to 200.0.
-        time_to_next_transmit (np.ndarray): The time between subsequent
-            transmit events of shape (n_frames, n_tx).
-        tgc_gain_curve (np.ndarray): Time gain compensation (TGC) curve of shape (n_ax,).
-        waveforms_one_way (np.ndarray): The one-way transmit waveforms of shape
-            (n_waveforms, n_samples).
-        waveforms_two_way (np.ndarray): The two-way transmit waveforms of shape
-            (n_waveforms, n_samples).
-        t_peak (np.ndarray, optional): The time of the peak of the pulse of every transmit waveform
-            of shape (n_tx,).
-        pixels_per_wavelength (int, optional): Number of pixels per wavelength.
-            Defaults to 4.
-        element_width (float, optional): Width of each transducer element in meters.
-        resolution (float, optional): Resolution for scan conversion in mm / pixel.
-            If None, it is calculated based on the input image.
-        pfield_kwargs (dict, optional): Additional parameters for pressure field computation.
-            See `zea.beamform.pfield.compute_pfield` for details.
-        apply_lens_correction (bool, optional): Whether to apply lens correction to
-            delays. Defaults to False.
-        lens_thickness (float, optional): Thickness of the lens in meters.
-        f_number (float, optional): F-number of the transducer. Defaults to 1.0.
-        theta_range (tuple, optional): Range of theta angles for 3D imaging.
-        phi_range (tuple, optional): Range of phi angles for 3D imaging.
-        rho_range (tuple, optional): Range of rho (radial) distances for 3D imaging.
-        fill_value (float, optional): Value to use for out-of-bounds pixels.
-        attenuation_coef (float, optional): Attenuation coefficient in dB/(MHz*cm).
-            Defaults to 0.0.
-        selected_transmits (None, str, int, list, slice, or np.ndarray, optional):
-            Specifies which transmit events to select.
-            - None or "all": Use all transmits.
-            - "center": Use only the center transmit.
-            - int: Select this many evenly spaced transmits.
-            - list/array: Use these specific transmit indices.
-            - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2)).
-        grid_type (str, optional): Type of grid to use for beamforming.
-            Can be "cartesian" or "polar". Defaults to "cartesian".
-        dynamic_range (tuple, optional): Dynamic range for image display.
-            Defined in dB as (min_dB, max_dB).
-        distance_to_apex (float, optional): Distance from the transducer to the apex of the
-            pixel grid. This property is used for polar grids. Will be computed automatically
-            if not provided.
     """
+
+    sound_speed: float
+    """Speed of sound in the medium [m/s]. Defaults to 1540.0."""
+
+    sampling_frequency: float
+    """Sampling frequency of the received signal [Hz]."""
+
+    center_frequency: float | np.ndarray
+    """Transmit center frequency [Hz]. Scalar, or shape (n_tx,) per transmit."""
+
+    probe_center_frequency: float
+    """Nominal center frequency of the probe [Hz]."""
+
+    probe_bandwidth_percent: float
+    """Probe bandwidth as a percentage of the center frequency. Defaults to 200.0."""
+
+    n_el: int
+    """Number of elements in the transducer array."""
+
+    n_ax: int
+    """Number of axial samples in the received signal."""
+
+    n_ch: int
+    """Number of channels (1 for RF, 2 for IQ data)."""
+
+    n_frames: int
+    """Number of frames in the dataset."""
+
+    probe_geometry: np.ndarray
+    """Element positions [m], shape (n_el, 3)."""
+
+    element_width: float
+    """Width of each transducer element [m]."""
+
+    element_height: float
+    """Height (elevation) of each transducer element [m]."""
+
+    selected_transmits: list[int] | None
+    """Indices of the currently selected transmit events, or ``None`` when not yet
+    resolved (e.g. image-only files where ``n_tx`` is unknown).
+
+    Assigning to this attribute (or calling :meth:`set_transmits`) accepts any of
+    the following, which are resolved to concrete indices via :meth:`find_transmits`:
+
+    - ``None`` or ``"all"``: use all transmits. If the total transmit count
+      ``n_tx`` is not yet known (image-only files), ``set_transmits(None)`` leaves
+      this as ``None`` until ``n_tx`` is set.
+    - ``"center"``: use only the center transmit.
+    - ``int``: select this many evenly spaced transmits.
+    - ``list``/``np.ndarray``: use these specific transmit indices.
+    - ``slice``: use transmits given by the slice (e.g. ``slice(0, 10, 2)``).
+    """
+
+    waveforms_one_way: np.ndarray | None
+    """One-way transmit waveforms, shape (n_tx, n_samples_one_way). None if absent."""
+
+    waveforms_two_way: np.ndarray | None
+    """Two-way transmit waveforms, shape (n_tx, n_samples_two_way). None if absent."""
+
+    pixels_per_wavelength: int
+    """Number of grid pixels per wavelength. Defaults to 4."""
+
+    grid_type: str
+    """Beamforming grid type, ``"cartesian"`` or ``"polar"``. Defaults to ``"cartesian"``."""
+
+    dynamic_range: np.ndarray
+    """Dynamic range for image display in dB, shape (2,) as (min_dB, max_dB)."""
+
+    resolution: float | None
+    """Resolution for scan conversion [mm/pixel]. If None, computed from the image."""
+
+    f_number: float
+    """F-number of the transducer. Defaults to 1.0."""
+
+    fill_value: float
+    """Value used for out-of-bounds pixels during scan conversion."""
+
+    attenuation_coef: float
+    """Attenuation coefficient [dB/(MHz*cm)]. Defaults to 0.0."""
+
+    apply_lens_correction: bool
+    """Whether to apply lens correction to the transmit delays. Defaults to False."""
+
+    lens_thickness: float
+    """Thickness of the lens [m]."""
+
+    lens_sound_speed: float
+    """Speed of sound in the lens material [m/s]."""
+
+    phi_range: tuple | np.ndarray
+    """Range of phi angles for 3D imaging [rad], shape (2,)."""
+
+    pfield_kwargs: dict
+    """Extra keyword arguments for the pressure-field computation. See
+    :func:`zea.beamform.pfield.compute_pfield`. Defaults to ``{}``."""
 
     scan_schema = deepcopy(ScanSpec.SCHEMA)
     probe_schema = deepcopy(Probe.SCHEMA)
@@ -493,6 +513,12 @@ class Parameters(BaseParameters):
     @cache_with_dependencies("selected_transmits")
     def n_tx(self):
         """The number of currently selected transmits."""
+        if self.selected_transmits is None:
+            raise ValueError(
+                'No transmits selected. Call `set_transmits(None/"all"/...)` to '
+                "resolve a selection (this requires the total transmit count `n_tx` "
+                "to be set first)."
+            )
         return len(self.selected_transmits)
 
     def set_transmits(self, selection):
