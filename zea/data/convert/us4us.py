@@ -1,38 +1,41 @@
 """Convert us4us (arrus + gui4us) pickle files to the zea format.
 
-The gui4us software (https://us4us.eu) stores acquired ultrasound data as Python
-pickle files containing:
+This converter supports pickle datasets acquired with ARRUS <= 0.14.x.
+
+NOTE: this converter works ONLY with the single-axis array probes (linear/convex/phase/ring/etc.).
+
+The arrus+gui4us software (https://us4us.eu) stores acquired ultrasound data as
+Python pickle files containing:
 
 - ``data["data"]``: a list of N frames, each frame is a tuple of M numpy arrays
   (one per pipeline output, e.g. image, beamformed IQ, raw channel data).
-- ``data["metadata"]``: a tuple of M :class:`ConstMetadata` objects, one per
-  pipeline output, describing the acquisition context, probe model, and sequence.
+- ``data["metadata"]``: a tuple of M :class:`ConstMetadata` (ARRUS python package)
+  objects, one per pipeline output, describing the acquisition context,
+  probe model and sequence.
 
 Example usage::
 
-    from zea.data.convert.us4us import convert_us4us
-    import argparse
+    python -m zea.data.convert us4us input.pkl output.h5 --mapping '{"0": "image", "1": "beamformed_data", "2": "raw_data"}'
 
-    args = argparse.Namespace(
-        src="path/to/data.pkl",
-        dst="path/to/output.hdf5",
-        mapping={0: "image", 2: "raw_data"},
-    )
-    convert_us4us(args)
+The ``mapping`` argument maps each us4us output index (position in the per-frame
+tuple in the pickle dataset) to a zea data type string.
 
-The ``mapping`` argument maps each output index (position in the per-frame
-tuple) to a zea data type string.  Supported types: ``"raw_data"``,
-``"image"``, ``"beamformed_data"``, ``"envelope_data"``, ``"aligned_data"``.
 Default: ``{0: "image"}``.
 
-Mapping from arrus metadata to zea scan/probe fields:
+The following mapping from arrus (<=0.14.x) metadata to zea scan/probe fields:
 
 - ``metadata.context.raw_sequence.ops[j].tx.delays``  →  ``t0_delays``
 - ``metadata.context.raw_sequence.ops[j].tx.aperture``  →  ``tx_apodizations``
 - ``metadata.context.raw_sequence.ops[j].rx.sample_range``  →  ``initial_times``
 - ``metadata.context.raw_sequence.ops[j].pri``  →  ``time_to_next_transmit``
-- ``metadata.context.sequence.tx_focus``  →  ``focus_distances``
-- ``metadata.context.sequence.angles``  →  ``polar_angles``
+- ``focus_distances`` is taken from ``metadata.context.sequence.tx_focus`` when
+  the user-facing sequence is a ``SimpleTxRxSequence``
+  (``LinSequence`` / ``PwiSequence`` / ``StaSequence``) and from
+  ``metadata.context.raw_sequence.ops[j].tx.focus`` when it is a bare
+  ``TxRxSequence``.
+- ``polar_angles`` is taken from ``metadata.context.sequence.angles`` for a
+  ``SimpleTxRxSequence`` and from ``metadata.context.raw_sequence.ops[j].tx.angle``
+  for a ``TxRxSequence``.
 - ``metadata.data_description.sampling_frequency``  →  ``sampling_frequency``
 - ``metadata.context.device.probe[0].model``  →  probe geometry / element_width
 - ``metadata.context.medium.speed_of_sound``  →  ``sound_speed``
@@ -45,23 +48,7 @@ import numpy as np
 
 from zea import log
 from zea.data.file import File
-from zea.data.spec import DEFAULT_COMPRESSION
-
-_ZEA_DATA_TYPES = frozenset(
-    {
-        "raw_data",
-        "image",
-        "beamformed_data",
-        "envelope_data",
-        "aligned_data",
-        "segmentation",
-        "sos_map",
-        "strain_percentage_map",
-        "shear_wave_elastography_map",
-        "tissue_doppler",
-        "color_doppler",
-    }
-)
+from zea.data.spec import DEFAULT_COMPRESSION, DataSpec
 
 
 # ---------------------------------------------------------------------------
@@ -217,11 +204,20 @@ def _extract_scan_dict(context, data_char, n_frames: int) -> dict:
     # -----------------------------------------------------------------------
     # focus_distances — (n_tx,)
     # -----------------------------------------------------------------------
+    # SimpleTxRxSequence (LinSequence/PwiSequence/StaSequence) carries a
+    # scalar `tx_focus` on the sequence object. A bare TxRxSequence stores
+    # `focus` per-op on each Tx (or None when the user supplied raw `delays`).
     tx_focus = getattr(sequence, "tx_focus", None)
-    if tx_focus is None:
-        focus_distances = np.full(n_tx, np.inf, dtype=np.float32)
-    else:
+    if tx_focus is not None:
         focus_distances = np.full(n_tx, float(tx_focus), dtype=np.float32)
+    else:
+        focus_distances = np.array(
+            [
+                float(op.tx.focus) if getattr(op.tx, "focus", None) is not None else np.inf
+                for op in ops
+            ],
+            dtype=np.float32,
+        )
 
     # -----------------------------------------------------------------------
     # transmit_origins — (n_tx, 3): centre of active TX aperture
@@ -236,12 +232,23 @@ def _extract_scan_dict(context, data_char, n_frames: int) -> dict:
     # -----------------------------------------------------------------------
     # polar_angles — (n_tx,)
     # -----------------------------------------------------------------------
-    angles_val = getattr(sequence, "angles", 0.0)
-    angles_arr = np.atleast_1d(np.asarray(angles_val, dtype=np.float32)).ravel()
-    if angles_arr.size == n_tx:
-        polar_angles = angles_arr
+    # SimpleTxRxSequence exposes `angles` (scalar or per-TX list) on the
+    # sequence. A bare TxRxSequence stores `angle` per-op on each Tx.
+    seq_angles = getattr(sequence, "angles", None)
+    if seq_angles is not None:
+        angles_arr = np.atleast_1d(np.asarray(seq_angles, dtype=np.float32)).ravel()
+        if angles_arr.size == n_tx:
+            polar_angles = angles_arr
+        else:
+            polar_angles = np.full(n_tx, float(angles_arr[0]), dtype=np.float32)
     else:
-        polar_angles = np.full(n_tx, float(angles_arr[0]), dtype=np.float32)
+        polar_angles = np.array(
+            [
+                float(op.tx.angle) if getattr(op.tx, "angle", None) is not None else 0.0
+                for op in ops
+            ],
+            dtype=np.float32,
+        )
 
     # -----------------------------------------------------------------------
     # time_to_next_transmit — (n_frames, n_tx)
@@ -280,9 +287,11 @@ def _get_image_coordinates(data_char) -> "np.ndarray | None":
     """
     spacing = getattr(data_char, "spacing", None)
     if spacing is None:
+        print("NO SPACING")
         return None
     coords = getattr(spacing, "coordinates", None)
     if coords is None or len(coords) < 2:
+        print("NO COORDS")
         return None
     try:
         z_vals = np.asarray(coords[0], dtype=np.float32).ravel()
@@ -291,6 +300,7 @@ def _get_image_coordinates(data_char) -> "np.ndarray | None":
         Y = np.zeros_like(Z)
         return np.stack([X, Y, Z], axis=-1)  # (n_z, n_x, 3)
     except Exception as exc:
+        print("EXCEPTION WHILE CALCULATING coords")
         log.warning(f"Could not build image coordinates: {exc}")
         return None
 
@@ -318,12 +328,12 @@ def _prepare_output(
     sample = raw[0]
 
     if data_type == "raw_data":
-        # arrus: (1, n_tx, n_ax, n_rx_hw) → zea: (n_frames, n_tx, n_ax, n_el, 1)
+        # arrus: (1, n_tx, n_ax, rx_aperture_size) → zea: (n_frames, n_tx, n_ax, n_el, 1)
         stacked = np.stack([a.squeeze(0) for a in raw], axis=0)
-        # stacked: (n_frames, n_tx, n_ax, n_rx_hw)
+        # stacked: (n_frames, n_tx, n_ax, rx_aperture_size)
 
         if raw_ops is not None:
-            # Scatter hardware receive channels back to full probe aperture.
+            # Distribute receive aperture elements back to full probe aperture.
             # Each firing i has:
             #   rx.padding = (left_pad, right_pad) — zeros prepended/appended
             #   rx.aperture — bool mask over all probe elements; True = active
@@ -442,11 +452,12 @@ def convert_us4us(args):
     if not src.exists():
         raise FileNotFoundError(f"Source file not found: {src}")
 
-    unknown = set(mapping.values()) - _ZEA_DATA_TYPES
+    valid_data_types = set(DataSpec.SCHEMA.keys())
+    unknown = set(mapping.values()) - valid_data_types
     if unknown:
         raise ValueError(
             f"Unknown zea data type(s) in mapping: {unknown}. "
-            f"Supported types: {sorted(_ZEA_DATA_TYPES)}"
+            f"Supported types: {sorted(valid_data_types)}"
         )
 
     log.info(f"Loading us4us pickle: {log.yellow(src)}")
@@ -472,6 +483,7 @@ def convert_us4us(args):
     # Build per-output data dicts
     raw_ops = context.raw_sequence.ops
     outputs: dict[str, dict | np.ndarray] = {}
+
     for output_idx, data_type in mapping.items():
         log.info(f"  output[{output_idx}] → {data_type}")
         meta_entry = metadata_tuple[output_idx]
@@ -494,14 +506,15 @@ def convert_us4us(args):
             data={data_type: arr},
             scan=scan_dict,
             probe=probe_dict,
-            description="us4us (arrus) data converted to zea format",
-            us_machine="us4r",
+            description="us4us (gui4us+arrus) data converted to zea format",
+            us_machine="us4R",
             compression=DEFAULT_COMPRESSION,
             overwrite=True,
         )
     else:
-        # Multiple outputs: use one track per data type so dimension constraints
-        # (e.g. n_ch=1 for raw_data vs n_ch=2 for IQ beamformed_data) don't conflict.
+        # NOTE: us4us "raw_data" can be either RF or IQ data. The following
+        # combination (RF raw_data, IQ beamformed_data) will cause
+        # "incosistent sizes" error (zea 0.1.1).
         tracks = [
             {"data": {data_type: arr}, "scan": scan_dict, "label": data_type}
             for data_type, arr in outputs.items()
