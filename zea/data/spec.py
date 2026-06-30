@@ -27,6 +27,7 @@ UNITS = {
     "dB": "decibels",
     "#": "count",
     "%": "percent",
+    "kg/m²": "kilograms per square meter",
 }
 
 DEFAULT_COMPRESSION = "lzf"
@@ -1531,6 +1532,7 @@ class Subject(Spec):
         age: Subject age in years.
         sex: Subject sex.
         fat_percentage: Subject fat percentage.
+        bmi: Subject body mass index in kg/m².
     """
 
     id: str | None = None
@@ -1538,6 +1540,7 @@ class Subject(Spec):
     age: np.uint8 | None = None
     sex: str | None = None
     fat_percentage: np.float32 | None = None
+    bmi: np.float32 | None = None
 
     SCHEMA = {
         "id": {"dtype": str, "shape": ()},
@@ -1545,6 +1548,7 @@ class Subject(Spec):
         "age": {"dtype": np.uint8, "shape": ()},
         "sex": {"dtype": str, "shape": ()},
         "fat_percentage": {"dtype": np.float32, "shape": ()},
+        "bmi": {"dtype": np.float32, "shape": ()},
     }
 
     FIELD_METADATA = {
@@ -1553,6 +1557,7 @@ class Subject(Spec):
         "age": {"unit": "–", "description": "Subject age in years.", "rare": True},
         "sex": {"unit": "–", "description": "Subject sex.", "rare": True},
         "fat_percentage": {"unit": "%", "description": "Subject fat percentage.", "rare": True},
+        "bmi": {"unit": "kg/m²", "description": "Subject body mass index.", "rare": True},
     }
 
     def __post_init__(self):
@@ -1567,6 +1572,17 @@ class Subject(Spec):
             raise ValueError(
                 f"Subject fat percentage must be between 0 and 100, got {self.fat_percentage}"
             )
+
+        if self.bmi is not None:
+            if not np.isfinite(self.bmi):
+                raise ValueError(f"Subject BMI must be finite, got {self.bmi}")
+            if self.bmi <= 0 or self.bmi > 100:
+                raise ValueError(f"Subject BMI must be between 0 and 100, got {self.bmi}")
+            if self.bmi < 10 or self.bmi > 60:
+                log.warning(
+                    f"Subject BMI of {self.bmi} kg/m² is outside the typical clinical range "
+                    "(10-60). Please verify the value and that it is in kg/m²."
+                )
 
 
 @dataclass

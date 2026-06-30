@@ -7,14 +7,17 @@ import pytest
 from keras import ops
 
 from zea import metrics
-from zea.backend.tensorflow.losses import SMSLE
 from zea.internal.registry import metrics_registry
 
 from . import DEFAULT_TEST_SEED, backend_equality_check
+from .backend_utils import runs_on
 
 
+@pytest.mark.tensorflow
 def test_smsle():
     """Test SMSLE loss function"""
+    from zea.backend.tensorflow.losses import SMSLE
+
     # Create random y_true and y_pred data
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     y_true = rng.standard_normal((1, 11, 128, 512, 2)).astype(np.float32)
@@ -53,7 +56,7 @@ def test_metrics(metric_name):
     assert metric_value.shape == (), f"Metric {metric_name} did not return a scalar value"
 
     # Regression test against TensorFlow implementations for SSIM and PSNR
-    if metric_name == "ssim":
+    if metric_name == "ssim" and runs_on("tensorflow"):
         import tensorflow as tf
 
         expected_value = tf.image.ssim(
@@ -62,7 +65,7 @@ def test_metrics(metric_name):
             max_val=255.0,
         )
         np.testing.assert_allclose(metric_value, expected_value, rtol=1e-5, atol=1e-5)
-    elif metric_name == "psnr":
+    elif metric_name == "psnr" and runs_on("tensorflow"):
         import tensorflow as tf
 
         expected_value = tf.image.psnr(

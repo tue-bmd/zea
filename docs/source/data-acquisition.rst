@@ -350,6 +350,8 @@ that do not fit the standard scan and probe fields can be stored as **custom ele
 see below:
 
 .. dropdown:: Custom spatial maps (``data`` group)
+   :name: custom-spatial-maps
+   :class-container: dropdown-accordion-custom-fields
 
    A custom map is a named entry in the ``data`` group that associates a pixel array with a
    per-pixel Cartesian coordinate grid.  Each map is then a function from Cartesian space to
@@ -407,6 +409,8 @@ see below:
       docstrings for full details.
 
 .. dropdown:: Custom metadata (``metadata`` group)
+   :name: custom-metadata
+   :class-container: dropdown-accordion-custom-fields
 
    Standard metadata fields (``credit``, ``annotations``, ``text_report``, ``subject``, ``ecg``, …)
    are validated by :class:`~zea.data.spec.MetadataSpec`.  Pass a plain dict to ``File.create``'s
@@ -486,6 +490,8 @@ see below:
    See :class:`~zea.data.spec.MetadataSpec` for the full list of supported standard fields.
 
 .. dropdown:: Custom elements (``custom`` group)
+   :name: custom-elements
+   :class-container: dropdown-accordion-custom-fields
 
    Sometimes you need to store data that does not fit the zea spec at all — neither a spatial map
    nor a metadata signal. Use :class:`~zea.data.CustomElement` for this: a named array (or

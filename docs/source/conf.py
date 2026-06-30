@@ -67,7 +67,7 @@ exclude_patterns = [
 autodoc_default_options = {
     "members": True,
     "undoc-members": True,
-    "exclude-members": "SCHEMA",
+    "exclude-members": "SCHEMA,VALID_PARAMS",
     "show-inheritance": True,
     "special-members": "__call__",
 }
