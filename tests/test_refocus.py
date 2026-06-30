@@ -76,6 +76,29 @@ def test_valid_methods_construct():
         assert op.method == method
 
 
+def test_svd_methods_are_non_jittable():
+    """SVD-based Refocus methods must report jittable=False so JIT is skipped everywhere."""
+    from zea import ops
+    from zea.ops import Refocus
+
+    # adjoint stays jittable
+    assert Refocus(method="adjoint").jittable is True
+
+    for method in ("tikhonov", "rsvd", "tsvd"):
+        op = Refocus(method=method)
+        assert op.jittable is False
+        # A jit_options="ops" pipeline must not actually JIT-wrap a non-jittable op:
+        # set_jit honours jittable, so _call stays the plain (un-jitted) call method.
+        pipeline = ops.Pipeline([Refocus(method=method)], jit_options="ops", validate=False)
+        refocus_op = pipeline.operations[0]
+        assert refocus_op._call == refocus_op.call
+
+    # A jit_options="pipeline" pipeline containing an SVD Refocus must fail fast and clearly,
+    # rather than silently tracing the unsupported SVD op.
+    with pytest.raises(ValueError, match="not all operations are jittable"):
+        ops.Pipeline([Refocus(method="tsvd")], jit_options="pipeline", validate=False)
+
+
 @pytest.mark.parametrize("method", ["adjoint", "tikhonov", "rsvd", "tsvd"])
 def test_output_shape_rf(method, probe_geometry, plane_wave_delays, rf_data):
     """Decoded RF output must have shape (n_el, n_ax, n_el, 1)."""
