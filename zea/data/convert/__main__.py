@@ -12,6 +12,8 @@ Examples::
     python -m zea.data.convert echoxflow ./raw ./output
     python -m zea.data.convert us4us ./data.pkl ./out.hdf5 \
         --mapping '{"0": "image", "2": "raw_data"}'
+    python -m zea.data.convert us4us ./pkl_dir/ ./out_dir/ \
+        --mapping '{"0": "image"}'
 
 Run ``python -m zea.data.convert --help`` for all options.
 """
@@ -339,8 +341,23 @@ def _add_parser_args_us4us(subparsers):
     us4us_parser = subparsers.add_parser(
         "us4us", help="Convert us4us (arrus + gui4us) pickle to zea format"
     )
-    us4us_parser.add_argument("src", type=Path, help="Source .pkl file path")
-    us4us_parser.add_argument("dst", type=Path, help="Destination .hdf5 file path")
+    us4us_parser.add_argument(
+        "src",
+        type=Path,
+        help=(
+            "Source path: either a single .pkl file or a directory containing "
+            "one or more .pkl files (matched by *.pkl at the top level)."
+        ),
+    )
+    us4us_parser.add_argument(
+        "dst",
+        type=Path,
+        help=(
+            "Destination path: a .hdf5 file when src is a file, or a directory "
+            "when src is a directory. In the directory case each <name>.pkl is "
+            "written as <dst>/<name>.hdf5."
+        ),
+    )
     us4us_parser.add_argument(
         "--mapping",
         type=_parse_us4us_mapping,

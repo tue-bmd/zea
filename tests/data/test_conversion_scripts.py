@@ -63,6 +63,7 @@ def run_subprocess(cmd, **kwargs):
         "cetus",
         "picmus",
         "verasonics",
+        "us4us",
     ],
 )
 @pytest.mark.heavy
@@ -148,6 +149,8 @@ def create_test_data_for_dataset(dataset, src):
         create_picmus_test_data(src)
     elif dataset == "verasonics":
         create_verasonics_test_data(src)
+    elif dataset == "us4us":
+        extra_args = create_us4us_test_data(src)
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
     return extra_args
@@ -177,6 +180,8 @@ def verify_converted_test_dataset(dataset, src, dst):
         verify_converted_picmus_test_data(dst)
     elif dataset == "verasonics":
         verify_converted_verasonics_test_data(src, dst)
+    elif dataset == "us4us":
+        verify_converted_us4us_test_data(src, dst)
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
 
@@ -565,6 +570,29 @@ def create_verasonics_test_data(src):
         yaml.dump(convert_yaml, f)
 
 
+# TODO(piotr-jarosik) move this file to the zeahub HuggingFace repository.
+US4US_TEST_PKL_URL = (
+    "https://www.dropbox.com/scl/fi/xhid5kosgut2vzeyr5j19/"
+    "zea_us4us_converter_test_data.pkl?rlkey=94e533yaebs2duijtk1mqnm79&dl=1"
+)
+
+
+def create_us4us_test_data(src):
+    """For us4us we download a small ``.pkl`` test sample from Dropbox.
+
+    The pickle is cached under ``ZEA_CACHE_DIR/test_data`` so subsequent test
+    runs reuse it. A two-entry ``--mapping`` is passed via ``extra_args`` so
+    the converter exercises the multi-track write path
+    (``tracks/track_0`` = image, ``tracks/track_1`` = beamformed_data).
+    """
+    cached_pkl = download_file(
+        US4US_TEST_PKL_URL,
+        ZEA_CACHE_DIR / "test_data" / "zea_us4us_converter_test_data.pkl",
+    )
+    shutil.copy(cached_pkl, src / cached_pkl.name)
+    return ["--mapping", '{"0": "image", "1": "beamformed_data"}']
+
+
 def verify_converted_echonet_test_data(dst):
     """
     Verify that the converted EchoNet test dataset has the correct structure with hdf5 files
@@ -825,6 +853,48 @@ def verify_converted_verasonics_test_data(src, dst):
         f.validate()
 
 
+def verify_converted_us4us_test_data(src, dst):
+    """Verify the us4us multi-track conversion output.
+
+    The CLI mapping ``{0: "image", 1: "beamformed_data"}`` triggers the
+    multi-track write path in ``us4us.py``: ``track_0`` holds an ``image`` of
+    shape ``(n_frames, *per_frame_image_shape)`` (matching the source pickle)
+    and ``track_1`` exposes a ``beamformed_data`` dataset.
+    """
+    from zea.data.convert.us4us import _load_us4us_pickle
+
+    h5_files = list(dst.rglob("*.hdf5"))
+    assert len(h5_files) == 1, "Expected 1 converted hdf5 file."
+    h5_file = h5_files[0]
+
+    src_pkl = next(Path(src).glob("*.pkl"))
+    src_pickle_data = _load_us4us_pickle(src_pkl)
+    expected_n_frames = len(src_pickle_data["data"])
+    expected_image_shape = src_pickle_data["data"][0][0].shape
+
+    with File(h5_file, "r") as f:
+        assert "probe" in f, f"Missing 'probe' in {h5_file}"
+        assert "tracks/track_0" in f, f"Missing 'tracks/track_0' in {h5_file}"
+        assert "tracks/track_1" in f, f"Missing 'tracks/track_1' in {h5_file}"
+
+        tracks = f.tracks
+        assert len(tracks) == 2, f"Expected 2 tracks, got {len(tracks)}"
+
+        image_values = tracks[0].data.image.values[:]
+        expected_shape = (expected_n_frames, *expected_image_shape)
+        assert image_values.shape == expected_shape, (
+            f"track_0 image shape {image_values.shape} does not match the "
+            f"per-frame pickle image stacked across frames ({expected_shape})."
+        )
+
+        assert "beamformed_data" in tracks[1].data, (
+            f"track_1 must expose 'beamformed_data' (got keys: "
+            f"{list(tracks[1].data.keys())})."
+        )
+
+        f.validate()
+
+
 def _install_fake_echoxflow(monkeypatch, src, recordings):
     """Install a fake ``echoxflow`` module so convert_echoxflow can run end-to-end.
 
@@ -1048,84 +1118,6 @@ def test_echoxflow_conversion_script(tmp_path_factory, monkeypatch):
     convert_echoxflow(args)
 
     verify_converted_echoxflow_test_data(dst, expected)
-
-
-# TODO(tristan-deep) move this file to your HF repository?
-US4US_TEST_PKL_URL = (
-    "https://www.dropbox.com/scl/fi/xhid5kosgut2vzeyr5j19/"
-    "zea_us4us_converter_test_data.pkl?rlkey=94e533yaebs2duijtk1mqnm79&dl=1"
-)
-
-
-@pytest.mark.heavy
-def test_us4us_conversion_script(tmp_path_factory):
-    """Convert an us4us (arrus+gui4us) pickle file end-to-end.
-
-    The us4us converter operates on a single ``.pkl`` file rather than a
-    directory tree, so it gets its own test instead of being parametrized
-    into :func:`test_conversion_script`. The pickle is downloaded once from
-    Dropbox and cached under ``ZEA_CACHE_DIR`` for subsequent runs.
-
-    Uses a two-entry mapping so ``convert_us4us`` writes a multi-track file
-    (``tracks/track_0`` → ``image``, ``tracks/track_1`` → ``beamformed_data``),
-    which exercises the branch in ``us4us.py`` that builds ``tracks=[...]``.
-    """
-    from zea.data.convert.us4us import _load_us4us_pickle, convert_us4us
-
-    src_pkl = download_file(
-        US4US_TEST_PKL_URL,
-        ZEA_CACHE_DIR / "test_data" / "zea_us4us_converter_test_data.pkl",
-    )
-
-    # Per-frame image shape from the original pickle. Used to verify that the
-    # converter stacks frames into (n_frames, *image_shape) without altering
-    # the spatial dimensions.
-    src_pickle_data = _load_us4us_pickle(src_pkl)
-    expected_n_frames = len(src_pickle_data["data"])
-    expected_image_shape = src_pickle_data["data"][0][0].shape
-
-    dst_h5 = tmp_path_factory.mktemp("us4us_dst") / "converted.hdf5"
-
-    args = argparse.Namespace(
-        src=str(src_pkl),
-        dst=str(dst_h5),
-        mapping={0: "image", 1: "beamformed_data"},
-    )
-    convert_us4us(args)
-
-    verify_converted_us4us_test_data(dst_h5, expected_n_frames, expected_image_shape)
-
-
-def verify_converted_us4us_test_data(dst_h5, expected_n_frames, expected_image_shape):
-    """Verify the us4us multi-track conversion output.
-
-    Checks that the file uses the multi-track layout written by ``us4us.py``
-    when the mapping has more than one entry: ``track_0`` holds an ``image``
-    of shape ``(n_frames, *expected_image_shape)`` and ``track_1`` exposes a
-    ``beamformed_data`` dataset.
-    """
-    assert dst_h5.exists(), f"Expected converted hdf5 file at {dst_h5}"
-    with File(dst_h5, "r") as f:
-        assert "probe" in f, f"Missing 'probe' in {dst_h5}"
-        assert "tracks/track_0" in f, f"Missing 'tracks/track_0' in {dst_h5}"
-        assert "tracks/track_1" in f, f"Missing 'tracks/track_1' in {dst_h5}"
-
-        tracks = f.tracks
-        assert len(tracks) == 2, f"Expected 2 tracks, got {len(tracks)}"
-
-        image_values = tracks[0].data.image.values[:]
-        expected_shape = (expected_n_frames, *expected_image_shape)
-        assert image_values.shape == expected_shape, (
-            f"track_0 image shape {image_values.shape} does not match the "
-            f"per-frame pickle image stacked across frames ({expected_shape})."
-        )
-
-        assert "beamformed_data" in tracks[1].data, (
-            f"track_1 must expose 'beamformed_data' (got keys: "
-            f"{list(tracks[1].data.keys())})."
-        )
-
-        f.validate()
 
 
 def test_echoxflow_missing_package_raises(monkeypatch):

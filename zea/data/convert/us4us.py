@@ -15,7 +15,14 @@ Python pickle files containing:
 
 Example usage::
 
-    python -m zea.data.convert us4us input.pkl output.h5 --mapping '{"0": "image", "1": "beamformed_data", "2": "raw_data"}'
+    # Single file → single file
+    python -m zea.data.convert us4us input.pkl output.hdf5 \
+        --mapping '{"0": "image", "1": "beamformed_data", "2": "raw_data"}'
+
+    # Directory of .pkl files → directory of .hdf5 files
+    # Each <name>.pkl in <src_dir> is written as <dst_dir>/<name>.hdf5.
+    python -m zea.data.convert us4us src_dir/ dst_dir/ \
+        --mapping '{"0": "image"}'
 
 The ``mapping`` argument maps each us4us output index (position in the per-frame
 tuple in the pickle dataset) to a zea data type string.
@@ -421,45 +428,8 @@ def _pick_scan_metadata(metadata_tuple, mapping: dict):
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def convert_us4us(args):
-    """Convert an us4us (arrus) pickle file to the zea HDF5 format.
-
-    Args:
-        args: An object with the following attributes:
-            - **src** (*str | Path*): Path to the source ``.pkl`` file.
-            - **dst** (*str | Path*): Path to the destination ``.hdf5`` file.
-            - **mapping** (*dict*, optional): Maps each output index (integer)
-              in the per-frame tuple to a zea data type string.  For example::
-
-                  {0: "image", 1: "beamformed_data", 2: "raw_data"}
-
-              Supported types: ``"raw_data"``, ``"image"``,
-              ``"beamformed_data"``, ``"envelope_data"``, ``"aligned_data"``.
-              Defaults to ``{0: "image"}``.
-
-    The function is intentionally lenient: arrus does **not** need to be
-    installed.  All arrus classes in the pickle are replaced with lightweight
-    namespace stubs that preserve the original attribute values.
-
-    Raises:
-        FileNotFoundError: If *src* does not exist.
-        ValueError: If a requested *mapping* value is not a known zea data type.
-    """
-    src = Path(args.src)
-    dst = Path(args.dst)
-    mapping: dict = getattr(args, "mapping", {0: "image"})
-
-    if not src.exists():
-        raise FileNotFoundError(f"Source file not found: {src}")
-
-    valid_data_types = set(DataSpec.SCHEMA.keys())
-    unknown = set(mapping.values()) - valid_data_types
-    if unknown:
-        raise ValueError(
-            f"Unknown zea data type(s) in mapping: {unknown}. "
-            f"Supported types: {sorted(valid_data_types)}"
-        )
-
+def _convert_single_us4us_pickle(src: Path, dst: Path, mapping: dict) -> None:
+    """Convert one us4us ``.pkl`` file to a single zea ``.hdf5`` file."""
     log.info(f"Loading us4us pickle: {log.yellow(src)}")
     data = _load_us4us_pickle(src)
 
@@ -530,4 +500,66 @@ def convert_us4us(args):
         )
 
     log.success(f"Converted {log.yellow(src)} → {log.yellow(dst)}")
+
+
+def convert_us4us(args):
+    """Convert one or more us4us (arrus) pickle files to the zea HDF5 format.
+
+    Args:
+        args: An object with the following attributes:
+            - **src** (*str | Path*): Path to a source ``.pkl`` file *or* a
+              directory containing one or more ``.pkl`` files (recursed via
+              ``glob("*.pkl")`` at the top level).
+            - **dst** (*str | Path*): Destination ``.hdf5`` file when *src* is
+              a file, or destination directory when *src* is a directory. In
+              the directory case, each input ``<name>.pkl`` is written as
+              ``<dst>/<name>.hdf5``.
+            - **mapping** (*dict*, optional): Maps each output index (integer)
+              in the per-frame tuple to a zea data type string.  For example::
+
+                  {0: "image", 1: "beamformed_data", 2: "raw_data"}
+
+              Supported types: ``"raw_data"``, ``"image"``,
+              ``"beamformed_data"``, ``"envelope_data"``, ``"aligned_data"``.
+              Defaults to ``{0: "image"}``.
+
+    The function is intentionally lenient: arrus does **not** need to be
+    installed.  All arrus classes in the pickle are replaced with lightweight
+    namespace stubs that preserve the original attribute values.
+
+    Raises:
+        FileNotFoundError: If *src* does not exist, or if *src* is a directory
+            that contains no ``.pkl`` files.
+        ValueError: If a requested *mapping* value is not a known zea data type.
+    """
+    src = Path(args.src)
+    dst = Path(args.dst)
+    mapping: dict = getattr(args, "mapping", {0: "image"})
+
+    if not src.exists():
+        raise FileNotFoundError(f"Source path not found: {src}")
+
+    valid_data_types = set(DataSpec.SCHEMA.keys())
+    unknown = set(mapping.values()) - valid_data_types
+    if unknown:
+        raise ValueError(
+            f"Unknown zea data type(s) in mapping: {unknown}. "
+            f"Supported types: {sorted(valid_data_types)}"
+        )
+
+    if src.is_dir():
+        pkl_files = sorted(src.glob("*.pkl"))
+        if not pkl_files:
+            raise FileNotFoundError(f"No .pkl files found in directory: {src}")
+        dst.mkdir(parents=True, exist_ok=True)
+        file_pairs = [(p, dst / f"{p.stem}.hdf5") for p in pkl_files]
+    else:
+        if dst.exists() and dst.is_dir():
+            dst_file = dst / f"{src.stem}.hdf5"
+        else:
+            dst_file = dst
+        file_pairs = [(src, dst_file)]
+
+    for src_pkl, dst_h5 in file_pairs:
+        _convert_single_us4us_pickle(src_pkl, dst_h5, mapping)
 
