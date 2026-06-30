@@ -599,4 +599,19 @@ See :mod:`zea.data.convert.verasonics` for details.
 
 **us4us**
 
-To be added in a future release. See ongoing issue `#448 <https://github.com/tue-bmd/zea/issues/448>`__.
+Record data using us4us software (ARRUS 0.14.x and gui4us 0.3.x), save it to the ``.pickle`` file, then convert:
+
+.. code-block:: shell
+
+    python -m zea.data.convert us4us <src.pkl> <dst.hdf5> --mapping '{"0": "image", "1": "raw_data"}'
+
+Arguments:
+
+- ``src``: path to the source ``.pkl`` file.
+- ``dst``: path to the destination ``.hdf5`` file.
+- ``--mapping``: JSON object mapping each us4us output index (position in the per-frame tuple)
+  to a zea data type. Supported types: ``raw_data``, ``image``, ``beamformed_data``,
+  ``envelope_data``, ``aligned_data``. Defaults to ``'{"0": "image"}'``.
+
+See :mod:`zea.data.convert.us4us` for the full mapping from ``arrus`` metadata to zea
+scan/probe fields and other implementation details.
