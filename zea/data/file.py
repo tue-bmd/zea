@@ -313,8 +313,31 @@ class Track:
         return ScanSpec(**scan_dict)
 
     @property
+    def transmit_only(self) -> bool:
+        """Whether this track carries only transmit parameters and no receive data.
+
+        True for transmit-only tracks such as ARFI push pulses, which have a
+        ``scan`` but no ``raw_data``.
+        """
+        if "transmit_only" in self._group:
+            return bool(self._group["transmit_only"][()])
+        return False
+
+    @property
     def n_frames(self) -> int:
-        """Number of frames."""
+        """Number of frames.
+
+        For a :attr:`transmit_only` track (no receive data) this is derived from
+        the track's ``scan`` (``time_to_next_transmit``) when available.
+        """
+        if self.transmit_only:
+            t2nt = self.scan.time_to_next_transmit
+            if t2nt is not None and np.ndim(t2nt) == 2:
+                return int(np.asarray(t2nt).shape[0])
+            raise TypeError(
+                "`n_frames` is not available for this transmit_only track: it has no "
+                "receive data and no 2-D `scan.time_to_next_transmit` to derive it from."
+            )
         return _shape_from_data_group(
             self._group["data"],
             index=0,
@@ -324,7 +347,13 @@ class Track:
 
     @property
     def n_tx(self) -> int:
-        """Number of transmit events."""
+        """Number of transmit events.
+
+        For a :attr:`transmit_only` track (no ``raw_data``) this is derived from
+        the track's ``scan`` (``t0_delays``) rather than the data group.
+        """
+        if self.transmit_only:
+            return int(self.scan.n_tx)
         return _shape_from_data_group(
             self._group["data"],
             index=1,

@@ -24,6 +24,7 @@ from zea.data.spec import (
     SosMap,
     Spec,
     Subject,
+    TrackSpec,
 )
 
 
@@ -1744,3 +1745,87 @@ def test_field_metadata_units_are_defined():
         + ", ".join(sorted(undefined))
         + ". Add the symbol to UNITS (it is the source of truth rendered in the docs)."
     )
+
+
+def _push_scan(n_frames: int = 3, n_push_tx: int = 1, n_el: int = 4):
+    """Scan dict for a focused ARFI push: one (or few) transmits, no receive data."""
+    scan = _scan_minimal(n_frames=n_frames, n_tx=n_push_tx, n_el=n_el)
+    # A push is focused into the tissue rather than a planewave.
+    scan["focus_distances"] = np.full((n_push_tx,), 0.02, dtype=np.float32)
+    return scan
+
+
+class TestTransmitOnlyTrack:
+    """Transmit-only tracks (e.g. ARFI push pulses): scan but no receive data."""
+
+    def test_transmit_only_track_builds_without_data(self):
+        track = TrackSpec(label="arfi_push", scan=_push_scan(), transmit_only=True)
+        assert bool(track.transmit_only) is True
+        assert isinstance(track.data, DataSpec)
+        assert track.data.raw_data is None
+
+    def test_transmit_only_requires_scan(self):
+        with pytest.raises(ValueError, match="'scan' is required for a transmit_only track"):
+            TrackSpec(label="arfi_push", transmit_only=True)
+
+    def test_transmit_only_rejects_raw_data(self):
+        with pytest.raises(ValueError, match="must not contain 'raw_data'"):
+            TrackSpec(
+                label="arfi_push",
+                data={"raw_data": np.zeros((2, 1, 8, 4, 1), dtype=np.float32)},
+                scan=_push_scan(n_frames=2),
+                transmit_only=True,
+            )
+
+    def test_non_transmit_only_still_requires_data(self):
+        with pytest.raises(ValueError, match="'data' is required"):
+            TrackSpec(label="image", scan=_scan_minimal())
+
+    def test_empty_dataspec_rejected_without_flag(self):
+        with pytest.raises(ValueError, match="At least one data field"):
+            DataSpec()
+
+    def test_empty_dataspec_allowed_with_flag(self):
+        assert DataSpec(allow_empty=True).raw_data is None
+
+    def test_arfi_push_filespec_save_and_load(self, tmp_path):
+        """An imaging track interleaved with an ARFI push track round-trips."""
+        n_frames, n_tx, n_ax, n_el = 2, 4, 16, 4
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        tracks = [
+            TrackSpec(
+                label="image",
+                data={"raw_data": raw},
+                scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            ),
+            TrackSpec(
+                label="arfi_push",
+                scan=_push_scan(n_frames=n_frames, n_push_tx=1, n_el=n_el),
+                transmit_only=True,
+            ),
+        ]
+        # One push transmit after each frame's imaging transmits.
+        schedule = np.array(([0] * n_tx + [1]) * n_frames, dtype=np.int32)
+
+        path = tmp_path / "arfi.hdf5"
+        File.create(
+            path,
+            tracks=tracks,
+            track_schedule=schedule,
+            probe=_probe_minimal(n_el=n_el),
+        )
+
+        with File(path) as f:
+            push = f.get_track("arfi_push")
+            image = f.get_track("image")
+            assert bool(push.transmit_only) is True
+            assert bool(image.transmit_only) is False
+            # Derived from scan, not from (absent) raw_data.
+            assert push.n_tx == 1
+            assert push.n_frames == n_frames
+            # transmit_only is only persisted on the push track (non-breaking).
+            assert "transmit_only" not in f["tracks/track_0"]
+            assert "transmit_only" in f["tracks/track_1"]
+            # Interleaved timestamps are computed from the schedule.
+            assert push._timestamps.shape == (n_frames, 1)
+            assert image._timestamps.shape == (n_frames, n_tx)

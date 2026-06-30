@@ -1136,8 +1136,13 @@ class DataSpec(Spec):
         shear_wave_elastography_map: ShearWaveElastographyMap | dict | None = None,
         tissue_doppler: TissueDopplerMap | dict | None = None,
         color_doppler: ColorDopplerMap | dict | None = None,
+        allow_empty: bool = False,
         **extra_maps,
     ):
+        # ``allow_empty`` permits a DataSpec with no data fields, used for
+        # transmit-only tracks (e.g. ARFI push pulses) that carry scan
+        # parameters but produce no receive data. Not a stored field.
+        self._allow_empty = allow_empty
         self.raw_data = raw_data
         self.aligned_data = aligned_data
         self.beamformed_data = beamformed_data
@@ -1174,14 +1179,17 @@ class DataSpec(Spec):
         self.__post_init__()
 
     def __post_init__(self):
-        # Ensure at least one data field is present
-        all_data_keys = [k for k in self.SCHEMA]
-        has_any = any(getattr(self, k, None) is not None for k in all_data_keys)
-        if not has_any:
-            raise ValueError(
-                "At least one data field must be provided. "
-                f"Available fields: {', '.join(all_data_keys)}"
-            )
+        # Ensure at least one data field is present, unless this is a
+        # transmit-only track (e.g. an ARFI push pulse) explicitly allowed
+        # to be empty.
+        if not getattr(self, "_allow_empty", False):
+            all_data_keys = [k for k in self.SCHEMA]
+            has_any = any(getattr(self, k, None) is not None for k in all_data_keys)
+            if not has_any:
+                raise ValueError(
+                    "At least one data field must be provided. "
+                    f"Available fields: {', '.join(all_data_keys)}"
+                )
 
         super().__post_init__()
 
@@ -1956,38 +1964,86 @@ class TrackSpec(Spec):
     field of the parent :class:`FileSpec`, if necessary.
     Single-track files may omit the label.
 
+    A track may be *transmit-only*: it carries :class:`ScanSpec` transmit
+    parameters but produces no receive data (empty ``data``).  This models
+    transmit events that have no corresponding ``raw_data``, such as ARFI push
+    pulses, which are interleaved with imaging transmits via the parent
+    :class:`FileSpec`'s ``track_schedule``.  Set ``transmit_only=True`` to mark
+    such a track; ``scan`` is then required and ``data`` must contain no data
+    fields.
+
     Args:
-        data (DataSpec | dict): The data for this track.
+        data (DataSpec | dict | None): The data for this track.  May be omitted
+            (or empty) for a ``transmit_only`` track.
         scan (ScanSpec | dict | None): The scan parameters for this track. Required when raw_data is
-            present in *data*.
+            present in *data*, and required for a ``transmit_only`` track.
         label (str | None): Short human-readable name for this track (e.g. ``"focused"``
             or ``"planewave"``).  Required when the parent :class:`FileSpec`
             contains more than one track.
+        transmit_only (bool): If *True*, this track carries only transmit
+            (``scan``) parameters and no receive data (e.g. an ARFI push
+            pulse).  Defaults to *False*.
     """
 
-    data: DataSpec | dict
+    data: DataSpec | dict | None = None
     scan: ScanSpec | dict | None = None
     label: str | None = None
+    transmit_only: bool = False
 
     SCHEMA = {
         "data": {"spec": DataSpec},
         "scan": {"spec": ScanSpec},
         "label": {"dtype": str, "shape": ()},
+        "transmit_only": {"dtype": np.bool_, "shape": ()},
     }
 
     FIELD_METADATA = {
         # label is enforced by FileSpec for multi-track (ValueError), and legitimately
         # absent for single-track files — warning here is never useful.
         "label": {"unit": "–", "description": "Short human-readable track name.", "rare": True},
+        "transmit_only": {
+            "unit": "–",
+            "description": (
+                "Whether this track carries only transmit parameters and no receive data."
+            ),
+            "rare": True,
+        },
     }
 
     def __post_init__(self):
+        # A transmit-only track (e.g. an ARFI push pulse) carries scan
+        # parameters but no receive data. Coerce its data into an explicitly
+        # empty DataSpec *before* base SCHEMA validation so the "at least one
+        # data field" requirement is bypassed for these tracks only.
+        # Normalize to np.bool_ so SCHEMA dtype validation (np.bool_) passes.
+        self.transmit_only = np.bool_(self.transmit_only)
+
+        if self.transmit_only:
+            if self.data is None:
+                self.data = DataSpec(allow_empty=True)
+            elif isinstance(self.data, dict):
+                self.data = DataSpec(allow_empty=True, **self.data)
+        elif self.data is None:
+            raise ValueError(
+                "'data' is required unless the track is 'transmit_only'. "
+                "Set transmit_only=True for tracks with only transmit parameters "
+                "and no receive data (e.g. ARFI push pulses)."
+            )
+
         super().__post_init__()
 
         data = self.data
         has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
             isinstance(data, dict) and data.get("raw_data") is not None
         )
+        if self.transmit_only:
+            if self.scan is None:
+                raise ValueError("'scan' is required for a transmit_only track.")
+            if has_raw:
+                raise ValueError(
+                    "A transmit_only track must not contain 'raw_data'. "
+                    "Remove raw_data or set transmit_only=False."
+                )
         if has_raw and self.scan is None:
             raise ValueError("'scan' is required when 'raw_data' is provided in track data.")
 
@@ -2003,13 +2059,25 @@ class TrackSpec(Spec):
         chunk_frames: bool = False,
         warn_missing_optional_fields: bool = True,
     ) -> None:
-        """Store data, scan, and label in the HDF5 group."""
-        super().store_in_group(
-            group,
-            compression=compression,
-            chunk_frames=chunk_frames,
-            warn_missing_optional_fields=warn_missing_optional_fields,
-        )
+        """Store data, scan, label, and (if set) the transmit_only flag.
+
+        ``transmit_only`` is only written when *True* so that ordinary tracks
+        are byte-for-byte unchanged from previous versions (non-breaking).
+        """
+        saved_transmit_only = self.transmit_only
+        if not self.transmit_only:
+            # Temporarily hide the default value so the base store skips it
+            # (None-valued SCHEMA fields are not written).
+            self.transmit_only = None  # type: ignore[assignment]
+        try:
+            super().store_in_group(
+                group,
+                compression=compression,
+                chunk_frames=chunk_frames,
+                warn_missing_optional_fields=warn_missing_optional_fields,
+            )
+        finally:
+            self.transmit_only = saved_transmit_only
 
 
 @dataclass
