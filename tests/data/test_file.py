@@ -237,9 +237,7 @@ def test_create_multitrack_with_transmit_only_track(tmp_path):
         tracks=[
             {
                 "data": {
-                    "raw_data": np.zeros(
-                        (n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32
-                    ),
+                    "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                 },
                 "scan": _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
                 "label": "focused",
