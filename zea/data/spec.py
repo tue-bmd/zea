@@ -1963,7 +1963,8 @@ class TrackSpec(Spec):
 
     Args:
         data (DataSpec | dict | None): The data for this track. May be ``None``
-            for a transmit-only track, but only if ``scan`` is provided.
+            for a transmit-only track (e.g. to store a shear wave push pulse),
+            but only if ``scan`` is provided.
         scan (ScanSpec | dict | None): The scan parameters for this track. Required when raw_data is
             present in *data*, and required when *data* is ``None``.
         label (str | None): Short human-readable name for this track (e.g. ``"focused"``
