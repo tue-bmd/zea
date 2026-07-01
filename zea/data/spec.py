@@ -1225,9 +1225,22 @@ class ScanSpec(Spec):
             full contribution. Negative values indicate that the element was
             fired with opposite polarity.
         focus_distances: The transmit focus distances in meters of shape (n_tx,).
-            This is the distance from the origin point on the transducer to
-            where the beam comes to focus. For planewaves this is set to
-            infinity or zero.
+            This is the distance from the transmit origin on the transducer to
+            where the beam comes to focus. The sign and magnitude encode the
+            transmit type:
+
+            - **positive finite**: focused transmit; the beam focuses at this
+              distance in front of the array.
+            - **negative finite**: diverging transmit; the (virtual) source
+              lies this distance behind the array.
+            - **infinite** (``np.inf``): plane wave. This is the preferred,
+              canonical value for plane waves in zea. ``0.0`` is also accepted
+              as a plane-wave marker (e.g. raw Verasonics data stores ``0``),
+              but new data should use ``np.inf``.
+
+            See :meth:`zea.Parameters.find_transmits` for how these values are
+            used to classify transmits as ``"focused"``, ``"diverging"`` or
+            ``"plane"``.
         transmit_origins: The transmit origins of the transmit beams in meters of
             shape (n_tx, 3). This is the (x, y, z) position from which the beam
             is transmitted.
@@ -1300,8 +1313,21 @@ class ScanSpec(Spec):
         "demodulation_frequency": {"unit": "Hz", "description": "Demodulation frequency."},
         "initial_times": {"unit": "s", "description": "A/D converter start times per transmit."},
         "t0_delays": {"unit": "s", "description": "Transmit delays per element."},
-        "tx_apodizations": {"unit": "–", "description": "Transmit apodization per element."},
-        "focus_distances": {"unit": "m", "description": "Transmit focus distances."},
+        "tx_apodizations": {
+            "unit": "–",
+            "description": (
+                "Transmit apodization per element, in [-1, 1]. 0 = element did not "
+                "contribute, 1 = full contribution, negative = fired with opposite polarity."
+            ),
+        },
+        "focus_distances": {
+            "unit": "m",
+            "description": (
+                "Transmit focus distances. Positive = focused, negative = diverging "
+                "(virtual source behind the array), ``np.inf`` = plane wave (preferred; "
+                "``0`` is also accepted)."
+            ),
+        },
         "transmit_origins": {"unit": "m", "description": "Transmit beam origins (x, y, z)."},
         "polar_angles": {"unit": "rad", "description": "Polar angles of transmit beams."},
         "time_to_next_transmit": {"unit": "s", "description": "Time between transmit events."},
