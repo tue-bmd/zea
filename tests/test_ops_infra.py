@@ -493,6 +493,58 @@ def test_inside_outer_jit_propagates_transitively():
     assert leaf_op._is_jitted is True
 
 
+def test_invalid_jit_options_raises():
+    """Invalid jit_options must raise ValueError in Pipeline and Map, at init and on set."""
+    with pytest.raises(ValueError, match="jit_options must be"):
+        ops.Pipeline([AddOperation()], jit_options="bogus")
+
+    with pytest.raises(ValueError, match="jit_options must be"):
+        Map([AddOperation()], argnames="x", jit_options="bogus")
+
+    pipeline = ops.Pipeline([AddOperation()], jit_options=None)
+    with pytest.raises(ValueError, match="jit_options must be"):
+        pipeline.jit_options = "bogus"
+
+    mapped = Map([AddOperation()], argnames="x", jit_options=None)
+    with pytest.raises(ValueError, match="jit_options must be"):
+        mapped.jit_options = "bogus"
+
+
+def test_map_configures_jit_on_nested_pipeline():
+    """A nested Pipeline inside a Map must be forced to None and marked inside the outer JIT."""
+    inner = ops.Pipeline([AddOperation()], jit_options="ops")
+    Map([inner], argnames="x", jit_options="ops")
+
+    # Map owns the JIT scope: its nested pipeline must not self-JIT and runs inside Map's trace.
+    assert inner.jit_options is None
+    assert inner._inside_outer_jit is True
+
+
+def test_prepare_parameters_rejects_non_parameters():
+    """prepare_parameters must reject anything that is not a zea.Parameters instance."""
+    pipeline = ops.Pipeline([AddOperation()], jit_options=None)
+    with pytest.raises(TypeError, match="Expected an instance of"):
+        pipeline.prepare_parameters({"not": "parameters"})
+
+
+def test_make_operation_chain_passthrough_and_bad_type():
+    """make_operation_chain keeps pre-built instances as-is and rejects unsupported types."""
+    from zea.ops.pipeline import make_operation_chain
+
+    op = AddOperation()
+    inner_pipeline = ops.Pipeline([MultiplyOperation()], jit_options=None)
+
+    # Pre-instantiated Operation and Pipeline objects are passed through unchanged.
+    chain = make_operation_chain([op, inner_pipeline, "add"])
+    assert chain[0] is op
+    assert chain[1] is inner_pipeline
+    assert isinstance(chain[2], AddOperation)
+
+    # An unsupported entry type raises TypeError.
+    with pytest.raises(TypeError, match="should be a string"):
+        make_operation_chain([12345])
+
+
 def test_scan_convert_guard_fires_inside_outer_jit():
     """ScanConvert must demand explicit coordinates whenever it runs inside a JIT trace."""
     img = keras.ops.ones((4, 8), dtype="float32")

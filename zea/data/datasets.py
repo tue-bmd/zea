@@ -35,7 +35,7 @@ import multiprocessing
 import os
 from collections import OrderedDict
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Sequence
+from typing import TYPE_CHECKING, Any, Callable, List, Sequence
 
 import numpy as np
 import tqdm
@@ -67,6 +67,84 @@ _CHECK_MAX_DATASET_SIZE = 10000
 _VALIDATED_FLAG_FILE = "validated.flag"
 FILE_HANDLE_CACHE_CAPACITY = 128
 FILE_TYPES = [".hdf5", ".h5"]
+
+
+def EXISTS(value: Any) -> bool:
+    """Condition for :func:`compile_file_filter` dict filters: field is present.
+
+    Use as the condition for a dotted path to keep only files where that field is
+    present (i.e. resolves to a non-``None`` value).  For example
+    ``{"metadata.subject.fat_percentage": EXISTS}`` keeps only files that record a
+    subject fat percentage.
+
+    It is a plain callable (so it survives module reloads and needs no special
+    casing), evaluated like any other value-level predicate.
+    """
+    return value is not None
+
+
+def _resolve_dotted_path(obj: Any, path: str) -> Any:
+    """Resolve a dotted attribute ``path`` on ``obj``, tolerating missing fields.
+
+    Walks each segment of ``path`` via :func:`getattr`.  Returns ``None`` as soon
+    as any segment is missing or already ``None`` (e.g. ``f.metadata`` raising
+    ``KeyError`` when there is no metadata group, or ``f.scan`` returning ``None``).
+    """
+    for part in path.split("."):
+        if obj is None:
+            return None
+        try:
+            obj = getattr(obj, part)
+        except (AttributeError, KeyError):
+            return None
+    return obj
+
+
+def _compile_dict_filter(spec: dict) -> Callable[["File"], bool]:
+    """Compile a dotted-path dict into a ``File -> bool`` predicate.
+
+    Each ``path -> condition`` entry is ANDed together. ``condition`` may be:
+
+    - a callable (e.g. :func:`EXISTS`, or a value-level lambda) — keep when
+      ``condition(value)`` is truthy. A ``None`` value (missing field) never
+      matches.
+    - any other value — keep when the resolved value equals it.
+    """
+    conditions = list(spec.items())
+
+    def predicate(file: "File") -> bool:
+        for path, condition in conditions:
+            value = _resolve_dotted_path(file, path)
+            if callable(condition):
+                if value is None or not condition(value):
+                    return False
+            else:
+                if value != condition:
+                    return False
+        return True
+
+    return predicate
+
+
+def compile_file_filter(
+    file_filter: "Callable[[File], bool] | dict | None",
+) -> "Callable[[File], bool] | None":
+    """Normalize ``file_filter`` into a ``File -> bool`` predicate (or ``None``).
+
+    Accepts either a callable predicate over an open :class:`~zea.data.file.File`,
+    or a declarative dotted-path dict (see :func:`_compile_dict_filter`). Returns
+    ``None`` when ``file_filter`` is ``None`` (no filtering).
+    """
+    if file_filter is None:
+        return None
+    if isinstance(file_filter, dict):
+        return _compile_dict_filter(file_filter)
+    if callable(file_filter):
+        return file_filter
+    raise TypeError(
+        "file_filter must be a callable 'File -> bool', a dotted-path dict, or None; "
+        f"got {type(file_filter).__name__}."
+    )
 
 
 class H5FileHandleCache:
@@ -452,6 +530,7 @@ class Dataset(H5FileHandleCache):
         directory_splits: list | None = None,
         revision: str | None = None,
         lazy: bool = False,
+        file_filter: "Callable[[File], bool] | dict | None" = None,
         _suggest_lazy: bool = True,
         **kwargs,
     ):
@@ -470,13 +549,31 @@ class Dataset(H5FileHandleCache):
             lazy (bool, optional): If True, ``hf://`` files are not downloaded at init — each
                 file is downloaded on first access. ``len(ds)`` returns the number of files
                 (not total frames). Defaults to False.
+            file_filter (callable or dict, optional): Keep only files whose content matches a
+                predicate. Either a callable ``File -> bool`` (a file is kept when it returns
+                ``True``), or a declarative dotted-path dict mapping a path on the
+                :class:`~zea.data.file.File` (e.g. ``"metadata.subject.fat_percentage"``,
+                ``"scan.center_frequency"``) to a condition: the :func:`EXISTS` helper
+                (field must be present), a plain value (equality), or a callable on the
+                resolved value. All dict entries are ANDed. Files whose predicate raises
+                (e.g. no ``metadata`` group) are excluded. Requires reading files, so it is
+                incompatible with ``lazy=True``. Defaults to ``None`` (no filtering).
 
         """
         super().__init__(**kwargs)
         self.validate = validate
         self.revision = revision
         self.lazy = lazy
+        self.file_filter = compile_file_filter(file_filter)
         self._suggest_lazy = _suggest_lazy
+
+        if self.file_filter is not None and self.lazy:
+            raise ValueError(
+                "file_filter is incompatible with lazy=True: filtering must read each file "
+                "to evaluate the predicate. Drop lazy=True (files will be downloaded), or "
+                "remove file_filter."
+            )
+
         self.file_paths = self.find_files(file_paths)
 
         if directory_splits is not None:
@@ -488,6 +585,42 @@ class Dataset(H5FileHandleCache):
             )
 
         assert self.n_files > 0, f"No files in file_paths: {file_paths}"
+
+        if self.file_filter is not None:
+            self.file_paths = self._apply_file_filter(self.file_paths)
+
+    def _apply_file_filter(self, file_paths: List[str]) -> List[str]:
+        """Return only the files for which ``self.file_filter`` returns ``True``.
+
+        Each file is opened and passed to the predicate. If the predicate raises
+        (e.g. the file has no ``metadata`` group), the file is excluded.
+        """
+        assert self.file_filter is not None, "file_filter must be set before applying it"
+        file_filter = self.file_filter
+        kept: List[str] = []
+        for path in file_paths:
+            # Opening the file is file access, not filtering: let open/download/
+            # permission failures propagate instead of silently dropping the file.
+            with File(path, revision=self.revision) as file:
+                try:
+                    keep = file_filter(file)
+                except Exception as e:  # noqa: BLE001 — a predicate failure means "does not match"
+                    log.debug(f"file_filter excluded '{path}': {type(e).__name__}: {e}")
+                    continue
+            if keep:
+                kept.append(path)
+            else:
+                log.debug(f"file_filter excluded '{path}'.")
+
+        n_removed = len(file_paths) - len(kept)
+        if not kept:
+            raise ValueError(
+                f"file_filter removed all {len(file_paths)} files. "
+                "Check that the filter matches the dataset's metadata/scan fields."
+            )
+        if n_removed:
+            log.info(f"file_filter kept {len(kept)}/{len(file_paths)} files ({n_removed} removed).")
+        return kept
 
     def load_file_shapes(self, key: str):
         """Load the shapes of the datasets in each file."""
