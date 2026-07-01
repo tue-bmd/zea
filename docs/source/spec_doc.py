@@ -421,6 +421,7 @@ def generate() -> str:
     lines += [
         "   .. tab-item:: data",
         "      :sync: data",
+        "      :name: group-data",
         "",
         "      Data group containing raw channel data, derived pipeline products,",
         "      and optional grouped data products.",
@@ -476,6 +477,7 @@ def generate() -> str:
     lines += [
         "   .. tab-item:: scan",
         "      :sync: scan",
+        "      :name: group-scan",
         "",
         "      Scan group with acquisition and transmit sequence parameters.",
         "",
@@ -486,6 +488,7 @@ def generate() -> str:
     lines += [
         "   .. tab-item:: probe",
         "      :sync: probe",
+        "      :name: group-probe",
         "",
         "      Probe group with probe geometry and frequency parameters.",
         "",
@@ -496,6 +499,7 @@ def generate() -> str:
     lines += [
         "   .. tab-item:: metadata",
         "      :sync: metadata",
+        "      :name: group-metadata",
         "",
         "      Optional metadata group for subject, acquisition context, annotations,",
         "      and extra time-series signals (ECG, voice narration, probe orientation).",
@@ -531,6 +535,7 @@ def generate() -> str:
     lines += [
         "   .. tab-item:: metrics",
         "      :sync: metrics",
+        "      :name: group-metrics",
         "",
         "      Optional metrics group for acquisition-level quality and performance metrics.",
         "",
