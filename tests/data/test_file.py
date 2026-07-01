@@ -216,6 +216,7 @@ def test_create_transmit_only_track(tmp_path):
             {
                 "data": None,
                 "scan": _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                "transmit_only": True,
             }
         ],
         ignore_warnings=True,
@@ -246,6 +247,7 @@ def test_create_multitrack_with_transmit_only_track(tmp_path):
                 "data": None,
                 "scan": _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
                 "label": "push",
+                "transmit_only": True,
             },
         ],
         probe=_probe_minimal(n_el=n_el),

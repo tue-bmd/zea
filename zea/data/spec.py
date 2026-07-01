@@ -1959,33 +1959,50 @@ class TrackSpec(Spec):
     A track must carry at least one of ``data`` or ``scan``.  ``data`` may be
     left as ``None`` to describe a transmit-only track (one that records the
     transmit sequence via ``scan`` but stores no recorded data), but only when
-    ``scan`` is provided.
+    ``scan`` is provided and ``transmit_only=True`` is explicitly passed.
+
+    A transmit-only track is useful when we want to store information about a
+    transmit event without any corresponding receive data, for example a shear
+    wave push pulse or therapeutic ultrasound.
 
     Args:
         data (DataSpec | dict | None): The data for this track. May be ``None``
             for a transmit-only track (e.g. to store a shear wave push pulse),
-            but only if ``scan`` is provided.
+            but only if ``scan`` is provided and ``transmit_only=True``.
         scan (ScanSpec | dict | None): The scan parameters for this track. Required when raw_data is
             present in *data*, and required when *data* is ``None``.
         label (str | None): Short human-readable name for this track (e.g. ``"focused"``
             or ``"planewave"``).  Required when the parent :class:`FileSpec`
             contains more than one track.
+        transmit_only (bool): Must be explicitly set to ``True`` to construct a
+            transmit-only track (``data=None`` with ``scan`` provided).
     """
 
     data: DataSpec | dict | None = None
     scan: ScanSpec | dict | None = None
     label: str | None = None
+    transmit_only: bool = False
 
     SCHEMA = {
         "data": {"spec": DataSpec},
         "scan": {"spec": ScanSpec},
         "label": {"dtype": str, "shape": ()},
+        "transmit_only": {"dtype": np.bool_, "shape": ()},
     }
 
     FIELD_METADATA = {
         # label is enforced by FileSpec for multi-track (ValueError), and legitimately
         # absent for single-track files — warning here is never useful.
         "label": {"unit": "–", "description": "Short human-readable track name.", "rare": True},
+        "transmit_only": {
+            "unit": "–",
+            "description": (
+                "Whether this track records only the transmit sequence with no "
+                "corresponding receive data (e.g. a shear wave push pulse or "
+                "therapeutic ultrasound)."
+            ),
+            "rare": True,
+        },
     }
 
     def __post_init__(self):
@@ -1994,7 +2011,23 @@ class TrackSpec(Spec):
         if self.data is None and self.scan is None:
             raise ValueError(
                 "A track must have at least one of 'data' or 'scan'. "
-                "'data' may be None (a transmit-only track) only when 'scan' is provided."
+                "'data' may be None (a transmit-only track) only when 'scan' is provided "
+                "and 'transmit_only=True' is explicitly set."
+            )
+
+        if self.data is None and self.scan is not None and not self.transmit_only:
+            raise ValueError(
+                "'data' is None but 'transmit_only' was not set to True. "
+                "Pass 'transmit_only=True' to explicitly create a transmit-only track "
+                "(one that records only the transmit sequence via 'scan', with no "
+                "corresponding receive data, e.g. a shear wave push pulse or "
+                "therapeutic ultrasound exposure)."
+            )
+
+        if self.transmit_only and self.data is not None:
+            raise ValueError(
+                "'transmit_only=True' was set but 'data' is not None. "
+                "A transmit-only track must not carry data."
             )
 
         data = self.data

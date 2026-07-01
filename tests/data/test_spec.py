@@ -1759,13 +1759,25 @@ def _image_data(n_frames: int = 3):
 
 
 class TestTransmitOnlyTrack:
-    """A TrackSpec may omit ``data`` (transmit-only track) only when ``scan`` is provided."""
+    """A TrackSpec may omit ``data`` (transmit-only track) only when ``scan`` is provided
+    and ``transmit_only=True`` is explicitly set."""
 
-    def test_data_none_with_scan_is_allowed(self):
-        """A transmit-only track (scan but no data) is valid."""
-        track = TrackSpec(data=None, scan=_scan_minimal())
+    def test_data_none_with_scan_and_transmit_only_is_allowed(self):
+        """A transmit-only track (scan but no data) is valid when explicitly flagged."""
+        track = TrackSpec(data=None, scan=_scan_minimal(), transmit_only=True)
         assert track.data is None
         assert isinstance(track.scan, ScanSpec)
+        assert bool(track.transmit_only) is True
+
+    def test_data_none_with_scan_without_transmit_only_raises(self):
+        """Omitting 'data' without setting 'transmit_only=True' is rejected."""
+        with pytest.raises(ValueError, match="'transmit_only' was not set to True"):
+            TrackSpec(data=None, scan=_scan_minimal())
+
+    def test_transmit_only_with_data_raises(self):
+        """'transmit_only=True' combined with non-None data is rejected."""
+        with pytest.raises(ValueError, match="must not carry data"):
+            TrackSpec(data=_image_data(), scan=None, transmit_only=True)
 
     def test_data_none_without_scan_raises(self):
         """A track with neither data nor scan is invalid."""
@@ -1791,11 +1803,15 @@ class TestTransmitOnlyTrack:
             TrackSpec(data=data, scan=None)
 
     def test_transmit_only_track_roundtrips_through_filespec(self, tmp_path):
-        """A FileSpec with a transmit-only track stores and reloads without raw_data."""
-        spec = FileSpec(tracks=[{"data": None, "scan": _scan_minimal()}])
+        """A FileSpec with a transmit-only track stores and reloads without raw_data,
+        and the 'transmit_only' flag itself is persisted in the file."""
+        spec = FileSpec(tracks=[{"data": None, "scan": _scan_minimal(), "transmit_only": True}])
         path = tmp_path / "transmit_only.hdf5"
         spec.save(str(path), warn_missing_optional_fields=False)
         with File(path) as f:
             assert "scan" in f
             assert "data" not in f
             assert isinstance(f.scan, ScanSpec)
+            (track,) = f.tracks
+            assert "transmit_only" in track._group
+            assert bool(track._group["transmit_only"][()]) is True
