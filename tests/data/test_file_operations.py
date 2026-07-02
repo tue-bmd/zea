@@ -11,7 +11,7 @@ import pytest
 
 from zea import Parameters
 from zea.data.file import CustomElement, File, load_file_all_data_types, validate_file
-from zea.data.file_operations import (
+from zea.data.__main__ import (
     compound_frames,
     compound_transmits,
     extract_frames_transmits,

@@ -36,18 +36,11 @@ Convert datasets
 .. autoprogram:: zea.data.convert.__main__:get_parser()
    :prog: python -m zea.data.convert
 
--------------------------------
-Data copying
--------------------------------
-
-.. autoprogram:: zea.data.copy:get_parser()
-   :prog: python -m zea.data.copy
-
 .. _cli-file-operations:
 
 -------------------------------
 Data file manipulation
 -------------------------------
 
-.. autoprogram:: zea.data.file_operations:get_parser()
-   :prog: python -m zea.data.file_operations
+.. autoprogram:: zea.data:get_parser()
+   :prog: python -m zea.data
