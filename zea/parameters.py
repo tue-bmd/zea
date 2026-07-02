@@ -437,7 +437,7 @@ class Parameters(BaseParameters):
         radius = max(self.zlims)
         ylims_azimuth = (
             (0.0, 0.0)  # avoid numerical imprecision with np.cos(np.pi/2)
-            if self.azimuth_limits[0] == self.azimuth_limits[1]
+            if self.azimuth_limits is None or self.azimuth_limits[0] == self.azimuth_limits[1]
             else (
                 radius * np.cos(-np.pi / 2 + self.azimuth_limits[0]),
                 radius * np.cos(-np.pi / 2 + self.azimuth_limits[1]),
@@ -703,12 +703,20 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
-    @cache_with_dependencies("azimuth_angles")
+    @cache_with_dependencies("selected_transmits", "n_tx")
     def azimuth_limits(self):
-        """The limits of the azimuth angles."""
+        """The limits of the azimuth angles.
+
+        Returns ``None`` if azimuth angles were
+        not provided (e.g. standard 2D imaging).
+
+        The presence check uses the raw parameter to avoid triggering the
+        :attr:`azimuth_angles` "using zeros" fallback warning for 2D data.
+        """
         value = self._params.get("azimuth_limits")
-        if value is None and self.azimuth_angles is not None:
-            value = self.azimuth_angles.min(), self.azimuth_angles.max()
+        if value is None and self._params.get("azimuth_angles") is not None:
+            azimuth_angles = self.azimuth_angles
+            value = azimuth_angles.min(), azimuth_angles.max()
             diff = value[1] - value[0]
             # add 15% margin to the limits
             value = (value[0] - 0.15 * diff, value[1] + 0.15 * diff)
