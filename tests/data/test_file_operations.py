@@ -168,7 +168,14 @@ def test_file_operations_cli_sum(tmp_hdf5_path):
     # Sum the datasets
     output_path = tmp_hdf5_path.parent / "summed_dataset.hdf5"
 
-    os.system("python -m zea.data sum " + str(path1) + " " + str(path2) + " " + str(output_path))
+    os.system(
+        "python -m zea.data sum "
+        + str(path1)
+        + " "
+        + str(path2)
+        + " --output-path "
+        + str(output_path)
+    )
 
     # Load the summed dataset and check if the data is correct
     with File(output_path) as f:

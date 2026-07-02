@@ -6,11 +6,13 @@ See the :ref:`CLI documentation <cli-file-operations>` for the available operati
 their command-line usage.
 """
 
-import argparse
 import functools
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Annotated, Literal, Union
 
 import numpy as np
+import tyro
 from tqdm import tqdm
 
 from zea import Parameters
@@ -543,7 +545,7 @@ def _interpret_index(input_str):
 
 
 def _interpret_indices(input_str_list):
-    if isinstance(input_str_list, str) and input_str_list == "all":
+    if input_str_list == "all" or input_str_list == ["all"]:
         return slice(None)
 
     if len(input_str_list) == 1 and "-" in input_str_list[0]:
@@ -565,173 +567,172 @@ def _scan_reduce_frames(parameters, frame_indices):
     return parameters
 
 
-def get_parser():
-    """Command line argument parser with subcommands"""
-
-    parser = argparse.ArgumentParser(
-        description=(
-            "Manipulate zea data files.\n\n"
-            "All operations accept files; folder inputs are also supported. For "
-            "file-to-file operations, each zea file in the input folder is processed "
-            "and written to a mirrored path in the output folder."
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="operation", required=True)
-    _add_parser_sum(subparsers)
-    _add_parser_compound_frames(subparsers)
-    _add_parser_compound_transmits(subparsers)
-    _add_parser_resave(subparsers)
-    _add_parser_extract(subparsers)
-    _add_parser_summary(subparsers)
-    _add_parser_copy(subparsers)
-
-    return parser
+# ── Command line interface (tyro) ────────────────────────────────────────────
+#
+# Each subcommand is a dataclass whose fields become CLI arguments and whose
+# ``run`` method dispatches to the matching operation above. Field comments are
+# picked up by tyro as ``--help`` text.
 
 
-def _add_parser_sum(subparsers):
-    sum_parser = subparsers.add_parser("sum", help="Sum the raw data of multiple files or folders.")
-    sum_parser.add_argument(
-        "input_paths", type=Path, nargs="+", help="Paths to the input files or folders."
-    )
-    sum_parser.add_argument("output_path", type=Path, help="Output HDF5 file.")
-    sum_parser.add_argument(
-        "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
-    )
+@dataclass
+class _Sum:
+    """Sum the raw data of multiple files or folders."""
+
+    input_paths: tyro.conf.Positional[list[Path]]
+    """Paths to the input files or folders."""
+    output_path: Path
+    """Output HDF5 file. Passed as ``--output-path`` because the inputs are variadic."""
+    overwrite: bool = False
+    """Overwrite existing output file."""
+
+    def run(self):
+        sum_data(
+            input_paths=self.input_paths, output_path=self.output_path, overwrite=self.overwrite
+        )
 
 
-def _add_parser_compound_frames(subparsers):
-    cf_parser = subparsers.add_parser("compound_frames", help="Compound frames to increase SNR.")
-    cf_parser.add_argument("input_path", type=Path, help="Input HDF5 file or folder.")
-    cf_parser.add_argument("output_path", type=Path, help="Output HDF5 file or folder.")
-    cf_parser.add_argument(
-        "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
-    )
+@dataclass
+class _CompoundFrames:
+    """Compound frames to increase SNR."""
+
+    input_path: tyro.conf.Positional[Path]
+    """Input HDF5 file or folder."""
+    output_path: tyro.conf.Positional[Path]
+    """Output HDF5 file or folder."""
+    overwrite: bool = False
+    """Overwrite existing output file."""
+
+    def run(self):
+        compound_frames(
+            input_path=self.input_path, output_path=self.output_path, overwrite=self.overwrite
+        )
 
 
-def _add_parser_compound_transmits(subparsers):
-    ct_parser = subparsers.add_parser(
-        "compound_transmits", help="Compound transmits to increase SNR."
-    )
-    ct_parser.add_argument("input_path", type=Path, help="Input HDF5 file or folder.")
-    ct_parser.add_argument("output_path", type=Path, help="Output HDF5 file or folder.")
-    ct_parser.add_argument(
-        "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
-    )
+@dataclass
+class _CompoundTransmits:
+    """Compound transmits to increase SNR."""
+
+    input_path: tyro.conf.Positional[Path]
+    """Input HDF5 file or folder."""
+    output_path: tyro.conf.Positional[Path]
+    """Output HDF5 file or folder."""
+    overwrite: bool = False
+    """Overwrite existing output file."""
+
+    def run(self):
+        compound_transmits(
+            input_path=self.input_path, output_path=self.output_path, overwrite=self.overwrite
+        )
 
 
-def _add_parser_resave(subparsers):
-    resave_parser = subparsers.add_parser("resave", help="Resave a file to change format version.")
-    resave_parser.add_argument("input_path", type=Path, help="Input HDF5 file or folder.")
-    resave_parser.add_argument("output_path", type=Path, help="Output HDF5 file or folder.")
-    resave_parser.add_argument(
-        "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
-    )
-    resave_parser.add_argument(
-        "--chunk-frames",
-        action="store_true",
-        default=False,
-        help="Store the data datasets with HDF5 chunked storage, one frame per chunk.",
-    )
-    resave_parser.add_argument(
-        "--disable-compression",
-        action="store_true",
-        default=False,
-        help="Disable lzf compression for the datasets.",
-    )
+@dataclass
+class _Resave:
+    """Resave a file to change format version."""
+
+    input_path: tyro.conf.Positional[Path]
+    """Input HDF5 file or folder."""
+    output_path: tyro.conf.Positional[Path]
+    """Output HDF5 file or folder."""
+    overwrite: bool = False
+    """Overwrite existing output file."""
+    chunk_frames: bool = False
+    """Store the data datasets with HDF5 chunked storage, one frame per chunk."""
+    disable_compression: bool = False
+    """Disable lzf compression for the datasets."""
+
+    def run(self):
+        resave(
+            input_path=self.input_path,
+            output_path=self.output_path,
+            overwrite=self.overwrite,
+            enable_compression=not self.disable_compression,
+            chunk_frames=self.chunk_frames,
+        )
 
 
-def _add_parser_extract(subparsers):
-    extract_parser = subparsers.add_parser("extract", help="Extract subset of frames or transmits.")
-    extract_parser.add_argument("input_path", type=Path, help="Input HDF5 file or folder.")
-    extract_parser.add_argument("output_path", type=Path, help="Output HDF5 file or folder.")
-    extract_parser.add_argument(
-        "--transmits",
-        type=str,
-        nargs="+",
-        default="all",
-        help="Target transmits. Can be a list of integers or ranges (e.g. 0-3 7).",
-    )
-    extract_parser.add_argument(
-        "--frames",
-        type=str,
-        nargs="+",
-        default="all",
-        help="Target frames. Can be a list of integers or ranges (e.g. 0-3 7).",
-    )
-    extract_parser.add_argument(
-        "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
-    )
+@dataclass
+class _Extract:
+    """Extract subset of frames or transmits."""
+
+    input_path: tyro.conf.Positional[Path]
+    """Input HDF5 file or folder."""
+    output_path: tyro.conf.Positional[Path]
+    """Output HDF5 file or folder."""
+    transmits: list[str] = field(default_factory=lambda: ["all"])
+    """Target transmits. Can be a list of integers or ranges (e.g. 0-3 7)."""
+    frames: list[str] = field(default_factory=lambda: ["all"])
+    """Target frames. Can be a list of integers or ranges (e.g. 0-3 7)."""
+    overwrite: bool = False
+    """Overwrite existing output file."""
+
+    def run(self):
+        extract_frames_transmits(
+            input_path=self.input_path,
+            output_path=self.output_path,
+            frame_indices=_interpret_indices(self.frames),
+            transmit_indices=_interpret_indices(self.transmits),
+            overwrite=self.overwrite,
+        )
 
 
-def _add_parser_summary(subparsers):
-    summary_parser = subparsers.add_parser(
-        "summary", help="Print a summary of a zea data file to the console."
-    )
-    summary_parser.add_argument("input_path", type=Path, help="Input HDF5 file.")
+@dataclass
+class _Summary:
+    """Print a summary of a zea data file to the console."""
+
+    input_path: tyro.conf.Positional[Path]
+    """Input HDF5 file."""
+
+    def run(self):
+        summary(input_path=self.input_path)
 
 
-def _add_parser_copy(subparsers):
-    copy_parser = subparsers.add_parser("copy", help="Copy zea files or folders to a new location.")
-    copy_parser.add_argument("src", type=Path, help="Source file or folder path.")
-    copy_parser.add_argument("dst", type=Path, help="Destination folder path.")
-    copy_parser.add_argument(
-        "--key", type=str, required=True, help="Key to access in the HDF5 files."
-    )
-    copy_parser.add_argument(
-        "--mode",
-        type=str,
-        choices=["a", "w", "r+", "x"],
-        default=None,
-        help="HDF5 file mode for the destination files. Defaults to auto-selection.",
-    )
+@dataclass
+class _Copy:
+    """Copy zea files or folders to a new location."""
+
+    src: tyro.conf.Positional[Path]
+    """Source file or folder path."""
+    dst: tyro.conf.Positional[Path]
+    """Destination folder path."""
+    key: str
+    """Key to access in the HDF5 files."""
+    mode: Literal["a", "w", "r+", "x"] | None = None
+    """HDF5 file mode for the destination files. Defaults to auto-selection."""
+
+    def run(self):
+        copy(src=self.src, dst=self.dst, key=self.key, mode=self.mode)
 
 
-if __name__ == "__main__":
-    parser = get_parser()
-    args = parser.parse_args()
+_Command = Union[
+    Annotated[_Sum, tyro.conf.subcommand("sum")],
+    Annotated[_CompoundFrames, tyro.conf.subcommand("compound_frames")],
+    Annotated[_CompoundTransmits, tyro.conf.subcommand("compound_transmits")],
+    Annotated[_Resave, tyro.conf.subcommand("resave")],
+    Annotated[_Extract, tyro.conf.subcommand("extract")],
+    Annotated[_Summary, tyro.conf.subcommand("summary")],
+    Annotated[_Copy, tyro.conf.subcommand("copy")],
+]
+
+
+def main():
+    """Parse command line arguments and run the requested operation.
+
+    Manipulate zea data files. All operations accept files; folder inputs are also
+    supported. For file-to-file operations, each zea file in the input folder is
+    processed and written to a mirrored path in the output folder.
+    """
+    args = tyro.cli(_Command)  # ty: ignore[no-matching-overload]
 
     # For folder operations the output is a directory; individual output files are
     # still guarded per file. Only block when the output is an existing file.
     # Read-only operations (e.g. "summary") have no output_path to guard.
-    if getattr(args, "output_path", None) is not None:
-        if args.output_path.is_file() and not args.overwrite:
-            logger.error(
-                f"Output file {args.output_path} already exists. Use --overwrite to overwrite it."
-            )
-            exit(1)
+    output_path = getattr(args, "output_path", None)
+    if output_path is not None and output_path.is_file() and not getattr(args, "overwrite", False):
+        logger.error(f"Output file {output_path} already exists. Use --overwrite to overwrite it.")
+        raise SystemExit(1)
 
-    if args.operation == "compound_frames":
-        compound_frames(
-            input_path=args.input_path, output_path=args.output_path, overwrite=args.overwrite
-        )
-    elif args.operation == "compound_transmits":
-        compound_transmits(
-            input_path=args.input_path, output_path=args.output_path, overwrite=args.overwrite
-        )
-    elif args.operation == "resave":
-        resave(
-            input_path=args.input_path,
-            output_path=args.output_path,
-            overwrite=args.overwrite,
-            enable_compression=not args.disable_compression,
-            chunk_frames=args.chunk_frames,
-        )
-    elif args.operation == "extract":
-        extract_frames_transmits(
-            input_path=args.input_path,
-            output_path=args.output_path,
-            frame_indices=_interpret_indices(args.frames),
-            transmit_indices=_interpret_indices(args.transmits),
-            overwrite=args.overwrite,
-        )
-    elif args.operation == "sum":
-        sum_data(
-            input_paths=args.input_paths, output_path=args.output_path, overwrite=args.overwrite
-        )
-    elif args.operation == "summary":
-        summary(input_path=args.input_path)
-    elif args.operation == "copy":
-        copy(src=args.src, dst=args.dst, key=args.key, mode=args.mode)
-    else:
-        raise ValueError(f"Unknown operation: {args.operation}")
+    args.run()
+
+
+if __name__ == "__main__":
+    main()
