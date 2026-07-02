@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from zea.data.file import File, validate_file
-from zea.data.__main__ import save_file
+from zea.data.file_operations import save_file
 from zea.data.spec import ScanSpec
 
 from . import generate_example_dataset

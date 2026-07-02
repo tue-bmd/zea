@@ -14,7 +14,7 @@ import numpy as np
 from tqdm import tqdm
 
 from zea import Parameters
-from zea.data.datasets import Dataset, Folder
+from zea.data.datasets import Dataset
 from zea.data.file import File, load_file_all_data_types
 from zea.data.spec import DEFAULT_COMPRESSION
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
@@ -513,19 +513,19 @@ def summary(input_path: Path):
 
 
 def copy(src: Path, dst: Path, key: str, mode: str | None = None):
-    """Copies a :class:`zea.Folder` to a new location.
+    """Copies zea files to a new location using :meth:`zea.Dataset.copy`.
 
     Args:
-        src (Path): Source folder path.
+        src (Path): Source path. Can be a single file, a list of files, or a folder.
         dst (Path): Destination folder path.
         key (str): Key to access in the HDF5 files. Use ``"all"`` or ``"*"`` to copy
             everything.
         mode (str, optional): HDF5 file mode for the destination files. Defaults to
-            None, which lets :meth:`zea.Folder.copy` auto-select the mode (``"a"`` for a
+            None, which lets :meth:`zea.Dataset.copy` auto-select the mode (``"a"`` for a
             single key, ``"w"`` when ``key`` is ``"all"``/``"*"``).
     """
-    src_folder = Folder(src, validate=False)
-    src_folder.copy(dst, key, mode=mode)
+    dataset = Dataset(src, validate=False)
+    dataset.copy(dst, key, mode=mode)
 
 
 def _delete_file_if_exists(path: Path):
@@ -672,8 +672,8 @@ def _add_parser_summary(subparsers):
 
 
 def _add_parser_copy(subparsers):
-    copy_parser = subparsers.add_parser("copy", help="Copy a zea folder to a new location.")
-    copy_parser.add_argument("src", type=Path, help="Source folder path.")
+    copy_parser = subparsers.add_parser("copy", help="Copy zea files or folders to a new location.")
+    copy_parser.add_argument("src", type=Path, help="Source file or folder path.")
     copy_parser.add_argument("dst", type=Path, help="Destination folder path.")
     copy_parser.add_argument(
         "--key", type=str, required=True, help="Key to access in the HDF5 files."
