@@ -29,6 +29,7 @@ OPERATION_NAMES = [
     "compound_transmits",
     "resave",
     "extract",
+    "summary",
 ]
 
 
@@ -500,6 +501,16 @@ def extract_frames_transmits(
     )
 
 
+def summary(input_path: Path):
+    """Prints a summary of a zea data file to the console.
+
+    Args:
+        input_path (Path): Path to the zea data file.
+    """
+    with File(input_path) as f:
+        f.summary()
+
+
 def _delete_file_if_exists(path: Path):
     """Deletes a file if it exists."""
     if path.exists():
@@ -555,6 +566,7 @@ def get_parser():
     _add_parser_compound_transmits(subparsers)
     _add_parser_resave(subparsers)
     _add_parser_extract(subparsers)
+    _add_parser_summary(subparsers)
 
     return parser
 
@@ -634,17 +646,26 @@ def _add_parser_extract(subparsers):
     )
 
 
+def _add_parser_summary(subparsers):
+    summary_parser = subparsers.add_parser(
+        "summary", help="Print a summary of a zea data file to the console."
+    )
+    summary_parser.add_argument("input_path", type=Path, help="Input HDF5 file.")
+
+
 if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
 
     # For folder operations the output is a directory; individual output files are
     # still guarded per file. Only block when the output is an existing file.
-    if args.output_path.is_file() and not args.overwrite:
-        logger.error(
-            f"Output file {args.output_path} already exists. Use --overwrite to overwrite it."
-        )
-        exit(1)
+    # Read-only operations (e.g. "summary") have no output_path to guard.
+    if getattr(args, "output_path", None) is not None:
+        if args.output_path.is_file() and not args.overwrite:
+            logger.error(
+                f"Output file {args.output_path} already exists. Use --overwrite to overwrite it."
+            )
+            exit(1)
 
     if args.operation == "compound_frames":
         compound_frames(
@@ -674,5 +695,7 @@ if __name__ == "__main__":
         sum_data(
             input_paths=args.input_paths, output_path=args.output_path, overwrite=args.overwrite
         )
+    elif args.operation == "summary":
+        summary(input_path=args.input_path)
     else:
         raise ValueError(f"Unknown operation: {args.operation}")
