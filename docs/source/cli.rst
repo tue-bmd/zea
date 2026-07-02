@@ -40,8 +40,8 @@ Convert datasets
 Data copying
 -------------------------------
 
-.. autoprogram:: zea.data.__main__:get_parser()
-   :prog: python -m zea.data
+.. autoprogram:: zea.data.copy:get_parser()
+   :prog: python -m zea.data.copy
 
 .. _cli-file-operations:
 

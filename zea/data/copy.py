@@ -1,7 +1,7 @@
 """Command-line interface for copying a zea.Folder to a new location.
 
 Usage:
-    python -m zea.data --src <source> --dst <destination> --key <key>
+    python -m zea.data.copy --src <source> --dst <destination> --key <key>
 """
 
 import warnings
