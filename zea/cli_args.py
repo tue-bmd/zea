@@ -9,7 +9,7 @@ code lives in :mod:`zea.data.process`.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal, Union
 
 import tyro
 
@@ -70,3 +70,201 @@ class ProcessArgs:
             ),
         ),
     ] = "auto:1"
+
+
+# ── Data file manipulation subcommands (``zea data …``) ───────────────────────
+#
+# Each dataclass's fields become CLI arguments; its ``run`` method dispatches to
+# the matching operation in :mod:`zea.data.file_operations`. That module is
+# imported lazily inside ``run`` so that parsing ``zea --help`` / ``zea data
+# --help`` stays free of heavy imports (keras, ``zea.data`` …).
+
+
+@dataclass
+class _Sum:
+    """Sum the raw data of multiple files or folders."""
+
+    input_paths: tyro.conf.Positional[list[Path]]
+    """Paths to the input files or folders."""
+    output_path: Path
+    """Output HDF5 file. Passed as ``--output-path`` because the inputs are variadic."""
+    overwrite: bool = False
+    """Overwrite existing output file."""
+
+    def run(self):
+        from zea.data.file_operations import sum_data
+
+        sum_data(
+            input_paths=self.input_paths, output_path=self.output_path, overwrite=self.overwrite
+        )
+
+
+@dataclass
+class _CompoundFrames:
+    """Compound frames to increase SNR."""
+
+    input_path: tyro.conf.Positional[Path]
+    """Input HDF5 file or folder."""
+    output_path: tyro.conf.Positional[Path]
+    """Output HDF5 file or folder."""
+    overwrite: bool = False
+    """Overwrite existing output file."""
+
+    def run(self):
+        from zea.data.file_operations import compound_frames
+
+        compound_frames(
+            input_path=self.input_path, output_path=self.output_path, overwrite=self.overwrite
+        )
+
+
+@dataclass
+class _CompoundTransmits:
+    """Compound transmits to increase SNR."""
+
+    input_path: tyro.conf.Positional[Path]
+    """Input HDF5 file or folder."""
+    output_path: tyro.conf.Positional[Path]
+    """Output HDF5 file or folder."""
+    overwrite: bool = False
+    """Overwrite existing output file."""
+
+    def run(self):
+        from zea.data.file_operations import compound_transmits
+
+        compound_transmits(
+            input_path=self.input_path, output_path=self.output_path, overwrite=self.overwrite
+        )
+
+
+@dataclass
+class _Resave:
+    """Resave a file to change format version."""
+
+    input_path: tyro.conf.Positional[Path]
+    """Input HDF5 file or folder."""
+    output_path: tyro.conf.Positional[Path]
+    """Output HDF5 file or folder."""
+    overwrite: bool = False
+    """Overwrite existing output file."""
+    chunk_frames: bool = False
+    """Store the data datasets with HDF5 chunked storage, one frame per chunk."""
+    disable_compression: bool = False
+    """Disable lzf compression for the datasets."""
+
+    def run(self):
+        from zea.data.file_operations import resave
+
+        resave(
+            input_path=self.input_path,
+            output_path=self.output_path,
+            overwrite=self.overwrite,
+            enable_compression=not self.disable_compression,
+            chunk_frames=self.chunk_frames,
+        )
+
+
+@dataclass
+class _Extract:
+    """Extract subset of frames or transmits."""
+
+    input_path: tyro.conf.Positional[Path]
+    """Input HDF5 file or folder."""
+    output_path: tyro.conf.Positional[Path]
+    """Output HDF5 file or folder."""
+    transmits: list[str] = field(default_factory=lambda: ["all"])
+    """Target transmits. Can be a list of integers or ranges (e.g. 0-3 7)."""
+    frames: list[str] = field(default_factory=lambda: ["all"])
+    """Target frames. Can be a list of integers or ranges (e.g. 0-3 7)."""
+    overwrite: bool = False
+    """Overwrite existing output file."""
+
+    def run(self):
+        from zea.data.file_operations import _interpret_indices, extract_frames_transmits
+
+        extract_frames_transmits(
+            input_path=self.input_path,
+            output_path=self.output_path,
+            frame_indices=_interpret_indices(self.frames),
+            transmit_indices=_interpret_indices(self.transmits),
+            overwrite=self.overwrite,
+        )
+
+
+@dataclass
+class _Summary:
+    """Print a summary of a zea data file to the console."""
+
+    input_path: tyro.conf.Positional[Path]
+    """Input HDF5 file."""
+
+    def run(self):
+        from zea.data.file_operations import summary
+
+        summary(input_path=self.input_path)
+
+
+@dataclass
+class _Copy:
+    """Copy zea files or folders to a new location."""
+
+    src: tyro.conf.Positional[Path]
+    """Source file or folder path."""
+    dst: tyro.conf.Positional[Path]
+    """Destination folder path."""
+    key: str
+    """Key to access in the HDF5 files."""
+    mode: Literal["a", "w", "r+", "x"] | None = None
+    """HDF5 file mode for the destination files. Defaults to auto-selection."""
+
+    def run(self):
+        from zea.data.file_operations import copy
+
+        copy(src=self.src, dst=self.dst, key=self.key, mode=self.mode)
+
+
+DataCommand = Union[
+    Annotated[_Sum, tyro.conf.subcommand("sum")],
+    Annotated[_CompoundFrames, tyro.conf.subcommand("compound_frames")],
+    Annotated[_CompoundTransmits, tyro.conf.subcommand("compound_transmits")],
+    Annotated[_Resave, tyro.conf.subcommand("resave")],
+    Annotated[_Extract, tyro.conf.subcommand("extract")],
+    Annotated[_Summary, tyro.conf.subcommand("summary")],
+    Annotated[_Copy, tyro.conf.subcommand("copy")],
+]
+
+
+def _run_data_command(command) -> None:
+    """Guard the output path (unless ``--overwrite``) and run a data subcommand.
+
+    Read-only operations such as ``summary`` have no ``output_path`` and are never
+    blocked. For folder operations the output is a directory; per-file outputs are
+    still guarded inside the operation itself, so only an existing output *file* is
+    blocked here.
+    """
+    from zea.log import logger
+
+    output_path = getattr(command, "output_path", None)
+    if (
+        output_path is not None
+        and Path(output_path).is_file()
+        and not getattr(command, "overwrite", False)
+    ):
+        logger.error(f"Output file {output_path} already exists. Use --overwrite to overwrite it.")
+        raise SystemExit(1)
+    command.run()
+
+
+@dataclass
+class DataArgs:
+    """Manipulate zea data files (sum, compound, resave, extract, summary, copy).
+
+    All operations accept files; folder inputs are also supported. For file-to-file
+    operations, each zea file in the input folder is processed and written to a
+    mirrored path in the output folder.
+    """
+
+    command: tyro.conf.OmitSubcommandPrefixes[DataCommand]
+
+    def run(self) -> None:
+        _run_data_command(self.command)

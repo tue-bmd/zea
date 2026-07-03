@@ -4,6 +4,7 @@ Usage::
 
     zea process --dataset <path> --config <config.yaml> [options]  # batch beamform a dataset
     zea app [--share] [--server-port PORT]                         # launch the Gradio visualizer
+    zea data <operation> [options]                                 # manipulate zea data files
 
 """
 
@@ -18,12 +19,13 @@ if "ZEA_LOG_LEVEL" not in os.environ:
 
 import tyro
 
-from zea.cli_args import AppArgs, ProcessArgs
+from zea.cli_args import AppArgs, DataArgs, ProcessArgs
 
 # Top-level CLI: a union of subcommands, each tagged with its command name.
 SubCmd = Union[
     Annotated[ProcessArgs, tyro.conf.subcommand("process")],
     Annotated[AppArgs, tyro.conf.subcommand("app")],
+    Annotated[DataArgs, tyro.conf.subcommand("data")],
 ]
 
 
@@ -41,6 +43,11 @@ def parse_args(argv: Optional[Sequence[str]] = None):
 def main() -> None:
     """Dispatch to the requested subcommand using tyro for rich help output."""
     args = parse_args()
+
+    if isinstance(args, DataArgs):
+        # Data file operations run on the parsed data and do not need a compute device.
+        args.run()
+        return
 
     from zea.internal.device import init_device
 

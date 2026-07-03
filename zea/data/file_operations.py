@@ -7,9 +7,7 @@ their command-line usage.
 """
 
 import functools
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Literal, Union
 
 import numpy as np
 import tyro
@@ -569,169 +567,21 @@ def _scan_reduce_frames(parameters, frame_indices):
 
 # ── Command line interface (tyro) ────────────────────────────────────────────
 #
-# Each subcommand is a dataclass whose fields become CLI arguments and whose
-# ``run`` method dispatches to the matching operation above. Field comments are
-# picked up by tyro as ``--help`` text.
-
-
-@dataclass
-class _Sum:
-    """Sum the raw data of multiple files or folders."""
-
-    input_paths: tyro.conf.Positional[list[Path]]
-    """Paths to the input files or folders."""
-    output_path: Path
-    """Output HDF5 file. Passed as ``--output-path`` because the inputs are variadic."""
-    overwrite: bool = False
-    """Overwrite existing output file."""
-
-    def run(self):
-        sum_data(
-            input_paths=self.input_paths, output_path=self.output_path, overwrite=self.overwrite
-        )
-
-
-@dataclass
-class _CompoundFrames:
-    """Compound frames to increase SNR."""
-
-    input_path: tyro.conf.Positional[Path]
-    """Input HDF5 file or folder."""
-    output_path: tyro.conf.Positional[Path]
-    """Output HDF5 file or folder."""
-    overwrite: bool = False
-    """Overwrite existing output file."""
-
-    def run(self):
-        compound_frames(
-            input_path=self.input_path, output_path=self.output_path, overwrite=self.overwrite
-        )
-
-
-@dataclass
-class _CompoundTransmits:
-    """Compound transmits to increase SNR."""
-
-    input_path: tyro.conf.Positional[Path]
-    """Input HDF5 file or folder."""
-    output_path: tyro.conf.Positional[Path]
-    """Output HDF5 file or folder."""
-    overwrite: bool = False
-    """Overwrite existing output file."""
-
-    def run(self):
-        compound_transmits(
-            input_path=self.input_path, output_path=self.output_path, overwrite=self.overwrite
-        )
-
-
-@dataclass
-class _Resave:
-    """Resave a file to change format version."""
-
-    input_path: tyro.conf.Positional[Path]
-    """Input HDF5 file or folder."""
-    output_path: tyro.conf.Positional[Path]
-    """Output HDF5 file or folder."""
-    overwrite: bool = False
-    """Overwrite existing output file."""
-    chunk_frames: bool = False
-    """Store the data datasets with HDF5 chunked storage, one frame per chunk."""
-    disable_compression: bool = False
-    """Disable lzf compression for the datasets."""
-
-    def run(self):
-        resave(
-            input_path=self.input_path,
-            output_path=self.output_path,
-            overwrite=self.overwrite,
-            enable_compression=not self.disable_compression,
-            chunk_frames=self.chunk_frames,
-        )
-
-
-@dataclass
-class _Extract:
-    """Extract subset of frames or transmits."""
-
-    input_path: tyro.conf.Positional[Path]
-    """Input HDF5 file or folder."""
-    output_path: tyro.conf.Positional[Path]
-    """Output HDF5 file or folder."""
-    transmits: list[str] = field(default_factory=lambda: ["all"])
-    """Target transmits. Can be a list of integers or ranges (e.g. 0-3 7)."""
-    frames: list[str] = field(default_factory=lambda: ["all"])
-    """Target frames. Can be a list of integers or ranges (e.g. 0-3 7)."""
-    overwrite: bool = False
-    """Overwrite existing output file."""
-
-    def run(self):
-        extract_frames_transmits(
-            input_path=self.input_path,
-            output_path=self.output_path,
-            frame_indices=_interpret_indices(self.frames),
-            transmit_indices=_interpret_indices(self.transmits),
-            overwrite=self.overwrite,
-        )
-
-
-@dataclass
-class _Summary:
-    """Print a summary of a zea data file to the console."""
-
-    input_path: tyro.conf.Positional[Path]
-    """Input HDF5 file."""
-
-    def run(self):
-        summary(input_path=self.input_path)
-
-
-@dataclass
-class _Copy:
-    """Copy zea files or folders to a new location."""
-
-    src: tyro.conf.Positional[Path]
-    """Source file or folder path."""
-    dst: tyro.conf.Positional[Path]
-    """Destination folder path."""
-    key: str
-    """Key to access in the HDF5 files."""
-    mode: Literal["a", "w", "r+", "x"] | None = None
-    """HDF5 file mode for the destination files. Defaults to auto-selection."""
-
-    def run(self):
-        copy(src=self.src, dst=self.dst, key=self.key, mode=self.mode)
-
-
-_Command = Union[
-    Annotated[_Sum, tyro.conf.subcommand("sum")],
-    Annotated[_CompoundFrames, tyro.conf.subcommand("compound_frames")],
-    Annotated[_CompoundTransmits, tyro.conf.subcommand("compound_transmits")],
-    Annotated[_Resave, tyro.conf.subcommand("resave")],
-    Annotated[_Extract, tyro.conf.subcommand("extract")],
-    Annotated[_Summary, tyro.conf.subcommand("summary")],
-    Annotated[_Copy, tyro.conf.subcommand("copy")],
-]
+# The CLI subcommand dataclasses live in :mod:`zea.cli_args` (a light-import
+# module) so that ``zea data …`` can be wired into the top-level ``zea`` CLI
+# without importing this heavy module just to render ``--help``. The dataclasses
+# there dispatch back to the operation functions above.
 
 
 def main():
-    """Parse command line arguments and run the requested operation.
+    """Parse command line arguments and run the requested data operation.
 
-    Manipulate zea data files. All operations accept files; folder inputs are also
-    supported. For file-to-file operations, each zea file in the input folder is
-    processed and written to a mirrored path in the output folder.
+    Entry point for ``python -m zea.data``. This is equivalent to ``zea data``.
     """
-    args = tyro.cli(_Command)  # ty: ignore[no-matching-overload]
+    from zea.cli_args import DataCommand, _run_data_command
 
-    # For folder operations the output is a directory; individual output files are
-    # still guarded per file. Only block when the output is an existing file.
-    # Read-only operations (e.g. "summary") have no output_path to guard.
-    output_path = getattr(args, "output_path", None)
-    if output_path is not None and output_path.is_file() and not getattr(args, "overwrite", False):
-        logger.error(f"Output file {output_path} already exists. Use --overwrite to overwrite it.")
-        raise SystemExit(1)
-
-    args.run()
+    args = tyro.cli(DataCommand)  # ty: ignore[no-matching-overload]
+    _run_data_command(args)
 
 
 if __name__ == "__main__":
