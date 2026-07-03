@@ -16,7 +16,7 @@ from keras import ops
 
 from zea import io_lib, log
 from zea.backend import jit
-from zea.cli_args import ProcessArgs
+from zea.cli_args import SUPPORTED_FORMATS, ProcessArgs
 from zea.config import Config
 from zea.data.dataloader import Dataloader
 from zea.data.datasets import Dataset
@@ -26,8 +26,6 @@ from zea.internal.checks import _NON_IMAGE_DATA_TYPES
 from zea.internal.device import init_device
 from zea.ops.pipeline import Pipeline
 from zea.utils import FunctionTimer
-
-SUPPORTED_FORMATS = ["gif", "mp4", "hdf5"]
 
 
 def _axis_selections_from_params(parameters) -> dict | None:
@@ -43,7 +41,6 @@ try:
     import SimpleITK as _sitk
 
     sitk = _sitk
-    SUPPORTED_FORMATS += ["nii.gz"]
 except ImportError:
     pass
 

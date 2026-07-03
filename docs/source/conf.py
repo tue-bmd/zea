@@ -8,6 +8,7 @@ import sys
 from importlib.metadata import version as get_version
 
 sys.path.insert(0, os.path.abspath("../.."))
+sys.path.insert(0, os.path.abspath("_ext"))  # local Sphinx extensions
 
 # -- Project information -----------------------------------------------------
 project = "zea"
@@ -30,6 +31,7 @@ extensions = [
     "sphinxcontrib.bibtex",  # for bibliography support
     "sphinx_reredirects",  # for redirecting empty toc entries
     "sphinx.ext.mathjax",  # for rendering math in the documentation
+    "tyroprogram",  # local: auto-documents the tyro CLI (docs/source/_ext/tyroprogram.py)
 ]
 
 autodoc_mock_imports = [

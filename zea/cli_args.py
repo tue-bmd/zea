@@ -7,11 +7,17 @@ because importing ``zea.data`` eagerly pulls in keras. The actual processing
 code lives in :mod:`zea.data.process`.
 """
 
+import importlib.util
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Literal, Union
 
 import tyro
+
+SUPPORTED_FORMATS = ["gif", "mp4", "hdf5"]
+sitk = importlib.util.find_spec("SimpleITK")
+if sitk is not None:
+    SUPPORTED_FORMATS += ["nii.gz"]
 
 
 @dataclass
@@ -50,17 +56,76 @@ class ProcessArgs:
             help="Path to config.yaml for the beamforming pipeline.",
         ),
     ]
-    save_dir: Path = Path("output")
-    key: str = "data/raw_data"
-    n_frames: int | None = None
-    save_as: str = "gif"
-    keep_keys: list[str] = field(default_factory=lambda: ["maxval"])
-    timings: bool = False
-    num_threads: int = 16
-    revision: str | None = None
-    config_revision: str | None = None
-    overwrite: bool = False
-    keep_dynamic_range: bool = False
+    save_dir: Annotated[
+        Path,
+        tyro.conf.arg(
+            aliases=["-o"],
+            help="Directory where output files are written. Default: output/",
+        ),
+    ] = Path("output")
+    key: Annotated[
+        str,
+        tyro.conf.arg(
+            help="Data key to load from each file (e.g. data/raw_data, data/image/values).",
+        ),
+    ] = "data/raw_data"
+    n_frames: Annotated[
+        int | None,
+        tyro.conf.arg(
+            help="Maximum number of frames to process per file (all frames when omitted).",
+        ),
+    ] = None
+    save_as: Annotated[
+        str,
+        tyro.conf.arg(
+            help=f"Output format. One of: {', '.join(SUPPORTED_FORMATS)}.",
+        ),
+    ] = "gif"
+    keep_keys: Annotated[
+        list[str],
+        tyro.conf.arg(
+            help="List of pipeline output keys to forward to the next frame iteration.",
+        ),
+    ] = field(default_factory=lambda: ["maxval"])
+    timings: Annotated[
+        bool,
+        tyro.conf.arg(
+            help="Record dataloader and pipeline timings and save to YAML files in save_dir.",
+        ),
+    ] = False
+    num_threads: Annotated[
+        int,
+        tyro.conf.arg(
+            help="Number of threads for the dataloader. Default: 16.",
+        ),
+    ] = 16
+    revision: Annotated[
+        str | None,
+        tyro.conf.arg(
+            help="HuggingFace revision for the dataset (branch, tag, or commit hash). "
+            "Only used for hf:// paths."
+        ),
+    ] = None
+    config_revision: Annotated[
+        str | None,
+        tyro.conf.arg(
+            help="HuggingFace revision for the config (branch, tag, or commit hash). "
+            "Defaults to --revision if omitted."
+        ),
+    ] = None
+    overwrite: Annotated[
+        bool,
+        tyro.conf.arg(
+            help="Overwrite existing output files. Default: False.",
+        ),
+    ] = False
+    keep_dynamic_range: Annotated[
+        bool,
+        tyro.conf.arg(
+            help="Store pipeline output as-is (float32 dB) instead of converting to uint8. "
+            "Only valid when --save-as hdf5."
+        ),
+    ] = False
     device: Annotated[
         str,
         tyro.conf.arg(

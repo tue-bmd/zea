@@ -1,9 +1,9 @@
 """
 This module provides some utilities to edit zea data files, either individually or in bulk.
 
-Each operation is available both as a Python function and as a command line subcommand.
-See the :ref:`CLI documentation <cli-file-operations>` for the available operations and
-their command-line usage.
+Each operation is available both as a Python function and as a ``zea data`` command line
+subcommand. See the :doc:`CLI documentation </cli>` for the available operations and their
+command-line usage.
 """
 
 import functools
