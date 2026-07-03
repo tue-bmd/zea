@@ -7,11 +7,9 @@ Usage::
 
 """
 
-import argparse
 import os
 import warnings
-from dataclasses import dataclass
-from typing import Annotated, Union
+from typing import Annotated, Optional, Sequence, Union
 
 import zea
 
@@ -20,88 +18,29 @@ if "ZEA_LOG_LEVEL" not in os.environ:
 
 import tyro
 
-from zea.cli_args import ProcessArgs
+from zea.cli_args import AppArgs, ProcessArgs
+
+# Top-level CLI: a union of subcommands, each tagged with its command name.
+SubCmd = Union[
+    Annotated[ProcessArgs, tyro.conf.subcommand("process")],
+    Annotated[AppArgs, tyro.conf.subcommand("app")],
+]
 
 
-@dataclass
-class AppArgs:
-    """Arguments for the interactive Gradio dataset visualizer."""
+def parse_args(argv: Optional[Sequence[str]] = None):
+    """Parse ``argv`` into a :class:`ProcessArgs` or :class:`AppArgs` instance.
 
-    share: Annotated[
-        bool,
-        tyro.conf.arg(help="Create a public Gradio share link."),
-    ] = False
-    server_port: Annotated[
-        int,
-        tyro.conf.arg(help="Port for the Gradio server to listen on. Defaults to 7860."),
-    ] = 7860
-    device: Annotated[
-        str,
-        tyro.conf.arg(help="Compute device passed to init_device (e.g. 'cpu', 'auto:1')."),
-    ] = "auto:1"
-
-
-def get_parser() -> argparse.ArgumentParser:
-    """Return the top-level argument parser with ``process`` and ``app`` subcommands.
-
-    Kept as plain argparse for ``sphinxcontrib-autoprogram`` doc generation and tests.
-    The interactive ``main()`` uses :func:`tyro.cli` for richer help output.
+    Passing ``argv=None`` reads from ``sys.argv`` (normal CLI usage). A ``--help``
+    request or a parse error raises :class:`SystemExit`, matching tyro's behavior.
     """
-    parser = argparse.ArgumentParser(
-        prog="zea",
-        description="zea ultrasound toolbox.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="command", metavar="command")
-    subparsers.required = True
-
-    # ── process ──────────────────────────────────────────────────────────────
-    from zea.data.process import get_parser as _process_parser
-
-    subparsers.add_parser(
-        "process",
-        help="Beamform a zea dataset using a pipeline YAML config.",
-        parents=[_process_parser(add_help=False)],
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-
-    # ── app ──────────────────────────────────────────────────────────────────
-    app_p = subparsers.add_parser(
-        "app",
-        help="Launch the interactive Gradio dataset visualizer.",
-    )
-    app_p.add_argument(
-        "--share",
-        action="store_true",
-        help="Create a public Gradio share link.",
-    )
-    app_p.add_argument(
-        "--server-port",
-        dest="server_port",
-        type=int,
-        default=None,
-        help="Port for the Gradio server to listen on. Defaults to 7860.",
-    )
-    app_p.add_argument(
-        "--device",
-        type=str,
-        default="auto:1",
-        help="Compute device passed to init_device (e.g. 'cpu', 'auto:1').",
-    )
-
-    return parser
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        return tyro.cli(SubCmd, args=argv)  # ty: ignore[no-matching-overload]
 
 
 def main() -> None:
     """Dispatch to the requested subcommand using tyro for rich help output."""
-    SubCmd = Union[
-        Annotated[ProcessArgs, tyro.conf.subcommand("process")],
-        Annotated[AppArgs, tyro.conf.subcommand("app")],
-    ]
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        args = tyro.cli(SubCmd)  # ty: ignore[no-matching-overload]
+    args = parse_args()
 
     from zea.internal.device import init_device
 

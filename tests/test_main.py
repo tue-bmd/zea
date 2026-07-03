@@ -1,12 +1,12 @@
 """Lightweight tests for the ``zea`` CLI entry point (zea.__main__)."""
 
+import contextlib
+import io
+
 import pytest
 
-
-def _parser():
-    from zea.__main__ import get_parser
-
-    return get_parser()
+from zea.__main__ import parse_args
+from zea.cli_args import AppArgs, ProcessArgs
 
 
 # ── parser structure ──────────────────────────────────────────────────────────
@@ -14,43 +14,39 @@ def _parser():
 
 def test_subcommands_exist():
     """Both 'process' and 'app' subcommands must be registered."""
-    p = _parser()
-    # argparse stores subparser choices on the subparsers action
-    subparsers_action = next(a for a in p._actions if hasattr(a, "_name_parser_map"))
-    assert "process" in subparsers_action._name_parser_map
-    assert "app" in subparsers_action._name_parser_map
+    assert isinstance(parse_args(["process", "-d", "data/", "-c", "cfg.yaml"]), ProcessArgs)
+    assert isinstance(parse_args(["app"]), AppArgs)
 
 
 def test_no_subcommand_exits_nonzero():
     """Invoking zea with no subcommand should exit with a non-zero status."""
     with pytest.raises(SystemExit) as exc_info:
-        _parser().parse_args([])
+        parse_args([])
     assert exc_info.value.code != 0
 
 
 # ── process subcommand ────────────────────────────────────────────────────────
 
 
-def test_process_help_exits_zero(capsys):
+def test_process_help_exits_zero():
     """zea process --help should print usage and exit 0."""
-    with pytest.raises(SystemExit) as exc_info:
-        _parser().parse_args(["process", "--help"])
+    buf = io.StringIO()
+    with pytest.raises(SystemExit) as exc_info, contextlib.redirect_stdout(buf):
+        parse_args(["process", "--help"])
     assert exc_info.value.code == 0
-    assert "dataset" in capsys.readouterr().out
+    assert "dataset" in buf.getvalue()
 
 
 def test_process_parses_required_flags():
-    args = _parser().parse_args(
-        ["process", "--dataset", "hf://zeahub/data", "--config", "cfg.yaml"]
-    )
-    assert args.command == "process"
+    args = parse_args(["process", "--dataset", "hf://zeahub/data", "--config", "cfg.yaml"])
+    assert isinstance(args, ProcessArgs)
     assert args.dataset == "hf://zeahub/data"
     assert args.config == "cfg.yaml"
     assert str(args.save_dir) == "output"  # default
 
 
 def test_process_short_flags():
-    args = _parser().parse_args(
+    args = parse_args(
         [
             "process",
             "-d",
@@ -64,7 +60,7 @@ def test_process_short_flags():
 
 
 def test_process_optional_args():
-    args = _parser().parse_args(
+    args = parse_args(
         [
             "process",
             "--dataset",
@@ -89,7 +85,7 @@ def test_process_optional_args():
 
 
 def test_process_defaults():
-    args = _parser().parse_args(["process", "--dataset", "data/", "--config", "cfg.yaml"])
+    args = parse_args(["process", "--dataset", "data/", "--config", "cfg.yaml"])
     assert args.key == "data/raw_data"
     assert args.n_frames is None
     assert args.save_as == "gif"
@@ -100,24 +96,32 @@ def test_process_defaults():
     assert str(args.save_dir) == "output"
 
 
+def test_process_boolean_flags():
+    args = parse_args(
+        ["process", "-d", "data/", "-c", "cfg.yaml", "--overwrite", "--keep-dynamic-range"]
+    )
+    assert args.overwrite is True
+    assert args.keep_dynamic_range is True
+
+
 # ── app subcommand ────────────────────────────────────────────────────────────
 
 
-def test_app_help_exits_zero(capsys):
+def test_app_help_exits_zero():
     """zea app --help should exit 0 without importing gradio."""
-    with pytest.raises(SystemExit) as exc_info:
-        _parser().parse_args(["app", "--help"])
+    with pytest.raises(SystemExit) as exc_info, contextlib.redirect_stdout(io.StringIO()):
+        parse_args(["app", "--help"])
     assert exc_info.value.code == 0
 
 
 def test_app_defaults():
-    args = _parser().parse_args(["app"])
-    assert args.command == "app"
+    args = parse_args(["app"])
+    assert isinstance(args, AppArgs)
     assert args.share is False
-    assert args.server_port is None
+    assert args.server_port == 7860
 
 
 def test_app_flags():
-    args = _parser().parse_args(["app", "--share", "--server-port", "7861"])
+    args = parse_args(["app", "--share", "--server-port", "7861"])
     assert args.share is True
     assert args.server_port == 7861

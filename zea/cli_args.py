@@ -15,6 +15,24 @@ import tyro
 
 
 @dataclass
+class AppArgs:
+    """Arguments for the interactive Gradio dataset visualizer."""
+
+    share: Annotated[
+        bool,
+        tyro.conf.arg(help="Create a public Gradio share link."),
+    ] = False
+    server_port: Annotated[
+        int,
+        tyro.conf.arg(help="Port for the Gradio server to listen on. Defaults to 7860."),
+    ] = 7860
+    device: Annotated[
+        str,
+        tyro.conf.arg(help="Compute device passed to init_device (e.g. 'cpu', 'auto:1')."),
+    ] = "auto:1"
+
+
+@dataclass
 class ProcessArgs:
     """Arguments for beamforming a zea dataset."""
 

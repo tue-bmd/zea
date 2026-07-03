@@ -54,11 +54,12 @@ def test_key_requires_pipeline_false():
     assert _key_requires_pipeline(None) is False
 
 
-def test_get_parser_defaults():
-    from zea.data.process import get_parser
+def test_cli_defaults():
+    import tyro
 
-    p = get_parser()
-    args = p.parse_args(["--dataset", "data/", "--config", "cfg.yaml"])
+    from zea.cli_args import ProcessArgs
+
+    args = tyro.cli(ProcessArgs, args=["--dataset", "data/", "--config", "cfg.yaml"])
     assert args.key == "data/raw_data"
     assert args.n_frames is None
     assert args.save_as == "gif"
