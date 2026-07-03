@@ -2,9 +2,9 @@ Command line interface
 ================================
 
 Besides the main :doc:`zea API documentation <_autosummary/zea>`, ``zea`` provides a
-command line interface (CLI) built with `tyro <https://brentyi.github.io/tyro/>`_. The
-reference below is generated directly from the CLI definitions in
-:mod:`zea.cli_args`, so it always matches the installed version.
+command line interface (CLI) with three primary subcommands.
+
+Note that is very new functionality, and might change in future releases. Please report any issues you encounter.
 
 .. code-block:: text
 
@@ -14,3 +14,10 @@ reference below is generated directly from the CLI definitions in
 
 .. tyroprogram:: zea.__main__:SubCmd
    :prog: zea
+
+-------------------------------
+Convert datasets
+-------------------------------
+
+.. autoprogram:: zea.data.convert.__main__:get_parser()
+   :prog: python -m zea.data.convert
