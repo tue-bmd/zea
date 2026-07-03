@@ -9,8 +9,7 @@ Usage::
 """
 
 import os
-import warnings
-from typing import Annotated, Optional, Sequence, Union
+from typing import Annotated, Union
 
 import zea
 
@@ -29,20 +28,9 @@ SubCmd = Union[
 ]
 
 
-def parse_args(argv: Optional[Sequence[str]] = None):
-    """Parse ``argv`` into a :class:`ProcessArgs` or :class:`AppArgs` instance.
-
-    Passing ``argv=None`` reads from ``sys.argv`` (normal CLI usage). A ``--help``
-    request or a parse error raises :class:`SystemExit`, matching tyro's behavior.
-    """
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        return tyro.cli(SubCmd, args=argv)  # ty: ignore[no-matching-overload]
-
-
 def main() -> None:
     """Dispatch to the requested subcommand using tyro for rich help output."""
-    args = parse_args()
+    args = tyro.cli(SubCmd)  # ty: ignore[no-matching-overload]
 
     if isinstance(args, DataArgs):
         # Data file operations run on the parsed data and do not need a compute device.

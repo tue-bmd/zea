@@ -4,9 +4,15 @@ import contextlib
 import io
 
 import pytest
+import tyro
 
-from zea.__main__ import parse_args
+from zea.__main__ import SubCmd
 from zea.cli_args import AppArgs, ProcessArgs
+
+
+def parse_args(argv):
+    return tyro.cli(SubCmd, args=argv)  # ty: ignore[no-matching-overload]
+
 
 # ── parser structure ──────────────────────────────────────────────────────────
 
@@ -117,10 +123,10 @@ def test_app_defaults():
     args = parse_args(["app"])
     assert isinstance(args, AppArgs)
     assert args.share is False
-    assert args.server_port == 7860
+    assert args.server_port is None
 
 
 def test_app_flags():
     args = parse_args(["app", "--share", "--server-port", "7861"])
     assert args.share is True
-    assert args.server_port is None
+    assert args.server_port == 7861
