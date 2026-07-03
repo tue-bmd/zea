@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from zea import Parameters
+from zea.data.file import CustomElement, File, load_file_all_data_types, validate_file
 from zea.data.file_operations import (
     compound_frames,
     compound_transmits,
@@ -18,7 +19,6 @@ from zea.data.file_operations import (
     save_file,
     sum_data,
 )
-from zea.data.file import CustomElement, File, load_file_all_data_types, validate_file
 
 from . import generate_dummy_scan, generate_example_dataset
 
@@ -169,7 +169,7 @@ def test_file_operations_cli_sum(tmp_hdf5_path):
     output_path = tmp_hdf5_path.parent / "summed_dataset.hdf5"
 
     os.system(
-        "python -m zea.data sum "
+        "python -m zea data sum "
         + str(path1)
         + " "
         + str(path2)
@@ -194,7 +194,7 @@ def test_file_operations_cli_extract(tmp_hdf5_path):
     generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
     os.system(
-        "python -m zea.data extract "
+        "python -m zea data extract "
         + str(input_path)
         + " "
         + str(output_path)
@@ -220,7 +220,7 @@ def test_file_operations_cli_resave(tmp_hdf5_path):
     # Create an example dataset
     generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
-    os.system("python -m zea.data resave " + str(input_path) + " " + str(output_path))
+    os.system("python -m zea data resave " + str(input_path) + " " + str(output_path))
 
     # Validate the resaved dataset
     validate_file(output_path)
@@ -236,7 +236,7 @@ def test_file_operations_cli_compound_frames(tmp_hdf5_path):
     # Create an example dataset
     generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
-    os.system("python -m zea.data compound_frames " + str(input_path) + " " + str(output_path))
+    os.system("python -m zea data compound_frames " + str(input_path) + " " + str(output_path))
 
     data_dict, parameters = load_file_all_data_types(output_path)
     data_dict = SimpleNamespace(**data_dict)
@@ -255,7 +255,7 @@ def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
     # Create an example dataset
     generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
-    os.system("python -m zea.data compound_transmits " + str(input_path) + " " + str(output_path))
+    os.system("python -m zea data compound_transmits " + str(input_path) + " " + str(output_path))
 
     data_dict, parameters = load_file_all_data_types(output_path)
     data_dict = SimpleNamespace(**data_dict)

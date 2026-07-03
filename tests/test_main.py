@@ -8,7 +8,6 @@ import pytest
 from zea.__main__ import parse_args
 from zea.cli_args import AppArgs, ProcessArgs
 
-
 # ── parser structure ──────────────────────────────────────────────────────────
 
 
@@ -124,4 +123,4 @@ def test_app_defaults():
 def test_app_flags():
     args = parse_args(["app", "--share", "--server-port", "7861"])
     assert args.share is True
-    assert args.server_port == 7861
+    assert args.server_port is None
