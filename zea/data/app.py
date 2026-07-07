@@ -14,7 +14,6 @@ import os
 import tempfile
 import threading
 import warnings
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +21,7 @@ import tyro
 from keras import ops
 
 from zea import display, io_lib
+from zea.cli_args import AppArgs
 from zea.config import Config
 from zea.data.dataloader import Dataloader
 from zea.data.datasets import Dataset
@@ -1860,16 +1860,6 @@ def build_interface() -> "gr.Blocks":
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
-
-
-@dataclass
-class AppArgs:
-    """Launch the zea Gradio visualizer."""
-
-    share: bool = False
-    """Create a public Gradio share link."""
-    server_port: int | None = None
-    """Port to listen on."""
 
 
 def main() -> None:

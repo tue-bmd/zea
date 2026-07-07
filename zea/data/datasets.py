@@ -292,15 +292,19 @@ def _copy_h5_files(file_paths, base_path, to_path, key, mode=None):
 
     if all_keys:
         key_msg = "Including all keys."
-        assert mode in ["w", "x"], (
-            "If you want to copy all keys, the destination file must be opened "
-            "in 'w' or 'x' mode, which means it will be overwritten or created."
-        )
+        if mode not in ["w", "x"]:
+            raise ValueError(
+                f"Invalid mode '{mode}' for copying all keys. Must be 'w' or 'x'."
+                "If you want to copy all keys, the destination file must be opened "
+                "in 'w' or 'x' mode, which means it will be overwritten or created."
+            )
     else:
         key_msg = f"Only copying key '{key}'."
-        assert mode in ["a", "w", "r+", "x"], (
-            f"Invalid mode '{mode}'. Must be one of 'a', 'w', 'r+', or 'x'."
-        )
+        if mode not in ["a", "w", "r+", "x"]:
+            raise ValueError(
+                f"Invalid mode '{mode}' for copying a specific key. "
+                "Must be one of 'a', 'w', 'r+', or 'x'."
+            )
 
     base_path = Path(base_path)
     to_path = Path(to_path)
