@@ -75,7 +75,7 @@ class ProcessArgs:
         ),
     ] = None
     save_as: Annotated[
-        str,
+        Literal[tuple(SUPPORTED_FORMATS)],  # ty: ignore[invalid-type-form]
         tyro.conf.arg(
             help=f"Output format. One of: {', '.join(SUPPORTED_FORMATS)}.",
         ),

@@ -9,16 +9,15 @@ Usage::
 """
 
 import os
+from dataclasses import dataclass
 from typing import Annotated, Union
 
-import zea
+import tyro
 
 if "ZEA_LOG_LEVEL" not in os.environ:
-    zea.log.set_level("WARNING")
+    from zea import log
 
-from dataclasses import dataclass
-
-import tyro
+    log.set_level("WARNING")
 
 from zea.cli_args import AppArgs, DataArgs, ProcessArgs
 
@@ -55,7 +54,7 @@ def _check_if_device_needed(subcommand) -> bool:
 
 def main() -> None:
     """Dispatch to the requested subcommand using tyro for rich help output."""
-    cli_args = tyro.cli(CLI)  # ty: ignore[no-matching-overload]
+    cli_args = tyro.cli(CLI)
     args = cli_args.subcommand
 
     # Check if device is needed for the subcommand
