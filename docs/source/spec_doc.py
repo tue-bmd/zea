@@ -341,7 +341,7 @@ MAP_DESCRIPTIONS = {
     "image": "Reconstructed (log-compressed) image. Values are ``uint8`` in (n_frames, z, x) or (n_frames, z, x, y).",  # noqa: E501
     "segmentation": "Semantic segmentation mask. Values are ``bool`` in (n_frames, z, x, y, n_labels); ``labels`` names each channel.",  # noqa: E501
     "sos_map": "Speed-of-sound map in m/s. Values are ``float32``.",
-    "attenuation_map": "Acoustic attenuation coefficient map in dB/cm/MHz (frequency-normalized). Values are ``float32``.",  # noqa: E501
+    "attenuation_map": "Acoustic attenuation coefficient map in dB/m/Hz (frequency-normalized), with a scalar power-law exponent ``gamma`` (alpha(f) = alpha_0 * f**gamma; default 1.0). Values are ``float32``.",  # noqa: E501
     "strain_percentage_map": "Strain map in %. Values are ``float32``.",
     "shear_wave_elastography_map": "Shear-wave elastography map in m/s. Values are ``float32``.",
     "tissue_doppler": "Tissue Doppler velocity map in m/s. Values are ``float32``.",

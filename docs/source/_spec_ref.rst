@@ -524,7 +524,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``attenuation_map``
 
-         Acoustic attenuation coefficient map in dB/cm/MHz (frequency-normalized). Values are ``float32``.
+         Acoustic attenuation coefficient map in dB/m/Hz (frequency-normalized), with a scalar power-law exponent ``gamma`` (alpha(f) = alpha_0 * f**gamma; default 1.0). Values are ``float32``.
 
          .. list-table::
             :header-rows: 1
@@ -579,6 +579,11 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - ``float32``
               - scalar
               - Maximum value of the map.
+              - |badge-opt|
+            * - ``gamma``
+              - ``float32``
+              - scalar
+              - Power-law exponent of the frequency dependence alpha(f) = alpha_0 * f**gamma. 1.0 is linear (soft tissue ~1-1.5, e.g. liver ~1.14), 2.0 for water.
               - |badge-opt|
 
       .. _spec-data-strain-percentage-map:
