@@ -359,7 +359,7 @@ def _add_parser_args_us4us(subparsers):
         type=Path,
         help=(
             "Source path: either a single .pkl file or a directory containing "
-            "one or more .pkl files (matched by *.pkl at the top level)."
+            "one or more .pkl files (matched by ``*.pkl`` at the top level)."
         ),
     )
     us4us_parser.add_argument(

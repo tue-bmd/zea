@@ -582,36 +582,34 @@ def convert_us4us(args):
     """Convert one or more us4us (arrus) pickle files to the zea HDF5 format.
 
     Args:
-        args: An object with the following attributes:
-            - **src** (*str | Path*): Path to a source ``.pkl`` file *or* a
-              directory containing one or more ``.pkl`` files (recursed via
-              ``glob("*.pkl")`` at the top level).
-            - **dst** (*str | Path*): Destination ``.hdf5`` file when *src* is
-              a file, or destination directory when *src* is a directory. In
-              the directory case, each input ``<name>.pkl`` is written as
+        args (argparse.Namespace): An object with attributes:
+
+            - src (str | Path): Source ``.pkl`` file, or a directory containing
+              one or more ``.pkl`` files (matched by ``*.pkl`` at the top level).
+            - dst (str | Path): Destination ``.hdf5`` file when ``src`` is a
+              file, or destination directory when ``src`` is a directory. In
+              the directory case each input ``<name>.pkl`` is written as
               ``<dst>/<name>.hdf5``.
-            - **mapping** (*dict*, optional): Maps each output index (integer)
-              in the per-frame tuple to a zea data type string.  For example::
+            - mapping (dict, optional): Maps each output index (integer) in
+              the per-frame tuple to a zea data type string, e.g.
+              ``{0: "image", 1: "beamformed_data", 2: "raw_data"}``. Supported
+              types: ``raw_data``, ``image``, ``beamformed_data``,
+              ``envelope_data``, ``aligned_data``. Defaults to ``{0: "image"}``.
+            - overwrite (bool, optional): When ``True``, existing destination
+              ``.hdf5`` files are replaced. Defaults to ``False`` so previously
+              converted outputs are never silently overwritten; the caller must
+              opt in explicitly (via ``--overwrite`` on the CLI or
+              ``args.overwrite = True`` in code).
 
-                  {0: "image", 1: "beamformed_data", 2: "raw_data"}
-
-              Supported types: ``"raw_data"``, ``"image"``,
-              ``"beamformed_data"``, ``"envelope_data"``, ``"aligned_data"``.
-              Defaults to ``{0: "image"}``.
-            - **overwrite** (*bool*, optional): When ``True``, existing
-              destination ``.hdf5`` files are replaced. Defaults to ``False``
-              so previously converted outputs are never silently overwritten;
-              the caller must opt in explicitly (via ``--overwrite`` on the
-              CLI or ``args.overwrite = True`` in code).
-
-    The function is intentionally lenient: arrus does **not** need to be
-    installed.  All arrus classes in the pickle are replaced with lightweight
+    The function is intentionally lenient: ``arrus`` does not need to be
+    installed. All arrus classes in the pickle are replaced with lightweight
     namespace stubs that preserve the original attribute values.
 
     Raises:
-        FileNotFoundError: If *src* does not exist, or if *src* is a directory
-            that contains no ``.pkl`` files.
-        ValueError: If a requested *mapping* value is not a known zea data type.
+        FileNotFoundError: If ``src`` does not exist, or if ``src`` is a
+            directory that contains no ``.pkl`` files.
+        ValueError: If a requested ``mapping`` value is not a supported us4us
+            converter data type.
     """
     src = Path(args.src)
     dst = Path(args.dst)
