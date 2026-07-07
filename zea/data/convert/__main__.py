@@ -41,12 +41,25 @@ def _parse_us4us_mapping(value: str) -> dict:
         raise argparse.ArgumentTypeError(
             f"--mapping must decode to a JSON object, got {type(parsed).__name__}"
         )
-    try:
-        return {int(k): v for k, v in parsed.items()}
-    except (TypeError, ValueError) as exc:
-        raise argparse.ArgumentTypeError(
-            f"--mapping keys must be integers, got {list(parsed.keys())}"
-        ) from exc
+    result: dict = {}
+    for raw_key, data_type in parsed.items():
+        try:
+            idx = int(raw_key)
+        except (TypeError, ValueError) as exc:
+            raise argparse.ArgumentTypeError(
+                f"--mapping keys must be integers, got {list(parsed.keys())}"
+            ) from exc
+        if idx < 0:
+            raise argparse.ArgumentTypeError(
+                f"--mapping keys must be non-negative pipeline output indices, got {raw_key!r}"
+            )
+        if idx in result:
+            raise argparse.ArgumentTypeError(
+                f"--mapping has duplicate index {idx} "
+                f"(keys {list(parsed.keys())} collide after int normalization)"
+            )
+        result[idx] = data_type
+    return result
 
 
 def _add_parser_args_echonet(subparsers):
