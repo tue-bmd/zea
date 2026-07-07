@@ -459,8 +459,19 @@ def _pick_scan_metadata(metadata_tuple, mapping: dict):
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def _convert_single_us4us_pickle(src: Path, dst: Path, mapping: dict) -> None:
-    """Convert one us4us ``.pkl`` file to a single zea ``.hdf5`` file."""
+def _convert_single_us4us_pickle(
+    src: Path, dst: Path, mapping: dict, *, overwrite: bool = False
+) -> None:
+    """Convert one us4us ``.pkl`` file to a single zea ``.hdf5`` file.
+
+    Args:
+        src: Source ``.pkl`` file.
+        dst: Destination ``.hdf5`` file.
+        mapping: Maps each pipeline output index to a zea data type string.
+        overwrite: When ``True``, an existing ``dst`` file is replaced.
+            When ``False`` (the default), :meth:`zea.File.create` raises
+            rather than silently overwriting an existing converted output.
+    """
     log.info(f"Loading us4us pickle: {log.yellow(src)}")
     data = _load_us4us_pickle(src)
 
@@ -527,7 +538,7 @@ def _convert_single_us4us_pickle(src: Path, dst: Path, mapping: dict) -> None:
             description="us4us (gui4us+arrus) data converted to zea format",
             us_machine="us4R",
             compression=DEFAULT_COMPRESSION,
-            overwrite=True,
+            overwrite=overwrite,
         )
     else:
         # NOTE: us4us "raw_data" can be either RF or IQ data. The following
@@ -544,7 +555,7 @@ def _convert_single_us4us_pickle(src: Path, dst: Path, mapping: dict) -> None:
             description="us4us (gui4us+arrus) data converted to zea format",
             us_machine="us4R",
             compression=DEFAULT_COMPRESSION,
-            overwrite=True,
+            overwrite=overwrite,
         )
 
     log.success(f"Converted {log.yellow(src)} → {log.yellow(dst)}")
@@ -570,6 +581,11 @@ def convert_us4us(args):
               Supported types: ``"raw_data"``, ``"image"``,
               ``"beamformed_data"``, ``"envelope_data"``, ``"aligned_data"``.
               Defaults to ``{0: "image"}``.
+            - **overwrite** (*bool*, optional): When ``True``, existing
+              destination ``.hdf5`` files are replaced. Defaults to ``False``
+              so previously converted outputs are never silently overwritten;
+              the caller must opt in explicitly (via ``--overwrite`` on the
+              CLI or ``args.overwrite = True`` in code).
 
     The function is intentionally lenient: arrus does **not** need to be
     installed.  All arrus classes in the pickle are replaced with lightweight
@@ -583,6 +599,7 @@ def convert_us4us(args):
     src = Path(args.src)
     dst = Path(args.dst)
     mapping: dict = getattr(args, "mapping", {0: "image"})
+    overwrite: bool = bool(getattr(args, "overwrite", False))
 
     if not src.exists():
         raise FileNotFoundError(f"Source path not found: {src}")
@@ -609,5 +626,5 @@ def convert_us4us(args):
         file_pairs = [(src, dst_file)]
 
     for src_pkl, dst_h5 in file_pairs:
-        _convert_single_us4us_pickle(src_pkl, dst_h5, mapping)
+        _convert_single_us4us_pickle(src_pkl, dst_h5, mapping, overwrite=overwrite)
 

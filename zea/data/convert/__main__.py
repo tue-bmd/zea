@@ -382,6 +382,15 @@ def _add_parser_args_us4us(subparsers):
             "aligned_data. Defaults to '{\"0\": \"image\"}'."
         ),
     )
+    us4us_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help=(
+            "Overwrite existing destination .hdf5 files. Off by default so a "
+            "second conversion run cannot silently replace previously converted "
+            "outputs; you must pass --overwrite explicitly to opt in."
+        ),
+    )
 
 
 def get_parser():
