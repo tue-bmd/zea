@@ -55,7 +55,24 @@ import numpy as np
 
 from zea import log
 from zea.data.file import File
-from zea.data.spec import DEFAULT_COMPRESSION, DataSpec
+from zea.data.spec import DEFAULT_COMPRESSION
+
+
+# Converter-local allowlist of zea data types this module actually knows how
+# to build in :func:`_prepare_output` and hand to :meth:`zea.File.create`.
+# Kept intentionally narrower than ``DataSpec.SCHEMA``: the broader schema
+# contains data types that no branch of ``_prepare_output`` produces, so
+# accepting them here would silently fall through to the generic fallback and
+# emit arrays that neither ``File.create`` nor downstream readers understand
+# for that slot.  Any new supported type must both get an explicit branch in
+# ``_prepare_output`` *and* be added here.
+_SUPPORTED_MAPPING_DATA_TYPES: frozenset[str] = frozenset({
+    "raw_data",
+    "image",
+    "beamformed_data",
+    "envelope_data",
+    "aligned_data",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -604,12 +621,12 @@ def convert_us4us(args):
     if not src.exists():
         raise FileNotFoundError(f"Source path not found: {src}")
 
-    valid_data_types = set(DataSpec.SCHEMA.keys())
-    unknown = set(mapping.values()) - valid_data_types
+    unknown = set(mapping.values()) - _SUPPORTED_MAPPING_DATA_TYPES
     if unknown:
         raise ValueError(
-            f"Unknown zea data type(s) in mapping: {unknown}. "
-            f"Supported types: {sorted(valid_data_types)}"
+            f"Unknown zea data type(s) in mapping: {sorted(unknown)}. "
+            "The us4us converter supports only the types it can build in "
+            f"_prepare_output: {sorted(_SUPPORTED_MAPPING_DATA_TYPES)}."
         )
 
     if src.is_dir():
