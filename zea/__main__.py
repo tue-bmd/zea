@@ -16,30 +16,53 @@ import zea
 if "ZEA_LOG_LEVEL" not in os.environ:
     zea.log.set_level("WARNING")
 
+from dataclasses import dataclass
+
 import tyro
 
 from zea.cli_args import AppArgs, DataArgs, ProcessArgs
 
-# Top-level CLI: a union of subcommands, each tagged with its command name.
-SubCmd = Union[
-    Annotated[ProcessArgs, tyro.conf.subcommand("process")],
-    Annotated[AppArgs, tyro.conf.subcommand("app")],
-    Annotated[DataArgs, tyro.conf.subcommand("data")],
-]
+# subcommands that don't require a device
+_NO_DEVICE_FNS = [DataArgs]
+
+
+@dataclass
+class CLI:
+    """Top-level CLI with global arguments and subcommands."""
+
+    subcommand: tyro.conf.OmitSubcommandPrefixes[
+        Union[
+            Annotated[ProcessArgs, tyro.conf.subcommand("process")],
+            Annotated[AppArgs, tyro.conf.subcommand("app")],
+            Annotated[DataArgs, tyro.conf.subcommand("data")],
+        ]
+    ]
+    device: Annotated[
+        tyro.conf.CascadeSubcommandArgs[str],
+        tyro.conf.arg(help="Compute device passed to init_device (e.g. 'cpu', 'auto:1')."),
+    ] = "auto:1"
+
+
+def _check_if_device_needed(subcommand) -> bool:
+    """Check if the subcommand requires a device."""
+    if subcommand.__class__ in _NO_DEVICE_FNS:
+        return False
+    if hasattr(subcommand, "subcommand"):
+        return _check_if_device_needed(subcommand.subcommand)
+
+    return True
 
 
 def main() -> None:
     """Dispatch to the requested subcommand using tyro for rich help output."""
-    args = tyro.cli(SubCmd)  # ty: ignore[no-matching-overload]
+    cli_args = tyro.cli(CLI)  # ty: ignore[no-matching-overload]
+    args = cli_args.subcommand
 
-    if isinstance(args, DataArgs):
-        # Data file operations run on the parsed data and do not need a compute device.
-        args.run()
-        return
+    # Check if device is needed for the subcommand
+    if _check_if_device_needed(args):
+        from zea.internal.device import init_device
 
-    from zea.internal.device import init_device
-
-    init_device(args.device)
+        init_device(cli_args.device)
 
     if isinstance(args, ProcessArgs):
         from zea.data.process import run_processing
@@ -77,6 +100,10 @@ def main() -> None:
             theme=gr.themes.Soft(primary_hue="violet", secondary_hue="yellow"),
             css=CSS,
         )
+    elif isinstance(args, DataArgs):
+        args.run()
+    else:
+        raise ValueError(f"Unknown command: {args}")
 
 
 if __name__ == "__main__":

@@ -23,7 +23,6 @@ from zea.data.datasets import Dataset
 from zea.data.file import File
 from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
-from zea.internal.device import init_device
 from zea.ops.pipeline import Pipeline
 from zea.utils import FunctionTimer
 
@@ -313,7 +312,6 @@ def run_processing(
 
 def main() -> None:
     args = tyro.cli(ProcessArgs)
-    init_device(args.device)
     run_processing(
         args.dataset,
         args.config,

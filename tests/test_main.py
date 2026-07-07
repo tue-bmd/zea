@@ -6,12 +6,12 @@ import io
 import pytest
 import tyro
 
-from zea.__main__ import SubCmd
+from zea.__main__ import CLI
 from zea.cli_args import AppArgs, ProcessArgs
 
 
 def parse_args(argv):
-    return tyro.cli(SubCmd, args=argv)  # ty: ignore[no-matching-overload]
+    return tyro.cli(CLI, args=argv)  # ty: ignore[no-matching-overload]
 
 
 # ── parser structure ──────────────────────────────────────────────────────────

@@ -12,7 +12,7 @@ Note that is very new functionality, and might change in future releases. Please
     zea app [--share] [--server-port PORT]                         # launch the Gradio visualizer
     zea data <operation> [options]                                 # manipulate zea data files
 
-.. tyroprogram:: zea.__main__:SubCmd
+.. tyroprogram:: zea.__main__:CLI
    :prog: zea
 
 -------------------------------

@@ -13,7 +13,7 @@ Usage in reStructuredText::
     Command line interface
     ======================
 
-    .. tyroprogram:: zea.__main__:SubCmd
+    .. tyroprogram:: zea.__main__:CLI
        :prog: zea
 
 The directive argument is ``module:expr`` where ``expr`` evaluates to the type or

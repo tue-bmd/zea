@@ -35,10 +35,6 @@ class AppArgs:
             "port starting at 7860. Defaults to None."
         ),
     ] = None
-    device: Annotated[
-        str,
-        tyro.conf.arg(help="Compute device passed to init_device (e.g. 'cpu', 'auto:1')."),
-    ] = "auto:1"
 
 
 @dataclass
@@ -129,15 +125,6 @@ class ProcessArgs:
             "Only valid when --save-as hdf5."
         ),
     ] = False
-    device: Annotated[
-        str,
-        tyro.conf.arg(
-            help=(
-                "Compute device ('cuda:0', 'cpu', 'auto:1', …). "
-                "Only relevant when running the beamformer pipeline."
-            ),
-        ),
-    ] = "auto:1"
 
 
 # ── Data file manipulation subcommands (``zea data …``) ───────────────────────
@@ -332,7 +319,7 @@ class DataArgs:
     mirrored path in the output folder.
     """
 
-    command: tyro.conf.OmitSubcommandPrefixes[DataCommand]
+    subcommand: tyro.conf.OmitSubcommandPrefixes[DataCommand]
 
     def run(self) -> None:
-        _run_data_command(self.command)
+        _run_data_command(self.subcommand)
