@@ -895,7 +895,10 @@ def verify_converted_us4us_test_data(src, dst):
     src_pickle_data = _load_us4us_pickle(src_pkl)
     expected_n_frames = len(src_pickle_data["data"])
     expected_image_shape = src_pickle_data["data"][0][0].shape
-    expected_beamformed_shape = src_pickle_data["data"][0][1].shape
+
+    src_beamformed = src_pickle_data["data"][0][1]
+    _, n_tx, n_ax = src_beamformed.shape
+    expected_beamformed_stacked_shape = (expected_n_frames, n_ax, n_tx, 2)
 
     with File(h5_file, "r") as f:
         assert "probe" in f, f"Missing 'probe' in {h5_file}"
@@ -917,11 +920,11 @@ def verify_converted_us4us_test_data(src, dst):
             f"{list(tracks[1].data.keys())})."
         )
         beamformed_values = tracks[1].data.beamformed_data.values[:]
-        expected_beamformed_stacked_shape = (expected_n_frames, *expected_beamformed_shape)
         assert beamformed_values.shape == expected_beamformed_stacked_shape, (
             f"track_1 beamformed_data shape {beamformed_values.shape} does not "
-            f"match the per-frame pickle beamformed_data stacked across frames "
-            f"({expected_beamformed_stacked_shape})."
+            f"match the expected (n_frames, n_ax, n_tx, 2) shape "
+            f"({expected_beamformed_stacked_shape}) derived from the per-frame "
+            f"pickle beamformed_data ({src_beamformed.shape})."
         )
 
         f.validate()
