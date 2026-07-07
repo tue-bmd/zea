@@ -19,8 +19,10 @@ def parse_args(argv):
 
 def test_subcommands_exist():
     """Both 'process' and 'app' subcommands must be registered."""
-    assert isinstance(parse_args(["process", "-d", "data/", "-c", "cfg.yaml"]), ProcessArgs)
-    assert isinstance(parse_args(["app"]), AppArgs)
+    assert isinstance(
+        parse_args(["process", "-d", "data/", "-c", "cfg.yaml"]).subcommand, ProcessArgs
+    )
+    assert isinstance(parse_args(["app"]).subcommand, AppArgs)
 
 
 def test_no_subcommand_exits_nonzero():
@@ -43,7 +45,8 @@ def test_process_help_exits_zero():
 
 
 def test_process_parses_required_flags():
-    args = parse_args(["process", "--dataset", "hf://zeahub/data", "--config", "cfg.yaml"])
+    cli_args = parse_args(["process", "--dataset", "hf://zeahub/data", "--config", "cfg.yaml"])
+    args = cli_args.subcommand
     assert isinstance(args, ProcessArgs)
     assert args.dataset == "hf://zeahub/data"
     assert args.config == "cfg.yaml"
@@ -51,7 +54,7 @@ def test_process_parses_required_flags():
 
 
 def test_process_short_flags():
-    args = parse_args(
+    cli_args = parse_args(
         [
             "process",
             "-d",
@@ -60,12 +63,13 @@ def test_process_short_flags():
             "cfg.yaml",
         ]
     )
+    args = cli_args.subcommand
     assert args.dataset == "hf://zeahub/data"
     assert args.config == "cfg.yaml"
 
 
 def test_process_optional_args():
-    args = parse_args(
+    cli_args = parse_args(
         [
             "process",
             "--dataset",
@@ -82,6 +86,7 @@ def test_process_optional_args():
             "mp4",
         ]
     )
+    args = cli_args.subcommand
     assert args.config == "config.yaml"
     assert str(args.save_dir) == "/tmp/out"
     assert args.revision == "v0.1.0"
@@ -90,7 +95,8 @@ def test_process_optional_args():
 
 
 def test_process_defaults():
-    args = parse_args(["process", "--dataset", "data/", "--config", "cfg.yaml"])
+    cli_args = parse_args(["process", "--dataset", "data/", "--config", "cfg.yaml"])
+    args = cli_args.subcommand
     assert args.key == "data/raw_data"
     assert args.n_frames is None
     assert args.save_as == "gif"
@@ -102,9 +108,10 @@ def test_process_defaults():
 
 
 def test_process_boolean_flags():
-    args = parse_args(
+    cli_args = parse_args(
         ["process", "-d", "data/", "-c", "cfg.yaml", "--overwrite", "--keep-dynamic-range"]
     )
+    args = cli_args.subcommand
     assert args.overwrite is True
     assert args.keep_dynamic_range is True
 
@@ -120,13 +127,15 @@ def test_app_help_exits_zero():
 
 
 def test_app_defaults():
-    args = parse_args(["app"])
+    cli_args = parse_args(["app"])
+    args = cli_args.subcommand
     assert isinstance(args, AppArgs)
     assert args.share is False
     assert args.server_port is None
 
 
 def test_app_flags():
-    args = parse_args(["app", "--share", "--server-port", "7861"])
+    cli_args = parse_args(["app", "--share", "--server-port", "7861"])
+    args = cli_args.subcommand
     assert args.share is True
     assert args.server_port == 7861
