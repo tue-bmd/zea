@@ -808,13 +808,13 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - ``float32``
            - (n_tx, n_el)
            - –
-           - Transmit apodization per element.
+           - Transmit apodization per element, in [-1, 1]. 0 = element did not contribute, 1 = full contribution, negative = fired with opposite polarity.
            - |badge-req|
          * - ``focus_distances``
            - ``float32``
            - (n_tx)
            - m
-           - Transmit focus distances.
+           - Transmit focus distances. Positive = focused, negative = diverging (virtual source behind the array), ``np.inf`` = plane wave (preferred; ``0`` is also accepted).
            - |badge-req|
          * - ``transmit_origins``
            - ``float32``

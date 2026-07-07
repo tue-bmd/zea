@@ -1225,9 +1225,22 @@ class ScanSpec(Spec):
             full contribution. Negative values indicate that the element was
             fired with opposite polarity.
         focus_distances: The transmit focus distances in meters of shape (n_tx,).
-            This is the distance from the origin point on the transducer to
-            where the beam comes to focus. For planewaves this is set to
-            infinity or zero.
+            This is the distance from the transmit origin on the transducer to
+            where the beam comes to focus. The sign and magnitude encode the
+            transmit type:
+
+            - **positive finite**: focused transmit; the beam focuses at this
+              distance in front of the array.
+            - **negative finite**: diverging transmit; the (virtual) source
+              lies this distance behind the array.
+            - **infinite** (``np.inf``): plane wave. This is the preferred,
+              canonical value for plane waves in zea. ``0.0`` is also accepted
+              as a plane-wave marker (e.g. raw Verasonics data stores ``0``),
+              but new data should use ``np.inf``.
+
+            See :meth:`zea.Parameters.find_transmits` for how these values are
+            used to classify transmits as ``"focused"``, ``"diverging"`` or
+            ``"plane"``.
         transmit_origins: The transmit origins of the transmit beams in meters of
             shape (n_tx, 3). This is the (x, y, z) position from which the beam
             is transmitted.
@@ -1300,8 +1313,21 @@ class ScanSpec(Spec):
         "demodulation_frequency": {"unit": "Hz", "description": "Demodulation frequency."},
         "initial_times": {"unit": "s", "description": "A/D converter start times per transmit."},
         "t0_delays": {"unit": "s", "description": "Transmit delays per element."},
-        "tx_apodizations": {"unit": "–", "description": "Transmit apodization per element."},
-        "focus_distances": {"unit": "m", "description": "Transmit focus distances."},
+        "tx_apodizations": {
+            "unit": "–",
+            "description": (
+                "Transmit apodization per element, in [-1, 1]. 0 = element did not "
+                "contribute, 1 = full contribution, negative = fired with opposite polarity."
+            ),
+        },
+        "focus_distances": {
+            "unit": "m",
+            "description": (
+                "Transmit focus distances. Positive = focused, negative = diverging "
+                "(virtual source behind the array), ``np.inf`` = plane wave (preferred; "
+                "``0`` is also accepted)."
+            ),
+        },
         "transmit_origins": {"unit": "m", "description": "Transmit beam origins (x, y, z)."},
         "polar_angles": {"unit": "rad", "description": "Polar angles of transmit beams."},
         "time_to_next_transmit": {"unit": "s", "description": "Time between transmit events."},
@@ -1956,33 +1982,79 @@ class TrackSpec(Spec):
     field of the parent :class:`FileSpec`, if necessary.
     Single-track files may omit the label.
 
+    A track must carry at least one of ``data`` or ``scan``.  ``data`` may be
+    left as ``None`` to describe a transmit-only track (one that records the
+    transmit sequence via ``scan`` but stores no recorded data), but only when
+    ``scan`` is provided and ``transmit_only=True`` is explicitly passed.
+
+    A transmit-only track is useful when we want to store information about a
+    transmit event without any corresponding receive data, for example a shear
+    wave push pulse or therapeutic ultrasound.
+
     Args:
-        data (DataSpec | dict): The data for this track.
+        data (DataSpec | dict | None): The data for this track. May be ``None``
+            for a transmit-only track (e.g. to store a shear wave push pulse),
+            but only if ``scan`` is provided and ``transmit_only=True``.
         scan (ScanSpec | dict | None): The scan parameters for this track. Required when raw_data is
-            present in *data*.
+            present in *data*, and required when *data* is ``None``.
         label (str | None): Short human-readable name for this track (e.g. ``"focused"``
             or ``"planewave"``).  Required when the parent :class:`FileSpec`
             contains more than one track.
+        transmit_only (bool): Must be explicitly set to ``True`` to construct a
+            transmit-only track (``data=None`` with ``scan`` provided).
     """
 
-    data: DataSpec | dict
+    data: DataSpec | dict | None = None
     scan: ScanSpec | dict | None = None
     label: str | None = None
+    transmit_only: bool = False
 
     SCHEMA = {
         "data": {"spec": DataSpec},
         "scan": {"spec": ScanSpec},
         "label": {"dtype": str, "shape": ()},
+        "transmit_only": {"dtype": np.bool_, "shape": ()},
     }
 
     FIELD_METADATA = {
         # label is enforced by FileSpec for multi-track (ValueError), and legitimately
         # absent for single-track files — warning here is never useful.
         "label": {"unit": "–", "description": "Short human-readable track name.", "rare": True},
+        "transmit_only": {
+            "unit": "–",
+            "description": (
+                "Whether this track records only the transmit sequence with no "
+                "corresponding receive data (e.g. a shear wave push pulse or "
+                "therapeutic ultrasound)."
+            ),
+            "rare": True,
+        },
     }
 
     def __post_init__(self):
         super().__post_init__()
+
+        if self.data is None and self.scan is None:
+            raise ValueError(
+                "A track must have at least one of 'data' or 'scan'. "
+                "'data' may be None (a transmit-only track) only when 'scan' is provided "
+                "and 'transmit_only=True' is explicitly set."
+            )
+
+        if self.data is None and self.scan is not None and not self.transmit_only:
+            raise ValueError(
+                "'data' is None but 'transmit_only' was not set to True. "
+                "Pass 'transmit_only=True' to explicitly create a transmit-only track "
+                "(one that records only the transmit sequence via 'scan', with no "
+                "corresponding receive data, e.g. a shear wave push pulse or "
+                "therapeutic ultrasound exposure)."
+            )
+
+        if self.transmit_only and self.data is not None:
+            raise ValueError(
+                "'transmit_only=True' was set but 'data' is not None. "
+                "A transmit-only track must not carry data."
+            )
 
         data = self.data
         has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
@@ -2297,7 +2369,7 @@ class FileSpec(Spec):
         """Pad flat timing arrays and reshape to (n_frames * n_tx) by padding last
         frame with a zero."""
         for i, track in enumerate(self.tracks):
-            raw_data = track.data.raw_data
+            raw_data = track.data.raw_data if track.data is not None else None
             scan = track.scan
             if raw_data is None or scan is None or scan.time_to_next_transmit is None:
                 continue

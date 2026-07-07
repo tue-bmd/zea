@@ -786,6 +786,36 @@ def test_band_pass_filter():
     return result_default
 
 
+def test_band_pass_filter_validates_in_eager_mode():
+    """Frequency validation in BandPassFilter.call must run in eager (non-JIT) mode."""
+    import keras
+
+    from zea import ops
+
+    data = keras.ops.ones((1, 2, 128, 4, 1), dtype="float32")
+
+    # Eager (jit_compile=False): invalid frequencies must raise.
+    op = ops.BandPassFilter(
+        axis=-3,
+        with_batch_dim=True,
+        passband=(100e6, 200e6),  # far above Nyquist — always invalid
+        jit_compile=False,
+    )
+    with pytest.raises(ValueError, match="Invalid cutoff frequency"):
+        op(data=data, sampling_frequency=40e6)
+
+    # jit_compile=True: values are abstract inside the JIT trace, so float() fails
+    # and the try/except in get_band_pass_filter silently skips validation. This is a
+    # known limitation — test that it at least does not crash with valid frequencies.
+    op_jit = ops.BandPassFilter(
+        axis=-3,
+        with_batch_dim=True,
+        passband=(3.5e6, 6.5e6),
+        jit_compile=True,
+    )
+    op_jit(data=data, sampling_frequency=40e6)  # must not raise
+
+
 def test_make_tgc_curve():
     """Test that TGC curve is monotonically increasing with depth."""
     n_ax = 1000
