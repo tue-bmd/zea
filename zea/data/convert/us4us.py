@@ -481,6 +481,23 @@ def _convert_single_us4us_pickle(src: Path, dst: Path, mapping: dict) -> None:
     probe_dict = _extract_probe_dict(probe_dto, context.raw_sequence.ops)
     scan_dict = _extract_scan_dict(context, data_char, n_frames)
 
+    # Reject duplicate target data types: two pipeline outputs mapped to the
+    # same zea data type (e.g. ``{"0": "image", "1": "image"}``) would silently
+    # overwrite each other in ``outputs`` below, since ``outputs`` is keyed by
+    # ``data_type``.  The current data model has one slot per data type, so
+    # this must be rejected up-front rather than emitting a lossy file.
+    seen: dict[str, int] = {}
+    for output_idx, data_type in mapping.items():
+        if data_type in seen:
+            raise ValueError(
+                f"mapping assigns data type {data_type!r} to multiple pipeline "
+                f"outputs (indices {seen[data_type]} and {output_idx}). Each "
+                "zea data type can only be written once per file; pick a "
+                "different data type for one of them (e.g. 'image' vs "
+                "'beamformed_data')."
+            )
+        seen[data_type] = output_idx
+
     # Build per-output data dicts
     raw_ops = context.raw_sequence.ops
     outputs: dict[str, dict | np.ndarray] = {}
