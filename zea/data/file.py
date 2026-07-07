@@ -240,6 +240,7 @@ if TYPE_CHECKING:
         image: _SpatialMapProxy
         segmentation: _SpatialMapProxy
         sos_map: _SpatialMapProxy
+        attenuation_map: _SpatialMapProxy
         strain_percentage_map: _SpatialMapProxy
         shear_wave_elastography_map: _SpatialMapProxy
         tissue_doppler: _SpatialMapProxy

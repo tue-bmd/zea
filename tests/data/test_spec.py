@@ -9,6 +9,7 @@ from zea.data import spec as spec_module
 from zea.data.file import File
 from zea.data.spec import (
     Annotations,
+    AttenuationMap,
     DataSpec,
     FileSpec,
     Image,
@@ -162,6 +163,10 @@ def _example_data(n_frames, n_tx, n_el, n_ax, n_ch):
         },
         "sos_map": {
             "values": np.full((n_frames, 16, 12, 1), 1540.0, dtype=np.float32),
+            "coordinates": coords_3d,
+        },
+        "attenuation_map": {
+            "values": np.full((n_frames, 16, 12, 1), 5e-5, dtype=np.float32),
             "coordinates": coords_3d,
         },
         "strain": {
@@ -812,6 +817,70 @@ class TestDataValidationErrors:
                 values=np.zeros((2, 16, 12, 1), dtype=np.uint8),
                 coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
             )
+
+    def test_attenuation_map_rejects_wrong_unit(self):
+        """AttenuationMap enforces a canonical unit of dB/m/Hz (not clinical dB/cm/MHz)."""
+        with pytest.raises(ValueError, match="Attenuation map unit should be 'dB/m/Hz'"):
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), 5e-5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+                unit="dB/cm/MHz",
+            )
+
+    def test_attenuation_map_accepts_canonical_unit(self):
+        """AttenuationMap accepts float32 values with the dB/m/Hz unit."""
+        att = AttenuationMap(
+            values=np.full((2, 16, 12, 1), 7e-5, dtype=np.float32),
+            coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            unit="dB/m/Hz",
+        )
+        assert att.values.dtype == np.float32
+
+    def test_attenuation_map_gamma_defaults_to_linear(self):
+        """gamma defaults to 1.0 (linear frequency dependence) and is stored as float32."""
+        att = AttenuationMap(
+            values=np.full((2, 16, 12, 1), 5e-5, dtype=np.float32),
+            coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+        )
+        assert att.gamma == 1.0
+        assert np.dtype(np.asarray(att.gamma).dtype) == np.float32
+
+    def test_attenuation_map_accepts_gamma(self):
+        """A non-linear power-law exponent (e.g. water gamma=2) is accepted and cast to float32."""
+        att = AttenuationMap(
+            values=np.full((2, 16, 12, 1), 5e-5, dtype=np.float32),
+            coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            gamma=2.0,
+        )
+        assert att.gamma == np.float32(2.0)
+
+    def test_attenuation_map_warns_on_implausible_gamma(self):
+        """A power-law exponent outside the physically typical (0, 2] range warns."""
+        with patch.object(spec_module.log, "warning") as mock_warning:
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), 5e-5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+                gamma=3.0,
+            )
+        assert any("gamma" in str(c) for c in mock_warning.call_args_list)
+
+    def test_attenuation_map_warns_on_clinical_unit_magnitude(self):
+        """Values sized like dB/cm/MHz (~0.5) are far too large for dB/m/Hz and warn."""
+        with patch.object(spec_module.log, "warning") as mock_warning:
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), 0.5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            )
+        assert any("dB/m/Hz" in str(c) for c in mock_warning.call_args_list)
+
+    def test_attenuation_map_warns_on_negative_values(self):
+        """Negative attenuation coefficients are physically unexpected and warn."""
+        with patch.object(spec_module.log, "warning") as mock_warning:
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), -5e-5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            )
+        assert any("negative values" in str(c) for c in mock_warning.call_args_list)
 
     def test_image_wrong_pixel_dtype_raises(self):
         """Image is UnsignedIntMap – values must be float32 or uint8, not complex128."""

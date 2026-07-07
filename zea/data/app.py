@@ -81,6 +81,7 @@ _DATA_KEYS = [
     "data/image/values",
     "data/segmentation/values",
     "data/sos_map/values",
+    "data/attenuation_map/values",
 ]
 
 # ── Presets ───────────────────────────────────────────────────────────────────
