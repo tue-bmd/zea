@@ -105,7 +105,10 @@ builds a pipeline, and saves it to YAML below:
        from zea.ops import Normalize, Operation
 
 
-       @ops_registry("my_project.my_ops.MyScale")
+       # Defined in this script, so register under "__main__". In a real project,
+       # register under your module path (e.g. "my_project.my_ops.MyScale") so the
+       # saved YAML can be loaded from anywhere, as described above.
+       @ops_registry("__main__.MyScale")
        class MyScale(Operation):
            """Scale the input data by a constant factor."""
 
