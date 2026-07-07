@@ -34,9 +34,7 @@ def _parse_us4us_mapping(value: str) -> dict:
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError as exc:
-        raise argparse.ArgumentTypeError(
-            f"Invalid JSON for --mapping: {value!r} ({exc})"
-        ) from exc
+        raise argparse.ArgumentTypeError(f"Invalid JSON for --mapping: {value!r} ({exc})") from exc
     if not isinstance(parsed, dict):
         raise argparse.ArgumentTypeError(
             f"--mapping must decode to a JSON object, got {type(parsed).__name__}"
@@ -379,7 +377,7 @@ def _add_parser_args_us4us(subparsers):
             "JSON string mapping pipeline output indices to zea data types. "
             'Example: \'{"0": "image", "2": "raw_data"}\'. '
             "Supported types: raw_data, image, beamformed_data, envelope_data, "
-            "aligned_data. Defaults to '{\"0\": \"image\"}'."
+            'aligned_data. Defaults to \'{"0": "image"}\'.'
         ),
     )
     us4us_parser.add_argument(

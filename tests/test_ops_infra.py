@@ -406,16 +406,161 @@ def test_pipeline_with_elementwise_operation():
 def test_pipeline_jit_options():
     """Tests the JIT options for the Pipeline."""
     operations = [MultiplyOperation(), AddOperation()]
+
     pipeline = ops.Pipeline(operations=operations, jit_options="pipeline")
-    assert callable(pipeline.call)
+    # Pipeline itself is JIT-compiled; individual ops are not (they run inside the outer JIT)
+    assert pipeline._call_pipeline is not pipeline.call
+    for operation in pipeline.operations:
+        assert operation._jit_compile is False
 
     pipeline = ops.Pipeline(operations=operations, jit_options="ops")
+    # Pipeline itself is not JIT-compiled; each op is
+    assert pipeline._call_pipeline.__func__ is pipeline.call.__func__
     for operation in pipeline.operations:
         assert operation._jit_compile is True
 
     pipeline = ops.Pipeline(operations=operations, jit_options=None)
+    # Nothing is JIT-compiled
+    assert pipeline._call_pipeline.__func__ is pipeline.call.__func__
     for operation in pipeline.operations:
         assert operation._jit_compile is False
+
+
+def test_pipeline_jit_options_pipeline_does_not_jit_nested_map():
+    """jit_options='pipeline' should JIT only the parent pipeline, not nested pipelines like Map."""
+    inner_map = Map(
+        operations=[AddOperation()],
+        argnames="x",
+        jit_options=None,
+    )
+    pipeline = ops.Pipeline(
+        operations=[MultiplyOperation(), inner_map],
+        jit_options="pipeline",
+    )
+
+    # Parent pipeline should be JIT-compiled (its call wrapper is replaced by a jitted function)
+    assert pipeline._call_pipeline is not pipeline.call
+
+    # Nested Map should NOT be independently JIT-compiled; its jit_options must remain None
+    assert inner_map.jit_options is None
+    # _jittable_call must be the unwrapped method, not a jit-compiled callable
+    assert inner_map._jittable_call.__func__ is inner_map.jittable_call.__func__
+
+
+def test_map_inside_outer_jit_does_not_disable_vmap_jit():
+    """Map nested in a jit_options='pipeline' parent must not disable its internal vmap JIT.
+
+    disable_jit=True causes vmap to fall back to a Python for-loop (simple_map), which
+    unrolls inside the outer JIT trace and is catastrophic for large inputs.
+    """
+    inner_map = Map(
+        operations=[AddOperation()],
+        argnames="x",
+        chunks=4,
+        jit_options=None,
+    )
+    # Standalone with jit_options=None: disable_jit should be True (no JIT anywhere)
+    assert inner_map._inside_outer_jit is False
+
+    ops.Pipeline(
+        operations=[MultiplyOperation(), inner_map],
+        jit_options="pipeline",
+    )
+
+    # Nested inside a "pipeline" parent: disable_jit must be False so that
+    # vmap uses ops.map / jax.vmap rather than the Python-loop fallback.
+    assert inner_map._inside_outer_jit is True
+
+    # A truly standalone Map (never nested) stays out of any outer JIT.
+    standalone = Map(operations=[AddOperation()], argnames="x", chunks=4, jit_options="ops")
+    assert standalone._inside_outer_jit is False
+
+
+def test_inside_outer_jit_propagates_transitively():
+    """jit_options='pipeline' must mark every descendant (any depth) as inside the outer JIT."""
+    leaf_op = AddOperation()
+    deep_map = Map(operations=[leaf_op], argnames="x", chunks=2, jit_options=None)
+    middle = ops.Pipeline(operations=[deep_map], jit_options=None)
+    root = ops.Pipeline(operations=[MultiplyOperation(), middle], jit_options="pipeline")
+
+    # The nested pipeline, the Map two levels down, and the Map's inner op must all
+    # know they run inside the root's JIT trace.
+    assert root.jit_options == "pipeline"
+    assert middle._inside_outer_jit is True
+    assert middle.jit_options is None  # forced off: it must not self-JIT inside the outer trace
+    assert deep_map._inside_outer_jit is True
+    assert leaf_op._inside_outer_jit is True
+    assert leaf_op._is_jitted is True
+
+
+def test_invalid_jit_options_raises():
+    """Invalid jit_options must raise ValueError in Pipeline and Map, at init and on set."""
+    with pytest.raises(ValueError, match="jit_options must be"):
+        ops.Pipeline([AddOperation()], jit_options="bogus")
+
+    with pytest.raises(ValueError, match="jit_options must be"):
+        Map([AddOperation()], argnames="x", jit_options="bogus")
+
+    pipeline = ops.Pipeline([AddOperation()], jit_options=None)
+    with pytest.raises(ValueError, match="jit_options must be"):
+        pipeline.jit_options = "bogus"
+
+    mapped = Map([AddOperation()], argnames="x", jit_options=None)
+    with pytest.raises(ValueError, match="jit_options must be"):
+        mapped.jit_options = "bogus"
+
+
+def test_map_configures_jit_on_nested_pipeline():
+    """A nested Pipeline inside a Map must be forced to None and marked inside the outer JIT."""
+    inner = ops.Pipeline([AddOperation()], jit_options="ops")
+    Map([inner], argnames="x", jit_options="ops")
+
+    # Map owns the JIT scope: its nested pipeline must not self-JIT and runs inside Map's trace.
+    assert inner.jit_options is None
+    assert inner._inside_outer_jit is True
+
+
+def test_prepare_parameters_rejects_non_parameters():
+    """prepare_parameters must reject anything that is not a zea.Parameters instance."""
+    pipeline = ops.Pipeline([AddOperation()], jit_options=None)
+    with pytest.raises(TypeError, match="Expected an instance of"):
+        pipeline.prepare_parameters({"not": "parameters"})
+
+
+def test_make_operation_chain_passthrough_and_bad_type():
+    """make_operation_chain keeps pre-built instances as-is and rejects unsupported types."""
+    from zea.ops.pipeline import make_operation_chain
+
+    op = AddOperation()
+    inner_pipeline = ops.Pipeline([MultiplyOperation()], jit_options=None)
+
+    # Pre-instantiated Operation and Pipeline objects are passed through unchanged.
+    chain = make_operation_chain([op, inner_pipeline, "add"])
+    assert chain[0] is op
+    assert chain[1] is inner_pipeline
+    assert isinstance(chain[2], AddOperation)
+
+    # An unsupported entry type raises TypeError.
+    with pytest.raises(TypeError, match="should be a string"):
+        make_operation_chain([12345])
+
+
+def test_scan_convert_guard_fires_inside_outer_jit():
+    """ScanConvert must demand explicit coordinates whenever it runs inside a JIT trace."""
+    img = keras.ops.ones((4, 8), dtype="float32")
+
+    # jit_options='pipeline': the op does not self-JIT but runs inside the outer trace.
+    scan_op = ops.ScanConvert(order=1, with_batch_dim=False)
+    ops.Pipeline(operations=[scan_op], jit_options="pipeline", validate=False)
+    assert scan_op._is_jitted is True
+    with pytest.raises(ValueError, match="coordinates must be provided"):
+        scan_op(data=img, rho_range=(0.0, 1.0), theta_range=(-0.5, 0.5))
+
+    # Eager (no JIT anywhere): coordinates are computed on the fly, no error.
+    eager_op = ops.ScanConvert(order=1, jit_compile=False, with_batch_dim=False)
+    assert eager_op._is_jitted is False
+    out = eager_op(data=img, rho_range=(0.0, 1.0), theta_range=(-0.5, 0.5))
+    assert "data" in out
 
 
 def test_pipeline_set_params():

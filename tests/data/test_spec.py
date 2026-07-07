@@ -24,6 +24,7 @@ from zea.data.spec import (
     SosMap,
     Spec,
     Subject,
+    TrackSpec,
 )
 
 
@@ -1744,3 +1745,73 @@ def test_field_metadata_units_are_defined():
         + ", ".join(sorted(undefined))
         + ". Add the symbol to UNITS (it is the source of truth rendered in the docs)."
     )
+
+
+def _image_data(n_frames: int = 3):
+    """Minimal DataSpec dict with only an image map (no raw_data, so no scan required)."""
+    coords = _make_coordinates((n_frames, 16, 12))
+    return {
+        "image": {
+            "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+            "coordinates": coords,
+        }
+    }
+
+
+class TestTransmitOnlyTrack:
+    """A TrackSpec may omit ``data`` (transmit-only track) only when ``scan`` is provided
+    and ``transmit_only=True`` is explicitly set."""
+
+    def test_data_none_with_scan_and_transmit_only_is_allowed(self):
+        """A transmit-only track (scan but no data) is valid when explicitly flagged."""
+        track = TrackSpec(data=None, scan=_scan_minimal(), transmit_only=True)
+        assert track.data is None
+        assert isinstance(track.scan, ScanSpec)
+        assert bool(track.transmit_only) is True
+
+    def test_data_none_with_scan_without_transmit_only_raises(self):
+        """Omitting 'data' without setting 'transmit_only=True' is rejected."""
+        with pytest.raises(ValueError, match="'transmit_only' was not set to True"):
+            TrackSpec(data=None, scan=_scan_minimal())
+
+    def test_transmit_only_with_data_raises(self):
+        """'transmit_only=True' combined with non-None data is rejected."""
+        with pytest.raises(ValueError, match="must not carry data"):
+            TrackSpec(data=_image_data(), scan=None, transmit_only=True)
+
+    def test_data_none_without_scan_raises(self):
+        """A track with neither data nor scan is invalid."""
+        with pytest.raises(ValueError, match="at least one of 'data' or 'scan'"):
+            TrackSpec(data=None, scan=None)
+
+    def test_default_track_has_neither_and_raises(self):
+        """Constructing a TrackSpec with no arguments raises (both default to None)."""
+        with pytest.raises(ValueError, match="at least one of 'data' or 'scan'"):
+            TrackSpec()
+
+    def test_data_without_scan_still_allowed(self):
+        """Data without raw_data does not require a scan."""
+        track = TrackSpec(data=_image_data(), scan=None)
+        assert isinstance(track.data, DataSpec)
+        assert track.scan is None
+
+    def test_raw_data_still_requires_scan(self):
+        """A track whose data contains raw_data requires a scan."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
+        data = {"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)}
+        with pytest.raises(ValueError, match="'scan' is required when 'raw_data'"):
+            TrackSpec(data=data, scan=None)
+
+    def test_transmit_only_track_roundtrips_through_filespec(self, tmp_path):
+        """A FileSpec with a transmit-only track stores and reloads without raw_data,
+        and the 'transmit_only' flag itself is persisted in the file."""
+        spec = FileSpec(tracks=[{"data": None, "scan": _scan_minimal(), "transmit_only": True}])
+        path = tmp_path / "transmit_only.hdf5"
+        spec.save(str(path), warn_missing_optional_fields=False)
+        with File(path) as f:
+            assert "scan" in f
+            assert "data" not in f
+            assert isinstance(f.scan, ScanSpec)
+            (track,) = f.tracks
+            assert "transmit_only" in track._group
+            assert bool(track._group["transmit_only"][()]) is True

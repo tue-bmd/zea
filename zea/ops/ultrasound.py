@@ -322,10 +322,13 @@ class ScanConvert(Operation):
 
         data = kwargs[self.key]
 
-        if self._jit_compile and self.jittable:
-            assert coordinates is not None, (
-                "coordinates must be provided to jit scan conversion."
-                "You can set ScanConvert(jit_compile=False) to disable jitting."
+        if self._is_jitted and self.jittable and coordinates is None:
+            # Computing coordinates calls ops.arange with tensor-derived bounds, which
+            # produces a data-dependent output shape that cannot be traced inside a JIT.
+            raise ValueError(
+                "coordinates must be provided when ScanConvert runs inside a JIT context "
+                "(jit_compile=True, or jit_options='ops'/'pipeline' on the enclosing pipeline). "
+                "Pre-compute coordinates and pass them explicitly, or disable JIT."
             )
 
         data_out, parameters = scan_convert(
@@ -603,9 +606,7 @@ class BandPassFilter(FirFilter):
             f1 = demodulation_frequency - bandwidth / 2
             f2 = demodulation_frequency + bandwidth / 2
 
-        bpf = get_band_pass_filter(
-            self.num_taps, sampling_frequency, f1, f2, validate=not self._jit_compile
-        )
+        bpf = get_band_pass_filter(self.num_taps, sampling_frequency, f1, f2)
         kwargs[self.filter_key] = bpf
         return super().call(**kwargs)
 

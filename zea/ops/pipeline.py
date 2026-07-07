@@ -91,9 +91,6 @@ class Pipeline:
 
         self._pipeline_layers: List[Union[Operation, "Pipeline"]] = list(operations)
 
-        if jit_options not in ["pipeline", "ops", None]:
-            raise ValueError("jit_options must be 'pipeline', 'ops', or None")
-
         self.with_batch_dim = with_batch_dim
         self._validate_flag = validate
 
@@ -135,6 +132,10 @@ class Pipeline:
             }
 
         self.jit_kwargs = jit_kwargs
+        # True when an enclosing pipeline is JIT-compiled as a whole, so this
+        # pipeline already runs inside that trace. Updated by the parent via
+        # _configure_jit; defaults to False for a standalone/root pipeline.
+        self._inside_outer_jit = False
         self.jit_options = jit_options  # will handle the jit compilation
         self.device = device
 
@@ -446,16 +447,34 @@ class Pipeline:
     @jit_options.setter
     def jit_options(self, value: Union[str, None]):
         """Set the jit_options property of the pipeline."""
+        self._configure_jit(value, inside_outer_jit=self._inside_outer_jit)
 
-        assert value in ["pipeline", "ops", None], "jit_options must be 'pipeline', 'ops', or None"
+    def _configure_jit(self, value: Union[str, None], inside_outer_jit: bool):
+        """Recursively configure JIT for this pipeline and all descendants.
+
+        Args:
+            value: jit_options for this pipeline ("pipeline", "ops", or None).
+            inside_outer_jit: True if an enclosing pipeline is JIT-compiled as a
+                whole, so this pipeline already runs inside a trace.
+        """
+        if value not in ("pipeline", "ops", None):
+            raise ValueError(f"jit_options must be 'pipeline', 'ops', or None, got {value!r}")
 
         self._jit_options = value
+        self._inside_outer_jit = inside_outer_jit
         self.set_jit(value == "pipeline")
+
+        # Children run inside a trace if we compile ourselves as a whole, or we
+        # already do. When that happens they must not add their own JIT, so their
+        # jit_options is forced to None.
+        child_inside_outer_jit = inside_outer_jit or value == "pipeline"
+        child_value = None if child_inside_outer_jit else value
         for operation in self.operations:
             if isinstance(operation, Pipeline):
-                operation.jit_options = value
+                operation._configure_jit(child_value, inside_outer_jit=child_inside_outer_jit)
             else:
-                operation.set_jit(value == "ops")
+                operation.set_jit(child_value == "ops")
+                operation._inside_outer_jit = child_inside_outer_jit
 
     def _jit(self):
         """JIT compile the pipeline."""
@@ -819,9 +838,8 @@ class Pipeline:
         override_keys = set(overrides.keys())
 
         if parameters is not None:
-            assert isinstance(parameters, Parameters), (
-                f"Expected an instance of `zea.Parameters`, got {type(parameters)}"
-            )
+            if not isinstance(parameters, Parameters):
+                raise TypeError(f"Expected an instance of `zea.Parameters`, got {type(parameters)}")
             # Only convert keys the pipeline needs and that are not overridden,
             # so we avoid deriving unnecessary parameters.
             needs_keys = self.needs_keys - override_keys
@@ -960,29 +978,33 @@ class Map(Pipeline):
             chunks=self.chunks,
             batch_size=self.batch_size,
             fn_supports_batch=True,
-            disable_jit=not bool(self.jit_options),
+            disable_jit=not bool(self.jit_options) and not self._inside_outer_jit,
         )(*mapped_args)
 
         return out
 
-    @property
-    def jit_options(self):
-        """Get the jit_options property of the pipeline."""
-        return self._jit_options
+    def _configure_jit(self, value: Union[str, None], inside_outer_jit: bool):
+        """Configure JIT for this Map and its inner operations.
 
-    @jit_options.setter
-    def jit_options(self, value: Union[str, None]):
-        """Set the jit_options property of the pipeline."""
-
-        assert value in ["pipeline", "ops", None], "jit_options must be 'pipeline', 'ops', or None"
+        Map compiles its entire mapped call as a single unit whenever it self-jits
+        (any non-None ``jit_options``). Its inner operations never JIT themselves;
+        Map owns that scope. See :meth:`Pipeline._configure_jit`.
+        """
+        if value not in ("pipeline", "ops", None):
+            raise ValueError(f"jit_options must be 'pipeline', 'ops', or None, got {value!r}")
 
         self._jit_options = value
-        self.set_jit(value == "pipeline" or value == "ops")
+        self._inside_outer_jit = inside_outer_jit
+        self.set_jit(value is not None)
+
+        # Inner ops run inside a trace if Map self-jits or an outer pipeline does.
+        child_inside_outer_jit = value is not None or inside_outer_jit
         for operation in self.operations:
             if isinstance(operation, Pipeline):
-                operation.jit_options = None
+                operation._configure_jit(None, inside_outer_jit=child_inside_outer_jit)
             else:
                 operation.set_jit(False)
+                operation._inside_outer_jit = child_inside_outer_jit
 
     def _jit(self):
         """JIT compile the pipeline."""
@@ -1566,14 +1588,14 @@ class Refocus(Operation):
     def __init__(self, method="adjoint", param=None, **kwargs):
         if method not in self._VALID_METHODS:
             raise ValueError(f"method must be one of {self._VALID_METHODS}, got '{method}'")
-        # SVD is not supported by TF XLA; disable JIT for SVD-based methods.
+        # SVD is not supported by TF XLA, so SVD-based methods cannot be JIT-compiled
         if method != "adjoint":
-            if kwargs.get("jit_compile", True):
+            if kwargs.get("jittable", True):
                 log.warning(
                     f"Refocus method='{method}' uses SVD, which is not supported by the XLA "
-                    "JIT compiler. Setting jit_compile=False."
+                    "JIT compiler. Marking this operation as non-jittable."
                 )
-            kwargs["jit_compile"] = False
+            kwargs["jittable"] = False
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
@@ -1809,9 +1831,11 @@ def make_operation_chain(
             chain.append(operation)
             continue
 
-        assert isinstance(operation, (str, dict, Config)), (
-            f"Operation {operation} should be a string, dict, Config object, Operation, or Pipeline"
-        )
+        if not isinstance(operation, (str, dict, Config)):
+            raise TypeError(
+                f"Operation {operation} should be a string, dict, Config object, Operation, "
+                "or Pipeline"
+            )
 
         if isinstance(operation, str):
             operation_instance = get_ops(operation)()
