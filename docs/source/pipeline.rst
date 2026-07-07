@@ -98,15 +98,14 @@ builds a pipeline, and saves it to YAML below:
 
 .. dropdown:: Full example of using a custom operation
 
-
-   .. code-block:: python
+   .. testcode::
 
        from zea import Pipeline
        from zea.internal.registry import ops_registry
        from zea.ops import Normalize, Operation
 
 
-       @ops_registry("__main__.MyScale")
+       @ops_registry("my_project.my_ops.MyScale")
        class MyScale(Operation):
            """Scale the input data by a constant factor."""
 
@@ -123,6 +122,12 @@ builds a pipeline, and saves it to YAML below:
 
        loaded = Pipeline.from_path("pipeline.yaml")
        assert loaded == pipeline
+
+   .. testcleanup::
+
+       import os
+
+       os.remove("pipeline.yaml")
 
 .. _adding-ops:
 
