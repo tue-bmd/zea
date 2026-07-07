@@ -66,13 +66,15 @@ from zea.data.spec import DEFAULT_COMPRESSION
 # emit arrays that neither ``File.create`` nor downstream readers understand
 # for that slot.  Any new supported type must both get an explicit branch in
 # ``_prepare_output`` *and* be added here.
-_SUPPORTED_MAPPING_DATA_TYPES: frozenset[str] = frozenset({
-    "raw_data",
-    "image",
-    "beamformed_data",
-    "envelope_data",
-    "aligned_data",
-})
+_SUPPORTED_MAPPING_DATA_TYPES: frozenset[str] = frozenset(
+    {
+        "raw_data",
+        "image",
+        "beamformed_data",
+        "envelope_data",
+        "aligned_data",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -492,13 +494,11 @@ def _convert_single_us4us_pickle(
     log.info(f"Loading us4us pickle: {log.yellow(src)}")
     data = _load_us4us_pickle(src)
 
-    frames_data = data["data"]        # list[tuple[np.ndarray, ...]]
+    frames_data = data["data"]  # list[tuple[np.ndarray, ...]]
     metadata_tuple = data["metadata"]  # tuple[ConstMetadata, ...]
     n_frames = len(frames_data)
 
-    log.info(f"Frames: {n_frames}, "
-             f"pipeline outputs: {len(metadata_tuple)}, "
-             f"mapping: {mapping}")
+    log.info(f"Frames: {n_frames}, pipeline outputs: {len(metadata_tuple)}, mapping: {mapping}")
 
     # Scan and probe parameters come from the most informative metadata entry
     scan_meta = _pick_scan_metadata(metadata_tuple, mapping)
@@ -642,4 +642,3 @@ def convert_us4us(args):
 
     for src_pkl, dst_h5 in file_pairs:
         _convert_single_us4us_pickle(src_pkl, dst_h5, mapping, overwrite=overwrite)
-

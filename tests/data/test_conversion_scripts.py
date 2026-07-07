@@ -913,8 +913,7 @@ def verify_converted_us4us_test_data(src, dst):
         )
 
         assert "beamformed_data" in tracks[1].data, (
-            f"track_1 must expose 'beamformed_data' (got keys: "
-            f"{list(tracks[1].data.keys())})."
+            f"track_1 must expose 'beamformed_data' (got keys: {list(tracks[1].data.keys())})."
         )
         beamformed_values = tracks[1].data.beamformed_data.values[:]
         expected_beamformed_stacked_shape = (expected_n_frames, *expected_beamformed_shape)
