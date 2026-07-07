@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import hashlib
 import os
 import shutil
 import subprocess
@@ -575,20 +576,43 @@ US4US_TEST_PKL_URL = (
     "https://www.dropbox.com/scl/fi/xhid5kosgut2vzeyr5j19/"
     "zea_us4us_converter_test_data.pkl?rlkey=94e533yaebs2duijtk1mqnm79&dl=1"
 )
+# Pinned so the test fails loudly if the remote asset (or the cached copy) is
+# ever replaced with different bytes, rather than silently converting stale
+# or unexpected data.
+US4US_TEST_PKL_SHA256 = "98bc02df030f11cf74fb690899ca2207043ab79e5d66c87475226807a0b52412"
+
+
+def _sha256_of_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def create_us4us_test_data(src):
     """For us4us we download a small ``.pkl`` test sample from Dropbox.
 
     The pickle is cached under ``ZEA_CACHE_DIR/test_data`` so subsequent test
-    runs reuse it. A two-entry ``--mapping`` is passed via ``extra_args`` so
-    the converter exercises the multi-track write path
-    (``tracks/track_0`` = image, ``tracks/track_1`` = beamformed_data).
+    runs reuse it, and its SHA256 is verified against
+    :data:`US4US_TEST_PKL_SHA256` on every run so a changed remote asset or a
+    tampered cache entry fails the test instead of being silently accepted.
+    A two-entry ``--mapping`` is passed via ``extra_args`` so the converter
+    exercises the multi-track write path (``tracks/track_0`` = image,
+    ``tracks/track_1`` = beamformed_data).
     """
-    cached_pkl = download_file(
-        US4US_TEST_PKL_URL,
-        ZEA_CACHE_DIR / "test_data" / "zea_us4us_converter_test_data.pkl",
-    )
+    cache_path = ZEA_CACHE_DIR / "test_data" / "zea_us4us_converter_test_data.pkl"
+    cached_pkl = download_file(US4US_TEST_PKL_URL, cache_path)
+    actual_sha256 = _sha256_of_file(cached_pkl)
+    if actual_sha256 != US4US_TEST_PKL_SHA256:
+        # Drop the bad cache entry so a re-run will attempt a fresh download.
+        cached_pkl.unlink(missing_ok=True)
+        raise AssertionError(
+            "us4us test pickle checksum mismatch: "
+            f"expected {US4US_TEST_PKL_SHA256}, got {actual_sha256} for {cache_path}. "
+            "The remote asset or the cached copy has changed; update "
+            "US4US_TEST_PKL_SHA256 if this new content is intentional."
+        )
     shutil.copy(cached_pkl, src / cached_pkl.name)
     return ["--mapping", '{"0": "image", "1": "beamformed_data"}']
 
