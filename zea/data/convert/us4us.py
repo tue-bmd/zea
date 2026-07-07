@@ -59,11 +59,29 @@ from zea.data.spec import DEFAULT_COMPRESSION, DataSpec
 
 
 # ---------------------------------------------------------------------------
-# Stub unpickler — replaces every arrus class with a plain namespace object
-# The below stub is needed only to give the possibility to deserialize 
-# us4us pickles without the requirements of having arrus Python package 
-# installed.
+# Stub / allowlisted unpickler
+#
+# TRUST BOUNDARY:
+# Pickle deserialization is not a safe format for arbitrary input -- every
+# ``GLOBAL`` / ``STACK_GLOBAL`` opcode resolves a class that can run code
+# through ``__reduce__`` / ``__setstate__`` / ``__new__`` hooks.  To keep this
+# converter usable without the third-party ``arrus`` Python package installed
+# (and to prevent a hostile ``.pkl`` from popping a shell via
+# ``os.system``/``subprocess.Popen``/etc.), we restrict ``find_class`` to an
+# explicit allowlist:
+#
+#   * any ``arrus.*`` global is replaced by :class:`_ArrusStub`;
+#   * any ``numpy.*`` global is resolved normally (arrays / dtypes / scalars);
+#   * everything else raises :class:`pickle.UnpicklingError` before the
+#     class is looked up.
+#
+# Even with this allowlist, only run this loader against ``.pkl`` files
+# produced by us4us / arrus acquisition pipelines that you control.  Do not
+# point it at ``.pkl`` files received from untrusted third parties.
 # ---------------------------------------------------------------------------
+_ALLOWED_PICKLE_MODULE_PREFIXES = ("numpy",)
+
+
 class _ArrusStub:
     """Namespace placeholder for any arrus class encountered during unpickling."""
 
@@ -75,26 +93,39 @@ class _ArrusStub:
 
 
 class _ArrusUnpickler(pickle.Unpickler):
-    """Unpickler that swaps all arrus classes for :class:`_ArrusStub`."""
+    """Allowlisted unpickler for us4us pickle files.
+
+    Swaps ``arrus.*`` classes for :class:`_ArrusStub`, resolves ``numpy.*``
+    globals normally, and refuses everything else so that malicious payloads
+    referencing e.g. ``os.system`` or ``subprocess.Popen`` cannot execute.
+    """
 
     def find_class(self, module, name):
         if "arrus" in module:
             return _ArrusStub
-        return super().find_class(module, name)
+        if module == "numpy" or any(
+            module.startswith(p + ".") for p in _ALLOWED_PICKLE_MODULE_PREFIXES
+        ):
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(
+            f"Refusing to load class {module}.{name} from us4us pickle: "
+            "module is not in the us4us converter allowlist. Only trusted "
+            "us4us .pkl files should be processed by this loader."
+        )
 
 
 # ---------------------------------------------------------------------------
 # Pickle loading
 # ---------------------------------------------------------------------------
 def _load_us4us_pickle(path: Path) -> dict:
-    """Load an us4us pickle, falling back to the stub unpickler if arrus is absent."""
-    with open(path, "rb") as f:
-        try:
-            return pickle.load(f)
-        except Exception:
-            pass
+    """Load an us4us pickle with an allowlisted unpickler.
 
-    log.debug("Standard pickle load failed — retrying with arrus stub unpickler.")
+    .. warning::
+        Pickle is not a safe format for arbitrary input.  Even with the
+        allowlist enforced by :class:`_ArrusUnpickler`, only invoke this on
+        ``.pkl`` files produced by us4us / arrus acquisition pipelines that
+        you control — never on files received from untrusted third parties.
+    """
     with open(path, "rb") as f:
         return _ArrusUnpickler(f).load()
 
