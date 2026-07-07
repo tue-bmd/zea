@@ -26,7 +26,6 @@ from keras import ops
 from zea.backend import jit
 from zea.func.tensor import sinc, vmap
 from zea.internal.cache import cache_output
-from zea.probes import Probe
 
 
 def _abs_sinc(x):
@@ -119,6 +118,8 @@ def compute_pfield(
 
     # array params
     if element_width is None:
+        from zea.probes import Probe
+
         pitch = Probe.get_pitch(probe_geometry)
         kerf = 0.1 * pitch
         element_width = pitch - kerf
