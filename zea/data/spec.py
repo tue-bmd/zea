@@ -25,6 +25,7 @@ UNITS = {
     "–": "unitless",
     "rad": "radians",
     "dB": "decibels",
+    "dB/m/Hz": "decibels per meter per hertz",
     "#": "count",
     "%": "percent",
     "kg/m²": "kilograms per square meter",
@@ -981,6 +982,98 @@ class SosMap(FloatMap):
 
 
 @dataclass
+class AttenuationMap(FloatMap):
+    """Acoustic attenuation map with per-pixel Cartesian coordinates.
+
+    Acoustic attenuation describes the loss of acoustic energy as the wave
+    propagates through tissue (through absorption and scattering).  Attenuation
+    is frequency dependent and is modelled here with the usual power law
+
+    .. math::
+
+        \\alpha(f) = \\alpha_0 \\, f^{\\gamma},
+
+    where :math:`\\alpha_0` is the per-pixel attenuation coefficient stored in
+    ``values`` and :math:`\\gamma` is the (scalar) power-law exponent stored in
+    ``gamma``.  Reporting the coefficient normalized by frequency makes values
+    comparable across systems and transmit frequencies.
+
+    The coefficient is stored in the spec's base units of ``dB/m/Hz`` (rather
+    than the common clinical ``dB/cm/MHz``; note ``1 dB/cm/MHz = 1e-4 dB/m/Hz``).
+    Strictly, when :math:`\\gamma \\neq 1` the coefficient carries the exponent in
+    its units (``dB/m/Hz**gamma``); the ``dB/m/Hz`` label reflects the linear
+    (:math:`\\gamma = 1`) convention.
+
+    The exponent is close to 1 for most soft tissue (attenuation is roughly
+    linear in frequency), e.g. liver :math:`\\gamma \\approx 1.14`, breast
+    :math:`\\gamma \\approx 1.5`, while water / low-loss viscous media follow
+    :math:`\\gamma = 2`.  It defaults to ``1.0`` (linear), which reproduces the
+    plain frequency-normalized "attenuation coefficient slope".
+
+    Args:
+        values: The attenuation coefficient :math:`\\alpha_0` in ``dB/m/Hz`` of
+            shape ``(n_frames, z, x, y)`` and type float32.
+        coordinates: Per-pixel Cartesian positions in metres, shape
+            ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
+        gamma: Scalar power-law exponent :math:`\\gamma` of the frequency
+            dependence :math:`\\alpha(f) = \\alpha_0 f^{\\gamma}`.  Defaults to
+            ``1.0`` (linear frequency dependence).
+    """
+
+    gamma: float = 1.0
+
+    SCHEMA = {
+        **FloatMap.SCHEMA,
+        "gamma": {"dtype": np.float32, "shape": ()},
+    }
+
+    FIELD_METADATA = {
+        **Map.FIELD_METADATA,
+        "gamma": {
+            "unit": "–",
+            "description": (
+                "Power-law exponent of the frequency dependence alpha(f) = alpha_0 * f**gamma. "
+                "1.0 is linear (soft tissue ~1-1.5, e.g. liver ~1.14), 2.0 for water."
+            ),
+            "rare": True,
+        },
+    }
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.unit is not None and self.unit != "dB/m/Hz":
+            raise ValueError(f"Attenuation map unit should be 'dB/m/Hz', got '{self.unit}'")
+
+        # Attenuation coefficients describe energy loss and are therefore non-negative.
+        if np.any(self.values < 0):
+            log.warning(
+                "Attenuation map contains negative values, which is physically unexpected "
+                "for an attenuation coefficient. Please verify the values are in dB/m/Hz."
+            )
+
+        # Guard against the coefficient being supplied in the common clinical unit
+        # dB/cm/MHz (= 1e-4 dB/m/Hz) instead of the spec's dB/m/Hz base unit: even
+        # highly attenuating media stay well below 1e-2 dB/m/Hz.
+        max_abs = float(np.max(np.abs(self.values), initial=0.0))
+        if max_abs > 1e-2:
+            log.warning(
+                f"Attenuation map has a maximum absolute value of {max_abs:.4g} dB/m/Hz, which "
+                "is unusually high.  Please verify the values are in dB/m/Hz "
+                "(1 dB/cm/MHz = 1e-4 dB/m/Hz), not dB/cm/MHz."
+            )
+
+        # The power-law exponent is positive; soft tissue is ~1, water is 2.
+        if self.gamma is not None and (self.gamma <= 0 or self.gamma > 2.0):
+            log.warning(
+                f"Attenuation map gamma={self.gamma} is outside the physically typical range "
+                "(0, 2]. Soft tissue is around 1.0-1.5 and water is 2.0."
+            )
+
+
+@dataclass
 class StrainPercentageMap(FloatMap):
     """Strain map data with per-pixel Cartesian coordinates.
 
@@ -1064,6 +1157,7 @@ class DataSpec(Spec):
         - image: Reconstructed image data and per-pixel coordinates.
         - segmentation: Segmentation data and per-pixel coordinates.
         - sos_map: Speed-of-sound map data and per-pixel coordinates.
+        - attenuation_map: Acoustic attenuation map data and per-pixel coordinates.
         - strain_percentage_map: Strain map data and per-pixel coordinates.
         - shear_wave_elastography_map: Shear-wave elastography data and per-pixel coordinates.
         - tissue_doppler: Tissue Doppler data and per-pixel coordinates.
@@ -1082,6 +1176,7 @@ class DataSpec(Spec):
     image: Image | dict | None = None
     segmentation: Segmentation | dict | None = None
     sos_map: SosMap | dict | None = None
+    attenuation_map: AttenuationMap | dict | None = None
     strain_percentage_map: StrainPercentageMap | dict | None = None
     shear_wave_elastography_map: ShearWaveElastographyMap | dict | None = None
     tissue_doppler: TissueDopplerMap | dict | None = None
@@ -1100,6 +1195,7 @@ class DataSpec(Spec):
         "image": {"spec": Image},
         "segmentation": {"spec": Segmentation},
         "sos_map": {"spec": SosMap},
+        "attenuation_map": {"spec": AttenuationMap},
         "strain_percentage_map": {"spec": StrainPercentageMap},
         "shear_wave_elastography_map": {"spec": ShearWaveElastographyMap},
         "tissue_doppler": {"spec": TissueDopplerMap},
@@ -1114,6 +1210,7 @@ class DataSpec(Spec):
         "image": {"description": "Reconstructed image data.", "rare": True},
         "segmentation": {"description": "Segmentation data.", "rare": True},
         "sos_map": {"description": "Speed-of-sound map data.", "rare": True},
+        "attenuation_map": {"description": "Acoustic attenuation map data.", "rare": True},
         "strain_percentage_map": {"description": "Strain map data.", "rare": True},
         "shear_wave_elastography_map": {
             "description": "Shear-wave elastography data.",
@@ -1132,6 +1229,7 @@ class DataSpec(Spec):
         image: Image | dict | None = None,
         segmentation: Segmentation | dict | None = None,
         sos_map: SosMap | dict | None = None,
+        attenuation_map: AttenuationMap | dict | None = None,
         strain_percentage_map: StrainPercentageMap | dict | None = None,
         shear_wave_elastography_map: ShearWaveElastographyMap | dict | None = None,
         tissue_doppler: TissueDopplerMap | dict | None = None,
@@ -1145,6 +1243,7 @@ class DataSpec(Spec):
         self.image = image
         self.segmentation = segmentation
         self.sos_map = sos_map
+        self.attenuation_map = attenuation_map
         self.strain_percentage_map = strain_percentage_map
         self.shear_wave_elastography_map = shear_wave_elastography_map
         self.tissue_doppler = tissue_doppler
@@ -1225,9 +1324,22 @@ class ScanSpec(Spec):
             full contribution. Negative values indicate that the element was
             fired with opposite polarity.
         focus_distances: The transmit focus distances in meters of shape (n_tx,).
-            This is the distance from the origin point on the transducer to
-            where the beam comes to focus. For planewaves this is set to
-            infinity or zero.
+            This is the distance from the transmit origin on the transducer to
+            where the beam comes to focus. The sign and magnitude encode the
+            transmit type:
+
+            - **positive finite**: focused transmit; the beam focuses at this
+              distance in front of the array.
+            - **negative finite**: diverging transmit; the (virtual) source
+              lies this distance behind the array.
+            - **infinite** (``np.inf``): plane wave. This is the preferred,
+              canonical value for plane waves in zea. ``0.0`` is also accepted
+              as a plane-wave marker (e.g. raw Verasonics data stores ``0``),
+              but new data should use ``np.inf``.
+
+            See :meth:`zea.Parameters.find_transmits` for how these values are
+            used to classify transmits as ``"focused"``, ``"diverging"`` or
+            ``"plane"``.
         transmit_origins: The transmit origins of the transmit beams in meters of
             shape (n_tx, 3). This is the (x, y, z) position from which the beam
             is transmitted.
@@ -1300,8 +1412,21 @@ class ScanSpec(Spec):
         "demodulation_frequency": {"unit": "Hz", "description": "Demodulation frequency."},
         "initial_times": {"unit": "s", "description": "A/D converter start times per transmit."},
         "t0_delays": {"unit": "s", "description": "Transmit delays per element."},
-        "tx_apodizations": {"unit": "–", "description": "Transmit apodization per element."},
-        "focus_distances": {"unit": "m", "description": "Transmit focus distances."},
+        "tx_apodizations": {
+            "unit": "–",
+            "description": (
+                "Transmit apodization per element, in [-1, 1]. 0 = element did not "
+                "contribute, 1 = full contribution, negative = fired with opposite polarity."
+            ),
+        },
+        "focus_distances": {
+            "unit": "m",
+            "description": (
+                "Transmit focus distances. Positive = focused, negative = diverging "
+                "(virtual source behind the array), ``np.inf`` = plane wave (preferred; "
+                "``0`` is also accepted)."
+            ),
+        },
         "transmit_origins": {"unit": "m", "description": "Transmit beam origins (x, y, z)."},
         "polar_angles": {"unit": "rad", "description": "Polar angles of transmit beams."},
         "time_to_next_transmit": {"unit": "s", "description": "Time between transmit events."},
@@ -1956,33 +2081,79 @@ class TrackSpec(Spec):
     field of the parent :class:`FileSpec`, if necessary.
     Single-track files may omit the label.
 
+    A track must carry at least one of ``data`` or ``scan``.  ``data`` may be
+    left as ``None`` to describe a transmit-only track (one that records the
+    transmit sequence via ``scan`` but stores no recorded data), but only when
+    ``scan`` is provided and ``transmit_only=True`` is explicitly passed.
+
+    A transmit-only track is useful when we want to store information about a
+    transmit event without any corresponding receive data, for example a shear
+    wave push pulse or therapeutic ultrasound.
+
     Args:
-        data (DataSpec | dict): The data for this track.
+        data (DataSpec | dict | None): The data for this track. May be ``None``
+            for a transmit-only track (e.g. to store a shear wave push pulse),
+            but only if ``scan`` is provided and ``transmit_only=True``.
         scan (ScanSpec | dict | None): The scan parameters for this track. Required when raw_data is
-            present in *data*.
+            present in *data*, and required when *data* is ``None``.
         label (str | None): Short human-readable name for this track (e.g. ``"focused"``
             or ``"planewave"``).  Required when the parent :class:`FileSpec`
             contains more than one track.
+        transmit_only (bool): Must be explicitly set to ``True`` to construct a
+            transmit-only track (``data=None`` with ``scan`` provided).
     """
 
-    data: DataSpec | dict
+    data: DataSpec | dict | None = None
     scan: ScanSpec | dict | None = None
     label: str | None = None
+    transmit_only: bool = False
 
     SCHEMA = {
         "data": {"spec": DataSpec},
         "scan": {"spec": ScanSpec},
         "label": {"dtype": str, "shape": ()},
+        "transmit_only": {"dtype": np.bool_, "shape": ()},
     }
 
     FIELD_METADATA = {
         # label is enforced by FileSpec for multi-track (ValueError), and legitimately
         # absent for single-track files — warning here is never useful.
         "label": {"unit": "–", "description": "Short human-readable track name.", "rare": True},
+        "transmit_only": {
+            "unit": "–",
+            "description": (
+                "Whether this track records only the transmit sequence with no "
+                "corresponding receive data (e.g. a shear wave push pulse or "
+                "therapeutic ultrasound)."
+            ),
+            "rare": True,
+        },
     }
 
     def __post_init__(self):
         super().__post_init__()
+
+        if self.data is None and self.scan is None:
+            raise ValueError(
+                "A track must have at least one of 'data' or 'scan'. "
+                "'data' may be None (a transmit-only track) only when 'scan' is provided "
+                "and 'transmit_only=True' is explicitly set."
+            )
+
+        if self.data is None and self.scan is not None and not self.transmit_only:
+            raise ValueError(
+                "'data' is None but 'transmit_only' was not set to True. "
+                "Pass 'transmit_only=True' to explicitly create a transmit-only track "
+                "(one that records only the transmit sequence via 'scan', with no "
+                "corresponding receive data, e.g. a shear wave push pulse or "
+                "therapeutic ultrasound exposure)."
+            )
+
+        if self.transmit_only and self.data is not None:
+            raise ValueError(
+                "'transmit_only=True' was set but 'data' is not None. "
+                "A transmit-only track must not carry data."
+            )
 
         data = self.data
         has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
@@ -2297,7 +2468,7 @@ class FileSpec(Spec):
         """Pad flat timing arrays and reshape to (n_frames * n_tx) by padding last
         frame with a zero."""
         for i, track in enumerate(self.tracks):
-            raw_data = track.data.raw_data
+            raw_data = track.data.raw_data if track.data is not None else None
             scan = track.scan
             if raw_data is None or scan is None or scan.time_to_next_transmit is None:
                 continue

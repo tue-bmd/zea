@@ -437,7 +437,7 @@ class Parameters(BaseParameters):
         radius = max(self.zlims)
         ylims_azimuth = (
             (0.0, 0.0)  # avoid numerical imprecision with np.cos(np.pi/2)
-            if self.azimuth_limits[0] == self.azimuth_limits[1]
+            if self.azimuth_limits is None or self.azimuth_limits[0] == self.azimuth_limits[1]
             else (
                 radius * np.cos(-np.pi / 2 + self.azimuth_limits[0]),
                 radius * np.cos(-np.pi / 2 + self.azimuth_limits[1]),
@@ -526,15 +526,19 @@ class Parameters(BaseParameters):
 
         Args:
             selection: Specifies which transmits to select:
-                - None: Use all transmits
-                - "all": Use all transmits
-                - "center": Use only the center transmit
-                - "focused": Use only focused transmits
-                - "diverging": Use only diverging transmits
-                - "plane": Use only plane wave transmits
-                - int: Select this many evenly spaced transmits
-                - list/array: Use these specific transmit indices
-                - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2))
+
+            - None: Use all transmits
+            - "all": Use all transmits
+            - "center": Use only the center transmit
+            - "focused": Use only focused transmits (positive finite
+                ``focus_distances``)
+            - "diverging": Use only diverging transmits (negative finite
+                ``focus_distances``)
+            - "plane": Use only plane wave transmits (``np.inf``, the
+                preferred marker, or ``0``)
+            - int: Select this many evenly spaced transmits
+            - list/array: Use these specific transmit indices
+            - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2))
 
         Returns:
             The current instance for method chaining.
@@ -559,15 +563,19 @@ class Parameters(BaseParameters):
 
         Args:
             selection: Specifies which transmits to select:
-                - None: Use all transmits
-                - "all": Use all transmits
-                - "center": Use only the center transmit
-                - "focused": Use only focused transmits
-                - "diverging": Use only diverging transmits
-                - "plane": Use only plane wave transmits
-                - int: Select this many evenly spaced transmits
-                - list/array: Use these specific transmit indices
-                - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2))
+
+            - None: Use all transmits
+            - "all": Use all transmits
+            - "center": Use only the center transmit
+            - "focused": Use only focused transmits (positive finite
+                ``focus_distances``)
+            - "diverging": Use only diverging transmits (negative finite
+                ``focus_distances``)
+            - "plane": Use only plane wave transmits (``np.inf``, the
+                preferred marker, or ``0``)
+            - int: Select this many evenly spaced transmits
+            - list/array: Use these specific transmit indices
+            - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2))
 
         Returns:
             The selected transmit indices.
@@ -695,12 +703,20 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
-    @cache_with_dependencies("azimuth_angles")
+    @cache_with_dependencies("selected_transmits", "n_tx")
     def azimuth_limits(self):
-        """The limits of the azimuth angles."""
+        """The limits of the azimuth angles.
+
+        Returns ``None`` if azimuth angles were
+        not provided (e.g. standard 2D imaging).
+
+        The presence check uses the raw parameter to avoid triggering the
+        :attr:`azimuth_angles` "using zeros" fallback warning for 2D data.
+        """
         value = self._params.get("azimuth_limits")
-        if value is None and self.azimuth_angles is not None:
-            value = self.azimuth_angles.min(), self.azimuth_angles.max()
+        if value is None and self._params.get("azimuth_angles") is not None:
+            azimuth_angles = self.azimuth_angles
+            value = azimuth_angles.min(), azimuth_angles.max()
             diff = value[1] - value[0]
             # add 15% margin to the limits
             value = (value[0] - 0.15 * diff, value[1] + 0.15 * diff)
@@ -735,7 +751,16 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("selected_transmits", "n_tx")
     def focus_distances(self):
-        """Focus distances in meters for each event of shape (n_tx,)."""
+        """Focus distances in meters for each event of shape (n_tx,).
+
+        The sign and magnitude encode the transmit type: a positive finite value
+        is a focused transmit (focal point that distance in front of the array),
+        a negative finite value is a diverging transmit (virtual source that
+        distance behind the array), and ``np.inf`` is a plane wave. ``np.inf`` is
+        the preferred, canonical plane-wave value in zea; ``0.0`` is also accepted
+        (see :meth:`find_transmits`). When no focus distances are provided, zeros
+        are used (i.e. treated as plane waves).
+        """
         value = self._params.get("focus_distances")
         if value is None:
             log.warning_once(

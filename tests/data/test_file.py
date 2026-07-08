@@ -206,6 +206,66 @@ def _probe_minimal(name=None, n_el=4):
     return probe
 
 
+def test_create_transmit_only_track(tmp_path):
+    """File.create with a single transmit-only track (scan but no data) works."""
+    n_frames, n_tx, n_el = 3, 2, 4
+    path = tmp_path / "transmit_only.hdf5"
+    File.create(
+        path,
+        tracks=[
+            {
+                "data": None,
+                "scan": _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                "transmit_only": True,
+            }
+        ],
+        ignore_warnings=True,
+    )
+
+    with File(path) as f:
+        assert isinstance(f.scan, ScanSpec), "f.scan should return a ScanSpec"
+        (track,) = f.tracks
+        assert "data" not in track._group, "Transmit-only track should have no data group"
+        assert isinstance(track.scan, ScanSpec)
+
+
+def test_create_multitrack_with_transmit_only_track(tmp_path):
+    """File.create can mix a data track with a transmit-only (scan-only) track."""
+    n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
+    path = tmp_path / "mixed_tracks.hdf5"
+    File.create(
+        path,
+        tracks=[
+            {
+                "data": {
+                    "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+                },
+                "scan": _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                "label": "focused",
+            },
+            {
+                "data": None,
+                "scan": _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                "label": "push",
+                "transmit_only": True,
+            },
+        ],
+        probe=_probe_minimal(n_el=n_el),
+        ignore_warnings=True,
+    )
+
+    with File(path) as f:
+        assert f.track_labels == ["focused", "push"]
+
+        focused = f.get_track("focused")
+        assert "data" in focused._group, "Data track should have a data group"
+        assert focused.data.raw_data.shape == (n_frames, n_tx, n_ax, n_el, n_ch)
+
+        push = f.get_track("push")
+        assert "data" not in push._group, "Transmit-only track should have no data group"
+        assert isinstance(push.scan, ScanSpec)
+
+
 @pytest.fixture
 def spec_file(tmp_path):
     """Create a spec-format HDF5 file via FileSpec.save()."""
