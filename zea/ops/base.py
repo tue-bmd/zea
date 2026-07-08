@@ -217,6 +217,11 @@ class Operation(keras.Operation):
         self.with_batch_dim = with_batch_dim
         self._jittable = jittable
 
+        # True when an enclosing Pipeline is JIT-compiled as a whole
+        # (jit_options="pipeline"), so this op runs inside that trace even though
+        # it does not wrap itself in jit. Set by the parent pipeline.
+        self._inside_outer_jit = False
+
         # Set the jit compilation flag and compile the `call` method
         # Set zea logger level to suppress warnings regarding
         # torch not being able to compile the function
@@ -237,6 +242,15 @@ class Operation(keras.Operation):
     def jit_compile(self):
         """Get the JIT compilation flag."""
         return self._jit_compile
+
+    @property
+    def _is_jitted(self) -> bool:
+        """Whether :meth:`call` runs inside a JIT trace.
+
+        True when this op wraps itself in jit (``jit_compile=True``) or when an
+        enclosing pipeline is compiled as a whole (``jit_options="pipeline"``).
+        """
+        return self._jit_compile or self._inside_outer_jit
 
     def set_jit(self, jit_compile: bool):
         """Set the JIT compilation flag and set the `_call` method accordingly."""

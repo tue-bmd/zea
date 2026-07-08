@@ -34,8 +34,12 @@ A unit of ``–`` denotes a unitless (dimensionless) quantity.
      - radians
    * - ``dB``
      - decibels
+   * - ``dB/m/Hz``
+     - decibels per meter per hertz
    * - ``#``
      - count
    * - ``%``
      - percent
+   * - ``kg/m²``
+     - kilograms per square meter
 

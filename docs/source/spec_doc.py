@@ -20,6 +20,7 @@ from zea.data.spec import (
     UNITS,
     AlignedData,
     Annotations,
+    AttenuationMap,
     BeamformedData,
     ColorDopplerMap,
     DataSpec,
@@ -248,6 +249,7 @@ FILE_TREE = """\
    \u2502   \u251c\u2500\u2500 image/                    group (Image)
    \u2502   \u251c\u2500\u2500 segmentation/             group (Segmentation)
    \u2502   \u251c\u2500\u2500 sos_map/                  group (SosMap)
+   \u2502   \u251c\u2500\u2500 attenuation_map/          group (AttenuationMap)
    \u2502   \u251c\u2500\u2500 strain_percentage_map/    group (StrainPercentageMap)
    \u2502   \u251c\u2500\u2500 tissue_doppler/           group (TissueDopplerMap)
    \u2502   \u251c\u2500\u2500 color_doppler/            group (ColorDopplerMap)
@@ -316,6 +318,7 @@ DATA_SUBGROUP_ANCHORS = {
     "image": "spec-data-image",
     "segmentation": "spec-data-segmentation",
     "sos_map": "spec-data-sos-map",
+    "attenuation_map": "spec-data-attenuation-map",
     "strain_percentage_map": "spec-data-strain-percentage-map",
     "shear_wave_elastography_map": "spec-data-shear-wave-elastography-map",
     "tissue_doppler": "spec-data-tissue-doppler",
@@ -338,6 +341,7 @@ MAP_DESCRIPTIONS = {
     "image": "Reconstructed (log-compressed) image. Values are ``uint8`` in (n_frames, z, x) or (n_frames, z, x, y).",  # noqa: E501
     "segmentation": "Semantic segmentation mask. Values are ``bool`` in (n_frames, z, x, y, n_labels); ``labels`` names each channel.",  # noqa: E501
     "sos_map": "Speed-of-sound map in m/s. Values are ``float32``.",
+    "attenuation_map": "Acoustic attenuation coefficient map in dB/m/Hz (frequency-normalized), with a scalar power-law exponent ``gamma`` (alpha(f) = alpha_0 * f**gamma; default 1.0). Values are ``float32``.",  # noqa: E501
     "strain_percentage_map": "Strain map in %. Values are ``float32``.",
     "shear_wave_elastography_map": "Shear-wave elastography map in m/s. Values are ``float32``.",
     "tissue_doppler": "Tissue Doppler velocity map in m/s. Values are ``float32``.",
@@ -417,6 +421,7 @@ def generate() -> str:
     lines += [
         "   .. tab-item:: data",
         "      :sync: data",
+        "      :name: group-data",
         "",
         "      Data group containing raw channel data, derived pipeline products,",
         "      and optional grouped data products.",
@@ -445,6 +450,7 @@ def generate() -> str:
         ("image", Image),
         ("segmentation", Segmentation),
         ("sos_map", SosMap),
+        ("attenuation_map", AttenuationMap),
         ("strain_percentage_map", StrainPercentageMap),
         ("shear_wave_elastography_map", ShearWaveElastographyMap),
         ("tissue_doppler", TissueDopplerMap),
@@ -471,6 +477,7 @@ def generate() -> str:
     lines += [
         "   .. tab-item:: scan",
         "      :sync: scan",
+        "      :name: group-scan",
         "",
         "      Scan group with acquisition and transmit sequence parameters.",
         "",
@@ -481,6 +488,7 @@ def generate() -> str:
     lines += [
         "   .. tab-item:: probe",
         "      :sync: probe",
+        "      :name: group-probe",
         "",
         "      Probe group with probe geometry and frequency parameters.",
         "",
@@ -491,6 +499,7 @@ def generate() -> str:
     lines += [
         "   .. tab-item:: metadata",
         "      :sync: metadata",
+        "      :name: group-metadata",
         "",
         "      Optional metadata group for subject, acquisition context, annotations,",
         "      and extra time-series signals (ECG, voice narration, probe orientation).",
@@ -526,6 +535,7 @@ def generate() -> str:
     lines += [
         "   .. tab-item:: metrics",
         "      :sync: metrics",
+        "      :name: group-metrics",
         "",
         "      Optional metrics group for acquisition-level quality and performance metrics.",
         "",

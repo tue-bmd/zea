@@ -9,6 +9,7 @@ from zea.data import spec as spec_module
 from zea.data.file import File
 from zea.data.spec import (
     Annotations,
+    AttenuationMap,
     DataSpec,
     FileSpec,
     Image,
@@ -24,6 +25,7 @@ from zea.data.spec import (
     SosMap,
     Spec,
     Subject,
+    TrackSpec,
 )
 
 
@@ -161,6 +163,10 @@ def _example_data(n_frames, n_tx, n_el, n_ax, n_ch):
         },
         "sos_map": {
             "values": np.full((n_frames, 16, 12, 1), 1540.0, dtype=np.float32),
+            "coordinates": coords_3d,
+        },
+        "attenuation_map": {
+            "values": np.full((n_frames, 16, 12, 1), 5e-5, dtype=np.float32),
             "coordinates": coords_3d,
         },
         "strain": {
@@ -812,6 +818,70 @@ class TestDataValidationErrors:
                 coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
             )
 
+    def test_attenuation_map_rejects_wrong_unit(self):
+        """AttenuationMap enforces a canonical unit of dB/m/Hz (not clinical dB/cm/MHz)."""
+        with pytest.raises(ValueError, match="Attenuation map unit should be 'dB/m/Hz'"):
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), 5e-5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+                unit="dB/cm/MHz",
+            )
+
+    def test_attenuation_map_accepts_canonical_unit(self):
+        """AttenuationMap accepts float32 values with the dB/m/Hz unit."""
+        att = AttenuationMap(
+            values=np.full((2, 16, 12, 1), 7e-5, dtype=np.float32),
+            coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            unit="dB/m/Hz",
+        )
+        assert att.values.dtype == np.float32
+
+    def test_attenuation_map_gamma_defaults_to_linear(self):
+        """gamma defaults to 1.0 (linear frequency dependence) and is stored as float32."""
+        att = AttenuationMap(
+            values=np.full((2, 16, 12, 1), 5e-5, dtype=np.float32),
+            coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+        )
+        assert att.gamma == 1.0
+        assert np.dtype(np.asarray(att.gamma).dtype) == np.float32
+
+    def test_attenuation_map_accepts_gamma(self):
+        """A non-linear power-law exponent (e.g. water gamma=2) is accepted and cast to float32."""
+        att = AttenuationMap(
+            values=np.full((2, 16, 12, 1), 5e-5, dtype=np.float32),
+            coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            gamma=2.0,
+        )
+        assert att.gamma == np.float32(2.0)
+
+    def test_attenuation_map_warns_on_implausible_gamma(self):
+        """A power-law exponent outside the physically typical (0, 2] range warns."""
+        with patch.object(spec_module.log, "warning") as mock_warning:
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), 5e-5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+                gamma=3.0,
+            )
+        assert any("gamma" in str(c) for c in mock_warning.call_args_list)
+
+    def test_attenuation_map_warns_on_clinical_unit_magnitude(self):
+        """Values sized like dB/cm/MHz (~0.5) are far too large for dB/m/Hz and warn."""
+        with patch.object(spec_module.log, "warning") as mock_warning:
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), 0.5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            )
+        assert any("dB/m/Hz" in str(c) for c in mock_warning.call_args_list)
+
+    def test_attenuation_map_warns_on_negative_values(self):
+        """Negative attenuation coefficients are physically unexpected and warn."""
+        with patch.object(spec_module.log, "warning") as mock_warning:
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), -5e-5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            )
+        assert any("negative values" in str(c) for c in mock_warning.call_args_list)
+
     def test_image_wrong_pixel_dtype_raises(self):
         """Image is UnsignedIntMap – values must be float32 or uint8, not complex128."""
         with pytest.raises(TypeError, match="Image: field 'values'"):
@@ -945,6 +1015,28 @@ class TestMetadataAndMetricsValidationErrors:
         """age must be uint8, not str."""
         with pytest.raises(TypeError, match="age"):
             Subject(age="forty two")
+
+    def test_subject_bmi_out_of_range_raises(self):
+        """bmi must be within the physically-possible range (0, 100]."""
+        with pytest.raises(ValueError, match="BMI"):
+            Subject(bmi=np.float32(150.0))
+        with pytest.raises(ValueError, match="BMI"):
+            Subject(bmi=np.float32(0.0))
+        with pytest.raises(ValueError, match="BMI"):
+            Subject(bmi=np.float32(-1.0))
+
+    def test_subject_bmi_valid(self):
+        """A sensible bmi value passes validation without warning."""
+        with patch("zea.log.warning") as mock_warn:
+            subject = Subject(bmi=np.float32(23.4))
+        assert subject.bmi == np.float32(23.4)
+        assert not any("BMI" in str(c.args[0]) for c in mock_warn.call_args_list)
+
+    def test_subject_bmi_unusual_warns(self):
+        """Values outside the typical clinical range warn but do not raise."""
+        with patch("zea.log.warning") as mock_warn:
+            Subject(bmi=np.float32(75.0))
+        assert any("BMI" in str(c.args[0]) for c in mock_warn.call_args_list)
 
     def test_signal_missing_required_field_raises(self):
         """Signal1D requires either sampling_frequency or timestamps."""
@@ -1342,6 +1434,7 @@ class TestSubjectFieldWarnings:
                 age=np.uint8(42),
                 sex="f",
                 fat_percentage=np.float32(17.5),
+                bmi=np.float32(23.4),
             )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert not any("Optional Subject field" in m for m in messages)
@@ -1721,3 +1814,73 @@ def test_field_metadata_units_are_defined():
         + ", ".join(sorted(undefined))
         + ". Add the symbol to UNITS (it is the source of truth rendered in the docs)."
     )
+
+
+def _image_data(n_frames: int = 3):
+    """Minimal DataSpec dict with only an image map (no raw_data, so no scan required)."""
+    coords = _make_coordinates((n_frames, 16, 12))
+    return {
+        "image": {
+            "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+            "coordinates": coords,
+        }
+    }
+
+
+class TestTransmitOnlyTrack:
+    """A TrackSpec may omit ``data`` (transmit-only track) only when ``scan`` is provided
+    and ``transmit_only=True`` is explicitly set."""
+
+    def test_data_none_with_scan_and_transmit_only_is_allowed(self):
+        """A transmit-only track (scan but no data) is valid when explicitly flagged."""
+        track = TrackSpec(data=None, scan=_scan_minimal(), transmit_only=True)
+        assert track.data is None
+        assert isinstance(track.scan, ScanSpec)
+        assert bool(track.transmit_only) is True
+
+    def test_data_none_with_scan_without_transmit_only_raises(self):
+        """Omitting 'data' without setting 'transmit_only=True' is rejected."""
+        with pytest.raises(ValueError, match="'transmit_only' was not set to True"):
+            TrackSpec(data=None, scan=_scan_minimal())
+
+    def test_transmit_only_with_data_raises(self):
+        """'transmit_only=True' combined with non-None data is rejected."""
+        with pytest.raises(ValueError, match="must not carry data"):
+            TrackSpec(data=_image_data(), scan=None, transmit_only=True)
+
+    def test_data_none_without_scan_raises(self):
+        """A track with neither data nor scan is invalid."""
+        with pytest.raises(ValueError, match="at least one of 'data' or 'scan'"):
+            TrackSpec(data=None, scan=None)
+
+    def test_default_track_has_neither_and_raises(self):
+        """Constructing a TrackSpec with no arguments raises (both default to None)."""
+        with pytest.raises(ValueError, match="at least one of 'data' or 'scan'"):
+            TrackSpec()
+
+    def test_data_without_scan_still_allowed(self):
+        """Data without raw_data does not require a scan."""
+        track = TrackSpec(data=_image_data(), scan=None)
+        assert isinstance(track.data, DataSpec)
+        assert track.scan is None
+
+    def test_raw_data_still_requires_scan(self):
+        """A track whose data contains raw_data requires a scan."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
+        data = {"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)}
+        with pytest.raises(ValueError, match="'scan' is required when 'raw_data'"):
+            TrackSpec(data=data, scan=None)
+
+    def test_transmit_only_track_roundtrips_through_filespec(self, tmp_path):
+        """A FileSpec with a transmit-only track stores and reloads without raw_data,
+        and the 'transmit_only' flag itself is persisted in the file."""
+        spec = FileSpec(tracks=[{"data": None, "scan": _scan_minimal(), "transmit_only": True}])
+        path = tmp_path / "transmit_only.hdf5"
+        spec.save(str(path), warn_missing_optional_fields=False)
+        with File(path) as f:
+            assert "scan" in f
+            assert "data" not in f
+            assert isinstance(f.scan, ScanSpec)
+            (track,) = f.tracks
+            assert "transmit_only" in track._group
+            assert bool(track._group["transmit_only"][()]) is True
