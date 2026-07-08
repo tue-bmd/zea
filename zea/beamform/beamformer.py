@@ -16,16 +16,22 @@ from zea.internal.checks import _check_raw_data
 from zea.log import warning_once as _warning_once
 
 
-def warn_if_focal_region_margin_unused(focus_distances, focal_region_margin):
-    """Warn when ``focal_region_margin`` is set but no transmit is focused.
+def warn_if_focal_region_length_unused(focus_distances, focal_region_length):
+    """Warn when ``focal_region_length`` is set but no transmit is focused.
 
-    The hybrid delay model only applies to focused transmits (finite, positive
-    ``focus_distance``). Setting ``focal_region_margin`` for plane-wave,
+    Focal-region blending only applies to focused transmits (finite, positive
+    ``focus_distance``). Setting ``focal_region_length`` for plane-wave,
     diverging-wave or synthetic-aperture data has no effect, so this is likely a
     mistake worth flagging. Meant to be called pre-jit with concrete
     ``focus_distances`` (a no-op otherwise).
     """
-    if not focal_region_margin:
+    if focal_region_length is None:
+        return
+    try:
+        length = float(np.asarray(ops.convert_to_numpy(focal_region_length)))
+    except Exception:  # e.g. a tracer inside jit; skip silently
+        return
+    if length <= 0.0:
         return
     try:
         fd = np.asarray(ops.convert_to_numpy(focus_distances), dtype=float)
@@ -33,7 +39,7 @@ def warn_if_focal_region_margin_unused(focus_distances, focal_region_margin):
         return
     if not np.any(np.isfinite(fd) & (fd > 0)):
         _warning_once(
-            "`focal_region_margin` is set but none of the transmits are focused "
+            "`focal_region_length` is set but none of the transmits are focused "
             "(no finite positive focus_distance); it will have no effect. "
             "It only applies to focused transmits."
         )
@@ -125,7 +131,7 @@ def tof_correction(
     sos_map=None,
     sos_grid_x=None,
     sos_grid_z=None,
-    focal_region_margin=None,
+    focal_region_length=None,
 ):
     """Time-of-flight (TOF) correction for ultrasound data on a flat pixel grid.
 
@@ -192,11 +198,12 @@ def tof_correction(
             Defaults to ``None``.
         sos_grid_x (Tensor, optional): x-coordinates of ``sos_map`` columns.
         sos_grid_z (Tensor, optional): z-coordinates of ``sos_map`` rows.
-        focal_region_margin (float, optional): Half-width in meters of the
-            region around the focal plane of focused transmits where the
-            hybrid (locally plane wave) delay model is used, removing the
-            transmit-delay discontinuity at the focus. See
-            :func:`transmit_delays`. Defaults to ``None`` (disabled).
+        focal_region_length (float, optional): Full length in meters of the
+            region around the focal plane of focused transmits where
+            first-arrival and last-arrival delays are linearly blended. This
+            smooths the focal-plane transition while preserving the same model
+            outside the region. See :func:`transmit_delays`. Defaults to
+            ``None`` (disabled).
 
     Returns:
         Tensor: Time-of-flight corrected data of shape
@@ -233,7 +240,7 @@ def tof_correction(
             apply_lens_correction,
             lens_thickness,
             lens_sound_speed,
-            focal_region_margin=focal_region_margin,
+            focal_region_length=focal_region_length,
         )
         # calculate_delays returns txdel (n_pix, n_tx), rxdel (n_pix, n_el)
     else:
@@ -366,7 +373,7 @@ def calculate_delays(
     lens_thickness=None,
     lens_sound_speed=None,
     n_iter=2,
-    focal_region_margin=None,
+    focal_region_length=None,
 ):
     """Compute transmit and receive delays in samples to every pixel.
 
@@ -406,11 +413,12 @@ def calculate_delays(
             m/s.
         n_iter (int, optional): Newton-Raphson iterations for lens
             correction.  Defaults to ``2``.
-        focal_region_margin (float, optional): Half-width in meters of the
-            region around the focal plane of focused transmits where the
-            hybrid (locally plane wave) delay model is used, removing the
-            transmit-delay discontinuity at the focus. See
-            :func:`transmit_delays`. Defaults to ``None`` (disabled).
+        focal_region_length (float, optional): Full length in meters of the
+            region around the focal plane of focused transmits where
+            first-arrival and last-arrival delays are linearly blended. This
+            smooths the focal-plane transition while preserving the same model
+            outside the region. See :func:`transmit_delays`. Defaults to
+            ``None`` (disabled).
 
     Returns:
         tuple[Tensor, Tensor]:
@@ -454,7 +462,7 @@ def calculate_delays(
         initial_times,
         None,
         transmit_origins,
-        focal_region_margin,
+        focal_region_length,
     )
 
     # Add the offset to the transmit peak time
@@ -629,21 +637,19 @@ def transmit_delays(
     initial_time,
     azimuth_angle=None,
     transmit_origin=None,
-    focal_region_margin=None,
+    focal_region_length=None,
 ):
     """Compute the transmit delay from transmission to each pixel.
 
     Uses the **first-arrival** time for pixels before the focus (or virtual
     source) and the **last-arrival** time for pixels beyond the focus.
 
-    For focused transmits this first/last-arrival switch is discontinuous at
-    the focal plane, which causes an image artifact around the focal depth.
-    When ``focal_region_margin`` is given, the first- and last-arrival times are
-    instead linearly blended within ``focal_region_margin`` meters of the focus
-    (measured along the beam), removing the discontinuity while joining the
-    surrounding delays continuously (the *hybrid* focal-region idea of Rindal,
-    Rodriguez-Molares & Austeng, "A simple, artifact-free, virtual source
-    model", IEEE IUS 2018).
+    For focused transmits this first/last-arrival switch creates a kink at the
+    focal plane that can produce a focal-depth band artifact (as described by
+    Rindal et al., IEEE IUS 2018). When ``focal_region_length`` is given, this
+    implementation linearly blends the first- and last-arrival times within a
+    centered focal slab of that full length (measured along the beam), so the
+    transition is smooth and joins the surrounding delays continuously.
 
     Args:
         grid (Tensor): Pixel positions ``(x, y, z)`` of shape ``(n_pix, 3)``.
@@ -661,12 +667,14 @@ def transmit_delays(
             Defaults to ``None`` (treated as 0).
         transmit_origin (Tensor, optional): Origin of the transmit beam of
             shape ``(3,)``.  Defaults to ``(0, 0, 0)``.
-        focal_region_margin (float, optional): Half-width in meters of the
+        focal_region_length (float, optional): Full length in meters of the
             region around the focal plane where the first- and last-arrival
             times are linearly blended instead of switched, removing the
-            focal-plane discontinuity. Only affects focused transmits (finite,
-            positive ``focus_distance``). Set to ``0`` or ``None`` (default) to
-            use the conventional first/last-arrival switch everywhere.
+            focal-plane discontinuity. Internally this corresponds to a
+            half-length of ``focal_region_length / 2`` on each side of the
+            focal plane. Only affects focused transmits (finite, positive
+            ``focus_distance``). Set to ``0`` or ``None`` (default) to use the
+            conventional first/last-arrival switch everywhere.
 
     Returns:
         Tensor: Transmit delays of shape ``(n_pix,)``.
@@ -736,22 +744,22 @@ def transmit_delays(
     t_last = ops.max(total_times - offset[None, :], axis=-1)  # last arrival
     tx_delay = ops.where(is_before_focus, t_first, t_last)
 
-    if focal_region_margin:
-        # Hybrid focal-region model (Rindal et al., IUS 2018): the first/last
-        # arrival switch above is discontinuous at the focal plane, producing an
-        # artifact at the focal depth. Within +-focal_region_margin of the focus
-        # (measured along the beam), linearly blend the first-arrival and
-        # last-arrival times instead of switching between them. The blend equals
-        # t_first at the near edge and t_last at the far edge, so it joins the
-        # surrounding delays continuously while removing the discontinuity. Only
-        # applies to focused transmits (finite, positive focus_distance).
+    if focal_region_length is not None:
+        # Blend first- and last-arrival delays in a small focal slab to smooth
+        # the focal-plane transition while preserving the same model elsewhere.
+        length = ops.cast(focal_region_length, tx_delay.dtype)
+        half_length = 0.5 * length
+        use_blend = ops.logical_and(ops.isfinite(length), length > 0.0)
+
         signed = ops.cast(ops.sign(focus_distance), "float32") * projection_along_beam
-        weight = ops.clip((signed + focal_region_margin) / (2.0 * focal_region_margin), 0.0, 1.0)
+        denom = ops.where(use_blend, length, ops.ones_like(length))
+        weight = ops.clip((signed + half_length) / denom, 0.0, 1.0)
         blended = (1.0 - weight) * t_first + weight * t_last
 
         is_focused = ops.logical_and(ops.isfinite(focus_distance), focus_distance > 0.0)
-        in_focal_region = ops.logical_and(is_focused, ops.abs(signed) < focal_region_margin)
-        tx_delay = ops.where(in_focal_region, blended, tx_delay)
+        in_focal_region = ops.logical_and(is_focused, ops.abs(signed) < half_length)
+        apply_blend = ops.logical_and(use_blend, in_focal_region)
+        tx_delay = ops.where(apply_blend, blended, tx_delay)
 
     # Subtract the initial time offset for this transmit
     tx_delay = tx_delay - initial_time

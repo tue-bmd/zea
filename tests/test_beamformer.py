@@ -439,7 +439,7 @@ def test_scanline_via_pixel_beamform_matches_per_transmit_tof(probe_geometry):
         np.testing.assert_allclose(image[:, n], expected, rtol=1e-5, atol=1e-5)
 
 
-def _focused_transmit_delays(grid, focus, angle, focal_region_margin):
+def _focused_transmit_delays(grid, focus, angle, focal_region_length):
     """transmit_delays for a single focused beam, returning a numpy array."""
     xs = np.linspace(-10e-3, 10e-3, N_EL)
     probe = np.stack([xs, np.zeros(N_EL), np.zeros(N_EL)], -1).astype(np.float32)
@@ -460,7 +460,7 @@ def _focused_transmit_delays(grid, focus, angle, focal_region_margin):
         np.float32(focus),
         np.float32(angle),
         np.float32(0.0),
-        focal_region_margin=focal_region_margin,
+        focal_region_length=focal_region_length,
     )
     return keras.ops.convert_to_numpy(txd)
 
@@ -473,41 +473,41 @@ def _offaxis_column(focus, angle, x_offset=5e-3, n=801):
     return np.stack([np.full_like(z, x_col), np.zeros_like(z), z], -1).astype(np.float32)
 
 
-def test_focal_region_margin_defaults_to_noop():
-    """margin=0.0 and margin=None must reproduce the conventional model exactly."""
+def test_focal_region_length_defaults_to_noop():
+    """length=0.0 and length=None must reproduce the conventional model exactly."""
     grid = _offaxis_column(focus=15e-3, angle=0.0)
     base = _focused_transmit_delays(grid, 15e-3, 0.0, None)
     zero = _focused_transmit_delays(grid, 15e-3, 0.0, np.float32(0.0))
     np.testing.assert_allclose(base, zero, rtol=0, atol=0)
 
 
-def test_focal_region_margin_only_changes_focal_slab():
-    """The hybrid patch may only touch pixels within `margin` of the focal plane."""
-    focus, margin = 15e-3, 1e-3
+def test_focal_region_length_only_changes_focal_slab():
+    """Focal-region blending may only touch pixels within length/2 of the focal plane."""
+    focus, length = 15e-3, 2e-3
     grid = _offaxis_column(focus=focus, angle=0.0)
     base = _focused_transmit_delays(grid, focus, 0.0, None)
-    hybrid = _focused_transmit_delays(grid, focus, 0.0, np.float32(margin))
+    blended = _focused_transmit_delays(grid, focus, 0.0, np.float32(length))
 
-    changed = ~np.isclose(base, hybrid, atol=1e-12)
+    changed = ~np.isclose(base, blended, atol=1e-12)
     # for an on-axis beam the focal plane is at z == focus; projection == z - focus
-    inside_slab = np.abs(grid[:, 2] - focus) < margin
+    inside_slab = np.abs(grid[:, 2] - focus) < (0.5 * length)
     assert np.all(changed[changed] == inside_slab[changed])
-    assert changed.any(), "expected the hybrid model to change some focal-region pixels"
+    assert changed.any(), "expected focal-region blending to change some focal-region pixels"
 
 
-def test_focal_region_margin_reduces_delay_discontinuity():
-    """The hybrid model must shrink the transmit-delay jump at the focal plane."""
-    focus, margin = 15e-3, 1e-3
+def test_focal_region_length_reduces_delay_discontinuity():
+    """Focal-region blending must shrink the transmit-delay jump at the focal plane."""
+    focus, length = 15e-3, 2e-3
     grid = _offaxis_column(focus=focus, angle=0.0, x_offset=2e-3)
     jump_base = np.abs(np.diff(_focused_transmit_delays(grid, focus, 0.0, None))).max()
-    jump_hybrid = np.abs(
-        np.diff(_focused_transmit_delays(grid, focus, 0.0, np.float32(margin)))
+    jump_blended = np.abs(
+        np.diff(_focused_transmit_delays(grid, focus, 0.0, np.float32(length)))
     ).max()
-    assert jump_hybrid < 0.6 * jump_base
+    assert jump_blended < 0.6 * jump_base
 
 
-def test_focal_region_margin_noop_for_planewave(flatgrid, probe_geometry):
-    """Plane-wave transmits are unaffected by focal_region_margin."""
+def test_focal_region_length_noop_for_planewave(flatgrid, probe_geometry):
+    """Plane-wave transmits are unaffected by focal_region_length."""
     flatgrid_t = keras.ops.convert_to_tensor(flatgrid)
     probe_t = keras.ops.convert_to_tensor(probe_geometry)
     n_el = probe_geometry.shape[0]
@@ -526,7 +526,7 @@ def test_focal_region_margin_noop_for_planewave(flatgrid, probe_geometry):
         np.float32(np.inf),
         np.float32(0.0),
         np.float32(0.0),
-        focal_region_margin=np.float32(1e-3),
+        focal_region_length=np.float32(2e-3),
         **common,
     )
     np.testing.assert_allclose(
@@ -534,7 +534,7 @@ def test_focal_region_margin_noop_for_planewave(flatgrid, probe_geometry):
     )
 
 
-def test_warn_if_focal_region_margin_unused(monkeypatch):
+def test_warn_if_focal_region_length_unused(monkeypatch):
     """The pre-jit helper warns for non-focused data and stays quiet otherwise."""
     import zea.beamform.beamformer as bf
 
@@ -544,11 +544,11 @@ def test_warn_if_focal_region_margin_unused(monkeypatch):
     planewave = np.full(4, np.inf, np.float32)
     focused = np.full(4, 15e-3, np.float32)
 
-    bf.warn_if_focal_region_margin_unused(planewave, 1e-3)  # unused -> warns
-    assert len(calls) == 1 and "focal_region_margin" in calls[0]
+    bf.warn_if_focal_region_length_unused(planewave, 2e-3)  # unused -> warns
+    assert len(calls) == 1 and "focal_region_length" in calls[0]
 
-    bf.warn_if_focal_region_margin_unused(focused, 1e-3)  # focused -> no warning
-    bf.warn_if_focal_region_margin_unused(planewave, 0.0)  # disabled -> no warning
+    bf.warn_if_focal_region_length_unused(focused, 2e-3)  # focused -> no warning
+    bf.warn_if_focal_region_length_unused(planewave, 0.0)  # disabled -> no warning
     assert len(calls) == 1
 
 

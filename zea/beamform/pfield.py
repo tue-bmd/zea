@@ -50,7 +50,7 @@ def compute_pfield(
     percentile=10,
     norm=True,
     point_batch_size=2048,
-    interpolation="nearest",
+    interpolation="bilinear",
 ):
     """Compute the pressure field for ultrasound imaging.
 
@@ -82,9 +82,9 @@ def compute_pfield(
             Higher is slightly faster, but requires more memory. Default is 2048.
         interpolation (str, optional): Interpolation used to resize the pressure
             field from the downsampled grid back to the full grid. "nearest"
-            (default) is fastest but imprints the downsampled blocks on the
+            is fastest but imprints the downsampled blocks on the
             weighting, which can cause visible steps at the edges of each
-            transmit's insonified region; "bilinear" removes those steps at a
+            transmit's insonified region; "bilinear" (default) removes those steps at a
             small extra cost and is recommended for display-quality images.
 
     Returns:

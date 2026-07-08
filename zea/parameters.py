@@ -223,12 +223,14 @@ class Parameters(BaseParameters):
     apply_lens_correction: bool
     """Whether to apply lens correction to the transmit delays. Defaults to False."""
 
-    focal_region_margin: float
-    """Half-width in meters of the region around the focal plane of focused transmits.
+    focal_region_length: float
+    """Full length in meters of the region around the focal plane of focused transmits.
 
-    In this region the hybrid (locally plane wave) transmit-delay model is used, removing the delay
-    discontinuity at the focus (Rindal et al., IUS 2018). Defaults to 0.0 (disabled, i.e.
-    the conventional virtual-source model everywhere); a typical value to enable it is 1e-3 m.
+    In this region the first-arrival and last-arrival transmit delays are linearly blended,
+    smoothing the focal-plane transition while preserving the same model outside the region.
+    This targets the focal-depth artifact described by Rindal et al. (IUS 2018). Defaults to
+    0.0 (disabled, i.e. conventional first/last-arrival switching everywhere). A typical
+    starting value is 2e-3 m (corresponding to +/-1e-3 m around the focal plane).
     """
 
     lens_thickness: float
@@ -275,7 +277,7 @@ class Parameters(BaseParameters):
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
         "num_scanline_pixels": {"dtype": np.int32, "default": 700},
         "scanline_sector": {"dtype": bool, "default": False},  # native dtype on purpose
-        "focal_region_margin": {"dtype": np.float32, "default": 0.0},
+        "focal_region_length": {"dtype": np.float32, "default": 0.0},
         "grid_type": {"dtype": str, "default": "cartesian"},
         "polar_limits": {"dtype": np.float32, "shape": (2,)},
         "dynamic_range": {"dtype": np.float32, "shape": (2,)},
