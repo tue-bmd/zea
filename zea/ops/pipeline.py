@@ -853,7 +853,23 @@ class Pipeline:
             tensor_overrides = dict_to_tensor(overrides, keep_as_is=self.static_params)
 
         # Overrides overwrite values taken from the parameters object.
-        return {**params_dict, **tensor_overrides}
+        prepared = {**params_dict, **tensor_overrides}
+
+        self.check_parameters(prepared)
+
+        return prepared
+
+    def check_parameters(self, prepared: Dict[str, Any]):
+        """Check the prepared parameters for potential issues."""
+
+        # Lightweight, pre-jit sanity check: flag a focal_region_margin that
+        # cannot take effect because the data has no focused transmits.
+        if prepared.get("focal_region_margin") and "focus_distances" in prepared:
+            from zea.beamform.beamformer import warn_if_focal_region_margin_unused
+
+            warn_if_focal_region_margin_unused(
+                prepared["focus_distances"], prepared["focal_region_margin"]
+            )
 
 
 @ops_registry("map")

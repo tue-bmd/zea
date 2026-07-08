@@ -111,7 +111,7 @@ class TOFCorrection(Operation):
     """Time-of-flight correction operation for ultrasound data."""
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["f_number", "apply_lens_correction"]
+    STATIC_PARAMS = ["f_number", "apply_lens_correction", "focal_region_margin"]
 
     def __init__(self, **kwargs):
         super().__init__(
@@ -141,6 +141,7 @@ class TOFCorrection(Operation):
         sos_map=None,
         sos_grid_x=None,
         sos_grid_z=None,
+        focal_region_margin=None,
         **kwargs,
     ):
         """Perform time-of-flight correction on raw RF data.
@@ -166,6 +167,11 @@ class TOFCorrection(Operation):
             sos_map (Tensor): Speed-of-sound map of shape ``(Nz, Nx)`` in m/s.
             sos_grid_x (Tensor): x-coordinates of ``sos_map`` rows.
             sos_grid_z (Tensor): z-coordinates of ``sos_map`` columns.
+            focal_region_margin (float): Half-width in meters of the region
+                around the focal plane of focused transmits where the hybrid
+                (locally plane wave) delay model is used, removing the
+                transmit-delay discontinuity at the focus (Rindal et al.,
+                IUS 2018). ``None`` or ``0`` disables it.
 
         Returns:
             dict: Dictionary containing tof_corrected_data
@@ -193,6 +199,7 @@ class TOFCorrection(Operation):
             "sos_map": sos_map,
             "sos_grid_x": sos_grid_x,
             "sos_grid_z": sos_grid_z,
+            "focal_region_margin": focal_region_margin,
         }
 
         if not self.with_batch_dim:

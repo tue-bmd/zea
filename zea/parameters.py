@@ -219,6 +219,14 @@ class Parameters(BaseParameters):
     apply_lens_correction: bool
     """Whether to apply lens correction to the transmit delays. Defaults to False."""
 
+    focal_region_margin: float
+    """Half-width in meters of the region around the focal plane of focused transmits.
+
+    In this region the hybrid (locally plane wave) transmit-delay model is used, removing the delay
+    discontinuity at the focus (Rindal et al., IUS 2018). Defaults to 0.0 (disabled, i.e.
+    the conventional virtual-source model everywhere); a typical value to enable it is 1e-3 m.
+    """
+
     lens_thickness: float
     """Thickness of the lens [m]."""
 
@@ -229,8 +237,10 @@ class Parameters(BaseParameters):
     """Range of phi angles for 3D imaging [rad], shape (2,)."""
 
     pfield_kwargs: dict
-    """Extra keyword arguments for the pressure-field computation. See
-    :func:`zea.beamform.pfield.compute_pfield`. Defaults to ``{}``."""
+    """Extra keyword arguments for the pressure-field computation.
+
+    See :func:`zea.beamform.pfield.compute_pfield`. Defaults to ``{}``.
+    """
 
     num_scanline_pixels: int
     """Number of depth samples per transmit line for scanline beamforming.
@@ -261,6 +271,7 @@ class Parameters(BaseParameters):
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
         "num_scanline_pixels": {"dtype": np.int32, "default": 700},
         "scanline_sector": {"dtype": bool, "default": False},  # native dtype on purpose
+        "focal_region_margin": {"dtype": np.float32, "default": 0.0},
         "grid_type": {"dtype": str, "default": "cartesian"},
         "polar_limits": {"dtype": np.float32, "shape": (2,)},
         "dynamic_range": {"dtype": np.float32, "shape": (2,)},
