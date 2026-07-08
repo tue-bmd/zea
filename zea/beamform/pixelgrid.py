@@ -192,3 +192,57 @@ def polar_pixel_grid(
 
     # In case of rounding errors, trim the grid to the correct number of radial pixels
     return grid[:num_radial_pixels, :, :]
+
+
+def scanline_pixel_grid(
+    transmit_origins,
+    focus_distances,
+    polar_angles,
+    zlims,
+    num_depth_pixels,
+    azimuth_angles=None,
+    sector=False,
+):
+    """Per-transmit beam-line pixel grids for scanline beamforming.
+
+    Builds one line of ``num_depth_pixels`` points per transmit, to be paired
+    with :func:`zea.beamform.beamformer.beamform_scanline` (transmit ``n`` is
+    beamformed along line ``n``).
+
+    Args:
+        transmit_origins (np.ndarray): Beam origins ``(n_tx, 3)`` in meters.
+        focus_distances (np.ndarray): Focus distances ``(n_tx,)`` in meters.
+        polar_angles (np.ndarray): Steering angles ``(n_tx,)`` in radians.
+        zlims (tuple): Depth range ``(z_min, z_max)`` in meters.
+        num_depth_pixels (int): Number of samples along each line.
+        azimuth_angles (np.ndarray, optional): Azimuth angles ``(n_tx,)``.
+            Defaults to zeros.
+        sector (bool): If ``True`` each line is a steered ray from its transmit
+            origin (sector / phased-array geometry). If ``False`` each line is a
+            vertical column at the beam's lateral focus position (linear-scan
+            geometry).
+
+    Returns:
+        np.ndarray: Pixel positions ``(n_tx, num_depth_pixels, 3)`` in Cartesian
+        ``(x, y, z)`` coordinates (meters).
+    """
+    to = np.asarray(transmit_origins, dtype=np.float32)
+    fd = np.asarray(focus_distances, dtype=np.float32)
+    pa = np.asarray(polar_angles, dtype=np.float32)
+    az = np.zeros_like(pa) if azimuth_angles is None else np.asarray(azimuth_angles, dtype=np.float32)
+    n_tx = pa.shape[0]
+
+    s = np.linspace(zlims[0], zlims[1], num_depth_pixels).astype(np.float32)
+    v = np.stack(
+        [np.sin(pa) * np.cos(az), np.sin(pa) * np.sin(az), np.cos(pa)], axis=-1
+    )  # (n_tx, 3) beam direction
+
+    grids = np.zeros((n_tx, num_depth_pixels, 3), dtype=np.float32)
+    for n in range(n_tx):
+        if sector:
+            grids[n] = to[n][None, :] + s[:, None] * v[n][None, :]
+        else:
+            x_n = float(to[n, 0] + fd[n] * v[n, 0])  # lateral focus position
+            grids[n, :, 0] = x_n
+            grids[n, :, 2] = s
+    return grids

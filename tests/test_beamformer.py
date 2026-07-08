@@ -6,6 +6,7 @@ import pytest
 
 from zea.beamform.beamformer import (
     apply_delays,
+    beamform_scanline,
     calculate_delays,
     complex_rotate,
     distance_Rx,
@@ -14,7 +15,7 @@ from zea.beamform.beamformer import (
 )
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
-from zea.beamform.pixelgrid import cartesian_pixel_grid
+from zea.beamform.pixelgrid import cartesian_pixel_grid, scanline_pixel_grid
 
 from . import backend_equality_check
 
@@ -321,6 +322,260 @@ def test_transmit_delays_focused(flatgrid, probe_geometry):
     return txd
 
 
+def _focused_transmit_delays(grid, focus, angle, focal_region_margin):
+    """transmit_delays for a single focused beam, returning a numpy array."""
+    xs = np.linspace(-10e-3, 10e-3, N_EL)
+    probe = np.stack([xs, np.zeros(N_EL), np.zeros(N_EL)], -1).astype(np.float32)
+    t0 = compute_t0_delays_focused(
+        np.zeros((1, 3), np.float32),
+        np.array([focus], np.float32),
+        probe,
+        np.array([angle], np.float32),
+        sound_speed=SOUND_SPEED,
+    )[0]
+    t0 = (t0 - t0.min()).astype(np.float32)
+    rx = (np.linalg.norm(grid[:, None] - probe[None], axis=-1) / SOUND_SPEED).astype(np.float32)
+    txd = transmit_delays(
+        grid.astype(np.float32),
+        t0,
+        np.ones(N_EL, np.float32),
+        rx,
+        np.float32(focus),
+        np.float32(angle),
+        np.float32(0.0),
+        focal_region_margin=focal_region_margin,
+    )
+    return keras.ops.convert_to_numpy(txd)
+
+
+def _offaxis_column(focus, angle, x_offset=5e-3, n=801):
+    """Vertical pixel column offset laterally from a focused beam axis."""
+    v = np.array([np.sin(angle), 0.0, np.cos(angle)], np.float32)
+    x_col = float(focus * v[0]) + x_offset
+    z = np.linspace(focus - 8e-3, focus + 8e-3, n).astype(np.float32)
+    return np.stack([np.full_like(z, x_col), np.zeros_like(z), z], -1).astype(np.float32)
+
+
+def test_focal_region_margin_defaults_to_noop():
+    """margin=0.0 and margin=None must reproduce the conventional model exactly."""
+    grid = _offaxis_column(focus=15e-3, angle=0.0)
+    base = _focused_transmit_delays(grid, 15e-3, 0.0, None)
+    zero = _focused_transmit_delays(grid, 15e-3, 0.0, np.float32(0.0))
+    np.testing.assert_allclose(base, zero, rtol=0, atol=0)
+
+
+def test_focal_region_margin_only_changes_focal_slab():
+    """The hybrid patch may only touch pixels within `margin` of the focal plane."""
+    focus, margin = 15e-3, 1e-3
+    grid = _offaxis_column(focus=focus, angle=0.0)
+    base = _focused_transmit_delays(grid, focus, 0.0, None)
+    hybrid = _focused_transmit_delays(grid, focus, 0.0, np.float32(margin))
+
+    changed = ~np.isclose(base, hybrid, atol=1e-12)
+    # for an on-axis beam the focal plane is at z == focus; projection == z - focus
+    inside_slab = np.abs(grid[:, 2] - focus) < margin
+    assert np.all(changed[changed] == inside_slab[changed])
+    assert changed.any(), "expected the hybrid model to change some focal-region pixels"
+
+
+def test_focal_region_margin_reduces_delay_discontinuity():
+    """The hybrid model must shrink the transmit-delay jump at the focal plane."""
+    focus, margin = 15e-3, 1e-3
+    grid = _offaxis_column(focus=focus, angle=0.0, x_offset=2e-3)
+    jump_base = np.abs(np.diff(_focused_transmit_delays(grid, focus, 0.0, None))).max()
+    jump_hybrid = np.abs(
+        np.diff(_focused_transmit_delays(grid, focus, 0.0, np.float32(margin)))
+    ).max()
+    assert jump_hybrid < 0.6 * jump_base
+
+
+def test_focal_region_margin_noop_for_planewave(flatgrid, probe_geometry):
+    """Plane-wave transmits are unaffected by focal_region_margin."""
+    flatgrid_t = keras.ops.convert_to_tensor(flatgrid)
+    probe_t = keras.ops.convert_to_tensor(probe_geometry)
+    n_el = probe_geometry.shape[0]
+    t0 = keras.ops.zeros((n_el,))
+    tx_apod = keras.ops.ones((n_el,))
+    rx = distance_Rx(flatgrid_t, probe_t) / SOUND_SPEED
+    common = dict(transmit_origin=keras.ops.zeros((3,)))
+    base = transmit_delays(
+        flatgrid_t, t0, tx_apod, rx, np.float32(np.inf), np.float32(0.0), np.float32(0.0), **common
+    )
+    hybrid = transmit_delays(
+        flatgrid_t,
+        t0,
+        tx_apod,
+        rx,
+        np.float32(np.inf),
+        np.float32(0.0),
+        np.float32(0.0),
+        focal_region_margin=np.float32(1e-3),
+        **common,
+    )
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(base), keras.ops.convert_to_numpy(hybrid), rtol=0, atol=0
+    )
+
+
+def test_warn_if_focal_region_margin_unused(monkeypatch):
+    """The pre-jit helper warns for non-focused data and stays quiet otherwise."""
+    import zea.beamform.beamformer as bf
+
+    calls = []
+    monkeypatch.setattr(bf, "_warning_once", lambda msg, *a, **k: calls.append(msg))
+
+    planewave = np.full(4, np.inf, np.float32)
+    focused = np.full(4, 15e-3, np.float32)
+
+    bf.warn_if_focal_region_margin_unused(planewave, 1e-3)  # unused -> warns
+    assert len(calls) == 1 and "focal_region_margin" in calls[0]
+
+    bf.warn_if_focal_region_margin_unused(focused, 1e-3)  # focused -> no warning
+    bf.warn_if_focal_region_margin_unused(planewave, 0.0)  # disabled -> no warning
+    assert len(calls) == 1
+
+
+# scanline beamforming
+
+
+def test_scanline_pixel_grid_linear():
+    """Linear scanline grids are vertical columns at each beam's lateral focus."""
+    origins = np.zeros((3, 3), np.float32)
+    origins[:, 0] = [-5e-3, 0.0, 5e-3]  # walking transmit origins
+    focus = np.full(3, 20e-3, np.float32)
+    angles = np.zeros(3, np.float32)
+    grids = scanline_pixel_grid(origins, focus, angles, (1e-3, 30e-3), 16, sector=False)
+    assert grids.shape == (3, 16, 3)
+    for n in range(3):
+        # angle 0 -> lateral focus == origin x, and every point on the line is at that x
+        assert np.allclose(grids[n, :, 0], origins[n, 0])
+        assert np.isclose(grids[n, 0, 2], 1e-3) and np.isclose(grids[n, -1, 2], 30e-3)
+
+
+def test_scanline_pixel_grid_sector():
+    """Sector scanline grids are steered rays from the transmit origin."""
+    origins = np.zeros((3, 3), np.float32)
+    focus = np.full(3, 40e-3, np.float32)
+    angles = np.array([-0.3, 0.0, 0.3], np.float32)
+    grids = scanline_pixel_grid(origins, focus, angles, (0.0, 50e-3), 16, sector=True)
+    assert grids.shape == (3, 16, 3)
+    for n in range(3):
+        r = np.linalg.norm(grids[n] - origins[n], axis=-1)
+        np.testing.assert_allclose(grids[n, :, 0], r * np.sin(angles[n]), atol=1e-6)
+        np.testing.assert_allclose(grids[n, :, 2], r * np.cos(angles[n]), atol=1e-6)
+
+
+def _make_scanline_inputs(probe_geometry, n_line=12):
+    """Two focused transmits and their per-transmit beam-line grids."""
+    n_el = probe_geometry.shape[0]
+    origins = np.zeros((2, 3), np.float32)
+    origins[:, 0] = [-3e-3, 3e-3]
+    focus = np.full(2, 18e-3, np.float32)
+    angles = np.zeros(2, np.float32)
+    t0 = np.stack(
+        [
+            compute_t0_delays_focused(
+                o[None], f[None], probe_geometry, a[None], sound_speed=SOUND_SPEED
+            )[0]
+            for o, f, a in zip(origins, focus, angles)
+        ]
+    ).astype(np.float32)
+    grids = scanline_pixel_grid(origins, focus, angles, (2e-3, 25e-3), n_line, sector=False)
+    inputs = dict(
+        t0_delays=t0,
+        tx_apodizations=np.ones((2, n_el), np.float32),
+        sound_speed=SOUND_SPEED,
+        probe_geometry=probe_geometry,
+        initial_times=np.zeros(2, np.float32),
+        sampling_frequency=SAMPLING_FREQ,
+        demodulation_frequency=DEMOD_FREQ,
+        f_number=0.0,
+        polar_angles=angles,
+        focus_distances=focus,
+        t_peak=np.zeros(2, np.float32),
+        transmit_origins=origins,
+    )
+    return grids.astype(np.float32), inputs
+
+
+def test_beamform_scanline_shape(probe_geometry):
+    """beamform_scanline returns one line per transmit, summed over elements."""
+    n_line = 12
+    grids, inputs = _make_scanline_inputs(probe_geometry, n_line=n_line)
+    data = np.random.randn(2, 96, probe_geometry.shape[0], 1).astype(np.float32)
+    out = keras.ops.convert_to_numpy(beamform_scanline(data, grids, **inputs))
+    assert out.shape == (2, n_line, 1)
+    assert np.all(np.isfinite(out))
+
+
+def test_beamform_scanline_matches_per_transmit_tof(probe_geometry):
+    """Line n must equal transmit n's tof_correction summed over the aperture."""
+    grids, inputs = _make_scanline_inputs(probe_geometry, n_line=10)
+    data = np.random.randn(2, 96, probe_geometry.shape[0], 2).astype(np.float32)
+    out = keras.ops.convert_to_numpy(beamform_scanline(data, grids, **inputs))
+    for n in range(2):
+        tof = tof_correction(
+            data[n : n + 1],
+            grids[n],
+            inputs["t0_delays"][n : n + 1],
+            inputs["tx_apodizations"][n : n + 1],
+            SOUND_SPEED,
+            probe_geometry,
+            inputs["initial_times"][n : n + 1],
+            SAMPLING_FREQ,
+            DEMOD_FREQ,
+            0.0,
+            inputs["polar_angles"][n : n + 1],
+            inputs["focus_distances"][n : n + 1],
+            inputs["t_peak"][n : n + 1],
+            inputs["transmit_origins"][n : n + 1],
+        )
+        expected = keras.ops.convert_to_numpy(keras.ops.sum(tof, axis=2)[0])
+        np.testing.assert_allclose(out[n], expected, rtol=1e-5, atol=1e-5)
+
+
+def test_beamform_scanline_batched_matches_unbatched(probe_geometry):
+    """Batched scanline beamforming should match per-frame unbatched results."""
+    grids, inputs = _make_scanline_inputs(probe_geometry, n_line=10)
+    batch_data = np.random.randn(3, 2, 96, probe_geometry.shape[0], 2).astype(np.float32)
+
+    batched = keras.ops.convert_to_numpy(beamform_scanline(batch_data, grids, **inputs))
+    assert batched.shape == (3, 2, 10, 2)
+
+    for i in range(batch_data.shape[0]):
+        unbatched = keras.ops.convert_to_numpy(beamform_scanline(batch_data[i], grids, **inputs))
+        np.testing.assert_allclose(batched[i], unbatched, rtol=1e-5, atol=1e-5)
+
+
+def test_scanline_beamform_op(probe_geometry):
+    """The ScanlineBeamform op returns the image plus its Cartesian grid."""
+    from zea.ops import ScanlineBeamform
+
+    grids, inputs = _make_scanline_inputs(probe_geometry, n_line=16)
+    data = np.random.randn(2, 96, probe_geometry.shape[0], 2).astype(np.float32)
+
+    op = ScanlineBeamform(with_batch_dim=False)
+    out = op.call(data=data, scanline_grids=grids, **inputs)
+    image = keras.ops.convert_to_numpy(out["data"])
+    assert image.shape == (16, 2, 2)  # (num_scanline_pixels, n_tx, n_ch)
+    assert keras.ops.convert_to_numpy(out["grid_x"]).shape == (16, 2)
+    assert keras.ops.convert_to_numpy(out["grid_z"]).shape == (16, 2)
+
+
+def test_scanline_beamform_op_with_batch_dim(probe_geometry):
+    """With batch dim enabled, ScanlineBeamform should return batched images."""
+    from zea.ops import ScanlineBeamform
+
+    grids, inputs = _make_scanline_inputs(probe_geometry, n_line=14)
+    data = np.random.randn(4, 2, 96, probe_geometry.shape[0], 1).astype(np.float32)
+
+    op = ScanlineBeamform(with_batch_dim=True)
+    out = op.call(data=data, scanline_grids=grids, **inputs)
+    image = keras.ops.convert_to_numpy(out["data"])
+
+    assert image.shape == (4, 14, 2, 1)
+    assert keras.ops.convert_to_numpy(out["grid_x"]).shape == (14, 2)
+    assert keras.ops.convert_to_numpy(out["grid_z"]).shape == (14, 2)
 # calculate_delays
 
 
