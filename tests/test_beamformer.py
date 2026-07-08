@@ -326,14 +326,22 @@ def _focused_transmit_delays(grid, focus, angle, focal_region_margin):
     xs = np.linspace(-10e-3, 10e-3, N_EL)
     probe = np.stack([xs, np.zeros(N_EL), np.zeros(N_EL)], -1).astype(np.float32)
     t0 = compute_t0_delays_focused(
-        np.zeros((1, 3), np.float32), np.array([focus], np.float32),
-        probe, np.array([angle], np.float32), sound_speed=SOUND_SPEED,
+        np.zeros((1, 3), np.float32),
+        np.array([focus], np.float32),
+        probe,
+        np.array([angle], np.float32),
+        sound_speed=SOUND_SPEED,
     )[0]
     t0 = (t0 - t0.min()).astype(np.float32)
     rx = (np.linalg.norm(grid[:, None] - probe[None], axis=-1) / SOUND_SPEED).astype(np.float32)
     txd = transmit_delays(
-        grid.astype(np.float32), t0, np.ones(N_EL, np.float32), rx,
-        np.float32(focus), np.float32(angle), np.float32(0.0),
+        grid.astype(np.float32),
+        t0,
+        np.ones(N_EL, np.float32),
+        rx,
+        np.float32(focus),
+        np.float32(angle),
+        np.float32(0.0),
         focal_region_margin=focal_region_margin,
     )
     return keras.ops.convert_to_numpy(txd)
@@ -393,8 +401,15 @@ def test_focal_region_margin_noop_for_planewave(flatgrid, probe_geometry):
         flatgrid_t, t0, tx_apod, rx, np.float32(np.inf), np.float32(0.0), np.float32(0.0), **common
     )
     hybrid = transmit_delays(
-        flatgrid_t, t0, tx_apod, rx, np.float32(np.inf), np.float32(0.0), np.float32(0.0),
-        focal_region_margin=np.float32(1e-3), **common,
+        flatgrid_t,
+        t0,
+        tx_apod,
+        rx,
+        np.float32(np.inf),
+        np.float32(0.0),
+        np.float32(0.0),
+        focal_region_margin=np.float32(1e-3),
+        **common,
     )
     np.testing.assert_allclose(
         keras.ops.convert_to_numpy(base), keras.ops.convert_to_numpy(hybrid), rtol=0, atol=0
