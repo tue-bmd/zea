@@ -232,6 +232,14 @@ class Parameters(BaseParameters):
     """Extra keyword arguments for the pressure-field computation. See
     :func:`zea.beamform.pfield.compute_pfield`. Defaults to ``{}``."""
 
+    num_scanline_pixels: int
+    """Number of depth samples per transmit line for scanline beamforming.
+    Defaults to 700."""
+
+    scanline_sector: bool
+    """Scanline grid mode: ``False`` for focused linear columns, ``True`` for
+    steered sector rays. Defaults to ``False``."""
+
     scan_schema = deepcopy(ScanSpec.SCHEMA)
     probe_schema = deepcopy(Probe.SCHEMA)
     for key in Probe._NON_PARAMETERS:
@@ -251,7 +259,6 @@ class Parameters(BaseParameters):
         "pixels_per_wavelength": {"dtype": np.int32, "default": 4},
         "pfield_kwargs": {"dtype": dict, "default": {}},
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
-        "focal_region_margin": {"dtype": np.float32, "default": 0.0},
         "num_scanline_pixels": {"dtype": np.int32, "default": 700},
         "scanline_sector": {"dtype": bool, "default": False},  # native dtype on purpose
         "grid_type": {"dtype": str, "default": "cartesian"},
