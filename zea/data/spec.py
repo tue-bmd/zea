@@ -14,7 +14,13 @@ import numpy as np
 from zea import log
 from zea.internal.typing import Scalar
 
+# Named dimensions whose sizes must agree wherever they appear.
 CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch", "n_spatial_ch"}
+
+# Subset that must only agree within a single spec, not across sibling data
+# products: channel counts are independent between products (e.g. RF raw_data
+# next to IQ beamformed_data), so they are not propagated across spec boundaries.
+LOCAL_CONSISTENCY_DIMENSIONS = {"n_ch", "n_spatial_ch"}
 
 UNITS = {
     "m/s": "meters per second",
@@ -188,6 +194,10 @@ class Spec:
         nested_dim_to_field_sizes: defaultdict[str, dict[str, int]],
     ) -> None:
         for dim_name, nested_field_sizes in nested_dim_to_field_sizes.items():
+            # Channel dimensions are only consistent within a single spec, not
+            # across data products, so they are not propagated to the parent.
+            if dim_name in LOCAL_CONSISTENCY_DIMENSIONS:
+                continue
             dim_to_field_sizes[dim_name].update(nested_field_sizes)
 
     @staticmethod

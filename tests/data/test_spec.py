@@ -10,6 +10,7 @@ from zea.data.file import File
 from zea.data.spec import (
     Annotations,
     AttenuationMap,
+    BeamformedData,
     DataSpec,
     FileSpec,
     Image,
@@ -306,6 +307,69 @@ def test_inconsistent_dimension_error_groups_fields_by_size():
     assert "t0_delays" in message and "tx_apodizations" in message
     size_2_line = next(line for line in message.splitlines() if line.strip().startswith("size 2:"))
     assert "t0_delays" in size_2_line
+
+
+def test_n_ch_is_independent_across_data_products():
+    """RF raw_data (n_ch=1) may coexist with IQ beamformed_data (n_ch=2).
+
+    The channel dimension is semantically independent between data products, so
+    it must not be cross-checked at the DataSpec level.
+    """
+    n_frames, n_tx, n_ax, n_el, z, x = 2, 4, 64, 8, 16, 16
+    data = DataSpec(
+        raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32),
+        beamformed_data={
+            "values": np.zeros((n_frames, z, x, 2), dtype=np.float32),
+            "coordinates": np.zeros((n_frames, z, x, 3), dtype=np.float32),
+        },
+    )
+    assert data.raw_data.shape[-1] == 1
+    assert data.beamformed_data.values.shape[-1] == 2
+    assert list(data.beamformed_data.labels) == ["I", "Q"]
+
+
+def test_n_spatial_ch_is_independent_across_maps():
+    """Two maps in the same DataSpec may have different channel counts."""
+    n_frames, z, x = 2, 16, 16
+    coordinates = np.zeros((n_frames, z, x, 3), dtype=np.float32)
+    data = DataSpec(
+        segmentation={
+            "values": np.zeros((n_frames, z, x, 3), dtype=np.bool_),
+            "labels": np.array(["a", "b", "c"], dtype=np.str_),
+            "coordinates": coordinates,
+        },
+        sos_map={
+            "values": np.zeros((n_frames, z, x, 2), dtype=np.float32),
+            "labels": np.array(["lo", "hi"], dtype=np.str_),
+            "coordinates": coordinates,
+        },
+    )
+    assert data.segmentation.values.shape[-1] == 3
+    assert data.sos_map.values.shape[-1] == 2
+
+
+def test_n_ch_still_consistent_within_a_single_map():
+    """values and labels within one Map must still agree on n_ch."""
+    n_frames, z, x = 2, 16, 16
+    with pytest.raises(ValueError, match="Dimension 'n_ch' has inconsistent sizes"):
+        BeamformedData(
+            values=np.zeros((n_frames, z, x, 2), dtype=np.float32),
+            coordinates=np.zeros((n_frames, z, x, 3), dtype=np.float32),
+            labels=np.array(["only_one"], dtype=np.str_),
+        )
+
+
+def test_shared_dimensions_still_cross_checked_across_data_products():
+    """Non-channel dimensions (e.g. n_frames) must still agree across products."""
+    z, x = 16, 16
+    with pytest.raises(ValueError, match="Dimension 'n_frames' has inconsistent sizes"):
+        DataSpec(
+            raw_data=np.zeros((2, 4, 64, 8, 1), dtype=np.float32),
+            beamformed_data={
+                "values": np.zeros((3, z, x, 1), dtype=np.float32),
+                "coordinates": np.zeros((3, z, x, 3), dtype=np.float32),
+            },
+        )
 
 
 def test_signal_nd_accepts_variable_trailing_dimensions_with_ellipsis():
