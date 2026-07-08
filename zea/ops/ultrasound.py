@@ -3,16 +3,16 @@ import numpy as np
 from keras import ops
 
 from zea import log
-from zea.beamform.beamformer import beamform_scanline, tof_correction
+from zea.beamform.beamformer import tof_correction
 from zea.display import scan_convert
 from zea.func.tensor import (
     apply_along_axis,
     correlate,
-    extend_n_dims,
     gaussian_filter,
     reshape_axis,
 )
 from zea.func.ultrasound import (
+    apply_receive_apodization,
     channels_to_complex,
     complex_to_channels,
     demodulate,
@@ -238,108 +238,49 @@ class PfieldWeighting(Operation):
         if flat_pfield is None:
             return {self.output_key: data}
 
-        # Swap (n_pix, n_tx) to (n_tx, n_pix)
-        flat_pfield = ops.swapaxes(flat_pfield, 0, 1)
-
-        # Add batch dimension if needed
-        if self.with_batch_dim:
-            pfield_expanded = ops.expand_dims(flat_pfield, axis=0)
-        else:
-            pfield_expanded = flat_pfield
-
-        append_n_dims = ops.ndim(data) - ops.ndim(pfield_expanded)
-        pfield_expanded = extend_n_dims(pfield_expanded, axis=-1, n_dims=append_n_dims)
-
-        # Perform element-wise multiplication with the pressure weight mask
-        weighted_data = data * pfield_expanded
+        weighted_data = apply_receive_apodization(data, flat_pfield, self.with_batch_dim)
 
         return {self.output_key: weighted_data}
 
 
-@ops_registry("scanline_beamform")
-class ScanlineBeamform(Operation):
-    """Scanline (line-by-line) beamforming operation.
+@ops_registry("receive_apodization")
+class ReceiveApodization(Operation):
+    """Weighting aligned data with an arbitrary, directly-supplied per-pixel,
+    per-transmit apodization mask.
 
-    A drop-in replacement for :class:`~zea.ops.Beamform` for conventional
-    focused (scanline) acquisitions: instead of compounding every transmit onto
-    a shared pixel grid, each transmit is delay-and-summed along **its own beam
-    line** and the lines are assembled into the image. This is the faithful
-    reconstruction for one-focused-beam-per-line scans (walking-focus linear
-    scans with ``sector=False``; steered focused scans with ``sector=True``).
-
-    Input is RF/IQ data ``(n_tx, n_ax, n_el, n_ch)`` (optional batch dim); output
-    is the beamformed image ``(num_scanline_pixels, n_tx, n_ch)`` — depth along
-    the rows, one column per transmit beam. The Cartesian ``(x, z)`` position of
-    every image pixel is returned as ``grid_x`` / ``grid_z`` (shape
-    ``(num_scanline_pixels, n_tx)``), so the image can be displayed directly on
-    its true geometry (e.g. ``pcolormesh``) for both the linear and the steered
-    (fan) case without a separate scan-conversion step. ``x_lim`` / ``z_lim``
-    give the overall extent.
+    This is the same mechanism as :class:`PfieldWeighting`, generalized to take
+    the weight directly instead of deriving it from a simulated pressure field.
+    Any transmit's contribution to any pixel can be scaled or masked out before
+    the receive-aperture and transmit sums, e.g. to reconstruct scanline (one
+    transmit per image line) imaging as a special case of pixel-based DAS:
+    weight 1 for a pixel's owning beam, 0 for every other transmit. See
+    :func:`zea.beamform.pixelgrid.scanline_receive_apodization`.
     """
-
-    STATIC_PARAMS = ["f_number"]
-    ADD_OUTPUT_KEYS = ["grid_x", "grid_z"]
 
     def __init__(self, **kwargs):
         super().__init__(
-            input_data_type=DataTypes.RAW_DATA,
-            output_data_type=DataTypes.BEAMFORMED_DATA,
-            jittable=False,
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.ALIGNED_DATA,
             **kwargs,
         )
 
-    def call(
-        self,
-        scanline_grids,
-        t0_delays,
-        tx_apodizations,
-        sound_speed,
-        probe_geometry,
-        initial_times,
-        sampling_frequency,
-        demodulation_frequency,
-        f_number,
-        polar_angles,
-        focus_distances,
-        t_peak,
-        transmit_origins,
-        **kwargs,
-    ):
-        """Beamform each transmit along its own beam line and stack the lines.
+    def call(self, flat_apodization=None, **kwargs):
+        """Weight data with a per-pixel, per-transmit apodization mask.
 
-        The per-transmit beam-line grids are supplied by
-        :attr:`zea.Parameters.scanline_grids`. Returns the beamformed image plus
-        the Cartesian ``grid_x`` / ``grid_z`` of each pixel for display.
+        Args:
+            flat_apodization (ops.Tensor): Apodization weight of shape (n_pix, n_tx)
+
+        Returns:
+            dict: Dictionary containing weighted data
         """
-        data = kwargs[self.key]
+        data = kwargs[self.key]  # must start with ((batch_size,) n_tx, n_pix, ...)
 
-        lines = beamform_scanline(
-            data,
-            scanline_grids,
-            t0_delays,
-            tx_apodizations,
-            sound_speed,
-            probe_geometry,
-            initial_times,
-            sampling_frequency,
-            demodulation_frequency,
-            f_number,
-            polar_angles,
-            focus_distances,
-            t_peak,
-            transmit_origins,
-        )
+        if flat_apodization is None:
+            return {self.output_key: data}
 
-        if self.with_batch_dim:
-            image = ops.transpose(lines, (0, 2, 1, 3))  # (batch, n_line, n_tx, n_ch)
-        else:
-            image = ops.transpose(lines, (1, 0, 2))  # (n_line, n_tx, n_ch)
+        weighted_data = apply_receive_apodization(data, flat_apodization, self.with_batch_dim)
 
-        return {
-            self.output_key: image,
-            "grid_x": ops.transpose(scanline_grids[..., 0]),  # (n_line, n_tx) Cartesian x
-            "grid_z": ops.transpose(scanline_grids[..., 2]),  # (n_line, n_tx) Cartesian z
-        }
+        return {self.output_key: weighted_data}
 
 
 @ops_registry("scan_convert")

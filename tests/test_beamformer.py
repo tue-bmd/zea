@@ -6,7 +6,6 @@ import pytest
 
 from zea.beamform.beamformer import (
     apply_delays,
-    beamform_scanline,
     calculate_delays,
     complex_rotate,
     distance_Rx,
@@ -15,7 +14,11 @@ from zea.beamform.beamformer import (
 )
 from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
-from zea.beamform.pixelgrid import cartesian_pixel_grid, scanline_pixel_grid
+from zea.beamform.pixelgrid import (
+    cartesian_pixel_grid,
+    scanline_pixel_grid,
+    scanline_receive_apodization,
+)
 
 from . import backend_equality_check
 
@@ -331,12 +334,12 @@ def test_scanline_pixel_grid_linear():
     origins[:, 0] = [-5e-3, 0.0, 5e-3]  # walking transmit origins
     focus = np.full(3, 20e-3, np.float32)
     angles = np.zeros(3, np.float32)
-    grids = scanline_pixel_grid(origins, focus, angles, (1e-3, 30e-3), 16, sector=False)
-    assert grids.shape == (3, 16, 3)
+    grid = scanline_pixel_grid(origins, focus, angles, (1e-3, 30e-3), 16, sector=False)
+    assert grid.shape == (16, 3, 3)
     for n in range(3):
         # angle 0 -> lateral focus == origin x, and every point on the line is at that x
-        assert np.allclose(grids[n, :, 0], origins[n, 0])
-        assert np.isclose(grids[n, 0, 2], 1e-3) and np.isclose(grids[n, -1, 2], 30e-3)
+        assert np.allclose(grid[:, n, 0], origins[n, 0])
+        assert np.isclose(grid[0, n, 2], 1e-3) and np.isclose(grid[-1, n, 2], 30e-3)
 
 
 def test_scanline_pixel_grid_sector():
@@ -344,21 +347,34 @@ def test_scanline_pixel_grid_sector():
     origins = np.zeros((3, 3), np.float32)
     focus = np.full(3, 40e-3, np.float32)
     angles = np.array([-0.3, 0.0, 0.3], np.float32)
-    grids = scanline_pixel_grid(origins, focus, angles, (0.0, 50e-3), 16, sector=True)
-    assert grids.shape == (3, 16, 3)
+    grid = scanline_pixel_grid(origins, focus, angles, (0.0, 50e-3), 16, sector=True)
+    assert grid.shape == (16, 3, 3)
     for n in range(3):
-        r = np.linalg.norm(grids[n] - origins[n], axis=-1)
-        np.testing.assert_allclose(grids[n, :, 0], r * np.sin(angles[n]), atol=1e-6)
-        np.testing.assert_allclose(grids[n, :, 2], r * np.cos(angles[n]), atol=1e-6)
+        r = np.linalg.norm(grid[:, n] - origins[n], axis=-1)
+        np.testing.assert_allclose(grid[:, n, 0], r * np.sin(angles[n]), atol=1e-6)
+        np.testing.assert_allclose(grid[:, n, 2], r * np.cos(angles[n]), atol=1e-6)
+
+
+def test_scanline_receive_apodization_one_hot():
+    """Each pixel's apodization row selects exactly its own column's transmit."""
+    n_tx, n_line = 4, 5
+    apod = scanline_receive_apodization(n_tx, n_line)
+    assert apod.shape == (n_line * n_tx, n_tx)
+    for i in range(n_line):
+        for n in range(n_tx):
+            expected = np.zeros(n_tx, np.float32)
+            expected[n] = 1.0
+            np.testing.assert_array_equal(apod[i * n_tx + n], expected)
 
 
 def _make_scanline_inputs(probe_geometry, n_line=12):
-    """Two focused transmits and their per-transmit beam-line grids."""
+    """Two focused transmits and their shared scanline pixel grid."""
     n_el = probe_geometry.shape[0]
-    origins = np.zeros((2, 3), np.float32)
+    n_tx = 2
+    origins = np.zeros((n_tx, 3), np.float32)
     origins[:, 0] = [-3e-3, 3e-3]
-    focus = np.full(2, 18e-3, np.float32)
-    angles = np.zeros(2, np.float32)
+    focus = np.full(n_tx, 18e-3, np.float32)
+    angles = np.zeros(n_tx, np.float32)
     t0 = np.stack(
         [
             compute_t0_delays_focused(
@@ -367,43 +383,45 @@ def _make_scanline_inputs(probe_geometry, n_line=12):
             for o, f, a in zip(origins, focus, angles)
         ]
     ).astype(np.float32)
-    grids = scanline_pixel_grid(origins, focus, angles, (2e-3, 25e-3), n_line, sector=False)
+    grid = scanline_pixel_grid(origins, focus, angles, (2e-3, 25e-3), n_line, sector=False)
+    apodization = scanline_receive_apodization(n_tx, n_line)
     inputs = dict(
         t0_delays=t0,
-        tx_apodizations=np.ones((2, n_el), np.float32),
+        tx_apodizations=np.ones((n_tx, n_el), np.float32),
         sound_speed=SOUND_SPEED,
         probe_geometry=probe_geometry,
-        initial_times=np.zeros(2, np.float32),
+        initial_times=np.zeros(n_tx, np.float32),
         sampling_frequency=SAMPLING_FREQ,
         demodulation_frequency=DEMOD_FREQ,
         f_number=0.0,
         polar_angles=angles,
         focus_distances=focus,
-        t_peak=np.zeros(2, np.float32),
+        t_peak=np.zeros(n_tx, np.float32),
         transmit_origins=origins,
     )
-    return grids.astype(np.float32), inputs
+    return grid.astype(np.float32), apodization, inputs
 
 
-def test_beamform_scanline_shape(probe_geometry):
-    """beamform_scanline returns one line per transmit, summed over elements."""
-    n_line = 12
-    grids, inputs = _make_scanline_inputs(probe_geometry, n_line=n_line)
-    data = np.random.randn(2, 96, probe_geometry.shape[0], 1).astype(np.float32)
-    out = keras.ops.convert_to_numpy(beamform_scanline(data, grids, **inputs))
-    assert out.shape == (2, n_line, 1)
-    assert np.all(np.isfinite(out))
+def test_scanline_via_pixel_beamform_matches_per_transmit_tof(probe_geometry):
+    """Reconstructing the scanline grid via tof_correction + receive apodization
+    (i.e. the regular pixel-based DAS path) must give, for every column, exactly
+    what a standalone tof_correction call for that column's own transmit gives.
+    """
+    n_line = 10
+    grid, apodization, inputs = _make_scanline_inputs(probe_geometry, n_line=n_line)
+    n_tx = grid.shape[1]
+    flatgrid = grid.reshape(-1, 3)
+    data = np.random.randn(n_tx, 96, probe_geometry.shape[0], 2).astype(np.float32)
 
+    tof = tof_correction(data, flatgrid, **inputs)  # (n_tx, n_pix, n_el, n_ch)
+    apod_tx_pix = keras.ops.convert_to_tensor(apodization.T, dtype=tof.dtype)[:, :, None, None]
+    image = keras.ops.convert_to_numpy(keras.ops.sum(tof * apod_tx_pix, axis=(0, 2)))
+    image = image.reshape(n_line, n_tx, -1)
 
-def test_beamform_scanline_matches_per_transmit_tof(probe_geometry):
-    """Line n must equal transmit n's tof_correction summed over the aperture."""
-    grids, inputs = _make_scanline_inputs(probe_geometry, n_line=10)
-    data = np.random.randn(2, 96, probe_geometry.shape[0], 2).astype(np.float32)
-    out = keras.ops.convert_to_numpy(beamform_scanline(data, grids, **inputs))
-    for n in range(2):
-        tof = tof_correction(
+    for n in range(n_tx):
+        tof_n = tof_correction(
             data[n : n + 1],
-            grids[n],
+            grid[:, n],
             inputs["t0_delays"][n : n + 1],
             inputs["tx_apodizations"][n : n + 1],
             SOUND_SPEED,
@@ -417,52 +435,8 @@ def test_beamform_scanline_matches_per_transmit_tof(probe_geometry):
             inputs["t_peak"][n : n + 1],
             inputs["transmit_origins"][n : n + 1],
         )
-        expected = keras.ops.convert_to_numpy(keras.ops.sum(tof, axis=2)[0])
-        np.testing.assert_allclose(out[n], expected, rtol=1e-5, atol=1e-5)
-
-
-def test_beamform_scanline_batched_matches_unbatched(probe_geometry):
-    """Batched scanline beamforming should match per-frame unbatched results."""
-    grids, inputs = _make_scanline_inputs(probe_geometry, n_line=10)
-    batch_data = np.random.randn(3, 2, 96, probe_geometry.shape[0], 2).astype(np.float32)
-
-    batched = keras.ops.convert_to_numpy(beamform_scanline(batch_data, grids, **inputs))
-    assert batched.shape == (3, 2, 10, 2)
-
-    for i in range(batch_data.shape[0]):
-        unbatched = keras.ops.convert_to_numpy(beamform_scanline(batch_data[i], grids, **inputs))
-        np.testing.assert_allclose(batched[i], unbatched, rtol=1e-5, atol=1e-5)
-
-
-def test_scanline_beamform_op(probe_geometry):
-    """The ScanlineBeamform op returns the image plus its Cartesian grid."""
-    from zea.ops import ScanlineBeamform
-
-    grids, inputs = _make_scanline_inputs(probe_geometry, n_line=16)
-    data = np.random.randn(2, 96, probe_geometry.shape[0], 2).astype(np.float32)
-
-    op = ScanlineBeamform(with_batch_dim=False)
-    out = op.call(data=data, scanline_grids=grids, **inputs)
-    image = keras.ops.convert_to_numpy(out["data"])
-    assert image.shape == (16, 2, 2)  # (num_scanline_pixels, n_tx, n_ch)
-    assert keras.ops.convert_to_numpy(out["grid_x"]).shape == (16, 2)
-    assert keras.ops.convert_to_numpy(out["grid_z"]).shape == (16, 2)
-
-
-def test_scanline_beamform_op_with_batch_dim(probe_geometry):
-    """With batch dim enabled, ScanlineBeamform should return batched images."""
-    from zea.ops import ScanlineBeamform
-
-    grids, inputs = _make_scanline_inputs(probe_geometry, n_line=14)
-    data = np.random.randn(4, 2, 96, probe_geometry.shape[0], 1).astype(np.float32)
-
-    op = ScanlineBeamform(with_batch_dim=True)
-    out = op.call(data=data, scanline_grids=grids, **inputs)
-    image = keras.ops.convert_to_numpy(out["data"])
-
-    assert image.shape == (4, 14, 2, 1)
-    assert keras.ops.convert_to_numpy(out["grid_x"]).shape == (14, 2)
-    assert keras.ops.convert_to_numpy(out["grid_z"]).shape == (14, 2)
+        expected = keras.ops.convert_to_numpy(keras.ops.sum(tof_n, axis=2)[0])
+        np.testing.assert_allclose(image[:, n], expected, rtol=1e-5, atol=1e-5)
 
 
 def _focused_transmit_delays(grid, focus, angle, focal_region_margin):

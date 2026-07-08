@@ -25,6 +25,7 @@ from zea.ops.ultrasound import (
     EnvelopeDetect,
     LogCompress,
     PfieldWeighting,
+    ReceiveApodization,
     ReshapeGrid,
     TOFCorrection,
 )
@@ -203,6 +204,7 @@ class Pipeline:
         num_patches=100,
         baseband=False,
         enable_pfield=False,
+        enable_receive_apodization=False,
         timed=False,
         **kwargs,
     ) -> "Pipeline":
@@ -223,6 +225,9 @@ class Pipeline:
                 so input signal has a single channel dim and is still on carrier frequency.
             enable_pfield (bool): If True, apply PfieldWeighting. Defaults to False.
                 This will calculate pressure field and only beamform the data to those locations.
+            enable_receive_apodization (bool): If True, apply ReceiveApodization using
+                ``parameters.flat_apodization``. Defaults to False. Used e.g. for scanline
+                (line-by-line) imaging with ``parameters.grid_type = "scanline"``.
             timed (bool, optional): Whether to time each operation. Defaults to False.
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
@@ -242,6 +247,7 @@ class Pipeline:
                 beamformer=beamformer,
                 num_patches=num_patches,
                 enable_pfield=enable_pfield,
+                enable_receive_apodization=enable_receive_apodization,
             ),
         )
 
@@ -1092,7 +1098,12 @@ class PatchedGrid(Map):
     """
 
     def __init__(self, *args, num_patches=10, **kwargs):
-        super().__init__(*args, argnames=["flatgrid", "flat_pfield"], chunks=num_patches, **kwargs)
+        super().__init__(
+            *args,
+            argnames=["flatgrid", "flat_pfield", "flat_apodization"],
+            chunks=num_patches,
+            **kwargs,
+        )
         self.num_patches = num_patches
 
     def get_dict(self, compact=True):
@@ -1117,12 +1128,28 @@ class Beamform(Pipeline):
     Will run the following operations in sequence:
     - TOFCorrection (output type `DataTypes.ALIGNED_DATA`: `(n_tx, n_ax, n_el, n_ch)`)
     - PfieldWeighting (optional, output type `DataTypes.ALIGNED_DATA`: `(n_tx, n_ax, n_el, n_ch)`)
+    - ReceiveApodization (optional, output type `DataTypes.ALIGNED_DATA`: `(n_tx, n_ax, n_el, n_ch)`)
     - Sum over channels (DAS)
     - Sum over transmits (Compounding) (output type `DataTypes.BEAMFORMED_DATA`: `(grid_size_z, grid_size_x, n_ch)`)
     - ReshapeGrid (flattened grid is also reshaped to `(grid_size_z, grid_size_x)`)
+
+    Scanline (line-by-line) imaging is a special case of this pipeline: set
+    ``parameters.grid_type = "scanline"`` and ``enable_receive_apodization=True``
+    so that each pixel's grid column is beamformed from its own owning transmit
+    only, with every other transmit masked to zero by
+    :class:`~zea.ops.ReceiveApodization` (fed
+    :func:`zea.beamform.pixelgrid.scanline_receive_apodization`) instead of
+    compounding all transmits onto a shared grid.
     """  # noqa: E501
 
-    def __init__(self, beamformer="delay_and_sum", num_patches=100, enable_pfield=False, **kwargs):
+    def __init__(
+        self,
+        beamformer="delay_and_sum",
+        num_patches=100,
+        enable_pfield=False,
+        enable_receive_apodization=False,
+        **kwargs,
+    ):
         """Initialize a Delay-and-Sum beamforming `zea.Pipeline`.
 
         Args:
@@ -1136,11 +1163,15 @@ class Beamform(Pipeline):
             num_patches (int): Number of patches to split the grid into for patch-wise
                 beamforming. If 1, no patching is performed.
             enable_pfield (bool): Whether to include pressure field weighting in the beamforming.
+            enable_receive_apodization (bool): Whether to include an explicit per-pixel,
+                per-transmit receive apodization mask (``parameters.flat_apodization``) in the
+                beamforming, e.g. to reconstruct scanline imaging (see class docstring).
         """
 
         self.beamformer_type = beamformer
         self.num_patches = num_patches
         self.enable_pfield = enable_pfield
+        self.enable_receive_apodization = enable_receive_apodization
 
         # for backwards compatibility
         name_mapping = {
@@ -1163,9 +1194,12 @@ class Beamform(Pipeline):
         # Get beamforming ops
         beamforming: List[Operation] = [
             TOFCorrection(),
-            # PfieldWeighting(),  # Inserted conditionally
+            # PfieldWeighting() / ReceiveApodization(), inserted conditionally
             beamformer_registry[self.beamformer_type](),
         ]
+
+        if self.enable_receive_apodization:
+            beamforming.insert(1, ReceiveApodization())
 
         if self.enable_pfield:
             beamforming.insert(1, PfieldWeighting())
@@ -1201,7 +1235,8 @@ class Beamform(Pipeline):
 
         Unlike Pipeline.get_dict(), this does NOT include the internal
         operations list, since Beamform auto-generates its operations
-        from ``beamformer``, ``num_patches``, and ``enable_pfield``.
+        from ``beamformer``, ``num_patches``, ``enable_pfield``, and
+        ``enable_receive_apodization``.
         """
         config = super().get_dict(compact=compact)
         config.pop("operations", None)
@@ -1213,6 +1248,8 @@ class Beamform(Pipeline):
             params["num_patches"] = self.num_patches
         if not compact or self.enable_pfield:
             params["enable_pfield"] = self.enable_pfield
+        if not compact or self.enable_receive_apodization:
+            params["enable_receive_apodization"] = self.enable_receive_apodization
 
         # Merge in the pipeline-level params from super().
         params.update(config.get("params", {}))
@@ -1764,6 +1801,9 @@ class Refocus(Operation):
             * ``"t_peak"`` — shared transmit-waveform peak time ``(n_el,)``.
             * ``"flat_pfield"`` — ``None`` (resets pfield so downstream
               :class:`PfieldWeighting` becomes a no-op).
+            * ``"flat_apodization"`` — ``None`` (resets the receive apodization mask,
+              which was sized for the old transmit count, so downstream
+              :class:`ReceiveApodization` becomes a no-op).
         """
         data = kwargs[self.key]
 
@@ -1808,6 +1848,7 @@ class Refocus(Operation):
             "initial_times": sa_initial_times,
             "t_peak": sa_t_peak,
             "flat_pfield": None,
+            "flat_apodization": None,
         }
 
 

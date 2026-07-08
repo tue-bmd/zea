@@ -1040,6 +1040,68 @@ def test_common_midpoint_phase_error_coherent_data():
     return phase_error
 
 
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+@backend_equality_check(decimal=5)
+def test_apply_receive_apodization(with_batch_dim):
+    """A per-pixel, per-transmit weight scales each transmit's contribution to a
+    pixel, e.g. a one-hot mask isolates a single owning transmit per pixel
+    (the scanline / line-by-line special case of pixel-based DAS)."""
+    from zea.func.ultrasound import apply_receive_apodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    data = keras.ops.ones((n_tx, n_pix, n_el, n_ch))
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    # Pixel 0 belongs to transmit 0; pixel 1 belongs to transmit 2.
+    apodization = keras.ops.convert_to_tensor(
+        np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+    )
+
+    out = keras.ops.convert_to_numpy(apply_receive_apodization(data, apodization, with_batch_dim))
+
+    expected = np.zeros((n_tx, n_pix, n_el, n_ch), dtype=np.float32)
+    expected[0, 0] = 1.0
+    expected[2, 1] = 1.0
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+    return out
+
+
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+def test_receive_apodization_op(with_batch_dim):
+    """ReceiveApodization applies flat_apodization to aligned data; with no mask
+    supplied (flat_apodization=None) it passes the data through unchanged."""
+    from zea.ops import ReceiveApodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    data = keras.ops.ones((n_tx, n_pix, n_el, n_ch))
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    op = ReceiveApodization(with_batch_dim=with_batch_dim)
+
+    out_noop = op(data=data)["data"]
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(out_noop), keras.ops.convert_to_numpy(data)
+    )
+
+    apodization = keras.ops.convert_to_tensor(
+        np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+    )
+    out = keras.ops.convert_to_numpy(op(data=data, flat_apodization=apodization)["data"])
+
+    expected = np.zeros((n_tx, n_pix, n_el, n_ch), dtype=np.float32)
+    expected[0, 0] = 1.0
+    expected[2, 1] = 1.0
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+
+
 @backend_equality_check(decimal=2)
 def test_prepare_parameters_pfield_all_backends():
     """pipeline.prepare_parameters must work on all backends when pfield is enabled.
