@@ -229,7 +229,11 @@ def scanline_pixel_grid(
     to = np.asarray(transmit_origins, dtype=np.float32)
     fd = np.asarray(focus_distances, dtype=np.float32)
     pa = np.asarray(polar_angles, dtype=np.float32)
-    az = np.zeros_like(pa) if azimuth_angles is None else np.asarray(azimuth_angles, dtype=np.float32)
+    az = (
+        np.zeros_like(pa)
+        if azimuth_angles is None
+        else np.asarray(azimuth_angles, dtype=np.float32)
+    )
     n_tx = pa.shape[0]
 
     s = np.linspace(zlims[0], zlims[1], num_depth_pixels).astype(np.float32)
