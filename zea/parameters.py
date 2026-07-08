@@ -109,6 +109,7 @@ from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
     check_for_aliasing,
     polar_pixel_grid,
+    scanline_pixel_grid,
 )
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
@@ -261,6 +262,8 @@ class Parameters(BaseParameters):
         "pfield_kwargs": {"dtype": dict, "default": {}},
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
         "focal_region_margin": {"dtype": np.float32, "default": 0.0},
+        "num_scanline_pixels": {"dtype": np.int32, "default": 700},
+        "scanline_sector": {"dtype": bool, "default": False},  # native dtype on purpose
         "grid_type": {"dtype": str, "default": "cartesian"},
         "polar_limits": {"dtype": np.float32, "shape": (2,)},
         "dynamic_range": {"dtype": np.float32, "shape": (2,)},
@@ -359,6 +362,32 @@ class Parameters(BaseParameters):
                 f"Unsupported grid type: {self.grid_type}. Supported types are "
                 "'cartesian' and 'polar'."
             )
+
+    @cache_with_dependencies(
+        "transmit_origins",
+        "focus_distances",
+        "polar_angles",
+        "zlims",
+        "num_scanline_pixels",
+        "scanline_sector",
+    )
+    def scanline_grids(self):
+        """Per-transmit beam-line grids for scanline beamforming.
+
+        One line of ``num_scanline_pixels`` points per transmit, of shape
+        ``(n_tx, num_scanline_pixels, 3)``. ``scanline_sector`` selects steered
+        rays (``True``) or vertical columns (``False``). Consumed by
+        :class:`~zea.ops.ScanlineBeamform`.
+        """
+        return scanline_pixel_grid(
+            self.transmit_origins,
+            self.focus_distances,
+            self.polar_angles,
+            self.zlims,
+            int(self.num_scanline_pixels),
+            azimuth_angles=self.azimuth_angles,
+            sector=bool(self.scanline_sector),
+        )
 
     @cache_with_dependencies("xlims", "wavelength", "pixels_per_wavelength")
     def grid_size_x(self):

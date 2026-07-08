@@ -3,7 +3,7 @@ import numpy as np
 from keras import ops
 
 from zea import log
-from zea.beamform.beamformer import tof_correction
+from zea.beamform.beamformer import beamform_scanline, tof_correction
 from zea.display import scan_convert
 from zea.func.tensor import (
     apply_along_axis,
@@ -254,6 +254,92 @@ class PfieldWeighting(Operation):
         weighted_data = data * pfield_expanded
 
         return {self.output_key: weighted_data}
+
+
+@ops_registry("scanline_beamform")
+class ScanlineBeamform(Operation):
+    """Scanline (line-by-line) beamforming operation.
+
+    A drop-in replacement for :class:`~zea.ops.Beamform` for conventional
+    focused (scanline) acquisitions: instead of compounding every transmit onto
+    a shared pixel grid, each transmit is delay-and-summed along **its own beam
+    line** and the lines are assembled into the image. This is the faithful
+    reconstruction for one-focused-beam-per-line scans (walking-focus linear
+    scans with ``sector=False``; steered focused scans with ``sector=True``).
+
+    Input is RF/IQ data ``(n_tx, n_ax, n_el, n_ch)`` (optional batch dim); output
+    is the beamformed image ``(num_scanline_pixels, n_tx, n_ch)`` — depth along
+    the rows, one column per transmit beam. The Cartesian ``(x, z)`` position of
+    every image pixel is returned as ``grid_x`` / ``grid_z`` (shape
+    ``(num_scanline_pixels, n_tx)``), so the image can be displayed directly on
+    its true geometry (e.g. ``pcolormesh``) for both the linear and the steered
+    (fan) case without a separate scan-conversion step. ``x_lim`` / ``z_lim``
+    give the overall extent.
+    """
+
+    STATIC_PARAMS = ["f_number"]
+    ADD_OUTPUT_KEYS = ["grid_x", "grid_z"]
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.RAW_DATA,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
+            jittable=False,
+            **kwargs,
+        )
+
+    def call(
+        self,
+        scanline_grids,
+        t0_delays,
+        tx_apodizations,
+        sound_speed,
+        probe_geometry,
+        initial_times,
+        sampling_frequency,
+        demodulation_frequency,
+        f_number,
+        polar_angles,
+        focus_distances,
+        t_peak,
+        transmit_origins,
+        **kwargs,
+    ):
+        """Beamform each transmit along its own beam line and stack the lines.
+
+        The per-transmit beam-line grids are supplied by
+        :attr:`zea.Parameters.scanline_grids`. Returns the beamformed image plus
+        the Cartesian ``grid_x`` / ``grid_z`` of each pixel for display.
+        """
+        data = kwargs[self.key]
+
+        lines = beamform_scanline(
+            data,
+            scanline_grids,
+            t0_delays,
+            tx_apodizations,
+            sound_speed,
+            probe_geometry,
+            initial_times,
+            sampling_frequency,
+            demodulation_frequency,
+            f_number,
+            polar_angles,
+            focus_distances,
+            t_peak,
+            transmit_origins,
+        )
+
+        if self.with_batch_dim:
+            image = ops.transpose(lines, (0, 2, 1, 3))  # (batch, n_line, n_tx, n_ch)
+        else:
+            image = ops.transpose(lines, (1, 0, 2))  # (n_line, n_tx, n_ch)
+
+        return {
+            self.output_key: image,
+            "grid_x": ops.transpose(scanline_grids[..., 0]),  # (n_line, n_tx) Cartesian x
+            "grid_z": ops.transpose(scanline_grids[..., 2]),  # (n_line, n_tx) Cartesian z
+        }
 
 
 @ops_registry("scan_convert")
