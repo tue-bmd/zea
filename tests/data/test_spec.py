@@ -1131,15 +1131,43 @@ class TestMetadataAndMetricsValidationErrors:
                 },
             )
 
-    def test_annotations_n_frames_mismatch_against_later_track_raises(self):
-        """Metadata may agree with track 0 but conflict with a later track.
+    def test_annotations_may_match_one_of_several_tracks(self):
+        """Metadata annotates one acquisition, so it only needs to match one track.
 
-        Exercises the multi-track loop in ``FileSpec.__post_init__``: the
-        per-track consistency check must keep iterating past the matching
-        track and report which track disagrees.
+        A single-frame auxiliary track (e.g. a reference map) may coexist with a
+        multi-frame main track whose n_frames matches the annotations. Only the
+        main track needs to agree with the per-frame metadata.
         """
         n_tx, n_el, n_ax, n_ch = 2, 4, 8, 1
-        n_frames_match, n_frames_conflict = 3, 5
+        n_frames_main, n_frames_aux = 5, 1
+
+        def _track(n_frames):
+            return {
+                "data": {
+                    "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+                },
+                "scan": _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                "label": f"track_{n_frames}",
+            }
+
+        # Annotations match the main track (n_frames_main); the auxiliary track
+        # has a different n_frames and must not cause a failure.
+        spec = FileSpec(
+            tracks=[_track(n_frames_main), _track(n_frames_aux)],
+            track_schedule=np.zeros(1, dtype=np.int32),
+            probe=_probe_minimal(n_el=n_el),
+            metadata={
+                "annotations": {
+                    "view": np.array(["a4c"] * n_frames_main, dtype=np.str_),
+                }
+            },
+        )
+        assert len(spec.tracks) == 2
+
+    def test_annotations_matching_no_track_raises(self):
+        """Metadata whose n_frames matches none of the tracks is still an error."""
+        n_tx, n_el, n_ax, n_ch = 2, 4, 8, 1
+        n_frames_a, n_frames_b, n_frames_ann = 3, 1, 5
 
         def _track(n_frames):
             return {
@@ -1152,22 +1180,22 @@ class TestMetadataAndMetricsValidationErrors:
 
         with pytest.raises(ValueError) as exc_info:
             FileSpec(
-                tracks=[_track(n_frames_match), _track(n_frames_conflict)],
+                tracks=[_track(n_frames_a), _track(n_frames_b)],
+                track_schedule=np.zeros(1, dtype=np.int32),
                 probe=_probe_minimal(n_el=n_el),
                 metadata={
                     "annotations": {
-                        "view": np.array(["a4c"] * n_frames_match, dtype=np.str_),
+                        "view": np.array(["a4c"] * n_frames_ann, dtype=np.str_),
                     }
                 },
             )
 
         message = str(exc_info.value)
         assert message.startswith("Dimension 'n_frames' has inconsistent sizes:")
-        # The message attributes the sizes to the metadata field and the
-        # conflicting track (not track 0, which matched the metadata).
+        # The message lists the metadata field and every track carrying the dim.
         assert "metadata.annotations.view" in message
+        assert "tracks[0]." in message
         assert "tracks[1]." in message
-        assert "tracks[0]." not in message
 
 
 class TestProbePoseValidation:
