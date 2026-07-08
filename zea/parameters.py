@@ -187,6 +187,12 @@ class Parameters(BaseParameters):
             See `zea.beamform.pfield.compute_pfield` for details.
         apply_lens_correction (bool, optional): Whether to apply lens correction to
             delays. Defaults to False.
+        focal_region_margin (float, optional): Half-width in meters of the region
+            around the focal plane of focused transmits where the hybrid (locally
+            plane wave) transmit-delay model is used, removing the delay
+            discontinuity at the focus (Rindal et al., IUS 2018). Defaults to 0.0
+            (disabled, i.e. the conventional virtual-source model everywhere); a
+            typical value to enable it is 1e-3 m.
         lens_thickness (float, optional): Thickness of the lens in meters.
         f_number (float, optional): F-number of the transducer. Defaults to 1.0.
         theta_range (tuple, optional): Range of theta angles for 3D imaging.
@@ -230,6 +236,7 @@ class Parameters(BaseParameters):
         "pixels_per_wavelength": {"dtype": np.int32, "default": 4},
         "pfield_kwargs": {"dtype": dict, "default": {}},
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
+        "focal_region_margin": {"dtype": np.float32, "default": 0.0},
         "grid_type": {"dtype": str, "default": "cartesian"},
         "polar_limits": {"dtype": np.float32, "shape": (2,)},
         "dynamic_range": {"dtype": np.float32, "shape": (2,)},
