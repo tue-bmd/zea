@@ -235,6 +235,82 @@ def test_polar_grid(default_pipeline: ops.Pipeline, ultrasound_scatterers):
     )
 
 
+@pytest.mark.heavy
+def test_scanline_grid(ultrasound_scatterers):
+    """Scanline imaging (grid_type="scanline") is the special case of pixel-based DAS
+    with one grid column per transmit and a receive apodization mask that keeps only
+    each pixel's owning transmit, wired through the exact same Beamform / TOFCorrection
+    / PatchedGrid machinery as the regular pixel-based pipeline.
+
+    Note: with only ``n_tx=8`` lines (this fixture's coarse synthetic sub-aperture
+    scan), lateral sampling is far coarser than depth sampling, and sidelobes from
+    neighbouring scatterers can dominate the local peak. That makes a
+    scatterer-localization check (as used for the cartesian/polar grids above)
+    unreliable here, so this test instead checks numerical properties: patch-wise
+    beamforming must match unpatched beamforming, and each column must equal an
+    independent single-transmit reference built from the same `Parameters`.
+    """
+    probe = _get_probe("linear")
+    parameters = _get_parameters(probe, "linescan", grid_type="scanline")
+
+    assert parameters.grid_type == "scanline"
+
+    n_tx = parameters.n_tx
+    num_scanline_pixels = int(parameters.num_scanline_pixels)
+
+    def run(params, num_patches):
+        """Beamform-only pipeline (no envelope/normalize/log): raw complex IQ
+        pixel values, so results across differently-sized transmit sets are
+        directly comparable (Normalize would rescale each image by its own
+        max and break that comparison).
+        """
+        pipeline = ops.Pipeline(
+            operations=[
+                ops.Simulate(),
+                ops.Cast(dtype="float32"),
+                ops.ApplyWindow(),
+                ops.Demodulate(),
+                ops.Beamform(
+                    beamformer="delay_and_sum",
+                    num_patches=num_patches,
+                    enable_receive_apodization=True,
+                ),
+            ],
+            jit_options=None,
+        )
+        inputs = pipeline.prepare_parameters(params)
+        output = pipeline(
+            **inputs,
+            scatterer_positions=ultrasound_scatterers["positions"],
+            scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
+        )
+        return keras.ops.convert_to_numpy(output["data"][0])
+
+    image_unpatched = run(parameters, num_patches=1)
+    image_patched = run(parameters, num_patches=10)
+
+    assert image_unpatched.shape == (num_scanline_pixels, n_tx, 2)
+    assert np.all(np.isfinite(image_unpatched))
+    assert np.any(image_unpatched != 0)
+
+    # Patch-wise beamforming (PatchedGrid chunks `flatgrid` and `flat_apodization`
+    # together) must give the same result as beamforming the whole grid at once.
+    np.testing.assert_allclose(image_patched, image_unpatched, rtol=1e-4, atol=1e-4)
+
+    # Column n is beamformed from transmit n only: it must equal an independent
+    # single-transmit, single-column reference built from the same `Parameters`.
+    column = n_tx // 2
+    single_tx_parameters = parameters.copy()
+    single_tx_parameters.set_transmits([column])
+    single_tx_parameters.grid_type = "scanline"
+    image_single_tx = run(single_tx_parameters, num_patches=1)
+
+    assert image_single_tx.shape == (num_scanline_pixels, 1, 2)
+    np.testing.assert_allclose(
+        image_patched[:, column], image_single_tx[:, 0], rtol=1e-4, atol=1e-4
+    )
+
+
 def test_phantoms():
     """Tests the phantom generation functions."""
     fish_scat = fish()

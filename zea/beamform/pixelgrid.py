@@ -203,11 +203,17 @@ def scanline_pixel_grid(
     azimuth_angles=None,
     sector=False,
 ):
-    """Per-transmit beam-line pixel grids for scanline beamforming.
+    """Pixel grid for scanline beamforming: one column of pixels per transmit.
 
-    Builds one line of ``num_depth_pixels`` points per transmit, to be paired
-    with :func:`zea.beamform.beamformer.beamform_scanline` (transmit ``n`` is
-    beamformed along line ``n``).
+    Scanline (line-by-line) imaging is the special case of pixel-based DAS
+    beamforming where each pixel is only ever insonified by a single transmit —
+    its own beam line. This builds that grid in the same
+    ``(grid_size_z, grid_size_x, 3)`` layout as :func:`cartesian_pixel_grid`
+    (one column ``n`` per transmit ``n``, ``num_depth_pixels`` rows), so it can
+    be beamformed by the regular pixel-based :class:`~zea.ops.Beamform`
+    pipeline. Pair with :func:`scanline_receive_apodization` (fed to
+    :class:`~zea.ops.ReceiveApodization`) to mask out every transmit but the
+    one that owns each pixel.
 
     Args:
         transmit_origins (np.ndarray): Beam origins ``(n_tx, 3)`` in meters.
@@ -223,8 +229,9 @@ def scanline_pixel_grid(
             geometry).
 
     Returns:
-        np.ndarray: Pixel positions ``(n_tx, num_depth_pixels, 3)`` in Cartesian
-        ``(x, y, z)`` coordinates (meters).
+        np.ndarray: Pixel positions of shape ``(num_depth_pixels, n_tx, 3)`` in
+        Cartesian ``(x, y, z)`` coordinates (meters); column ``n`` is the beam
+        line of transmit ``n``.
     """
     to = np.asarray(transmit_origins, dtype=np.float32)
     fd = np.asarray(focus_distances, dtype=np.float32)
@@ -234,19 +241,42 @@ def scanline_pixel_grid(
         if azimuth_angles is None
         else np.asarray(azimuth_angles, dtype=np.float32)
     )
-    n_tx = pa.shape[0]
 
     s = np.linspace(zlims[0], zlims[1], num_depth_pixels).astype(np.float32)
     v = np.stack(
         [np.sin(pa) * np.cos(az), np.sin(pa) * np.sin(az), np.cos(pa)], axis=-1
     )  # (n_tx, 3) beam direction
 
-    grids = np.zeros((n_tx, num_depth_pixels, 3), dtype=np.float32)
-    for n in range(n_tx):
-        if sector:
-            grids[n] = to[n][None, :] + s[:, None] * v[n][None, :]
-        else:
-            x_n = float(to[n, 0] + fd[n] * v[n, 0])  # lateral focus position
-            grids[n, :, 0] = x_n
-            grids[n, :, 2] = s
-    return grids
+    if sector:
+        # Steered rays from each transmit's own origin.
+        grid = to[None, :, :] + s[:, None, None] * v[None, :, :]
+    else:
+        # Vertical columns at each beam's lateral focus position.
+        x = to[:, 0] + fd * v[:, 0]  # (n_tx,) lateral focus position per line
+        grid = np.zeros((num_depth_pixels, pa.shape[0], 3), dtype=np.float32)
+        grid[:, :, 0] = x[None, :]
+        grid[:, :, 2] = s[:, None]
+
+    return grid.astype(np.float32)
+
+
+def scanline_receive_apodization(n_tx, num_depth_pixels):
+    """Receive apodization mask that isolates each pixel's owning transmit.
+
+    For a grid built by :func:`scanline_pixel_grid` (shape
+    ``(num_depth_pixels, n_tx, 3)``, flattened row-major to ``(n_pix, 3)``),
+    pixel ``(i, n)`` at flat index ``i * n_tx + n`` belongs to transmit ``n``.
+    This returns the corresponding one-hot weight (1 for the owning transmit,
+    0 for every other transmit) to feed to
+    :class:`zea.ops.ReceiveApodization`, turning the regular pixel-based DAS
+    pipeline into scanline (line-by-line) beamforming.
+
+    Args:
+        n_tx (int): Number of transmits (grid columns).
+        num_depth_pixels (int): Number of depth samples per line (grid rows).
+
+    Returns:
+        np.ndarray: Apodization weights of shape
+        ``(num_depth_pixels * n_tx, n_tx)``.
+    """
+    return np.tile(np.eye(n_tx, dtype=np.float32), (num_depth_pixels, 1))

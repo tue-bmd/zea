@@ -6,6 +6,7 @@ from keras import ops
 from zea import log
 from zea.func import split_seed
 from zea.func.tensor import (
+    extend_n_dims,
     resample,
     split_into_windows,
 )
@@ -562,6 +563,36 @@ def envelope_detect(data, axis=-3):
 
     data = ops.abs(data)
     return data
+
+
+def apply_receive_apodization(data, apodization, with_batch_dim):
+    """Multiply aligned data by a per-pixel, per-transmit weight.
+
+    Used by :class:`~zea.ops.PfieldWeighting` and
+    :class:`~zea.ops.ReceiveApodization` to scale or mask out a transmit's
+    contribution to a pixel before the receive-aperture and transmit sums
+    (e.g. compounding, or scanline/line-by-line imaging where only one
+    transmit should contribute per pixel).
+
+    Args:
+        data (Tensor): Aligned data, ``((batch_size,) n_tx, n_pix, n_el, n_ch)``.
+        apodization (Tensor): Weight of shape ``(n_pix, n_tx)``.
+        with_batch_dim (bool): Whether `data` carries a leading batch dimension.
+
+    Returns:
+        Tensor: Weighted data, same shape as `data`.
+    """
+    # Swap (n_pix, n_tx) to (n_tx, n_pix)
+    apodization = ops.swapaxes(apodization, 0, 1)
+
+    # Add batch dimension if needed
+    if with_batch_dim:
+        apodization = ops.expand_dims(apodization, axis=0)
+
+    append_n_dims = ops.ndim(data) - ops.ndim(apodization)
+    apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
+
+    return data * apodization
 
 
 def log_compress(data, eps=1e-16):
