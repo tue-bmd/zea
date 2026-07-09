@@ -16,7 +16,7 @@ from zea.internal.checks import _check_raw_data
 from zea.log import warning_once as _warning_once
 
 
-def warn_if_focal_region_length_unused(focus_distances, focal_region_length):
+def _warn_if_focal_region_length_unused(focus_distances, focal_region_length):
     """Warn when ``focal_region_length`` is set but no transmit is focused.
 
     Focal-region blending only applies to focused transmits (finite, positive
@@ -218,6 +218,8 @@ def tof_correction(
     n_pix = ops.shape(flatgrid)[0]
 
     _validate_delay_inputs(data, flatgrid, t0_delays, probe_geometry, tx_apodizations)
+
+    _warn_if_focal_region_length_unused(focus_distances, focal_region_length)
 
     # ---- Compute delays ------------------------------------------------
     # txdel: transmit delay from t=0 to wavefront reaching each pixel

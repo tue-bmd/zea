@@ -426,11 +426,11 @@ def test_warn_if_focal_region_length_unused(monkeypatch):
     planewave = np.full(4, np.inf, np.float32)
     focused = np.full(4, 15e-3, np.float32)
 
-    bf.warn_if_focal_region_length_unused(planewave, 2e-3)  # unused -> warns
+    bf._warn_if_focal_region_length_unused(planewave, 2e-3)  # unused -> warns
     assert len(calls) == 1 and "focal_region_length" in calls[0]
 
-    bf.warn_if_focal_region_length_unused(focused, 2e-3)  # focused -> no warning
-    bf.warn_if_focal_region_length_unused(planewave, 0.0)  # disabled -> no warning
+    bf._warn_if_focal_region_length_unused(focused, 2e-3)  # focused -> no warning
+    bf._warn_if_focal_region_length_unused(planewave, 0.0)  # disabled -> no warning
     assert len(calls) == 1
 
 
