@@ -4,7 +4,6 @@ Usage:
     python -m zea.data.process --dataset <path> --config <config.yaml>
 """
 
-import argparse
 import re
 import types
 from concurrent.futures import ThreadPoolExecutor
@@ -17,18 +16,15 @@ from keras import ops
 
 from zea import io_lib, log
 from zea.backend import jit
-from zea.cli_args import ProcessArgs
+from zea.cli_args import SUPPORTED_FORMATS, ProcessArgs
 from zea.config import Config
 from zea.data.dataloader import Dataloader
 from zea.data.datasets import Dataset
 from zea.data.file import File
 from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
-from zea.internal.device import init_device
 from zea.ops.pipeline import Pipeline
 from zea.utils import FunctionTimer
-
-SUPPORTED_FORMATS = ["gif", "mp4", "hdf5"]
 
 
 def _axis_selections_from_params(parameters) -> dict | None:
@@ -44,126 +40,8 @@ try:
     import SimpleITK as _sitk
 
     sitk = _sitk
-    SUPPORTED_FORMATS += ["nii.gz"]
 except ImportError:
     pass
-
-
-def get_parser(add_help: bool = True) -> argparse.ArgumentParser:
-    """Return an argparse parser equivalent to :class:`ProcessArgs`.
-
-    Kept as a plain argparse parser for compatibility with
-    ``sphinxcontrib-autoprogram`` and use as an argparse ``parents`` entry.
-    """
-    parser = argparse.ArgumentParser(
-        description=(
-            "Beamform a zea dataset using a pipeline defined in a config YAML file. "
-            "Processes frames sequentially to support temporal algorithms."
-        ),
-        add_help=add_help,
-    )
-    parser.add_argument(
-        "--dataset",
-        "-d",
-        required=True,
-        type=str,
-        help="Path/URI to the zea dataset (folder of HDF5 files or a single HDF5 file).",
-    )
-    parser.add_argument(
-        "--config",
-        "-c",
-        required=True,
-        type=str,
-        help="Path to config.yaml for the beamforming pipeline.",
-    )
-    parser.add_argument(
-        "--save-dir",
-        type=Path,
-        default=Path("output"),
-        help="Directory where output files are written. Default: output/",
-    )
-    parser.add_argument(
-        "--key",
-        type=str,
-        default="data/raw_data",
-        help="Data key to load from each file (e.g. data/raw_data, data/image/values).",
-    )
-    parser.add_argument(
-        "--n-frames",
-        type=int,
-        default=None,
-        dest="n_frames",
-        help="Maximum number of frames to process per file (all frames when omitted).",
-    )
-    parser.add_argument(
-        "--save-as",
-        type=str,
-        default="gif",
-        dest="save_as",
-        help=f"Output format. One of: {', '.join(SUPPORTED_FORMATS)}.",
-    )
-    parser.add_argument(
-        "--keep-keys",
-        nargs="+",
-        default=["maxval"],
-        dest="keep_keys",
-        help="Pipeline output keys to forward to the next frame iteration.",
-    )
-    parser.add_argument(
-        "--timings",
-        action="store_true",
-        help="Record dataloader and pipeline timings and save to YAML files in save_dir.",
-    )
-    parser.add_argument(
-        "--num-threads",
-        type=int,
-        default=16,
-        dest="num_threads",
-        help="Number of threads used by the dataloader. Default is 16.",
-    )
-    parser.add_argument(
-        "--revision",
-        type=str,
-        default=None,
-        help=(
-            "HuggingFace revision for the dataset (branch, tag, or commit hash). "
-            "Only used for hf:// paths."
-        ),
-    )
-    parser.add_argument(
-        "--config-revision",
-        type=str,
-        default=None,
-        dest="config_revision",
-        help=(
-            "HuggingFace revision for the config (branch, tag, or commit hash). "
-            "Defaults to --revision if omitted."
-        ),
-    )
-    parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="Overwrite existing output files. Default is False.",
-    )
-    parser.add_argument(
-        "--keep-dynamic-range",
-        action="store_true",
-        dest="keep_dynamic_range",
-        help=(
-            "Store pipeline output as-is (float32 dB) instead of converting to uint8. "
-            "Only valid when --save-as hdf5."
-        ),
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="auto:1",
-        help=(
-            "Compute device ('cuda:0', 'cpu', 'auto:1', …). "
-            "Only relevant when running the beamformer pipeline."
-        ),
-    )
-    return parser
 
 
 def _get_config_parameters(config: Config) -> dict:
@@ -434,7 +312,6 @@ def run_processing(
 
 def main() -> None:
     args = tyro.cli(ProcessArgs)
-    init_device(args.device)
     run_processing(
         args.dataset,
         args.config,

@@ -14,7 +14,13 @@ import numpy as np
 from zea import log
 from zea.internal.typing import Scalar
 
+# Named dimensions whose sizes must agree wherever they appear.
 CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch", "n_spatial_ch"}
+
+# Subset that must only agree within a single spec, not across sibling data
+# products: channel counts are independent between products (e.g. RF raw_data
+# next to IQ beamformed_data), so they are not propagated across spec boundaries.
+LOCAL_CONSISTENCY_DIMENSIONS = {"n_ch", "n_spatial_ch"}
 
 UNITS = {
     "m/s": "meters per second",
@@ -188,6 +194,10 @@ class Spec:
         nested_dim_to_field_sizes: defaultdict[str, dict[str, int]],
     ) -> None:
         for dim_name, nested_field_sizes in nested_dim_to_field_sizes.items():
+            # Channel dimensions are only consistent within a single spec, not
+            # across data products, so they are not propagated to the parent.
+            if dim_name in LOCAL_CONSISTENCY_DIMENSIONS:
+                continue
             dim_to_field_sizes[dim_name].update(nested_field_sizes)
 
     @staticmethod
@@ -1919,15 +1929,15 @@ class Annotations(Spec):
     """Frame-level annotations, either per frame or broadcast labels.
 
     Args:
-        anatomy: Anatomy label.
-        view: View label of shape (n_frames,).
-        label: Pathology or classification label of shape (n_frames,).
-        image_quality: Image quality label, e.g. low, mid, high.
+        anatomy (str): Anatomy label.
+        view (str): View label.
+        label (str): Pathology or classification label.
+        image_quality (str): Image quality label, e.g. low, mid, high.
     """
 
     anatomy: np.ndarray | str | None = None
-    view: np.ndarray | None = None
-    label: np.ndarray | None = None
+    view: np.ndarray | str | None = None
+    label: np.ndarray | str | None = None
     image_quality: np.ndarray | str | None = None
 
     SCHEMA = {
@@ -2441,17 +2451,37 @@ class FileSpec(Spec):
         # Run base SCHEMA validation (metadata, metrics, scalars, track_schedule)
         super().__post_init__()
 
-        # Validate that dimensions which are present in both metadata and tracks
-        # are consistent across all tracks.
+        # Per-frame metadata (e.g. annotations) describes one acquisition, so for
+        # each shared dimension it must match at least one track - auxiliary tracks may
+        # legitimately differ.
         if isinstance(self.metadata, MetadataSpec):
             meta_dim_field_sizes = self.metadata._collect_dimension_info("metadata.")
-            for i, track in enumerate(self.tracks):
-                track_dim_field_sizes = track._collect_dimension_info(f"tracks[{i}].")
-                for dim in CONSISTENCY_DIMENSIONS:
-                    if dim in meta_dim_field_sizes and dim in track_dim_field_sizes:
-                        field_sizes = {**meta_dim_field_sizes[dim], **track_dim_field_sizes[dim]}
-                        if len(set(field_sizes.values())) > 1:
-                            raise ValueError(self._format_inconsistent_dimension(dim, field_sizes))
+            per_track_dim_field_sizes = [
+                track._collect_dimension_info(f"tracks[{i}].")
+                for i, track in enumerate(self.tracks)
+            ]
+            for dim in CONSISTENCY_DIMENSIONS:
+                # Nothing to validate if the metadata doesn't use this dimension.
+                if dim not in meta_dim_field_sizes:
+                    continue
+
+                # Nor if no track carries it - there's nothing to match against.
+                tracks_with_dim = [t[dim] for t in per_track_dim_field_sizes if dim in t]
+                if not tracks_with_dim:
+                    continue
+
+                # Metadata is internally consistent, so meta_values is a single
+                # size; it must match at least one track that carries this dim.
+                meta_sizes = meta_dim_field_sizes[dim]
+                meta_values = set(meta_sizes.values())
+                if any(meta_values == set(track_sizes.values()) for track_sizes in tracks_with_dim):
+                    continue
+                # No track matched: report the metadata field(s) alongside every
+                # track that carries the dimension.
+                field_sizes = dict(meta_sizes)
+                for track_sizes in tracks_with_dim:
+                    field_sizes.update(track_sizes)
+                raise ValueError(self._format_inconsistent_dimension(dim, field_sizes))
 
         # Validate custom elements are CustomElement instances (lazy import to
         # avoid a circular dependency with zea.data.file).

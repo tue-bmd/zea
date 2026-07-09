@@ -1,16 +1,16 @@
 """
 This module provides some utilities to edit zea data files, either individually or in bulk.
 
-Each operation is available both as a Python function and as a command line subcommand.
-See the :ref:`CLI documentation <cli-file-operations>` for the available operations and
-their command-line usage.
+Each operation is available both as a Python function and as a ``zea data`` command line
+subcommand. See the :doc:`CLI documentation </cli>` for the available operations and their
+command-line usage.
 """
 
-import argparse
 import functools
 from pathlib import Path
 
 import numpy as np
+import tyro
 from tqdm import tqdm
 
 from zea import Parameters
@@ -29,6 +29,8 @@ OPERATION_NAMES = [
     "compound_transmits",
     "resave",
     "extract",
+    "summary",
+    "copy",
 ]
 
 
@@ -500,6 +502,32 @@ def extract_frames_transmits(
     )
 
 
+def summary(input_path: Path):
+    """Prints a summary of a zea data file to the console.
+
+    Args:
+        input_path (Path): Path to the zea data file.
+    """
+    with File(input_path) as f:
+        f.summary()
+
+
+def copy(src: Path, dst: Path, key: str, mode: str | None = None):
+    """Copies zea files to a new location using :meth:`zea.Dataset.copy`.
+
+    Args:
+        src (Path): Source path. Can be a single file, a list of files, or a folder.
+        dst (Path): Destination folder path.
+        key (str): Key to access in the HDF5 files. Use ``"all"`` or ``"*"`` to copy
+            everything.
+        mode (str, optional): HDF5 file mode for the destination files. Defaults to
+            None, which lets :meth:`zea.Dataset.copy` auto-select the mode (``"a"`` for a
+            single key, ``"w"`` when ``key`` is ``"all"``/``"*"``).
+    """
+    dataset = Dataset(src, validate=False)
+    dataset.copy(dst, key, mode=mode)
+
+
 def _delete_file_if_exists(path: Path):
     """Deletes a file if it exists."""
     if path.exists():
@@ -515,7 +543,7 @@ def _interpret_index(input_str):
 
 
 def _interpret_indices(input_str_list):
-    if isinstance(input_str_list, str) and input_str_list == "all":
+    if input_str_list == "all" or input_str_list == ["all"]:
         return slice(None)
 
     if len(input_str_list) == 1 and "-" in input_str_list[0]:
@@ -537,142 +565,24 @@ def _scan_reduce_frames(parameters, frame_indices):
     return parameters
 
 
-def get_parser():
-    """Command line argument parser with subcommands"""
-
-    parser = argparse.ArgumentParser(
-        description=(
-            "Manipulate zea data files.\n\n"
-            "All operations accept files; folder inputs are also supported. For "
-            "file-to-file operations, each zea file in the input folder is processed "
-            "and written to a mirrored path in the output folder."
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="operation", required=True)
-    _add_parser_sum(subparsers)
-    _add_parser_compound_frames(subparsers)
-    _add_parser_compound_transmits(subparsers)
-    _add_parser_resave(subparsers)
-    _add_parser_extract(subparsers)
-
-    return parser
+# ── Command line interface (tyro) ────────────────────────────────────────────
+#
+# The CLI subcommand dataclasses live in :mod:`zea.cli_args` (a light-import
+# module) so that ``zea data …`` can be wired into the top-level ``zea`` CLI
+# without importing this heavy module just to render ``--help``. The dataclasses
+# there dispatch back to the operation functions above.
 
 
-def _add_parser_sum(subparsers):
-    sum_parser = subparsers.add_parser("sum", help="Sum the raw data of multiple files or folders.")
-    sum_parser.add_argument(
-        "input_paths", type=Path, nargs="+", help="Paths to the input files or folders."
-    )
-    sum_parser.add_argument("output_path", type=Path, help="Output HDF5 file.")
-    sum_parser.add_argument(
-        "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
-    )
+def main():
+    """Parse command line arguments and run the requested data operation.
 
+    Entry point for ``python -m zea.data``. This is equivalent to ``zea data``.
+    """
+    from zea.cli_args import DataCommand, _run_data_command
 
-def _add_parser_compound_frames(subparsers):
-    cf_parser = subparsers.add_parser("compound_frames", help="Compound frames to increase SNR.")
-    cf_parser.add_argument("input_path", type=Path, help="Input HDF5 file or folder.")
-    cf_parser.add_argument("output_path", type=Path, help="Output HDF5 file or folder.")
-    cf_parser.add_argument(
-        "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
-    )
-
-
-def _add_parser_compound_transmits(subparsers):
-    ct_parser = subparsers.add_parser(
-        "compound_transmits", help="Compound transmits to increase SNR."
-    )
-    ct_parser.add_argument("input_path", type=Path, help="Input HDF5 file or folder.")
-    ct_parser.add_argument("output_path", type=Path, help="Output HDF5 file or folder.")
-    ct_parser.add_argument(
-        "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
-    )
-
-
-def _add_parser_resave(subparsers):
-    resave_parser = subparsers.add_parser("resave", help="Resave a file to change format version.")
-    resave_parser.add_argument("input_path", type=Path, help="Input HDF5 file or folder.")
-    resave_parser.add_argument("output_path", type=Path, help="Output HDF5 file or folder.")
-    resave_parser.add_argument(
-        "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
-    )
-    resave_parser.add_argument(
-        "--chunk-frames",
-        action="store_true",
-        default=False,
-        help="Store the data datasets with HDF5 chunked storage, one frame per chunk.",
-    )
-    resave_parser.add_argument(
-        "--disable-compression",
-        action="store_true",
-        default=False,
-        help="Disable lzf compression for the datasets.",
-    )
-
-
-def _add_parser_extract(subparsers):
-    extract_parser = subparsers.add_parser("extract", help="Extract subset of frames or transmits.")
-    extract_parser.add_argument("input_path", type=Path, help="Input HDF5 file or folder.")
-    extract_parser.add_argument("output_path", type=Path, help="Output HDF5 file or folder.")
-    extract_parser.add_argument(
-        "--transmits",
-        type=str,
-        nargs="+",
-        default="all",
-        help="Target transmits. Can be a list of integers or ranges (e.g. 0-3 7).",
-    )
-    extract_parser.add_argument(
-        "--frames",
-        type=str,
-        nargs="+",
-        default="all",
-        help="Target frames. Can be a list of integers or ranges (e.g. 0-3 7).",
-    )
-    extract_parser.add_argument(
-        "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
-    )
+    args = tyro.cli(DataCommand)  # ty: ignore[no-matching-overload]
+    _run_data_command(args)
 
 
 if __name__ == "__main__":
-    parser = get_parser()
-    args = parser.parse_args()
-
-    # For folder operations the output is a directory; individual output files are
-    # still guarded per file. Only block when the output is an existing file.
-    if args.output_path.is_file() and not args.overwrite:
-        logger.error(
-            f"Output file {args.output_path} already exists. Use --overwrite to overwrite it."
-        )
-        exit(1)
-
-    if args.operation == "compound_frames":
-        compound_frames(
-            input_path=args.input_path, output_path=args.output_path, overwrite=args.overwrite
-        )
-    elif args.operation == "compound_transmits":
-        compound_transmits(
-            input_path=args.input_path, output_path=args.output_path, overwrite=args.overwrite
-        )
-    elif args.operation == "resave":
-        resave(
-            input_path=args.input_path,
-            output_path=args.output_path,
-            overwrite=args.overwrite,
-            enable_compression=not args.disable_compression,
-            chunk_frames=args.chunk_frames,
-        )
-    elif args.operation == "extract":
-        extract_frames_transmits(
-            input_path=args.input_path,
-            output_path=args.output_path,
-            frame_indices=_interpret_indices(args.frames),
-            transmit_indices=_interpret_indices(args.transmits),
-            overwrite=args.overwrite,
-        )
-    elif args.operation == "sum":
-        sum_data(
-            input_paths=args.input_paths, output_path=args.output_path, overwrite=args.overwrite
-        )
-    else:
-        raise ValueError(f"Unknown operation: {args.operation}")
+    main()
