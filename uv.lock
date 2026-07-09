@@ -7661,7 +7661,7 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4" },
     { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.49" },
     { name = "ty", marker = "extra == 'tests'", specifier = "==0.0.49" },
-    { name = "tyro", specifier = ">=0.9" },
+    { name = "tyro", specifier = ">=1.0" },
     { name = "wandb", specifier = ">=0.18" },
     { name = "wget", specifier = ">=3.2" },
 ]
