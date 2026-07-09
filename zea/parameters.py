@@ -200,10 +200,9 @@ class Parameters(BaseParameters):
     """Number of grid pixels per wavelength. Defaults to 4."""
 
     grid_type: str
-    """Beamforming grid type, ``"cartesian"``, ``"polar"``, or ``"scanline"``.
-    Defaults to ``"cartesian"``. ``"scanline"`` builds one pixel column per
-    transmit (see :func:`~zea.beamform.pixelgrid.scanline_pixel_grid`); pair
-    with ``flat_apodization`` (fed to :class:`~zea.ops.ReceiveApodization`)."""
+    """Beamforming grid type, ``"cartesian"`` or ``"polar"``. Defaults to
+    ``"cartesian"``. Combine with ``enable_scanline=True`` for line-by-line
+    (scanline) imaging instead of a shared compounded grid."""
 
     dynamic_range: np.ndarray
     """Dynamic range for image display in dB, shape (2,) as (min_dB, max_dB)."""
@@ -248,13 +247,23 @@ class Parameters(BaseParameters):
     See :func:`zea.beamform.pfield.compute_pfield`. Defaults to ``{}``.
     """
 
-    num_scanline_pixels: int
-    """Number of depth samples per transmit line for scanline beamforming.
-    Defaults to 700."""
+    enable_scanline: bool
+    """Whether to beamform in scanline (line-by-line) mode: one pixel column
+    per transmit (see :func:`~zea.beamform.pixelgrid.scanline_pixel_grid`)
+    instead of a shared compounded ``grid_type`` grid, paired with
+    ``flat_apodization`` (fed to :class:`~zea.ops.ReceiveApodization`).
+    Combine with ``grid_type="cartesian"`` for vertical focused columns
+    (linear-scan geometry) or ``grid_type="polar"`` for steered rays from
+    each transmit's own origin (sector / phased-array geometry). Defaults to
+    ``False``.
 
-    scanline_sector: bool
-    """Scanline grid mode: ``False`` for focused linear columns, ``True`` for
-    steered sector rays. Defaults to ``False``."""
+    .. note::
+        This only builds the scanline *grid*. For true classical scanline
+        beamforming, also construct the beamformer with
+        ``Beamform(enable_receive_apodization=True)`` so that ``flat_apodization``
+        masks each pixel to its owning transmit; without it every transmit is
+        still compounded onto the one-column-per-transmit grid.
+    """
 
     scan_schema = deepcopy(ScanSpec.SCHEMA)
     probe_schema = deepcopy(Probe.SCHEMA)
@@ -275,9 +284,8 @@ class Parameters(BaseParameters):
         "pixels_per_wavelength": {"dtype": np.int32, "default": 4},
         "pfield_kwargs": {"dtype": dict, "default": {}},
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
-        "num_scanline_pixels": {"dtype": np.int32, "default": 700},
-        "scanline_sector": {"dtype": bool, "default": False},  # native dtype on purpose
         "focal_region_length": {"dtype": np.float32, "default": 0.0},
+        "enable_scanline": {"dtype": bool, "default": False},  # native dtype on purpose
         "grid_type": {"dtype": str, "default": "cartesian"},
         "polar_limits": {"dtype": np.float32, "shape": (2,)},
         "dynamic_range": {"dtype": np.float32, "shape": (2,)},
@@ -347,12 +355,32 @@ class Parameters(BaseParameters):
         "focus_distances",
         "polar_angles",
         "azimuth_angles",
-        "num_scanline_pixels",
-        "scanline_sector",
+        "enable_scanline",
     )
     def grid(self):
         """The beamforming grid of shape (grid_size_z, grid_size_x, [grid_size_y], 3)."""
-        if self.grid_type == "polar":
+        if self.enable_scanline:
+            # One pixel column per transmit: scanline imaging is the special case
+            # of pixel-based DAS where each pixel belongs to exactly one transmit.
+            # Reuses the same `grid_type` (cartesian/polar) that also picks the
+            # geometry of the regular (non-scanline) grid below.
+            polar_angles = self.polar_angles
+            if polar_angles is None:
+                log.warning_once(
+                    "No ``polar_angles`` provided, using zeros",
+                    key=(id(self), "polar_angles"),
+                )
+                polar_angles = np.zeros(self.n_tx)
+            return scanline_pixel_grid(
+                self.transmit_origins,
+                self.focus_distances,
+                polar_angles,
+                self.zlims,
+                self.grid_size_z,
+                azimuth_angles=self.azimuth_angles,
+                grid_type=self.grid_type,
+            )
+        elif self.grid_type == "polar":
             if self.is_3d:
                 raise NotImplementedError("3D polar grids are not yet supported.")
             return polar_pixel_grid(
@@ -377,45 +405,35 @@ class Parameters(BaseParameters):
                 # No wavelength (e.g. missing center frequency); cannot assess aliasing.
                 pass
             return grid
-        elif self.grid_type == "scanline":
-            # One pixel column per transmit: scanline imaging is the special case
-            # of pixel-based DAS where each pixel belongs to exactly one transmit.
-            return scanline_pixel_grid(
-                self.transmit_origins,
-                self.focus_distances,
-                self.polar_angles,
-                self.zlims,
-                int(self.num_scanline_pixels),
-                azimuth_angles=self.azimuth_angles,
-                sector=bool(self.scanline_sector),
-            )
         else:
             raise ValueError(
                 f"Unsupported grid type: {self.grid_type}. Supported types are "
-                "'cartesian', 'polar', and 'scanline'."
+                "'cartesian' and 'polar'."
             )
 
-    @cache_with_dependencies("grid_type", "n_tx", "num_scanline_pixels")
+    @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z")
     def flat_apodization(self):
         """Per-pixel, per-transmit receive apodization weight of shape (n_pix, n_tx).
 
-        Only defined for ``grid_type == "scanline"``, where it is the one-hot
+        Only defined when ``enable_scanline`` is ``True``, where it is the one-hot
         mask (see :func:`~zea.beamform.pixelgrid.scanline_receive_apodization`)
         that isolates each pixel's owning transmit. ``None`` otherwise, which
         makes :class:`~zea.ops.ReceiveApodization` a no-op.
         """
-        if self.grid_type != "scanline":
+        if not self.enable_scanline:
             return None
-        return scanline_receive_apodization(self.n_tx, int(self.num_scanline_pixels))
+        return scanline_receive_apodization(self.n_tx, self.grid_size_z)
 
-    @cache_with_dependencies("xlims", "wavelength", "pixels_per_wavelength", "grid_type", "n_tx")
+    @cache_with_dependencies(
+        "xlims", "wavelength", "pixels_per_wavelength", "enable_scanline", "n_tx"
+    )
     def grid_size_x(self):
         """Grid width in pixels. For a cartesian grid, this is the lateral (x) pixels in the grid,
         set to prevent aliasing if not provided. For a polar grid, this can be thought of as
-        the number for rays in the polar direction. For a scanline grid, this is fixed to
-        ``n_tx`` (one column per transmit).
+        the number for rays in the polar direction. When ``enable_scanline`` is ``True``, this is
+        fixed to ``n_tx`` (one column per transmit).
         """
-        if self.grid_type == "scanline":
+        if self.enable_scanline:
             return self.n_tx
 
         grid_size_x = self._params.get("grid_size_x")
@@ -448,16 +466,11 @@ class Parameters(BaseParameters):
         "zlims",
         "wavelength",
         "pixels_per_wavelength",
-        "grid_type",
-        "num_scanline_pixels",
     )
     def grid_size_z(self):
         """Grid depth in pixels. This is the number of axial (z) pixels in the grid,
-        set to prevent aliasing if not provided. For a scanline grid, this is
-        ``num_scanline_pixels`` (samples per line)."""
-        if self.grid_type == "scanline":
-            return int(self.num_scanline_pixels)
-
+        set to prevent aliasing if not provided. When ``enable_scanline`` is ``True``,
+        this is the number of depth samples per transmit line."""
         grid_size_z = self._params.get("grid_size_z")
         if grid_size_z is not None:
             return grid_size_z

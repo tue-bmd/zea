@@ -334,7 +334,7 @@ def test_scanline_pixel_grid_linear():
     origins[:, 0] = [-5e-3, 0.0, 5e-3]  # walking transmit origins
     focus = np.full(3, 20e-3, np.float32)
     angles = np.zeros(3, np.float32)
-    grid = scanline_pixel_grid(origins, focus, angles, (1e-3, 30e-3), 16, sector=False)
+    grid = scanline_pixel_grid(origins, focus, angles, (1e-3, 30e-3), 16, grid_type="cartesian")
     assert grid.shape == (16, 3, 3)
     for n in range(3):
         # angle 0 -> lateral focus == origin x, and every point on the line is at that x
@@ -343,16 +343,81 @@ def test_scanline_pixel_grid_linear():
 
 
 def test_scanline_pixel_grid_sector():
-    """Sector scanline grids are steered rays from the transmit origin."""
+    """Polar-style scanline grids are steered rays from the transmit origin."""
     origins = np.zeros((3, 3), np.float32)
     focus = np.full(3, 40e-3, np.float32)
     angles = np.array([-0.3, 0.0, 0.3], np.float32)
-    grid = scanline_pixel_grid(origins, focus, angles, (0.0, 50e-3), 16, sector=True)
+    grid = scanline_pixel_grid(origins, focus, angles, (0.0, 50e-3), 16, grid_type="polar")
     assert grid.shape == (16, 3, 3)
     for n in range(3):
         r = np.linalg.norm(grid[:, n] - origins[n], axis=-1)
         np.testing.assert_allclose(grid[:, n, 0], r * np.sin(angles[n]), atol=1e-6)
         np.testing.assert_allclose(grid[:, n, 2], r * np.cos(angles[n]), atol=1e-6)
+
+
+def test_scanline_pixel_grid_default_is_cartesian():
+    """``grid_type`` defaults to ``"cartesian"``, matching the old ``sector=False`` default."""
+    origins = np.zeros((2, 3), np.float32)
+    focus = np.full(2, 20e-3, np.float32)
+    angles = np.zeros(2, np.float32)
+    default_grid = scanline_pixel_grid(origins, focus, angles, (1e-3, 30e-3), 8)
+    cartesian_grid = scanline_pixel_grid(
+        origins, focus, angles, (1e-3, 30e-3), 8, grid_type="cartesian"
+    )
+    np.testing.assert_array_equal(default_grid, cartesian_grid)
+
+
+def test_scanline_pixel_grid_invalid_grid_type():
+    """An unsupported ``grid_type`` raises a clear error instead of silently misbehaving."""
+    origins = np.zeros((2, 3), np.float32)
+    focus = np.full(2, 20e-3, np.float32)
+    angles = np.zeros(2, np.float32)
+    with pytest.raises(ValueError, match="Unsupported grid_type"):
+        scanline_pixel_grid(origins, focus, angles, (1e-3, 30e-3), 8, grid_type="scanline")
+
+
+def test_scanline_pixel_grid_plane_wave_on_axis_no_nan():
+    """A plane-wave (``np.inf`` focus distance) on-axis transmit must not produce NaN
+    (regression test for the ``inf * 0`` hazard in the cartesian-style branch)."""
+    origins = np.array([[1e-3, 0, 0], [2e-3, 0, 0]], np.float32)
+    focus = np.array([np.inf, np.inf], np.float32)
+    angles = np.zeros(2, np.float32)
+    grid = scanline_pixel_grid(origins, focus, angles, (0, 0.05), 8, grid_type="cartesian")
+    assert not np.isnan(grid).any()
+    np.testing.assert_allclose(grid[:, 0, 0], origins[0, 0])
+    np.testing.assert_allclose(grid[:, 1, 0], origins[1, 0])
+
+
+def test_scanline_pixel_grid_golden_values():
+    """Golden-value regression test locking in the exact numerics of both scanline
+    grid styles (pinned before an internal refactor that renamed ``sector`` to
+    ``grid_type`` without changing the underlying math)."""
+    origins = np.array([[-5e-3, 0, 0], [0, 0, 0], [5e-3, 0, 0]], dtype=np.float32)
+    focus = np.array([20e-3, np.inf, 15e-3], dtype=np.float32)
+    angles = np.array([0.05, 0.0, -0.05], dtype=np.float32)
+    grid_a = scanline_pixel_grid(origins, focus, angles, (1e-3, 30e-3), 5, grid_type="cartesian")
+    expected_a_row0 = np.array(
+        [[-0.00400042, 0.0, 0.001], [0.0, 0.0, 0.001], [0.00425031, 0.0, 0.001]],
+        dtype=np.float32,
+    )
+    np.testing.assert_allclose(grid_a[0], expected_a_row0, atol=1e-7)
+
+    origins_b = np.zeros((3, 3), dtype=np.float32)
+    focus_b = np.full(3, 40e-3, dtype=np.float32)
+    angles_b = np.array([-0.3, 0.0, 0.3], dtype=np.float32)
+    az_b = np.array([0.1, 0.0, -0.1], dtype=np.float32)
+    grid_b = scanline_pixel_grid(
+        origins_b, focus_b, angles_b, (0.0, 50e-3), 5, azimuth_angles=az_b, grid_type="polar"
+    )
+    expected_b_row1 = np.array(
+        [
+            [-0.00367555, -0.00036878, 0.01194171],
+            [0.0, 0.0, 0.0125],
+            [0.00367555, -0.00036878, 0.01194171],
+        ],
+        dtype=np.float32,
+    )
+    np.testing.assert_allclose(grid_b[1], expected_b_row1, atol=1e-7)
 
 
 def test_scanline_receive_apodization_one_hot():
@@ -383,7 +448,7 @@ def _make_scanline_inputs(probe_geometry, n_line=12):
             for o, f, a in zip(origins, focus, angles)
         ]
     ).astype(np.float32)
-    grid = scanline_pixel_grid(origins, focus, angles, (2e-3, 25e-3), n_line, sector=False)
+    grid = scanline_pixel_grid(origins, focus, angles, (2e-3, 25e-3), n_line, grid_type="cartesian")
     apodization = scanline_receive_apodization(n_tx, n_line)
     inputs = dict(
         t0_delays=t0,

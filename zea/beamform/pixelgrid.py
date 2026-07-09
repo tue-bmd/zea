@@ -201,19 +201,19 @@ def scanline_pixel_grid(
     zlims,
     num_depth_pixels,
     azimuth_angles=None,
-    sector=False,
+    grid_type="cartesian",
 ):
     """Pixel grid for scanline beamforming: one column of pixels per transmit.
 
-    Scanline (line-by-line) imaging is the special case of pixel-based DAS
-    beamforming where each pixel is only ever insonified by a single transmit —
-    its own beam line. This builds that grid in the same
+    Scanline (line-by-line) imaging is a special case of pixel-based DAS
+    beamforming where each transmit is beamformed to a single column of
+    pixels. This builds that grid in the same
     ``(grid_size_z, grid_size_x, 3)`` layout as :func:`cartesian_pixel_grid`
     (one column ``n`` per transmit ``n``, ``num_depth_pixels`` rows), so it can
     be beamformed by the regular pixel-based :class:`~zea.ops.Beamform`
     pipeline. Pair with :func:`scanline_receive_apodization` (fed to
-    :class:`~zea.ops.ReceiveApodization`) to mask out every transmit but the
-    one that owns each pixel.
+    :class:`~zea.ops.ReceiveApodization`) to zero out every transmit except
+    the one whose column each pixel belongs to.
 
     Args:
         transmit_origins (np.ndarray): Beam origins ``(n_tx, 3)`` in meters.
@@ -223,40 +223,57 @@ def scanline_pixel_grid(
         num_depth_pixels (int): Number of samples along each line.
         azimuth_angles (np.ndarray, optional): Azimuth angles ``(n_tx,)``.
             Defaults to zeros.
-        sector (bool): If ``True`` each line is a steered ray from its transmit
-            origin (sector / phased-array geometry). If ``False`` each line is a
-            vertical column at the beam's lateral focus position (linear-scan
-            geometry).
+        grid_type (str): ``"cartesian"`` for a vertical column at each beam's
+            lateral focus position (linear-scan geometry), matching
+            :func:`cartesian_pixel_grid`. ``"polar"`` for a steered ray from
+            each transmit's own origin (sector / phased-array geometry),
+            matching :func:`polar_pixel_grid`. Defaults to ``"cartesian"``.
 
     Returns:
         np.ndarray: Pixel positions of shape ``(num_depth_pixels, n_tx, 3)`` in
         Cartesian ``(x, y, z)`` coordinates (meters); column ``n`` is the beam
         line of transmit ``n``.
     """
-    to = np.asarray(transmit_origins, dtype=np.float32)
-    fd = np.asarray(focus_distances, dtype=np.float32)
-    pa = np.asarray(polar_angles, dtype=np.float32)
-    az = (
-        np.zeros_like(pa)
+    origins = np.asarray(transmit_origins, dtype=np.float32)
+    focus_distances = np.asarray(focus_distances, dtype=np.float32)
+    polar_angles = np.asarray(polar_angles, dtype=np.float32)
+    azimuth_angles = (
+        np.zeros_like(polar_angles)
         if azimuth_angles is None
         else np.asarray(azimuth_angles, dtype=np.float32)
     )
 
-    s = np.linspace(zlims[0], zlims[1], num_depth_pixels).astype(np.float32)
-    v = np.stack(
-        [np.sin(pa) * np.cos(az), np.sin(pa) * np.sin(az), np.cos(pa)], axis=-1
-    )  # (n_tx, 3) beam direction
+    line_depths = np.linspace(zlims[0], zlims[1], num_depth_pixels).astype(np.float32)
+    beam_directions = np.stack(
+        [
+            np.sin(polar_angles) * np.cos(azimuth_angles),
+            np.sin(polar_angles) * np.sin(azimuth_angles),
+            np.cos(polar_angles),
+        ],
+        axis=-1,
+    )
 
-    if sector:
+    # Every scanline column is a ray sampled along ``line_depths``; the two grid
+    # types differ only in each column's origin and direction.
+    if grid_type == "polar":
         # Steered rays from each transmit's own origin.
-        grid = to[None, :, :] + s[:, None, None] * v[None, :, :]
+        column_origins = origins
+        column_directions = beam_directions
+    elif grid_type == "cartesian":
+        # Vertical columns at each beam's lateral focus position. Non-finite
+        # (e.g. plane-wave np.inf) focus distances must contribute no lateral
+        # offset, otherwise inf * 0 gives NaN for on-axis transmits.
+        finite_focus_distances = np.where(np.isfinite(focus_distances), focus_distances, 0.0)
+        column_origins = np.zeros_like(origins)
+        column_origins[:, 0] = origins[:, 0] + finite_focus_distances * beam_directions[:, 0]
+        column_directions = np.zeros_like(beam_directions)
+        column_directions[:, 2] = 1.0
     else:
-        # Vertical columns at each beam's lateral focus position.
-        x = to[:, 0] + fd * v[:, 0]  # (n_tx,) lateral focus position per line
-        grid = np.zeros((num_depth_pixels, pa.shape[0], 3), dtype=np.float32)
-        grid[:, :, 0] = x[None, :]
-        grid[:, :, 2] = s[:, None]
+        raise ValueError(
+            f"Unsupported grid_type: {grid_type!r}. Supported types are 'cartesian' and 'polar'."
+        )
 
+    grid = column_origins[None, :, :] + line_depths[:, None, None] * column_directions[None, :, :]
     return grid.astype(np.float32)
 
 

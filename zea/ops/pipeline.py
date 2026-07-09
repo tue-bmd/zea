@@ -227,7 +227,7 @@ class Pipeline:
                 This will calculate pressure field and only beamform the data to those locations.
             enable_receive_apodization (bool): If True, apply ReceiveApodization using
                 ``parameters.flat_apodization``. Defaults to False. Used e.g. for scanline
-                (line-by-line) imaging with ``parameters.grid_type = "scanline"``.
+                (line-by-line) imaging with ``parameters.enable_scanline = True``.
             timed (bool, optional): Whether to time each operation. Defaults to False.
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
@@ -1090,7 +1090,8 @@ class Map(Pipeline):
 @ops_registry("patched_grid")
 class PatchedGrid(Map):
     """
-    A pipeline that maps its operations over `flatgrid` and `flat_pfield` keys.
+    A pipeline that maps its operations over `flatgrid`, `flat_pfield`, and
+    `flat_apodization` keys.
 
     This can be used to reduce memory usage by processing data in chunks.
 
@@ -1134,7 +1135,7 @@ class Beamform(Pipeline):
     - ReshapeGrid (flattened grid is also reshaped to `(grid_size_z, grid_size_x)`)
 
     Scanline (line-by-line) imaging is a special case of this pipeline: set
-    ``parameters.grid_type = "scanline"`` and ``enable_receive_apodization=True``
+    ``parameters.enable_scanline = True`` and ``enable_receive_apodization=True``
     so that each pixel's grid column is beamformed from its own owning transmit
     only, with every other transmit masked to zero by
     :class:`~zea.ops.ReceiveApodization` (fed
@@ -1163,10 +1164,17 @@ class Beamform(Pipeline):
             num_patches (int): Number of patches to split the grid into for patch-wise
                 beamforming. If 1, no patching is performed.
             enable_pfield (bool): Whether to include pressure field weighting in the beamforming.
+                Mutually exclusive with ``enable_receive_apodization``.
             enable_receive_apodization (bool): Whether to include an explicit per-pixel,
                 per-transmit receive apodization mask (``parameters.flat_apodization``) in the
                 beamforming, e.g. to reconstruct scanline imaging (see class docstring).
+                Mutually exclusive with ``enable_pfield``.
         """
+        if enable_pfield and enable_receive_apodization:
+            raise ValueError(
+                "enable_pfield and enable_receive_apodization are mutually exclusive. "
+                "Please specify only one."
+            )
 
         self.beamformer_type = beamformer
         self.num_patches = num_patches
