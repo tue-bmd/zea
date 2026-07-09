@@ -16,8 +16,8 @@ from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_pla
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
+    scanline_aligned_apodization,
     scanline_pixel_grid,
-    scanline_receive_apodization,
 )
 
 from . import backend_equality_check
@@ -420,10 +420,10 @@ def test_scanline_pixel_grid_golden_values():
     np.testing.assert_allclose(grid_b[1], expected_b_row1, atol=1e-7)
 
 
-def test_scanline_receive_apodization_one_hot():
+def test_scanline_aligned_apodization_one_hot():
     """Each pixel's apodization row selects exactly its own column's transmit."""
     n_tx, n_line = 4, 5
-    apod = scanline_receive_apodization(n_tx, n_line)
+    apod = scanline_aligned_apodization(n_tx, n_line)
     assert apod.shape == (n_line * n_tx, n_tx)
     for i in range(n_line):
         for n in range(n_tx):
@@ -449,7 +449,7 @@ def _make_scanline_inputs(probe_geometry, n_line=12):
         ]
     ).astype(np.float32)
     grid = scanline_pixel_grid(origins, focus, angles, (2e-3, 25e-3), n_line, grid_type="cartesian")
-    apodization = scanline_receive_apodization(n_tx, n_line)
+    apodization = scanline_aligned_apodization(n_tx, n_line)
     inputs = dict(
         t0_delays=t0,
         tx_apodizations=np.ones((n_tx, n_el), np.float32),

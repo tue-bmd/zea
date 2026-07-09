@@ -12,6 +12,7 @@ from zea.func.tensor import (
     reshape_axis,
 )
 from zea.func.ultrasound import (
+    apply_aligned_apodization,
     apply_receive_apodization,
     channels_to_complex,
     complex_to_channels,
@@ -108,7 +109,14 @@ class Simulate(Operation):
 
 @ops_registry("tof_correction")
 class TOFCorrection(Operation):
-    """Time-of-flight correction operation for ultrasound data."""
+    """Time-of-flight correction operation for ultrasound data.
+
+    Aligns raw channel data to each pixel and applies the built-in
+    receive-aperture apodization (the f-number mask, see
+    :func:`zea.beamform.beamformer.fnumber_mask`, controlled by ``f_number``).
+    For custom receive-aperture apodization use :class:`ReceiveApodization`;
+    for transmit-axis (compounding) apodization use :class:`AlignedApodization`.
+    """
 
     # Define operation-specific static parameters
     STATIC_PARAMS = ["f_number", "apply_lens_correction", "focal_region_length"]
@@ -238,23 +246,30 @@ class PfieldWeighting(Operation):
         if flat_pfield is None:
             return {self.output_key: data}
 
-        weighted_data = apply_receive_apodization(data, flat_pfield, self.with_batch_dim)
+        weighted_data = apply_aligned_apodization(data, flat_pfield, self.with_batch_dim)
 
         return {self.output_key: weighted_data}
 
 
-@ops_registry("receive_apodization")
-class ReceiveApodization(Operation):
+@ops_registry("aligned_apodization")
+class AlignedApodization(Operation):
     """Weighting aligned data with an arbitrary, directly-supplied per-pixel,
     per-transmit apodization mask.
 
-    This is the same mechanism as :class:`PfieldWeighting`, generalized to take
-    the weight directly instead of deriving it from a simulated pressure field.
-    Any transmit's contribution to any pixel can be scaled or masked out before
-    the receive-aperture and transmit sums, e.g. to reconstruct scanline (one
-    transmit per image line) imaging as a special case of pixel-based DAS:
+    This weights the **transmit** axis (compounding): any transmit's
+    contribution to any pixel can be scaled or masked out before the
+    receive-channel and transmit sums. It is the same mechanism as
+    :class:`PfieldWeighting`, generalized to take the weight directly instead of
+    deriving it from a simulated pressure field, e.g. to reconstruct scanline
+    (one transmit per image line) imaging as a special case of pixel-based DAS:
     weight 1 for a pixel's owning beam, 0 for every other transmit. See
-    :func:`zea.beamform.pixelgrid.scanline_receive_apodization`.
+    :func:`zea.beamform.pixelgrid.scanline_aligned_apodization`.
+
+    .. note::
+        This is *not* receive-aperture apodization. For per-element
+        (receive-channel) weighting see :class:`ReceiveApodization` (custom) or
+        the built-in f-number mask
+        (:func:`zea.beamform.beamformer.fnumber_mask`).
     """
 
     def __init__(self, **kwargs):
@@ -264,21 +279,68 @@ class ReceiveApodization(Operation):
             **kwargs,
         )
 
-    def call(self, flat_apodization=None, **kwargs):
+    def call(self, flat_aligned_apodization=None, **kwargs):
         """Weight data with a per-pixel, per-transmit apodization mask.
 
         Args:
-            flat_apodization (ops.Tensor): Apodization weight of shape (n_pix, n_tx)
+            flat_aligned_apodization (ops.Tensor): Apodization weight of shape (n_pix, n_tx)
 
         Returns:
             dict: Dictionary containing weighted data
         """
         data = kwargs[self.key]  # must start with ((batch_size,) n_tx, n_pix, ...)
 
-        if flat_apodization is None:
+        if flat_aligned_apodization is None:
             return {self.output_key: data}
 
-        weighted_data = apply_receive_apodization(data, flat_apodization, self.with_batch_dim)
+        weighted_data = apply_aligned_apodization(
+            data, flat_aligned_apodization, self.with_batch_dim
+        )
+
+        return {self.output_key: weighted_data}
+
+
+@ops_registry("receive_apodization")
+class ReceiveApodization(Operation):
+    """Custom receive-aperture apodization: weight aligned data with a per-pixel,
+    per-element (receive-channel) mask.
+
+    This weights the **receive-element** axis, scaling each element's
+    contribution to a pixel before the receive-channel sum. It is the
+    user-supplied counterpart of the built-in f-number mask
+    (:func:`zea.beamform.beamformer.fnumber_mask`), and is applied *in addition*
+    to it — set ``f_number=0`` to disable the built-in mask and use a fully
+    custom receive apodization alone.
+
+    .. note::
+        This is distinct from :class:`AlignedApodization`, which weights the
+        *transmit* axis (compounding), not the receive channels.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.ALIGNED_DATA,
+            **kwargs,
+        )
+
+    def call(self, flat_receive_apodization=None, **kwargs):
+        """Weight data with a per-pixel, per-element apodization mask.
+
+        Args:
+            flat_receive_apodization (ops.Tensor): Apodization weight of shape (n_pix, n_el)
+
+        Returns:
+            dict: Dictionary containing weighted data
+        """
+        data = kwargs[self.key]  # must start with ((batch_size,) n_tx, n_pix, n_el, ...)
+
+        if flat_receive_apodization is None:
+            return {self.output_key: data}
+
+        weighted_data = apply_receive_apodization(
+            data, flat_receive_apodization, self.with_batch_dim
+        )
 
         return {self.output_key: weighted_data}
 

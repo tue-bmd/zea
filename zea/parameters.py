@@ -109,8 +109,8 @@ from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
     check_for_aliasing,
     polar_pixel_grid,
+    scanline_aligned_apodization,
     scanline_pixel_grid,
-    scanline_receive_apodization,
 )
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
@@ -251,7 +251,7 @@ class Parameters(BaseParameters):
     """Whether to beamform in scanline (line-by-line) mode: one pixel column
     per transmit (see :func:`~zea.beamform.pixelgrid.scanline_pixel_grid`)
     instead of a shared compounded ``grid_type`` grid, paired with
-    ``flat_apodization`` (fed to :class:`~zea.ops.ReceiveApodization`).
+    ``flat_aligned_apodization`` (fed to :class:`~zea.ops.AlignedApodization`).
     Combine with ``grid_type="cartesian"`` for vertical focused columns
     (linear-scan geometry) or ``grid_type="polar"`` for steered rays from
     each transmit's own origin (sector / phased-array geometry). Defaults to
@@ -260,9 +260,25 @@ class Parameters(BaseParameters):
     .. note::
         This only builds the scanline *grid*. For true classical scanline
         beamforming, also construct the beamformer with
-        ``Beamform(enable_receive_apodization=True)`` so that ``flat_apodization``
-        masks each pixel to its owning transmit; without it every transmit is
-        still compounded onto the one-column-per-transmit grid.
+        ``Beamform(enable_aligned_apodization=True)`` so that
+        ``flat_aligned_apodization`` masks each pixel to its owning transmit;
+        without it every transmit is still compounded onto the
+        one-column-per-transmit grid.
+    """
+
+    flat_receive_apodization: np.ndarray
+    """Optional custom receive-aperture apodization of shape ``(n_pix, n_el)``.
+
+    Per-pixel, per-element (receive-channel) weights, fed to
+    :class:`~zea.ops.ReceiveApodization` when the beamformer is built with
+    ``Beamform(enable_receive_apodization=True)``. This is the user-supplied
+    counterpart of the built-in f-number mask
+    (:func:`~zea.beamform.beamformer.fnumber_mask`) and is applied *in addition*
+    to it (set ``f_number=0`` to use a fully custom receive apodization alone).
+    ``None`` (default) makes :class:`~zea.ops.ReceiveApodization` a no-op.
+
+    Distinct from ``flat_aligned_apodization``, which weights the *transmit*
+    axis (compounding), not the receive channels.
     """
 
     scan_schema = deepcopy(ScanSpec.SCHEMA)
@@ -286,6 +302,8 @@ class Parameters(BaseParameters):
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
         "focal_region_length": {"dtype": np.float32, "default": 0.0},
         "enable_scanline": {"dtype": bool, "default": False},  # native dtype on purpose
+        "flat_receive_apodization": {"dtype": (type(None), np.ndarray), "default": None},
+        "focal_region_length": {"dtype": np.float32, "default": 0.0},
         "grid_type": {"dtype": str, "default": "cartesian"},
         "polar_limits": {"dtype": np.float32, "shape": (2,)},
         "dynamic_range": {"dtype": np.float32, "shape": (2,)},
@@ -412,17 +430,20 @@ class Parameters(BaseParameters):
             )
 
     @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z")
-    def flat_apodization(self):
-        """Per-pixel, per-transmit receive apodization weight of shape (n_pix, n_tx).
+    def flat_aligned_apodization(self):
+        """Per-pixel, per-transmit compounding apodization weight of shape (n_pix, n_tx).
 
         Only defined when ``enable_scanline`` is ``True``, where it is the one-hot
-        mask (see :func:`~zea.beamform.pixelgrid.scanline_receive_apodization`)
+        mask (see :func:`~zea.beamform.pixelgrid.scanline_aligned_apodization`)
         that isolates each pixel's owning transmit. ``None`` otherwise, which
-        makes :class:`~zea.ops.ReceiveApodization` a no-op.
+        makes :class:`~zea.ops.AlignedApodization` a no-op.
+
+        This weights the *transmit* axis (compounding), not the receive channels;
+        for custom receive-aperture apodization see ``flat_receive_apodization``.
         """
         if not self.enable_scanline:
             return None
-        return scanline_receive_apodization(self.n_tx, self.grid_size_z)
+        return scanline_aligned_apodization(self.n_tx, self.grid_size_z)
 
     @cache_with_dependencies(
         "xlims", "wavelength", "pixels_per_wavelength", "enable_scanline", "n_tx"
