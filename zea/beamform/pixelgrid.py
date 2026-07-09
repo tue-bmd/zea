@@ -205,15 +205,15 @@ def scanline_pixel_grid(
 ):
     """Pixel grid for scanline beamforming: one column of pixels per transmit.
 
-    Scanline (line-by-line) imaging is the special case of pixel-based DAS
-    beamforming where each pixel is only ever insonified by a single transmit —
-    its own beam line. This builds that grid in the same
+    Scanline (line-by-line) imaging is a special case of pixel-based DAS
+    beamforming where each transmit is beamformed to a single column of
+    pixels. This builds that grid in the same
     ``(grid_size_z, grid_size_x, 3)`` layout as :func:`cartesian_pixel_grid`
     (one column ``n`` per transmit ``n``, ``num_depth_pixels`` rows), so it can
     be beamformed by the regular pixel-based :class:`~zea.ops.Beamform`
     pipeline. Pair with :func:`scanline_receive_apodization` (fed to
-    :class:`~zea.ops.ReceiveApodization`) to mask out every transmit but the
-    one that owns each pixel.
+    :class:`~zea.ops.ReceiveApodization`) to zero out every transmit except
+    the one whose column each pixel belongs to.
 
     Args:
         transmit_origins (np.ndarray): Beam origins ``(n_tx, 3)`` in meters.
@@ -251,8 +251,11 @@ def scanline_pixel_grid(
         # Steered rays from each transmit's own origin.
         grid = to[None, :, :] + s[:, None, None] * v[None, :, :]
     else:
-        # Vertical columns at each beam's lateral focus position.
-        x = to[:, 0] + fd * v[:, 0]  # (n_tx,) lateral focus position per line
+        # Vertical columns at each beam's lateral focus position. Non-finite
+        # focus distances (e.g. the plane-wave marker, np.inf) have no lateral
+        # focus offset; guard against inf * 0 producing NaN for on-axis transmits.
+        fd_safe = np.where(np.isfinite(fd), fd, 0.0)
+        x = to[:, 0] + fd_safe * v[:, 0]  # (n_tx,) lateral focus position per line
         grid = np.zeros((num_depth_pixels, pa.shape[0], 3), dtype=np.float32)
         grid[:, :, 0] = x[None, :]
         grid[:, :, 2] = s[:, None]

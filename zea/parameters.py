@@ -236,10 +236,6 @@ class Parameters(BaseParameters):
     """Extra keyword arguments for the pressure-field computation. See
     :func:`zea.beamform.pfield.compute_pfield`. Defaults to ``{}``."""
 
-    num_scanline_pixels: int
-    """Number of depth samples per transmit line for scanline beamforming.
-    Defaults to 700."""
-
     scanline_sector: bool
     """Scanline grid mode: ``False`` for focused linear columns, ``True`` for
     steered sector rays. Defaults to ``False``."""
@@ -263,7 +259,6 @@ class Parameters(BaseParameters):
         "pixels_per_wavelength": {"dtype": np.int32, "default": 4},
         "pfield_kwargs": {"dtype": dict, "default": {}},
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
-        "num_scanline_pixels": {"dtype": np.int32, "default": 700},
         "scanline_sector": {"dtype": bool, "default": False},  # native dtype on purpose
         "grid_type": {"dtype": str, "default": "cartesian"},
         "polar_limits": {"dtype": np.float32, "shape": (2,)},
@@ -334,7 +329,6 @@ class Parameters(BaseParameters):
         "focus_distances",
         "polar_angles",
         "azimuth_angles",
-        "num_scanline_pixels",
         "scanline_sector",
     )
     def grid(self):
@@ -367,12 +361,19 @@ class Parameters(BaseParameters):
         elif self.grid_type == "scanline":
             # One pixel column per transmit: scanline imaging is the special case
             # of pixel-based DAS where each pixel belongs to exactly one transmit.
+            polar_angles = self.polar_angles
+            if polar_angles is None:
+                log.warning_once(
+                    "No ``polar_angles`` provided, using zeros",
+                    key=(id(self), "polar_angles"),
+                )
+                polar_angles = np.zeros(self.n_tx)
             return scanline_pixel_grid(
                 self.transmit_origins,
                 self.focus_distances,
-                self.polar_angles,
+                polar_angles,
                 self.zlims,
-                int(self.num_scanline_pixels),
+                self.grid_size_z,
                 azimuth_angles=self.azimuth_angles,
                 sector=bool(self.scanline_sector),
             )
@@ -382,7 +383,7 @@ class Parameters(BaseParameters):
                 "'cartesian', 'polar', and 'scanline'."
             )
 
-    @cache_with_dependencies("grid_type", "n_tx", "num_scanline_pixels")
+    @cache_with_dependencies("grid_type", "n_tx", "grid_size_z")
     def flat_apodization(self):
         """Per-pixel, per-transmit receive apodization weight of shape (n_pix, n_tx).
 
@@ -393,7 +394,7 @@ class Parameters(BaseParameters):
         """
         if self.grid_type != "scanline":
             return None
-        return scanline_receive_apodization(self.n_tx, int(self.num_scanline_pixels))
+        return scanline_receive_apodization(self.n_tx, self.grid_size_z)
 
     @cache_with_dependencies("xlims", "wavelength", "pixels_per_wavelength", "grid_type", "n_tx")
     def grid_size_x(self):
@@ -435,16 +436,11 @@ class Parameters(BaseParameters):
         "zlims",
         "wavelength",
         "pixels_per_wavelength",
-        "grid_type",
-        "num_scanline_pixels",
     )
     def grid_size_z(self):
         """Grid depth in pixels. This is the number of axial (z) pixels in the grid,
-        set to prevent aliasing if not provided. For a scanline grid, this is
-        ``num_scanline_pixels`` (samples per line)."""
-        if self.grid_type == "scanline":
-            return int(self.num_scanline_pixels)
-
+        set to prevent aliasing if not provided. For a scanline grid, this is the
+        number of depth samples per transmit line."""
         grid_size_z = self._params.get("grid_size_z")
         if grid_size_z is not None:
             return grid_size_z

@@ -1074,7 +1074,8 @@ class Map(Pipeline):
 @ops_registry("patched_grid")
 class PatchedGrid(Map):
     """
-    A pipeline that maps its operations over `flatgrid` and `flat_pfield` keys.
+    A pipeline that maps its operations over `flatgrid`, `flat_pfield`, and
+    `flat_apodization` keys.
 
     This can be used to reduce memory usage by processing data in chunks.
 
@@ -1147,10 +1148,17 @@ class Beamform(Pipeline):
             num_patches (int): Number of patches to split the grid into for patch-wise
                 beamforming. If 1, no patching is performed.
             enable_pfield (bool): Whether to include pressure field weighting in the beamforming.
+                Mutually exclusive with ``enable_receive_apodization``.
             enable_receive_apodization (bool): Whether to include an explicit per-pixel,
                 per-transmit receive apodization mask (``parameters.flat_apodization``) in the
                 beamforming, e.g. to reconstruct scanline imaging (see class docstring).
+                Mutually exclusive with ``enable_pfield``.
         """
+        if enable_pfield and enable_receive_apodization:
+            raise ValueError(
+                "enable_pfield and enable_receive_apodization are mutually exclusive. "
+                "Please specify only one."
+            )
 
         self.beamformer_type = beamformer
         self.num_patches = num_patches

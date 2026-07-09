@@ -256,7 +256,7 @@ def test_scanline_grid(ultrasound_scatterers):
     assert parameters.grid_type == "scanline"
 
     n_tx = parameters.n_tx
-    num_scanline_pixels = int(parameters.num_scanline_pixels)
+    num_scanline_pixels = int(parameters.grid_size_z)
 
     def run(params, num_patches):
         """Beamform-only pipeline (no envelope/normalize/log): raw complex IQ
