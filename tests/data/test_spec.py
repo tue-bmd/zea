@@ -10,6 +10,7 @@ from zea.data.file import File
 from zea.data.spec import (
     Annotations,
     AttenuationMap,
+    BeamformedData,
     DataSpec,
     FileSpec,
     Image,
@@ -306,6 +307,69 @@ def test_inconsistent_dimension_error_groups_fields_by_size():
     assert "t0_delays" in message and "tx_apodizations" in message
     size_2_line = next(line for line in message.splitlines() if line.strip().startswith("size 2:"))
     assert "t0_delays" in size_2_line
+
+
+def test_n_ch_is_independent_across_data_products():
+    """RF raw_data (n_ch=1) may coexist with IQ beamformed_data (n_ch=2).
+
+    The channel dimension is semantically independent between data products, so
+    it must not be cross-checked at the DataSpec level.
+    """
+    n_frames, n_tx, n_ax, n_el, z, x = 2, 4, 64, 8, 16, 16
+    data = DataSpec(
+        raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32),
+        beamformed_data={
+            "values": np.zeros((n_frames, z, x, 2), dtype=np.float32),
+            "coordinates": np.zeros((n_frames, z, x, 3), dtype=np.float32),
+        },
+    )
+    assert data.raw_data.shape[-1] == 1
+    assert data.beamformed_data.values.shape[-1] == 2
+    assert list(data.beamformed_data.labels) == ["I", "Q"]
+
+
+def test_n_spatial_ch_is_independent_across_maps():
+    """Two maps in the same DataSpec may have different channel counts."""
+    n_frames, z, x = 2, 16, 16
+    coordinates = np.zeros((n_frames, z, x, 3), dtype=np.float32)
+    data = DataSpec(
+        segmentation={
+            "values": np.zeros((n_frames, z, x, 3), dtype=np.bool_),
+            "labels": np.array(["a", "b", "c"], dtype=np.str_),
+            "coordinates": coordinates,
+        },
+        sos_map={
+            "values": np.zeros((n_frames, z, x, 2), dtype=np.float32),
+            "labels": np.array(["lo", "hi"], dtype=np.str_),
+            "coordinates": coordinates,
+        },
+    )
+    assert data.segmentation.values.shape[-1] == 3
+    assert data.sos_map.values.shape[-1] == 2
+
+
+def test_n_ch_still_consistent_within_a_single_map():
+    """values and labels within one Map must still agree on n_ch."""
+    n_frames, z, x = 2, 16, 16
+    with pytest.raises(ValueError, match="Dimension 'n_ch' has inconsistent sizes"):
+        BeamformedData(
+            values=np.zeros((n_frames, z, x, 2), dtype=np.float32),
+            coordinates=np.zeros((n_frames, z, x, 3), dtype=np.float32),
+            labels=np.array(["only_one"], dtype=np.str_),
+        )
+
+
+def test_shared_dimensions_still_cross_checked_across_data_products():
+    """Non-channel dimensions (e.g. n_frames) must still agree across products."""
+    z, x = 16, 16
+    with pytest.raises(ValueError, match="Dimension 'n_frames' has inconsistent sizes"):
+        DataSpec(
+            raw_data=np.zeros((2, 4, 64, 8, 1), dtype=np.float32),
+            beamformed_data={
+                "values": np.zeros((3, z, x, 1), dtype=np.float32),
+                "coordinates": np.zeros((3, z, x, 3), dtype=np.float32),
+            },
+        )
 
 
 def test_signal_nd_accepts_variable_trailing_dimensions_with_ellipsis():
@@ -1067,15 +1131,43 @@ class TestMetadataAndMetricsValidationErrors:
                 },
             )
 
-    def test_annotations_n_frames_mismatch_against_later_track_raises(self):
-        """Metadata may agree with track 0 but conflict with a later track.
+    def test_annotations_may_match_one_of_several_tracks(self):
+        """Metadata annotates one acquisition, so it only needs to match one track.
 
-        Exercises the multi-track loop in ``FileSpec.__post_init__``: the
-        per-track consistency check must keep iterating past the matching
-        track and report which track disagrees.
+        A single-frame auxiliary track (e.g. a reference map) may coexist with a
+        multi-frame main track whose n_frames matches the annotations. Only the
+        main track needs to agree with the per-frame metadata.
         """
         n_tx, n_el, n_ax, n_ch = 2, 4, 8, 1
-        n_frames_match, n_frames_conflict = 3, 5
+        n_frames_main, n_frames_aux = 5, 1
+
+        def _track(n_frames):
+            return {
+                "data": {
+                    "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+                },
+                "scan": _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                "label": f"track_{n_frames}",
+            }
+
+        # Annotations match the main track (n_frames_main); the auxiliary track
+        # has a different n_frames and must not cause a failure.
+        spec = FileSpec(
+            tracks=[_track(n_frames_main), _track(n_frames_aux)],
+            track_schedule=np.zeros(1, dtype=np.int32),
+            probe=_probe_minimal(n_el=n_el),
+            metadata={
+                "annotations": {
+                    "view": np.array(["a4c"] * n_frames_main, dtype=np.str_),
+                }
+            },
+        )
+        assert len(spec.tracks) == 2
+
+    def test_annotations_matching_no_track_raises(self):
+        """Metadata whose n_frames matches none of the tracks is still an error."""
+        n_tx, n_el, n_ax, n_ch = 2, 4, 8, 1
+        n_frames_a, n_frames_b, n_frames_ann = 3, 1, 5
 
         def _track(n_frames):
             return {
@@ -1088,22 +1180,22 @@ class TestMetadataAndMetricsValidationErrors:
 
         with pytest.raises(ValueError) as exc_info:
             FileSpec(
-                tracks=[_track(n_frames_match), _track(n_frames_conflict)],
+                tracks=[_track(n_frames_a), _track(n_frames_b)],
+                track_schedule=np.zeros(1, dtype=np.int32),
                 probe=_probe_minimal(n_el=n_el),
                 metadata={
                     "annotations": {
-                        "view": np.array(["a4c"] * n_frames_match, dtype=np.str_),
+                        "view": np.array(["a4c"] * n_frames_ann, dtype=np.str_),
                     }
                 },
             )
 
         message = str(exc_info.value)
         assert message.startswith("Dimension 'n_frames' has inconsistent sizes:")
-        # The message attributes the sizes to the metadata field and the
-        # conflicting track (not track 0, which matched the metadata).
+        # The message lists the metadata field and every track carrying the dim.
         assert "metadata.annotations.view" in message
+        assert "tracks[0]." in message
         assert "tracks[1]." in message
-        assert "tracks[0]." not in message
 
 
 class TestProbePoseValidation:
