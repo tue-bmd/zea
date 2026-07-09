@@ -565,14 +565,16 @@ def envelope_detect(data, axis=-3):
     return data
 
 
-def apply_receive_apodization(data, apodization, with_batch_dim):
+def apply_aligned_apodization(data, apodization, with_batch_dim):
     """Multiply aligned data by a per-pixel, per-transmit weight.
 
     Used by :class:`~zea.ops.PfieldWeighting` and
-    :class:`~zea.ops.ReceiveApodization` to scale or mask out a transmit's
+    :class:`~zea.ops.AlignedApodization` to scale or mask out a transmit's
     contribution to a pixel before the receive-aperture and transmit sums
     (e.g. compounding, or scanline/line-by-line imaging where only one
-    transmit should contribute per pixel).
+    transmit should contribute per pixel). This weights the *transmit* axis;
+    for per-element (receive-channel) weighting see
+    :func:`apply_receive_apodization`.
 
     Args:
         data (Tensor): Aligned data, ``((batch_size,) n_tx, n_pix, n_el, n_ch)``.
@@ -589,6 +591,38 @@ def apply_receive_apodization(data, apodization, with_batch_dim):
     if with_batch_dim:
         apodization = ops.expand_dims(apodization, axis=0)
 
+    append_n_dims = ops.ndim(data) - ops.ndim(apodization)
+    apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
+
+    return data * apodization
+
+
+def apply_receive_apodization(data, apodization, with_batch_dim):
+    """Multiply aligned data by a per-pixel, per-element (receive-aperture) weight.
+
+    Used by :class:`~zea.ops.ReceiveApodization` to apply a custom
+    receive-aperture apodization: it weights each receive element's
+    contribution to a pixel before the receive-channel sum. This is the
+    element-wise counterpart of the built-in f-number mask
+    (:func:`zea.beamform.beamformer.fnumber_mask`), and is orthogonal to
+    :func:`apply_aligned_apodization`, which weights the *transmit* axis.
+
+    Args:
+        data (Tensor): Aligned data, ``((batch_size,) n_tx, n_pix, n_el, n_ch)``.
+        apodization (Tensor): Weight of shape ``(n_pix, n_el)``.
+        with_batch_dim (bool): Whether `data` carries a leading batch dimension.
+
+    Returns:
+        Tensor: Weighted data, same shape as `data`.
+    """
+    # (n_pix, n_el) -> insert the transmit axis in front of n_pix: (1, n_pix, n_el)
+    apodization = ops.expand_dims(apodization, axis=0)
+
+    # Add batch dimension if needed
+    if with_batch_dim:
+        apodization = ops.expand_dims(apodization, axis=0)
+
+    # Append the trailing channel axis/axes so it broadcasts over n_ch
     append_n_dims = ops.ndim(data) - ops.ndim(apodization)
     apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
 

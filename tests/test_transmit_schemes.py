@@ -274,7 +274,7 @@ def test_scanline_grid(ultrasound_scatterers):
                 ops.Beamform(
                     beamformer="delay_and_sum",
                     num_patches=num_patches,
-                    enable_receive_apodization=True,
+                    enable_aligned_apodization=True,
                 ),
             ],
             jit_options=None,
@@ -294,7 +294,7 @@ def test_scanline_grid(ultrasound_scatterers):
     assert np.all(np.isfinite(image_unpatched))
     assert np.any(image_unpatched != 0)
 
-    # Patch-wise beamforming (PatchedGrid chunks `flatgrid` and `flat_apodization`
+    # Patch-wise beamforming (PatchedGrid chunks `flatgrid` and `flat_aligned_apodization`
     # together) must give the same result as beamforming the whole grid at once.
     np.testing.assert_allclose(image_patched, image_unpatched, rtol=1e-4, atol=1e-4)
 
@@ -356,7 +356,7 @@ def test_scanline_grid_polar_style():
     )
     np.testing.assert_allclose(np.asarray(parameters.grid), expected, atol=1e-6)
     assert parameters.grid_size_x == n_tx
-    assert parameters.flat_apodization.shape == (grid_size_z * n_tx, n_tx)
+    assert parameters.flat_aligned_apodization.shape == (grid_size_z * n_tx, n_tx)
 
 
 def test_phantoms():

@@ -211,8 +211,8 @@ def scanline_pixel_grid(
     ``(grid_size_z, grid_size_x, 3)`` layout as :func:`cartesian_pixel_grid`
     (one column ``n`` per transmit ``n``, ``num_depth_pixels`` rows), so it can
     be beamformed by the regular pixel-based :class:`~zea.ops.Beamform`
-    pipeline. Pair with :func:`scanline_receive_apodization` (fed to
-    :class:`~zea.ops.ReceiveApodization`) to zero out every transmit except
+    pipeline. Pair with :func:`scanline_aligned_apodization` (fed to
+    :class:`~zea.ops.AlignedApodization`) to zero out every transmit except
     the one whose column each pixel belongs to.
 
     Args:
@@ -277,15 +277,15 @@ def scanline_pixel_grid(
     return grid.astype(np.float32)
 
 
-def scanline_receive_apodization(n_tx, num_depth_pixels):
-    """Receive apodization mask that isolates each pixel's owning transmit.
+def scanline_aligned_apodization(n_tx, num_depth_pixels):
+    """Compounding apodization mask that isolates each pixel's owning transmit.
 
     For a grid built by :func:`scanline_pixel_grid` (shape
     ``(num_depth_pixels, n_tx, 3)``, flattened row-major to ``(n_pix, 3)``),
     pixel ``(i, n)`` at flat index ``i * n_tx + n`` belongs to transmit ``n``.
     This returns the corresponding one-hot weight (1 for the owning transmit,
     0 for every other transmit) to feed to
-    :class:`zea.ops.ReceiveApodization`, turning the regular pixel-based DAS
+    :class:`zea.ops.AlignedApodization`, turning the regular pixel-based DAS
     pipeline into scanline (line-by-line) beamforming.
 
     Args:

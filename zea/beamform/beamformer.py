@@ -772,11 +772,18 @@ def transmit_delays(
 def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):
     """Receive-aperture apodization mask based on the f-number.
 
+    This is the **built-in** receive-aperture (per-element) apodization.
     Computes a per-pixel, per-element mask that suppresses contributions
     from elements whose angle to a pixel exceeds the acceptance cone
     defined by the f-number.  The transition within the cone is controlled
     by *fnum_window_fn* (e.g. :func:`fnum_window_fn_rect`,
     :func:`fnum_window_fn_hann`, :func:`fnum_window_fn_tukey`).
+
+    For a *custom* receive-aperture apodization (arbitrary per-pixel,
+    per-element weights) use :class:`zea.ops.ReceiveApodization`, which is
+    applied on top of this mask. This is distinct from
+    :class:`zea.ops.AlignedApodization`, which weights the *transmit* axis
+    (compounding), not the receive channels.
 
     Args:
         flatgrid (Tensor): Flattened pixel grid of shape ``(n_pix, 3)``.

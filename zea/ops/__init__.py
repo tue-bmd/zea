@@ -242,6 +242,7 @@ from .pipeline import (
 )
 from .tensor import GaussianBlur, Normalize, Pad, Threshold
 from .ultrasound import (
+    AlignedApodization,
     AnisotropicDiffusion,
     ApplyWindow,
     BandPassFilter,
@@ -292,6 +293,7 @@ __all__ = [
     "Pad",
     "Threshold",
     # Ultrasound operations
+    "AlignedApodization",
     "AnisotropicDiffusion",
     "ApplyWindow",
     "BandPassFilter",
