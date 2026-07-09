@@ -261,7 +261,12 @@ class _Summary:
 
 @dataclass
 class _Copy:
-    """Copy zea files or folders to a new location."""
+    """Copy zea files or folders to a new location.
+
+    You can specify a data key to copy only a subset of the data.
+    If the destination file already exists, you can specify a mode to control
+    how the data is written (append, overwrite, etc.).
+    """
 
     src: tyro.conf.Positional[Path]
     """Source file or folder path."""

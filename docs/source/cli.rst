@@ -2,7 +2,7 @@ Command line interface
 ================================
 
 Besides the main :doc:`zea API documentation <_autosummary/zea>`, ``zea`` provides a
-command line interface (CLI) with three primary subcommands.
+command line interface (CLI) with three primary subcommands (process, app, data).
 
 Note that is very new functionality, and might change in future releases. Please report any issues you encounter.
 
