@@ -227,7 +227,7 @@ class Pipeline:
                 This will calculate pressure field and only beamform the data to those locations.
             enable_receive_apodization (bool): If True, apply ReceiveApodization using
                 ``parameters.flat_apodization``. Defaults to False. Used e.g. for scanline
-                (line-by-line) imaging with ``parameters.grid_type = "scanline"``.
+                (line-by-line) imaging with ``parameters.enable_scanline = True``.
             timed (bool, optional): Whether to time each operation. Defaults to False.
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
@@ -1119,7 +1119,7 @@ class Beamform(Pipeline):
     - ReshapeGrid (flattened grid is also reshaped to `(grid_size_z, grid_size_x)`)
 
     Scanline (line-by-line) imaging is a special case of this pipeline: set
-    ``parameters.grid_type = "scanline"`` and ``enable_receive_apodization=True``
+    ``parameters.enable_scanline = True`` and ``enable_receive_apodization=True``
     so that each pixel's grid column is beamformed from its own owning transmit
     only, with every other transmit masked to zero by
     :class:`~zea.ops.ReceiveApodization` (fed

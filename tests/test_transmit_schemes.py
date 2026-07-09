@@ -237,7 +237,7 @@ def test_polar_grid(default_pipeline: ops.Pipeline, ultrasound_scatterers):
 
 @pytest.mark.heavy
 def test_scanline_grid(ultrasound_scatterers):
-    """Scanline imaging (grid_type="scanline") is the special case of pixel-based DAS
+    """Scanline imaging (``enable_scanline=True``) is the special case of pixel-based DAS
     with one grid column per transmit and a receive apodization mask that keeps only
     each pixel's owning transmit, wired through the exact same Beamform / TOFCorrection
     / PatchedGrid machinery as the regular pixel-based pipeline.
@@ -251,9 +251,10 @@ def test_scanline_grid(ultrasound_scatterers):
     independent single-transmit reference built from the same `Parameters`.
     """
     probe = _get_probe("linear")
-    parameters = _get_parameters(probe, "linescan", grid_type="scanline")
+    parameters = _get_parameters(probe, "linescan", grid_type="cartesian", enable_scanline=True)
 
-    assert parameters.grid_type == "scanline"
+    assert parameters.enable_scanline is True
+    assert parameters.grid_type == "cartesian"
 
     n_tx = parameters.n_tx
     num_scanline_pixels = int(parameters.grid_size_z)
@@ -302,13 +303,60 @@ def test_scanline_grid(ultrasound_scatterers):
     column = n_tx // 2
     single_tx_parameters = parameters.copy()
     single_tx_parameters.set_transmits([column])
-    single_tx_parameters.grid_type = "scanline"
     image_single_tx = run(single_tx_parameters, num_patches=1)
 
     assert image_single_tx.shape == (num_scanline_pixels, 1, 2)
     np.testing.assert_allclose(
         image_patched[:, column], image_single_tx[:, 0], rtol=1e-4, atol=1e-4
     )
+
+
+def test_scanline_grid_polar_style():
+    """``enable_scanline=True`` combined with ``grid_type="polar"`` builds steered rays
+    from each transmit's own origin (the old ``scanline_sector=True`` behavior),
+    reusing the same ``grid_type`` that also drives the regular (non-scanline)
+    grid, instead of a separate scanline-only flag.
+    """
+    from zea.beamform.pixelgrid import scanline_pixel_grid
+    from zea.parameters import Parameters
+
+    n_tx, n_el = 4, 16
+    probe_geometry = np.zeros((n_el, 3), np.float32)
+    probe_geometry[:, 0] = np.linspace(-10e-3, 10e-3, n_el)
+    transmit_origins = np.zeros((n_tx, 3), np.float32)
+    focus_distances = np.full(n_tx, 30e-3, np.float32)
+    polar_angles = np.linspace(-0.2, 0.2, n_tx).astype(np.float32)
+    zlims = (0.0, 40e-3)
+    grid_size_z = 12
+
+    parameters = Parameters(
+        n_tx=n_tx,
+        n_el=n_el,
+        probe_geometry=probe_geometry,
+        transmit_origins=transmit_origins,
+        focus_distances=focus_distances,
+        polar_angles=polar_angles,
+        zlims=zlims,
+        grid_size_z=grid_size_z,
+        center_frequency=5e6,
+        sound_speed=1540.0,
+        sampling_frequency=20e6,
+        grid_type="polar",
+        enable_scanline=True,
+        selected_transmits="all",
+    )
+
+    expected = scanline_pixel_grid(
+        transmit_origins,
+        focus_distances,
+        polar_angles,
+        zlims,
+        grid_size_z,
+        grid_type="polar",
+    )
+    np.testing.assert_allclose(np.asarray(parameters.grid), expected, atol=1e-6)
+    assert parameters.grid_size_x == n_tx
+    assert parameters.flat_apodization.shape == (grid_size_z * n_tx, n_tx)
 
 
 def test_phantoms():
