@@ -1976,3 +1976,114 @@ class TestTransmitOnlyTrack:
             (track,) = f.tracks
             assert "transmit_only" in track._group
             assert bool(track._group["transmit_only"][()]) is True
+
+
+class TestCastNativeToNumpy:
+    """Unit tests for Spec._cast_native_to_numpy dtype-coercion helper."""
+
+    cast = staticmethod(spec_module.Spec._cast_native_to_numpy)
+
+    def test_none_is_passed_through(self):
+        assert self.cast(None, [np.float32]) is None
+
+    def test_native_str_kept_as_is(self):
+        value = "a4c"
+        result = self.cast(value, [np.str_])
+        assert result is value
+        assert isinstance(result, str)
+
+    def test_native_bytes_kept_as_is(self):
+        value = b"raw"
+        result = self.cast(value, [np.str_])
+        assert result is value
+        assert isinstance(result, bytes)
+
+    def test_list_converted_to_float32_array(self):
+        result = self.cast([1.0, 2.0, 3.0], [np.float32])
+        assert isinstance(result, np.ndarray)
+        assert result.dtype == np.float32
+        assert np.array_equal(result, np.array([1.0, 2.0, 3.0], dtype=np.float32))
+
+    def test_tuple_converted_to_first_numpy_dtype_when_no_float(self):
+        result = self.cast((1, 2, 3), [np.uint8])
+        assert isinstance(result, np.ndarray)
+        assert result.dtype == np.uint8
+
+    def test_list_prefers_float_dtype_over_other_numpy_dtypes(self):
+        # float32 appears after uint8, but a floating target must win.
+        result = self.cast([1, 2, 3], [np.uint8, np.float32])
+        assert result.dtype == np.float32
+
+    def test_list_kept_when_list_is_a_valid_native_type(self):
+        # When ``list`` itself is an accepted native type, the value is not
+        # converted to a numpy array even though numpy dtypes are also allowed.
+        value = [1, 2, 3]
+        result = self.cast(value, [list, np.float32])
+        assert result is value
+
+    def test_list_not_converted_without_numpy_dtypes(self):
+        # No numpy-convertible dtypes -> the list/tuple branch is skipped and,
+        # since ``list`` is a matching native type, it is returned unchanged.
+        value = [1, 2, 3]
+        result = self.cast(value, [list])
+        assert result is value
+
+    def test_float_array_downcast_to_expected_float_dtype(self):
+        value = np.zeros((2, 3), dtype=np.float64)
+        result = self.cast(value, [np.float32])
+        assert result.dtype == np.float32
+        assert result.shape == (2, 3)
+
+    def test_float_array_matching_dtype_returned_unchanged(self):
+        value = np.zeros((2, 3), dtype=np.float32)
+        result = self.cast(value, [np.float32])
+        assert result is value
+
+    def test_non_float_array_returned_unchanged(self):
+        # No float target -> array with a dtype attribute passes through as-is.
+        value = np.zeros((2, 3), dtype=np.uint8)
+        result = self.cast(value, [np.uint8])
+        assert result is value
+
+    def test_integer_array_not_cast_to_float_target(self):
+        # Only floating inputs are normalized to the float target; an integer
+        # array is left untouched (the dtype check happens downstream).
+        value = np.arange(3, dtype=np.int32)
+        result = self.cast(value, [np.float32])
+        assert result is value
+        assert result.dtype == np.int32
+
+    def test_numpy_scalar_float_downcast(self):
+        result = self.cast(np.float64(1.5), [np.float32])
+        assert result.dtype == np.float32
+        assert result == np.float32(1.5)
+
+    def test_native_int_matching_native_type_kept(self):
+        value = 42
+        result = self.cast(value, [int])
+        assert result is value
+        assert isinstance(result, int)
+
+    def test_native_float_cast_to_numpy_scalar(self):
+        result = self.cast(3.14, [np.float32])
+        assert isinstance(result, np.float32)
+        assert result == np.float32(3.14)
+
+    def test_native_int_cast_to_numpy_scalar(self):
+        result = self.cast(7, [np.uint8])
+        assert isinstance(result, np.uint8)
+        assert result == np.uint8(7)
+
+    def test_uncastable_value_returned_unchanged(self):
+        # An object that cannot be turned into any expected dtype is returned
+        # as-is rather than raising.
+        sentinel = object()
+        result = self.cast(sentinel, [np.float32])
+        assert result is sentinel
+
+    def test_non_numpy_dtypes_are_skipped_when_building_targets(self):
+        # A dtype entry that np.dtype cannot parse is ignored; the float target
+        # is still discovered from the remaining entries.
+        result = self.cast([1.0, 2.0], ["not-a-dtype", np.float32])
+        assert isinstance(result, np.ndarray)
+        assert result.dtype == np.float32

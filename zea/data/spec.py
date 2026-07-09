@@ -245,6 +245,10 @@ class Spec:
         accepted and normalized to the first floating dtype in ``expected_dtype``
         (typically ``np.float32``).
         """
+        # Keep None
+        if value is None:
+            return value
+
         expected_np_dtypes = []
         for dt in expected_dtype:
             try:

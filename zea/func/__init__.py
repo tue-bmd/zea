@@ -46,6 +46,8 @@ from .tensor import (
     vmap,
 )
 from .ultrasound import (
+    apply_aligned_apodization,
+    apply_receive_apodization,
     channels_to_complex,
     complex_to_channels,
     compute_time_to_peak,
@@ -105,6 +107,8 @@ __all__ = [
     "vmap",
     "split_into_windows",
     # Ultrasound functions
+    "apply_aligned_apodization",
+    "apply_receive_apodization",
     "channels_to_complex",
     "complex_to_channels",
     "compute_time_to_peak",
