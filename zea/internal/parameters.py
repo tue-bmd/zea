@@ -21,6 +21,40 @@ from zea.internal.core import Object as ZeaObject
 from zea.internal.core import _to_tensor, hash_elements, serialize_elements
 
 
+def _values_equal(a, b, equal_nan: bool = True) -> bool:
+    """Check whether two parameter values are equal, handling arrays/lists/dicts/NaNs."""
+    if a is None or b is None:
+        return a is b
+
+    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+        a_arr, b_arr = np.asarray(a), np.asarray(b)
+        if a_arr.shape != b_arr.shape:
+            return False
+        can_have_nan = equal_nan and (
+            np.issubdtype(a_arr.dtype, np.floating) and np.issubdtype(b_arr.dtype, np.floating)
+        )
+        return bool(np.array_equal(a_arr, b_arr, equal_nan=can_have_nan))
+
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        if len(a) != len(b):
+            return False
+        return all(_values_equal(x, y, equal_nan=equal_nan) for x, y in zip(a, b))
+
+    if isinstance(a, dict) and isinstance(b, dict):
+        if set(a) != set(b):
+            return False
+        return all(_values_equal(a[k], b[k], equal_nan=equal_nan) for k in a)
+
+    if equal_nan and isinstance(a, (float, np.floating)) and isinstance(b, (float, np.floating)):
+        if np.isnan(a) and np.isnan(b):
+            return True
+
+    try:
+        return bool(a == b)
+    except Exception:
+        return a is b
+
+
 def cache_with_dependencies(*deps):
     """Decorator to mark a method as a computed property with dependencies."""
 
@@ -708,3 +742,25 @@ class BaseParameters(ZeaObject):
     def items(self):
         """Return (key, value) pairs for all stored parameters (valid + custom)."""
         return self._flat().items()
+
+    def diff(self, other: "BaseParameters", equal_nan: bool = True) -> dict[str, tuple[Any, Any]]:
+        """Compare stored parameters against another instance, key by key.
+
+        Args:
+            other: The other parameters instance to compare against.
+            equal_nan: Whether NaNs should be treated as equal (default True).
+
+        Returns:
+            dict: Mapping of parameter name to a ``(self_value, other_value)`` tuple,
+                for every key whose value differs. Keys present on only one side are
+                included with the missing side set to ``None``.
+        """
+        self_flat = self._flat()
+        other_flat = other._flat()
+        result = {}
+        for key in sorted(set(self_flat) | set(other_flat)):
+            v1 = self_flat.get(key)
+            v2 = other_flat.get(key)
+            if not _values_equal(v1, v2, equal_nan=equal_nan):
+                result[key] = (v1, v2)
+        return result
