@@ -218,6 +218,16 @@ class Parameters(BaseParameters):
     apply_lens_correction: bool
     """Whether to apply lens correction to the transmit delays. Defaults to False."""
 
+    focal_region_length: float
+    """Full length in meters of the region around the focal plane of focused transmits.
+
+    In this region the first-arrival and last-arrival transmit delays are linearly blended,
+    smoothing the focal-plane transition while preserving the same model outside the region.
+    This targets the focal-depth artifact described by Rindal et al. (IUS 2018). Defaults to
+    0.0 (disabled, i.e. conventional first/last-arrival switching everywhere). A typical
+    starting value is 2e-3 m (corresponding to +/-1e-3 m around the focal plane).
+    """
+
     lens_thickness: float
     """Thickness of the lens [m]."""
 
@@ -228,8 +238,10 @@ class Parameters(BaseParameters):
     """Range of phi angles for 3D imaging [rad], shape (2,)."""
 
     pfield_kwargs: dict
-    """Extra keyword arguments for the pressure-field computation. See
-    :func:`zea.beamform.pfield.compute_pfield`. Defaults to ``{}``."""
+    """Extra keyword arguments for the pressure-field computation.
+
+    See :func:`zea.beamform.pfield.compute_pfield`. Defaults to ``{}``.
+    """
 
     scan_schema = deepcopy(ScanSpec.SCHEMA)
     probe_schema = deepcopy(Probe.SCHEMA)
@@ -250,6 +262,7 @@ class Parameters(BaseParameters):
         "pixels_per_wavelength": {"dtype": np.int32, "default": 4},
         "pfield_kwargs": {"dtype": dict, "default": {}},
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
+        "focal_region_length": {"dtype": np.float32, "default": 0.0},
         "grid_type": {"dtype": str, "default": "cartesian"},
         "polar_limits": {"dtype": np.float32, "shape": (2,)},
         "dynamic_range": {"dtype": np.float32, "shape": (2,)},

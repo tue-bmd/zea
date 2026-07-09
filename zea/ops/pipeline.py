@@ -853,7 +853,9 @@ class Pipeline:
             tensor_overrides = dict_to_tensor(overrides, keep_as_is=self.static_params)
 
         # Overrides overwrite values taken from the parameters object.
-        return {**params_dict, **tensor_overrides}
+        prepared = {**params_dict, **tensor_overrides}
+
+        return prepared
 
 
 @ops_registry("map")

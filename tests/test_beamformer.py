@@ -12,7 +12,7 @@ from zea.beamform.beamformer import (
     tof_correction,
     transmit_delays,
 )
-from zea.beamform.delays import compute_t0_delays_planewave
+from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.beamform.pixelgrid import cartesian_pixel_grid
 
@@ -319,6 +319,119 @@ def test_transmit_delays_focused(flatgrid, probe_geometry):
     assert txd.shape == (flatgrid.shape[0],)
     assert np.all(np.isfinite(txd))
     return txd
+
+
+def _focused_transmit_delays(grid, focus, angle, focal_region_length):
+    """transmit_delays for a single focused beam, returning a numpy array."""
+    xs = np.linspace(-10e-3, 10e-3, N_EL)
+    probe = np.stack([xs, np.zeros(N_EL), np.zeros(N_EL)], -1).astype(np.float32)
+    t0 = compute_t0_delays_focused(
+        np.zeros((1, 3), np.float32),
+        np.array([focus], np.float32),
+        probe,
+        np.array([angle], np.float32),
+        sound_speed=SOUND_SPEED,
+    )[0]
+    t0 = (t0 - t0.min()).astype(np.float32)
+    rx = (np.linalg.norm(grid[:, None] - probe[None], axis=-1) / SOUND_SPEED).astype(np.float32)
+    txd = transmit_delays(
+        grid.astype(np.float32),
+        t0,
+        np.ones(N_EL, np.float32),
+        rx,
+        np.float32(focus),
+        np.float32(angle),
+        np.float32(0.0),
+        focal_region_length=focal_region_length,
+    )
+    return keras.ops.convert_to_numpy(txd)
+
+
+def _offaxis_column(focus, angle, x_offset=5e-3, n=801):
+    """Vertical pixel column offset laterally from a focused beam axis."""
+    v = np.array([np.sin(angle), 0.0, np.cos(angle)], np.float32)
+    x_col = float(focus * v[0]) + x_offset
+    z = np.linspace(focus - 8e-3, focus + 8e-3, n).astype(np.float32)
+    return np.stack([np.full_like(z, x_col), np.zeros_like(z), z], -1).astype(np.float32)
+
+
+def test_focal_region_length_defaults_to_noop():
+    """length=0.0 and length=None must reproduce the conventional model exactly."""
+    grid = _offaxis_column(focus=15e-3, angle=0.0)
+    base = _focused_transmit_delays(grid, 15e-3, 0.0, None)
+    zero = _focused_transmit_delays(grid, 15e-3, 0.0, np.float32(0.0))
+    np.testing.assert_allclose(base, zero, rtol=0, atol=0)
+
+
+def test_focal_region_length_only_changes_focal_slab():
+    """Focal-region blending may only touch pixels within length/2 of the focal plane."""
+    focus, length = 15e-3, 2e-3
+    grid = _offaxis_column(focus=focus, angle=0.0)
+    base = _focused_transmit_delays(grid, focus, 0.0, None)
+    blended = _focused_transmit_delays(grid, focus, 0.0, np.float32(length))
+
+    changed = ~np.isclose(base, blended, atol=1e-12)
+    # for an on-axis beam the focal plane is at z == focus; projection == z - focus
+    inside_slab = np.abs(grid[:, 2] - focus) < (0.5 * length)
+    assert np.all(changed[changed] == inside_slab[changed])
+    assert changed.any(), "expected focal-region blending to change some focal-region pixels"
+
+
+def test_focal_region_length_reduces_delay_discontinuity():
+    """Focal-region blending must shrink the transmit-delay jump at the focal plane."""
+    focus, length = 15e-3, 2e-3
+    grid = _offaxis_column(focus=focus, angle=0.0, x_offset=2e-3)
+    jump_base = np.abs(np.diff(_focused_transmit_delays(grid, focus, 0.0, None))).max()
+    jump_blended = np.abs(
+        np.diff(_focused_transmit_delays(grid, focus, 0.0, np.float32(length)))
+    ).max()
+    assert jump_blended < 0.6 * jump_base
+
+
+def test_focal_region_length_noop_for_planewave(flatgrid, probe_geometry):
+    """Plane-wave transmits are unaffected by focal_region_length."""
+    flatgrid_t = keras.ops.convert_to_tensor(flatgrid)
+    probe_t = keras.ops.convert_to_tensor(probe_geometry)
+    n_el = probe_geometry.shape[0]
+    t0 = keras.ops.zeros((n_el,))
+    tx_apod = keras.ops.ones((n_el,))
+    rx = distance_Rx(flatgrid_t, probe_t) / SOUND_SPEED
+    common = dict(transmit_origin=keras.ops.zeros((3,)))
+    base = transmit_delays(
+        flatgrid_t, t0, tx_apod, rx, np.float32(np.inf), np.float32(0.0), np.float32(0.0), **common
+    )
+    hybrid = transmit_delays(
+        flatgrid_t,
+        t0,
+        tx_apod,
+        rx,
+        np.float32(np.inf),
+        np.float32(0.0),
+        np.float32(0.0),
+        focal_region_length=np.float32(2e-3),
+        **common,
+    )
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(base), keras.ops.convert_to_numpy(hybrid), rtol=0, atol=0
+    )
+
+
+def test_warn_if_focal_region_length_unused(monkeypatch):
+    """The pre-jit helper warns for non-focused data and stays quiet otherwise."""
+    import zea.beamform.beamformer as bf
+
+    calls = []
+    monkeypatch.setattr(bf, "_warning_once", lambda msg, *a, **k: calls.append(msg))
+
+    planewave = np.full(4, np.inf, np.float32)
+    focused = np.full(4, 15e-3, np.float32)
+
+    bf._warn_if_focal_region_length_unused(planewave, 2e-3)  # unused -> warns
+    assert len(calls) == 1 and "focal_region_length" in calls[0]
+
+    bf._warn_if_focal_region_length_unused(focused, 2e-3)  # focused -> no warning
+    bf._warn_if_focal_region_length_unused(planewave, 0.0)  # disabled -> no warning
+    assert len(calls) == 1
 
 
 # calculate_delays
