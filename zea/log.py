@@ -236,8 +236,8 @@ def configure_console_logger(
 
     formatter = CustomFormatter(name, color, name_color)
 
-    # stdout stream handler if no handler is configured
-    if not new_logger.hasHandlers():
+    # stdout stream handler if this logger doesn't already have one of its own
+    if not new_logger.handlers:
         console = _ProgressAwareStreamHandler(stream=sys.stdout)
         console.setFormatter(formatter)
         console.setLevel(level)
@@ -271,8 +271,8 @@ def configure_file_logger(level="INFO") -> logging.Logger:
 
     formatter = logging.Formatter(file_log_format, date_format)
 
-    # stdout stream handler if no handler is configured
-    if not new_logger.hasHandlers():
+    # File handler if this logger doesn't already have one of its own
+    if not new_logger.handlers:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
 
         # Add file handler
