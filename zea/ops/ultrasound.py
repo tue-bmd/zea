@@ -130,10 +130,19 @@ class TOFCorrection(Operation):
     # ``_reduce_das``); set per-instance by :class:`TOFAndSum`.
     reduce_beamformer = "delay_and_sum"
 
-    def __init__(self, use_pfield=False, **kwargs):
-        # Only the fused path (TOFAndSum) folds pfield weighting into TOF
-        # correction; when set, flat_pfield becomes a derived dependency.
+    def __init__(
+        self,
+        use_pfield=False,
+        use_aligned_apodization=False,
+        use_receive_apodization=False,
+        **kwargs,
+    ):
+        # Only the fused path (TOFAndSum) folds pfield / apodization weighting
+        # into TOF correction; when set, the matching flat_* input becomes a
+        # derived dependency.
         self.use_pfield = use_pfield
+        self.use_aligned_apodization = use_aligned_apodization
+        self.use_receive_apodization = use_receive_apodization
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=self._output_data_type,
@@ -144,15 +153,22 @@ class TOFCorrection(Operation):
     def needs_keys(self) -> set:
         """Input keys this op requires the pipeline to provide/derive.
 
-        ``flat_pfield`` is in the call signature (so it is forwarded at runtime
-        when present) but is only an actual *dependency* for the fused
-        pfield-weighted path. Plain TOF correction leaves pfield to the separate
-        :class:`PfieldWeighting` op, so it must not force pfield derivation
-        (mirrors gating pfield on the presence of that op).
+        The ``flat_pfield`` / ``flat_aligned_apodization`` /
+        ``flat_receive_apodization`` weights are in the call signature (so they
+        are forwarded at runtime when present) but are only actual
+        *dependencies* for the fused low-memory path, and only when the matching
+        weighting is enabled. Plain TOF correction leaves these to the separate
+        :class:`PfieldWeighting` / :class:`AlignedApodization` /
+        :class:`ReceiveApodization` ops, so it must not force their derivation
+        (mirrors gating each weight on the presence of its op).
         """
         keys = super().needs_keys
         if not (self._reduce_das and self.use_pfield):
             keys = keys - {"flat_pfield"}
+        if not (self._reduce_das and self.use_aligned_apodization):
+            keys = keys - {"flat_aligned_apodization"}
+        if not (self._reduce_das and self.use_receive_apodization):
+            keys = keys - {"flat_receive_apodization"}
         return keys
 
     def call(
@@ -178,6 +194,8 @@ class TOFCorrection(Operation):
         sos_grid_z=None,
         focal_region_length=None,
         flat_pfield=None,
+        flat_aligned_apodization=None,
+        flat_receive_apodization=None,
         **kwargs,
     ):
         """Perform time-of-flight correction on raw RF data.
@@ -213,6 +231,17 @@ class TOFCorrection(Operation):
                 where it is folded into the delay-and-sum; ignored by plain
                 :class:`TOFCorrection` (pfield is applied by
                 :class:`PfieldWeighting` there).
+            flat_aligned_apodization (Tensor): Per-pixel, per-transmit compounding
+                weights of shape ``(n_pix, n_tx)``. Only consumed by the fused
+                low-memory path (:class:`TOFAndSum`), where it is folded into the
+                delay-and-sum; ignored by plain :class:`TOFCorrection` (applied by
+                :class:`AlignedApodization` there).
+            flat_receive_apodization (Tensor): Custom per-pixel, per-element
+                receive-aperture weights of shape ``(n_pix, n_el)``. Only consumed
+                by the fused low-memory path (:class:`TOFAndSum`), where it is
+                folded into the delay-and-sum; ignored by plain
+                :class:`TOFCorrection` (applied by :class:`ReceiveApodization`
+                there).
 
         Returns:
             dict: Dictionary containing tof_corrected_data
@@ -243,9 +272,12 @@ class TOFCorrection(Operation):
             "focal_region_length": focal_region_length,
             "reduce_das": self._reduce_das,
             "reduce_beamformer": self.reduce_beamformer,
-            # pfield weighting is folded into the fused path only; plain
-            # TOFCorrection leaves it to the separate PfieldWeighting op.
+            # pfield / apodization weighting is folded into the fused path only;
+            # plain TOFCorrection leaves each to its separate op (PfieldWeighting
+            # / AlignedApodization / ReceiveApodization).
             "flat_pfield": flat_pfield if self._reduce_das else None,
+            "flat_aligned_apodization": (flat_aligned_apodization if self._reduce_das else None),
+            "flat_receive_apodization": (flat_receive_apodization if self._reduce_das else None),
         }
 
         if not self.with_batch_dim:
@@ -274,10 +306,14 @@ class TOFAndSum(TOFCorrection):
 
     Enabled via ``Beamform(..., low_memory=True)``. Supports ``delay_and_sum`` and
     ``delay_multiply_and_sum`` (the latter requires IQ data) on a homogeneous
-    medium (no speed-of-sound map), optionally with pressure-field weighting
-    (``enable_pfield=True``), which is folded into the fused pass via the
-    ``flat_pfield`` input. Output has type ``DataTypes.BEAMFORMED_DATA`` and shape
-    ``(n_pix, n_ch)`` (with optional batch dimension).
+    medium (no speed-of-sound map). The optional weighting stages are folded into
+    the fused pass instead of running as separate ops: pressure-field weighting
+    (``use_pfield``, via ``flat_pfield``), per-pixel/per-transmit compounding
+    apodization (``use_aligned_apodization``, via ``flat_aligned_apodization``,
+    e.g. scanline imaging) and custom receive-aperture apodization
+    (``use_receive_apodization``, via ``flat_receive_apodization``). Output has
+    type ``DataTypes.BEAMFORMED_DATA`` and shape ``(n_pix, n_ch)`` (with optional
+    batch dimension).
     """
 
     _reduce_das = True

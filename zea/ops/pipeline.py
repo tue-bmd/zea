@@ -1192,8 +1192,11 @@ class Beamform(Pipeline):
                 Cuts peak memory ~``n_tx``× so large grids fit on a small GPU,
                 at the cost of being slower. Supported for
                 ``beamformer="delay_and_sum"`` and ``"delay_multiply_and_sum"``
-                (the latter requires IQ data); pressure-field weighting
-                (``enable_pfield=True``) is folded into the fused pass.
+                (the latter requires IQ data). The optional weighting stages are
+                folded into the fused pass: pressure-field weighting
+                (``enable_pfield``), compounding apodization
+                (``enable_aligned_apodization``, e.g. scanline imaging) and
+                custom receive apodization (``enable_receive_apodization``).
                 Defaults to ``False``.
         """
         if enable_pfield and enable_aligned_apodization:
@@ -1235,10 +1238,18 @@ class Beamform(Pipeline):
                     f"got '{self.beamformer_type}'."
                 )
             # Fused TOF-correction + beamformer reduction (memory-saving, slower).
-            # When enable_pfield is set, TOFAndSum folds the pfield weighting into
-            # the fused pass via its flat_pfield input (no separate PfieldWeighting).
+            # The optional weighting stages are folded into the fused pass (via
+            # the corresponding flat_* inputs) instead of running as separate
+            # ops: pfield (flat_pfield), compounding apodization
+            # (flat_aligned_apodization) and receive apodization
+            # (flat_receive_apodization).
             beamforming: List[Operation] = [
-                TOFAndSum(beamformer=self.beamformer_type, use_pfield=self.enable_pfield)
+                TOFAndSum(
+                    beamformer=self.beamformer_type,
+                    use_pfield=self.enable_pfield,
+                    use_aligned_apodization=self.enable_aligned_apodization,
+                    use_receive_apodization=self.enable_receive_apodization,
+                )
             ]
         else:
             # Get beamforming ops

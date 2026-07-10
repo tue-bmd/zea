@@ -1590,15 +1590,52 @@ def test_beamform_low_memory_wiring():
     d = b.get_dict(compact=False)
     assert d["params"]["low_memory"] is True
 
-    # low_memory is only valid for plain delay-and-sum.
+    # low_memory supports delay_and_sum and delay_multiply_and_sum, but rejects
+    # other beamformers (e.g. coherence_factor).
     with pytest.raises(ValueError, match="delay_and_sum"):
-        Beamform(beamformer="delay_multiply_and_sum", low_memory=True, jit_options=None)
+        Beamform(beamformer="coherence_factor", low_memory=True, jit_options=None)
+    assert isinstance(
+        Beamform(
+            beamformer="delay_multiply_and_sum",
+            num_patches=1,
+            low_memory=True,
+            jit_options=None,
+        ).operations[0],
+        ops.TOFAndSum,
+    )
 
     # low_memory is compatible with pfield weighting: still a single fused op
     # (no separate PfieldWeighting), and the pipeline builds without error.
     b_pf = Beamform(num_patches=1, low_memory=True, enable_pfield=True, jit_options=None)
     assert isinstance(b_pf.operations[0], ops.TOFAndSum)
     assert not any(isinstance(op, ops.PfieldWeighting) for op in b_pf.operations)
+    assert b_pf.operations[0].use_pfield is True
+    assert "flat_pfield" in b_pf.operations[0].needs_keys
+
+    # The apodization stages are folded into the fused op too: the flags flow to
+    # TOFAndSum, no separate apodization ops are inserted, and the matching
+    # flat_* weight becomes a needed key only when its stage is enabled.
+    tofsum = Beamform(num_patches=1, low_memory=True, jit_options=None).operations[0]
+    assert tofsum.use_aligned_apodization is False
+    assert tofsum.use_receive_apodization is False
+    assert "flat_aligned_apodization" not in tofsum.needs_keys
+    assert "flat_receive_apodization" not in tofsum.needs_keys
+
+    b_ap = Beamform(
+        num_patches=1,
+        low_memory=True,
+        enable_aligned_apodization=True,
+        enable_receive_apodization=True,
+        jit_options=None,
+    )
+    assert isinstance(b_ap.operations[0], ops.TOFAndSum)
+    assert not any(
+        isinstance(op, (ops.AlignedApodization, ops.ReceiveApodization)) for op in b_ap.operations
+    )
+    assert b_ap.operations[0].use_aligned_apodization is True
+    assert b_ap.operations[0].use_receive_apodization is True
+    assert "flat_aligned_apodization" in b_ap.operations[0].needs_keys
+    assert "flat_receive_apodization" in b_ap.operations[0].needs_keys
 
 
 def test_get_dict_callable_param_raises():

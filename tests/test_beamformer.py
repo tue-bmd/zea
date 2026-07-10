@@ -743,6 +743,66 @@ def test_tof_correction_reduce_das_pfield_matches_full(probe_geometry, flatgrid)
 
 
 @backend_equality_check(decimal=2)  # see note on the reduce_das test above
+def test_tof_correction_reduce_das_aligned_apodization_matches_full(probe_geometry, flatgrid):
+    """reduce_das with flat_aligned_apodization must equal the weighted DAS of the full output.
+
+    Folding the per-(pixel, transmit) compounding weights into the fused pass
+    (the same transmit-axis mechanism as pfield) must match weighting the full
+    aligned tensor then summing.
+    """
+    n_tx, n_ax, n_ch = 3, 1500, 2
+    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=n_tx, n_ax=n_ax, n_ch=n_ch)
+    n_pix = flatgrid.shape[0]
+    rng = np.random.default_rng(1)
+    flat_aligned = (np.abs(rng.standard_normal((n_pix, n_tx))) + 0.1).astype(np.float32)
+
+    full = keras.ops.convert_to_numpy(tof_correction(**inputs))  # (n_tx, n_pix, n_el, n_ch)
+    reduced = keras.ops.convert_to_numpy(
+        tof_correction(reduce_das=True, flat_aligned_apodization=flat_aligned, **inputs)
+    )
+    assert reduced.shape == (n_pix, n_ch)
+    # weight per (tx, pix), then sum over elements and transmits.
+    weighted = full * np.transpose(flat_aligned)[:, :, None, None]
+    expected = weighted.sum(axis=2).sum(axis=0)
+    np.testing.assert_allclose(reduced, expected, rtol=1e-4, atol=1e-4)
+    # the apodization must actually change the result vs the unweighted reduction.
+    unweighted = keras.ops.convert_to_numpy(tof_correction(reduce_das=True, **inputs))
+    assert np.abs(reduced - unweighted).max() > 1e-3
+    return reduced
+
+
+@backend_equality_check(decimal=2)  # see note on the reduce_das test above
+def test_tof_correction_reduce_das_receive_apodization_matches_full(probe_geometry, flatgrid):
+    """reduce_das with flat_receive_apodization must equal the weighted DAS of the full output.
+
+    Folding the per-(pixel, element) receive-aperture weights into the fused
+    pass must match weighting each element of the full aligned tensor then
+    summing over elements and transmits.
+    """
+    n_tx, n_ax, n_ch = 3, 1500, 2
+    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=n_tx, n_ax=n_ax, n_ch=n_ch)
+    n_pix = flatgrid.shape[0]
+    n_el = probe_geometry.shape[0]
+    rng = np.random.default_rng(2)
+    flat_receive = (np.abs(rng.standard_normal((n_pix, n_el))) + 0.1).astype(np.float32)
+
+    full = keras.ops.convert_to_numpy(tof_correction(**inputs))  # (n_tx, n_pix, n_el, n_ch)
+    reduced = keras.ops.convert_to_numpy(
+        tof_correction(reduce_das=True, flat_receive_apodization=flat_receive, **inputs)
+    )
+    assert reduced.shape == (n_pix, n_ch)
+    # weight per (pix, el) (broadcast over tx and channels), then sum over
+    # elements and transmits.
+    weighted = full * flat_receive[None, :, :, None]
+    expected = weighted.sum(axis=2).sum(axis=0)
+    np.testing.assert_allclose(reduced, expected, rtol=1e-4, atol=1e-4)
+    # the apodization must actually change the result vs the unweighted reduction.
+    unweighted = keras.ops.convert_to_numpy(tof_correction(reduce_das=True, **inputs))
+    assert np.abs(reduced - unweighted).max() > 1e-3
+    return reduced
+
+
+@backend_equality_check(decimal=2)  # see note on the reduce_das test above
 def test_tof_correction_reduce_dmas_matches_full(probe_geometry, flatgrid):
     """Fused reduce_beamformer='delay_multiply_and_sum' must equal naive DMAS of the full output.
 

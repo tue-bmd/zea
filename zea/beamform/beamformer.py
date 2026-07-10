@@ -177,6 +177,8 @@ def tof_correction(
     reduce_das=False,
     reduce_beamformer="delay_and_sum",
     flat_pfield=None,
+    flat_aligned_apodization=None,
+    flat_receive_apodization=None,
 ):
     """Time-of-flight (TOF) correction for ultrasound data on a flat pixel grid.
 
@@ -272,6 +274,20 @@ def tof_correction(
             :class:`~zea.ops.ultrasound.PfieldWeighting` into the fused
             low-memory pass. ``None`` disables pfield weighting. Defaults to
             ``None``.
+        flat_aligned_apodization (Tensor, optional): Per-pixel, per-transmit
+            compounding weights of shape ``(n_pix, n_tx)``. Only used when
+            ``reduce_das=True``: each transmit's contribution is scaled by its
+            per-pixel weight before the reduction (same transmit-axis mechanism
+            as ``flat_pfield``), folding
+            :class:`~zea.ops.ultrasound.AlignedApodization` into the fused
+            low-memory pass. ``None`` disables it. Defaults to ``None``.
+        flat_receive_apodization (Tensor, optional): Custom per-pixel,
+            per-element receive-aperture weights of shape ``(n_pix, n_el)``.
+            Only used when ``reduce_das=True``: each element's contribution is
+            scaled before the reduction over receive elements (on top of the
+            built-in f-number mask), folding
+            :class:`~zea.ops.ultrasound.ReceiveApodization` into the fused
+            low-memory pass. ``None`` disables it. Defaults to ``None``.
 
     Returns:
         Tensor: Time-of-flight corrected data of shape
@@ -432,10 +448,18 @@ def tof_correction(
         def _accumulate_tx(i, acc):
             # (n_pix, n_el, n_ch) for one transmit.
             tof_tx = _correct_single_tx(data[i], txdel[i])
-            # Fold in pressure-field weighting (per-pixel scalar per transmit)
-            # before the beamformer reduction, matching PfieldWeighting.
+            # Fold in the transmit-axis weights (per-pixel scalar per transmit)
+            # before the beamformer reduction, matching PfieldWeighting /
+            # AlignedApodization applied to the full aligned tensor.
             if flat_pfield is not None:
                 tof_tx = tof_tx * flat_pfield[:, i][:, None, None]
+            if flat_aligned_apodization is not None:
+                tof_tx = tof_tx * flat_aligned_apodization[:, i][:, None, None]
+            # Fold in the custom receive-aperture weight (per-pixel, per-element)
+            # before the reduction over receive elements, matching
+            # ReceiveApodization (applied on top of the built-in f-number mask).
+            if flat_receive_apodization is not None:
+                tof_tx = tof_tx * flat_receive_apodization[:, :, None]
             return acc + reduce_tx(tof_tx)
 
         acc0 = ops.zeros((n_pix, n_ch_out), dtype=rxdel.dtype)
