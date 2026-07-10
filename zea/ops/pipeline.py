@@ -485,13 +485,15 @@ class Pipeline:
             raise ValueError(
                 "Parameters (and Probe/Config) objects should be first processed with "
                 "`Pipeline.prepare_parameters` before calling the pipeline. "
-                "e.g. inputs = pipeline.prepare_parameters(parameters, **overrides)"
+                "e.g. `inputs = pipeline.prepare_parameters(parameters, **overrides)`"
             )
 
         if any(isinstance(arg, str) for arg in inputs.values()):
             raise ValueError(
                 "Pipeline does not support string inputs. "
-                "Please ensure all inputs are convertible to tensors."
+                "Please ensure all inputs are convertible to tensors, or use "
+                "`inputs = Pipeline.prepare_parameters(parameters)` to convert "
+                "all your parameters for you."
             )
 
         if not self._logged_difference_keys:
