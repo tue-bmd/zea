@@ -233,6 +233,10 @@ class BaseParameters(ZeaObject):
         if not isinstance(expected_dtype, (list, tuple)):
             expected_dtype = [expected_dtype]
         value = Spec._cast_native_to_numpy(value, expected_dtype)
+
+        if value is None:
+            return value
+
         try:
             check_dtype(value, expected_dtype)
         except TypeError as e:
