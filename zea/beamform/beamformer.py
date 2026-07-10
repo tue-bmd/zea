@@ -12,6 +12,7 @@ from keras import ops
 
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.tensor import vmap
+from zea.func.ultrasound import channels_to_complex, complex_to_channels
 from zea.internal.checks import _check_raw_data
 from zea.log import warning_once as _warning_once
 
@@ -109,6 +110,47 @@ def fnum_window_fn_tukey(normalized_angle, alpha=0.5):
     )
 
 
+def _fused_reduction(beamformer, n_ch):
+    """Per-transmit receive-element reduction for the fused low-memory path.
+
+    Returns a function mapping one transmit's aligned data ``(n_pix, n_el, n_ch)``
+    to its beamformed contribution ``(n_pix, n_ch_out)``, which the transmit loop
+    accumulates. Keeps the fused (:func:`tof_correction` ``reduce_das=True``) path
+    and the vmap beamformer ops (:class:`~zea.ops.pipeline.DelayAndSum`,
+    :class:`~zea.ops.pipeline.DelayMultiplyAndSum`) numerically consistent.
+    """
+    if beamformer == "delay_and_sum":
+
+        def _das(tof_tx):
+            return ops.sum(tof_tx, axis=-2)  # sum over receive elements
+
+        return _das
+
+    if beamformer == "delay_multiply_and_sum":
+        if n_ch != 2:
+            raise ValueError(
+                f"delay_multiply_and_sum requires IQ data with 2 channels, got n_ch={n_ch}."
+            )
+        eps = keras.backend.epsilon()
+
+        def _dmas(tof_tx):
+            # Same O(n_el) DMAS identity as DelayMultiplyAndSum.process_image
+            # (sum_{i<j} y_i y_j = 1/2[(sum y_i)^2 - sum y_i^2], y_i = x_i/sqrt(|x_i|)),
+            # applied to one transmit so the (n_el, n_el) product is never formed.
+            c = channels_to_complex(tof_tx)  # (n_pix, n_el) complex
+            y = c / ops.cast(ops.sqrt(ops.abs(c)) + eps, c.dtype)
+            sum_y = ops.sum(y, axis=-1)
+            sum_y2 = ops.sum(y * y, axis=-1)
+            return complex_to_channels(0.5 * (sum_y * sum_y - sum_y2))  # (n_pix, 2)
+
+        return _dmas
+
+    raise ValueError(
+        f"Unsupported reduce_beamformer '{beamformer}'. Supported: "
+        "'delay_and_sum', 'delay_multiply_and_sum'."
+    )
+
+
 def tof_correction(
     data,
     flatgrid,
@@ -132,6 +174,9 @@ def tof_correction(
     sos_grid_x=None,
     sos_grid_z=None,
     focal_region_length=None,
+    reduce_das=False,
+    reduce_beamformer="delay_and_sum",
+    flat_pfield=None,
 ):
     """Time-of-flight (TOF) correction for ultrasound data on a flat pixel grid.
 
@@ -204,10 +249,35 @@ def tof_correction(
             smooths the focal-plane transition while preserving the same model
             outside the region. See :func:`transmit_delays`. Defaults to
             ``None`` (disabled).
+        reduce_das (bool, optional): When ``True``, fold the delay-and-sum
+            reduction (over receive elements *and* transmits) into the transmit
+            loop and return the beamformed image of shape ``(n_pix, n_ch)``
+            directly, instead of the full aligned tensor. This scans over
+            transmits one at a time so only a single transmit's
+            ``(n_pix, n_el, n_ch)`` tensor is ever materialized, cutting peak
+            memory ~``n_tx``× at the cost of serializing the transmit loop
+            (slower). Intended for beamforming large grids on memory-constrained
+            GPUs. Only supported for the homogeneous medium (``sos_map=None``).
+            Defaults to ``False``.
+        reduce_beamformer (str, optional): Which beamformer reduction to fold into
+            the fused transmit loop when ``reduce_das=True``. Either
+            ``"delay_and_sum"`` (sum over receive elements) or
+            ``"delay_multiply_and_sum"`` (the O(n_el) DMAS reduction; requires IQ
+            data, ``n_ch=2``). Ignored when ``reduce_das=False``. Defaults to
+            ``"delay_and_sum"``.
+        flat_pfield (Tensor, optional): Pressure-field weights of shape
+            ``(n_pix, n_tx)``. Only used when ``reduce_das=True``: each
+            transmit's contribution is scaled by its per-pixel pfield weight
+            before the delay-and-sum reduction, folding
+            :class:`~zea.ops.ultrasound.PfieldWeighting` into the fused
+            low-memory pass. ``None`` disables pfield weighting. Defaults to
+            ``None``.
 
     Returns:
         Tensor: Time-of-flight corrected data of shape
-        ``(n_tx, n_pix, n_el, n_ch)``.
+        ``(n_tx, n_pix, n_el, n_ch)``. When ``reduce_das=True`` the delay-and-sum
+        reduction is applied inline and the returned beamformed data has shape
+        ``(n_pix, n_ch)``.
     """
     assert len(data.shape) == 4, (
         "The input data should have 4 dimensions, "
@@ -279,6 +349,21 @@ def tof_correction(
         # through the heterogeneous beamformer (e.g. SOS estimation).
         mask = ops.stop_gradient(mask)
 
+    # ---- Precompute the receive-side phase rotation (IQ only) ----------
+    # The rotation angle theta = 2*pi*f_demod * (rxdel + txdel) / fs separates
+    # into a receive term (per pixel/element, identical for every transmit) and
+    # a transmit term (per pixel, one scalar per transmit). Computing cos/sin of
+    # the receive term once here — instead of cos/sin of the full (n_pix, n_el)
+    # angle inside every transmit — replaces O(n_tx * n_pix * n_el) transcendentals
+    # with O(n_pix * n_el) + O(n_tx * n_pix). The transmit term is combined per
+    # transmit with the cos/sin angle-addition identities (exact up to rounding).
+    is_iq = data.shape[-1] == 2
+    if is_iq:
+        phase_scale = 2 * np.pi * demodulation_frequency / sampling_frequency
+        theta_rx = phase_scale * rxdel  # (n_pix, n_el)
+        cos_rx = ops.cos(theta_rx)
+        sin_rx = ops.sin(theta_rx)
+
     # ---- Correct a single transmit (closure) ---------------------------
     def _correct_single_tx(data_tx, txdel_tx, mask_tx=None):
         """Apply delay-and-interpolate for one transmit event.
@@ -303,17 +388,58 @@ def tof_correction(
         else:
             tof_tx = tof_tx * mask
 
-        # Phase rotation for IQ data (see complex_rotate docstring)
-        if data_tx.shape[-1] == 2:
-            total_delay_seconds = delays / sampling_frequency
-            theta = 2 * np.pi * demodulation_frequency * total_delay_seconds
-            tof_tx = complex_rotate(tof_tx, theta)
+        # Phase rotation for IQ data (see complex_rotate docstring). Combine the
+        # precomputed receive rotation with this transmit's rotation via
+        # cos(a+b) = cos a cos b - sin a sin b, sin(a+b) = sin a cos b + cos a sin b.
+        if is_iq:
+            debug_benchmark = False
+            if debug_benchmark:
+                # original version, left in for convenient comparison/testing for now
+                total_delay_seconds = delays / sampling_frequency
+                theta = 2 * np.pi * demodulation_frequency * total_delay_seconds
+                tof_tx = complex_rotate(tof_tx, theta)
+            else:
+                theta_tx = phase_scale * txdel_tx  # (n_pix, 1)
+                cos_tx = ops.cos(theta_tx)
+                sin_tx = ops.sin(theta_tx)
+                cos_theta = cos_rx * cos_tx - sin_rx * sin_tx
+                sin_theta = sin_rx * cos_tx + cos_rx * sin_tx
+                tof_tx = complex_rotate(tof_tx, None, cos_theta=cos_theta, sin_theta=sin_theta)
 
         return tof_tx
 
     # ---- Vectorize over transmits --------------------------------------
     # Reshape txdel from (n_pix, n_tx) -> (n_tx, n_pix, 1) for per-tx slicing
     txdel = ops.moveaxis(txdel, 1, 0)[..., None]
+
+    # ---- Fused low-memory delay-and-sum --------------------------------
+    # Accumulate the DAS reduction (over receive elements and transmits) one
+    # transmit at a time. Only a single transmit's (n_pix, n_el, n_ch) aligned
+    # tensor is ever live, so peak memory is independent of n_tx (~n_tx× less
+    # than the vmap path) at the cost of serializing the transmit loop.
+    if reduce_das:
+        if sos_map is not None:
+            raise ValueError(
+                "reduce_das=True (fused low-memory beamforming) is only "
+                "supported for a homogeneous medium (sos_map=None)."
+            )
+        n_ch = data.shape[-1]
+        reduce_tx = _fused_reduction(reduce_beamformer, n_ch)
+        # DMAS accumulates a complex scalar per pixel -> 2 output channels even
+        # though the reduction consumes IQ; DAS keeps the input channel count.
+        n_ch_out = 2 if reduce_beamformer == "delay_multiply_and_sum" else n_ch
+
+        def _accumulate_tx(i, acc):
+            # (n_pix, n_el, n_ch) for one transmit.
+            tof_tx = _correct_single_tx(data[i], txdel[i])
+            # Fold in pressure-field weighting (per-pixel scalar per transmit)
+            # before the beamformer reduction, matching PfieldWeighting.
+            if flat_pfield is not None:
+                tof_tx = tof_tx * flat_pfield[:, i][:, None, None]
+            return acc + reduce_tx(tof_tx)
+
+        acc0 = ops.zeros((n_pix, n_ch_out), dtype=rxdel.dtype)
+        return ops.fori_loop(0, n_tx, _accumulate_tx, acc0)
 
     if sos_map is None:
         return vmap(_correct_single_tx)(data, txdel)
@@ -544,7 +670,7 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
     return reflection_samples
 
 
-def complex_rotate(iq, theta):
+def complex_rotate(iq, theta, cos_theta=None, sin_theta=None):
     r"""Phase-rotate IQ data by angle *theta*.
 
     When delaying IQ-demodulated data it is not sufficient to interpolate the
@@ -559,7 +685,13 @@ def complex_rotate(iq, theta):
     Args:
         iq (Tensor): IQ data of shape ``(..., 2)``.
         theta (Tensor or float): Rotation angle in radians (broadcastable to
-            ``iq[..., 0]``).
+            ``iq[..., 0]``). Ignored when both ``cos_theta`` and ``sin_theta``
+            are supplied.
+        cos_theta (Tensor, optional): Precomputed ``cos(theta)``, broadcastable
+            to ``iq[..., 0]``. Avoids recomputing the transcendental when the
+            caller can obtain it more cheaply. Defaults to ``None``.
+        sin_theta (Tensor, optional): Precomputed ``sin(theta)``. Defaults to
+            ``None``.
 
     Returns:
         Tensor: Rotated IQ data of shape ``(..., 2)``.
@@ -598,13 +730,20 @@ def complex_rotate(iq, theta):
         "The last dimension of the input tensor should be 2, "
         f"got {iq.shape[-1]} dimensions and shape {iq.shape}."
     )
+    # Allow passing precomputed cos/sin of theta to avoid recomputing the
+    # transcendentals (e.g. when the caller factors theta into cheaper terms).
+    if cos_theta is None:
+        cos_theta = ops.cos(theta)
+    if sin_theta is None:
+        sin_theta = ops.sin(theta)
+
     # Select i and q channels
     i = iq[..., 0]
     q = iq[..., 1]
 
     # Compute rotated components
-    ir = i * ops.cos(theta) - q * ops.sin(theta)
-    qr = q * ops.cos(theta) + i * ops.sin(theta)
+    ir = i * cos_theta - q * sin_theta
+    qr = q * cos_theta + i * sin_theta
 
     # Reintroduce channel dimension
     ir = ir[..., None]

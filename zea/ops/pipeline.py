@@ -26,6 +26,7 @@ from zea.ops.ultrasound import (
     LogCompress,
     PfieldWeighting,
     ReshapeGrid,
+    TOFAndSum,
     TOFCorrection,
 )
 from zea.utils import FunctionTimer
@@ -1108,7 +1109,14 @@ class Beamform(Pipeline):
     - ReshapeGrid (flattened grid is also reshaped to `(grid_size_z, grid_size_x)`)
     """  # noqa: E501
 
-    def __init__(self, beamformer="delay_and_sum", num_patches=100, enable_pfield=False, **kwargs):
+    def __init__(
+        self,
+        beamformer="delay_and_sum",
+        num_patches=100,
+        enable_pfield=False,
+        low_memory=False,
+        **kwargs,
+    ):
         """Initialize a Delay-and-Sum beamforming `zea.Pipeline`.
 
         Args:
@@ -1122,11 +1130,21 @@ class Beamform(Pipeline):
             num_patches (int): Number of patches to split the grid into for patch-wise
                 beamforming. If 1, no patching is performed.
             enable_pfield (bool): Whether to include pressure field weighting in the beamforming.
+            low_memory (bool): Use the fused low-memory delay-and-sum path
+                (:class:`~zea.ops.ultrasound.TOFAndSum`), which scans over
+                transmits instead of materializing the full aligned tensor.
+                Cuts peak memory ~``n_tx``× so large grids fit on a small GPU,
+                at the cost of being slower. Supported for
+                ``beamformer="delay_and_sum"`` and ``"delay_multiply_and_sum"``
+                (the latter requires IQ data); pressure-field weighting
+                (``enable_pfield=True``) is folded into the fused pass.
+                Defaults to ``False``.
         """
 
         self.beamformer_type = beamformer
         self.num_patches = num_patches
         self.enable_pfield = enable_pfield
+        self.low_memory = low_memory
 
         # for backwards compatibility
         name_mapping = {
@@ -1146,15 +1164,29 @@ class Beamform(Pipeline):
                 f"Supported types are: {beamformer_registry.registered_names()}."
             )
 
-        # Get beamforming ops
-        beamforming: List[Operation] = [
-            TOFCorrection(),
-            # PfieldWeighting(),  # Inserted conditionally
-            beamformer_registry[self.beamformer_type](),
-        ]
+        if self.low_memory:
+            if self.beamformer_type not in ("delay_and_sum", "delay_multiply_and_sum"):
+                raise ValueError(
+                    "low_memory beamforming is only supported for "
+                    "beamformer in ('delay_and_sum', 'delay_multiply_and_sum'), "
+                    f"got '{self.beamformer_type}'."
+                )
+            # Fused TOF-correction + beamformer reduction (memory-saving, slower).
+            # When enable_pfield is set, TOFAndSum folds the pfield weighting into
+            # the fused pass via its flat_pfield input (no separate PfieldWeighting).
+            beamforming: List[Operation] = [
+                TOFAndSum(beamformer=self.beamformer_type, use_pfield=self.enable_pfield)
+            ]
+        else:
+            # Get beamforming ops
+            beamforming = [
+                TOFCorrection(),
+                # PfieldWeighting(),  # Inserted conditionally
+                beamformer_registry[self.beamformer_type](),
+            ]
 
-        if self.enable_pfield:
-            beamforming.insert(1, PfieldWeighting())
+            if self.enable_pfield:
+                beamforming.insert(1, PfieldWeighting())
 
         # Optionally add patching
         if self.num_patches > 1:
@@ -1199,6 +1231,8 @@ class Beamform(Pipeline):
             params["num_patches"] = self.num_patches
         if not compact or self.enable_pfield:
             params["enable_pfield"] = self.enable_pfield
+        if not compact or self.low_memory:
+            params["low_memory"] = self.low_memory
 
         # Merge in the pipeline-level params from super().
         params.update(config.get("params", {}))
@@ -1275,35 +1309,29 @@ class DelayMultiplyAndSum(Operation):
                 f"Got data with shape {data.shape}."
             )
 
-        # Compute the correlation matrix
-        data = channels_to_complex(data)
+        # DMAS compounds the signed-sqrt-normalized cross product of every distinct
+        # element pair: sum_tx sum_{i<j} x_i x_j / sqrt(|x_i x_j|). The naive form builds
+        # the full (n_el, n_el) product matrix per (tx, pixel) and masks out the diagonal
+        # and upper triangle -- O(n_el^2) work and memory, most of it discarded.
+        #
+        # Instead use the identity  sum_{i<j} y_i y_j = 1/2 [(sum_i y_i)^2 - sum_i y_i^2]
+        # with y_i = x_i / sqrt(|x_i|) (the complex signed-sqrt magnitude), for which
+        # y_i y_j = x_i x_j / sqrt(|x_i x_j|) is exactly the normalized product. This is
+        # two O(n_el) reductions per pixel and never materializes the element matrix.
+        data = channels_to_complex(data)  # (n_tx, n_pix, n_el)
 
-        data = self._multiply(data)
-        data = self._select_lower_triangle(data)
-        data = ops.sum(data, axis=(0, 2, 3))
-
-        data = complex_to_channels(data)
-
-        return data
-
-    def _select_lower_triangle(self, data):
-        """Select only the lower triangle of the correlation matrix."""
-        n_el = data.shape[3]
-        mask = ops.ones((n_el, n_el), dtype=data.dtype) - ops.eye(n_el, dtype=data.dtype)
-        data = data * mask[None, None, :, :] / 2
-        return data
-
-    def _multiply(self, data):
-        """Apply the DMAS multiplication step."""
-        channel_products = data[:, :, :, None] * data[:, :, None, :]
-
-        # Signed square root: sign(z) * sqrt(|z|) == z / sqrt(|z|).
-        # Written this way to avoid ops.sign on complex data (torch.sign
-        # does not support complex numbers; use torch.sgn instead).
+        # y_i = x_i / sqrt(|x_i|); eps guards |x_i| == 0 (then y_i -> 0).
         eps = keras.backend.epsilon()
-        safe_sqrt = ops.cast(ops.sqrt(ops.abs(channel_products) + eps**2), channel_products.dtype)
-        data = channel_products / safe_sqrt
-        return data
+        y = data / ops.cast(ops.sqrt(ops.abs(data)) + eps, data.dtype)
+
+        sum_y = ops.sum(y, axis=-1)  # sum_i y_i        -> (n_tx, n_pix)
+        sum_y2 = ops.sum(y * y, axis=-1)  # sum_i y_i^2 -> (n_tx, n_pix)
+        per_tx = 0.5 * (sum_y * sum_y - sum_y2)  # sum_{i<j} y_i y_j
+
+        # Compound over transmits.
+        data = ops.sum(per_tx, axis=0)  # (n_pix,)
+
+        return complex_to_channels(data)
 
     def call(self, **kwargs):
         """Performs DMAS beamforming on tof-corrected input.

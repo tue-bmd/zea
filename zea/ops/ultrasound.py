@@ -113,12 +113,39 @@ class TOFCorrection(Operation):
     # Define operation-specific static parameters
     STATIC_PARAMS = ["f_number", "apply_lens_correction", "focal_region_length"]
 
-    def __init__(self, **kwargs):
+    # Whether to fold the beamformer reduction into the TOF correction (see
+    # :class:`TOFAndSum`). Overridden by subclasses; a class attribute so it is a
+    # trace-time constant rather than a jitted argument.
+    _reduce_das = False
+    _output_data_type = DataTypes.ALIGNED_DATA
+    # Which beamformer reduction the fused path folds in (only consulted when
+    # ``_reduce_das``); set per-instance by :class:`TOFAndSum`.
+    reduce_beamformer = "delay_and_sum"
+
+    def __init__(self, use_pfield=False, **kwargs):
+        # Only the fused path (TOFAndSum) folds pfield weighting into TOF
+        # correction; when set, flat_pfield becomes a derived dependency.
+        self.use_pfield = use_pfield
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
-            output_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=self._output_data_type,
             **kwargs,
         )
+
+    @property
+    def needs_keys(self) -> set:
+        """Input keys this op requires the pipeline to provide/derive.
+
+        ``flat_pfield`` is in the call signature (so it is forwarded at runtime
+        when present) but is only an actual *dependency* for the fused
+        pfield-weighted path. Plain TOF correction leaves pfield to the separate
+        :class:`PfieldWeighting` op, so it must not force pfield derivation
+        (mirrors gating pfield on the presence of that op).
+        """
+        keys = super().needs_keys
+        if not (self._reduce_das and self.use_pfield):
+            keys = keys - {"flat_pfield"}
+        return keys
 
     def call(
         self,
@@ -142,6 +169,7 @@ class TOFCorrection(Operation):
         sos_grid_x=None,
         sos_grid_z=None,
         focal_region_length=None,
+        flat_pfield=None,
         **kwargs,
     ):
         """Perform time-of-flight correction on raw RF data.
@@ -172,6 +200,11 @@ class TOFCorrection(Operation):
                 last-arrival delays are linearly blended. This smooths the
                 focal-plane transition while preserving the same model outside
                 the region. ``None`` or ``0`` disables it.
+            flat_pfield (Tensor): Pressure-field weights of shape ``(n_pix, n_tx)``.
+                Only consumed by the fused low-memory path (:class:`TOFAndSum`),
+                where it is folded into the delay-and-sum; ignored by plain
+                :class:`TOFCorrection` (pfield is applied by
+                :class:`PfieldWeighting` there).
 
         Returns:
             dict: Dictionary containing tof_corrected_data
@@ -200,6 +233,11 @@ class TOFCorrection(Operation):
             "sos_grid_x": sos_grid_x,
             "sos_grid_z": sos_grid_z,
             "focal_region_length": focal_region_length,
+            "reduce_das": self._reduce_das,
+            "reduce_beamformer": self.reduce_beamformer,
+            # pfield weighting is folded into the fused path only; plain
+            # TOFCorrection leaves it to the separate PfieldWeighting op.
+            "flat_pfield": flat_pfield if self._reduce_das else None,
         }
 
         if not self.with_batch_dim:
@@ -211,6 +249,36 @@ class TOFCorrection(Operation):
             )
 
         return {self.output_key: tof_corrected}
+
+
+@ops_registry("tof_and_sum")
+class TOFAndSum(TOFCorrection):
+    """Fused time-of-flight correction and beamformer reduction (low-memory).
+
+    Combines :class:`TOFCorrection` and the beamformer reduction
+    (:class:`~zea.ops.pipeline.DelayAndSum` or
+    :class:`~zea.ops.pipeline.DelayMultiplyAndSum`) into a single operation that
+    scans over transmits, reducing over receive elements and compounding over
+    transmits on the fly. Unlike the two-op path it never materializes the full
+    ``(n_tx, n_pix, n_el, n_ch)`` aligned tensor, cutting peak memory ~``n_tx``×
+    at the cost of serializing the transmit loop (slower). Intended for
+    beamforming large grids on memory-constrained GPUs.
+
+    Enabled via ``Beamform(..., low_memory=True)``. Supports ``delay_and_sum`` and
+    ``delay_multiply_and_sum`` (the latter requires IQ data) on a homogeneous
+    medium (no speed-of-sound map), optionally with pressure-field weighting
+    (``enable_pfield=True``), which is folded into the fused pass via the
+    ``flat_pfield`` input. Output has type ``DataTypes.BEAMFORMED_DATA`` and shape
+    ``(n_pix, n_ch)`` (with optional batch dimension).
+    """
+
+    _reduce_das = True
+    _output_data_type = DataTypes.BEAMFORMED_DATA
+
+    def __init__(self, beamformer="delay_and_sum", **kwargs):
+        # Which beamformer reduction to fold into the fused transmit loop.
+        self.reduce_beamformer = beamformer
+        super().__init__(**kwargs)
 
 
 @ops_registry("pfield_weighting")

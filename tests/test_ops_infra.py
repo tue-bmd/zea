@@ -1554,6 +1554,33 @@ def test_beamform_repr():
     assert "TOFCorrection" in r
 
 
+def test_beamform_low_memory_wiring():
+    """low_memory swaps in the fused TOFAndSum op and round-trips through config."""
+    b = Beamform(num_patches=1, low_memory=True, jit_options=None)
+    # The (only) inner beamforming op is the fused TOFAndSum, not TOFCorrection.
+    inner = b.operations[0]
+    assert isinstance(inner, ops.TOFAndSum)
+    assert not any(
+        isinstance(op, ops.TOFCorrection) and not isinstance(op, ops.TOFAndSum)
+        for op in b.operations
+    )
+    assert inner.output_data_type == DataTypes.BEAMFORMED_DATA
+
+    # Serializes non-compact and reconstructs identically.
+    d = b.get_dict(compact=False)
+    assert d["params"]["low_memory"] is True
+
+    # low_memory is only valid for plain delay-and-sum.
+    with pytest.raises(ValueError, match="delay_and_sum"):
+        Beamform(beamformer="delay_multiply_and_sum", low_memory=True, jit_options=None)
+
+    # low_memory is compatible with pfield weighting: still a single fused op
+    # (no separate PfieldWeighting), and the pipeline builds without error.
+    b_pf = Beamform(num_patches=1, low_memory=True, enable_pfield=True, jit_options=None)
+    assert isinstance(b_pf.operations[0], ops.TOFAndSum)
+    assert not any(isinstance(op, ops.PfieldWeighting) for op in b_pf.operations)
+
+
 def test_get_dict_callable_param_raises():
     """Generic Lambda with arbitrary callable should fail with a clear message."""
     lam = ops.Lambda(lambda x: {"data": x + 1})
