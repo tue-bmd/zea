@@ -743,8 +743,6 @@ class ComplexToChannels(Operation):
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        # keras.ops.view_as_real always appends the real/imaginary axis last, so move it
-        # to the requested axis to preserve the previous complex_to_channels behavior.
         output = ops.moveaxis(ops.view_as_real(data), -1, self.axis)
         return {self.output_key: output}
 
