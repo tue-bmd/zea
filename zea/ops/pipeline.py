@@ -28,7 +28,6 @@ from zea.ops.ultrasound import (
     PfieldWeighting,
     ReceiveApodization,
     ReshapeGrid,
-    TOFAndSum,
     TOFCorrection,
 )
 from zea.utils import FunctionTimer
@@ -1159,7 +1158,6 @@ class Beamform(Pipeline):
         enable_pfield=False,
         enable_aligned_apodization=False,
         enable_receive_apodization=False,
-        low_memory=False,
         **kwargs,
     ):
         """Initialize a Delay-and-Sum beamforming `zea.Pipeline`.
@@ -1186,18 +1184,6 @@ class Beamform(Pipeline):
                 (``parameters.flat_receive_apodization``) in the beamforming. Applied in
                 addition to the built-in f-number mask; independent of and combinable with
                 ``enable_pfield`` / ``enable_aligned_apodization``.
-            low_memory (bool): Use the fused low-memory delay-and-sum path
-                (:class:`~zea.ops.ultrasound.TOFAndSum`), which scans over
-                transmits instead of materializing the full aligned tensor.
-                Cuts peak memory ~``n_tx``× so large grids fit on a small GPU,
-                at the cost of being slower. Supported for
-                ``beamformer="delay_and_sum"`` and ``"delay_multiply_and_sum"``
-                (the latter requires IQ data). The optional weighting stages are
-                folded into the fused pass: pressure-field weighting
-                (``enable_pfield``), compounding apodization
-                (``enable_aligned_apodization``, e.g. scanline imaging) and
-                custom receive apodization (``enable_receive_apodization``).
-                Defaults to ``False``.
         """
         if enable_pfield and enable_aligned_apodization:
             raise ValueError(
@@ -1210,7 +1196,6 @@ class Beamform(Pipeline):
         self.enable_pfield = enable_pfield
         self.enable_aligned_apodization = enable_aligned_apodization
         self.enable_receive_apodization = enable_receive_apodization
-        self.low_memory = low_memory
 
         # for backwards compatibility
         name_mapping = {
@@ -1230,44 +1215,22 @@ class Beamform(Pipeline):
                 f"Supported types are: {beamformer_registry.registered_names()}."
             )
 
-        if self.low_memory:
-            if self.beamformer_type not in ("delay_and_sum", "delay_multiply_and_sum"):
-                raise ValueError(
-                    "low_memory beamforming is only supported for "
-                    "beamformer in ('delay_and_sum', 'delay_multiply_and_sum'), "
-                    f"got '{self.beamformer_type}'."
-                )
-            # Fused TOF-correction + beamformer reduction (memory-saving, slower).
-            # The optional weighting stages are folded into the fused pass (via
-            # the corresponding flat_* inputs) instead of running as separate
-            # ops: pfield (flat_pfield), compounding apodization
-            # (flat_aligned_apodization) and receive apodization
-            # (flat_receive_apodization).
-            beamforming: List[Operation] = [
-                TOFAndSum(
-                    beamformer=self.beamformer_type,
-                    use_pfield=self.enable_pfield,
-                    use_aligned_apodization=self.enable_aligned_apodization,
-                    use_receive_apodization=self.enable_receive_apodization,
-                )
-            ]
-        else:
-            # Get beamforming ops
-            beamforming = [
-                TOFCorrection(),
-                # ReceiveApodization() / AlignedApodization() / PfieldWeighting(),
-                # inserted conditionally
-                beamformer_registry[self.beamformer_type](),
-            ]
+        # Get beamforming ops
+        beamforming: List[Operation] = [
+            TOFCorrection(),
+            # ReceiveApodization() / AlignedApodization() / PfieldWeighting(),
+            # inserted conditionally
+            beamformer_registry[self.beamformer_type](),
+        ]
 
-            if self.enable_receive_apodization:
-                beamforming.insert(1, ReceiveApodization())
+        if self.enable_receive_apodization:
+            beamforming.insert(1, ReceiveApodization())
 
-            if self.enable_aligned_apodization:
-                beamforming.insert(1, AlignedApodization())
+        if self.enable_aligned_apodization:
+            beamforming.insert(1, AlignedApodization())
 
-            if self.enable_pfield:
-                beamforming.insert(1, PfieldWeighting())
+        if self.enable_pfield:
+            beamforming.insert(1, PfieldWeighting())
 
         # Optionally add patching
         if self.num_patches > 1:
@@ -1317,8 +1280,6 @@ class Beamform(Pipeline):
             params["enable_aligned_apodization"] = self.enable_aligned_apodization
         if not compact or self.enable_receive_apodization:
             params["enable_receive_apodization"] = self.enable_receive_apodization
-        if not compact or self.low_memory:
-            params["low_memory"] = self.low_memory
 
         # Merge in the pipeline-level params from super().
         params.update(config.get("params", {}))

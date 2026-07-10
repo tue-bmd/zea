@@ -57,12 +57,6 @@ def parse_args():
         default=None,
         help="Override pressure-field weighting (enable_pfield). Default uses the config value.",
     )
-    parser.add_argument(
-        "--low-memory",
-        action="store_true",
-        help="Use the fused low-memory delay-and-sum path (scans over transmits; "
-        "much less peak memory, slower). Lets large grids fit on a small GPU.",
-    )
     parser.add_argument("--warmup", type=int, default=3, help="Warmup calls after compilation.")
     parser.add_argument("--repeats", type=int, default=20, help="Timed steady-state calls.")
     parser.add_argument("--device", default="auto:1", help="Device passed to init_device.")
@@ -207,8 +201,6 @@ def main():
         beamform_params["beamformer"] = args.beamformer
     if args.pfield is not None:
         beamform_params["enable_pfield"] = args.pfield == "on"
-    if args.low_memory:
-        beamform_params["low_memory"] = True
 
     if args.grid_size is not None:
         gz, gx = (int(v) for v in args.grid_size.lower().split("x"))
@@ -233,7 +225,6 @@ def main():
     print(f"data shape       : {tuple(data.shape)}  (n_tx, n_ax, n_el, n_ch)")
     print(f"grid             : {parameters.grid_size_z} x {parameters.grid_size_x} = {n_pix} px")
     print(f"num_patches      : {args.num_patches}")
-    print(f"low_memory       : {args.low_memory}")
 
     compile_s, times = time_pipeline(pipeline, inputs, args.warmup, args.repeats, backend)
 
@@ -293,7 +284,6 @@ def main():
             "beamformer": args.beamformer,
             "pfield": args.pfield,
             "num_patches": args.num_patches,
-            "low_memory": args.low_memory,
             "grid_size": [int(parameters.grid_size_z), int(parameters.grid_size_x)],
             "compile_s": compile_s,
             "mean_ms": mean_s * 1e3,

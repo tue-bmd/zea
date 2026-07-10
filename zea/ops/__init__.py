@@ -263,7 +263,6 @@ from .ultrasound import (
     ScanConvert,
     Simulate,
     TissueSuppression,
-    TOFAndSum,
     TOFCorrection,
     UpMix,
 )
@@ -313,7 +312,6 @@ __all__ = [
     "ReshapeGrid",
     "ScanConvert",
     "Simulate",
-    "TOFAndSum",
     "TOFCorrection",
     "TissueSuppression",
     "UpMix",
