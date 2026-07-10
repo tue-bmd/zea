@@ -572,9 +572,14 @@ def test_compute_time_to_peak():
     assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
 
 
-@pytest.mark.parametrize("beamformer_name", beamformer_registry.registered_names())
-@backend_equality_check()
-def test_beamformers(beamformer_name):
+# MinimumVariance uses complex linalg.solve which TF/XLA does not support.
+_MV_BACKENDS = ["torch", "jax"]
+_ALL_BACKENDS_BEAMFORMERS = [
+    n for n in beamformer_registry.registered_names() if n != "minimum_variance"
+]
+
+
+def _run_beamformer_shape_check(beamformer_name):
     """All beamformer operations produce the correct output shape and agree across backends."""
 
     import keras
@@ -589,6 +594,20 @@ def test_beamformers(beamformer_name):
         f"Expected shape (1, {n_pix}, {n_ch}) for '{beamformer_name}', got {output.shape}"
     )
     return output
+
+
+@pytest.mark.parametrize("beamformer_name", _ALL_BACKENDS_BEAMFORMERS)
+@backend_equality_check()
+def test_beamformers(beamformer_name):
+    """All beamformer operations produce the correct output shape and agree across backends."""
+    return _run_beamformer_shape_check(beamformer_name)
+
+
+@pytest.mark.parametrize("beamformer_name", ["minimum_variance"])
+@backend_equality_check(backends=_MV_BACKENDS)
+def test_beamformers_mv(beamformer_name):
+    """MinimumVariance shape check — JAX and PyTorch only (complex linalg not in TF/XLA)."""
+    return _run_beamformer_shape_check(beamformer_name)
 
 
 def test_dmas_requires_iq_data():
@@ -680,6 +699,102 @@ def test_generalized_coherence_factor_m_zero_passthrough():
     ), "Expected different results for different m_zero values"
 
     return out_init
+
+
+@backend_equality_check(backends=_MV_BACKENDS)
+def test_minimum_variance_output_shape_iq():
+    """MV beamformer returns the correct output shape for IQ (2-channel) input."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el, n_ch = 2, 9, 8, 2
+    data = keras.ops.convert_to_tensor(
+        rng.standard_normal((1, n_tx, n_pix, n_el, n_ch)).astype(np.float32)
+    )
+    out = ops.MinimumVariance(with_batch_dim=True)(data=data)["data"]
+    assert out.shape == (1, n_pix, n_ch)
+    return out
+
+
+@backend_equality_check(backends=_MV_BACKENDS)
+def test_minimum_variance_finite_on_random_data():
+    """MV output is finite (no NaN/Inf) for random IQ input."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el, n_ch = 3, 11, 8, 2
+    data = keras.ops.convert_to_tensor(
+        rng.standard_normal((1, n_tx, n_pix, n_el, n_ch)).astype(np.float32)
+    )
+    out = ops.MinimumVariance(with_batch_dim=True)(data=data)["data"]
+    assert np.all(np.isfinite(keras.ops.convert_to_numpy(out))), "MV output contains NaN or Inf"
+    return out
+
+
+@backend_equality_check(backends=_MV_BACKENDS)
+def test_minimum_variance_custom_subarray_size():
+    """Custom subarray_size is respected and output shape is unchanged."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el, n_ch = 2, 7, 8, 2
+    data = keras.ops.convert_to_tensor(
+        rng.standard_normal((1, n_tx, n_pix, n_el, n_ch)).astype(np.float32)
+    )
+    out = ops.MinimumVariance(subarray_size=3, with_batch_dim=True)(data=data)["data"]
+    assert out.shape == (1, n_pix, n_ch)
+    return out
+
+
+@backend_equality_check(backends=_MV_BACKENDS)
+def test_minimum_variance_diagonal_loading_affects_output():
+    """Different diagonal_loading values produce different outputs for non-trivial data."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el, n_ch = 3, 7, 8, 2
+    data = keras.ops.convert_to_tensor(
+        rng.standard_normal((1, n_tx, n_pix, n_el, n_ch)).astype(np.float32)
+    )
+    out_low = ops.MinimumVariance(diagonal_loading=1e-4, with_batch_dim=True)(data=data)["data"]
+    out_high = ops.MinimumVariance(diagonal_loading=1e2, with_batch_dim=True)(data=data)["data"]
+    assert not np.allclose(
+        keras.ops.convert_to_numpy(out_low),
+        keras.ops.convert_to_numpy(out_high),
+    ), "Different diagonal_loading values should yield different outputs"
+    return out_low
+
+
+@backend_equality_check(backends=_MV_BACKENDS)
+def test_minimum_variance_zero_data_is_finite():
+    """All-zero input (boundary pixels) must produce finite output, not NaN.
+
+    TOFCorrection returns zeros outside the image boundary.  The covariance for
+    those pixels is the zero matrix, whose trace is zero, so diagonal loading
+    collapses unless the trace is clamped away from zero.  This test exercises
+    that guard directly.
+    """
+    import keras
+
+    from zea import ops
+
+    n_tx, n_pix, n_el = 2, 5, 8
+    data = keras.ops.zeros((1, n_tx, n_pix, n_el, 2))
+    out = ops.MinimumVariance(with_batch_dim=True)(data=data)["data"]
+    out_np = keras.ops.convert_to_numpy(out)
+    assert np.all(np.isfinite(out_np)), (
+        f"MV produced non-finite values for all-zero input: "
+        f"nan={np.isnan(out_np).sum()}, inf={np.isinf(out_np).sum()}"
+    )
+    return out
 
 
 @pytest.mark.parametrize(
