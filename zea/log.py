@@ -295,14 +295,6 @@ def remove_color_escape_codes(text):
     return escape_code_pattern.sub("", text)
 
 
-def success(message):
-    """Prints a message to the console in green."""
-    logger.info(green(message))
-    if file_logger:
-        file_logger.info(remove_color_escape_codes(message))
-    return message
-
-
 # Absolute path (with trailing separator) of the zea package directory, used to tell
 # zea-internal call frames apart from external ("user") ones in `_caller_frame`.
 _LOG_FILE = os.path.abspath(__file__)
@@ -312,19 +304,19 @@ _PACKAGE_DIR = os.path.dirname(_LOG_FILE) + os.sep
 def _caller_frame(skip_package=True):
     """Finds the stack frame most relevant to attribute a log message to.
 
-    Always skips frames inside this module (the ``warning``/``warning_once``
-    wrapper machinery itself). When ``skip_package`` is True (the default),
-    also skips past any further frames inside the ``zea`` package, returning
-    the first external ("user") frame - usually the call site people actually
-    want to see, even if the warning was actually raised deep inside some
-    internal zea helper. If the whole stack is inside zea (e.g. a warning
-    triggered from zea's own tests/examples), falls back to the immediate
-    caller instead of raising.
+    Always skips frames inside this module (the ``log.*`` wrapper machinery
+    itself, e.g. :func:`warning` or :func:`_log`). When ``skip_package`` is
+    True (the default), also skips past any further frames inside the ``zea``
+    package, returning the first external ("user") frame - usually the call
+    site people actually want to see, even if the message was actually
+    emitted deep inside some internal zea helper. If the whole stack is
+    inside zea (e.g. triggered from zea's own tests/examples), falls back to
+    the immediate caller instead of raising.
 
     Args:
         skip_package: If False, only skip this module's own frames and return
-            the literal call site of the ``log.warning``/``log.warning_once``
-            call, even if that's inside zea itself.
+            the literal call site of the ``log.*`` call, even if that's
+            inside zea itself.
     """
     frames = [f for f in inspect.stack()[1:] if f.filename != _LOG_FILE]
     if skip_package:
@@ -362,28 +354,43 @@ def suppress_warnings():
         _warnings_suppressed.reset(token)
 
 
-def warning(message, *args, location=False, raw_location=False, **kwargs):
-    """Prints a message with log level warning.
+def _log(level, message, *args, suppressible=False, location=False, raw_location=False, **kwargs):
+    """Core implementation shared by all ``log.<level>`` functions.
 
     Args:
+        level: The numeric logging level (e.g. ``logging.INFO``) to log at.
         message: The message to log.
+        suppressible: If True, this call is skipped while
+            :func:`suppress_warnings` is active.
         location: If True, prefixes the message with the ``file:line`` of the
             call site, similar to Python's :func:`warnings.warn`. By default
-            this is the first call frame *outside* zea, so a warning raised
+            this is the first call frame *outside* zea, so a message emitted
             deep inside an internal helper still points at the user's code.
         raw_location: If True (and ``location`` is True), show the literal
-            call site of this ``log.warning`` call instead - useful when the
-            warning is actually about something zea-internal.
+            call site of the ``log.*`` call instead - useful when the message
+            is actually about something zea-internal.
+
+    Returns:
+        The (possibly location-prefixed) message that was logged.
     """
-    if _warnings_suppressed.get():
+    if suppressible and _warnings_suppressed.get():
         return message
     if location:
         frame = _caller_frame(skip_package=not raw_location)
         message = f"{frame.filename}:{frame.lineno}: {message}"
-    logger.warning(message, *args, **kwargs)
+    logger.log(level, message, *args, **kwargs)
     if file_logger:
-        file_logger.warning(remove_color_escape_codes(message), *args, **kwargs)
+        file_logger.log(level, remove_color_escape_codes(message), *args, **kwargs)
     return message
+
+
+def warning(message, *args, **kwargs):
+    """Prints a message with log level warning.
+
+    Also accepts ``location``/``raw_location`` to prefix the message with its
+    call site - see :func:`_log` for details.
+    """
+    return _log(logging.WARNING, message, *args, suppressible=True, **kwargs)
 
 
 def warning_once(message, *args, key=None, **kwargs):
@@ -392,8 +399,8 @@ def warning_once(message, *args, key=None, **kwargs):
     By default, deduplication is per call location. A custom ``key`` can be
     provided to scope once-only behavior (for example, per object instance).
 
-    Accepts the same ``location``/``raw_location`` arguments as :func:`warning`
-    (forwarded via ``**kwargs``).
+    Also accepts the same ``location``/``raw_location`` arguments as
+    :func:`warning` (forwarded via ``**kwargs``).
 
     Args:
         message: The message to log.
@@ -412,43 +419,32 @@ def warning_once(message, *args, key=None, **kwargs):
 
 def deprecated(message, *args, **kwargs):
     """Prints a message with custom log level DEPRECATED."""
-    if _warnings_suppressed.get():
-        return message
-    logger.log(DEPRECATED_LEVEL_NUM, message, *args, **kwargs)
-    if file_logger:
-        file_logger.log(DEPRECATED_LEVEL_NUM, remove_color_escape_codes(message), *args, **kwargs)
-    return message
+    return _log(DEPRECATED_LEVEL_NUM, message, *args, suppressible=True, **kwargs)
 
 
 def error(message, *args, **kwargs):
     """Prints a message with log level error."""
-    logger.error(message, *args, **kwargs)
-    if file_logger:
-        file_logger.error(remove_color_escape_codes(message), *args, **kwargs)
-    return message
+    return _log(logging.ERROR, message, *args, **kwargs)
 
 
 def debug(message, *args, **kwargs):
     """Prints a message with log level debug."""
-    logger.debug(message, *args, **kwargs)
-    if file_logger:
-        file_logger.debug(remove_color_escape_codes(message), *args, **kwargs)
-    return message
+    return _log(logging.DEBUG, message, *args, **kwargs)
 
 
 def info(message, *args, **kwargs):
     """Prints a message with log level info."""
-    logger.info(message, *args, **kwargs)
-    if file_logger:
-        file_logger.info(remove_color_escape_codes(message), *args, **kwargs)
-    return message
+    return _log(logging.INFO, message, *args, **kwargs)
 
 
 def critical(message, *args, **kwargs):
     """Prints a message with log level critical."""
-    logger.critical(message, *args, **kwargs)
-    if file_logger:
-        file_logger.critical(message, *args, **kwargs)
+    return _log(logging.CRITICAL, message, *args, **kwargs)
+
+
+def success(message, *args, **kwargs):
+    """Prints a message to the console in green."""
+    _log(logging.INFO, green(message), *args, **kwargs)
     return message
 
 
