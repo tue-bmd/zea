@@ -7,6 +7,7 @@ command-line usage.
 """
 
 import functools
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -46,7 +47,7 @@ def save_file(
     custom_maps: dict | None = None,
     custom_elements: list | None = None,
     metadata: dict | None = None,
-    compression: str = DEFAULT_COMPRESSION,
+    compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
     chunk_axes=DEFAULT_CHUNK_AXES,
     **kwargs,
 ):
@@ -90,7 +91,9 @@ def save_file(
                     "credit": "My Lab, 2024",
                     "annotations": {"label": np.array(["healthy", "healthy"])},
                 }
-        compression (str, optional): The HDF5 compression filter to use. Defaults to ``"lzf"``.
+        compression (str or Mapping, optional): The HDF5 compression filter to use.
+            Defaults to ``"lzf"``. May also be a mapping of ``create_dataset`` kwargs,
+            e.g. an ``hdf5plugin`` filter object. See :meth:`zea.File.create`.
         chunk_axes (tuple, optional): Dimension names to chunk with size 1. Defaults
             to ``("n_frames", "n_tx")`` so partial and streamed reads fetch only the
             requested frames/transmits; other axes stay at full extent. Use

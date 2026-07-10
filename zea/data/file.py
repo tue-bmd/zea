@@ -3,6 +3,7 @@
 import contextlib
 import difflib
 import enum
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1067,7 +1068,7 @@ class File(h5py.File):
         description: str | None = None,
         acquisition_time: str | None = None,
         custom=None,
-        compression: str | None = DEFAULT_COMPRESSION,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
         chunk_axes: "tuple[str, ...] | None" = DEFAULT_CHUNK_AXES,
         overwrite: bool = False,
         ignore_warnings: bool = False,
@@ -1115,7 +1116,11 @@ class File(h5py.File):
             custom: Optional list of :class:`CustomElement` objects holding data that
                 does not fit the zea format. They are stored in a ``custom`` group and
                 read back via :attr:`File.custom`.
-            compression: HDF5 compression filter (default ``"lzf"``).
+            compression: HDF5 compression filter (default ``"lzf"``). May be a filter
+                name (``"lzf"``, ``"gzip"``) or a mapping of ``create_dataset`` kwargs,
+                e.g. an ``hdf5plugin`` filter object (``hdf5plugin.Blosc2(...)``) or
+                ``{"compression": "gzip", "compression_opts": 4}``. Files written with
+                ``hdf5plugin`` filters require ``import hdf5plugin`` to be read back.
             chunk_axes: Dimension names to chunk with HDF5 chunk size 1 (default
                 ``("n_frames", "n_tx")``); every other axis is stored at full extent,
                 so partial and streamed (``hf://``) reads fetch only the frames/

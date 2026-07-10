@@ -1,6 +1,7 @@
 import os
 import tempfile
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
@@ -488,36 +489,57 @@ class Spec:
         group: h5py.Group,
         field_name: str,
         value: Any,
-        compression: str | None = DEFAULT_COMPRESSION,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
         chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
         dim_names: tuple | None = None,
     ) -> None:
         """Create a dataset in the given group for the specified field and value,
         handling string and scalar values appropriately.
 
+        ``compression`` may be an h5py filter name (e.g. ``"lzf"``, ``"gzip"``) or
+        a mapping of ``create_dataset`` keyword arguments, such as an
+        ``hdf5plugin`` filter object (``hdf5plugin.Blosc2(...)``) or an explicit
+        ``{"compression": "gzip", "compression_opts": 4}``. Reading such a file
+        back requires the corresponding filter to be available (for ``hdf5plugin``
+        filters, ``import hdf5plugin`` in the reading process).
+
         When ``dim_names`` (the field's schema dimension names) is provided, the
         chunk shape is derived from ``chunk_axes`` to match common subsampling
         patterns; see :meth:`_resolve_chunks`.
         """
         dataset_is_scalar = np.isscalar(value) or value.ndim == 0
-        compression = None if dataset_is_scalar else compression
         chunks = None if dataset_is_scalar else Spec._resolve_chunks(value, dim_names, chunk_axes)
+        # Filters are meaningless for scalars; strings only take named codecs
+        # (plugin filters like Blosc reject variable-length string data).
+        if dataset_is_scalar:
+            comp_kwargs: dict = {}
+        elif isinstance(compression, Mapping):
+            comp_kwargs = dict(compression)
+        elif compression is not None:
+            comp_kwargs = {"compression": compression}
+        else:
+            comp_kwargs = {}
         if Spec._is_string_value(value):
             string_dtype = h5py.string_dtype(encoding="utf-8")
             string_value = np.asarray(value, dtype=object)
+            # Only named codecs apply to strings, and never to scalar datasets
+            # (h5py rejects chunk/filter options on scalars). Plugin filters
+            # (Mapping) are skipped — they reject variable-length string data.
+            use_str_codec = isinstance(compression, str) and not dataset_is_scalar
+            string_comp = {"compression": compression} if use_str_codec else {}
             group.create_dataset(
                 field_name,
                 data=string_value,
                 dtype=string_dtype,
-                compression=compression,
+                **string_comp,
             )
         else:
-            group.create_dataset(field_name, data=value, compression=compression, chunks=chunks)
+            group.create_dataset(field_name, data=value, chunks=chunks, **comp_kwargs)
 
     def store_in_group(
         self,
         group: h5py.Group,
-        compression: str | None = DEFAULT_COMPRESSION,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
         chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
         warn_missing_optional_fields: bool = True,
     ) -> None:
@@ -2224,7 +2246,7 @@ class TrackSpec(Spec):
     def store_in_group(
         self,
         group: "h5py.Group",
-        compression: str | None = DEFAULT_COMPRESSION,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
         chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
         warn_missing_optional_fields: bool = True,
     ) -> None:
@@ -2588,7 +2610,7 @@ class FileSpec(Spec):
     def save(
         self,
         path: str,
-        compression: str | None = DEFAULT_COMPRESSION,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
         chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
         warn_missing_optional_fields: bool = True,
     ) -> None:
@@ -2659,7 +2681,7 @@ class FileSpec(Spec):
         self,
         path: Path,
         zea_version: str,
-        compression: str | None,
+        compression: "str | Mapping | None",
         chunk_axes: tuple[str, ...] | None,
         warn_missing_optional_fields: bool,
     ) -> None:
