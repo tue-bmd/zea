@@ -303,6 +303,37 @@ def success(message):
     return message
 
 
+# Absolute path (with trailing separator) of the zea package directory, used to tell
+# zea-internal call frames apart from external ("user") ones in `_caller_frame`.
+_LOG_FILE = os.path.abspath(__file__)
+_PACKAGE_DIR = os.path.dirname(_LOG_FILE) + os.sep
+
+
+def _caller_frame(skip_package=True):
+    """Finds the stack frame most relevant to attribute a log message to.
+
+    Always skips frames inside this module (the ``warning``/``warning_once``
+    wrapper machinery itself). When ``skip_package`` is True (the default),
+    also skips past any further frames inside the ``zea`` package, returning
+    the first external ("user") frame - usually the call site people actually
+    want to see, even if the warning was actually raised deep inside some
+    internal zea helper. If the whole stack is inside zea (e.g. a warning
+    triggered from zea's own tests/examples), falls back to the immediate
+    caller instead of raising.
+
+    Args:
+        skip_package: If False, only skip this module's own frames and return
+            the literal call site of the ``log.warning``/``log.warning_once``
+            call, even if that's inside zea itself.
+    """
+    frames = [f for f in inspect.stack()[1:] if f.filename != _LOG_FILE]
+    if skip_package:
+        for frame in frames:
+            if not frame.filename.startswith(_PACKAGE_DIR):
+                return frame
+    return frames[0]
+
+
 # Track locations that have already emitted a once-only warning
 _warned_locations: set = set()
 
@@ -331,10 +362,24 @@ def suppress_warnings():
         _warnings_suppressed.reset(token)
 
 
-def warning(message, *args, **kwargs):
-    """Prints a message with log level warning."""
+def warning(message, *args, location=False, raw_location=False, **kwargs):
+    """Prints a message with log level warning.
+
+    Args:
+        message: The message to log.
+        location: If True, prefixes the message with the ``file:line`` of the
+            call site, similar to Python's :func:`warnings.warn`. By default
+            this is the first call frame *outside* zea, so a warning raised
+            deep inside an internal helper still points at the user's code.
+        raw_location: If True (and ``location`` is True), show the literal
+            call site of this ``log.warning`` call instead - useful when the
+            warning is actually about something zea-internal.
+    """
     if _warnings_suppressed.get():
         return message
+    if location:
+        frame = _caller_frame(skip_package=not raw_location)
+        message = f"{frame.filename}:{frame.lineno}: {message}"
     logger.warning(message, *args, **kwargs)
     if file_logger:
         file_logger.warning(remove_color_escape_codes(message), *args, **kwargs)
@@ -346,6 +391,13 @@ def warning_once(message, *args, key=None, **kwargs):
 
     By default, deduplication is per call location. A custom ``key`` can be
     provided to scope once-only behavior (for example, per object instance).
+
+    Accepts the same ``location``/``raw_location`` arguments as :func:`warning`
+    (forwarded via ``**kwargs``).
+
+    Args:
+        message: The message to log.
+        key: Optional dedupe key scoping the once-only behavior.
     """
     if _warnings_suppressed.get():
         return message
