@@ -75,6 +75,7 @@ An example of how to use the :class:`zea.models.diffusion.DiffusionModel` is sho
 """
 
 from . import (
+    able,
     carotid_segmenter,
     deeplabv3,
     dense,
