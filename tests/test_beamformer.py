@@ -14,7 +14,11 @@ from zea.beamform.beamformer import (
 )
 from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
-from zea.beamform.pixelgrid import cartesian_pixel_grid
+from zea.beamform.pixelgrid import (
+    cartesian_pixel_grid,
+    scanline_aligned_apodization,
+    scanline_pixel_grid,
+)
 
 from . import backend_equality_check
 
@@ -319,6 +323,185 @@ def test_transmit_delays_focused(flatgrid, probe_geometry):
     assert txd.shape == (flatgrid.shape[0],)
     assert np.all(np.isfinite(txd))
     return txd
+
+
+# scanline beamforming
+
+
+def test_scanline_pixel_grid_linear():
+    """Linear scanline grids are vertical columns at each beam's lateral focus."""
+    origins = np.zeros((3, 3), np.float32)
+    origins[:, 0] = [-5e-3, 0.0, 5e-3]  # walking transmit origins
+    focus = np.full(3, 20e-3, np.float32)
+    angles = np.zeros(3, np.float32)
+    grid = scanline_pixel_grid(origins, focus, angles, (1e-3, 30e-3), 16, grid_type="cartesian")
+    assert grid.shape == (16, 3, 3)
+    for n in range(3):
+        # angle 0 -> lateral focus == origin x, and every point on the line is at that x
+        assert np.allclose(grid[:, n, 0], origins[n, 0])
+        assert np.isclose(grid[0, n, 2], 1e-3) and np.isclose(grid[-1, n, 2], 30e-3)
+
+
+def test_scanline_pixel_grid_sector():
+    """Polar-style scanline grids are steered rays from the transmit origin."""
+    origins = np.zeros((3, 3), np.float32)
+    focus = np.full(3, 40e-3, np.float32)
+    angles = np.array([-0.3, 0.0, 0.3], np.float32)
+    grid = scanline_pixel_grid(origins, focus, angles, (0.0, 50e-3), 16, grid_type="polar")
+    assert grid.shape == (16, 3, 3)
+    for n in range(3):
+        r = np.linalg.norm(grid[:, n] - origins[n], axis=-1)
+        np.testing.assert_allclose(grid[:, n, 0], r * np.sin(angles[n]), atol=1e-6)
+        np.testing.assert_allclose(grid[:, n, 2], r * np.cos(angles[n]), atol=1e-6)
+
+
+def test_scanline_pixel_grid_default_is_cartesian():
+    """``grid_type`` defaults to ``"cartesian"``, matching the old ``sector=False`` default."""
+    origins = np.zeros((2, 3), np.float32)
+    focus = np.full(2, 20e-3, np.float32)
+    angles = np.zeros(2, np.float32)
+    default_grid = scanline_pixel_grid(origins, focus, angles, (1e-3, 30e-3), 8)
+    cartesian_grid = scanline_pixel_grid(
+        origins, focus, angles, (1e-3, 30e-3), 8, grid_type="cartesian"
+    )
+    np.testing.assert_array_equal(default_grid, cartesian_grid)
+
+
+def test_scanline_pixel_grid_invalid_grid_type():
+    """An unsupported ``grid_type`` raises a clear error instead of silently misbehaving."""
+    origins = np.zeros((2, 3), np.float32)
+    focus = np.full(2, 20e-3, np.float32)
+    angles = np.zeros(2, np.float32)
+    with pytest.raises(ValueError, match="Unsupported grid_type"):
+        scanline_pixel_grid(origins, focus, angles, (1e-3, 30e-3), 8, grid_type="scanline")
+
+
+def test_scanline_pixel_grid_plane_wave_on_axis_no_nan():
+    """A plane-wave (``np.inf`` focus distance) on-axis transmit must not produce NaN
+    (regression test for the ``inf * 0`` hazard in the cartesian-style branch)."""
+    origins = np.array([[1e-3, 0, 0], [2e-3, 0, 0]], np.float32)
+    focus = np.array([np.inf, np.inf], np.float32)
+    angles = np.zeros(2, np.float32)
+    grid = scanline_pixel_grid(origins, focus, angles, (0, 0.05), 8, grid_type="cartesian")
+    assert not np.isnan(grid).any()
+    np.testing.assert_allclose(grid[:, 0, 0], origins[0, 0])
+    np.testing.assert_allclose(grid[:, 1, 0], origins[1, 0])
+
+
+def test_scanline_pixel_grid_golden_values():
+    """Golden-value regression test locking in the exact numerics of both scanline
+    grid styles (pinned before an internal refactor that renamed ``sector`` to
+    ``grid_type`` without changing the underlying math)."""
+    origins = np.array([[-5e-3, 0, 0], [0, 0, 0], [5e-3, 0, 0]], dtype=np.float32)
+    focus = np.array([20e-3, np.inf, 15e-3], dtype=np.float32)
+    angles = np.array([0.05, 0.0, -0.05], dtype=np.float32)
+    grid_a = scanline_pixel_grid(origins, focus, angles, (1e-3, 30e-3), 5, grid_type="cartesian")
+    expected_a_row0 = np.array(
+        [[-0.00400042, 0.0, 0.001], [0.0, 0.0, 0.001], [0.00425031, 0.0, 0.001]],
+        dtype=np.float32,
+    )
+    np.testing.assert_allclose(grid_a[0], expected_a_row0, atol=1e-7)
+
+    origins_b = np.zeros((3, 3), dtype=np.float32)
+    focus_b = np.full(3, 40e-3, dtype=np.float32)
+    angles_b = np.array([-0.3, 0.0, 0.3], dtype=np.float32)
+    az_b = np.array([0.1, 0.0, -0.1], dtype=np.float32)
+    grid_b = scanline_pixel_grid(
+        origins_b, focus_b, angles_b, (0.0, 50e-3), 5, azimuth_angles=az_b, grid_type="polar"
+    )
+    expected_b_row1 = np.array(
+        [
+            [-0.00367555, -0.00036878, 0.01194171],
+            [0.0, 0.0, 0.0125],
+            [0.00367555, -0.00036878, 0.01194171],
+        ],
+        dtype=np.float32,
+    )
+    np.testing.assert_allclose(grid_b[1], expected_b_row1, atol=1e-7)
+
+
+def test_scanline_aligned_apodization_one_hot():
+    """Each pixel's apodization row selects exactly its own column's transmit."""
+    n_tx, n_line = 4, 5
+    apod = scanline_aligned_apodization(n_tx, n_line)
+    assert apod.shape == (n_line * n_tx, n_tx)
+    for i in range(n_line):
+        for n in range(n_tx):
+            expected = np.zeros(n_tx, np.float32)
+            expected[n] = 1.0
+            np.testing.assert_array_equal(apod[i * n_tx + n], expected)
+
+
+def _make_scanline_inputs(probe_geometry, n_line=12):
+    """Two focused transmits and their shared scanline pixel grid."""
+    n_el = probe_geometry.shape[0]
+    n_tx = 2
+    origins = np.zeros((n_tx, 3), np.float32)
+    origins[:, 0] = [-3e-3, 3e-3]
+    focus = np.full(n_tx, 18e-3, np.float32)
+    angles = np.zeros(n_tx, np.float32)
+    t0 = np.stack(
+        [
+            compute_t0_delays_focused(
+                o[None], f[None], probe_geometry, a[None], sound_speed=SOUND_SPEED
+            )[0]
+            for o, f, a in zip(origins, focus, angles)
+        ]
+    ).astype(np.float32)
+    grid = scanline_pixel_grid(origins, focus, angles, (2e-3, 25e-3), n_line, grid_type="cartesian")
+    apodization = scanline_aligned_apodization(n_tx, n_line)
+    inputs = dict(
+        t0_delays=t0,
+        tx_apodizations=np.ones((n_tx, n_el), np.float32),
+        sound_speed=SOUND_SPEED,
+        probe_geometry=probe_geometry,
+        initial_times=np.zeros(n_tx, np.float32),
+        sampling_frequency=SAMPLING_FREQ,
+        demodulation_frequency=DEMOD_FREQ,
+        f_number=0.0,
+        polar_angles=angles,
+        focus_distances=focus,
+        t_peak=np.zeros(n_tx, np.float32),
+        transmit_origins=origins,
+    )
+    return grid.astype(np.float32), apodization, inputs
+
+
+def test_scanline_via_pixel_beamform_matches_per_transmit_tof(probe_geometry):
+    """Reconstructing the scanline grid via tof_correction + receive apodization
+    (i.e. the regular pixel-based DAS path) must give, for every column, exactly
+    what a standalone tof_correction call for that column's own transmit gives.
+    """
+    n_line = 10
+    grid, apodization, inputs = _make_scanline_inputs(probe_geometry, n_line=n_line)
+    n_tx = grid.shape[1]
+    flatgrid = grid.reshape(-1, 3)
+    data = np.random.randn(n_tx, 96, probe_geometry.shape[0], 2).astype(np.float32)
+
+    tof = tof_correction(data, flatgrid, **inputs)  # (n_tx, n_pix, n_el, n_ch)
+    apod_tx_pix = keras.ops.convert_to_tensor(apodization.T, dtype=tof.dtype)[:, :, None, None]
+    image = keras.ops.convert_to_numpy(keras.ops.sum(tof * apod_tx_pix, axis=(0, 2)))
+    image = image.reshape(n_line, n_tx, -1)
+
+    for n in range(n_tx):
+        tof_n = tof_correction(
+            data[n : n + 1],
+            grid[:, n],
+            inputs["t0_delays"][n : n + 1],
+            inputs["tx_apodizations"][n : n + 1],
+            SOUND_SPEED,
+            probe_geometry,
+            inputs["initial_times"][n : n + 1],
+            SAMPLING_FREQ,
+            DEMOD_FREQ,
+            0.0,
+            inputs["polar_angles"][n : n + 1],
+            inputs["focus_distances"][n : n + 1],
+            inputs["t_peak"][n : n + 1],
+            inputs["transmit_origins"][n : n + 1],
+        )
+        expected = keras.ops.convert_to_numpy(keras.ops.sum(tof_n, axis=2)[0])
+        np.testing.assert_allclose(image[:, n], expected, rtol=1e-5, atol=1e-5)
 
 
 def _focused_transmit_delays(grid, focus, angle, focal_region_length):

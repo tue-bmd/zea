@@ -9,6 +9,129 @@ Pipeline
    :no-special-members:
    :no-index:
 
+.. _custom-ops:
+
+Custom operations
+-----------------------------------------
+
+You can define your own operations in your own project and use them everywhere a
+built-in ``zea`` operation works, including inside a :class:`~zea.ops.Pipeline` and saving them
+to a YAML config, without needing to change the ``zea`` source. In case you do want to add your
+custom operation to ``zea``, see :ref:`adding a new operation <adding-ops>`.
+
+Any :class:`~zea.ops.Operation` subclass you register is treated exactly like a built-in one.
+This is handy for one-off experiments, project-specific processing, or code you want to
+keep in your own repository.
+
+Define the operation exactly as you would a built-in one (see :ref:`adding a new operation <adding-ops>`),
+but in your *own* module. The ``@ops_registry`` decorator registers it under a name the moment
+the module is imported:
+
+.. code-block:: python
+
+    # my_project/my_ops.py
+    import keras.ops as ops
+    from zea.internal.registry import ops_registry
+    from zea.ops import Operation
+
+
+    @ops_registry("my_project.my_ops.MyScale")
+    class MyScale(Operation):
+        """Scale the input data by a constant factor."""
+
+        def __init__(self, factor: float = 2.0, **kwargs):
+            super().__init__(**kwargs)
+            self.factor = factor
+
+        def call(self, **kwargs):
+            data = kwargs[self.key]
+            return {self.output_key: data * self.factor}
+
+You can now use it directly in a pipeline by passing an instance:
+
+.. code-block:: python
+
+    from zea import Pipeline
+    from zea.ops import Normalize
+    from my_project.my_ops import MyScale
+
+    pipeline = Pipeline(operations=[MyScale(factor=3.0), Normalize()])
+
+Using a custom operation in YAML
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Because the operation is in the registry, :meth:`Pipeline.to_yaml
+<zea.ops.Pipeline.to_yaml>` serializes it and :meth:`Pipeline.from_path
+<zea.ops.Pipeline.from_path>` reads it back — the round-trip yields an identical
+pipeline:
+
+.. code-block:: python
+
+    pipeline.to_yaml("pipeline.yaml")
+    loaded = Pipeline.from_path("pipeline.yaml")
+    assert loaded == pipeline
+
+The trick that makes the YAML **shareable** is the *name* you register under. When you
+register with a fully-qualified module path (``"my_project.my_ops.MyScale"`` above), the
+saved YAML stores that path:
+
+.. code-block:: yaml
+
+    pipeline:
+        operations:
+        -   name: my_project.my_ops.myscale
+            params:
+                factor: 3.0
+        -   name: normalize
+
+On load, :func:`~zea.ops.get_ops` sees the dotted path, imports ``my_project.my_ops``
+automatically (which re-runs the ``@ops_registry`` decorator), and resolves the class.
+So anyone with your module on their ``PYTHONPATH`` can load the pipeline, without
+needing to import your module themselves.
+
+If you instead register under a plain name (e.g. ``@ops_registry("my_scale")``), the
+YAML will contain ``name: my_scale`` and the recipient must ``import my_project.my_ops``
+themselves before loading, so that the name is present in the registry.
+
+Putting it together, see a self-contained snippet that defines a custom operation,
+builds a pipeline, and saves it to YAML below:
+
+.. dropdown:: Full example of using a custom operation
+
+   .. testcode::
+
+       from zea import Pipeline
+       from zea.internal.registry import ops_registry
+       from zea.ops import Normalize, Operation
+
+
+       # Defined in this script, so register under "__main__". In a real project,
+       # register under your module path (e.g. "my_project.my_ops.MyScale") so the
+       # saved YAML can be loaded from anywhere, as described above.
+       @ops_registry("__main__.MyScale")
+       class MyScale(Operation):
+           """Scale the input data by a constant factor."""
+
+           def __init__(self, factor: float = 2.0, **kwargs):
+               super().__init__(**kwargs)
+               self.factor = factor
+
+           def call(self, **kwargs):
+               return {self.output_key: kwargs[self.key] * self.factor}
+
+
+       pipeline = Pipeline(operations=[MyScale(factor=3.0), Normalize()])
+       pipeline.to_yaml("pipeline.yaml")
+
+       loaded = Pipeline.from_path("pipeline.yaml")
+       assert loaded == pipeline
+
+   .. testcleanup::
+
+       import os
+
+       os.remove("pipeline.yaml")
+
 .. _adding-ops:
 
 Adding a new operation

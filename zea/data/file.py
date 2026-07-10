@@ -2007,28 +2007,30 @@ def _print_hdf5_attrs(hdf5_obj, prefix=""):
     if isinstance(hdf5_obj, h5py.File):
         name = "root" if hdf5_obj.name == "/" else hdf5_obj.name
         print(prefix + name + "/")
-        prefix += "    "
-    elif isinstance(hdf5_obj, h5py.Dataset):
-        shape_str = str(hdf5_obj.shape).replace(",)", ")")
-        print(prefix + "├── " + hdf5_obj.name + " (shape=" + shape_str + ")")
-        prefix += "│   "
 
-    # Print all attributes
-    for key, val in hdf5_obj.attrs.items():
-        print(prefix + "├── " + key + ": " + str(val))
-
-    # Recursively print all keys, attributes, and shapes in groups
+    # Collect all children (attributes first, then sub-groups/datasets) into a
+    # single ordered list so ``is_last`` is computed across the full set and the
+    # tree connectors line up correctly.
+    entries = [("attr", key, val) for key, val in hdf5_obj.attrs.items()]
     if isinstance(hdf5_obj, h5py.Group):
-        for i, key in enumerate(hdf5_obj.keys()):
-            is_last = i == len(hdf5_obj.keys()) - 1
-            if is_last:
-                marker = "└── "
-                new_prefix = prefix + "    "
-            else:
-                marker = "├── "
-                new_prefix = prefix + "│   "
+        entries += [("item", key, None) for key in hdf5_obj.keys()]
+
+    for i, (kind, key, val) in enumerate(entries):
+        is_last = i == len(entries) - 1
+        marker = "└── " if is_last else "├── "
+        child_prefix = prefix + ("    " if is_last else "│   ")
+
+        if kind == "attr":
+            print(prefix + marker + key + ": " + str(val))
+            continue
+
+        child = hdf5_obj[key]
+        if isinstance(child, h5py.Dataset):
+            shape_str = str(child.shape).replace(",)", ")")
+            print(prefix + marker + key + " (shape=" + shape_str + ")")
+        else:
             print(prefix + marker + key + "/")
-            _print_hdf5_attrs(hdf5_obj[key], new_prefix)
+        _print_hdf5_attrs(child, child_prefix)
 
 
 def validate_file(path: str | None = None, file: "File | None" = None):

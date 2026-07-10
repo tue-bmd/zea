@@ -1040,6 +1040,138 @@ def test_common_midpoint_phase_error_coherent_data():
     return phase_error
 
 
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+@backend_equality_check(decimal=5)
+def test_apply_aligned_apodization(with_batch_dim):
+    """A per-pixel, per-transmit weight scales each transmit's contribution to a
+    pixel, e.g. a one-hot mask isolates a single owning transmit per pixel
+    (the scanline / line-by-line special case of pixel-based DAS)."""
+    from zea.func.ultrasound import apply_aligned_apodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    data = keras.ops.ones((n_tx, n_pix, n_el, n_ch))
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    # Pixel 0 belongs to transmit 0; pixel 1 belongs to transmit 2.
+    apodization = keras.ops.convert_to_tensor(
+        np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+    )
+
+    out = keras.ops.convert_to_numpy(apply_aligned_apodization(data, apodization, with_batch_dim))
+
+    expected = np.zeros((n_tx, n_pix, n_el, n_ch), dtype=np.float32)
+    expected[0, 0] = 1.0
+    expected[2, 1] = 1.0
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+    return out
+
+
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+def test_aligned_apodization_op(with_batch_dim):
+    """AlignedApodization applies flat_aligned_apodization to aligned data; with no
+    mask supplied (flat_aligned_apodization=None) it passes the data through
+    unchanged."""
+    from zea.ops import AlignedApodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    data = keras.ops.ones((n_tx, n_pix, n_el, n_ch))
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    op = AlignedApodization(with_batch_dim=with_batch_dim)
+
+    out_noop = op(data=data)["data"]
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(out_noop), keras.ops.convert_to_numpy(data)
+    )
+
+    apodization = keras.ops.convert_to_tensor(
+        np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+    )
+    out = keras.ops.convert_to_numpy(op(data=data, flat_aligned_apodization=apodization)["data"])
+
+    expected = np.zeros((n_tx, n_pix, n_el, n_ch), dtype=np.float32)
+    expected[0, 0] = 1.0
+    expected[2, 1] = 1.0
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+
+
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+@backend_equality_check(decimal=5)
+def test_apply_receive_apodization(with_batch_dim):
+    """A per-pixel, per-element weight scales each receive element's contribution
+    to a pixel (custom receive-aperture apodization), broadcasting uniformly over
+    the transmit and channel axes."""
+    from zea.func.ultrasound import apply_receive_apodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    data = keras.ops.ones((n_tx, n_pix, n_el, n_ch))
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    # Per-pixel taper over the receive elements (independent of transmit/channel).
+    apod_np = np.array([[1.0, 0.5, 0.0, 0.0], [0.0, 0.0, 0.5, 1.0]], dtype=np.float32)
+    apodization = keras.ops.convert_to_tensor(apod_np)
+
+    out = keras.ops.convert_to_numpy(apply_receive_apodization(data, apodization, with_batch_dim))
+
+    # Broadcast the (n_pix, n_el) weight over n_tx (leading) and n_ch (trailing).
+    expected = np.broadcast_to(apod_np[None, :, :, None], (n_tx, n_pix, n_el, n_ch)).copy()
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+    return out
+
+
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+def test_receive_apodization_op(with_batch_dim):
+    """ReceiveApodization applies a custom per-pixel, per-element mask to aligned
+    data; with no mask supplied (flat_receive_apodization=None) it passes the data
+    through unchanged, and a uniform ones-weight is the identity."""
+    from zea.ops import ReceiveApodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    rng = np.random.default_rng(0)
+    data_np = rng.standard_normal((n_tx, n_pix, n_el, n_ch)).astype(np.float32)
+    data = keras.ops.convert_to_tensor(data_np)
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    op = ReceiveApodization(with_batch_dim=with_batch_dim)
+
+    # None -> pass-through
+    out_noop = op(data=data)["data"]
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(out_noop), keras.ops.convert_to_numpy(data)
+    )
+
+    # Ones -> identity
+    ones = keras.ops.ones((n_pix, n_el))
+    out_ones = op(data=data, flat_receive_apodization=ones)["data"]
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(out_ones), keras.ops.convert_to_numpy(data), rtol=1e-5
+    )
+
+    # Per-element taper -> scales the expected elements
+    apod_np = np.array([[1.0, 0.5, 0.0, 0.0], [0.0, 0.0, 0.5, 1.0]], dtype=np.float32)
+    apodization = keras.ops.convert_to_tensor(apod_np)
+    out = keras.ops.convert_to_numpy(op(data=data, flat_receive_apodization=apodization)["data"])
+
+    expected = data_np * apod_np[None, :, :, None]
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+
+
 @backend_equality_check(decimal=2)
 def test_prepare_parameters_pfield_all_backends():
     """pipeline.prepare_parameters must work on all backends when pfield is enabled.

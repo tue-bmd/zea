@@ -269,6 +269,62 @@ def _file_hash(filepaths):
     return hash_elements([total_size, modified_times])
 
 
+def _copy_h5_files(file_paths, base_path, to_path, key, mode=None):
+    """Copy ``key`` (or all keys) from each file to ``to_path``, mirroring structure.
+
+    Each file's location relative to ``base_path`` is preserved under ``to_path``.
+    Shared implementation for :meth:`Folder.copy` and :meth:`Dataset.copy`.
+
+    Args:
+        file_paths (list): Paths to the source HDF5 files.
+        base_path (str or Path): Base directory the source files are made relative to
+            when constructing their destination paths.
+        to_path (str or Path): The destination directory where files will be copied.
+        key (str): The key to copy from the source files. If ``"all"`` or ``"*"``, all
+            keys are copied.
+        mode (str, optional): The mode in which to open the destination files. Defaults
+            to ``"a"`` (append), and ``"w"`` (write) if ``key`` is ``"all"`` or ``"*"``.
+    """
+    all_keys = key == "all" or key == "*"
+
+    if mode is None:
+        mode = "a" if not all_keys else "w"
+
+    if all_keys:
+        key_msg = "Including all keys."
+        if mode not in ["w", "x"]:
+            raise ValueError(
+                f"Invalid mode '{mode}' for copying all keys. Must be 'w' or 'x'."
+                "If you want to copy all keys, the destination file must be opened "
+                "in 'w' or 'x' mode, which means it will be overwritten or created."
+            )
+    else:
+        key_msg = f"Only copying key '{key}'."
+        if mode not in ["a", "w", "r+", "x"]:
+            raise ValueError(
+                f"Invalid mode '{mode}' for copying a specific key. "
+                "Must be one of 'a', 'w', 'r+', or 'x'."
+            )
+
+    base_path = Path(base_path)
+    to_path = Path(to_path)
+    to_path.mkdir(parents=True, exist_ok=True)
+
+    for file_path in tqdm.tqdm(
+        file_paths,
+        total=len(file_paths),
+        desc=f"Copying {len(file_paths)} file(s) from {base_path} to {to_path}. {key_msg}",
+    ):
+        dst_path = to_path / Path(file_path).relative_to(base_path)
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        with File(file_path) as src, File(dst_path, mode) as dst:
+            if all_keys:
+                for obj in src.keys():
+                    src.copy(obj, dst)
+            else:
+                src.copy_key(key, dst)
+
+
 class Folder:
     """Group of HDF5 files in a folder that can be validated.
     Mostly used internally, you might want to use the Dataset class instead.
@@ -486,38 +542,7 @@ class Folder:
                 Defaults to 'a' (append mode), and 'w' (write mode) if key is 'all' or '*'.
                 See: https://docs.h5py.org/en/stable/high/file.html#opening-creating-files
         """
-        all_keys = key == "all" or key == "*"
-
-        if mode is None:
-            mode = "a" if not all_keys else "w"
-
-        if all_keys:
-            key_msg = "Including all keys."
-            assert mode in ["w", "x"], (
-                "If you want to copy all keys, the destination file must be opened "
-                "in 'w' or 'x' mode, which means it will be overwritten or created."
-            )
-        else:
-            key_msg = f"Only copying key '{key}'."
-            assert mode in ["a", "w", "r+", "x"], (
-                f"Invalid mode '{mode}'. Must be one of 'a', 'w', 'r+', or 'x'."
-            )
-
-        to_path = Path(to_path)
-        to_path.mkdir(parents=True, exist_ok=True)
-
-        for file_path in tqdm.tqdm(
-            self.file_paths,
-            total=self.n_files,
-            desc=f"Copying dataset from {self.folder_path} to {to_path}. {key_msg}",
-        ):
-            dst_path = Path(file_path).relative_to(self.folder_path)
-            with File(file_path) as src, File(to_path / dst_path, mode) as dst:
-                if all_keys:
-                    for obj in src.keys():
-                        src.copy(obj, dst)
-                else:
-                    src.copy_key(key, dst)
+        _copy_h5_files(self.file_paths, self.folder_path, to_path, key, mode=mode)
 
 
 class Dataset(H5FileHandleCache):
@@ -714,6 +739,32 @@ class Dataset(H5FileHandleCache):
     def n_files(self):
         """Return number of files in dataset."""
         return len(self.file_paths)
+
+    def copy(self, to_path: str | Path, key: str, mode: str | None = None):
+        """Copy the data for all or a specific key to a new location.
+
+        Works for a dataset built from a single file, a list of files, or a folder. Each
+        file is written under ``to_path``, mirroring its location relative to the common
+        parent directory of the dataset's files (for a single file, its own name is used).
+
+        Has the option to copy all keys or only a specific key. By default, it only copies
+        if the destination file does not already contain the key. You can change the mode to
+        'w' to overwrite the destination file. Will always copy metadata such as dataset
+        attributes and scan object.
+
+        Args:
+            to_path (str or Path): The destination folder where files will be copied.
+            key (str): The key to copy from the source files.
+                If 'all' or '*', all keys will be copied.
+            mode (str, optional): The mode in which to open the destination files.
+                Defaults to 'a' (append mode), and 'w' (write mode) if key is 'all' or '*'.
+                See: https://docs.h5py.org/en/stable/high/file.html#opening-creating-files
+        """
+        if self.n_files == 1:
+            base_path = Path(self.file_paths[0]).parent
+        else:
+            base_path = Path(os.path.commonpath([str(p) for p in self.file_paths]))
+        _copy_h5_files(self.file_paths, base_path, to_path, key, mode=mode)
 
     def __getitem__(self, index) -> File:
         """Retrieves an item from the dataset."""

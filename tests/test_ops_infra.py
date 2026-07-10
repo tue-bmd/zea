@@ -633,6 +633,26 @@ def test_pipeline_validation():
         _ = ops.Pipeline(operations=operations)
 
 
+def test_beamform_pfield_and_aligned_apodization_mutually_exclusive():
+    """Beamform should reject enabling both pfield weighting and aligned (compounding)
+    apodization, since both weight the transmit axis."""
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        Beamform(enable_pfield=True, enable_aligned_apodization=True)
+
+    # Either one alone (or neither) is fine.
+    Beamform(enable_pfield=True, enable_aligned_apodization=False)
+    Beamform(enable_pfield=False, enable_aligned_apodization=True)
+    Beamform(enable_pfield=False, enable_aligned_apodization=False)
+
+
+def test_beamform_receive_apodization_is_independent():
+    """The custom (per-element) receive apodization is orthogonal to pfield /
+    aligned apodization and can be combined with either."""
+    Beamform(enable_pfield=True, enable_receive_apodization=True)
+    Beamform(enable_aligned_apodization=True, enable_receive_apodization=True)
+    Beamform(enable_receive_apodization=True)
+
+
 def test_pipeline_with_parameters():
     """Tests the Pipeline with a Parameters object as input.
 
