@@ -23,7 +23,10 @@ import logging
 import os
 import re
 import sys
+import weakref
 from pathlib import Path
+
+from tqdm import tqdm as _tqdm_cls
 
 # The logger to use
 logger: logging.Logger
@@ -113,6 +116,61 @@ def bold(string):
     return "\033[1m" + str(string) + "\033[0m"
 
 
+# Progress bars (other than tqdm, which is handled separately below) that have
+# asked to be redrawn whenever a log message is emitted while they are on screen.
+# A WeakSet so a bar that never explicitly unregisters (e.g. a loop that
+# `break`s before reaching its target) doesn't leak here forever - it drops out
+# once nothing else references it.
+# See `register_progress`/`unregister_progress` and `zea.utils.ProgressBar`.
+_active_progress: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def register_progress(bar):
+    """Registers a progress-bar-like object so log output doesn't corrupt its line.
+
+    ``bar`` must implement a no-argument ``redraw()`` method that forces a fresh
+    render of its current state. Registered bars are redrawn whenever a log
+    message is emitted to the console while they are active.
+    """
+    _active_progress.add(bar)
+
+
+def unregister_progress(bar):
+    """Unregisters a progress bar previously passed to :func:`register_progress`."""
+    _active_progress.discard(bar)
+
+
+class _ProgressAwareStreamHandler(logging.StreamHandler):
+    """A :class:`logging.StreamHandler` that doesn't corrupt an in-progress bar's line.
+
+    - If any :mod:`tqdm` bars are currently active, the message is routed through
+      ``tqdm.write()``, which knows how to clear and redraw every active bar.
+    - Otherwise, if any bar registered via :func:`register_progress` is active
+      (e.g. a :class:`zea.utils.ProgressBar`), the current unterminated line is
+      cleared before the message is written, and each registered bar is asked
+      to redraw itself.
+    - If neither applies, this behaves like a plain ``StreamHandler``.
+    """
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            if _tqdm_cls._instances:
+                _tqdm_cls.write(msg, file=stream)
+                return
+            if _active_progress:
+                stream.write("\r\x1b[K")
+            stream.write(msg + self.terminator)
+            self.flush()
+            for bar in list(_active_progress):
+                bar.redraw()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
+
+
 class CustomFormatter(logging.Formatter):
     """Custom formatter to use different format strings for different log levels"""
 
@@ -180,7 +238,7 @@ def configure_console_logger(
 
     # stdout stream handler if no handler is configured
     if not new_logger.hasHandlers():
-        console = logging.StreamHandler(stream=sys.stdout)
+        console = _ProgressAwareStreamHandler(stream=sys.stdout)
         console.setFormatter(formatter)
         console.setLevel(level)
         new_logger.addHandler(console)
