@@ -2,32 +2,18 @@ Command line interface
 ================================
 
 Besides the main :doc:`zea API documentation <_autosummary/zea>`, ``zea`` provides a
-command line interface (CLI) with two primary subcommands.
+command line interface (CLI) with three primary subcommands (process, app, data).
 
--------------------------------
-zea — main entry point
--------------------------------
-
-The ``zea`` command exposes two subcommands:
+Note that is very new functionality, and might change in future releases. Please report any issues you encounter.
 
 .. code-block:: text
 
-    zea process --dataset <path> --config <config.yaml> [options]  # batch beamform
-    zea app [--share] [--server_port PORT]                         # Gradio visualizer
+    zea process --dataset <path> --config <config.yaml> [options]  # batch beamform a dataset
+    zea app [--share] [--server-port PORT]                         # launch the Gradio visualizer
+    zea data <operation> [options]                                 # manipulate zea data files
 
-.. autoprogram:: zea.__main__:get_parser()
+.. tyroprogram:: zea.__main__:CLI
    :prog: zea
-
---------------------------------
-Process dataset (standalone CLI)
---------------------------------
-
-The beamformer can also be invoked directly as a module (equivalent to ``zea process``).
-Both ``--dataset`` / ``-d`` and ``--config`` / ``-c`` are required; ``--save-dir`` is optional
-(defaults to ``output/``):
-
-.. autoprogram:: zea.data.process:get_parser()
-   :prog: python -m zea.data.process
 
 -------------------------------
 Convert datasets
@@ -35,19 +21,3 @@ Convert datasets
 
 .. autoprogram:: zea.data.convert.__main__:get_parser()
    :prog: python -m zea.data.convert
-
--------------------------------
-Data copying
--------------------------------
-
-.. autoprogram:: zea.data.__main__:get_parser()
-   :prog: python -m zea.data
-
-.. _cli-file-operations:
-
--------------------------------
-Data file manipulation
--------------------------------
-
-.. autoprogram:: zea.data.file_operations:get_parser()
-   :prog: python -m zea.data.file_operations

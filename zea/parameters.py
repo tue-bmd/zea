@@ -300,6 +300,8 @@ class Parameters(BaseParameters):
         "pixels_per_wavelength": {"dtype": np.int32, "default": 4},
         "pfield_kwargs": {"dtype": dict, "default": {}},
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
+        "enable_scanline": {"dtype": bool, "default": False},  # native dtype on purpose
+        "flat_receive_apodization": {"dtype": (type(None), np.ndarray), "default": None},
         "focal_region_length": {"dtype": np.float32, "default": 0.0},
         "enable_scanline": {"dtype": bool, "default": False},  # native dtype on purpose
         "flat_receive_apodization": {"dtype": (type(None), np.ndarray), "default": None},

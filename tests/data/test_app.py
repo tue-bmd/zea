@@ -246,21 +246,25 @@ def test_read_file_info_nonexistent_path():
     assert _read_file_info("/nonexistent/path.hdf5") == {}
 
 
-# ── get_parser ────────────────────────────────────────────────────────────────
+# ── CLI ───────────────────────────────────────────────────────────────────────
 
 
-def test_get_parser_defaults():
-    from zea.data.app import get_parser
+def test_cli_defaults():
+    import tyro
 
-    args = get_parser().parse_args([])
+    from zea.data.app import AppArgs
+
+    args = tyro.cli(AppArgs, args=[])
     assert args.share is False
     assert args.server_port is None
 
 
-def test_get_parser_with_flags():
-    from zea.data.app import get_parser
+def test_cli_with_flags():
+    import tyro
 
-    args = get_parser().parse_args(["--share", "--server-port", "8080"])
+    from zea.data.app import AppArgs
+
+    args = tyro.cli(AppArgs, args=["--share", "--server-port", "8080"])
     assert args.share is True
     assert args.server_port == 8080
 
