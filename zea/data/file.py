@@ -1116,11 +1116,12 @@ class File(h5py.File):
             custom: Optional list of :class:`CustomElement` objects holding data that
                 does not fit the zea format. They are stored in a ``custom`` group and
                 read back via :attr:`File.custom`.
-            compression: HDF5 compression filter (default ``"lzf"``). May be a filter
-                name (``"lzf"``, ``"gzip"``) or a mapping of ``create_dataset`` kwargs,
-                e.g. an ``hdf5plugin`` filter object (``hdf5plugin.Blosc2(...)``) or
-                ``{"compression": "gzip", "compression_opts": 4}``. Files written with
-                ``hdf5plugin`` filters require ``import hdf5plugin`` to be read back.
+            compression: HDF5 compression filter (default Blosc zstd+shuffle). May be
+                a filter name (``"lzf"``, ``"gzip"``) or a mapping of ``create_dataset``
+                kwargs, e.g. an ``hdf5plugin`` filter object (``hdf5plugin.Blosc(...)``)
+                or ``{"compression": "gzip", "compression_opts": 4}``. Files written
+                with ``hdf5plugin`` filters require ``import hdf5plugin`` to be read
+                back (zea imports it automatically).
             chunk_axes: Dimension names to chunk with HDF5 chunk size 1 (default
                 ``("n_frames", "n_tx")``); every other axis is stored at full extent,
                 so partial and streamed (``hf://``) reads fetch only the frames/

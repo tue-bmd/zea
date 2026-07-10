@@ -154,9 +154,9 @@ def test_omit_required_scan_key(key, tmp_hdf5_path):
 @pytest.mark.parametrize(
     "chunk_axes, expected",
     [
-        # Default: one chunk per (frame, transmit) plane, full n_ax/n_el/n_ch.
+        # One chunk per (frame, transmit) plane, full n_ax/n_el/n_ch.
         (("n_frames", "n_tx"), lambda s: (1, 1) + s[2:]),
-        # Single axis: one full frame per chunk (the old chunk_frames=True).
+        # One full frame per chunk (the current default).
         (("n_frames",), lambda s: (1,) + s[1:]),
         # Disabled: contiguous storage (no chunking) — needs compression off.
         (None, lambda s: None),
@@ -183,6 +183,23 @@ def test_chunk_axes(chunk_axes, expected, tmp_hdf5_path):
         raw_data = file["data/raw_data"]
         assert raw_data.chunks == expected(raw_data.shape)
         # Data must still be readable regardless of chunking.
+        assert np.array_equal(raw_data[:], DATA["raw_data"])
+
+
+def test_default_write_is_blosc_and_per_frame(tmp_hdf5_path):
+    """Default File.create uses Blosc(zstd) compression and one-frame-per-chunk."""
+    import hdf5plugin
+
+    File.create(path=tmp_hdf5_path, data=DATA, scan=SCAN, probe=PROBE)  # all defaults
+
+    with File(tmp_hdf5_path) as file:
+        raw_data = file["data/raw_data"]
+        # per-frame default: chunk size 1 on n_frames, full on the rest
+        assert raw_data.chunks == (1,) + raw_data.shape[1:]
+        # Blosc filter is applied (h5py doesn't name external filters, so check id)
+        dcpl = raw_data.id.get_create_plist()
+        filter_ids = {dcpl.get_filter(i)[0] for i in range(dcpl.get_nfilters())}
+        assert hdf5plugin.Blosc.filter_id in filter_ids
         assert np.array_equal(raw_data[:], DATA["raw_data"])
 
 

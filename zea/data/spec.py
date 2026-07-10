@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, ClassVar, List, NoReturn, Sequence, Tuple, cast
 
 import h5py
+import hdf5plugin
 import numpy as np
 
 from zea import log
@@ -38,13 +39,20 @@ UNITS = {
     "kg/m²": "kilograms per square meter",
 }
 
-DEFAULT_COMPRESSION = "lzf"
+# Default compression: Blosc(zstd) with byte-shuffle. A single HDF5 filter
+# (id 32001) that decodes via numcodecs.Blosc, so files can be read both by h5py
+# (hdf5plugin registers the filter on import) and by the Zarr/VirtualiZarr cloud
+# read path. Importing hdf5plugin here also registers the filter for every read.
+# ``create_dataset`` accepts this Mapping directly (see ``_resolve_chunks``).
+DEFAULT_COMPRESSION = hdf5plugin.Blosc(cname="zstd", clevel=5, shuffle=hdf5plugin.Blosc.SHUFFLE)
 
-# Default dataset dimensions to chunk along (HDF5 chunk size 1 on each), so that
-# partial and streamed (hf://) reads fetch only the requested frames/transmits.
-# Any axis not present on a given field is ignored, and every remaining axis
-# (e.g. n_ax, n_el, n_ch — almost always read whole) stays at full extent.
-DEFAULT_CHUNK_AXES: tuple[str, ...] = ("n_frames", "n_tx")
+# Default dataset dimensions to chunk along (HDF5 chunk size 1 on each). One full
+# frame per chunk (chunk ``(1, n_tx, n_ax, n_el, n_ch)`` for raw_data): few large
+# contiguous chunks that the cloud/virtual read path fetches concurrently, while
+# staying fine for h5py+blockcache. Any axis not present on a field is ignored.
+# NOTE: for very high n_tx this makes large chunks; a max-transmits-per-chunk
+# option is a planned refinement (see plan.md Phase 1b).
+DEFAULT_CHUNK_AXES: tuple[str, ...] = ("n_frames",)
 
 # Default unit/description for every SCHEMA leaf field.  Subclasses may
 # override by defining their own FIELD_METADATA dict.

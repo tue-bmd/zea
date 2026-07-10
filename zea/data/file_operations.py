@@ -92,8 +92,9 @@ def save_file(
                     "annotations": {"label": np.array(["healthy", "healthy"])},
                 }
         compression (str or Mapping, optional): The HDF5 compression filter to use.
-            Defaults to ``"lzf"``. May also be a mapping of ``create_dataset`` kwargs,
-            e.g. an ``hdf5plugin`` filter object. See :meth:`zea.File.create`.
+            Defaults to Blosc zstd+shuffle. May also be a filter name or a mapping of
+            ``create_dataset`` kwargs, e.g. an ``hdf5plugin`` filter object. See
+            :meth:`zea.File.create`.
         chunk_axes (tuple, optional): Dimension names to chunk with size 1. Defaults
             to ``("n_frames", "n_tx")`` so partial and streamed reads fetch only the
             requested frames/transmits; other axes stay at full extent. Use
