@@ -122,8 +122,8 @@ def detect_cone_parameters(image, image_range, min_cone_half_angle_deg=20, thres
             "The image may be empty or the threshold too high."
         )
 
-    min_y = np.min(non_zero_indices[:, 0])
-    max_y = np.max(non_zero_indices[:, 0])
+    min_y = int(np.min(non_zero_indices[:, 0]))
+    max_y = int(np.max(non_zero_indices[:, 0]))
 
     # Collect left and right edge points
     left_edge_points = []
