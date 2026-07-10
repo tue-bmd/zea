@@ -49,6 +49,65 @@ def complex_h5_file(h5_filepath):
     yield h5_filepath
 
 
+def test_hf_streams_by_default(complex_h5_file, monkeypatch):
+    """An ``hf://`` path streams lazily by default (no full download)."""
+    calls = {"stream": [], "download": []}
+
+    def fake_stream(hf_path, **kwargs):
+        calls["stream"].append(hf_path)
+        return open(complex_h5_file, "rb")  # noqa: SIM115 — closed by File.close()
+
+    def fake_resolve(hf_path, **kwargs):
+        calls["download"].append(hf_path)
+        return str(complex_h5_file)
+
+    monkeypatch.setattr("zea.data.file._hf_stream_open", fake_stream)
+    monkeypatch.setattr("zea.data.file._hf_resolve_path", fake_resolve)
+
+    with File("hf://org/repo/x.hdf5") as file:
+        assert file["dummy_dataset2"][:].tolist() == [0, 1, 2, 3, 4]
+        assert file._stream_fileobj is not None  # streamed, not downloaded
+
+    assert calls["stream"] == ["hf://org/repo/x.hdf5"]
+    assert calls["download"] == []
+    assert file._stream_fileobj is None  # released on close
+
+
+def test_hf_stream_false_downloads(complex_h5_file, monkeypatch):
+    """``stream=False`` falls back to downloading the full file."""
+    calls = {"stream": [], "download": []}
+
+    def fake_stream(hf_path, **kwargs):
+        calls["stream"].append(hf_path)
+        return open(complex_h5_file, "rb")  # noqa: SIM115
+
+    def fake_resolve(hf_path, **kwargs):
+        calls["download"].append(hf_path)
+        return str(complex_h5_file)
+
+    monkeypatch.setattr("zea.data.file._hf_stream_open", fake_stream)
+    monkeypatch.setattr("zea.data.file._hf_resolve_path", fake_resolve)
+
+    with File("hf://org/repo/x.hdf5", stream=False) as file:
+        assert file["dummy_dataset2"][:].tolist() == [0, 1, 2, 3, 4]
+        assert file._stream_fileobj is None
+
+    assert calls["download"] == ["hf://org/repo/x.hdf5"]
+    assert calls["stream"] == []
+
+
+def test_stream_true_local_path_raises(h5_filepath):
+    """``stream=True`` on a non-hf path is rejected."""
+    with pytest.raises(ValueError, match="only supported for 'hf://'"):
+        File(str(h5_filepath), stream=True)
+
+
+def test_stream_write_mode_raises():
+    """Streaming is read-only; write modes must download instead."""
+    with pytest.raises(ValueError, match="read mode"):
+        File("hf://org/repo/x.hdf5", mode="w")
+
+
 def test_basic_properties(simple_h5_file):
     """Test basic properties of File class."""
 

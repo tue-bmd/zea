@@ -16,7 +16,7 @@ from tqdm import tqdm
 from zea import Parameters
 from zea.data.datasets import Dataset
 from zea.data.file import File, load_file_all_data_types
-from zea.data.spec import DEFAULT_COMPRESSION
+from zea.data.spec import DEFAULT_CHUNK_AXES, DEFAULT_COMPRESSION
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.log import logger
@@ -47,7 +47,7 @@ def save_file(
     custom_elements: list | None = None,
     metadata: dict | None = None,
     compression: str = DEFAULT_COMPRESSION,
-    chunk_frames=False,
+    chunk_axes=DEFAULT_CHUNK_AXES,
     **kwargs,
 ):
     """Saves data to a zea data file (h5py file).
@@ -91,8 +91,11 @@ def save_file(
                     "annotations": {"label": np.array(["healthy", "healthy"])},
                 }
         compression (str, optional): The HDF5 compression filter to use. Defaults to ``"lzf"``.
-        chunk_frames (bool, optional): Whether to store the data datasets with HDF5
-            chunked storage, using one frame per chunk. Defaults to False.
+        chunk_axes (tuple, optional): Dimension names to chunk with size 1. Defaults
+            to ``("n_frames", "n_tx")`` so partial and streamed reads fetch only the
+            requested frames/transmits; other axes stay at full extent. Use
+            ``None``/``()`` for contiguous storage. See
+            :meth:`zea.data.spec.Spec._resolve_chunks`.
     """
 
     data = {}
@@ -119,7 +122,7 @@ def save_file(
         description=description,
         custom=custom_elements,
         compression=compression,
-        chunk_frames=chunk_frames,
+        chunk_axes=chunk_axes,
         overwrite=True,
     )
 
@@ -422,7 +425,7 @@ def resave(
     output_path: Path,
     overwrite=False,
     enable_compression=True,
-    chunk_frames=False,
+    chunk_axes=DEFAULT_CHUNK_AXES,
 ):
     """
     Resaves a zea data file to a new location.
@@ -434,8 +437,11 @@ def resave(
             Defaults to False.
         enable_compression (bool, optional): Whether to enable lzf compression for the
             datasets. Defaults to True.
-        chunk_frames (bool, optional): Whether to store the data datasets with HDF5
-            chunked storage, using one frame per chunk. Defaults to False.
+        chunk_axes (tuple, optional): Dimension names to chunk with size 1. Defaults
+            to ``("n_frames", "n_tx")`` so partial and streamed reads fetch only the
+            requested frames/transmits; other axes stay at full extent. Use
+            ``None``/``()`` for contiguous storage. See
+            :meth:`zea.data.spec.Spec._resolve_chunks`.
     """
 
     data_dict, parameters = load_file_all_data_types(input_path)
@@ -453,7 +459,7 @@ def resave(
         custom_elements=custom_elements,
         description=description,
         enable_compression=enable_compression,
-        chunk_frames=chunk_frames,
+        chunk_axes=chunk_axes,
     )
 
 

@@ -398,7 +398,9 @@ class H5DataSource:
 
         if self.return_filename:
             file_data = {
-                "fullpath": file.filename,  # same as file.path, but str type
+                # For streamed hf:// files ``filename`` is a placeholder for the
+                # underlying file object, so prefer the original source path.
+                "fullpath": getattr(file, "_source_name", None) or file.filename,
                 "filename": file.stem,
                 "indices": indices,
             }

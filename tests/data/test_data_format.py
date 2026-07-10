@@ -151,13 +151,27 @@ def test_omit_required_scan_key(key, tmp_hdf5_path):
         )
 
 
-@pytest.mark.parametrize("chunk_frames", [True, False])
-def test_chunk_frames(chunk_frames, tmp_hdf5_path):
-    """Tests that chunk_frames stores data datasets with one frame per chunk."""
+@pytest.mark.parametrize(
+    "chunk_axes, expected",
+    [
+        # Default: one chunk per (frame, transmit) plane, full n_ax/n_el/n_ch.
+        (("n_frames", "n_tx"), lambda s: (1, 1) + s[2:]),
+        # Single axis: one full frame per chunk (the old chunk_frames=True).
+        (("n_frames",), lambda s: (1,) + s[1:]),
+        # Disabled: contiguous storage (no chunking) — needs compression off.
+        (None, lambda s: None),
+        ((), lambda s: None),
+    ],
+)
+def test_chunk_axes(chunk_axes, expected, tmp_hdf5_path):
+    """chunk_axes controls which dimensions get HDF5 chunk size 1."""
+    # Contiguous storage is only possible without compression.
+    compression = None if not chunk_axes else "lzf"
 
     File.create(
         path=tmp_hdf5_path,
-        chunk_frames=chunk_frames,
+        chunk_axes=chunk_axes,
+        compression=compression,
         data=DATA,
         scan=SCAN,
         probe=PROBE,
@@ -167,11 +181,9 @@ def test_chunk_frames(chunk_frames, tmp_hdf5_path):
 
     with File(tmp_hdf5_path) as file:
         raw_data = file["data/raw_data"]
-        if chunk_frames:
-            # One frame (a single slice along the first axis) per chunk.
-            assert raw_data.chunks == (1,) + raw_data.shape[1:]
+        assert raw_data.chunks == expected(raw_data.shape)
         # Data must still be readable regardless of chunking.
-        assert np.array_equal(file["data/raw_data"][:], DATA["raw_data"])
+        assert np.array_equal(raw_data[:], DATA["raw_data"])
 
 
 def test_existing_path(tmp_hdf5_path):

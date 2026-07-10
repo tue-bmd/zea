@@ -202,8 +202,10 @@ class _Resave:
     """Output HDF5 file or folder."""
     overwrite: bool = False
     """Overwrite existing output file."""
-    chunk_frames: bool = False
-    """Store the data datasets with HDF5 chunked storage, one frame per chunk."""
+    chunk_axes: tuple[str, ...] = ("n_frames", "n_tx")
+    """Dimension names to chunk with HDF5 chunk size 1 (others stored at full extent),
+    so partial/streamed reads fetch only the requested frames/transmits. Pass no values
+    for contiguous storage (use together with --disable-compression)."""
     disable_compression: bool = False
     """Disable lzf compression for the datasets."""
 
@@ -215,7 +217,7 @@ class _Resave:
             output_path=self.output_path,
             overwrite=self.overwrite,
             enable_compression=not self.disable_compression,
-            chunk_frames=self.chunk_frames,
+            chunk_axes=self.chunk_axes,
         )
 
 

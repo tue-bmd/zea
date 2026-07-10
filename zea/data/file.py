@@ -6,7 +6,7 @@ import enum
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, List, Tuple, Union, cast
 
 import h5py
 import numpy as np
@@ -15,6 +15,7 @@ import zea
 from zea import log
 from zea.data.legacy_file import legacy_data, legacy_probe, legacy_scan
 from zea.data.spec import (
+    DEFAULT_CHUNK_AXES,
     DEFAULT_COMPRESSION,
     DataSpec,
     FileSpec,
@@ -25,7 +26,7 @@ from zea.data.spec import (
 )
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
-from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
+from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path, _hf_stream_open
 from zea.internal.utils import deprecated
 
 _ZEA_ISSUES_URL = "https://github.com/tue-bmd/zea/issues"
@@ -635,13 +636,30 @@ class File(h5py.File):
                 the prefix 'hf://', in which case it will be resolved to a
                 huggingface path.
             mode (str, optional): The mode to open the file in. Defaults to "r".
+            stream (bool, optional): Only used when ``name`` starts with ``hf://``.
+                When ``True`` (the default for ``hf://`` paths), the file is read
+                lazily over HTTP range requests via
+                :class:`~huggingface_hub.HfFileSystem` — only the byte ranges
+                actually accessed (e.g. the frames you slice) are fetched, instead
+                of downloading the whole file. Requires read mode (``"r"``). Pass
+                ``stream=False`` to download the full file to the local cache
+                (the previous behaviour), which is required for writing.
             revision (str, optional): HuggingFace revision (branch, tag, or commit hash)
-                to download from. Only used when ``name`` starts with ``hf://``.
-                Defaults to ``"main"``. Example: ``revision="v0.1.0"``.
+                to read from. Only used when ``name`` starts with ``hf://``.
+                Defaults to the repository default branch. Example: ``revision="v0.1.0"``.
             repo_type (str, optional): HuggingFace repository type. Only used when
                 ``name`` starts with ``hf://``. Defaults to ``"dataset"``.
             cache_dir (str or Path, optional): Local cache directory for downloaded
-                HuggingFace files. Only used when ``name`` starts with ``hf://``.
+                HuggingFace files. Only used when ``name`` starts with ``hf://`` and
+                ``stream=False``.
+            block_size (int, optional): Block size in bytes for streaming reads.
+                zea files store each frame as many small chunks, so a larger block
+                coalesces more chunk reads into a single HTTP request — faster for
+                whole-frame reads, at the cost of more over-fetch for sparse reads.
+                Only used when ``name`` starts with ``hf://`` and ``stream=True``.
+            cache_type (str, optional): fsspec cache strategy for streaming reads
+                (default ``"blockcache"``). Only used when ``name`` starts with
+                ``hf://`` and ``stream=True``.
             *args: Additional arguments to pass to h5py.File.
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
@@ -651,22 +669,61 @@ class File(h5py.File):
         )
 
         # Extract HF-only kwargs so they never reach h5py
-        hf_kwargs = {}
-        for key in ("revision", "repo_type", "cache_dir"):
+        hf_kwargs: dict[str, Any] = {}
+        for key in ("revision", "repo_type", "cache_dir", "block_size", "cache_type"):
             if key in kwargs:
                 hf_kwargs[key] = kwargs.pop(key)
 
+        is_hf = str(name).startswith(HF_PREFIX)
+
+        # Streaming (HTTP range requests) is the default for hf:// paths: only the
+        # bytes actually read are fetched, rather than downloading the whole file.
+        stream = kwargs.pop("stream", None)
+        if stream is None:
+            stream = is_hf
+        elif stream and not is_hf:
+            raise ValueError("stream=True is only supported for 'hf://' paths.")
+
+        # File object opened for streaming; kept so we can close it in close().
+        stream_fileobj = None
+        # Original source path, retained for streamed files whose ``filename`` is
+        # just a placeholder for the underlying file object (see ``path``).
+        source_name = None
+
         # Resolve huggingface path
-        if str(name).startswith(HF_PREFIX):
+        if is_hf and stream:
+            if mode != "r":
+                raise ValueError(
+                    "Streaming hf:// files is only supported in read mode ('r'). "
+                    "Pass stream=False to download the file for other modes."
+                )
+            # cache_dir only applies to full downloads; it is irrelevant here.
+            hf_kwargs.pop("cache_dir", None)
+            source_name = str(name)
+            stream_fileobj = _hf_stream_open(str(name), **hf_kwargs)
+            name = stream_fileobj
+        elif is_hf:
+            # Full download (previous behaviour); block_size/cache_type are
+            # streaming-only.
+            hf_kwargs.pop("block_size", None)
+            hf_kwargs.pop("cache_type", None)
             name = _hf_resolve_path(str(name), **hf_kwargs)
 
-        # Disable locking for read mode by default
-        if "locking" not in kwargs and mode == "r":
+        # Disable locking for read mode by default. Locking is meaningless for an
+        # in-memory/streamed file object, so only apply it to real filesystem paths.
+        if stream_fileobj is None and "locking" not in kwargs and mode == "r":
             # If the file is opened in read mode, disable locking
             kwargs["locking"] = False
 
         # Initialize the h5py.File
-        super().__init__(name, mode, *args, **kwargs)
+        try:
+            super().__init__(name, mode, *args, **kwargs)
+        except Exception:
+            if stream_fileobj is not None:
+                stream_fileobj.close()
+            raise
+        self._stream_fileobj = stream_fileobj
+        self._source_name = source_name
 
         # Warn when opening an existing file that pre-dates zea v0.1.0
         if mode in ("r", "r+"):
@@ -681,6 +738,21 @@ class File(h5py.File):
         and :meth:`load_parameters`) rather than the base ``h5py`` type.
         """
         return self
+
+    def close(self):
+        """Close the file, also releasing the streamed HF file object if any.
+
+        ``h5py`` does not close file-like objects it did not open itself, so when
+        this :class:`File` was opened from an ``hf://`` path with ``stream=True``
+        we close the underlying fsspec file object here.
+        """
+        try:
+            super().close()
+        finally:
+            stream_fileobj = getattr(self, "_stream_fileobj", None)
+            if stream_fileobj is not None:
+                stream_fileobj.close()
+                self._stream_fileobj = None
 
     def __contains__(self, key):
         """Check whether *key* exists in the file.
@@ -726,7 +798,15 @@ class File(h5py.File):
 
     @property
     def path(self):
-        """Return the path of the file."""
+        """Return the path of the file.
+
+        For files opened by streaming an ``hf://`` path, ``self.filename`` is a
+        placeholder for the underlying file object rather than a real path, so we
+        return the original ``hf://`` source path instead.
+        """
+        source = getattr(self, "_source_name", None)
+        if source is not None:
+            return Path(source)
         return Path(self.filename)
 
     @property
@@ -988,7 +1068,7 @@ class File(h5py.File):
         acquisition_time: str | None = None,
         custom=None,
         compression: str | None = DEFAULT_COMPRESSION,
-        chunk_frames: bool = False,
+        chunk_axes: "tuple[str, ...] | None" = DEFAULT_CHUNK_AXES,
         overwrite: bool = False,
         ignore_warnings: bool = False,
         warn_missing_optional_fields: bool = True,
@@ -1036,9 +1116,14 @@ class File(h5py.File):
                 does not fit the zea format. They are stored in a ``custom`` group and
                 read back via :attr:`File.custom`.
             compression: HDF5 compression filter (default ``"lzf"``).
-            chunk_frames: If *True*, use frame-wise chunking for all datasets containing
-                a "frames" dimension. Dataset will be stored with HDF5 chunking enabled,
-                using a single frame (a single slice along the first dimension) per chunk.
+            chunk_axes: Dimension names to chunk with HDF5 chunk size 1 (default
+                ``("n_frames", "n_tx")``); every other axis is stored at full extent,
+                so partial and streamed (``hf://``) reads fetch only the frames/
+                transmits requested. Axes not present on a field are ignored (an
+                ``image`` without ``n_tx`` is chunked on ``n_frames`` only). Set to a
+                single axis (e.g. ``("n_frames",)``) for one full frame per chunk, or
+                to ``None``/``()`` for contiguous storage (use with
+                ``compression=None``). See :meth:`zea.data.spec.Spec._resolve_chunks`.
             overwrite: If *False* (default), raise if the file exists.
             ignore_warnings: If *True*, suppress all warnings emitted while
                 creating the file (missing optional metadata fields, custom keys,
@@ -1141,7 +1226,7 @@ class File(h5py.File):
             spec.save(
                 str(path),
                 compression=compression,
-                chunk_frames=chunk_frames,
+                chunk_axes=chunk_axes,
                 warn_missing_optional_fields=warn_missing_optional_fields,
             )
 
