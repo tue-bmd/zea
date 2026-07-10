@@ -1028,6 +1028,94 @@ class TestDataValidationErrors:
                 coordinates=np.zeros((2, 12, 3), dtype=np.float32),
             )
 
+    def test_map_values_frame_broadcast(self):
+        """A single Map's values may omit the leading n_frames axis, broadcasting
+        one map (e.g. computed from all frames of raw data) across all frames."""
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # Unchanneled, framed (regression)
+            m_framed = Map(values=np.zeros((2, 16, 12), dtype=np.uint8))
+            assert m_framed.values.shape == (2, 16, 12)
+
+            # Unchanneled, broadcast (no leading n_frames)
+            m_broadcast = Map(values=np.zeros((16, 12), dtype=np.uint8))
+            assert m_broadcast.values.shape == (16, 12)
+
+            # Broadcast values combined with broadcast coordinates
+            m_both_broadcast = Map(
+                values=np.zeros((16, 12), dtype=np.uint8),
+                coordinates=np.zeros((16, 12, 3), dtype=np.float32),
+            )
+            assert m_both_broadcast.values.shape == (16, 12)
+            assert m_both_broadcast.coordinates.shape == (16, 12, 3)
+
+            # Broadcast values combined with fully-framed coordinates is also valid,
+            # since coordinates and values broadcast independently of each other.
+            m_values_broadcast_coords_framed = Map(
+                values=np.zeros((16, 12), dtype=np.uint8),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            )
+            assert m_values_broadcast_coords_framed.values.shape == (16, 12)
+            assert m_values_broadcast_coords_framed.coordinates.shape == (2, 16, 12, 3)
+
+    def test_map_values_frame_broadcast_channeled_requires_labels(self):
+        """Broadcast (frame-less) channeled Segmentation values still require labels,
+        the same as framed values (Segmentation always mandates labels regardless of
+        the values shape, unlike base Map where a broadcast+channeled shape can be
+        ambiguous with a framed+unchanneled one of the same rank)."""
+        with pytest.raises(AssertionError, match="Segmentation requires labels"):
+            Segmentation(values=np.zeros((16, 12, 2), dtype=np.bool_))
+
+        seg = Segmentation(
+            values=np.zeros((16, 12, 2), dtype=np.bool_),
+            labels=np.array(["background", "lv"], dtype=np.str_),
+        )
+        assert seg.values.shape == (16, 12, 2)
+        assert list(seg.labels) == ["background", "lv"]
+
+    def test_map_values_frame_broadcast_subclasses(self):
+        """Frame-broadcast values also work for Map subclasses that override the
+        'values' shape (Image, Segmentation, BeamformedData, EnvelopeData)."""
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            img = Image(values=np.zeros((16, 12), dtype=np.uint8))
+            assert img.values.shape == (16, 12)
+
+            seg = Segmentation(
+                values=np.zeros((16, 12, 2), dtype=np.bool_),
+                labels=np.array(["background", "lv"], dtype=np.str_),
+            )
+            assert seg.values.shape == (16, 12, 2)
+
+            bf = BeamformedData(values=np.zeros((16, 12, 1), dtype=np.float32))
+            assert bf.values.shape == (16, 12, 1)
+            assert list(bf.labels) == ["RF"]
+
+    def test_map_values_broadcast_in_dataspec_does_not_affect_n_frames(self):
+        """A broadcast Map's values must not be treated as the n_frames dimension,
+        so it can coexist with raw_data that has a different frame count."""
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            ds = DataSpec(
+                raw_data=np.zeros((3, 4, 64, 8, 1), dtype=np.float32),
+                image={"values": np.zeros((16, 12), dtype=np.uint8)},
+            )
+            assert ds.raw_data.shape[0] == 3
+            assert ds.image.values.shape == (16, 12)
+
+            # A fully-framed image with a mismatched frame count must still raise.
+            with pytest.raises(ValueError, match="n_frames"):
+                DataSpec(
+                    raw_data=np.zeros((3, 4, 64, 8, 1), dtype=np.float32),
+                    image={"values": np.zeros((5, 16, 12), dtype=np.uint8)},
+                )
+
     def test_map_coordinates_millimetre_range_warns(self):
         """Coordinates with |value| > 1 m should trigger a units warning."""
         # Values of 50 mm look fine in mm but are 0.05 m — no warning expected.

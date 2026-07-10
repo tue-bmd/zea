@@ -1899,13 +1899,19 @@ def load_file_all_data_types(
                     ds = item[sub_key]
                     if isinstance(ds, h5py.Dataset):
                         if sub_key == "values":
-                            group_dict[sub_key] = ds[indices_for_ds]
+                            # Values may omit the leading frame axis (broadcast mode — a
+                            # single map, e.g. computed from all frames of raw data, shared
+                            # across all frames). Only apply frame indexing when the first
+                            # dim matches the file's actual frame count.
+                            if ds.shape[0] == file.n_frames:
+                                group_dict[sub_key] = ds[indices_for_ds]
+                            else:
+                                group_dict[sub_key] = ds[()]
                         elif sub_key == "coordinates":
                             # Coordinates may omit the leading frame axis (broadcast mode —
                             # one grid shared across all frames). Only apply frame indexing
-                            # when the first dim matches the values dataset's first dim.
-                            values_ds = item.get("values")
-                            if values_ds is not None and ds.shape[0] == values_ds.shape[0]:
+                            # when the first dim matches the file's actual frame count.
+                            if ds.shape[0] == file.n_frames:
                                 group_dict[sub_key] = ds[indices_for_ds]
                             else:
                                 group_dict[sub_key] = ds[()]
