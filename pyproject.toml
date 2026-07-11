@@ -140,6 +140,14 @@ zea = "zea.__main__:main"
 [tool.hatch.build.targets.wheel]
 packages = ["zea"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "/zea",
+    "/README.md",
+    "/LICENSE",
+    "/CITATION.cff",
+]
+
 [tool.ruff]
 # We use ruff to lint and auto-format code
 
