@@ -109,6 +109,7 @@ Homepage = "https://github.com/tue-bmd/zea/"
 Repository = "https://github.com/tue-bmd/zea/"
 Documentation = "https://zea.readthedocs.io"
 Issues = "https://github.com/tue-bmd/zea/issues"
+Contributing = "https://zea.readthedocs.io/en/latest/contributing.html"
 
 [project.scripts]
 zea = "zea.__main__:main"
