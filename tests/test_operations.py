@@ -197,6 +197,89 @@ def test_channels_to_complex(size, axis):
 
 
 @pytest.mark.parametrize(
+    "size, axis",
+    [
+        ((2, 1, 128, 32), -1),
+        ((2, 20, 8), 1),
+        ((512, 512), -1),
+    ],
+)
+@backend_equality_check(decimal=5)
+def test_complex_channels_operations(size, axis):
+    """Round-trip the ComplexToChannels and ChannelsToComplex operations.
+
+    ``ComplexToChannels`` splits complex data into two real channels placed at
+    ``axis``, while ``ChannelsToComplex`` reads the two channels from the last
+    axis, so we move them back before converting to complex again.
+    """
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    complex_data = (rng.random(size) + 1j * rng.random(size)).astype("complex64")
+
+    channels = ops.ComplexToChannels(axis=axis)(data=keras.ops.convert_to_tensor(complex_data))[
+        "data"
+    ]
+    channels = keras.ops.convert_to_numpy(channels)
+    assert channels.shape[axis] == 2, "Real/imaginary channels should live on `axis`."
+
+    restored = ops.ChannelsToComplex()(
+        data=keras.ops.convert_to_tensor(np.moveaxis(channels, axis, -1))
+    )["data"]
+    restored = keras.ops.convert_to_numpy(restored)
+
+    np.testing.assert_almost_equal(restored, complex_data, decimal=5)
+    return restored
+
+
+# NOTE: torch is excluded because keras' correlate drops the complex dtype on the
+# torch backend, which the complex_channels path relies on.
+@backend_equality_check(decimal=4, backends=["tensorflow", "jax"])
+def test_fir_filter_complex_channels():
+    """FirFilter with complex_channels=True filters IQ data given as two real channels.
+
+    Because the filter taps are real, filtering the complex signal is equivalent to
+    filtering the real and imaginary channels independently, so the complex-channel
+    path must match a plain real-valued FirFilter applied along the same axis.
+    """
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    # (batch, n_ax, complex_channels) — filter along the n_ax axis.
+    signal = rng.standard_normal((2, 64, 2)).astype("float32")
+    taps = rng.standard_normal((7,)).astype("float32")
+    signal_tensor = keras.ops.convert_to_tensor(signal)
+    taps_tensor = keras.ops.convert_to_tensor(taps)
+
+    result = ops.FirFilter(axis=1, complex_channels=True, with_batch_dim=True)(
+        data=signal_tensor, fir_filter_taps=taps_tensor
+    )["data"]
+    result = keras.ops.convert_to_numpy(result)
+
+    assert result.shape == signal.shape, "Real/imaginary channels should be restored."
+    assert not np.allclose(result, signal), "Filtering should change the signal."
+
+    reference = ops.FirFilter(axis=1, complex_channels=False, with_batch_dim=True)(
+        data=signal_tensor, fir_filter_taps=taps_tensor
+    )["data"]
+    reference = keras.ops.convert_to_numpy(reference)
+
+    np.testing.assert_almost_equal(result, reference, decimal=4)
+
+    # Last axis holds the complex channels, so it may not be the filter axis.
+    with pytest.raises(AssertionError):
+        ops.FirFilter(axis=-1, complex_channels=True, with_batch_dim=True)(
+            data=signal_tensor, fir_filter_taps=taps_tensor
+        )
+
+    return result
+
+
+@pytest.mark.parametrize(
     "factor, batch_size",
     [
         (1, 2),
