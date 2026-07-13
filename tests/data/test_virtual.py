@@ -14,7 +14,9 @@ pytest.importorskip("virtualizarr", reason="needs the 'zea[virtual]' extra")
 
 from zea.data import virtual  # noqa: E402  (after importorskip)
 from zea.data.virtual import (  # noqa: E402
+    VirtualFile,
     build_virtual_reference,
+    open_virtual_file,
     open_virtual_reference,
 )
 
@@ -175,9 +177,56 @@ def test_dataset_virtual(dataset_dir, reference):
         virtual = dataset.virtual
         assert len(virtual) == len(dataset) == 3
         assert np.array_equal(virtual["raw_data"][0], reference["raw_data"][0])
+        assert dataset.total_frames == 2 + 2 + 3  # from the reference: nothing is opened
 
-        # File-returning semantics are unchanged for the non-virtual access path.
-        assert isinstance(dataset[0], File)
+
+def test_dataset_getitem_is_file_like(dataset_dir, reference):
+    """dataset[i] reads with the File API — no download, no HDF5 open."""
+    with Dataset(dataset_dir, lazy="virtual") as dataset:
+        for index, path in enumerate(dataset.file_paths):
+            file = dataset[index]
+            assert isinstance(file, VirtualFile)
+            # dataset[i] and the reference must agree on *which* file this is: the
+            # reference orders files by shape group, the dataset by discovery order.
+            assert file.path == path
+
+            with File(path) as h5py_file:
+                assert np.array_equal(file.data.raw_data[0], h5py_file.data.raw_data[0])
+                assert file.n_frames == h5py_file.n_frames
+                assert file.load_parameters() == h5py_file.load_parameters()
+
+
+def test_open_virtual_file_without_a_reference(dataset_dir):
+    """A single file needs no published reference: its manifest is built on open.
+
+    It goes through the same machinery as a dataset reference (a lone file is just a
+    reference with one file in it), so it yields the same VirtualFile.
+    """
+    path = dataset_dir / "file_0.hdf5"
+    file = open_virtual_file(path)
+
+    assert isinstance(file, VirtualFile)
+    with File(path) as h5py_file:
+        assert np.array_equal(file.data.raw_data[:], h5py_file.data.raw_data[:])
+        assert file.load_parameters() == h5py_file.load_parameters()
+
+
+def test_virtual_file_data_proxy(tmp_path):
+    """The proxy mirrors the File API: nested groups, shape/dtype, array conversion."""
+    image = np.tile(np.linspace(0, 255, 32, dtype=np.uint8), (2, 32, 1))
+    _write_file(tmp_path / "file.hdf5", _compressible_raw(2), image=image)
+
+    file = open_virtual_file(tmp_path / "file.hdf5")
+
+    assert np.array_equal(file.data.image.values[:], image)  # nested group
+    assert file.data.raw_data.shape == (2, N_TX, N_AX, N_EL, 1)  # no leading file axis
+    assert file.data.raw_data.dtype == np.float32
+    assert len(file.data.raw_data) == 2
+    assert np.array_equal(np.asarray(file.data.image.values), image)
+    assert "raw_data" in file.data and "image" in file.data
+
+    with pytest.raises(AttributeError, match="No key 'nope'"):
+        _ = file.data.nope
 
 
 def test_dataset_virtual_requires_lazy_virtual(dataset_dir):

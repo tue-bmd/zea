@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     # 3.10 floor runtime-clean.
     from typing_extensions import Self
 
-    from zea.data.virtual import VirtualReference
+    from zea.data.virtual import VirtualFile, VirtualReference
 
 _CHECK_MAX_DATASET_SIZE = 10000
 _VALIDATED_FLAG_FILE = "validated.flag"
@@ -837,9 +837,19 @@ class Dataset(H5FileHandleCache):
             )
         return self._virtual
 
-    def __getitem__(self, index) -> File:
-        """Retrieves an item from the dataset."""
+    def __getitem__(self, index) -> "File | VirtualFile":
+        """Retrieves an item from the dataset.
+
+        With ``lazy="virtual"`` this is a :class:`~zea.data.virtual.VirtualFile`, which
+        answers to the same read calls (``dataset[0].data.raw_data[0]``) but fetches only
+        that frame's chunk byte ranges — no download, no HDF5 open. Otherwise it is a
+        :class:`~zea.data.file.File` (``hf://`` files are downloaded on first access).
+        """
         path = self.file_paths[index]
+        if self.lazy == VIRTUAL:
+            # Look up by path rather than position: the reference orders its files by
+            # shape group, which need not match this dataset's file order.
+            return self.virtual.file(path)
         if path.startswith(HF_PREFIX):
             hf_kwargs = {}
             if self.revision is not None:
@@ -862,6 +872,9 @@ class Dataset(H5FileHandleCache):
     @property
     def total_frames(self):
         """Return total number of frames in dataset."""
+        if self.lazy == VIRTUAL:
+            # The reference knows every file's shape: no need to open (or download) any.
+            return sum(file.n_frames for file in self.virtual.files())
         return sum(self.get_file(file_path).n_frames for file_path in self.file_paths)
 
     def __repr__(self):

@@ -3,11 +3,12 @@
 from pathlib import Path
 from typing import Generator
 
+import h5py
 import numpy as np
 import pytest
 
 from zea.data.file import File, validate_file
-from zea.data.spec import ScanSpec
+from zea.data.spec import PAGED_LAYOUT, ScanSpec
 
 from . import generate_example_dataset
 
@@ -200,6 +201,24 @@ def test_default_write_is_blosc_and_per_frame(tmp_hdf5_path):
         filter_ids = {dcpl.get_filter(i)[0] for i in range(dcpl.get_nfilters())}
         assert hdf5plugin.Blosc.filter_id in filter_ids
         assert np.array_equal(raw_data[:], DATA["raw_data"])
+
+
+def test_default_write_is_paged(tmp_hdf5_path):
+    """Files are written with a paged file space, which speeds up streamed opens.
+
+    Paging collects the metadata a reader walks on open into few adjacent pages, so a
+    cold open over HTTP costs fewer round trips. It must not change what is stored: the
+    file stays a plain HDF5 file, readable by h5py without any special handling.
+    """
+    File.create(path=tmp_hdf5_path, data=DATA, scan=SCAN, probe=PROBE)  # all defaults
+
+    with h5py.File(tmp_hdf5_path, "r") as file:
+        plist = file.id.get_create_plist()
+        strategy = plist.get_file_space_strategy()[0]
+        assert strategy == h5py.h5f.FSPACE_STRATEGY_PAGE
+        assert plist.get_file_space_page_size() == PAGED_LAYOUT["fs_page_size"]
+        # plain h5py (no zea key remapping): the file is an ordinary HDF5 file
+        assert np.array_equal(file["tracks/track_0/data/raw_data"][:], DATA["raw_data"])
 
 
 def test_existing_path(tmp_hdf5_path):

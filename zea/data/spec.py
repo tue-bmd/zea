@@ -54,6 +54,20 @@ DEFAULT_COMPRESSION = hdf5plugin.Blosc(cname="zstd", clevel=5, shuffle=hdf5plugi
 # option is a planned refinement (see plan.md Phase 1b).
 DEFAULT_CHUNK_AXES: tuple[str, ...] = ("n_frames",)
 
+# Paged file-space strategy: HDF5 allocates in fixed-size pages, which collects the
+# metadata that a reader must walk on open (superblock, group and chunk B-trees) into
+# few, adjacent pages instead of scattering it through the file. Over HTTP this cuts a
+# cold open from 3 requests to 2 and ~0.16 s to ~0.05 s, at ~2% file size for 64 KiB
+# pages (larger pages waste space and, past ~1 MiB, requests too).
+#
+# Requires HDF5 >= 1.10.1 on the reader, which `libver="latest"` implies anyway.
+PAGED_LAYOUT = {
+    "libver": "latest",
+    "fs_strategy": "page",
+    "fs_page_size": 64 * 1024,
+    "fs_persist": True,
+}
+
 # Default unit/description for every SCHEMA leaf field.  Subclasses may
 # override by defining their own FIELD_METADATA dict.
 _DEFAULT_FIELD_UNIT = "–"
@@ -2697,7 +2711,7 @@ class FileSpec(Spec):
         # Lazy import to avoid circular dependency (spec.py is imported by file.py)
         from zea import File
 
-        with File(str(path), "w") as f:
+        with File(str(path), "w", **PAGED_LAYOUT) as f:
             f.attrs["zea_version"] = zea_version
 
             # Write scalar/array metadata fields (metadata, metrics, probe_name, etc.)

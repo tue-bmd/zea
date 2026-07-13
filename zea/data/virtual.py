@@ -17,17 +17,28 @@ Two sides:
   reads each file's metadata (over HTTP for ``hf://`` inputs — the data itself is
   never downloaded) and writes a combined reference. Also available as
   ``zea data virtualize <input> <output>``.
-- **Reading** (user): :func:`open_virtual_reference`, or
-  :class:`~zea.data.datasets.Dataset` with ``lazy="virtual"``.
+- **Reading** (user): :class:`~zea.data.datasets.Dataset` with ``lazy="virtual"``, or
+  :func:`open_virtual_file` for a lone file.
 
-Files are combined along a new leading ``file`` axis, so a read looks like::
+Reads use the ordinary file API — a :class:`VirtualFile` answers to the same calls as a
+:class:`~zea.data.file.File`, it just fetches chunk byte ranges instead of opening HDF5::
 
-    virtual = open_virtual_reference("hf://zeahub/camus-sample/virtual/index.json")
-    virtual["raw_data"][2, 0:3]  # file 2, frames 0-3 — one concurrent range read
+    dataset = Dataset("hf://zeahub/camus-sample", lazy="virtual")
+    dataset[2].data.raw_data[0]  # file 2, frame 0 — nothing else is fetched
+
+    open_virtual_file("hf://zeahub/camus-sample/a.hdf5").data.raw_data[0]
+
+A single file is just a reference with one file in it, so both go through the same
+machinery. On top of that, files of equal shape are stacked along a leading ``file``
+axis, which lets one expression read across files concurrently — something the per-file
+API cannot express::
+
+    dataset.virtual["raw_data"][[0, 4], 0:2]  # frames 0-2 of files 0 and 4
 
 Only numeric bulk arrays (``raw_data``, ``image/values``, …) live in a reference;
-scan/probe parameters are not virtualized (they are vlen strings and scalars) —
-open the file itself for those.
+scan/probe parameters ride along in a sidecar (:meth:`VirtualFile.load_parameters`),
+and metadata/custom elements are not virtualized at all — open the file with
+:class:`~zea.data.file.File` (which streams over HTTP) for those.
 
 Requires the optional dependencies: ``pip install 'zea[virtual]'``.
 
@@ -41,6 +52,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from collections import OrderedDict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Sequence, Tuple, cast
@@ -347,8 +359,6 @@ def build_virtual_reference(
     """
     _require_deps()
 
-    import xarray as xr
-
     from zea.data.datasets import Dataset
 
     with Dataset(
@@ -357,6 +367,27 @@ def build_virtual_reference(
         # Sorted, so that the file index of a reference is reproducible: folder walks
         # and HF repo listings come back in arbitrary order.
         file_paths = sorted(dataset.file_paths)
+
+    refs, parameters, n_groups = _build_references(file_paths, revision, verbose=verbose)
+    output_path = _write_references(Path(output_path), refs, parameters)
+
+    log.info(
+        f"Wrote virtual reference for {len(file_paths)} file(s) in "
+        f"{n_groups} shape group(s) to {log.yellow(str(output_path))}"
+    )
+    return output_path
+
+
+def _build_references(
+    file_paths: List[str], revision: str | None, verbose: bool = False
+) -> tuple[dict, dict, int]:
+    """Build the chunk manifest + packed parameters for ``file_paths``.
+
+    The work behind both :func:`build_virtual_reference` (a whole dataset, written to
+    disk and published) and :func:`open_virtual_file` (a single file, kept locally) —
+    so a lone file is simply a reference with one file in it, read through the same path.
+    """
+    import xarray as xr
 
     registry = _object_store_registry()
 
@@ -405,19 +436,14 @@ def build_virtual_reference(
             }
         }
     )
+    return refs, _pack_parameters(parameters), len(manifest_groups)
 
-    output_path = Path(output_path)
+
+def _write_references(output_path: Path, refs: dict, parameters: dict) -> Path:
+    """Write a reference and its parameter sidecar (which must sit next to it)."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps({"version": 1, "refs": refs}), encoding="utf-8")
-
-    params_path = output_path.parent / _PARAMS_FILENAME
-    params_path.write_text(json.dumps(_pack_parameters(parameters)), encoding="utf-8")
-
-    log.info(
-        f"Wrote virtual reference for {len(file_paths)} file(s) in "
-        f"{len(manifest_groups)} shape group(s) to {log.yellow(str(output_path))} "
-        f"(parameters: {log.yellow(str(params_path))})"
-    )
+    (output_path.parent / _PARAMS_FILENAME).write_text(json.dumps(parameters), encoding="utf-8")
     return output_path
 
 
@@ -459,6 +485,177 @@ def _read(array: "zarr.Array", index: tuple) -> np.ndarray:
     if any(isinstance(part, (list, np.ndarray)) for part in index):
         return cast(np.ndarray, array.oindex[index])
     return cast(np.ndarray, array[index])
+
+
+class _VirtualDataset:
+    """One data key of one file: the virtual stand-in for an ``h5py.Dataset``.
+
+    Slices like an array — ``f.data.raw_data[0]`` reads exactly that frame's chunk byte
+    ranges, concurrently, and nothing else.
+    """
+
+    __slots__ = ("_array", "_file_index")
+
+    def __init__(self, array: "VirtualArray", file_index: int):
+        self._array = array
+        self._file_index = file_index
+
+    @property
+    def shape(self) -> tuple:
+        """Shape of this file's array (no leading ``file`` axis)."""
+        reference = self._array.reference
+        group_index, _ = reference._locate(self._file_index)
+        info = reference._groups[group_index]["arrays"][self._array.key]
+        return tuple(info["shape"][1:])
+
+    @property
+    def dtype(self) -> np.dtype:
+        reference = self._array.reference
+        group_index, _ = reference._locate(self._file_index)
+        return np.dtype(reference._groups[group_index]["arrays"][self._array.key]["dtype"])
+
+    @property
+    def ndim(self) -> int:
+        return len(self.shape)
+
+    def __len__(self) -> int:
+        return self.shape[0]
+
+    def __getitem__(self, index) -> np.ndarray:
+        if not isinstance(index, tuple):
+            index = (index,)
+        return self._array[(self._file_index, *index)]
+
+    def __array__(self, dtype=None, copy=None) -> np.ndarray:
+        values = self[...]
+        return values if dtype is None else values.astype(dtype)
+
+    def __repr__(self):
+        return f"<VirtualDataset '{self._array.key}' shape={self.shape} dtype={self.dtype}>"
+
+
+class _VirtualGroup:
+    """Dot-access proxy over a file's virtualized keys, mirroring :class:`_GroupProxy`.
+
+    Makes the virtual path answer to the same calls as a real file::
+
+        file.data.raw_data[0]
+        file.data.image.values[:]
+    """
+
+    __slots__ = ("_reference", "_file_index", "_prefix")
+
+    def __init__(self, reference: "VirtualReference", file_index: int, prefix: str = ""):
+        self._reference = reference
+        self._file_index = file_index
+        self._prefix = prefix
+
+    def _keys(self) -> List[str]:
+        """Keys of this file, relative to the current prefix (one level deep)."""
+        keys: list[str] = []
+        for key in self._reference._file_keys(self._file_index):
+            if not key.startswith(self._prefix):
+                continue
+            name = key[len(self._prefix) :].split("/", 1)[0]
+            if name not in keys:
+                keys.append(name)
+        return keys
+
+    def __getattr__(self, name: str):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        key = f"{self._prefix}{name}"
+        file_keys = self._reference._file_keys(self._file_index)
+        if key in file_keys:
+            return _VirtualDataset(self._reference[key], self._file_index)
+        if any(other.startswith(f"{key}/") for other in file_keys):
+            return _VirtualGroup(self._reference, self._file_index, prefix=f"{key}/")
+        raise AttributeError(
+            f"No key '{name}' in the virtualized data of this file. "
+            f"Available keys: {self._keys()}. Note that only bulk arrays are virtualized "
+            "(not metadata or custom elements) — open the file with zea.File for those."
+        )
+
+    __getitem__ = __getattr__
+
+    def keys(self):
+        """Keys available at this level."""
+        return self._keys()
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._keys()
+
+    def __iter__(self):
+        return iter(self._keys())
+
+    def __dir__(self):
+        return self._keys()
+
+    def __repr__(self):
+        return f"<VirtualGroup '{self._prefix or '/'}' keys={self._keys()}>"
+
+
+class VirtualFile:
+    """One file of a virtual reference, read like a :class:`~zea.data.file.File`.
+
+    Reads go straight to chunk byte ranges through Zarr + obstore: no HDF5 metadata walk,
+    no download, and concurrent fetches. The read API is the file's::
+
+        file = dataset[0]  # or open_virtual_file("hf://zeahub/x/a.hdf5")
+        file.data.raw_data[0]  # one frame — only its chunks are fetched
+        file.data.image.values[:]
+        file.load_parameters()  # from the reference's parameter sidecar
+
+    Only the bulk arrays are virtualized. Metadata, custom elements and the raw HDF5
+    structure are not: open the file with :class:`~zea.data.file.File` for those (which
+    streams over HTTP for ``hf://`` paths).
+    """
+
+    def __init__(self, reference: "VirtualReference", file_index: int):
+        self.reference = reference
+        self.file_index = file_index
+
+    @property
+    def path(self) -> str:
+        """Path of the file this view reads, as recorded in the reference."""
+        return self.reference.file_paths[self.file_index]
+
+    @property
+    def name(self) -> str:
+        return self.path.rsplit("/", 1)[-1]
+
+    @property
+    def data(self) -> Any:
+        """Proxy over the file's virtualized data keys (``file.data.raw_data[0]``)."""
+        return _VirtualGroup(self.reference, self.file_index)
+
+    def keys(self) -> List[str]:
+        """The file's virtualized keys, e.g. ``["raw_data", "image/values"]``."""
+        return self.reference._file_keys(self.file_index)
+
+    @property
+    def n_frames(self) -> int:
+        """Number of frames (leading axis of the file's arrays)."""
+        key = self.reference.default_key
+        if key not in self.keys():
+            key = self.keys()[0]
+        return int(_VirtualDataset(self.reference[key], self.file_index).shape[0])
+
+    def load_parameters(self) -> "Parameters":
+        """Scan + probe parameters, from the reference's sidecar (no file access)."""
+        return self.reference.parameters(self.file_index)
+
+    def close(self) -> None:
+        """No-op: a virtual file holds no open handle (kept for File-like use)."""
+
+    def __enter__(self) -> "VirtualFile":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
+    def __repr__(self):
+        return f"VirtualFile('{self.path}', keys={self.keys()})"
 
 
 class VirtualArray:
@@ -568,6 +765,9 @@ class VirtualReference:
         self._offsets = np.cumsum([0] + [len(group["files"]) for group in self._groups])
         self._registry = _object_store_registry()
         self._arrays: dict[tuple[int, str], zarr.Array] = {}
+        # Set when the manifest was built on the fly (see ``open_virtual_file``): the
+        # temporary directory holding it, kept alive for as long as this reference is.
+        self._scratch: tempfile.TemporaryDirectory | None = None
 
     def __repr__(self):
         return f"VirtualReference(n_files={len(self)}, keys={self.keys()})"
@@ -581,11 +781,38 @@ class VirtualReference:
         return [path for group in self._groups for path in group["files"]]
 
     def keys(self) -> List[str]:
-        """Data keys available in this reference (e.g. ``raw_data``, ``image/values``)."""
+        """Data keys available in this reference (e.g. ``raw_data``, ``image/values``).
+
+        The union across shape groups: an individual file may have fewer (see
+        :meth:`_file_keys`), e.g. when an array of it could not be virtualized.
+        """
         keys: list[str] = []
         for group in self._groups:
             keys += [key for key in group["arrays"] if key not in keys]
         return keys
+
+    def _file_keys(self, file_index: int) -> List[str]:
+        """Data keys of one file (i.e. of its shape group)."""
+        group_index, _ = self._locate(file_index)
+        return list(self._groups[group_index]["arrays"])
+
+    def file(self, file: "int | str | Path") -> VirtualFile:
+        """A single file of this reference, read like a :class:`~zea.data.file.File`.
+
+        Args:
+            file (int, str or Path): File index, or the path of a virtualized file.
+
+        Returns:
+            VirtualFile: ``file.data.raw_data[0]`` reads that frame over the network.
+        """
+        index = file if isinstance(file, int) else self.index_of(file)
+        if not 0 <= index < len(self):
+            raise IndexError(f"File index {index} out of range for {len(self)} file(s).")
+        return VirtualFile(self, index)
+
+    def files(self) -> List[VirtualFile]:
+        """Every file of this reference, as :class:`VirtualFile` views."""
+        return [VirtualFile(self, index) for index in range(len(self))]
 
     @property
     def default_key(self) -> str:
@@ -764,3 +991,43 @@ def open_virtual_reference(path: str | Path, revision: str | None = None) -> Vir
             )
 
     return VirtualReference(local_path, revision=revision, source=path)
+
+
+def open_virtual_file(path: str | Path, revision: str | None = None) -> VirtualFile:
+    """Open a single zea file for virtual (Zarr) reads, building its manifest on the fly.
+
+    A lone file is just a reference with one file in it, so this goes through exactly the
+    same machinery as a published dataset reference — and returns the same
+    :class:`VirtualFile`::
+
+        file = open_virtual_file("hf://zeahub/my-dataset/a.hdf5")
+        file.data.raw_data[0]  # one frame, straight from its chunk byte ranges
+
+    The manifest is built here rather than downloaded, which costs one pass over the
+    file's HDF5 metadata (over HTTP for ``hf://`` paths — no array data is fetched). That
+    is the same cost as opening the file with h5py, so the gain over
+    ``zea.File(path)`` is in the *reads*, which go out concurrently. To skip the metadata
+    pass entirely, publish a reference and open that (see :func:`build_virtual_reference`).
+
+    Args:
+        path (str or Path): A local or ``hf://`` path to one zea HDF5 file.
+        revision (str, optional): HuggingFace revision. Only used for ``hf://`` paths.
+
+    Returns:
+        VirtualFile: The file, read through Zarr + obstore.
+    """
+    _require_deps()
+
+    path = str(path)
+    refs, parameters, _ = _build_references([path], revision)
+
+    # The manifest is a local artifact of this session; the chunks it points at live at
+    # ``path``. Kept alive by the reference, and cleaned up with it.
+    scratch = tempfile.TemporaryDirectory(prefix="zea_virtual_")
+    reference = VirtualReference(
+        _write_references(Path(scratch.name) / "index.json", refs, parameters),
+        revision=revision,
+        source=path,
+    )
+    reference._scratch = scratch
+    return reference.file(0)
