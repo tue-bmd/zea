@@ -6,18 +6,23 @@ correct backend.
 """
 
 import math
+from unittest import mock
 
 import keras
 import numpy as np
 import pytest
+from scipy.linalg import hadamard
 from scipy.ndimage import gaussian_filter
 from scipy.signal import hilbert as hilbert_scipy
 
 from zea import ops
+from zea.beamform.delays import compute_t0_delays_focused
 from zea.func.ultrasound import (
     channels_to_complex,
     complex_to_channels,
     compute_time_to_peak_stack,
+    construct_acquisition_from_synthetic_aperture,
+    decode_hadamard,
     make_tgc_curve,
 )
 from zea.ops import Pipeline, Simulate, beamformer_registry
@@ -1268,3 +1273,145 @@ def test_tissue_suppression():
     )
 
     return output
+
+
+def hadamard_encode(data, hadamard_matrix):
+    """Encodes transmits as Hadamard combinations: encoded[j] = sum_t H[j, t] * data[t]."""
+    return np.einsum("itklm,jt->ijklm", data, hadamard_matrix)
+
+
+def test_decode_hadamard():
+    """Hadamard encoding followed by decoding recovers the original data up to a factor n_tx."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    n_frames, n_tx, n_ax, n_el, n_ch = 2, 4, 16, 8, 1
+    data = rng.standard_normal((n_frames, n_tx, n_ax, n_el, n_ch))
+    hadamard_matrix = hadamard(n_tx).astype(np.float64)
+
+    encoded = hadamard_encode(data, hadamard_matrix)
+    decoded = decode_hadamard(encoded, hadamard_matrix)
+
+    assert decoded.shape == data.shape
+    np.testing.assert_allclose(decoded / n_tx, data, atol=1e-12)
+
+
+def test_decode_hadamard_warns_on_non_orthogonal_matrix():
+    """A non-orthogonal tx_apodizations matrix triggers a warning."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = rng.standard_normal((1, 2, 4, 2, 1))
+    non_orthogonal = np.array([[1.0, 1.0], [1.0, 1.0]])
+    with mock.patch("zea.func.ultrasound.logger.warning") as warning:
+        decode_hadamard(data, non_orthogonal)
+    warning.assert_called_once()
+
+
+def linear_probe_geometry(n_elements, pitch):
+    """Returns a linear array geometry of shape (n_elements, 3) along the x-axis."""
+    x = np.arange(n_elements) * pitch
+    return np.stack([x, np.zeros(n_elements), np.zeros(n_elements)], axis=1)
+
+
+def synthetic_aperture_acquisition(raw_data, probe_geometry, polar_angle=0.0, **kwargs):
+    """Runs construct_acquisition_from_synthetic_aperture and returns numpy outputs."""
+    raw_data = keras.ops.convert_to_tensor(raw_data)
+    constructed, t0_delays = construct_acquisition_from_synthetic_aperture(
+        raw_data,
+        probe_geometry,
+        polar_angle=polar_angle,
+        azimuth_angle=0.0,
+        focus_distance=kwargs.pop("focus_distance", np.inf),
+        sampling_frequency=kwargs.pop("sampling_frequency", 1.0),
+        sound_speed=kwargs.pop("sound_speed", 1.0),
+        **kwargs,
+    )
+    return keras.ops.convert_to_numpy(constructed), np.asarray(t0_delays)
+
+
+def test_construct_acquisition_zero_angle_sums_transmits():
+    """A zero-angle plane wave has zero delays, so the output is the sum over transmits."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    n_frames, n_el, n_ax, n_ch = 2, 4, 32, 1
+    raw_data = rng.standard_normal((n_frames, n_el, n_ax, n_el, n_ch)).astype(np.float32)
+    probe_geometry = linear_probe_geometry(n_el, pitch=1.0)
+
+    constructed, t0_delays = synthetic_aperture_acquisition(raw_data, probe_geometry)
+
+    assert constructed.shape == (n_frames, 1, n_ax, n_el, n_ch)
+    assert t0_delays.shape == (1, n_el)
+    np.testing.assert_allclose(t0_delays, 0.0, atol=1e-12)
+    np.testing.assert_allclose(constructed[:, 0], raw_data.sum(axis=1), atol=1e-4)
+
+
+def test_construct_acquisition_applies_integer_sample_delays():
+    """An angled plane wave shifts an impulse by exactly t0_delay * sampling_frequency samples."""
+    n_el, n_ax, impulse_sample, active_transmit = 4, 64, 10, 2
+    raw_data = np.zeros((1, n_el, n_ax, n_el, 1), dtype=np.float32)
+    raw_data[0, active_transmit, impulse_sample] = 1.0
+    # pitch=2, sound_speed=1, sin(30 degrees)=0.5 gives delays of exactly [0, 1, 2, 3] samples
+    probe_geometry = linear_probe_geometry(n_el, pitch=2.0)
+
+    constructed, t0_delays = synthetic_aperture_acquisition(
+        raw_data, probe_geometry, polar_angle=np.pi / 6
+    )
+
+    np.testing.assert_allclose(t0_delays[0], np.arange(n_el), atol=1e-9)
+    expected_sample = impulse_sample + active_transmit
+    for element in range(n_el):
+        signal = constructed[0, 0, :, element, 0]
+        assert np.argmax(signal) == expected_sample
+        np.testing.assert_allclose(signal[expected_sample], 1.0, atol=1e-4)
+
+
+def test_construct_acquisition_applies_tx_apodization():
+    """The tx_apodization scales the output per receive element."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    n_el, n_ax = 4, 32
+    raw_data = rng.standard_normal((1, n_el, n_ax, n_el, 1)).astype(np.float32)
+    probe_geometry = linear_probe_geometry(n_el, pitch=1.0)
+    apodization = np.array([[0.0, 1.0, 0.5, 2.0]], dtype=np.float32)
+
+    unapodized, _ = synthetic_aperture_acquisition(raw_data, probe_geometry)
+    apodized, _ = synthetic_aperture_acquisition(
+        raw_data, probe_geometry, tx_apodization=keras.ops.convert_to_tensor(apodization)
+    )
+
+    expected = unapodized * apodization[0][None, None, None, :, None]
+    np.testing.assert_allclose(apodized, expected, atol=1e-4)
+
+
+def test_construct_acquisition_is_independent_of_chunk_size():
+    """Processing transmits in chunks of 1 gives the same result as a single chunk."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    n_el, n_ax = 4, 32
+    raw_data = rng.standard_normal((2, n_el, n_ax, n_el, 1)).astype(np.float32)
+    probe_geometry = linear_probe_geometry(n_el, pitch=2.0)
+
+    single_chunk, _ = synthetic_aperture_acquisition(
+        raw_data, probe_geometry, polar_angle=np.pi / 6, transmit_chunk_size=n_el
+    )
+    chunked, _ = synthetic_aperture_acquisition(
+        raw_data, probe_geometry, polar_angle=np.pi / 6, transmit_chunk_size=1
+    )
+
+    np.testing.assert_allclose(chunked, single_chunk, atol=1e-4)
+
+
+def test_construct_acquisition_focused_transmit_delays():
+    """A finite focus distance uses focused transmit delays."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    n_el, n_ax, focus_distance = 4, 32, 20.0
+    raw_data = rng.standard_normal((1, n_el, n_ax, n_el, 1)).astype(np.float32)
+    probe_geometry = linear_probe_geometry(n_el, pitch=1.0)
+
+    constructed, t0_delays = synthetic_aperture_acquisition(
+        raw_data, probe_geometry, focus_distance=focus_distance
+    )
+
+    expected_delays = compute_t0_delays_focused(
+        transmit_origins=np.zeros((1, 3)),
+        focus_distances=np.array([focus_distance]),
+        probe_geometry=probe_geometry,
+        polar_angles=np.array([0.0]),
+        sound_speed=1.0,
+    )
+    assert constructed.shape == (1, 1, n_ax, n_el, 1)
+    np.testing.assert_allclose(t0_delays, expected_delays, atol=1e-12)
