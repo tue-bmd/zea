@@ -1046,6 +1046,7 @@ def construct_acquisition_from_synthetic_aperture(
     transmit_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
     sound_speed: float = 1540.0,
     tx_apodization=None,
+    transmit_chunk_size: int = 32,
 ):
     """
     Construct a specific acquisition from synthetic aperture data by applying time delays to the
@@ -1062,6 +1063,8 @@ def construct_acquisition_from_synthetic_aperture(
         tx_apodization (str, ops.Tensor, optional): The transmit apodization to apply to the raw
             data. If None, no apodization is applied. Set to "kaiser" or "hanning" to apply a Kaiser
             or Hanning window, respectively.
+        transmit_chunk_size: Number of transmits to process per FFT chunk. Lower values reduce
+            peak memory usage.
 
     Returns:
         raw_data (ops.Tensor): The constructed raw data of shape (n_frames, 1, n_ax, n_el, n_ch).
@@ -1085,29 +1088,66 @@ def construct_acquisition_from_synthetic_aperture(
         )
 
     if tx_apodization is None:
-        tx_apodization = np.ones((1, probe_geometry.shape[0]), dtype=np.float32)
+        tx_apodization = ops.ones((1, probe_geometry.shape[0]), dtype=np.float32)
     elif tx_apodization == "kaiser":
-        tx_apodization = scipy.signal.windows.kaiser(probe_geometry.shape[0], beta=5.0).astype(
-            np.float32
-        )[None, :]
-    elif tx_apodization == "hanning":
-        tx_apodization = scipy.signal.windows.hann(probe_geometry.shape[0]).astype(np.float32)[
+        tx_apodization = keras.ops.kaiser(probe_geometry.shape[0], beta=5.0).astype(np.float32)[
             None, :
         ]
+    elif tx_apodization == "hanning":
+        tx_apodization = keras.ops.hanning(probe_geometry.shape[0]).astype(np.float32)[None, :]
 
     n_ax = raw_data.shape[2]
+    n_tx = raw_data.shape[1]
+    n_fft = n_ax + n_ax // 2
 
-    # Pad the raw data to avoid circular convolution artifacts during FFT
-    raw_data = np.pad(raw_data, ((0, 0), (0, 0), (0, n_ax // 2), (0, 0), (0, 0)), mode="constant")
+    # Delay phasors exp(-2j * pi * f * t0) per transmit, applied in the frequency domain
+    frequencies = np.fft.fftfreq(n_fft, d=1 / sampling_frequency)
+    phase = ops.convert_to_tensor(
+        (-2 * np.pi * frequencies[None, :] * np.asarray(t0_delays)[0][:, None]).astype(np.float32)
+    )
 
-    # Apply time delays in the frequency domain
-    raw_data_fft = np.fft.fft(raw_data, axis=2)
-    times = np.fft.fftfreq(raw_data.shape[2], d=1 / sampling_frequency)
-    delays = np.exp(-2j * np.pi * times[None] * t0_delays[0][:, None])
-    raw_data_fft = raw_data_fft * delays[None, :, :, None, None]
+    # Process the transmits in chunks to bound peak memory during the FFT
+    spectrum_real, spectrum_imag = 0.0, 0.0
+    for start in range(0, n_tx, transmit_chunk_size):
+        end = min(start + transmit_chunk_size, n_tx)
+        chunk_real, chunk_imag = _delayed_transmit_spectrum(
+            raw_data[:, start:end], phase[start:end], n_fft - n_ax
+        )
+        spectrum_real += chunk_real
+        spectrum_imag += chunk_imag
 
-    # Sum over the transmits to get the final single transmit
-    raw_data_fft = np.sum(raw_data_fft, axis=1, keepdims=True)
+    apodization = tx_apodization[0][None, None, :, None, None]
+    spectrum_real = spectrum_real * apodization
+    spectrum_imag = spectrum_imag * apodization
 
-    raw_data = np.fft.ifft(raw_data_fft, axis=2).real[:, :, :n_ax]
+    # Inverse FFT via the conjugate trick: real(ifft(X)) = real(fft(conj(X))) / n_fft
+    raw_data = ops.fft((spectrum_real, -spectrum_imag))[0] / n_fft
+
+    # Restore the original axis order and remove the padding
+    raw_data = ops.transpose(raw_data, (0, 1, 4, 2, 3))[:, :, :n_ax]
     return raw_data, t0_delays
+
+
+def _delayed_transmit_spectrum(raw_data, phase, n_pad):
+    """FFTs transmits along the axial axis, applies delay phasors, and sums over transmits.
+
+    Args:
+        raw_data (ops.Tensor): Raw data chunk of shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        phase (ops.Tensor): Delay phases of shape (n_tx, n_fft).
+        n_pad: Number of zeros to pad the axial axis with to reach n_fft samples.
+
+    Returns:
+        Real and imaginary spectra of shape (n_frames, 1, n_el, n_ch, n_fft), where the
+        axial axis has been moved to the end because ops.fft operates on the last axis.
+    """
+    raw_data = ops.pad(raw_data, ((0, 0), (0, 0), (0, n_pad), (0, 0), (0, 0)))
+    raw_data = ops.transpose(raw_data, (0, 1, 3, 4, 2))
+    fft_real, fft_imag = ops.fft((raw_data, ops.zeros_like(raw_data)))
+    delay_real = ops.cos(phase)[None, :, None, None, :]
+    delay_imag = ops.sin(phase)[None, :, None, None, :]
+    delayed_real = fft_real * delay_real - fft_imag * delay_imag
+    delayed_imag = fft_real * delay_imag + fft_imag * delay_real
+    return (
+        ops.sum(delayed_real, axis=1, keepdims=True),
+        ops.sum(delayed_imag, axis=1, keepdims=True),
+    )
