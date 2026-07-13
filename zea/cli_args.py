@@ -15,11 +15,12 @@ from typing import Annotated, Literal, Union
 import numpy as np
 import tyro
 
+from zea.data.file_operations import decode_hadamard_file_operation
+
 SUPPORTED_FORMATS = ["gif", "mp4", "hdf5"]
 sitk = importlib.util.find_spec("SimpleITK")
 if sitk is not None:
     SUPPORTED_FORMATS += ["nii.gz"]
-from zea.data.file_operations import decode_hadamard_file_operation
 
 
 @dataclass
