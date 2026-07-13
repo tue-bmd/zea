@@ -516,8 +516,7 @@ class Pipeline:
                 if benign:
                     log.debug(
                         f"[zea.Pipeline] Ignoring input keys not used by the pipeline: "
-                        f"{sorted(benign)}. This is expected when passing extra parameters "
-                        "(e.g. from `zea.Parameters`). Shown once per pipeline."
+                        f"{sorted(benign)}."
                     )
                 self._logged_difference_keys = True
 
