@@ -1,3 +1,4 @@
+import inspect
 import json
 from typing import TYPE_CHECKING, Any, Dict, List, Sequence, Union, cast
 
@@ -1184,6 +1185,10 @@ class Beamform(Pipeline):
                 (``parameters.flat_receive_apodization``) in the beamforming. Applied in
                 addition to the built-in f-number mask; independent of and combinable with
                 ``enable_pfield`` / ``enable_aligned_apodization``.
+            **kwargs: Any keyword accepted by the chosen ``beamformer``'s own constructor
+                (e.g. ``subarray_size`` / ``diagonal_loading`` for ``"minimum_variance"``)
+                is forwarded to it. Remaining keywords are forwarded to the underlying
+                ``Pipeline`` / ``PatchedGrid``.
         """
         if enable_pfield and enable_aligned_apodization:
             raise ValueError(
@@ -1215,12 +1220,23 @@ class Beamform(Pipeline):
                 f"Supported types are: {beamformer_registry.registered_names()}."
             )
 
+        # Pull out any kwargs meant for the beamformer op itself (e.g. `subarray_size` /
+        # `diagonal_loading` for "minimum_variance"), so they don't leak into the
+        # Pipeline / PatchedGrid kwargs below.
+        beamformer_cls = beamformer_registry[self.beamformer_type]
+        beamformer_params = {
+            name
+            for name, param in inspect.signature(beamformer_cls.__init__).parameters.items()
+            if name != "self" and param.kind != inspect.Parameter.VAR_KEYWORD
+        }
+        self.beamformer_kwargs = {k: kwargs.pop(k) for k in list(kwargs) if k in beamformer_params}
+
         # Get beamforming ops
         beamforming: List[Operation] = [
             TOFCorrection(),
             # ReceiveApodization() / AlignedApodization() / PfieldWeighting(),
             # inserted conditionally
-            beamformer_registry[self.beamformer_type](),
+            beamformer_cls(**self.beamformer_kwargs),
         ]
 
         if self.enable_receive_apodization:
@@ -1280,6 +1296,7 @@ class Beamform(Pipeline):
             params["enable_aligned_apodization"] = self.enable_aligned_apodization
         if not compact or self.enable_receive_apodization:
             params["enable_receive_apodization"] = self.enable_receive_apodization
+        params.update(self.beamformer_kwargs)
 
         # Merge in the pipeline-level params from super().
         params.update(config.get("params", {}))
