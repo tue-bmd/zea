@@ -26,7 +26,6 @@ from zea.data.spec import (
     ScanSpec,
 )
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
-from zea.internal.core import DataTypes
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path, _hf_stream_open
 from zea.internal.utils import deprecated
 
@@ -1794,6 +1793,8 @@ class File(h5py.File):
         """
         kwargs: dict = {"tracks": self._load_tracks(), "probe": self.probe}
 
+        if self.custom:
+            kwargs["custom"] = self.custom
         if self.track_schedule is not None:
             kwargs["track_schedule"] = self.track_schedule
         if "metadata" in self:
@@ -1919,108 +1920,6 @@ class File(h5py.File):
     def summary(self):
         """Print the contents of the file."""
         _print_hdf5_attrs(self)
-
-
-def load_file_all_data_types(
-    path,
-    indices: Tuple[Union[list, slice, int], ...] | List[int] | int | slice | None = None,
-    scan_kwargs: dict | None = None,
-):
-    """Loads a zea data files (h5py file).
-
-    Returns all data types together with a parameters object containing the parameters
-    of the acquisition. Probe information is available via ``parameters.to_probe_dict()``
-    or ``File.probe``.
-
-    Additionally, it can load a specific subset of frames / transmits.
-
-    .. include:: ../common/file_indexing.rst
-
-    Args:
-        path (str, pathlike): The path to the hdf5 file.
-        indices (optional): The indices to load. Defaults to None in
-            which case all frames are loaded.
-        scan_kwargs (Config, dict, optional): Additional keyword arguments
-            to pass to :meth:`File.load_parameters`. These will override the
-            parameters from the file if they are present. Defaults to None.
-
-    Returns:
-        (dict): A dictionary with all data types as keys and the corresponding data as values.
-        (Parameters): A parameters object containing the parameters of the acquisition.
-    """
-    # Define the additional keyword parameters from the scan object
-    if scan_kwargs is None:
-        scan_kwargs = {}
-
-    data_dict = {}
-
-    # Data types stored as HDF5 groups (Map-based specs with values/coordinates)
-    _GROUP_DATA_TYPES = {"aligned_data", "beamformed_data", "envelope_data", "image_sc", "image"}
-    # Among _GROUP_DATA_TYPES, only aligned_data has a transmit (n_tx) axis as its 2nd dimension.
-    # All others have spatial axes after n_frames, so a transmit-selection tuple index must not
-    # be applied to them (it would mis-slice a spatial dimension instead of a transmit dimension).
-    _GROUP_TYPES_WITH_TX_AXIS = {"aligned_data"}
-
-    with File(path, mode="r") as file:
-        for data_type in DataTypes:
-            if not file.has_key(data_type.value):
-                data_dict[data_type.value] = None
-                continue
-
-            # Load the desired frames from the file
-            _key = file.format_key(data_type.value)
-            _indices = indices if indices is not None else slice(None)
-            item = file[_key]
-
-            if isinstance(item, h5py.Group) and data_type.value in _GROUP_DATA_TYPES:
-                # Map-based group: load all sub-datasets as a dict.
-                # Compute per-dataset indices once: for non-TX types, a transmit-selection
-                # tuple must not be applied to spatial dimensions.
-                if (
-                    isinstance(_indices, tuple)
-                    and len(_indices) > 1
-                    and data_type.value not in _GROUP_TYPES_WITH_TX_AXIS
-                ):
-                    indices_for_ds = (_indices[0],)
-                else:
-                    indices_for_ds = _indices
-
-                group_dict = {}
-                for sub_key in item.keys():
-                    ds = item[sub_key]
-                    if isinstance(ds, h5py.Dataset):
-                        if sub_key == "values":
-                            group_dict[sub_key] = ds[indices_for_ds]
-                        elif sub_key == "coordinates":
-                            # Coordinates may omit the leading frame axis (broadcast mode —
-                            # one grid shared across all frames). Only apply frame indexing
-                            # when the first dim matches the values dataset's first dim.
-                            values_ds = item.get("values")
-                            if values_ds is not None and ds.shape[0] == values_ds.shape[0]:
-                                group_dict[sub_key] = ds[indices_for_ds]
-                            else:
-                                group_dict[sub_key] = ds[()]
-                        elif h5py.check_string_dtype(ds.dtype) is not None:
-                            val = ds.asstr()[()]
-                            if isinstance(val, np.ndarray) and val.dtype == object:
-                                val = val.astype(np.str_)
-                            group_dict[sub_key] = val
-                        else:
-                            group_dict[sub_key] = ds[()]
-                data_dict[data_type.value] = group_dict
-            else:
-                data_dict[data_type.value] = item[_indices]
-
-        # extract transmits from indices
-        # we only have to do this when the data has a n_tx dimension
-        # in that case we also have update scan parameters to match
-        # the number of selected transmits
-        if isinstance(indices, tuple) and len(indices) > 1:
-            scan_kwargs["selected_transmits"] = indices[1]
-
-        parameters = file.load_parameters(**scan_kwargs)
-
-        return data_dict, parameters
 
 
 @deprecated(replacement="File(...) with file.load_parameters() and file.data.<type>[...]")

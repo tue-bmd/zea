@@ -205,11 +205,8 @@ class _Resave:
     chunk_axes: tuple[str, ...] = ("n_frames",)
     """Dimension names to chunk with HDF5 chunk size 1 (others stored at full extent),
     so partial/streamed reads fetch only the requested frames. Defaults to one chunk per
-    frame, mirroring zea.data.spec.DEFAULT_CHUNK_AXES (not imported here: zea.data pulls
-    in a heavy import chain). Pass no values for contiguous storage (use together with
-    --disable-compression)."""
-    disable_compression: bool = False
-    """Disable compression (Blosc zstd+shuffle by default) for the datasets."""
+    frame, mirroring zea.data.spec.DEFAULT_CHUNK_AXES
+    """
 
     def run(self):
         from zea.data.file_operations import resave
@@ -218,7 +215,6 @@ class _Resave:
             input_path=self.input_path,
             output_path=self.output_path,
             overwrite=self.overwrite,
-            enable_compression=not self.disable_compression,
             chunk_axes=self.chunk_axes,
         )
 

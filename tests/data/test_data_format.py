@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 
 from zea.data.file import File, validate_file
-from zea.data.file_operations import save_file
 from zea.data.spec import ScanSpec
 
 from . import generate_example_dataset
@@ -293,7 +292,7 @@ def _parameters(tmp_path):
 
 
 def test_save_file_custom_maps(tmp_hdf5_path, _parameters):
-    """Tests that save_file correctly stores custom spatial maps in the data group."""
+    """Tests that saving correctly stores custom spatial maps in the data group."""
     import warnings
 
     custom_values = np.zeros((n_frames, 32, 32, 1), dtype=np.uint8)
@@ -301,16 +300,18 @@ def test_save_file_custom_maps(tmp_hdf5_path, _parameters):
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        save_file(
+        File.create(
             path=tmp_hdf5_path,
-            parameters=_parameters,
-            raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
-            custom_maps={
+            data={
+                "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                 "my_overlay": {
                     "values": custom_values,
                     "coordinates": custom_coordinates,
-                }
+                },
             },
+            scan=_parameters.to_scan_dict(),
+            probe=_parameters.to_probe_dict(),
+            overwrite=True,
         )
 
     with File(tmp_hdf5_path) as f:
@@ -320,11 +321,13 @@ def test_save_file_custom_maps(tmp_hdf5_path, _parameters):
 
 
 def test_save_file_custom_metadata(tmp_hdf5_path, _parameters):
-    """Tests that save_file correctly stores metadata in the metadata group."""
-    save_file(
+    """Tests that saving correctly stores metadata in the metadata group."""
+    File.create(
         path=tmp_hdf5_path,
-        parameters=_parameters,
-        raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+        data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+        scan=_parameters.to_scan_dict(),
+        probe=_parameters.to_probe_dict(),
+        overwrite=True,
         metadata={
             "credit": "Test Lab, 2024",
             "text_report": "Normal acquisition.",
