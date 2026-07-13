@@ -549,8 +549,8 @@ def decode_hadamard_file_operation(input_path: Path, output_path: Path, overwrit
     if data_dict["raw_data"] is None:
         raise ValueError("No raw_data found in the input file.")
 
-        raw_data = data_dict["raw_data"]
-        tx_apodizations = parameters.tx_apodizations
+    raw_data = data_dict["raw_data"]
+    tx_apodizations = parameters.tx_apodizations
     raw_data = decode_hadamard(raw_data, tx_apodizations)
     data_dict["raw_data"] = raw_data
     parameters.tx_apodizations = np.eye(parameters.tx_apodizations.shape[1])
@@ -582,8 +582,6 @@ def sa_to_virtual_focus(
     angles, focus distance, and transmit origin.
     """
 
-    from zea.func.ultrasound import construct_acquisition_from_synthetic_aperture
-
     data_dict, parameters = load_file_all_data_types(input_path)
     raw_data, t0_delays = construct_acquisition_from_synthetic_aperture(
         raw_data=data_dict["raw_data"],
@@ -597,8 +595,8 @@ def sa_to_virtual_focus(
         tx_apodization=tx_apodization,
     )
 
-    data_dict["raw_data"] = raw_data
-    parameters.t0_delays = t0_delays
+    data_dict["raw_data"] = ops.convert_to_numpy(raw_data)
+    parameters.t0_delays = np.asarray(t0_delays)
     parameters.tx_apodizations = np.ones((1, parameters.probe_geometry.shape[0]))
     parameters.polar_angles = np.array([polar_angle])
     parameters.azimuth_angles = np.array([azimuth_angle])
@@ -615,6 +613,7 @@ def sa_to_virtual_focus(
         parameters=parameters,
         custom_elements=None,
         description="SA to virtual focus",
+        overwrite=overwrite,
     )
 
 
