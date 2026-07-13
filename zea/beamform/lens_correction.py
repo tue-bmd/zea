@@ -113,8 +113,15 @@ def compute_xl(element_pos_2d, pixel_pos_2d, lens_thickness, c_lens, c_medium, n
 
     # Apply Newton-Raphson method to find the lateral point on the lens that the shortest
     # path goes through
-    xl_init = lens_thickness * (xs - xe) / (zs - ze) + xe
-    xl = xl_init
+    eps = 1e-6
+    # zs == ze whenever a pixel sits level with the element -- most notably the whole
+    # top row of a grid that starts at z=0, the transducer face. Without the eps guard
+    # this is a division by zero (0/0 for on-axis pixels, x/0 elsewhere), producing a
+    # NaN/Inf that a single Newton step's nan_to_num can't undo once it's the seed value.
+    xl_init = lens_thickness * (xs - xe) / (zs - ze + eps) + xe
+    # Clip immediately: for zs == ze the raw ratio can still blow up to +/-inf even with
+    # the eps guard (finite / eps), so bring it into the valid range before it's used.
+    xl = ops.clip(xl_init, ops.minimum(xs, xe), ops.maximum(xs, xe))
     for _ in range(n_iter):
         xl = xl + dxl(xe, ze, xl, xs, zs, lens_thickness, c_lens, c_medium)
 
