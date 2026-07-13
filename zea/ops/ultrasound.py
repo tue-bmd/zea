@@ -14,8 +14,6 @@ from zea.func.tensor import (
 from zea.func.ultrasound import (
     apply_aligned_apodization,
     apply_receive_apodization,
-    channels_to_complex,
-    complex_to_channels,
     demodulate,
     envelope_detect,
     get_band_pass_filter,
@@ -29,6 +27,7 @@ from zea.internal.core import (
     DataTypes,
 )
 from zea.internal.registry import ops_registry
+from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
 from zea.simulator import simulate_rf
 from zea.utils import canonicalize_axis
@@ -542,7 +541,7 @@ class FirFilter(Operation):
                 "When using complex_channels=True, the complex channels are removed to convert"
                 " to complex numbers before filtering, so axis cannot be the last axis."
             )
-            signal = channels_to_complex(signal)
+            signal = ops.view_as_complex(signal)
 
         def _convolve(signal):
             """Apply the filter to the signal using correlation."""
@@ -551,7 +550,7 @@ class FirFilter(Operation):
         filtered_signal = apply_along_axis(_convolve, axis, signal)
 
         if self.complex_channels:
-            filtered_signal = complex_to_channels(filtered_signal)
+            filtered_signal = ops.view_as_real(filtered_signal)
 
         return {self.output_key: filtered_signal}
 
@@ -731,21 +730,26 @@ class BandPassFilter(FirFilter):
 
 @ops_registry("channels_to_complex")
 class ChannelsToComplex(Operation):
+    @deprecated(replacement="zea.ops.keras_ops.ViewAsComplex")
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
     def call(self, **kwargs):
         data = kwargs[self.key]
-        output = channels_to_complex(data)
+        output = ops.view_as_complex(data)
         return {self.output_key: output}
 
 
 @ops_registry("complex_to_channels")
 class ComplexToChannels(Operation):
+    @deprecated(replacement="zea.ops.keras_ops.ViewAsReal")
     def __init__(self, axis=-1, **kwargs):
         super().__init__(**kwargs)
         self.axis = axis
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        output = complex_to_channels(data, axis=self.axis)
+        output = ops.moveaxis(ops.view_as_real(data), -1, self.axis)
         return {self.output_key: output}
 
 
@@ -1085,7 +1089,7 @@ class UpMix(Operation):
             log.warning("Upmixing is not applicable to RF data.")
             return {self.output_key: data}
         elif data.shape[-1] == 2:
-            data = channels_to_complex(data)
+            data = ops.view_as_complex(data)
 
         data = upmix(data, sampling_frequency, demodulation_frequency, self.upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
