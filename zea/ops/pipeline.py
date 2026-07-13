@@ -1671,6 +1671,11 @@ class MinimumVariance(Operation):
         n_el = data.shape[-2]
         n_tx = ops.shape(data)[0]
 
+        if self.subarray_size is not None and not (1 <= self.subarray_size <= n_el):
+            raise ValueError(
+                f"subarray_size ({self.subarray_size}) must be between 1 and n_el ({n_el})."
+            )
+
         subarray_length = (
             self.subarray_size if self.subarray_size is not None else max(1, n_el // 2)
         )
