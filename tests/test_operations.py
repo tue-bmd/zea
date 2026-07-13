@@ -1218,6 +1218,15 @@ def test_prepare_parameters_pfield_all_backends():
     )
     parameters.grid_size_x = 8
     parameters.grid_size_z = 8
+    # compute_pfield's default downsample=10 collapses this 8x8 grid to a single
+    # downsampled point, so the (bilinear-upsampled) field is constant to within
+    # backend rounding noise. The per-pixel quantile threshold in
+    # normalize_pressure_field is then computed from that same near-constant array,
+    # so a sub-ULP difference between backends can tip individual pixels across the
+    # threshold and get amplified by the cross-transmit renormalization (flaky
+    # backend mismatch). Use a downsample factor that keeps multiple distinct
+    # downsampled points so the field isn't degenerate.
+    parameters.pfield_kwargs = {"downsample": 2}
 
     # Disable the on-disk result cache so ops are actually executed in each backend
     # subprocess (the cache would serve a stale pickle and hide crashes).
