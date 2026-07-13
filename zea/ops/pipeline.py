@@ -422,7 +422,8 @@ class Pipeline:
                     raise
                 if isinstance(exc, KeyError):
                     self._raise_missing_key(operation, exc, inputs)
-                self._raise_operation_error(operation, exc, inputs)
+                else:
+                    self._raise_operation_error(operation, exc, inputs)
             inputs = outputs
         return outputs
 
@@ -502,11 +503,11 @@ class Pipeline:
                 # Separate likely typos (close to a key the pipeline actually uses)
                 # from benign pass-through keys (e.g. extra `zea.Parameters` fields).
                 candidates = self.valid_keys - {"kwargs"}
-                typos = {
-                    key: difflib.get_close_matches(key, candidates, n=1, cutoff=0.6)[0]
+                matches = {
+                    key: difflib.get_close_matches(key, candidates, n=1, cutoff=0.6)
                     for key in difference_keys
-                    if difflib.get_close_matches(key, candidates, n=1, cutoff=0.6)
                 }
+                typos = {key: match[0] for key, match in matches.items() if match}
                 benign = difference_keys - set(typos)
                 if typos:
                     hints = ", ".join(f"'{k}' -> did you mean '{v}'?" for k, v in typos.items())
