@@ -27,6 +27,7 @@ from zea.internal.core import (
     DataTypes,
 )
 from zea.internal.registry import ops_registry
+from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
 from zea.simulator import simulate_rf
 from zea.utils import canonicalize_axis
@@ -729,6 +730,10 @@ class BandPassFilter(FirFilter):
 
 @ops_registry("channels_to_complex")
 class ChannelsToComplex(Operation):
+    @deprecated(replacement="zea.ops.keras_ops.ViewAsComplex")
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
     def call(self, **kwargs):
         data = kwargs[self.key]
         output = ops.view_as_complex(data)
@@ -737,6 +742,7 @@ class ChannelsToComplex(Operation):
 
 @ops_registry("complex_to_channels")
 class ComplexToChannels(Operation):
+    @deprecated(replacement="zea.ops.keras_ops.ViewAsReal")
     def __init__(self, axis=-1, **kwargs):
         super().__init__(**kwargs)
         self.axis = axis
