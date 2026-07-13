@@ -318,6 +318,8 @@ class _CapturingHandler:
 
 
 def test_handler_clears_line_and_redraws_registered_bars():
+    gc.collect()
+    assert not log._tqdm_cls._instances
     bar = _FakeBar()
     log.register_progress(bar)
     try:
@@ -348,6 +350,8 @@ def test_handler_prefers_tqdm_over_registered_bars_when_active():
 
 
 def test_handler_behaves_like_plain_stream_handler_when_idle():
+    gc.collect()
+    assert not log._tqdm_cls._instances
     with _CapturingHandler() as stream:
         log.info("plain message")
         out = stream.getvalue()

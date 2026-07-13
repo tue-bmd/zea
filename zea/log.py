@@ -318,12 +318,17 @@ def _caller_frame(skip_package=True):
             the literal call site of the ``log.*`` call, even if that's
             inside zea itself.
     """
-    frames = [f for f in inspect.stack()[1:] if f.filename != _LOG_FILE]
+    stack = inspect.stack()[1:]
+    frames = [f for f in stack if f.filename != _LOG_FILE]
     if skip_package:
         for frame in frames:
             if not frame.filename.startswith(_PACKAGE_DIR):
                 return frame
-    return frames[0]
+    if frames:
+        return frames[0]
+    # Whole stack is inside this module: fall back to the immediate caller
+    # rather than raising, as documented above.
+    return stack[0]
 
 
 # Track locations that have already emitted a once-only warning
