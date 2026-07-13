@@ -192,9 +192,9 @@ def build_parameters(seq, n_ax):
     polar_angles = np.deg2rad(seq["angles_deg"]).astype(np.float32)
 
     # Plane-wave transmit delays from the steering angles (seconds, min == 0).
-    t0_delays = compute_t0_delays_planewave(
-        probe_geometry, polar_angles, sound_speed=c
-    ).astype(np.float32)
+    t0_delays = compute_t0_delays_planewave(probe_geometry, polar_angles, sound_speed=c).astype(
+        np.float32
+    )
 
     # --- Sampling / demodulation frequency ---------------------------------
     # Match MUST's ``das``: for baseband IQ the sampling frequency IS the
@@ -317,22 +317,28 @@ def svd_clutter_filter(iq_bf, cutoff):
 
     # Keep everything except the strongest tissue components. process.m keeps
     # eig_vect(:, Ncut:end) (1-based), i.e. drops the first Ncut-1 columns.
-    keep = eig_vect[:, max(n_cut - 1, 0):]
+    keep = eig_vect[:, max(n_cut - 1, 0) :]
     filtered = (casorati @ keep) @ jnp.conj(keep.T)
 
     return np.asarray(filtered).reshape(Nz, Nx, n_frames)
 
 
-def power_doppler(iq_cf):
-    """Integrated Power-Doppler image in dB (normalised to 0 dB max).
+def power_doppler(iq_cf, frame=None):
+    """Power-Doppler image in dB (normalised to 0 dB max).
 
     Args:
         iq_cf (np.ndarray): Clutter-filtered movie ``(Nz, Nx, n_frames)``.
+        frame (int, optional): Show a single frame's clutter-filtered magnitude.
+            When ``None`` (default) the magnitude is integrated (summed) over all
+            frames (the standard Power-Doppler image).
 
     Returns:
         np.ndarray: Power-Doppler image ``(Nz, Nx)`` in dB.
     """
-    pd = 20 * np.log10(np.sum(np.abs(iq_cf), axis=-1) + 1e-12)
+    if frame is None:
+        pd = 20 * np.log10(np.sum(np.abs(iq_cf), axis=-1) + 1e-12)
+    else:
+        pd = 20 * np.log10(np.abs(iq_cf[..., frame]) + 1e-12)
     return pd - pd.max()
 
 
@@ -382,10 +388,36 @@ def main():
         help="Where to save the B-mode image.",
     )
     parser.add_argument(
+        "--pd-frame-out",
+        default=str(Path(__file__).with_name("power_doppler_frame.png")),
+        help=(
+            "Where to save the single-frame Power-Doppler snapshot "
+            "(only saved when --frame is given)."
+        ),
+    )
+    parser.add_argument(
         "--n-frames",
         type=int,
         default=None,
         help="Optionally limit the number of frames (for a quick run).",
+    )
+    parser.add_argument(
+        "--frame",
+        type=int,
+        default=None,
+        help=(
+            "Select a single frame (0-based) for the B-mode and for an extra "
+            "single-frame Power-Doppler snapshot (--pd-frame-out). The integrated "
+            "Power-Doppler is always saved. Default: frame-averaged B-mode, no snapshot."
+        ),
+    )
+    parser.add_argument(
+        "--cmap",
+        default="gray",
+        help=(
+            "Matplotlib colormap for the images. Use 'parula' (or 'viridis') for "
+            "the MATLAB-style blue-yellow map. Default: gray."
+        ),
     )
     args = parser.parse_args()
 
@@ -413,14 +445,25 @@ def main():
     print("Beamforming (zea delay-and-sum, JAX)...")
     iq_bf = beamform_frames(iq, parameters)  # (Nz, Nx, n_frames)
 
-    print("Computing B-mode...")
-    bm = bmode(iq_bf)
+    if args.frame is not None:
+        print(f"Computing B-mode (frame {args.frame})...")
+    else:
+        print("Computing B-mode (frame-averaged)...")
+    bm = bmode(iq_bf, frame=args.frame)
 
     print("SVD clutter filtering (JAX)...")
     iq_cf = svd_clutter_filter(iq_bf, CLUTTER_FILTER_CUT)
 
-    print("Computing Power Doppler...")
+    print("Computing Power Doppler (frame-integrated)...")
     pd = power_doppler(iq_cf)
+
+    # Like process.m (which shows both the per-frame powerDopplerMovie and the
+    # integrated powerDoppler), also compute a single-frame Power-Doppler
+    # snapshot when a frame is selected.
+    pd_frame = None
+    if args.frame is not None:
+        print(f"Computing Power Doppler (frame {args.frame})...")
+        pd_frame = power_doppler(iq_cf, frame=args.frame)
 
     # ---- Display / save ---------------------------------------------------- #
     import matplotlib.pyplot as plt
@@ -430,9 +473,9 @@ def main():
     set_mpl_style()
     extent = [START_X * 1e3, END_X * 1e3, END_Z * 1e3, START_Z * 1e3]  # mm
 
-    def _show(image, title, out_path, vmin, vmax):
+    def _show(image, title, out_path, vmin, vmax, cmap):
         plt.figure()
-        plt.imshow(image, cmap="gray", extent=extent, vmin=vmin, vmax=vmax, aspect="equal")
+        plt.imshow(image, cmap=cmap, extent=extent, vmin=vmin, vmax=vmax, aspect="equal")
         plt.title(title)
         plt.xlabel("x axis (mm)")
         plt.ylabel("z axis (mm)")
@@ -440,8 +483,18 @@ def main():
         plt.savefig(out_path, dpi=200, bbox_inches="tight")
         print(f"Saved {title} to {out_path}")
 
-    _show(bm, "B-mode (dB)", args.bmode_out, vmin=-50, vmax=0)
-    _show(pd, "Power Doppler (dB)", args.out, vmin=-40, vmax=0)
+    bmode_title = "B-mode (dB)" if args.frame is None else f"B-mode (dB), frame {args.frame}"
+    _show(bm, bmode_title, args.bmode_out, vmin=-50, vmax=0, cmap="gray")
+    _show(pd, "Power Doppler (dB)", args.out, vmin=-40, vmax=0, cmap="viridis")
+    if pd_frame is not None:
+        _show(
+            pd_frame,
+            f"Power Doppler (dB), frame {args.frame}",
+            args.pd_frame_out,
+            vmin=-40,
+            vmax=0,
+            cmap="viridis",
+        )
 
 
 if __name__ == "__main__":
