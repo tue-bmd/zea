@@ -4,6 +4,7 @@ import scipy.signal
 from keras import ops
 
 from zea import log
+from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
 from zea.func import split_seed
 from zea.func.tensor import (
     extend_n_dims,
@@ -1033,3 +1034,80 @@ def suppress_tissue(data, cutoff: int = 5):
     reconstructed = ops.matmul(reconstructed[:, cutoff:], ops.transpose(V[:, cutoff:]))
 
     return ops.reshape(ops.transpose(reconstructed), original_shape)
+
+
+def construct_acquisition_from_synthetic_aperture(
+    raw_data,
+    probe_geometry,
+    polar_angle: float,
+    azimuth_angle: float,
+    focus_distance: float,
+    sampling_frequency: float,
+    transmit_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    sound_speed: float = 1540.0,
+    tx_apodization=None,
+):
+    """
+    Construct a specific acquisition from synthetic aperture data by applying time delays to the
+    raw data.
+
+    Args:
+        raw_data (ops.Tensor): The synthetic aperture raw data.
+        probe_geometry (ops.Tensor): The probe geometry.
+        polar_angle: The polar angle of the transmit.
+        azimuth_angle: The azimuth angle of the transmit.
+        focus_distance: The focus distance of the transmit. Set to np.inf for plane wave transmit.
+        transmit_origin: The origin of the transmit in 3D space.
+        sampling_frequency: The sampling frequency of the raw data.
+        tx_apodization (str, ops.Tensor, optional): The transmit apodization to apply to the raw
+            data. If None, no apodization is applied. Set to "kaiser" or "hanning" to apply a Kaiser
+            or Hanning window, respectively.
+
+    Returns:
+        raw_data (ops.Tensor): The constructed raw data of shape (n_frames, 1, n_ax, n_el, n_ch).
+        t0_delays (ops.Tensor): t0 delays of shape (1, n_el).
+    """
+    if not np.isinf(focus_distance):
+        t0_delays = compute_t0_delays_focused(
+            transmit_origins=np.array([transmit_origin]),
+            focus_distances=np.array([focus_distance]),
+            probe_geometry=probe_geometry,
+            polar_angles=np.array([polar_angle]),
+            azimuth_angles=np.array([azimuth_angle]),
+            sound_speed=sound_speed,
+        )
+    else:
+        t0_delays = compute_t0_delays_planewave(
+            probe_geometry=probe_geometry,
+            polar_angles=np.array([polar_angle]),
+            azimuth_angles=np.array([azimuth_angle]),
+            sound_speed=sound_speed,
+        )
+
+    if tx_apodization is None:
+        tx_apodization = np.ones((1, probe_geometry.shape[0]), dtype=np.float32)
+    elif tx_apodization == "kaiser":
+        tx_apodization = scipy.signal.windows.kaiser(probe_geometry.shape[0], beta=5.0).astype(
+            np.float32
+        )[None, :]
+    elif tx_apodization == "hanning":
+        tx_apodization = scipy.signal.windows.hann(probe_geometry.shape[0]).astype(np.float32)[
+            None, :
+        ]
+
+    n_ax = raw_data.shape[2]
+
+    # Pad the raw data to avoid circular convolution artifacts during FFT
+    raw_data = np.pad(raw_data, ((0, 0), (0, 0), (0, n_ax // 2), (0, 0), (0, 0)), mode="constant")
+
+    # Apply time delays in the frequency domain
+    raw_data_fft = np.fft.fft(raw_data, axis=2)
+    times = np.fft.fftfreq(raw_data.shape[2], d=1 / sampling_frequency)
+    delays = np.exp(-2j * np.pi * times[None] * t0_delays[0][:, None])
+    raw_data_fft = raw_data_fft * delays[None, :, :, None, None]
+
+    # Sum over the transmits to get the final single transmit
+    raw_data_fft = np.sum(raw_data_fft, axis=1, keepdims=True)
+
+    raw_data = np.fft.ifft(raw_data_fft, axis=2).real[:, :, :n_ax]
+    return raw_data, t0_delays

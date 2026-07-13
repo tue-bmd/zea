@@ -31,6 +31,8 @@ OPERATION_NAMES = [
     "extract",
     "summary",
     "copy",
+    "decode_hadamard",
+    "sa_to_virtual_focus",
 ]
 
 
@@ -526,6 +528,89 @@ def copy(src: Path, dst: Path, key: str, mode: str | None = None):
     """
     dataset = Dataset(src, validate=False)
     dataset.copy(dst, key, mode=mode)
+
+
+def decode_hadamard(input_path: Path, output_path: Path, overwrite=False):
+    """Decodes Hadamard-encoded data in a zea file.
+
+    Args:
+        input_path: Path to the input zea data file, or a folder of files.
+        output_path: Path to the output file (or folder) where the decoded
+            data will be saved.
+        overwrite: Whether to overwrite the output file if it exists.
+    """
+    data_dict, parameters = load_file_all_data_types(input_path)
+    with File(input_path) as f:
+        description = f.description
+        custom_elements = f.custom
+
+    if data_dict["raw_data"] is not None:
+        raw_data = data_dict["raw_data"]
+        tx_apodizations = parameters.tx_apodizations
+        raw_data = np.einsum("ijklm,la->ijkam", raw_data, tx_apodizations)
+
+    if overwrite:
+        _delete_file_if_exists(output_path)
+
+    save_file(
+        path=output_path,
+        **data_dict,
+        parameters=parameters,
+        custom_elements=custom_elements,
+        description=description,
+    )
+
+
+def sa_to_virtual_focus(
+    input_path: Path,
+    output_path: Path,
+    polar_angle: float,
+    azimuth_angle: float,
+    focus_distance: float,
+    transmit_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    tx_apodization: str = "kaiser",
+    overwrite=False,
+):
+    """
+    Constructs a new zea file with the given transmit scheme from a synthetic aperture (SA)
+    acquisition. The new file will have a single transmit with the specified polar and azimuth
+    angles, focus distance, and transmit origin.
+    """
+
+    from zea.func.ultrasound import construct_acquisition_from_synthetic_aperture
+
+    data_dict, parameters = load_file_all_data_types(input_path)
+    raw_data, t0_delays = construct_acquisition_from_synthetic_aperture(
+        raw_data=data_dict["raw_data"],
+        probe_geometry=parameters.probe_geometry,
+        sampling_frequency=parameters.sampling_frequency,
+        polar_angle=polar_angle,
+        azimuth_angle=azimuth_angle,
+        focus_distance=focus_distance,
+        transmit_origin=transmit_origin,
+        sound_speed=parameters.sound_speed,
+        tx_apodization=tx_apodization,
+    )
+
+    data_dict["raw_data"] = raw_data
+    parameters.t0_delays = t0_delays
+    parameters.tx_apodizations = np.ones((1, parameters.probe_geometry.shape[0]))
+    parameters.polar_angles = np.array([polar_angle])
+    parameters.azimuth_angles = np.array([azimuth_angle])
+    parameters.focus_distances = np.array([focus_distance])
+    parameters.transmit_origins = np.array([transmit_origin])
+    parameters.initial_times = parameters.initial_times[:1]
+    parameters.waveforms_one_way = parameters.waveforms_one_way[:1]
+    parameters.waveforms_two_way = parameters.waveforms_two_way[:1]
+    parameters.time_to_next_transmit = parameters.time_to_next_transmit[:, :1]
+    parameters.set_transmits([0])
+    save_file(
+        path=output_path,
+        **data_dict,
+        parameters=parameters,
+        custom_elements=None,
+        description="SA to virtual focus",
+    )
 
 
 def _delete_file_if_exists(path: Path):
