@@ -1218,6 +1218,9 @@ def test_prepare_parameters_pfield_all_backends():
     )
     parameters.grid_size_x = 8
     parameters.grid_size_z = 8
+    # default downsample=10 collapses this 8x8 grid to 1 point, making the field
+    # constant up to backend rounding noise, which flakes the quantile threshold.
+    parameters.pfield_kwargs = {"downsample": 2}
 
     # Disable the on-disk result cache so ops are actually executed in each backend
     # subprocess (the cache would serve a stale pickle and hide crashes).
