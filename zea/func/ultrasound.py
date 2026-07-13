@@ -1083,9 +1083,8 @@ def construct_acquisition_from_synthetic_aperture(
         focus_distance: The focus distance of the transmit. Set to np.inf for plane wave transmit.
         transmit_origin: The origin of the transmit in 3D space.
         sampling_frequency: The sampling frequency of the raw data.
-        tx_apodization (str, ops.Tensor, optional): The transmit apodization to apply to the raw
-            data. If None, no apodization is applied. Set to "kaiser" or "hanning" to apply a Kaiser
-            or Hanning window, respectively.
+        tx_apodization (ops.Tensor, optional): The transmit apodization to apply to the raw
+            data. If None, no apodization is applied.
         transmit_chunk_size: Number of transmits to process per FFT chunk. Lower values reduce
             peak memory usage.
 
@@ -1111,13 +1110,7 @@ def construct_acquisition_from_synthetic_aperture(
         )
 
     if tx_apodization is None:
-        tx_apodization = ops.ones((1, probe_geometry.shape[0]), dtype=np.float32)
-    elif tx_apodization == "kaiser":
-        tx_apodization = keras.ops.kaiser(probe_geometry.shape[0], beta=5.0).astype(np.float32)[
-            None, :
-        ]
-    elif tx_apodization == "hanning":
-        tx_apodization = keras.ops.hanning(probe_geometry.shape[0]).astype(np.float32)[None, :]
+        tx_apodization = ops.ones((1, raw_data.shape[1]), dtype=raw_data.dtype)
 
     n_ax = raw_data.shape[2]
     n_tx = raw_data.shape[1]

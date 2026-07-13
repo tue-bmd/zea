@@ -583,6 +583,16 @@ def sa_to_virtual_focus(
     """
 
     data_dict, parameters = load_file_all_data_types(input_path)
+
+    if tx_apodization is None:
+        tx_apodization = ops.ones((1, parameters.probe_geometry.shape[0]), dtype=np.float32)
+    elif tx_apodization == "kaiser":
+        tx_apodization = ops.kaiser(parameters.probe_geometry.shape[0], beta=5.0).astype(
+            np.float32
+        )[None, :]
+    elif tx_apodization == "hanning":
+        tx_apodization = ops.hanning(parameters.probe_geometry.shape[0]).astype(np.float32)[None, :]
+
     raw_data, t0_delays = construct_acquisition_from_synthetic_aperture(
         raw_data=data_dict["raw_data"],
         probe_geometry=parameters.probe_geometry,
