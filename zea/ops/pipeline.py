@@ -10,7 +10,6 @@ from zea import backend, log
 from zea.backend import func_on_device, jit
 from zea.config import Config
 from zea.func.tensor import vmap
-from zea.func.ultrasound import channels_to_complex, complex_to_channels
 from zea.internal.core import DataTypes, ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
 from zea.internal.core import Object as ZEAObject
 from zea.internal.ops_list import OperationList
@@ -1357,13 +1356,13 @@ class DelayMultiplyAndSum(Operation):
             )
 
         # Compute the correlation matrix
-        data = channels_to_complex(data)
+        data = ops.view_as_complex(data)
 
         data = self._multiply(data)
         data = self._select_lower_triangle(data)
         data = ops.sum(data, axis=(0, 2, 3))
 
-        data = complex_to_channels(data)
+        data = ops.view_as_real(data)
 
         return data
 

@@ -10,6 +10,7 @@ from zea.func.tensor import (
     resample,
     split_into_windows,
 )
+from zea.internal.utils import deprecated
 from zea.utils import ProgressBar
 
 
@@ -289,8 +290,13 @@ def get_low_pass_iq_filter(num_taps, sampling_frequency, center_frequency, bandw
     return lpf_complex
 
 
+@deprecated(replacement="keras.ops.view_as_real")
 def complex_to_channels(complex_data, axis=-1):
     """Unroll complex data to separate channels.
+
+    .. deprecated::
+        Use :func:`keras.ops.view_as_real` instead. Note that ``keras.ops.view_as_real``
+        always appends the real/imaginary components as the last axis.
 
     Args:
         complex_data (complex ndarray): complex input data.
@@ -311,9 +317,13 @@ def complex_to_channels(complex_data, axis=-1):
     return iq_data
 
 
+@deprecated(replacement="keras.ops.view_as_complex")
 def channels_to_complex(data):
     """Convert array with real and imaginary components at
     different channels to complex data array.
+
+    .. deprecated::
+        Use :func:`keras.ops.view_as_complex` instead.
 
     Args:
         data (ndarray): input data, with at 0 index of axis
@@ -482,7 +492,7 @@ def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3):
     iq_data_signal_complex = analytical_signal * ops.exp(phasor_exponent)
 
     # Split the complex signal into two channels
-    iq_data_two_channel = complex_to_channels(ops.squeeze(iq_data_signal_complex, axis=-1))
+    iq_data_two_channel = ops.view_as_real(ops.squeeze(iq_data_signal_complex, axis=-1))
 
     return iq_data_two_channel
 
@@ -524,7 +534,7 @@ def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency
     waveforms_iq_complex_channels = demodulate(
         waveform[..., None], center_frequency, waveform_sampling_frequency, axis=-1
     )
-    waveforms_iq_complex = channels_to_complex(waveforms_iq_complex_channels)
+    waveforms_iq_complex = ops.view_as_complex(waveforms_iq_complex_channels)
     envelope = ops.abs(waveforms_iq_complex)
     peak_idx = ops.argmax(envelope, axis=-1)
     t_peak = ops.cast(peak_idx, dtype="float32") / waveform_sampling_frequency
@@ -547,7 +557,7 @@ def envelope_detect(data, axis=-3):
             of shape (..., grid_size_z, grid_size_x).
     """
     if data.shape[-1] == 2:
-        data = channels_to_complex(data)
+        data = ops.view_as_complex(data)
     else:
         n_ax = ops.shape(data)[axis]
 
