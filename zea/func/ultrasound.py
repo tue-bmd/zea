@@ -1042,7 +1042,8 @@ def decode_hadamard(raw_data, tx_apodizations):
     Decode Hadamard-encoded raw data using the provided transmit apodizations.
 
     Args:
-        raw_data (ops.Tensor): The Hadamard-encoded raw data of shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        raw_data (ops.Tensor): The Hadamard-encoded raw data of shape (n_frames, n_tx, n_ax, n_el,
+            n_ch).
         tx_apodizations (ops.Tensor): The transmit apodizations of shape (n_tx, n_tx).
     """
     raw_data = np.einsum("ijklm,ja->iaklm", raw_data, tx_apodizations.T)
