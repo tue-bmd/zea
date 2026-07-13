@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Literal, Union
 
+import numpy as np
 import tyro
 
 SUPPORTED_FORMATS = ["gif", "mp4", "hdf5"]
@@ -283,6 +284,61 @@ class _Copy:
         copy(src=self.src, dst=self.dst, key=self.key, mode=self.mode)
 
 
+@dataclass
+class _DecodeHadamard:
+    """Decode Hadamard-encoded data in a zea file or folder."""
+
+    input_path: tyro.conf.Positional[Path]
+    """Input HDF5 file or folder."""
+    output_path: tyro.conf.Positional[Path]
+    """Output HDF5 file or folder."""
+    overwrite: bool = False
+    """Overwrite existing output file."""
+
+    def run(self):
+        from zea.data.file_operations import decode_hadamard
+
+        decode_hadamard(
+            input_path=self.input_path, output_path=self.output_path, overwrite=self.overwrite
+        )
+
+
+@dataclass
+class _SAToVirtualFocus:
+    """Convert a synthetic aperture dataset to a virtual focus dataset."""
+
+    input_path: tyro.conf.Positional[Path]
+    """Input HDF5 file or folder."""
+    output_path: tyro.conf.Positional[Path]
+    """Output HDF5 file or folder."""
+    polar_angle_deg: float = 0.0
+    """Polar angle for the virtual focus."""
+    azimuth_angle_deg: float = 0.0
+    """Azimuth angle for the virtual focus."""
+    focus_distance: float = float("inf")
+    """Focus distance for the virtual focus."""
+    transmit_origin: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    """Origin of the transmit."""
+    tx_apodization: str = "kaiser"
+    """Type of transmit apodization to apply."""
+    overwrite: bool = False
+    """Overwrite existing output file."""
+
+    def run(self):
+        from zea.data.file_operations import sa_to_virtual_focus
+
+        sa_to_virtual_focus(
+            polar_angle=np.deg2rad(self.polar_angle_deg),
+            azimuth_angle=np.deg2rad(self.azimuth_angle_deg),
+            focus_distance=self.focus_distance,
+            transmit_origin=self.transmit_origin,
+            tx_apodization=self.tx_apodization,
+            input_path=self.input_path,
+            output_path=self.output_path,
+            overwrite=self.overwrite,
+        )
+
+
 DataCommand = Union[
     Annotated[_Sum, tyro.conf.subcommand("sum")],
     Annotated[_CompoundFrames, tyro.conf.subcommand("compound_frames")],
@@ -291,6 +347,8 @@ DataCommand = Union[
     Annotated[_Extract, tyro.conf.subcommand("extract")],
     Annotated[_Summary, tyro.conf.subcommand("summary")],
     Annotated[_Copy, tyro.conf.subcommand("copy")],
+    Annotated[_DecodeHadamard, tyro.conf.subcommand("decode_hadamard")],
+    Annotated[_SAToVirtualFocus, tyro.conf.subcommand("sa_to_virtual_focus")],
 ]
 
 
