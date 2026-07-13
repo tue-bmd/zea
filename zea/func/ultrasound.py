@@ -11,6 +11,7 @@ from zea.func.tensor import (
     resample,
     split_into_windows,
 )
+from zea.log import logger
 
 
 def demodulate_not_jitable(
@@ -1034,6 +1035,27 @@ def suppress_tissue(data, cutoff: int = 5):
     reconstructed = ops.matmul(reconstructed[:, cutoff:], ops.transpose(V[:, cutoff:]))
 
     return ops.reshape(ops.transpose(reconstructed), original_shape)
+
+
+def decode_hadamard(raw_data, tx_apodizations):
+    """
+    Decode Hadamard-encoded raw data using the provided transmit apodizations.
+
+    Args:
+        raw_data (ops.Tensor): The Hadamard-encoded raw data of shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        tx_apodizations (ops.Tensor): The transmit apodizations of shape (n_tx, n_tx).
+    """
+    raw_data = np.einsum("ijklm,ja->iaklm", raw_data, tx_apodizations.T)
+    tx_apodizations_decoded = tx_apodizations @ tx_apodizations.T
+    if not np.allclose(
+        tx_apodizations_decoded / np.max(tx_apodizations_decoded),
+        np.eye(tx_apodizations_decoded.shape[0]),
+    ):
+        logger.warning(
+            "The Hadamard decoding may not be correct. The tx_apodizations matrix is not "
+            "orthogonal."
+        )
+    return raw_data
 
 
 def construct_acquisition_from_synthetic_aperture(

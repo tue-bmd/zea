@@ -11,12 +11,14 @@ from pathlib import Path
 
 import numpy as np
 import tyro
+from keras import ops
 from tqdm import tqdm
 
 from zea import Parameters
 from zea.data.datasets import Dataset
 from zea.data.file import File, load_file_all_data_types
 from zea.data.spec import DEFAULT_COMPRESSION
+from zea.func.ultrasound import construct_acquisition_from_synthetic_aperture, decode_hadamard
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.log import logger
@@ -530,7 +532,7 @@ def copy(src: Path, dst: Path, key: str, mode: str | None = None):
     dataset.copy(dst, key, mode=mode)
 
 
-def decode_hadamard(input_path: Path, output_path: Path, overwrite=False):
+def decode_hadamard_file_operation(input_path: Path, output_path: Path, overwrite=False):
     """Decodes Hadamard-encoded data in a zea file.
 
     Args:
@@ -544,11 +546,14 @@ def decode_hadamard(input_path: Path, output_path: Path, overwrite=False):
         description = f.description
         custom_elements = f.custom
 
-    if data_dict["raw_data"] is not None:
+    if data_dict["raw_data"] is None:
+        raise ValueError("No raw_data found in the input file.")
+
         raw_data = data_dict["raw_data"]
         tx_apodizations = parameters.tx_apodizations
-        raw_data = np.einsum("ijklm,la->ijkam", raw_data, tx_apodizations)
-
+    raw_data = decode_hadamard(raw_data, tx_apodizations)
+    data_dict["raw_data"] = raw_data
+    parameters.tx_apodizations = np.eye(parameters.tx_apodizations.shape[1])
     if overwrite:
         _delete_file_if_exists(output_path)
 
