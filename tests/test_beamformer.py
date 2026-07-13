@@ -754,3 +754,23 @@ def test_lens_correction_known_vertical_path():
     expected = lens_thickness / c_lens + (z_pixel - lens_thickness) / c_medium
     np.testing.assert_allclose(tt[0, 0], expected, rtol=1e-4)
     return tt
+
+
+@backend_equality_check()
+def test_lens_correction_z_zero_no_nan(probe_geometry):
+    """A pixel row at z=0 (level with the elements, e.g. the top row of a grid that
+    starts at the transducer face) must not produce NaN/Inf, including for the
+    on-axis pixel-element pair (pixel x exactly equal to an element x), which is
+    the exact 0/0 case the Newton-Raphson initial guess divides by."""
+    pixel_pos = keras.ops.convert_to_tensor(probe_geometry)  # same x's, z=0 -> worst case
+    tt = keras.ops.convert_to_numpy(
+        compute_lens_corrected_travel_times(
+            keras.ops.convert_to_tensor(probe_geometry),
+            pixel_pos,
+            lens_thickness=1e-3,
+            c_lens=1000.0,
+            c_medium=SOUND_SPEED,
+        )
+    )
+    assert np.isfinite(tt).all()
+    return tt
