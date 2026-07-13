@@ -202,12 +202,14 @@ class _Resave:
     """Output HDF5 file or folder."""
     overwrite: bool = False
     """Overwrite existing output file."""
-    chunk_axes: tuple[str, ...] = ("n_frames", "n_tx")
+    chunk_axes: tuple[str, ...] = ("n_frames",)
     """Dimension names to chunk with HDF5 chunk size 1 (others stored at full extent),
-    so partial/streamed reads fetch only the requested frames/transmits. Pass no values
-    for contiguous storage (use together with --disable-compression)."""
+    so partial/streamed reads fetch only the requested frames. Defaults to one chunk per
+    frame, mirroring zea.data.spec.DEFAULT_CHUNK_AXES (not imported here: zea.data pulls
+    in a heavy import chain). Pass no values for contiguous storage (use together with
+    --disable-compression)."""
     disable_compression: bool = False
-    """Disable lzf compression for the datasets."""
+    """Disable compression (Blosc zstd+shuffle by default) for the datasets."""
 
     def run(self):
         from zea.data.file_operations import resave
@@ -285,6 +287,79 @@ class _Copy:
         copy(src=self.src, dst=self.dst, key=self.key, mode=self.mode)
 
 
+@dataclass
+class _Virtualize:
+    """Build a virtual (Zarr) reference for cloud-optimized reads.
+
+    Reads only each file's HDF5 metadata — over HTTP for ``hf://`` inputs, so nothing is
+    downloaded — and writes one JSON reference combining all files. Publish it in the
+    dataset at ``virtual/index.json`` to let readers use ``Dataset(..., lazy='virtual')``,
+    which fetches array data straight from chunk byte ranges.
+
+    Files must be written with a Zarr-decodable codec (the Blosc default since zea
+    0.1.3); resave older lzf files first.
+    """
+
+    input_path: tyro.conf.Positional[str]
+    """Input HDF5 file, folder, or hf:// path."""
+    output_path: tyro.conf.Positional[Path]
+    """Output JSON reference file."""
+    revision: str | None = None
+    """HuggingFace revision (branch, tag, or commit hash) to pin the chunk URLs to.
+    Only used for hf:// inputs. Pin to a commit hash so the reference cannot go stale."""
+    overwrite: bool = False
+    """Overwrite an existing reference file."""
+
+    def run(self):
+        from zea.data.file_operations import virtualize
+
+        virtualize(
+            input_path=self.input_path,
+            output_path=self.output_path,
+            revision=self.revision,
+        )
+
+
+@dataclass
+class _Publish:
+    """Publish a dataset to the Hugging Face Hub in the cloud-optimized layout.
+
+    Resaves every file with the current defaults (Blosc + one chunk per frame), uploads
+    them, and publishes a virtual reference pinned to that commit — so readers can use
+    ``Dataset(..., lazy='virtual')``. Also the migration path for datasets published
+    before zea 0.1.3 (lzf): pass their ``hf://`` path as the input.
+
+    Writes to a remote repository (creates it if needed, then commits twice). Needs
+    write access: set HF_TOKEN, or run `hf auth login`.
+    """
+
+    input_path: tyro.conf.Positional[str]
+    """Dataset to publish: a local file/folder, or an hf:// path to migrate."""
+    repo_id: tyro.conf.Positional[str]
+    """Target HuggingFace dataset repo, e.g. zeahub/my-dataset."""
+    branch: str | None = None
+    """Branch to commit to. Defaults to the repo's default branch."""
+    private: bool = False
+    """Create the repo private, if it does not exist yet."""
+    no_resave: bool = False
+    """Upload the files as they are. Only for files already written with the current
+    codec and chunking; the virtual reference cannot be built otherwise."""
+    workdir: Path | None = None
+    """Where to write the resaved files. Defaults to a temporary directory."""
+
+    def run(self):
+        from zea.data.publish import publish_dataset
+
+        publish_dataset(
+            input_path=self.input_path,
+            repo_id=self.repo_id,
+            resave=not self.no_resave,
+            branch=self.branch,
+            private=self.private,
+            workdir=self.workdir,
+        )
+
+
 DataCommand = Union[
     Annotated[_Sum, tyro.conf.subcommand("sum")],
     Annotated[_CompoundFrames, tyro.conf.subcommand("compound_frames")],
@@ -293,6 +368,8 @@ DataCommand = Union[
     Annotated[_Extract, tyro.conf.subcommand("extract")],
     Annotated[_Summary, tyro.conf.subcommand("summary")],
     Annotated[_Copy, tyro.conf.subcommand("copy")],
+    Annotated[_Virtualize, tyro.conf.subcommand("virtualize")],
+    Annotated[_Publish, tyro.conf.subcommand("publish")],
 ]
 
 
@@ -319,7 +396,8 @@ def _run_data_command(command) -> None:
 
 @dataclass
 class DataArgs:
-    """Manipulate zea data files (sum, compound, resave, extract, summary, copy).
+    """Manipulate zea data files (sum, compound, resave, extract, summary, copy,
+    virtualize, publish).
 
     All operations accept files; folder inputs are also supported. For file-to-file
     operations, each zea file in the input folder is processed and written to a

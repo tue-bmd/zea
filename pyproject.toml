@@ -119,6 +119,9 @@ docs = [
     "PyStemmer",
     "IPython",
 ]
+# Cloud-optimized reads through virtual (Zarr) references: see zea.data.virtual.
+# Pinned to the versions this path was validated against.
+virtual = ["virtualizarr", "zarr", "obstore", "xarray"]
 jax = ["jax[cuda12]>=0.4.35"]
 display = ["opencv-python>=4"]
 display-headless = ["opencv-python-headless>=4"]

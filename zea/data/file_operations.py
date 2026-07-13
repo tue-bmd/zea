@@ -32,6 +32,8 @@ OPERATION_NAMES = [
     "extract",
     "summary",
     "copy",
+    "virtualize",
+    "publish",
 ]
 
 
@@ -49,7 +51,6 @@ def save_file(
     metadata: dict | None = None,
     compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
     chunk_axes=DEFAULT_CHUNK_AXES,
-    **kwargs,
 ):
     """Saves data to a zea data file (h5py file).
 
@@ -96,8 +97,8 @@ def save_file(
             ``create_dataset`` kwargs, e.g. an ``hdf5plugin`` filter object. See
             :meth:`zea.File.create`.
         chunk_axes (tuple, optional): Dimension names to chunk with size 1. Defaults
-            to ``("n_frames", "n_tx")`` so partial and streamed reads fetch only the
-            requested frames/transmits; other axes stay at full extent. Use
+            to ``("n_frames",)`` — one full frame per chunk — so partial and streamed
+            reads fetch only the requested frames; other axes stay at full extent. Use
             ``None``/``()`` for contiguous storage. See
             :meth:`zea.data.spec.Spec._resolve_chunks`.
     """
@@ -428,7 +429,6 @@ def resave(
     input_path: Path,
     output_path: Path,
     overwrite=False,
-    enable_compression=True,
     chunk_axes=DEFAULT_CHUNK_AXES,
 ):
     """
@@ -439,11 +439,9 @@ def resave(
         output_path (Path): Path to the output file (or folder) where the data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists.
             Defaults to False.
-        enable_compression (bool, optional): Whether to enable lzf compression for the
-            datasets. Defaults to True.
         chunk_axes (tuple, optional): Dimension names to chunk with size 1. Defaults
-            to ``("n_frames", "n_tx")`` so partial and streamed reads fetch only the
-            requested frames/transmits; other axes stay at full extent. Use
+            to ``("n_frames",)`` — one full frame per chunk — so partial and streamed
+            reads fetch only the requested frames; other axes stay at full extent. Use
             ``None``/``()`` for contiguous storage. See
             :meth:`zea.data.spec.Spec._resolve_chunks`.
     """
@@ -462,7 +460,6 @@ def resave(
         parameters=parameters,
         custom_elements=custom_elements,
         description=description,
-        enable_compression=enable_compression,
         chunk_axes=chunk_axes,
     )
 
@@ -536,6 +533,25 @@ def copy(src: Path, dst: Path, key: str, mode: str | None = None):
     """
     dataset = Dataset(src, validate=False)
     dataset.copy(dst, key, mode=mode)
+
+
+def virtualize(input_path: str | Path, output_path: str | Path, revision: str | None = None):
+    """Builds a virtual (Zarr) reference for a zea dataset, for cloud-optimized reads.
+
+    Reads only the HDF5 metadata of each file — over HTTP range requests for ``hf://``
+    inputs, so no data is downloaded — and writes a single JSON reference combining
+    them. Publish it next to the data (at ``virtual/index.json``) to let readers use
+    ``Dataset(..., lazy="virtual")``. See :mod:`zea.data.virtual`.
+
+    Args:
+        input_path (str or Path): Input zea file, folder, or ``hf://`` path.
+        output_path (str or Path): Path of the JSON reference to write.
+        revision (str, optional): HuggingFace revision (branch, tag, or commit hash) to
+            pin the chunk URLs to. Only used for ``hf://`` inputs. Defaults to ``main``.
+    """
+    from zea.data.virtual import build_virtual_reference
+
+    build_virtual_reference(input_path, output_path, revision=revision)
 
 
 def _delete_file_if_exists(path: Path):
