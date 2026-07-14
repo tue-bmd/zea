@@ -37,6 +37,7 @@ from zea.models.preset_utils import register_presets
 from zea.models.presets import diffusion_model_presets
 from zea.models.unet import get_time_conditional_unetwork
 from zea.models.utils import LossTrackerWrapper
+from zea.utils import ProgressBar
 
 tf = _import_tf()
 
@@ -875,7 +876,7 @@ class DiffusionModel(DeepGenerativeModel):
         step_size = self.max_t / diffusion_steps
 
         if verbose:
-            progbar = keras.utils.Progbar(diffusion_steps, verbose=verbose)
+            progbar = ProgressBar(diffusion_steps, verbose=verbose)
         else:
             progbar = None
 

@@ -23,7 +23,10 @@ import logging
 import os
 import re
 import sys
+import weakref
 from pathlib import Path
+
+from tqdm import tqdm as _tqdm_cls
 
 # The logger to use
 logger: logging.Logger
@@ -113,6 +116,61 @@ def bold(string):
     return "\033[1m" + str(string) + "\033[0m"
 
 
+# Progress bars (other than tqdm, which is handled separately below) that have
+# asked to be redrawn whenever a log message is emitted while they are on screen.
+# A WeakSet so a bar that never explicitly unregisters (e.g. a loop that
+# `break`s before reaching its target) doesn't leak here forever - it drops out
+# once nothing else references it.
+# See `register_progress`/`unregister_progress` and `zea.utils.ProgressBar`.
+_active_progress: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def register_progress(bar):
+    """Registers a progress-bar-like object so log output doesn't corrupt its line.
+
+    ``bar`` must implement a no-argument ``redraw()`` method that forces a fresh
+    render of its current state. Registered bars are redrawn whenever a log
+    message is emitted to the console while they are active.
+    """
+    _active_progress.add(bar)
+
+
+def unregister_progress(bar):
+    """Unregisters a progress bar previously passed to :func:`register_progress`."""
+    _active_progress.discard(bar)
+
+
+class _ProgressAwareStreamHandler(logging.StreamHandler):
+    """A :class:`logging.StreamHandler` that doesn't corrupt an in-progress bar's line.
+
+    - If any :mod:`tqdm` bars are currently active, the message is routed through
+      ``tqdm.write()``, which knows how to clear and redraw every active bar.
+    - Otherwise, if any bar registered via :func:`register_progress` is active
+      (e.g. a :class:`zea.utils.ProgressBar`), the current unterminated line is
+      cleared before the message is written, and each registered bar is asked
+      to redraw itself.
+    - If neither applies, this behaves like a plain ``StreamHandler``.
+    """
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            if _tqdm_cls._instances:
+                _tqdm_cls.write(msg, file=stream)
+                return
+            if _active_progress:
+                stream.write("\r\x1b[K")
+            stream.write(msg + self.terminator)
+            self.flush()
+            for bar in list(_active_progress):
+                bar.redraw()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
+
+
 class CustomFormatter(logging.Formatter):
     """Custom formatter to use different format strings for different log levels"""
 
@@ -178,9 +236,9 @@ def configure_console_logger(
 
     formatter = CustomFormatter(name, color, name_color)
 
-    # stdout stream handler if no handler is configured
-    if not new_logger.hasHandlers():
-        console = logging.StreamHandler(stream=sys.stdout)
+    # stdout stream handler if this logger doesn't already have one of its own
+    if not new_logger.handlers:
+        console = _ProgressAwareStreamHandler(stream=sys.stdout)
         console.setFormatter(formatter)
         console.setLevel(level)
         new_logger.addHandler(console)
@@ -213,8 +271,8 @@ def configure_file_logger(level="INFO") -> logging.Logger:
 
     formatter = logging.Formatter(file_log_format, date_format)
 
-    # stdout stream handler if no handler is configured
-    if not new_logger.hasHandlers():
+    # File handler if this logger doesn't already have one of its own
+    if not new_logger.handlers:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
 
         # Add file handler
@@ -237,12 +295,40 @@ def remove_color_escape_codes(text):
     return escape_code_pattern.sub("", text)
 
 
-def success(message):
-    """Prints a message to the console in green."""
-    logger.info(green(message))
-    if file_logger:
-        file_logger.info(remove_color_escape_codes(message))
-    return message
+# Absolute path (with trailing separator) of the zea package directory, used to tell
+# zea-internal call frames apart from external ("user") ones in `_caller_frame`.
+_LOG_FILE = os.path.abspath(__file__)
+_PACKAGE_DIR = os.path.dirname(_LOG_FILE) + os.sep
+
+
+def _caller_frame(skip_package=True):
+    """Finds the stack frame most relevant to attribute a log message to.
+
+    Always skips frames inside this module (the ``log.*`` wrapper machinery
+    itself, e.g. :func:`warning` or :func:`_log`). When ``skip_package`` is
+    True (the default), also skips past any further frames inside the ``zea``
+    package, returning the first external ("user") frame - usually the call
+    site people actually want to see, even if the message was actually
+    emitted deep inside some internal zea helper. If the whole stack is
+    inside zea (e.g. triggered from zea's own tests/examples), falls back to
+    the immediate caller instead of raising.
+
+    Args:
+        skip_package: If False, only skip this module's own frames and return
+            the literal call site of the ``log.*`` call, even if that's
+            inside zea itself.
+    """
+    stack = inspect.stack()[1:]
+    frames = [f for f in stack if f.filename != _LOG_FILE]
+    if skip_package:
+        for frame in frames:
+            if not frame.filename.startswith(_PACKAGE_DIR):
+                return frame
+    if frames:
+        return frames[0]
+    # Whole stack is inside this module: fall back to the immediate caller
+    # rather than raising, as documented above.
+    return stack[0]
 
 
 # Track locations that have already emitted a once-only warning
@@ -273,14 +359,43 @@ def suppress_warnings():
         _warnings_suppressed.reset(token)
 
 
-def warning(message, *args, **kwargs):
-    """Prints a message with log level warning."""
-    if _warnings_suppressed.get():
+def _log(level, message, *args, suppressible=False, location=False, raw_location=False, **kwargs):
+    """Core implementation shared by all ``log.<level>`` functions.
+
+    Args:
+        level: The numeric logging level (e.g. ``logging.INFO``) to log at.
+        message: The message to log.
+        suppressible: If True, this call is skipped while
+            :func:`suppress_warnings` is active.
+        location: If True, prefixes the message with the ``file:line`` of the
+            call site, similar to Python's :func:`warnings.warn`. By default
+            this is the first call frame *outside* zea, so a message emitted
+            deep inside an internal helper still points at the user's code.
+        raw_location: If True (and ``location`` is True), show the literal
+            call site of the ``log.*`` call instead - useful when the message
+            is actually about something zea-internal.
+
+    Returns:
+        The (possibly location-prefixed) message that was logged.
+    """
+    if suppressible and _warnings_suppressed.get():
         return message
-    logger.warning(message, *args, **kwargs)
+    if location:
+        frame = _caller_frame(skip_package=not raw_location)
+        message = f"{frame.filename}:{frame.lineno}: {message}"
+    logger.log(level, message, *args, **kwargs)
     if file_logger:
-        file_logger.warning(remove_color_escape_codes(message), *args, **kwargs)
+        file_logger.log(level, remove_color_escape_codes(message), *args, **kwargs)
     return message
+
+
+def warning(message, *args, **kwargs):
+    """Prints a message with log level warning.
+
+    Also accepts ``location``/``raw_location`` to prefix the message with its
+    call site - see :func:`_log` for details.
+    """
+    return _log(logging.WARNING, message, *args, suppressible=True, **kwargs)
 
 
 def warning_once(message, *args, key=None, **kwargs):
@@ -288,6 +403,13 @@ def warning_once(message, *args, key=None, **kwargs):
 
     By default, deduplication is per call location. A custom ``key`` can be
     provided to scope once-only behavior (for example, per object instance).
+
+    Also accepts the same ``location``/``raw_location`` arguments as
+    :func:`warning` (forwarded via ``**kwargs``).
+
+    Args:
+        message: The message to log.
+        key: Optional dedupe key scoping the once-only behavior.
     """
     if _warnings_suppressed.get():
         return message
@@ -302,43 +424,32 @@ def warning_once(message, *args, key=None, **kwargs):
 
 def deprecated(message, *args, **kwargs):
     """Prints a message with custom log level DEPRECATED."""
-    if _warnings_suppressed.get():
-        return message
-    logger.log(DEPRECATED_LEVEL_NUM, message, *args, **kwargs)
-    if file_logger:
-        file_logger.log(DEPRECATED_LEVEL_NUM, remove_color_escape_codes(message), *args, **kwargs)
-    return message
+    return _log(DEPRECATED_LEVEL_NUM, message, *args, suppressible=True, **kwargs)
 
 
 def error(message, *args, **kwargs):
     """Prints a message with log level error."""
-    logger.error(message, *args, **kwargs)
-    if file_logger:
-        file_logger.error(remove_color_escape_codes(message), *args, **kwargs)
-    return message
+    return _log(logging.ERROR, message, *args, **kwargs)
 
 
 def debug(message, *args, **kwargs):
     """Prints a message with log level debug."""
-    logger.debug(message, *args, **kwargs)
-    if file_logger:
-        file_logger.debug(remove_color_escape_codes(message), *args, **kwargs)
-    return message
+    return _log(logging.DEBUG, message, *args, **kwargs)
 
 
 def info(message, *args, **kwargs):
     """Prints a message with log level info."""
-    logger.info(message, *args, **kwargs)
-    if file_logger:
-        file_logger.info(remove_color_escape_codes(message), *args, **kwargs)
-    return message
+    return _log(logging.INFO, message, *args, **kwargs)
 
 
 def critical(message, *args, **kwargs):
     """Prints a message with log level critical."""
-    logger.critical(message, *args, **kwargs)
-    if file_logger:
-        file_logger.critical(message, *args, **kwargs)
+    return _log(logging.CRITICAL, message, *args, **kwargs)
+
+
+def success(message, *args, **kwargs):
+    """Prints a message to the console in green."""
+    _log(logging.INFO, green(message), *args, **kwargs)
     return message
 
 
