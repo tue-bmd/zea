@@ -149,7 +149,8 @@ class ChunkedDataset:
     def __getitem__(self, selection):
         from zea.data.chunk_reader import read
 
-        return read(self._dset, selection, self._fetcher)
+        progress = getattr(self._fetcher, "progress", False)
+        return read(self._dset, selection, self._fetcher, progress)
 
     def __getattr__(self, name: str):
         return getattr(self._dset, name)
@@ -728,6 +729,10 @@ class File(h5py.File):
         elif stream and not is_hf:
             raise ValueError("stream=True is only supported for 'hf://' paths.")
 
+        # Progress reporting for concurrent chunk reads. Off by default: a bar that prints
+        # itself from inside a dataloader with several workers is noise, not information.
+        progress = kwargs.pop("progress", False)
+
         # File object opened for streaming; kept so we can close it in close().
         stream_fileobj = None
         # Original source path, retained for streamed files whose ``filename`` is
@@ -773,10 +778,33 @@ class File(h5py.File):
         # opens a file descriptor / an HTTP session, which a write-only user never needs).
         self._fetcher: Any = None
         self._fetcher_built = False
+        self._progress = progress
 
         # Warn when opening an existing file that pre-dates zea v0.1.0
         if mode in ("r", "r+"):
             _warn_if_legacy_file(self)
+
+    @property
+    def progress(self):
+        """Whether chunk reads report progress (see :func:`zea.data.chunk_reader.read`).
+
+        ``True`` draws a tqdm bar over the compressed bytes of each read; a callable is
+        invoked with each chunk's size as it lands. Settable after opening::
+
+            with File("hf://...") as file:
+                file.progress = True
+                file.data.raw_data[:5]
+
+        Reads that fall back to h5py (an lzf file, a strided selection) report nothing —
+        h5py fetches the whole selection in one opaque call.
+        """
+        return self._progress
+
+    @progress.setter
+    def progress(self, value):
+        self._progress = value
+        if self._fetcher_built and self._fetcher is not None:
+            self._fetcher.progress = value
 
     @property
     def _chunk_fetcher(self):
@@ -791,6 +819,8 @@ class File(h5py.File):
             self._fetcher_built = True
             try:
                 self._fetcher = fetcher_for(self)
+                if self._fetcher is not None:
+                    self._fetcher.progress = self._progress
             except Exception as exc:  # noqa: BLE001 — a fast path is never worth an error
                 log.debug(f"Concurrent chunk reads unavailable for '{self.path}': {exc}")
                 self._fetcher = None

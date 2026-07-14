@@ -191,6 +191,66 @@ class TestEqualityWithH5py:
         assert any(masks), "expected HDF5 to store incompressible chunks unfiltered"
 
 
+class TestProgress:
+    """Progress is reported per chunk, and counts the bytes that actually move."""
+
+    def test_ticks_once_per_chunk_with_the_compressed_size(self, structured_file):
+        """The bar's total comes from the chunk manifest, so it must match the bytes fetched.
+
+        Ticking the *uncompressed* size would be the easy mistake: the bar would then race
+        ahead of the download and finish early.
+        """
+        ticks = []
+        with File(structured_file) as file:
+            dset = file[RAW]
+            got = read(dset, slice(0, 3), file._chunk_fetcher, progress=ticks.append)
+            stored = [dset.id.get_chunk_info(i).size for i in range(3)]
+
+            np.testing.assert_array_equal(got, dset[0:3])
+            assert len(ticks) == 3, "expected one tick per chunk"
+            assert sum(ticks) == sum(stored), "ticks must total the compressed bytes"
+
+    def test_progress_does_not_change_the_data(self, structured_file):
+        with File(structured_file) as file:
+            dset, fetcher = file[RAW], file._chunk_fetcher
+            with_bar = read(dset, slice(0, 3), fetcher, progress=True)
+            without = read(dset, slice(0, 3), fetcher, progress=False)
+            np.testing.assert_array_equal(with_bar, without)
+            np.testing.assert_array_equal(with_bar, dset[0:3])
+
+    def test_file_level_flag_reaches_the_read(self, structured_file):
+        """``File(progress=...)`` and ``file.progress = ...`` both drive ChunkedDataset.
+
+        Reads 3 frames, not 2: below ``MIN_BYTES`` the read is served by h5py and reports
+        nothing at all — correctly, but it would make this test pass for the wrong reason.
+        """
+        ticks = []
+        with File(structured_file, progress=ticks.append) as file:
+            assert file.progress is not None
+            file.data.raw_data[0:3]
+        assert ticks, "the file-level flag never reached the reader"
+
+        later = []
+        with File(structured_file) as file:
+            file.progress = later.append  # set after opening
+            file.data.raw_data[0:3]
+        assert later
+
+    def test_fallback_reads_report_nothing(self, tmp_path):
+        """lzf has no fast path, so there is no progress to report — and no crash either.
+
+        h5py fetches the whole selection in one opaque call, so a bar could only jump 0->100%.
+        Asking for one must still return the right data.
+        """
+        ticks = []
+        path = _write(tmp_path / "lzf.hdf5", _structured(), compression="lzf")
+        with File(path) as file:
+            dset = file[RAW]
+            got = read(dset, slice(0, 3), file._chunk_fetcher, progress=ticks.append)
+            np.testing.assert_array_equal(got, dset[0:3])
+        assert ticks == []
+
+
 class TestFallback:
     """Anything the fast path does not fully understand must go to h5py, not guess."""
 

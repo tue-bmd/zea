@@ -30,10 +30,15 @@ from __future__ import annotations
 import os
 import zlib
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Sequence
+from contextlib import contextmanager
+from itertools import repeat
+from typing import Any, Callable, Sequence, cast
 
 import h5py
 import numpy as np
+
+#: Called with the byte size of each chunk as it arrives. Runs on worker threads.
+Ticker = Callable[[int], None] | None
 
 # HDF5 filter ids we can decode in-process, via numcodecs and the stdlib. Wider than zea's own
 # default so foreign files also get the concurrent path, but it stops at codecs that would cost
@@ -79,8 +84,16 @@ class Fetcher:
     #: Whether fetching one chunk on its own is cheap (see above).
     per_chunk = False
 
-    def fetch(self, ranges: Sequence[tuple[int, int]]) -> list[bytes]:
-        """Return the bytes of each ``(offset, size)`` range, in order."""
+    #: Progress reporting for reads through this file (set by :class:`~zea.data.file.File`).
+    progress: "bool | Ticker" = False
+
+    def fetch(self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None) -> list[bytes]:
+        """Return the bytes of each ``(offset, size)`` range, in order.
+
+        ``on_bytes`` is called with the size of each range as it arrives (for progress
+        reporting). It runs on whichever thread completed the fetch, so it must be
+        thread-safe.
+        """
         raise NotImplementedError
 
     def close(self) -> None:
@@ -101,10 +114,15 @@ class LocalFetcher(Fetcher):
     def __init__(self, path: str | os.PathLike):
         self._fd: int | None = os.open(os.fspath(path), os.O_RDONLY)
 
-    def fetch(self, ranges: Sequence[tuple[int, int]]) -> list[bytes]:
+    def fetch(self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None) -> list[bytes]:
         if self._fd is None:
             raise ValueError("Cannot read chunks: the file has been closed.")
-        return [os.pread(self._fd, int(size), int(offset)) for offset, size in ranges]
+        out = []
+        for offset, size in ranges:
+            out.append(os.pread(self._fd, int(size), int(offset)))
+            if on_bytes is not None:
+                on_bytes(int(size))
+        return out
 
     def close(self):
         if self._fd is not None:
@@ -118,6 +136,12 @@ class HTTPFetcher(Fetcher):
     Deliberately fsspec's **async** ``HTTPFileSystem`` and not ``HfFileSystem``, whose
     ``cat_ranges`` is serial: the same 16 ranges took 2745 ms through ``HfFileSystem`` against
     177 ms here — sixteen round trips against one. The whole remote win rests on this.
+
+    The ranges are issued as individual ``_cat_file`` coroutines gathered on fsspec's event
+    loop, rather than through ``cat_ranges``. That is both faster and steadier — ``cat_ranges``
+    does its own batching and periodically stalls (measured at 20 ms/request: 32 ranges in
+    1.06 s against 0.06 s here) — and it is what makes per-chunk progress possible at all,
+    since ``cat_ranges`` only returns once every range is done.
     """
 
     def __init__(self, url: str, token: str | None = None):
@@ -129,10 +153,25 @@ class HTTPFetcher(Fetcher):
             "http", client_kwargs={"headers": headers} if headers else None
         )
 
-    def fetch(self, ranges: Sequence[tuple[int, int]]) -> list[bytes]:
-        starts = [offset for offset, _ in ranges]
-        ends = [offset + size for offset, size in ranges]
-        return self._fs.cat_ranges([self.url] * len(ranges), starts, ends)
+    def fetch(self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None) -> list[bytes]:
+        import asyncio
+
+        from fsspec.asyn import sync
+
+        out: list[bytes | None] = [None] * len(ranges)
+
+        async def one(index: int, offset: int, size: int) -> None:
+            out[index] = await self._fs._cat_file(self.url, start=offset, end=offset + size)
+            if on_bytes is not None:
+                on_bytes(size)
+
+        async def gather() -> None:
+            await asyncio.gather(
+                *(one(i, int(off), int(size)) for i, (off, size) in enumerate(ranges))
+            )
+
+        sync(self._fs.loop, gather)
+        return cast(list[bytes], out)
 
 
 def fetcher_for(file: h5py.File) -> Fetcher | None:
@@ -319,7 +358,12 @@ def _blocks(indices: np.ndarray, start: int, size: int):
     return slice(lo, hi), src, whole
 
 
-def read(dset: h5py.Dataset, selection: Any, fetcher: Fetcher | None) -> np.ndarray:
+def read(
+    dset: h5py.Dataset,
+    selection: Any,
+    fetcher: Fetcher | None,
+    progress: bool | Ticker = False,
+) -> np.ndarray:
     """Read ``selection`` from ``dset``, concurrently, falling back to h5py when unsure.
 
     The contract is equality: this returns exactly what ``dset[selection]`` returns.
@@ -330,6 +374,10 @@ def read(dset: h5py.Dataset, selection: Any, fetcher: Fetcher | None) -> np.ndar
             lists take the fast path; anything else is handed to h5py.
         fetcher (Fetcher, optional): Source of the chunk bytes for this file (see
             :func:`fetcher_for`). ``None`` disables the fast path.
+        progress (bool | callable): ``True`` shows a tqdm bar over the compressed bytes;
+            a callable is invoked with each chunk's size as it arrives. Reads served by
+            h5py (an lzf file, a strided selection) report nothing: h5py fetches the whole
+            selection in one opaque call, so there is no progress to observe.
 
     Returns:
         np.ndarray: The selected data.
@@ -395,25 +443,46 @@ def read(dset: h5py.Dataset, selection: Any, fetcher: Fetcher | None) -> np.ndar
         # (_normalize allows at most one advanced index, which does not move axes), so reshape.
         view[...] = block[source].reshape(view.shape)
 
-    def fetch_and_place(task):
+    def fetch_and_place(task, on_bytes):
         info = task[0]
-        (raw,) = fetcher.fetch([(int(info.byte_offset), int(info.size))])
+        (raw,) = fetcher.fetch([(int(info.byte_offset), int(info.size))], on_bytes)
         place(task, raw)
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        if fetcher.per_chunk:
-            # Each worker reads its own chunk, so the next read overlaps the last decode. Only
-            # MAX_WORKERS chunks are ever in flight, so there is nothing to bound.
-            list(pool.map(fetch_and_place, tasks))
-        else:
-            # Remote: the ranges must go out together (that is the win), so fetch a batch and
-            # then decode it. Bounded by *bytes*, since chunk sizes vary hugely across files.
-            for batch in _batched(tasks, MAX_BYTES_IN_FLIGHT):
-                ranges = [(int(t[0].byte_offset), int(t[0].size)) for t in batch]
-                raws = fetcher.fetch(ranges)
-                list(pool.map(place, batch, raws))
+    # The manifest gives every chunk's compressed size up front, so the bar knows its true
+    # total before a single byte moves — it measures the bytes actually transferred, not a
+    # guess. Ticks arrive from worker threads; tqdm.update is thread-safe.
+    total = sum(int(task[0].size) for task in tasks)
+    with _ticker(progress, total) as on_bytes:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            if fetcher.per_chunk:
+                # Each worker reads its own chunk, so the next read overlaps the last decode.
+                # Only MAX_WORKERS chunks are ever in flight, so there is nothing to bound.
+                list(pool.map(fetch_and_place, tasks, repeat(on_bytes)))
+            else:
+                # Remote: the ranges go out together (that is the win), then we decode them.
+                # Bounded by *bytes*, since chunk sizes vary hugely across files.
+                for batch in _batched(tasks, MAX_BYTES_IN_FLIGHT):
+                    ranges = [(int(t[0].byte_offset), int(t[0].size)) for t in batch]
+                    raws = fetcher.fetch(ranges, on_bytes)
+                    list(pool.map(place, batch, raws))
 
     return out
+
+
+@contextmanager
+def _ticker(progress: bool | Ticker, total: int):
+    """The per-chunk callback for ``progress``, and the tqdm bar behind it if there is one."""
+    if not progress:
+        yield None
+        return
+    if callable(progress):
+        yield progress
+        return
+
+    from tqdm.auto import tqdm  # tqdm.auto: renders as a widget in notebooks, text elsewhere
+
+    with tqdm(total=total, unit="B", unit_scale=True, desc="reading chunks") as bar:
+        yield bar.update
 
 
 def _product(grids: list[list[int]]):
