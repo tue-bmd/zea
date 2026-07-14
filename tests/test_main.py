@@ -179,6 +179,16 @@ def test_data_output_path_rejects_hf():
     assert exc_info.value.code != 0
 
 
+def test_data_copy_dst_rejects_hf():
+    """CLI-level guard also applies to `copy`'s dst, which uses a different field name."""
+    from zea.cli_args import _run_data_command
+
+    cli_args = parse_args(["data", "copy", "in.hdf5", "hf://zeahub/out/", "--key", "all"])
+    with pytest.raises(SystemExit) as exc_info:
+        _run_data_command(cli_args.subcommand.subcommand)
+    assert exc_info.value.code != 0
+
+
 def test_data_output_path_local_runs_and_overwrites(tmp_path):
     """A local (non-'hf://') output_path is unaffected by the 'hf://' guard and,
     with --overwrite, replaces an existing output file."""

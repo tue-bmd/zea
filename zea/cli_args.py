@@ -305,7 +305,10 @@ def _run_data_command(command) -> None:
     from zea.log import logger
 
     output_path = getattr(command, "output_path", None)
-    if output_path is not None and str(output_path).startswith("hf://"):
+    dst = getattr(command, "dst", None)
+    if (output_path is not None and str(output_path).startswith("hf://")) or (
+        dst is not None and str(dst).startswith("hf://")
+    ):
         logger.error("Output path cannot be an 'hf://' path; 'hf://' is only supported for inputs.")
         raise SystemExit(1)
     if (
