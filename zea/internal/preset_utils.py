@@ -222,6 +222,45 @@ _HF_STREAM_CACHE_TYPE = "blockcache"
 _HF_STREAM_BLOCK_SIZE = 8 * 1024 * 1024  # 8 MiB
 
 
+# Host serving the file bytes. Range requests for chunk reads go straight here rather than
+# through :class:`~huggingface_hub.HfFileSystem`, which issues them one at a time.
+_HF_HOST = "https://huggingface.co"
+
+# The ``resolve`` endpoint of a repo type, as it appears in a download URL.
+_HF_URL_PREFIX = {"dataset": "datasets/", "model": "", "space": "spaces/"}
+
+
+def _hf_stream_url(
+    hf_path: str,
+    revision: str | None = None,
+    repo_type: str = "dataset",
+    **kwargs,
+) -> str:
+    """The HTTPS URL the bytes of an ``hf://`` file live at.
+
+    :func:`_hf_stream_open` streams through :class:`~huggingface_hub.HfFileSystem`, which
+    is a *sync* filesystem: its ``cat_ranges`` fetches ranges one after another. Concurrent
+    chunk reads (:mod:`zea.data.chunk_reader`) therefore address this URL directly through
+    fsspec's async HTTP filesystem instead — measured at one round trip for 16 ranges,
+    against sixteen through ``HfFileSystem``.
+
+    Args:
+        hf_path (str): An ``hf://org/repo/path/to/file`` path to a single file.
+        revision (str, optional): Branch, tag or commit hash. Defaults to the repository
+            default branch.
+        repo_type (str, optional): One of ``"dataset"``, ``"model"`` or ``"space"``.
+        **kwargs: Ignored (accepts the same kwargs as :func:`_hf_stream_open`).
+
+    Returns:
+        str: The ``resolve`` URL of the file.
+    """
+    repo_id, subpath = _hf_parse_path(hf_path)
+    if not subpath:
+        raise ValueError(f"Expected an 'hf://' path to a single file, got '{hf_path}'.")
+    prefix = _HF_URL_PREFIX[repo_type]
+    return f"{_HF_HOST}/{prefix}{repo_id}/resolve/{revision or 'main'}/{subpath}"
+
+
 def _hf_stream_open(
     hf_path: str,
     revision: str | None = None,

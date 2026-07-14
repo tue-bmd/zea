@@ -53,7 +53,6 @@ from zea.internal.preset_utils import (
     _hf_parse_path,
     _hf_resolve_path,
 )
-from zea.data.virtual import VIRTUAL_INDEX_PATH
 from zea.internal.utils import calculate_file_hash, reduce_to_signature
 from zea.io_lib import search_file_tree
 from zea.tools.hf import HFPath
@@ -64,16 +63,10 @@ if TYPE_CHECKING:
     # 3.10 floor runtime-clean.
     from typing_extensions import Self
 
-    from zea.data.virtual import VirtualFile, VirtualReference
-
 _CHECK_MAX_DATASET_SIZE = 10000
 _VALIDATED_FLAG_FILE = "validated.flag"
 FILE_HANDLE_CACHE_CAPACITY = 128
 FILE_TYPES = [".hdf5", ".h5"]
-
-# ``lazy="virtual"``: read array data through a published virtual reference
-# (Zarr + HTTP range requests) instead of opening each HDF5 file.
-VIRTUAL = "virtual"
 
 
 def EXISTS(value: Any) -> bool:
@@ -561,9 +554,8 @@ class Dataset(H5FileHandleCache):
         validate: bool = False,
         directory_splits: list | None = None,
         revision: str | None = None,
-        lazy: "bool | str" = False,
+        lazy: bool = False,
         file_filter: "Callable[[File], bool] | dict | None" = None,
-        virtual_index: "str | Path | None" = None,
         _suggest_lazy: bool = True,
         **kwargs,
     ):
@@ -579,12 +571,9 @@ class Dataset(H5FileHandleCache):
             revision (str, optional): HuggingFace revision (branch, tag, or commit hash).
                 Only used when file_paths contains ``hf://`` paths. Defaults to ``None``
                 (uses HuggingFace Hub default, i.e. the ``main`` branch).
-            lazy (bool or str, optional): If True, ``hf://`` files are not downloaded at init —
+            lazy (bool, optional): If True, ``hf://`` files are not downloaded at init —
                 each file is downloaded on first access. ``len(ds)`` returns the number of files
-                (not total frames). Pass ``"virtual"`` to additionally enable the cloud read
-                path: :attr:`virtual` then reads array data straight from byte ranges through a
-                published virtual reference (see :mod:`zea.data.virtual`), with no per-file HDF5
-                open. Defaults to False.
+                (not total frames). Defaults to False.
             file_filter (callable or dict, optional): Keep only files whose content matches a
                 predicate. Either a callable ``File -> bool`` (a file is kept when it returns
                 ``True``), or a declarative dotted-path dict mapping a path on the
@@ -594,21 +583,12 @@ class Dataset(H5FileHandleCache):
                 resolved value. All dict entries are ANDed. Files whose predicate raises
                 (e.g. no ``metadata`` group) are excluded. Requires reading files, so it is
                 incompatible with ``lazy=True``. Defaults to ``None`` (no filtering).
-            virtual_index (str or Path, optional): Location of the virtual reference used by
-                ``lazy="virtual"``. Defaults to ``None``: the reference is looked up at
-                ``virtual/index.json`` next to the data (in the HF repo, or in the dataset's
-                folder for local files).
-
         """
         super().__init__(**kwargs)
         self.validate = validate
         self.revision = revision
-        if isinstance(lazy, str) and lazy != VIRTUAL:
-            raise ValueError(f"lazy must be a bool or '{VIRTUAL}', got '{lazy}'.")
         self.lazy = lazy
         self.file_filter = compile_file_filter(file_filter)
-        self.virtual_index = virtual_index
-        self._virtual: "VirtualReference | None" = None
         self._suggest_lazy = _suggest_lazy
 
         if self.file_filter is not None and self.lazy:
@@ -785,71 +765,14 @@ class Dataset(H5FileHandleCache):
             base_path = Path(os.path.commonpath([str(p) for p in self.file_paths]))
         _copy_h5_files(self.file_paths, base_path, to_path, key, mode=mode)
 
-    def _virtual_index_path(self) -> str:
-        """Where to look for this dataset's virtual reference."""
-        if self.virtual_index is not None:
-            return str(self.virtual_index)
-
-        first = self.file_paths[0]
-        if first.startswith(HF_PREFIX):
-            repo_id, _ = _hf_parse_path(first)
-            return f"{HF_PREFIX}{repo_id}/{VIRTUAL_INDEX_PATH}"
-
-        if self.n_files == 1:
-            root = Path(first).parent
-        else:
-            root = Path(os.path.commonpath([str(p) for p in self.file_paths]))
-        return str(root / VIRTUAL_INDEX_PATH)
-
-    @property
-    def virtual(self) -> "VirtualReference":
-        """Cloud read path: the dataset's files as one logical, Zarr-backed array.
-
-        Available with ``lazy="virtual"``. Array data is read straight from chunk byte
-        ranges (concurrently, no HDF5 metadata walk, no download) through a virtual
-        reference published alongside the data. Index it by file first::
-
-            ds = Dataset("hf://zeahub/camus-sample", lazy="virtual")
-            ds.virtual["raw_data"][0, 0:4]  # first 4 frames of the first file
-
-        Note that the file order follows the reference (see
-        :attr:`~zea.data.virtual.VirtualReference.file_paths`), which need not match
-        :attr:`file_paths` — and that scan/probe parameters are not virtualized: open
-        the file itself (``ds[i]``) for those.
-
-        Returns:
-            VirtualReference: The combined reference (see :mod:`zea.data.virtual`).
-
-        Raises:
-            AttributeError: When the dataset was not opened with ``lazy="virtual"``.
-            FileNotFoundError: When no virtual reference has been published for this
-                dataset. Generate one with ``zea data virtualize <input> <output>``.
-        """
-        if self.lazy != VIRTUAL:
-            raise AttributeError(
-                f"The virtual read path requires {type(self).__name__}(..., lazy='{VIRTUAL}')."
-            )
-        if self._virtual is None:
-            from zea.data.virtual import open_virtual_reference
-
-            self._virtual = open_virtual_reference(
-                self._virtual_index_path(), revision=self.revision
-            )
-        return self._virtual
-
-    def __getitem__(self, index) -> "File | VirtualFile":
+    def __getitem__(self, index) -> "File":
         """Retrieves an item from the dataset.
 
-        With ``lazy="virtual"`` this is a :class:`~zea.data.virtual.VirtualFile`, which
-        answers to the same read calls (``dataset[0].data.raw_data[0]``) but fetches only
-        that frame's chunk byte ranges — no download, no HDF5 open. Otherwise it is a
-        :class:`~zea.data.file.File` (``hf://`` files are downloaded on first access).
+        Returns a :class:`~zea.data.file.File`; ``hf://`` files are downloaded on first
+        access. Reads through it (``dataset[0].data.raw_data[0]``) fetch only the chunks
+        they touch — see :mod:`zea.data.chunk_reader`.
         """
         path = self.file_paths[index]
-        if self.lazy == VIRTUAL:
-            # Look up by path rather than position: the reference orders its files by
-            # shape group, which need not match this dataset's file order.
-            return self.virtual.file(path)
         if path.startswith(HF_PREFIX):
             hf_kwargs = {}
             if self.revision is not None:
@@ -872,9 +795,6 @@ class Dataset(H5FileHandleCache):
     @property
     def total_frames(self):
         """Return total number of frames in dataset."""
-        if self.lazy == VIRTUAL:
-            # The reference knows every file's shape: no need to open (or download) any.
-            return sum(file.n_frames for file in self.virtual.files())
         return sum(self.get_file(file_path).n_frames for file_path in self.file_paths)
 
     def __repr__(self):

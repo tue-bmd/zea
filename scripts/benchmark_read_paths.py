@@ -1,23 +1,25 @@
 """Benchmark the read paths for a zea ``raw_data`` cube, local and over HTTP.
 
-Answers the question `plan-direct-chunk.md` hinges on: **how does reading N frames
-compare across the four ways zea can get those bytes?**
+This is the evidence behind `plan-direct-chunk.md`: **how does reading N frames compare
+across the ways zea could get those bytes?**
 
   1. ``h5py``            plain ``h5py.File`` / ``zea.File`` (streams over HTTP for ``hf://``,
-                         with the fsspec blockcache).
-  2. ``direct``          the *proposed* path (not yet in zea, prototyped here): pull the
-                         chunk manifest out of h5py (``get_chunk_info``), fetch the raw
-                         chunk bytes ourselves — concurrently when remote — and decode
-                         them in a thread pool with ``numcodecs``.
-  3. ``virtual``         the implemented ``zea.data.virtual`` path (VirtualiZarr manifest
-                         + Zarr + obstore). Both the on-the-fly manifest
-                         (``open_virtual_file``) and, when present, the published
-                         reference (``virtual/index.json``, ~0-request open).
+                         with the fsspec blockcache). Reads chunks one at a time, under a
+                         global lock.
+  2. ``direct``          what zea now does (:mod:`zea.data.chunk_reader`): pull the chunk
+                         manifest out of h5py (``get_chunk_info``), fetch the raw chunk
+                         bytes ourselves — concurrently when remote — and decode them in a
+                         thread pool, straight into the output array. Reproduced
+                         standalone here so the comparison does not depend on zea internals.
+  3. ``virtual``         the VirtualiZarr path (manifest + Zarr + obstore) that this
+                         replaced, kept as the yardstick it was measured against. Needs
+                         ``pip install virtualizarr zarr obstore xarray``; the rows are
+                         skipped when it is not installed.
 
 The sweep over ``--n-frames`` is the point: with zea's per-frame chunking, one frame is
 one chunk, so it separates the regime where a read touches a *single* chunk (nothing to
 parallelise — only the open cost differs) from the regime where it touches *many* (where
-concurrent fetch + parallel decode is the whole argument for the pivot).
+concurrent fetch + parallel decode is the whole argument).
 
 Open and read are timed **separately**: the open is the HDF5 metadata walk (~2-3 HTTP
 round trips) that a published manifest avoids entirely, and it is a constant, not a
@@ -293,24 +295,17 @@ def t_direct_local(path, n, workers):
 
 def t_virtual(path, n):
     """On-the-fly manifest: the open pays for one HDF5 metadata pass, the read goes to Zarr."""
-    from zea.data.virtual import open_virtual_file
+    import zarr
+    from virtualizarr.parsers import HDFParser
 
+    url = Path(path).absolute().as_uri()
     t0 = time.perf_counter()
-    vfile = open_virtual_file(str(path))
+    with h5py.File(path, "r") as f:
+        group = raw_key(f).rsplit("/", 1)[0]
+    store = HDFParser(group=group)(url, _obstore_registry(url))
+    array = zarr.open_group(store, mode="r")["raw_data"]
     t1 = time.perf_counter()
-    arr = np.asarray(vfile.data.raw_data[0:n])
-    return t1 - t0, time.perf_counter() - t1, arr
-
-
-def t_virtual_published(reference_path, file_path, n):
-    """Published reference: the open is a local JSON parse — the ~0-request cold open."""
-    from zea.data.virtual import open_virtual_reference
-
-    t0 = time.perf_counter()
-    reference = open_virtual_reference(reference_path)
-    vfile = reference.file(reference.index_of(str(file_path)))
-    t1 = time.perf_counter()
-    arr = np.asarray(vfile.data.raw_data[0:n])
+    arr = np.asarray(array[0:n])
     return t1 - t0, time.perf_counter() - t1, arr
 
 
@@ -432,13 +427,11 @@ def _obstore_registry(base_url):
     except ImportError:
         from virtualizarr.registry import ObjectStoreRegistry
 
-    return ObjectStoreRegistry(
-        {
-            "file://": LocalStore(),
-            # allow_http: obstore refuses plain (non-TLS) HTTP by default.
-            base_url: HTTPStore.from_url(base_url, client_options={"allow_http": True}),
-        }
-    )
+    stores = {"file://": LocalStore()}
+    if base_url.startswith("http"):
+        # allow_http: obstore refuses plain (non-TLS) HTTP by default.
+        stores[base_url] = HTTPStore.from_url(base_url, client_options={"allow_http": True})
+    return ObjectStoreRegistry(stores)
 
 
 def build_refs(local_path, url, out_json):
@@ -562,6 +555,17 @@ def _chunk_coords_for(path, n):
 # --------------------------------------------------------------------------- #
 # Harness
 # --------------------------------------------------------------------------- #
+def have_virtualizarr() -> bool:
+    """The virtual path is no longer a zea dependency: its rows are optional."""
+    try:
+        import virtualizarr  # noqa: F401
+        import zarr  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def run(label, fn, n, reference, repeats, rows, stat="median"):
     """Time ``fn`` ``repeats`` times and check the result against h5py.
 
@@ -633,11 +637,12 @@ def bench_local(path, n_frames_list, repeats, workers):
             repeats,
             rows,
         )
-        run("virtual (on the fly)", lambda n=n: t_virtual(path, n), n, ref, repeats, rows)
+        if have_virtualizarr():
+            run("virtual (on the fly)", lambda n=n: t_virtual(path, n), n, ref, repeats, rows)
     return rows
 
 
-def bench_cloud(hf_path, n_frames_list, repeats, workers, reference_path):
+def bench_cloud(hf_path, n_frames_list, repeats, workers):
     with zea.File(hf_path, mode="r") as f:
         ds = f[raw_key(f)]
         describe(ds, n_frames_list)
@@ -668,17 +673,6 @@ def bench_cloud(hf_path, n_frames_list, repeats, workers, reference_path):
             rows,
             best,
         )
-        run("virtual (on the fly)", lambda n=n: t_virtual(hf_path, n), n, ref, repeats, rows, best)
-        if reference_path:
-            run(
-                "virtual (published ref)",
-                lambda n=n: t_virtual_published(reference_path, hf_path, n),
-                n,
-                ref,
-                repeats,
-                rows,
-                best,
-            )
     return rows
 
 
@@ -768,11 +762,6 @@ def main():
     )
     p.add_argument("--local", default=None, help="Local zea file. Synthesised when omitted.")
     p.add_argument("--hf", default=None, help="hf:// path to one zea file (cloud benchmark).")
-    p.add_argument(
-        "--virtual-index",
-        default=None,
-        help="Published reference (e.g. hf://<repo>/virtual/index.json) for the 0-request open.",
-    )
     p.add_argument("--n-frames", type=int, nargs="+", default=[1, 2, 4, 8, 16])
     p.add_argument("--repeats", type=int, default=3)
     p.add_argument("--workers", type=int, default=8, help="Decode/fetch threads (direct path).")
@@ -807,7 +796,7 @@ def main():
     if args.hf:
         if not args.hf.startswith(HF_PREFIX):
             raise SystemExit(f"--hf must be an 'hf://' path, got '{args.hf}'.")
-        bench_cloud(args.hf, args.n_frames, args.repeats, args.workers, args.virtual_index)
+        bench_cloud(args.hf, args.n_frames, args.repeats, args.workers)
         if args.probe_concurrency:
             probe_concurrency(args.hf)
 

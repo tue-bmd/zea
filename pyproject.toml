@@ -37,6 +37,8 @@ dependencies = [
     "keras >=3.12.1",
     "h5py >=3.11",
     "hdf5plugin >=4.4",
+    # Decodes HDF5 chunks in-process for the concurrent read path (zea.data.chunk_reader).
+    "numcodecs >=0.13",
     "numpy >= 1.24",
     "matplotlib >=3.10",
     "scipy >=1.13",
@@ -119,9 +121,6 @@ docs = [
     "PyStemmer",
     "IPython",
 ]
-# Cloud-optimized reads through virtual (Zarr) references: see zea.data.virtual.
-# Pinned to the versions this path was validated against.
-virtual = ["virtualizarr", "zarr", "obstore", "xarray"]
 jax = ["jax[cuda12]>=0.4.35"]
 display = ["opencv-python>=4"]
 display-headless = ["opencv-python-headless>=4"]

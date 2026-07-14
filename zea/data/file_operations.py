@@ -41,8 +41,6 @@ OPERATION_NAMES = [
     "extract",
     "summary",
     "copy",
-    "virtualize",
-    "publish",
 ]
 
 
@@ -632,25 +630,6 @@ def copy(src: Path, dst: Path, key: str, mode: str | None = None):
     """
     dataset = Dataset(src, validate=False)
     dataset.copy(dst, key, mode=mode)
-
-
-def virtualize(input_path: str | Path, output_path: str | Path, revision: str | None = None):
-    """Builds a virtual (Zarr) reference for a zea dataset, for cloud-optimized reads.
-
-    Reads only the HDF5 metadata of each file — over HTTP range requests for ``hf://``
-    inputs, so no data is downloaded — and writes a single JSON reference combining
-    them. Publish it next to the data (at ``virtual/index.json``) to let readers use
-    ``Dataset(..., lazy="virtual")``. See :mod:`zea.data.virtual`.
-
-    Args:
-        input_path (str or Path): Input zea file, folder, or ``hf://`` path.
-        output_path (str or Path): Path of the JSON reference to write.
-        revision (str, optional): HuggingFace revision (branch, tag, or commit hash) to
-            pin the chunk URLs to. Only used for ``hf://`` inputs. Defaults to ``main``.
-    """
-    from zea.data.virtual import build_virtual_reference
-
-    build_virtual_reference(input_path, output_path, revision=revision)
 
 
 def _delete_file_if_exists(path: Path):

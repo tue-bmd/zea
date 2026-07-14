@@ -8,7 +8,15 @@ import numpy as np
 import pytest
 
 import zea
-from zea.data.file import CustomElement, File, Track, _GroupProxy, _StringDataset, load_file
+from zea.data.file import (
+    ChunkedDataset,
+    CustomElement,
+    File,
+    Track,
+    _GroupProxy,
+    _StringDataset,
+    load_file,
+)
 from zea.data.legacy_file import dict_to_sorted_list
 from zea.data.spec import FileSpec, Image, ScanSpec, Segmentation
 from zea.parameters import Parameters
@@ -428,11 +436,16 @@ class TestStringDataset:
 
 class TestGroupProxy:
     def test_attribute_access_returns_dataset(self, spec_file):
+        """Datasets come back as ChunkedDataset (concurrent reads), delegating to h5py."""
         path, _, raw, _ = spec_file
         with File(path) as f:
             ds = f.data.raw_data
-            assert isinstance(ds, h5py.Dataset)
+            assert isinstance(ds, ChunkedDataset)
             assert ds.shape == raw.shape
+            assert ds.dtype == raw.dtype
+            assert ds.chunks is not None  # delegated straight to the h5py dataset
+            # The raw h5py object stays reachable for anyone who wants it.
+            assert isinstance(f["tracks/track_0/data/raw_data"], h5py.Dataset)
 
     def test_slicing_loads_subset(self, spec_file):
         path, _, raw, _ = spec_file

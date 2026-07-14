@@ -129,15 +129,57 @@ class _StringDataset:
         return f"<StringDataset shape={self._ds.shape} dtype=str>"
 
 
+class ChunkedDataset:
+    """An ``h5py.Dataset`` whose reads go through :mod:`zea.data.chunk_reader`.
+
+    Behaves exactly like the dataset it wraps — same ``shape``, ``dtype``, ``attrs``,
+    everything — except that slicing fetches the chunk byte ranges itself and decodes them
+    concurrently, instead of letting h5py do it one chunk at a time under its global lock.
+    Reads that the fast path does not fully understand fall back to h5py, so the result is
+    always what plain h5py would have returned; it just tends to arrive sooner.
+
+    Handed out by :class:`_GroupProxy`, so ``file.data.raw_data[0:8]`` is already on the
+    fast path. ``file["data/raw_data"]`` still returns the bare ``h5py.Dataset``.
+    """
+
+    __slots__ = ("_dset", "_fetcher")
+
+    def __init__(self, dset: h5py.Dataset, fetcher):
+        self._dset = dset
+        self._fetcher = fetcher
+
+    def __getitem__(self, selection):
+        from zea.data.chunk_reader import read
+
+        return read(self._dset, selection, self._fetcher)
+
+    def __getattr__(self, name: str):
+        return getattr(self._dset, name)
+
+    def __array__(self, dtype=None, copy=None):
+        values = self[...]
+        return values if dtype is None else values.astype(dtype)
+
+    def __len__(self):
+        return len(self._dset)
+
+    def __iter__(self):
+        for index in range(len(self._dset)):
+            yield self[index]
+
+    def __repr__(self):
+        return f"<ChunkedDataset {self._dset.name} shape={self.shape} dtype={self.dtype}>"
+
+
 class _GroupProxy:
     """Lazy proxy for an h5py.Group that exposes children as attributes.
 
-    Datasets are returned as-is (h5py.Dataset supports slicing without
-    loading everything into RAM).  Sub-groups are wrapped in another
-    ``GroupProxy`` so the dot-access pattern works recursively::
+    Datasets are returned as :class:`ChunkedDataset` – they slice like an
+    ``h5py.Dataset`` (nothing is loaded until you index them), but the read goes
+    through :mod:`zea.data.chunk_reader`, which fetches the chunks concurrently::
 
         with File(path) as f:
-            # returns h5py.Dataset – no data loaded yet
+            # returns ChunkedDataset – no data loaded yet
             f.data.raw_data
             # slicing triggers the actual read, just like plain h5py
             f.data.raw_data[:, :n_tx]
@@ -149,10 +191,11 @@ class _GroupProxy:
     than raw ``bytes``.
     """
 
-    __slots__ = ("_group",)
+    __slots__ = ("_group", "_fetcher")
 
-    def __init__(self, group: h5py.Group):
+    def __init__(self, group: h5py.Group, fetcher=None):
         self._group = group
+        self._fetcher = fetcher
 
     def __getattr__(self, name: str):
         try:
@@ -163,10 +206,10 @@ class _GroupProxy:
                 f"Available keys: {list(self._group.keys())}"
             )
         if isinstance(child, h5py.Group):
-            return _GroupProxy(child)
+            return _GroupProxy(child, self._fetcher)
         if isinstance(child, h5py.Dataset) and h5py.check_string_dtype(child.dtype):
             return _StringDataset(child)
-        return child  # h5py.Dataset – supports slicing natively
+        return ChunkedDataset(child, self._fetcher)
 
     def __dir__(self):
         return list(self._group.keys())
@@ -264,7 +307,7 @@ class Track:
                 parameters = track.load_parameters()
     """
 
-    __slots__ = ("_index", "_group", "_timestamps", "_label", "_probe")
+    __slots__ = ("_index", "_group", "_timestamps", "_label", "_probe", "_fetcher")
 
     # Declared for type checkers only: the values live in the slots above and
     # are populated in __init__ via ``object.__setattr__`` (Track is immutable).
@@ -273,6 +316,7 @@ class Track:
     _timestamps: "np.ndarray | None"
     _label: "str | None"
     _probe: "dict | None"
+    _fetcher: Any
 
     def __init__(
         self,
@@ -281,12 +325,14 @@ class Track:
         timestamps: "np.ndarray | None" = None,
         label: "str | None" = None,
         probe: "dict | None" = None,
+        fetcher: Any = None,
     ):
         object.__setattr__(self, "_index", index)
         object.__setattr__(self, "_group", group)
         object.__setattr__(self, "_timestamps", timestamps)
         object.__setattr__(self, "_label", label)
         object.__setattr__(self, "_probe", probe)
+        object.__setattr__(self, "_fetcher", fetcher)
 
     @property
     def data(self) -> "_DataProxy":
@@ -296,7 +342,7 @@ class Track:
                 f"Track {self._index} has no 'data' group. "
                 f"Available keys: {list(self._group.keys())}"
             )
-        return cast("_DataProxy", _GroupProxy(self._group["data"]))
+        return cast("_DataProxy", _GroupProxy(self._group["data"], self._fetcher))
 
     @property
     def scan(self) -> "ScanSpec":
@@ -724,10 +770,33 @@ class File(h5py.File):
             raise
         self._stream_fileobj = stream_fileobj
         self._source_name = source_name
+        self._hf_kwargs = hf_kwargs
+        # Source of raw chunk bytes for the concurrent read path, built on first use (it
+        # opens a file descriptor / an HTTP session, which a write-only user never needs).
+        self._fetcher: Any = None
+        self._fetcher_built = False
 
         # Warn when opening an existing file that pre-dates zea v0.1.0
         if mode in ("r", "r+"):
             _warn_if_legacy_file(self)
+
+    @property
+    def _chunk_fetcher(self):
+        """Fetcher backing :class:`ChunkedDataset` reads, or ``None`` when unavailable.
+
+        ``None`` means every dataset of this file falls back to plain h5py reads — which is
+        correct, just not concurrent.
+        """
+        if not self._fetcher_built:
+            from zea.data.chunk_reader import fetcher_for
+
+            self._fetcher_built = True
+            try:
+                self._fetcher = fetcher_for(self)
+            except Exception as exc:  # noqa: BLE001 — a fast path is never worth an error
+                log.debug(f"Concurrent chunk reads unavailable for '{self.path}': {exc}")
+                self._fetcher = None
+        return self._fetcher
 
     def __enter__(self) -> "Self":
         """Enter the context manager, returning this :class:`File` instance.
@@ -749,6 +818,10 @@ class File(h5py.File):
         try:
             super().close()
         finally:
+            fetcher = getattr(self, "_fetcher", None)
+            if fetcher is not None:
+                fetcher.close()
+                self._fetcher = None
             stream_fileobj = getattr(self, "_stream_fileobj", None)
             if stream_fileobj is not None:
                 stream_fileobj.close()
@@ -878,7 +951,9 @@ class File(h5py.File):
             if "label" in track_group:
                 raw = track_group["label"][()]
                 label = raw.decode() if isinstance(raw, bytes) else str(raw)
-            tracks.append(Track(i, track_group, label=label, probe=probe_dict))
+            tracks.append(
+                Track(i, track_group, label=label, probe=probe_dict, fetcher=self._chunk_fetcher)
+            )
             i += 1
 
         schedule = self.track_schedule
@@ -1264,10 +1339,10 @@ class File(h5py.File):
         if "tracks" in self:
             track0 = self["tracks"].get("track_0")
             if track0 is not None and "data" in track0:
-                return cast("_DataProxy", _GroupProxy(track0["data"]))
+                return cast("_DataProxy", _GroupProxy(track0["data"], self._chunk_fetcher))
         # Flat layout (no tracks group): root-level data/ group
         if super().__contains__("data"):
-            return cast("_DataProxy", _GroupProxy(self["data"]))
+            return cast("_DataProxy", _GroupProxy(self["data"], self._chunk_fetcher))
         raise KeyError("No 'data' group found in this file.")
 
     @property
