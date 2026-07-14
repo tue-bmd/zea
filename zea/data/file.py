@@ -733,6 +733,10 @@ class File(h5py.File):
         # itself from inside a dataloader with several workers is noise, not information.
         progress = kwargs.pop("progress", False)
 
+        # Cache streamed chunks on disk (see zea.data.chunk_cache). On by default, like the
+        # HF hub cache; ``cache=False`` (or ZEA_CHUNK_CACHE=0) re-fetches every time.
+        cache_chunks = kwargs.pop("cache", True)
+
         # File object opened for streaming; kept so we can close it in close().
         stream_fileobj = None
         # Original source path, retained for streamed files whose ``filename`` is
@@ -779,6 +783,7 @@ class File(h5py.File):
         self._fetcher: Any = None
         self._fetcher_built = False
         self._progress = progress
+        self._cache_chunks = cache_chunks
 
         # Warn when opening an existing file that pre-dates zea v0.1.0
         if mode in ("r", "r+"):

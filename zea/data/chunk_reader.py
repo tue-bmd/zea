@@ -144,10 +144,11 @@ class HTTPFetcher(Fetcher):
     since ``cat_ranges`` only returns once every range is done.
     """
 
-    def __init__(self, url: str, token: str | None = None):
+    def __init__(self, url: str, token: str | None = None, cache=None):
         import fsspec
 
         self.url = url
+        self.cache = cache  # zea.data.chunk_cache.ChunkCache, or None
         headers = {"Authorization": f"Bearer {token}"} if token else None
         self._fs = fsspec.filesystem(
             "http", client_kwargs={"headers": headers} if headers else None
@@ -160,15 +161,30 @@ class HTTPFetcher(Fetcher):
 
         out: list[bytes | None] = [None] * len(ranges)
 
+        # Serve what the cache has, and only go to the network for the rest.
+        misses = []
+        for index, (offset, size) in enumerate(ranges):
+            hit = self.cache.get(int(offset), int(size)) if self.cache is not None else None
+            if hit is not None:
+                out[index] = hit
+                if on_bytes is not None:
+                    on_bytes(int(size))  # tick, so the bar still reaches 100%
+            else:
+                misses.append((index, int(offset), int(size)))
+
+        if not misses:
+            return cast(list[bytes], out)
+
         async def one(index: int, offset: int, size: int) -> None:
-            out[index] = await self._fs._cat_file(self.url, start=offset, end=offset + size)
+            data = await self._fs._cat_file(self.url, start=offset, end=offset + size)
+            out[index] = data
+            if self.cache is not None:
+                self.cache.put(offset, size, data)
             if on_bytes is not None:
                 on_bytes(size)
 
         async def gather() -> None:
-            await asyncio.gather(
-                *(one(i, int(off), int(size)) for i, (off, size) in enumerate(ranges))
-            )
+            await asyncio.gather(*(one(*miss) for miss in misses))
 
         sync(self._fs.loop, gather)
         return cast(list[bytes], out)
@@ -181,12 +197,18 @@ def fetcher_for(file: h5py.File) -> Fetcher | None:
     descriptor. Anything else (an in-memory file, a driver we do not recognise) has no
     fast path, and its datasets fall back to h5py.
     """
+    from zea.data.chunk_cache import cache_for
     from zea.internal.preset_utils import HF_PREFIX, _hf_stream_url
 
     source = getattr(file, "_source_name", None)
     if source is not None and str(source).startswith(HF_PREFIX):
         token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-        return HTTPFetcher(_hf_stream_url(str(source), **getattr(file, "_hf_kwargs", {})), token)
+        url = _hf_stream_url(str(source), **getattr(file, "_hf_kwargs", {}))
+        # The streamed file object already carries HF's metadata (fetched on open), so the
+        # content hash that keys the cache costs no extra request.
+        details = getattr(getattr(file, "_stream_fileobj", None), "details", None) or {}
+        cache = cache_for(details) if getattr(file, "_cache_chunks", True) else None
+        return HTTPFetcher(url, token, cache)
 
     if getattr(file, "_stream_fileobj", None) is not None:
         return None  # streamed from somewhere we cannot issue range requests against

@@ -44,6 +44,17 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - ``auto:1``
      - Any valid device name as accepted by :func:`zea.init_device`. For example, ``cpu``,
        ``cuda:0``, ``auto:1``, etc.
+   * - ``ZEA_CHUNK_CACHE``
+     - Cache chunks fetched while streaming (``hf://``) on disk, under ``ZEA_CACHE_DIR``, so a
+       repeated read is served locally instead of re-downloaded. Set to ``0`` to disable
+       (equivalently, ``zea.File(..., cache=False)``). See :ref:`chunk-cache` below.
+     - ``1``
+     - ``0``, ``1``
+   * - ``ZEA_CHUNK_CACHE_SIZE``
+     - Byte budget for that cache. Once exceeded, the least-recently-*used* chunks are deleted
+       until it fits.
+     - ``10737418240`` (10 GiB)
+     - Any positive integer (bytes).
    * - ``BLOSC_NTHREADS``
      - Threads Blosc uses to compress or decompress the blocks *within* a single HDF5 chunk.
        ``zea`` sets this to ``min(8, cpu_count)`` if you have not set it yourself, which is
@@ -51,6 +62,27 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
        see :ref:`blosc-nthreads` below.
      - ``min(8, cpu_count)``
      - Any positive integer.
+
+.. _chunk-cache:
+
+Streaming chunk cache (``ZEA_CHUNK_CACHE``)
+-------------------------------------------
+
+Streaming fetches only the chunks a read touches — but without a cache it re-fetches them
+every time, so reading the same frames twice costs the network twice. ``zea`` therefore caches
+the fetched (still compressed) chunks under ``ZEA_CACHE_DIR/chunks``. Measured on a 5-frame
+read of a streamed 618 MB file: **4.4 s cold, 0.39 s once cached** — and the cache is on disk,
+so it survives across processes, notebook restarts and training epochs.
+
+This is *partial*-file caching, and that is the point: ``stream=False`` already caches whole
+files via the HF hub, but downloading 6 GB to read 5 frames is what streaming exists to avoid.
+
+Chunks are keyed by the file's **content hash**, not its URL — an ``hf://`` path resolves to a
+mutable ref, so re-uploading a file changes the bytes behind the same URL. Keying on content
+means a re-upload simply misses; it can never serve you the old file's data.
+
+Disable per-file with ``zea.File(..., cache=False)`` or globally with ``ZEA_CHUNK_CACHE=0``.
+``zea.data.chunk_cache.clear()`` empties it.
 
 .. _blosc-nthreads:
 
