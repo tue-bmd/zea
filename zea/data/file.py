@@ -754,6 +754,17 @@ class File(h5py.File):
             hf_kwargs.pop("cache_dir", None)
             source_name = str(name)
             stream_fileobj = _hf_stream_open(str(name), **hf_kwargs)
+
+            # Serve the HDF5 metadata h5py walks on open from the cache too, not just the
+            # data chunks: it is the same file, and re-opening otherwise re-fetches it every
+            # time (~0.4 s, and ~3 s whenever HF's CDN stalls on a cold object).
+            if cache_chunks:
+                from zea.data.chunk_cache import CachedFile, cache_for
+
+                chunk_cache = cache_for(getattr(stream_fileobj, "details", None) or {})
+                if chunk_cache is not None:
+                    stream_fileobj = CachedFile(stream_fileobj, chunk_cache)
+
             name = stream_fileobj
         elif is_hf:
             # Full download (previous behaviour); block_size/cache_type are

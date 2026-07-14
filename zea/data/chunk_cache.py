@@ -89,6 +89,85 @@ class ChunkCache:
             log.debug(f"Could not cache chunk: {exc}")
 
 
+class CachedFile:
+    """A read-only file object that serves h5py's metadata reads from the chunk cache.
+
+    Opening a streamed file re-reads its HDF5 metadata (superblock, group and chunk B-trees)
+    over the network every time — and HF's CDN intermittently stalls ~3 s on the first range
+    request to a cold object, which is then most of the cost of an open. Those metadata bytes
+    are as cacheable as the chunks are, so they go in the same cache.
+
+    Reads are served in aligned blocks, since h5py's metadata reads are many and small; a
+    block is the unit that gets stored. Chunks and blocks share one keyspace safely: a key is
+    ``(offset, size)`` into an immutable file, so the same key always means the same bytes.
+    """
+
+    def __init__(self, fileobj, cache: "ChunkCache", block_size: int = 1 << 20):
+        self._file = fileobj
+        self._cache = cache
+        self._block = block_size
+        self._pos = 0
+        self.size = fileobj.size
+        #: Passed through: this is where the chunk fetcher reads the file's content hash from.
+        self.details = getattr(fileobj, "details", {})
+
+    def _block_bytes(self, index: int) -> bytes:
+        offset = index * self._block
+        size = min(self._block, self.size - offset)
+        hit = self._cache.get(offset, size)
+        if hit is not None:
+            return hit
+        self._file.seek(offset)
+        data = self._file.read(size)
+        self._cache.put(offset, size, data)
+        return data
+
+    def read(self, length: int = -1) -> bytes:
+        if length < 0:
+            length = self.size - self._pos
+        length = max(0, min(length, self.size - self._pos))
+        if not length:
+            return b""
+
+        out = bytearray()
+        pos = self._pos
+        while len(out) < length:
+            index = pos // self._block
+            within = pos - index * self._block
+            block = self._block_bytes(index)
+            take = block[within : within + (length - len(out))]
+            if not take:
+                break  # short block: end of file
+            out += take
+            pos += len(take)
+        self._pos = pos
+        return bytes(out)
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        base = {0: 0, 1: self._pos, 2: self.size}[whence]
+        self._pos = max(0, base + offset)
+        return self._pos
+
+    def tell(self) -> int:
+        return self._pos
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def writable(self) -> bool:
+        return False
+
+    def close(self) -> None:
+        self._file.close()
+
+    @property
+    def closed(self) -> bool:
+        return self._file.closed
+
+
 def cache_for(details: dict, root: str | os.PathLike | None = None) -> ChunkCache | None:
     """A cache for the file described by ``details`` (an fsspec ``info`` mapping).
 
