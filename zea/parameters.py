@@ -330,6 +330,11 @@ class Parameters(BaseParameters):
     # Add some defaults that are not stored in a file
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
     VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
+    # Give these a default of None (rather than leaving them unset) so that they can be
+    # declared as dependencies of computed properties (e.g. t_peak, n_waveforms) without
+    # tripping MissingDependencyError
+    VALID_PARAMS["waveforms_one_way"]["default"] = None
+    VALID_PARAMS["waveforms_two_way"]["default"] = None
 
     @cache_with_dependencies("probe_geometry")
     def aperture_size(self):
@@ -912,7 +917,7 @@ class Parameters(BaseParameters):
 
         return 1
 
-    @cache_with_dependencies("center_frequency", "selected_transmits")
+    @cache_with_dependencies("center_frequency", "selected_transmits", "waveforms_two_way")
     def t_peak(self):
         """The time of the peak of the pulse in seconds of shape (n_tx,).
 
