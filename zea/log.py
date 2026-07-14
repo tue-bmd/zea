@@ -58,6 +58,7 @@ def get_format_fn(name_format):
         "orange": orange,
         # Formatting
         "bold": bold,
+        "dim": dim,
     }.get(name_format)
 
 
@@ -114,6 +115,11 @@ def orange(string):
 def bold(string):
     """Adds ANSI escape codes to print a string in bold around the string."""
     return "\033[1m" + str(string) + "\033[0m"
+
+
+def dim(string):
+    """Adds ANSI escape codes to print a string in a dim/faint style around the string."""
+    return "\033[2m" + str(string) + "\033[0m"
 
 
 # Progress bars (other than tqdm, which is handled separately below) that have
