@@ -705,6 +705,17 @@ class File(h5py.File):
             cache_type (str, optional): fsspec cache strategy for streaming reads
                 (default ``"blockcache"``). Only used when ``name`` starts with
                 ``hf://`` and ``stream=True``.
+            progress (bool or callable, optional): Report progress while reading chunks.
+                ``True`` draws a tqdm bar over the compressed bytes of each read; a callable
+                is invoked with each chunk's size as it arrives. Defaults to ``False``, since
+                a bar printing itself from inside a multi-worker dataloader is noise. Can also
+                be set after opening (``file.progress = True``). Reads served by h5py (an lzf
+                file, a strided selection) report nothing: h5py fetches the whole selection in
+                one opaque call, so there is no progress to observe.
+            cache (bool, optional): Cache fetched chunks on disk, under ``ZEA_CACHE_DIR``, so
+                a repeated read is served locally instead of re-downloaded (default ``True``;
+                see :mod:`zea.data.chunk_cache`). Only affects streamed files. Set to
+                ``False`` (or ``ZEA_CHUNK_CACHE=0``) to always re-fetch.
             *args: Additional arguments to pass to h5py.File.
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
