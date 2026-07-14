@@ -9,7 +9,6 @@ import types
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import keras
 import numpy as np
 import tyro
 from keras import ops
@@ -24,7 +23,7 @@ from zea.data.file import File
 from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
 from zea.ops.pipeline import Pipeline
-from zea.utils import FunctionTimer
+from zea.utils import FunctionTimer, ProgressBar
 
 
 def _axis_selections_from_params(parameters) -> dict | None:
@@ -78,7 +77,7 @@ def _run_passthrough(
     save_dir.mkdir(parents=True, exist_ok=True)
 
     with Dataset(dataset_path, validate=False, lazy=True, _suggest_lazy=False, **hf_kwargs) as ds:
-        pbar = keras.utils.Progbar(len(ds))
+        pbar = ProgressBar(len(ds))
         for i in range(len(ds)):
             f = ds[i]  # lazy download for hf:// paths; returns cached File handle
             data_key = f.format_key(key)
@@ -237,7 +236,7 @@ def run_processing(
             sitk.WriteImage(sitk.GetImageFromArray(video), str(save_path))
             log.info(f"Saved NIfTI to {log.yellow(save_path)}")
 
-    pbar = keras.utils.Progbar(total_batches)
+    pbar = ProgressBar(total_batches)
 
     @jit
     def to_8bit(image, dynamic_range):
