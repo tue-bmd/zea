@@ -2059,8 +2059,8 @@ def _format_hdf5_dataset_line(key, dataset):
             dtype_str = dataset.dtype.name
         body = f"{log.bold(key)} " + log.dim(f"(shape={shape_str}, dtype={dtype_str})")
 
-    unit = dataset.attrs.get("unit", "")
-    description = dataset.attrs.get("description", "")
+    unit = _decode_hdf5_scalar(dataset.attrs.get("unit", ""))
+    description = _decode_hdf5_scalar(dataset.attrs.get("description", ""))
     extras = []
     if unit not in _EMPTY_UNITS:
         extras.append(log.dim(f"[{unit}]"))
@@ -2110,9 +2110,12 @@ def _print_hdf5_attrs(hdf5_obj, prefix=""):
         child = hdf5_obj[key]
         if isinstance(child, h5py.Dataset):
             print(prefix + marker + _format_hdf5_dataset_line(key, child))
-        else:
+        elif isinstance(child, h5py.Group):
             print(prefix + marker + log.bold(key) + "/")
             _print_hdf5_attrs(child, child_prefix)
+        else:
+            # e.g. a committed h5py.Datatype — not a Dataset or Group, nothing to recurse into.
+            print(prefix + marker + log.bold(key))
 
 
 def validate_file(path: str | None = None, file: "File | None" = None):
