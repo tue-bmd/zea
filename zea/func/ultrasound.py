@@ -11,6 +11,7 @@ from zea.func.tensor import (
     split_into_windows,
 )
 from zea.internal.utils import deprecated
+from zea.utils import ProgressBar
 
 
 def demodulate_not_jitable(
@@ -943,7 +944,7 @@ def dehaze_nuclear_diffusion(
     frame_tissue_preds = [[] for _ in range(int(seq_len))]
     frame_haze_preds = [[] for _ in range(int(seq_len))]
 
-    progbar = keras.utils.Progbar(len(windows), verbose=verbose, unit_name="window")
+    progbar = ProgressBar(len(windows), verbose=verbose, unit_name="window")
 
     # Process each window
     for window_idx, (window, frame_indices) in enumerate(zip(windows, window_indices)):
