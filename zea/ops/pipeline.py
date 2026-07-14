@@ -1,3 +1,4 @@
+import difflib
 import json
 from typing import TYPE_CHECKING, Any, Dict, List, Sequence, Union, cast
 
@@ -35,6 +36,50 @@ if TYPE_CHECKING:
     # Imported lazily at runtime (inside prepare_parameters) to avoid a circular
     # import: zea.parameters imports the data specs, which can pull in this module.
     from zea.parameters import Parameters
+
+
+class PipelineError(RuntimeError):
+    """Error raised when an operation inside a :class:`Pipeline` fails.
+
+    Subclass of :class:`RuntimeError` so existing ``except RuntimeError`` handlers
+    keep working. Instances carry a ``_zea_annotated`` marker so that enclosing
+    pipelines do not re-wrap (and thus double-annotate) an error that an inner
+    pipeline already reported.
+    """
+
+    _zea_annotated = True
+
+
+class PipelineKeyError(KeyError):
+    """Raised when a :class:`Pipeline` operation is missing a required input key.
+
+    Subclass of :class:`KeyError` so existing ``except KeyError`` handlers keep
+    working. ``__str__`` is overridden so the (multi-line) message renders as-is
+    instead of the ``repr``-quoted single line that :class:`KeyError` produces.
+    Carries the ``_zea_annotated`` marker to prevent double-wrapping.
+    """
+
+    _zea_annotated = True
+
+    def __str__(self) -> str:
+        return self.args[0] if self.args else ""
+
+
+def _summarize_inputs(inputs: Dict[str, Any]) -> str:
+    """Compact ``key: shape dtype`` summary of pipeline inputs for error messages.
+
+    Keeps large arrays out of tracebacks while still surfacing the shape/dtype
+    information needed to diagnose most pipeline failures.
+    """
+    parts = []
+    for key, value in inputs.items():
+        shape = getattr(value, "shape", None)
+        dtype = getattr(value, "dtype", None)
+        if shape is not None and dtype is not None:
+            parts.append(f"{key}: {tuple(shape)} {dtype}")
+        else:
+            parts.append(f"{key}: {type(value).__name__}")
+    return "{" + ", ".join(parts) + "}"
 
 
 @ops_registry("pipeline")
@@ -369,22 +414,53 @@ class Pipeline:
         for operation in self._callable_layers:
             try:
                 outputs = operation(**inputs)
-            except KeyError as exc:
-                raise KeyError(
-                    f"[zea.Pipeline] Operation '{operation.__class__.__name__}' "
-                    f"requires input key '{exc.args[0]}', "
-                    "but it was not provided in the inputs.\n"
-                    "Check whether the objects (such as `zea.Parameters`) passed to "
-                    "`pipeline.prepare_parameters()` contain all required keys.\n"
-                    f"Current list of all passed keys: {list(inputs.keys())}\n"
-                    f"Valid keys for this pipeline: {self.valid_keys}"
-                ) from exc
             except Exception as exc:
-                raise RuntimeError(
-                    f"[zea.Pipeline] Error in operation '{operation.__class__.__name__}': {exc}"
-                )
+                # Already annotated by this or an inner pipeline: re-raise as-is so
+                # we do not wrap the message (and traceback) a second time.
+                if getattr(exc, "_zea_annotated", False):
+                    raise
+                if isinstance(exc, KeyError):
+                    self._raise_missing_key(operation, exc, inputs)
+                else:
+                    self._raise_operation_error(operation, exc, inputs)
             inputs = outputs
         return outputs
+
+    def _raise_missing_key(self, operation, exc: KeyError, inputs: Dict[str, Any]):
+        """Re-raise a bare ``KeyError`` from an operation with actionable context."""
+        missing = exc.args[0] if exc.args else "?"
+        unused = [k for k in (set(inputs.keys()) - self.valid_keys) if k != "kwargs"]
+        # If the caller passed something close to the missing key, it is likely a typo.
+        typo = difflib.get_close_matches(str(missing), unused, n=1, cutoff=0.6)
+        hint = (
+            f" You provided '{typo[0]}', which is unused — did you mean '{missing}'?"
+            if typo
+            else ""
+        )
+        raise PipelineKeyError(
+            f"[zea.Pipeline] Operation '{operation.__class__.__name__}' "
+            f"requires input key '{missing}', but it was not provided.{hint}\n"
+            "Check whether the objects (such as `zea.Parameters`) passed to "
+            "`pipeline.prepare_parameters()` contain all required keys.\n"
+            f"Provided keys: {sorted(inputs.keys())}\n"
+            f"Valid keys for this pipeline: {sorted(self.valid_keys - {'kwargs'})}"
+        ) from exc
+
+    def _raise_operation_error(self, operation, exc: Exception, inputs: Dict[str, Any]):
+        """Re-raise a generic operation failure as a :class:`PipelineError`.
+
+        Adds the failing operation name and a compact shape/dtype summary of its
+        inputs, and truncates the underlying message so a concrete (non-jit) array
+        is never dumped in full into the traceback.
+        """
+        original = str(exc)
+        if len(original) > 500:
+            original = original[:500] + "… (truncated)"
+        raise PipelineError(
+            f"[zea.Pipeline] Operation '{operation.__class__.__name__}' failed with "
+            f"{type(exc).__name__}: {original}\n"
+            f"Inputs: {_summarize_inputs(inputs)}"
+        ) from exc
 
     def __call__(
         self, return_numpy=False, device: Union[str, None] = None, **inputs
@@ -409,23 +485,39 @@ class Pipeline:
             raise ValueError(
                 "Parameters (and Probe/Config) objects should be first processed with "
                 "`Pipeline.prepare_parameters` before calling the pipeline. "
-                "e.g. inputs = pipeline.prepare_parameters(parameters, **overrides)"
+                "e.g. `inputs = pipeline.prepare_parameters(parameters, **overrides)`"
             )
 
         if any(isinstance(arg, str) for arg in inputs.values()):
             raise ValueError(
                 "Pipeline does not support string inputs. "
-                "Please ensure all inputs are convertible to tensors."
+                "Please ensure all inputs are convertible to tensors, or use "
+                "`inputs = Pipeline.prepare_parameters(parameters)` to convert "
+                "all your parameters for you."
             )
 
         if not self._logged_difference_keys:
             difference_keys = set(inputs.keys()) - self.valid_keys
             if difference_keys:
-                log.debug(
-                    f"[zea.Pipeline] The following input keys are not used by the pipeline: "
-                    f"{difference_keys}. Make sure this is intended. "
-                    "This warning will only be shown once."
-                )
+                # Separate likely typos (close to a key the pipeline actually uses)
+                # from benign pass-through keys (e.g. extra `zea.Parameters` fields).
+                candidates = self.valid_keys - {"kwargs"}
+                matches = {
+                    key: difflib.get_close_matches(key, candidates, n=1, cutoff=0.6)
+                    for key in difference_keys
+                }
+                typos = {key: match[0] for key, match in matches.items() if match}
+                benign = difference_keys - set(typos)
+                if typos:
+                    hints = ", ".join(f"'{k}' -> did you mean '{v}'?" for k, v in typos.items())
+                    log.warning(
+                        f"[zea.Pipeline] Some input keys look like typos and are ignored: {hints}"
+                    )
+                if benign:
+                    log.debug(
+                        f"[zea.Pipeline] Ignoring input keys not used by the pipeline: "
+                        f"{sorted(benign)}."
+                    )
                 self._logged_difference_keys = True
 
         ## PROCESSING
