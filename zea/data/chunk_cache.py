@@ -100,12 +100,18 @@ class CachedFile:
     Reads are served in aligned blocks, since h5py's metadata reads are many and small; a
     block is the unit that gets stored. Chunks and blocks share one keyspace safely: a key is
     ``(offset, size)`` into an immutable file, so the same key always means the same bytes.
+
+    ``block_size`` defaults to the streamed file object's own block size, so a cached open and
+    an uncached one fetch the same ranges — a smaller block here would split each of the
+    underlying reads into several requests.
     """
 
-    def __init__(self, fileobj, cache: "ChunkCache", block_size: int = 1 << 20):
+    def __init__(self, fileobj, cache: "ChunkCache", block_size: int | None = None):
+        from zea.internal.preset_utils import _HF_STREAM_BLOCK_SIZE
+
         self._file = fileobj
         self._cache = cache
-        self._block = block_size
+        self._block = block_size or getattr(fileobj, "blocksize", None) or _HF_STREAM_BLOCK_SIZE
         self._pos = 0
         self.size = fileobj.size
         #: Passed through: this is where the chunk fetcher reads the file's content hash from.

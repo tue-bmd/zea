@@ -213,13 +213,11 @@ def _hf_resolve_path(
 _HF_FS_PREFIX = {"dataset": "datasets/", "model": "", "space": "spaces/"}
 
 
-# Streaming reads are dominated by HTTP round-trip latency: zea .hdf5 files store
-# each frame as many small (compressed) chunks, so a naive read issues ~one range
-# request per chunk. A large block cache coalesces the contiguous chunks of a frame
-# into a handful of requests, which is several times faster. These are the defaults;
-# both are overridable via kwargs to File(...).
+# This file object only serves h5py's metadata reads; chunk_reader fetches the array chunks
+# itself. The paged layout keeps that metadata to ~0.26 MB in one request, so the block just has
+# to cover it. Keep it aligned with chunk_cache.CachedFile's block size. Overridable via File().
 _HF_STREAM_CACHE_TYPE = "blockcache"
-_HF_STREAM_BLOCK_SIZE = 8 * 1024 * 1024  # 8 MiB
+_HF_STREAM_BLOCK_SIZE = 1024 * 1024  # 1 MiB
 
 
 # Host serving the file bytes. Range requests for chunk reads go straight here rather than
