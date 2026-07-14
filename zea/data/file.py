@@ -132,14 +132,12 @@ class _StringDataset:
 class ChunkedDataset:
     """An ``h5py.Dataset`` whose reads go through :mod:`zea.data.chunk_reader`.
 
-    Behaves exactly like the dataset it wraps — same ``shape``, ``dtype``, ``attrs``,
-    everything — except that slicing fetches the chunk byte ranges itself and decodes them
-    concurrently, instead of letting h5py do it one chunk at a time under its global lock.
-    Reads that the fast path does not fully understand fall back to h5py, so the result is
-    always what plain h5py would have returned; it just tends to arrive sooner.
+    Behaves exactly like the dataset it wraps, except that slicing fetches the chunk byte
+    ranges itself and decodes them concurrently; reads the fast path does not understand fall
+    back to h5py, so the result is always what h5py would have returned.
 
-    Handed out by :class:`_GroupProxy`, so ``file.data.raw_data[0:8]`` is already on the
-    fast path. ``file["data/raw_data"]`` still returns the bare ``h5py.Dataset``.
+    Handed out by :class:`_GroupProxy`, so ``file.data.raw_data[0:8]`` is already on the fast
+    path. ``file["data/raw_data"]`` still returns the bare ``h5py.Dataset``.
     """
 
     __slots__ = ("_dset", "_fetcher")

@@ -4,36 +4,25 @@ zea.data.chunk_reader
 
 Concurrent chunk reads for zea HDF5 files, bypassing h5py's serial read path.
 
-h5py reads one chunk at a time, and it decodes them under a global lock (the HDF5 C
-library is not concurrency-safe), so a read of N chunks costs N decodes back to back —
-and, over HTTP, N round trips. Neither scales with the data.
+h5py reads one chunk at a time and decodes them under a global lock, so N chunks cost N
+decodes back to back — and, over HTTP, N round trips. But h5py *does* hand us the chunk
+manifest (``get_chunk_info_by_coord``: byte offset, size, filter mask), so we can fetch the
+compressed bytes ourselves — concurrently when remote, from the file descriptor when local —
+and decode them in a thread pool (Blosc and zlib release the GIL). Measured on a 201 MB read
+of 16 chunks: 31 ms against h5py's 291 ms locally, 126 ms against 863 ms over HTTP.
 
-But h5py *does* hand us the chunk manifest: ``get_chunk_info_by_coord`` gives the byte
-offset, byte size and filter mask of any chunk. With that we can fetch the compressed
-bytes ourselves — concurrently when the file is remote, straight from the file descriptor
-when it is local — and decode them in a thread pool (Blosc and zlib release the GIL). The
-result is bit-identical to what h5py returns; it just arrives sooner. Measured on a
-201 MB read of 16 chunks: **31 ms against h5py's 291 ms** locally, and **126 ms against
-863 ms** over HTTP at 20 ms/request.
+A pure optimisation, and treated as one: anything the fast path does not fully understand (an
+unknown codec, a contiguous dataset, an exotic selection) falls back to ``dset[selection]``,
+and h5py stays the reader for everything else in the file. Wired in through
+:class:`~zea.data.file.ChunkedDataset`, so ``file.data.raw_data[0:8]`` gets it for free.
 
-This is a pure optimisation, and treated as one: anything the fast path does not fully
-understand — an unknown codec, a contiguous dataset, an exotic selection — falls back to
-plain ``dset[selection]``. h5py stays the reader for everything else in the file
-(parameters, metadata, strings, attributes).
+Two details carry most of the win and are easy to lose in a refactor:
 
-Wired in through :class:`~zea.data.file.ChunkedDataset`, so callers get it for free::
-
-    with File("scan.hdf5") as file:
-        file.data.raw_data[0:8]  # 8 chunks, fetched and decoded concurrently
-
-Two details carry most of the win, and both are easy to lose in a refactor:
-
-* The bytes are read with ``os.pread``, **not** ``h5py``'s ``read_direct_chunk`` — that
-  call takes the same global lock, so it would serialise the fetch and copy every chunk an
-  extra time.
-* Chunks are decompressed **straight into the output array**, not into a temporary that is
-  copied in afterwards. That copy is serial and costs more than the decode itself (121 ms
-  of copying against 26 ms of decoding, for a 16-chunk read).
+* Bytes are read with ``os.pread``, **not** ``read_direct_chunk`` — that takes h5py's global
+  lock, serialising the fetch and copying every chunk an extra time.
+* Chunks are decompressed **straight into the output array**. Decoding to a temporary and
+  copying it in costs more than the decode itself (121 ms of copy against 26 ms of decode)
+  and the copy is serial, so it caps everything.
 """
 
 from __future__ import annotations
@@ -46,16 +35,11 @@ from typing import Any, Callable, Sequence
 import h5py
 import numpy as np
 
-# HDF5 filter ids we can decode in-process, all through ``numcodecs`` and the standard
-# library. Anything else — notably lzf, zea's pre-0.1.3 default — falls back to h5py, which
-# decodes it natively: correct, just serial.
-#
-# The list is wider than zea's own default on purpose, so that a file written elsewhere still
-# gets the concurrent path. It stops at codecs that would cost a dependency: Blosc2 and
-# Bitshuffle were implemented and measured, and both were rejected — their Python bindings
-# hold the GIL, so they cannot decode concurrently (Blosc2 scales 1.1x across the thread pool
-# where Blosc scales 7.2x) and they lose on read throughput no matter how well they compress.
-# Files using them still read correctly through h5py.
+# HDF5 filter ids we can decode in-process, via numcodecs and the stdlib. Wider than zea's own
+# default so foreign files also get the concurrent path, but it stops at codecs that would cost
+# a dependency: Blosc2 and Bitshuffle were measured and rejected — their bindings hold the GIL,
+# so they cannot decode concurrently however well they compress. Anything not listed (notably
+# lzf) falls back to h5py: correct, just serial.
 BLOSC = 32001  # zea's default codec
 LZ4 = 32004
 ZSTD = 32015
@@ -64,13 +48,11 @@ SHUFFLE = 2
 DECODABLE = (BLOSC, LZ4, ZSTD, GZIP, SHUFFLE)
 
 
-# Reads below this are served by h5py: handing a chunk to a worker thread costs more than
-# it saves when there is barely any data to decode.
+# Reads below this are served by h5py: the thread hand-off costs more than it saves.
 MIN_BYTES = 1 << 20  # 1 MiB
 
-# Ceiling on compressed bytes held in memory at once. Chunk sizes vary hugely across zea
-# files (12 MB for a plane-wave scan, 166 MB for a 149-transmit carotid one), so bounding
-# the *count* of concurrent chunks would bound nothing: we bound their bytes.
+# Ceiling on compressed bytes held in memory at once. Bounded by bytes and not by chunk
+# *count*, because chunk sizes vary hugely across files (12 MB to 166 MB).
 MAX_BYTES_IN_FLIGHT = 512 << 20  # 512 MiB
 
 # Decode threads. Blosc and zlib release the GIL, so these scale with cores; but the work
@@ -88,14 +70,10 @@ class _Unsupported(Exception):
 class Fetcher:
     """Source of raw (still-compressed) chunk bytes for one open file.
 
-    Two shapes of fetch, because the two backends want opposite things:
-
-    * ``per_chunk``: one chunk at a time, cheaply, from inside a decode worker — so the
-      read of the next chunk overlaps the decode of the last one. This is how a local file
-      wants to be read (a ``pread`` is nearly free to issue).
-    * batched: every range in one call, so they can go out *together*. This is how HTTP
-      wants to be read — the whole point is that N ranges cost one round trip, which a
-      chunk-at-a-time fetch would throw away.
+    The two backends want opposite things. A local file wants ``per_chunk``: one chunk at a
+    time from inside a decode worker, so the next read overlaps the last decode. HTTP wants
+    the ranges batched into one call so they go out *together* — N ranges for one round trip,
+    which a chunk-at-a-time fetch would throw away.
     """
 
     #: Whether fetching one chunk on its own is cheap (see above).
@@ -112,11 +90,10 @@ class Fetcher:
 class LocalFetcher(Fetcher):
     """Reads chunk bytes from the file descriptor.
 
-    ``os.pread`` is positional, so it needs no seek and no lock: the decode workers can
-    each read the descriptor themselves, which overlaps I/O with decoding (measured: 31 ms
-    against 46 ms for a 16-chunk read, where the two phases run one after the other).
-    Going through ``h5py.Dataset.id.read_direct_chunk`` would do neither — it takes h5py's
-    global lock, serialising the reads, and copies each chunk an extra time.
+    ``os.pread`` is positional, so it needs no seek and no lock: the decode workers each read
+    the descriptor themselves, overlapping I/O with decoding (31 ms against 46 ms for a
+    16-chunk read). ``read_direct_chunk`` would do neither — it takes h5py's global lock and
+    copies each chunk an extra time.
     """
 
     per_chunk = True
@@ -138,11 +115,9 @@ class LocalFetcher(Fetcher):
 class HTTPFetcher(Fetcher):
     """Reads chunk bytes over HTTP range requests, all of them concurrently.
 
-    Deliberately uses fsspec's **async** ``HTTPFileSystem`` rather than ``HfFileSystem``:
-    the latter is a sync filesystem whose ``cat_ranges`` issues the ranges one after the
-    other. Measured against the same file, 16 ranges took 2745 ms through ``HfFileSystem``
-    and 177 ms through ``HTTPFileSystem`` — one round trip instead of sixteen. The whole
-    remote win rests on this, so the choice is not incidental.
+    Deliberately fsspec's **async** ``HTTPFileSystem`` and not ``HfFileSystem``, whose
+    ``cat_ranges`` is serial: the same 16 ranges took 2745 ms through ``HfFileSystem`` against
+    177 ms here — sixteen round trips against one. The whole remote win rests on this.
     """
 
     def __init__(self, url: str, token: str | None = None):
@@ -198,14 +173,10 @@ def filter_ids(dset: h5py.Dataset) -> list[int]:
 def _decode_lz4(raw: bytes) -> bytes:
     """Reverse the HDF5 LZ4 filter (32004), whose framing is its own.
 
-    The chunk is a header — 8-byte big-endian decompressed size, 4-byte big-endian block
-    size — followed by blocks, each prefixed with its own 4-byte big-endian compressed size.
-    A block that did not compress is stored verbatim, which shows up as a compressed size
-    equal to the uncompressed one.
-
-    ``numcodecs.lz4`` reads a 4-byte *little-endian* length header instead of taking the
-    size as an argument, so each raw LZ4 block is handed to it with that header prepended
-    rather than pulling in the ``lz4`` package for one call.
+    Header of 8-byte big-endian total size and 4-byte big-endian block size, then blocks each
+    prefixed with their 4-byte big-endian compressed size. ``numcodecs.lz4`` wants a 4-byte
+    *little-endian* length header instead of a size argument, so each block is handed to it
+    with that prepended — cheaper than depending on the ``lz4`` package for one call.
     """
     from numcodecs import lz4
 
@@ -229,12 +200,9 @@ def _decode_lz4(raw: bytes) -> bytes:
 def _decode(raw: bytes, filters: list[int], filter_mask: int, itemsize: int) -> bytes:
     """Reverse the filter pipeline of one chunk.
 
-    ``filter_mask`` has bit *i* set when HDF5 **skipped** filter *i* for this chunk, which
-    it does whenever the filter failed to shrink it (incompressible data is stored raw).
-    Honouring the mask per chunk is what makes this correct where the Zarr path was not:
-    Zarr applies the codec to every chunk unconditionally and decoded such chunks to
-    garbage, so whole arrays had to be excluded from a virtual reference. Here the mask is
-    handed to us, so the bug cannot happen.
+    ``filter_mask`` has bit *i* set when HDF5 **skipped** filter *i* for this chunk, which it
+    does whenever the filter failed to shrink it — incompressible data is stored raw. Applying
+    the codec regardless would decode such chunks to garbage, silently.
     """
     from numcodecs import blosc, shuffle, zstd
 
@@ -414,19 +382,17 @@ def read(dset: h5py.Dataset, selection: Any, fetcher: Fetcher | None) -> np.ndar
         mask = int(info.filter_mask)
         view = out[target]
         if blosc_only and not mask and whole and view.flags.c_contiguous and view.size == n_elem:
-            # The chunk *is* this region of the output: decode straight into it. No
-            # temporary, no copy, and the page faults spread across the worker threads.
+            # The chunk *is* this region of the output: decode straight into it, no temporary
+            # and no (serial) copy back.
             from numcodecs import blosc
 
             blosc.decompress(raw, dest=view)
             return
         buf = _decode(raw, filters, mask, itemsize)
         block = np.frombuffer(buf, dtype=dset.dtype, count=n_elem).reshape(chunks)
-        # ``source`` keeps one entry per *dataset* axis, so the selected block still has an
-        # axis (of length 1) wherever the selection used an int — while ``view`` has dropped
-        # it. Same elements, same order, so reshape it onto the destination. At most one
-        # axis of ``source`` is an index array (more is rejected in _normalize), and a lone
-        # advanced index does not move axes around, so the order really is preserved.
+        # ``source`` has one entry per *dataset* axis, so it keeps a length-1 axis wherever the
+        # selection used an int, while ``view`` has dropped it. Same elements in the same order
+        # (_normalize allows at most one advanced index, which does not move axes), so reshape.
         view[...] = block[source].reshape(view.shape)
 
     def fetch_and_place(task):
@@ -436,14 +402,12 @@ def read(dset: h5py.Dataset, selection: Any, fetcher: Fetcher | None) -> np.ndar
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         if fetcher.per_chunk:
-            # Each worker reads its own chunk, so the next read overlaps the last decode.
-            # Nothing to bound here: only MAX_WORKERS chunks are ever in flight.
+            # Each worker reads its own chunk, so the next read overlaps the last decode. Only
+            # MAX_WORKERS chunks are ever in flight, so there is nothing to bound.
             list(pool.map(fetch_and_place, tasks))
         else:
-            # Remote: the ranges must go out together (that is the whole win), so fetch a
-            # batch and then decode it. Batches are bounded by *bytes*, not by chunk count:
-            # one file's chunks are 12 MB and another's are 166 MB, and 16 of the latter in
-            # flight would be 2.6 GB.
+            # Remote: the ranges must go out together (that is the win), so fetch a batch and
+            # then decode it. Bounded by *bytes*, since chunk sizes vary hugely across files.
             for batch in _batched(tasks, MAX_BYTES_IN_FLIGHT):
                 ranges = [(int(t[0].byte_offset), int(t[0].size)) for t in batch]
                 raws = fetcher.fetch(ranges)

@@ -1,18 +1,14 @@
 """Tests for :mod:`zea.data.chunk_reader`.
 
 The fast path is a pure optimisation, so **h5py is the oracle**: whatever
-``dataset[selection]`` returns, the concurrent reader must return exactly that — same
-values, dtype, shape, and the same exceptions. Nearly every test here is that comparison,
-run across the codecs, chunk layouts and selection kinds where it could plausibly diverge.
+``dataset[selection]`` returns, the concurrent reader must return exactly that — values,
+dtype, shape and exceptions. Most tests here are that comparison, across the codecs, chunk
+layouts and selections where it could plausibly diverge. The cases that earn their keep:
 
-The cases that earn their keep:
-
-* **filter-masked chunks** — incompressible data that HDF5 stored *raw*, which the Zarr
-  path decoded to garbage. Exercised by the ``int16`` noise dataset.
-* **fallbacks** — lzf, contiguous datasets and strided slices have no fast path and must
-  quietly fall through to h5py.
-* **concurrency** — the remote win is real only if N chunks cost ~1 round trip, so we
-  count requests against a latency-injecting server rather than trusting the wall clock.
+* **filter-masked chunks** — incompressible data HDF5 stored *raw* (the ``int16`` noise set).
+* **fallbacks** — lzf, contiguous datasets and strided slices must fall through to h5py.
+* **concurrency** — N chunks must cost ~1 round trip, counted against a latency-injecting
+  server rather than trusted from the wall clock.
 """
 
 import http.server
@@ -169,12 +165,10 @@ class TestEqualityWithH5py:
     def test_chunk_spanning_many_codec_blocks(self, tmp_path, codec):
         """A chunk far larger than the codec's internal block size must still decode exactly.
 
-        Codecs are block-structured underneath, and a decoder that mishandles that boundary
-        fails in a nasty direction: it returns the *right number of bytes*, so nothing raises
-        — it just returns the wrong ones, and only once a chunk outgrows a single block. A
-        small-chunk test would pass while every real file (chunks are capped at
-        ``MAX_CHUNK_BYTES``, i.e. megabytes) silently decoded to garbage. This pins the
-        multi-block case explicitly, since that is the only size that actually ships.
+        A decoder that mishandles a block boundary returns the *right number of bytes* — so
+        nothing raises, it just returns the wrong ones, and only once a chunk outgrows one
+        block. A small-chunk test would pass while every real file (chunks run to megabytes)
+        decoded to garbage.
         """
         raw = _structured()
         path = _write(tmp_path / "big.hdf5", raw, compression=codec, chunk_axes=("n_frames",))
@@ -187,10 +181,8 @@ class TestEqualityWithH5py:
     def test_incompressible_chunks_are_stored_raw(self, tmp_path):
         """Guards the premise of the test above: this data really does trip filter masks.
 
-        HDF5 stores a chunk raw when the filter fails to shrink it, and records that in the
-        chunk's filter mask. This is the case Zarr could not express — it decoded such
-        chunks to garbage — so if this data ever became compressible, the test that covers
-        the mask handling would silently stop covering anything.
+        HDF5 stores a chunk raw when the filter fails to shrink it. If this data ever became
+        compressible, the test covering the mask handling would silently cover nothing.
         """
         path = _write(tmp_path / "noise.hdf5", _incompressible())
         with File(path) as file:

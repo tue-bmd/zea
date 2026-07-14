@@ -57,28 +57,17 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
 Blosc threading (``BLOSC_NTHREADS``)
 ------------------------------------
 
-``zea`` stores array data with the Blosc HDF5 filter, and HDF5 runs that filter **one chunk at a
-time, single-threaded**. Blosc itself, however, splits each chunk into blocks and can process
-those in parallel, and its HDF5 filter reads ``BLOSC_NTHREADS`` from the environment on every
-call. So this variable is most of what determines write throughput.
+HDF5 runs the Blosc filter **one chunk at a time, single-threaded**, but Blosc can process the
+blocks *within* a chunk in parallel, and reads ``BLOSC_NTHREADS`` from the environment on every
+call. So this variable is most of what determines write throughput. ``zea`` defaults it to
+``min(8, cpu_count)`` via ``setdefault``, so an explicit value in your environment always wins.
 
-``zea`` therefore sets a default of ``min(8, cpu_count)`` (in :mod:`zea.data.spec`), using
-``setdefault`` — **an explicit ``BLOSC_NTHREADS`` in your environment always wins.**
-
-Two reasons you might want to set it yourself:
-
-* **Turn it down when your writes are already parallel.** Several dataloader workers each saving
-  a file will multiply with this: 8 workers x 8 Blosc threads is 64 threads competing for memory
-  bandwidth. Setting ``BLOSC_NTHREADS=1`` or ``2`` is usually better in that case.
-* **Do not turn it far up.** The gain flattens and then reverses, because the blocks within one
-  chunk are small: on real data, 32 threads measured *slower* than 8 (272 against 345 MB/s).
-
-It does not change what is stored — files are byte-for-byte identical at any thread count, only
-faster or slower to produce.
+Turn it **down** (to ``1`` or ``2``) when your writes are already parallel — several dataloader
+workers each saving a file will multiply with this. Do not turn it far **up**: the gain reverses
+once the blocks go memory-bound (32 threads measured slower than 8). It never changes what is
+stored, only how fast it is produced.
 
 .. note::
 
-   ``numcodecs`` (which ``zea`` uses to decode chunks concurrently on the read path, see
-   :mod:`zea.data.chunk_reader`) keeps its **own** Blosc thread setting, which already defaults
-   to 8 and is *not* read from this variable. Setting ``BLOSC_NTHREADS`` therefore affects
-   writes, not reads.
+   ``numcodecs``, which decodes chunks on the read path (:mod:`zea.data.chunk_reader`), keeps its
+   own Blosc thread setting and does not read this variable — so this affects writes, not reads.

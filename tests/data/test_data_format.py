@@ -190,26 +190,19 @@ def test_chunk_axes(chunk_axes, expected, tmp_hdf5_path):
 
 
 def test_blosc_nthreads_is_set_for_writes():
-    """Blosc is told to thread inside a chunk, which is most of the write throughput.
+    """Blosc threads within a chunk, which is ~4x of the write throughput.
 
-    HDF5 runs the filter one chunk at a time and single-threaded, but Blosc can compress the
-    blocks *within* a chunk in parallel — its HDF5 filter picks the thread count up from the
-    environment on every call. Setting it is worth ~4x on writes (105 -> 453 MB/s on real
-    int16 data) for one line, so a regression here would be silent and expensive: the files
-    would still be correct, just slow to produce.
+    A regression here would be silent: the files stay correct, just slow to produce.
     """
     assert os.environ.get("BLOSC_NTHREADS") == str(BLOSC_NTHREADS)
     assert 1 < BLOSC_NTHREADS <= 8, "more threads than this measured *slower* (memory-bound)"
 
 
 def test_blosc_nthreads_does_not_override_the_user():
-    """An explicit BLOSC_NTHREADS in the environment wins — zea only supplies a default.
+    """An explicit BLOSC_NTHREADS wins — zea only supplies a default.
 
-    Writes are often already parallel at a coarser grain (several dataloader workers each
-    saving a file), and that multiplies with this, so the operator has to be able to turn it
-    down without editing zea. Checked in a subprocess because the behaviour happens at import:
-    reloading the module in-process would rebuild zea's dataclasses and break every isinstance
-    check that the rest of the suite depends on.
+    Run in a subprocess because the behaviour happens at import: reloading the module in-process
+    rebuilds zea's dataclasses and breaks isinstance checks across the rest of the suite.
     """
     env = {**os.environ, "BLOSC_NTHREADS": "3"}
     proc = subprocess.run(
@@ -242,11 +235,9 @@ def test_default_write_is_blosc_and_per_frame(tmp_hdf5_path):
 def test_large_frames_are_split_into_capped_chunks(tmp_hdf5_path):
     """A frame bigger than MAX_CHUNK_BYTES is split along n_tx, not stored as one chunk.
 
-    A chunk is the unit of read *parallelism* — ``chunk_reader`` decodes each one in a single
-    worker thread — so a whole-frame chunk of a high-transmit scan (166 MB on real carotid
-    data) has nothing to parallelise, and reads ~7x slower than the same frame in 8 MB
-    chunks. The split must fall on ``n_tx`` (the outermost full axis), leaving ``n_ax`` and
-    ``n_el`` whole so each chunk stays a contiguous run of the array.
+    A chunk decodes in a single thread, so a whole-frame chunk of a high-transmit scan has
+    nothing to parallelise (~7x slower to read). The split must fall on ``n_tx``, leaving
+    ``n_ax``/``n_el`` whole so each chunk stays a contiguous run of the array.
     """
     big_frames, big_tx, big_ax, big_el = 2, 64, 2048, 64
     raw = np.zeros((big_frames, big_tx, big_ax, big_el, 1), dtype=np.float32)

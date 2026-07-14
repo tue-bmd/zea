@@ -40,65 +40,29 @@ UNITS = {
     "kg/m²": "kilograms per square meter",
 }
 
-# Default compression: Blosc(zstd) at clevel 7 with **bit**-shuffle. A single HDF5 filter
-# (id 32001), decoded in-process and concurrently by zea.data.chunk_reader.
-#
-# Chosen against the alternatives on real data (scripts/benchmark_compression.py):
-#
-# * Blosc, not Blosc2/Zstd/LZ4/Bitshuffle-as-a-filter. Blosc2 compresses ~2% better, but
-#   python-blosc2 holds the GIL, so it cannot decode concurrently: it scales 1.1x across a
-#   thread pool where Blosc scales 7.2x, which costs ~30x read throughput. The codec is only
-#   half the decision — the other half is whether it can be decoded in parallel.
-# * Bit-shuffle, not byte-shuffle. Shuffle separates a dtype into planes for zstd to find
-#   structure in, and an int16 (what new acquisitions store) has only two byte-planes to
-#   separate, so byte-shuffle has little to work with. On int16 carotid data, bit-shuffle at
-#   clevel 7 beats byte-shuffle at clevel 5 on *every* axis at once: ratio 1.83 vs 1.75,
-#   writes 125 vs 47 MB/s, cold reads 5670 vs 4561 MB/s. On float32 it costs ~3% ratio and
-#   buys ~1.5x write speed.
-# * clevel 7, not 9. Level 9 writes at 6-9 MB/s for ~1% more compression — over an hour to
-#   re-save a 25 GB scan.
-#
-# Importing hdf5plugin here also registers the filter for every read.
+# Blosc(zstd) + bit-shuffle: the one codec zea.data.chunk_reader can decode concurrently.
+# Blosc2 compresses ~2% better but its binding holds the GIL, which costs ~30x on reads.
+# Bit-shuffle beats byte-shuffle on int16 (only two byte-planes to separate); clevel 9 writes
+# ~15x slower than 7 for ~1% more compression. Importing hdf5plugin also registers the filter.
 DEFAULT_COMPRESSION = hdf5plugin.Blosc(cname="zstd", clevel=7, shuffle=hdf5plugin.Blosc.BITSHUFFLE)
 
-# Threads Blosc uses *inside* one chunk, when HDF5 runs the filter on a write.
-#
-# Compression is the write bottleneck, and HDF5 runs the filter pipeline one chunk at a time,
-# single-threaded — but Blosc itself splits a chunk into blocks and can compress those in
-# parallel. Its HDF5 filter reads this from the environment on every call, so setting it here
-# costs nothing and roughly quadruples writes: measured on int16 carotid data, 108 MB/s at one
-# thread against 453 MB/s at eight.
-#
-# Eight, not more: the gain flattens and then reverses (32 threads measured *slower* than 8,
-# 272 against 345 MB/s) because the blocks within a chunk are small and the threads start
-# fighting over memory bandwidth. Modest also matters because writes are often already
-# parallel at a coarser grain — several dataloader workers each saving a file — and this
-# multiplies with that.
-#
-# ``setdefault``: an explicit BLOSC_NTHREADS in the environment always wins.
-#
-# This is the cheap half of the write story. The other half is compressing chunks ourselves in
-# a thread pool and handing HDF5 the finished bytes with ``write_direct_chunk``, which reaches
-# ~1500 MB/s (14x) — the write-side mirror of :mod:`zea.data.chunk_reader`. It is not done here
-# because it moves write correctness to us; see the plan in the PR description.
+# Threads Blosc uses on the blocks *within* one chunk. HDF5 runs the filter one chunk at a time
+# and single-threaded, so this is most of the write throughput: ~4x (105 -> 453 MB/s). The gain
+# reverses past ~8 (the blocks are small and go memory-bound), and writes are often already
+# parallel per-file, so keep it modest. setdefault: an explicit env var wins.
 BLOSC_NTHREADS = min(8, os.cpu_count() or 1)
 os.environ.setdefault("BLOSC_NTHREADS", str(BLOSC_NTHREADS))
 
-# Default dataset dimensions to chunk along (HDF5 chunk size 1 on each): one frame per chunk,
-# since a frame is what a read subsamples first. Any axis not present on a field is ignored.
+# Chunk size 1 on each of these dims: one frame per chunk, since a frame is what a read
+# subsamples first. Dims not present on a field are ignored.
 DEFAULT_CHUNK_AXES: tuple[str, ...] = ("n_frames",)
 
-# Ceiling on the uncompressed bytes of one chunk. A chunk is the unit of *parallelism*, not
-# just of I/O: zea.data.chunk_reader fetches chunks concurrently and decodes each one in a
-# single worker thread, so one enormous chunk has nothing to parallelise. A whole frame of a
-# 149-transmit carotid scan is 166 MB (83 MB as int16), and reading one such frame took
-# 102 ms against 13 ms once the frame was split into 8 MB chunks — the largest single lever
-# measured, and it costs nothing on disk (compression ratio is flat across chunk size).
-#
-# Too small is its own failure, and it bites over the network rather than locally: chunking
-# per transmit makes 149 chunks per frame, and 149 HTTP range requests take 1.3 s against
-# 97 ms for 19 of them. 8 MB sits mid-plateau of a broad optimum (~2-16 MB) that is the same
-# for local and cloud reads, for both int16 and float32.
+# Ceiling on the uncompressed bytes of one chunk. A chunk is the unit of *parallelism*:
+# chunk_reader decodes each one in a single thread, so a whole-frame chunk (166 MB on a
+# 149-transmit scan) has nothing to parallelise — 102 ms to read one frame against 13 ms at
+# 8 MB. Too small costs round trips instead (149 chunks/frame = 1.3 s over HTTP). 8 MB sits
+# mid-plateau of a broad optimum (~2-16 MB), the same one for local and cloud, and costs
+# nothing on disk: the compression ratio is flat across chunk size.
 MAX_CHUNK_BYTES = 8 << 20  # 8 MiB
 
 # Paged file-space strategy: HDF5 allocates in fixed-size pages, which collects the
@@ -535,17 +499,11 @@ class Spec:
         not present on this field are ignored (e.g. an ``image`` without ``n_tx`` is
         chunked on ``n_frames`` only).
 
-        The result is then capped to ``max_chunk_bytes`` (defaulting to
-        :data:`MAX_CHUNK_BYTES`, read at call time so it can be overridden) by
-        splitting the **outermost full axis** — ``n_tx`` for ``raw_data`` — because a
-        chunk is the unit of read parallelism and one 166 MB chunk decodes in a single
-        thread. Splitting the outermost axis keeps each chunk a contiguous run of the
-        array, so reads stay sequential and the compression ratio is unaffected.
-
-        Only that one axis is split. If a single index along it is already over budget
-        (a very deep or wide acquisition), the chunk is left at that size rather than
-        cutting into ``n_ax``/``n_el``: those are read whole anyway, so splitting them
-        would add chunks without adding useful concurrency.
+        The result is capped to ``max_chunk_bytes`` (default :data:`MAX_CHUNK_BYTES`) by
+        splitting the outermost full axis — ``n_tx`` for ``raw_data`` — which keeps each
+        chunk a contiguous run of the array. Only that axis is split: if one index along
+        it already exceeds the budget, the chunk is left oversized rather than cutting
+        into ``n_ax``/``n_el``, which are read whole anyway.
 
         Returns ``None`` (contiguous / h5py default) when ``chunk_axes`` is empty
         or ``None``, the value is not a ≥2-D array, or the field's dimension names
