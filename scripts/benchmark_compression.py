@@ -30,10 +30,10 @@ All codecs are lossless; every configuration is asserted bit-equal to the source
 Usage::
 
     pip install hdf5plugin
-    python scripts/benchmark_compression.py                       # synthetic
-    python scripts/benchmark_compression.py --from-file scan.hdf5 --n-frames 4
-    python scripts/benchmark_compression.py --from-file scan.hdf5 --only chunks
-    python scripts/benchmark_compression.py --from-file scan.hdf5 --latency 0.02
+    python benchmark_compression.py                       # synthetic
+    python benchmark_compression.py --from-file scan.hdf5 --n-frames 4
+    python benchmark_compression.py --from-file scan.hdf5 --only chunks
+    python benchmark_compression.py --from-file scan.hdf5 --latency 0.02
 
 ``--from-file`` uses real data (strongly preferred — compressibility is a property of
 the data, and synthetic RF only approximates it); ``--n-frames`` caps how much of it is

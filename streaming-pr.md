@@ -17,41 +17,786 @@ Just checking the summary of a cloud file:
 
 ```python
 import zea
-with zea.File("...", stream=True) as f:
-    print(f.summary()) # 300 ms, previously would have to download entire file!
+with zea.File("hf://...", stream=True) as f:
+    print(f.summary())  # 171 ms, previously 2.3 s — it had to download the entire file!
 ```
 
 Loading a couple of frames from a cloud file:
 
 ```python
 import zea
-with zea.File("...", stream=True) as f:
-    raw_data = f.data.raw_data[:3] # streams chunks from cloud, decompresses in parallel, returns numpy array
+with zea.File("hf://...", stream=True) as f:
+    raw_data = f.data.raw_data[:3]  # streams chunks from cloud, decompresses in parallel
+```
 
 Loading a local file:
 
 ```python
 import zea
-with zea.File("...") as f:
-    raw_data = f.data.raw_data[:3] # concurrently reads and decompress chunks from disk, returns numpy array
+with zea.File("scan.hdf5") as f:
+    raw_data = f.data.raw_data[:3]  # concurrently reads and decompresses chunks from disk
 ```
 
 ## Benchmark to compare to `main`
 
-... insert md table here...
+Measured on a real carotid scan (`n_tx=149`), 8 frames, reading 3 frames — on `main`'s own code,
+checked out into a git worktree and driven in a subprocess, so both branches run the same data on
+the same machine and only zea changes. Both are asserted to read back identical values.
+
+**float32** (1328 MB raw — how this data is stored today):
+
+|             | codec      | chunk                | chunk size | stored | ratio | write    |
+|-------------|------------|----------------------|------------|--------|-------|----------|
+| main        | lzf        | (1, 10, 272, 16, 1)  | 0.2 MB     | 713 MB | 1.86x | 184 MB/s |
+| **this PR** | blosc-zstd | (1, 7, 2176, 128, 1) | 7.8 MB     | 410 MB | 3.24x | 74 MB/s  |
+
+|                         | main  | this PR    | speed-up  |
+|-------------------------|-------|------------|-----------|
+| local read (cold cache) | 1.6 s | **104 ms** | **15.6x** |
+| cloud `summary()`       | 2.3 s | **171 ms** | **13.2x** |
+| cloud read (3 frames)   | 3.0 s | **556 ms** | **5.4x**  |
+
+**int16** (664 MB raw — what new acquisitions will store):
+
+|             | codec      | chunk                 | chunk size | stored | ratio | write    |
+|-------------|------------|-----------------------|------------|--------|-------|----------|
+| main        | lzf        | (1, 19, 272, 16, 1)   | 0.2 MB     | 552 MB | 1.20x | 141 MB/s |
+| **this PR** | blosc-zstd | (1, 15, 2176, 128, 1) | 8.4 MB     | 362 MB | 1.83x | 118 MB/s |
+
+|                         | main   | this PR    | speed-up  |
+|-------------------------|--------|------------|-----------|
+| local read (cold cache) | 894 ms | **86 ms**  | **10.4x** |
+| cloud `summary()`       | 1.5 s  | **173 ms** | **8.9x**  |
+| cloud read (3 frames)   | 1.9 s  | **431 ms** | **4.4x**  |
+
+Files also get **42% smaller** (float32) / **34% smaller** (int16).
+
+**The one regression: writes are slower** — 74 MB/s against 184 MB/s on float32, because zstd at
+clevel 7 works harder than lzf. That is the deliberate trade: writing happens once per file,
+reading happens every epoch of every training run, and the file ends up smaller. On int16 the gap
+mostly closes (118 vs 141 MB/s).
+
+Two notes on how the cloud row is measured. `main` **cannot stream at all**, so reaching a cloud
+file means downloading it whole — that is what its cloud numbers are, and the asymmetry is the
+point of the feature. And "the cloud" here is a local HTTP server with a fixed 20 ms latency per
+request rather than real HF, because real HF is bandwidth-bound and noisy by 3-4x, which drowns
+the round-trip effect being measured. It must be an *asyncio* server: a thread-per-connection one
+collapses under concurrent range requests (462 MB/s for a single range, 103 MB/s for 64), which
+would charge the concurrent reader a 4x penalty invented by the harness — enough to make streaming
+look *slower* than downloading. Real object stores scale up with concurrency, not down.
+
+The script below checks `main` out into a git worktree, runs each version in a subprocess with
+`PYTHONPATH` pointed at that tree, and points zea's HF plumbing at a local latency-injecting HTTP
+server so the `hf://` streaming path runs for real. Save it anywhere and run:
+
+```bash
+python benchmark_vs_main.py --from-file carotid.hdf5 --n-frames 8 --read-frames 3
+python benchmark_vs_main.py --from-file carotid.hdf5 --n-frames 8 --read-frames 3 --cast int16
+```
 
 <details>
 
 <summary>Benchmark vs main script</summary>
+
 ```python
-... write a script to test local/cloud read/compression performance vs a zea File from the main branch ...
+"""Benchmark this branch against ``main``: write, local read, cloud read.
+
+Runs the **real code of both branches**, rather than trusting a description of what ``main``
+used to do: it checks ``main`` out into a git worktree and drives each version in its own
+subprocess with ``PYTHONPATH`` pointed at that tree. Same machine, same data, same file
+contents — only zea changes.
+
+What separates the two:
+
+* ``main`` writes **lzf**, with h5py's *auto-chosen* chunk shape, and reads through h5py —
+  one chunk at a time, decoded under h5py's global lock.
+* this branch writes **Blosc(zstd, clevel 7, bit-shuffle)**, one frame per chunk capped at
+  ``MAX_CHUNK_BYTES``, in a paged file, and reads through :mod:`zea.data.chunk_reader`:
+  chunk byte ranges fetched by us and decoded in a thread pool.
+
+The cloud case is not a like-for-like read, because ``main`` cannot stream at all — an
+``hf://`` file is *downloaded whole* before the first byte is used. That asymmetry is the
+point, so it is measured as each branch actually behaves: ``main`` downloads the file and
+opens it locally; this branch opens the file over HTTP range requests and fetches only the
+chunks it needs. To keep it honest and reproducible, "the cloud" is a local HTTP server with
+a fixed latency per request (real HF is bandwidth-bound and noisy by 3-4x, which drowns the
+round-trip effect being measured), and zea's HF plumbing is pointed at it.
+
+Run it from anywhere **inside the zea checkout you want to benchmark** (it compares that working
+tree against ``main``)::
+
+    python benchmark_vs_main.py --from-file scan.hdf5 --n-frames 8 --read-frames 3
+    python benchmark_vs_main.py --from-file scan.hdf5 --n-frames 8 --cast int16
+    python benchmark_vs_main.py --latency 0.02 --read-frames 3
+
+Without ``--from-file`` it uses synthetic data, which is fine for a smoke test but not for a
+decision: the wins here are proportional to file size, and a small array makes downloading the
+whole thing look competitive.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from pathlib import Path
+
+import numpy as np
+
+
+def _find_repo() -> Path:
+    """The zea checkout to benchmark: the git root of the working directory.
+
+    Deliberately *not* derived from ``__file__`` — this script is meant to be runnable from
+    anywhere (including pasted out of a PR description into /tmp), and a path relative to the
+    script would then point at the wrong tree, or at no tree at all.
+    """
+    try:
+        top = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return Path(top)
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        raise SystemExit(
+            "Run this from inside the zea git checkout you want to benchmark "
+            "(it compares the working tree against `main`)."
+        ) from exc
+
+
+RAW_KEY = "raw_data"
+
+# A fake hf:// path. zea only streams for ``hf://``, so the worker monkeypatches zea's two HF
+# helpers to resolve this to the local test server (see ``_patch_hf`` in the worker).
+FAKE_HF = "hf://bench/repo/scan.hdf5"
+
+
+# --------------------------------------------------------------------------- #
+# Worker: runs inside a subprocess, against whichever zea is on PYTHONPATH
+# --------------------------------------------------------------------------- #
+def _warmup(zea_mod, path) -> None:
+    """Pay zea's one-time process costs *before* the clock starts.
+
+    The first ``zea.File`` open in a process costs ~3 s — it initialises the Keras backend
+    lazily — and every subsequent one costs ~10 ms. That is a startup cost, not a read cost:
+    left inside the timed region it swamps the thing being measured (a 17 MB read looked like
+    3.0 s on both branches, i.e. a dead heat that was really just two JAX imports). Both
+    versions pay it identically, so warming first changes no comparison — it only stops the
+    constant from drowning the signal.
+    """
+    if not Path(path).exists():
+        return
+    with zea_mod.File(path, mode="r") as f:
+        _ = f.summary()
+
+
+def worker_main(args) -> None:
+    """One timed task, in a process whose ``PYTHONPATH`` selects the zea under test."""
+    import zea  # resolved from PYTHONPATH: either this branch or the main worktree
+
+    result: dict = {"zea": str(Path(zea.__file__).resolve().parent.parent)}
+    raw = np.load(args.source, mmap_mode="r")
+
+    if args.task != "write":
+        _warmup(zea, args.path)
+
+    if args.task == "write":
+        params = json.loads(Path(args.params).read_text())
+        data = {RAW_KEY: np.asarray(raw)}
+        scan = {k: np.asarray(v) for k, v in params["scan"].items()}
+        probe = {"name": "generic", "probe_geometry": np.asarray(params["probe_geometry"])}
+
+        # Same one-time backend init as _warmup, but a write has no file to open yet: do a
+        # throwaway single-frame write so the real one is timed against a warm process.
+        warm = str(Path(args.path).with_suffix(".warmup.hdf5"))
+        warm_scan = dict(scan)
+        if "time_to_next_transmit" in warm_scan:
+            warm_scan["time_to_next_transmit"] = warm_scan["time_to_next_transmit"][:1]
+        zea.File.create(
+            warm,
+            data={RAW_KEY: np.asarray(raw[:1])},
+            scan=warm_scan,
+            probe=probe,
+            overwrite=True,
+            ignore_warnings=True,
+        )
+        os.unlink(warm)
+
+        t0 = time.perf_counter()
+        zea.File.create(
+            args.path,
+            data=data,
+            scan=scan,
+            probe=probe,
+            overwrite=True,
+            ignore_warnings=True,
+        )
+        result["seconds"] = time.perf_counter() - t0
+
+        import h5py
+
+        with h5py.File(args.path, "r") as f:
+            dset = f[_raw_path(f)]
+            result["stored_bytes"] = dset.id.get_storage_size()
+            result["chunks"] = list(dset.chunks) if dset.chunks else None
+            plist = dset.id.get_create_plist()
+            result["filters"] = [plist.get_filter(i)[0] for i in range(plist.get_nfilters())]
+        result["raw_bytes"] = int(np.asarray(raw).nbytes)
+
+    elif args.task == "read_local":
+        _drop_cache(args.path)
+        t0 = time.perf_counter()
+        with zea.File(args.path, mode="r") as f:
+            got = f.data.raw_data[: args.read_frames]
+        result["seconds"] = time.perf_counter() - t0
+        result["checksum"] = float(np.asarray(got, dtype=np.float64).sum())
+
+    elif args.task == "cloud_summary":
+        # main has no streaming: reaching a file at all means downloading it whole.
+        t0 = time.perf_counter()
+        with _open_cloud(zea, args) as f:
+            summary = f.summary()
+        result["seconds"] = time.perf_counter() - t0
+        result["summary_chars"] = len(str(summary))
+
+    elif args.task == "cloud_read":
+        t0 = time.perf_counter()
+        with _open_cloud(zea, args) as f:
+            got = f.data.raw_data[: args.read_frames]
+        result["seconds"] = time.perf_counter() - t0
+        result["checksum"] = float(np.asarray(got, dtype=np.float64).sum())
+
+    print(json.dumps(result))
+
+
+def _raw_path(f) -> str:
+    for candidate in ("tracks/track_0/data/raw_data", "data/raw_data"):
+        if candidate in f:
+            return candidate
+    raise KeyError("raw_data not found")
+
+
+def _drop_cache(path) -> None:
+    """Evict the file from the page cache — a cold read is the one that matters here."""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+    finally:
+        os.close(fd)
+
+
+class _Downloaded:
+    """A whole file pulled over HTTP, then opened locally — how ``main`` reaches a dataset."""
+
+    def __init__(self, zea_mod, url):
+        import urllib.request
+
+        self._tmp = tempfile.NamedTemporaryFile(suffix=".hdf5", delete=False)
+        with urllib.request.urlopen(url) as response:
+            self._tmp.write(response.read())
+        self._tmp.close()
+        self._file = zea_mod.File(self._tmp.name, mode="r")
+
+    def __enter__(self):
+        return self._file
+
+    def __exit__(self, *exc):
+        self._file.close()
+        os.unlink(self._tmp.name)
+
+
+def _open_cloud(zea_mod, args):
+    """Open the served file the way this branch would — or the way ``main`` is forced to."""
+    if not args.streaming:
+        return _Downloaded(zea_mod, args.url)
+    _patch_hf(args.url)
+    return zea_mod.File(FAKE_HF, mode="r", stream=True)
+
+
+def _patch_hf(url: str) -> None:
+    """Point zea's two HF helpers at the local server, so the hf:// stream path runs for real.
+
+    Only the *location* of the bytes is faked. Everything downstream — the paged-metadata
+    open over HTTP, ``ChunkedDataset``, the concurrent range fetches in ``chunk_reader`` — is
+    the real code path, which is the whole point of measuring it.
+    """
+    import fsspec
+
+    from zea.data import file as zea_file
+    from zea.internal import preset_utils
+
+    def stream_open(_hf_path, **_kwargs):
+        fs = fsspec.filesystem("http", skip_instance_cache=True)
+        return fs.open(url, block_size=8 * 1024 * 1024, cache_type="blockcache")
+
+    def stream_url(_hf_path, **_kwargs):
+        return url
+
+    preset_utils._hf_stream_open = stream_open
+    preset_utils._hf_stream_url = stream_url
+    zea_file._hf_stream_open = stream_open
+
+
+# --------------------------------------------------------------------------- #
+# The cloud stand-in: counts requests, adds a fixed latency to each
+# --------------------------------------------------------------------------- #
+class _Counter:
+    def __init__(self):
+        self.n = 0
+        self.lock = threading.Lock()
+
+    def bump(self):
+        with self.lock:
+            self.n += 1
+
+    def value(self):
+        with self.lock:
+            return self.n
+
+
+class _Server:
+    """Range-capable HTTP server on an asyncio loop, counting requests and adding latency.
+
+    It must be **asyncio**, not ``http.server``. The threaded one collapses under exactly the
+    access pattern this PR introduces: measured on the same file, it served a single 200 MB
+    range at 462 MB/s but 64 concurrent ranges at only 103 MB/s — thread-per-connection plus
+    the GIL. That would have charged the concurrent reader a 4x penalty *created by the test
+    harness*, and made streaming look slower than downloading the whole file. On the asyncio
+    loop the same two cases run at 486 and 533 MB/s: flat, which is how a real object store
+    behaves (S3/HF scale up with concurrent range requests, they do not degrade).
+    """
+
+    def __init__(self, directory, counter, latency):
+        self.directory, self.counter, self.latency = directory, counter, latency
+        self.loop = None
+        ready = threading.Event()
+        threading.Thread(target=self._serve, args=(ready,), daemon=True).start()
+        ready.wait()
+
+    async def _handle(self, reader, writer):
+        try:
+            while True:
+                request = await reader.readline()
+                if not request:
+                    return
+                parts = request.decode(errors="replace").split()
+                headers = {}
+                while True:
+                    line = await reader.readline()
+                    if line in (b"\r\n", b"\n", b""):
+                        break
+                    key, _, value = line.decode(errors="replace").partition(":")
+                    headers[key.strip().lower()] = value.strip()
+                if len(parts) < 2:
+                    return
+
+                method, target = parts[0], parts[1].split("?")[0]
+                self.counter.bump()
+                if self.latency:
+                    await asyncio.sleep(self.latency)
+
+                path = os.path.join(self.directory, target.lstrip("/"))
+                try:
+                    size = os.path.getsize(path)
+                except OSError:
+                    writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                    await writer.drain()
+                    continue
+
+                if method == "HEAD":
+                    writer.write(
+                        f"HTTP/1.1 200 OK\r\nContent-Length: {size}\r\n"
+                        f"Accept-Ranges: bytes\r\n\r\n".encode()
+                    )
+                    await writer.drain()
+                    continue
+
+                rng = headers.get("range", "")
+                if rng.startswith("bytes="):
+                    start_s, _, end_s = rng[6:].partition("-")
+                    start = int(start_s) if start_s else 0
+                    end = int(end_s) if end_s else size - 1
+                    fd = os.open(path, os.O_RDONLY)
+                    try:
+                        body = os.pread(fd, end - start + 1, start)
+                    finally:
+                        os.close(fd)
+                    head = (
+                        f"HTTP/1.1 206 Partial Content\r\n"
+                        f"Content-Range: bytes {start}-{start + len(body) - 1}/{size}\r\n"
+                        f"Content-Length: {len(body)}\r\nAccept-Ranges: bytes\r\n\r\n"
+                    )
+                else:
+                    with open(path, "rb") as handle:
+                        body = handle.read()
+                    head = (
+                        f"HTTP/1.1 200 OK\r\nContent-Length: {len(body)}\r\n"
+                        f"Accept-Ranges: bytes\r\n\r\n"
+                    )
+                writer.write(head.encode())
+                writer.write(body)
+                await writer.drain()
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        finally:
+            writer.close()
+
+    def _serve(self, ready):
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        server = self.loop.run_until_complete(asyncio.start_server(self._handle, "127.0.0.1", 0))
+        self.port = server.sockets[0].getsockname()[1]
+        ready.set()
+        self.loop.run_forever()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}/"
+
+    def shutdown(self) -> None:
+        self.loop.call_soon_threadsafe(self.loop.stop)
+
+
+# --------------------------------------------------------------------------- #
+# Driver
+# --------------------------------------------------------------------------- #
+def run(tree: Path, task: str, counter: _Counter, **kwargs) -> dict:
+    """Run one task in a subprocess whose zea comes from ``tree``. Returns its JSON result."""
+    cmd = [sys.executable, str(Path(__file__).resolve()), "--worker", "--task", task]
+    for key, value in kwargs.items():
+        flag = "--" + key.replace("_", "-")
+        if isinstance(value, bool):
+            if value:
+                cmd.append(flag)
+        else:
+            cmd += [flag, str(value)]
+
+    env = dict(os.environ, PYTHONPATH=str(tree), KERAS_BACKEND="numpy", ZEA_DISABLE_CACHE="1")
+    before = counter.value()
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=env, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(f"{task} failed under {tree}:\n{proc.stdout}\n{proc.stderr}")
+
+    payload = json.loads(proc.stdout.strip().splitlines()[-1])
+    payload["requests"] = counter.value() - before
+    return payload
+
+
+def source_data(args, outdir: Path):
+    """The array both branches will store, plus the scan/probe needed to make a valid file."""
+    if args.from_file:
+        import zea
+
+        print(f"Loading {args.from_file} ...")
+        with zea.File(args.from_file, mode="r") as f:
+            raw = f.data.raw_data[: args.n_frames]
+            params = f.load_parameters()
+        scan, probe = params.to_scan_dict(), params.to_probe_dict()
+    else:
+        print("Generating synthetic data ...")
+        shape = (args.n_frames, args.n_tx, args.n_ax, args.n_el, 1)
+        rng = np.random.default_rng(0)
+        depth = np.linspace(0, 1, args.n_ax)[None, None, :, None, None]
+        base = np.exp(-2.5 * depth) * np.sin(2 * np.pi * 40 * depth)
+        speckle = 1 + 0.7 * rng.standard_normal(shape)
+        raw = (base * speckle * 1000).astype(np.float32)
+        n_tx, n_el = args.n_tx, args.n_el
+        scan = {
+            "sampling_frequency": np.float32(40e6),
+            "center_frequency": np.float32(7e6),
+            "demodulation_frequency": np.float32(7e6),
+            "initial_times": np.zeros(n_tx, np.float32),
+            "t0_delays": np.zeros((n_tx, n_el), np.float32),
+            "sound_speed": np.float32(1540.0),
+            "tx_apodizations": np.ones((n_tx, n_el), np.float32),
+            "focus_distances": np.zeros(n_tx, np.float32),
+            "polar_angles": np.zeros(n_tx, np.float32),
+            "azimuth_angles": np.zeros(n_tx, np.float32),
+            "transmit_origins": np.zeros((n_tx, 3), np.float32),
+        }
+        probe = {"probe_geometry": np.zeros((n_el, 3), np.float32)}
+
+    if args.cast == "int16" and not np.issubdtype(raw.dtype, np.integer):
+        peak = 0.9 * np.iinfo(np.int16).max
+        raw = np.clip(raw / (np.abs(raw).max() + 1e-9) * peak, -32768, 32767).astype(np.int16)
+
+    n_frames = raw.shape[0]
+    scan = {k: v for k, v in scan.items() if v is not None}
+    # Per-frame scan fields must match the frames we kept.
+    for key in ("time_to_next_transmit",):
+        if key in scan:
+            scan[key] = np.asarray(scan[key])[:n_frames]
+
+    source = outdir / "source.npy"
+    np.save(source, raw)
+    params_path = outdir / "params.json"
+    params_path.write_text(
+        json.dumps(
+            {
+                "scan": {k: np.asarray(v).tolist() for k, v in scan.items()},
+                "probe_geometry": np.asarray(probe["probe_geometry"]).tolist(),
+            }
+        )
+    )
+    return raw, source, params_path
+
+
+def worktree_for(repo: Path, ref: str, path: Path) -> Path:
+    """A detached worktree at ``ref``, so ``main``'s real code can be imported."""
+    if path.exists():
+        return path
+    # Drop registrations left behind by a previous run whose outdir has since been deleted,
+    # otherwise git refuses to re-add the same path.
+    subprocess.run(["git", "-C", str(repo), "worktree", "prune"], check=False, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "--detach", str(path), ref],
+        check=True,
+        capture_output=True,
+    )
+    return path
+
+
+def fmt(seconds: float) -> str:
+    return f"{seconds * 1e3:.0f} ms" if seconds < 1 else f"{seconds:.1f} s"
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--task", default=None, help=argparse.SUPPRESS)
+    p.add_argument("--path", default=None, help=argparse.SUPPRESS)
+    p.add_argument("--source", default=None, help=argparse.SUPPRESS)
+    p.add_argument("--params", default=None, help=argparse.SUPPRESS)
+    p.add_argument("--url", default=None, help=argparse.SUPPRESS)
+    p.add_argument("--streaming", action="store_true", help=argparse.SUPPRESS)
+
+    p.add_argument("--from-file", default=None, help="Real zea file to benchmark on.")
+    p.add_argument("--n-frames", type=int, default=8, help="Frames to store in the test file.")
+    p.add_argument("--read-frames", type=int, default=3, help="Frames each timed read fetches.")
+    p.add_argument("--cast", choices=["none", "int16"], default="none")
+    p.add_argument("--n-tx", type=int, default=64, help="Synthetic only.")
+    p.add_argument("--n-ax", type=int, default=2048, help="Synthetic only.")
+    p.add_argument("--n-el", type=int, default=128, help="Synthetic only.")
+    p.add_argument("--latency", type=float, default=0.02, help="Seconds per HTTP request.")
+    p.add_argument("--main-ref", default="main", help="Git ref to compare against.")
+    p.add_argument("--outdir", default=None)
+    args = p.parse_args()
+
+    if args.worker:
+        worker_main(args)
+        return
+
+    outdir = Path(args.outdir or tempfile.mkdtemp(prefix="zea_vs_main_"))
+    outdir.mkdir(parents=True, exist_ok=True)
+    raw, source, params = source_data(args, outdir)
+
+    repo = _find_repo()
+    main_tree = worktree_for(repo, args.main_ref, outdir / "main_tree")
+    trees = {"main": main_tree, "this PR": repo}
+
+    counter = _Counter()
+    httpd = _Server(str(outdir), counter, args.latency)
+    base_url = httpd.url
+
+    print(f"\nraw_data: shape={raw.shape} dtype={raw.dtype} ({raw.nbytes / 1e6:.0f} MB)")
+    print(f"reads fetch {args.read_frames} frame(s); cloud = {args.latency * 1e3:.0f} ms/request\n")
+
+    results: dict[str, dict] = {}
+    try:
+        for label, tree in trees.items():
+            path = outdir / f"{label.replace(' ', '_')}.hdf5"
+            row: dict = {}
+
+            row["write"] = run(tree, "write", counter, path=path, source=source, params=params)
+            row["local"] = run(
+                tree, "read_local", counter, path=path, source=source, read_frames=args.read_frames
+            )
+
+            url = base_url + path.name
+            streaming = label != "main"  # main cannot stream: it downloads the file whole
+            row["cloud_summary"] = run(
+                tree,
+                "cloud_summary",
+                counter,
+                path=path,
+                source=source,
+                url=url,
+                streaming=streaming,
+            )
+            row["cloud_read"] = run(
+                tree,
+                "cloud_read",
+                counter,
+                path=path,
+                source=source,
+                url=url,
+                streaming=streaming,
+                read_frames=args.read_frames,
+            )
+            results[label] = row
+            print(f"  {label:8} done")
+    finally:
+        httpd.shutdown()
+
+    # The two versions must have stored the *same numbers*, or none of the times mean anything.
+    checks = {label: row["local"]["checksum"] for label, row in results.items()}
+    expected = float(np.asarray(raw[: args.read_frames], dtype=np.float64).sum())
+    for label, value in checks.items():
+        assert np.isclose(value, expected, rtol=1e-6), f"{label} read back different data!"
+    print("\n✓ both branches read back identical data\n")
+
+    report(results, raw, args)
+
+
+def report(results, raw, args) -> None:
+    raw_mb = raw.nbytes / 1e6
+
+    def table(rows, headers):
+        widths = [max(len(str(r[i])) for r in [headers, *rows]) for i in range(len(headers))]
+        line = "| " + " | ".join(h.ljust(w) for h, w in zip(headers, widths)) + " |"
+        sep = "|" + "|".join("-" * (w + 2) for w in widths) + "|"
+        body = [
+            "| " + " | ".join(str(c).ljust(w) for c, w in zip(row, widths)) + " |" for row in rows
+        ]
+        return "\n".join([line, sep, *body])
+
+    codec = {32001: "blosc-zstd", 32000: "lzf", 1: "gzip"}
+    file_rows, local_rows, cloud_rows = [], [], []
+    for label, row in results.items():
+        write, local = row["write"], row["local"]
+        filters = ", ".join(codec.get(f, str(f)) for f in write["filters"]) or "none"
+        chunk = write["chunks"]
+        chunk_mb = (np.prod(chunk) * raw.dtype.itemsize / 1e6) if chunk else 0
+        file_rows.append(
+            [
+                label,
+                filters,
+                f"{tuple(chunk)}" if chunk else "auto",
+                f"{chunk_mb:.1f} MB",
+                f"{write['stored_bytes'] / 1e6:.0f} MB",
+                f"{write['raw_bytes'] / write['stored_bytes']:.2f}x",
+                f"{raw_mb / write['seconds']:.0f} MB/s",
+            ]
+        )
+        local_rows.append([label, fmt(local["seconds"])])
+        cloud_rows.append(
+            [
+                label,
+                fmt(row["cloud_summary"]["seconds"]),
+                str(row["cloud_summary"]["requests"]),
+                fmt(row["cloud_read"]["seconds"]),
+                str(row["cloud_read"]["requests"]),
+            ]
+        )
+
+    def speedup(rows, index):
+        """main / this-PR, from the formatted table rows' underlying seconds."""
+        a = results["main"][index]["seconds"]
+        b = results["this PR"][index]["seconds"]
+        return f"{a / b:.1f}x"
+
+    local_rows.append(["**speed-up**", f"**{speedup(local_rows, 'local')}**"])
+    cloud_rows.append(
+        [
+            "**speed-up**",
+            f"**{speedup(cloud_rows, 'cloud_summary')}**",
+            "",
+            f"**{speedup(cloud_rows, 'cloud_read')}**",
+            "",
+        ]
+    )
+
+    print("### File on disk\n")
+    print(table(file_rows, ["", "codec", "chunk", "chunk size", "stored", "ratio", "write"]))
+    print(f"\n### Local read ({args.read_frames} frames, cold page cache)\n")
+    print(table(local_rows, ["", "time"]))
+    print(f"\n### Cloud ({args.latency * 1e3:.0f} ms/request)\n")
+    print(
+        table(
+            cloud_rows,
+            ["", "summary()", "requests", f"read {args.read_frames} frames", "requests"],
+        )
+    )
+    print(
+        "\n_`main` cannot stream: reaching a cloud file at all means downloading it whole, "
+        "which is what its cloud numbers measure._"
+    )
+
+
+if __name__ == "__main__":
+    main()
 ```
+
 </details>
 
 ## Compression benchmark
 
-I checked which compression algorithm is fastest for our use case. The script can be found in this
-collapsed section:
+I checked which compression algorithm and chunk size are best for our use case, on real data,
+through the read path this PR actually uses.
+
+### Chunk size is the biggest lever — and it is free
+
+Compression ratio is **flat across chunk size** (181 MB stored whether a chunk is 1 transmit or a
+whole frame), so chunk size costs nothing on disk and only ever affects read speed. A chunk is the
+unit of *parallelism*: `chunk_reader` decodes each one in a single worker thread, so one 83 MB
+whole-frame chunk has nothing to parallelise, while 149 single-transmit chunks drown the network in
+round trips. int16 carotid, reading 1 frame:
+
+| chunk               | local read | cloud requests | cloud read |
+|---------------------|------------|----------------|------------|
+| 1 tx (0.6 MB)       | 32 ms      | 149            | 1579 ms    |
+| 4 tx (2.2 MB)       | **13 ms**  | 38             | 81 ms      |
+| 8 tx (4.5 MB)       | 13 ms      | 19             | **77 ms**  |
+| 16 tx (8.9 MB)      | 19 ms      | 10             | 122 ms     |
+| whole frame (83 MB) | 102 ms     | 1              | 231 ms     |
+
+The optimum is a broad plateau (~2–16 MB) and it is **the same plateau for local and cloud**, so one
+default serves both. Hence `MAX_CHUNK_BYTES = 8 MiB`: one frame per chunk, split along `n_tx` until
+it fits the budget.
+
+### Codec: Blosc(zstd) at clevel 7 with bit-shuffle
+
+Every codec below decodes **in-process and concurrently**, so this compares codecs rather than
+comparing "codecs my reader happens to support" (lzf is the exception, kept to show what falling
+back to h5py costs). int16 carotid, 8 transmits per chunk:
+
+| codec                    | ratio    | write MB/s | cold read MB/s | 1 frame   |
+|--------------------------|----------|------------|----------------|-----------|
+| none                     | 0.98     | 1509       | 3332           | 17 ms     |
+| **blosc-zstd-7-bitshuf** | **1.83** | **125**    | **5670**       | **13 ms** |
+| blosc-zstd-5 (byte-shuf) | 1.75     | 47         | 4561           | 20 ms     |
+| blosc-zstd-9 (byte-shuf) | 1.82     | 6          | 4646           | 23 ms     |
+| blosc-lz4-9              | 1.27     | 697        | 4866           | 14 ms     |
+| lzf (`main`'s default)   | 1.19     | 150        | 228            | 251 ms    |
+
+`zstd-7 + bit-shuffle` **strictly dominates** the alternatives on int16 — better ratio, faster
+writes *and* faster reads than `zstd-5 + byte-shuffle`. Bit-shuffle wins because an int16 has only
+two byte-planes for byte-shuffle to separate, so there is far more structure to expose at the bit
+level. clevel 9 is a trap: 6 MB/s writes for ~1% more compression.
+
+Two codecs were implemented, measured, and **rejected**: Blosc2 and Bitshuffle-as-a-filter both
+compress slightly better, but their Python bindings **hold the GIL** — Blosc2 scales 1.1x across
+the decode thread pool where Blosc scales 7.2x, costing ~30x read throughput. No compression ratio
+buys that back. (Their decoders are not in the PR; such files still read correctly via h5py.)
+
+The script below sweeps codec x clevel and chunk size on real data, through
+`zea.data.chunk_reader`, timing local reads warm *and* cold (page cache dropped — a 25 GB scan
+never sits in RAM) and cloud reads against a latency-injecting server. Every configuration is
+asserted bit-equal to the source. Save it anywhere and run:
+
+```bash
+python benchmark_compression.py --from-file carotid.hdf5 --n-frames 4 --cast int16
+python benchmark_compression.py --from-file carotid.hdf5 --n-frames 4 --only chunks
+```
 
 <details>
 
@@ -90,10 +835,10 @@ All codecs are lossless; every configuration is asserted bit-equal to the source
 Usage::
 
     pip install hdf5plugin
-    python scripts/benchmark_compression.py                       # synthetic
-    python scripts/benchmark_compression.py --from-file scan.hdf5 --n-frames 4
-    python scripts/benchmark_compression.py --from-file scan.hdf5 --only chunks
-    python scripts/benchmark_compression.py --from-file scan.hdf5 --latency 0.02
+    python benchmark_compression.py                       # synthetic
+    python benchmark_compression.py --from-file scan.hdf5 --n-frames 4
+    python benchmark_compression.py --from-file scan.hdf5 --only chunks
+    python benchmark_compression.py --from-file scan.hdf5 --latency 0.02
 
 ``--from-file`` uses real data (strongly preferred — compressibility is a property of
 the data, and synthetic RF only approximates it); ``--n-frames`` caps how much of it is
@@ -602,7 +1347,19 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 ```
 
 </details>
+
+## Notes for reviewers
+
+- **Existing files keep working.** lzf files still read (via h5py, serially); nothing needs
+  migrating. Re-saving a file with `zea data resave` gets it the new codec and chunking.
+- **`chunk_reader` correctness is ours now**, so it is a pure optimisation with an h5py fallback for
+  anything it does not fully understand (unknown codec, contiguous dataset, exotic selection), and
+  h5py is the oracle in the tests: equality across codecs x chunk layouts x selections, including
+  incompressible chunks that HDF5 stores raw (`filter_mask`).
+- **Edge case:** if a *single* transmit already exceeds `MAX_CHUNK_BYTES` (a very deep/wide
+  acquisition), the chunk is left oversized rather than splitting `n_ax`/`n_el`, which are always
+  read whole. Documented in `_resolve_chunks`.
+- **Write speed** for `File.create` we are still going through `h5py`, which means it cannot concurrently encode chunks. That is a one-time cost per file, but may still be optimized in the future (not sure if even possible). We might want to encourage people saving multiple files to use `File.create` in a process pool
