@@ -172,7 +172,48 @@ bigger lever than any of this for high-`n_tx` data.** A real carotid file (`n_tx
 **166 MB chunks**, so one frame = one chunk, and a single-frame read has *nothing* to
 parallelize in any approach. Splitting one chunk's byte range across sub-ranges does not
 rescue it either (4/8/16/32 sub-ranges all land at ~157 MB/s — the link is saturated, not
-latency-bound). The cap is independent of this plan and should be picked up next.
+latency-bound).
+
+**5b. The cap, and the codec.** — **done** (`scripts/benchmark_compression.py`, run against
+the real carotid file in both dtypes). Three defaults changed in `zea/data/spec.py`:
+
+- **`MAX_CHUNK_BYTES = 8 MiB`** (new). Chunk size turns out to cost *nothing* on disk — the
+  compression ratio is flat from 1 transmit to a whole frame — so it is a pure read-speed
+  knob, and the old whole-frame default sat at the worst end of it. The optimum is a broad
+  plateau (~2–16 MB) that is *the same for local and cloud*, so one cap serves both: too
+  large starves the thread pool (one chunk decodes in one thread), too small drowns the
+  network (149 chunks/frame = 149 range requests = 1.3 s, against 97 ms for 19).
+- **`clevel 5 → 7`, byte-shuffle → bit-shuffle.** On int16 (what new acquisitions store)
+  this is strictly better on *every* axis: ratio 1.75 → 1.83, writes 47 → 125 MB/s, cold
+  reads 4561 → 5670 MB/s. An int16 has only two byte-planes for byte-shuffle to separate, so
+  bit-shuffle simply has more structure to expose. `clevel 9` is a trap: 6–9 MB/s writes for
+  ~1% more ratio.
+- **Blosc stays.** Blosc2 compresses ~2% better and now decodes in-process too, but
+  python-blosc2 **holds the GIL**: it scales 1.1× across the thread pool where Blosc scales
+  7.2×, costing ~30× read throughput. The codec is only half the choice; the other half is
+  whether it can be decoded *in parallel*.
+
+End to end through `zea.File`, on real int16 carotid data: a single-frame read goes from
+**221 ms to 36 ms** cold (151 → 24 ms warm), writes from 47 → 107 MB/s, and the file gets
+**5% smaller**.
+
+Making that comparison honest took work, because a codec with no in-process decoder falls
+back to h5py and loses the concurrent path — a ~30x read penalty that would decide any codec
+comparison by itself, on the *reader's* limitations rather than the codec's. So all four
+rivals (Blosc2, Zstd, LZ4, Bitshuffle) were given real decoders and re-measured. Blosc still
+won, now on the merits.
+
+**Only Zstd (32015) and LZ4 (32004) were kept** — they decode through `numcodecs`, already a
+dependency. The Blosc2 and Bitshuffle decoders were **removed after measuring**: both would
+cost a new dependency to support a codec we then reject anyway, and both hold the GIL. Files
+written with them still read correctly, through h5py.
+
+One finding from that detour is worth keeping even though the code is gone: a Blosc2 chunk is
+a **b2nd cframe**, and decoding it as a flat super-chunk returns Blosc2's padded internal
+layout — byte-identical for a chunk that fits one 256 KB block, silently corrupt for anything
+larger, i.e. every real chunk. It is a decode bug that returns the right *number* of bytes,
+so nothing raises. `tests/data/test_chunk_reader.py` keeps a multi-block chunk test for the
+codecs we do ship, because a small-chunk test would never have caught it.
 
 **6. Remove the virtual path.** Delete `zea/data/virtual.py`, `zea/data/publish.py`, the
 `zea data virtualize` / `zea data publish` commands, `Dataset(lazy="virtual")` /

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from zea.data.file import File, validate_file
-from zea.data.spec import PAGED_LAYOUT, ScanSpec
+from zea.data.spec import MAX_CHUNK_BYTES, PAGED_LAYOUT, ScanSpec
 
 from . import generate_example_dataset
 
@@ -201,6 +201,51 @@ def test_default_write_is_blosc_and_per_frame(tmp_hdf5_path):
         filter_ids = {dcpl.get_filter(i)[0] for i in range(dcpl.get_nfilters())}
         assert hdf5plugin.Blosc.filter_id in filter_ids
         assert np.array_equal(raw_data[:], DATA["raw_data"])
+
+
+def test_large_frames_are_split_into_capped_chunks(tmp_hdf5_path):
+    """A frame bigger than MAX_CHUNK_BYTES is split along n_tx, not stored as one chunk.
+
+    A chunk is the unit of read *parallelism* — ``chunk_reader`` decodes each one in a single
+    worker thread — so a whole-frame chunk of a high-transmit scan (166 MB on real carotid
+    data) has nothing to parallelise, and reads ~7x slower than the same frame in 8 MB
+    chunks. The split must fall on ``n_tx`` (the outermost full axis), leaving ``n_ax`` and
+    ``n_el`` whole so each chunk stays a contiguous run of the array.
+    """
+    big_frames, big_tx, big_ax, big_el = 2, 64, 2048, 64
+    raw = np.zeros((big_frames, big_tx, big_ax, big_el, 1), dtype=np.float32)
+    assert raw[0].nbytes > MAX_CHUNK_BYTES, "the frame must exceed the cap to test the cap"
+
+    scan = {
+        **SCAN,
+        "initial_times": np.zeros(big_tx, dtype=np.float32),
+        "t0_delays": np.zeros((big_tx, big_el), dtype=np.float32),
+        "focus_distances": np.zeros(big_tx, dtype=np.float32),
+        "polar_angles": np.linspace(-np.pi / 2, np.pi / 2, big_tx, dtype=np.float32),
+        "azimuth_angles": np.zeros(big_tx, dtype=np.float32),
+        "tx_apodizations": np.ones((big_tx, big_el), dtype=np.float32),
+        "time_to_next_transmit": np.ones((big_frames, big_tx), dtype=np.float32),
+        "transmit_origins": np.zeros((big_tx, 3), dtype=np.float32),
+    }
+    probe = {**PROBE, "probe_geometry": np.zeros((big_el, 3), dtype=np.float32)}
+    File.create(
+        path=tmp_hdf5_path,
+        data={"raw_data": raw},
+        scan=scan,
+        probe=probe,
+        overwrite=True,
+    )
+
+    with File(tmp_hdf5_path) as file:
+        raw_data = file["data/raw_data"]
+        chunks = raw_data.chunks
+        chunk_bytes = np.prod(chunks) * raw.dtype.itemsize
+
+        assert chunk_bytes <= MAX_CHUNK_BYTES
+        assert chunks[0] == 1  # still one frame per chunk
+        assert 1 <= chunks[1] < big_tx  # split along n_tx ...
+        assert chunks[2:] == (big_ax, big_el, 1)  # ... and only along n_tx
+        assert np.array_equal(raw_data[:], raw)
 
 
 def test_default_write_is_paged(tmp_hdf5_path):

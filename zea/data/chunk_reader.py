@@ -46,12 +46,23 @@ from typing import Any, Callable, Sequence
 import h5py
 import numpy as np
 
-# HDF5 filter ids we can decode in-process. A dataset using anything else (notably lzf,
-# zea's pre-0.1.3 default) falls back to h5py, which decodes it natively.
-BLOSC = 32001  # zea's default codec since 0.1.3
+# HDF5 filter ids we can decode in-process, all through ``numcodecs`` and the standard
+# library. Anything else — notably lzf, zea's pre-0.1.3 default — falls back to h5py, which
+# decodes it natively: correct, just serial.
+#
+# The list is wider than zea's own default on purpose, so that a file written elsewhere still
+# gets the concurrent path. It stops at codecs that would cost a dependency: Blosc2 and
+# Bitshuffle were implemented and measured, and both were rejected — their Python bindings
+# hold the GIL, so they cannot decode concurrently (Blosc2 scales 1.1x across the thread pool
+# where Blosc scales 7.2x) and they lose on read throughput no matter how well they compress.
+# Files using them still read correctly through h5py.
+BLOSC = 32001  # zea's default codec
+LZ4 = 32004
+ZSTD = 32015
 GZIP = 1
 SHUFFLE = 2
-DECODABLE = (BLOSC, GZIP, SHUFFLE)
+DECODABLE = (BLOSC, LZ4, ZSTD, GZIP, SHUFFLE)
+
 
 # Reads below this are served by h5py: handing a chunk to a worker thread costs more than
 # it saves when there is barely any data to decode.
@@ -184,6 +195,37 @@ def filter_ids(dset: h5py.Dataset) -> list[int]:
     return [plist.get_filter(i)[0] for i in range(plist.get_nfilters())]
 
 
+def _decode_lz4(raw: bytes) -> bytes:
+    """Reverse the HDF5 LZ4 filter (32004), whose framing is its own.
+
+    The chunk is a header — 8-byte big-endian decompressed size, 4-byte big-endian block
+    size — followed by blocks, each prefixed with its own 4-byte big-endian compressed size.
+    A block that did not compress is stored verbatim, which shows up as a compressed size
+    equal to the uncompressed one.
+
+    ``numcodecs.lz4`` reads a 4-byte *little-endian* length header instead of taking the
+    size as an argument, so each raw LZ4 block is handed to it with that header prepended
+    rather than pulling in the ``lz4`` package for one call.
+    """
+    from numcodecs import lz4
+
+    total = int.from_bytes(raw[0:8], "big")
+    block_size = int.from_bytes(raw[8:12], "big") or total
+    out, pos, remaining = [], 12, total
+    while remaining > 0:
+        size = int.from_bytes(raw[pos : pos + 4], "big")
+        pos += 4
+        wanted = min(block_size, remaining)
+        block = raw[pos : pos + size]
+        pos += size
+        if size == wanted:
+            out.append(block)  # stored raw: this block did not compress
+        else:
+            out.append(lz4.decompress(wanted.to_bytes(4, "little") + block))
+        remaining -= wanted
+    return b"".join(out)
+
+
 def _decode(raw: bytes, filters: list[int], filter_mask: int, itemsize: int) -> bytes:
     """Reverse the filter pipeline of one chunk.
 
@@ -194,7 +236,7 @@ def _decode(raw: bytes, filters: list[int], filter_mask: int, itemsize: int) -> 
     garbage, so whole arrays had to be excluded from a virtual reference. Here the mask is
     handed to us, so the bug cannot happen.
     """
-    from numcodecs import blosc, shuffle
+    from numcodecs import blosc, shuffle, zstd
 
     buf = raw
     for i in reversed(range(len(filters))):
@@ -203,6 +245,10 @@ def _decode(raw: bytes, filters: list[int], filter_mask: int, itemsize: int) -> 
         fid = filters[i]
         if fid == BLOSC:
             buf = blosc.decompress(buf)  # codec params live in the blosc header
+        elif fid == ZSTD:
+            buf = zstd.decompress(buf)
+        elif fid == LZ4:
+            buf = _decode_lz4(buf)
         elif fid == GZIP:
             buf = zlib.decompress(buf)
         elif fid == SHUFFLE:

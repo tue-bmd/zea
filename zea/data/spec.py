@@ -1,3 +1,4 @@
+import math
 import os
 import tempfile
 from collections import defaultdict
@@ -39,20 +40,43 @@ UNITS = {
     "kg/m²": "kilograms per square meter",
 }
 
-# Default compression: Blosc(zstd) with byte-shuffle. A single HDF5 filter
-# (id 32001) that decodes via numcodecs.Blosc, so files can be read both by h5py
-# (hdf5plugin registers the filter on import) and by the Zarr/VirtualiZarr cloud
-# read path. Importing hdf5plugin here also registers the filter for every read.
-# ``create_dataset`` accepts this Mapping directly (see ``_resolve_chunks``).
-DEFAULT_COMPRESSION = hdf5plugin.Blosc(cname="zstd", clevel=5, shuffle=hdf5plugin.Blosc.SHUFFLE)
+# Default compression: Blosc(zstd) at clevel 7 with **bit**-shuffle. A single HDF5 filter
+# (id 32001), decoded in-process and concurrently by zea.data.chunk_reader.
+#
+# Chosen against the alternatives on real data (scripts/benchmark_compression.py):
+#
+# * Blosc, not Blosc2/Zstd/LZ4/Bitshuffle-as-a-filter. Blosc2 compresses ~2% better, but
+#   python-blosc2 holds the GIL, so it cannot decode concurrently: it scales 1.1x across a
+#   thread pool where Blosc scales 7.2x, which costs ~30x read throughput. The codec is only
+#   half the decision — the other half is whether it can be decoded in parallel.
+# * Bit-shuffle, not byte-shuffle. Shuffle separates a dtype into planes for zstd to find
+#   structure in, and an int16 (what new acquisitions store) has only two byte-planes to
+#   separate, so byte-shuffle has little to work with. On int16 carotid data, bit-shuffle at
+#   clevel 7 beats byte-shuffle at clevel 5 on *every* axis at once: ratio 1.83 vs 1.75,
+#   writes 125 vs 47 MB/s, cold reads 5670 vs 4561 MB/s. On float32 it costs ~3% ratio and
+#   buys ~1.5x write speed.
+# * clevel 7, not 9. Level 9 writes at 6-9 MB/s for ~1% more compression — over an hour to
+#   re-save a 25 GB scan.
+#
+# Importing hdf5plugin here also registers the filter for every read.
+DEFAULT_COMPRESSION = hdf5plugin.Blosc(cname="zstd", clevel=7, shuffle=hdf5plugin.Blosc.BITSHUFFLE)
 
-# Default dataset dimensions to chunk along (HDF5 chunk size 1 on each). One full
-# frame per chunk (chunk ``(1, n_tx, n_ax, n_el, n_ch)`` for raw_data): few large
-# contiguous chunks that the cloud/virtual read path fetches concurrently, while
-# staying fine for h5py+blockcache. Any axis not present on a field is ignored.
-# NOTE: for very high n_tx this makes large chunks; a max-transmits-per-chunk
-# option is a planned refinement (see plan.md Phase 1b).
+# Default dataset dimensions to chunk along (HDF5 chunk size 1 on each): one frame per chunk,
+# since a frame is what a read subsamples first. Any axis not present on a field is ignored.
 DEFAULT_CHUNK_AXES: tuple[str, ...] = ("n_frames",)
+
+# Ceiling on the uncompressed bytes of one chunk. A chunk is the unit of *parallelism*, not
+# just of I/O: zea.data.chunk_reader fetches chunks concurrently and decodes each one in a
+# single worker thread, so one enormous chunk has nothing to parallelise. A whole frame of a
+# 149-transmit carotid scan is 166 MB (83 MB as int16), and reading one such frame took
+# 102 ms against 13 ms once the frame was split into 8 MB chunks — the largest single lever
+# measured, and it costs nothing on disk (compression ratio is flat across chunk size).
+#
+# Too small is its own failure, and it bites over the network rather than locally: chunking
+# per transmit makes 149 chunks per frame, and 149 HTTP range requests take 1.3 s against
+# 97 ms for 19 of them. 8 MB sits mid-plateau of a broad optimum (~2-16 MB) that is the same
+# for local and cloud reads, for both int16 and float32.
+MAX_CHUNK_BYTES = 8 << 20  # 8 MiB
 
 # Paged file-space strategy: HDF5 allocates in fixed-size pages, which collects the
 # metadata that a reader must walk on open (superblock, group and chunk B-trees) into
@@ -477,15 +501,28 @@ class Spec:
         value: Any,
         dim_names: tuple | None,
         chunk_axes: tuple[str, ...] | None,
+        max_chunk_bytes: int | None = None,
     ) -> tuple | None:
         """Choose an HDF5 chunk shape aligned with common access patterns.
 
         ``chunk_axes`` names the dimensions to chunk with size 1 (default
-        :data:`DEFAULT_CHUNK_AXES`, ``("n_frames", "n_tx")``); every other axis is
-        stored at full extent, so partial/streaming reads fetch only the requested
-        frames/transmits instead of h5py's poorly-shaped auto-guess. Axes named in
-        ``chunk_axes`` but not present on this field are ignored (e.g. an ``image``
-        without ``n_tx`` is chunked on ``n_frames`` only).
+        :data:`DEFAULT_CHUNK_AXES`, ``("n_frames",)``); every other axis is stored at
+        full extent, so partial/streaming reads fetch only the requested frames
+        instead of h5py's poorly-shaped auto-guess. Axes named in ``chunk_axes`` but
+        not present on this field are ignored (e.g. an ``image`` without ``n_tx`` is
+        chunked on ``n_frames`` only).
+
+        The result is then capped to ``max_chunk_bytes`` (defaulting to
+        :data:`MAX_CHUNK_BYTES`, read at call time so it can be overridden) by
+        splitting the **outermost full axis** — ``n_tx`` for ``raw_data`` — because a
+        chunk is the unit of read parallelism and one 166 MB chunk decodes in a single
+        thread. Splitting the outermost axis keeps each chunk a contiguous run of the
+        array, so reads stay sequential and the compression ratio is unaffected.
+
+        Only that one axis is split. If a single index along it is already over budget
+        (a very deep or wide acquisition), the chunk is left at that size rather than
+        cutting into ``n_ax``/``n_el``: those are read whole anyway, so splitting them
+        would add chunks without adding useful concurrency.
 
         Returns ``None`` (contiguous / h5py default) when ``chunk_axes`` is empty
         or ``None``, the value is not a ≥2-D array, or the field's dimension names
@@ -502,9 +539,22 @@ class Spec:
         mark = [d in chunk_axes for d in dim_names]
         # Require a mix: at least one chunk axis present *and* at least one full
         # axis, else the chunks would be scalar-sized (all ones).
-        if any(mark) and not all(mark):
-            return tuple(1 if m else dim for m, dim in zip(mark, value.shape))
-        return None
+        if not (any(mark) and not all(mark)):
+            return None
+
+        shape = cast(Tuple[int, ...], value.shape)
+        chunks: list[int] = [1 if m else dim for m, dim in zip(mark, shape)]
+        if max_chunk_bytes is None:
+            max_chunk_bytes = MAX_CHUNK_BYTES
+        if not max_chunk_bytes:  # 0 / None disables the cap: one full frame per chunk
+            return tuple(chunks)
+
+        split = mark.index(False)  # outermost axis kept at full extent
+        # Bytes of one index along that axis, i.e. everything nested inside it.
+        inner = math.prod(chunks[split + 1 :]) * value.dtype.itemsize
+        if inner:
+            chunks[split] = min(chunks[split], max(1, max_chunk_bytes // inner))
+        return tuple(chunks)
 
     @staticmethod
     def create_dataset(

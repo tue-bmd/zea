@@ -36,7 +36,10 @@ from zea.data.file import ChunkedDataset, File
 
 RAW = "tracks/track_0/data/raw_data"
 
-BLOSC = dict(hdf5plugin.Blosc(cname="zstd", clevel=5, shuffle=hdf5plugin.Blosc.SHUFFLE))
+BLOSC = dict(hdf5plugin.Blosc(cname="zstd", clevel=7, shuffle=hdf5plugin.Blosc.BITSHUFFLE))
+BLOSC_BYTESHUF = dict(hdf5plugin.Blosc(cname="zstd", clevel=5, shuffle=hdf5plugin.Blosc.SHUFFLE))
+ZSTD = dict(hdf5plugin.Zstd(clevel=3))
+LZ4 = dict(hdf5plugin.LZ4())
 GZIP = {"compression": "gzip", "compression_opts": 4}
 GZIP_SHUFFLE = {"compression": "gzip", "compression_opts": 4, "shuffle": True}
 
@@ -134,8 +137,17 @@ class TestEqualityWithH5py:
 
     @pytest.mark.parametrize(
         "codec",
-        [BLOSC, GZIP, GZIP_SHUFFLE, "lzf", None],
-        ids=["blosc", "gzip", "gzip+shuffle", "lzf", "none"],
+        [BLOSC, BLOSC_BYTESHUF, ZSTD, LZ4, GZIP, GZIP_SHUFFLE, "lzf", None],
+        ids=[
+            "blosc",
+            "blosc+byteshuffle",
+            "zstd",
+            "lz4",
+            "gzip",
+            "gzip+shuffle",
+            "lzf",
+            "none",
+        ],
     )
     @pytest.mark.parametrize(
         "chunk_axes",
@@ -152,6 +164,25 @@ class TestEqualityWithH5py:
             oracle, fast = file[RAW], file.data.raw_data
             for selection in SELECTIONS:
                 np.testing.assert_array_equal(fast[selection], oracle[selection])
+
+    @pytest.mark.parametrize("codec", [BLOSC, ZSTD, LZ4], ids=["blosc", "zstd", "lz4"])
+    def test_chunk_spanning_many_codec_blocks(self, tmp_path, codec):
+        """A chunk far larger than the codec's internal block size must still decode exactly.
+
+        Codecs are block-structured underneath, and a decoder that mishandles that boundary
+        fails in a nasty direction: it returns the *right number of bytes*, so nothing raises
+        — it just returns the wrong ones, and only once a chunk outgrows a single block. A
+        small-chunk test would pass while every real file (chunks are capped at
+        ``MAX_CHUNK_BYTES``, i.e. megabytes) silently decoded to garbage. This pins the
+        multi-block case explicitly, since that is the only size that actually ships.
+        """
+        raw = _structured()
+        path = _write(tmp_path / "big.hdf5", raw, compression=codec, chunk_axes=("n_frames",))
+        with File(path) as file:
+            chunk_bytes = np.prod(file[RAW].chunks) * raw.dtype.itemsize
+            assert chunk_bytes > (256 << 10), "chunk must span several codec blocks"
+            assert eligible(file[RAW], fetcher_for(file)), "must be on the fast path to test it"
+            np.testing.assert_array_equal(file.data.raw_data[:], raw)
 
     def test_incompressible_chunks_are_stored_raw(self, tmp_path):
         """Guards the premise of the test above: this data really does trip filter masks.
