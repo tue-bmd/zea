@@ -120,7 +120,8 @@ def bold(string):
 def dim(string):
     """Adds ANSI escape codes to print a string in a dim/faint style around the string."""
     return "\033[2m" + str(string) + "\033[0m"
-  
+
+
 # Progress bars (other than tqdm, which is handled separately below) that have
 # asked to be redrawn whenever a log message is emitted while they are on screen.
 # A WeakSet so a bar that never explicitly unregisters (e.g. a loop that
