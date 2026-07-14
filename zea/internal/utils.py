@@ -130,6 +130,10 @@ def deprecated(replacement=None):
                     log.deprecated(f"Call to deprecated {item.__name__}.")
                 return item(*args, **kwargs)
 
+            # Preserve the original signature so introspection-based tooling (e.g.
+            # keras.Operation's auto get_config, which uses inspect.getfullargspec)
+            # still sees the real parameters instead of this wrapper's *args/**kwargs.
+            wrapper.__signature__ = inspect.signature(item)  # ty: ignore[unresolved-attribute]
             return wrapper
         elif isinstance(item, property):
             # If it's a property of a class
