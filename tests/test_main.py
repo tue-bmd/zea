@@ -177,3 +177,22 @@ def test_data_output_path_rejects_hf():
     with pytest.raises(SystemExit) as exc_info:
         _run_data_command(cli_args.subcommand.subcommand)
     assert exc_info.value.code != 0
+
+
+def test_data_output_path_local_runs_and_overwrites(tmp_path):
+    """A local (non-'hf://') output_path is unaffected by the 'hf://' guard and,
+    with --overwrite, replaces an existing output file."""
+    from zea.cli_args import _run_data_command
+    from zea.data.file import validate_file
+
+    from .data import generate_example_dataset
+
+    input_path = tmp_path / "in.hdf5"
+    output_path = tmp_path / "out.hdf5"
+    generate_example_dataset(input_path)
+    output_path.write_bytes(b"stale")
+
+    cli_args = parse_args(["data", "resave", str(input_path), str(output_path), "--overwrite"])
+    _run_data_command(cli_args.subcommand.subcommand)
+
+    validate_file(output_path)
