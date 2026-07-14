@@ -1826,7 +1826,12 @@ class File(h5py.File):
             self.copy(scan_path, dst, name="scan")
 
     def summary(self):
-        """Print the contents of the file."""
+        """Print a human-readable tree of the file's contents.
+
+        Scalars and small datasets are printed with their actual value; large
+        datasets show their shape and dtype instead. Unit and description
+        metadata is shown inline where available.
+        """
         _print_hdf5_attrs(self)
 
 
@@ -1991,29 +1996,107 @@ def load_file(
         return data, parameters
 
 
+# A dataset with this many elements or fewer has its actual values printed;
+# bigger datasets only show their shape/dtype to avoid dumping large arrays.
+_MAX_INLINE_ELEMENTS = 8
+
+# Placeholder unit/description values written by DataSpec for fields that have
+# no curated metadata (see `_DEFAULT_FIELD_UNIT`/`_DEFAULT_FIELD_DESCRIPTION`
+# in `zea.data.spec`). These carry no information, so the summary hides them.
+_EMPTY_UNITS = {"", "-", "–"}
+
+
+def _decode_hdf5_scalar(value):
+    """Decode a raw scalar read from HDF5 (bytes/np.generic) to a native Python value."""
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, bytes):
+        value = value.decode()
+    return value
+
+
+def _format_hdf5_scalar(value):
+    """Colorize a single decoded scalar value for display."""
+    if isinstance(value, str):
+        return log.cyan(f'"{value}"')
+    if isinstance(value, (bool, np.bool_)):
+        return log.cyan(str(value))
+    if isinstance(value, float):
+        if value != value:  # NaN
+            text = "nan"
+        elif value.is_integer() and abs(value) < 1e15:
+            text = str(int(value))
+        else:
+            text = f"{value:.6g}"
+        return log.cyan(text)
+    return log.cyan(str(value))
+
+
+def _format_hdf5_value(value):
+    """Colorize an HDF5 attribute or (small) dataset value for display."""
+    if isinstance(value, np.ndarray):
+        if value.shape == ():
+            return _format_hdf5_scalar(_decode_hdf5_scalar(value[()]))
+        items = [_decode_hdf5_scalar(item) for item in value.tolist()]
+        return log.cyan(str(items))
+    return _format_hdf5_scalar(_decode_hdf5_scalar(value))
+
+
+def _format_hdf5_attr_line(key, value):
+    """Format a plain HDF5 attribute (e.g. a file- or group-level attribute) as one line."""
+    return f"{log.bold(key)}: {_format_hdf5_value(value)}"
+
+
+def _format_hdf5_dataset_line(key, dataset):
+    """Format a leaf HDF5 dataset as one line: its value (or shape) plus unit/description."""
+    if 0 < dataset.size <= _MAX_INLINE_ELEMENTS:
+        body = f"{log.bold(key)}: {_format_hdf5_value(dataset[()])}"
+    else:
+        shape_str = str(dataset.shape).replace(",)", ")")
+        if h5py.check_string_dtype(dataset.dtype) is not None:
+            dtype_str = "str"
+        else:
+            dtype_str = dataset.dtype.name
+        body = f"{log.bold(key)} " + log.dim(f"(shape={shape_str}, dtype={dtype_str})")
+
+    unit = _decode_hdf5_scalar(dataset.attrs.get("unit", ""))
+    description = _decode_hdf5_scalar(dataset.attrs.get("description", ""))
+    extras = []
+    if unit not in _EMPTY_UNITS:
+        extras.append(log.dim(f"[{unit}]"))
+    if description:
+        extras.append(log.dim(description))
+    if extras:
+        body += "  " + "  ".join(extras)
+    return body
+
+
 def _print_hdf5_attrs(hdf5_obj, prefix=""):
-    """Recursively prints all keys, attributes, and shapes in an HDF5 file.
+    """Recursively prints the contents of an HDF5 file in a human-readable tree.
+
+    Scalars and small datasets (up to ``_MAX_INLINE_ELEMENTS`` elements) are printed
+    with their actual value; larger datasets only show their shape and dtype. Unit and
+    description metadata is shown inline, and hidden when unset.
 
     Args:
-        hdf5_obj (h5py.File, h5py.Group, h5py.Dataset): HDF5 object to print.
+        hdf5_obj (h5py.File, h5py.Group): HDF5 object to print.
         prefix (str, optional): Prefix to print before each line. This
             parameter is used in internal recursion and should not be supplied
             by the user.
     """
-    assert isinstance(hdf5_obj, (h5py.File, h5py.Group, h5py.Dataset)), (
-        "ERROR: hdf5_obj must be a File, Group, or Dataset object"
+    assert isinstance(hdf5_obj, (h5py.File, h5py.Group)), (
+        "ERROR: hdf5_obj must be a File or Group object"
     )
 
     if isinstance(hdf5_obj, h5py.File):
         name = "root" if hdf5_obj.name == "/" else hdf5_obj.name
-        print(prefix + name + "/")
+        print(prefix + log.bold(name) + "/")
 
     # Collect all children (attributes first, then sub-groups/datasets) into a
     # single ordered list so ``is_last`` is computed across the full set and the
     # tree connectors line up correctly.
     entries = [("attr", key, val) for key, val in hdf5_obj.attrs.items()]
-    if isinstance(hdf5_obj, h5py.Group):
-        entries += [("item", key, None) for key in hdf5_obj.keys()]
+    entries += [("item", key, None) for key in hdf5_obj.keys()]
 
     for i, (kind, key, val) in enumerate(entries):
         is_last = i == len(entries) - 1
@@ -2021,16 +2104,18 @@ def _print_hdf5_attrs(hdf5_obj, prefix=""):
         child_prefix = prefix + ("    " if is_last else "│   ")
 
         if kind == "attr":
-            print(prefix + marker + key + ": " + str(val))
+            print(prefix + marker + _format_hdf5_attr_line(key, val))
             continue
 
         child = hdf5_obj[key]
         if isinstance(child, h5py.Dataset):
-            shape_str = str(child.shape).replace(",)", ")")
-            print(prefix + marker + key + " (shape=" + shape_str + ")")
+            print(prefix + marker + _format_hdf5_dataset_line(key, child))
+        elif isinstance(child, h5py.Group):
+            print(prefix + marker + log.bold(key) + "/")
+            _print_hdf5_attrs(child, child_prefix)
         else:
-            print(prefix + marker + key + "/")
-        _print_hdf5_attrs(child, child_prefix)
+            # e.g. a committed h5py.Datatype — not a Dataset or Group, nothing to recurse into.
+            print(prefix + marker + log.bold(key))
 
 
 def validate_file(path: str | None = None, file: "File | None" = None):
