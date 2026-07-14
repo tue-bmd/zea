@@ -141,14 +141,6 @@ def test_app_flags():
     assert args.server_port == 7861
 
 
-# ── data subcommand: hf:// paths (issue #374) ─────────────────────────────────
-#
-# input_path/input_paths/src are parsed as `str` (not `Path`) specifically so that
-# 'hf://' URIs survive unchanged: `Path("hf://org/repo")` collapses the double
-# slash to `PosixPath('hf:/org/repo')`, which breaks the 'hf://' prefix checks
-# used to resolve Hugging Face paths.
-
-
 @pytest.mark.parametrize(
     "argv,attr",
     [
@@ -161,11 +153,15 @@ def test_app_flags():
     ],
 )
 def test_data_subcommands_preserve_hf_paths(argv, attr):
+    """'hf://' URIs must survive tyro parsing unchanged: as a `Path`, the double slash
+    collapses to `PosixPath('hf:/org/repo')`, breaking the 'hf://' prefix checks used to
+    resolve Hugging Face paths. These fields are parsed as `str` to avoid that."""
     args = parse_args(argv).subcommand.subcommand
     assert getattr(args, attr) == argv[2]
 
 
 def test_data_sum_preserves_hf_paths():
+    """`sum`'s variadic input_paths must also survive as unmangled 'hf://' strings."""
     cli_args = parse_args(
         ["data", "sum", "hf://zeahub/a", "hf://zeahub/b", "--output-path", "out.hdf5"]
     )

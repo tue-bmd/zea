@@ -338,9 +338,6 @@ def test_file_operations_folder_sum(tmp_path):
         assert raw_data[0, 0, 0, 0, 0] == data0[0, 0, 0, 0, 0] + data1[0, 0, 0, 0, 0]
 
 
-# ── hf:// support (issue #374) ──────────────────────────────────────────────
-
-
 def test_resave_accepts_hf_path(tmp_path, monkeypatch):
     """resave resolves an 'hf://' input_path via File's existing hf:// resolution logic."""
     downloaded = tmp_path / "downloaded.hdf5"
