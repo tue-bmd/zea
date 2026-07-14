@@ -61,6 +61,29 @@ UNITS = {
 # Importing hdf5plugin here also registers the filter for every read.
 DEFAULT_COMPRESSION = hdf5plugin.Blosc(cname="zstd", clevel=7, shuffle=hdf5plugin.Blosc.BITSHUFFLE)
 
+# Threads Blosc uses *inside* one chunk, when HDF5 runs the filter on a write.
+#
+# Compression is the write bottleneck, and HDF5 runs the filter pipeline one chunk at a time,
+# single-threaded — but Blosc itself splits a chunk into blocks and can compress those in
+# parallel. Its HDF5 filter reads this from the environment on every call, so setting it here
+# costs nothing and roughly quadruples writes: measured on int16 carotid data, 108 MB/s at one
+# thread against 453 MB/s at eight.
+#
+# Eight, not more: the gain flattens and then reverses (32 threads measured *slower* than 8,
+# 272 against 345 MB/s) because the blocks within a chunk are small and the threads start
+# fighting over memory bandwidth. Modest also matters because writes are often already
+# parallel at a coarser grain — several dataloader workers each saving a file — and this
+# multiplies with that.
+#
+# ``setdefault``: an explicit BLOSC_NTHREADS in the environment always wins.
+#
+# This is the cheap half of the write story. The other half is compressing chunks ourselves in
+# a thread pool and handing HDF5 the finished bytes with ``write_direct_chunk``, which reaches
+# ~1500 MB/s (14x) — the write-side mirror of :mod:`zea.data.chunk_reader`. It is not done here
+# because it moves write correctness to us; see the plan in the PR description.
+BLOSC_NTHREADS = min(8, os.cpu_count() or 1)
+os.environ.setdefault("BLOSC_NTHREADS", str(BLOSC_NTHREADS))
+
 # Default dataset dimensions to chunk along (HDF5 chunk size 1 on each): one frame per chunk,
 # since a frame is what a read subsamples first. Any axis not present on a field is ignored.
 DEFAULT_CHUNK_AXES: tuple[str, ...] = ("n_frames",)

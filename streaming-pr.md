@@ -9,7 +9,12 @@ This PR introduces various fixes to improve that.
 - It switches compression algotrithm to a faster one (blosc+zstd+bitshuffle @ clevel 7)
 - It decompresses chunks in parallel using a thread pool (going around h5py GIL limitation)
 - It changes the default chunk size to be more suitable for our use case
+- It lets Blosc thread *within* a chunk on writes (`BLOSC_NTHREADS`), which is ~4x on writes
 - It adds a streaming interface to `zea.File` for huggingface datasets
+
+Net effect on a real carotid scan: **10-13x faster local reads**, **~10x faster cloud `summary()`**,
+**4-6x faster cloud reads**, files **34-42% smaller** — and writes come out *faster* than `main`
+too, despite compressing much harder.
 
 ## Speed-ups in common use cases
 
@@ -45,36 +50,41 @@ the same machine and only zea changes. Both are asserted to read back identical 
 
 **float32** (1328 MB raw — how this data is stored today):
 
-|             | codec      | chunk                | chunk size | stored | ratio | write    |
-|-------------|------------|----------------------|------------|--------|-------|----------|
-| main        | lzf        | (1, 10, 272, 16, 1)  | 0.2 MB     | 713 MB | 1.86x | 184 MB/s |
-| **this PR** | blosc-zstd | (1, 7, 2176, 128, 1) | 7.8 MB     | 410 MB | 3.24x | 74 MB/s  |
+|             | codec      | chunk                | chunk size | stored | ratio | write        |
+|-------------|------------|----------------------|------------|--------|-------|--------------|
+| main        | lzf        | (1, 10, 272, 16, 1)  | 0.2 MB     | 713 MB | 1.86x | 203 MB/s     |
+| **this PR** | blosc-zstd | (1, 7, 2176, 128, 1) | 7.8 MB     | 410 MB | 3.24x | **341 MB/s** |
 
 |                         | main  | this PR    | speed-up  |
 |-------------------------|-------|------------|-----------|
-| local read (cold cache) | 1.6 s | **104 ms** | **15.6x** |
-| cloud `summary()`       | 2.3 s | **171 ms** | **13.2x** |
-| cloud read (3 frames)   | 3.0 s | **556 ms** | **5.4x**  |
+| local read (cold cache) | 1.4 s | **105 ms** | **13.3x** |
+| cloud `summary()`       | 1.9 s | **145 ms** | **13.0x** |
+| cloud read (3 frames)   | 2.8 s | **468 ms** | **6.0x**  |
 
 **int16** (664 MB raw — what new acquisitions will store):
 
-|             | codec      | chunk                 | chunk size | stored | ratio | write    |
-|-------------|------------|-----------------------|------------|--------|-------|----------|
-| main        | lzf        | (1, 19, 272, 16, 1)   | 0.2 MB     | 552 MB | 1.20x | 141 MB/s |
-| **this PR** | blosc-zstd | (1, 15, 2176, 128, 1) | 8.4 MB     | 362 MB | 1.83x | 118 MB/s |
+|             | codec      | chunk                 | chunk size | stored | ratio | write        |
+|-------------|------------|-----------------------|------------|--------|-------|--------------|
+| main        | lzf        | (1, 19, 272, 16, 1)   | 0.2 MB     | 552 MB | 1.20x | 151 MB/s     |
+| **this PR** | blosc-zstd | (1, 15, 2176, 128, 1) | 8.4 MB     | 362 MB | 1.83x | **477 MB/s** |
 
 |                         | main   | this PR    | speed-up  |
 |-------------------------|--------|------------|-----------|
-| local read (cold cache) | 894 ms | **86 ms**  | **10.4x** |
-| cloud `summary()`       | 1.5 s  | **173 ms** | **8.9x**  |
-| cloud read (3 frames)   | 1.9 s  | **431 ms** | **4.4x**  |
+| local read (cold cache) | 876 ms | **87 ms**  | **10.0x** |
+| cloud `summary()`       | 1.6 s  | **163 ms** | **9.7x**  |
+| cloud read (3 frames)   | 1.9 s  | **432 ms** | **4.4x**  |
 
 Files also get **42% smaller** (float32) / **34% smaller** (int16).
 
-**The one regression: writes are slower** — 74 MB/s against 184 MB/s on float32, because zstd at
-clevel 7 works harder than lzf. That is the deliberate trade: writing happens once per file,
-reading happens every epoch of every training run, and the file ends up smaller. On int16 the gap
-mostly closes (118 vs 141 MB/s).
+**Writes got faster too, which was not obvious.** zstd at clevel 7 works far harder than lzf, so
+this started out as a regression (74 MB/s against 184). The fix is that HDF5 runs the filter one
+chunk at a time and *single-threaded*, while Blosc can compress the blocks **within** a chunk in
+parallel — and its HDF5 filter picks the thread count up from `BLOSC_NTHREADS` on every call. zea
+now defaults it to `min(8, cpu_count)`, which turns 105 MB/s into 453 MB/s on int16 and puts the
+PR ahead of `main` despite compressing 1.5x harder. It is a `setdefault`, so an explicit
+`BLOSC_NTHREADS` still wins; see [`docs/source/environment.rst`](docs/source/environment.rst) for
+when you would want to turn it *down* (several dataloader workers writing files at once will
+multiply with it).
 
 Two notes on how the cloud row is measured. `main` **cannot stream at all**, so reaching a cloud
 file means downloading it whole — that is what its cloud numbers are, and the asymmetry is the
@@ -1350,6 +1360,90 @@ if __name__ == "__main__":
 ```
 
 </details>
+
+## Follow-up: faster writes still (14x), and why it is *not* MPI
+
+[HDF5's own "parallel compression"](https://support.hdfgroup.org/documentation/hdf5/latest/_par_compr.html)
+solves a different problem than ours. It is **multi-process (MPI)** parallelism: several MPI ranks
+collectively write one dataset, HDF5 assigns each chunk an owner rank, non-owners ship their edits
+to the owner, and each rank runs the filter on the chunks it owns. It needs HDF5 built with
+parallel support, collective writes (`H5Pset_dxpl_mpio` with `H5FD_MPIO_COLLECTIVE`), and every
+rank must participate in every write even when it has no data. Our h5py is not an MPI build
+(`h5py.get_config().mpi` is `False`), and our workload is one process writing one file — so it
+buys us nothing without a rebuild and an MPI-shaped rewrite.
+
+Worth reading anyway, because its **tuning** guidance independently endorses what this PR does:
+get chunk sizing right *before* adding compression, avoid chunks shared between writers, use
+`H5F_FSPACE_STRATEGY_PAGE`, and set `H5Pset_libver_bounds` to latest. We already do the paged
+file space and `libver="latest"` (`PAGED_LAYOUT`), our per-frame chunks have exactly one writer
+each, and "chunking before compression" is precisely what the benchmark above concluded.
+
+The parallelism we *can* still exploit is threads in one process — the write-side mirror of
+`chunk_reader`. Measured on the real carotid file (332 MB int16, 8.4 MB chunks, this PR's codec):
+
+| approach                                                 | write         | vs today |
+|----------------------------------------------------------|---------------|----------|
+| HDF5 filter pipeline, single-threaded                    | 104 MB/s      | 1x       |
+| **`BLOSC_NTHREADS=8`** (in this PR)                      | 453 MB/s      | 4.3x     |
+| parallel compress + `write_direct_chunk` (16-32 threads) | **1491 MB/s** | **14x**  |
+
+All three produce byte-identical files of the same size (181 MB), readable by plain h5py.
+
+### Plan for `write_direct_chunk` (not in this PR — up for grabs)
+
+Compression is the write bottleneck and it parallelises; the byte-writes stay serial under h5py's
+lock, but they are cheap. So: compress each chunk yourself in a `ThreadPoolExecutor`
+(`numcodecs.blosc.compress` releases the GIL), then hand HDF5 the finished bytes with
+`dset.id.write_direct_chunk(offset, buf)`, bypassing the filter pipeline entirely. This mirrors
+`zea.data.chunk_reader` exactly, and would live next to it.
+
+Working prototype (this is the measured 1491 MB/s):
+
+```python
+ncblosc.set_nthreads(1)                       # the pool provides the parallelism, not blosc
+grid = [math.ceil(s / c) for s, c in zip(raw.shape, CH)]
+cells = [(i, j) for i in range(grid[0]) for j in range(grid[1])]
+
+def compress(cell):
+    i, j = cell
+    offset = (i * CH[0], j * CH[1], 0, 0, 0)   # ELEMENT coords, on a chunk boundary
+    sl = tuple(slice(o, min(o + c, s)) for o, c, s in zip(offset, CH, raw.shape))
+    block = np.ascontiguousarray(raw[sl])
+    if block.shape != CH:                      # edge chunk: HDF5 stores chunks FULL-size
+        pad = np.zeros(CH, dtype=raw.dtype)
+        pad[tuple(slice(0, n) for n in block.shape)] = block
+        block = pad
+    return offset, ncblosc.compress(block, b"zstd", 7, ncblosc.BITSHUFFLE)
+
+with h5py.File(path, "w") as f:
+    d = f.create_dataset("d", shape=raw.shape, dtype=raw.dtype, chunks=CH, **BLOSC)
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        for offset, buf in ex.map(compress, cells):
+            d.id.write_direct_chunk(offset, buf)
+```
+
+**The traps, all of which I hit building the prototype:**
+
+1. **The codec params must match the dataset's declared filter pipeline exactly** — same cname,
+   clevel, shuffle. HDF5 **does not verify this**. Get it wrong and you write a file that decodes
+   to silent garbage, with no error at write *or* open. This is the one that would bite hardest,
+   and it is why this is a separate PR: write correctness becomes ours, and the failure mode is
+   invisible.
+2. **Offsets are in element coordinates on a chunk boundary**, not chunk indices — `(i*1, j*15,
+   0, 0, 0)`, not `(i, j, 0, 0, 0)`. Passing chunk indices raises
+   `OSError: offset doesn't fall on chunks's boundary`, which at least fails loudly.
+3. **Edge chunks are stored full-size.** A chunk that hangs off the end of the array must be
+   zero-padded to the full chunk shape before compressing, or the buffer is short.
+4. **Incompressible chunks.** HDF5's filter stores such a chunk *raw* and records that in its
+   `filter_mask`. Writing directly, you either always store compressed (fine — that is what the
+   prototype does, and `chunk_reader` handles the mask correctly on the way back in) or replicate
+   the raw-store behaviour with the mask bit set.
+5. **Memory is `workers x chunk_size`** — 16 x 8 MB here. Bound it the way `chunk_reader` bounds
+   reads (`MAX_BYTES_IN_FLIGHT`), by bytes rather than by chunk count.
+
+Diminishing returns past ~16 threads (32 was 1491, 64 was 1431 MB/s). The equality tests should
+mirror `tests/data/test_chunk_reader.py`: write via the fast path, read back with **plain h5py**
+as the oracle, across codecs x chunk layouts x edge-shaped arrays x incompressible data.
 
 ## Notes for reviewers
 

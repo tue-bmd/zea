@@ -1,5 +1,8 @@
 """Test generating and validating zea data format."""
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Generator
 
@@ -8,7 +11,7 @@ import numpy as np
 import pytest
 
 from zea.data.file import File, validate_file
-from zea.data.spec import MAX_CHUNK_BYTES, PAGED_LAYOUT, ScanSpec
+from zea.data.spec import BLOSC_NTHREADS, MAX_CHUNK_BYTES, PAGED_LAYOUT, ScanSpec
 
 from . import generate_example_dataset
 
@@ -184,6 +187,39 @@ def test_chunk_axes(chunk_axes, expected, tmp_hdf5_path):
         assert raw_data.chunks == expected(raw_data.shape)
         # Data must still be readable regardless of chunking.
         assert np.array_equal(raw_data[:], DATA["raw_data"])
+
+
+def test_blosc_nthreads_is_set_for_writes():
+    """Blosc is told to thread inside a chunk, which is most of the write throughput.
+
+    HDF5 runs the filter one chunk at a time and single-threaded, but Blosc can compress the
+    blocks *within* a chunk in parallel — its HDF5 filter picks the thread count up from the
+    environment on every call. Setting it is worth ~4x on writes (105 -> 453 MB/s on real
+    int16 data) for one line, so a regression here would be silent and expensive: the files
+    would still be correct, just slow to produce.
+    """
+    assert os.environ.get("BLOSC_NTHREADS") == str(BLOSC_NTHREADS)
+    assert 1 < BLOSC_NTHREADS <= 8, "more threads than this measured *slower* (memory-bound)"
+
+
+def test_blosc_nthreads_does_not_override_the_user():
+    """An explicit BLOSC_NTHREADS in the environment wins — zea only supplies a default.
+
+    Writes are often already parallel at a coarser grain (several dataloader workers each
+    saving a file), and that multiplies with this, so the operator has to be able to turn it
+    down without editing zea. Checked in a subprocess because the behaviour happens at import:
+    reloading the module in-process would rebuild zea's dataclasses and break every isinstance
+    check that the rest of the suite depends on.
+    """
+    env = {**os.environ, "BLOSC_NTHREADS": "3"}
+    proc = subprocess.run(
+        [sys.executable, "-c", "import os, zea.data.spec; print(os.environ['BLOSC_NTHREADS'])"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert proc.stdout.strip().splitlines()[-1] == "3"  # last line: zea logs a backend banner
 
 
 def test_default_write_is_blosc_and_per_frame(tmp_hdf5_path):
