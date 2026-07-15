@@ -16,49 +16,19 @@ All geometry is expressed in the **2-D imaging plane**: ``transmit_origins``,
 
 from keras import ops
 
-from zea.func.ultrasound import hilbert
-
 __all__ = [
     "straight_ray_times",
     "usct_reflectivity_das",
 ]
 
 
-def channels_to_analytic(data, axis):
-    """Return the analytic signal (complex) from RF (``n_ch == 1``) or from
-    two-channel I/Q (``n_ch == 2``) data.
-
-    Args:
-        data: Tensor of shape ``(..., n_ch)`` with ``n_ch in {1, 2}``. For RF the
-            analytic signal is formed with a Hilbert transform along ``axis``;
-            for I/Q the two channels are read as real/imaginary parts.
-        axis: Fast-time (axial) axis along which to Hilbert-transform RF data.
-
-    Returns:
-        Complex tensor with the channel axis removed.
-    """
-    n_ch = data.shape[-1]
-    if n_ch == 2:
-        return ops.view_as_complex(data)
-    if n_ch == 1:
-        return hilbert(data[..., 0], axis=axis)
-    raise ValueError(f"USCT reconstruction expects n_ch in {{1, 2}}, got {n_ch}.")
-
-
-def pairwise_distance(a, b):
-    """Euclidean distance between every row of ``a`` ``(M, D)`` and ``b``
-    ``(N, D)`` -> ``(M, N)``."""
-    a2 = ops.sum(ops.square(a), axis=-1, keepdims=True)
-    b2 = ops.sum(ops.square(b), axis=-1, keepdims=True)
-    cross = ops.matmul(a, ops.transpose(b))
-    return ops.sqrt(ops.maximum(a2 + ops.transpose(b2) - 2 * cross, 0.0))
-
-
 def distance_and_unit(src, pixels):
     """``src`` ``(M, D)``, ``pixels`` ``(P, D)`` -> ``(dist (M, P), unit (M, P, D))``
     where ``unit`` points from each pixel toward the source."""
+    from zea.beamform.beamformer import compute_receive_distances
+
     diff = src[:, None, :] - pixels[None, :, :]
-    dist = ops.sqrt(ops.sum(ops.square(diff), axis=-1))
+    dist = compute_receive_distances(src, pixels)
     unit = diff / (dist[..., None] + 1e-9)
     return dist, unit
 
@@ -86,9 +56,7 @@ def _sample_grid(grid, x_axis, z_axis, xq, zq):
     )
 
 
-def straight_ray_times(
-    positions, pixels, sos_map, x_axis, z_axis, background_c, n_samples=16
-):
+def straight_ray_times(positions, pixels, sos_map, x_axis, z_axis, background_c, n_samples=16):
     """Straight-ray travel times through a heterogeneous sound-speed map.
 
     For each source/element position the local slowness (``1 / c``) is integrated
@@ -202,6 +170,8 @@ def usct_reflectivity_das(
         in patches (see :class:`zea.ops.PatchedGrid`) and reshape afterwards (see
         :class:`zea.ops.ReshapeGrid`).
     """
+    from zea.beamform.beamformer import compute_receive_distances
+
     n_tx = int(analytic.shape[0])
     n_ax = int(analytic.shape[1])
     P = int(pixels.shape[0])
@@ -215,8 +185,13 @@ def usct_reflectivity_das(
     if not per_tx_rx:
         if use_sos:
             rx_time = straight_ray_times(
-                receive_positions, px, sos_map, sos_grid_x, sos_grid_z,
-                sound_speed, n_sos_ray_samples,
+                receive_positions,
+                px,
+                sos_map,
+                sos_grid_x,
+                sos_grid_z,
+                sound_speed,
+                n_sos_ray_samples,
             )
             _, rx_unit = distance_and_unit(receive_positions, px)
         else:
@@ -232,8 +207,13 @@ def usct_reflectivity_das(
 
         if use_sos:
             tx_time = straight_ray_times(
-                tx_pos, px, sos_map, sos_grid_x, sos_grid_z,
-                sound_speed, n_sos_ray_samples,
+                tx_pos,
+                px,
+                sos_map,
+                sos_grid_x,
+                sos_grid_z,
+                sound_speed,
+                n_sos_ray_samples,
             )
             _, tx_unit = distance_and_unit(tx_pos, px)
         else:
@@ -246,8 +226,13 @@ def usct_reflectivity_das(
             for k in range(int(rx_here.shape[0])):
                 if use_sos:
                     rt = straight_ray_times(
-                        rx_here[k], px, sos_map, sos_grid_x, sos_grid_z,
-                        sound_speed, n_sos_ray_samples,
+                        rx_here[k],
+                        px,
+                        sos_map,
+                        sos_grid_x,
+                        sos_grid_z,
+                        sound_speed,
+                        n_sos_ray_samples,
                     )
                     _, ru = distance_and_unit(rx_here[k], px)
                 else:
@@ -255,16 +240,16 @@ def usct_reflectivity_das(
                     rt = rd / sound_speed
                 rt_list.append(rt)
                 ru_list.append(ru)
-            rx_time_c = ops.stack(rt_list, axis=0)          # (c, n_el, P)
-            rx_unit_c = ops.stack(ru_list, axis=0)          # (c, n_el, P, 2)
+            rx_time_c = ops.stack(rt_list, axis=0)  # (c, n_el, P)
+            rx_unit_c = ops.stack(ru_list, axis=0)  # (c, n_el, P, 2)
             t_round = tx_time[:, None, :] + rx_time_c
             direct = _pairwise_batched_direct(tx_pos, rx_here) / sound_speed  # (c, n_el)
             direct = direct[:, :, None]
             cos = ops.sum(tx_unit[:, None, :, :] * rx_unit_c, axis=-1)
             trace = ops.transpose(analytic[i:j], (0, 2, 1))  # (c, n_el, n_ax)
         else:
-            t_round = tx_time[:, None, :] + rx_time[None, :, :]              # (c, n_el, P)
-            direct = pairwise_distance(tx_pos, receive_positions)[:, :, None] / sound_speed
+            t_round = tx_time[:, None, :] + rx_time[None, :, :]  # (c, n_el, P)
+            direct = compute_receive_distances(tx_pos, receive_positions)[:, :, None] / sound_speed
             cos = ops.sum(tx_unit[:, None, :, :] * rx_unit[None, :, :, :], axis=-1)
             trace = ops.transpose(analytic[i:j], (0, 2, 1))  # (c, n_el, n_ax)
 
@@ -280,7 +265,7 @@ def usct_reflectivity_das(
         else:
             weight = ops.cast(valid, "float32")
 
-        amp = _gather_time(trace, sample_pos, n_ax, interpolation)           # (c, n_el, P)
+        amp = _gather_time(trace, sample_pos, n_ax, interpolation)  # (c, n_el, P)
         accum = accum + ops.sum(amp * ops.cast(weight, "complex64"), axis=(0, 1))
         hits = hits + ops.sum(weight, axis=(0, 1))
 

@@ -41,16 +41,40 @@ Optionally, a spatial **speed-of-sound map** can be supplied
 with a straight-ray integral of the local slowness — useful when a ground-truth
 or estimated SoS map is available and the medium has large sound-speed contrast.
 
+The core round-trip delay computation (including the two-tap linear
+interpolation at the fractional sample) and the Hilbert-based analytic signal
+follow the reflection ultrasound computed tomography (RUCT) approach for
+ring-array systems described below: both sum the analytic signal coherently
+before taking a magnitude, rather than summing per-pair envelopes. Two
+differences from the reference implementation: the magnitude here is taken
+once, over the joint sum across every transmit/receive pair (the reference
+compounds a per-transmit-event magnitude across transmits), and out-of-window
+delays are masked out rather than clamped to the nearest valid sample.
+Transmission rejection and backscatter apodization are further extensions, not
+present in the reference implementation.
+
+.. admonition:: Reference
+
+   B. Lafci, J. Robin, X. L. Deán-Ben and D. Razansky.
+   *Expediting Image Acquisition in Reflection Ultrasound Computed Tomography.*
+   IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency Control,
+   69(10):2837-2848, 2022.
+   `DOI: 10.1109/TUFFC.2022.3172713 <https://doi.org/10.1109/TUFFC.2022.3172713>`_
+
+.. rubric:: Reference implementation
+
+* `pyruct <https://github.com/berkanlafci/pyruct>`_
+
 Like the rest of zea's beamforming stack, the operation images the **XZ plane**,
 with ``y`` as the elevation (out-of-plane) axis. It consumes the standard zea
-parameters — ``flatgrid``, ``probe_geometry``, ``transmit_origins``,
-``sampling_frequency``, ``initial_times`` and ``sound_speed`` — and projects them
+parameters: ``flatgrid``, ``probe_geometry``, ``transmit_origins``,
+``sampling_frequency``, ``initial_times`` and ``sound_speed``, and projects them
 onto the imaging plane internally, so a :class:`~zea.ops.Pipeline` can be driven
 straight from a file's parameters. Ring tomographs should therefore store their
 ring in the XZ plane (``y == 0``), the same convention a linear array uses.
 
-Each pixel is reconstructed independently, so — exactly like
-:class:`~zea.ops.Beamform` — the grid can be processed in patches to bound peak
+Each pixel is reconstructed independently, so, exactly like
+:class:`~zea.ops.Beamform`, the grid can be processed in patches to bound peak
 memory, and reshaped to an image afterwards::
 
     Cast -> PatchedGrid([USCTReflectivityDAS]) -> ReshapeGrid -> Normalize -> LogCompress
@@ -61,7 +85,8 @@ is what makes a full-resolution grid blow up.
 
 from keras import ops
 
-from zea.func.usct import channels_to_analytic, usct_reflectivity_das
+from zea.func.ultrasound import channels_to_analytic
+from zea.func.usct import usct_reflectivity_das
 from zea.internal.core import DataTypes
 from zea.internal.registry import ops_registry
 from zea.ops.base import Operation
@@ -106,9 +131,6 @@ class USCTReflectivityDAS(Operation):
         self.n_sos_ray_samples = n_sos_ray_samples
         self.axial_axis = axial_axis
 
-    # Named parameters (not bare **kwargs) so Pipeline key-validation knows they
-    # are consumed here rather than flagging them as unused/typos. The names match
-    # zea's standard parameters, so `Pipeline.prepare_parameters` fills them in.
     def call(
         self,
         flatgrid=None,

@@ -48,6 +48,7 @@ from .tensor import (
 from .ultrasound import (
     apply_aligned_apodization,
     apply_receive_apodization,
+    channels_to_analytic,
     channels_to_complex,
     complex_to_channels,
     compute_time_to_peak,
@@ -113,6 +114,7 @@ __all__ = [
     # Ultrasound functions
     "apply_aligned_apodization",
     "apply_receive_apodization",
+    "channels_to_analytic",
     "channels_to_complex",
     "complex_to_channels",
     "compute_time_to_peak",

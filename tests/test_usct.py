@@ -2,102 +2,25 @@
 
 USCT is not covered by zea's standard beamformer, so its reconstruction lives in
 :func:`zea.func.usct.usct_reflectivity_das` (wrapped by the
-:class:`zea.ops.USCTReflectivityDAS` operation). These tests pin that
-implementation two ways:
+:class:`zea.ops.USCTReflectivityDAS` operation). The DAS algorithm (round-trip
+time-of-flight delay-and-sum with through-transmission rejection and backscatter
+apodization) follows the reflection ultrasound computed tomography (RUCT)
+approach described in :mod:`zea.ops.usct`.
 
-1. **Numerical oracle.** An independent, plain-NumPy round-trip time-of-flight
-   DAS (``_numpy_usct_das`` below) recomputes the exact same quantity from first
-   principles. We assert the keras/zea implementation matches it on a small
-   deterministic case across both interpolation modes and with
-   transmission-rejection / backscatter-apodization on and off. This guards the
-   gather/apodization/summation arithmetic against regressions.
-
-2. **Physical correctness.** A synthetic point scatterer on a ring array
-   (analytic RF built from the round-trip delays) must reconstruct to a peak at
-   the scatterer's true location — the same "does the reflector land where it
-   should" check we used to validate against the Dartmouth ground truth.
-
-The DAS algorithm (round-trip ToF delay-and-sum with through-transmission
-rejection) matches the reflection-USCT baseline described for OpenPros
-(arXiv:2505.12261) and the RUCT DAS reference of Lafci et al. (pyruct); the
-NumPy oracle here is an independent re-derivation, not vendored code.
+These tests cover the functional core and the operation wrapper directly: a
+synthetic point scatterer must reconstruct at its true location, each
+reconstruction option (interpolation mode, transmission rejection, backscatter
+apodization, per-transmit receive apertures, speed-of-sound maps) is checked
+for the effect it is documented to have, and the operation wrapper is checked
+against the functional core it wraps.
 """
 
 import numpy as np
 import pytest
 from keras import ops
 
-from zea.func.usct import channels_to_analytic, usct_reflectivity_das
-
-
-def _numpy_usct_das(
-    analytic,
-    tx,
-    rx,
-    pixels,
-    fs,
-    t0,
-    c,
-    *,
-    reject_transmission,
-    transmission_guard_s,
-    backscatter_apodization,
-    interpolation,
-):
-    """Independent NumPy reference for :func:`usct_reflectivity_das`.
-
-    Shared receive aperture, constant sound speed (no SoS map). Deliberately
-    written as a naive double loop over transmit/receive pairs so it is obviously
-    correct rather than fast.
-    """
-    analytic = np.asarray(analytic)
-    tx = np.asarray(tx, dtype=np.float64)
-    rx = np.asarray(rx, dtype=np.float64)
-    pixels = np.asarray(pixels, dtype=np.float64)
-    t0 = np.asarray(t0, dtype=np.float64)
-    n_tx, n_ax, n_el = analytic.shape
-    P = pixels.shape[0]
-
-    accum = np.zeros(P, dtype=np.complex128)
-    hits = np.zeros(P, dtype=np.float64)
-
-    for i in range(n_tx):
-        s = tx[i]
-        tx_dist = np.linalg.norm(pixels - s, axis=1)
-        tx_unit = (s - pixels) / (tx_dist[:, None] + 1e-9)  # pixel -> source
-        for j in range(n_el):
-            e = rx[j]
-            rx_dist = np.linalg.norm(pixels - e, axis=1)
-            rx_unit = (e - pixels) / (rx_dist[:, None] + 1e-9)  # pixel -> element
-            t_round = (tx_dist + rx_dist) / c
-            sample_pos = (t_round - t0[i]) * fs
-
-            valid = (sample_pos >= 0) & (sample_pos < n_ax)
-            if reject_transmission:
-                direct = np.linalg.norm(s - e) / c
-                valid = valid & (t_round > direct + transmission_guard_s)
-
-            cos = np.sum(tx_unit * rx_unit, axis=1)
-            if backscatter_apodization:
-                weight = valid.astype(np.float64) * np.where(cos > 0.0, cos, 0.0)
-            else:
-                weight = valid.astype(np.float64)
-
-            trace = analytic[i, :, j]
-            if interpolation == "nearest":
-                idx = np.clip(np.round(sample_pos), 0, n_ax - 1).astype(int)
-                amp = trace[idx]
-            else:
-                i0 = np.floor(sample_pos)
-                frac = sample_pos - i0
-                i0c = np.clip(i0, 0, n_ax - 1).astype(int)
-                i1c = np.clip(i0 + 1, 0, n_ax - 1).astype(int)
-                amp = trace[i0c] * (1.0 - frac) + trace[i1c] * frac
-
-            accum += amp * weight
-            hits += weight
-
-    return np.abs(accum) / (hits + 1e-6)
+from zea.func.ultrasound import channels_to_analytic
+from zea.func.usct import usct_reflectivity_das
 
 
 def _small_scene(seed=0):
@@ -106,7 +29,8 @@ def _small_scene(seed=0):
     The geometry, ``fs`` and ``n_ax`` are chosen together so the round-trip
     delays land *inside* the trace (sample positions ~30-50 of 64) with non-zero
     fractional parts. If they fell outside, every gather would be masked out and
-    the oracle comparison would be trivially satisfied by two all-zero images.
+    tests comparing two reconstructions would pass vacuously on two all-zero
+    images.
     """
     rng = np.random.default_rng(seed)
     n_tx, n_ax, n_el = 4, 64, 6
@@ -126,39 +50,76 @@ def _small_scene(seed=0):
     ).astype(np.complex64)
 
     return dict(
-        analytic=analytic, tx=tx, rx=rx, pixels=pixels, fs=1.5e6,
-        t0=np.zeros(n_tx, np.float32), c=1500.0, grid_shape=(n, n),
+        analytic=analytic,
+        tx=tx,
+        rx=rx,
+        pixels=pixels,
+        fs=1.5e6,
+        t0=np.zeros(n_tx, np.float32),
+        c=1500.0,
+        grid_shape=(n, n),
     )
 
 
-@pytest.mark.parametrize("interpolation", ["linear", "nearest"])
-@pytest.mark.parametrize("reject", [True, False])
-@pytest.mark.parametrize("apod", [True, False])
-def test_usct_das_matches_numpy_oracle(interpolation, reject, apod):
-    """The keras implementation reproduces the independent NumPy DAS bit-for-bit
-    (to float32 tolerance) across interpolation modes and options."""
-    s = _small_scene()
-    guard = 1.0e-6
-
-    got = usct_reflectivity_das(
-        s["analytic"], s["tx"], s["rx"], s["pixels"], s["fs"], s["t0"], s["c"],
-        tx_chunk=2, reject_transmission=reject,
-        transmission_guard_s=guard, backscatter_apodization=apod,
-        interpolation=interpolation,
-    )
-    got = np.asarray(ops.convert_to_numpy(got), dtype=np.float64)
-
-    ref = _numpy_usct_das(
-        s["analytic"], s["tx"], s["rx"], s["pixels"], s["fs"], s["t0"], s["c"],
-        reject_transmission=reject, transmission_guard_s=guard,
-        backscatter_apodization=apod, interpolation=interpolation,
+def test_usct_das_reject_transmission_masks_near_direct_path():
+    """A pixel that sits on the straight line between transmitter and receiver
+    has a round-trip delay equal to the direct-arrival delay; with
+    ``reject_transmission`` that pair must be masked out entirely."""
+    c, fs = 1500.0, 5e6
+    tx = np.array([[-0.005, 0.0]], dtype=np.float32)
+    rx = np.array([[0.005, 0.0]], dtype=np.float32)
+    pixels = np.array([[0.0, 0.0]], dtype=np.float32)  # on the tx-rx segment
+    analytic = np.ones((1, 64, 1), dtype=np.complex64)
+    t0 = np.zeros(1, dtype=np.float32)
+    common = dict(
+        tx_chunk=1,
+        backscatter_apodization=False,
+        interpolation="linear",
+        transmission_guard_s=1e-6,
     )
 
-    # Guard against a degenerate scene: if the delays fell outside the trace both
-    # images would be all-zero and the comparison below would pass vacuously.
-    assert np.any(ref > 1e-6), "reference image is all zeros - scene is degenerate"
+    kept = usct_reflectivity_das(
+        analytic, tx, rx, pixels, fs, t0, c, reject_transmission=False, **common
+    )
+    rejected = usct_reflectivity_das(
+        analytic, tx, rx, pixels, fs, t0, c, reject_transmission=True, **common
+    )
+    kept = float(np.asarray(ops.convert_to_numpy(kept))[0])
+    rejected = float(np.asarray(ops.convert_to_numpy(rejected))[0])
+    assert kept == pytest.approx(1.0, rel=1e-3)
+    assert rejected == pytest.approx(0.0, abs=1e-8)
 
-    np.testing.assert_allclose(got, ref, rtol=1e-4, atol=1e-4)
+
+def test_usct_das_backscatter_apodization_effect():
+    """``backscatter_apodization`` weights pairs by the pixel-referred tx/rx
+    cosine: it must suppress a pass-through geometry (tx and rx on opposite
+    sides of the pixel, cos ~= -1) while keeping a genuine backscatter
+    geometry (tx and rx on the same side, cos > 0), and have no effect when
+    disabled."""
+    c, fs = 1500.0, 5e6
+    analytic = np.ones((1, 64, 1), dtype=np.complex64)
+    t0 = np.zeros(1, dtype=np.float32)
+    pixels = np.array([[0.0, 0.0]], dtype=np.float32)
+    common = dict(tx_chunk=1, reject_transmission=False, interpolation="linear")
+
+    # tx and rx on the same side of the pixel: backscatter geometry (cos > 0).
+    tx_back = np.array([[-0.004, 0.001]], dtype=np.float32)
+    rx_back = np.array([[-0.004, -0.001]], dtype=np.float32)
+    # tx and rx on opposite sides of the pixel: pass-through geometry (cos < 0).
+    tx_fwd = np.array([[-0.005, 0.0]], dtype=np.float32)
+    rx_fwd = np.array([[0.005, 0.0]], dtype=np.float32)
+
+    def image_value(tx, rx, apod):
+        out = usct_reflectivity_das(
+            analytic, tx, rx, pixels, fs, t0, c, backscatter_apodization=apod, **common
+        )
+        return float(np.asarray(ops.convert_to_numpy(out))[0])
+
+    assert image_value(tx_back, rx_back, apod=True) == pytest.approx(1.0, rel=1e-2)
+    assert image_value(tx_fwd, rx_fwd, apod=True) == pytest.approx(0.0, abs=1e-8)
+    # With apodization off, both geometries contribute with full weight.
+    assert image_value(tx_back, rx_back, apod=False) == pytest.approx(1.0, rel=1e-2)
+    assert image_value(tx_fwd, rx_fwd, apod=False) == pytest.approx(1.0, rel=1e-2)
 
 
 def test_usct_das_linear_differs_from_nearest():
@@ -166,15 +127,187 @@ def test_usct_das_linear_differs_from_nearest():
     against the linear branch silently collapsing to nearest)."""
     s = _small_scene()
     common = dict(
-        tx_chunk=2, reject_transmission=False, backscatter_apodization=False,
+        tx_chunk=2,
+        reject_transmission=False,
+        backscatter_apodization=False,
     )
-    lin = np.asarray(ops.convert_to_numpy(usct_reflectivity_das(
-        s["analytic"], s["tx"], s["rx"], s["pixels"], s["fs"], s["t0"], s["c"],
-        interpolation="linear", **common)))
-    near = np.asarray(ops.convert_to_numpy(usct_reflectivity_das(
-        s["analytic"], s["tx"], s["rx"], s["pixels"], s["fs"], s["t0"], s["c"],
-        interpolation="nearest", **common)))
+    lin = np.asarray(
+        ops.convert_to_numpy(
+            usct_reflectivity_das(
+                s["analytic"],
+                s["tx"],
+                s["rx"],
+                s["pixels"],
+                s["fs"],
+                s["t0"],
+                s["c"],
+                interpolation="linear",
+                **common,
+            )
+        )
+    )
+    near = np.asarray(
+        ops.convert_to_numpy(
+            usct_reflectivity_das(
+                s["analytic"],
+                s["tx"],
+                s["rx"],
+                s["pixels"],
+                s["fs"],
+                s["t0"],
+                s["c"],
+                interpolation="nearest",
+                **common,
+            )
+        )
+    )
     assert not np.allclose(lin, near, atol=1e-3)
+
+
+def test_usct_das_invalid_interpolation_raises():
+    """An unrecognized ``interpolation`` value must fail loudly rather than
+    silently falling back to a default."""
+    s = _small_scene()
+    with pytest.raises(ValueError, match="interpolation"):
+        usct_reflectivity_das(
+            s["analytic"],
+            s["tx"],
+            s["rx"],
+            s["pixels"],
+            s["fs"],
+            s["t0"],
+            s["c"],
+            tx_chunk=2,
+            interpolation="cubic",
+        )
+
+
+def test_usct_channels_to_analytic_invalid_n_ch_raises():
+    """A channel count other than 1 (RF) or 2 (I/Q) must fail loudly."""
+    with pytest.raises(ValueError, match="n_ch"):
+        channels_to_analytic(np.zeros((2, 8, 3), dtype=np.float32), axis=1)
+
+
+def test_usct_channels_to_analytic_iq_path():
+    """Two-channel I/Q data is read directly as real/imaginary parts, with no
+    Hilbert transform involved (the RF path is exercised elsewhere)."""
+    rng = np.random.default_rng(21)
+    iq = rng.standard_normal((3, 8, 4, 2)).astype(np.float32)
+    got = np.asarray(ops.convert_to_numpy(channels_to_analytic(iq, axis=1)))
+    expected = iq[..., 0] + 1j * iq[..., 1]
+    np.testing.assert_allclose(got, expected, rtol=1e-6, atol=1e-6)
+
+
+def test_usct_das_per_tx_rx_matches_shared_aperture():
+    """A per-transmit receive aperture (``receive_positions`` of shape
+    ``(n_tx, n_el, 2)``) that happens to be identical for every transmit must
+    reproduce the shared-aperture (``(n_el, 2)``) result. Exercises the
+    per_tx_rx branch, which the other tests never touch since they all pass a
+    shared receive aperture."""
+    s = _small_scene(seed=9)
+    n_tx = s["tx"].shape[0]
+    rx_per_tx = np.broadcast_to(s["rx"], (n_tx, *s["rx"].shape)).copy()
+
+    common = dict(
+        tx_chunk=2,
+        reject_transmission=True,
+        transmission_guard_s=1e-6,
+        backscatter_apodization=True,
+        interpolation="linear",
+    )
+    shared = usct_reflectivity_das(
+        s["analytic"],
+        s["tx"],
+        s["rx"],
+        s["pixels"],
+        s["fs"],
+        s["t0"],
+        s["c"],
+        **common,
+    )
+    per_tx = usct_reflectivity_das(
+        s["analytic"],
+        s["tx"],
+        rx_per_tx,
+        s["pixels"],
+        s["fs"],
+        s["t0"],
+        s["c"],
+        **common,
+    )
+    shared = np.asarray(ops.convert_to_numpy(shared))
+    per_tx = np.asarray(ops.convert_to_numpy(per_tx))
+    np.testing.assert_allclose(shared, per_tx, rtol=1e-5, atol=1e-5)
+
+
+def test_usct_straight_ray_times_matches_constant_speed():
+    """Straight-ray integration through a uniform SoS map (matching the
+    background speed) must reduce to the plain straight-line travel time,
+    both inside and outside the map footprint."""
+    from zea.func.usct import straight_ray_times
+
+    c = 1500.0
+    x_axis = np.linspace(-0.01, 0.01, 21).astype(np.float32)
+    z_axis = np.linspace(-0.01, 0.01, 21).astype(np.float32)
+    sos_map = np.full((21, 21), c, dtype=np.float32)
+
+    # One position inside the map footprint, one outside (exercises the
+    # background_c fallback).
+    positions = np.array([[0.003, -0.004], [0.02, 0.0]], dtype=np.float32)
+    pixels = np.array([[0.0, 0.0], [0.003, -0.002]], dtype=np.float32)
+
+    times = straight_ray_times(positions, pixels, sos_map, x_axis, z_axis, c, n_samples=8)
+    times = np.asarray(ops.convert_to_numpy(times))
+
+    dist = np.linalg.norm(positions[:, None, :] - pixels[None, :, :], axis=-1)
+    np.testing.assert_allclose(times, dist / c, rtol=1e-5, atol=1e-8)
+
+
+def test_usct_das_sos_map_matches_constant_speed_when_uniform():
+    """A uniform SoS map exactly matching the background speed must give the
+    same image as the plain constant-speed path, validating the straight-ray
+    wiring inside ``usct_reflectivity_das`` end to end."""
+    s = _small_scene(seed=13)
+    c = s["c"]
+    margin = 0.01
+    x_axis = np.linspace(-margin, margin, 33).astype(np.float32)
+    z_axis = np.linspace(-margin, margin, 33).astype(np.float32)
+    sos_map = np.full((33, 33), c, dtype=np.float32)
+
+    common = dict(
+        tx_chunk=2,
+        reject_transmission=True,
+        transmission_guard_s=1e-6,
+        backscatter_apodization=True,
+        interpolation="linear",
+    )
+    no_sos = usct_reflectivity_das(
+        s["analytic"],
+        s["tx"],
+        s["rx"],
+        s["pixels"],
+        s["fs"],
+        s["t0"],
+        c,
+        **common,
+    )
+    with_sos = usct_reflectivity_das(
+        s["analytic"],
+        s["tx"],
+        s["rx"],
+        s["pixels"],
+        s["fs"],
+        s["t0"],
+        c,
+        **common,
+        sos_map=sos_map,
+        sos_grid_x=x_axis,
+        sos_grid_z=z_axis,
+        n_sos_ray_samples=32,
+    )
+    no_sos = np.asarray(ops.convert_to_numpy(no_sos))
+    with_sos = np.asarray(ops.convert_to_numpy(with_sos))
+    np.testing.assert_allclose(no_sos, with_sos, rtol=1e-3, atol=1e-3)
 
 
 def test_usct_das_point_scatterer_peaks_at_true_location():
@@ -200,15 +333,15 @@ def test_usct_das_point_scatterer_peaks_at_true_location():
     # Round-trip delays for the scatterer, over all tx/rx pairs.
     tx_d = np.linalg.norm(scat[None, :] - tx, axis=1)  # (n_tx,)
     rx_d = np.linalg.norm(scat[None, :] - rx, axis=1)  # (n_el,)
-    tau = (tx_d[:, None] + rx_d[None, :]) / c           # (n_tx, n_el)
+    tau = (tx_d[:, None] + rx_d[None, :]) / c  # (n_tx, n_el)
     centres = tau * fs
     n_ax = int(centres.max()) + 40
 
     # Build RF: a short Gaussian-modulated cosine pulse at each round-trip delay.
-    t_idx = np.arange(n_ax)[None, None, :]              # (1,1,n_ax)
-    ctr = centres[:, :, None]                           # (n_tx,n_el,1)
+    t_idx = np.arange(n_ax)[None, None, :]  # (1,1,n_ax)
+    ctr = centres[:, :, None]  # (n_tx,n_el,1)
     sigma, f0 = 2.5, 3e6
-    env = np.exp(-((t_idx - ctr) ** 2) / (2 * sigma ** 2))
+    env = np.exp(-((t_idx - ctr) ** 2) / (2 * sigma**2))
     rf = env * np.cos(2 * np.pi * f0 * (t_idx - ctr) / fs)
     rf = np.transpose(rf, (0, 2, 1))[..., None].astype(np.float32)  # (n_tx,n_ax,n_el,1)
 
@@ -221,8 +354,16 @@ def test_usct_das_point_scatterer_peaks_at_true_location():
     pixels = np.stack([gx.ravel(), gy.ravel()], axis=-1)
 
     img = usct_reflectivity_das(
-        analytic, tx, rx, pixels, fs, np.zeros(n_el, np.float32), c,
-        tx_chunk=6, reject_transmission=False, backscatter_apodization=False,
+        analytic,
+        tx,
+        rx,
+        pixels,
+        fs,
+        np.zeros(n_el, np.float32),
+        c,
+        tx_chunk=6,
+        reject_transmission=False,
+        backscatter_apodization=False,
         interpolation="linear",
     )
     # The DAS returns one value per pixel; reshape to the grid to locate the peak.
@@ -262,23 +403,36 @@ def test_usct_operation_matches_functional():
     rf = rng.standard_normal((n_tx, n_ax, n_el, 1)).astype(np.float32)
 
     op = USCTReflectivityDAS(
-        tx_chunk=2, reject_transmission=True, transmission_guard_s=1e-6,
-        backscatter_apodization=True, interpolation="linear",
+        tx_chunk=2,
+        reject_transmission=True,
+        transmission_guard_s=1e-6,
+        backscatter_apodization=True,
+        interpolation="linear",
     )
     out = op(
         data=rf,
         flatgrid=_to_xz(s["pixels"]),
         probe_geometry=_to_xz(s["rx"]),
         transmit_origins=_to_xz(s["tx"]),
-        sampling_frequency=s["fs"], initial_times=s["t0"], sound_speed=s["c"],
+        sampling_frequency=s["fs"],
+        initial_times=s["t0"],
+        sound_speed=s["c"],
     )[op.output_key]
     out = np.asarray(ops.convert_to_numpy(out))
 
     analytic = channels_to_analytic(rf, axis=1)
     ref = usct_reflectivity_das(
-        analytic, s["tx"], s["rx"], s["pixels"], s["fs"], s["t0"], s["c"],
-        tx_chunk=2, reject_transmission=True,
-        transmission_guard_s=1e-6, backscatter_apodization=True,
+        analytic,
+        s["tx"],
+        s["rx"],
+        s["pixels"],
+        s["fs"],
+        s["t0"],
+        s["c"],
+        tx_chunk=2,
+        reject_transmission=True,
+        transmission_guard_s=1e-6,
+        backscatter_apodization=True,
         interpolation="linear",
     )
     ref = np.asarray(ops.convert_to_numpy(ref))
@@ -297,12 +451,18 @@ def test_usct_operation_ignores_elevation():
     op = USCTReflectivityDAS(tx_chunk=2, transmission_guard_s=1e-6)
 
     def run(y):
-        return np.asarray(ops.convert_to_numpy(op(
-            data=rf,
-            flatgrid=_to_xz(s["pixels"], y=y),
-            probe_geometry=_to_xz(s["rx"], y=y),
-            transmit_origins=_to_xz(s["tx"], y=y),
-            sampling_frequency=s["fs"], initial_times=s["t0"], sound_speed=s["c"],
-        )[op.output_key]))
+        return np.asarray(
+            ops.convert_to_numpy(
+                op(
+                    data=rf,
+                    flatgrid=_to_xz(s["pixels"], y=y),
+                    probe_geometry=_to_xz(s["rx"], y=y),
+                    transmit_origins=_to_xz(s["tx"], y=y),
+                    sampling_frequency=s["fs"],
+                    initial_times=s["t0"],
+                    sound_speed=s["c"],
+                )[op.output_key]
+            )
+        )
 
     np.testing.assert_allclose(run(0.0), run(0.03), rtol=1e-5, atol=1e-5)

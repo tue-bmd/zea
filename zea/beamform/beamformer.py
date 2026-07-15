@@ -430,7 +430,7 @@ def calculate_delays(
 
     if not apply_lens_correction:
         # Compute receive distances in meters of shape (n_pix, n_el)
-        rx_distances = distance_Rx(grid, probe_geometry)
+        rx_distances = compute_receive_distances(grid, probe_geometry)
 
         # Convert distances to delays in seconds
         rx_delays = rx_distances / sound_speed
@@ -613,7 +613,7 @@ def complex_rotate(iq, theta):
     return ops.concatenate([ir, qr], -1)
 
 
-def distance_Rx(grid, probe_geometry):
+def compute_receive_distances(grid, probe_geometry):
     """Euclidean distance from every pixel to every transducer element.
 
     Args:
