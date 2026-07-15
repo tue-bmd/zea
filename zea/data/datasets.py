@@ -554,7 +554,7 @@ class Dataset(H5FileHandleCache):
         validate: bool = False,
         directory_splits: list | None = None,
         revision: str | None = None,
-        lazy: bool = False,
+        lazy: bool = True,
         file_filter: "Callable[[File], bool] | dict | None" = None,
         _suggest_lazy: bool = True,
         **kwargs,
@@ -581,8 +581,10 @@ class Dataset(H5FileHandleCache):
                 ``"scan.center_frequency"``) to a condition: the :func:`EXISTS` helper
                 (field must be present), a plain value (equality), or a callable on the
                 resolved value. All dict entries are ANDed. Files whose predicate raises
-                (e.g. no ``metadata`` group) are excluded. Requires reading files, so it is
-                incompatible with ``lazy=True``. Defaults to ``None`` (no filtering).
+                (e.g. no ``metadata`` group) are excluded. Evaluating the predicate reads
+                each file; with ``lazy=True`` remote (``hf://``) files are streamed for just
+                the metadata/scan bytes rather than downloaded in full, and the surviving
+                files stay lazy. Defaults to ``None`` (no filtering).
         """
         super().__init__(**kwargs)
         self.validate = validate
@@ -590,13 +592,6 @@ class Dataset(H5FileHandleCache):
         self.lazy = lazy
         self.file_filter = compile_file_filter(file_filter)
         self._suggest_lazy = _suggest_lazy
-
-        if self.file_filter is not None and self.lazy:
-            raise ValueError(
-                "file_filter is incompatible with lazy=True: filtering must read each file "
-                "to evaluate the predicate. Drop lazy=True (files will be downloaded), or "
-                "remove file_filter."
-            )
 
         self.file_paths = self.find_files(file_paths)
 
