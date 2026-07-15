@@ -1,0 +1,147 @@
+"""Reflectivity reconstruction for ultrasound computed tomography (USCT).
+
+USCT acquisitions do not fit zea's standard linear/phased-array B-mode pipeline
+(:class:`~zea.ops.Beamform` with :class:`~zea.ops.TOFCorrection`). In USCT the
+transmit events originate from **individual point sources** — either single ring
+elements firing in turn (full-ring tomographs) or dedicated emitters placed
+around the medium — rather than a wavefront steered *from* the receive aperture
+with per-element ``t0_delays`` and ``focus_distances``. The standard
+:class:`~zea.ops.TOFCorrection` derives its transmit time-of-flight from that
+steered-wavefront model and cannot represent an off-aperture point source, so a
+dedicated operation is required.
+
+:class:`USCTReflectivityDAS` implements a round-trip time-of-flight
+Delay-And-Sum (DAS) reflectivity image that is the natural common denominator of
+these geometries. For every pixel it coherently sums, over all transmit/receive
+pairs, the analytic channel signal sampled at the round-trip delay
+
+.. math::
+
+    \\tau_{t,r}(\\mathbf{p}) =
+        \\frac{\\lVert \\mathbf{p} - \\mathbf{s}_t \\rVert}{c}
+        + \\frac{\\lVert \\mathbf{p} - \\mathbf{e}_r \\rVert}{c}
+        - t_{0,t},
+
+where :math:`\\mathbf{s}_t` is the transmit point-source position,
+:math:`\\mathbf{e}_r` the receive-element position, :math:`c` the sound speed and
+:math:`t_{0,t}` the per-transmit time-zero. Two options make it usable on the
+strongly-transmissive ring / dual-panel geometries that USCT uses:
+
+- **Transmission rejection** (``reject_transmission``): discard the direct
+  through-transmission arrival (which dwarfs the backscatter) by keeping only
+  round-trip delays that exceed the straight-line source→element time by a guard
+  interval.
+- **Backscatter apodization** (``backscatter_apodization``): weight each pair by
+  the cosine of the angle between the pixel→source and pixel→element directions,
+  keeping only geometries where the receiver looks back toward the illumination
+  (``cos > 0``).
+
+Optionally, a spatial **speed-of-sound map** can be supplied
+(``sos_map``/``sos_grid_x``/``sos_grid_z``) to replace the constant-``c`` delays
+with a straight-ray integral of the local slowness — useful when a ground-truth
+or estimated SoS map is available and the medium has large sound-speed contrast.
+
+Like the rest of zea's beamforming stack, the operation images the **XZ plane**,
+with ``y`` as the elevation (out-of-plane) axis. It consumes the standard zea
+parameters — ``flatgrid``, ``probe_geometry``, ``transmit_origins``,
+``sampling_frequency``, ``initial_times`` and ``sound_speed`` — and projects them
+onto the imaging plane internally, so a :class:`~zea.ops.Pipeline` can be driven
+straight from a file's parameters. Ring tomographs should therefore store their
+ring in the XZ plane (``y == 0``), the same convention a linear array uses.
+
+Each pixel is reconstructed independently, so — exactly like
+:class:`~zea.ops.Beamform` — the grid can be processed in patches to bound peak
+memory, and reshaped to an image afterwards::
+
+    Cast -> PatchedGrid([USCTReflectivityDAS]) -> ReshapeGrid -> Normalize -> LogCompress
+
+Without patching, the receive-leg geometry alone costs ``O(n_el * n_pix)``, which
+is what makes a full-resolution grid blow up.
+"""
+
+from keras import ops
+
+from zea.func.usct import channels_to_analytic, usct_reflectivity_das
+from zea.internal.core import DataTypes
+from zea.internal.registry import ops_registry
+from zea.ops.base import Operation
+
+__all__ = ["USCTReflectivityDAS"]
+
+# Columns of a zea (x, y, z) coordinate array that span the XZ imaging plane.
+_IN_PLANE = [0, 2]
+
+
+@ops_registry("usct_reflectivity_das")
+class USCTReflectivityDAS(Operation):
+    """Round-trip TOF DAS reflectivity for USCT acquisitions (see module docstring).
+
+    Accepts raw RF (``n_ch == 1``, Hilbert-transformed internally) or two-channel
+    I/Q (``n_ch == 2``). Geometry, timing and the imaging grid are taken from the
+    standard zea parameters at call time; reconstruction/apodization parameters are
+    constructor arguments and are serialized to ``pipeline.yaml``.
+    """
+
+    def __init__(
+        self,
+        tx_chunk=4,
+        reject_transmission=True,
+        transmission_guard_s=2.5e-6,
+        backscatter_apodization=True,
+        interpolation="linear",
+        n_sos_ray_samples=16,
+        axial_axis=1,
+        **kwargs,
+    ):
+        # Python-level gather/loops: not jittable and processed one frame at a time.
+        kwargs.setdefault("jit_compile", False)
+        kwargs.setdefault("jittable", False)
+        kwargs.setdefault("with_batch_dim", False)
+        super().__init__(output_data_type=DataTypes.ENVELOPE_DATA, **kwargs)
+        self.tx_chunk = tx_chunk
+        self.reject_transmission = reject_transmission
+        self.transmission_guard_s = transmission_guard_s
+        self.backscatter_apodization = backscatter_apodization
+        self.interpolation = interpolation
+        self.n_sos_ray_samples = n_sos_ray_samples
+        self.axial_axis = axial_axis
+
+    # Named parameters (not bare **kwargs) so Pipeline key-validation knows they
+    # are consumed here rather than flagging them as unused/typos. The names match
+    # zea's standard parameters, so `Pipeline.prepare_parameters` fills them in.
+    def call(
+        self,
+        flatgrid=None,
+        probe_geometry=None,
+        transmit_origins=None,
+        sampling_frequency=None,
+        initial_times=None,
+        sound_speed=None,
+        sos_map=None,
+        sos_grid_x=None,
+        sos_grid_z=None,
+        **kwargs,
+    ):
+        data = kwargs[self.key]
+        analytic = channels_to_analytic(data, axis=self.axial_axis)  # (n_tx, n_ax, n_el)
+
+        img = usct_reflectivity_das(
+            analytic,
+            ops.take(transmit_origins, _IN_PLANE, axis=-1),
+            ops.take(probe_geometry, _IN_PLANE, axis=-1),
+            # flatgrid is (n_pix, 3) in (x, y, z); image the XZ plane.
+            ops.take(flatgrid, _IN_PLANE, axis=-1),
+            sampling_frequency,
+            initial_times,
+            sound_speed,
+            tx_chunk=self.tx_chunk,
+            reject_transmission=self.reject_transmission,
+            transmission_guard_s=self.transmission_guard_s,
+            backscatter_apodization=self.backscatter_apodization,
+            interpolation=self.interpolation,
+            sos_map=sos_map,
+            sos_grid_x=sos_grid_x,
+            sos_grid_z=sos_grid_z,
+            n_sos_ray_samples=self.n_sos_ray_samples,
+        )
+        return {self.output_key: img}

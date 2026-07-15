@@ -64,6 +64,10 @@ from .ultrasound import (
     suppress_tissue,
     upmix,
 )
+from .usct import (
+    straight_ray_times,
+    usct_reflectivity_das,
+)
 
 __all__ = [
     # Tensor functions
@@ -124,4 +128,7 @@ __all__ = [
     "log_compress",
     "make_tgc_curve",
     "suppress_tissue",
+    # USCT functions
+    "straight_ray_times",
+    "usct_reflectivity_das",
 ]
