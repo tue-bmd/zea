@@ -223,6 +223,20 @@ os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 os.environ["HF_HUB_VERBOSITY"] = "error"
 """
 
+# -- Options for linkcheck builder --------------------------------------------
+# `make docs-linkcheck` (sphinx -b linkcheck) walks the same doctree used for
+# HTML output, so links in the example notebooks under docs/source/notebooks
+# (rendered into the doctree by nbsphinx) are checked exactly like links in
+# any .rst/.md page.
+linkcheck_retries = 3
+linkcheck_timeout = 20
+linkcheck_workers = 8
+linkcheck_ignore = [
+    # Colab blocks automated (non-browser) requests to notebook/asset URLs,
+    # so these always report as broken even when perfectly valid.
+    r"^https://colab\.research\.google\.com/",
+]
+
 
 def setup(app):
     app.connect("autodoc-skip-member", _skip_reexported_members)

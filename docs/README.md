@@ -50,6 +50,16 @@ make docs-clean && make docs-serve
 
 This uses `sphinx-autobuild` to serve the docs at [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
+## 5. Check for broken links
+
+To check that all hyperlinks in the docs resolve (including links in the
+example notebooks under `docs/source/notebooks`, which nbsphinx renders into
+the same doctree as the rest of the docs), run:
+
+```sh
+make docs-linkcheck
+```
+
 ---
 
 For more information, see the [Sphinx documentation](https://www.sphinx-doc.org/).
