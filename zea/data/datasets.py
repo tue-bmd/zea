@@ -169,13 +169,15 @@ class H5FileHandleCache:
 
     def get_file(self, file_path) -> File:
         """Open an HDF5 file and cache it."""
+        # Subclasses (e.g. Dataset) carry the requested HF revision
+        revision = getattr(self, "revision", None)
         # If file is already in cache, return it and move it to the end
         if file_path in self._file_handle_cache:
             self._file_handle_cache.move_to_end(file_path)
             file = self._file_handle_cache[file_path]
             # if file was closed, reopen:
             if not self._check_if_open(file):
-                file = File(file_path, "r", progress=False)
+                file = File(file_path, "r", progress=False, revision=revision)
                 self._file_handle_cache[file_path] = file
         # If file is not in cache, open it and add it to the cache
         else:
@@ -183,7 +185,7 @@ class H5FileHandleCache:
             if len(self._file_handle_cache) >= self.file_handle_cache_capacity:
                 _, close_file = self._file_handle_cache.popitem(last=False)
                 close_file.close()
-            file = File(file_path, "r", progress=False)
+            file = File(file_path, "r", progress=False, revision=revision)
             self._file_handle_cache[file_path] = file
 
         return self._file_handle_cache[file_path]
@@ -269,7 +271,7 @@ def _file_hash(filepaths):
     return hash_elements([total_size, modified_times])
 
 
-def _copy_h5_files(file_paths, base_path, to_path, key, mode=None):
+def _copy_h5_files(file_paths, base_path, to_path, key, mode=None, revision=None):
     """Copy ``key`` (or all keys) from each file to ``to_path``, mirroring structure.
 
     Each file's location relative to ``base_path`` is preserved under ``to_path``.
@@ -284,6 +286,7 @@ def _copy_h5_files(file_paths, base_path, to_path, key, mode=None):
             keys are copied.
         mode (str, optional): The mode in which to open the destination files. Defaults
             to ``"a"`` (append), and ``"w"`` (write) if ``key`` is ``"all"`` or ``"*"``.
+        revision (str, optional): HuggingFace revision used to download ``hf://`` sources.
     """
     all_keys = key == "all" or key == "*"
 
@@ -317,7 +320,7 @@ def _copy_h5_files(file_paths, base_path, to_path, key, mode=None):
     ):
         dst_path = to_path / Path(file_path).relative_to(base_path)
         dst_path.parent.mkdir(parents=True, exist_ok=True)
-        with File(file_path) as src, File(dst_path, mode) as dst:
+        with File(file_path, stream=False, revision=revision) as src, File(dst_path, mode) as dst:
             if all_keys:
                 for obj in src.keys():
                     src.copy(obj, dst)
@@ -766,7 +769,7 @@ class Dataset(H5FileHandleCache):
             base_path = Path(self.file_paths[0]).parent
         else:
             base_path = Path(os.path.commonpath([str(p) for p in self.file_paths]))
-        _copy_h5_files(self.file_paths, base_path, to_path, key, mode=mode)
+        _copy_h5_files(self.file_paths, base_path, to_path, key, mode=mode, revision=self.revision)
 
     def __getitem__(self, index) -> "File":
         """Retrieves an item from the dataset.

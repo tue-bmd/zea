@@ -347,8 +347,9 @@ def _resave_note(dset: h5py.Dataset, fetcher: Fetcher | None) -> None:
     if dset.chunks is None:
         cause = "stored without chunking, which zea cannot read concurrently"
     else:
-        codec = getattr(dset, "compression", None) or "a codec zea cannot decode concurrently"
-        cause = f"compressed with {codec}, which zea cannot decode concurrently"
+        codec = getattr(dset, "compression", None)
+        named = f"compressed with {codec}" if codec else "compressed with a codec"
+        cause = f"{named}, which zea cannot decode concurrently"
     _fallback_note(
         dset,
         kind="resave",
