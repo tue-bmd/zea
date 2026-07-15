@@ -7,7 +7,7 @@ def adam(step_size, b1=0.9, b2=0.999, eps=1e-8):
     """Construct optimizer triple for Adam.
 
     Implementation adapted from `JAX's example
-    <https://github.com/jax-ml/jax/blob/main/jax/example_libraries/optimizers.py>`_
+    <https://github.com/jax-ml/jax/blob/1d0a5f961948dfbaceaebbd93c9d61c1702348f4/jax/example_libraries/optimizers.py#L393>`_
     See example usage: `JAX's example usage <https://docs.jax.dev/en/latest/jax.example_libraries.optimizers.html#jax.example_libraries.optimizers.adam>`_
 
     Args:
