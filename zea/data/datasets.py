@@ -175,7 +175,7 @@ class H5FileHandleCache:
             file = self._file_handle_cache[file_path]
             # if file was closed, reopen:
             if not self._check_if_open(file):
-                file = File(file_path, "r")
+                file = File(file_path, "r", progress=False)
                 self._file_handle_cache[file_path] = file
         # If file is not in cache, open it and add it to the cache
         else:
