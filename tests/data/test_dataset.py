@@ -221,22 +221,17 @@ def test_folder_rejects_single_file(dummy_dataset_path):
         Folder(file_path, validate=False)
 
 
-def test_dataset_lazy_hf_streams_on_access(tmp_path):
+def test_dataset_lazy_hf_streams_on_access():
     """lazy=True stores hf:// pointers at init and streams each file on first access.
 
     Access must not resolve (download) the file via ``_hf_resolve_path``; instead the
     ``hf://`` URI is passed straight to ``File``, which streams it (stream=True default).
     """
-    f1 = tmp_path / "file1.hdf5"
-    f2 = tmp_path / "file2.hdf5"
-    generate_example_dataset(f1)
-    generate_example_dataset(f2)
-
     hf_files = [("file1.hdf5", 1024), ("file2.hdf5", 2048)]
 
     with (
         patch("zea.data.datasets._hf_list_h5_files", return_value=hf_files),
-        patch("zea.data.datasets._hf_resolve_path", return_value=f1) as mock_resolve,
+        patch("zea.data.datasets._hf_resolve_path") as mock_resolve,
         patch("zea.data.datasets.File") as mock_file,
     ):
         ds = Dataset("hf://org/myrepo", lazy=True)
@@ -268,15 +263,13 @@ def test_dataset_lazy_hf_streams_on_access(tmp_path):
         ds.close()
 
 
-def test_dataset_lazy_hf_streams_at_requested_revision(tmp_path):
+def test_dataset_lazy_hf_streams_at_requested_revision():
     """A non-default revision must reach ``File`` so the stream targets that branch/tag."""
-    f1 = tmp_path / "file1.hdf5"
-    generate_example_dataset(f1)
     hf_files = [("file1.hdf5", 1024)]
 
     with (
         patch("zea.data.datasets._hf_list_h5_files", return_value=hf_files),
-        patch("zea.data.datasets._hf_resolve_path", return_value=f1),
+        patch("zea.data.datasets._hf_resolve_path"),
         patch("zea.data.datasets.File") as mock_file,
     ):
         ds = Dataset("hf://org/myrepo", lazy=True, revision="v0.1.0")
