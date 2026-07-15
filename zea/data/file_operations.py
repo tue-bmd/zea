@@ -7,6 +7,7 @@ command-line usage.
 """
 
 import functools
+from collections.abc import Sequence
 from copy import copy as shallow_copy
 from pathlib import Path
 from typing import TypeVar
@@ -25,6 +26,7 @@ from zea.data.spec import (
     find_matched_shape,
 )
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
+from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 
 ALL_DATA_TYPES_EXCEPT_RAW = set(_IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES) - {"raw_data"}
 
@@ -48,7 +50,7 @@ OPERATION_NAMES = [
 ]
 
 
-def _iter_folder_io(input_path: Path, output_path: Path):
+def _iter_folder_io(input_path: str | Path, output_path: str | Path):
     """Yields ``(input_file, output_file)`` path pairs for a folder operation.
 
     Uses :class:`zea.Dataset` to iterate over every zea file in ``input_path``. The
@@ -74,10 +76,17 @@ def _supports_folders(operation):
     applied to every zea file in that folder (iterated with :class:`zea.Dataset`),
     writing the results to ``output_path`` and mirroring the input folder structure.
     A single file is processed as before.
+
+    ``input_path`` may also be an ``hf://`` path (pointing at a single file or a
+    folder in a Hugging Face dataset repo); it is downloaded via
+    :func:`zea.internal.preset_utils._hf_resolve_path` before dispatching.
     """
 
     @functools.wraps(operation)
     def wrapper(input_path, output_path, *args, **kwargs):
+        input_path = str(input_path)
+        if input_path.startswith(HF_PREFIX):
+            input_path = _hf_resolve_path(input_path)
         if not Path(input_path).is_dir():
             return operation(input_path, output_path, *args, **kwargs)
         output_path = Path(output_path)
@@ -183,7 +192,7 @@ def _compound_named_dim(file_spec: FileSpec, dim_name: str) -> FileSpec:
     return compounded
 
 
-def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
+def sum_data(input_paths: Sequence[str | Path], output_path: str | Path, overwrite=False):
     """
     Sums multiple raw data files and saves the result to a new file.
 
@@ -192,13 +201,15 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     averaging in the linear domain.
 
     Args:
-        input_paths (list[Path]): List of paths to the input raw data files. Each path
-            may be a single file or a folder; folders are expanded into all zea files
-            they contain (using :class:`zea.Dataset`).
+        input_paths (list[str, Path]): List of paths to the input raw data files. Each path
+            may be a single file, a folder, or an ``hf://`` path; folders (local or ``hf://``)
+            are expanded into all zea files they contain (using :class:`zea.Dataset`).
         output_path (Path): Path to the output file where the summed data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists.
             Defaults to False.
     """
+
+    _prepare_output_path(str(output_path), overwrite)
 
     with Dataset(input_paths, validate=False) as dataset:
         input_paths = [file.path for file in dataset]
@@ -289,7 +300,6 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
 
     file_spec.__post_init__()
 
-    _prepare_output_path(output_path, overwrite)
     file_spec.save(str(output_path))
 
 
@@ -318,29 +328,31 @@ def _assert_scans_equal(scan, other_scan, name="scan"):
 
 
 @_supports_folders
-def compound_frames(input_path: Path, output_path: Path, overwrite=False):
+def compound_frames(input_path: str | Path, output_path: str | Path, overwrite=False):
     """
     Compounds frames in a raw data file by averaging them.
 
     Args:
-        input_path (Path): Path to the input raw data file, or a folder of files.
+        input_path (str, Path): Path to the input raw data file, or a folder of files.
+            Also accepts an ``hf://`` path (file or folder).
         output_path (Path): Path to the output file (or folder) where the compounded
             data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists.
             Defaults to False.
     """
 
+    _prepare_output_path(str(output_path), overwrite)
+
     with File(input_path) as f:
         file_spec = f._to_file_spec()
 
     file_spec = _compound_named_dim(file_spec, "n_frames")
 
-    _prepare_output_path(output_path, overwrite)
     file_spec.save(str(output_path))
 
 
 @_supports_folders
-def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
+def compound_transmits(input_path: str | Path, output_path: str | Path, overwrite=False):
     """
     Compounds transmits in a raw data file by averaging them.
 
@@ -349,12 +361,15 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
         function will result in incorrect scan parameters.
 
     Args:
-        input_path (Path): Path to the input raw data file, or a folder of files.
+        input_path (str, Path): Path to the input raw data file, or a folder of files.
+            Also accepts an ``hf://`` path (file or folder).
         output_path (Path): Path to the output file (or folder) where the compounded
             data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists.
             Defaults to False.
     """
+
+    _prepare_output_path(str(output_path), overwrite)
 
     with File(input_path) as f:
         file_spec = f._to_file_spec()
@@ -368,7 +383,6 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
 
     file_spec = _compound_named_dim(file_spec, "n_tx")
 
-    _prepare_output_path(output_path, overwrite)
     file_spec.save(str(output_path))
 
 
@@ -398,8 +412,8 @@ def _check_all_identical(array, axis=0):
 
 @_supports_folders
 def resave(
-    input_path: Path,
-    output_path: Path,
+    input_path: str | Path,
+    output_path: str | Path,
     overwrite=False,
     **kwargs,
 ):
@@ -407,7 +421,8 @@ def resave(
     Resaves a zea data file to a new location.
 
     Args:
-        input_path (Path): Path to the input zea data file, or a folder of files.
+        input_path (str, Path): Path to the input zea data file, or a folder of files.
+            Also accepts an ``hf://`` path (file or folder).
         output_path (Path): Path to the output file (or folder) where the data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists.
             Defaults to False.
@@ -418,19 +433,13 @@ def resave(
             :meth:`zea.data.spec.Spec._resolve_chunks`.
     """
 
+    _prepare_output_path(str(output_path), overwrite)
+
     if not Path(input_path).exists():
         raise FileNotFoundError(f"Input path {input_path} does not exist.")
 
-    if Path(output_path).exists() and not overwrite:
-        raise FileExistsError(
-            f"Output path {output_path} already exists. Use overwrite=True to overwrite."
-        )
-
     with File(input_path) as f:
         file_spec = f._to_file_spec()
-
-    if overwrite:
-        _delete_file_if_exists(output_path)
 
     file_spec.save(str(output_path), **kwargs)
 
@@ -583,8 +592,8 @@ def slice_spec_dims(spec: SpecT, **dim_indices) -> SpecT:
 
 @_supports_folders
 def extract_frames_transmits(
-    input_path: Path,
-    output_path: Path,
+    input_path: str | Path,
+    output_path: str | Path,
     frame_indices=slice(None),
     transmit_indices=slice(None),
     overwrite=False,
@@ -598,7 +607,8 @@ def extract_frames_transmits(
     annotations and metrics stay in sync with the extracted data.
 
     Args:
-        input_path (Path): Path to the input raw data file, or a folder of files.
+        input_path (str, Path): Path to the input raw data file, or a folder of files.
+            Also accepts an ``hf://`` path (file or folder).
         output_path (Path): Path to the output file (or folder) where the extracted
             data will be saved.
         frame_indices (list, array-like, or slice): Indices of the frames to keep.
@@ -637,25 +647,26 @@ def extract_frames_transmits(
             n_events = int(np.prod(raw_data.shape[:2]))
             file_spec.track_schedule = np.zeros(n_events, dtype=np.int32)
 
-    _prepare_output_path(output_path, overwrite)
+    _prepare_output_path(str(output_path), overwrite)
     file_spec.save(str(output_path), **kwargs)
 
 
-def summary(input_path: Path):
+def summary(input_path: str | Path):
     """Prints a summary of a zea data file to the console.
 
     Args:
-        input_path (Path): Path to the zea data file.
+        input_path (str, Path): Path to the zea data file. Also accepts an ``hf://`` path.
     """
     with File(input_path) as f:
         f.summary()
 
 
-def copy(src: Path, dst: Path, key: str, mode: str | None = None):
+def copy(src: str | Path, dst: str | Path, key: str, mode: str | None = None):
     """Copies zea files to a new location using :meth:`zea.Dataset.copy`.
 
     Args:
-        src (Path): Source path. Can be a single file, a list of files, or a folder.
+        src (str, Path): Source path. Can be a single file, a list of files, a folder,
+            or an ``hf://`` path.
         dst (Path): Destination folder path.
         key (str): Key to access in the HDF5 files. Use ``"all"`` or ``"*"`` to copy
             everything.
@@ -673,18 +684,25 @@ def _delete_file_if_exists(path: Path):
         path.unlink()
 
 
-def _prepare_output_path(output_path: Path, overwrite: bool):
+def _prepare_output_path(output_path: str, overwrite: bool):
     """Guard the save target, matching :func:`resave`: refuse to clobber unless asked.
 
     ``FileSpec.save`` overwrites atomically and has no ``overwrite`` flag of its own, so
     callers must enforce it here or an existing file is silently replaced.
+
+    Also refuses to save to an ``hf://`` path, which is read-only.
     """
+    if output_path.startswith(HF_PREFIX):
+        raise ValueError(
+            f"Cannot save to an 'hf://' path: {output_path}. 'hf://' paths are read-only; "
+            "save to a local path instead."
+        )
     if Path(output_path).exists() and not overwrite:
         raise FileExistsError(
             f"Output path {output_path} already exists. Use overwrite=True to overwrite."
         )
     if overwrite:
-        _delete_file_if_exists(output_path)
+        _delete_file_if_exists(Path(output_path))
 
 
 def _interpret_index(input_str):

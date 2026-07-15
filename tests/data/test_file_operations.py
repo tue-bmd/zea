@@ -12,6 +12,7 @@ import pytest
 from zea import Parameters
 from zea.data.file import CustomElement, File, validate_file
 from zea.data.file_operations import (
+    _prepare_output_path,
     compound_frames,
     compound_transmits,
     extract_frames_transmits,
@@ -21,6 +22,9 @@ from zea.data.file_operations import (
 from zea.data.spec import Spec
 
 from . import generate_dummy_scan, generate_example_dataset
+
+HF_INPUT_PATH = "hf://zeahub/pytest/case_0.hdf5"
+HF_FOLDER_PATH = "hf://zeahub/pytest/folder"
 
 
 @pytest.fixture
@@ -341,6 +345,51 @@ def test_file_operations_folder_sum(tmp_path):
     with File(output_path) as f:
         raw_data = f["data/raw_data"][:]
         assert raw_data[0, 0, 0, 0, 0] == data0[0, 0, 0, 0, 0] + data1[0, 0, 0, 0, 0]
+
+
+def test_resave_accepts_hf_path(tmp_path, monkeypatch):
+    """resave resolves an 'hf://' input_path via File's existing hf:// resolution logic."""
+    downloaded = tmp_path / "downloaded.hdf5"
+    generate_example_dataset(downloaded, add_optional_dtypes=True)
+    output_path = tmp_path / "resaved.hdf5"
+
+    monkeypatch.setattr(
+        "zea.data.file_operations._hf_resolve_path", lambda hf_path, **kwargs: downloaded
+    )
+
+    resave(HF_INPUT_PATH, output_path)
+
+    validate_file(output_path)
+    _assert_descriptions_and_custom_elements_equal(downloaded, output_path)
+
+
+def test_compound_frames_accepts_hf_folder(tmp_path, monkeypatch):
+    """compound_frames resolves an 'hf://' folder input_path and mirrors it to output_path,
+    just like it already does for local folders."""
+    hf_snapshot_dir = tmp_path / "snapshot"
+    input_paths = [hf_snapshot_dir / "case_0.hdf5", hf_snapshot_dir / "case_1.hdf5"]
+    for path in input_paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        generate_example_dataset(path, add_optional_dtypes=True)
+    output_folder = tmp_path / "output"
+
+    monkeypatch.setattr(
+        "zea.data.file_operations._hf_resolve_path", lambda hf_path, **kwargs: hf_snapshot_dir
+    )
+
+    compound_frames(HF_FOLDER_PATH, output_folder)
+
+    for input_path in input_paths:
+        output_path = output_folder / input_path.name
+        assert output_path.is_file()
+        with File(output_path) as f:
+            assert f.data.raw_data.shape[0] == 1  # Only one frame should remain
+
+
+def test_prepare_output_path_refuses_hf_path():
+    """save_file must refuse to write to an 'hf://' path since it is read-only."""
+    with pytest.raises(ValueError, match="hf://"):
+        _prepare_output_path("hf://zeahub/pytest/out.hdf5")
 
 
 def _create_dataset_with_custom(path, n_frames=2, n_tx=4, n_el=8, n_ax=64):
