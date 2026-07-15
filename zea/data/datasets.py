@@ -573,7 +573,7 @@ class Dataset(H5FileHandleCache):
                 (uses HuggingFace Hub default, i.e. the ``main`` branch).
             lazy (bool, optional): If True, ``hf://`` files are not downloaded at init —
                 each file is downloaded on first access. ``len(ds)`` returns the number of files
-                (not total frames). Defaults to False.
+                (not total frames). Defaults to True.
             file_filter (callable or dict, optional): Keep only files whose content matches a
                 predicate. Either a callable ``File -> bool`` (a file is kept when it returns
                 ``True``), or a declarative dotted-path dict mapping a path on the
@@ -581,7 +581,9 @@ class Dataset(H5FileHandleCache):
                 ``"scan.center_frequency"``) to a condition: the :func:`EXISTS` helper
                 (field must be present), a plain value (equality), or a callable on the
                 resolved value. All dict entries are ANDed. Files whose predicate raises
-                (e.g. no ``metadata`` group) are excluded. Evaluating the predicate reads
+                (e.g. no ``metadata`` group) are excluded, except that I/O errors
+                (``OSError`` from HDF5/network reads) propagate rather than being treated
+                as a mismatch. Evaluating the predicate reads
                 each file; with ``lazy=True`` remote (``hf://``) files are streamed for just
                 the metadata/scan bytes rather than downloaded in full, and the surviving
                 files stay lazy. Defaults to ``None`` (no filtering).
@@ -612,7 +614,8 @@ class Dataset(H5FileHandleCache):
         """Return only the files for which ``self.file_filter`` returns ``True``.
 
         Each file is opened and passed to the predicate. If the predicate raises
-        (e.g. the file has no ``metadata`` group), the file is excluded.
+        (e.g. the file has no ``metadata`` group), the file is excluded. I/O failures
+        (``OSError`` from HDF5/network reads) are not mismatches and propagate instead.
         """
         assert self.file_filter is not None, "file_filter must be set before applying it"
         file_filter = self.file_filter
@@ -623,6 +626,11 @@ class Dataset(H5FileHandleCache):
             with File(path, revision=self.revision) as file:
                 try:
                     keep = file_filter(file)
+                except OSError:
+                    # I/O failure (HDF5/network read while streaming a lazy remote
+                    # file) is not a filter mismatch: propagate rather than silently
+                    # dropping a file that may actually match.
+                    raise
                 except Exception as e:  # noqa: BLE001 — a predicate failure means "does not match"
                     log.debug(f"file_filter excluded '{path}': {type(e).__name__}: {e}")
                     continue
