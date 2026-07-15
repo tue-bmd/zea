@@ -228,9 +228,13 @@ os.environ["HF_HUB_VERBOSITY"] = "error"
 # HTML output, so links in the example notebooks under docs/source/notebooks
 # (rendered into the doctree by nbsphinx) are checked exactly like links in
 # any .rst/.md page.
-linkcheck_retries = 3
-linkcheck_timeout = 20
+# Keep these low: with dozens of external links, a couple of retries at a long
+# timeout (or a long wait on a rate-limited host) adds minutes to the build.
+# Known-difficult links are called out below instead of relying on retries.
+linkcheck_retries = 1
+linkcheck_timeout = 10
 linkcheck_workers = 8
+linkcheck_rate_limit_timeout = 30
 linkcheck_ignore = [
     # Colab blocks automated (non-browser) requests to notebook/asset URLs,
     # so these always report as broken even when perfectly valid.
@@ -241,6 +245,17 @@ linkcheck_ignore = [
     r"^https://doi\.org/10\.1001/jamacardio\.2021\.6059$",  # jamanetwork.com
     r"^https://doi\.org/10\.1016/j\.ultrasmedbio\.2024\.12\.008$",  # sciencedirect.com
     r"^https://nl\.mathworks\.com/matlabcentral/",
+    # Consistently times out (TCP connect never completes) from CI runners.
+    r"^https://www\.creatis\.insa-lyon\.fr/",
+    # Broken (404), but inherited from an installed h5py's File docstring rather
+    # than zea's own source; current h5py (>=3.16) already fixed this upstream,
+    # so this depends on the h5py version actually resolved at build time.
+    r"^https://portal\.hdfgroup\.org/display/HDF5/H5P_SET_",
+]
+# Single-page apps where the URL fragment is a client-side route, not a real
+# HTML anchor, so linkcheck's static-HTML anchor check always misses it.
+linkcheck_anchors_ignore_for_url = [
+    r"^https://humanheart-project\.creatis\.insa-lyon\.fr/",
 ]
 
 
