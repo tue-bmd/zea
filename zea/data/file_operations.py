@@ -80,6 +80,9 @@ def _supports_folders(operation):
     ``input_path`` may also be an ``hf://`` path (pointing at a single file or a
     folder in a Hugging Face dataset repo); it is downloaded via
     :func:`zea.internal.preset_utils._hf_resolve_path` before dispatching.
+
+    Note that if a file operation does not need all the data, this might not be optimal since
+    it doesn't stream the data and instead downloads the whole file.
     """
 
     @functools.wraps(operation)

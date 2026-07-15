@@ -771,19 +771,16 @@ class Dataset(H5FileHandleCache):
     def __getitem__(self, index) -> "File":
         """Retrieves an item from the dataset.
 
-        Returns a :class:`~zea.data.file.File`; ``hf://`` files are downloaded on first
-        access. Reads through it (``dataset[0].data.raw_data[0]``) fetch only the chunks
-        they touch — see :mod:`zea.data.chunk_reader`.
+        Returns a :class:`~zea.data.file.File`. Lazy ``hf://`` files are opened with
+        streaming enabled rather than downloaded in full: reads through the file
+        (``dataset[0].data.raw_data[0]``) fetch only the chunks they touch — see
+        :mod:`zea.data.chunk_reader`.
         """
-        path = self.file_paths[index]
-        if path.startswith(HF_PREFIX):
-            hf_kwargs = {}
-            if self.revision is not None:
-                hf_kwargs["revision"] = self.revision
-            local_path = str(_hf_resolve_path(path, **hf_kwargs))
-            self.file_paths[index] = local_path
-            path = local_path
-        return self.get_file(path)
+        # Lazy datasets keep ``hf://`` URIs in ``file_paths``; pass them straight to
+        # ``get_file`` so ``File`` streams them (stream=True is the default for hf://
+        # paths) instead of resolving to a local path, which downloads the whole file.
+        # Non-lazy HF paths were already resolved at init, and non-HF paths are local.
+        return self.get_file(self.file_paths[index])
 
     def __iter__(self):
         """

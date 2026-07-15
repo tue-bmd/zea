@@ -155,6 +155,8 @@ def _hf_resolve_path(
     - hf://org/repo/subdir/ - Downloads all files in subdirectory
     - hf://org/repo/file.h5 - Downloads specific file
     - hf://org/repo - Downloads all files in repo
+
+    Note that we also support streaming, so this should not be used that often!
     """
     repo_id, subpath = _hf_parse_path(hf_path)
     files = _hf_list_files(

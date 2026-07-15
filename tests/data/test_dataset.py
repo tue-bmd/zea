@@ -221,8 +221,12 @@ def test_folder_rejects_single_file(dummy_dataset_path):
         Folder(file_path, validate=False)
 
 
-def test_dataset_lazy_hf_defers_download(tmp_path):
-    """lazy=True stores hf:// pointers at init and downloads each file on first access."""
+def test_dataset_lazy_hf_streams_on_access(tmp_path):
+    """lazy=True stores hf:// pointers at init and streams each file on first access.
+
+    Access must not resolve (download) the file via ``_hf_resolve_path``; instead the
+    ``hf://`` URI is passed straight to ``File``, which streams it (stream=True default).
+    """
     f1 = tmp_path / "file1.hdf5"
     f2 = tmp_path / "file2.hdf5"
     generate_example_dataset(f1)
@@ -233,10 +237,11 @@ def test_dataset_lazy_hf_defers_download(tmp_path):
     with (
         patch("zea.data.datasets._hf_list_h5_files", return_value=hf_files),
         patch("zea.data.datasets._hf_resolve_path", return_value=f1) as mock_resolve,
+        patch("zea.data.datasets.File") as mock_file,
     ):
         ds = Dataset("hf://org/myrepo", lazy=True)
 
-        # No download at init
+        # No download/resolution at init
         mock_resolve.assert_not_called()
         assert len(ds) == 2
         assert ds.file_paths[0] == "hf://org/myrepo/file1.hdf5"
@@ -244,15 +249,18 @@ def test_dataset_lazy_hf_defers_download(tmp_path):
         # __len__ and file_paths must not trigger resolution
         mock_resolve.assert_not_called()
 
-        # First access triggers download of that file only
+        # First access streams the file (opens the hf:// URI directly), never downloads it
         _ = ds[0]
-        mock_resolve.assert_called_once_with("hf://org/myrepo/file1.hdf5")
-        assert ds.file_paths[0] == str(f1)  # pointer replaced with local path
-        assert ds.file_paths[1] == "hf://org/myrepo/file2.hdf5"  # untouched
+        mock_resolve.assert_not_called()
+        mock_file.assert_called_once_with("hf://org/myrepo/file1.hdf5", "r", progress=False)
+        # Pointer preserved as the hf:// URI so it keeps streaming, not swapped for a local path
+        assert ds.file_paths[0] == "hf://org/myrepo/file1.hdf5"
+        assert ds.file_paths[1] == "hf://org/myrepo/file2.hdf5"
 
-        # Second access to the same index does not re-download
-        mock_resolve.reset_mock()
+        # Second access to the same index reuses the cached handle, no re-open
+        mock_file.reset_mock()
         _ = ds[0]
+        mock_file.assert_not_called()
         mock_resolve.assert_not_called()
 
         ds.close()
