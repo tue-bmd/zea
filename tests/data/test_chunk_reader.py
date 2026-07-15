@@ -13,6 +13,7 @@ layouts and selections where it could plausibly diverge. The cases that earn the
 
 import http.server
 import logging
+import os
 import socketserver
 import threading
 import time
@@ -447,6 +448,39 @@ class TestFetchers:
         assert file._chunk_fetcher is not None
         file.close()
         assert file._fetcher is None
+
+    def test_pread_path_is_lock_free(self, structured_file):
+        """Where os.pread exists (Unix), its positional read is thread-safe, so no lock."""
+        if not hasattr(os, "pread"):
+            pytest.skip("platform has no os.pread")
+        fetcher = LocalFetcher(structured_file)
+        try:
+            assert fetcher._lock is None
+        finally:
+            fetcher.close()
+
+    def test_windows_path_guards_with_a_lock(self, structured_file, monkeypatch):
+        """Without os.pread (Windows), seek+read shares the fd position and must be locked."""
+        monkeypatch.delattr(os, "pread", raising=False)
+        fetcher = LocalFetcher(structured_file)
+        try:
+            assert fetcher._lock is not None
+        finally:
+            fetcher.close()
+
+    def test_windows_fallback_matches_h5py(self, structured_file, monkeypatch):
+        """The lock-guarded lseek+read fallback must return exactly what h5py returns, even
+        under the concurrent decode pool (a whole-file read fans out across every chunk)."""
+        monkeypatch.delattr(os, "pread", raising=False)
+        with File(structured_file) as file:
+            dset = file[RAW]
+            fetcher = LocalFetcher(structured_file)
+            assert fetcher._lock is not None  # confirm the Windows branch is the one exercised
+            try:
+                got = read(dset, slice(None), fetcher, progress=False)
+            finally:
+                fetcher.close()
+            np.testing.assert_array_equal(got, dset[:])
 
 
 # --------------------------------------------------------------------------- #
