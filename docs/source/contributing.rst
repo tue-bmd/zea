@@ -303,18 +303,9 @@ New tutorial or example notebooks are always welcome! Please add them to the
 `docs/source/notebooks <https://github.com/tue-bmd/zea/tree/main/docs/source/notebooks>`_
 directory. Make sure to follow the naming conventions and structure of existing
 notebooks. If you are adding a new tutorial, please also update :doc:`examples`
-to check if your notebook is included.
-
-Notebooks are rendered by nbsphinx into the same doctree as the rest of the
-docs, so when linking to another zea documentation page (an API reference or
-another notebook), use a path **relative** to the notebook's location, e.g.
-``[zea.Pipeline](../../_autosummary/zea.Pipeline.rst)`` or
-``[pipeline docs](../../pipeline.rst)``, instead of a hardcoded
-``https://zea.readthedocs.io/...`` URL. Relative links are checked for broken
-targets by the doc build itself and keep working across doc versions, whereas
-absolute links can silently rot; ``notebook_clean_and_check.py`` rejects
-hardcoded ``readthedocs.io`` links for this reason. All hyperlinks (including
-external ones) are checked with ``make docs-linkcheck``.
+to check if your notebook is included. See the `docs README
+<https://github.com/tue-bmd/zea/tree/main/docs#readme>`_ for notebook link
+conventions and how to check the docs for broken links.
 
 Adding to ``zea.models``
 ~~~~~~~~~~~~~~~~~~~~~~~~

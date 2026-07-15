@@ -60,6 +60,15 @@ the same doctree as the rest of the docs), run:
 make docs-linkcheck
 ```
 
+When linking to another zea documentation page (an API reference or another
+notebook) from a notebook, use a path **relative** to the notebook's
+location, e.g. `[zea.Pipeline](../../_autosummary/zea.Pipeline.rst)` or
+`[pipeline docs](../../pipeline.rst)`, instead of a hardcoded
+`https://zea.readthedocs.io/...` URL. Relative links are checked for broken
+targets by the doc build itself and keep working across doc versions, whereas
+absolute links can silently rot; `notebook_clean_and_check.py` rejects
+hardcoded `readthedocs.io` links for this reason.
+
 ---
 
 For more information, see the [Sphinx documentation](https://www.sphinx-doc.org/).
