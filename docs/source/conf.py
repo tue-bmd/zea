@@ -224,56 +224,29 @@ os.environ["HF_HUB_VERBOSITY"] = "error"
 """
 
 # -- Options for linkcheck builder --------------------------------------------
-# `make docs-linkcheck` (sphinx -b linkcheck) walks the same doctree used for
-# HTML output, so links in the example notebooks under docs/source/notebooks
-# (rendered into the doctree by nbsphinx) are checked exactly like links in
-# any .rst/.md page.
-# Keep these low: with dozens of external links, a couple of retries at a long
-# timeout (or a long wait on a rate-limited host) adds minutes to the build.
-# Known-difficult links are called out below instead of relying on retries.
+# `make docs-linkcheck` also checks links in the example notebooks, which
+# nbsphinx renders into the same doctree as the rest of the docs.
+# Keep retries/timeout low; known-difficult links are ignored below instead.
 linkcheck_retries = 1
 linkcheck_timeout = 10
 linkcheck_workers = 8
 linkcheck_rate_limit_timeout = 30
 linkcheck_ignore = [
-    # Colab blocks automated (non-browser) requests to notebook/asset URLs,
-    # so these always report as broken even when perfectly valid.
-    r"^https://colab\.research\.google\.com/",
-    # Publishers/hosts below return 403 to automated requests (confirmed
-    # working in a browser) even though the DOI/link itself is valid.
-    r"^https://doi\.org/10\.1098/rsta\.2024\.0327$",  # royalsocietypublishing.org
-    r"^https://doi\.org/10\.1001/jamacardio\.2021\.6059$",  # jamanetwork.com
-    r"^https://doi\.org/10\.1016/j\.ultrasmedbio\.2024\.12\.008$",  # sciencedirect.com
-    r"^https://nl\.mathworks\.com/matlabcentral/",
-    # Consistently times out (TCP connect never completes) from CI runners.
-    r"^https://www\.creatis\.insa-lyon\.fr/",
-    # Broken (404), but inherited from an installed h5py's File docstring rather
-    # than zea's own source; current h5py (>=3.16) already fixed this upstream,
-    # so this depends on the h5py version actually resolved at build time.
-    r"^https://portal\.hdfgroup\.org/display/HDF5/H5P_SET_",
-    # Links to files within this same repo (notebook "View on GitHub" badges,
-    # references to docs/README.md, docs/example_google_docstrings.py, etc.).
-    # If the build got this far, the file exists in the tree being built, so
-    # these paths are already correct by construction (badge paths are also
-    # independently verified, with no network call, by check_badges() in
-    # notebook_clean_and_check.py). Hitting a couple dozen github.com/blob
-    # URLs from the same CI runner reliably trips GitHub's anonymous rate
-    # limit (429s) partway through -- which link fails is flaky and depends
-    # on how much of the budget earlier requests in the same run consumed, so
-    # ignoring individual paths one at a time doesn't converge; ignore the
-    # whole self-referential pattern instead.
+    r"^https://colab\.research\.google\.com/",  # blocks non-browser requests
+    r"^https://doi\.org/10\.1098/rsta\.2024\.0327$",  # royalsociety 403s bots
+    r"^https://doi\.org/10\.1001/jamacardio\.2021\.6059$",  # jamanetwork 403s bots
+    r"^https://doi\.org/10\.1016/j\.ultrasmedbio\.2024\.12\.008$",  # sciencedirect 403s bots
+    r"^https://nl\.mathworks\.com/matlabcentral/",  # 403s bots
+    r"^https://www\.creatis\.insa-lyon\.fr/",  # times out from CI
+    r"^https://portal\.hdfgroup\.org/display/HDF5/H5P_SET_",  # 404, from an older h5py docstring
+    # Self-repo file links (badges, README refs): correct by construction if
+    # the build got this far, and hitting them over HTTP trips GitHub's
+    # anonymous rate limit.
     r"^https://github\.com/tue-bmd/zea/blob/main/",
 ]
 linkcheck_anchors_ignore_for_url = [
-    # GitHub's blob viewer no longer renders per-line `id="L<N>"` anchors into
-    # the server-side HTML (they're added client-side), so line-number links
-    # like `.../blob/<sha>/file.py#L123` always report a false "anchor not
-    # found".
-    r"^https://github\.com/[^/]+/[^/]+/blob/",
-    # Single-page app where the URL fragment is a client-side route, not a
-    # real HTML anchor, so linkcheck's static-HTML anchor check always misses
-    # it.
-    r"^https://humanheart-project\.creatis\.insa-lyon\.fr/",
+    r"^https://github\.com/[^/]+/[^/]+/blob/",  # line anchors are JS-rendered
+    r"^https://humanheart-project\.creatis\.insa-lyon\.fr/",  # SPA, fragment is a client route
 ]
 
 
