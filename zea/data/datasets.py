@@ -183,7 +183,7 @@ class H5FileHandleCache:
             if len(self._file_handle_cache) >= self.file_handle_cache_capacity:
                 _, close_file = self._file_handle_cache.popitem(last=False)
                 close_file.close()
-            file = File(file_path, "r")
+            file = File(file_path, "r", progress=False)
             self._file_handle_cache[file_path] = file
 
         return self._file_handle_cache[file_path]
