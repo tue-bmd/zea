@@ -94,7 +94,11 @@ def check_execution_counts(nb, nb_path):
         )
 
 
-READTHEDOCS_LINK = re.compile(r"\]\((https://zea\.readthedocs\.io/[^)]+)\)")
+# Matches the bare URL regardless of how it's embedded in Markdown (inline link
+# destination, reference-style link definition, angle-bracket autolink, or a
+# plain URL in prose), since in every case the literal URL string appears as-is
+# in the cell source.
+READTHEDOCS_LINK = re.compile(r"https?://zea\.readthedocs\.io/[^\s)\]>\"'`]+")
 
 
 def check_doc_links(nb, nb_path):
@@ -107,7 +111,7 @@ def check_doc_links(nb, nb_path):
         match = READTHEDOCS_LINK.search(src)
         if match:
             error(
-                f"Found hardcoded readthedocs.io link to zea docs: {match.group(1)}. "
+                f"Found hardcoded readthedocs.io link to zea docs: {match.group(0)}. "
                 "Use a relative link to the target .rst page instead "
                 "(e.g. '../../_autosummary/zea.X.rst' or '../../pipeline.rst').",
                 nb_path,
