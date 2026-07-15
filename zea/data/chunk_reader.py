@@ -301,6 +301,79 @@ def eligible(dset: h5py.Dataset, fetcher: Fetcher | None) -> bool:
     return all(fid in DECODABLE for fid in filter_ids(dset))
 
 
+def _needs_resave(dset: h5py.Dataset, fetcher: Fetcher | None) -> bool:
+    """Whether this dataset misses the fast path for a reason resaving would fix.
+
+    True means it is plainly typed and has a fetcher — but is either stored without chunking, or
+    compressed with a codec we cannot decode in-process (``lzf`` above all: zea's default before
+    Blosc). Both cost the concurrent read path — locally as well as over HTTP — and both are
+    fixed by resaving through :meth:`File.create`, which chunks and Blosc-compresses. A strided
+    selection or an exotic dtype is a different matter and stays out of this.
+    """
+    if fetcher is None:
+        return False
+    if dset.dtype.hasobject or dset.dtype.fields is not None:
+        return False
+    if dset.chunks is None:
+        return True
+    return not all(fid in DECODABLE for fid in filter_ids(dset))
+
+
+def _fallback_note(dset: h5py.Dataset, kind: str, cause: str, fix: str) -> None:
+    """Nudge, once per dataset, when a read misses the concurrent path and goes to h5py.
+
+    Serial reads happen locally too, not only when streaming, so this fires whether or not
+    progress was requested. ``cause`` completes "Reading '{name}' {cause}" and ``fix`` says how
+    to avoid it; ``kind`` scopes the once-only dedupe so the resave and selection notes do not
+    silence each other. Anything that could break here is swallowed; a message is never worth
+    failing a read over.
+    """
+    try:
+        from zea import log
+
+        log.warning_once(
+            f"Reading '{dset.name}' {cause} — falling back to a serial h5py read. {fix}",
+            key=(dset.name, kind),
+        )
+    except Exception:  # noqa: BLE001 — messaging must never break a read
+        pass
+
+
+def _resave_note(dset: h5py.Dataset, fetcher: Fetcher | None) -> None:
+    """Note a read that misses the concurrent path for a reason resaving would fix (see
+    :func:`_needs_resave`): the storage layout, not the selection."""
+    if not _needs_resave(dset, fetcher):
+        return
+    if dset.chunks is None:
+        cause = "stored without chunking, which zea cannot read concurrently"
+    else:
+        codec = getattr(dset, "compression", None) or "a codec zea cannot decode concurrently"
+        cause = f"compressed with {codec}, which zea cannot decode concurrently"
+    _fallback_note(
+        dset,
+        kind="resave",
+        cause=cause,
+        fix="Re-save the file (e.g. via zea.File.create) to read it concurrently, with progress.",
+    )
+
+
+def _selection_note(dset: h5py.Dataset) -> None:
+    """Note a read that misses the concurrent path *only* because of its selection.
+
+    Reached after :func:`eligible` has already passed, so the dataset itself is fast-path
+    material — the selection is the sole blocker, and unlike the layout, resaving will not help.
+    """
+    _fallback_note(
+        dset,
+        kind="selection",
+        cause=(
+            "with a selection zea cannot map to chunks (e.g. a strided slice, a boolean mask, "
+            "or an unsorted or repeated index list)"
+        ),
+        fix="Use a contiguous slice or a single increasing index list to read it concurrently.",
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Selection -> chunks
 # --------------------------------------------------------------------------- #
@@ -397,6 +470,11 @@ def read(
 
     The contract is equality: this returns exactly what ``dset[selection]`` returns.
 
+    Any read that misses the concurrent path — for its storage layout
+    (unchunked or a codec zea cannot decode) or its selection — logs a one-time note
+    naming the cause and the fix, regardless of ``progress``, since the serial
+    fallback is slower on disk too (see :func:`_resave_note`, :func:`_selection_note`).
+
     Args:
         dset (h5py.Dataset): The dataset to read from.
         selection: Any NumPy-style index. Ints, unit-step slices and increasing index
@@ -405,17 +483,19 @@ def read(
             :func:`fetcher_for`). ``None`` disables the fast path.
         progress (bool | callable): ``True`` shows a tqdm bar over the compressed bytes;
             a callable is invoked with each chunk's size as it arrives. Reads served by
-            h5py (an lzf file, a strided selection) report nothing: h5py fetches the whole
-            selection in one opaque call, so there is no progress to observe.
+            h5py (an lzf file, a strided selection) report no per-chunk progress: h5py
+            fetches the whole selection in one opaque call, so there is nothing to observe.
 
     Returns:
         np.ndarray: The selected data.
     """
     if fetcher is None or not eligible(dset, fetcher):
+        _resave_note(dset, fetcher)
         return dset[selection]
     try:
         axes = _normalize(selection, dset.shape)
     except _Unsupported:
+        _selection_note(dset)
         return dset[selection]
 
     itemsize = dset.dtype.itemsize

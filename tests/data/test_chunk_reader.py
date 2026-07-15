@@ -12,6 +12,7 @@ layouts and selections where it could plausibly diverge. The cases that earn the
 """
 
 import http.server
+import logging
 import socketserver
 import threading
 import time
@@ -269,6 +270,65 @@ class TestFallback:
         """Without a fetcher there is no fast path at all — but reads must still work."""
         with File(structured_file) as file:
             np.testing.assert_array_equal(read(file[RAW], slice(0, 2), None), file[RAW][0:2])
+
+
+class TestFallbackNotes:
+    """A read that misses the concurrent path nudges once, naming the cause and the fix.
+
+    The serial fallback is slower on disk as well as over HTTP, so the note fires regardless
+    of ``progress`` — but it must never fire on a read the fast path actually served, and never
+    twice for the same dataset.
+    """
+
+    @pytest.fixture
+    def notes(self, caplog):
+        """Capture ``zea.log`` (``propagate=False``) and isolate the once-only dedupe set."""
+        from zea import log
+
+        caplog.set_level(logging.WARNING)
+        log.logger.addHandler(caplog.handler)
+        saved = set(log._warned_locations)
+        log._warned_locations.clear()
+        try:
+            yield caplog
+        finally:
+            log.logger.removeHandler(caplog.handler)
+            log._warned_locations.clear()
+            log._warned_locations.update(saved)
+
+    def test_lzf_nudges_to_resave_even_without_progress(self, tmp_path, notes):
+        path = _write(tmp_path / "lzf.hdf5", _structured(), compression="lzf")
+        with File(path) as file:
+            read(file[RAW], slice(None), file._chunk_fetcher, progress=False)
+        assert len(notes.records) == 1
+        assert "lzf" in notes.text and "Re-save" in notes.text
+
+    def test_contiguous_nudges_to_resave(self, tmp_path, notes):
+        path = _write(tmp_path / "flat.hdf5", _structured(), compression=None, chunk_axes=None)
+        with File(path) as file:
+            read(file[RAW], slice(None), file._chunk_fetcher, progress=False)
+        assert len(notes.records) == 1
+        assert "without chunking" in notes.text and "Re-save" in notes.text
+
+    def test_strided_selection_nudges_about_indexing_not_resave(self, tmp_path, notes):
+        path = _write(tmp_path / "blosc.hdf5", _structured())  # fast-path-eligible dataset
+        with File(path) as file:
+            read(file[RAW], slice(None, None, 2), file._chunk_fetcher, progress=False)
+        assert len(notes.records) == 1
+        assert "selection" in notes.text and "Re-save" not in notes.text
+
+    def test_fast_path_read_is_quiet(self, tmp_path, notes):
+        path = _write(tmp_path / "blosc.hdf5", _structured())
+        with File(path) as file:
+            read(file[RAW], slice(0, 4), file._chunk_fetcher, progress=False)
+        assert notes.records == []
+
+    def test_note_fires_only_once_per_dataset(self, tmp_path, notes):
+        path = _write(tmp_path / "lzf.hdf5", _structured(), compression="lzf")
+        with File(path) as file:
+            for _ in range(3):
+                read(file[RAW], slice(None), file._chunk_fetcher, progress=False)
+        assert len(notes.records) == 1
 
     def test_multi_axis_fancy_index_raises_like_h5py(self, structured_file):
         """h5py allows one fancy axis and raises otherwise; we must raise identically."""

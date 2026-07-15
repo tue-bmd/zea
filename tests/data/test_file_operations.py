@@ -389,7 +389,7 @@ def test_compound_frames_accepts_hf_folder(tmp_path, monkeypatch):
 def test_prepare_output_path_refuses_hf_path():
     """save_file must refuse to write to an 'hf://' path since it is read-only."""
     with pytest.raises(ValueError, match="hf://"):
-        _prepare_output_path("hf://zeahub/pytest/out.hdf5")
+        _prepare_output_path("hf://zeahub/pytest/out.hdf5", overwrite=True)
 
 
 def _create_dataset_with_custom(path, n_frames=2, n_tx=4, n_el=8, n_ax=64):

@@ -675,7 +675,16 @@ def _warn_custom_keys(data: dict, metadata: dict):
 
 
 class File(h5py.File):
-    """File handler for ``zea`` formatted ultrasound files. Extends the h5py.File class."""
+    """File handler for ``zea`` formatted ultrasound files. Extends the h5py.File class.
+
+    Has functionality to read and write zea files, as well as to access the data, parameters
+    and metadata in the file.
+
+    In contrast to `h5py.File`, this class can read and decompress chunks concurrently
+    for some codecs (e.g. the zea default). If it cannot use the fast path, it will fallback to
+    the standard `h5py.File` behavior, and will throw a relevant warning to point the user
+    to the issue. See :mod:`zea.data.chunk_reader` for details.
+    """
 
     def __init__(self, name, mode="r", *args, **kwargs):
         """Initialize the file.
@@ -713,7 +722,7 @@ class File(h5py.File):
             progress (bool or callable, optional): Report progress while streaming chunks.
                 Also settable after opening (``file.progress = True``). Defaults to ``True``
                 for streamed files, ``False`` otherwise. Reads that fall back to h5py
-                (an lzf file, a strided selection) reports nothing.
+                (an lzf file, a strided selection) report no per-chunk progress.
             cache (bool, optional): Cache fetched/streamed chunks on disk so a repeated read is
                 served locally instead of re-downloaded (default ``True``, streamed files only; see
                 :mod:`zea.data.chunk_cache`).
@@ -822,8 +831,8 @@ class File(h5py.File):
                 file.progress = True
                 file.data.raw_data[:5]
 
-        Reads that fall back to h5py (an lzf file, a strided selection) report nothing —
-        h5py fetches the whole selection in one opaque call.
+        Reads that fall back to h5py (an lzf file, a strided selection) report no per-chunk
+        progress — h5py fetches the whole selection in one opaque call.
         """
         return self._progress
 
