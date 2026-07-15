@@ -251,13 +251,18 @@ linkcheck_ignore = [
     # than zea's own source; current h5py (>=3.16) already fixed this upstream,
     # so this depends on the h5py version actually resolved at build time.
     r"^https://portal\.hdfgroup\.org/display/HDF5/H5P_SET_",
-    # "View on GitHub" badge links to this repo's own notebooks. Their path is
-    # already verified locally (no network) by check_badges() in
-    # notebook_clean_and_check.py, which asserts the badge URL contains the
-    # notebook's own repo-relative path. Checking ~20 of these over HTTP on
-    # every build routinely trips GitHub's anonymous rate limit (429s), which
-    # is pure noise since the check above already covers correctness.
-    r"^https://github\.com/tue-bmd/zea/blob/main/docs/source/notebooks/",
+    # Links to files within this same repo (notebook "View on GitHub" badges,
+    # references to docs/README.md, docs/example_google_docstrings.py, etc.).
+    # If the build got this far, the file exists in the tree being built, so
+    # these paths are already correct by construction (badge paths are also
+    # independently verified, with no network call, by check_badges() in
+    # notebook_clean_and_check.py). Hitting a couple dozen github.com/blob
+    # URLs from the same CI runner reliably trips GitHub's anonymous rate
+    # limit (429s) partway through -- which link fails is flaky and depends
+    # on how much of the budget earlier requests in the same run consumed, so
+    # ignoring individual paths one at a time doesn't converge; ignore the
+    # whole self-referential pattern instead.
+    r"^https://github\.com/tue-bmd/zea/blob/main/",
 ]
 linkcheck_anchors_ignore_for_url = [
     # GitHub's blob viewer no longer renders per-line `id="L<N>"` anchors into
