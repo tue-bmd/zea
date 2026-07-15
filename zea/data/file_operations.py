@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from zea import Parameters
 from zea.data.datasets import Dataset
-from zea.data.file import File, load_file_all_data_types
+from zea.data.file import CustomElements, File, load_file_all_data_types
 from zea.data.spec import DEFAULT_COMPRESSION
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
@@ -46,7 +46,7 @@ def save_file(
     image: dict | None = None,
     description=None,
     custom_maps: dict | None = None,
-    custom_elements: list | None = None,
+    custom_elements: list | CustomElements | None = None,
     metadata: dict | None = None,
     compression: str = DEFAULT_COMPRESSION,
     chunk_frames=False,

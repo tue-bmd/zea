@@ -2487,16 +2487,16 @@ class FileSpec(Spec):
                     field_sizes.update(track_sizes)
                 raise ValueError(self._format_inconsistent_dimension(dim, field_sizes))
 
-        # Validate custom elements are CustomElement instances (lazy import to
-        # avoid a circular dependency with zea.data.file).
+        # Validate custom elements are CustomElement instances
         if self.custom:
-            from zea.data.file import CustomElement
+            from zea.data.file import CustomElement, _validate_custom_element_naming
 
             for i, element in enumerate(self.custom):
                 if not isinstance(element, CustomElement):
                     raise TypeError(
                         f"custom[{i}] must be a CustomElement, got {type(element).__name__}."
                     )
+                _validate_custom_element_naming(element, i)
 
     def _normalize_time_to_next_transmit(self) -> None:
         """Pad flat timing arrays and reshape to (n_frames * n_tx) by padding last
@@ -2613,7 +2613,6 @@ class FileSpec(Spec):
         warn_missing_optional_fields: bool,
     ) -> None:
         """Write all groups/datasets of this spec to a fresh HDF5 file at ``path``."""
-        # Lazy import to avoid circular dependency (spec.py is imported by file.py)
         from zea import File
 
         with File(str(path), "w") as f:
