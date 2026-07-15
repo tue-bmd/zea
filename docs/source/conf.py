@@ -251,10 +251,23 @@ linkcheck_ignore = [
     # than zea's own source; current h5py (>=3.16) already fixed this upstream,
     # so this depends on the h5py version actually resolved at build time.
     r"^https://portal\.hdfgroup\.org/display/HDF5/H5P_SET_",
+    # "View on GitHub" badge links to this repo's own notebooks. Their path is
+    # already verified locally (no network) by check_badges() in
+    # notebook_clean_and_check.py, which asserts the badge URL contains the
+    # notebook's own repo-relative path. Checking ~20 of these over HTTP on
+    # every build routinely trips GitHub's anonymous rate limit (429s), which
+    # is pure noise since the check above already covers correctness.
+    r"^https://github\.com/tue-bmd/zea/blob/main/docs/source/notebooks/",
 ]
-# Single-page apps where the URL fragment is a client-side route, not a real
-# HTML anchor, so linkcheck's static-HTML anchor check always misses it.
 linkcheck_anchors_ignore_for_url = [
+    # GitHub's blob viewer no longer renders per-line `id="L<N>"` anchors into
+    # the server-side HTML (they're added client-side), so line-number links
+    # like `.../blob/<sha>/file.py#L123` always report a false "anchor not
+    # found".
+    r"^https://github\.com/[^/]+/[^/]+/blob/",
+    # Single-page app where the URL fragment is a client-side route, not a
+    # real HTML anchor, so linkcheck's static-HTML anchor check always misses
+    # it.
     r"^https://humanheart-project\.creatis\.insa-lyon\.fr/",
 ]
 
