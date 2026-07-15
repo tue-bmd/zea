@@ -195,7 +195,9 @@ def test_blosc_nthreads_is_set_for_writes():
     A regression here would be silent: the files stay correct, just slow to produce.
     """
     assert os.environ.get("BLOSC_NTHREADS") == str(BLOSC_NTHREADS)
-    assert 1 < BLOSC_NTHREADS <= 8, "more threads than this measured *slower* (memory-bound)"
+    # Lower bound is 1 (a single-core host is a valid config); above 8 measured *slower*
+    # (memory-bound).
+    assert 1 <= BLOSC_NTHREADS <= 8, "more threads than this measured *slower* (memory-bound)"
 
 
 def test_blosc_nthreads_does_not_override_the_user():

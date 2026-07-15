@@ -40,6 +40,7 @@ class ChunkCache:
     """Compressed chunks of one file, on disk, addressed by ``(offset, size)``."""
 
     def __init__(self, content_id: str, root: str | os.PathLike | None = None):
+        self._root = root
         self.dir = Path(root or ZEA_CACHE_DIR) / "chunks" / content_id[:2] / content_id
         self._writes = 0
 
@@ -84,7 +85,7 @@ class ChunkCache:
 
             self._writes += 1
             if self._writes % PRUNE_EVERY == 0:
-                prune()
+                prune(self._root)
         except OSError as exc:  # full disk, read-only cache dir, ...
             log.debug(f"Could not cache chunk: {exc}")
 

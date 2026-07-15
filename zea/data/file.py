@@ -6,7 +6,7 @@ import enum
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, List, Tuple, Union, cast
 
 import h5py
@@ -151,6 +151,11 @@ class ChunkedDataset:
 
         progress = getattr(self._fetcher, "progress", False)
         return read(self._dset, selection, self._fetcher, progress)
+
+    def __setitem__(self, selection, value):
+        # Writes never take the read fast path; forward straight to the underlying dataset
+        # so ``file.data.raw_data[...] = value`` keeps behaving like a bare h5py.Dataset.
+        self._dset[selection] = value
 
     def __getattr__(self, name: str):
         return getattr(self._dset, name)
@@ -929,6 +934,11 @@ class File(h5py.File):
         """
         source = getattr(self, "_source_name", None)
         if source is not None:
+            # ``Path("hf://org/repo/file")`` collapses the ``//`` to ``hf:/``, mangling the
+            # URI, so return it verbatim. ``name``/``stem`` wrap it in PurePath, which still
+            # extracts the basename correctly.
+            if str(source).startswith(HF_PREFIX):
+                return str(source)
             return Path(source)
         return Path(self.filename)
 
@@ -1247,7 +1257,7 @@ class File(h5py.File):
                 with ``hdf5plugin`` filters require ``import hdf5plugin`` to be read
                 back (zea imports it automatically).
             chunk_axes: Dimension names to chunk with HDF5 chunk size 1 (default
-                ``("n_frames", "n_tx")``); every other axis is stored at full extent,
+                ``("n_frames",)``); every other axis is stored at full extent,
                 so partial and streamed (``hf://``) reads fetch only the frames/
                 transmits requested. Axes not present on a field are ignored (an
                 ``image`` without ``n_tx`` is chunked on ``n_frames`` only). Set to a
@@ -1415,12 +1425,13 @@ class File(h5py.File):
     @property
     def name(self):
         """Return the name of the file."""
-        return self.path.name
+        # ``path`` may be a plain string (an ``hf://`` URI); PurePath handles both.
+        return PurePath(str(self.path)).name
 
     @property
     def stem(self):
         """Return the stem of the file."""
-        return self.path.stem
+        return PurePath(str(self.path)).stem
 
     def _get_single_track_data_group(self) -> "h5py.Group":
         """Return the data group for single-track or flat-layout files."""
@@ -1959,6 +1970,10 @@ class File(h5py.File):
                 track_dict["data"] = load_dict_from_hdf5_group(track._group["data"])
             if "scan" in track._group:
                 track_dict["scan"] = track.scan
+            # Preserve transmit-only tracks (data=None); without this the rebuilt TrackSpec
+            # would default transmit_only=False and reject the missing data.
+            if "transmit_only" in track._group:
+                track_dict["transmit_only"] = bool(track._group["transmit_only"][()])
             tracks.append(track_dict)
         return tracks
 

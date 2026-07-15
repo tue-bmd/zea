@@ -255,7 +255,11 @@ def _hf_stream_url(
     repo_id, subpath = _hf_parse_path(hf_path)
     if not subpath:
         raise ValueError(f"Expected an 'hf://' path to a single file, got '{hf_path}'.")
-    prefix = _HF_URL_PREFIX[repo_type]
+    prefix = _HF_URL_PREFIX.get(repo_type)
+    if prefix is None:  # "model" maps to "", so test membership, not truthiness
+        raise ValueError(
+            f"Unsupported repo_type '{repo_type}'. Expected one of {list(_HF_URL_PREFIX)}."
+        )
     return f"{_HF_HOST}/{prefix}{repo_id}/resolve/{revision or 'main'}/{subpath}"
 
 

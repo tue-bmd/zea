@@ -33,6 +33,10 @@ SpecT = TypeVar("SpecT", bound=Spec)
 # Data products stored log-compressed (in dB), which must be averaged in the linear domain.
 _LOG_DOMAIN_FIELDS = frozenset({"image"})
 
+# dB conversion factor: zea's ``log_compress`` uses ``20 * log10(x)`` (see
+# ``zea.func.ultrasound.log_compress``), so the inverse is ``10 ** (dB / 20)``.
+_DB_FACTOR = 20.0
+
 OPERATION_NAMES = [
     "sum",
     "compound_frames",
@@ -138,7 +142,10 @@ def _mean_over_axis(array: np.ndarray, axis: int, log_domain: bool = False) -> n
     uint8 images are averaged in float and clipped back into range.
     """
     if log_domain and array.dtype == np.float32:
-        return np.log(np.mean(np.exp(array), axis=axis, keepdims=True)).astype(np.float32)
+        # Undo the dB compression (10**(dB/20)), average in the linear domain, re-compress.
+        linear = np.power(10.0, array / _DB_FACTOR)
+        mean = np.mean(linear, axis=axis, keepdims=True)
+        return (_DB_FACTOR * np.log10(mean)).astype(np.float32)
     if array.dtype == np.uint8:
         mean = np.mean(array.astype(np.float32), axis=axis, keepdims=True)
         return np.clip(mean, 0, 255).astype(np.uint8)
@@ -207,8 +214,14 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
         for field_name, (array, _) in _data_arrays(track).items():
             if field_name in _LOG_DOMAIN_FIELDS:
                 track_totals[field_name] = (
-                    np.exp(array) if array.dtype == np.float32 else array.astype(np.float32)
+                    np.power(10.0, array / _DB_FACTOR)
+                    if array.dtype == np.float32
+                    else array.astype(np.float32)
                 )
+            elif np.issubdtype(array.dtype, np.integer):
+                # Widen integer accumulators (raw_data may be int16) so summing many files
+                # cannot overflow; the sum is validated and cast back to the input dtype below.
+                track_totals[field_name] = array.astype(np.int64)
             else:
                 track_totals[field_name] = array.copy()
         totals.append(track_totals)
@@ -227,6 +240,12 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
             _assert_scans_equal(track.scan, other_track.scan, f"tracks[{i}].scan")
 
             other_arrays = _data_arrays(other_track)
+            extra_fields = set(other_arrays) - set(totals[i])
+            if extra_fields:
+                raise ValueError(
+                    f"{path} has field(s) {sorted(extra_fields)} not present in "
+                    f"{input_paths[0]}. Only files with matching data products can be summed."
+                )
             for field_name, total in totals[i].items():
                 if field_name not in other_arrays:
                     raise ValueError(
@@ -236,47 +255,66 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
                 _assert_shapes_equal(total, array, field_name)
                 if field_name in _LOG_DOMAIN_FIELDS:
                     total += (
-                        np.exp(array) if array.dtype == np.float32 else array.astype(np.float32)
+                        np.power(10.0, array / _DB_FACTOR)
+                        if array.dtype == np.float32
+                        else array.astype(np.float32)
                     )
                 else:
                     total += array
 
     n_files = len(input_paths)
     for track, track_totals in zip(file_spec.tracks, totals):
+        field_dtypes = {name: array.dtype for name, (array, _) in _data_arrays(track).items()}
         for field_name, total in track_totals.items():
+            dtype = field_dtypes[field_name]
             if field_name in _LOG_DOMAIN_FIELDS:
-                dtype = _data_arrays(track)[field_name][0].dtype
                 if dtype == np.float32:
-                    # Back to dB, and clamp: log-compressed images are <= 0 dB.
-                    total = np.minimum(np.log(total / n_files), 0.0).astype(np.float32)
+                    # Back to dB (20*log10), and clamp: log-compressed images are <= 0 dB.
+                    total = np.minimum(_DB_FACTOR * np.log10(total / n_files), 0.0).astype(
+                        np.float32
+                    )
                 else:
                     total = np.clip(total / n_files, 0, 255).astype(np.uint8)
+            elif np.issubdtype(dtype, np.integer):
+                # Cast the widened sum back to the input dtype, refusing silent overflow.
+                info = np.iinfo(dtype)
+                if total.min() < info.min or total.max() > info.max:
+                    raise ValueError(
+                        f"Summed '{field_name}' does not fit {np.dtype(dtype).name}: value "
+                        f"range [{int(total.min())}, {int(total.max())}] exceeds "
+                        f"[{info.min}, {info.max}]."
+                    )
+                total = total.astype(dtype)
             _set_data_array(track, field_name, total)
 
     file_spec.__post_init__()
 
-    if overwrite:
-        _delete_file_if_exists(output_path)
-
+    _prepare_output_path(output_path, overwrite)
     file_spec.save(str(output_path))
 
 
 def _assert_shapes_equal(array0, array1, name="array"):
+    # Raise explicitly (not ``assert``) so validation survives ``python -O``.
     shape0, shape1 = array0.shape, array1.shape
-    assert shape0 == shape1, f"{name} shapes do not match. Got {shape0} and {shape1}."
+    if shape0 != shape1:
+        raise ValueError(f"{name} shapes do not match. Got {shape0} and {shape1}.")
 
 
 def _assert_scans_equal(scan, other_scan, name="scan"):
-    """Assert two ScanSpecs describe the same acquisition, field by field."""
+    """Check two ScanSpecs describe the same acquisition, field by field."""
+    # Raise explicitly (not ``assert``) so validation survives ``python -O``.
     if scan is None or other_scan is None:
-        assert scan is other_scan, f"{name}: one file has scan parameters and the other does not."
+        if scan is not other_scan:
+            raise ValueError(f"{name}: one file has scan parameters and the other does not.")
         return
 
     for field_name in scan.SCHEMA:
         value, other_value = getattr(scan, field_name), getattr(other_scan, field_name)
-        assert np.array_equal(value, other_value), (
-            f"{name}.{field_name} does not match across the summed files: {value} vs {other_value}."
-        )
+        if not np.array_equal(value, other_value):
+            raise ValueError(
+                f"{name}.{field_name} does not match across the summed files: "
+                f"{value} vs {other_value}."
+            )
 
 
 @_supports_folders
@@ -297,9 +335,7 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
 
     file_spec = _compound_named_dim(file_spec, "n_frames")
 
-    if overwrite:
-        _delete_file_if_exists(output_path)
-
+    _prepare_output_path(output_path, overwrite)
     file_spec.save(str(output_path))
 
 
@@ -332,9 +368,7 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
 
     file_spec = _compound_named_dim(file_spec, "n_tx")
 
-    if overwrite:
-        _delete_file_if_exists(output_path)
-
+    _prepare_output_path(output_path, overwrite)
     file_spec.save(str(output_path))
 
 
@@ -593,16 +627,17 @@ def extract_frames_transmits(
 
     # track_schedule is indexed by global transmit event ('n_total_tx'), not by 'n_tx',
     # so the schema-driven slicing above leaves it alone. A single-track schedule is all
-    # zeros with one entry per transmit event, so it can simply be rebuilt.
-    data = file_spec.tracks[0].data
-    raw_data = data.raw_data if data is not None else None
-    if file_spec.track_schedule is not None and raw_data is not None:
-        n_events = int(np.prod(raw_data.shape[:2]))
-        file_spec.track_schedule = np.zeros(n_events, dtype=np.int32)
+    # zeros with one entry per transmit event, so it can simply be rebuilt. Multi-track
+    # files only reach here on a no-op (select-all) extraction — see the guard above — so
+    # their schedule encodes the genuine cross-track ordering and must be preserved as-is.
+    if len(file_spec.tracks) == 1:
+        data = file_spec.tracks[0].data
+        raw_data = data.raw_data if data is not None else None
+        if file_spec.track_schedule is not None and raw_data is not None:
+            n_events = int(np.prod(raw_data.shape[:2]))
+            file_spec.track_schedule = np.zeros(n_events, dtype=np.int32)
 
-    if overwrite:
-        _delete_file_if_exists(output_path)
-
+    _prepare_output_path(output_path, overwrite)
     file_spec.save(str(output_path), **kwargs)
 
 
@@ -636,6 +671,20 @@ def _delete_file_if_exists(path: Path):
     """Deletes a file if it exists."""
     if path.exists():
         path.unlink()
+
+
+def _prepare_output_path(output_path: Path, overwrite: bool):
+    """Guard the save target, matching :func:`resave`: refuse to clobber unless asked.
+
+    ``FileSpec.save`` overwrites atomically and has no ``overwrite`` flag of its own, so
+    callers must enforce it here or an existing file is silently replaced.
+    """
+    if Path(output_path).exists() and not overwrite:
+        raise FileExistsError(
+            f"Output path {output_path} already exists. Use overwrite=True to overwrite."
+        )
+    if overwrite:
+        _delete_file_if_exists(output_path)
 
 
 def _interpret_index(input_str):

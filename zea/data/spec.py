@@ -2755,6 +2755,7 @@ class FileSpec(Spec):
                     value.store_in_group(
                         group,
                         compression=compression,
+                        chunk_axes=chunk_axes,
                         warn_missing_optional_fields=warn_missing_optional_fields,
                     )
                 else:

@@ -397,6 +397,9 @@ class _CountingServer:
 
     def __init__(self, directory, latency=0.02):
         self.count = 0
+        #: Highest number of requests in flight at once — the real evidence of concurrency.
+        self.peak = 0
+        self._active = 0
         lock = threading.Lock()
         outer = self
 
@@ -412,7 +415,13 @@ class _CountingServer:
             def send_head(self):
                 with lock:
                     outer.count += 1
-                time.sleep(latency)
+                    outer._active += 1
+                    outer.peak = max(outer.peak, outer._active)
+                try:
+                    time.sleep(latency)  # hold the request open so overlaps are observable
+                finally:
+                    with lock:
+                        outer._active -= 1
                 path = self.translate_path(self.path)
                 with open(path, "rb") as handle:
                     body = handle.read()
@@ -490,9 +499,9 @@ class TestRemote:
     def test_chunks_are_fetched_concurrently(self, structured_file):
         """The point of the remote path: N chunks cost ~1 round trip, not N.
 
-        Timed against an injected per-request latency, because that is the only thing that
-        distinguishes concurrent range requests from serial ones — the request *count* is
-        the same either way.
+        Asserted on *peak concurrency* — the maximum number of requests the server held open
+        at once — which distinguishes concurrent range requests from serial ones directly,
+        instead of the fragile wall-clock threshold. Elapsed time is kept as benchmark data.
         """
         latency = 0.05
         server = _CountingServer(structured_file.parent, latency=latency)
@@ -503,15 +512,14 @@ class TestRemote:
                 before = server.count
                 start = time.perf_counter()
                 got = read(file[RAW], slice(0, n_chunks), fetcher)
-                elapsed = time.perf_counter() - start
+                elapsed = time.perf_counter() - start  # benchmark only, not asserted
                 requests = server.count - before
 
                 np.testing.assert_array_equal(got, file[RAW][0:n_chunks])
                 assert requests >= n_chunks, "expected one range request per chunk"
-                # Serial would cost n_chunks * latency; concurrent costs about one.
-                assert elapsed < n_chunks * latency, (
-                    f"{n_chunks} chunks took {elapsed:.3f}s, "
-                    f"which is serial ({n_chunks * latency:.3f}s at {latency}s/request)"
+                assert server.peak > 1, (
+                    f"requests were served serially (peak concurrency {server.peak}); "
+                    f"expected overlapping range requests. Elapsed {elapsed:.3f}s."
                 )
         finally:
             server.close()

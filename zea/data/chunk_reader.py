@@ -314,10 +314,13 @@ def _normalize(selection: Any, shape: tuple[int, ...]) -> list[tuple[np.ndarray,
     if not isinstance(selection, tuple):
         selection = (selection,)
 
-    if selection.count(Ellipsis) > 1:
+    # Compare by identity: an array entry (a valid fancy index) makes ``== Ellipsis``
+    # return an array, so ``count``/``in``/``index`` would raise on the ambiguous truth value.
+    ellipsis_at = [i for i, item in enumerate(selection) if item is Ellipsis]
+    if len(ellipsis_at) > 1:
         raise IndexError("An index can only have a single ellipsis ('...').")
-    if Ellipsis in selection:
-        at = selection.index(Ellipsis)
+    if ellipsis_at:
+        at = ellipsis_at[0]
         fill = len(shape) - (len(selection) - 1)
         selection = selection[:at] + (slice(None),) * fill + selection[at + 1 :]
     if len(selection) > len(shape):
@@ -340,6 +343,10 @@ def _normalize(selection: Any, shape: tuple[int, ...]) -> list[tuple[np.ndarray,
             values = np.asarray(index)
             if values.dtype == bool or values.ndim != 1 or values.size == 0:
                 raise _Unsupported("boolean or non-1d index")
+            if not np.issubdtype(values.dtype, np.integer):
+                # h5py rejects float/other indices; astype(intp) would silently truncate
+                # them, so hand back to h5py to preserve its behaviour.
+                raise _Unsupported("non-integer index")
             values = values.astype(np.intp)
             values = np.where(values < 0, values + size, values)
             if np.any(values < 0) or np.any(values >= size):
