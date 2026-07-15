@@ -7,6 +7,7 @@ command-line usage.
 """
 
 import functools
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,7 @@ from zea.data.file import File, load_file_all_data_types
 from zea.data.spec import DEFAULT_COMPRESSION
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
+from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.log import logger
 
 ALL_DATA_TYPES_EXCEPT_RAW = set(_IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES) - {"raw_data"}
@@ -53,7 +55,8 @@ def save_file(
     """Saves data to a zea data file (h5py file).
 
     Args:
-        path (str, pathlike): The path to the hdf5 file.
+        path (str, pathlike): The path to the hdf5 file. Must be a local path; ``hf://``
+            paths are read-only and cannot be used as a save destination.
         parameters (Parameters): The parameters object containing acquisition and probe
             parameters.
         raw_data (np.ndarray): The data to save.
@@ -94,6 +97,11 @@ def save_file(
         chunk_frames (bool, optional): Whether to store the data datasets with HDF5
             chunked storage, using one frame per chunk. Defaults to False.
     """
+    if str(path).startswith(HF_PREFIX):
+        raise ValueError(
+            f"Cannot save to an 'hf://' path: {path}. 'hf://' paths are read-only; "
+            "save to a local path instead."
+        )
 
     data = {}
     for key, arr in [
@@ -124,7 +132,7 @@ def save_file(
     )
 
 
-def _iter_folder_io(input_path: Path, output_path: Path):
+def _iter_folder_io(input_path: str | Path, output_path: str | Path):
     """Yields ``(input_file, output_file)`` path pairs for a folder operation.
 
     Uses :class:`zea.Dataset` to iterate over every zea file in ``input_path``. The
@@ -150,10 +158,17 @@ def _supports_folders(operation):
     applied to every zea file in that folder (iterated with :class:`zea.Dataset`),
     writing the results to ``output_path`` and mirroring the input folder structure.
     A single file is processed as before.
+
+    ``input_path`` may also be an ``hf://`` path (pointing at a single file or a
+    folder in a Hugging Face dataset repo); it is downloaded via
+    :func:`zea.internal.preset_utils._hf_resolve_path` before dispatching.
     """
 
     @functools.wraps(operation)
     def wrapper(input_path, output_path, *args, **kwargs):
+        input_path = str(input_path)
+        if input_path.startswith(HF_PREFIX):
+            input_path = _hf_resolve_path(input_path)
         if not Path(input_path).is_dir():
             return operation(input_path, output_path, *args, **kwargs)
         output_path = Path(output_path)
@@ -169,7 +184,7 @@ def _supports_folders(operation):
     return wrapper
 
 
-def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
+def sum_data(input_paths: Sequence[str | Path], output_path: str | Path, overwrite=False):
     """
     Sums multiple raw data files and saves the result to a new file.
 
@@ -178,9 +193,9 @@ def sum_data(input_paths: list[Path], output_path: Path, overwrite=False):
     averaging in the linear domain.
 
     Args:
-        input_paths (list[Path]): List of paths to the input raw data files. Each path
-            may be a single file or a folder; folders are expanded into all zea files
-            they contain (using :class:`zea.Dataset`).
+        input_paths (list[str, Path]): List of paths to the input raw data files. Each path
+            may be a single file, a folder, or an ``hf://`` path; folders (local or ``hf://``)
+            are expanded into all zea files they contain (using :class:`zea.Dataset`).
         output_path (Path): Path to the output file where the summed data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists.
             Defaults to False.
@@ -283,12 +298,13 @@ def _assert_shapes_equal(array0, array1, name="array"):
 
 
 @_supports_folders
-def compound_frames(input_path: Path, output_path: Path, overwrite=False):
+def compound_frames(input_path: str | Path, output_path: str | Path, overwrite=False):
     """
     Compounds frames in a raw data file by averaging them.
 
     Args:
-        input_path (Path): Path to the input raw data file, or a folder of files.
+        input_path (str, Path): Path to the input raw data file, or a folder of files.
+            Also accepts an ``hf://`` path (file or folder).
         output_path (Path): Path to the output file (or folder) where the compounded
             data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists.
@@ -344,7 +360,7 @@ def compound_frames(input_path: Path, output_path: Path, overwrite=False):
 
 
 @_supports_folders
-def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
+def compound_transmits(input_path: str | Path, output_path: str | Path, overwrite=False):
     """
     Compounds transmits in a raw data file by averaging them.
 
@@ -353,7 +369,8 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
         function will result in incorrect scan parameters.
 
     Args:
-        input_path (Path): Path to the input raw data file, or a folder of files.
+        input_path (str, Path): Path to the input raw data file, or a folder of files.
+            Also accepts an ``hf://`` path (file or folder).
         output_path (Path): Path to the output file (or folder) where the compounded
             data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists.
@@ -418,8 +435,8 @@ def _check_all_identical(array, axis=0):
 
 @_supports_folders
 def resave(
-    input_path: Path,
-    output_path: Path,
+    input_path: str | Path,
+    output_path: str | Path,
     overwrite=False,
     enable_compression=True,
     chunk_frames=False,
@@ -428,7 +445,8 @@ def resave(
     Resaves a zea data file to a new location.
 
     Args:
-        input_path (Path): Path to the input zea data file, or a folder of files.
+        input_path (str, Path): Path to the input zea data file, or a folder of files.
+            Also accepts an ``hf://`` path (file or folder).
         output_path (Path): Path to the output file (or folder) where the data will be saved.
         overwrite (bool, optional): Whether to overwrite the output file if it exists.
             Defaults to False.
@@ -459,8 +477,8 @@ def resave(
 
 @_supports_folders
 def extract_frames_transmits(
-    input_path: Path,
-    output_path: Path,
+    input_path: str | Path,
+    output_path: str | Path,
     frame_indices=slice(None),
     transmit_indices=slice(None),
     overwrite=False,
@@ -473,7 +491,8 @@ def extract_frames_transmits(
     information on the supported index types.
 
     Args:
-        input_path (Path): Path to the input raw data file, or a folder of files.
+        input_path (str, Path): Path to the input raw data file, or a folder of files.
+            Also accepts an ``hf://`` path (file or folder).
         output_path (Path): Path to the output file (or folder) where the extracted
             data will be saved.
         frame_indices (list, array-like, or slice): Indices of the frames to keep.
@@ -502,21 +521,22 @@ def extract_frames_transmits(
     )
 
 
-def summary(input_path: Path):
+def summary(input_path: str | Path):
     """Prints a summary of a zea data file to the console.
 
     Args:
-        input_path (Path): Path to the zea data file.
+        input_path (str, Path): Path to the zea data file. Also accepts an ``hf://`` path.
     """
     with File(input_path) as f:
         f.summary()
 
 
-def copy(src: Path, dst: Path, key: str, mode: str | None = None):
+def copy(src: str | Path, dst: str | Path, key: str, mode: str | None = None):
     """Copies zea files to a new location using :meth:`zea.Dataset.copy`.
 
     Args:
-        src (Path): Source path. Can be a single file, a list of files, or a folder.
+        src (str, Path): Source path. Can be a single file, a list of files, a folder,
+            or an ``hf://`` path.
         dst (Path): Destination folder path.
         key (str): Key to access in the HDF5 files. Use ``"all"`` or ``"*"`` to copy
             everything.
@@ -528,8 +548,9 @@ def copy(src: Path, dst: Path, key: str, mode: str | None = None):
     dataset.copy(dst, key, mode=mode)
 
 
-def _delete_file_if_exists(path: Path):
+def _delete_file_if_exists(path: str | Path):
     """Deletes a file if it exists."""
+    path = Path(path)
     if path.exists():
         path.unlink()
 

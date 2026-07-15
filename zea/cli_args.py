@@ -139,9 +139,9 @@ class ProcessArgs:
 class _Sum:
     """Sum the raw data of multiple files or folders."""
 
-    input_paths: tyro.conf.Positional[list[Path]]
-    """Paths to the input files or folders."""
-    output_path: Path
+    input_paths: tyro.conf.Positional[list[str]]
+    """Paths to the input files or folders. Also accepts 'hf://' paths."""
+    output_path: str
     """Output HDF5 file. Passed as ``--output-path`` because the inputs are variadic."""
     overwrite: bool = False
     """Overwrite existing output file."""
@@ -158,9 +158,9 @@ class _Sum:
 class _CompoundFrames:
     """Compound frames to increase SNR."""
 
-    input_path: tyro.conf.Positional[Path]
-    """Input HDF5 file or folder."""
-    output_path: tyro.conf.Positional[Path]
+    input_path: tyro.conf.Positional[str]
+    """Input HDF5 file or folder. Also accepts an 'hf://' path."""
+    output_path: tyro.conf.Positional[str]
     """Output HDF5 file or folder."""
     overwrite: bool = False
     """Overwrite existing output file."""
@@ -177,9 +177,9 @@ class _CompoundFrames:
 class _CompoundTransmits:
     """Compound transmits to increase SNR."""
 
-    input_path: tyro.conf.Positional[Path]
-    """Input HDF5 file or folder."""
-    output_path: tyro.conf.Positional[Path]
+    input_path: tyro.conf.Positional[str]
+    """Input HDF5 file or folder. Also accepts an 'hf://' path."""
+    output_path: tyro.conf.Positional[str]
     """Output HDF5 file or folder."""
     overwrite: bool = False
     """Overwrite existing output file."""
@@ -196,9 +196,9 @@ class _CompoundTransmits:
 class _Resave:
     """Resave a file to change format version."""
 
-    input_path: tyro.conf.Positional[Path]
-    """Input HDF5 file or folder."""
-    output_path: tyro.conf.Positional[Path]
+    input_path: tyro.conf.Positional[str]
+    """Input HDF5 file or folder. Also accepts an 'hf://' path."""
+    output_path: tyro.conf.Positional[str]
     """Output HDF5 file or folder."""
     overwrite: bool = False
     """Overwrite existing output file."""
@@ -223,9 +223,9 @@ class _Resave:
 class _Extract:
     """Extract subset of frames or transmits."""
 
-    input_path: tyro.conf.Positional[Path]
-    """Input HDF5 file or folder."""
-    output_path: tyro.conf.Positional[Path]
+    input_path: tyro.conf.Positional[str]
+    """Input HDF5 file or folder. Also accepts an 'hf://' path."""
+    output_path: tyro.conf.Positional[str]
     """Output HDF5 file or folder."""
     transmits: list[str] = field(default_factory=lambda: ["all"])
     """Target transmits. Can be a list of integers or ranges (e.g. 0-3 7)."""
@@ -250,8 +250,8 @@ class _Extract:
 class _Summary:
     """Print a summary of a zea data file to the console."""
 
-    input_path: tyro.conf.Positional[Path]
-    """Input HDF5 file."""
+    input_path: tyro.conf.Positional[str]
+    """Input HDF5 file. Also accepts an 'hf://' path."""
 
     def run(self):
         from zea.data.file_operations import summary
@@ -268,9 +268,9 @@ class _Copy:
     how the data is written (append, overwrite, etc.).
     """
 
-    src: tyro.conf.Positional[Path]
-    """Source file or folder path."""
-    dst: tyro.conf.Positional[Path]
+    src: tyro.conf.Positional[str]
+    """Source file or folder path. Also accepts an 'hf://' path."""
+    dst: tyro.conf.Positional[str]
     """Destination folder path."""
     key: str
     """Key to access in the HDF5 files."""
@@ -305,6 +305,12 @@ def _run_data_command(command) -> None:
     from zea.log import logger
 
     output_path = getattr(command, "output_path", None)
+    dst = getattr(command, "dst", None)
+    if (output_path is not None and str(output_path).startswith("hf://")) or (
+        dst is not None and str(dst).startswith("hf://")
+    ):
+        logger.error("Output path cannot be an 'hf://' path; 'hf://' is only supported for inputs.")
+        raise SystemExit(1)
     if (
         output_path is not None
         and Path(output_path).is_file()
@@ -321,7 +327,8 @@ class DataArgs:
 
     All operations accept files; folder inputs are also supported. For file-to-file
     operations, each zea file in the input folder is processed and written to a
-    mirrored path in the output folder.
+    mirrored path in the output folder. Inputs also accept ``hf://`` paths (a single
+    file or a folder in a Hugging Face dataset repo); outputs must be local paths.
     """
 
     subcommand: tyro.conf.OmitSubcommandPrefixes[DataCommand]

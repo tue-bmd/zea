@@ -139,3 +139,70 @@ def test_app_flags():
     args = cli_args.subcommand
     assert args.share is True
     assert args.server_port == 7861
+
+
+@pytest.mark.parametrize(
+    "argv,attr",
+    [
+        (["data", "resave", "hf://zeahub/data/file.h5", "out.hdf5"], "input_path"),
+        (["data", "compound_frames", "hf://zeahub/data/", "out/"], "input_path"),
+        (["data", "compound_transmits", "hf://zeahub/data/file.h5", "out.hdf5"], "input_path"),
+        (["data", "extract", "hf://zeahub/data/file.h5", "out.hdf5"], "input_path"),
+        (["data", "summary", "hf://zeahub/data/file.h5"], "input_path"),
+        (["data", "copy", "hf://zeahub/data/", "out/", "--key", "all"], "src"),
+    ],
+)
+def test_data_subcommands_preserve_hf_paths(argv, attr):
+    """'hf://' URIs must survive tyro parsing unchanged: as a `Path`, the double slash
+    collapses to `PosixPath('hf:/org/repo')`, breaking the 'hf://' prefix checks used to
+    resolve Hugging Face paths. These fields are parsed as `str` to avoid that."""
+    args = parse_args(argv).subcommand.subcommand
+    assert getattr(args, attr) == argv[2]
+
+
+def test_data_sum_preserves_hf_paths():
+    """`sum`'s variadic input_paths must also survive as unmangled 'hf://' strings."""
+    cli_args = parse_args(
+        ["data", "sum", "hf://zeahub/a", "hf://zeahub/b", "--output-path", "out.hdf5"]
+    )
+    args = cli_args.subcommand.subcommand
+    assert args.input_paths == ["hf://zeahub/a", "hf://zeahub/b"]
+
+
+def test_data_output_path_rejects_hf():
+    """CLI-level guard: 'hf://' is read-only and cannot be used as an output_path."""
+    from zea.cli_args import _run_data_command
+
+    cli_args = parse_args(["data", "resave", "in.hdf5", "hf://zeahub/out.hdf5"])
+    with pytest.raises(SystemExit) as exc_info:
+        _run_data_command(cli_args.subcommand.subcommand)
+    assert exc_info.value.code != 0
+
+
+def test_data_copy_dst_rejects_hf():
+    """CLI-level guard also applies to `copy`'s dst, which uses a different field name."""
+    from zea.cli_args import _run_data_command
+
+    cli_args = parse_args(["data", "copy", "in.hdf5", "hf://zeahub/out/", "--key", "all"])
+    with pytest.raises(SystemExit) as exc_info:
+        _run_data_command(cli_args.subcommand.subcommand)
+    assert exc_info.value.code != 0
+
+
+def test_data_output_path_local_runs_and_overwrites(tmp_path):
+    """A local (non-'hf://') output_path is unaffected by the 'hf://' guard and,
+    with --overwrite, replaces an existing output file."""
+    from zea.cli_args import _run_data_command
+    from zea.data.file import validate_file
+
+    from .data import generate_example_dataset
+
+    input_path = tmp_path / "in.hdf5"
+    output_path = tmp_path / "out.hdf5"
+    generate_example_dataset(input_path)
+    output_path.write_bytes(b"stale")
+
+    cli_args = parse_args(["data", "resave", str(input_path), str(output_path), "--overwrite"])
+    _run_data_command(cli_args.subcommand.subcommand)
+
+    validate_file(output_path)
