@@ -28,6 +28,7 @@ Two details carry most of the win and are easy to lose in a refactor:
 from __future__ import annotations
 
 import os
+import threading
 import zlib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -103,23 +104,38 @@ class Fetcher:
 class LocalFetcher(Fetcher):
     """Reads chunk bytes from the file descriptor.
 
-    ``os.pread`` is positional, so it needs no seek and no lock: the decode workers each read
-    the descriptor themselves, overlapping I/O with decoding (31 ms against 46 ms for a
-    16-chunk read). ``read_direct_chunk`` would do neither — it takes h5py's global lock and
-    copies each chunk an extra time.
+    ``os.pread`` is positional, so it needs no seek and no lock: reading a raw OS descriptor
+    touches none of h5py/HDF5's state, so the decode workers each read the descriptor
+    themselves, overlapping I/O with decoding (31 ms against 46 ms for a 16-chunk read).
+
+    ``os.pread`` is Unix-only, though. On Windows it is absent, so we fall back to a
+    lock-guarded ``lseek`` + ``read``: the workers share the fd's file position, so the reads
+    serialise there, but decoding still overlaps across chunks. (``read_direct_chunk`` under a
+    lock would serve here too, but it is slower and drags in HDF5's chunk API for no gain.)
     """
 
     per_chunk = True
 
     def __init__(self, path: str | os.PathLike):
         self._fd: int | None = os.open(os.fspath(path), os.O_RDONLY)
+        # No lock needed when os.pread is available (its positional read is thread-safe).
+        self._lock = None if hasattr(os, "pread") else threading.Lock()
+
+    def _pread(self, offset: int, size: int) -> bytes:
+        """Read ``size`` bytes at ``offset``, thread-safely, on any platform."""
+        assert self._fd is not None  # fetch() guards against a closed file before calling
+        if self._lock is None:
+            return os.pread(self._fd, size, offset)
+        with self._lock:  # Windows: seek+read is not atomic, so guard the shared position.
+            os.lseek(self._fd, offset, os.SEEK_SET)
+            return os.read(self._fd, size)
 
     def fetch(self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None) -> list[bytes]:
         if self._fd is None:
             raise ValueError("Cannot read chunks: the file has been closed.")
         out = []
         for offset, size in ranges:
-            out.append(os.pread(self._fd, int(size), int(offset)))
+            out.append(self._pread(int(offset), int(size)))
             if on_bytes is not None:
                 on_bytes(int(size))
         return out
