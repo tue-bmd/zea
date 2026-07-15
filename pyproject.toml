@@ -38,8 +38,8 @@ dependencies = [
     "keras >=3.12.1",
     "h5py >=3.11",
     "hdf5plugin >=4.4",
-    # Decodes HDF5 chunks in-process for the concurrent read path (zea.data.chunk_reader).
     "numcodecs >=0.13",
+    "fsspec[http]",
     "numpy >= 1.24",
     "matplotlib >=3.10",
     "scipy >=1.13",
@@ -121,12 +121,7 @@ zea = "zea.__main__:main"
 packages = ["zea"]
 
 [tool.hatch.build.targets.sdist]
-include = [
-    "/zea",
-    "/README.md",
-    "/LICENSE",
-    "/CITATION.cff",
-]
+include = ["/zea", "/README.md", "/LICENSE", "/CITATION.cff"]
 
 [tool.ruff]
 # We use ruff to lint and auto-format code

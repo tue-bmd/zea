@@ -510,7 +510,7 @@ def _ticker(progress: bool | Ticker, total: int):
 
     from tqdm.auto import tqdm  # tqdm.auto: renders as a widget in notebooks, text elsewhere
 
-    with tqdm(total=total, unit="B", unit_scale=True, desc="reading chunks") as bar:
+    with tqdm(total=total, unit="B", unit_scale=True, desc="streaming data") as bar:
         yield bar.update
 
 
