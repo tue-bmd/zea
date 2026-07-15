@@ -960,7 +960,7 @@ class AnisotropicDiffusion(Operation):
     """Speckle Reducing Anisotropic Diffusion (SRAD) filter.
 
     Reference:
-    - https://www.researchgate.net/publication/5602035_Speckle_reducing_anisotropic_diffusion
+    - https://doi.org/10.1109/TIP.2002.804276
     - https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox
     """
 

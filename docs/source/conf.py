@@ -235,6 +235,12 @@ linkcheck_ignore = [
     # Colab blocks automated (non-browser) requests to notebook/asset URLs,
     # so these always report as broken even when perfectly valid.
     r"^https://colab\.research\.google\.com/",
+    # Publishers/hosts below return 403 to automated requests (confirmed
+    # working in a browser) even though the DOI/link itself is valid.
+    r"^https://doi\.org/10\.1098/rsta\.2024\.0327$",  # royalsocietypublishing.org
+    r"^https://doi\.org/10\.1001/jamacardio\.2021\.6059$",  # jamanetwork.com
+    r"^https://doi\.org/10\.1016/j\.ultrasmedbio\.2024\.12\.008$",  # sciencedirect.com
+    r"^https://nl\.mathworks\.com/matlabcentral/",
 ]
 
 

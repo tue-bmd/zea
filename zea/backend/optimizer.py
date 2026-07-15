@@ -6,8 +6,9 @@ import keras
 def adam(step_size, b1=0.9, b2=0.999, eps=1e-8):
     """Construct optimizer triple for Adam.
 
-    Implementation adapted from `JAX's example <https://jax.readthedocs.io/en/latest/_modules/jax/example_libraries/optimizers.html#adam>`_
-    See example usage: `JAX's example usage <https://jax.readthedocs.io/en/latest/jax.example_libraries.optimizers.html#jax.example_libraries.optimizers.adam>`_
+    Implementation adapted from `JAX's example
+    <https://github.com/jax-ml/jax/blob/main/jax/example_libraries/optimizers.py>`_
+    See example usage: `JAX's example usage <https://docs.jax.dev/en/latest/jax.example_libraries.optimizers.html#jax.example_libraries.optimizers.adam>`_
 
     Args:
         step_size: positive scalar
