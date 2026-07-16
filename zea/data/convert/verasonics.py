@@ -68,7 +68,6 @@ from zea.data.convert.utils import (
     write_dataset_card,
 )
 from zea.data.file import CustomElement, File
-from zea.data.spec import DEFAULT_COMPRESSION
 from zea.func import log_compress, normalize
 from zea.internal.device import init_device
 from zea.utils import strtobool
@@ -1196,7 +1195,6 @@ class VerasonicsFile(h5py.File):
         output_path,
         frames=None,
         allow_accumulate=False,
-        enable_compression=True,
         additional_functions=None,
         lens_sound_speed: float = 1000.0,
     ):
@@ -1213,8 +1211,6 @@ class VerasonicsFile(h5py.File):
                 In this case, the mode in the Receive structure is set to 1 (accumulate).
                 If this flag is set to False, an error is raised when such a mode is detected.
                 Defaults to False.
-            enable_compression (bool, optional): Whether to enable compression when saving
-                the zea file. Defaults to True.
             additional_functions (list, optional): A list of functions that read additional
                 data from the file. Each function should take the `VerasonicsFile` as input
                 and return a `CustomElement`. Defaults to None.
@@ -1234,7 +1230,6 @@ class VerasonicsFile(h5py.File):
 
         # Generate the zea dataset
         log.info("Generating zea dataset...")
-        compression = DEFAULT_COMPRESSION if enable_compression else None
         File.create(
             path=output_path,
             data=data_dict,
@@ -1242,7 +1237,6 @@ class VerasonicsFile(h5py.File):
             probe=probe_dict,
             description="Verasonics data",
             custom=custom_elements,
-            compression=compression,
         )
 
 
@@ -1594,7 +1588,6 @@ def convert_verasonics(args):
                 file_output_path,
                 frames=args.frames,
                 allow_accumulate=args.allow_accumulate,
-                enable_compression=not args.no_compression,
             )
             num_converted += 1
         except Exception:

@@ -3,10 +3,12 @@
 import contextlib
 import difflib
 import enum
+import inspect
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import TYPE_CHECKING, List, Tuple, Union, cast
+from pathlib import Path, PurePath
+from typing import TYPE_CHECKING, Any, List, Tuple, Union, cast
 
 import h5py
 import numpy as np
@@ -15,6 +17,7 @@ import zea
 from zea import log
 from zea.data.legacy_file import legacy_data, legacy_probe, legacy_scan
 from zea.data.spec import (
+    DEFAULT_CHUNK_AXES,
     DEFAULT_COMPRESSION,
     DataSpec,
     FileSpec,
@@ -24,11 +27,22 @@ from zea.data.spec import (
     ScanSpec,
 )
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
-from zea.internal.core import DataTypes
-from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
+from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path, _hf_stream_open
 from zea.internal.utils import deprecated
 
 _ZEA_ISSUES_URL = "https://github.com/tue-bmd/zea/issues"
+
+# h5py.File's own named parameters (everything but its **kwds catch-all). Kept for streamed
+# hf:// opens: h5py validates unknown kwargs itself for a plain path, but for a file-like
+# object it routes them to the 'fileobj' driver, which silently ignores anything it does not
+# recognise (see _set_fapl_fileobj) instead of raising — so a typo like ``version=`` for
+# ``revision=`` would otherwise vanish rather than error.
+_H5PY_FILE_KWARGS = frozenset(inspect.signature(h5py.File.__init__).parameters) - {
+    "self",
+    "name",
+    "mode",
+    "kwds",
+}
 
 if TYPE_CHECKING:
     # ``Self`` is in ``typing`` only from 3.11; import lazily to keep the
@@ -128,15 +142,61 @@ class _StringDataset:
         return f"<StringDataset shape={self._ds.shape} dtype=str>"
 
 
+class ChunkedDataset:
+    """An ``h5py.Dataset`` whose reads go through :mod:`zea.data.chunk_reader`.
+
+    Behaves exactly like the dataset it wraps, except that slicing fetches the chunk byte
+    ranges itself and decodes them concurrently; reads the fast path does not understand fall
+    back to h5py, so the result is always what h5py would have returned.
+
+    Handed out by :class:`_GroupProxy`, so ``file.data.raw_data[0:8]`` is already on the fast
+    path. ``file["data/raw_data"]`` still returns the bare ``h5py.Dataset``.
+    """
+
+    __slots__ = ("_dset", "_fetcher")
+
+    def __init__(self, dset: h5py.Dataset, fetcher):
+        self._dset = dset
+        self._fetcher = fetcher
+
+    def __getitem__(self, selection):
+        from zea.data.chunk_reader import read
+
+        progress = getattr(self._fetcher, "progress", False)
+        return read(self._dset, selection, self._fetcher, progress)
+
+    def __setitem__(self, selection, value):
+        # Writes never take the read fast path; forward straight to the underlying dataset
+        # so ``file.data.raw_data[...] = value`` keeps behaving like a bare h5py.Dataset.
+        self._dset[selection] = value
+
+    def __getattr__(self, name: str):
+        return getattr(self._dset, name)
+
+    def __array__(self, dtype=None, copy=None):
+        values = self[...]
+        return values if dtype is None else values.astype(dtype)
+
+    def __len__(self):
+        return len(self._dset)
+
+    def __iter__(self):
+        for index in range(len(self._dset)):
+            yield self[index]
+
+    def __repr__(self):
+        return f"<ChunkedDataset {self._dset.name} shape={self.shape} dtype={self.dtype}>"
+
+
 class _GroupProxy:
     """Lazy proxy for an h5py.Group that exposes children as attributes.
 
-    Datasets are returned as-is (h5py.Dataset supports slicing without
-    loading everything into RAM).  Sub-groups are wrapped in another
-    ``GroupProxy`` so the dot-access pattern works recursively::
+    Datasets are returned as :class:`ChunkedDataset` – they slice like an
+    ``h5py.Dataset`` (nothing is loaded until you index them), but the read goes
+    through :mod:`zea.data.chunk_reader`, which fetches the chunks concurrently::
 
         with File(path) as f:
-            # returns h5py.Dataset – no data loaded yet
+            # returns ChunkedDataset – no data loaded yet
             f.data.raw_data
             # slicing triggers the actual read, just like plain h5py
             f.data.raw_data[:, :n_tx]
@@ -148,10 +208,11 @@ class _GroupProxy:
     than raw ``bytes``.
     """
 
-    __slots__ = ("_group",)
+    __slots__ = ("_group", "_fetcher")
 
-    def __init__(self, group: h5py.Group):
+    def __init__(self, group: h5py.Group, fetcher=None):
         self._group = group
+        self._fetcher = fetcher
 
     def __getattr__(self, name: str):
         try:
@@ -162,10 +223,10 @@ class _GroupProxy:
                 f"Available keys: {list(self._group.keys())}"
             )
         if isinstance(child, h5py.Group):
-            return _GroupProxy(child)
+            return _GroupProxy(child, self._fetcher)
         if isinstance(child, h5py.Dataset) and h5py.check_string_dtype(child.dtype):
             return _StringDataset(child)
-        return child  # h5py.Dataset – supports slicing natively
+        return ChunkedDataset(child, self._fetcher)
 
     def __dir__(self):
         return list(self._group.keys())
@@ -263,7 +324,7 @@ class Track:
                 parameters = track.load_parameters()
     """
 
-    __slots__ = ("_index", "_group", "_timestamps", "_label", "_probe")
+    __slots__ = ("_index", "_group", "_timestamps", "_label", "_probe", "_fetcher")
 
     # Declared for type checkers only: the values live in the slots above and
     # are populated in __init__ via ``object.__setattr__`` (Track is immutable).
@@ -272,6 +333,7 @@ class Track:
     _timestamps: "np.ndarray | None"
     _label: "str | None"
     _probe: "dict | None"
+    _fetcher: Any
 
     def __init__(
         self,
@@ -280,12 +342,14 @@ class Track:
         timestamps: "np.ndarray | None" = None,
         label: "str | None" = None,
         probe: "dict | None" = None,
+        fetcher: Any = None,
     ):
         object.__setattr__(self, "_index", index)
         object.__setattr__(self, "_group", group)
         object.__setattr__(self, "_timestamps", timestamps)
         object.__setattr__(self, "_label", label)
         object.__setattr__(self, "_probe", probe)
+        object.__setattr__(self, "_fetcher", fetcher)
 
     @property
     def data(self) -> "_DataProxy":
@@ -295,7 +359,7 @@ class Track:
                 f"Track {self._index} has no 'data' group. "
                 f"Available keys: {list(self._group.keys())}"
             )
-        return cast("_DataProxy", _GroupProxy(self._group["data"]))
+        return cast("_DataProxy", _GroupProxy(self._group["data"], self._fetcher))
 
     @property
     def scan(self) -> "ScanSpec":
@@ -624,7 +688,16 @@ def _warn_custom_keys(data: dict, metadata: dict):
 
 
 class File(h5py.File):
-    """File handler for ``zea`` formatted ultrasound files. Extends the h5py.File class."""
+    """File handler for ``zea`` formatted ultrasound files. Extends the h5py.File class.
+
+    Has functionality to read and write zea files, as well as to access the data, parameters
+    and metadata in the file.
+
+    In contrast to `h5py.File`, this class can read and decompress chunks concurrently
+    for some codecs (e.g. the zea default). If it cannot use the fast path, it will fallback to
+    the standard `h5py.File` behavior, and will throw a relevant warning to point the user
+    to the issue. See :mod:`zea.data.chunk_reader` for details.
+    """
 
     def __init__(self, name, mode="r", *args, **kwargs):
         """Initialize the file.
@@ -635,13 +708,37 @@ class File(h5py.File):
                 the prefix 'hf://', in which case it will be resolved to a
                 huggingface path.
             mode (str, optional): The mode to open the file in. Defaults to "r".
+            stream (bool, optional): Only used when ``name`` starts with ``hf://``.
+                When ``True`` (the default for ``hf://`` paths), the file is read
+                lazily over HTTP range requests via
+                :class:`~huggingface_hub.HfFileSystem` — only the byte ranges
+                actually accessed (e.g. the frames you slice) are fetched, instead
+                of downloading the whole file. Requires read mode (``"r"``). Pass
+                ``stream=False`` to download the full file to the local cache
+                (the previous behaviour), which is required for writing.
             revision (str, optional): HuggingFace revision (branch, tag, or commit hash)
-                to download from. Only used when ``name`` starts with ``hf://``.
-                Defaults to ``"main"``. Example: ``revision="v0.1.0"``.
+                to read from. Only used when ``name`` starts with ``hf://``.
+                Defaults to the repository default branch. Example: ``revision="v0.1.0"``.
             repo_type (str, optional): HuggingFace repository type. Only used when
                 ``name`` starts with ``hf://``. Defaults to ``"dataset"``.
             cache_dir (str or Path, optional): Local cache directory for downloaded
-                HuggingFace files. Only used when ``name`` starts with ``hf://``.
+                HuggingFace files. Only used when ``name`` starts with ``hf://`` and
+                ``stream=False``.
+            block_size (int, optional): Block size in bytes for streaming reads.
+                zea files store each frame as many small chunks, so a larger block
+                coalesces more chunk reads into a single HTTP request — faster for
+                whole-frame reads, at the cost of more over-fetch for sparse reads.
+                Only used when ``name`` starts with ``hf://`` and ``stream=True``.
+            cache_type (str, optional): fsspec cache strategy for streaming reads
+                (default ``"blockcache"``). Only used when ``name`` starts with
+                ``hf://`` and ``stream=True``.
+            progress (bool or callable, optional): Report progress while streaming chunks.
+                Also settable after opening (``file.progress = True``). Defaults to ``True``
+                for streamed files, ``False`` otherwise. Reads that fall back to h5py
+                (an lzf file, a strided selection) report no per-chunk progress.
+            cache (bool, optional): Cache fetched/streamed chunks on disk so a repeated read is
+                served locally instead of re-downloaded (default ``True``, streamed files only; see
+                :mod:`zea.data.chunk_cache`).
             *args: Additional arguments to pass to h5py.File.
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
@@ -651,26 +748,141 @@ class File(h5py.File):
         )
 
         # Extract HF-only kwargs so they never reach h5py
-        hf_kwargs = {}
-        for key in ("revision", "repo_type", "cache_dir"):
+        hf_kwargs: dict[str, Any] = {}
+        for key in ("revision", "repo_type", "cache_dir", "block_size", "cache_type"):
             if key in kwargs:
                 hf_kwargs[key] = kwargs.pop(key)
 
+        is_hf = str(name).startswith(HF_PREFIX)
+
+        # Streaming (HTTP range requests) is the default for hf:// paths: only the
+        # bytes actually read are fetched, rather than downloading the whole file.
+        stream = kwargs.pop("stream", None)
+        if stream is None:
+            stream = is_hf
+        elif stream and not is_hf:
+            raise ValueError("stream=True is only supported for 'hf://' paths.")
+
+        # Progress reporting for concurrent chunk reads
+        progress = kwargs.pop("progress", True)
+
+        # Cache streamed chunks on disk (see zea.data.chunk_cache). On by default, like the
+        # HF hub cache; ``cache=False`` (or ZEA_CHUNK_CACHE=0) re-fetches every time.
+        cache_chunks = kwargs.pop("cache", True)
+
+        # File object opened for streaming; kept so we can close it in close().
+        stream_fileobj = None
+        # Original source path, retained for streamed files whose ``filename`` is
+        # just a placeholder for the underlying file object (see ``path``).
+        source_name = None
+
         # Resolve huggingface path
-        if str(name).startswith(HF_PREFIX):
+        if is_hf and stream:
+            if mode != "r":
+                raise ValueError(
+                    "Streaming hf:// files is only supported in read mode ('r'). "
+                    "Pass stream=False to download the file for other modes."
+                )
+            # A file-like object routes through h5py's 'fileobj' driver, which silently drops
+            # any kwarg it does not recognise (see _H5PY_FILE_KWARGS) rather than raising —
+            # so check now, before that swallows a typo like version= for revision=.
+            unknown = set(kwargs) - _H5PY_FILE_KWARGS
+            if unknown:
+                raise TypeError(
+                    f"'{next(iter(unknown))}' is an invalid keyword argument for zea.File."
+                )
+
+            # cache_dir only applies to full downloads; it is irrelevant here.
+            hf_kwargs.pop("cache_dir", None)
+            source_name = str(name)
+            stream_fileobj = _hf_stream_open(str(name), **hf_kwargs)
+
+            # Serve the HDF5 metadata h5py walks on open from the cache too, not just the
+            # data chunks: it is the same file, and re-opening otherwise re-fetches it every
+            # time (~0.4 s, and ~3 s whenever HF's CDN stalls on a cold object).
+            if cache_chunks:
+                from zea.data.chunk_cache import CachedFile, cache_for
+
+                chunk_cache = cache_for(getattr(stream_fileobj, "details", None) or {})
+                if chunk_cache is not None:
+                    stream_fileobj = CachedFile(stream_fileobj, chunk_cache)
+
+            name = stream_fileobj
+        elif is_hf:
+            # Full download (previous behaviour); block_size/cache_type are
+            # streaming-only.
+            hf_kwargs.pop("block_size", None)
+            hf_kwargs.pop("cache_type", None)
             name = _hf_resolve_path(str(name), **hf_kwargs)
 
-        # Disable locking for read mode by default
-        if "locking" not in kwargs and mode == "r":
+        # Disable locking for read mode by default. Locking is meaningless for an
+        # in-memory/streamed file object, so only apply it to real filesystem paths.
+        if stream_fileobj is None and "locking" not in kwargs and mode == "r":
             # If the file is opened in read mode, disable locking
             kwargs["locking"] = False
 
         # Initialize the h5py.File
-        super().__init__(name, mode, *args, **kwargs)
+        try:
+            super().__init__(name, mode, *args, **kwargs)
+        except Exception:
+            if stream_fileobj is not None:
+                stream_fileobj.close()
+            raise
+        self._stream_fileobj = stream_fileobj
+        self._source_name = source_name
+        self._hf_kwargs = hf_kwargs
+        # Source of raw chunk bytes for the concurrent read path, built on first use (it
+        # opens a file descriptor / an HTTP session, which a write-only user never needs).
+        self._fetcher: Any = None
+        self._fetcher_built = False
+        self._progress = progress
+        self._cache_chunks = cache_chunks
 
         # Warn when opening an existing file that pre-dates zea v0.1.0
         if mode in ("r", "r+"):
             _warn_if_legacy_file(self)
+
+    @property
+    def progress(self):
+        """Whether chunk reads report progress (see :func:`zea.data.chunk_reader.read`).
+
+        ``True`` draws a tqdm bar over the compressed bytes of each read; a callable is
+        invoked with each chunk's size as it lands. Settable after opening::
+
+            with File("hf://...") as file:
+                file.progress = True
+                file.data.raw_data[:5]
+
+        Reads that fall back to h5py (an lzf file, a strided selection) report no per-chunk
+        progress — h5py fetches the whole selection in one opaque call.
+        """
+        return self._progress
+
+    @progress.setter
+    def progress(self, value):
+        self._progress = value
+        if self._fetcher_built and self._fetcher is not None:
+            self._fetcher.progress = value
+
+    @property
+    def _chunk_fetcher(self):
+        """Fetcher backing :class:`ChunkedDataset` reads, or ``None`` when unavailable.
+
+        ``None`` means every dataset of this file falls back to plain h5py reads — which is
+        correct, just not concurrent.
+        """
+        if not self._fetcher_built:
+            from zea.data.chunk_reader import fetcher_for
+
+            self._fetcher_built = True
+            try:
+                self._fetcher = fetcher_for(self)
+                if self._fetcher is not None:
+                    self._fetcher.progress = self._progress
+            except Exception as exc:  # noqa: BLE001 — a fast path is never worth an error
+                log.debug(f"Concurrent chunk reads unavailable for '{self.path}': {exc}")
+                self._fetcher = None
+        return self._fetcher
 
     def __enter__(self) -> "Self":
         """Enter the context manager, returning this :class:`File` instance.
@@ -681,6 +893,25 @@ class File(h5py.File):
         and :meth:`load_parameters`) rather than the base ``h5py`` type.
         """
         return self
+
+    def close(self):
+        """Close the file, also releasing the streamed HF file object if any.
+
+        ``h5py`` does not close file-like objects it did not open itself, so when
+        this :class:`File` was opened from an ``hf://`` path with ``stream=True``
+        we close the underlying fsspec file object here.
+        """
+        try:
+            super().close()
+        finally:
+            fetcher = getattr(self, "_fetcher", None)
+            if fetcher is not None:
+                fetcher.close()
+                self._fetcher = None
+            stream_fileobj = getattr(self, "_stream_fileobj", None)
+            if stream_fileobj is not None:
+                stream_fileobj.close()
+                self._stream_fileobj = None
 
     def __contains__(self, key):
         """Check whether *key* exists in the file.
@@ -726,7 +957,20 @@ class File(h5py.File):
 
     @property
     def path(self):
-        """Return the path of the file."""
+        """Return the path of the file.
+
+        For files opened by streaming an ``hf://`` path, ``self.filename`` is a
+        placeholder for the underlying file object rather than a real path, so we
+        return the original ``hf://`` source path instead.
+        """
+        source = getattr(self, "_source_name", None)
+        if source is not None:
+            # ``Path("hf://org/repo/file")`` collapses the ``//`` to ``hf:/``, mangling the
+            # URI, so return it verbatim. ``name``/``stem`` wrap it in PurePath, which still
+            # extracts the basename correctly.
+            if str(source).startswith(HF_PREFIX):
+                return str(source)
+            return Path(source)
         return Path(self.filename)
 
     @property
@@ -798,7 +1042,9 @@ class File(h5py.File):
             if "label" in track_group:
                 raw = track_group["label"][()]
                 label = raw.decode() if isinstance(raw, bytes) else str(raw)
-            tracks.append(Track(i, track_group, label=label, probe=probe_dict))
+            tracks.append(
+                Track(i, track_group, label=label, probe=probe_dict, fetcher=self._chunk_fetcher)
+            )
             i += 1
 
         schedule = self.track_schedule
@@ -987,8 +1233,8 @@ class File(h5py.File):
         description: str | None = None,
         acquisition_time: str | None = None,
         custom=None,
-        compression: str | None = DEFAULT_COMPRESSION,
-        chunk_frames: bool = False,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
+        chunk_axes: "tuple[str, ...] | None" = DEFAULT_CHUNK_AXES,
         overwrite: bool = False,
         ignore_warnings: bool = False,
         warn_missing_optional_fields: bool = True,
@@ -1035,10 +1281,20 @@ class File(h5py.File):
             custom: Optional list of :class:`CustomElement` objects holding data that
                 does not fit the zea format. They are stored in a ``custom`` group and
                 read back via :attr:`File.custom`.
-            compression: HDF5 compression filter (default ``"lzf"``).
-            chunk_frames: If *True*, use frame-wise chunking for all datasets containing
-                a "frames" dimension. Dataset will be stored with HDF5 chunking enabled,
-                using a single frame (a single slice along the first dimension) per chunk.
+            compression: HDF5 compression filter (default Blosc zstd+shuffle). May be
+                a filter name (``"lzf"``, ``"gzip"``) or a mapping of ``create_dataset``
+                kwargs, e.g. an ``hdf5plugin`` filter object (``hdf5plugin.Blosc(...)``)
+                or ``{"compression": "gzip", "compression_opts": 4}``. Files written
+                with ``hdf5plugin`` filters require ``import hdf5plugin`` to be read
+                back (zea imports it automatically).
+            chunk_axes: Dimension names to chunk with HDF5 chunk size 1 (default
+                ``("n_frames",)``); every other axis is stored at full extent,
+                so partial and streamed (``hf://``) reads fetch only the frames/
+                transmits requested. Axes not present on a field are ignored (an
+                ``image`` without ``n_tx`` is chunked on ``n_frames`` only). Set to a
+                single axis (e.g. ``("n_frames",)``) for one full frame per chunk, or
+                to ``None``/``()`` for contiguous storage (use with
+                ``compression=None``). See :meth:`zea.data.spec.Spec._resolve_chunks`.
             overwrite: If *False* (default), raise if the file exists.
             ignore_warnings: If *True*, suppress all warnings emitted while
                 creating the file (missing optional metadata fields, custom keys,
@@ -1141,7 +1397,7 @@ class File(h5py.File):
             spec.save(
                 str(path),
                 compression=compression,
-                chunk_frames=chunk_frames,
+                chunk_axes=chunk_axes,
                 warn_missing_optional_fields=warn_missing_optional_fields,
             )
 
@@ -1174,10 +1430,10 @@ class File(h5py.File):
         if "tracks" in self:
             track0 = self["tracks"].get("track_0")
             if track0 is not None and "data" in track0:
-                return cast("_DataProxy", _GroupProxy(track0["data"]))
+                return cast("_DataProxy", _GroupProxy(track0["data"], self._chunk_fetcher))
         # Flat layout (no tracks group): root-level data/ group
         if super().__contains__("data"):
-            return cast("_DataProxy", _GroupProxy(self["data"]))
+            return cast("_DataProxy", _GroupProxy(self["data"], self._chunk_fetcher))
         raise KeyError("No 'data' group found in this file.")
 
     @property
@@ -1200,12 +1456,13 @@ class File(h5py.File):
     @property
     def name(self):
         """Return the name of the file."""
-        return self.path.name
+        # ``path`` may be a plain string (an ``hf://`` URI); PurePath handles both.
+        return PurePath(str(self.path)).name
 
     @property
     def stem(self):
         """Return the stem of the file."""
-        return self.path.stem
+        return PurePath(str(self.path)).stem
 
     def _get_single_track_data_group(self) -> "h5py.Group":
         """Return the data group for single-track or flat-layout files."""
@@ -1703,6 +1960,8 @@ class File(h5py.File):
         """
         kwargs: dict = {"tracks": self._load_tracks(), "probe": self.probe}
 
+        if self.custom:
+            kwargs["custom"] = self.custom
         if self.track_schedule is not None:
             kwargs["track_schedule"] = self.track_schedule
         if "metadata" in self:
@@ -1742,6 +2001,10 @@ class File(h5py.File):
                 track_dict["data"] = load_dict_from_hdf5_group(track._group["data"])
             if "scan" in track._group:
                 track_dict["scan"] = track.scan
+            # Preserve transmit-only tracks (data=None); without this the rebuilt TrackSpec
+            # would default transmit_only=False and reject the missing data.
+            if "transmit_only" in track._group:
+                track_dict["transmit_only"] = bool(track._group["transmit_only"][()])
             tracks.append(track_dict)
         return tracks
 
@@ -1833,108 +2096,6 @@ class File(h5py.File):
         metadata is shown inline where available.
         """
         _print_hdf5_attrs(self)
-
-
-def load_file_all_data_types(
-    path,
-    indices: Tuple[Union[list, slice, int], ...] | List[int] | int | slice | None = None,
-    scan_kwargs: dict | None = None,
-):
-    """Loads a zea data files (h5py file).
-
-    Returns all data types together with a parameters object containing the parameters
-    of the acquisition. Probe information is available via ``parameters.to_probe_dict()``
-    or ``File.probe``.
-
-    Additionally, it can load a specific subset of frames / transmits.
-
-    .. include:: ../common/file_indexing.rst
-
-    Args:
-        path (str, pathlike): The path to the hdf5 file.
-        indices (optional): The indices to load. Defaults to None in
-            which case all frames are loaded.
-        scan_kwargs (Config, dict, optional): Additional keyword arguments
-            to pass to :meth:`File.load_parameters`. These will override the
-            parameters from the file if they are present. Defaults to None.
-
-    Returns:
-        (dict): A dictionary with all data types as keys and the corresponding data as values.
-        (Parameters): A parameters object containing the parameters of the acquisition.
-    """
-    # Define the additional keyword parameters from the scan object
-    if scan_kwargs is None:
-        scan_kwargs = {}
-
-    data_dict = {}
-
-    # Data types stored as HDF5 groups (Map-based specs with values/coordinates)
-    _GROUP_DATA_TYPES = {"aligned_data", "beamformed_data", "envelope_data", "image_sc", "image"}
-    # Among _GROUP_DATA_TYPES, only aligned_data has a transmit (n_tx) axis as its 2nd dimension.
-    # All others have spatial axes after n_frames, so a transmit-selection tuple index must not
-    # be applied to them (it would mis-slice a spatial dimension instead of a transmit dimension).
-    _GROUP_TYPES_WITH_TX_AXIS = {"aligned_data"}
-
-    with File(path, mode="r") as file:
-        for data_type in DataTypes:
-            if not file.has_key(data_type.value):
-                data_dict[data_type.value] = None
-                continue
-
-            # Load the desired frames from the file
-            _key = file.format_key(data_type.value)
-            _indices = indices if indices is not None else slice(None)
-            item = file[_key]
-
-            if isinstance(item, h5py.Group) and data_type.value in _GROUP_DATA_TYPES:
-                # Map-based group: load all sub-datasets as a dict.
-                # Compute per-dataset indices once: for non-TX types, a transmit-selection
-                # tuple must not be applied to spatial dimensions.
-                if (
-                    isinstance(_indices, tuple)
-                    and len(_indices) > 1
-                    and data_type.value not in _GROUP_TYPES_WITH_TX_AXIS
-                ):
-                    indices_for_ds = (_indices[0],)
-                else:
-                    indices_for_ds = _indices
-
-                group_dict = {}
-                for sub_key in item.keys():
-                    ds = item[sub_key]
-                    if isinstance(ds, h5py.Dataset):
-                        if sub_key == "values":
-                            group_dict[sub_key] = ds[indices_for_ds]
-                        elif sub_key == "coordinates":
-                            # Coordinates may omit the leading frame axis (broadcast mode —
-                            # one grid shared across all frames). Only apply frame indexing
-                            # when the first dim matches the values dataset's first dim.
-                            values_ds = item.get("values")
-                            if values_ds is not None and ds.shape[0] == values_ds.shape[0]:
-                                group_dict[sub_key] = ds[indices_for_ds]
-                            else:
-                                group_dict[sub_key] = ds[()]
-                        elif h5py.check_string_dtype(ds.dtype) is not None:
-                            val = ds.asstr()[()]
-                            if isinstance(val, np.ndarray) and val.dtype == object:
-                                val = val.astype(np.str_)
-                            group_dict[sub_key] = val
-                        else:
-                            group_dict[sub_key] = ds[()]
-                data_dict[data_type.value] = group_dict
-            else:
-                data_dict[data_type.value] = item[_indices]
-
-        # extract transmits from indices
-        # we only have to do this when the data has a n_tx dimension
-        # in that case we also have update scan parameters to match
-        # the number of selected transmits
-        if isinstance(indices, tuple) and len(indices) > 1:
-            scan_kwargs["selected_transmits"] = indices[1]
-
-        parameters = file.load_parameters(**scan_kwargs)
-
-        return data_dict, parameters
 
 
 @deprecated(replacement="File(...) with file.load_parameters() and file.data.<type>[...]")
