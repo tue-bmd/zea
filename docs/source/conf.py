@@ -252,6 +252,9 @@ linkcheck_ignore = [
     r"^https://github\.com/[^/]+/[^/]+/blob/[0-9a-f]{40}/",
     # GitHub 429s bots; branch link (not a permalink), so not covered above.
     r"^https://github\.com/moono/lpips-tf2\.x/blob/master/example_export_script/convert_to_tensorflow\.py$",
+    # GitHub 429s bots; repo-root link (not a permalink), so not covered above.
+    # Referenced by the inverse beamforming notebooks as the original study.
+    r"^https://github\.com/sankethvedula/das-inverse$",
 ]
 linkcheck_anchors_ignore_for_url = [
     r"^https://github\.com/[^/]+/[^/]+/blob/",  # line anchors are JS-rendered
