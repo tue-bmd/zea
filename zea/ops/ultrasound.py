@@ -1348,11 +1348,77 @@ class TissueSuppression(Operation):
 
     Removes stationary tissue components from multi-frame ultrasound data
     by zeroing the dominant singular values of the Casorati matrix.
+
+    Two filter types are available, selected with ``filter_type``:
+
+    * ``"svd"`` (default) -- the real-valued Direct SVD filter. Builds the Gram
+      matrix with a plain transpose.
+    * ``"svd_complex"`` -- the same filter with a conjugate (Hermitian)
+      transpose, for complex baseband IQ input. This is the filter used for
+      Power-Doppler / ULM processing (as in MUST's ``process.m``). On complex
+      input ``"svd"`` builds ``XᵀX`` instead of the temporal covariance ``XᴴX``
+      and will not suppress the tissue.
+
+    .. note::
+        On the TensorFlow backend ``"svd_complex"`` runs eagerly: TensorFlow
+        registers no XLA ``Svd`` kernel for complex dtypes. The other backends
+        JIT it.
     """
 
-    def __init__(self, cutoff: int = 5, **kwargs):
-        super().__init__(**kwargs)
+    FILTER_TYPES = ("svd", "svd_complex")
+
+    def __init__(self, cutoff: int | float = 5, filter_type: str = "svd", **kwargs):
+        """
+        Args:
+            cutoff (int or float): Number of principal (tissue) components to
+                reject. An ``int`` is a component count. A ``float`` in ``[0, 1)``
+                is a fraction of the number of frames, resolved at call time as
+                ``round(n_frames * cutoff)`` (matching the ULM convention of
+                specifying the clutter cutoff as a percentage of frames).
+            filter_type (str): Which clutter filter to use, one of
+                :attr:`FILTER_TYPES`. Use ``"svd_complex"`` for complex IQ input.
+        """
+        if filter_type not in self.FILTER_TYPES:
+            raise ValueError(
+                f"Unknown filter_type {filter_type!r}, expected one of "
+                f"{', '.join(map(repr, self.FILTER_TYPES))}."
+            )
+        if isinstance(cutoff, float) and not 0 <= cutoff < 1:
+            raise ValueError(
+                f"A float cutoff is a fraction of the frames and must be in [0, 1), got {cutoff}."
+            )
+        # Set before super().__init__(), which calls set_jit() -> reads self.jittable.
         self.cutoff = cutoff
+        self.filter_type = filter_type
+        super().__init__(**kwargs)
+
+    @property
+    def jittable(self):
+        """Whether this operation can be JIT compiled.
+
+        TensorFlow registers no XLA ``Svd`` kernel for complex dtypes, so on that
+        backend the filter has to run eagerly. ``svd_complex`` only ever makes
+        sense on complex input, so it is never jitted there. Plain ``svd`` is
+        meant for real data and stays jittable (feeding it complex data on
+        TensorFlow raises, but that combination does not suppress the tissue
+        anyway -- use ``svd_complex`` for complex input).
+        """
+        if self.filter_type == "svd_complex" and keras.backend.backend() == "tensorflow":
+            return False
+        return super().jittable
+
+    def resolve_cutoff(self, n_frames: int) -> int:
+        """Resolve a fractional ``cutoff`` into a component count.
+
+        Args:
+            n_frames (int): Number of frames in the data.
+
+        Returns:
+            int: Number of principal components to reject.
+        """
+        if isinstance(self.cutoff, float):
+            return int(round(n_frames * self.cutoff))
+        return self.cutoff
 
     def suppress_tissue(self, data):
         """
@@ -1362,7 +1428,11 @@ class TissueSuppression(Operation):
             data (ops.Tensor): Shape (n_frames, ...)
 
         """
-        return suppress_tissue(data, self.cutoff)
+        return suppress_tissue(
+            data,
+            self.resolve_cutoff(data.shape[0]),
+            conjugate=self.filter_type == "svd_complex",
+        )
 
     def call(self, **kwargs):
         data = kwargs[self.key]

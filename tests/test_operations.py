@@ -12,8 +12,6 @@ import numpy as np
 import pytest
 from scipy.ndimage import gaussian_filter
 from scipy.signal import hilbert as hilbert_scipy
-
-from zea import ops
 from zea.func.ultrasound import (
     channels_to_complex,
     complex_to_channels,
@@ -22,6 +20,8 @@ from zea.func.ultrasound import (
 )
 from zea.ops import Pipeline, Simulate, beamformer_registry
 from zea.parameters import Parameters
+
+from zea import ops
 
 from . import DEFAULT_TEST_SEED, backend_equality_check
 
@@ -103,7 +103,10 @@ def test_converting_to_image(size, dynamic_range, input_range):
         _input_range = input_range
 
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
-    data = rng.standard_normal(size) * (_input_range[1] - _input_range[0]) + _input_range[0]
+    data = (
+        rng.standard_normal(size) * (_input_range[1] - _input_range[0])
+        + _input_range[0]
+    )
     output_range = (0, 1)
     normalize = ops.Normalize(output_range, input_range)
     log_compress = ops.LogCompress()
@@ -219,9 +222,9 @@ def test_complex_channels_operations(size, axis):
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     complex_data = (rng.random(size) + 1j * rng.random(size)).astype("complex64")
 
-    channels = ops.ComplexToChannels(axis=axis)(data=keras.ops.convert_to_tensor(complex_data))[
-        "data"
-    ]
+    channels = ops.ComplexToChannels(axis=axis)(
+        data=keras.ops.convert_to_tensor(complex_data)
+    )["data"]
     channels = keras.ops.convert_to_numpy(channels)
     assert channels.shape[axis] == 2, "Real/imaginary channels should live on `axis`."
 
@@ -574,7 +577,9 @@ def test_lee_filter(sigma, spiral_image):
     ],
 )
 @backend_equality_check()
-def test_threshold_op(spiral_image, threshold_type, below_threshold, fill_value, threshold_param):
+def test_threshold_op(
+    spiral_image, threshold_type, below_threshold, fill_value, threshold_param
+):
     """Test `ops.Threshold` operation on a synthetic spiral image."""
     import keras
 
@@ -593,7 +598,9 @@ def test_threshold_op(spiral_image, threshold_type, below_threshold, fill_value,
     percentile = threshold_param.get("percentile", None)
     threshold_value = threshold_param.get("threshold", None)
 
-    out = threshold(data=spiral_tensor, percentile=percentile, threshold=threshold_value)
+    out = threshold(
+        data=spiral_tensor, percentile=percentile, threshold=threshold_value
+    )
     out_np = keras.ops.convert_to_numpy(out["data"])
 
     # Quantitative: check that thresholding changes the image
@@ -652,7 +659,9 @@ def test_compute_time_to_peak():
 
     t_peak = compute_time_to_peak_stack(waveforms, center_frequencies, 250e6)
 
-    assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
+    assert np.allclose(t_peak, 1e-6, atol=1e-8), (
+        f"t_peak should be close to 1e-6, got {t_peak}"
+    )
 
 
 @pytest.mark.parametrize("beamformer_name", beamformer_registry.registered_names())
@@ -661,7 +670,6 @@ def test_beamformers(beamformer_name):
     """All beamformer operations produce the correct output shape and agree across backends."""
 
     import keras
-
     from zea.ops import beamformer_registry
 
     n_tx, n_pix, n_el, n_ch = 3, 7, 4, 2
@@ -746,8 +754,12 @@ def test_generalized_coherence_factor_m_zero_passthrough():
     )
 
     # m_zero=2 at init vs. m_zero=2 at call time should give identical results
-    out_init = ops.GeneralizedCoherenceFactor(m_zero=2, with_batch_dim=True)(data=data)["data"]
-    out_call = ops.GeneralizedCoherenceFactor(with_batch_dim=True)(data=data, m_zero=2)["data"]
+    out_init = ops.GeneralizedCoherenceFactor(m_zero=2, with_batch_dim=True)(data=data)[
+        "data"
+    ]
+    out_call = ops.GeneralizedCoherenceFactor(with_batch_dim=True)(data=data, m_zero=2)[
+        "data"
+    ]
     np.testing.assert_allclose(
         keras.ops.convert_to_numpy(out_init),
         keras.ops.convert_to_numpy(out_call),
@@ -756,7 +768,9 @@ def test_generalized_coherence_factor_m_zero_passthrough():
 
     # Different m_zero values should produce different results
     out_default = ops.GeneralizedCoherenceFactor(with_batch_dim=True)(data=data)["data"]
-    out_m0 = ops.GeneralizedCoherenceFactor(with_batch_dim=True)(data=data, m_zero=0)["data"]
+    out_m0 = ops.GeneralizedCoherenceFactor(with_batch_dim=True)(data=data, m_zero=0)[
+        "data"
+    ]
     assert not np.allclose(
         keras.ops.convert_to_numpy(out_default),
         keras.ops.convert_to_numpy(out_m0),
@@ -777,10 +791,11 @@ def test_apply_window(axis, size, start, end, window_type):
     """Test ApplyWindow operation."""
 
     import keras
-
     from zea.ops.ultrasound import ApplyWindow
 
-    operation = ApplyWindow(axis=axis, size=size, start=start, end=end, window_type=window_type)
+    operation = ApplyWindow(
+        axis=axis, size=size, start=start, end=end, window_type=window_type
+    )
 
     data = keras.ops.ones((256, 128, 64))
     data_out = operation(data=data)["data"]
@@ -855,11 +870,19 @@ def test_band_pass_filter():
     result_demod_frequency = keras.ops.convert_to_numpy(result_demod_frequency)
 
     # Compare the three passband-related modes.
-    assert np.allclose(result_init_passband, result_demod_frequency, rtol=rtol, atol=atol)
-    assert not np.allclose(result_init_passband, result_call_passband, rtol=rtol, atol=atol)
-    assert not np.allclose(result_demod_frequency, result_call_passband, rtol=rtol, atol=atol)
+    assert np.allclose(
+        result_init_passband, result_demod_frequency, rtol=rtol, atol=atol
+    )
+    assert not np.allclose(
+        result_init_passband, result_call_passband, rtol=rtol, atol=atol
+    )
+    assert not np.allclose(
+        result_demod_frequency, result_call_passband, rtol=rtol, atol=atol
+    )
 
-    with pytest.raises(ValueError, match="passband must be an iterable of two numeric values"):
+    with pytest.raises(
+        ValueError, match="passband must be an iterable of two numeric values"
+    ):
         operation(
             data=data,
             sampling_frequency=40e6,
@@ -916,14 +939,20 @@ def test_make_tgc_curve():
     )
 
     # Check output shape
-    assert tgc_curve.shape == (n_ax,), f"Expected shape ({n_ax},), got {tgc_curve.shape}"
+    assert tgc_curve.shape == (n_ax,), (
+        f"Expected shape ({n_ax},), got {tgc_curve.shape}"
+    )
 
     # Check output dtype
-    assert tgc_curve.dtype == np.float32, f"Expected dtype float32, got {tgc_curve.dtype}"
+    assert tgc_curve.dtype == np.float32, (
+        f"Expected dtype float32, got {tgc_curve.dtype}"
+    )
 
     # Check that the curve is monotonically increasing (TGC should increase with depth)
     differences = np.diff(tgc_curve)
-    assert np.all(differences >= 0), "TGC curve should be monotonically increasing with depth"
+    assert np.all(differences >= 0), (
+        "TGC curve should be monotonically increasing with depth"
+    )
 
     # Check that the first value is 1 (no gain at zero depth)
     assert np.isclose(tgc_curve[0], 1.0, rtol=1e-5), (
@@ -962,7 +991,9 @@ def test_common_midpoint_phase_error(n_tx, n_pix, n_rx, with_batch):
     # Add random phase variations to simulate realistic ultrasound data
     # IQ data has 2 channels (I and Q)
     phase = rng.random((n_tx, n_pix, n_rx)) * 2 * np.pi
-    amplitude = rng.random((n_tx, n_pix, n_rx)) * 0.5 + 0.5  # Amplitude between 0.5 and 1
+    amplitude = (
+        rng.random((n_tx, n_pix, n_rx)) * 0.5 + 0.5
+    )  # Amplitude between 0.5 and 1
 
     # Convert to IQ format
     data = np.stack(
@@ -1012,7 +1043,9 @@ def test_common_midpoint_phase_error(n_tx, n_pix, n_rx, with_batch):
     )
 
     # Check for NaN values
-    assert not np.any(np.isnan(phase_error_np)), "Phase errors should not contain NaN values"
+    assert not np.any(np.isnan(phase_error_np)), (
+        "Phase errors should not contain NaN values"
+    )
 
     if with_batch:
         # Check that the two batches are not identical (due to different phase patterns)
@@ -1064,10 +1097,14 @@ def test_common_midpoint_phase_error_with_zeros():
     phase_error = keras.ops.convert_to_numpy(output["data"])
 
     # Check that computation doesn't crash and produces valid output
-    assert phase_error.shape == (n_pix,), f"Expected shape ({n_pix},), got {phase_error.shape}"
+    assert phase_error.shape == (n_pix,), (
+        f"Expected shape ({n_pix},), got {phase_error.shape}"
+    )
 
     # Check for inf values (should never occur)
-    assert not np.any(np.isinf(phase_error)), "Phase errors should not contain infinities"
+    assert not np.any(np.isinf(phase_error)), (
+        "Phase errors should not contain infinities"
+    )
 
     # NaNs are acceptable where all subapertures are invalid (division by zero)
     # but not all values should be NaN
@@ -1118,7 +1155,9 @@ def test_common_midpoint_phase_error_coherent_data():
     )
 
     # Check shape
-    assert phase_error.shape == (n_pix,), f"Expected shape ({n_pix},), got {phase_error.shape}"
+    assert phase_error.shape == (n_pix,), (
+        f"Expected shape ({n_pix},), got {phase_error.shape}"
+    )
 
     return phase_error
 
@@ -1141,7 +1180,9 @@ def test_apply_aligned_apodization(with_batch_dim):
         np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
     )
 
-    out = keras.ops.convert_to_numpy(apply_aligned_apodization(data, apodization, with_batch_dim))
+    out = keras.ops.convert_to_numpy(
+        apply_aligned_apodization(data, apodization, with_batch_dim)
+    )
 
     expected = np.zeros((n_tx, n_pix, n_el, n_ch), dtype=np.float32)
     expected[0, 0] = 1.0
@@ -1175,7 +1216,9 @@ def test_aligned_apodization_op(with_batch_dim):
     apodization = keras.ops.convert_to_tensor(
         np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
     )
-    out = keras.ops.convert_to_numpy(op(data=data, flat_aligned_apodization=apodization)["data"])
+    out = keras.ops.convert_to_numpy(
+        op(data=data, flat_aligned_apodization=apodization)["data"]
+    )
 
     expected = np.zeros((n_tx, n_pix, n_el, n_ch), dtype=np.float32)
     expected[0, 0] = 1.0
@@ -1203,10 +1246,14 @@ def test_apply_receive_apodization(with_batch_dim):
     apod_np = np.array([[1.0, 0.5, 0.0, 0.0], [0.0, 0.0, 0.5, 1.0]], dtype=np.float32)
     apodization = keras.ops.convert_to_tensor(apod_np)
 
-    out = keras.ops.convert_to_numpy(apply_receive_apodization(data, apodization, with_batch_dim))
+    out = keras.ops.convert_to_numpy(
+        apply_receive_apodization(data, apodization, with_batch_dim)
+    )
 
     # Broadcast the (n_pix, n_el) weight over n_tx (leading) and n_ch (trailing).
-    expected = np.broadcast_to(apod_np[None, :, :, None], (n_tx, n_pix, n_el, n_ch)).copy()
+    expected = np.broadcast_to(
+        apod_np[None, :, :, None], (n_tx, n_pix, n_el, n_ch)
+    ).copy()
     if with_batch_dim:
         expected = expected[None]
 
@@ -1240,13 +1287,17 @@ def test_receive_apodization_op(with_batch_dim):
     ones = keras.ops.ones((n_pix, n_el))
     out_ones = op(data=data, flat_receive_apodization=ones)["data"]
     np.testing.assert_allclose(
-        keras.ops.convert_to_numpy(out_ones), keras.ops.convert_to_numpy(data), rtol=1e-5
+        keras.ops.convert_to_numpy(out_ones),
+        keras.ops.convert_to_numpy(data),
+        rtol=1e-5,
     )
 
     # Per-element taper -> scales the expected elements
     apod_np = np.array([[1.0, 0.5, 0.0, 0.0], [0.0, 0.0, 0.5, 1.0]], dtype=np.float32)
     apodization = keras.ops.convert_to_tensor(apod_np)
-    out = keras.ops.convert_to_numpy(op(data=data, flat_receive_apodization=apodization)["data"])
+    out = keras.ops.convert_to_numpy(
+        op(data=data, flat_receive_apodization=apodization)["data"]
+    )
 
     expected = data_np * apod_np[None, :, :, None]
     if with_batch_dim:
@@ -1265,7 +1316,6 @@ def test_prepare_parameters_pfield_all_backends():
     """
 
     import keras
-
     from zea.beamform.delays import compute_t0_delays_planewave
     from zea.internal.cache import cache_disabled
     from zea.ops import Pipeline
@@ -1341,10 +1391,14 @@ def test_tissue_suppression():
     output = keras.ops.convert_to_numpy(op(data=data_tensor)["data"])
 
     assert output.shape == shape, f"Expected shape {shape}, got {output.shape}"
-    assert output.dtype == data.dtype, f"Expected dtype {data.dtype}, got {output.dtype}"
+    assert output.dtype == data.dtype, (
+        f"Expected dtype {data.dtype}, got {output.dtype}"
+    )
 
     # After suppression, energy should be lower than the original tissue-dominated signal
-    assert np.mean(output**2) < np.mean(data**2), "Tissue suppression should reduce signal energy"
+    assert np.mean(output**2) < np.mean(data**2), (
+        "Tissue suppression should reduce signal energy"
+    )
 
     correlation_across_frames = np.corrcoef(output.reshape(n_frames, -1))
     # The correlation across frames should be reduced after tissue suppression
@@ -1354,3 +1408,133 @@ def test_tissue_suppression():
     )
 
     return output
+
+
+def _complex_clutter_movie(n_frames=40, n_z=16, n_x=16, seed=DEFAULT_TEST_SEED):
+    """Complex IQ movie: strong phase-rotating tissue clutter + weak blood.
+
+    The tissue rotates in phase over time (as moving tissue does in real
+    baseband IQ), which is what distinguishes the Hermitian Gram matrix from the
+    plain-transpose one -- for tissue that is merely a constant real map repeated
+    across frames, both give the same answer.
+    """
+    rng = np.random.default_rng(seed)
+
+    def _complex_normal(shape):
+        return (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)).astype(
+            np.complex64
+        )
+
+    spatial = _complex_normal((n_z, n_x)) * 10
+    phase = np.exp(1j * 2 * np.pi * 0.02 * np.arange(n_frames)).astype(np.complex64)
+    tissue = (phase[:, None, None] * spatial[None]).astype(np.complex64)
+    blood = (_complex_normal((n_frames, n_z, n_x)) * 0.1).astype(np.complex64)
+    return (tissue + blood).astype(np.complex64), tissue
+
+
+def test_tissue_suppression_complex():
+    """TissueSuppression with filter_type='svd_complex' suppresses complex IQ clutter.
+
+    Deliberately not a ``backend_equality_check``: what survives the filter is the
+    near-null-space residual, and different backends' SVD implementations pick
+    different (equally valid) bases for the discarded subspace, so the residual is
+    not comparable elementwise across backends. For this reason,
+    the ratio of the energy before and after filtering is asserted as a
+    regression test.
+    """
+    import keras
+
+    from zea import ops
+
+    data, _ = _complex_clutter_movie()
+
+    op = ops.TissueSuppression(cutoff=2, filter_type="svd_complex")
+    output = keras.ops.convert_to_numpy(
+        op(data=keras.ops.convert_to_tensor(data))["data"]
+    )
+
+    assert output.shape == data.shape
+    assert output.dtype == data.dtype, (
+        f"Expected dtype {data.dtype}, got {output.dtype}"
+    )
+
+    # The clutter dominates the energy, so removing it must remove nearly all of it.
+    energy_ratio = np.mean(np.abs(output) ** 2) / np.mean(np.abs(data) ** 2)
+    assert energy_ratio < 0.01, (
+        f"Expected clutter to be suppressed, energy ratio {energy_ratio}"
+    )
+
+
+def test_tissue_suppression_complex_needs_conjugate():
+    """The plain-transpose 'svd' filter fails on complex IQ; 'svd_complex' is required.
+
+    This is the reason filter_type exists: on complex data the plain transpose
+    builds X^T X rather than the temporal covariance X^H X, so the dominant
+    components it finds are not the tissue subspace and the clutter survives.
+
+    This is a property of the maths, not of any backend, so it is checked against
+    the reference (numpy) implementation directly rather than through the op --
+    TensorFlow cannot XLA-compile a complex SVD at all.
+    """
+    from zea.func.ultrasound import suppress_tissue
+
+    data, _ = _complex_clutter_movie()
+
+    def _energy_ratio(conjugate):
+        output = np.asarray(suppress_tissue(data, 2, conjugate=conjugate))
+        return np.mean(np.abs(output) ** 2) / np.mean(np.abs(data) ** 2)
+
+    assert _energy_ratio(conjugate=True) < 0.01
+    # The plain transpose leaves the phase-rotating clutter essentially intact.
+    assert _energy_ratio(conjugate=False) > 0.5
+
+
+def test_tissue_suppression_conjugate_matches_plain_on_real_data():
+    """For real input the conjugate transpose is a no-op, so both filters agree.
+
+    The tolerance is loose because the two do not necessarily run through the same
+    code path: on TensorFlow ``svd_complex`` is forced eager (there is no complex
+    XLA ``Svd`` kernel) while ``svd`` is XLA-compiled, and XLA's float32 SVD
+    differs from the eager one by ~1e-3 on a matrix with near-degenerate singular
+    values. The point here is that the maths is equivalent, not bit-exactness.
+    """
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = rng.standard_normal((10, 8, 8)).astype(np.float32)
+    data_tensor = keras.ops.convert_to_tensor(data)
+
+    outputs = [
+        keras.ops.convert_to_numpy(
+            ops.TissueSuppression(cutoff=3, filter_type=filter_type)(data=data_tensor)[
+                "data"
+            ]
+        )
+        for filter_type in ("svd", "svd_complex")
+    ]
+    np.testing.assert_allclose(outputs[0], outputs[1], atol=1e-2)
+
+
+def test_tissue_suppression_fractional_cutoff():
+    """A float cutoff is resolved as a fraction of the number of frames."""
+    from zea import ops
+
+    assert ops.TissueSuppression(cutoff=0.05).resolve_cutoff(400) == 20
+    assert ops.TissueSuppression(cutoff=0.1).resolve_cutoff(95) == 10
+    # An int cutoff is used as-is, independent of the frame count.
+    assert ops.TissueSuppression(cutoff=5).resolve_cutoff(400) == 5
+
+
+def test_tissue_suppression_invalid_arguments():
+    """Invalid filter_type / cutoff are rejected at construction time."""
+    import pytest
+
+    from zea import ops
+
+    with pytest.raises(ValueError, match="Unknown filter_type"):
+        ops.TissueSuppression(filter_type="not_a_filter")
+
+    with pytest.raises(ValueError, match="fraction of the frames"):
+        ops.TissueSuppression(cutoff=1.5)

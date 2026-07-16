@@ -1011,24 +1011,37 @@ def dehaze_nuclear_diffusion(
     return tissue_frames, haze_frames
 
 
-def suppress_tissue(data, cutoff: int = 5):
+def suppress_tissue(data, cutoff: int = 5, conjugate: bool = False):
     """
     Suppresses tissue using Direct SVD.
+
+    Builds the Casorati matrix (frames x pixels), takes the SVD of its temporal
+    Gram matrix, and projects the data onto the subspace orthogonal to the
+    ``cutoff`` strongest (tissue) components.
 
     Args:
         data (ops.Tensor): Shape (n_frames, ...)
         cutoff (int): Number of principal components (tissue) to reject.
+        conjugate (bool): Whether to use the conjugate (Hermitian) transpose when
+            forming the Gram matrix and the projector. Leave ``False`` for
+            real-valued input. Set to ``True`` for complex (baseband IQ) input:
+            the plain transpose builds ``XᵀX`` rather than ``XᴴX``, which is not
+            the temporal covariance of a complex signal and does not suppress the
+            tissue. Ignored for real input, where the two are identical.
     """
     if cutoff <= 0:
         return data
     if cutoff >= data.shape[0]:
         raise ValueError(f"Cutoff must be between 0 and n_frames-1, got {cutoff}.")
 
+    def _transpose(x):
+        return ops.conj(ops.transpose(x)) if conjugate else ops.transpose(x)
+
     original_shape = data.shape
     n_frames = original_shape[0]
     data_2d = ops.reshape(data, (n_frames, -1))
 
-    casorati_matrix = ops.matmul(data_2d, ops.transpose(data_2d))
+    casorati_matrix = ops.matmul(data_2d, _transpose(data_2d))
 
     # We call the data X
     # X = U @ S @ Vh
@@ -1038,9 +1051,9 @@ def suppress_tissue(data, cutoff: int = 5):
     V, S, _ = ops.linalg.svd(casorati_matrix)
 
     # Remove the right singular vectors
-    reconstructed = ops.matmul(ops.transpose(data_2d), V)
+    reconstructed = ops.matmul(_transpose(data_2d), V)
 
     # Reconstruct with only part of the vectors
-    reconstructed = ops.matmul(reconstructed[:, cutoff:], ops.transpose(V[:, cutoff:]))
+    reconstructed = ops.matmul(reconstructed[:, cutoff:], _transpose(V[:, cutoff:]))
 
-    return ops.reshape(ops.transpose(reconstructed), original_shape)
+    return ops.reshape(_transpose(reconstructed), original_shape)
