@@ -202,10 +202,11 @@ class _Resave:
     """Output HDF5 file or folder."""
     overwrite: bool = False
     """Overwrite existing output file."""
-    chunk_frames: bool = False
-    """Store the data datasets with HDF5 chunked storage, one frame per chunk."""
-    disable_compression: bool = False
-    """Disable lzf compression for the datasets."""
+    chunk_axes: tuple[str, ...] = ("n_frames",)
+    """Dimension names to chunk with HDF5 chunk size 1 (others stored at full extent),
+    so partial/streamed reads fetch only the requested frames. Defaults to one chunk per
+    frame, mirroring zea.data.spec.DEFAULT_CHUNK_AXES
+    """
 
     def run(self):
         from zea.data.file_operations import resave
@@ -214,8 +215,7 @@ class _Resave:
             input_path=self.input_path,
             output_path=self.output_path,
             overwrite=self.overwrite,
-            enable_compression=not self.disable_compression,
-            chunk_frames=self.chunk_frames,
+            chunk_axes=self.chunk_axes,
         )
 
 

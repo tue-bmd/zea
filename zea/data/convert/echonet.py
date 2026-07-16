@@ -7,7 +7,7 @@ Script to convert the EchoNet database to zea format.
 For more information about the dataset, resort to the following links:
 
 - The original dataset can be found at `this link <https://stanfordaimi.azurewebsites.net/datasets/834e1cd1-92f7-4268-9daa-d359198b310a>`_.
-- The project page is available `here <https://echonet.github.io/>`_.
+- The project page is available `here <https://echonet.github.io/dynamic/>`_.
 
 """
 

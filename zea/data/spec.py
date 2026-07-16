@@ -1,6 +1,8 @@
+import math
 import os
 import tempfile
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
@@ -9,6 +11,7 @@ from pathlib import Path
 from typing import Any, ClassVar, List, NoReturn, Sequence, Tuple, cast
 
 import h5py
+import hdf5plugin
 import numpy as np
 
 from zea import log
@@ -37,7 +40,44 @@ UNITS = {
     "kg/m²": "kilograms per square meter",
 }
 
-DEFAULT_COMPRESSION = "lzf"
+# Blosc(zstd) + bit-shuffle: the one codec zea.data.chunk_reader can decode concurrently.
+# Blosc2 compresses ~2% better but its binding holds the GIL, which costs ~30x on reads.
+# Bit-shuffle beats byte-shuffle on int16 (only two byte-planes to separate); clevel 9 writes
+# ~15x slower than 7 for ~1% more compression. Importing hdf5plugin also registers the filter.
+DEFAULT_COMPRESSION = hdf5plugin.Blosc(cname="zstd", clevel=7, shuffle=hdf5plugin.Blosc.BITSHUFFLE)
+
+# Threads Blosc uses on the blocks *within* one chunk. HDF5 runs the filter one chunk at a time
+# and single-threaded, so this is most of the write throughput: ~4x (105 -> 453 MB/s). The gain
+# reverses past ~8 (the blocks are small and go memory-bound), and writes are often already
+# parallel per-file, so keep it modest. setdefault: an explicit env var wins.
+BLOSC_NTHREADS = min(8, os.cpu_count() or 1)
+os.environ.setdefault("BLOSC_NTHREADS", str(BLOSC_NTHREADS))
+
+# Chunk size 1 on each of these dims: one frame per chunk, since a frame is what a read
+# subsamples first. Dims not present on a field are ignored.
+DEFAULT_CHUNK_AXES: tuple[str, ...] = ("n_frames",)
+
+# Ceiling on the uncompressed bytes of one chunk. A chunk is the unit of *parallelism*:
+# chunk_reader decodes each one in a single thread, so a whole-frame chunk (166 MB on a
+# 149-transmit scan) has nothing to parallelise — 102 ms to read one frame against 13 ms at
+# 8 MB. Too small costs round trips instead (149 chunks/frame = 1.3 s over HTTP). 8 MB sits
+# mid-plateau of a broad optimum (~2-16 MB), the same one for local and cloud, and costs
+# nothing on disk: the compression ratio is flat across chunk size.
+MAX_CHUNK_BYTES = 8 << 20  # 8 MiB
+
+# Paged file-space strategy: HDF5 allocates in fixed-size pages, which collects the
+# metadata that a reader must walk on open (superblock, group and chunk B-trees) into
+# few, adjacent pages instead of scattering it through the file. Over HTTP this cuts a
+# cold open from 3 requests to 2 and ~0.16 s to ~0.05 s, at ~2% file size for 64 KiB
+# pages (larger pages waste space and, past ~1 MiB, requests too).
+#
+# Requires HDF5 >= 1.10.1 on the reader, which `libver="latest"` implies anyway.
+PAGED_LAYOUT = {
+    "libver": "latest",
+    "fs_strategy": "page",
+    "fs_page_size": 64 * 1024,
+    "fs_persist": True,
+}
 
 # Default unit/description for every SCHEMA leaf field.  Subclasses may
 # override by defining their own FIELD_METADATA dict.
@@ -444,42 +484,116 @@ class Spec:
         return False
 
     @staticmethod
+    def _resolve_chunks(
+        value: Any,
+        dim_names: tuple | None,
+        chunk_axes: tuple[str, ...] | None,
+        max_chunk_bytes: int | None = None,
+    ) -> tuple | None:
+        """Choose an HDF5 chunk shape aligned with common access patterns.
+
+        ``chunk_axes`` names the dimensions to chunk with size 1 (default
+        :data:`DEFAULT_CHUNK_AXES`, ``("n_frames",)``); every other axis is stored at
+        full extent, so partial/streaming reads fetch only the requested frames
+        instead of h5py's poorly-shaped auto-guess. Axes named in ``chunk_axes`` but
+        not present on this field are ignored (e.g. an ``image`` without ``n_tx`` is
+        chunked on ``n_frames`` only).
+
+        The result is capped to ``max_chunk_bytes`` (default :data:`MAX_CHUNK_BYTES`) by
+        splitting the outermost full axis — ``n_tx`` for ``raw_data`` — which keeps each
+        chunk a contiguous run of the array. Only that axis is split: if one index along
+        it already exceeds the budget, the chunk is left oversized rather than cutting
+        into ``n_ax``/``n_el``, which are read whole anyway.
+
+        Returns ``None`` (contiguous / h5py default) when ``chunk_axes`` is empty
+        or ``None``, the value is not a ≥2-D array, or the field's dimension names
+        are unknown.
+        """
+        if not chunk_axes or not isinstance(value, np.ndarray) or value.ndim < 2:
+            return None
+        if not (
+            dim_names is not None
+            and len(dim_names) == value.ndim
+            and all(isinstance(d, str) for d in dim_names)
+        ):
+            return None
+        mark = [d in chunk_axes for d in dim_names]
+        # Require a mix: at least one chunk axis present *and* at least one full
+        # axis, else the chunks would be scalar-sized (all ones).
+        if not (any(mark) and not all(mark)):
+            return None
+
+        shape = cast(Tuple[int, ...], value.shape)
+        chunks: list[int] = [1 if m else dim for m, dim in zip(mark, shape)]
+        if max_chunk_bytes is None:
+            max_chunk_bytes = MAX_CHUNK_BYTES
+        if not max_chunk_bytes:  # 0 / None disables the cap: one full frame per chunk
+            return tuple(chunks)
+
+        split = mark.index(False)  # outermost axis kept at full extent
+        # Bytes of one index along that axis, i.e. everything nested inside it.
+        inner = math.prod(chunks[split + 1 :]) * value.dtype.itemsize
+        if inner:
+            chunks[split] = min(chunks[split], max(1, max_chunk_bytes // inner))
+        return tuple(chunks)
+
+    @staticmethod
     def create_dataset(
         group: h5py.Group,
         field_name: str,
         value: Any,
-        compression: str | None = DEFAULT_COMPRESSION,
-        chunk_frames: bool = False,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
+        chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
+        dim_names: tuple | None = None,
     ) -> None:
         """Create a dataset in the given group for the specified field and value,
-        handling string and scalar values appropriately."""
+        handling string and scalar values appropriately.
+
+        ``compression`` may be an h5py filter name (e.g. ``"lzf"``, ``"gzip"``) or
+        a mapping of ``create_dataset`` keyword arguments, such as an
+        ``hdf5plugin`` filter object (``hdf5plugin.Blosc2(...)``) or an explicit
+        ``{"compression": "gzip", "compression_opts": 4}``. Reading such a file
+        back requires the corresponding filter to be available (for ``hdf5plugin``
+        filters, ``import hdf5plugin`` in the reading process).
+
+        When ``dim_names`` (the field's schema dimension names) is provided, the
+        chunk shape is derived from ``chunk_axes`` to match common subsampling
+        patterns; see :meth:`_resolve_chunks`.
+        """
         dataset_is_scalar = np.isscalar(value) or value.ndim == 0
-        compression = None if dataset_is_scalar else compression
-        chunks = None
-        if (
-            chunk_frames
-            and not dataset_is_scalar
-            and isinstance(value, np.ndarray)
-            and value.ndim >= 2
-        ):
-            chunks = (1,) + value.shape[1:]
+        chunks = None if dataset_is_scalar else Spec._resolve_chunks(value, dim_names, chunk_axes)
+        # Filters are meaningless for scalars; strings only take named codecs
+        # (plugin filters like Blosc reject variable-length string data).
+        if dataset_is_scalar:
+            comp_kwargs: dict = {}
+        elif isinstance(compression, Mapping):
+            comp_kwargs = dict(compression)
+        elif compression is not None:
+            comp_kwargs = {"compression": compression}
+        else:
+            comp_kwargs = {}
         if Spec._is_string_value(value):
             string_dtype = h5py.string_dtype(encoding="utf-8")
             string_value = np.asarray(value, dtype=object)
+            # Only named codecs apply to strings, and never to scalar datasets
+            # (h5py rejects chunk/filter options on scalars). Plugin filters
+            # (Mapping) are skipped — they reject variable-length string data.
+            use_str_codec = isinstance(compression, str) and not dataset_is_scalar
+            string_comp = {"compression": compression} if use_str_codec else {}
             group.create_dataset(
                 field_name,
                 data=string_value,
                 dtype=string_dtype,
-                compression=compression,
+                **string_comp,
             )
         else:
-            group.create_dataset(field_name, data=value, compression=compression, chunks=chunks)
+            group.create_dataset(field_name, data=value, chunks=chunks, **comp_kwargs)
 
     def store_in_group(
         self,
         group: h5py.Group,
-        compression: str | None = DEFAULT_COMPRESSION,
-        chunk_frames: bool = False,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
+        chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
         warn_missing_optional_fields: bool = True,
     ) -> None:
         """Store the data in the given group (e.g. hdf5 group)."""
@@ -505,7 +619,7 @@ class Spec:
                 value.store_in_group(
                     subgroup,
                     compression=compression,
-                    chunk_frames=chunk_frames,
+                    chunk_axes=chunk_axes,
                     warn_missing_optional_fields=warn_missing_optional_fields,
                 )
             else:
@@ -514,7 +628,8 @@ class Spec:
                     field_name,
                     value,
                     compression=compression,
-                    chunk_frames=chunk_frames,
+                    chunk_axes=chunk_axes,
+                    dim_names=field_info.get("shape"),
                 )
                 meta = field_metadata.get(field_name, {})
                 group[field_name].attrs["unit"] = meta.get("unit", _DEFAULT_FIELD_UNIT)
@@ -2184,15 +2299,15 @@ class TrackSpec(Spec):
     def store_in_group(
         self,
         group: "h5py.Group",
-        compression: str | None = DEFAULT_COMPRESSION,
-        chunk_frames: bool = False,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
+        chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
         warn_missing_optional_fields: bool = True,
     ) -> None:
         """Store data, scan, and label in the HDF5 group."""
         super().store_in_group(
             group,
             compression=compression,
-            chunk_frames=chunk_frames,
+            chunk_axes=chunk_axes,
             warn_missing_optional_fields=warn_missing_optional_fields,
         )
 
@@ -2548,8 +2663,8 @@ class FileSpec(Spec):
     def save(
         self,
         path: str,
-        compression: str | None = DEFAULT_COMPRESSION,
-        chunk_frames: bool = False,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
+        chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
         warn_missing_optional_fields: bool = True,
     ) -> None:
         """Save the dataset to the specified path."""
@@ -2557,6 +2672,17 @@ class FileSpec(Spec):
             _zea_version = _get_pkg_version("zea")
         except PackageNotFoundError:
             _zea_version = "dev"
+
+        # HDF5 requires chunked storage for compression. With no chunk_axes we
+        # emit contiguous datasets, so h5py would silently fall back to its
+        # (poorly-shaped) auto-guess when compression is on — warn instead.
+        if not chunk_axes and compression is not None:
+            log.warning(
+                f"chunk_axes is empty but compression={compression!r} is enabled; "
+                "HDF5 requires chunking for compression, so h5py will auto-pick chunk "
+                "shapes (often poor for partial/streamed reads). Pass compression=None "
+                "for contiguous storage, or set chunk_axes to the dimensions to chunk."
+            )
 
         _path = Path(path)
         _path.parent.mkdir(parents=True, exist_ok=True)
@@ -2594,7 +2720,7 @@ class FileSpec(Spec):
         tmp_path = Path(tmp_name)
         try:
             self._write_hdf5(
-                tmp_path, _zea_version, compression, chunk_frames, warn_missing_optional_fields
+                tmp_path, _zea_version, compression, chunk_axes, warn_missing_optional_fields
             )
             os.replace(tmp_path, _path)
         except BaseException:
@@ -2608,15 +2734,15 @@ class FileSpec(Spec):
         self,
         path: Path,
         zea_version: str,
-        compression: str | None,
-        chunk_frames: bool,
+        compression: "str | Mapping | None",
+        chunk_axes: tuple[str, ...] | None,
         warn_missing_optional_fields: bool,
     ) -> None:
         """Write all groups/datasets of this spec to a fresh HDF5 file at ``path``."""
         # Lazy import to avoid circular dependency (spec.py is imported by file.py)
         from zea import File
 
-        with File(str(path), "w") as f:
+        with File(str(path), "w", **PAGED_LAYOUT) as f:
             f.attrs["zea_version"] = zea_version
 
             # Write scalar/array metadata fields (metadata, metrics, probe_name, etc.)
@@ -2629,6 +2755,7 @@ class FileSpec(Spec):
                     value.store_in_group(
                         group,
                         compression=compression,
+                        chunk_axes=chunk_axes,
                         warn_missing_optional_fields=warn_missing_optional_fields,
                     )
                 else:
@@ -2647,7 +2774,7 @@ class FileSpec(Spec):
                 track.store_in_group(
                     track_group,
                     compression=compression,
-                    chunk_frames=chunk_frames,
+                    chunk_axes=chunk_axes,
                     warn_missing_optional_fields=warn_missing_optional_fields,
                 )
 
