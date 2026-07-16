@@ -47,6 +47,7 @@ zea
    display
    doppler
    func
+   inverse
    io_lib
    log
    metrics
