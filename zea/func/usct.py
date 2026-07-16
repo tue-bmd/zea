@@ -141,7 +141,12 @@ def usct_reflectivity_das(
     sos_grid_z=None,
     n_sos_ray_samples=16,
 ):
-    """Round-trip TOF DAS reflectivity for a single USCT frame.
+    """Round-trip TOF DAS reflectivity for a single Ultrasound Computed Tomography frame.
+
+    .. seealso::
+
+        See :class:`zea.ops.USCTReflectivityDAS` for the physical model and
+        more detailed documentation.
 
     Args:
         analytic: complex tensor ``(n_tx, n_ax, n_el)`` — the analytic channel

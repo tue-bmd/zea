@@ -1,89 +1,4 @@
-"""Reflectivity reconstruction for ultrasound computed tomography (USCT).
-
-USCT acquisitions do not fit zea's standard linear/phased-array B-mode pipeline
-(:class:`~zea.ops.Beamform` with :class:`~zea.ops.TOFCorrection`). In USCT the
-transmit events originate from **individual point sources** — either single ring
-elements firing in turn (full-ring tomographs) or dedicated emitters placed
-around the medium — rather than a wavefront steered *from* the receive aperture
-with per-element ``t0_delays`` and ``focus_distances``. The standard
-:class:`~zea.ops.TOFCorrection` derives its transmit time-of-flight from that
-steered-wavefront model and cannot represent an off-aperture point source, so a
-dedicated operation is required.
-
-:class:`USCTReflectivityDAS` implements a round-trip time-of-flight
-Delay-And-Sum (DAS) reflectivity image that is the natural common denominator of
-these geometries. For every pixel it coherently sums, over all transmit/receive
-pairs, the analytic channel signal sampled at the round-trip delay
-
-.. math::
-
-    \\tau_{t,r}(\\mathbf{p}) =
-        \\frac{\\lVert \\mathbf{p} - \\mathbf{s}_t \\rVert}{c}
-        + \\frac{\\lVert \\mathbf{p} - \\mathbf{e}_r \\rVert}{c}
-        - t_{0,t},
-
-where :math:`\\mathbf{s}_t` is the transmit point-source position,
-:math:`\\mathbf{e}_r` the receive-element position, :math:`c` the sound speed and
-:math:`t_{0,t}` the per-transmit time-zero. This implementation is loosely
-based on the reflection ultrasound computed tomography (RUCT) approach for
-ring-array systems described below.
-
-.. admonition:: Reference
-
-   B. Lafci, J. Robin, X. L. Deán-Ben and D. Razansky.
-   *Expediting Image Acquisition in Reflection Ultrasound Computed Tomography.*
-   IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency Control,
-   69(10):2837-2848, 2022.
-   `DOI: 10.1109/TUFFC.2022.3172713 <https://doi.org/10.1109/TUFFC.2022.3172713>`_
-
-.. rubric:: Reference implementation
-
-* `pyruct <https://github.com/berkanlafci/pyruct>`_
-
-A few options make it usable on the strongly-transmissive ring / dual-panel
-geometries that USCT uses:
-
-- **Transmission rejection** (``reject_transmission``): discard the direct
-  through-transmission arrival (which dwarfs the backscatter) by keeping only
-  round-trip delays that exceed the straight-line source→element time by a guard
-  interval.
-- **Backscatter apodization** (``backscatter_apodization``): weight each pair by
-  the cosine of the angle between the pixel→source and pixel→element directions,
-  keeping only geometries where the receiver looks back toward the illumination
-  (``cos > 0``).
-- **Compounding** (``compounding``): ``"coherent"`` (default) sums the analytic
-  signal across every transmit/receive pair as one complex sum before taking
-  the magnitude once, which gives the best resolution when the delay model is
-  accurate everywhere. ``"incoherent"`` instead takes the magnitude per
-  transmit (coherent only across that transmit's receive aperture) and
-  averages those magnitudes across transmits, trading some resolution for
-  robustness to phase decorrelation between transmits caused by sound-speed
-  mismatch or calibration error — decorrelation that grows with the aperture
-  spanned by a full ring, where transmit/receive pairs can be far apart and
-  see very different propagation paths.
-
-Optionally, a spatial **speed-of-sound map** can be supplied
-(``sos_map``/``sos_grid_x``/``sos_grid_z``) to replace the constant-``c`` delays
-with a straight-ray integral of the local slowness — useful when a ground-truth
-or estimated SoS map is available and the medium has large sound-speed contrast.
-
-Like the rest of zea's beamforming stack, the operation images the **XZ plane**,
-with ``y`` as the elevation (out-of-plane) axis. It consumes the standard zea
-parameters: ``flatgrid``, ``probe_geometry``, ``transmit_origins``,
-``sampling_frequency``, ``initial_times`` and ``sound_speed``, and projects them
-onto the imaging plane internally, so a :class:`~zea.ops.Pipeline` can be driven
-straight from a file's parameters. Ring tomographs should therefore store their
-ring in the XZ plane (``y == 0``), the same convention a linear array uses.
-
-Each pixel is reconstructed independently, so, exactly like
-:class:`~zea.ops.Beamform`, the grid can be processed in patches to bound peak
-memory, and reshaped to an image afterwards::
-
-    Cast -> PatchedGrid([USCTReflectivityDAS]) -> ReshapeGrid -> Normalize -> LogCompress
-
-Without patching, the receive-leg geometry alone costs ``O(n_el * n_pix)``, which
-is what makes a full-resolution grid blow up.
-"""
+"""Reflectivity reconstruction for ultrasound computed tomography (USCT)."""
 
 from keras import ops
 
@@ -101,12 +16,94 @@ _IN_PLANE = [0, 2]
 
 @ops_registry("usct_reflectivity_das")
 class USCTReflectivityDAS(Operation):
-    """Round-trip TOF DAS reflectivity for USCT acquisitions (see module docstring).
+    """Round-trip TOF DAS reflectivity for Ultrasound Computed Tomography acquisitions.
 
-    Accepts raw RF (``n_ch == 1``, Hilbert-transformed internally) or two-channel
-    I/Q (``n_ch == 2``). Geometry, timing and the imaging grid are taken from the
-    standard zea parameters at call time; reconstruction/apodization parameters are
-    constructor arguments and are serialized to ``pipeline.yaml``.
+    USCT acquisitions do not fit zea's standard linear/phased-array B-mode pipeline
+    (:class:`~zea.ops.Beamform` with :class:`~zea.ops.TOFCorrection`). In USCT the
+    transmit events originate from **individual point sources**, either single ring
+    elements firing in turn (full-ring tomographs) or dedicated emitters placed
+    around the medium, rather than a wavefront steered *from* the receive aperture
+    with per-element ``t0_delays`` and ``focus_distances``. The standard
+    :class:`~zea.ops.TOFCorrection` derives its transmit time-of-flight from that
+    steered-wavefront model and cannot represent an off-aperture point source, so a
+    dedicated operation is required.
+
+    This operation implements a round-trip time-of-flight Delay-And-Sum (DAS)
+    reflectivity image that is the natural common denominator of these geometries.
+    For every pixel it coherently sums, over all transmit/receive pairs, the
+    analytic channel signal sampled at the round-trip delay
+
+    .. math::
+
+        \\tau_{t,r}(\\mathbf{p}) =
+            \\frac{\\lVert \\mathbf{p} - \\mathbf{s}_t \\rVert}{c}
+            + \\frac{\\lVert \\mathbf{p} - \\mathbf{e}_r \\rVert}{c}
+            - t_{0,t},
+
+    where :math:`\\mathbf{s}_t` is the transmit point-source position,
+    :math:`\\mathbf{e}_r` the receive-element position, :math:`c` the sound speed and
+    :math:`t_{0,t}` the per-transmit time-zero. This implementation is loosely
+    based on the reflection ultrasound computed tomography (RUCT) approach for
+    ring-array systems described below.
+
+    .. admonition:: Reference
+
+       B. Lafci, J. Robin, X. L. Deán-Ben and D. Razansky.
+       *Expediting Image Acquisition in Reflection Ultrasound Computed Tomography.*
+       IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency Control,
+       69(10):2837-2848, 2022.
+       `DOI: 10.1109/TUFFC.2022.3172713 <https://doi.org/10.1109/TUFFC.2022.3172713>`_
+
+    .. seealso::
+
+        See the `pyruct <https://github.com/berkanlafci/pyruct>`_
+        repository for a reference implementation.
+
+    A few options make it usable on the strongly-transmissive ring / dual-panel
+    geometries that USCT uses:
+
+    - **Transmission rejection** (``reject_transmission``): discard the direct
+      through-transmission arrival (which dwarfs the backscatter) by keeping only
+      round-trip delays that exceed the straight-line source→element time by a guard
+      interval.
+    - **Backscatter apodization** (``backscatter_apodization``): weight each pair by
+      the cosine of the angle between the pixel→source and pixel→element directions,
+      keeping only geometries where the receiver looks back toward the illumination
+      (``cos > 0``).
+    - **Compounding** (``compounding``): ``"coherent"`` (default) sums the analytic
+      signal across every transmit/receive pair as one complex sum before taking
+      the magnitude once, which gives the best resolution when the delay model is
+      accurate everywhere. ``"incoherent"`` instead takes the magnitude per
+      transmit (coherent only across that transmit's receive aperture) and
+      averages those magnitudes across transmits, trading some resolution for
+      robustness to phase decorrelation between transmits caused by sound-speed
+      mismatch or calibration error — decorrelation that grows with the aperture
+      spanned by a full ring, where transmit/receive pairs can be far apart and
+      see very different propagation paths.
+    - Optionally, a spatial **speed-of-sound map** can be supplied
+      (``sos_map``/``sos_grid_x``/``sos_grid_z``) to replace the constant-``c`` delays
+      with a straight-ray integral of the local slowness — useful when a ground-truth
+      or estimated SoS map is available and the medium has large sound-speed contrast.
+
+    Like the rest of zea's beamforming stack, the operation images the **XZ plane**,
+    with ``y`` as the elevation (out-of-plane) axis. It consumes the standard zea
+    parameters: ``flatgrid``, ``probe_geometry``, ``transmit_origins``,
+    ``sampling_frequency``, ``initial_times`` and ``sound_speed``, and projects them
+    onto the imaging plane internally, so a :class:`~zea.ops.Pipeline` can be driven
+    straight from a file's parameters. Ring tomographs should therefore store their
+    ring in the XZ plane (``y == 0``), the same convention a linear array uses.
+
+    Each pixel is reconstructed independently, so, exactly like
+    :class:`~zea.ops.Beamform`, the grid can be processed in patches to bound peak
+    memory, and reshaped to an image afterwards::
+
+        Cast -> PatchedGrid([USCTReflectivityDAS]) -> ReshapeGrid -> Normalize -> LogCompress
+
+    Without patching, the receive-leg geometry alone costs ``O(n_el * n_pix)``, which
+    is what makes a full-resolution grid blow up.
+
+    Accepts raw RF (``n_ch == 1``, where it is demodulated with Hilbert internally),
+    or two-channel I/Q (``n_ch == 2``).
     """
 
     def __init__(
