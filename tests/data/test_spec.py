@@ -1141,15 +1141,15 @@ class TestMetadataAndMetricsValidationErrors:
         with pytest.raises(TypeError, match="weight"):
             Subject(weight="fifteen")
 
-    def test_subject_strain_empty_raises(self):
-        with pytest.raises(ValueError, match="strain"):
-            Subject(strain="   ")
+    def test_subject_genetic_strain_empty_raises(self):
+        with pytest.raises(ValueError, match="genetic_strain"):
+            Subject(genetic_strain="   ")
 
-    def test_subject_strain_valid(self):
-        assert Subject(strain="C57BL/6N").strain == "C57BL/6N"
+    def test_subject_genetic_strain_valid(self):
+        assert Subject(genetic_strain="C57BL/6N").genetic_strain == "C57BL/6N"
 
     def test_subject_animal_metadata_round_trip_hdf5(self, tmp_path):
-        """An animal subject's strain and weight survive a save/load round trip."""
+        """An animal subject's genetic strain and weight survive a save/load round trip."""
         path = tmp_path / "mouse.hdf5"
         File.create(
             path,
@@ -1159,7 +1159,7 @@ class TestMetadataAndMetricsValidationErrors:
             metadata={
                 "subject": {
                     "type": "animal",
-                    "strain": "C57BL/6N",
+                    "genetic_strain": "C57BL/6N",
                     "sex": "F",
                     "weight": np.float32(0.015),
                 }
@@ -1167,7 +1167,7 @@ class TestMetadataAndMetricsValidationErrors:
         )
 
         loaded = File(str(path))._to_file_spec().metadata.subject
-        assert loaded.strain == "C57BL/6N"
+        assert loaded.genetic_strain == "C57BL/6N"
         assert loaded.weight == pytest.approx(0.015)
         assert loaded.type == "animal"
 
@@ -1595,7 +1595,7 @@ class TestSubjectFieldWarnings:
                 age=np.uint8(42),
                 sex="f",
                 weight=np.float32(72.0),
-                strain="n/a",
+                genetic_strain="n/a",
                 fat_percentage=np.float32(17.5),
                 bmi=np.float32(23.4),
             )

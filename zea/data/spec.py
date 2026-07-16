@@ -1787,7 +1787,7 @@ class Subject(Spec):
         age: Subject age in years.
         sex: Subject sex.
         weight: Subject weight in kg.
-        strain: Animal strain, e.g. C57BL/6N. Only meaningful for animal subjects.
+        genetic_strain: Genetic strain of an animal subject, e.g. C57BL/6N.
         fat_percentage: Subject fat percentage.
         bmi: Subject body mass index in kg/m².
     """
@@ -1797,7 +1797,7 @@ class Subject(Spec):
     age: np.uint8 | None = None
     sex: str | None = None
     weight: np.float32 | None = None
-    strain: str | None = None
+    genetic_strain: str | None = None
     fat_percentage: np.float32 | None = None
     bmi: np.float32 | None = None
 
@@ -1807,7 +1807,7 @@ class Subject(Spec):
         "age": {"dtype": np.uint8, "shape": ()},
         "sex": {"dtype": str, "shape": ()},
         "weight": {"dtype": np.float32, "shape": ()},
-        "strain": {"dtype": str, "shape": ()},
+        "genetic_strain": {"dtype": str, "shape": ()},
         "fat_percentage": {"dtype": np.float32, "shape": ()},
         "bmi": {"dtype": np.float32, "shape": ()},
     }
@@ -1818,7 +1818,11 @@ class Subject(Spec):
         "age": {"unit": "–", "description": "Subject age in years.", "rare": True},
         "sex": {"unit": "–", "description": "Subject sex.", "rare": True},
         "weight": {"unit": "kg", "description": "Subject weight.", "rare": True},
-        "strain": {"unit": "–", "description": "Animal strain, e.g. C57BL/6N.", "rare": True},
+        "genetic_strain": {
+            "unit": "–",
+            "description": "Genetic strain (inbred line) of an animal subject, e.g. C57BL/6N.",
+            "rare": True,
+        },
         "fat_percentage": {"unit": "%", "description": "Subject fat percentage.", "rare": True},
         "bmi": {"unit": "kg/m²", "description": "Subject body mass index.", "rare": True},
     }
@@ -1836,8 +1840,8 @@ class Subject(Spec):
                 f"Subject fat percentage must be between 0 and 100, got {self.fat_percentage}"
             )
 
-        if self.strain is not None and not self.strain.strip():
-            raise ValueError("Subject strain cannot be an empty string")
+        if self.genetic_strain is not None and not self.genetic_strain.strip():
+            raise ValueError("Subject genetic_strain cannot be an empty string")
 
         if self.weight is not None:
             if not np.isfinite(self.weight):
