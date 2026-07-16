@@ -281,6 +281,27 @@ def test_seed_scatterers_shape_mismatch_raises(operator):
         seed_scatterers(np.zeros((4, 4)), grid, 10)
 
 
+def test_simulator_rejects_invalid_chunk_size(parameters):
+    """A non-positive chunk size raises a ValueError instead of dividing by zero."""
+    with pytest.raises(ValueError, match="chunk_size"):
+        ScattererSimulator(parameters, chunk_size=0)
+
+
+def test_simulator_rejects_empty_magnitudes(simulator):
+    """Simulating zero scatterers raises a ValueError."""
+    with pytest.raises(ValueError, match="at least one"):
+        simulator(np.zeros(0, dtype=np.float32), positions=np.zeros((0, 3), dtype=np.float32))
+
+
+def test_invert_scatterers_rejects_custom_grid(parameters, measurement):
+    """Custom-flatgrid operators are rejected: seeding uses `parameters.grid`."""
+    _, image = measurement
+    flatgrid = np.asarray(parameters.grid, dtype=np.float32).reshape(-1, 3)[::2]
+    operator = DASOperator(parameters, flatgrid=flatgrid)
+    with pytest.raises(ValueError, match="custom `flatgrid`"):
+        invert_scatterers(operator, image[: len(flatgrid)], n_scatterers=10, n_iter=1)
+
+
 def test_invert_direct_fits_image(operator, measurement):
     """The pseudo-inverse reproduces the measured image almost exactly."""
     _, image = measurement

@@ -2142,6 +2142,47 @@ class TestLegacyFileLoading:
         assert parameters.waveforms_two_way.shape == (n_tx, waveform.size)
         np.testing.assert_array_equal(parameters.waveforms_two_way[0], waveform)
 
+    def test_missing_tx_waveform_indices(self, tmp_path):
+        """Legacy files without ``tx_waveform_indices`` keep waveform arrays as-is.
+
+        Files that already store one waveform per transmit (arrays of shape
+        ``(n_tx, n_samples)``) have no indices to expand with; the waveforms
+        must pass through unchanged instead of failing on iterating ``None``.
+        """
+        path = tmp_path / "legacy_no_waveform_indices.hdf5"
+        n_frames, n_tx, n_el, n_ax, n_ch = 1, 3, 4, 16, 1
+        waveforms = np.tile(np.hanning(32).astype(np.float32), (n_tx, 1))
+
+        with h5py.File(path, "w") as f:
+            f.attrs["probe"] = "generic"
+            f.attrs["description"] = "legacy file without tx_waveform_indices"
+            data_group = f.create_group("data")
+            data_group.create_dataset(
+                "raw_data",
+                data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+            )
+            scan = f.create_group("scan")
+            scan["probe_geometry"] = np.zeros((n_el, 3), dtype=np.float32)
+            scan["sampling_frequency"] = np.float32(30e6)
+            scan["center_frequency"] = np.float32(5e6)
+            scan["sound_speed"] = np.float32(1540.0)
+            scan["initial_times"] = np.zeros(n_tx, dtype=np.float32)
+            scan["t0_delays"] = np.zeros((n_tx, n_el), dtype=np.float32)
+            scan["tx_apodizations"] = np.ones((n_tx, n_el), dtype=np.float32)
+            scan["focus_distances"] = np.full(n_tx, np.inf, dtype=np.float32)
+            scan["polar_angles"] = np.zeros(n_tx, dtype=np.float32)
+            scan["azimuth_angles"] = np.zeros(n_tx, dtype=np.float32)
+            scan["n_frames"] = np.int64(n_frames)
+            scan["n_tx"] = np.int64(n_tx)
+            scan["n_ax"] = np.int64(n_ax)
+            scan["n_el"] = np.int64(n_el)
+            scan["n_ch"] = np.int64(n_ch)
+            scan["waveforms_two_way"] = waveforms
+
+        with File(path) as f:
+            parameters = f.load_parameters()
+        np.testing.assert_array_equal(parameters.waveforms_two_way, waveforms)
+
 
 class TestCustomElements:
     """Tests for storing/loading :class:`CustomElement` objects via the ``custom`` key."""

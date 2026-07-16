@@ -154,13 +154,15 @@ def legacy_scan(scan_parameters: dict):
         # as list indices below.
         tx_waveform_indices = np.asarray(tx_waveform_indices).astype(int)
 
-    if "waveforms_one_way" in scan_parameters:
+    # Without tx_waveform_indices (files that already store one waveform per
+    # transmit) the waveforms are kept as-is.
+    if "waveforms_one_way" in scan_parameters and tx_waveform_indices is not None:
         waveforms_one_way_list = scan_parameters["waveforms_one_way"]
         scan_parameters["waveforms_one_way"] = np.stack(
             [waveforms_one_way_list[i] for i in tx_waveform_indices]
         )
 
-    if "waveforms_two_way" in scan_parameters:
+    if "waveforms_two_way" in scan_parameters and tx_waveform_indices is not None:
         waveforms_two_way_list = scan_parameters["waveforms_two_way"]
         scan_parameters["waveforms_two_way"] = np.stack(
             [waveforms_two_way_list[i] for i in tx_waveform_indices]

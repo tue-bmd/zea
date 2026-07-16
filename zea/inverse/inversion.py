@@ -161,6 +161,21 @@ def invert_scatterers(
     if simulator is None:
         simulator = ScattererSimulator(parameters)
 
+    # Seeding samples positions from `parameters.grid`, so an operator built
+    # on a custom flatgrid would be seeded at unrelated coordinates. For
+    # custom grids, seed positions manually and use ScattererSimulator + cgls.
+    parameters_flatgrid = np.asarray(ops.convert_to_numpy(parameters.flatgrid), dtype=np.float32)
+    operator_flatgrid = np.asarray(ops.convert_to_numpy(operator.flatgrid), dtype=np.float32)
+    if operator_flatgrid.shape != parameters_flatgrid.shape or not np.allclose(
+        operator_flatgrid, parameters_flatgrid
+    ):
+        raise ValueError(
+            "`invert_scatterers` seeds scatterers from `operator.parameters.grid`, "
+            "which does not match the operator's custom `flatgrid`. Build the "
+            "operator on `parameters.flatgrid`, or seed positions manually and "
+            "solve with `ScattererSimulator` and `cgls` directly."
+        )
+
     image = ops.reshape(ops.cast(ops.convert_to_tensor(image), "float32"), (-1,))
     positions = seed_scatterers(
         ops.convert_to_numpy(operator.to_grid(image)),

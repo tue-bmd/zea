@@ -294,6 +294,8 @@ class ScattererSimulator:
     ):
         self.parameters = parameters
         self.chunk_size = int(chunk_size)
+        if self.chunk_size <= 0:
+            raise ValueError(f"`chunk_size` must be positive, got {chunk_size}.")
         self.waveform_sampling_frequency = waveform_sampling_frequency
         self.reference_distance = reference_distance
 
@@ -418,6 +420,8 @@ class ScattererSimulator:
         params = self.parameters
         magnitudes = ops.cast(ops.convert_to_tensor(magnitudes), "float32")
         n_scat = int(magnitudes.shape[0])
+        if n_scat == 0:
+            raise ValueError("`magnitudes` must contain at least one scatterer.")
         chunk_size = min(self.chunk_size, n_scat)
         axial_times = ops.arange(params.n_ax, dtype="float32") / params.sampling_frequency
 
