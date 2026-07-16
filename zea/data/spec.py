@@ -37,7 +37,7 @@ UNITS = {
     "dB/m/Hz": "decibels per meter per hertz",
     "#": "count",
     "%": "percent",
-    "g": "grams",
+    "kg": "kilograms",
     "kg/m²": "kilograms per square meter",
 }
 
@@ -1786,7 +1786,8 @@ class Subject(Spec):
         type: Subject type, e.g. human, phantom, animal.
         age: Subject age in years.
         sex: Subject sex.
-        weight: Subject weight in grams.s.
+        weight: Subject weight in kg. Small-animal subjects are fractional
+            (a mouse is ~0.015-0.030 kg).
         strain: Animal strain, e.g. C57BL/6N. Only meaningful for animal subjects.
         fat_percentage: Subject fat percentage.
         bmi: Subject body mass index in kg/m².
@@ -1817,7 +1818,7 @@ class Subject(Spec):
         "type": {"unit": "–", "description": "Subject type, e.g. human, phantom, animal."},
         "age": {"unit": "–", "description": "Subject age in years.", "rare": True},
         "sex": {"unit": "–", "description": "Subject sex.", "rare": True},
-        "weight": {"unit": "g", "description": "Subject weight.", "rare": True},
+        "weight": {"unit": "kg", "description": "Subject weight.", "rare": True},
         "strain": {"unit": "–", "description": "Animal strain, e.g. C57BL/6N.", "rare": True},
         "fat_percentage": {"unit": "%", "description": "Subject fat percentage.", "rare": True},
         "bmi": {"unit": "kg/m²", "description": "Subject body mass index.", "rare": True},
@@ -1843,11 +1844,11 @@ class Subject(Spec):
             if not np.isfinite(self.weight):
                 raise ValueError(f"Subject weight must be finite, got {self.weight}")
             if self.weight <= 0:
-                raise ValueError(f"Subject weight must be positive, got {self.weight} g")
-            if self.weight < 1:
+                raise ValueError(f"Subject weight must be positive, got {self.weight} kg")
+            if self.weight > 1000:
                 log.warning(
-                    f"Subject weight of {self.weight} g is implausibly small. Please verify "
-                    "the value and that it is in grams, not kilograms."
+                    f"Subject weight was specified as {self.weight} kg."
+                    "Please verify the value and that it is in kilograms, not grams."
                 )
 
         if self.bmi is not None:
