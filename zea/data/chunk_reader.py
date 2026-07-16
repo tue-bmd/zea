@@ -370,6 +370,20 @@ def _human_bytes(n: int) -> str:
     return f"{size:.1f} TB"
 
 
+def _display_path(dset: h5py.Dataset) -> str:
+    """Dataset path as the user indexes it, not the raw internal HDF5 path.
+
+    Single-track files resolve paths without the tracks prefix (``f.data.raw_data``
+    rather than ``f.tracks[0].data.raw_data`` — see :class:`zea.data.file.File`), so
+    when ``track_0`` is the only track, drop ``/tracks/track_0`` from the path.
+    """
+    path = dset.name
+    prefix = "/tracks/track_0/"
+    if path.startswith(prefix) and len(dset.file["tracks"]) == 1:
+        return path[len(prefix) - 1 :]
+    return path
+
+
 def _fallback_note(
     dset: h5py.Dataset, fetcher: Fetcher | None, kind: str, cause: str, fix: str
 ) -> None:
@@ -378,17 +392,19 @@ def _fallback_note(
     Serial reads happen locally too, not only when streaming, so this fires whether or not
     progress was requested. ``cause`` completes "Reading '{name}' {cause}" and ``fix`` says how
     to avoid it; ``kind`` scopes the once-only dedupe so the resave and selection notes do not
-    silence each other. The name is the file, not the dataset's internal HDF5 path — that is
-    what a user would actually act on. Anything that could break here is swallowed; a message
-    is never worth failing a read over.
+    silence each other. The name is the file — that is what a user would actually act on —
+    with the dataset's path in brackets (as the user indexes it, see :func:`_display_path`),
+    so notes for different datasets of the same file read as distinct rather than as repeats.
+    Anything that could break here is swallowed; a message is never worth failing a read over.
     """
     try:
         from zea import log
 
         name = fetcher.source if fetcher is not None else dset.name
         size = _human_bytes(dset.nbytes)
+        detail = log.dim(f"({_display_path(dset)}, {size})")
         log.warning_once(
-            f"Reading '{name}' ({size}) {cause} — falling back to a serial h5py read "
+            f"Reading '{name}' {detail} {cause} — falling back to a serial h5py read "
             f"(slower). {fix}",
             key=(dset.name, kind),
         )
