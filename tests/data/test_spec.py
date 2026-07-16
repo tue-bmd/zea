@@ -1102,6 +1102,75 @@ class TestMetadataAndMetricsValidationErrors:
             Subject(bmi=np.float32(75.0))
         assert any("BMI" in str(c.args[0]) for c in mock_warn.call_args_list)
 
+    def test_subject_weight_out_of_range_raises(self):
+        """weight must be a positive, finite number of kilograms."""
+        with pytest.raises(ValueError, match="weight"):
+            Subject(weight=np.float32(0.0))
+        with pytest.raises(ValueError, match="weight"):
+            Subject(weight=np.float32(-1.0))
+        with pytest.raises(ValueError, match="weight"):
+            Subject(weight=np.float32("nan"))
+
+    def test_subject_weight_valid(self):
+        """A human-sized weight in kg passes validation without warning."""
+        with patch("zea.log.warning") as mock_warn:
+            subject = Subject(weight=np.float32(72.0))
+        assert subject.weight == np.float32(72.0)
+        assert not any("weight" in str(c.args[0]) for c in mock_warn.call_args_list)
+
+    def test_subject_small_animal_weight_valid(self):
+        """A mouse weighs a fraction of a kg and must not warn."""
+        with patch("zea.log.warning") as mock_warn:
+            subject = Subject(weight=np.float32(0.015))
+        assert subject.weight == pytest.approx(0.015)
+        assert not any("weight" in str(c.args[0]) for c in mock_warn.call_args_list)
+
+    def test_subject_weight_implausibly_large_warns(self):
+        """A gram value passed into the kg field warns, but does not raise."""
+        with patch("zea.log.warning") as mock_warn:
+            Subject(weight=np.float32(72000.0))
+        assert any("kilograms" in str(c.args[0]) for c in mock_warn.call_args_list)
+
+    def test_subject_weight_accepts_python_float(self):
+        """Native floats are cast to the float32 declared in SCHEMA."""
+        subject = Subject(weight=72.0)
+        assert subject.weight == np.float32(72.0)
+        assert subject.weight.dtype == np.float32
+
+    def test_subject_weight_wrong_dtype_raises(self):
+        with pytest.raises(TypeError, match="weight"):
+            Subject(weight="fifteen")
+
+    def test_subject_genetic_strain_empty_raises(self):
+        with pytest.raises(ValueError, match="genetic_strain"):
+            Subject(genetic_strain="   ")
+
+    def test_subject_genetic_strain_valid(self):
+        assert Subject(genetic_strain="C57BL/6N").genetic_strain == "C57BL/6N"
+
+    def test_subject_animal_metadata_round_trip_hdf5(self, tmp_path):
+        """An animal subject's genetic strain and weight survive a save/load round trip."""
+        path = tmp_path / "mouse.hdf5"
+        File.create(
+            path,
+            data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=2, n_tx=2, n_el=4),
+            probe=_probe_minimal(n_el=4),
+            metadata={
+                "subject": {
+                    "type": "animal",
+                    "genetic_strain": "C57BL/6N",
+                    "sex": "F",
+                    "weight": np.float32(0.015),
+                }
+            },
+        )
+
+        loaded = File(str(path))._to_file_spec().metadata.subject
+        assert loaded.genetic_strain == "C57BL/6N"
+        assert loaded.weight == pytest.approx(0.015)
+        assert loaded.type == "animal"
+
     def test_signal_missing_required_field_raises(self):
         """Signal1D requires either sampling_frequency or timestamps."""
         with pytest.raises(ValueError, match="sampling_frequency|timestamps"):
@@ -1525,6 +1594,8 @@ class TestSubjectFieldWarnings:
                 type="human",
                 age=np.uint8(42),
                 sex="f",
+                weight=np.float32(72.0),
+                genetic_strain="n/a",
                 fat_percentage=np.float32(17.5),
                 bmi=np.float32(23.4),
             )
