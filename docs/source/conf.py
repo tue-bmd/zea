@@ -223,6 +223,32 @@ os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 os.environ["HF_HUB_VERBOSITY"] = "error"
 """
 
+# -- Options for linkcheck builder --------------------------------------------
+# `make docs-linkcheck` also checks links in the example notebooks, which
+# nbsphinx renders into the same doctree as the rest of the docs.
+# Keep retries/timeout low; known-difficult links are ignored below instead.
+linkcheck_retries = 1
+linkcheck_timeout = 10
+linkcheck_workers = 8
+linkcheck_rate_limit_timeout = 30
+linkcheck_ignore = [
+    r"^https://colab\.research\.google\.com/",  # blocks non-browser requests
+    r"^https://doi\.org/10\.1098/rsta\.2024\.0327$",  # royalsociety 403s bots
+    r"^https://doi\.org/10\.1001/jamacardio\.2021\.6059$",  # jamanetwork 403s bots
+    r"^https://doi\.org/10\.1016/j\.ultrasmedbio\.2024\.12\.008$",  # sciencedirect 403s bots
+    r"^https://nl\.mathworks\.com/matlabcentral/",  # 403s bots
+    r"^https://www\.creatis\.insa-lyon\.fr/",  # times out from CI
+    r"^https://portal\.hdfgroup\.org/display/HDF5/H5P_SET_",  # 404, from an older h5py docstring
+    # Self-repo file links (badges, README refs): correct by construction if
+    # the build got this far, and hitting them over HTTP trips GitHub's
+    # anonymous rate limit.
+    r"^https://github\.com/tue-bmd/zea/blob/main/",
+]
+linkcheck_anchors_ignore_for_url = [
+    r"^https://github\.com/[^/]+/[^/]+/blob/",  # line anchors are JS-rendered
+    r"^https://humanheart-project\.creatis\.insa-lyon\.fr/",  # SPA, fragment is a client route
+]
+
 
 def setup(app):
     app.connect("autodoc-skip-member", _skip_reexported_members)

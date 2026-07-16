@@ -18,7 +18,7 @@ def split_seed(seed, n):
     """Split a seed into n seeds for reproducible random ops.
 
     Supports `keras.random.SeedGenerator <https://keras.io/api/random/#seedgenerator-class>`_
-    and `JAX random keys <https://jax.readthedocs.io/en/latest/jax.random.html#jax.random.PRNGKey>`_.
+    and `JAX random keys <https://docs.jax.dev/en/latest/_autosummary/jax.random.PRNGKey.html>`_.
 
     Args:
         seed: None, jax.Array, or keras.random.SeedGenerator.
