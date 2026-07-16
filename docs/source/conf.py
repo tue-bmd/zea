@@ -54,9 +54,11 @@ exclude_patterns = [
     # Exclude internal implementation modules from documentation
     "_autosummary/zea.func.tensor.rst",
     "_autosummary/zea.func.ultrasound.rst",
+    "_autosummary/zea.func.usct.rst",
     "_autosummary/zea.ops.base.rst",
     "_autosummary/zea.ops.tensor.rst",
     "_autosummary/zea.ops.ultrasound.rst",
+    "_autosummary/zea.ops.usct.rst",
     "_autosummary/zea.ops.pipeline.rst",
     "_autosummary/zea.tracking.base.rst",
     "_autosummary/zea.tracking.segmentation.rst",
