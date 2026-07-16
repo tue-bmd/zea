@@ -243,6 +243,13 @@ linkcheck_ignore = [
     # the build got this far, and hitting them over HTTP trips GitHub's
     # anonymous rate limit.
     r"^https://github\.com/tue-bmd/zea/blob/main/",
+    # Any GitHub blob link pinned to a full 40-char commit SHA is a permalink:
+    # immutable by construction, so re-checking it is low-value and these are
+    # exactly the links that keep tripping GitHub's anonymous rate limit (429).
+    # Covers all repos, not just zea's own, so new ones don't need patching in.
+    r"^https://github\.com/[^/]+/[^/]+/blob/[0-9a-f]{40}/",
+    # GitHub 429s bots; branch link (not a permalink), so not covered above.
+    r"^https://github\.com/moono/lpips-tf2\.x/blob/master/example_export_script/convert_to_tensorflow\.py$",
 ]
 linkcheck_anchors_ignore_for_url = [
     r"^https://github\.com/[^/]+/[^/]+/blob/",  # line anchors are JS-rendered

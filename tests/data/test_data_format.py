@@ -1,14 +1,17 @@
 """Test generating and validating zea data format."""
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Generator
 
+import h5py
 import numpy as np
 import pytest
 
 from zea.data.file import File, validate_file
-from zea.data.file_operations import save_file
-from zea.data.spec import ScanSpec
+from zea.data.spec import BLOSC_NTHREADS, MAX_CHUNK_BYTES, PAGED_LAYOUT, ScanSpec
 
 from . import generate_example_dataset
 
@@ -151,13 +154,27 @@ def test_omit_required_scan_key(key, tmp_hdf5_path):
         )
 
 
-@pytest.mark.parametrize("chunk_frames", [True, False])
-def test_chunk_frames(chunk_frames, tmp_hdf5_path):
-    """Tests that chunk_frames stores data datasets with one frame per chunk."""
+@pytest.mark.parametrize(
+    "chunk_axes, expected",
+    [
+        # One chunk per (frame, transmit) plane, full n_ax/n_el/n_ch.
+        (("n_frames", "n_tx"), lambda s: (1, 1) + s[2:]),
+        # One full frame per chunk (the current default).
+        (("n_frames",), lambda s: (1,) + s[1:]),
+        # Disabled: contiguous storage (no chunking) — needs compression off.
+        (None, lambda s: None),
+        ((), lambda s: None),
+    ],
+)
+def test_chunk_axes(chunk_axes, expected, tmp_hdf5_path):
+    """chunk_axes controls which dimensions get HDF5 chunk size 1."""
+    # Contiguous storage is only possible without compression.
+    compression = None if not chunk_axes else "lzf"
 
     File.create(
         path=tmp_hdf5_path,
-        chunk_frames=chunk_frames,
+        chunk_axes=chunk_axes,
+        compression=compression,
         data=DATA,
         scan=SCAN,
         probe=PROBE,
@@ -167,11 +184,115 @@ def test_chunk_frames(chunk_frames, tmp_hdf5_path):
 
     with File(tmp_hdf5_path) as file:
         raw_data = file["data/raw_data"]
-        if chunk_frames:
-            # One frame (a single slice along the first axis) per chunk.
-            assert raw_data.chunks == (1,) + raw_data.shape[1:]
+        assert raw_data.chunks == expected(raw_data.shape)
         # Data must still be readable regardless of chunking.
-        assert np.array_equal(file["data/raw_data"][:], DATA["raw_data"])
+        assert np.array_equal(raw_data[:], DATA["raw_data"])
+
+
+def test_blosc_nthreads_is_set_for_writes():
+    """Blosc threads within a chunk, which is ~4x of the write throughput.
+
+    A regression here would be silent: the files stay correct, just slow to produce.
+    """
+    assert os.environ.get("BLOSC_NTHREADS") == str(BLOSC_NTHREADS)
+    # Lower bound is 1 (a single-core host is a valid config); above 8 measured *slower*
+    # (memory-bound).
+    assert 1 <= BLOSC_NTHREADS <= 8, "more threads than this measured *slower* (memory-bound)"
+
+
+def test_blosc_nthreads_does_not_override_the_user():
+    """An explicit BLOSC_NTHREADS wins — zea only supplies a default.
+
+    Run in a subprocess because the behaviour happens at import: reloading the module in-process
+    rebuilds zea's dataclasses and breaks isinstance checks across the rest of the suite.
+    """
+    env = {**os.environ, "BLOSC_NTHREADS": "3"}
+    proc = subprocess.run(
+        [sys.executable, "-c", "import os, zea.data.spec; print(os.environ['BLOSC_NTHREADS'])"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert proc.stdout.strip().splitlines()[-1] == "3"  # last line: zea logs a backend banner
+
+
+def test_default_write_is_blosc_and_per_frame(tmp_hdf5_path):
+    """Default File.create uses Blosc(zstd) compression and one-frame-per-chunk."""
+    import hdf5plugin
+
+    File.create(path=tmp_hdf5_path, data=DATA, scan=SCAN, probe=PROBE)  # all defaults
+
+    with File(tmp_hdf5_path) as file:
+        raw_data = file["data/raw_data"]
+        # per-frame default: chunk size 1 on n_frames, full on the rest
+        assert raw_data.chunks == (1,) + raw_data.shape[1:]
+        # Blosc filter is applied (h5py doesn't name external filters, so check id)
+        dcpl = raw_data.id.get_create_plist()
+        filter_ids = {dcpl.get_filter(i)[0] for i in range(dcpl.get_nfilters())}
+        assert hdf5plugin.Blosc.filter_id in filter_ids
+        assert np.array_equal(raw_data[:], DATA["raw_data"])
+
+
+def test_large_frames_are_split_into_capped_chunks(tmp_hdf5_path):
+    """A frame bigger than MAX_CHUNK_BYTES is split along n_tx, not stored as one chunk.
+
+    A chunk decodes in a single thread, so a whole-frame chunk of a high-transmit scan has
+    nothing to parallelise (~7x slower to read). The split must fall on ``n_tx``, leaving
+    ``n_ax``/``n_el`` whole so each chunk stays a contiguous run of the array.
+    """
+    big_frames, big_tx, big_ax, big_el = 2, 64, 2048, 64
+    raw = np.zeros((big_frames, big_tx, big_ax, big_el, 1), dtype=np.float32)
+    assert raw[0].nbytes > MAX_CHUNK_BYTES, "the frame must exceed the cap to test the cap"
+
+    scan = {
+        **SCAN,
+        "initial_times": np.zeros(big_tx, dtype=np.float32),
+        "t0_delays": np.zeros((big_tx, big_el), dtype=np.float32),
+        "focus_distances": np.zeros(big_tx, dtype=np.float32),
+        "polar_angles": np.linspace(-np.pi / 2, np.pi / 2, big_tx, dtype=np.float32),
+        "azimuth_angles": np.zeros(big_tx, dtype=np.float32),
+        "tx_apodizations": np.ones((big_tx, big_el), dtype=np.float32),
+        "time_to_next_transmit": np.ones((big_frames, big_tx), dtype=np.float32),
+        "transmit_origins": np.zeros((big_tx, 3), dtype=np.float32),
+    }
+    probe = {**PROBE, "probe_geometry": np.zeros((big_el, 3), dtype=np.float32)}
+    File.create(
+        path=tmp_hdf5_path,
+        data={"raw_data": raw},
+        scan=scan,
+        probe=probe,
+        overwrite=True,
+    )
+
+    with File(tmp_hdf5_path) as file:
+        raw_data = file["data/raw_data"]
+        chunks = raw_data.chunks
+        chunk_bytes = np.prod(chunks) * raw.dtype.itemsize
+
+        assert chunk_bytes <= MAX_CHUNK_BYTES
+        assert chunks[0] == 1  # still one frame per chunk
+        assert 1 <= chunks[1] < big_tx  # split along n_tx ...
+        assert chunks[2:] == (big_ax, big_el, 1)  # ... and only along n_tx
+        assert np.array_equal(raw_data[:], raw)
+
+
+def test_default_write_is_paged(tmp_hdf5_path):
+    """Files are written with a paged file space, which speeds up streamed opens.
+
+    Paging collects the metadata a reader walks on open into few adjacent pages, so a
+    cold open over HTTP costs fewer round trips. It must not change what is stored: the
+    file stays a plain HDF5 file, readable by h5py without any special handling.
+    """
+    File.create(path=tmp_hdf5_path, data=DATA, scan=SCAN, probe=PROBE)  # all defaults
+
+    with h5py.File(tmp_hdf5_path, "r") as file:
+        plist = file.id.get_create_plist()
+        strategy = plist.get_file_space_strategy()[0]
+        assert strategy == h5py.h5f.FSPACE_STRATEGY_PAGE
+        assert plist.get_file_space_page_size() == PAGED_LAYOUT["fs_page_size"]
+        # plain h5py (no zea key remapping): the file is an ordinary HDF5 file
+        assert np.array_equal(file["tracks/track_0/data/raw_data"][:], DATA["raw_data"])
 
 
 def test_existing_path(tmp_hdf5_path):
@@ -264,7 +385,7 @@ def _parameters(tmp_path):
 
 
 def test_save_file_custom_maps(tmp_hdf5_path, _parameters):
-    """Tests that save_file correctly stores custom spatial maps in the data group."""
+    """Tests that saving correctly stores custom spatial maps in the data group."""
     import warnings
 
     custom_values = np.zeros((n_frames, 32, 32, 1), dtype=np.uint8)
@@ -272,16 +393,18 @@ def test_save_file_custom_maps(tmp_hdf5_path, _parameters):
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        save_file(
+        File.create(
             path=tmp_hdf5_path,
-            parameters=_parameters,
-            raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
-            custom_maps={
+            data={
+                "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                 "my_overlay": {
                     "values": custom_values,
                     "coordinates": custom_coordinates,
-                }
+                },
             },
+            scan=_parameters.to_scan_dict(),
+            probe=_parameters.to_probe_dict(),
+            overwrite=True,
         )
 
     with File(tmp_hdf5_path) as f:
@@ -291,11 +414,13 @@ def test_save_file_custom_maps(tmp_hdf5_path, _parameters):
 
 
 def test_save_file_custom_metadata(tmp_hdf5_path, _parameters):
-    """Tests that save_file correctly stores metadata in the metadata group."""
-    save_file(
+    """Tests that saving correctly stores metadata in the metadata group."""
+    File.create(
         path=tmp_hdf5_path,
-        parameters=_parameters,
-        raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+        data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+        scan=_parameters.to_scan_dict(),
+        probe=_parameters.to_probe_dict(),
+        overwrite=True,
         metadata={
             "credit": "Test Lab, 2024",
             "text_report": "Normal acquisition.",
