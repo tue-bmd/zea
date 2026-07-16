@@ -13,6 +13,7 @@ from zea.data.file import (
     CustomElement,
     File,
     Track,
+    _format_selection,
     _GroupProxy,
     _StringDataset,
     load_file,
@@ -473,6 +474,24 @@ class TestStringDataset:
             result = labels_ds[:]
             assert result.dtype.kind == "U"
             np.testing.assert_array_equal(result, seg_labels)
+
+
+class TestFormatSelection:
+    @pytest.mark.parametrize(
+        ("selection", "expected"),
+        [
+            (slice(None), ":"),
+            (slice(1, 5), "1:5"),
+            (slice(None, None, 2), "::2"),
+            (slice(1, 5, 2), "1:5:2"),
+            (Ellipsis, "..."),
+            (0, "0"),
+            ((0, slice(None), slice(1, 5)), "0, :, 1:5"),
+            ((Ellipsis, 0), "..., 0"),
+        ],
+    )
+    def test_formats_selection_as_source_would_read(self, selection, expected):
+        assert _format_selection(selection) == expected
 
 
 class TestGroupProxy:

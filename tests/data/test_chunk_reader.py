@@ -27,6 +27,8 @@ from zea.data.chunk_reader import (
     MIN_BYTES,
     HTTPFetcher,
     LocalFetcher,
+    _display_path,
+    _human_bytes,
     eligible,
     fetcher_for,
     read,
@@ -369,6 +371,46 @@ class TestFallbackNotes:
             got = file.data.raw_data[selection]
             assert got.nbytes < MIN_BYTES
             np.testing.assert_array_equal(got, file[RAW][selection])
+
+
+class TestHumanBytes:
+    @pytest.mark.parametrize(
+        ("n", "expected"),
+        [
+            (0, "0 B"),
+            (1023, "1023 B"),
+            (1024, "1.0 KB"),
+            (1536, "1.5 KB"),
+            (1024**2, "1.0 MB"),
+            (1024**3, "1.0 GB"),
+            (1024**4, "1.0 TB"),
+            (1024**5, "1024.0 TB"),
+        ],
+    )
+    def test_units(self, n, expected):
+        assert _human_bytes(n) == expected
+
+
+class TestDisplayPath:
+    def test_strips_track_prefix_for_single_track_file(self, structured_file):
+        with File(structured_file) as file:
+            assert _display_path(file[RAW]) == "/data/raw_data"
+
+    def test_keeps_track_prefix_for_multi_track_file(self, tmp_path):
+        path = tmp_path / "multi_track.hdf5"
+
+        def _track(label):
+            return {"data": {"raw_data": _structured()}, "scan": _scan(), "label": label}
+
+        File.create(
+            path,
+            tracks=[_track("a"), _track("b")],
+            probe={"name": "generic", "probe_geometry": np.zeros((N_EL, 3), np.float32)},
+            ignore_warnings=True,
+        )
+        with File(path) as file:
+            dset = file["tracks/track_0/data/raw_data"]
+            assert _display_path(dset) == "/tracks/track_0/data/raw_data"
 
 
 @pytest.fixture
