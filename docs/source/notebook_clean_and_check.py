@@ -94,6 +94,30 @@ def check_execution_counts(nb, nb_path):
         )
 
 
+# Matches the bare URL regardless of how it's embedded in Markdown (inline link
+# destination, reference-style link definition, angle-bracket autolink, or a
+# plain URL in prose), since in every case the literal URL string appears as-is
+# in the cell source.
+READTHEDOCS_LINK = re.compile(r"https?://zea\.readthedocs\.io/[^\s)\]>\"'`]+")
+
+
+def check_doc_links(nb, nb_path):
+    # Relative links (unlike hardcoded readthedocs.io URLs) are validated by the
+    # doc build itself and keep working across doc versions.
+    for cell in nb.get("cells", []):
+        if cell.get("cell_type") != "markdown":
+            continue
+        src = "".join(cell.get("source", []))
+        match = READTHEDOCS_LINK.search(src)
+        if match:
+            error(
+                f"Found hardcoded readthedocs.io link to zea docs: {match.group(0)}. "
+                "Use a relative link to the target .rst page instead "
+                "(e.g. '../../_autosummary/zea.X.rst' or '../../pipeline.rst').",
+                nb_path,
+            )
+
+
 def check_badges(nb, nb_path):
     # validate badge URLs and detect common typos
     badge_pattern = re.compile(r"\[!\[[^\]]+\]\([^)]+\)\]\(([^)]+)\)")
@@ -228,6 +252,7 @@ def process_notebook(nb_path):
     check_cell_size(nb, nb_path)
     check_first_cell(nb, nb_path)
     check_execution_counts(nb, nb_path)
+    check_doc_links(nb, nb_path)
     badge_cell_idx = check_badges(nb, nb_path)
     check_gpu_warning(nb, nb_path, badge_cell_idx)
 

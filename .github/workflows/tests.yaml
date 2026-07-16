@@ -349,5 +349,6 @@ jobs:
               export ZEA_LOG_LEVEL=ERROR && \
               make docs-clean && \
               make docs-build SPHINXOPTS='-W --keep-going' && \
-              make docs-test \
+              make docs-test && \
+              make docs-linkcheck SPHINXOPTS='--keep-going' \
             "
