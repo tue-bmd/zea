@@ -122,6 +122,56 @@ def test_usct_das_backscatter_apodization_effect():
     assert image_value(tx_fwd, rx_fwd, apod=False) == pytest.approx(1.0, rel=1e-2)
 
 
+def test_usct_das_incoherent_compounding_avoids_cross_transmit_cancellation():
+    """``compounding="incoherent"`` takes the magnitude per transmit and
+    averages those magnitudes across transmits, instead of summing complex
+    amplitudes across transmits. A transmit-to-transmit phase flip that
+    perfectly cancels the coherent sum must leave the incoherent one at full
+    amplitude."""
+    c, fs = 1500.0, 5e6
+    tx = np.array([[-0.006, 0.0], [-0.006, 0.002]], dtype=np.float32)
+    rx = np.array([[0.006, 0.0]], dtype=np.float32)
+    pixels = np.array([[0.0, 0.0]], dtype=np.float32)
+    t0 = np.zeros(2, dtype=np.float32)
+
+    analytic = np.ones((2, 64, 1), dtype=np.complex64)
+    analytic[1] *= -1.0  # second transmit's trace is exactly out of phase
+
+    common = dict(
+        tx_chunk=1,
+        reject_transmission=False,
+        backscatter_apodization=False,
+        interpolation="linear",
+    )
+    coherent = usct_reflectivity_das(
+        analytic, tx, rx, pixels, fs, t0, c, compounding="coherent", **common
+    )
+    incoherent = usct_reflectivity_das(
+        analytic, tx, rx, pixels, fs, t0, c, compounding="incoherent", **common
+    )
+    coherent = float(np.asarray(ops.convert_to_numpy(coherent))[0])
+    incoherent = float(np.asarray(ops.convert_to_numpy(incoherent))[0])
+    assert coherent == pytest.approx(0.0, abs=1e-6)
+    assert incoherent == pytest.approx(1.0, rel=1e-3)
+
+
+def test_usct_das_invalid_compounding_raises():
+    """An unrecognized ``compounding`` value must fail loudly."""
+    s = _small_scene()
+    with pytest.raises(ValueError, match="compounding"):
+        usct_reflectivity_das(
+            s["analytic"],
+            s["tx"],
+            s["rx"],
+            s["pixels"],
+            s["fs"],
+            s["t0"],
+            s["c"],
+            tx_chunk=2,
+            compounding="banana",
+        )
+
+
 def test_usct_das_linear_differs_from_nearest():
     """Sanity check that the interpolation modes are actually distinct (guards
     against the linear branch silently collapsing to nearest)."""
@@ -408,6 +458,7 @@ def test_usct_operation_matches_functional():
         transmission_guard_s=1e-6,
         backscatter_apodization=True,
         interpolation="linear",
+        compounding="incoherent",
     )
     out = op(
         data=rf,
@@ -434,6 +485,7 @@ def test_usct_operation_matches_functional():
         transmission_guard_s=1e-6,
         backscatter_apodization=True,
         interpolation="linear",
+        compounding="incoherent",
     )
     ref = np.asarray(ops.convert_to_numpy(ref))
     np.testing.assert_allclose(out, ref, rtol=1e-5, atol=1e-5)

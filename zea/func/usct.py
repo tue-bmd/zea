@@ -134,6 +134,7 @@ def usct_reflectivity_das(
     transmission_guard_s=2.5e-6,
     backscatter_apodization=True,
     interpolation="linear",
+    compounding="coherent",
     sos_map=None,
     sos_grid_x=None,
     sos_grid_z=None,
@@ -160,6 +161,15 @@ def usct_reflectivity_das(
             ``"nearest"`` (round to the closest sample). Linear preserves carrier
             phase far better when the acquisition is only marginally oversampled
             (e.g. ring probes at ~4 samples/wavelength).
+        compounding: ``"coherent"`` (default) sums the analytic signal across
+            every transmit/receive pair as one complex sum and takes the
+            magnitude once at the end — the highest-resolution option when the
+            delay model is accurate everywhere. ``"incoherent"`` instead takes
+            the magnitude per transmit (coherent across the receive aperture
+            only) and averages those magnitudes across transmits; it trades
+            some resolution for robustness to phase decorrelation between
+            transmits caused by sound-speed mismatch or calibration error,
+            which grows with the size of the aperture spanned by a full ring.
         sos_map, sos_grid_x, sos_grid_z: optional SoS map and its in-plane axes,
             enabling straight-ray SoS-corrected delays.
         n_sos_ray_samples: ray samples for the SoS integral.
@@ -170,6 +180,8 @@ def usct_reflectivity_das(
         in patches (see :class:`zea.ops.PatchedGrid`) and reshape afterwards (see
         :class:`zea.ops.ReshapeGrid`).
     """
+    if compounding not in ("coherent", "incoherent"):
+        raise ValueError(f"compounding must be 'coherent' or 'incoherent', got {compounding!r}.")
     from zea.beamform.beamformer import compute_receive_distances
 
     n_tx = int(analytic.shape[0])
@@ -198,7 +210,7 @@ def usct_reflectivity_das(
             rx_dist, rx_unit = distance_and_unit(receive_positions, px)
             rx_time = rx_dist / sound_speed
 
-    accum = ops.zeros((P,), dtype="complex64")
+    accum = ops.zeros((P,), dtype="complex64" if compounding == "coherent" else "float32")
     hits = ops.zeros((P,), dtype="float32")
 
     for i in range(0, n_tx, tx_chunk):
@@ -266,7 +278,21 @@ def usct_reflectivity_das(
             weight = ops.cast(valid, "float32")
 
         amp = _gather_time(trace, sample_pos, n_ax, interpolation)  # (c, n_el, P)
-        accum = accum + ops.sum(amp * ops.cast(weight, "complex64"), axis=(0, 1))
-        hits = hits + ops.sum(weight, axis=(0, 1))
+        weight_c = ops.cast(weight, "complex64")
 
-    return ops.abs(accum) / (hits + 1e-6)
+        if compounding == "coherent":
+            accum = accum + ops.sum(amp * weight_c, axis=(0, 1))
+            hits = hits + ops.sum(weight, axis=(0, 1))
+        else:
+            # Coherent within one transmit's receive aperture, then averaged
+            # (incoherently) across transmits: robust to phase decorrelation
+            # between transmits, at the cost of some resolution.
+            per_tx = ops.sum(amp * weight_c, axis=1)  # (c, P)
+            per_tx_hits = ops.sum(weight, axis=1)  # (c, P)
+            per_tx_amp = ops.abs(per_tx) / (per_tx_hits + 1e-6)
+            accum = accum + ops.sum(per_tx_amp, axis=0)
+            hits = hits + ops.sum(ops.cast(per_tx_hits > 0, "float32"), axis=0)
+
+    if compounding == "coherent":
+        return ops.abs(accum) / (hits + 1e-6)
+    return accum / (hits + 1e-6)

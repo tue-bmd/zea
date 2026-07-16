@@ -24,34 +24,9 @@ pairs, the analytic channel signal sampled at the round-trip delay
 
 where :math:`\\mathbf{s}_t` is the transmit point-source position,
 :math:`\\mathbf{e}_r` the receive-element position, :math:`c` the sound speed and
-:math:`t_{0,t}` the per-transmit time-zero. Two options make it usable on the
-strongly-transmissive ring / dual-panel geometries that USCT uses:
-
-- **Transmission rejection** (``reject_transmission``): discard the direct
-  through-transmission arrival (which dwarfs the backscatter) by keeping only
-  round-trip delays that exceed the straight-line source→element time by a guard
-  interval.
-- **Backscatter apodization** (``backscatter_apodization``): weight each pair by
-  the cosine of the angle between the pixel→source and pixel→element directions,
-  keeping only geometries where the receiver looks back toward the illumination
-  (``cos > 0``).
-
-Optionally, a spatial **speed-of-sound map** can be supplied
-(``sos_map``/``sos_grid_x``/``sos_grid_z``) to replace the constant-``c`` delays
-with a straight-ray integral of the local slowness — useful when a ground-truth
-or estimated SoS map is available and the medium has large sound-speed contrast.
-
-The core round-trip delay computation (including the two-tap linear
-interpolation at the fractional sample) and the Hilbert-based analytic signal
-follow the reflection ultrasound computed tomography (RUCT) approach for
-ring-array systems described below: both sum the analytic signal coherently
-before taking a magnitude, rather than summing per-pair envelopes. Two
-differences from the reference implementation: the magnitude here is taken
-once, over the joint sum across every transmit/receive pair (the reference
-compounds a per-transmit-event magnitude across transmits), and out-of-window
-delays are masked out rather than clamped to the nearest valid sample.
-Transmission rejection and backscatter apodization are further extensions, not
-present in the reference implementation.
+:math:`t_{0,t}` the per-transmit time-zero. This implementation is loosely
+based on the reflection ultrasound computed tomography (RUCT) approach for
+ring-array systems described below.
 
 .. admonition:: Reference
 
@@ -64,6 +39,33 @@ present in the reference implementation.
 .. rubric:: Reference implementation
 
 * `pyruct <https://github.com/berkanlafci/pyruct>`_
+
+A few options make it usable on the strongly-transmissive ring / dual-panel
+geometries that USCT uses:
+
+- **Transmission rejection** (``reject_transmission``): discard the direct
+  through-transmission arrival (which dwarfs the backscatter) by keeping only
+  round-trip delays that exceed the straight-line source→element time by a guard
+  interval.
+- **Backscatter apodization** (``backscatter_apodization``): weight each pair by
+  the cosine of the angle between the pixel→source and pixel→element directions,
+  keeping only geometries where the receiver looks back toward the illumination
+  (``cos > 0``).
+- **Compounding** (``compounding``): ``"coherent"`` (default) sums the analytic
+  signal across every transmit/receive pair as one complex sum before taking
+  the magnitude once, which gives the best resolution when the delay model is
+  accurate everywhere. ``"incoherent"`` instead takes the magnitude per
+  transmit (coherent only across that transmit's receive aperture) and
+  averages those magnitudes across transmits, trading some resolution for
+  robustness to phase decorrelation between transmits caused by sound-speed
+  mismatch or calibration error — decorrelation that grows with the aperture
+  spanned by a full ring, where transmit/receive pairs can be far apart and
+  see very different propagation paths.
+
+Optionally, a spatial **speed-of-sound map** can be supplied
+(``sos_map``/``sos_grid_x``/``sos_grid_z``) to replace the constant-``c`` delays
+with a straight-ray integral of the local slowness — useful when a ground-truth
+or estimated SoS map is available and the medium has large sound-speed contrast.
 
 Like the rest of zea's beamforming stack, the operation images the **XZ plane**,
 with ``y`` as the elevation (out-of-plane) axis. It consumes the standard zea
@@ -114,6 +116,7 @@ class USCTReflectivityDAS(Operation):
         transmission_guard_s=2.5e-6,
         backscatter_apodization=True,
         interpolation="linear",
+        compounding="coherent",
         n_sos_ray_samples=16,
         axial_axis=1,
         **kwargs,
@@ -128,6 +131,7 @@ class USCTReflectivityDAS(Operation):
         self.transmission_guard_s = transmission_guard_s
         self.backscatter_apodization = backscatter_apodization
         self.interpolation = interpolation
+        self.compounding = compounding
         self.n_sos_ray_samples = n_sos_ray_samples
         self.axial_axis = axial_axis
 
@@ -161,6 +165,7 @@ class USCTReflectivityDAS(Operation):
             transmission_guard_s=self.transmission_guard_s,
             backscatter_apodization=self.backscatter_apodization,
             interpolation=self.interpolation,
+            compounding=self.compounding,
             sos_map=sos_map,
             sos_grid_x=sos_grid_x,
             sos_grid_z=sos_grid_z,
