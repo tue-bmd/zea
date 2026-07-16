@@ -16,6 +16,8 @@ All geometry is expressed in the **2-D imaging plane**: ``transmit_origins``,
 
 from keras import ops
 
+from zea.func.tensor import vmap
+
 __all__ = [
     "straight_ray_times",
     "usct_reflectivity_das",
@@ -81,9 +83,7 @@ def straight_ray_times(positions, pixels, sos_map, x_axis, z_axis, background_c,
     x_lo, x_hi = x_axis[0], x_axis[-1]
     z_lo, z_hi = z_axis[0], z_axis[-1]
 
-    rows = []
-    for m in range(int(positions.shape[0])):
-        src = positions[m]
+    def _one_source(src):
         seg = pixels - src[None, :]
         dist = ops.sqrt(ops.sum(ops.square(seg), axis=-1))
         pts = src[None, None, :] + t_mid[:, None, None] * seg[None, :, :]  # (S, P, 2)
@@ -94,8 +94,9 @@ def straight_ray_times(positions, pixels, sos_map, x_axis, z_axis, background_c,
             ops.logical_and(zq >= z_lo, zq <= z_hi),
         )
         c_eff = ops.where(inside, c_samp, background_c)
-        rows.append(dist * ops.mean(1.0 / c_eff, axis=0))
-    return ops.stack(rows, axis=0)
+        return dist * ops.mean(1.0 / c_eff, axis=0)
+
+    return vmap(_one_source)(positions)
 
 
 def _gather_time(trace, sample_pos, n_ax, interpolation):
@@ -152,7 +153,7 @@ def usct_reflectivity_das(
         sampling_frequency: sampling rate [Hz].
         initial_times: ``(n_tx,)`` per-transmit time-zero [s].
         sound_speed: background sound speed [m/s].
-        tx_chunk: transmits processed per batch (memory/speed knob).
+        tx_chunk: transmits processed per vectorized batch (memory/speed knob).
         reject_transmission: drop the direct through-transmission arrival.
         transmission_guard_s: guard interval [s] added to the direct-path time
             when ``reject_transmission`` is set.
@@ -184,9 +185,7 @@ def usct_reflectivity_das(
         raise ValueError(f"compounding must be 'coherent' or 'incoherent', got {compounding!r}.")
     from zea.beamform.beamformer import compute_receive_distances
 
-    n_tx = int(analytic.shape[0])
     n_ax = int(analytic.shape[1])
-    P = int(pixels.shape[0])
     fs = sampling_frequency
     per_tx_rx = len(receive_positions.shape) == 3
 
@@ -199,6 +198,8 @@ def usct_reflectivity_das(
     px = ops.convert_to_tensor(pixels)
 
     # Precompute receive-leg geometry when the aperture is shared across transmits.
+    # This is the single biggest beneficiary of `straight_ray_times` now using
+    # `vmap` internally instead of a Python loop over `n_el` elements (see below).
     if not per_tx_rx:
         if use_sos:
             rx_time = straight_ray_times(
@@ -215,6 +216,8 @@ def usct_reflectivity_das(
             rx_dist, rx_unit = distance_and_unit(receive_positions, px)
             rx_time = rx_dist / sound_speed
 
+    n_tx = int(analytic.shape[0])
+    P = int(px.shape[0])
     accum = ops.zeros((P,), dtype="complex64" if compounding == "coherent" else "float32")
     hits = ops.zeros((P,), dtype="float32")
 
@@ -239,42 +242,38 @@ def usct_reflectivity_das(
 
         if per_tx_rx:
             rx_here = receive_positions[i:j]  # (c, n_el, 2)
-            rt_list, ru_list, direct_list = [], [], []
-            for k in range(int(rx_here.shape[0])):
+
+            def _rx_time_one(rx_one):
                 if use_sos:
-                    rt = straight_ray_times(
-                        rx_here[k],
-                        px,
+                    return straight_ray_times(
+                        rx_one, px, sos_map, sos_grid_x, sos_grid_z, sound_speed, n_sos_ray_samples
+                    )
+                rd, _ = distance_and_unit(rx_one, px)
+                return rd / sound_speed
+
+            def _rx_unit_one(rx_one):
+                return distance_and_unit(rx_one, px)[1]
+
+            rx_time_c = vmap(_rx_time_one)(rx_here)  # (c, n_el, P)
+            rx_unit_c = vmap(_rx_unit_one)(rx_here)  # (c, n_el, P, 2)
+
+            if use_sos:
+
+                def _direct_one(tx_one, rx_one):
+                    return straight_ray_times(
+                        tx_one[None],
+                        rx_one,
                         sos_map,
                         sos_grid_x,
                         sos_grid_z,
                         sound_speed,
                         n_sos_ray_samples,
-                    )
-                    _, ru = distance_and_unit(rx_here[k], px)
-                    direct_list.append(
-                        straight_ray_times(
-                            tx_pos[k : k + 1],
-                            rx_here[k],
-                            sos_map,
-                            sos_grid_x,
-                            sos_grid_z,
-                            sound_speed,
-                            n_sos_ray_samples,
-                        )[0]
-                    )
-                else:
-                    rd, ru = distance_and_unit(rx_here[k], px)
-                    rt = rd / sound_speed
-                rt_list.append(rt)
-                ru_list.append(ru)
-            rx_time_c = ops.stack(rt_list, axis=0)  # (c, n_el, P)
-            rx_unit_c = ops.stack(ru_list, axis=0)  # (c, n_el, P, 2)
-            t_round = tx_time[:, None, :] + rx_time_c
-            if use_sos:
-                direct = ops.stack(direct_list, axis=0)  # (c, n_el)
+                    )[0]
+
+                direct = vmap(_direct_one, in_axes=(0, 0))(tx_pos, rx_here)  # (c, n_el)
             else:
                 direct = _pairwise_batched_direct(tx_pos, rx_here) / sound_speed  # (c, n_el)
+            t_round = tx_time[:, None, :] + rx_time_c
             direct = direct[:, :, None]
             cos = ops.sum(tx_unit[:, None, :, :] * rx_unit_c, axis=-1)
             trace = ops.transpose(analytic[i:j], (0, 2, 1))  # (c, n_el, n_ax)
