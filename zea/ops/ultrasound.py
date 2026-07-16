@@ -1386,7 +1386,8 @@ class CommonMidpointPhaseError(Operation):
 
 @ops_registry("tissue_suppression")
 class TissueSuppression(Operation):
-    """Tissue suppression using SVD-based clutter filtering.
+    """Tissue suppression using SVD-based clutter filtering. Typically applied
+    after beamforming but before envelope detection, on beamformed RF or IQ data.
 
     Removes stationary tissue components from multi-frame ultrasound data
     by zeroing the dominant singular values of the Casorati matrix.
@@ -1396,18 +1397,11 @@ class TissueSuppression(Operation):
     * ``"svd"`` -- the real-valued Direct SVD filter, building the temporal Gram
       matrix with a plain transpose (``XᵀX``). For real data.
     * ``"svd_complex"`` -- the same filter using the conjugate (Hermitian)
-      transpose (``XᴴX``, the true temporal covariance), for IQ data. The op
-      converts the ``[I, Q]`` channels to a complex tensor internally with
-      ``keras.ops.view_as_complex`` and back with ``view_as_real`` before
-      returning, so the op's inputs and outputs stay real-valued and compose in
-      a :class:`Pipeline` like any other operation. This is the filter used for
-      Power-Doppler / ULM processing (as in MUST's ``process.m``).
+      transpose (``XᴴX``, the true temporal covariance), for IQ data.
 
     By default ``filter_type=None`` picks between them from the channel axis --
-    ``n_ch=2`` means IQ and selects ``"svd_complex"``, anything else selects
-    ``"svd"`` -- the same ``shape[-1] == 2`` test
-    :func:`zea.func.ultrasound.envelope_detect` and :class:`Upmix` use. Pass
-    ``filter_type`` explicitly to override this.
+    ``n_ch=2`` means IQ and selects ``"svd_complex"``, otherwise
+    ``"svd"``.
 
     .. note::
         On the TensorFlow backend the ``"svd_complex"`` path runs eagerly:
@@ -1425,8 +1419,7 @@ class TissueSuppression(Operation):
             cutoff (int or float): Number of principal (tissue) components to
                 reject. An ``int`` is a component count. A ``float`` in ``[0, 1)``
                 is a fraction of the number of frames, resolved at call time as
-                ``round(n_frames * cutoff)`` (matching the ULM convention of
-                specifying the clutter cutoff as a percentage of frames).
+                ``round(n_frames * cutoff)``.
             filter_type (str or None): Which clutter filter to use, one of
                 :attr:`FILTER_TYPES`. Defaults to ``None``, which selects
                 ``"svd_complex"`` for IQ input (``n_ch=2``) and ``"svd"``
@@ -1496,9 +1489,7 @@ class TissueSuppression(Operation):
             data (ops.Tensor): Shape (n_frames, ...). Complex for the
                 ``"svd_complex"`` filter type, real otherwise.
             filter_type (str or None): Filter to apply. Defaults to ``None``,
-                which resolves it from ``data`` via :meth:`resolve_filter_type`
-                (note that by then the IQ channels have already been merged into
-                a complex axis, so callers inside :meth:`call` pass it in).
+                which resolves it from ``data`` via :meth:`resolve_filter_type`.
 
         """
         if filter_type is None:
@@ -1514,10 +1505,6 @@ class TissueSuppression(Operation):
         filter_type = self.resolve_filter_type(data)
         is_complex = filter_type == "svd_complex"
 
-        # Real IQ-channel input ((n_frames, ..., 2)) <-> complex ((n_frames, ...))
-        # conversion happens inside the op, same as DelayMultiplyAndSum, so the
-        # op's dict-boundary contract stays real-valued and composes in a
-        # Pipeline like any other op.
         array = ops.view_as_complex(ops.array(data)) if is_complex else ops.array(data)
         filtered = self.suppress_tissue(array, filter_type=filter_type)
         if is_complex:
