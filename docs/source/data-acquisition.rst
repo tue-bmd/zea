@@ -497,7 +497,7 @@ see below:
    nor a metadata signal. Use :class:`~zea.data.CustomElement` for this: a named array (or
    scalar) with a ``description`` and ``unit``, optionally nested under a ``group_name``.  Pass a
    list of them to the ``custom`` argument of :meth:`~zea.File.create`; they are written to a
-   dedicated ``custom`` group and read back via :attr:`~zea.File.custom`.
+   dedicated ``custom`` group.
 
    .. doctest::
 
@@ -547,13 +547,11 @@ see below:
        ... )
 
        >>> with File("custom_elements.hdf5") as f:
-       ...     elements = {e.name: e for e in f.custom}
-       >>> sorted(elements)
-       ['lens_correction', 'profile']
-       >>> float(elements["lens_correction"].data)
+       ...     custom = f.custom
+       >>> float(custom.lens_correction.data)
        1.5
-       >>> elements["profile"].group_name
-       'lens'
+       >>> custom.lens.profile.unit
+       '-'
 
    .. testcleanup::
 
