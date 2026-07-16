@@ -2228,6 +2228,24 @@ class TestCustomElements:
                 ],
             )
 
+    def test_custom_element_absolute_group_name_rejected_on_save(self, tmp_path):
+        """A ``group_name`` starting with '/' raises ValueError instead of writing outside
+        the ``custom`` group."""
+        path = tmp_path / "absolute_group.hdf5"
+        with pytest.raises(ValueError, match="not snake_case"):
+            self._create_with_custom(
+                path,
+                custom=[
+                    CustomElement(
+                        name="x",
+                        data=np.float32(1.0),
+                        description="d",
+                        unit="-",
+                        group_name="/lens/profile",
+                    )
+                ],
+            )
+
     def test_custom_element_non_snake_case_still_readable(self, tmp_path):
         """Files already containing non-snake_case custom element names still load."""
         path = tmp_path / "legacy_bad_name.hdf5"
@@ -2309,6 +2327,29 @@ class TestCustomElements:
                     },
                 },
                 scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                probe=_probe_minimal("test_probe", n_el=n_el),
+                overwrite=True,
+            )
+
+    def test_custom_track_data_key_naming_rejected_on_save(self, tmp_path):
+        """Non-snake_case custom keys in a ``tracks=[...]`` track's ``data`` raise ValueError."""
+        n_frames, n_tx, n_el, n_ax = 2, 2, 4, 8
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+        with pytest.raises(ValueError, match="not snake_case"):
+            File.create(
+                tmp_path / "bad_track_data_key.hdf5",
+                tracks=[
+                    {
+                        "data": {
+                            "raw_data": raw,
+                            "My Overlay": {
+                                "values": np.zeros((n_frames, 4, 4, 1), dtype=np.uint8),
+                            },
+                        },
+                        "scan": scan,
+                    }
+                ],
                 probe=_probe_minimal("test_probe", n_el=n_el),
                 overwrite=True,
             )

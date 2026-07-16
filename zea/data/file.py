@@ -131,6 +131,13 @@ def _validate_custom_element_naming(element: CustomElement, index: int) -> None:
             f"{_suggest_snake_case(element.name)!r}). This is only enforced when "
             f"saving — existing files with non-conforming names can still be read."
         )
+    if element.group_name.startswith("/"):
+        raise ValueError(
+            f"custom[{index}].group_name {element.group_name!r} is not snake_case "
+            f"(group_name must be a relative path and must not start with '/'). This is "
+            f"only enforced when saving — existing files with non-conforming names can "
+            f"still be read."
+        )
     for segment in filter(None, element.group_name.split("/")):
         if not _SNAKE_CASE_RE.match(segment):
             raise ValueError(
@@ -1542,7 +1549,18 @@ class File(h5py.File):
         if custom is not None:
             kwargs["custom"] = custom
 
-        _validate_custom_key_naming(kwargs.get("data", {}), kwargs.get("metadata", {}))
+        if tracks is not None:
+            for track in tracks:
+                track_data = (
+                    track.get("data")
+                    if isinstance(track, Mapping)
+                    else getattr(track, "data", None)
+                )
+                if isinstance(track_data, Mapping):
+                    _validate_custom_key_naming(track_data, {})
+            _validate_custom_key_naming({}, kwargs.get("metadata", {}))
+        else:
+            _validate_custom_key_naming(kwargs.get("data", {}), kwargs.get("metadata", {}))
 
         warn_ctx = log.suppress_warnings() if ignore_warnings else contextlib.nullcontext()
         with warn_ctx:
