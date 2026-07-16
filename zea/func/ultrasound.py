@@ -541,24 +541,23 @@ def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency
     return t_peak
 
 
-def envelope_detect(data, axis=-3):
-    """Envelope detection of RF signals.
-
-    If the input data is real, it first applies the Hilbert transform along the specified axis
-    and then computes the magnitude of the resulting complex signal.
-    If the input data is complex, it computes the magnitude directly.
+def channels_to_analytic(data, axis):
+    """Return the analytic signal (complex) from RF (``n_ch == 1``) or from
+    two-channel I/Q (``n_ch == 2``) data.
 
     Args:
-        - data (Tensor): The beamformed data of shape (..., grid_size_z, grid_size_x, n_ch).
-        - axis (int): Axis along which to apply the Hilbert transform. Defaults to -3.
+        data (Tensor): Tensor of shape ``(..., n_ch)`` with ``n_ch in {1, 2}``. For RF
+            the analytic signal is formed with a Hilbert transform along ``axis``; for
+            I/Q the two channels are read as real/imaginary parts.
+        axis (int): Fast-time (axial) axis along which to Hilbert-transform RF data.
 
     Returns:
-        - envelope_data (Tensor): The envelope detected data
-            of shape (..., grid_size_z, grid_size_x).
+        Tensor: Complex tensor with the channel axis removed.
     """
-    if data.shape[-1] == 2:
-        data = ops.view_as_complex(data)
-    else:
+    n_ch = data.shape[-1]
+    if n_ch == 2:
+        return ops.view_as_complex(data)
+    if n_ch == 1:
         n_ax = ops.shape(data)[axis]
 
         # Calculate next power of 2: M = 2^ceil(log2(n_ax))
@@ -570,10 +569,25 @@ def envelope_detect(data, axis=-3):
         indices = ops.arange(n_ax)
 
         data = ops.take(data, indices, axis=axis)
-        data = ops.squeeze(data, axis=-1)
+        return ops.squeeze(data, axis=-1)
+    raise ValueError(f"Expected data with n_ch in {{1, 2}} (last axis), got n_ch={n_ch}.")
 
-    data = ops.abs(data)
-    return data
+
+def envelope_detect(data, axis=-3):
+    """Envelope detection of RF signals.
+
+    If the input data is real, it first applies the Hilbert transform along the specified axis
+    and then computes the magnitude of the resulting complex signal.
+    If the input data is complex, it computes the magnitude directly.
+
+    Args:
+        data (Tensor): The beamformed data of shape (..., grid_size_z, grid_size_x, n_ch).
+        axis (int): Axis along which to apply the Hilbert transform. Defaults to -3.
+
+    Returns:
+        Tensor: The envelope detected data of shape (..., grid_size_z, grid_size_x).
+    """
+    return ops.abs(channels_to_analytic(data, axis))
 
 
 def apply_aligned_apodization(data, apodization, with_batch_dim):
