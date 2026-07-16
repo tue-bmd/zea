@@ -245,9 +245,7 @@ class PfieldWeighting(Operation):
         if flat_pfield is None:
             return {self.output_key: data}
 
-        weighted_data = apply_aligned_apodization(
-            data, flat_pfield, self.with_batch_dim
-        )
+        weighted_data = apply_aligned_apodization(data, flat_pfield, self.with_batch_dim)
 
         return {self.output_key: weighted_data}
 
@@ -334,9 +332,7 @@ class ReceiveApodization(Operation):
         Returns:
             dict: Dictionary containing weighted data
         """
-        data = kwargs[
-            self.key
-        ]  # must start with ((batch_size,) n_tx, n_pix, n_el, ...)
+        data = kwargs[self.key]  # must start with ((batch_size,) n_tx, n_pix, n_el, ...)
 
         if flat_receive_apodization is None:
             return {self.output_key: data}
@@ -376,8 +372,7 @@ class ScanConvert(Operation):
         if order > 1:
             jittable = False
             log.warning(
-                "GPU support for order > 1 is not available. "
-                + "Disabling jit for ScanConvert."
+                "GPU support for order > 1 is not available. " + "Disabling jit for ScanConvert."
             )
         else:
             jittable = True
@@ -588,9 +583,7 @@ class LowPassFilterIQ(FirFilter):
                 Odd will result in a type I filter, even in a type II filter.
         """
         if "jittable" in kwargs:
-            raise ValueError(
-                "LowPassFilterIQ is not jittable, so jittable must be set to False."
-            )
+            raise ValueError("LowPassFilterIQ is not jittable, so jittable must be set to False.")
         if "complex_channels" in kwargs and not kwargs["complex_channels"]:
             raise ValueError(
                 "LowPassFilterIQ operates on IQ data, so complex_channels must be True."
@@ -728,8 +721,7 @@ class BandPassFilter(FirFilter):
             raise ValueError(passband_error_message)
 
         if not all(
-            isinstance(f, (int, float, np.number)) and not isinstance(f, bool)
-            for f in (f1, f2)
+            isinstance(f, (int, float, np.number)) and not isinstance(f, bool) for f in (f1, f2)
         ):
             raise ValueError(passband_error_message)
 
@@ -882,13 +874,9 @@ class Companding(Operation):
             raise ValueError("comp_type must be 'mu' or 'a'.")
 
         if self.comp_type == "mu":
-            self._compand_func = (
-                self._mu_law_expand if self.expand else self._mu_law_compress
-            )
+            self._compand_func = self._mu_law_expand if self.expand else self._mu_law_compress
         else:
-            self._compand_func = (
-                self._a_law_expand if self.expand else self._a_law_compress
-            )
+            self._compand_func = self._a_law_expand if self.expand else self._a_law_compress
 
     @staticmethod
     def _mu_law_compress(x, mu=255, **kwargs):
@@ -999,9 +987,7 @@ class AnisotropicDiffusion(Operation):
         results = []
         for i in range(batch_size):
             image = data[i]
-            image_out = self._anisotropic_diffusion_single(
-                image, niter, lmbda, rect, eps
-            )
+            image_out = self._anisotropic_diffusion_single(image, niter, lmbda, rect, eps)
             results.append(image_out)
 
         result = ops.stack(results, axis=0)
@@ -1017,25 +1003,15 @@ class AnisotropicDiffusion(Operation):
         M, N = image.shape
 
         for _ in range(niter):
-            iN = ops.concatenate(
-                [image[1:], ops.zeros((1, N), dtype=image.dtype)], axis=0
-            )
-            iS = ops.concatenate(
-                [ops.zeros((1, N), dtype=image.dtype), image[:-1]], axis=0
-            )
-            jW = ops.concatenate(
-                [image[:, 1:], ops.zeros((M, 1), dtype=image.dtype)], axis=1
-            )
-            jE = ops.concatenate(
-                [ops.zeros((M, 1), dtype=image.dtype), image[:, :-1]], axis=1
-            )
+            iN = ops.concatenate([image[1:], ops.zeros((1, N), dtype=image.dtype)], axis=0)
+            iS = ops.concatenate([ops.zeros((1, N), dtype=image.dtype), image[:-1]], axis=0)
+            jW = ops.concatenate([image[:, 1:], ops.zeros((M, 1), dtype=image.dtype)], axis=1)
+            jE = ops.concatenate([ops.zeros((M, 1), dtype=image.dtype), image[:, :-1]], axis=1)
 
             if rect is not None:
                 x1, y1, x2, y2 = rect
                 imageuniform = image[x1:x2, y1:y2]
-                q0_squared = (
-                    ops.std(imageuniform) / (ops.mean(imageuniform) + eps)
-                ) ** 2
+                q0_squared = (ops.std(imageuniform) / (ops.mean(imageuniform) + eps)) ** 2
 
             dN = iN - image
             dS = iS - image
@@ -1052,9 +1028,7 @@ class AnisotropicDiffusion(Operation):
                 den = (q_squared - q0_squared) / (q0_squared * (1 + q0_squared) + eps)
             c = 1.0 / (1 + den)
             cS = ops.concatenate([ops.zeros((1, N), dtype=image.dtype), c[:-1]], axis=0)
-            cE = ops.concatenate(
-                [ops.zeros((M, 1), dtype=image.dtype), c[:, :-1]], axis=1
-            )
+            cE = ops.concatenate([ops.zeros((M, 1), dtype=image.dtype), c[:, :-1]], axis=1)
 
             D = (cS * dS) + (c * dN) + (cE * dE) + (c * dW)
             image = image + (lmbda / 4) * D
@@ -1117,9 +1091,7 @@ class UpMix(Operation):
         elif data.shape[-1] == 2:
             data = ops.view_as_complex(data)
 
-        data = upmix(
-            data, sampling_frequency, demodulation_frequency, self.upsampling_rate
-        )
+        data = upmix(data, sampling_frequency, demodulation_frequency, self.upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
         return {self.output_key: data}
 
@@ -1158,9 +1130,7 @@ class LogCompress(Operation):
 
         compressed_data = log_compress(data)
         if self.clip:
-            compressed_data = ops.clip(
-                compressed_data, dynamic_range[0], dynamic_range[1]
-            )
+            compressed_data = ops.clip(compressed_data, dynamic_range[0], dynamic_range[1])
 
         return {self.output_key: compressed_data}
 
@@ -1181,9 +1151,7 @@ class ReshapeGrid(Operation):
             - reshaped_data (Tensor): The reshaped data of shape (..., grid.shape, ...).
         """
         data = kwargs[self.key]
-        reshaped_data = reshape_axis(
-            data, grid.shape[:-1], self.axis + int(self.with_batch_dim)
-        )
+        reshaped_data = reshape_axis(data, grid.shape[:-1], self.axis + int(self.with_batch_dim))
         return {self.output_key: reshaped_data}
 
 
@@ -1198,9 +1166,7 @@ class ApplyWindow(Operation):
     [start (zero)] - [size (window)] - [middle (unmodified)] - [size (window)] - [end (zero)]
     """
 
-    def __init__(
-        self, axis=-3, size=32, start=16, end=0, window_type="hanning", **kwargs
-    ):
+    def __init__(self, axis=-3, size=32, start=16, end=0, window_type="hanning", **kwargs):
         """
         Args:
             axis (int): Axis along which to apply the window.
@@ -1312,9 +1278,7 @@ class CommonMidpointPhaseError(Operation):
         n_tx, n_pix, n_rx, n_ch = data.shape
         receive_subaps = ops.zeros((n_rx, n_tx))
         for diag in range(-halfsa, halfsa + 1):
-            receive_subaps = receive_subaps + ops.diag(
-                ops.ones((n_rx - abs(diag),)), diag
-            )
+            receive_subaps = receive_subaps + ops.diag(ops.ones((n_rx - abs(diag),)), diag)
         receive_subaps = receive_subaps[halfsa : receive_subaps.shape[0] - halfsa : dx]
         transmit_subaps = ops.flip(receive_subaps, axis=0)
         return transmit_subaps, receive_subaps
@@ -1330,9 +1294,7 @@ class CommonMidpointPhaseError(Operation):
         """
 
         transmit_subaps, receive_subaps = self.create_subapertures(data, 8, 1)
-        complex_data = ops.view_as_complex(
-            data
-        )  # [n_tx, n_pix, n_rx, n_ch] -> [n_rtx, n_pix, r_x]
+        complex_data = ops.view_as_complex(data)  # [n_tx, n_pix, n_rx, n_ch] -> [n_rtx, n_pix, r_x]
         complex_data = ops.transpose(complex_data, (2, 0, 1))  # [n_rx, n_tx, n_pix]
         rx_zero_count = ops.matmul(receive_subaps, ops.cast(complex_data == 0, "int32"))
 
@@ -1340,12 +1302,8 @@ class CommonMidpointPhaseError(Operation):
         rx_valid = rx_zero_count <= 1
         complex_data_rx = ops.matmul(receive_subaps, complex_data)
         complex_data_rx = ops.where(rx_valid, complex_data_rx, 0)
-        complex_data_rx = ops.transpose(
-            complex_data_rx, (1, 0, 2)
-        )  # [n_tx, n_subap_rx, n_pix]
-        tx_zero_count = ops.matmul(
-            transmit_subaps, ops.cast(complex_data_rx == 0, "int32")
-        )
+        complex_data_rx = ops.transpose(complex_data_rx, (1, 0, 2))  # [n_tx, n_subap_rx, n_pix]
+        tx_zero_count = ops.matmul(transmit_subaps, ops.cast(complex_data_rx == 0, "int32"))
 
         # Mask out subapertures with point outside fov in transmit
         tx_valid = tx_zero_count <= 1
@@ -1447,10 +1405,7 @@ class TissueSuppression(Operation):
         TensorFlow raises, but that combination does not suppress the tissue
         anyway -- use ``svd_complex`` for complex input).
         """
-        if (
-            self.filter_type == "svd_complex"
-            and keras.backend.backend() == "tensorflow"
-        ):
+        if self.filter_type == "svd_complex" and keras.backend.backend() == "tensorflow":
             return False
         return super().jittable
 
