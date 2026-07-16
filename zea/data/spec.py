@@ -1786,8 +1786,7 @@ class Subject(Spec):
         type: Subject type, e.g. human, phantom, animal.
         age: Subject age in years.
         sex: Subject sex.
-        weight: Subject weight in kg. Small-animal subjects are fractional
-            (a mouse is ~0.015-0.030 kg).
+        weight: Subject weight in kg.
         strain: Animal strain, e.g. C57BL/6N. Only meaningful for animal subjects.
         fat_percentage: Subject fat percentage.
         bmi: Subject body mass index in kg/m².
