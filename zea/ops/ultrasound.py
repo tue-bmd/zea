@@ -1362,6 +1362,12 @@ class TissueSuppression(Operation):
     ``"svd"``.
 
     .. note::
+        Unlike most operations, this one is temporal: axis 0 of the input is the
+        frame axis and is consumed jointly, so ``with_batch_dim`` does not apply
+        and is ignored. Input is always ``(n_frames, ...)``. To process several
+        acquisitions, loop the pipeline over them.
+
+    .. note::
         On the TensorFlow backend the ``"svd_complex"`` path runs eagerly:
         TensorFlow registers no XLA ``Svd`` kernel for complex dtypes. The other
         backends JIT it.
