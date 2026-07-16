@@ -1548,6 +1548,48 @@ def test_tissue_suppression_fractional_cutoff():
     assert ops.TissueSuppression(cutoff=5).resolve_cutoff(400) == 5
 
 
+def test_tissue_suppression_filter_type_autodetect():
+    """filter_type=None picks svd_complex for IQ (n_ch=2) and svd otherwise.
+
+    This is zea's channel convention (n_ch=1 -> RF/real, n_ch=2 -> IQ), the same
+    ``shape[-1] == 2`` test envelope_detect and Upmix use.
+    """
+    import keras
+
+    from zea import ops
+
+    def _resolve(shape, filter_type=None):
+        data = keras.ops.convert_to_tensor(np.zeros(shape, dtype=np.float32))
+        return ops.TissueSuppression(cutoff=2, filter_type=filter_type).resolve_filter_type(data)
+
+    assert _resolve((10, 8, 8, 2)) == "svd_complex"  # IQ
+    assert _resolve((10, 8, 8, 1)) == "svd"  # RF
+    assert _resolve((10, 8, 8)) == "svd"  # real, no channel axis
+    assert _resolve((10,)) == "svd"  # 1-D, no channel axis to read
+
+    # An explicit filter_type always wins over auto-detection.
+    assert _resolve((10, 8, 8, 2), filter_type="svd") == "svd"
+    assert _resolve((10, 8, 8), filter_type="svd_complex") == "svd_complex"
+
+
+def test_tissue_suppression_autodetect_matches_explicit():
+    """Auto-detected IQ input gives the same result as filter_type='svd_complex'."""
+    import keras
+
+    from zea import ops
+
+    _, data_channels = _complex_clutter_video()
+    data_tensor = keras.ops.convert_to_tensor(data_channels)
+
+    outputs = [
+        keras.ops.convert_to_numpy(
+            ops.TissueSuppression(cutoff=2, filter_type=filter_type)(data=data_tensor)["data"]
+        )
+        for filter_type in (None, "svd_complex")
+    ]
+    np.testing.assert_allclose(outputs[0], outputs[1], atol=1e-5)
+
+
 def test_tissue_suppression_invalid_arguments():
     """Invalid filter_type / cutoff are rejected at construction time."""
     import pytest

@@ -1349,27 +1349,47 @@ class TissueSuppression(Operation):
     Removes stationary tissue components from multi-frame ultrasound data
     by zeroing the dominant singular values of the Casorati matrix.
 
-    Two filter types are available, selected with ``filter_type``:
+    Input
+    -----
+    Data of shape ``(n_frames, ..., n_ch)``, following zea's channel convention:
+    ``n_ch=1`` (or no channel axis) for RF / real-valued data, ``n_ch=2`` for IQ
+    data carried as two real ``[I, Q]`` channels (e.g. the output of
+    :class:`Beamform` on baseband data). Output has the same shape and dtype as
+    the input.
 
-    * ``"svd"`` (default) -- the real-valued Direct SVD filter. Builds the Gram
-      matrix with a plain transpose. Input is real data of shape
-      ``(n_frames, ...)``.
-    * ``"svd_complex"`` -- the same filter with a conjugate (Hermitian)
-      transpose, for complex baseband IQ input. This is the filter used for
-      Power-Doppler / ULM processing (as in MUST's ``process.m``). Input is IQ
-      data as two real channels, shape ``(n_frames, ..., 2)``.
-      On real ``[I, Q]`` channel data ``"svd"`` builds ``XᵀX`` instead of
-      the temporal covariance ``XᴴX`` and will not suppress the tissue.
+    Two filter types are available:
+
+    * ``"svd"`` -- the real-valued Direct SVD filter, building the temporal Gram
+      matrix with a plain transpose (``XᵀX``). For real data.
+    * ``"svd_complex"`` -- the same filter using the conjugate (Hermitian)
+      transpose (``XᴴX``, the true temporal covariance), for IQ data. The op
+      converts the ``[I, Q]`` channels to a complex tensor internally with
+      ``keras.ops.view_as_complex`` and back with ``view_as_real`` before
+      returning, so the op's inputs and outputs stay real-valued and compose in
+      a :class:`Pipeline` like any other operation. This is the filter used for
+      Power-Doppler / ULM processing (as in MUST's ``process.m``).
+
+    By default ``filter_type=None`` picks between them from the channel axis --
+    ``n_ch=2`` means IQ and selects ``"svd_complex"``, anything else selects
+    ``"svd"`` -- the same ``shape[-1] == 2`` test
+    :func:`zea.func.ultrasound.envelope_detect` and :class:`Upmix` use. Pass
+    ``filter_type`` explicitly to override this.
+
+    Using ``"svd"`` on IQ data is not meaningful: ``XᵀX`` is complex *symmetric*
+    rather than Hermitian, so it is not a covariance and its dominant
+    eigenvectors are not guaranteed to span the tissue subspace. It may still
+    appear to suppress clutter on data whose tissue does not rotate in phase,
+    but that is incidental -- prefer ``"svd_complex"`` for IQ.
 
     .. note::
-        On the TensorFlow backend ``"svd_complex"`` runs eagerly: TensorFlow
-        registers no XLA ``Svd`` kernel for complex dtypes. The other backends
-        JIT it.
+        On the TensorFlow backend the ``"svd_complex"`` path runs eagerly:
+        TensorFlow registers no XLA ``Svd`` kernel for complex dtypes. The other
+        backends JIT it.
     """
 
     FILTER_TYPES = ("svd", "svd_complex")
 
-    def __init__(self, cutoff: int | float = 5, filter_type: str = "svd", **kwargs):
+    def __init__(self, cutoff: int | float = 5, filter_type: str | None = None, **kwargs):
         """
         Args:
             cutoff (int or float): Number of principal (tissue) components to
@@ -1377,13 +1397,15 @@ class TissueSuppression(Operation):
                 is a fraction of the number of frames, resolved at call time as
                 ``round(n_frames * cutoff)`` (matching the ULM convention of
                 specifying the clutter cutoff as a percentage of frames).
-            filter_type (str): Which clutter filter to use, one of
-                :attr:`FILTER_TYPES`. Use ``"svd_complex"`` for complex IQ input.
+            filter_type (str or None): Which clutter filter to use, one of
+                :attr:`FILTER_TYPES`. Defaults to ``None``, which selects
+                ``"svd_complex"`` for IQ input (``n_ch=2``) and ``"svd"``
+                otherwise.
         """
-        if filter_type not in self.FILTER_TYPES:
+        if filter_type is not None and filter_type not in self.FILTER_TYPES:
             raise ValueError(
                 f"Unknown filter_type {filter_type!r}, expected one of "
-                f"{', '.join(map(repr, self.FILTER_TYPES))}."
+                f"{', '.join(map(repr, self.FILTER_TYPES))} or None (auto-detect)."
             )
         if isinstance(cutoff, float) and not 0 <= cutoff < 1:
             raise ValueError(
@@ -1398,16 +1420,30 @@ class TissueSuppression(Operation):
     def jittable(self):
         """Whether this operation can be JIT compiled.
 
-        TensorFlow registers no XLA ``Svd`` kernel for complex dtypes, so on that
-        backend the filter has to run eagerly. ``svd_complex`` only ever makes
-        sense on complex input, so it is never jitted there. Plain ``svd`` is
-        meant for real data and stays jittable (feeding it complex data on
-        TensorFlow raises, but that combination does not suppress the tissue
-        anyway -- use ``svd_complex`` for complex input).
+        TensorFlow registers no XLA ``Svd`` kernel for complex dtypes, so the
+        ``"svd_complex"`` path has to run eagerly there. With ``filter_type=None``
+        the path is only known once the data's channel axis is seen, so on
+        TensorFlow we conservatively assume complex is possible and stay eager;
+        pass ``filter_type="svd"`` explicitly to keep the real filter jitted.
         """
-        if self.filter_type == "svd_complex" and keras.backend.backend() == "tensorflow":
+        if self.filter_type != "svd" and keras.backend.backend() == "tensorflow":
             return False
         return super().jittable
+
+    def resolve_filter_type(self, data) -> str:
+        """Resolve which filter to use for ``data``.
+
+        Args:
+            data (ops.Tensor): Input of shape ``(n_frames, ..., n_ch)``.
+
+        Returns:
+            str: The configured ``filter_type``, or -- when it is ``None`` --
+            ``"svd_complex"`` if the channel axis marks the data as IQ
+            (``n_ch=2``, zea's convention) and ``"svd"`` otherwise.
+        """
+        if self.filter_type is not None:
+            return self.filter_type
+        return "svd_complex" if len(data.shape) > 1 and data.shape[-1] == 2 else "svd"
 
     def resolve_cutoff(self, n_frames: int) -> int:
         """Resolve a fractional ``cutoff`` into a component count.
@@ -1422,31 +1458,38 @@ class TissueSuppression(Operation):
             return int(round(n_frames * self.cutoff))
         return self.cutoff
 
-    def suppress_tissue(self, data):
+    def suppress_tissue(self, data, filter_type=None):
         """
         Suppresses tissue using Direct SVD.
 
         Args:
             data (ops.Tensor): Shape (n_frames, ...). Complex for the
                 ``"svd_complex"`` filter type, real otherwise.
+            filter_type (str or None): Filter to apply. Defaults to ``None``,
+                which resolves it from ``data`` via :meth:`resolve_filter_type`
+                (note that by then the IQ channels have already been merged into
+                a complex axis, so callers inside :meth:`call` pass it in).
 
         """
+        if filter_type is None:
+            filter_type = self.resolve_filter_type(data)
         return suppress_tissue(
             data,
             self.resolve_cutoff(data.shape[0]),
-            conjugate=self.filter_type == "svd_complex",
+            conjugate=filter_type == "svd_complex",
         )
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        is_complex = self.filter_type == "svd_complex"
+        filter_type = self.resolve_filter_type(data)
+        is_complex = filter_type == "svd_complex"
 
         # Real IQ-channel input ((n_frames, ..., 2)) <-> complex ((n_frames, ...))
         # conversion happens inside the op, same as DelayMultiplyAndSum, so the
         # op's dict-boundary contract stays real-valued and composes in a
         # Pipeline like any other op.
         array = ops.view_as_complex(ops.array(data)) if is_complex else ops.array(data)
-        filtered = self.suppress_tissue(array)
+        filtered = self.suppress_tissue(array, filter_type=filter_type)
         if is_complex:
             filtered = ops.view_as_real(filtered)
 
