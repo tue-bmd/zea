@@ -243,6 +243,7 @@ linkcheck_ignore = [
     # the build got this far, and hitting them over HTTP trips GitHub's
     # anonymous rate limit.
     r"^https://github\.com/tue-bmd/zea/blob/main/",
+    r"^https://github\.com/moono/lpips-tf2\.x/blob/master/example_export_script/convert_to_tensorflow\.py$",
 ]
 linkcheck_anchors_ignore_for_url = [
     r"^https://github\.com/[^/]+/[^/]+/blob/",  # line anchors are JS-rendered
