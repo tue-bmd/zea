@@ -12,6 +12,8 @@ import numpy as np
 import pytest
 from scipy.ndimage import gaussian_filter
 from scipy.signal import hilbert as hilbert_scipy
+
+from zea import ops
 from zea.func.ultrasound import (
     channels_to_complex,
     complex_to_channels,
@@ -20,8 +22,6 @@ from zea.func.ultrasound import (
 )
 from zea.ops import Pipeline, Simulate, beamformer_registry
 from zea.parameters import Parameters
-
-from zea import ops
 
 from . import DEFAULT_TEST_SEED, backend_equality_check
 
@@ -661,6 +661,7 @@ def test_beamformers(beamformer_name):
     """All beamformer operations produce the correct output shape and agree across backends."""
 
     import keras
+
     from zea.ops import beamformer_registry
 
     n_tx, n_pix, n_el, n_ch = 3, 7, 4, 2
@@ -776,6 +777,7 @@ def test_apply_window(axis, size, start, end, window_type):
     """Test ApplyWindow operation."""
 
     import keras
+
     from zea.ops.ultrasound import ApplyWindow
 
     operation = ApplyWindow(axis=axis, size=size, start=start, end=end, window_type=window_type)
@@ -1265,6 +1267,7 @@ def test_prepare_parameters_pfield_all_backends():
     """
 
     import keras
+
     from zea.beamform.delays import compute_t0_delays_planewave
     from zea.internal.cache import cache_disabled
     from zea.ops import Pipeline
@@ -1358,15 +1361,11 @@ def test_tissue_suppression():
 def _complex_clutter_video(n_frames=40, n_z=16, n_x=16, seed=DEFAULT_TEST_SEED):
     """Complex IQ video: strong phase-rotating tissue clutter + weak blood.
 
-    The tissue rotates in phase over time (as moving tissue does in real
-    baseband IQ), which is what distinguishes the Hermitian Gram matrix from the
-    plain-transpose one -- for tissue that is merely a constant real map repeated
-    across frames, both give the same answer.
+    The tissue rotates in phase over time, which is what distinguishes the
+    Hermitian Gram matrix from the plain-transpose one.
 
-    Returns the video both as a complex array (n_frames, n_z, n_x) -- for testing
-    :func:`zea.func.ultrasound.suppress_tissue` directly -- and as real IQ
-    channels (n_frames, n_z, n_x, 2), the shape :class:`zea.ops.TissueSuppression`
-    with ``filter_type="svd_complex"`` actually expects on its dict boundary.
+    Returns the video as a complex array (n_frames, n_z, n_x) and as real IQ
+    channels (n_frames, n_z, n_x, 2).
     """
     rng = np.random.default_rng(seed)
 
@@ -1382,20 +1381,12 @@ def _complex_clutter_video(n_frames=40, n_z=16, n_x=16, seed=DEFAULT_TEST_SEED):
     return data, data_channels
 
 
+@backend_equality_check(allow_none=True)
 def test_tissue_suppression_complex():
     """TissueSuppression with filter_type='svd_complex' suppresses complex IQ clutter.
 
-    The op takes IQ data as two real channels (n_frames, ..., 2) -- the zea
-    convention, matching e.g. Beamform's output -- and converts to/from complex
-    internally with view_as_complex/view_as_real, the same pattern
-    DelayMultiplyAndSum uses, so it composes with the rest of a Pipeline.
-
-    Deliberately not a ``backend_equality_check``: what survives the filter is the
-    near-null-space residual, and different backends' SVD implementations pick
-    different (equally valid) bases for the discarded subspace, so the residual is
-    not comparable elementwise across backends. For this reason,
-    the ratio of the energy before and after filtering is asserted as a
-    regression test.
+    The op takes IQ data as two real channels (n_frames, ..., 2), the zea
+    convention, and converts to/from complex internally.
     """
     import keras
 
@@ -1419,14 +1410,12 @@ def test_tissue_suppression_complex():
 def test_tissue_suppression_complex_needs_conjugate():
     """The plain-transpose 'svd' filter fails on complex IQ; 'svd_complex' is required.
 
-    This is the reason filter_type exists: on complex data the plain transpose
-    builds X^T X rather than the temporal covariance X^H X, so the dominant
-    components it finds are not the tissue subspace and the clutter survives.
-
-    This is a property of the maths, not of any backend, so it is checked against
-    the reference (numpy) implementation directly rather than through the op --
-    TensorFlow cannot XLA-compile a complex SVD at all.
+    On complex data the plain transpose builds X^T X rather than the temporal
+    covariance X^H X, so the components it finds are not the tissue subspace.
+    Checked against the reference implementation: this is maths, not backend behaviour.
     """
+    import keras
+
     from zea.func.ultrasound import suppress_tissue
 
     data, _ = _complex_clutter_video()  # complex array, not the real-channel one
@@ -1440,20 +1429,9 @@ def test_tissue_suppression_complex_needs_conjugate():
     assert _energy_ratio(conjugate=False) > 0.5
 
 
+@backend_equality_check(allow_none=True)
 def test_tissue_suppression_conjugate_matches_plain_on_zero_imag_data():
-    """With a zero imaginary part, the conjugate transpose is a no-op.
-
-    ``svd_complex`` on IQ channels ``[real, 0]`` (i.e. genuinely real data,
-    just carried in the two-channel convention) must agree with ``svd``
-    applied to the real channel directly, since ``conj()`` is the identity on
-    real numbers.
-
-    The tolerance is loose because the two do not necessarily run through the same
-    code path: on TensorFlow ``svd_complex`` is forced eager (there is no complex
-    XLA ``Svd`` kernel) while ``svd`` is XLA-compiled, and XLA's float32 SVD
-    differs from the eager one by ~1e-3 on a matrix with near-degenerate singular
-    values. The point here is that the maths is equivalent, not bit-exactness.
-    """
+    """With a zero imaginary part, the conjugate transpose is a no-op."""
     import keras
 
     from zea import ops
@@ -1488,11 +1466,7 @@ def test_tissue_suppression_fractional_cutoff():
 
 
 def test_tissue_suppression_filter_type_autodetect():
-    """filter_type=None picks svd_complex for IQ (n_ch=2) and svd otherwise.
-
-    This is zea's channel convention (n_ch=1 -> RF/real, n_ch=2 -> IQ), the same
-    ``shape[-1] == 2`` test envelope_detect and Upmix use.
-    """
+    """filter_type=None picks svd_complex for IQ (n_ch=2) and svd otherwise."""
     import keras
 
     from zea import ops
@@ -1511,6 +1485,7 @@ def test_tissue_suppression_filter_type_autodetect():
     assert _resolve((10, 8, 8), filter_type="svd_complex") == "svd_complex"
 
 
+@backend_equality_check(allow_none=True)
 def test_tissue_suppression_autodetect_matches_explicit():
     """Auto-detected IQ input gives the same result as filter_type='svd_complex'."""
     import keras
