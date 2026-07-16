@@ -81,6 +81,12 @@ def compute_pfield(
         norm (bool, optional): per pixel normalization (True) or unnormalized (False)
         point_batch_size (int, optional): Batch size for the pressure field computation.
             Higher is slightly faster, but requires more memory. Default is 2048.
+        interpolation (str, optional): Interpolation used to resize the pressure
+            field from the downsampled grid back to the full grid. "nearest"
+            is fastest but imprints the downsampled blocks on the
+            weighting, which can cause visible steps at the edges of each
+            transmit's insonified region; "bilinear" (default) removes those steps at a
+            small extra cost and is recommended for display-quality images.
 
     Returns:
         ops.array: The (normalized) pressure field (across tx events)
@@ -302,7 +308,7 @@ def compute_pfield(
     pressure = ops.transpose(ops.sqrt(pressure_squared), (1, 0))
     pressure = ops.reshape(pressure, (-1, *size_downsampled))
 
-    # resize pressure to exactly the original grid size
+    # resize pressure to exactly the original grid size (see `interpolation`)
     p_arr = ops.squeeze(
         ops.image.resize(pressure[..., None], size_orig, interpolation=interpolation), axis=-1
     )

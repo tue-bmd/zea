@@ -89,8 +89,37 @@ def test_print_hdf5_attrs(complex_h5_file, capsys):
     with File(complex_h5_file) as file:
         file.summary()
 
-    captured = capsys.readouterr()
-    assert "dummy_attr" in captured.out
+    captured = capsys.readouterr().out
+    assert "dummy_attr" in captured
+    # dummy_dataset2 = np.arange(5) is small enough to show its actual values inline.
+    assert "[0, 1, 2, 3, 4]" in captured
+    # dummy_dataset has 200 elements: too big to inline, only shape/dtype are shown.
+    assert "shape=(10, 20)" in captured
+    assert "dtype=float64" in captured
+
+
+def test_print_hdf5_attrs_spec_file(tmp_path, capsys):
+    """Scalar spec fields print their value; large arrays only print shape/dtype;
+    unset unit/description metadata is hidden."""
+    path = tmp_path / "example.hdf5"
+    generate_example_dataset(path, n_tx=3, n_el=4, n_ax=8, n_frames=1)
+
+    with File(path) as file:
+        file.summary()
+
+    captured = capsys.readouterr().out
+    # `sound_speed` is a scalar field: its actual value and unit should be shown.
+    assert "sound_speed" in captured
+    assert "1540" in captured
+    assert "[m/s]" in captured
+    # `t0_delays` is a large array (n_tx * n_el = 12 elements): only its shape/dtype
+    # are shown, not the raw values.
+    assert "t0_delays" in captured
+    assert "shape=(3, 4)" in captured
+    # Fields without curated unit metadata fall back to the "-" placeholder, which
+    # carries no information and should be hidden rather than printed.
+    assert "[-]" not in captured
+    assert "[–]" not in captured
 
 
 def test_file_attributes():

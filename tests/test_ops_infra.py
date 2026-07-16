@@ -633,6 +633,26 @@ def test_pipeline_validation():
         _ = ops.Pipeline(operations=operations)
 
 
+def test_beamform_pfield_and_aligned_apodization_mutually_exclusive():
+    """Beamform should reject enabling both pfield weighting and aligned (compounding)
+    apodization, since both weight the transmit axis."""
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        Beamform(enable_pfield=True, enable_aligned_apodization=True)
+
+    # Either one alone (or neither) is fine.
+    Beamform(enable_pfield=True, enable_aligned_apodization=False)
+    Beamform(enable_pfield=False, enable_aligned_apodization=True)
+    Beamform(enable_pfield=False, enable_aligned_apodization=False)
+
+
+def test_beamform_receive_apodization_is_independent():
+    """The custom (per-element) receive apodization is orthogonal to pfield /
+    aligned apodization and can be combined with either."""
+    Beamform(enable_pfield=True, enable_receive_apodization=True)
+    Beamform(enable_aligned_apodization=True, enable_receive_apodization=True)
+    Beamform(enable_receive_apodization=True)
+
+
 def test_pipeline_with_parameters():
     """Tests the Pipeline with a Parameters object as input.
 
@@ -1505,6 +1525,71 @@ def test_pipeline_call_runtime_error():
     pipeline = ops.Pipeline([AlwaysCrashes()], jit_options=None, validate=False)
     with pytest.raises(RuntimeError, match="boom"):
         pipeline(data=None)
+
+
+def test_pipeline_operation_error_summarizes_inputs():
+    """A generic operation failure reports the op name and input shapes/dtypes."""
+    import numpy as np
+
+    @ops_registry("crashes_with_data")
+    class CrashesWithData(ops.Operation):
+        def call(self, **kwargs):
+            raise ValueError("boom")
+
+    pipeline = ops.Pipeline([CrashesWithData()], jit_options=None, validate=False)
+    with pytest.raises(RuntimeError) as excinfo:
+        pipeline(data=np.zeros((4, 8), dtype="float32"))
+    msg = str(excinfo.value)
+    assert "CrashesWithData" in msg
+    assert "(4, 8)" in msg  # shape summary of the offending input
+    assert "float32" in msg
+
+
+def test_pipeline_missing_key_suggests_typo():
+    """A missing required key suggests a close match among the provided keys."""
+
+    @ops_registry("needs_gain")
+    class NeedsGain(ops.Operation):
+        def call(self, **kwargs):
+            return {"result": kwargs["gain"]}
+
+    pipeline = ops.Pipeline([NeedsGain()], jit_options=None, validate=False)
+    # 'gian' is a typo for the required 'gain' key.
+    with pytest.raises(KeyError, match="did you mean 'gain'"):
+        pipeline(data=None, gian=1.0)
+
+
+def test_pipeline_unused_key_typo_warns(monkeypatch):
+    """A provided key close to a valid key is flagged as a likely typo (warning)."""
+    import numpy as np
+
+    from zea.ops import pipeline as pipeline_module
+
+    messages = []
+    monkeypatch.setattr(pipeline_module.log, "warning", lambda msg, *a, **k: messages.append(msg))
+
+    pipeline = ops.Pipeline(
+        [ops.LogCompress()], with_batch_dim=False, jit_options=None, validate=False
+    )
+    pipeline(data=np.zeros((4, 4), dtype="float32"), dynamic_rang=(-50, 0))
+    assert any("dynamic_range" in m and "typo" in m for m in messages)
+
+
+def test_pipeline_nested_error_not_double_wrapped():
+    """An error from a nested pipeline is annotated once, not wrapped twice."""
+    import numpy as np
+
+    @ops_registry("nested_crash")
+    class NestedCrash(ops.Operation):
+        def call(self, **kwargs):
+            raise ValueError("kaboom")
+
+    inner = ops.Pipeline([NestedCrash()], jit_options=None, validate=False)
+    outer = ops.Pipeline([inner], jit_options=None, validate=False)
+    with pytest.raises(RuntimeError) as excinfo:
+        outer(data=np.zeros((2, 2), dtype="float32"))
+    # "failed with" appears exactly once -> the inner annotation is reused.
+    assert str(excinfo.value).count("failed with") == 1
 
 
 def test_map_get_dict():

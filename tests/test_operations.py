@@ -197,6 +197,89 @@ def test_channels_to_complex(size, axis):
 
 
 @pytest.mark.parametrize(
+    "size, axis",
+    [
+        ((2, 1, 128, 32), -1),
+        ((2, 20, 8), 1),
+        ((512, 512), -1),
+    ],
+)
+@backend_equality_check(decimal=5)
+def test_complex_channels_operations(size, axis):
+    """Round-trip the ComplexToChannels and ChannelsToComplex operations.
+
+    ``ComplexToChannels`` splits complex data into two real channels placed at
+    ``axis``, while ``ChannelsToComplex`` reads the two channels from the last
+    axis, so we move them back before converting to complex again.
+    """
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    complex_data = (rng.random(size) + 1j * rng.random(size)).astype("complex64")
+
+    channels = ops.ComplexToChannels(axis=axis)(data=keras.ops.convert_to_tensor(complex_data))[
+        "data"
+    ]
+    channels = keras.ops.convert_to_numpy(channels)
+    assert channels.shape[axis] == 2, "Real/imaginary channels should live on `axis`."
+
+    restored = ops.ChannelsToComplex()(
+        data=keras.ops.convert_to_tensor(np.moveaxis(channels, axis, -1))
+    )["data"]
+    restored = keras.ops.convert_to_numpy(restored)
+
+    np.testing.assert_almost_equal(restored, complex_data, decimal=5)
+    return restored
+
+
+# NOTE: torch is excluded because keras' correlate drops the complex dtype on the
+# torch backend, which the complex_channels path relies on.
+@backend_equality_check(decimal=4, backends=["tensorflow", "jax"])
+def test_fir_filter_complex_channels():
+    """FirFilter with complex_channels=True filters IQ data given as two real channels.
+
+    Because the filter taps are real, filtering the complex signal is equivalent to
+    filtering the real and imaginary channels independently, so the complex-channel
+    path must match a plain real-valued FirFilter applied along the same axis.
+    """
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    # (batch, n_ax, complex_channels) — filter along the n_ax axis.
+    signal = rng.standard_normal((2, 64, 2)).astype("float32")
+    taps = rng.standard_normal((7,)).astype("float32")
+    signal_tensor = keras.ops.convert_to_tensor(signal)
+    taps_tensor = keras.ops.convert_to_tensor(taps)
+
+    result = ops.FirFilter(axis=1, complex_channels=True, with_batch_dim=True)(
+        data=signal_tensor, fir_filter_taps=taps_tensor
+    )["data"]
+    result = keras.ops.convert_to_numpy(result)
+
+    assert result.shape == signal.shape, "Real/imaginary channels should be restored."
+    assert not np.allclose(result, signal), "Filtering should change the signal."
+
+    reference = ops.FirFilter(axis=1, complex_channels=False, with_batch_dim=True)(
+        data=signal_tensor, fir_filter_taps=taps_tensor
+    )["data"]
+    reference = keras.ops.convert_to_numpy(reference)
+
+    np.testing.assert_almost_equal(result, reference, decimal=4)
+
+    # Last axis holds the complex channels, so it may not be the filter axis.
+    with pytest.raises(AssertionError):
+        ops.FirFilter(axis=-1, complex_channels=True, with_batch_dim=True)(
+            data=signal_tensor, fir_filter_taps=taps_tensor
+        )
+
+    return result
+
+
+@pytest.mark.parametrize(
     "factor, batch_size",
     [
         (1, 2),
@@ -1040,6 +1123,138 @@ def test_common_midpoint_phase_error_coherent_data():
     return phase_error
 
 
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+@backend_equality_check(decimal=5)
+def test_apply_aligned_apodization(with_batch_dim):
+    """A per-pixel, per-transmit weight scales each transmit's contribution to a
+    pixel, e.g. a one-hot mask isolates a single owning transmit per pixel
+    (the scanline / line-by-line special case of pixel-based DAS)."""
+    from zea.func.ultrasound import apply_aligned_apodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    data = keras.ops.ones((n_tx, n_pix, n_el, n_ch))
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    # Pixel 0 belongs to transmit 0; pixel 1 belongs to transmit 2.
+    apodization = keras.ops.convert_to_tensor(
+        np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+    )
+
+    out = keras.ops.convert_to_numpy(apply_aligned_apodization(data, apodization, with_batch_dim))
+
+    expected = np.zeros((n_tx, n_pix, n_el, n_ch), dtype=np.float32)
+    expected[0, 0] = 1.0
+    expected[2, 1] = 1.0
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+    return out
+
+
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+def test_aligned_apodization_op(with_batch_dim):
+    """AlignedApodization applies flat_aligned_apodization to aligned data; with no
+    mask supplied (flat_aligned_apodization=None) it passes the data through
+    unchanged."""
+    from zea.ops import AlignedApodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    data = keras.ops.ones((n_tx, n_pix, n_el, n_ch))
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    op = AlignedApodization(with_batch_dim=with_batch_dim)
+
+    out_noop = op(data=data)["data"]
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(out_noop), keras.ops.convert_to_numpy(data)
+    )
+
+    apodization = keras.ops.convert_to_tensor(
+        np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+    )
+    out = keras.ops.convert_to_numpy(op(data=data, flat_aligned_apodization=apodization)["data"])
+
+    expected = np.zeros((n_tx, n_pix, n_el, n_ch), dtype=np.float32)
+    expected[0, 0] = 1.0
+    expected[2, 1] = 1.0
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+
+
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+@backend_equality_check(decimal=5)
+def test_apply_receive_apodization(with_batch_dim):
+    """A per-pixel, per-element weight scales each receive element's contribution
+    to a pixel (custom receive-aperture apodization), broadcasting uniformly over
+    the transmit and channel axes."""
+    from zea.func.ultrasound import apply_receive_apodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    data = keras.ops.ones((n_tx, n_pix, n_el, n_ch))
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    # Per-pixel taper over the receive elements (independent of transmit/channel).
+    apod_np = np.array([[1.0, 0.5, 0.0, 0.0], [0.0, 0.0, 0.5, 1.0]], dtype=np.float32)
+    apodization = keras.ops.convert_to_tensor(apod_np)
+
+    out = keras.ops.convert_to_numpy(apply_receive_apodization(data, apodization, with_batch_dim))
+
+    # Broadcast the (n_pix, n_el) weight over n_tx (leading) and n_ch (trailing).
+    expected = np.broadcast_to(apod_np[None, :, :, None], (n_tx, n_pix, n_el, n_ch)).copy()
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+    return out
+
+
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+def test_receive_apodization_op(with_batch_dim):
+    """ReceiveApodization applies a custom per-pixel, per-element mask to aligned
+    data; with no mask supplied (flat_receive_apodization=None) it passes the data
+    through unchanged, and a uniform ones-weight is the identity."""
+    from zea.ops import ReceiveApodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    rng = np.random.default_rng(0)
+    data_np = rng.standard_normal((n_tx, n_pix, n_el, n_ch)).astype(np.float32)
+    data = keras.ops.convert_to_tensor(data_np)
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    op = ReceiveApodization(with_batch_dim=with_batch_dim)
+
+    # None -> pass-through
+    out_noop = op(data=data)["data"]
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(out_noop), keras.ops.convert_to_numpy(data)
+    )
+
+    # Ones -> identity
+    ones = keras.ops.ones((n_pix, n_el))
+    out_ones = op(data=data, flat_receive_apodization=ones)["data"]
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(out_ones), keras.ops.convert_to_numpy(data), rtol=1e-5
+    )
+
+    # Per-element taper -> scales the expected elements
+    apod_np = np.array([[1.0, 0.5, 0.0, 0.0], [0.0, 0.0, 0.5, 1.0]], dtype=np.float32)
+    apodization = keras.ops.convert_to_tensor(apod_np)
+    out = keras.ops.convert_to_numpy(op(data=data, flat_receive_apodization=apodization)["data"])
+
+    expected = data_np * apod_np[None, :, :, None]
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+
+
 @backend_equality_check(decimal=2)
 def test_prepare_parameters_pfield_all_backends():
     """pipeline.prepare_parameters must work on all backends when pfield is enabled.
@@ -1086,6 +1301,9 @@ def test_prepare_parameters_pfield_all_backends():
     )
     parameters.grid_size_x = 8
     parameters.grid_size_z = 8
+    # default downsample=10 collapses this 8x8 grid to 1 point, making the field
+    # constant up to backend rounding noise, which flakes the quantile threshold.
+    parameters.pfield_kwargs = {"downsample": 2}
 
     # Disable the on-disk result cache so ops are actually executed in each backend
     # subprocess (the cache would serve a stale pickle and hide crashes).
