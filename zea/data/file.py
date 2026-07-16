@@ -4,8 +4,9 @@ import contextlib
 import difflib
 import enum
 import inspect
+import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, List, Tuple, Union, cast
@@ -31,6 +32,15 @@ from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path, _hf_stream_op
 from zea.internal.utils import deprecated
 
 _ZEA_ISSUES_URL = "https://github.com/tue-bmd/zea/issues"
+
+_SNAKE_CASE_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def _suggest_snake_case(name: str) -> str:
+    """Best-effort snake_case suggestion for an error message (not applied automatically)."""
+    suggestion = re.sub(r"[^0-9a-zA-Z_]+", "_", name).strip("_").lower()
+    return suggestion or "_"
+
 
 # h5py.File's own named parameters (everything but its **kwds catch-all). Kept for streamed
 # hf:// opens: h5py validates unknown kwargs itself for a plain path, but for a file-like
@@ -106,6 +116,135 @@ def _load_custom_elements_from_group(file, path: str) -> List[CustomElement]:
         elif isinstance(item, h5py.Group):
             elements.extend(_load_custom_elements_from_group(file, f"{path}/{name}"))
     return elements
+
+
+def _validate_custom_element_naming(element: CustomElement, index: int) -> None:
+    """Raise ``ValueError`` if ``element.name`` or any ``group_name`` segment isn't snake_case.
+
+    Only called when *saving* new custom elements (:class:`~zea.data.spec.FileSpec`); existing
+    files with non-conforming names can still be read via :attr:`File.custom`.
+    """
+    if not _SNAKE_CASE_RE.match(element.name):
+        raise ValueError(
+            f"custom[{index}].name {element.name!r} is not snake_case "
+            f"(expected lowercase letters, digits, underscores; e.g. "
+            f"{_suggest_snake_case(element.name)!r}). This is only enforced when "
+            f"saving — existing files with non-conforming names can still be read."
+        )
+    if element.group_name.startswith("/"):
+        raise ValueError(
+            f"custom[{index}].group_name {element.group_name!r} is not snake_case "
+            f"(group_name must be a relative path and must not start with '/'). This is "
+            f"only enforced when saving — existing files with non-conforming names can "
+            f"still be read."
+        )
+    for segment in filter(None, element.group_name.split("/")):
+        if not _SNAKE_CASE_RE.match(segment):
+            raise ValueError(
+                f"custom[{index}].group_name segment {segment!r} (in "
+                f"{element.group_name!r}) is not snake_case (e.g. "
+                f"{_suggest_snake_case(segment)!r}). This is only enforced when "
+                f"saving — existing files with non-conforming names can still be read."
+            )
+
+
+def _custom_elements_relative(elements: List[CustomElement], prefix: str) -> List[CustomElement]:
+    """Elements under ``prefix``, with ``group_name`` rewritten relative to it.
+
+    Used to build a nested :class:`CustomElements` view, so that slicing by the leading path
+    segment composes correctly at every nesting level.
+    """
+    result = []
+    for element in elements:
+        if element.group_name == prefix:
+            result.append(replace(element, group_name=""))
+        elif element.group_name.startswith(prefix + "/"):
+            result.append(replace(element, group_name=element.group_name[len(prefix) + 1 :]))
+    return result
+
+
+class CustomElements:
+    """A :class:`list` of :class:`CustomElement` with name/group based dict- and dot-access.
+
+    Behaves like ``list[CustomElement]`` — iteration, ``len()``, positional indexing/slicing,
+    and equality with a plain list all work as before. On top of that, elements can be looked
+    up by name, and nested ``group_name`` groups can be walked into with dict- or dot-style
+    access::
+
+        f.custom["lens_correction"]  # by name
+        f.custom.lens_correction  # same, as an attribute
+        f.custom["lens"]["profile"]  # into a nested group_name
+        f.custom.lens.profile  # same
+        f.custom["lens/profile"]  # slash-path shortcut for the above
+
+    Dot access only works for names that are valid Python identifiers (snake_case is
+    recommended, and enforced when *saving* new files — see :class:`CustomElement`); names
+    with spaces or other characters are still reachable via ``[...]`` bracket access.
+
+    Note:
+        This wraps rather than subclasses :class:`list`, so a custom element named ``"keys"``
+        shadows that method for attribute access — use ``f.custom["keys"]`` in that case.
+    """
+
+    __slots__ = ("_elements",)
+
+    def __init__(self, elements):
+        object.__setattr__(self, "_elements", list(elements))
+
+    def __len__(self) -> int:
+        return len(self._elements)
+
+    def __iter__(self):
+        return iter(self._elements)
+
+    def __bool__(self) -> bool:
+        return bool(self._elements)
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, CustomElements):
+            return self._elements == other._elements
+        if isinstance(other, list):
+            return self._elements == other
+        return NotImplemented
+
+    def __repr__(self) -> str:
+        return repr(self._elements)
+
+    def __getitem__(self, key):
+        if isinstance(key, (int, slice)):
+            return self._elements[key]
+        if isinstance(key, str):
+            if "/" in key:
+                result = self
+                for part in key.split("/"):
+                    result = result[part]
+                return result
+            return self._lookup(key)
+        raise TypeError(f"CustomElements indices must be int, slice or str, not {type(key)}")
+
+    def __getattr__(self, name: str):
+        try:
+            return self._lookup(name)
+        except KeyError as e:
+            raise AttributeError(str(e)) from e
+
+    def _lookup(self, name: str):
+        for element in self._elements:
+            if element.group_name == "" and element.name == name:
+                return element
+        group = _custom_elements_relative(self._elements, name)
+        if group:
+            return CustomElements(group)
+        raise KeyError(
+            f"No custom element or group named {name!r}. Available: {sorted(self.keys())}"
+        )
+
+    def keys(self):
+        """Top-level names: leaf element names plus immediate sub-group names."""
+        return {
+            element.name if element.group_name == "" else element.group_name.split("/")[0]
+            for element in self._elements
+        }
 
 
 class _StringDataset:
@@ -642,6 +781,26 @@ def _warn_if_legacy_file(file: "File") -> None:
             "compatibility or re-save the file with zea v0.1.0 or later (e.g. via File.create).",
             key=file.filename,
         )
+
+
+def _validate_custom_key_naming(data: dict, metadata: dict) -> None:
+    """Raise ``ValueError`` for non-snake_case custom keys in data/metadata dicts.
+
+    Only called when *saving* (from :meth:`File.create`); existing files with non-conforming
+    custom keys can still be read.
+    """
+    for label, mapping, schema in (
+        ("data", data, DataSpec.SCHEMA),
+        ("metadata", metadata, MetadataSpec.SCHEMA),
+    ):
+        for key in mapping:
+            if key not in schema and not _SNAKE_CASE_RE.match(key):
+                raise ValueError(
+                    f"Custom {label!r} key {key!r} is not snake_case (expected lowercase "
+                    f"letters, digits, underscores; e.g. {_suggest_snake_case(key)!r}). "
+                    f"This is only enforced when saving — existing files with "
+                    f"non-conforming keys can still be read."
+                )
 
 
 def _warn_custom_keys(data: dict, metadata: dict):
@@ -1390,6 +1549,19 @@ class File(h5py.File):
         if custom is not None:
             kwargs["custom"] = custom
 
+        if tracks is not None:
+            for track in tracks:
+                track_data = (
+                    track.get("data")
+                    if isinstance(track, Mapping)
+                    else getattr(track, "data", None)
+                )
+                if isinstance(track_data, Mapping):
+                    _validate_custom_key_naming(track_data, {})
+            _validate_custom_key_naming({}, kwargs.get("metadata", {}))
+        else:
+            _validate_custom_key_naming(kwargs.get("data", {}), kwargs.get("metadata", {}))
+
         warn_ctx = log.suppress_warnings() if ignore_warnings else contextlib.nullcontext()
         with warn_ctx:
             _warn_custom_keys(kwargs.get("data", {}), kwargs.get("metadata", {}))
@@ -1441,17 +1613,24 @@ class File(h5py.File):
         return _is_legacy_file(self)
 
     @property
-    def custom(self) -> List[CustomElement]:
-        """Custom data elements."""
+    def custom(self) -> "CustomElements":
+        """Custom data elements.
+
+        Returned as a :class:`CustomElements` collection: it behaves like
+        ``list[CustomElement]`` (iteration, ``len()``, positional indexing, equality with a
+        plain list), but also supports name- and group-based access, e.g.
+        ``f.custom.lens_correction`` or ``f.custom["lens"]["profile"]`` for a
+        ``group_name="lens"`` element named ``"profile"``.
+        """
 
         if self._is_legacy_file:
             if "non_standard_elements" not in self:
-                return []
-            return _load_custom_elements_from_group(self, "non_standard_elements")
+                return CustomElements([])
+            return CustomElements(_load_custom_elements_from_group(self, "non_standard_elements"))
 
         if "custom" not in self:
-            return []
-        return _load_custom_elements_from_group(self, "custom")
+            return CustomElements([])
+        return CustomElements(_load_custom_elements_from_group(self, "custom"))
 
     @property
     def name(self):
