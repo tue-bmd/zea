@@ -468,6 +468,19 @@ class TestFetchers:
         finally:
             fetcher.close()
 
+    @pytest.mark.skipif(not hasattr(os, "O_BINARY"), reason="Windows-only file mode")
+    def test_windows_opens_local_chunks_in_binary_mode(self, structured_file, monkeypatch):
+        """Compressed chunk bytes must not undergo Windows text-mode translation."""
+        opened = {}
+        monkeypatch.setattr(os, "open", lambda path, flags: opened.setdefault("flags", flags) or 1)
+        monkeypatch.setattr(os, "close", lambda fd: None)
+
+        fetcher = LocalFetcher(structured_file)
+        try:
+            assert opened["flags"] & os.O_BINARY
+        finally:
+            fetcher.close()
+
     def test_windows_fallback_matches_h5py(self, structured_file, monkeypatch):
         """The lock-guarded lseek+read fallback must return exactly what h5py returns, even
         under the concurrent decode pool (a whole-file read fans out across every chunk)."""

@@ -117,7 +117,7 @@ class LocalFetcher(Fetcher):
     per_chunk = True
 
     def __init__(self, path: str | os.PathLike):
-        self._fd: int | None = os.open(os.fspath(path), os.O_RDONLY)
+        self._fd: int | None = os.open(os.fspath(path), os.O_RDONLY | getattr(os, "O_BINARY", 0))
         # No lock needed when os.pread is available (its positional read is thread-safe).
         self._lock = None if hasattr(os, "pread") else threading.Lock()
 
