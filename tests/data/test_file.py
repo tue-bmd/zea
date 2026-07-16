@@ -2094,6 +2094,54 @@ class TestLegacyFileLoading:
             spec = f.validate_spec()  # would raise if scalars caused unexpected-kwarg errors
         assert spec.scan is not None
 
+    def test_float_tx_waveform_indices(self, tmp_path):
+        """Legacy files storing ``tx_waveform_indices`` as floats load correctly.
+
+        Some legacy files store the waveform indices as float64; they are used
+        to index the per-waveform dataset list, so they must be cast to int.
+        """
+        path = tmp_path / "legacy_float_waveform_indices.hdf5"
+        n_frames, n_tx, n_el, n_ax, n_ch = 1, 3, 4, 16, 1
+        waveform = np.hanning(32).astype(np.float32)
+
+        with h5py.File(path, "w") as f:
+            f.attrs["probe"] = "generic"
+            f.attrs["description"] = "legacy file with float tx_waveform_indices"
+            data_group = f.create_group("data")
+            data_group.create_dataset(
+                "raw_data",
+                data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+            )
+            scan = f.create_group("scan")
+            scan["probe_geometry"] = np.zeros((n_el, 3), dtype=np.float32)
+            scan["sampling_frequency"] = np.float32(30e6)
+            scan["center_frequency"] = np.float32(5e6)
+            scan["sound_speed"] = np.float32(1540.0)
+            scan["initial_times"] = np.zeros(n_tx, dtype=np.float32)
+            scan["t0_delays"] = np.zeros((n_tx, n_el), dtype=np.float32)
+            scan["tx_apodizations"] = np.ones((n_tx, n_el), dtype=np.float32)
+            scan["focus_distances"] = np.full(n_tx, np.inf, dtype=np.float32)
+            scan["polar_angles"] = np.zeros(n_tx, dtype=np.float32)
+            scan["azimuth_angles"] = np.zeros(n_tx, dtype=np.float32)
+            scan["n_frames"] = np.int64(n_frames)
+            scan["n_tx"] = np.int64(n_tx)
+            scan["n_ax"] = np.int64(n_ax)
+            scan["n_el"] = np.int64(n_el)
+            scan["n_ch"] = np.int64(n_ch)
+            # The regression targets: float indices into the waveform lists,
+            # and jaxus-style lens fields in the scan group.
+            scan["tx_waveform_indices"] = np.zeros(n_tx, dtype=np.float64)
+            scan["lens_correction"] = np.float64(1.0)
+            scan["lens_thickness"] = np.float64(1e-3)
+            scan["lens_sound_speed"] = np.float64(1000.0)
+            scan.create_group("waveforms_one_way")["waveform_000"] = waveform
+            scan.create_group("waveforms_two_way")["waveform_000"] = waveform
+
+        with File(path) as f:
+            parameters = f.load_parameters()
+        assert parameters.waveforms_two_way.shape == (n_tx, waveform.size)
+        np.testing.assert_array_equal(parameters.waveforms_two_way[0], waveform)
+
 
 class TestCustomElements:
     """Tests for storing/loading :class:`CustomElement` objects via the ``custom`` key."""
