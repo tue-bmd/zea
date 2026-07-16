@@ -1352,12 +1352,18 @@ class TissueSuppression(Operation):
     Two filter types are available, selected with ``filter_type``:
 
     * ``"svd"`` (default) -- the real-valued Direct SVD filter. Builds the Gram
-      matrix with a plain transpose.
+      matrix with a plain transpose. Input is real data of shape
+      ``(n_frames, ...)``.
     * ``"svd_complex"`` -- the same filter with a conjugate (Hermitian)
       transpose, for complex baseband IQ input. This is the filter used for
-      Power-Doppler / ULM processing (as in MUST's ``process.m``). On complex
-      input ``"svd"`` builds ``XᵀX`` instead of the temporal covariance ``XᴴX``
-      and will not suppress the tissue.
+      Power-Doppler / ULM processing (as in MUST's ``process.m``). Input is IQ
+      data as two real channels, shape ``(n_frames, ..., 2)`` (the zea
+      convention -- see e.g. the output of ``Beamform``); the op converts to a
+      complex tensor internally with ``keras.ops.view_as_complex`` and back with
+      ``view_as_real`` before returning, the same pattern
+      :class:`DelayMultiplyAndSum` uses. On real ``[I, Q]`` channel data
+      ``"svd"`` builds ``XᵀX`` instead of the temporal covariance ``XᴴX`` and
+      will not suppress the tissue.
 
     .. note::
         On the TensorFlow backend ``"svd_complex"`` runs eagerly: TensorFlow
@@ -1425,7 +1431,8 @@ class TissueSuppression(Operation):
         Suppresses tissue using Direct SVD.
 
         Args:
-            data (ops.Tensor): Shape (n_frames, ...)
+            data (ops.Tensor): Shape (n_frames, ...). Complex for the
+                ``"svd_complex"`` filter type, real otherwise.
 
         """
         return suppress_tissue(
@@ -1436,5 +1443,15 @@ class TissueSuppression(Operation):
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        filtered = self.suppress_tissue(ops.array(data))
+        is_complex = self.filter_type == "svd_complex"
+
+        # Real IQ-channel input ((n_frames, ..., 2)) <-> complex ((n_frames, ...))
+        # conversion happens inside the op, same as DelayMultiplyAndSum, so the
+        # op's dict-boundary contract stays real-valued and composes in a
+        # Pipeline like any other op.
+        array = ops.view_as_complex(ops.array(data)) if is_complex else ops.array(data)
+        filtered = self.suppress_tissue(array)
+        if is_complex:
+            filtered = ops.view_as_real(filtered)
+
         return {self.output_key: ops.cast(ops.array(filtered), data.dtype)}

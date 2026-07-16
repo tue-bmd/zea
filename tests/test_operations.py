@@ -1417,6 +1417,11 @@ def _complex_clutter_movie(n_frames=40, n_z=16, n_x=16, seed=DEFAULT_TEST_SEED):
     baseband IQ), which is what distinguishes the Hermitian Gram matrix from the
     plain-transpose one -- for tissue that is merely a constant real map repeated
     across frames, both give the same answer.
+
+    Returns the movie both as a complex array (n_frames, n_z, n_x) -- for testing
+    :func:`zea.func.ultrasound.suppress_tissue` directly -- and as real IQ
+    channels (n_frames, n_z, n_x, 2), the shape :class:`zea.ops.TissueSuppression`
+    with ``filter_type="svd_complex"`` actually expects on its dict boundary.
     """
     rng = np.random.default_rng(seed)
 
@@ -1429,11 +1434,18 @@ def _complex_clutter_movie(n_frames=40, n_z=16, n_x=16, seed=DEFAULT_TEST_SEED):
     phase = np.exp(1j * 2 * np.pi * 0.02 * np.arange(n_frames)).astype(np.complex64)
     tissue = (phase[:, None, None] * spatial[None]).astype(np.complex64)
     blood = (_complex_normal((n_frames, n_z, n_x)) * 0.1).astype(np.complex64)
-    return (tissue + blood).astype(np.complex64), tissue
+    data = (tissue + blood).astype(np.complex64)
+    data_channels = np.stack([data.real, data.imag], axis=-1).astype(np.float32)
+    return data, data_channels
 
 
 def test_tissue_suppression_complex():
     """TissueSuppression with filter_type='svd_complex' suppresses complex IQ clutter.
+
+    The op takes IQ data as two real channels (n_frames, ..., 2) -- the zea
+    convention, matching e.g. Beamform's output -- and converts to/from complex
+    internally with view_as_complex/view_as_real, the same pattern
+    DelayMultiplyAndSum uses, so it composes with the rest of a Pipeline.
 
     Deliberately not a ``backend_equality_check``: what survives the filter is the
     near-null-space residual, and different backends' SVD implementations pick
@@ -1446,23 +1458,19 @@ def test_tissue_suppression_complex():
 
     from zea import ops
 
-    data, _ = _complex_clutter_movie()
+    _, data_channels = _complex_clutter_movie()
 
     op = ops.TissueSuppression(cutoff=2, filter_type="svd_complex")
-    output = keras.ops.convert_to_numpy(
-        op(data=keras.ops.convert_to_tensor(data))["data"]
-    )
+    output = keras.ops.convert_to_numpy(op(data=keras.ops.convert_to_tensor(data_channels))["data"])
 
-    assert output.shape == data.shape
-    assert output.dtype == data.dtype, (
-        f"Expected dtype {data.dtype}, got {output.dtype}"
+    assert output.shape == data_channels.shape
+    assert output.dtype == data_channels.dtype, (
+        f"Expected dtype {data_channels.dtype}, got {output.dtype}"
     )
 
     # The clutter dominates the energy, so removing it must remove nearly all of it.
-    energy_ratio = np.mean(np.abs(output) ** 2) / np.mean(np.abs(data) ** 2)
-    assert energy_ratio < 0.01, (
-        f"Expected clutter to be suppressed, energy ratio {energy_ratio}"
-    )
+    energy_ratio = np.mean(output**2) / np.mean(data_channels**2)
+    assert energy_ratio < 0.01, f"Expected clutter to be suppressed, energy ratio {energy_ratio}"
 
 
 def test_tissue_suppression_complex_needs_conjugate():
@@ -1478,7 +1486,7 @@ def test_tissue_suppression_complex_needs_conjugate():
     """
     from zea.func.ultrasound import suppress_tissue
 
-    data, _ = _complex_clutter_movie()
+    data, _ = _complex_clutter_movie()  # complex array, not the real-channel one
 
     def _energy_ratio(conjugate):
         output = np.asarray(suppress_tissue(data, 2, conjugate=conjugate))
@@ -1489,8 +1497,13 @@ def test_tissue_suppression_complex_needs_conjugate():
     assert _energy_ratio(conjugate=False) > 0.5
 
 
-def test_tissue_suppression_conjugate_matches_plain_on_real_data():
-    """For real input the conjugate transpose is a no-op, so both filters agree.
+def test_tissue_suppression_conjugate_matches_plain_on_zero_imag_data():
+    """With a zero imaginary part, the conjugate transpose is a no-op.
+
+    ``svd_complex`` on IQ channels ``[real, 0]`` (i.e. genuinely real data,
+    just carried in the two-channel convention) must agree with ``svd``
+    applied to the real channel directly, since ``conj()`` is the identity on
+    real numbers.
 
     The tolerance is loose because the two do not necessarily run through the same
     code path: on TensorFlow ``svd_complex`` is forced eager (there is no complex
@@ -1503,18 +1516,22 @@ def test_tissue_suppression_conjugate_matches_plain_on_real_data():
     from zea import ops
 
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
-    data = rng.standard_normal((10, 8, 8)).astype(np.float32)
-    data_tensor = keras.ops.convert_to_tensor(data)
+    real_data = rng.standard_normal((10, 8, 8)).astype(np.float32)
+    channel_data = np.stack([real_data, np.zeros_like(real_data)], axis=-1)
 
-    outputs = [
-        keras.ops.convert_to_numpy(
-            ops.TissueSuppression(cutoff=3, filter_type=filter_type)(data=data_tensor)[
-                "data"
-            ]
-        )
-        for filter_type in ("svd", "svd_complex")
-    ]
-    np.testing.assert_allclose(outputs[0], outputs[1], atol=1e-2)
+    real_output = keras.ops.convert_to_numpy(
+        ops.TissueSuppression(cutoff=3, filter_type="svd")(
+            data=keras.ops.convert_to_tensor(real_data)
+        )["data"]
+    )
+    complex_output = keras.ops.convert_to_numpy(
+        ops.TissueSuppression(cutoff=3, filter_type="svd_complex")(
+            data=keras.ops.convert_to_tensor(channel_data)
+        )["data"]
+    )
+
+    np.testing.assert_allclose(real_output, complex_output[..., 0], atol=1e-2)
+    np.testing.assert_allclose(complex_output[..., 1], 0, atol=1e-2)
 
 
 def test_tissue_suppression_fractional_cutoff():
