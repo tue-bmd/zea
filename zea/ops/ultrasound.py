@@ -1434,7 +1434,7 @@ class TissueSuppression(Operation):
             int: Number of principal components to reject.
         """
         if isinstance(self.cutoff, float):
-            return int(round(n_frames * self.cutoff))
+            return min(int(round(n_frames * self.cutoff)), n_frames - 1)
         return self.cutoff
 
     def suppress_tissue(self, data, filter_type=None):
