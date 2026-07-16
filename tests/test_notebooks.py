@@ -92,6 +92,12 @@ NOTEBOOK_PARAMETERS = {
         "num_iterations": 2,
         "step_size": 1,
     },
+    "inverse_beamforming_real_scans_example.ipynb": {
+        "n_iter": 3,
+        "n_scatterers_cirs": 2000,
+        # Skip the in-vivo carotid section on CI (411 MB download + long inversion)
+        "run_carotid": False,
+    },
     "nuclear_dehazing_example.ipynb": {
         "n_unconditional_samples": 1,
         "n_unconditional_steps": 2,
