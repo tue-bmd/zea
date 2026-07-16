@@ -118,9 +118,7 @@ class USCTReflectivityDAS(Operation):
         axial_axis=1,
         **kwargs,
     ):
-        # Python-level gather/loops: not jittable and processed one frame at a time.
-        kwargs.setdefault("jit_compile", False)
-        kwargs.setdefault("jittable", False)
+        # Processes one frame at a time (n_tx as the leading axis, not a batch of frames).
         kwargs.setdefault("with_batch_dim", False)
         super().__init__(output_data_type=DataTypes.ENVELOPE_DATA, **kwargs)
         self.tx_chunk = tx_chunk
@@ -146,17 +144,15 @@ class USCTReflectivityDAS(Operation):
         **kwargs,
     ):
         data = kwargs[self.key]
-        analytic = channels_to_analytic(data, axis=self.axial_axis)  # (n_tx, n_ax, n_el)
 
-        img = usct_reflectivity_das(
-            analytic,
-            ops.take(transmit_origins, _IN_PLANE, axis=-1),
-            ops.take(probe_geometry, _IN_PLANE, axis=-1),
+        das_kwargs = dict(
+            transmit_origins=ops.take(transmit_origins, _IN_PLANE, axis=-1),
+            receive_positions=ops.take(probe_geometry, _IN_PLANE, axis=-1),
             # flatgrid is (n_pix, 3) in (x, y, z); image the XZ plane.
-            ops.take(flatgrid, _IN_PLANE, axis=-1),
-            sampling_frequency,
-            initial_times,
-            sound_speed,
+            pixels=ops.take(flatgrid, _IN_PLANE, axis=-1),
+            sampling_frequency=sampling_frequency,
+            initial_times=initial_times,
+            sound_speed=sound_speed,
             tx_chunk=self.tx_chunk,
             reject_transmission=self.reject_transmission,
             transmission_guard_s=self.transmission_guard_s,
@@ -168,4 +164,15 @@ class USCTReflectivityDAS(Operation):
             sos_grid_z=sos_grid_z,
             n_sos_ray_samples=self.n_sos_ray_samples,
         )
+
+        def _reconstruct_one(data_one):
+            analytic = channels_to_analytic(data_one, axis=self.axial_axis)  # (n_tx, n_ax, n_el)
+            return usct_reflectivity_das(analytic, **das_kwargs)
+
+        if not self.with_batch_dim:
+            img = _reconstruct_one(data)
+        else:
+            num_frames = ops.shape(data)[0]
+            img = ops.stack([_reconstruct_one(data[i]) for i in range(num_frames)], axis=0)
+
         return {self.output_key: img}

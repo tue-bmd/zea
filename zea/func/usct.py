@@ -83,20 +83,17 @@ def straight_ray_times(positions, pixels, sos_map, x_axis, z_axis, background_c,
     x_lo, x_hi = x_axis[0], x_axis[-1]
     z_lo, z_hi = z_axis[0], z_axis[-1]
 
-    def _one_source(src):
-        seg = pixels - src[None, :]
-        dist = ops.sqrt(ops.sum(ops.square(seg), axis=-1))
-        pts = src[None, None, :] + t_mid[:, None, None] * seg[None, :, :]  # (S, P, 2)
-        xq, zq = pts[..., 0], pts[..., 1]
-        c_samp = _sample_grid(sos_map, x_axis, z_axis, xq, zq)
-        inside = ops.logical_and(
-            ops.logical_and(xq >= x_lo, xq <= x_hi),
-            ops.logical_and(zq >= z_lo, zq <= z_hi),
-        )
-        c_eff = ops.where(inside, c_samp, background_c)
-        return dist * ops.mean(1.0 / c_eff, axis=0)
-
-    return vmap(_one_source)(positions)
+    seg = pixels[None, :, :] - positions[:, None, :]  # (M, P, 2)
+    dist = ops.sqrt(ops.sum(ops.square(seg), axis=-1))  # (M, P)
+    pts = positions[:, None, None, :] + t_mid[None, :, None, None] * seg[:, None, :, :]  # (M,S,P,2)
+    xq, zq = pts[..., 0], pts[..., 1]  # (M, S, P)
+    c_samp = _sample_grid(sos_map, x_axis, z_axis, xq, zq)
+    inside = ops.logical_and(
+        ops.logical_and(xq >= x_lo, xq <= x_hi),
+        ops.logical_and(zq >= z_lo, zq <= z_hi),
+    )
+    c_eff = ops.where(inside, c_samp, background_c)
+    return dist * ops.mean(1.0 / c_eff, axis=1)  # (M, P)
 
 
 def _gather_time(trace, sample_pos, n_ax, interpolation):
