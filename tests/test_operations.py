@@ -1432,7 +1432,7 @@ def test_tissue_suppression_complex_needs_conjugate():
     data, _ = _complex_clutter_video()  # complex array, not the real-channel one
 
     def _energy_ratio(conjugate):
-        output = np.asarray(suppress_tissue(data, 2, conjugate=conjugate))
+        output = keras.ops.convert_to_numpy(suppress_tissue(data, 2, conjugate=conjugate))
         return np.mean(np.abs(output) ** 2) / np.mean(np.abs(data) ** 2)
 
     assert _energy_ratio(conjugate=True) < 0.01
