@@ -190,6 +190,11 @@ def usct_reflectivity_das(
     fs = sampling_frequency
     per_tx_rx = len(receive_positions.shape) == 3
 
+    sos_args = (sos_map, sos_grid_x, sos_grid_z)
+    if any(a is not None for a in sos_args) and not all(a is not None for a in sos_args):
+        raise ValueError(
+            "sos_map, sos_grid_x, and sos_grid_z must all be provided together, or all omitted."
+        )
     use_sos = sos_map is not None
     px = ops.convert_to_tensor(pixels)
 
@@ -234,7 +239,7 @@ def usct_reflectivity_das(
 
         if per_tx_rx:
             rx_here = receive_positions[i:j]  # (c, n_el, 2)
-            rt_list, ru_list = [], []
+            rt_list, ru_list, direct_list = [], [], []
             for k in range(int(rx_here.shape[0])):
                 if use_sos:
                     rt = straight_ray_times(
@@ -247,6 +252,17 @@ def usct_reflectivity_das(
                         n_sos_ray_samples,
                     )
                     _, ru = distance_and_unit(rx_here[k], px)
+                    direct_list.append(
+                        straight_ray_times(
+                            tx_pos[k : k + 1],
+                            rx_here[k],
+                            sos_map,
+                            sos_grid_x,
+                            sos_grid_z,
+                            sound_speed,
+                            n_sos_ray_samples,
+                        )[0]
+                    )
                 else:
                     rd, ru = distance_and_unit(rx_here[k], px)
                     rt = rd / sound_speed
@@ -255,13 +271,29 @@ def usct_reflectivity_das(
             rx_time_c = ops.stack(rt_list, axis=0)  # (c, n_el, P)
             rx_unit_c = ops.stack(ru_list, axis=0)  # (c, n_el, P, 2)
             t_round = tx_time[:, None, :] + rx_time_c
-            direct = _pairwise_batched_direct(tx_pos, rx_here) / sound_speed  # (c, n_el)
+            if use_sos:
+                direct = ops.stack(direct_list, axis=0)  # (c, n_el)
+            else:
+                direct = _pairwise_batched_direct(tx_pos, rx_here) / sound_speed  # (c, n_el)
             direct = direct[:, :, None]
             cos = ops.sum(tx_unit[:, None, :, :] * rx_unit_c, axis=-1)
             trace = ops.transpose(analytic[i:j], (0, 2, 1))  # (c, n_el, n_ax)
         else:
             t_round = tx_time[:, None, :] + rx_time[None, :, :]  # (c, n_el, P)
-            direct = compute_receive_distances(tx_pos, receive_positions)[:, :, None] / sound_speed
+            if use_sos:
+                direct = straight_ray_times(
+                    tx_pos,
+                    receive_positions,
+                    sos_map,
+                    sos_grid_x,
+                    sos_grid_z,
+                    sound_speed,
+                    n_sos_ray_samples,
+                )[:, :, None]
+            else:
+                direct = (
+                    compute_receive_distances(tx_pos, receive_positions)[:, :, None] / sound_speed
+                )
             cos = ops.sum(tx_unit[:, None, :, :] * rx_unit[None, :, :, :], axis=-1)
             trace = ops.transpose(analytic[i:j], (0, 2, 1))  # (c, n_el, n_ax)
 

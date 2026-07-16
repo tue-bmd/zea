@@ -502,14 +502,14 @@ def test_usct_operation_ignores_elevation():
     rf = rng.standard_normal((4, 60, 6, 1)).astype(np.float32)
     op = USCTReflectivityDAS(tx_chunk=2, transmission_guard_s=1e-6)
 
-    def run(y):
+    def run(y_grid, y_probe, y_tx):
         return np.asarray(
             ops.convert_to_numpy(
                 op(
                     data=rf,
-                    flatgrid=_to_xz(s["pixels"], y=y),
-                    probe_geometry=_to_xz(s["rx"], y=y),
-                    transmit_origins=_to_xz(s["tx"], y=y),
+                    flatgrid=_to_xz(s["pixels"], y=y_grid),
+                    probe_geometry=_to_xz(s["rx"], y=y_probe),
+                    transmit_origins=_to_xz(s["tx"], y=y_tx),
                     sampling_frequency=s["fs"],
                     initial_times=s["t0"],
                     sound_speed=s["c"],
@@ -517,4 +517,8 @@ def test_usct_operation_ignores_elevation():
             )
         )
 
-    np.testing.assert_allclose(run(0.0), run(0.03), rtol=1e-5, atol=1e-5)
+    # Distinct, non-matching elevation offsets per entity: a bug that fails to
+    # drop the y-axis (e.g. computing 3-D instead of in-plane distances) would
+    # change the pairwise geometry here, unlike a single shared offset applied
+    # to every entity (which cancels out in all pairwise differences).
+    np.testing.assert_allclose(run(0.0, 0.0, 0.0), run(0.02, -0.05, 0.03), rtol=1e-5, atol=1e-5)
