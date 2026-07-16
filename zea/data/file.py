@@ -3,6 +3,7 @@
 import contextlib
 import difflib
 import enum
+import inspect
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -30,6 +31,18 @@ from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path, _hf_stream_op
 from zea.internal.utils import deprecated
 
 _ZEA_ISSUES_URL = "https://github.com/tue-bmd/zea/issues"
+
+# h5py.File's own named parameters (everything but its **kwds catch-all). Kept for streamed
+# hf:// opens: h5py validates unknown kwargs itself for a plain path, but for a file-like
+# object it routes them to the 'fileobj' driver, which silently ignores anything it does not
+# recognise (see _set_fapl_fileobj) instead of raising — so a typo like ``version=`` for
+# ``revision=`` would otherwise vanish rather than error.
+_H5PY_FILE_KWARGS = frozenset(inspect.signature(h5py.File.__init__).parameters) - {
+    "self",
+    "name",
+    "mode",
+    "kwds",
+}
 
 if TYPE_CHECKING:
     # ``Self`` is in ``typing`` only from 3.11; import lazily to keep the
@@ -770,6 +783,15 @@ class File(h5py.File):
                     "Streaming hf:// files is only supported in read mode ('r'). "
                     "Pass stream=False to download the file for other modes."
                 )
+            # A file-like object routes through h5py's 'fileobj' driver, which silently drops
+            # any kwarg it does not recognise (see _H5PY_FILE_KWARGS) rather than raising —
+            # so check now, before that swallows a typo like version= for revision=.
+            unknown = set(kwargs) - _H5PY_FILE_KWARGS
+            if unknown:
+                raise TypeError(
+                    f"'{next(iter(unknown))}' is an invalid keyword argument for zea.File."
+                )
+
             # cache_dir only applies to full downloads; it is irrelevant here.
             hf_kwargs.pop("cache_dir", None)
             source_name = str(name)

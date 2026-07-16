@@ -33,6 +33,7 @@ import zlib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from itertools import repeat
+from pathlib import Path
 from typing import Any, Callable, Sequence, cast
 
 import h5py
@@ -88,6 +89,10 @@ class Fetcher:
     #: Progress reporting for reads through this file (set by :class:`~zea.data.file.File`).
     progress: "bool | Ticker" = False
 
+    #: Human-readable file identifier (the local path or ``hf://`` source url), used in
+    #: fallback messages instead of a dataset's internal HDF5 path (set by :func:`fetcher_for`).
+    source: "str | None" = None
+
     def fetch(self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None) -> list[bytes]:
         """Return the bytes of each ``(offset, size)`` range, in order.
 
@@ -96,6 +101,15 @@ class Fetcher:
         thread-safe.
         """
         raise NotImplementedError
+
+    def pending_bytes(self, ranges: Sequence[tuple[int, int]]) -> int:
+        """Bytes of ``ranges`` that :meth:`fetch` would actually have to stream or download.
+
+        Defaults to the full total: only :class:`HTTPFetcher` can know better, by checking
+        its on-disk cache. Used solely to decide whether a progress bar has anything to show —
+        a read served entirely from cache does not stream or download, so it gets no bar.
+        """
+        return sum(size for _, size in ranges)
 
     def close(self) -> None:
         """Release whatever the fetcher holds open."""
@@ -205,6 +219,13 @@ class HTTPFetcher(Fetcher):
         sync(self._fs.loop, gather)
         return cast(list[bytes], out)
 
+    def pending_bytes(self, ranges: Sequence[tuple[int, int]]) -> int:
+        if self.cache is None:
+            return super().pending_bytes(ranges)
+        return sum(
+            size for offset, size in ranges if self.cache.get(int(offset), int(size)) is None
+        )
+
 
 def fetcher_for(file: h5py.File) -> Fetcher | None:
     """The fetcher for an open :class:`~zea.data.file.File`, or ``None`` if it has none.
@@ -224,7 +245,9 @@ def fetcher_for(file: h5py.File) -> Fetcher | None:
         # content hash that keys the cache costs no extra request.
         details = getattr(getattr(file, "_stream_fileobj", None), "details", None) or {}
         cache = cache_for(details) if getattr(file, "_cache_chunks", True) else None
-        return HTTPFetcher(url, token, cache)
+        fetcher = HTTPFetcher(url, token, cache)
+        fetcher.source = str(source)  # the hf:// path, not the resolved streaming url
+        return fetcher
 
     if getattr(file, "_stream_fileobj", None) is not None:
         return None  # streamed from somewhere we cannot issue range requests against
@@ -235,7 +258,9 @@ def fetcher_for(file: h5py.File) -> Fetcher | None:
         return None
     if not path or not os.path.isfile(path):
         return None
-    return LocalFetcher(path)
+    fetcher = LocalFetcher(path)
+    fetcher.source = str(path)
+    return fetcher
 
 
 # --------------------------------------------------------------------------- #
@@ -335,20 +360,36 @@ def _needs_resave(dset: h5py.Dataset, fetcher: Fetcher | None) -> bool:
     return not all(fid in DECODABLE for fid in filter_ids(dset))
 
 
-def _fallback_note(dset: h5py.Dataset, kind: str, cause: str, fix: str) -> None:
+def _human_bytes(n: int) -> str:
+    """``n`` bytes as a short string, e.g. ``'128 MB'`` or ``'2.3 GB'``."""
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def _fallback_note(
+    dset: h5py.Dataset, fetcher: Fetcher | None, kind: str, cause: str, fix: str
+) -> None:
     """Nudge, once per dataset, when a read misses the concurrent path and goes to h5py.
 
     Serial reads happen locally too, not only when streaming, so this fires whether or not
     progress was requested. ``cause`` completes "Reading '{name}' {cause}" and ``fix`` says how
     to avoid it; ``kind`` scopes the once-only dedupe so the resave and selection notes do not
-    silence each other. Anything that could break here is swallowed; a message is never worth
-    failing a read over.
+    silence each other. The name is the file, not the dataset's internal HDF5 path — that is
+    what a user would actually act on. Anything that could break here is swallowed; a message
+    is never worth failing a read over.
     """
     try:
         from zea import log
 
+        name = fetcher.source if fetcher is not None else dset.name
+        size = _human_bytes(dset.nbytes)
         log.warning_once(
-            f"Reading '{dset.name}' {cause} — falling back to a serial h5py read. {fix}",
+            f"Reading '{name}' ({size}) {cause} — falling back to a serial h5py read "
+            f"(slower). {fix}",
             key=(dset.name, kind),
         )
     except Exception:  # noqa: BLE001 — messaging must never break a read
@@ -368,13 +409,15 @@ def _resave_note(dset: h5py.Dataset, fetcher: Fetcher | None) -> None:
         cause = f"{named}, which zea cannot decode concurrently"
     _fallback_note(
         dset,
+        fetcher,
         kind="resave",
         cause=cause,
-        fix="Re-save the file (e.g. via zea.File.create) to read it concurrently, with progress.",
+        fix="Re-save with the `zea data resave` CLI (or zea.File.create) to read it "
+        "concurrently, with a progress bar.",
     )
 
 
-def _selection_note(dset: h5py.Dataset) -> None:
+def _selection_note(dset: h5py.Dataset, fetcher: Fetcher | None) -> None:
     """Note a read that misses the concurrent path *only* because of its selection.
 
     Reached after :func:`eligible` has already passed, so the dataset itself is fast-path
@@ -382,6 +425,7 @@ def _selection_note(dset: h5py.Dataset) -> None:
     """
     _fallback_note(
         dset,
+        fetcher,
         kind="selection",
         cause=(
             "with a selection zea cannot map to chunks (e.g. a strided slice, a boolean mask, "
@@ -512,7 +556,7 @@ def read(
     try:
         axes = _normalize(selection, dset.shape)
     except _Unsupported:
-        _selection_note(dset)
+        _selection_note(dset, fetcher)
         return dset[selection]
 
     itemsize = dset.dtype.itemsize
@@ -578,7 +622,8 @@ def read(
     # total before a single byte moves — it measures the bytes actually transferred, not a
     # guess. Ticks arrive from worker threads; tqdm.update is thread-safe.
     total = sum(int(task[0].size) for task in tasks)
-    with _ticker(progress, total) as on_bytes:
+    all_ranges = [(int(task[0].byte_offset), int(task[0].size)) for task in tasks]
+    with _ticker(progress, total, all_ranges, fetcher) as on_bytes:
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
             if fetcher.per_chunk:
                 # Each worker reads its own chunk, so the next read overlaps the last decode.
@@ -596,18 +641,30 @@ def read(
 
 
 @contextmanager
-def _ticker(progress: bool | Ticker, total: int):
-    """The per-chunk callback for ``progress``, and the tqdm bar behind it if there is one."""
+def _ticker(
+    progress: bool | Ticker, total: int, ranges: Sequence[tuple[int, int]], fetcher: Fetcher
+):
+    """The per-chunk callback for ``progress``, and the tqdm bar behind it if there is one.
+
+    A callable gets every tick, cache hits included — it wants the true per-chunk arrivals for
+    its own bookkeeping, not a curated view. The bar is display only, so it is skipped
+    entirely when nothing is actually pending (:meth:`Fetcher.pending_bytes`): a read served
+    wholly from cache neither streams nor downloads, so there is nothing to show progress on.
+    """
     if not progress:
         yield None
         return
     if callable(progress):
         yield progress
         return
+    if fetcher.pending_bytes(ranges) <= 0:
+        yield None
+        return
 
     from tqdm.auto import tqdm  # tqdm.auto: renders as a widget in notebooks, text elsewhere
 
-    with tqdm(total=total, unit="B", unit_scale=True, desc="streaming data") as bar:
+    name = Path(fetcher.source).name if fetcher.source else "data"
+    with tqdm(total=total, unit="B", unit_scale=True, desc=f"streaming {name}") as bar:
         yield bar.update
 
 

@@ -116,6 +116,18 @@ def test_stream_write_mode_raises():
         File("hf://org/repo/x.hdf5", mode="w")
 
 
+def test_stream_unknown_kwarg_raises(monkeypatch):
+    """A typo like ``version=`` (instead of ``revision=``) must error, not silently vanish.
+
+    h5py's 'fileobj' driver (used for streamed reads) swallows unrecognised kwargs rather
+    than raising, so without this check the file would open against the default revision
+    with no indication the kwarg did nothing.
+    """
+    monkeypatch.setattr("zea.data.file._hf_stream_open", lambda hf_path, **kwargs: None)
+    with pytest.raises(TypeError, match="version"):
+        File("hf://org/repo/x.hdf5", version="v0.1.0")
+
+
 def test_basic_properties(simple_h5_file):
     """Test basic properties of File class."""
 

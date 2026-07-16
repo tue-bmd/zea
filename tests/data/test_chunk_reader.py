@@ -17,6 +17,7 @@ import os
 import socketserver
 import threading
 import time
+from unittest.mock import MagicMock
 
 import hdf5plugin
 import numpy as np
@@ -331,6 +332,28 @@ class TestFallbackNotes:
                 read(file[RAW], slice(None), file._chunk_fetcher, progress=False)
         assert len(notes.records) == 1
 
+    def test_lzf_over_http_still_nudges_when_progress_is_requested(self, tmp_path, notes):
+        """lzf has no fast path even when streamed, so asking for progress gets none of it —
+        the read still must not go quiet about why."""
+        path = _write(tmp_path / "lzf.hdf5", _structured(), compression="lzf")
+        server = _CountingServer(tmp_path)
+        try:
+            fetcher = HTTPFetcher(server.url + path.name)
+            with File(path) as file:
+                got = read(file[RAW], slice(None), fetcher, progress=True)
+                np.testing.assert_array_equal(got, file[RAW][:])
+        finally:
+            server.close()
+        assert len(notes.records) == 1
+        assert "lzf" in notes.text and "Re-save" in notes.text
+
+    def test_message_names_the_file_not_the_dataset_path(self, tmp_path, notes):
+        path = _write(tmp_path / "lzf.hdf5", _structured(), compression="lzf")
+        with File(path) as file:
+            read(file[RAW], slice(None), file._chunk_fetcher, progress=False)
+        assert str(path) in notes.text
+        assert RAW not in notes.text
+
     def test_multi_axis_fancy_index_raises_like_h5py(self, structured_file):
         """h5py allows one fancy axis and raises otherwise; we must raise identically."""
         with File(structured_file) as file:
@@ -628,5 +651,27 @@ class TestRemote:
                     f"requests were served serially (peak concurrency {server.peak}); "
                     f"expected overlapping range requests. Elapsed {elapsed:.3f}s."
                 )
+        finally:
+            server.close()
+
+    def test_fully_cached_read_draws_no_progress_bar(self, structured_file, tmp_path, monkeypatch):
+        """A read served entirely from the on-disk chunk cache neither streams nor downloads,
+        so ``progress=True`` must not draw a bar for it (it still would for a partial hit,
+        which is fine — real bytes are moving there)."""
+        from zea.data.chunk_cache import ChunkCache
+
+        server = _CountingServer(structured_file.parent, latency=0)
+        try:
+            cache = ChunkCache("test-content-id", root=tmp_path / "cache")
+            fetcher = HTTPFetcher(server.url + structured_file.name, cache=cache)
+            with File(structured_file) as file:
+                dset = file[RAW]
+                read(dset, slice(None), fetcher, progress=False)  # warms the cache
+
+                tqdm_mock = MagicMock()
+                monkeypatch.setattr("tqdm.auto.tqdm", tqdm_mock)
+                got = read(dset, slice(None), fetcher, progress=True)
+                np.testing.assert_array_equal(got, dset[:])
+            tqdm_mock.assert_not_called()
         finally:
             server.close()
