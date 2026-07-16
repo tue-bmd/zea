@@ -37,6 +37,7 @@ UNITS = {
     "dB/m/Hz": "decibels per meter per hertz",
     "#": "count",
     "%": "percent",
+    "kg": "kilograms",
     "kg/m²": "kilograms per square meter",
 }
 
@@ -1785,6 +1786,8 @@ class Subject(Spec):
         type: Subject type, e.g. human, phantom, animal.
         age: Subject age in years.
         sex: Subject sex.
+        weight: Subject weight in kg.
+        genetic_strain: Genetic strain of an animal subject, e.g. C57BL/6N.
         fat_percentage: Subject fat percentage.
         bmi: Subject body mass index in kg/m².
     """
@@ -1793,6 +1796,8 @@ class Subject(Spec):
     type: str | None = None
     age: np.uint8 | None = None
     sex: str | None = None
+    weight: np.float32 | None = None
+    genetic_strain: str | None = None
     fat_percentage: np.float32 | None = None
     bmi: np.float32 | None = None
 
@@ -1801,6 +1806,8 @@ class Subject(Spec):
         "type": {"dtype": str, "shape": ()},
         "age": {"dtype": np.uint8, "shape": ()},
         "sex": {"dtype": str, "shape": ()},
+        "weight": {"dtype": np.float32, "shape": ()},
+        "genetic_strain": {"dtype": str, "shape": ()},
         "fat_percentage": {"dtype": np.float32, "shape": ()},
         "bmi": {"dtype": np.float32, "shape": ()},
     }
@@ -1810,6 +1817,12 @@ class Subject(Spec):
         "type": {"unit": "–", "description": "Subject type, e.g. human, phantom, animal."},
         "age": {"unit": "–", "description": "Subject age in years.", "rare": True},
         "sex": {"unit": "–", "description": "Subject sex.", "rare": True},
+        "weight": {"unit": "kg", "description": "Subject weight.", "rare": True},
+        "genetic_strain": {
+            "unit": "–",
+            "description": "Genetic strain (inbred line) of an animal subject, e.g. C57BL/6N.",
+            "rare": True,
+        },
         "fat_percentage": {"unit": "%", "description": "Subject fat percentage.", "rare": True},
         "bmi": {"unit": "kg/m²", "description": "Subject body mass index.", "rare": True},
     }
@@ -1826,6 +1839,20 @@ class Subject(Spec):
             raise ValueError(
                 f"Subject fat percentage must be between 0 and 100, got {self.fat_percentage}"
             )
+
+        if self.genetic_strain is not None and not self.genetic_strain.strip():
+            raise ValueError("Subject genetic_strain cannot be an empty string")
+
+        if self.weight is not None:
+            if not np.isfinite(self.weight):
+                raise ValueError(f"Subject weight must be finite, got {self.weight}")
+            if self.weight <= 0:
+                raise ValueError(f"Subject weight must be positive, got {self.weight} kg")
+            if self.weight > 1000:
+                log.warning(
+                    f"Subject weight was specified as {self.weight} kg."
+                    "Please verify the value and that it is in kilograms, not grams."
+                )
 
         if self.bmi is not None:
             if not np.isfinite(self.bmi):
