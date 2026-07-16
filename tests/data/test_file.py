@@ -8,7 +8,15 @@ import numpy as np
 import pytest
 
 import zea
-from zea.data.file import CustomElement, File, Track, _GroupProxy, _StringDataset, load_file
+from zea.data.file import (
+    ChunkedDataset,
+    CustomElement,
+    File,
+    Track,
+    _GroupProxy,
+    _StringDataset,
+    load_file,
+)
 from zea.data.legacy_file import dict_to_sorted_list
 from zea.data.spec import FileSpec, Image, ScanSpec, Segmentation
 from zea.parameters import Parameters
@@ -47,6 +55,77 @@ def complex_h5_file(h5_filepath):
         dataset.create_dataset("dummy_dataset", data=np.random.randn(10, 20))
         dataset.create_dataset("dummy_dataset2", data=np.arange(5))
     yield h5_filepath
+
+
+def test_hf_streams_by_default(complex_h5_file, monkeypatch):
+    """An ``hf://`` path streams lazily by default (no full download)."""
+    calls = {"stream": [], "download": []}
+
+    def fake_stream(hf_path, **kwargs):
+        calls["stream"].append(hf_path)
+        return open(complex_h5_file, "rb")  # noqa: SIM115 — closed by File.close()
+
+    def fake_resolve(hf_path, **kwargs):
+        calls["download"].append(hf_path)
+        return str(complex_h5_file)
+
+    monkeypatch.setattr("zea.data.file._hf_stream_open", fake_stream)
+    monkeypatch.setattr("zea.data.file._hf_resolve_path", fake_resolve)
+
+    with File("hf://org/repo/x.hdf5") as file:
+        assert file["dummy_dataset2"][:].tolist() == [0, 1, 2, 3, 4]
+        assert file._stream_fileobj is not None  # streamed, not downloaded
+
+    assert calls["stream"] == ["hf://org/repo/x.hdf5"]
+    assert calls["download"] == []
+    assert file._stream_fileobj is None  # released on close
+
+
+def test_hf_stream_false_downloads(complex_h5_file, monkeypatch):
+    """``stream=False`` falls back to downloading the full file."""
+    calls = {"stream": [], "download": []}
+
+    def fake_stream(hf_path, **kwargs):
+        calls["stream"].append(hf_path)
+        return open(complex_h5_file, "rb")  # noqa: SIM115
+
+    def fake_resolve(hf_path, **kwargs):
+        calls["download"].append(hf_path)
+        return str(complex_h5_file)
+
+    monkeypatch.setattr("zea.data.file._hf_stream_open", fake_stream)
+    monkeypatch.setattr("zea.data.file._hf_resolve_path", fake_resolve)
+
+    with File("hf://org/repo/x.hdf5", stream=False) as file:
+        assert file["dummy_dataset2"][:].tolist() == [0, 1, 2, 3, 4]
+        assert file._stream_fileobj is None
+
+    assert calls["download"] == ["hf://org/repo/x.hdf5"]
+    assert calls["stream"] == []
+
+
+def test_stream_true_local_path_raises(h5_filepath):
+    """``stream=True`` on a non-hf path is rejected."""
+    with pytest.raises(ValueError, match="only supported for 'hf://'"):
+        File(str(h5_filepath), stream=True)
+
+
+def test_stream_write_mode_raises():
+    """Streaming is read-only; write modes must download instead."""
+    with pytest.raises(ValueError, match="read mode"):
+        File("hf://org/repo/x.hdf5", mode="w")
+
+
+def test_stream_unknown_kwarg_raises(monkeypatch):
+    """A typo like ``version=`` (instead of ``revision=``) must error, not silently vanish.
+
+    h5py's 'fileobj' driver (used for streamed reads) swallows unrecognised kwargs rather
+    than raising, so without this check the file would open against the default revision
+    with no indication the kwarg did nothing.
+    """
+    monkeypatch.setattr("zea.data.file._hf_stream_open", lambda hf_path, **kwargs: None)
+    with pytest.raises(TypeError, match="version"):
+        File("hf://org/repo/x.hdf5", version="v0.1.0")
 
 
 def test_basic_properties(simple_h5_file):
@@ -398,11 +477,16 @@ class TestStringDataset:
 
 class TestGroupProxy:
     def test_attribute_access_returns_dataset(self, spec_file):
+        """Datasets come back as ChunkedDataset (concurrent reads), delegating to h5py."""
         path, _, raw, _ = spec_file
         with File(path) as f:
             ds = f.data.raw_data
-            assert isinstance(ds, h5py.Dataset)
+            assert isinstance(ds, ChunkedDataset)
             assert ds.shape == raw.shape
+            assert ds.dtype == raw.dtype
+            assert ds.chunks is not None  # delegated straight to the h5py dataset
+            # The raw h5py object stays reachable for anyone who wants it.
+            assert isinstance(f["tracks/track_0/data/raw_data"], h5py.Dataset)
 
     def test_slicing_loads_subset(self, spec_file):
         path, _, raw, _ = spec_file
