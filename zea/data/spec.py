@@ -2223,7 +2223,7 @@ class FileSpec(Spec):
         description: Free-text description.
         custom: Optional list of :class:`~zea.data.file.CustomElement` objects holding
             data that does not fit the zea format.  These are written to a ``custom``
-            group and read back via :attr:`zea.File.custom`.
+            group.
 
     Example:
         .. doctest::
