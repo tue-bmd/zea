@@ -517,6 +517,14 @@ class TestGroupProxy:
             assert isinstance(proxy, _GroupProxy)
             assert proxy.values.shape == (n_frames, 16, 12, 1)
 
+    def test_slicing_group_raises_helpful_type_error(self, spec_file):
+        """Slicing a group directly (e.g. f.data.envelope_data[:]) should point to '.values'."""
+        path, *_ = spec_file
+
+        with File(path) as f:
+            with pytest.raises(TypeError, match=r"envelope_data\.values\[:\]"):
+                f.data.envelope_data[:]
+
     def test_missing_key_raises_attribute_error(self, spec_file):
         path, *_ = spec_file
 

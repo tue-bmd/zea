@@ -188,6 +188,25 @@ class ChunkedDataset:
         return f"<ChunkedDataset {self._dset.name} shape={self.shape} dtype={self.dtype}>"
 
 
+def _format_selection(selection) -> str:
+    """Formats a __getitem__ argument as it would appear in source, e.g. slice(None) -> ':'."""
+
+    def _format_one(part) -> str:
+        if isinstance(part, slice):
+            start = "" if part.start is None else part.start
+            stop = "" if part.stop is None else part.stop
+            if part.step is None:
+                return f"{start}:{stop}"
+            return f"{start}:{stop}:{part.step}"
+        if part is Ellipsis:
+            return "..."
+        return repr(part)
+
+    if isinstance(selection, tuple):
+        return ", ".join(_format_one(part) for part in selection)
+    return _format_one(selection)
+
+
 class _GroupProxy:
     """Lazy proxy for an h5py.Group that exposes children as attributes.
 
@@ -243,6 +262,16 @@ class _GroupProxy:
 
     def __iter__(self):
         return iter(self._group)
+
+    def __getitem__(self, selection):
+        attr_path = "f." + self._group.name.strip("/").replace("/", ".")
+        hint = ""
+        if "values" in self._group:
+            hint = f" Did you mean '{attr_path}.values[{_format_selection(selection)}]'?"
+        raise TypeError(
+            f"'{attr_path}' is a group, not a dataset, so it can't be sliced directly."
+            f"{hint} Available keys: {list(self._group.keys())}"
+        )
 
 
 def assert_key(file: h5py.File, key: str):
