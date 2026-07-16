@@ -17,6 +17,7 @@ inversions are provided:
 
 from dataclasses import dataclass
 
+import keras
 import numpy as np
 from keras import ops
 
@@ -29,11 +30,22 @@ from zea.inverse.seeding import seed_scatterers
 from zea.inverse.solvers import cgls, linear_adjoint
 
 
+def _jit_through_scan_grad(fn):
+    """JIT-compile a function that differentiates through ``ops.scan``.
+
+    On the tensorflow backend XLA cannot size the gradient accumulators of the
+    scan's while loop, so compile without XLA there.
+    """
+    if keras.backend.backend() == "tensorflow":
+        return backend_jit(fn, jit_compile=False)
+    return backend_jit(fn)
+
+
 @dataclass
 class InversionResult:
     """Result of a DAS inversion.
 
-    Attributes:
+    Args:
         channel_data (Tensor): Recovered pre-beamformed channel data of shape
             ``(n_tx, n_ax, n_el)``.
         image (Tensor): Re-beamformed image of the recovered channel data,
@@ -73,12 +85,12 @@ def invert_direct(operator, image, n_iter=50, jit=True, verbose=False):
     Returns:
         InversionResult: Recovered channel data and its re-beamformed image.
     """
-    image = ops.reshape(ops.convert_to_tensor(image), (-1,))
+    image = ops.reshape(ops.cast(ops.convert_to_tensor(image), "float32"), (-1,))
     matvec = operator.forward
     rmatvec = operator.adjoint
     if jit:
         matvec = backend_jit(matvec)
-        rmatvec = backend_jit(rmatvec)
+        rmatvec = _jit_through_scan_grad(rmatvec)
     channel_data = cgls(
         matvec,
         rmatvec,
@@ -149,7 +161,7 @@ def invert_scatterers(
     if simulator is None:
         simulator = ScattererSimulator(parameters)
 
-    image = ops.reshape(ops.convert_to_tensor(image), (-1,))
+    image = ops.reshape(ops.cast(ops.convert_to_tensor(image), "float32"), (-1,))
     positions = seed_scatterers(
         ops.convert_to_numpy(operator.to_grid(image)),
         parameters.grid,
@@ -167,7 +179,7 @@ def invert_scatterers(
     rmatvec = linear_adjoint(matvec, ops.zeros((n_scatterers,), dtype="float32"))
     if jit:
         matvec = backend_jit(matvec)
-        rmatvec = backend_jit(rmatvec)
+        rmatvec = _jit_through_scan_grad(rmatvec)
 
     magnitudes = cgls(
         matvec,
@@ -231,7 +243,7 @@ def _refine_scatterers(
     autograd.set_function(loss)
     gradient_fn = autograd.gradient
     if jit:
-        gradient_fn = backend_jit(gradient_fn)
+        gradient_fn = _jit_through_scan_grad(gradient_fn)
 
     init, update, get_params = adam(step_size)
     variable = ops.concatenate(

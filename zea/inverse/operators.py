@@ -103,7 +103,12 @@ class DASOperator:
     def __init__(self, parameters, flatgrid=None, fnum_window_fn=fnum_window_fn_tukey):
         self.parameters = parameters
         self.fnum_window_fn = fnum_window_fn
-        self.flatgrid = ops.convert_to_tensor(parameters.flatgrid if flatgrid is None else flatgrid)
+        # Cast to float32: grids from numpy default to float64, which the jax
+        # backend silently demotes but tensorflow/torch propagate into dtype
+        # mismatches inside the delay computation.
+        self.flatgrid = ops.cast(
+            ops.convert_to_tensor(parameters.flatgrid if flatgrid is None else flatgrid), "float32"
+        )
         self._adjoint_fn = None
 
     @property
@@ -186,10 +191,13 @@ class DASOperator:
             data_tx, txdel_tx = xs
             return accumulate(image, data_tx, txdel_tx), None
 
+        # A static `length` keeps the scan XLA-compilable on the tensorflow
+        # backend (its while_loop needs a fixed iteration count under jit).
         image, _ = ops.scan(
             _scan_body,
             ops.zeros((self.n_pix, n_ch), dtype="float32"),
             (data, ops.transpose(tx_delays)),
+            length=int(data.shape[0]),
         )
         return image[:, 0] if squeeze else image
 
@@ -304,7 +312,7 @@ class ScattererSimulator:
                 self._element_width_wavelengths = float(element_width) / wavelength
         self.apply_directivity = apply_directivity
 
-        waveforms = ops.convert_to_tensor(parameters.waveforms_two_way)
+        waveforms = ops.cast(ops.convert_to_tensor(parameters.waveforms_two_way), "float32")
         # Zero-pad both ends so that out-of-range interpolation returns 0.
         self._waveforms = ops.pad(waveforms, ((0, 0), (1, 1)))
         self._n_waveform_samples = int(self._waveforms.shape[1])
@@ -333,7 +341,7 @@ class ScattererSimulator:
             dict: Travel times and directivity/spreading weights.
         """
         params = self.parameters
-        positions = ops.convert_to_tensor(positions)
+        positions = ops.cast(ops.convert_to_tensor(positions), "float32")
         n_tx = params.n_tx
 
         lens_kwargs = {}
@@ -408,7 +416,7 @@ class ScattererSimulator:
             geometry = self.geometry(positions)
 
         params = self.parameters
-        magnitudes = ops.convert_to_tensor(magnitudes)
+        magnitudes = ops.cast(ops.convert_to_tensor(magnitudes), "float32")
         n_scat = int(magnitudes.shape[0])
         chunk_size = min(self.chunk_size, n_scat)
         axial_times = ops.arange(params.n_ax, dtype="float32") / params.sampling_frequency
@@ -444,18 +452,22 @@ class ScattererSimulator:
                 _chunk_body,
                 ops.zeros((params.n_ax, params.n_el), dtype="float32"),
                 (tx_time_tx, tx_gain_tx, rx_time_chunks, rx_gain_chunks, magnitude_chunks),
+                length=int(rx_time_chunks.shape[0]),
             )
-            return carry, channel
+            # The channel doubles as the carry: the tensorflow backend requires
+            # the stacked per-step outputs to have the carry's shape and dtype.
+            return channel, channel
 
         # Scan over transmits; per-transmit inputs are the waveform and the
         # transmit-dependent times/gains (moved to a leading transmit axis).
         _, channel_data = ops.scan(
             _tx_body,
-            ops.zeros((), dtype="float32"),
+            ops.zeros((params.n_ax, params.n_el), dtype="float32"),
             (
                 self._waveforms,
                 ops.moveaxis(tx_time_chunks, -1, 0),
                 ops.moveaxis(tx_gain_chunks, -1, 0),
             ),
+            length=params.n_tx,
         )
         return channel_data

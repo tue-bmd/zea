@@ -53,18 +53,8 @@ Example
 For a walkthrough see the notebook: :doc:`../notebooks/pipeline/inverse_beamforming_example`.
 """
 
+from zea.inverse import inversion, operators, seeding, solvers
 from zea.inverse.inversion import InversionResult, invert_direct, invert_scatterers
 from zea.inverse.operators import DASOperator, ScattererSimulator
 from zea.inverse.seeding import seed_scatterers
 from zea.inverse.solvers import cgls, linear_adjoint
-
-__all__ = [
-    "DASOperator",
-    "InversionResult",
-    "ScattererSimulator",
-    "cgls",
-    "invert_direct",
-    "invert_scatterers",
-    "linear_adjoint",
-    "seed_scatterers",
-]
