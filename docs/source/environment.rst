@@ -44,3 +44,21 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - ``auto:1``
      - Any valid device name as accepted by :func:`zea.init_device`. For example, ``cpu``,
        ``cuda:0``, ``auto:1``, etc.
+   * - ``ZEA_CHUNK_CACHE``
+     - Cache chunks fetched while streaming (``hf://``) under ``ZEA_CACHE_DIR/chunks``, so a
+       repeated read is served from disk instead of re-downloaded. Keyed by content hash, so a
+       re-uploaded file misses rather than serving stale bytes. Per-file: ``File(cache=False)``.
+     - ``1``
+     - ``0``, ``1``
+   * - ``ZEA_CHUNK_CACHE_SIZE``
+     - Byte budget for that cache; least-recently-used chunks are evicted once it is exceeded.
+     - ``10737418240`` (10 GiB)
+     - Any positive integer (bytes).
+   * - ``BLOSC_NTHREADS``
+     - Threads Blosc uses within a single HDF5 chunk, which is most of the write throughput
+       (~4x). Turn it **down** when writes are already parallel (several dataloader workers each
+       saving a file will multiply with it); turning it far up backfires, as the blocks go
+       memory-bound. Only affects writes: the read path (:mod:`zea.data.chunk_reader`) uses
+       ``numcodecs``, which has its own thread setting.
+     - ``min(8, cpu_count)``
+     - Any positive integer.

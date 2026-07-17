@@ -8,7 +8,16 @@ import numpy as np
 import pytest
 
 import zea
-from zea.data.file import CustomElement, File, Track, _GroupProxy, _StringDataset, load_file
+from zea.data.file import (
+    ChunkedDataset,
+    CustomElement,
+    File,
+    Track,
+    _format_selection,
+    _GroupProxy,
+    _StringDataset,
+    load_file,
+)
 from zea.data.legacy_file import dict_to_sorted_list
 from zea.data.spec import FileSpec, Image, ScanSpec, Segmentation
 from zea.parameters import Parameters
@@ -47,6 +56,77 @@ def complex_h5_file(h5_filepath):
         dataset.create_dataset("dummy_dataset", data=np.random.randn(10, 20))
         dataset.create_dataset("dummy_dataset2", data=np.arange(5))
     yield h5_filepath
+
+
+def test_hf_streams_by_default(complex_h5_file, monkeypatch):
+    """An ``hf://`` path streams lazily by default (no full download)."""
+    calls = {"stream": [], "download": []}
+
+    def fake_stream(hf_path, **kwargs):
+        calls["stream"].append(hf_path)
+        return open(complex_h5_file, "rb")  # noqa: SIM115 — closed by File.close()
+
+    def fake_resolve(hf_path, **kwargs):
+        calls["download"].append(hf_path)
+        return str(complex_h5_file)
+
+    monkeypatch.setattr("zea.data.file._hf_stream_open", fake_stream)
+    monkeypatch.setattr("zea.data.file._hf_resolve_path", fake_resolve)
+
+    with File("hf://org/repo/x.hdf5") as file:
+        assert file["dummy_dataset2"][:].tolist() == [0, 1, 2, 3, 4]
+        assert file._stream_fileobj is not None  # streamed, not downloaded
+
+    assert calls["stream"] == ["hf://org/repo/x.hdf5"]
+    assert calls["download"] == []
+    assert file._stream_fileobj is None  # released on close
+
+
+def test_hf_stream_false_downloads(complex_h5_file, monkeypatch):
+    """``stream=False`` falls back to downloading the full file."""
+    calls = {"stream": [], "download": []}
+
+    def fake_stream(hf_path, **kwargs):
+        calls["stream"].append(hf_path)
+        return open(complex_h5_file, "rb")  # noqa: SIM115
+
+    def fake_resolve(hf_path, **kwargs):
+        calls["download"].append(hf_path)
+        return str(complex_h5_file)
+
+    monkeypatch.setattr("zea.data.file._hf_stream_open", fake_stream)
+    monkeypatch.setattr("zea.data.file._hf_resolve_path", fake_resolve)
+
+    with File("hf://org/repo/x.hdf5", stream=False) as file:
+        assert file["dummy_dataset2"][:].tolist() == [0, 1, 2, 3, 4]
+        assert file._stream_fileobj is None
+
+    assert calls["download"] == ["hf://org/repo/x.hdf5"]
+    assert calls["stream"] == []
+
+
+def test_stream_true_local_path_raises(h5_filepath):
+    """``stream=True`` on a non-hf path is rejected."""
+    with pytest.raises(ValueError, match="only supported for 'hf://'"):
+        File(str(h5_filepath), stream=True)
+
+
+def test_stream_write_mode_raises():
+    """Streaming is read-only; write modes must download instead."""
+    with pytest.raises(ValueError, match="read mode"):
+        File("hf://org/repo/x.hdf5", mode="w")
+
+
+def test_stream_unknown_kwarg_raises(monkeypatch):
+    """A typo like ``version=`` (instead of ``revision=``) must error, not silently vanish.
+
+    h5py's 'fileobj' driver (used for streamed reads) swallows unrecognised kwargs rather
+    than raising, so without this check the file would open against the default revision
+    with no indication the kwarg did nothing.
+    """
+    monkeypatch.setattr("zea.data.file._hf_stream_open", lambda hf_path, **kwargs: None)
+    with pytest.raises(TypeError, match="version"):
+        File("hf://org/repo/x.hdf5", version="v0.1.0")
 
 
 def test_basic_properties(simple_h5_file):
@@ -396,13 +476,36 @@ class TestStringDataset:
             np.testing.assert_array_equal(result, seg_labels)
 
 
+class TestFormatSelection:
+    @pytest.mark.parametrize(
+        ("selection", "expected"),
+        [
+            (slice(None), ":"),
+            (slice(1, 5), "1:5"),
+            (slice(None, None, 2), "::2"),
+            (slice(1, 5, 2), "1:5:2"),
+            (Ellipsis, "..."),
+            (0, "0"),
+            ((0, slice(None), slice(1, 5)), "0, :, 1:5"),
+            ((Ellipsis, 0), "..., 0"),
+        ],
+    )
+    def test_formats_selection_as_source_would_read(self, selection, expected):
+        assert _format_selection(selection) == expected
+
+
 class TestGroupProxy:
     def test_attribute_access_returns_dataset(self, spec_file):
+        """Datasets come back as ChunkedDataset (concurrent reads), delegating to h5py."""
         path, _, raw, _ = spec_file
         with File(path) as f:
             ds = f.data.raw_data
-            assert isinstance(ds, h5py.Dataset)
+            assert isinstance(ds, ChunkedDataset)
             assert ds.shape == raw.shape
+            assert ds.dtype == raw.dtype
+            assert ds.chunks is not None  # delegated straight to the h5py dataset
+            # The raw h5py object stays reachable for anyone who wants it.
+            assert isinstance(f["tracks/track_0/data/raw_data"], h5py.Dataset)
 
     def test_slicing_loads_subset(self, spec_file):
         path, _, raw, _ = spec_file
@@ -432,6 +535,14 @@ class TestGroupProxy:
             proxy = f.data.image
             assert isinstance(proxy, _GroupProxy)
             assert proxy.values.shape == (n_frames, 16, 12, 1)
+
+    def test_slicing_group_raises_helpful_type_error(self, spec_file):
+        """Slicing a group directly (e.g. f.data.envelope_data[:]) should point to '.values'."""
+        path, *_ = spec_file
+
+        with File(path) as f:
+            with pytest.raises(TypeError, match=r"envelope_data\.values\[:\]"):
+                f.data.envelope_data[:]
 
     def test_missing_key_raises_attribute_error(self, spec_file):
         path, *_ = spec_file
@@ -2045,6 +2156,139 @@ class TestCustomElements:
         assert nested.group_name == "lens/profiles"
         assert nested.unit == "-"
 
+    def test_custom_dot_and_dict_access(self, tmp_path):
+        """f.custom supports name-based dict/dot access, including into nested groups."""
+        path = tmp_path / "custom_access.hdf5"
+        custom = [
+            CustomElement(
+                name="lens_correction",
+                data=np.float32(1.5),
+                description="scalar offset",
+                unit="wavelengths",
+            ),
+            CustomElement(
+                name="profile",
+                data=np.arange(5, dtype=np.float32),
+                description="per-element profile",
+                unit="-",
+                group_name="lens/profiles",
+            ),
+        ]
+        self._create_with_custom(path, custom=custom)
+
+        with File(path) as f:
+            c = f.custom
+
+            # dict-style, dot-style and slash-path access are all equivalent.
+            # Top-level leaves are returned by direct reference (identity holds); nested
+            # group access reconstructs CustomElement copies with a rewritten group_name
+            # at each level, so we compare fields directly rather than with `==`/`is`
+            # (CustomElement's dataclass-generated __eq__ raises for array-valued data,
+            # a pre-existing quirk unrelated to this feature).
+            assert c["lens_correction"] is c.lens_correction
+            assert float(c.lens_correction.data) == 1.5
+
+            for other in (c["lens"]["profiles"]["profile"], c["lens/profiles/profile"]):
+                assert other.name == c.lens.profiles.profile.name
+                assert other.group_name == c.lens.profiles.profile.group_name == ""
+                np.testing.assert_array_equal(other.data, c.lens.profiles.profile.data)
+            np.testing.assert_array_equal(
+                c.lens.profiles.profile.data, np.arange(5, dtype=np.float32)
+            )
+
+            assert set(c.keys()) == {"lens_correction", "lens"}
+
+            with pytest.raises(AttributeError, match="nonexistent"):
+                c.nonexistent
+            with pytest.raises(KeyError, match="nonexistent"):
+                c["nonexistent"]
+
+    def test_custom_backwards_compatible_list_behavior(self, tmp_path):
+        """f.custom still behaves like list[CustomElement] for existing callers."""
+        path = tmp_path / "custom_list.hdf5"
+        custom = [
+            CustomElement(name="a", data=np.float32(1.0), description="d", unit="-"),
+            CustomElement(name="b", data=np.float32(2.0), description="d", unit="-"),
+        ]
+        self._create_with_custom(path, custom=custom)
+
+        with File(path) as f:
+            c = f.custom
+            assert len(c) == 2
+            assert bool(c) is True
+            assert [e.name for e in c] == ["a", "b"]
+            assert c[0].name == "a"
+            assert {e.name: e for e in c} == {"a": c["a"], "b": c["b"]}
+            assert repr(c) == repr(list(c))
+            assert c == c
+            assert c != "not a custom elements collection"
+            with pytest.raises(TypeError, match="indices must be int, slice or str"):
+                c[1.5]
+
+        with File(path) as f:
+            assert f.custom != []
+
+    def test_custom_element_naming_rejected_on_save(self, tmp_path):
+        """Non-snake_case CustomElement name/group_name raise ValueError when saving."""
+        path = tmp_path / "bad_name.hdf5"
+        with pytest.raises(ValueError, match="not snake_case"):
+            self._create_with_custom(
+                path,
+                custom=[
+                    CustomElement(
+                        name="Lens Correction", data=np.float32(1.0), description="d", unit="-"
+                    )
+                ],
+            )
+
+        with pytest.raises(ValueError, match="not snake_case"):
+            self._create_with_custom(
+                path,
+                custom=[
+                    CustomElement(
+                        name="x",
+                        data=np.float32(1.0),
+                        description="d",
+                        unit="-",
+                        group_name="Bad Group",
+                    )
+                ],
+            )
+
+    def test_custom_element_absolute_group_name_rejected_on_save(self, tmp_path):
+        """A ``group_name`` starting with '/' raises ValueError instead of writing outside
+        the ``custom`` group."""
+        path = tmp_path / "absolute_group.hdf5"
+        with pytest.raises(ValueError, match="not snake_case"):
+            self._create_with_custom(
+                path,
+                custom=[
+                    CustomElement(
+                        name="x",
+                        data=np.float32(1.0),
+                        description="d",
+                        unit="-",
+                        group_name="/lens/profile",
+                    )
+                ],
+            )
+
+    def test_custom_element_non_snake_case_still_readable(self, tmp_path):
+        """Files already containing non-snake_case custom element names still load."""
+        path = tmp_path / "legacy_bad_name.hdf5"
+        with h5py.File(path, "w") as f:
+            f.attrs["zea_version"] = "0.1.0"
+            group = f.create_group("custom")
+            ds = group.create_dataset("Bad Name", data=np.float32(2.0))
+            ds.attrs["description"] = "legacy"
+            ds.attrs["unit"] = "-"
+
+        with File(path) as f:
+            c = f.custom
+            assert float(c["Bad Name"].data) == 2.0
+            with pytest.raises(AttributeError):
+                c.Bad_Name  # not a valid dot-accessor for a name with a space
+
     def test_custom_group_has_description_attr(self, tmp_path):
         """The ``custom`` group itself carries an explanatory description attribute."""
         path = tmp_path / "custom_attr.hdf5"
@@ -2085,3 +2329,90 @@ class TestCustomElements:
         assert elements[0].name == "lens_correction"
         assert float(elements[0].data) == 2.0
         assert elements[0].unit == "wavelengths"
+
+    def test_legacy_file_without_non_standard_elements_returns_empty(self, tmp_path):
+        """A legacy file with no ``non_standard_elements`` group exposes an empty custom list."""
+        path = tmp_path / "legacy_no_custom.hdf5"
+        with h5py.File(path, "w"):
+            pass  # no zea_version attr (legacy) and no non_standard_elements group
+
+        with File(path) as f:
+            assert f._is_legacy_file
+            assert f.custom == []
+
+    def test_custom_data_key_naming_rejected_on_save(self, tmp_path):
+        """Non-snake_case custom keys in ``data=`` raise ValueError when saving via File.create."""
+        n_frames, n_tx, n_el, n_ax = 2, 2, 4, 8
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        with pytest.raises(ValueError, match="not snake_case"):
+            File.create(
+                tmp_path / "bad_data_key.hdf5",
+                data={
+                    "raw_data": raw,
+                    "My Overlay": {
+                        "values": np.zeros((n_frames, 4, 4, 1), dtype=np.uint8),
+                    },
+                },
+                scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                probe=_probe_minimal("test_probe", n_el=n_el),
+                overwrite=True,
+            )
+
+    def test_custom_track_data_key_naming_rejected_on_save(self, tmp_path):
+        """Non-snake_case custom keys in a ``tracks=[...]`` track's ``data`` raise ValueError."""
+        n_frames, n_tx, n_el, n_ax = 2, 2, 4, 8
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        scan = _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el)
+        with pytest.raises(ValueError, match="not snake_case"):
+            File.create(
+                tmp_path / "bad_track_data_key.hdf5",
+                tracks=[
+                    {
+                        "data": {
+                            "raw_data": raw,
+                            "My Overlay": {
+                                "values": np.zeros((n_frames, 4, 4, 1), dtype=np.uint8),
+                            },
+                        },
+                        "scan": scan,
+                    }
+                ],
+                probe=_probe_minimal("test_probe", n_el=n_el),
+                overwrite=True,
+            )
+
+    def test_custom_metadata_key_naming_rejected_on_save(self, tmp_path):
+        """Non-snake_case custom keys in ``metadata=`` raise ValueError when saving."""
+        n_frames, n_tx, n_el, n_ax = 2, 2, 4, 8
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        with pytest.raises(ValueError, match="not snake_case"):
+            File.create(
+                tmp_path / "bad_metadata_key.hdf5",
+                data={"raw_data": raw},
+                scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                probe=_probe_minimal("test_probe", n_el=n_el),
+                metadata={"Bad Key": {"values": np.zeros(3, dtype=np.float32)}},
+                overwrite=True,
+            )
+
+    def test_custom_data_metadata_non_snake_case_still_readable(self, tmp_path):
+        """Files already containing non-snake_case custom data/metadata keys still load."""
+        n_frames, n_tx, n_el, n_ax = 2, 2, 4, 8
+        raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            fspec = FileSpec(
+                data={
+                    "raw_data": raw,
+                    "My Overlay": {
+                        "values": np.zeros((n_frames, 4, 4, 1), dtype=np.uint8),
+                    },
+                },
+                scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                probe=_probe_minimal("test_probe", n_el=n_el),
+            )
+        path = tmp_path / "bad_key_via_filespec.hdf5"
+        fspec.save(str(path))
+
+        with File(path) as f:
+            assert getattr(f.data, "My Overlay") is not None

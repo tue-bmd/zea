@@ -235,12 +235,6 @@ def _add_parser_args_verasonics(subparsers):
         help="Device to use for conversion (e.g., 'cpu' or 'gpu:0').",
     )
     verasonics_parser.add_argument(
-        "--no_compression",
-        action="store_true",
-        help="Disable compression when saving the zea dataset. By default, compression is "
-        "enabled, which reduces disk space at the cost of increased conversion time.",
-    )
-    verasonics_parser.add_argument(
         "--upload",
         action="store_true",
         help="Upload the converted dataset to HuggingFace Hub after conversion. "

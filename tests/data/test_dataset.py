@@ -221,22 +221,22 @@ def test_folder_rejects_single_file(dummy_dataset_path):
         Folder(file_path, validate=False)
 
 
-def test_dataset_lazy_hf_defers_download(tmp_path):
-    """lazy=True stores hf:// pointers at init and downloads each file on first access."""
-    f1 = tmp_path / "file1.hdf5"
-    f2 = tmp_path / "file2.hdf5"
-    generate_example_dataset(f1)
-    generate_example_dataset(f2)
+def test_dataset_lazy_hf_streams_on_access():
+    """lazy=True stores hf:// pointers at init and streams each file on first access.
 
+    Access must not resolve (download) the file via ``_hf_resolve_path``; instead the
+    ``hf://`` URI is passed straight to ``File``, which streams it (stream=True default).
+    """
     hf_files = [("file1.hdf5", 1024), ("file2.hdf5", 2048)]
 
     with (
         patch("zea.data.datasets._hf_list_h5_files", return_value=hf_files),
-        patch("zea.data.datasets._hf_resolve_path", return_value=f1) as mock_resolve,
+        patch("zea.data.datasets._hf_resolve_path") as mock_resolve,
+        patch("zea.data.datasets.File") as mock_file,
     ):
         ds = Dataset("hf://org/myrepo", lazy=True)
 
-        # No download at init
+        # No download/resolution at init
         mock_resolve.assert_not_called()
         assert len(ds) == 2
         assert ds.file_paths[0] == "hf://org/myrepo/file1.hdf5"
@@ -244,18 +244,60 @@ def test_dataset_lazy_hf_defers_download(tmp_path):
         # __len__ and file_paths must not trigger resolution
         mock_resolve.assert_not_called()
 
-        # First access triggers download of that file only
+        # First access streams the file (opens the hf:// URI directly), never downloads it
         _ = ds[0]
-        mock_resolve.assert_called_once_with("hf://org/myrepo/file1.hdf5")
-        assert ds.file_paths[0] == str(f1)  # pointer replaced with local path
-        assert ds.file_paths[1] == "hf://org/myrepo/file2.hdf5"  # untouched
+        mock_resolve.assert_not_called()
+        mock_file.assert_called_once_with(
+            "hf://org/myrepo/file1.hdf5", "r", progress=False, revision=None
+        )
+        # Pointer preserved as the hf:// URI so it keeps streaming, not swapped for a local path
+        assert ds.file_paths[0] == "hf://org/myrepo/file1.hdf5"
+        assert ds.file_paths[1] == "hf://org/myrepo/file2.hdf5"
 
-        # Second access to the same index does not re-download
-        mock_resolve.reset_mock()
+        # Second access to the same index reuses the cached handle, no re-open
+        mock_file.reset_mock()
         _ = ds[0]
+        mock_file.assert_not_called()
         mock_resolve.assert_not_called()
 
         ds.close()
+
+
+def test_dataset_lazy_hf_streams_at_requested_revision():
+    """A non-default revision must reach ``File`` so the stream targets that branch/tag."""
+    hf_files = [("file1.hdf5", 1024)]
+
+    with (
+        patch("zea.data.datasets._hf_list_h5_files", return_value=hf_files),
+        patch("zea.data.datasets._hf_resolve_path"),
+        patch("zea.data.datasets.File") as mock_file,
+    ):
+        ds = Dataset("hf://org/myrepo", lazy=True, revision="v0.1.0")
+        _ = ds[0]
+        mock_file.assert_called_once_with(
+            "hf://org/myrepo/file1.hdf5", "r", progress=False, revision="v0.1.0"
+        )
+        ds.close()
+
+
+def test_copy_downloads_hf_source_instead_of_streaming(tmp_path):
+    """``_copy_h5_files`` must never hand a streamed ``hf://`` source to h5py.copy(): it opens
+    the source with ``stream=False`` (a full local download) at the requested revision."""
+    from zea.data.datasets import _copy_h5_files
+
+    with patch("zea.data.datasets.File") as mock_file:
+        _copy_h5_files(
+            ["hf://org/myrepo/file1.hdf5"],
+            base_path="hf://org/myrepo",
+            to_path=tmp_path / "out",
+            key="all",
+            mode="w",
+            revision="v0.1.0",
+        )
+        # The source File (first open) forces a download at the requested revision.
+        src_call = mock_file.call_args_list[0]
+        assert src_call.args[0] == "hf://org/myrepo/file1.hdf5"
+        assert src_call.kwargs == {"stream": False, "revision": "v0.1.0"}
 
 
 def test_dataloader_rejects_lazy():
