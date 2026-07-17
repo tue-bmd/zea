@@ -1240,7 +1240,9 @@ def test_receive_apodization_op(with_batch_dim):
     ones = keras.ops.ones((n_pix, n_el))
     out_ones = op(data=data, flat_receive_apodization=ones)["data"]
     np.testing.assert_allclose(
-        keras.ops.convert_to_numpy(out_ones), keras.ops.convert_to_numpy(data), rtol=1e-5
+        keras.ops.convert_to_numpy(out_ones),
+        keras.ops.convert_to_numpy(data),
+        rtol=1e-5,
     )
 
     # Per-element taper -> scales the expected elements
@@ -1354,3 +1356,162 @@ def test_tissue_suppression():
     )
 
     return output
+
+
+def _complex_clutter_video(n_frames=40, n_z=16, n_x=16, seed=DEFAULT_TEST_SEED):
+    """Complex IQ video: strong phase-rotating tissue clutter + weak blood.
+
+    The tissue rotates in phase over time, which is what distinguishes the
+    Hermitian Gram matrix from the plain-transpose one.
+
+    Returns the video as a complex array (n_frames, n_z, n_x) and as real IQ
+    channels (n_frames, n_z, n_x, 2).
+    """
+    rng = np.random.default_rng(seed)
+
+    def _complex_normal(shape):
+        return (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)).astype(np.complex64)
+
+    spatial = _complex_normal((n_z, n_x)) * 10
+    phase = np.exp(1j * 2 * np.pi * 0.02 * np.arange(n_frames)).astype(np.complex64)
+    tissue = (phase[:, None, None] * spatial[None]).astype(np.complex64)
+    blood = (_complex_normal((n_frames, n_z, n_x)) * 0.1).astype(np.complex64)
+    data = (tissue + blood).astype(np.complex64)
+    data_channels = np.stack([data.real, data.imag], axis=-1).astype(np.float32)
+    return data, data_channels
+
+
+@backend_equality_check(allow_none=True)
+def test_tissue_suppression_complex():
+    """TissueSuppression with filter_type='svd_complex' suppresses complex IQ clutter.
+
+    The op takes IQ data as two real channels (n_frames, ..., 2), the zea
+    convention, and converts to/from complex internally.
+    """
+    import keras
+
+    from zea import ops
+
+    _, data_channels = _complex_clutter_video()
+
+    op = ops.TissueSuppression(cutoff=2, filter_type="svd_complex")
+    output = keras.ops.convert_to_numpy(op(data=keras.ops.convert_to_tensor(data_channels))["data"])
+
+    assert output.shape == data_channels.shape
+    assert output.dtype == data_channels.dtype, (
+        f"Expected dtype {data_channels.dtype}, got {output.dtype}"
+    )
+
+    # The clutter dominates the energy, so removing it must remove nearly all of it.
+    energy_ratio = np.mean(output**2) / np.mean(data_channels**2)
+    assert energy_ratio < 0.01, f"Expected clutter to be suppressed, energy ratio {energy_ratio}"
+
+
+def test_tissue_suppression_complex_needs_conjugate():
+    """The plain-transpose 'svd' filter fails on complex IQ; 'svd_complex' is required.
+
+    On complex data the plain transpose builds X^T X rather than the temporal
+    covariance X^H X, so the components it finds are not the tissue subspace.
+    Checked against the reference implementation: this is maths, not backend behaviour.
+    """
+    import keras
+
+    from zea.func.ultrasound import suppress_tissue
+
+    data, _ = _complex_clutter_video()  # complex array, not the real-channel one
+
+    def _energy_ratio(conjugate):
+        output = keras.ops.convert_to_numpy(suppress_tissue(data, 2, conjugate=conjugate))
+        return np.mean(np.abs(output) ** 2) / np.mean(np.abs(data) ** 2)
+
+    assert _energy_ratio(conjugate=True) < 0.01
+    # The plain transpose leaves the phase-rotating clutter essentially intact.
+    assert _energy_ratio(conjugate=False) > 0.5
+
+
+@backend_equality_check(allow_none=True)
+def test_tissue_suppression_conjugate_matches_plain_on_zero_imag_data():
+    """With a zero imaginary part, the conjugate transpose is a no-op."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    real_data = rng.standard_normal((10, 8, 8)).astype(np.float32)
+    channel_data = np.stack([real_data, np.zeros_like(real_data)], axis=-1)
+
+    real_output = keras.ops.convert_to_numpy(
+        ops.TissueSuppression(cutoff=3, filter_type="svd")(
+            data=keras.ops.convert_to_tensor(real_data)
+        )["data"]
+    )
+    complex_output = keras.ops.convert_to_numpy(
+        ops.TissueSuppression(cutoff=3, filter_type="svd_complex")(
+            data=keras.ops.convert_to_tensor(channel_data)
+        )["data"]
+    )
+
+    np.testing.assert_allclose(real_output, complex_output[..., 0], atol=1e-2)
+    np.testing.assert_allclose(complex_output[..., 1], 0, atol=1e-2)
+
+
+def test_tissue_suppression_fractional_cutoff():
+    """A float cutoff is resolved as a fraction of the number of frames."""
+    from zea import ops
+
+    assert ops.TissueSuppression(cutoff=0.05).resolve_cutoff(400) == 20
+    assert ops.TissueSuppression(cutoff=0.1).resolve_cutoff(95) == 10
+    # An int cutoff is used as-is, independent of the frame count.
+    assert ops.TissueSuppression(cutoff=5).resolve_cutoff(400) == 5
+
+
+def test_tissue_suppression_filter_type_autodetect():
+    """filter_type=None picks svd_complex for IQ (n_ch=2) and svd otherwise."""
+    import keras
+
+    from zea import ops
+
+    def _resolve(shape, filter_type=None):
+        data = keras.ops.convert_to_tensor(np.zeros(shape, dtype=np.float32))
+        return ops.TissueSuppression(cutoff=2, filter_type=filter_type).resolve_filter_type(data)
+
+    assert _resolve((10, 8, 8, 2)) == "svd_complex"  # IQ
+    assert _resolve((10, 8, 8, 1)) == "svd"  # RF
+    assert _resolve((10, 8, 8)) == "svd"  # real, no channel axis
+    assert _resolve((10,)) == "svd"  # 1-D, no channel axis to read
+
+    # An explicit filter_type always wins over auto-detection.
+    assert _resolve((10, 8, 8, 2), filter_type="svd") == "svd"
+    assert _resolve((10, 8, 8), filter_type="svd_complex") == "svd_complex"
+
+
+@backend_equality_check(allow_none=True)
+def test_tissue_suppression_autodetect_matches_explicit():
+    """Auto-detected IQ input gives the same result as filter_type='svd_complex'."""
+    import keras
+
+    from zea import ops
+
+    _, data_channels = _complex_clutter_video()
+    data_tensor = keras.ops.convert_to_tensor(data_channels)
+
+    outputs = [
+        keras.ops.convert_to_numpy(
+            ops.TissueSuppression(cutoff=2, filter_type=filter_type)(data=data_tensor)["data"]
+        )
+        for filter_type in (None, "svd_complex")
+    ]
+    np.testing.assert_allclose(outputs[0], outputs[1], atol=1e-5)
+
+
+def test_tissue_suppression_invalid_arguments():
+    """Invalid filter_type / cutoff are rejected at construction time."""
+    import pytest
+
+    from zea import ops
+
+    with pytest.raises(ValueError, match="Unknown filter_type"):
+        ops.TissueSuppression(filter_type="not_a_filter")
+
+    with pytest.raises(ValueError, match="fraction of the frames"):
+        ops.TissueSuppression(cutoff=1.5)
