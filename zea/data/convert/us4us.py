@@ -1,6 +1,6 @@
 """Convert us4us (arrus + gui4us) pickle files to the zea format.
 
-This converter supports pickle datasets acquired with ARRUS <= 0.14.x.
+This converter supports pickle datasets acquired with ARRUS 0.12.0 through 0.14.x.
 
 NOTE: this converter works ONLY with the single-axis array probes (linear/convex/phase/ring/etc.).
 
@@ -29,7 +29,7 @@ tuple in the pickle dataset) to a zea data type string.
 
 Default: ``{0: "image"}``.
 
-The following mapping from arrus (<=0.14.x) metadata to zea scan/probe fields:
+The following mapping from arrus (0.12.0 – 0.14.x) metadata to zea scan/probe fields:
 
 - ``metadata.context.raw_sequence.ops[j].tx.delays``  →  ``t0_delays``
 - ``metadata.context.raw_sequence.ops[j].tx.aperture``  →  ``tx_apodizations``
@@ -49,6 +49,7 @@ The following mapping from arrus (<=0.14.x) metadata to zea scan/probe fields:
 """
 
 import pickle
+import re
 from pathlib import Path
 
 import numpy as np
@@ -147,6 +148,76 @@ def _load_us4us_pickle(path: Path) -> dict:
     """
     with open(path, "rb") as f:
         return _ArrusUnpickler(f).load()
+
+
+# ARRUS releases this converter is known to handle: 0.12.x, 0.13.x, 0.14.x
+# (any patch level).  Used as the fast-path accept when ``metadata.version``
+# is populated.
+_SUPPORTED_ARRUS_VERSION_RE = re.compile(r"^0\.(12|13|14)\.[0-9]+$")
+
+
+def _has_supported_arrus_marker(first_metadata) -> bool:
+    try:
+        rx = first_metadata._context.raw_sequence.ops[0].rx
+    except (AttributeError, IndexError, TypeError):
+        return False
+    return hasattr(rx, "time_range")
+
+
+def _validate_us4us_pickle(data) -> None:
+    """
+    Validate the structure and ARRUS compatibility of a loaded us4us pickle.
+
+    Runs the following checks before any conversion work happens:
+
+    1. The top-level object is a ``dict`` with exactly the ``"data"`` and
+       ``"metadata"`` keys the rest of the converter assumes.
+    2. ``metadata[0].version`` matches ``0.12.x`` / ``0.13.x`` / ``0.14.x``
+       when it is set — the fast, explicit path.  When it is ``None``
+       we fall back to the structural marker
+       ``metadata[0].context.raw_sequence.ops[0].rx.time_range`` introduced
+       in ARRUS 0.12.0.
+
+    Raises:
+        ValueError: If the top-level structure is malformed, the version tag
+            names an unsupported ARRUS release, or the fallback marker is
+            missing when the version tag is unset.
+    """
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"us4us pickle must deserialize to a dict, got {type(data).__name__}."
+        )
+    expected_keys = {"data", "metadata"}
+    actual_keys = set(data.keys())
+    if actual_keys != expected_keys:
+        missing = sorted(expected_keys - actual_keys)
+        extra = sorted(actual_keys - expected_keys)
+        raise ValueError(
+            "us4us pickle top-level dict must have exactly the keys "
+            f"{sorted(expected_keys)}; missing={missing}, unexpected={extra}."
+        )
+
+    metadata_tuple = data["metadata"]
+    if not metadata_tuple:
+        raise ValueError(
+            "us4us pickle 'metadata' is empty; expected at least one entry."
+        )
+    first = metadata_tuple[0]
+    version = getattr(first, "version", None) or getattr(first, "_version", None)
+    if isinstance(version, str):
+        # Explicit version tag — accept iff it names a supported release.
+        if not _SUPPORTED_ARRUS_VERSION_RE.match(version):
+            raise ValueError(
+                f"Unsupported ARRUS metadata.version={version!r}. "
+                "This converter accepts ARRUS 0.12.x, 0.13.x, or 0.14.x."
+            )
+        return
+    # Version tag missing for any reason.
+    # Fall back to the ARRUS 0.12.0+ structural marker.
+    if not _has_supported_arrus_marker(first):
+        raise ValueError(
+            "us4us pickle does not look like a supported ARRUS 0.12.x – 0.14.x "
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -493,6 +564,7 @@ def _convert_single_us4us_pickle(
     """
     log.info(f"Loading us4us pickle: {log.yellow(src)}")
     data = _load_us4us_pickle(src)
+    _validate_us4us_pickle(data)
 
     frames_data = data["data"]  # list[tuple[np.ndarray, ...]]
     metadata_tuple = data["metadata"]  # tuple[ConstMetadata, ...]

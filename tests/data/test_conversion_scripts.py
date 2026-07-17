@@ -929,6 +929,32 @@ def verify_converted_us4us_test_data(src, dst):
         f.validate()
 
 
+def test_convert_us4us_rejects_pickle_missing_required_keys(tmp_path):
+    """``convert_us4us`` must fail with a clear ``ValueError`` when the
+    source ``.pkl`` is a dict missing the ``"data"`` or ``"metadata"`` key
+    required by the us4us pickle contract."""
+    import pickle as _pickle
+    from argparse import Namespace
+
+    from zea.data.convert.us4us import convert_us4us
+
+    def _run(pickle_payload, expected_pattern):
+        src = tmp_path / "bad.pkl"
+        with open(src, "wb") as f:
+            _pickle.dump(pickle_payload, f)
+        args = Namespace(
+            src=src,
+            dst=tmp_path / "out.hdf5",
+            mapping={0: "image"},
+            overwrite=True,
+        )
+        with pytest.raises(ValueError, match=expected_pattern):
+            convert_us4us(args)
+
+    _run({"data": []}, r"missing=\['metadata'\]")
+    _run({"metadata": ()}, r"missing=\['data'\]")
+
+
 def _install_fake_echoxflow(monkeypatch, src, recordings):
     """Install a fake ``echoxflow`` module so convert_echoxflow can run end-to-end.
 

@@ -605,7 +605,7 @@ See :mod:`zea.data.convert.verasonics` for details.
 
 **us4us**
 
-Record data using us4us software (ARRUS 0.14.x and gui4us 0.3.x), save it to the ``.pickle`` file, then convert:
+Record data using us4us software (ARRUS 0.12.0 – 0.14.x and gui4us 0.3.x), save it to the ``.pickle`` file, then convert:
 
 .. code-block:: shell
 
