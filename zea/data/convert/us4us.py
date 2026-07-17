@@ -2,7 +2,9 @@
 
 This converter supports pickle datasets acquired with ARRUS 0.12.0 through 0.14.x.
 
-NOTE: this converter works ONLY with the single-axis array probes (linear/convex/phase/ring/etc.).
+.. note::
+    This converter works ONLY with single-axis array probes
+    (linear / convex / phased / ring / etc.).
 
 The arrus+gui4us software (https://us4us.eu) stores acquired ultrasound data as
 Python pickle files containing:
