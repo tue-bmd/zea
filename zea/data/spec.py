@@ -25,6 +25,7 @@ UNITS = {
     "–": "unitless",
     "rad": "radians",
     "dB": "decibels",
+    "dB/m/Hz": "decibels per meter per hertz",
     "#": "count",
     "%": "percent",
     "kg/m²": "kilograms per square meter",
@@ -981,6 +982,98 @@ class SosMap(FloatMap):
 
 
 @dataclass
+class AttenuationMap(FloatMap):
+    """Acoustic attenuation map with per-pixel Cartesian coordinates.
+
+    Acoustic attenuation describes the loss of acoustic energy as the wave
+    propagates through tissue (through absorption and scattering).  Attenuation
+    is frequency dependent and is modelled here with the usual power law
+
+    .. math::
+
+        \\alpha(f) = \\alpha_0 \\, f^{\\gamma},
+
+    where :math:`\\alpha_0` is the per-pixel attenuation coefficient stored in
+    ``values`` and :math:`\\gamma` is the (scalar) power-law exponent stored in
+    ``gamma``.  Reporting the coefficient normalized by frequency makes values
+    comparable across systems and transmit frequencies.
+
+    The coefficient is stored in the spec's base units of ``dB/m/Hz`` (rather
+    than the common clinical ``dB/cm/MHz``; note ``1 dB/cm/MHz = 1e-4 dB/m/Hz``).
+    Strictly, when :math:`\\gamma \\neq 1` the coefficient carries the exponent in
+    its units (``dB/m/Hz**gamma``); the ``dB/m/Hz`` label reflects the linear
+    (:math:`\\gamma = 1`) convention.
+
+    The exponent is close to 1 for most soft tissue (attenuation is roughly
+    linear in frequency), e.g. liver :math:`\\gamma \\approx 1.14`, breast
+    :math:`\\gamma \\approx 1.5`, while water / low-loss viscous media follow
+    :math:`\\gamma = 2`.  It defaults to ``1.0`` (linear), which reproduces the
+    plain frequency-normalized "attenuation coefficient slope".
+
+    Args:
+        values: The attenuation coefficient :math:`\\alpha_0` in ``dB/m/Hz`` of
+            shape ``(n_frames, z, x, y)`` and type float32.
+        coordinates: Per-pixel Cartesian positions in metres, shape
+            ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
+        gamma: Scalar power-law exponent :math:`\\gamma` of the frequency
+            dependence :math:`\\alpha(f) = \\alpha_0 f^{\\gamma}`.  Defaults to
+            ``1.0`` (linear frequency dependence).
+    """
+
+    gamma: float = 1.0
+
+    SCHEMA = {
+        **FloatMap.SCHEMA,
+        "gamma": {"dtype": np.float32, "shape": ()},
+    }
+
+    FIELD_METADATA = {
+        **Map.FIELD_METADATA,
+        "gamma": {
+            "unit": "–",
+            "description": (
+                "Power-law exponent of the frequency dependence alpha(f) = alpha_0 * f**gamma. "
+                "1.0 is linear (soft tissue ~1-1.5, e.g. liver ~1.14), 2.0 for water."
+            ),
+            "rare": True,
+        },
+    }
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.unit is not None and self.unit != "dB/m/Hz":
+            raise ValueError(f"Attenuation map unit should be 'dB/m/Hz', got '{self.unit}'")
+
+        # Attenuation coefficients describe energy loss and are therefore non-negative.
+        if np.any(self.values < 0):
+            log.warning(
+                "Attenuation map contains negative values, which is physically unexpected "
+                "for an attenuation coefficient. Please verify the values are in dB/m/Hz."
+            )
+
+        # Guard against the coefficient being supplied in the common clinical unit
+        # dB/cm/MHz (= 1e-4 dB/m/Hz) instead of the spec's dB/m/Hz base unit: even
+        # highly attenuating media stay well below 1e-2 dB/m/Hz.
+        max_abs = float(np.max(np.abs(self.values), initial=0.0))
+        if max_abs > 1e-2:
+            log.warning(
+                f"Attenuation map has a maximum absolute value of {max_abs:.4g} dB/m/Hz, which "
+                "is unusually high.  Please verify the values are in dB/m/Hz "
+                "(1 dB/cm/MHz = 1e-4 dB/m/Hz), not dB/cm/MHz."
+            )
+
+        # The power-law exponent is positive; soft tissue is ~1, water is 2.
+        if self.gamma is not None and (self.gamma <= 0 or self.gamma > 2.0):
+            log.warning(
+                f"Attenuation map gamma={self.gamma} is outside the physically typical range "
+                "(0, 2]. Soft tissue is around 1.0-1.5 and water is 2.0."
+            )
+
+
+@dataclass
 class StrainPercentageMap(FloatMap):
     """Strain map data with per-pixel Cartesian coordinates.
 
@@ -1064,6 +1157,7 @@ class DataSpec(Spec):
         - image: Reconstructed image data and per-pixel coordinates.
         - segmentation: Segmentation data and per-pixel coordinates.
         - sos_map: Speed-of-sound map data and per-pixel coordinates.
+        - attenuation_map: Acoustic attenuation map data and per-pixel coordinates.
         - strain_percentage_map: Strain map data and per-pixel coordinates.
         - shear_wave_elastography_map: Shear-wave elastography data and per-pixel coordinates.
         - tissue_doppler: Tissue Doppler data and per-pixel coordinates.
@@ -1082,6 +1176,7 @@ class DataSpec(Spec):
     image: Image | dict | None = None
     segmentation: Segmentation | dict | None = None
     sos_map: SosMap | dict | None = None
+    attenuation_map: AttenuationMap | dict | None = None
     strain_percentage_map: StrainPercentageMap | dict | None = None
     shear_wave_elastography_map: ShearWaveElastographyMap | dict | None = None
     tissue_doppler: TissueDopplerMap | dict | None = None
@@ -1100,6 +1195,7 @@ class DataSpec(Spec):
         "image": {"spec": Image},
         "segmentation": {"spec": Segmentation},
         "sos_map": {"spec": SosMap},
+        "attenuation_map": {"spec": AttenuationMap},
         "strain_percentage_map": {"spec": StrainPercentageMap},
         "shear_wave_elastography_map": {"spec": ShearWaveElastographyMap},
         "tissue_doppler": {"spec": TissueDopplerMap},
@@ -1114,6 +1210,7 @@ class DataSpec(Spec):
         "image": {"description": "Reconstructed image data.", "rare": True},
         "segmentation": {"description": "Segmentation data.", "rare": True},
         "sos_map": {"description": "Speed-of-sound map data.", "rare": True},
+        "attenuation_map": {"description": "Acoustic attenuation map data.", "rare": True},
         "strain_percentage_map": {"description": "Strain map data.", "rare": True},
         "shear_wave_elastography_map": {
             "description": "Shear-wave elastography data.",
@@ -1132,6 +1229,7 @@ class DataSpec(Spec):
         image: Image | dict | None = None,
         segmentation: Segmentation | dict | None = None,
         sos_map: SosMap | dict | None = None,
+        attenuation_map: AttenuationMap | dict | None = None,
         strain_percentage_map: StrainPercentageMap | dict | None = None,
         shear_wave_elastography_map: ShearWaveElastographyMap | dict | None = None,
         tissue_doppler: TissueDopplerMap | dict | None = None,
@@ -1145,6 +1243,7 @@ class DataSpec(Spec):
         self.image = image
         self.segmentation = segmentation
         self.sos_map = sos_map
+        self.attenuation_map = attenuation_map
         self.strain_percentage_map = strain_percentage_map
         self.shear_wave_elastography_map = shear_wave_elastography_map
         self.tissue_doppler = tissue_doppler
