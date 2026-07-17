@@ -126,10 +126,7 @@ class _ArrusUnpickler(pickle.Unpickler):
     def find_class(self, module, name):
         if "arrus" in module:
             return _ArrusStub
-        if any(
-            module == p or module.startswith(p + ".")
-            for p in _ALLOWED_PICKLE_MODULE_PREFIXES
-        ):
+        if any(module == p or module.startswith(p + ".") for p in _ALLOWED_PICKLE_MODULE_PREFIXES):
             return super().find_class(module, name)
         raise pickle.UnpicklingError(
             f"Refusing to load class {module}.{name} from us4us pickle: "
@@ -172,8 +169,7 @@ def _has_supported_arrus_marker(first_metadata) -> bool:
 # so a rejected file always tells the user *which* dataset shape we expected
 # before naming the specific mismatch.
 _NOT_A_US4US_DATASET_MSG = (
-    "Loaded file is not a valid us4us dataset "
-    "(expected ARRUS 0.12.x – 0.14.x + gui4us 0.3.x): "
+    "Loaded file is not a valid us4us dataset (expected ARRUS 0.12.x – 0.14.x + gui4us 0.3.x): "
 )
 
 
@@ -226,8 +222,7 @@ def _validate_us4us_pickle(data) -> None:
         )
     if not metadata_tuple:
         raise ValueError(
-            _NOT_A_US4US_DATASET_MSG
-            + "'metadata' is empty; expected at least one entry."
+            _NOT_A_US4US_DATASET_MSG + "'metadata' is empty; expected at least one entry."
         )
     first = metadata_tuple[0]
     version = getattr(first, "version", None) or getattr(first, "_version", None)
