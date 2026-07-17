@@ -59,6 +59,7 @@ import numpy as np
 from zea import log
 from zea.data.file import File
 from zea.data.spec import DEFAULT_COMPRESSION
+from collections.abc import Sequence
 
 
 # Converter-local allowlist of zea data types this module actually knows how
@@ -101,7 +102,7 @@ _SUPPORTED_MAPPING_DATA_TYPES: frozenset[str] = frozenset(
 # produced by us4us / arrus acquisition pipelines that you control.  Do not
 # point it at ``.pkl`` files received from untrusted third parties.
 # ---------------------------------------------------------------------------
-_ALLOWED_PICKLE_MODULE_PREFIXES = ("numpy",)
+_ALLOWED_PICKLE_MODULE_PREFIXES = ("numpy", "collections")
 
 
 class _ArrusStub:
@@ -125,8 +126,9 @@ class _ArrusUnpickler(pickle.Unpickler):
     def find_class(self, module, name):
         if "arrus" in module:
             return _ArrusStub
-        if module == "numpy" or any(
-            module.startswith(p + ".") for p in _ALLOWED_PICKLE_MODULE_PREFIXES
+        if any(
+            module == p or module.startswith(p + ".")
+            for p in _ALLOWED_PICKLE_MODULE_PREFIXES
         ):
             return super().find_class(module, name)
         raise pickle.UnpicklingError(
@@ -166,6 +168,15 @@ def _has_supported_arrus_marker(first_metadata) -> bool:
     return hasattr(rx, "time_range")
 
 
+# Shared prefix used by every ValueError raised in _validate_us4us_pickle,
+# so a rejected file always tells the user *which* dataset shape we expected
+# before naming the specific mismatch.
+_NOT_A_US4US_DATASET_MSG = (
+    "Loaded file is not a valid us4us dataset "
+    "(expected ARRUS 0.12.x – 0.14.x + gui4us 0.3.x): "
+)
+
+
 def _validate_us4us_pickle(data) -> None:
     """
     Validate the structure and ARRUS compatibility of a loaded us4us pickle.
@@ -187,7 +198,8 @@ def _validate_us4us_pickle(data) -> None:
     """
     if not isinstance(data, dict):
         raise ValueError(
-            f"us4us pickle must deserialize to a dict, got {type(data).__name__}."
+            _NOT_A_US4US_DATASET_MSG
+            + f"top-level object must be a dict, got {type(data).__name__}."
         )
     expected_keys = {"data", "metadata"}
     actual_keys = set(data.keys())
@@ -195,14 +207,27 @@ def _validate_us4us_pickle(data) -> None:
         missing = sorted(expected_keys - actual_keys)
         extra = sorted(actual_keys - expected_keys)
         raise ValueError(
-            "us4us pickle top-level dict must have exactly the keys "
-            f"{sorted(expected_keys)}; missing={missing}, unexpected={extra}."
+            _NOT_A_US4US_DATASET_MSG
+            + "top-level dict must have exactly the keys "
+            + f"{sorted(expected_keys)}; missing={missing}, unexpected={extra}."
         )
 
     metadata_tuple = data["metadata"]
+    # Must be an indexable, sized sequence — list / tuple / deque / etc.
+    # Explicitly reject str / bytes / bytearray (also Sequence, but never a
+    # valid ConstMetadata container) and dicts (Mapping, not Sequence).
+    if not isinstance(metadata_tuple, Sequence) or isinstance(
+        metadata_tuple, (str, bytes, bytearray)
+    ):
+        raise ValueError(
+            _NOT_A_US4US_DATASET_MSG
+            + "'metadata' must be a sequence (list, tuple, deque, …), "
+            + f"got {type(metadata_tuple).__name__}."
+        )
     if not metadata_tuple:
         raise ValueError(
-            "us4us pickle 'metadata' is empty; expected at least one entry."
+            _NOT_A_US4US_DATASET_MSG
+            + "'metadata' is empty; expected at least one entry."
         )
     first = metadata_tuple[0]
     version = getattr(first, "version", None) or getattr(first, "_version", None)
@@ -210,15 +235,19 @@ def _validate_us4us_pickle(data) -> None:
         # Explicit version tag — accept iff it names a supported release.
         if not _SUPPORTED_ARRUS_VERSION_RE.match(version):
             raise ValueError(
-                f"Unsupported ARRUS metadata.version={version!r}. "
-                "This converter accepts ARRUS 0.12.x, 0.13.x, or 0.14.x."
+                _NOT_A_US4US_DATASET_MSG
+                + f"unsupported metadata.version={version!r} "
+                + "(this converter accepts ARRUS 0.12.x, 0.13.x, or 0.14.x)."
             )
         return
     # Version tag missing for any reason.
     # Fall back to the ARRUS 0.12.0+ structural marker.
     if not _has_supported_arrus_marker(first):
         raise ValueError(
-            "us4us pickle does not look like a supported ARRUS 0.12.x – 0.14.x "
+            _NOT_A_US4US_DATASET_MSG
+            + "metadata.version is unset AND the ARRUS 0.12.0 structural "
+            + "marker metadata[0].context.raw_sequence.ops[0].rx.time_range "
+            + "is missing."
         )
 
 
