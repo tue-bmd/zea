@@ -719,7 +719,7 @@ def polar_to_cartesian_coordinates(
         dtype (str, optional): Compute dtype for the axes. Defaults to ``"float32"``.
 
     Returns:
-        coordinates (Array): ``(2, cols, rows)`` stack of ``[rho_idx, theta_idx]``.
+        coords (Array): ``(2, cols, rows)`` stack of ``[rho_idx, theta_idx]`` sampling indices.
     """
     cart_rows, cart_cols = cartesian_shape
     if tip is None:
