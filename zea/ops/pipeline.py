@@ -1407,7 +1407,13 @@ class DelayAndSum(Operation):
                 of shape `(prod(grid.shape), n_ch)`
                 with optional batch dimension.
         """
-        data = kwargs[self.key]
+        # Accumulate the delay-and-sum in float32. Under a mixed-precision policy
+        # the aligned data is bfloat16 (produced cheaply by the TOF gather); summing
+        # ~n_el * n_tx terms in bfloat16 would accumulate significant error, so the
+        # reduction is up-cast. XLA fuses the cast into the reduction, so the input
+        # is still read as bfloat16 (half the memory bandwidth) but accumulated in
+        # float32. Under the default float32 policy this cast is a no-op.
+        data = ops.cast(kwargs[self.key], "float32")
 
         # Sum over the channels (n_el), i.e. DAS
         beamformed_data = ops.sum(data, -2)
@@ -1446,6 +1452,11 @@ class DelayMultiplyAndSum(Operation):
                 "MultiplyAndSum operation requires IQ data with 2 channels. "
                 f"Got data with shape {data.shape}."
             )
+
+        # DMAS forms a complex correlation matrix; run it in float32 (there is no
+        # complex bfloat16). Under a mixed-precision policy the aligned data arrives
+        # as bfloat16, so up-cast before the complex view.
+        data = ops.cast(data, "float32")
 
         # Compute the correlation matrix
         data = ops.view_as_complex(data)
@@ -1547,6 +1558,10 @@ class CoherenceFactor(Operation):
             ops.Tensor: Beamformed image of shape ``(n_pix, n_ch)``,
                 with optional batch dimension.
         """
+        # Coherence-factor power ratios are accumulated in float32 for stability;
+        # under a mixed-precision policy the aligned data arrives as bfloat16.
+        data = ops.cast(data, "float32")
+
         n_el = ops.shape(data)[-2]
 
         # DAS per transmit: sum over elements
@@ -1639,6 +1654,11 @@ class GeneralizedCoherenceFactor(Operation):
         """
         if m_zero is None:
             m_zero = self.m_zero
+
+        # GCF uses a spatial FFT and power ratios; run it in float32 (bfloat16 FFT
+        # is unsupported / inaccurate). Under a mixed-precision policy the aligned
+        # data arrives as bfloat16, so up-cast at entry.
+        data = ops.cast(data, "float32")
 
         n_el = ops.shape(data)[-2]
         n_ch = data.shape[-1]  # static Python int — safe for branching

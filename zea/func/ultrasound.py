@@ -619,6 +619,9 @@ def apply_aligned_apodization(data, apodization, with_batch_dim):
     append_n_dims = ops.ndim(data) - ops.ndim(apodization)
     apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
 
+    # Match the signal dtype so a low-precision (bfloat16) signal is not up-cast.
+    apodization = ops.cast(apodization, data.dtype)
+
     return data * apodization
 
 
@@ -650,6 +653,9 @@ def apply_receive_apodization(data, apodization, with_batch_dim):
     # Append the trailing channel axis/axes so it broadcasts over n_ch
     append_n_dims = ops.ndim(data) - ops.ndim(apodization)
     apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
+
+    # Match the signal dtype so a low-precision (bfloat16) signal is not up-cast.
+    apodization = ops.cast(apodization, data.dtype)
 
     return data * apodization
 
