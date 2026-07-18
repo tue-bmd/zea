@@ -35,17 +35,28 @@ from zea.utils import canonicalize_axis
 
 @ops_registry("simulate_rf")
 class Simulate(Operation):
-    """Simulate RF data."""
+    """Simulate RF data.
 
-    # Define operation-specific static parameters
+    Args:
+        wavefront_only (bool): If ``True``, use the wavefront-only approximation in
+            :func:`zea.simulator.simulate_rf` (only the first wave reaching each
+            scatterer is simulated), for a faster, lighter simulation at the cost of a
+            potentially larger model error. Defaults to ``False`` (full model).
+    """
+
+    # Define operation-specific static parameters. Note ``wavefront_only`` is a fixed
+    # instance attribute (set in ``__init__``), not a per-call kwarg, so it is baked
+    # into the JIT trace and does not belong in ``STATIC_PARAMS`` (which lists static
+    # ``call`` arguments).
     STATIC_PARAMS = ["n_ax", "apply_lens_correction"]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
-    def __init__(self, **kwargs):
+    def __init__(self, wavefront_only=False, **kwargs):
         super().__init__(
             output_data_type=DataTypes.RAW_DATA,
             **kwargs,
         )
+        self.wavefront_only = wavefront_only
 
     def call(
         self,
@@ -80,6 +91,15 @@ class Simulate(Operation):
             "element_width": element_width,
             "attenuation_coef": attenuation_coef,
             "tx_apodizations": tx_apodizations,
+            "wavefront_only": self.wavefront_only,
+            # Transmit geometry lets the wavefront-only model tell scatterers before
+            # the focus (first arrival) from those beyond it (last arrival); see
+            # :func:`zea.simulator.simulate_rf`. Only consumed when
+            # ``wavefront_only=True``, and optional (falls back to first-arrival).
+            "focus_distances": kwargs.get("focus_distances"),
+            "transmit_origins": kwargs.get("transmit_origins"),
+            "polar_angles": kwargs.get("polar_angles"),
+            "azimuth_angles": kwargs.get("azimuth_angles"),
         }
         if not self.with_batch_dim:
             simulated_rf = simulate_rf(
