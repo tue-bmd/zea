@@ -680,6 +680,30 @@ def test_tof_correction_with_fnumber(probe_geometry, flatgrid):
 
 
 @backend_equality_check()
+def test_tof_correction_convex_probe_fnumber(flatgrid):
+    """A curved (convex) probe runs end-to-end with per-element-normal masking.
+
+    The auto-derived element normals must not produce NaNs/Infs and must still
+    mask some channels (f_number > 0) for a non-flat geometry.
+    """
+    n_el = 48
+    phi = np.linspace(-0.5, 0.5, n_el).astype(np.float32)
+    radius = 40e-3
+    convex_geometry = np.stack(
+        [radius * np.sin(phi), np.zeros_like(phi), radius * (np.cos(phi) - 1.0)], axis=-1
+    ).astype(np.float32)
+
+    inputs = _make_tof_inputs(convex_geometry, flatgrid, n_tx=2, n_ax=64)
+    inputs["f_number"] = 1.0
+    result = keras.ops.convert_to_numpy(tof_correction(**inputs))
+
+    assert result.shape == (2, flatgrid.shape[0], n_el, 1)
+    assert np.all(np.isfinite(result))
+    assert np.any(result == 0.0), "Expected some masked-out values with f_number > 0"
+    return result
+
+
+@backend_equality_check()
 def test_tof_correction_zero_data(probe_geometry, flatgrid):
     """Zero input data should produce zero output regardless of delays."""
     n_tx, n_ax = 2, 64
