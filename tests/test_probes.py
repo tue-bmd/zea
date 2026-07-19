@@ -118,3 +118,39 @@ def test_pitch_derived_from_probe_geometry():
     probe = Probe(probe_geometry=pg)
     with pytest.raises(ValueError, match="Cannot compute pitch: probe has fewer than 2 elements"):
         _ = probe.pitch
+
+
+def test_verasonics_c5_2v_curved_probe():
+    """The C5-2v built-in is a 128-element convex arc (curved, y=0, apex at +z)."""
+    from zea.probes import create_curved_probe_geometry
+
+    probe = Probe.from_name("verasonics_c5_2v")
+    pg = np.asarray(probe.probe_geometry)
+
+    assert probe.type == "curved"
+    assert pg.shape == (128, 3)
+    # Imaging plane is x-z; the array is genuinely curved (z varies), not flat.
+    assert np.allclose(pg[:, 1], 0.0)
+    assert np.ptp(pg[:, 2]) > 1e-3
+    # Apex element faces +z (z ~= 0); peripheral elements curve back toward -z.
+    assert pg[:, 2].max() == pytest.approx(0.0, abs=1e-4)
+    assert pg[:, 2].min() < 0.0
+    # Arc spacing (pitch) is uniform at 0.508 mm.
+    spacing = np.linalg.norm(np.diff(pg, axis=0), axis=1)
+    assert np.allclose(spacing, 0.508e-3, atol=1e-6)
+
+    # The helper reproduces the same geometry from (n_el, pitch, radius).
+    regenerated = create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=49.57e-3)
+    assert np.allclose(pg, regenerated)
+
+
+def test_verasonics_p4_2v_phased_probe():
+    """The P4-2v built-in is a 64-element flat phased array."""
+    probe = Probe.from_name("verasonics_p4_2v")
+    pg = np.asarray(probe.probe_geometry)
+
+    assert probe.type == "phased"
+    assert pg.shape == (64, 3)
+    # Flat linear array: y and z are zero, x uniformly spaced at 0.30 mm.
+    assert np.allclose(pg[:, 1:], 0.0)
+    assert probe.pitch == pytest.approx(0.3e-3, rel=1e-4)
