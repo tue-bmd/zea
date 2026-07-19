@@ -969,7 +969,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - ``float32``
            - scalar
            - Hz
-           - Probe nominal centre frequency.
+           - Probe nominal centre frequency (midpoint of the probe's -6 dB band).
            - |badge-opt|
          * - ``probe_bandwidth_percent``
            - ``float32``
@@ -1107,7 +1107,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
             * - ``genetic_strain``
               - ``str``
               - scalar
-              - Genetic strain of an animal subject, e.g. C57BL/6N.
+              - Genetic strain (inbred line) of an animal subject, e.g. C57BL/6N.
               - |badge-opt|
             * - ``fat_percentage``
               - ``float32``
