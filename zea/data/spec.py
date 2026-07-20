@@ -128,14 +128,7 @@ def find_matched_shape(value: Any, expected_shapes: Sequence[tuple]) -> tuple | 
 
 
 def with_frame_broadcast_shapes(shapes: Sequence[tuple]) -> tuple[tuple, ...]:
-    """Append a leading-``"n_frames"``-omitted variant of each ``"n_frames"``-led shape.
-
-    Used by :class:`Image` and :class:`Segmentation` so a single map (e.g. one map
-    computed from all frames of raw data) can be broadcast across all frames, the same
-    way ``Map.coordinates`` already supports omitting the frame axis. Not used by base
-    :class:`Map` or its other subclasses (e.g. :class:`BeamformedData`), which always
-    require the leading frame axis on ``values``.
-    """
+    """Append a leading-``"n_frames"``-omitted variant of each ``"n_frames"``-led shape."""
     broadcast_shapes = tuple(shape[1:] for shape in shapes if shape and shape[0] == "n_frames")
     return (*shapes, *broadcast_shapes)
 
