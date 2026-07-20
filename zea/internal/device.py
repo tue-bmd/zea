@@ -513,6 +513,9 @@ def init_device(
     # Check if the selected backend is installed with CUDA support
     # -> Run this last because it will mess up the hiding of GPUs!
     if not backend_cuda_available(backend):
+        log.warning(
+            f"Selected backend ({backend}) is not installed with CUDA support. Falling back to CPU."
+        )
         device = "cpu"
 
     return device
