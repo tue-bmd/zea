@@ -692,8 +692,7 @@ class Map(Spec):
                 raise ValueError("Map.timestamps must be strictly increasing.")
 
         # The matched SCHEMA shape tells us whether values carries a leading "n_frames"
-        # axis and/or a trailing channel axis ("n_spatial_ch"), independent of ndim alone,
-        # since either axis may be omitted (broadcasting across frames and/or channels).
+        # axis and/or a trailing channel axis ("n_spatial_ch").
         values_shapes = self._expected_shapes(self.SCHEMA["values"]["shape"])
         matched_values_shape = find_matched_shape(self.values, values_shapes)
         values_is_framed = bool(matched_values_shape) and matched_values_shape[0] == "n_frames"
@@ -706,18 +705,13 @@ class Map(Spec):
             )
 
         if self.coordinates is not None:
-            # coordinates.shape[-1] is guaranteed == 3 by the SCHEMA check above.
-            # Values without its leading frame axis (if any) is the base spatial shape
-            # coordinates must match; the trailing axis may additionally be dropped since
-            # it is treated as a channel axis for coordinate-matching purposes even for
-            # Map subclasses (e.g. Image) whose own SCHEMA doesn't name it as such.
+            # values and coordinates must match on all dims except for n_frames and n_ch.
             values_no_frame_axis = self.values.shape[1:] if values_is_framed else self.values.shape
             candidate_spatial_shapes = {values_no_frame_axis}
             if len(values_no_frame_axis) > 1:
                 candidate_spatial_shapes.add(values_no_frame_axis[:-1])
 
-            # coordinates may carry its own leading frame axis (broadcasting one
-            # coordinate grid across all frames when absent), independent of whether
+            # coordinates may carry its own leading frame axis, independent of whether
             # values itself is framed.
             coords_spatial = self.coordinates.shape[:-1]
             coords_matches = coords_spatial in candidate_spatial_shapes or any(
