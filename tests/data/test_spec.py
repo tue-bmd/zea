@@ -13,7 +13,6 @@ from zea.data.spec import (
     BeamformedData,
     DataSpec,
     FileSpec,
-    FloatMap,
     Image,
     Map,
     MetadataSpec,
