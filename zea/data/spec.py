@@ -973,7 +973,9 @@ class Image(Map):
             "dtype": (np.float32, np.uint8),
             "shape": with_frame_broadcast_shapes(
                 (
+                    ("n_frames", "z", "x", "y", "n_spatial_ch"),
                     ("n_frames", "z", "x", "y"),
+                    ("n_frames", "z", "x", "n_spatial_ch"),
                     ("n_frames", "z", "x"),
                 )
             ),
