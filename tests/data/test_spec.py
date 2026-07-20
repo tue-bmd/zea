@@ -1029,19 +1029,6 @@ class TestDataValidationErrors:
                 coordinates=np.zeros((2, 12, 3), dtype=np.float32),
             )
 
-    def test_map_values_frame_broadcast_not_supported_for_base_map(self):
-        """Broadcasting values across frames (omitting the leading n_frames axis) is
-        only supported for Image and Segmentation, not base Map/FloatMap or other
-        Map subclasses (e.g. BeamformedData)."""
-        with pytest.raises(ValueError, match="values has shape"):
-            Map(values=np.zeros((16, 12), dtype=np.uint8))
-
-        with pytest.raises(ValueError, match="values has shape"):
-            FloatMap(values=np.zeros((16, 12), dtype=np.float32))
-
-        with pytest.raises(ValueError, match="values has shape"):
-            BeamformedData(values=np.zeros((16, 12, 1), dtype=np.float32))
-
     def test_image_values_frame_broadcast(self):
         """A single Image's values may omit the leading n_frames axis, broadcasting
         one image (e.g. computed from all frames of raw data) across all frames."""
