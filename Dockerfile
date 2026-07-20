@@ -116,6 +116,12 @@ ENV INSTALL_JAX=${INSTALL_JAX} \
 ENV PYTHONDONTWRITEBYTECODE=1 \
     LC_ALL=C
 
+# TF 2.21.0's libtensorflow_framework.so.2 has RUNPATH entries for every bundled CUDA lib
+# except cusolver (2.19 still had it), so TF silently falls back to CPU with a "Cannot
+# dlopen some GPU libraries" warning. Put that one directory on the loader path; harmless
+# when TF/CUDA is not installed. Drop this once the upstream wheel is fixed.
+ENV LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cusolver/lib
+
 # Install zea
 
 # Copy source code to /zea (needed for editable install)
