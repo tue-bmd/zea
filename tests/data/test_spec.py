@@ -1060,7 +1060,6 @@ class TestDataValidationErrors:
             assert img_values_broadcast_coords_framed.values.shape == (16, 12)
             assert img_values_broadcast_coords_framed.coordinates.shape == (2, 16, 12, 3)
 
-
         seg = Segmentation(
             values=np.zeros((16, 12, 2), dtype=np.bool_),
             labels=np.array(["background", "lv"], dtype=np.str_),
