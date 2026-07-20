@@ -588,7 +588,7 @@ def test_load_file_all_data_types_coordinates_indexed(tmp_path):
 
 
 def test_load_file_all_data_types_values_broadcast(tmp_path):
-    """A Map's values may omit the leading frame axis to broadcast a single map
+    """An Image's values may omit the leading frame axis to broadcast a single map
     (e.g. one map computed from all frames of raw data) across all frames.
 
     When load_file_all_data_types is called with frame indices, broadcast values
@@ -601,14 +601,14 @@ def test_load_file_all_data_types_values_broadcast(tmp_path):
 
     raw_data = np.random.rand(n_frames, n_tx, n_ax, n_el, 1).astype(np.float32)
     # A single map broadcast across all frames: no leading n_frames axis.
-    broadcast_values = np.arange(H * W, dtype=np.float32).reshape(H, W)
+    broadcast_values = np.arange(H * W, dtype=np.uint8).reshape(H, W)
     broadcast_coords = np.zeros((H, W, 3), dtype=np.float32)
 
     path = tmp_path / "broadcast_values.hdf5"
     FileSpec(
         data={
             "raw_data": raw_data,
-            "envelope_data": {"values": broadcast_values, "coordinates": broadcast_coords},
+            "image": {"values": broadcast_values, "coordinates": broadcast_coords},
         },
         scan={
             "sampling_frequency": np.float32(40e6),
@@ -628,8 +628,8 @@ def test_load_file_all_data_types_values_broadcast(tmp_path):
     data_dict, _ = load_file_all_data_types(path, indices=(frame_sel,))
 
     loaded_raw_data = data_dict["raw_data"]
-    loaded_values = data_dict["envelope_data"]["values"]
-    loaded_coords = data_dict["envelope_data"]["coordinates"]
+    loaded_values = data_dict["image"]["values"]
+    loaded_coords = data_dict["image"]["coordinates"]
 
     assert loaded_raw_data.shape[0] == len(frame_sel), "raw_data must have selected frames"
     assert loaded_values.shape == (H, W), "broadcast values must be loaded whole, not indexed"

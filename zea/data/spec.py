@@ -130,9 +130,11 @@ def find_matched_shape(value: Any, expected_shapes: Sequence[tuple]) -> tuple | 
 def with_frame_broadcast_shapes(shapes: Sequence[tuple]) -> tuple[tuple, ...]:
     """Append a leading-``"n_frames"``-omitted variant of each ``"n_frames"``-led shape.
 
-    Used by :class:`Map` (and subclasses that override its ``values`` shape) so a single
-    map (e.g. one map computed from all frames of raw data) can be broadcast across all
-    frames, the same way ``Map.coordinates`` already supports omitting the frame axis.
+    Used by :class:`Image` and :class:`Segmentation` so a single map (e.g. one map
+    computed from all frames of raw data) can be broadcast across all frames, the same
+    way ``Map.coordinates`` already supports omitting the frame axis. Not used by base
+    :class:`Map` or its other subclasses (e.g. :class:`BeamformedData`), which always
+    require the leading frame axis on ``values``.
     """
     broadcast_shapes = tuple(shape[1:] for shape in shapes if shape and shape[0] == "n_frames")
     return (*shapes, *broadcast_shapes)
@@ -594,8 +596,7 @@ class Map(Spec):
     Args:
         values: The map values of shape ``(n_frames, z, x, y, n_ch)`` or ``(n_frames, z, x, y)``
             or ``(n_frames, z, x, n_ch)`` or ``(n_frames, z, x)`` and type uint8, float32,
-            int16, or complex64.  The leading ``n_frames`` axis may be omitted to broadcast
-            a single map (e.g. computed from all frames of raw data) across all frames.
+            int16, or complex64.
         coordinates: Per-pixel Cartesian positions in metres, shape ``(*spatial_dims, 3)``
             where ``spatial_dims`` matches the spatial (non-channel) dimensions of ``values``.
             For non-channeled values the shape is ``(*values.shape, 3)``; for channeled values
@@ -633,13 +634,11 @@ class Map(Spec):
     SCHEMA = {
         "values": {
             "dtype": (np.uint8, np.float32, np.int16, np.complex64),
-            "shape": with_frame_broadcast_shapes(
-                (
-                    ("n_frames", "z", "x", "y", "n_spatial_ch"),
-                    ("n_frames", "z", "x", "y"),
-                    ("n_frames", "z", "x", "n_spatial_ch"),
-                    ("n_frames", "z", "x"),
-                )
+            "shape": (
+                ("n_frames", "z", "x", "y", "n_spatial_ch"),
+                ("n_frames", "z", "x", "y"),
+                ("n_frames", "z", "x", "n_spatial_ch"),
+                ("n_frames", "z", "x"),
             ),
         },
         "coordinates": {"dtype": np.float32, "shape": ("...", 3)},
@@ -944,8 +943,7 @@ class BeamformedData(FloatMap):
     Args:
         values: The beamformed data of shape ``(n_frames, z, x, n_ch)`` or
             ``(n_frames, z, x, y, n_ch)`` and type float32.
-            n_ch is 1 for RF data or 2 for IQ data. The leading frame axis may be
-            omitted to broadcast a single beamformed map across all frames.
+            n_ch is 1 for RF data or 2 for IQ data.
         coordinates: Per-pixel Cartesian positions in metres, shape
             ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
             The leading frame axis may be omitted to broadcast one coordinate grid
@@ -958,11 +956,9 @@ class BeamformedData(FloatMap):
         **FloatMap.SCHEMA,
         "values": {
             "dtype": np.float32,
-            "shape": with_frame_broadcast_shapes(
-                (
-                    ("n_frames", "z", "x", "y", "n_ch"),
-                    ("n_frames", "z", "x", "n_ch"),
-                )
+            "shape": (
+                ("n_frames", "z", "x", "y", "n_ch"),
+                ("n_frames", "z", "x", "n_ch"),
             ),
         },
         "labels": {"dtype": np.str_, "shape": ("n_ch",)},
@@ -990,8 +986,7 @@ class EnvelopeData(FloatMap):
 
     Args:
         values: The envelope data of shape ``(n_frames, z, x)`` or
-            ``(n_frames, z, x, y)`` and type float32. The leading frame axis may be
-            omitted to broadcast a single envelope map across all frames.
+            ``(n_frames, z, x, y)`` and type float32.
         coordinates: Per-pixel Cartesian positions in metres, shape ``(*values.shape, 3)``.
             The leading frame axis may be omitted to broadcast one coordinate grid
             across all frames.
@@ -1001,11 +996,9 @@ class EnvelopeData(FloatMap):
         **FloatMap.SCHEMA,
         "values": {
             "dtype": np.float32,
-            "shape": with_frame_broadcast_shapes(
-                (
-                    ("n_frames", "z", "x", "y"),
-                    ("n_frames", "z", "x"),
-                )
+            "shape": (
+                ("n_frames", "z", "x", "y"),
+                ("n_frames", "z", "x"),
             ),
         },
     }
@@ -1017,9 +1010,7 @@ class SosMap(FloatMap):
 
     Args:
         values: The speed-of-sound map values in m/s of shape ``(n_frames, z, x, y)``
-            and type float32. The leading frame axis may be omitted to broadcast a
-            single speed-of-sound map (e.g. computed from all frames of raw data)
-            across all frames.
+            and type float32.
         coordinates: Per-pixel Cartesian positions in metres, shape
             ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
             The leading frame axis may be omitted to broadcast one coordinate grid
@@ -1071,8 +1062,7 @@ class AttenuationMap(FloatMap):
 
     Args:
         values: The attenuation coefficient :math:`\\alpha_0` in ``dB/m/Hz`` of
-            shape ``(n_frames, z, x, y)`` and type float32. The leading frame axis
-            may be omitted to broadcast a single attenuation map across all frames.
+            shape ``(n_frames, z, x, y)`` and type float32.
         coordinates: Per-pixel Cartesian positions in metres, shape
             ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
             The leading frame axis may be omitted to broadcast one coordinate grid
@@ -1139,8 +1129,6 @@ class StrainPercentageMap(FloatMap):
 
     Args:
         values: The strain values in % of shape ``(n_frames, z, x, y)`` and type float32.
-            The leading frame axis may be omitted to broadcast a single strain map
-            across all frames.
         coordinates: Per-pixel Cartesian positions in metres.
     """
 
@@ -1157,8 +1145,7 @@ class ShearWaveElastographyMap(FloatMap):
 
     Args:
         values: The shear-wave elastography values in m/s of shape
-            ``(n_frames, z, x, y)`` and type float32. The leading frame axis may be
-            omitted to broadcast a single SWE map across all frames.
+            ``(n_frames, z, x, y)`` and type float32.
         coordinates: Per-pixel Cartesian positions in metres.
     """
 
@@ -1175,8 +1162,7 @@ class TissueDopplerMap(FloatMap):
 
     Args:
         values: The tissue Doppler values in m/s of shape ``(n_frames, z, x, y)``
-            and type float32. The leading frame axis may be omitted to broadcast a
-            single tissue Doppler map across all frames.
+            and type float32.
         coordinates: Per-pixel Cartesian positions in metres.
     """
 
@@ -1195,8 +1181,7 @@ class ColorDopplerMap(FloatMap):
         values: The color Doppler velocity values in m/s of shape
             ``(n_frames, z, x, y)`` and type float32. Positive values
             indicate flow towards the transducer, negative values
-            indicate flow away from the transducer. The leading frame axis may be
-            omitted to broadcast a single color Doppler map across all frames.
+            indicate flow away from the transducer.
         coordinates: Per-pixel Cartesian positions in metres.
     """
 

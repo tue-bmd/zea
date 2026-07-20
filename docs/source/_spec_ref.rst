@@ -354,7 +354,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``float32`` | ``uint8``
-              - (n_frames, z, x, y) or (n_frames, z, x)
+              - (n_frames, z, x, y) or (n_frames, z, x) or (z, x, y) or (z, x)
               - Map pixel values.
               - |badge-req|
             * - ``coordinates``
@@ -415,7 +415,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``bool``
-              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, n_spatial_ch)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, n_spatial_ch) or (z, x, y, n_spatial_ch) or (z, x, n_spatial_ch)
               - Map pixel values.
               - |badge-req|
             * - ``coordinates``
