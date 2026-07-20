@@ -1060,12 +1060,6 @@ class TestDataValidationErrors:
             assert img_values_broadcast_coords_framed.values.shape == (16, 12)
             assert img_values_broadcast_coords_framed.coordinates.shape == (2, 16, 12, 3)
 
-    def test_segmentation_values_frame_broadcast(self):
-        """A single Segmentation's values may omit the leading n_frames axis,
-        broadcasting one segmentation across all frames. Labels are still required,
-        the same as for framed values."""
-        with pytest.raises(AssertionError, match="Segmentation requires labels"):
-            Segmentation(values=np.zeros((16, 12, 2), dtype=np.bool_))
 
         seg = Segmentation(
             values=np.zeros((16, 12, 2), dtype=np.bool_),

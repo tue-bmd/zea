@@ -792,8 +792,6 @@ class Segmentation(BooleanMap):
     Args:
         values: The segmentation values of shape ``(n_frames, z, x, y, n_labels)`` for 3D
             (volumetric) data or ``(n_frames, z, x, n_labels)`` for 2D data, with type bool.
-            The leading frame axis may be omitted to broadcast a single segmentation
-            across all frames.
         coordinates: Per-pixel Cartesian positions in metres, shape ``(*spatial_dims, 3)``
             where ``spatial_dims`` matches the spatial (non-label) dimensions of ``values``.
             The leading frame axis may be omitted to broadcast one coordinate grid
@@ -818,24 +816,10 @@ class Segmentation(BooleanMap):
             values[ed_idx, :, :, 1:] = segmentation_mask  # shape (H, W, 3)
     """
 
-    SCHEMA = {
-        **BooleanMap.SCHEMA,
-        "values": {
-            **BooleanMap.SCHEMA["values"],
-            "shape": with_frame_broadcast_shapes(
-                (
-                    ("n_frames", "z", "x", "y", "n_spatial_ch"),
-                    ("n_frames", "z", "x", "n_spatial_ch"),
-                )
-            ),
-        },
-    }
-
     def __post_init__(self):
-        assert self.values.ndim in (3, 4, 5), (
-            "Segmentation values must have 3, 4, or 5 dimensions: "
+        assert self.values.ndim in (4, 5), (
+            "Segmentation values must have 4 or 5 dimensions: "
             "(n_frames, z, x, n_labels) for 2D or (n_frames, z, x, y, n_labels) for 3D, "
-            "or (z, x, n_labels) / (z, x, y, n_labels) to broadcast across all frames, "
             f"got shape {self.values.shape}"
         )
         assert self.labels is not None, "Segmentation requires labels to be provided"
