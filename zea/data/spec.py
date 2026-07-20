@@ -932,6 +932,18 @@ class Segmentation(BooleanMap):
             values[ed_idx, :, :, 1:] = segmentation_mask  # shape (H, W, 3)
     """
 
+    SCHEMA = {
+        **BooleanMap.SCHEMA,
+        "values": {
+            **BooleanMap.SCHEMA["values"],
+            "shape": (
+                ("n_frames", "z", "x", "y", "n_spatial_ch"),
+                ("n_frames", "z", "x", "n_spatial_ch"),
+            ),
+        },
+    }
+
+
     def __post_init__(self):
         assert self.values.ndim in (4, 5), (
             "Segmentation values must have 4 or 5 dimensions: "
