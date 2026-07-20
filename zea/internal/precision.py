@@ -1,12 +1,5 @@
 """Mixed-precision helpers for zea pipelines.
 
-zea beamforming keeps geometry and time-of-flight *delay* computation in
-``float32`` — those quantities need the full dynamic range (sample indices run
-into the thousands, and interpolation weights derived from them must be
-accurate) — while allowing the bulk *signal* compute (the TOF gather,
-interpolation, apodization and delay-and-sum) to run in a lower-precision
-"compute dtype" for speed.
-
 The compute dtype is resolved from the active Keras mixed-precision policy, so::
 
     import keras

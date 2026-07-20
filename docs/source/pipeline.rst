@@ -43,12 +43,8 @@ signal path is lowered, the reconstruction stays faithful to the float32
 baseline. The compute dtype is resolved by
 :func:`zea.internal.precision.signal_compute_dtype`.
 
-``int16`` RF data is accepted directly: the beamformer promotes it to the
-compute dtype internally, so no explicit cast is needed before beamforming.
-(Operations that require floating point earlier in the pipeline, such as
-:class:`~zea.ops.Demodulate`, still expect a preceding
-:class:`~zea.ops.Cast` — :meth:`Pipeline.from_default
-<zea.ops.Pipeline.from_default>` already inserts one.)
+``int16`` RF data is accepted directly: the beamformer and/or demodulate operations promotes 
+it to the compute dtype internally, so no explicit cast is needed before beamforming.
 
 See ``benchmarks/benchmark_mixed_precision.py`` for a speed/accuracy comparison.
 

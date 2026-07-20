@@ -222,12 +222,11 @@ def tof_correction(
 
     _warn_if_focal_region_length_unused(focus_distances, focal_region_length)
 
-    # Resolve the signal compute dtype (bfloat16 under an active mixed-precision
-    # policy, else float32) and cast the RF/IQ signal down to it. This is the
-    # single entry point where precision is lowered: everything below that
-    # touches the *signal* runs in this dtype, while the *delays* and geometry
-    # are kept in float32 for accuracy. Casting here also promotes integer RF
-    # (e.g. int16) to a floating dtype so the interpolation is well-defined.
+    # Resolve the signal compute dtype and cast the RF/IQ signal down to it. This is the
+    # single entry point where precision is lowered: everything below that touches the *signal*
+    # runs in this dtype, while the *delays* and geometry are kept in float32 for accuracy.
+    # Casting here also promotes integer RF (e.g. int16) to a floating dtype so the interpolation
+    # is well-defined.
     compute_dtype = signal_compute_dtype()
     data = ops.cast(data, compute_dtype)
 
@@ -556,7 +555,7 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
     # compute dtype. The gathered samples themselves stay in the (possibly
     # low-precision) signal dtype so the multiply-add runs in that dtype for
     # speed -- this is what makes mixed-precision beamforming worthwhile.
-    out_dtype = keras.backend.standardize_dtype(data0.dtype)
+    out_dtype = ops.dtype(data0)
     if out_dtype not in ("float16", "bfloat16", "float32", "float64"):
         # Integer RF (e.g. int16) gathered directly: promote to the compute dtype.
         out_dtype = signal_compute_dtype()
@@ -632,8 +631,7 @@ def complex_rotate(iq, theta):
 
     # ``theta`` is derived from the (float32) delays and can be large, so the
     # trigonometric functions are evaluated in the angle dtype and only then cast
-    # down to the signal dtype -- computing cos/sin of a large angle in bfloat16
-    # would be catastrophically inaccurate.
+    # down to the signal dtype.
     cos_t = ops.cast(ops.cos(theta), i.dtype)
     sin_t = ops.cast(ops.sin(theta), i.dtype)
 

@@ -17,7 +17,6 @@ from zea.internal.ops_list import OperationList
 from zea.internal.registry import beamformer_registry, ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Operation, get_ops
-from zea.ops.keras_ops import Cast
 from zea.ops.tensor import Normalize
 from zea.ops.ultrasound import (
     AlignedApodization,
@@ -282,7 +281,7 @@ class Pipeline:
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
         """
-        operations: List[Union[Operation, "Pipeline"]] = [Cast(dtype="float32")]
+        operations: List[Union[Operation, "Pipeline"]] = []
 
         # Add the demodulate operation
         if not baseband:
