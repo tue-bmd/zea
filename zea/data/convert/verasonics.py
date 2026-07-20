@@ -875,9 +875,19 @@ class VerasonicsFile(h5py.File):
         Returns:
             focus_distances (np.ndarray): The focus distances of shape (n_tx,).
 
-        Note:
-            This function assumes that the probe geometry is a 1d uniform linear array.
-            If not it will warn and return.
+        .. note::
+            For a 1d uniform linear array, transmits whose t0 delays form a linear ramp
+            across the active elements are treated as plane waves and their focus
+            distance is set to infinity.
+
+        .. note::
+            For a curved/arc array, a "flat-fire" transmit is a diverging wave rather
+            than a plane wave, so this normalization does not apply; an informational
+            log is emitted and the focus distances are returned unchanged.
+
+        .. note::
+            For any other (unrecognized) probe geometry, a warning is logged and the
+            focus distances are returned unchanged.
         """
         is_ordered, kind = self.probe._probe_geometry_ordering
         if kind != "linear":
