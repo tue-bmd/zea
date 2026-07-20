@@ -9,35 +9,13 @@
 File hierarchy
 --------------
 
-Every ``zea`` HDF5 file follows the layout shown below.
-See the :ref:`group reference <group-reference>` for a full description of each group's fields.
-
-.. code-block:: text
-
    data_file.hdf5         (attrs: us_machine, description, zea_version, acquisition_time)
    ├── data/
    │   ├── raw_data                  float32 | int16  (n_frames, n_tx, n_ax, n_el, n_ch)
-   │   ├── aligned_data/             group (AlignedData)
    │   ├── beamformed_data/          group (BeamformedData)
-   │   ├── envelope_data/            group (EnvelopeData)
    │   ├── image/                    group (Image)
-   │   ├── segmentation/             group (Segmentation)
    │   ├── sos_map/                  group (SosMap)
-   │   ├── attenuation_map/          group (AttenuationMap)
-   │   ├── strain_percentage_map/    group (StrainPercentageMap)
-   │   ├── tissue_doppler/           group (TissueDopplerMap)
-   │   ├── color_doppler/            group (ColorDopplerMap)
-   │   └── <custom>/                 group (any spatial map)
-   ├── scan/
-   │   ├── sampling_frequency        float32  scalar
-   │   ├── center_frequency          float32  scalar | (n_tx,)
-   │   ├── t0_delays                 float32  (n_tx, n_el)
-   │   └── …
-   ├── probe/
-   │   ├── name                      str
-   │   ├── type                      str
    │   ├── probe_geometry            float32  (n_el, 3)
-   │   ├── probe_center_frequency    float32  scalar
    │   └── …
    ├── metadata/
    │   ├── subject/                  group (Subject)
@@ -46,7 +24,6 @@ See the :ref:`group reference <group-reference>` for a full description of each 
    │   └── …
    ├── metrics/
    │   └── …
-   └── custom/
        ├── <name>                    any dtype  (CustomElement)
        └── <group>/
            └── <name>                any dtype  (nested CustomElement)
