@@ -1099,6 +1099,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Subject sex.
               - |badge-opt|
+            * - ``weight``
+              - ``float32``
+              - scalar
+              - Subject weight.
+              - |badge-opt|
+            * - ``genetic_strain``
+              - ``str``
+              - scalar
+              - Genetic strain of an animal subject, e.g. C57BL/6N.
+              - |badge-opt|
             * - ``fat_percentage``
               - ``float32``
               - scalar

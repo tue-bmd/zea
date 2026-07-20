@@ -109,9 +109,12 @@ from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
     check_for_aliasing,
     polar_pixel_grid,
+    scanline_aligned_apodization,
+    scanline_pixel_grid,
 )
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
+from zea.func.ultrasound import compute_time_to_peak_stack
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated
 from zea.probes import Probe
@@ -198,7 +201,9 @@ class Parameters(BaseParameters):
     """Number of grid pixels per wavelength. Defaults to 4."""
 
     grid_type: str
-    """Beamforming grid type, ``"cartesian"`` or ``"polar"``. Defaults to ``"cartesian"``."""
+    """Beamforming grid type, ``"cartesian"`` or ``"polar"``. Defaults to
+    ``"cartesian"``. Combine with ``enable_scanline=True`` for line-by-line
+    (scanline) imaging instead of a shared compounded grid."""
 
     dynamic_range: np.ndarray
     """Dynamic range for image display in dB, shape (2,) as (min_dB, max_dB)."""
@@ -218,6 +223,16 @@ class Parameters(BaseParameters):
     apply_lens_correction: bool
     """Whether to apply lens correction to the transmit delays. Defaults to False."""
 
+    focal_region_length: float
+    """Full length in meters of the region around the focal plane of focused transmits.
+
+    In this region the first-arrival and last-arrival transmit delays are linearly blended,
+    smoothing the focal-plane transition while preserving the same model outside the region.
+    This targets the focal-depth artifact described by Rindal et al. (IUS 2018). Defaults to
+    0.0 (disabled, i.e. conventional first/last-arrival switching everywhere). A typical
+    starting value is 2e-3 m (corresponding to +/-1e-3 m around the focal plane).
+    """
+
     lens_thickness: float
     """Thickness of the lens [m]."""
 
@@ -228,8 +243,44 @@ class Parameters(BaseParameters):
     """Range of phi angles for 3D imaging [rad], shape (2,)."""
 
     pfield_kwargs: dict
-    """Extra keyword arguments for the pressure-field computation. See
-    :func:`zea.beamform.pfield.compute_pfield`. Defaults to ``{}``."""
+    """Extra keyword arguments for the pressure-field computation.
+
+    See :func:`zea.beamform.pfield.compute_pfield`. Defaults to ``{}``.
+    """
+
+    enable_scanline: bool
+    """Whether to beamform in scanline (line-by-line) mode: one pixel column
+    per transmit (see :func:`~zea.beamform.pixelgrid.scanline_pixel_grid`)
+    instead of a shared compounded ``grid_type`` grid, paired with
+    ``flat_aligned_apodization`` (fed to :class:`~zea.ops.AlignedApodization`).
+    Combine with ``grid_type="cartesian"`` for vertical focused columns
+    (linear-scan geometry) or ``grid_type="polar"`` for steered rays from
+    each transmit's own origin (sector / phased-array geometry). Defaults to
+    ``False``.
+
+    .. note::
+        This only builds the scanline *grid*. For true classical scanline
+        beamforming, also construct the beamformer with
+        ``Beamform(enable_aligned_apodization=True)`` so that
+        ``flat_aligned_apodization`` masks each pixel to its owning transmit;
+        without it every transmit is still compounded onto the
+        one-column-per-transmit grid.
+    """
+
+    flat_receive_apodization: np.ndarray
+    """Optional custom receive-aperture apodization of shape ``(n_pix, n_el)``.
+
+    Per-pixel, per-element (receive-channel) weights, fed to
+    :class:`~zea.ops.ReceiveApodization` when the beamformer is built with
+    ``Beamform(enable_receive_apodization=True)``. This is the user-supplied
+    counterpart of the built-in f-number mask
+    (:func:`~zea.beamform.beamformer.fnumber_mask`) and is applied *in addition*
+    to it (set ``f_number=0`` to use a fully custom receive apodization alone).
+    ``None`` (default) makes :class:`~zea.ops.ReceiveApodization` a no-op.
+
+    Distinct from ``flat_aligned_apodization``, which weights the *transmit*
+    axis (compounding), not the receive channels.
+    """
 
     scan_schema = deepcopy(ScanSpec.SCHEMA)
     probe_schema = deepcopy(Probe.SCHEMA)
@@ -250,6 +301,9 @@ class Parameters(BaseParameters):
         "pixels_per_wavelength": {"dtype": np.int32, "default": 4},
         "pfield_kwargs": {"dtype": dict, "default": {}},
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
+        "enable_scanline": {"dtype": bool, "default": False},  # native dtype on purpose
+        "flat_receive_apodization": {"dtype": (type(None), np.ndarray), "default": None},
+        "focal_region_length": {"dtype": np.float32, "default": 0.0},
         "grid_type": {"dtype": str, "default": "cartesian"},
         "polar_limits": {"dtype": np.float32, "shape": (2,)},
         "dynamic_range": {"dtype": np.float32, "shape": (2,)},
@@ -276,6 +330,11 @@ class Parameters(BaseParameters):
     # Add some defaults that are not stored in a file
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
     VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
+    # Give these a default of None (rather than leaving them unset) so that they can be
+    # declared as dependencies of computed properties (e.g. t_peak, n_waveforms) without
+    # tripping MissingDependencyError
+    VALID_PARAMS["waveforms_one_way"]["default"] = None
+    VALID_PARAMS["waveforms_two_way"]["default"] = None
 
     @cache_with_dependencies("probe_geometry")
     def aperture_size(self):
@@ -315,10 +374,36 @@ class Parameters(BaseParameters):
         "is_3d",
         "polar_limits",
         "distance_to_apex",
+        "transmit_origins",
+        "focus_distances",
+        "polar_angles",
+        "azimuth_angles",
+        "enable_scanline",
     )
     def grid(self):
         """The beamforming grid of shape (grid_size_z, grid_size_x, [grid_size_y], 3)."""
-        if self.grid_type == "polar":
+        if self.enable_scanline:
+            # One pixel column per transmit: scanline imaging is the special case
+            # of pixel-based DAS where each pixel belongs to exactly one transmit.
+            # Reuses the same `grid_type` (cartesian/polar) that also picks the
+            # geometry of the regular (non-scanline) grid below.
+            polar_angles = self.polar_angles
+            if polar_angles is None:
+                log.warning_once(
+                    "No ``polar_angles`` provided, using zeros",
+                    key=(id(self), "polar_angles"),
+                )
+                polar_angles = np.zeros(self.n_tx)
+            return scanline_pixel_grid(
+                self.transmit_origins,
+                self.focus_distances,
+                polar_angles,
+                self.zlims,
+                self.grid_size_z,
+                azimuth_angles=self.azimuth_angles,
+                grid_type=self.grid_type,
+            )
+        elif self.grid_type == "polar":
             if self.is_3d:
                 raise NotImplementedError("3D polar grids are not yet supported.")
             return polar_pixel_grid(
@@ -349,12 +434,34 @@ class Parameters(BaseParameters):
                 "'cartesian' and 'polar'."
             )
 
-    @cache_with_dependencies("xlims", "wavelength", "pixels_per_wavelength")
+    @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z")
+    def flat_aligned_apodization(self):
+        """Per-pixel, per-transmit compounding apodization weight of shape (n_pix, n_tx).
+
+        Only defined when ``enable_scanline`` is ``True``, where it is the one-hot
+        mask (see :func:`~zea.beamform.pixelgrid.scanline_aligned_apodization`)
+        that isolates each pixel's owning transmit. ``None`` otherwise, which
+        makes :class:`~zea.ops.AlignedApodization` a no-op.
+
+        This weights the *transmit* axis (compounding), not the receive channels;
+        for custom receive-aperture apodization see ``flat_receive_apodization``.
+        """
+        if not self.enable_scanline:
+            return None
+        return scanline_aligned_apodization(self.n_tx, self.grid_size_z)
+
+    @cache_with_dependencies(
+        "xlims", "wavelength", "pixels_per_wavelength", "enable_scanline", "n_tx"
+    )
     def grid_size_x(self):
         """Grid width in pixels. For a cartesian grid, this is the lateral (x) pixels in the grid,
         set to prevent aliasing if not provided. For a polar grid, this can be thought of as
-        the number for rays in the polar direction.
+        the number for rays in the polar direction. When ``enable_scanline`` is ``True``, this is
+        fixed to ``n_tx`` (one column per transmit).
         """
+        if self.enable_scanline:
+            return self.n_tx
+
         grid_size_x = self._params.get("grid_size_x")
         if grid_size_x is not None:
             return grid_size_x
@@ -388,7 +495,8 @@ class Parameters(BaseParameters):
     )
     def grid_size_z(self):
         """Grid depth in pixels. This is the number of axial (z) pixels in the grid,
-        set to prevent aliasing if not provided."""
+        set to prevent aliasing if not provided. When ``enable_scanline`` is ``True``,
+        this is the number of depth samples per transmit line."""
         grid_size_z = self._params.get("grid_size_z")
         if grid_size_z is not None:
             return grid_size_z
@@ -809,12 +917,22 @@ class Parameters(BaseParameters):
 
         return 1
 
-    @cache_with_dependencies("center_frequency", "selected_transmits")
+    @cache_with_dependencies("center_frequency", "selected_transmits", "waveforms_two_way")
     def t_peak(self):
-        """The time of the peak of the pulse in seconds of shape (n_tx,)."""
+        """The time of the peak of the pulse in seconds of shape (n_tx,).
+
+        If not set explicitly and ``waveforms_two_way`` (the two-way,
+        pulse-echo transmit waveform) is available, this is estimated from it
+        via :func:`~zea.func.ultrasound.compute_time_to_peak_stack`. Otherwise
+        it defaults to ``1 / center_frequency``.
+        """
         t_peak = self._params.get("t_peak")
         if t_peak is None:
-            t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
+            waveforms = self._params.get("waveforms_two_way")
+            if waveforms is not None:
+                t_peak = np.asarray(compute_time_to_peak_stack(waveforms, self.center_frequency))
+            else:
+                t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
 
         return t_peak[self.selected_transmits]
 

@@ -40,6 +40,8 @@ A unit of ``–`` denotes a unitless (dimensionless) quantity.
      - count
    * - ``%``
      - percent
+   * - ``kg``
+     - kilograms
    * - ``kg/m²``
      - kilograms per square meter
 

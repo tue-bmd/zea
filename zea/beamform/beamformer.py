@@ -13,6 +13,36 @@ from keras import ops
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.tensor import vmap
 from zea.internal.checks import _check_raw_data
+from zea.log import warning_once as _warning_once
+
+
+def _warn_if_focal_region_length_unused(focus_distances, focal_region_length):
+    """Warn when ``focal_region_length`` is set but no transmit is focused.
+
+    Focal-region blending only applies to focused transmits (finite, positive
+    ``focus_distance``). Setting ``focal_region_length`` for plane-wave,
+    diverging-wave or synthetic-aperture data has no effect, so this is likely a
+    mistake worth flagging. Meant to be called pre-jit with concrete
+    ``focus_distances`` (a no-op otherwise).
+    """
+    if focal_region_length is None:
+        return
+    try:
+        length = float(np.asarray(ops.convert_to_numpy(focal_region_length)))
+    except Exception:  # e.g. a tracer inside jit; skip silently
+        return
+    if length <= 0.0:
+        return
+    try:
+        fd = np.asarray(ops.convert_to_numpy(focus_distances), dtype=float)
+    except Exception:  # e.g. a tracer inside jit; skip silently
+        return
+    if not np.any(np.isfinite(fd) & (fd > 0)):
+        _warning_once(
+            "`focal_region_length` is set but none of the transmits are focused "
+            "(no finite positive focus_distance); it will have no effect. "
+            "It only applies to focused transmits."
+        )
 
 
 def fnum_window_fn_rect(normalized_angle):
@@ -101,6 +131,7 @@ def tof_correction(
     sos_map=None,
     sos_grid_x=None,
     sos_grid_z=None,
+    focal_region_length=None,
 ):
     """Time-of-flight (TOF) correction for ultrasound data on a flat pixel grid.
 
@@ -167,6 +198,12 @@ def tof_correction(
             Defaults to ``None``.
         sos_grid_x (Tensor, optional): x-coordinates of ``sos_map`` columns.
         sos_grid_z (Tensor, optional): z-coordinates of ``sos_map`` rows.
+        focal_region_length (float, optional): Full length in meters of the
+            region around the focal plane of focused transmits where
+            first-arrival and last-arrival delays are linearly blended. This
+            smooths the focal-plane transition while preserving the same model
+            outside the region. See :func:`transmit_delays`. Defaults to
+            ``None`` (disabled).
 
     Returns:
         Tensor: Time-of-flight corrected data of shape
@@ -181,6 +218,8 @@ def tof_correction(
     n_pix = ops.shape(flatgrid)[0]
 
     _validate_delay_inputs(data, flatgrid, t0_delays, probe_geometry, tx_apodizations)
+
+    _warn_if_focal_region_length_unused(focus_distances, focal_region_length)
 
     # ---- Compute delays ------------------------------------------------
     # txdel: transmit delay from t=0 to wavefront reaching each pixel
@@ -203,6 +242,7 @@ def tof_correction(
             apply_lens_correction,
             lens_thickness,
             lens_sound_speed,
+            focal_region_length=focal_region_length,
         )
         # calculate_delays returns txdel (n_pix, n_tx), rxdel (n_pix, n_el)
     else:
@@ -335,6 +375,7 @@ def calculate_delays(
     lens_thickness=None,
     lens_sound_speed=None,
     n_iter=2,
+    focal_region_length=None,
 ):
     """Compute transmit and receive delays in samples to every pixel.
 
@@ -374,6 +415,12 @@ def calculate_delays(
             m/s.
         n_iter (int, optional): Newton-Raphson iterations for lens
             correction.  Defaults to ``2``.
+        focal_region_length (float, optional): Full length in meters of the
+            region around the focal plane of focused transmits where
+            first-arrival and last-arrival delays are linearly blended. This
+            smooths the focal-plane transition while preserving the same model
+            outside the region. See :func:`transmit_delays`. Defaults to
+            ``None`` (disabled).
 
     Returns:
         tuple[Tensor, Tensor]:
@@ -383,7 +430,7 @@ def calculate_delays(
 
     if not apply_lens_correction:
         # Compute receive distances in meters of shape (n_pix, n_el)
-        rx_distances = distance_Rx(grid, probe_geometry)
+        rx_distances = compute_receive_distances(grid, probe_geometry)
 
         # Convert distances to delays in seconds
         rx_delays = rx_distances / sound_speed
@@ -403,7 +450,11 @@ def calculate_delays(
         )
 
     # Compute transmit delays
-    tx_delays = vmap(transmit_delays, in_axes=(None, 0, 0, None, 0, 0, 0, None, 0), out_axes=1)(
+    tx_delays = vmap(
+        transmit_delays,
+        in_axes=(None, 0, 0, None, 0, 0, 0, None, 0, None),
+        out_axes=1,
+    )(
         grid,
         t0_delays,
         tx_apodizations,
@@ -413,6 +464,7 @@ def calculate_delays(
         initial_times,
         None,
         transmit_origins,
+        focal_region_length,
     )
 
     # Add the offset to the transmit peak time
@@ -561,7 +613,7 @@ def complex_rotate(iq, theta):
     return ops.concatenate([ir, qr], -1)
 
 
-def distance_Rx(grid, probe_geometry):
+def compute_receive_distances(grid, probe_geometry):
     """Euclidean distance from every pixel to every transducer element.
 
     Args:
@@ -587,11 +639,19 @@ def transmit_delays(
     initial_time,
     azimuth_angle=None,
     transmit_origin=None,
+    focal_region_length=None,
 ):
     """Compute the transmit delay from transmission to each pixel.
 
     Uses the **first-arrival** time for pixels before the focus (or virtual
     source) and the **last-arrival** time for pixels beyond the focus.
+
+    For focused transmits this first/last-arrival switch creates a kink at the
+    focal plane that can produce a focal-depth band artifact (as described by
+    Rindal et al., IEEE IUS 2018). When ``focal_region_length`` is given, this
+    implementation linearly blends the first- and last-arrival times within a
+    centered focal slab of that full length (measured along the beam), so the
+    transition is smooth and joins the surrounding delays continuously.
 
     Args:
         grid (Tensor): Pixel positions ``(x, y, z)`` of shape ``(n_pix, 3)``.
@@ -609,6 +669,14 @@ def transmit_delays(
             Defaults to ``None`` (treated as 0).
         transmit_origin (Tensor, optional): Origin of the transmit beam of
             shape ``(3,)``.  Defaults to ``(0, 0, 0)``.
+        focal_region_length (float, optional): Full length in meters of the
+            region around the focal plane where the first- and last-arrival
+            times are linearly blended instead of switched, removing the
+            focal-plane discontinuity. Internally this corresponds to a
+            half-length of ``focal_region_length / 2`` on each side of the
+            focal plane. Only affects focused transmits (finite, positive
+            ``focus_distance``). Set to ``0`` or ``None`` (default) to use the
+            conventional first/last-arrival switch everywhere.
 
     Returns:
         Tensor: Transmit delays of shape ``(n_pix,)``.
@@ -674,11 +742,26 @@ def transmit_delays(
     # smallest time over all elements (first wavefront arrival) for pixels before
     # the focus, and the largest time (last wavefront contribution) for pixels
     # beyond the focus.
-    tx_delay = ops.where(
-        is_before_focus,
-        ops.min(total_times + offset[None, :], axis=-1),
-        ops.max(total_times - offset[None, :], axis=-1),
-    )
+    t_first = ops.min(total_times + offset[None, :], axis=-1)  # first arrival
+    t_last = ops.max(total_times - offset[None, :], axis=-1)  # last arrival
+    tx_delay = ops.where(is_before_focus, t_first, t_last)
+
+    if focal_region_length is not None:
+        # Blend first- and last-arrival delays in a small focal slab to smooth
+        # the focal-plane transition while preserving the same model elsewhere.
+        length = ops.cast(focal_region_length, tx_delay.dtype)
+        half_length = 0.5 * length
+        use_blend = ops.logical_and(ops.isfinite(length), length > 0.0)
+
+        signed = ops.cast(ops.sign(focus_distance), "float32") * projection_along_beam
+        denom = ops.where(use_blend, length, ops.ones_like(length))
+        weight = ops.clip((signed + half_length) / denom, 0.0, 1.0)
+        blended = (1.0 - weight) * t_first + weight * t_last
+
+        is_focused = ops.logical_and(ops.isfinite(focus_distance), focus_distance > 0.0)
+        in_focal_region = ops.logical_and(is_focused, ops.abs(signed) < half_length)
+        apply_blend = ops.logical_and(use_blend, in_focal_region)
+        tx_delay = ops.where(apply_blend, blended, tx_delay)
 
     # Subtract the initial time offset for this transmit
     tx_delay = tx_delay - initial_time
@@ -689,11 +772,18 @@ def transmit_delays(
 def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):
     """Receive-aperture apodization mask based on the f-number.
 
+    This is the **built-in** receive-aperture (per-element) apodization.
     Computes a per-pixel, per-element mask that suppresses contributions
     from elements whose angle to a pixel exceeds the acceptance cone
     defined by the f-number.  The transition within the cone is controlled
     by *fnum_window_fn* (e.g. :func:`fnum_window_fn_rect`,
     :func:`fnum_window_fn_hann`, :func:`fnum_window_fn_tukey`).
+
+    For a *custom* receive-aperture apodization (arbitrary per-pixel,
+    per-element weights) use :class:`zea.ops.ReceiveApodization`, which is
+    applied on top of this mask. This is distinct from
+    :class:`zea.ops.AlignedApodization`, which weights the *transmit* axis
+    (compounding), not the receive channels.
 
     Args:
         flatgrid (Tensor): Flattened pixel grid of shape ``(n_pix, 3)``.

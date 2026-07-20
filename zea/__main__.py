@@ -4,102 +4,64 @@ Usage::
 
     zea process --dataset <path> --config <config.yaml> [options]  # batch beamform a dataset
     zea app [--share] [--server-port PORT]                         # launch the Gradio visualizer
+    zea data <operation> [options]                                 # manipulate zea data files
 
 """
 
-import argparse
 import os
-import warnings
 from dataclasses import dataclass
 from typing import Annotated, Union
 
-import zea
-
-if "ZEA_LOG_LEVEL" not in os.environ:
-    zea.log.set_level("WARNING")
-
 import tyro
 
-from zea.cli_args import ProcessArgs
+if "ZEA_LOG_LEVEL" not in os.environ:
+    from zea import log
+
+    log.set_level("WARNING")
+
+from zea.cli_args import AppArgs, DataArgs, ProcessArgs
+
+# subcommands that don't require a device
+_NO_DEVICE_FNS = [DataArgs]
 
 
 @dataclass
-class AppArgs:
-    """Arguments for the interactive Gradio dataset visualizer."""
+class CLI:
+    """Top-level CLI with global arguments and subcommands."""
 
-    share: bool = False
-    server_port: int | None = None
+    subcommand: tyro.conf.OmitSubcommandPrefixes[
+        Union[
+            Annotated[ProcessArgs, tyro.conf.subcommand("process")],
+            Annotated[AppArgs, tyro.conf.subcommand("app")],
+            Annotated[DataArgs, tyro.conf.subcommand("data")],
+        ]
+    ]
     device: Annotated[
-        str,
+        tyro.conf.CascadeSubcommandArgs[str],
         tyro.conf.arg(help="Compute device passed to init_device (e.g. 'cpu', 'auto:1')."),
     ] = "auto:1"
 
 
-def get_parser() -> argparse.ArgumentParser:
-    """Return the top-level argument parser with ``process`` and ``app`` subcommands.
+def _check_if_device_needed(subcommand) -> bool:
+    """Check if the subcommand requires a device."""
+    if subcommand.__class__ in _NO_DEVICE_FNS:
+        return False
+    if hasattr(subcommand, "subcommand"):
+        return _check_if_device_needed(subcommand.subcommand)
 
-    Kept as plain argparse for ``sphinxcontrib-autoprogram`` doc generation and tests.
-    The interactive ``main()`` uses :func:`tyro.cli` for richer help output.
-    """
-    parser = argparse.ArgumentParser(
-        prog="zea",
-        description="zea ultrasound toolbox.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="command", metavar="command")
-    subparsers.required = True
-
-    # ── process ──────────────────────────────────────────────────────────────
-    from zea.data.process import get_parser as _process_parser
-
-    subparsers.add_parser(
-        "process",
-        help="Beamform a zea dataset using a pipeline YAML config.",
-        parents=[_process_parser(add_help=False)],
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-
-    # ── app ──────────────────────────────────────────────────────────────────
-    app_p = subparsers.add_parser(
-        "app",
-        help="Launch the interactive Gradio dataset visualizer.",
-    )
-    app_p.add_argument(
-        "--share",
-        action="store_true",
-        help="Create a public Gradio share link.",
-    )
-    app_p.add_argument(
-        "--server-port",
-        dest="server_port",
-        type=int,
-        default=None,
-        help="Port for the Gradio server to listen on. Defaults to 7860.",
-    )
-    app_p.add_argument(
-        "--device",
-        type=str,
-        default="auto:1",
-        help="Compute device passed to init_device (e.g. 'cpu', 'auto:1').",
-    )
-
-    return parser
+    return True
 
 
 def main() -> None:
     """Dispatch to the requested subcommand using tyro for rich help output."""
-    SubCmd = Union[
-        Annotated[ProcessArgs, tyro.conf.subcommand("process")],
-        Annotated[AppArgs, tyro.conf.subcommand("app")],
-    ]
+    cli_args = tyro.cli(CLI)
+    args = cli_args.subcommand
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        args = tyro.cli(SubCmd)  # ty: ignore[no-matching-overload]
+    # Check if device is needed for the subcommand
+    if _check_if_device_needed(args):
+        from zea.internal.device import init_device
 
-    from zea.internal.device import init_device
-
-    init_device(args.device)
+        init_device(cli_args.device)
 
     if isinstance(args, ProcessArgs):
         from zea.data.process import run_processing
@@ -137,6 +99,10 @@ def main() -> None:
             theme=gr.themes.Soft(primary_hue="violet", secondary_hue="yellow"),
             css=CSS,
         )
+    elif isinstance(args, DataArgs):
+        args.run()
+    else:
+        raise ValueError(f"Unknown command: {args}")
 
 
 if __name__ == "__main__":

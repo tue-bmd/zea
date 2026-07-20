@@ -322,6 +322,54 @@ def test_accessing_valid_but_unset_attributes():
     parameters.focus_distances
 
 
+def test_t_peak_default_and_waveform_derived():
+    """t_peak falls back to 1/f0, but is estimated from waveforms_two_way when provided."""
+    center_frequency = 5e6
+    n_tx = 3
+
+    # Default: no waveform or explicit t_peak provided -> falls back to 1 / f0.
+    parameters = Parameters(n_tx=n_tx, center_frequency=center_frequency)
+    parameters.selected_transmits = "all"
+    assert np.allclose(parameters.t_peak, 1 / center_frequency)
+
+    # Build a synthetic pulse-echo waveform with a known envelope peak time.
+    sampling_frequency = 250e6
+    true_t_peak = 1.5e-6
+    t = np.arange(512) / sampling_frequency
+    pulse = np.exp(-((t - true_t_peak) ** 2) / (2 * (0.2e-6) ** 2)) * np.cos(
+        2 * np.pi * center_frequency * (t - true_t_peak)
+    )
+    waveforms_two_way = np.tile(pulse, (n_tx, 1))
+
+    parameters = Parameters(
+        n_tx=n_tx,
+        center_frequency=center_frequency,
+        waveforms_two_way=waveforms_two_way,
+    )
+    parameters.selected_transmits = "all"
+    assert np.allclose(parameters.t_peak, true_t_peak, atol=1e-8)
+
+    # An explicitly provided t_peak still takes priority over the waveform estimate.
+    explicit_t_peak = np.full(n_tx, 9e-7, dtype=np.float32)
+    parameters = Parameters(
+        n_tx=n_tx,
+        center_frequency=center_frequency,
+        waveforms_two_way=waveforms_two_way,
+        t_peak=explicit_t_peak,
+    )
+    parameters.selected_transmits = "all"
+    assert np.allclose(parameters.t_peak, explicit_t_peak)
+
+    # waveforms_one_way alone is not used to derive t_peak.
+    parameters = Parameters(
+        n_tx=n_tx,
+        center_frequency=center_frequency,
+        waveforms_one_way=waveforms_two_way,
+    )
+    parameters.selected_transmits = "all"
+    assert np.allclose(parameters.t_peak, 1 / center_frequency)
+
+
 def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
     local_scan_args = scan_args.copy()
     local_scan_args.pop("azimuth_angles", None)
