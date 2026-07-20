@@ -1107,7 +1107,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
             * - ``genetic_strain``
               - ``str``
               - scalar
-              - Genetic strain of an animal subject, e.g. C57BL/6N.
+              - Genetic strain (inbred line) of an animal subject, e.g. C57BL/6N.
               - |badge-opt|
             * - ``fat_percentage``
               - ``float32``
