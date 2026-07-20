@@ -1827,7 +1827,7 @@ class Subject(Spec):
         "weight": {"unit": "kg", "description": "Subject weight.", "rare": True},
         "genetic_strain": {
             "unit": "–",
-            "description": "Genetic strain (inbred line) of an animal subject, e.g. C57BL/6N.",
+            "description": "Genetic strain of an animal subject, e.g. C57BL/6N.",
             "rare": True,
         },
         "fat_percentage": {"unit": "%", "description": "Subject fat percentage.", "rare": True},
