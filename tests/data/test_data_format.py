@@ -316,6 +316,7 @@ def test_paged_file_readable_by_oldest_supported_h5py(tmp_hdf5_path, tmp_path_fa
         check=True,
         capture_output=True,
         text=True,
+        timeout=300,
     )
     venv_python = venv_dir / "bin" / "python"
     pip_install = subprocess.run(
@@ -345,6 +346,7 @@ def test_paged_file_readable_by_oldest_supported_h5py(tmp_hdf5_path, tmp_path_fa
         [str(venv_python), "-c", read_script],
         capture_output=True,
         text=True,
+        timeout=300,
     )
     assert read_result.returncode == 0, (
         f"h5py 3.11 (HDF5 1.14.x) could not read a file written by the current "
