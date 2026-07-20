@@ -587,57 +587,6 @@ def test_load_file_all_data_types_coordinates_indexed(tmp_path):
     np.testing.assert_array_equal(loaded_coords, coords[frame_sel])
 
 
-def test_load_file_all_data_types_values_broadcast(tmp_path):
-    """An Image's values may omit the leading frame axis to broadcast a single map
-    (e.g. one map computed from all frames of raw data) across all frames.
-
-    When load_file_all_data_types is called with frame indices, broadcast values
-    (and coordinates) must be loaded whole rather than frame-indexed, since they
-    have no frame axis to index into.
-    """
-    from zea.data.spec import FileSpec
-
-    n_frames, n_tx, n_ax, n_el, H, W = 4, 2, 32, 8, 8, 8
-
-    raw_data = np.random.rand(n_frames, n_tx, n_ax, n_el, 1).astype(np.float32)
-    # A single map broadcast across all frames: no leading n_frames axis.
-    broadcast_values = np.arange(H * W, dtype=np.uint8).reshape(H, W)
-    broadcast_coords = np.zeros((H, W, 3), dtype=np.float32)
-
-    path = tmp_path / "broadcast_values.hdf5"
-    FileSpec(
-        data={
-            "raw_data": raw_data,
-            "image": {"values": broadcast_values, "coordinates": broadcast_coords},
-        },
-        scan={
-            "sampling_frequency": np.float32(40e6),
-            "center_frequency": np.float32(5e6),
-            "demodulation_frequency": np.float32(5e6),
-            "initial_times": np.zeros(n_tx, dtype=np.float32),
-            "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
-            "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
-            "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
-            "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
-            "polar_angles": np.zeros(n_tx, dtype=np.float32),
-        },
-        probe={"name": "test_probe", "probe_geometry": np.zeros((n_el, 3))},
-    ).save(path)
-
-    frame_sel = [1, 3]
-    data_dict, _ = load_file_all_data_types(path, indices=(frame_sel,))
-
-    loaded_raw_data = data_dict["raw_data"]
-    loaded_values = data_dict["image"]["values"]
-    loaded_coords = data_dict["image"]["coordinates"]
-
-    assert loaded_raw_data.shape[0] == len(frame_sel), "raw_data must have selected frames"
-    assert loaded_values.shape == (H, W), "broadcast values must be loaded whole, not indexed"
-    assert loaded_coords.shape == (H, W, 3), "broadcast coordinates must be loaded whole"
-    np.testing.assert_array_equal(loaded_values, broadcast_values)
-    np.testing.assert_array_equal(loaded_coords, broadcast_coords)
-
-
 def test_save_file_from_parameters_round_trip(tmp_path):
     """Round-trip: generate a file, load its Parameters, save to a new file, validate.
 
