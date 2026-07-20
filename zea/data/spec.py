@@ -943,7 +943,6 @@ class Segmentation(BooleanMap):
         },
     }
 
-
     def __post_init__(self):
         assert self.values.ndim in (4, 5), (
             "Segmentation values must have 4 or 5 dimensions: "

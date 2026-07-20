@@ -415,7 +415,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - 
             * - ``values``
               - ``bool``
-              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, y) or (n_frames, z, x, n_spatial_ch) or (n_frames, z, x)
+              - (n_frames, z, x, y, n_spatial_ch) or (n_frames, z, x, n_spatial_ch)
               - Map pixel values.
               - |badge-req|
             * - ``coordinates``
