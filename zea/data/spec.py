@@ -1706,7 +1706,7 @@ class ProbeSpec(Spec):
         "type": {"description": "Probe geometry type (linear, phased, curved, ...)."},
         "probe_center_frequency": {
             "unit": "Hz",
-            "description": "Probe nominal centre frequency.",
+            "description": ("Probe nominal centre frequency (midpoint of the probe's -6 dB band)."),
         },
         "probe_bandwidth_percent": {
             "unit": "%",
