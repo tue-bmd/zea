@@ -31,7 +31,7 @@ Or alternatively, use the script below to convert all .mat files in a directory:
 
     .. code-block:: bash
 
-        python -m zea.data.convert verasonics "C:/path/to/source" "C:/path/to/output"
+        zea convert verasonics "C:/path/to/source" "C:/path/to/output"
 
 ---------------
 

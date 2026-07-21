@@ -42,13 +42,13 @@ Dataset splits:
 
 .. code-block:: console
 
-   python -m zea.data.convert camus ./raw ./output --download
+   zea convert camus ./raw ./output --download
 
 For testing purposes, you can also convert a reduced dataset containing only 6 half-sequence files:
 
 .. code-block:: console
 
-    python -m zea.data.convert camus ./raw ./output --download --reduced-dataset
+    zea convert camus ./raw ./output --download --reduced-dataset
 
 """
 
@@ -473,8 +473,8 @@ def convert_camus(args):
 
     Usage::
 
-        python -m zea.data.convert camus <source_folder> <destination_folder>
-        python -m zea.data.convert camus <source_folder> <destination_folder> --download
+        zea convert camus <source_folder> <destination_folder>
+        zea convert camus <source_folder> <destination_folder> --download
 
     Args:
         args (argparse.Namespace): An object with attributes:
@@ -662,7 +662,7 @@ This dataset was downloaded, converted to zea format, and uploaded using the
 [zea](https://github.com/tue-bmd/zea) data converter:
 
 ```bash
-python -m zea.data.convert camus <src> <dst> --download
+zea convert camus <src> <dst> --download
 ```
 
 ## Dataset structure

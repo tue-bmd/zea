@@ -1,10 +1,8 @@
 """CLI for converting common open-source ultrasound datasets to the zea format.
 
-The converters are available both as a subcommand of the ``zea`` command line tool
-and as a standalone module:
+Use the ``zea convert`` subcommand::
 
-    zea convert <dataset> <src> <dst> [options]        # preferred
-    python -m zea.data.convert <dataset> <src> <dst>   # equivalent
+    zea convert <dataset> <src> <dst> [options]
 
 Examples::
 
@@ -13,11 +11,12 @@ Examples::
     zea convert echonet ./raw ./output
     zea convert echoxflow ./raw ./output
 
-Run ``zea convert --help`` (or ``python -m zea.data.convert --help``) for all options.
+Run ``zea convert --help`` for all options.
 
-The CLI dataclasses themselves live in :mod:`zea.cli_args` (kept free of heavy
-imports so ``zea --help`` renders without loading an ML backend); they are
-re-exported here for backwards compatibility.
+Running this module directly (``python -m zea.data.convert ...``) remains supported
+for backwards compatibility. The CLI dataclasses live in :mod:`zea.cli_args` (kept
+free of heavy imports so ``zea --help`` renders without loading an ML backend) and
+are re-exported here.
 """
 
 import tyro

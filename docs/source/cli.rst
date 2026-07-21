@@ -13,8 +13,5 @@ Note that is very new functionality, and might change in future releases. Please
     zea data <operation> [options]                                 # manipulate zea data files
     zea convert <dataset> <src> <dst> [options]                    # convert raw datasets to zea
 
-The ``convert`` subcommand (documented below) is also available as a standalone
-module with an identical interface: ``python -m zea.data.convert <dataset> <src> <dst>``.
-
 .. tyroprogram:: zea.__main__:CLI
    :prog: zea
