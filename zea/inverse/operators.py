@@ -3,10 +3,11 @@
 This module provides the two forward maps used by :mod:`zea.inverse`:
 
 * :class:`DASOperator` — the delay-and-sum (DAS) beamformer as a linear
-  operator mapping pre-beamformed channel data to a beamformed image. Built on
-  the :mod:`zea.beamform.beamformer` primitives (:func:`calculate_delays`,
-  :func:`apply_delays`, :func:`fnumber_mask`), so it shares its delay model
-  (including lens correction) with the rest of ``zea``.
+  operator mapping pre-beamformed channel data to a beamformed image. Built as
+  a regular :class:`zea.Pipeline` (:class:`zea.ops.TOFCorrection` followed by
+  :class:`zea.ops.DelayAndSum`, chunked over grid pixels with
+  :class:`zea.ops.PatchedGrid`), so it shares its delay model (including lens
+  correction) with the rest of ``zea``.
 * :class:`ScattererSimulator` — a time-domain point-scatterer simulator that
   maps scatterer positions and magnitudes to pre-beamformed channel data using
   the scan's own (two-way) transmit waveforms. It uses the same delay model as
@@ -16,10 +17,11 @@ This module provides the two forward maps used by :mod:`zea.inverse`:
 
 Both operators are written with ``keras.ops`` and are differentiable on every
 Keras backend, which is what enables the optimization-based inversion in
-:mod:`zea.inverse.inversion`. Internally they iterate over transmits (and
-scatterer chunks) with ``keras.ops.scan`` and rematerialize each step with
-``keras.remat``, so peak memory under automatic differentiation stays bounded
-even for scans with hundreds of transmits.
+:mod:`zea.inverse.inversion`. Peak memory stays bounded even for scans with
+hundreds of transmits: the beamformer processes the imaging grid in pixel
+patches (:class:`zea.ops.PatchedGrid`), and the simulator iterates over
+transmits and scatterer chunks with ``keras.ops.scan``, rematerializing each
+step with ``keras.remat``.
 """
 
 import keras
@@ -27,14 +29,9 @@ import numpy as np
 from keras import ops
 
 from zea import log
-from zea.beamform.beamformer import (
-    apply_delays,
-    calculate_delays,
-    complex_rotate,
-    fnum_window_fn_tukey,
-    fnumber_mask,
-)
+from zea.beamform.beamformer import calculate_delays, fnum_window_fn_tukey
 from zea.inverse.solvers import linear_adjoint
+from zea.ops import DelayAndSum, PatchedGrid, Pipeline, TOFCorrection
 
 
 def _sinc(x):
@@ -78,10 +75,14 @@ class DASOperator:
 
     Maps pre-beamformed channel data of shape ``(n_tx, n_ax, n_el)`` (or
     ``(n_tx, n_ax, n_el, n_ch)``) to a flattened beamformed image of shape
-    ``(n_pix,)`` (or ``(n_pix, n_ch)``) by time-of-flight correction, receive
-    f-number masking and summation over elements and transmits. Transmits are
-    accumulated with a rematerialized ``ops.scan``, so memory under automatic
-    differentiation does not grow with the number of transmits.
+    ``(n_pix,)`` (or ``(n_pix, n_ch)``) with the standard ``zea`` beamforming
+    pipeline: :class:`zea.ops.TOFCorrection` (time-of-flight correction and
+    receive f-number masking) followed by :class:`zea.ops.DelayAndSum`
+    (summation over elements and transmits). The imaging grid is processed in
+    pixel patches (:class:`zea.ops.PatchedGrid`), which bounds the peak size
+    of the time-aligned tensor at roughly
+    ``n_tx * n_pix * n_el * 4 / num_patches`` bytes regardless of the number
+    of transmits.
 
     Because the map is linear and differentiable, its adjoint (transpose) is
     available through :meth:`adjoint`, which is all that is needed for
@@ -98,17 +99,43 @@ class DASOperator:
         fnum_window_fn (callable, optional): Window function for the receive
             f-number mask. Defaults to
             :func:`zea.beamform.beamformer.fnum_window_fn_tukey`.
+        num_patches (int, optional): Number of grid patches processed
+            sequentially per beamforming pass — the memory/parallelism
+            trade-off. Defaults to ``8``.
     """
 
-    def __init__(self, parameters, flatgrid=None, fnum_window_fn=fnum_window_fn_tukey):
+    def __init__(
+        self,
+        parameters,
+        flatgrid=None,
+        fnum_window_fn=fnum_window_fn_tukey,
+        num_patches=8,
+    ):
         self.parameters = parameters
         self.fnum_window_fn = fnum_window_fn
+        self.num_patches = int(num_patches)
+        # jit_options=None keeps the pipeline a pure keras-ops function, so
+        # the operator composes with jit and autodiff at the call site (the
+        # inversion drivers compile matvec/rmatvec as a whole).
+        self._pipeline = Pipeline(
+            [
+                PatchedGrid(
+                    [TOFCorrection(fnum_window_fn=fnum_window_fn), DelayAndSum()],
+                    num_patches=self.num_patches,
+                )
+            ],
+            with_batch_dim=False,
+            jit_options=None,
+        )
+        inputs = self._pipeline.prepare_parameters(parameters)
         # Cast to float32: grids from numpy default to float64, which the jax
         # backend silently demotes but tensorflow/torch propagate into dtype
         # mismatches inside the delay computation.
-        self.flatgrid = ops.cast(
+        inputs["flatgrid"] = ops.cast(
             ops.convert_to_tensor(parameters.flatgrid if flatgrid is None else flatgrid), "float32"
         )
+        self._inputs = inputs
+        self.flatgrid = inputs["flatgrid"]
         self._adjoint_fn = None
 
     @property
@@ -122,16 +149,6 @@ class DASOperator:
         params = self.parameters
         return (params.n_tx, params.n_ax, params.n_el)
 
-    def _lens_kwargs(self):
-        params = self.parameters
-        if not getattr(params, "apply_lens_correction", False):
-            return {}
-        return {
-            "apply_lens_correction": True,
-            "lens_thickness": params.lens_thickness,
-            "lens_sound_speed": params.lens_sound_speed,
-        }
-
     def forward(self, channel_data):
         """Beamform channel data into a flattened image.
 
@@ -144,61 +161,11 @@ class DASOperator:
             Tensor: Beamformed image of shape ``(n_pix,)`` when the input was
             3D, else ``(n_pix, n_ch)``.
         """
-        params = self.parameters
         squeeze = len(channel_data.shape) == 3
         data = channel_data[..., None] if squeeze else channel_data
-        n_ax = int(data.shape[1])
-        n_ch = int(data.shape[-1])
-
-        # Delays in samples: tx (n_pix, n_tx), rx (n_pix, n_el).
-        tx_delays, rx_delays = calculate_delays(
-            self.flatgrid,
-            t0_delays=params.t0_delays,
-            tx_apodizations=params.tx_apodizations,
-            probe_geometry=params.probe_geometry,
-            initial_times=params.initial_times,
-            sampling_frequency=params.sampling_frequency,
-            sound_speed=params.sound_speed,
-            focus_distances=params.focus_distances,
-            polar_angles=params.polar_angles,
-            t_peak=params.t_peak,
-            transmit_origins=params.transmit_origins,
-            **self._lens_kwargs(),
-        )
-
-        if params.f_number == 0:
-            mask = ops.ones((self.n_pix, params.n_el, 1))
-        else:
-            mask = fnumber_mask(
-                self.flatgrid, params.probe_geometry, params.f_number, self.fnum_window_fn
-            )
-
-        demodulation_frequency = params.demodulation_frequency
-        sampling_frequency = params.sampling_frequency
-
-        def _beamform_tx(image, data_tx, txdel_tx):
-            """TOF-correct one transmit and add its image contribution."""
-            delays = rx_delays + txdel_tx[:, None]
-            tof = apply_delays(data_tx, delays, clip_min=0, clip_max=n_ax - 1) * mask
-            if n_ch == 2:
-                theta = 2 * np.pi * demodulation_frequency * delays / sampling_frequency
-                tof = complex_rotate(tof, theta)
-            return image + ops.sum(tof, axis=1)
-
-        accumulate = keras.remat(_beamform_tx)
-
-        def _scan_body(image, xs):
-            data_tx, txdel_tx = xs
-            return accumulate(image, data_tx, txdel_tx), None
-
-        # A static `length` keeps the scan XLA-compilable on the tensorflow
-        # backend (its while_loop needs a fixed iteration count under jit).
-        image, _ = ops.scan(
-            _scan_body,
-            ops.zeros((self.n_pix, n_ch), dtype="float32"),
-            (data, ops.transpose(tx_delays)),
-            length=int(data.shape[0]),
-        )
+        data = ops.cast(ops.convert_to_tensor(data), "float32")
+        outputs = self._pipeline(data=data, **self._inputs)
+        image = outputs["data"]
         return image[:, 0] if squeeze else image
 
     def __call__(self, channel_data):
