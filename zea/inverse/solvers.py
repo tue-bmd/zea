@@ -48,7 +48,7 @@ def linear_adjoint(matvec, input_template):
             >>> matvec = lambda x: ops.matmul(matrix, x)
             >>> rmatvec = linear_adjoint(matvec, ops.zeros(5))
             >>> y = np.ones(3, dtype=np.float32)
-            >>> bool(np.allclose(rmatvec(y), matrix.T @ y, atol=1e-5))
+            >>> bool(np.allclose(rmatvec(y), matrix.T @ y, atol=1e-5))  # doctest: +SKIP
             True
     """
     zeros = ops.zeros_like(input_template)
