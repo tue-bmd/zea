@@ -310,6 +310,25 @@ def test_invert_direct_fits_image(operator, measurement):
     assert tuple(result.channel_data.shape) == operator.input_shape
 
 
+def test_invert_direct_twice_on_fresh_operator(parameters, measurement):
+    """Repeated jitted inversions on a fresh operator must not leak tracers.
+
+    Regression test: the adjoint used to be built lazily on first use, so a
+    first ``invert_direct`` call (jitted) cached a closure over traced values
+    and a second call raised ``UnexpectedTracerError`` on the jax backend.
+    """
+    _, image = measurement
+    operator = DASOperator(parameters)
+    first = invert_direct(operator, image, n_iter=2)
+    second = invert_direct(operator, image, n_iter=2)
+    np.testing.assert_allclose(
+        ops.convert_to_numpy(first.channel_data),
+        ops.convert_to_numpy(second.channel_data),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+
+
 def test_invert_scatterers_recovers_channel_data(operator, measurement):
     """The scatterer prior recovers the underlying channel data.
 

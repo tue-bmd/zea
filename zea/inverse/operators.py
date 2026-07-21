@@ -136,7 +136,12 @@ class DASOperator:
         )
         self._inputs = inputs
         self.flatgrid = inputs["flatgrid"]
-        self._adjoint_fn = None
+        # Build the adjoint eagerly: constructing it lazily inside a jitted
+        # caller (e.g. the first invert_direct call) would capture tracers in
+        # the cached closure and leak them into later jitted calls.
+        self._adjoint_fn = linear_adjoint(
+            self.forward, ops.zeros(self.input_shape, dtype="float32")
+        )
 
     @property
     def n_pix(self):
@@ -185,9 +190,6 @@ class DASOperator:
         Returns:
             Tensor: Channel data of shape ``(n_tx, n_ax, n_el)``.
         """
-        if self._adjoint_fn is None:
-            template = ops.zeros(self.input_shape, dtype="float32")
-            self._adjoint_fn = linear_adjoint(self.forward, template)
         return self._adjoint_fn(image)
 
     def to_grid(self, image):
