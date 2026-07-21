@@ -123,7 +123,7 @@ bibtex_bibfiles = ["../../paper/paper.bib"]
 # for redirecting empty toc items to their parent
 redirects = {
     f"notebooks/{page}.html": f"../examples.html#{page}"
-    for page in ["data", "pipeline", "models", "metrics", "agent"]
+    for page in ["data", "pipeline", "inversion", "models", "metrics", "agent"]
 }
 
 # this will make sure that when an __all__ is defined in a module, the members

@@ -93,17 +93,20 @@ NOTEBOOK_PARAMETERS = {
         "step_size": 1,
     },
     "inverse_beamforming_example.ipynb": {
+        "run_frequency_domain": False,
         "n_plane_waves": 3,
         "n_speckle": 1500,
         "n_scatterers": 800,
         "n_iter_direct": 5,
         "n_iter_scatterers": 5,
     },
-    "inverse_beamforming_real_scans_example.ipynb": {
+    "inverse_beamforming_cirs_example.ipynb": {
         "n_iter": 3,
-        "n_scatterers_cirs": 2000,
-        # Skip the in-vivo carotid section on CI (411 MB download + long inversion)
-        "run_carotid": False,
+        "n_scatterers": 2000,
+    },
+    "inverse_beamforming_carotid_example.ipynb": {
+        # Skip on CI: 411 MB download + a long inversion
+        "run_inversion": False,
     },
     "nuclear_dehazing_example.ipynb": {
         "n_unconditional_samples": 1,
