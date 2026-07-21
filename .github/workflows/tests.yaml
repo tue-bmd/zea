@@ -292,9 +292,9 @@ jobs:
           - name: pipeline
             dirs: pipeline
             label: pipeline
-          - name: inversion
-            dirs: inversion
-            label: inversion
+          - name: inverse
+            dirs: inverse
+            label: inverse
           - name: data-metrics
             dirs: "data metrics"
             label: data+metrics

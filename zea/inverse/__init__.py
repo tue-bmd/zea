@@ -50,9 +50,9 @@ Example
     result = invert_scatterers(operator, image, n_scatterers=15000, n_iter=70)
     # result.channel_data is the recovered pre-beamformed data cube
 
-For a walkthrough see the tutorials: :doc:`../notebooks/inversion/inverse_beamforming_example`
-(synthetic), :doc:`../notebooks/inversion/inverse_beamforming_cirs_example` (recorded phantom
-scan), and :doc:`../notebooks/inversion/inverse_beamforming_carotid_example` (in-vivo).
+For a walkthrough see the tutorials: :doc:`../notebooks/inverse/fish_example`
+(synthetic), :doc:`../notebooks/inverse/cirs_example` (recorded phantom
+scan), and :doc:`../notebooks/inverse/carotid_example` (in-vivo).
 """
 
 from zea.inverse import inversion, operators, seeding, solvers
