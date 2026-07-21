@@ -567,12 +567,12 @@ Supported datasets & conversion
 The ``zea`` toolbox includes conversion scripts for several public ultrasound datasets,
 available in :mod:`zea.data.convert`
 (`source on GitHub <https://github.com/tue-bmd/zea/tree/main/zea/data/convert/>`__).
-They are invoked as subcommands of ``python -m zea.data.convert``
-(see the full :doc:`CLI reference <cli>` for all options):
+They are invoked as subcommands of ``zea convert`` (or, equivalently,
+``python -m zea.data.convert``; see the full :doc:`CLI reference <cli>` for all options):
 
 .. code-block:: shell
 
-    python -m zea.data.convert <dataset> <source> <destination>
+    zea convert <dataset> <source> <destination>
 
 **Supported datasets:**
 
@@ -597,7 +597,7 @@ Record data with your Verasonics script, save the workspace to ``.mat``, then co
 
 .. code-block:: shell
 
-    python -m zea.data.convert verasonics <src> <dst>
+    zea convert verasonics <src> <dst>
 
 See :mod:`zea.data.convert.verasonics` for details.
 
