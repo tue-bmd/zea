@@ -75,7 +75,61 @@ from zea.utils import strtobool
 _VERASONICS_TO_ZEA_PROBE_NAMES = {
     "L11-4v": "verasonics_l11_4v",
     "L11-5v": "verasonics_l11_5v",
+    "C5-2v": "verasonics_c5_2v",
+    "C5-2V": "verasonics_c5_2v",
+    "P4-2v": "verasonics_p4_2v",
+    "P4-2V": "verasonics_p4_2v",
 }
+
+
+def classify_ordered_geometry(geometry, rtol=1e-3):
+    """Classify a probe geometry as an ordered linear array, ordered arc, or neither.
+
+    Used when interpreting transmit delays during conversion. A **uniform linear
+    array** (linear/phased probes) has identical step vectors between consecutive
+    elements. A **convex/curved** array has steps of equal length that turn by a
+    constant angle (a uniform arc). Anything else — a matrix array, or an
+    unordered element list — is ``"unknown"``.
+
+    This lets the converter pick the right check per probe instead of demanding a
+    strict linear array for everything (which needlessly flags valid curved
+    probes).
+
+    Args:
+        geometry (np.ndarray): Element positions of shape ``(n_el, 3)``.
+        rtol (float): Relative tolerance (scaled by the element spacing) for the
+            uniformity checks.
+
+    Returns:
+        tuple[bool, str]: ``(is_ordered, kind)`` with ``kind`` in
+        ``{"linear", "arc", "unknown"}``.
+    """
+    n_el = geometry.shape[0]
+    if n_el < 2:
+        return False, "unknown"
+
+    steps = geometry[1:] - geometry[:-1]
+    lengths = np.linalg.norm(steps, axis=1)
+    scale = lengths[0]
+    if scale == 0:
+        return False, "unknown"
+    tol = rtol * scale
+
+    # Linear: every step vector equals the first (same direction and spacing).
+    if np.max(np.linalg.norm(steps - steps[0], axis=1)) < tol:
+        return True, "linear"
+
+    if n_el < 3:
+        return False, "unknown"
+
+    # Arc: equal step lengths and a constant turning angle between steps.
+    if np.max(np.abs(lengths - scale)) < tol:
+        units = steps / lengths[:, None]
+        cos_turn = np.clip(np.sum(units[1:] * units[:-1], axis=1), -1.0, 1.0)
+        if np.max(np.abs(cos_turn - cos_turn[0])) < rtol:
+            return True, "arc"
+
+    return False, "unknown"
 
 
 _FRAMES_RANGE_RE = re.compile(r"^\d+(-\d+)?$")
@@ -821,15 +875,38 @@ class VerasonicsFile(h5py.File):
         Returns:
             focus_distances (np.ndarray): The focus distances of shape (n_tx,).
 
-        Note:
-            This function assumes that the probe geometry is a 1d uniform linear array.
-            If not it will warn and return.
+        .. note::
+            For a 1d uniform linear array, transmits whose t0 delays form a linear ramp
+            across the active elements are treated as plane waves and their focus
+            distance is set to infinity.
+
+        .. note::
+            For a curved/arc array, a "flat-fire" transmit is a diverging wave rather
+            than a plane wave, so this normalization does not apply; an informational
+            log is emitted and the focus distances are returned unchanged.
+
+        .. note::
+            For any other (unrecognized) probe geometry, a warning is logged and the
+            focus distances are returned unchanged.
         """
-        if not self.probe._probe_geometry_is_ordered_ula:
-            log.warning(
-                "The probe geometry is not ordered as a uniform linear array. "
-                "Focal distances are not set to infinity for plane waves."
-            )
+        is_ordered, kind = self.probe._probe_geometry_ordering
+        if kind != "linear":
+            if kind == "arc":
+                # Valid curved/convex array: the linear-ramp plane-wave test below
+                # does not apply (a "flat-fire" transmit on a curved array is a
+                # diverging wave, not a plane wave). Keep the focus distances as
+                # read from the file — for a diverging transmit that is a finite
+                # (often 0 or negative) value, not infinity.
+                log.info(
+                    "Curved/arc probe geometry detected; keeping transmit focus "
+                    "distances as read (plane-wave-to-infinity normalization only "
+                    "applies to linear arrays)."
+                )
+            else:
+                log.warning(
+                    "The probe geometry is not a recognized ordered array (linear or "
+                    "arc). Focal distances are not set to infinity for plane waves."
+                )
             return focus_distances
 
         for tx in range(focus_distances.size):
@@ -1374,10 +1451,15 @@ class VerasonicsProbe:
             return self.trans_obj["lensCorrection"][:].item()
 
     @property
+    def _probe_geometry_ordering(self):
+        """``(is_ordered, kind)`` for the geometry; see :func:`classify_ordered_geometry`."""
+        return classify_ordered_geometry(self.geometry)
+
+    @property
     def _probe_geometry_is_ordered_ula(self):
         """Checks if the probe geometry is ordered as a uniform linear array (ULA)."""
-        diff_vec = self.geometry[1:] - self.geometry[:-1]
-        return np.isclose(diff_vec, diff_vec[0]).all()
+        is_ordered, kind = self._probe_geometry_ordering
+        return is_ordered and kind == "linear"
 
     def to_probe_spec(self):
         """Convert the probe to a dict compatible with :class:`~zea.data.spec.ProbeSpec`."""
