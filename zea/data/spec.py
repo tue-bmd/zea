@@ -72,9 +72,16 @@ MAX_CHUNK_BYTES = 8 << 20  # 8 MiB
 # cold open from 3 requests to 2 and ~0.16 s to ~0.05 s, at ~2% file size for 64 KiB
 # pages (larger pages waste space and, past ~1 MiB, requests too).
 #
-# Requires HDF5 >= 1.10.1 on the reader, which `libver="latest"` implies anyway.
+# Requires HDF5 >= 1.10.1 on the reader, which the "v114" high bound below satisfies.
+# The high bound is pinned rather than left as "latest": h5py 3.16 started bundling
+# libhdf5 2.0, and "latest" resolves to whatever's bundled at write time. HDF5 2.0
+# writes newer object-header message versions (e.g. datatype messages) that HDF5
+# 1.14.x readers reject outright with "bad version number for datatype message" -
+# confirmed by round-tripping a file through h5py 3.16/libhdf5 2.0 and reading it
+# back with h5py 3.11/libhdf5 1.14.2. Capping at v114 keeps files readable by the
+# 1.14.x installs still in the wild without limiting which h5py *version* writes them.
 PAGED_LAYOUT = {
-    "libver": "latest",
+    "libver": ("earliest", "v114"),
     "fs_strategy": "page",
     "fs_page_size": 64 * 1024,
     "fs_persist": True,
