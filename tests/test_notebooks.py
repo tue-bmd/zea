@@ -92,6 +92,13 @@ NOTEBOOK_PARAMETERS = {
         "num_iterations": 2,
         "step_size": 1,
     },
+    "inverse_beamforming_example.ipynb": {
+        "n_plane_waves": 3,
+        "n_speckle": 1500,
+        "n_scatterers": 800,
+        "n_iter_direct": 5,
+        "n_iter_scatterers": 5,
+    },
     "inverse_beamforming_real_scans_example.ipynb": {
         "n_iter": 3,
         "n_scatterers_cirs": 2000,
