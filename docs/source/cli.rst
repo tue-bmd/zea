@@ -19,5 +19,5 @@ Note that is very new functionality, and might change in future releases. Please
 Convert datasets
 -------------------------------
 
-.. autoprogram:: zea.data.convert.__main__:get_parser()
+.. tyroprogram:: zea.data.convert.__main__:Dataset
    :prog: python -m zea.data.convert
