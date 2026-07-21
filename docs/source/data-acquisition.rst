@@ -20,6 +20,8 @@ Additionally, to support the :doc:`cognitive ultrasound framework <about>`, the 
 allow for flexible and efficient access to a part of the data (e.g. a single frame or transmit) without the need
 to load the entire file into memory.
 
+.. _working-with-zea-data-files:
+
 -------------------------------
 Working with zea data files
 -------------------------------
