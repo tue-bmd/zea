@@ -41,11 +41,21 @@ class Simulate(Operation):
     STATIC_PARAMS = ["n_ax", "apply_lens_correction"]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
-    def __init__(self, **kwargs):
+    def __init__(self, pulse_spectrum_fn=None, **kwargs):
+        """
+        Args:
+            pulse_spectrum_fn (callable, optional): Function mapping
+                frequencies [Hz] to the (complex) transmit-pulse spectrum,
+                see :func:`zea.simulator.simulate_rf`. Defaults to ``None``
+                (parametric Hann-windowed sine); use
+                :func:`zea.simulator.get_measured_pulse_spectrum_fn` to
+                simulate with a scan's stored waveform.
+        """
         super().__init__(
             output_data_type=DataTypes.RAW_DATA,
             **kwargs,
         )
+        self.pulse_spectrum_fn = pulse_spectrum_fn
 
     def call(
         self,
@@ -80,6 +90,7 @@ class Simulate(Operation):
             "element_width": element_width,
             "attenuation_coef": attenuation_coef,
             "tx_apodizations": tx_apodizations,
+            "pulse_spectrum_fn": self.pulse_spectrum_fn,
         }
         if not self.with_batch_dim:
             simulated_rf = simulate_rf(
