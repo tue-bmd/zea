@@ -1477,10 +1477,10 @@ def convert_verasonics(args):
         log.error(
             "When converting a single file, the output path should have the .hdf5 or .h5 extension."
         )
-        sys.exit()
+        sys.exit(2)
     elif selected_path.is_dir() and output_path.is_file():
         log.error("When converting a directory, the output path should be a directory.")
-        sys.exit()
+        sys.exit(2)
 
     if output_path.is_dir() and not selected_path_is_directory:
         output_path = output_path / (selected_path.name + "_zea.hdf5")
