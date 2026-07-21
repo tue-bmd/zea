@@ -120,12 +120,21 @@ class TOFCorrection(Operation):
     # Define operation-specific static parameters
     STATIC_PARAMS = ["f_number", "apply_lens_correction", "focal_region_length"]
 
-    def __init__(self, **kwargs):
+    def __init__(self, fnum_window_fn=None, **kwargs):
+        """
+        Args:
+            fnum_window_fn (callable, optional): Window function applied to the
+                f-number mask, mapping a normalized angle to a weight (see
+                :func:`zea.beamform.beamformer.fnumber_mask`). Defaults to
+                ``None``, which uses the :func:`tof_correction` default
+                (:func:`zea.beamform.beamformer.fnum_window_fn_rect`).
+        """
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
             **kwargs,
         )
+        self.fnum_window_fn = fnum_window_fn
 
     def call(
         self,
@@ -208,6 +217,8 @@ class TOFCorrection(Operation):
             "sos_grid_z": sos_grid_z,
             "focal_region_length": focal_region_length,
         }
+        if self.fnum_window_fn is not None:
+            tof_kwargs["fnum_window_fn"] = self.fnum_window_fn
 
         if not self.with_batch_dim:
             tof_corrected = tof_correction(raw_data, **tof_kwargs)
