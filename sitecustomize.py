@@ -14,5 +14,5 @@ try:
     import coverage
 
     coverage.process_startup()
-except ImportError:
+except ImportError:  # pragma: no cover - coverage is always installed during a coverage run
     pass
