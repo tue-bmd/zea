@@ -143,9 +143,9 @@ def _enable_subprocess_coverage():
     """
     try:
         import coverage
-    except ImportError:
+    except ImportError:  # pragma: no cover - coverage is always installed during a coverage run
         return
-    if coverage.Coverage.current() is None:
+    if coverage.Coverage.current() is None:  # pragma: no cover - only when coverage is inactive
         return
     config_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
     os.environ["COVERAGE_PROCESS_START"] = str(config_path)

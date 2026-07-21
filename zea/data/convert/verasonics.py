@@ -31,10 +31,7 @@ Or alternatively, use the script below to convert all .mat files in a directory:
 
     .. code-block:: bash
 
-        python zea/data/convert/verasonics.py "C:/path/to/directory"
-
-or without the directory argument, the script will prompt you to select a directory
-using a file dialog.
+        python -m zea.data.convert verasonics "C:/path/to/source" "C:/path/to/output"
 
 ---------------
 
@@ -1472,64 +1469,21 @@ def convert_verasonics(args):
     # Is set by the user in case these are found.
     existing_file_policy = None
 
-    if args.src is None:
-        log.info("Select a directory containing Verasonics MATLAB workspace files.")
-        # Create a Tkinter root window
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-
-            root = tk.Tk()
-            root.withdraw()
-            # Prompt the user to select a file or directory
-            selected_path = filedialog.askdirectory()
-        except ImportError as e:
-            raise ImportError(
-                log.error(
-                    "tkinter is not installed. Please install it with 'apt install python3-tk'."
-                )
-            ) from e
-        except Exception as e:
-            raise ValueError(
-                log.error(
-                    "Failed to open a file dialog (possibly in headless state). "
-                    "Please provide a path as an argument. "
-                )
-            ) from e
-    else:
-        selected_path = args.src
-
-    # Exit when no path is selected
-    if not selected_path:
-        log.error("No path selected.")
-        sys.exit()
-    else:
-        selected_path = Path(selected_path)
-
+    selected_path = Path(args.src)
     selected_path_is_directory = os.path.isdir(selected_path)
 
-    # Set the output path to be next to the input directory with _zea appended
-    # to the name
-    if args.dst is None:
-        if selected_path_is_directory:
-            output_path = selected_path.parent / (Path(selected_path).name + "_zea")
-        else:
-            output_path = str(selected_path.with_suffix("")) + "_zea.hdf5"
-            output_path = Path(output_path)
-    else:
-        output_path = Path(args.dst)
-        if selected_path.is_file() and output_path.suffix not in (".hdf5", ".h5"):
-            log.error(
-                "When converting a single file, the output path should have the .hdf5 "
-                "or .h5 extension."
-            )
-            sys.exit()
-        elif selected_path.is_dir() and output_path.is_file():
-            log.error("When converting a directory, the output path should be a directory.")
-            sys.exit()
+    output_path = Path(args.dst)
+    if selected_path.is_file() and output_path.suffix not in (".hdf5", ".h5"):
+        log.error(
+            "When converting a single file, the output path should have the .hdf5 or .h5 extension."
+        )
+        sys.exit()
+    elif selected_path.is_dir() and output_path.is_file():
+        log.error("When converting a directory, the output path should be a directory.")
+        sys.exit()
 
-        if output_path.is_dir() and not selected_path_is_directory:
-            output_path = output_path / (selected_path.name + "_zea.hdf5")
+    if output_path.is_dir() and not selected_path_is_directory:
+        output_path = output_path / (selected_path.name + "_zea.hdf5")
 
     log.info(f"Selected path: {log.yellow(selected_path)}")
 
