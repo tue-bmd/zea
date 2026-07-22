@@ -74,8 +74,6 @@ tests = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff==0.15.19",
-    "ty==0.0.53",
     "pytest-cov",
     "gradio>=6.0",
 ]
@@ -115,6 +113,12 @@ Contributing = "https://zea.readthedocs.io/en/latest/contributing.html"
 
 [project.scripts]
 zea = "zea.__main__:main"
+
+[dependency-groups]
+lint = [
+    "ruff==0.15.19",
+    "ty==0.0.53",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["zea"]

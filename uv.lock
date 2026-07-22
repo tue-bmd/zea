@@ -7614,7 +7614,6 @@ dev = [
     { name = "pystemmer" },
     { name = "pytest" },
     { name = "pytest-cov" },
-    { name = "ruff" },
     { name = "simpleitk" },
     { name = "sphinx", version = "8.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
@@ -7630,7 +7629,6 @@ dev = [
     { name = "sphinx-reredirects", version = "0.1.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "sphinx-reredirects", version = "1.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "sphinxcontrib-bibtex" },
-    { name = "ty" },
 ]
 display = [
     { name = "opencv-python" },
@@ -7679,8 +7677,12 @@ tests = [
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-cov" },
-    { name = "ruff" },
     { name = "simpleitk" },
+]
+
+[package.dev-dependencies]
+lint = [
+    { name = "ruff" },
     { name = "ty" },
 ]
 
@@ -7719,7 +7721,6 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'tests'", specifier = ">=9.0.3" },
     { name = "pytest-cov", marker = "extra == 'tests'" },
     { name = "pyyaml", specifier = ">=6" },
-    { name = "ruff", marker = "extra == 'tests'", specifier = "==0.15.19" },
     { name = "scikit-image", specifier = ">=0.23" },
     { name = "scikit-learn", specifier = ">=1.4" },
     { name = "scipy", specifier = ">=1.13" },
@@ -7734,7 +7735,6 @@ requires-dist = [
     { name = "tensorflow", marker = "extra == 'backends'", specifier = ">=2.12.1" },
     { name = "torch", marker = "extra == 'backends'", specifier = ">=2.2" },
     { name = "tqdm", specifier = ">=4" },
-    { name = "ty", marker = "extra == 'tests'", specifier = "==0.0.53" },
     { name = "tyro", specifier = ">=1.0" },
     { name = "wandb", specifier = ">=0.18" },
     { name = "wget", specifier = ">=3.2" },
@@ -7745,6 +7745,12 @@ requires-dist = [
     { name = "zea", extras = ["tests"], marker = "extra == 'dev'" },
 ]
 provides-extras = ["dev", "tests", "docs", "jax", "display", "display-headless", "models", "app", "backends"]
+
+[package.metadata.requires-dev]
+lint = [
+    { name = "ruff", specifier = "==0.15.19" },
+    { name = "ty", specifier = "==0.0.53" },
+]
 
 [[package]]
 name = "zipp"

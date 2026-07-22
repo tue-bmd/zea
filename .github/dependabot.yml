@@ -35,3 +35,16 @@ updates:
     labels:
        - "dev"
     open-pull-requests-limit: 3
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      pre-commit:
+        patterns:
+          - "*"
+    assignees:
+       - "tristan-deep"
+    labels:
+       - "dev"
+    open-pull-requests-limit: 3
