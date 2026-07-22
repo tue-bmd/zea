@@ -1125,7 +1125,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``annotations`` — Annotations
 
-         Frame-level annotations, either per frame or broadcast labels.
+         Frame-level annotations, either one per frame or a single broadcast value.
 
          .. list-table::
             :header-rows: 1
@@ -1139,12 +1139,12 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
             * - ``anatomy``
               - ``str``
               - (n_frames) or scalar
-              - Anatomy label.
+              - Anatomical structure imaged (e.g. carotid, liver).
               - |badge-opt|
             * - ``view``
               - ``str``
               - (n_frames) or scalar
-              - View label.
+              - Imaging plane/orientation (e.g. longitudinal, apical_4_chamber).
               - |badge-opt|
             * - ``label``
               - ``str``
