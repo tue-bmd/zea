@@ -39,10 +39,10 @@ elif os.environ["KERAS_BACKEND"] != "tensorflow":
 import time
 from pathlib import Path
 
-import torch  # ty: ignore[unresolved-import]
-import torchvision  # ty: ignore[unresolved-import]
+import torch
+import torchvision
 import wget
-from onnx2tf import convert  # noqa  # ty: ignore[unresolved-import]
+from onnx2tf import convert  # noqa
 
 from zea import log
 

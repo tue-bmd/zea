@@ -4,7 +4,7 @@ Tensorflow utilities
 
 import keras
 import numpy as np
-import tensorflow as tf  # ty: ignore[unresolved-import]
+import tensorflow as tf
 from keras.layers import Lambda, LeakyReLU, ReLU
 
 PI = tf.experimental.numpy.pi

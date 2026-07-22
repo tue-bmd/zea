@@ -234,11 +234,7 @@ docstring-code-line-length = "dynamic"
 python-version = "3.10"
 
 [tool.ty.rules]
-# zea is multi-backend: jax / torch / tensorflow are optional and usually not
-# all installed in the (lightweight) type-checking environment, so their
-# conditional `import` statements would otherwise be flagged. Keep this visible
-# as a warning rather than a hard error so it never blocks CI.
-unresolved-import = "warn"
+unresolved-import = "ignore"
 
 [tool.ty.src]
 include = ["zea"]

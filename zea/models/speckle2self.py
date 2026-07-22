@@ -78,7 +78,7 @@ def _build_torch_classes():  # pragma: no cover
         dict: ``{"SpeckleReductionNet": cls, "_SRNSingleInputWrapper": cls}``
     """
     # torch required for ONNX export
-    import torch.nn as nn  # noqa: F401  # ty: ignore[unresolved-import]
+    import torch.nn as nn  # noqa: F401
 
     class ConvBlock(nn.Module):  # pragma: no cover
         """Conv2d(stride) + InstanceNorm2d(affine=False) + optional ReLU."""
@@ -228,7 +228,7 @@ def convert_to_onnx(pth_path, onnx_path, input_size=(1, 1, 512, 512)):  # pragma
     Raises:
         ImportError: If ``torch`` is not installed.
     """
-    import torch  # ty: ignore[unresolved-import]
+    import torch
 
     classes = _build_torch_classes()
     srn = classes["SpeckleReductionNet"]()
@@ -242,7 +242,7 @@ def convert_to_onnx(pth_path, onnx_path, input_size=(1, 1, 512, 512)):  # pragma
     dummy = torch.zeros(*input_size)
     torch.onnx.export(
         wrapper,
-        dummy,
+        (dummy,),
         onnx_path,
         opset_version=11,
         input_names=["input"],
@@ -532,7 +532,7 @@ class Speckle2Self(BaseModel):
         Args:
             pth_path (str): Path to the ``.pth`` file produced by PyTorch.
         """
-        import torch  # only needed for weight loading  # ty: ignore[unresolved-import]
+        import torch  # only needed for weight loading
 
         # Build the full model (outer Speckle2Self) so save_weights works later
         if not self.built:

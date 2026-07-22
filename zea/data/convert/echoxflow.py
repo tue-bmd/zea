@@ -50,7 +50,7 @@ def _import_echoxflow():
     ``zea convert --help`` keeps working without it.
     """
     try:
-        from echoxflow import (  # ty: ignore[unresolved-import]
+        from echoxflow import (
             find_recordings,
             load_croissant,
             open_recording,

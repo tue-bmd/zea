@@ -3,7 +3,7 @@
 import keras
 from keras import Input, ops
 from keras.layers import Add, Conv2D, UpSampling2D
-from tensorflow.python.keras.layers import Layer  # ty: ignore[unresolved-import]
+from tensorflow.python.keras.layers import Layer
 
 from zea.backend.tensorflow.layers.utils import get_activation
 
