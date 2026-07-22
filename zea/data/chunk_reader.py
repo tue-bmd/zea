@@ -680,7 +680,9 @@ def _ticker(
     from tqdm.auto import tqdm  # tqdm.auto: renders as a widget in notebooks, text elsewhere
 
     name = Path(fetcher.source).name if fetcher.source else "data"
-    with tqdm(total=total, unit="B", unit_scale=True, desc=f"streaming {name}") as bar:
+    # per_chunk is local-only (see Fetcher.per_chunk); HTTP is what's actually "streaming".
+    verb = "reading" if fetcher.per_chunk else "streaming"
+    with tqdm(total=total, unit="B", unit_scale=True, desc=f"{verb} {name}") as bar:
         yield bar.update
 
 

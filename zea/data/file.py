@@ -951,8 +951,11 @@ class File(h5py.File):
         elif stream and not is_hf:
             raise ValueError("stream=True is only supported for 'hf://' paths.")
 
-        # Progress reporting for concurrent chunk reads
-        progress = kwargs.pop("progress", True)
+        # Progress reporting for concurrent chunk reads. Defaults to True for streamed
+        # (hf://) files, where a bar communicates real network wait; a local file's
+        # concurrent reads are fast enough (pread, no round trips) that a bar is just
+        # noise by default.
+        progress = kwargs.pop("progress", stream)
 
         # Cache streamed chunks on disk (see zea.data.chunk_cache). On by default, like the
         # HF hub cache; ``cache=False`` (or ZEA_CHUNK_CACHE=0) re-fetches every time.
