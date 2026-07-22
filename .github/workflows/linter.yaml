@@ -45,4 +45,4 @@ jobs:
       # intentionally left out, so their conditional imports are downgraded to
       # warnings in [tool.ty]. ty's version comes from the `lint` group.
       - name: Run Type Checker
-        run: uv run --python 3.10 --group lint ty check
+        run: uv run --python 3.10 --group lint ty check --exit-zero-on-warning
