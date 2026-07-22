@@ -605,4 +605,29 @@ See :mod:`zea.data.convert.verasonics` for details.
 
 **us4us**
 
-To be added in a future release. See ongoing issue `#448 <https://github.com/tue-bmd/zea/issues/448>`__.
+Record data using us4us software (ARRUS 0.12.0 – 0.14.x and gui4us 0.3.x), save it to the ``.pickle`` file, then convert:
+
+.. code-block:: shell
+
+    python -m zea.data.convert us4us <src> <dst> --mapping '{"0": "image", "1": "raw_data"}'
+
+``<src>`` and ``<dst>`` can each be either a directory or a single file (a ``.pkl`` file for ``<src>``, a ``.hdf5`` file for ``<dst>``).
+When directories are passed, every ``*.pkl`` file found in ``<src>`` is converted,
+and the results are written as ``<dst>/<name>.hdf5`` (``<dst>`` is created if it does not exist):
+
+.. code-block:: shell
+
+    python -m zea.data.convert us4us <src_dir>/ <dst_dir>/ --mapping '{"0": "image"}'
+
+Arguments:
+
+- ``src``: path to the source ``.pkl`` file, or to a directory containing one or
+  more ``.pkl`` files.
+- ``dst``: path to the destination ``.hdf5`` file when ``src`` is a file, or to
+  the destination directory when ``src`` is a directory.
+- ``--mapping``: JSON object mapping each us4us output index (position in the per-frame tuple)
+  to a zea data type. Supported types: ``raw_data``, ``image``, ``beamformed_data``,
+  ``envelope_data``, ``aligned_data``. Defaults to ``'{"0": "image"}'``.
+
+See :mod:`zea.data.convert.us4us` for the full mapping from ``arrus`` metadata to zea
+scan/probe fields and other implementation details.

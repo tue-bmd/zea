@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import hashlib
 import os
 import shutil
 import subprocess
@@ -20,6 +21,7 @@ import yaml
 from zea.data.convert.images import convert_image_dataset
 from zea.data.convert.utils import (
     check_output_dir_ownership,
+    download_file,
     load_avi,
     require_output_dir_ownership,
     sitk_load,
@@ -33,6 +35,7 @@ from zea.data.convert.verasonics import (
 )
 from zea.data.file import File
 from zea.func.tensor import translate
+from zea.internal.cache import ZEA_CACHE_DIR
 from zea.internal.preset_utils import _hf_resolve_path
 from zea.io_lib import _SUPPORTED_IMG_TYPES
 
@@ -61,6 +64,7 @@ def run_subprocess(cmd, **kwargs):
         "cetus",
         "picmus",
         "verasonics",
+        "us4us",
     ],
 )
 @pytest.mark.heavy
@@ -146,6 +150,8 @@ def create_test_data_for_dataset(dataset, src):
         create_picmus_test_data(src)
     elif dataset == "verasonics":
         create_verasonics_test_data(src)
+    elif dataset == "us4us":
+        extra_args = create_us4us_test_data(src)
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
     return extra_args
@@ -175,6 +181,8 @@ def verify_converted_test_dataset(dataset, src, dst):
         verify_converted_picmus_test_data(dst)
     elif dataset == "verasonics":
         verify_converted_verasonics_test_data(src, dst)
+    elif dataset == "us4us":
+        verify_converted_us4us_test_data(src, dst)
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
 
@@ -563,6 +571,52 @@ def create_verasonics_test_data(src):
         yaml.dump(convert_yaml, f)
 
 
+# TODO(piotr-jarosik) move this file to the zeahub HuggingFace repository.
+US4US_TEST_PKL_URL = (
+    "https://www.dropbox.com/scl/fi/xhid5kosgut2vzeyr5j19/"
+    "zea_us4us_converter_test_data.pkl?rlkey=94e533yaebs2duijtk1mqnm79&dl=1"
+)
+# Pinned so the test fails loudly if the remote asset (or the cached copy) is
+# ever replaced with different bytes, rather than silently converting stale
+# or unexpected data.
+US4US_TEST_PKL_SHA256 = "98bc02df030f11cf74fb690899ca2207043ab79e5d66c87475226807a0b52412"
+
+
+def _sha256_of_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def create_us4us_test_data(src):
+    """For us4us we download a small ``.pkl`` test sample from Dropbox.
+
+    The pickle is cached under ``ZEA_CACHE_DIR/test_data`` so subsequent test
+    runs reuse it, and its SHA256 is verified against
+    :data:`US4US_TEST_PKL_SHA256` on every run so a changed remote asset or a
+    tampered cache entry fails the test instead of being silently accepted.
+    A two-entry ``--mapping`` is passed via ``extra_args`` so the converter
+    exercises the multi-track write path (``tracks/track_0`` = image,
+    ``tracks/track_1`` = beamformed_data).
+    """
+    cache_path = ZEA_CACHE_DIR / "test_data" / "zea_us4us_converter_test_data.pkl"
+    cached_pkl = download_file(US4US_TEST_PKL_URL, cache_path)
+    actual_sha256 = _sha256_of_file(cached_pkl)
+    if actual_sha256 != US4US_TEST_PKL_SHA256:
+        # Drop the bad cache entry so a re-run will attempt a fresh download.
+        cached_pkl.unlink(missing_ok=True)
+        raise AssertionError(
+            "us4us test pickle checksum mismatch: "
+            f"expected {US4US_TEST_PKL_SHA256}, got {actual_sha256} for {cache_path}. "
+            "The remote asset or the cached copy has changed; update "
+            "US4US_TEST_PKL_SHA256 if this new content is intentional."
+        )
+    shutil.copy(cached_pkl, src / cached_pkl.name)
+    return ["--mapping", '{"0": "image", "1": "beamformed_data"}']
+
+
 def verify_converted_echonet_test_data(dst):
     """
     Verify that the converted EchoNet test dataset has the correct structure with hdf5 files
@@ -821,6 +875,84 @@ def verify_converted_verasonics_test_data(src, dst):
         assert "data" in f, f"Missing 'data' in {h5_file}"
         assert "scan" in f, f"Missing 'scan' in {h5_file}"
         f.validate()
+
+
+def verify_converted_us4us_test_data(src, dst):
+    """Verify the us4us multi-track conversion output.
+
+    The CLI mapping ``{0: "image", 1: "beamformed_data"}`` triggers the
+    multi-track write path in ``us4us.py``: ``track_0`` holds an ``image`` of
+    shape ``(n_frames, *per_frame_image_shape)`` (matching the source pickle)
+    and ``track_1`` exposes a ``beamformed_data`` dataset.
+    """
+    from zea.data.convert.us4us import _load_us4us_pickle
+
+    h5_files = list(dst.rglob("*.hdf5"))
+    assert len(h5_files) == 1, "Expected 1 converted hdf5 file."
+    h5_file = h5_files[0]
+
+    src_pkl = next(Path(src).glob("*.pkl"))
+    src_pickle_data = _load_us4us_pickle(src_pkl)
+    expected_n_frames = len(src_pickle_data["data"])
+    expected_image_shape = src_pickle_data["data"][0][0].shape
+
+    src_beamformed = src_pickle_data["data"][0][1]
+    _, n_tx, n_ax = src_beamformed.shape
+    expected_beamformed_stacked_shape = (expected_n_frames, n_ax, n_tx, 2)
+
+    with File(h5_file, "r") as f:
+        assert "probe" in f, f"Missing 'probe' in {h5_file}"
+        assert "tracks/track_0" in f, f"Missing 'tracks/track_0' in {h5_file}"
+        assert "tracks/track_1" in f, f"Missing 'tracks/track_1' in {h5_file}"
+
+        tracks = f.tracks
+        assert len(tracks) == 2, f"Expected 2 tracks, got {len(tracks)}"
+
+        image_values = tracks[0].data.image.values[:]
+        expected_shape = (expected_n_frames, *expected_image_shape)
+        assert image_values.shape == expected_shape, (
+            f"track_0 image shape {image_values.shape} does not match the "
+            f"per-frame pickle image stacked across frames ({expected_shape})."
+        )
+
+        assert "beamformed_data" in tracks[1].data, (
+            f"track_1 must expose 'beamformed_data' (got keys: {list(tracks[1].data.keys())})."
+        )
+        beamformed_values = tracks[1].data.beamformed_data.values[:]
+        assert beamformed_values.shape == expected_beamformed_stacked_shape, (
+            f"track_1 beamformed_data shape {beamformed_values.shape} does not "
+            f"match the expected (n_frames, n_ax, n_tx, 2) shape "
+            f"({expected_beamformed_stacked_shape}) derived from the per-frame "
+            f"pickle beamformed_data ({src_beamformed.shape})."
+        )
+
+        f.validate()
+
+
+def test_convert_us4us_rejects_pickle_missing_required_keys(tmp_path):
+    """``convert_us4us`` must fail with a clear ``ValueError`` when the
+    source ``.pkl`` is a dict missing the ``"data"`` or ``"metadata"`` key
+    required by the us4us pickle contract."""
+    import pickle as _pickle
+    from argparse import Namespace
+
+    from zea.data.convert.us4us import convert_us4us
+
+    def _run(pickle_payload, expected_pattern):
+        src = tmp_path / "bad.pkl"
+        with open(src, "wb") as f:
+            _pickle.dump(pickle_payload, f)
+        args = Namespace(
+            src=src,
+            dst=tmp_path / "out.hdf5",
+            mapping={0: "image"},
+            overwrite=True,
+        )
+        with pytest.raises(ValueError, match=expected_pattern):
+            convert_us4us(args)
+
+    _run({"data": []}, r"missing=\['metadata'\]")
+    _run({"metadata": ()}, r"missing=\['data'\]")
 
 
 def _install_fake_echoxflow(monkeypatch, src, recordings):
