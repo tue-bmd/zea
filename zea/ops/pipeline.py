@@ -1718,39 +1718,41 @@ class GeneralizedCoherenceFactor(Operation):
 class MinimumVariance(Operation):
     r"""Minimum Variance (Capon/MVDR) beamformer.
 
-    Each transmit is beamformed adaptively with its own weights and the results are
-    compounded afterwards, as in the reference implementations. Per transmit, the
-    sample covariance for each pixel is estimated by averaging the outer products of
-    the :math:`L = N_{el} - M + 1` overlapping sub-apertures of length :math:`M`, over
-    :math:`2K + 1` axially adjacent pixels:
+    Instead of summing the delayed channels with unit weights (delay-and-sum), the
+    weights :math:`\mathbf{w}` are chosen per pixel to minimise the output power
+    :math:`\mathbf{w}^H \hat{\mathbf{R}} \mathbf{w}` while passing the look direction
+    undistorted (:math:`\mathbf{w}^H \mathbf{e} = 1`, with :math:`\mathbf{e} =
+    \mathbf{1}`). This adapts the receive aperture to suppress off-axis energy,
+    improving lateral resolution and clutter rejection over delay-and-sum.
+
+    The covariance :math:`\hat{\mathbf{R}}` is estimated with spatial smoothing:
+    :math:`L = N_{el} - M + 1` overlapping sub-apertures of length :math:`M` are
+    averaged, optionally together with :math:`2K + 1` axially adjacent pixels,
 
     .. math::
 
-        \hat{\mathbf{R}}_t(p) = \frac{1}{L (2K+1)}
-        \sum_{l,k} \mathbf{x}_{l}[t, p_k]\,\mathbf{x}_{l}^H[t, p_k]
+        \hat{\mathbf{R}}(p) = \frac{1}{L (2K+1)}
+        \sum_{l,k} \mathbf{x}_{l}[p_k]\,\mathbf{x}_{l}^H[p_k],
 
-    It is regularised with diagonal loading
-    :math:`\delta\,\mathrm{tr}(\hat{\mathbf{R}}_t)/M` before solving for the Capon
-    weights
+    diagonally loaded by :math:`\delta\,\mathrm{tr}(\hat{\mathbf{R}})/M` to keep the
+    inverse well conditioned. The weights follow in closed form,
 
     .. math::
 
-        \mathbf{w}_t(p) = \frac{\hat{\mathbf{R}}_{t,\delta}^{-1}\,\mathbf{e}}
-        {\mathbf{e}^H\,\hat{\mathbf{R}}_{t,\delta}^{-1}\,\mathbf{e}}, \quad
-        \mathbf{e} = \mathbf{1}_M
+        \mathbf{w}(p) = \frac{\hat{\mathbf{R}}_\delta^{-1}\,\mathbf{e}}
+        {\mathbf{e}^H\,\hat{\mathbf{R}}_\delta^{-1}\,\mathbf{e}}.
 
-    The output is :math:`\sum_t \mathbf{w}_t^H \mathbf{x}_t`, averaged over the
-    sub-apertures and summed over transmits, matching the compounding convention of
-    :class:`DelayAndSum`.
+    Each transmit is beamformed with its own weights and the results are summed
+    (compounded), as in :class:`DelayAndSum`.
 
     .. warning::
 
-        Spatial smoothing assumes every sub-aperture sees the same array, which a hard
-        receive-aperture mask breaks. Elements zeroed by the f-number mask span a null
-        space of :math:`\hat{\mathbf{R}}` that the loaded inverse fills with weight,
-        starving the live channels and collapsing the lateral near field into a
-        triangular bright region. Set ``parameters.f_number = 0`` so that MV sees the
-        full aperture and adapts it itself.
+        Spatial smoothing assumes every sub-aperture sees the full array. Zeroing
+        receive channels breaks that: elements masked out by a nonzero ``f_number``
+        span a null space of :math:`\hat{\mathbf{R}}` that the loaded inverse fills
+        with weight, starving the live channels and darkening the lateral near field
+        into a triangular artefact. Set ``parameters.f_number = 0`` and let MV adapt
+        the aperture itself.
 
     .. admonition:: References
 
@@ -1763,16 +1765,15 @@ class MinimumVariance(Operation):
         Control* **55** (3), 2008. https://doi.org/10.1109/TUFFC.2008.686
 
     Args:
-        subarray_size (int or None): Sub-aperture length :math:`M`. Should not exceed
-            ``n_el // 2``, or the covariance estimate becomes singular. Defaults to
-            ``n_el // 2``.
+        subarray_size (int or None): Sub-aperture length :math:`M`. Smaller values are
+            more robust (shallow targets need this); ``n_el // 2`` is the maximum
+            before the covariance turns singular. Defaults to ``n_el // 2``.
         diagonal_loading (float): Loading :math:`\delta` as a fraction of the mean
-            eigenvalue :math:`\mathrm{tr}(\hat{\mathbf{R}})/M`. Larger values push
-            the solution toward DAS. Defaults to ``1e-2``.
-        axial_averaging (int): Half-width :math:`K` of the axial averaging window, in
-            pixels. Needs ``grid`` among the pipeline parameters, and enough axial
-            pixels per patch (lower ``num_patches`` if warned). ``0`` disables it.
-            Defaults to ``2``.
+            eigenvalue :math:`\mathrm{tr}(\hat{\mathbf{R}})/M`. Larger values are more
+            robust and tend toward delay-and-sum. Defaults to ``1e-2``.
+        axial_averaging (int): Half-width :math:`K` of the axial covariance averaging
+            window, in pixels. Requires a 2D ``grid`` pipeline parameter and enough
+            axial pixels per patch. ``0`` disables it. Defaults to ``2``.
         **kwargs: Forwarded to :class:`~zea.ops.base.Operation`.
     """
 
@@ -1800,8 +1801,8 @@ class MinimumVariance(Operation):
     def _axial_average(self, matrices, stride):
         """Average each pixel's matrix with its ``2K`` axial neighbours.
 
-        Axial neighbours sit ``stride`` apart in the flattened ``(n_z, n_x)`` grid.
-        Pixels near the edge of a patch average over fewer neighbours.
+        Axial neighbours sit ``stride`` apart in the flattened ``(n_z, n_x)`` grid;
+        pixels near a patch edge average over fewer of them.
         """
         n_pix = matrices.shape[0]
         width = self.axial_averaging * stride
@@ -1841,8 +1842,7 @@ class MinimumVariance(Operation):
             self.subarray_size if self.subarray_size is not None else max(1, n_el // 2)
         )
 
-        # Each transmit gets its own weights. Mapped rather than batched so that only
-        # one transmit's covariance (n_pix, M, M) is in flight at a time.
+        # One transmit at a time keeps only a single (n_pix, M, M) covariance in memory.
         per_transmit = ops.map(
             lambda transmit: self._beamform_transmit(transmit, subarray_length, axial_stride),
             data,
@@ -1860,8 +1860,8 @@ class MinimumVariance(Operation):
             axis=1,
         )
 
-        # Hermitian sample covariance (n_pix, M, M). The normalisation cancels in the
-        # weights; it only keeps the magnitudes in a sane float32 range.
+        # Hermitian sample covariance (n_pix, M, M). The 1/L scaling cancels in the
+        # weights; it only keeps magnitudes in float32 range.
         covariance = ops.einsum("pli,plj->pij", sub_ap, ops.conj(sub_ap)) / ops.cast(
             ops.cast(num_subarrays, "float32"), "complex64"
         )
@@ -1872,16 +1872,15 @@ class MinimumVariance(Operation):
             R_re = self._axial_average(R_re, axial_stride)
             R_im = self._axial_average(R_im, axial_stride)
 
-        # Diagonal loading relative to the mean eigenvalue tr(R)/M, so its effect does
-        # not change with subarray_size. The trace is clamped so that all-zero pixels
-        # outside the image stay invertible.
+        # Loading relative to the mean eigenvalue tr(R)/M, so it is independent of M.
+        # The trace is clamped so all-zero pixels outside the image stay invertible.
         trace = ops.maximum(ops.einsum("...ii->...", R_re), keras.backend.epsilon())[
             ..., None, None
         ]
         R_re = R_re + self.diagonal_loading * trace / subarray_length * ops.eye(subarray_length)
 
         # linalg.solve has no complex kernel under TF/XLA, so the Hermitian system
-        # (R_re + i R_im)(u + i v) = e is solved as the real symmetric 2M x 2M system
+        # (R_re + i R_im)(u + i v) = e is recast as the real 2M x 2M system
         # [[R_re, -R_im], [R_im, R_re]] [u; v] = [e; 0].
         block = ops.concatenate(
             [
@@ -1898,9 +1897,8 @@ class MinimumVariance(Operation):
             ops.stack([solution[..., :subarray_length], solution[..., subarray_length:]], axis=-1)
         )
 
-        # w = R^-1 e / (e^H R^-1 e). The denominator is real and positive for the loaded
-        # (positive definite) R, and an additive epsilon here would not be scale
-        # invariant, so it is divided out as is.
+        # w = R^-1 e / (e^H R^-1 e). The denominator is real and positive (R is loaded
+        # to positive definite); no epsilon guard, which would break scale invariance.
         capon_weights = R_inv_e / ops.sum(R_inv_e, axis=-1, keepdims=True)
 
         y = ops.einsum("pm,plm->p", ops.conj(capon_weights), sub_ap) / ops.cast(
