@@ -745,7 +745,7 @@ def main():
     """
     from zea.cli_args import DataCommand, _run_data_command
 
-    args = tyro.cli(DataCommand)  # ty: ignore[no-matching-overload]
+    args = tyro.cli(DataCommand)
     _run_data_command(args)
 
 

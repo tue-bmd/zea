@@ -21,8 +21,8 @@ are re-exported here.
 
 import tyro
 
-from zea.cli_args import ConvertArgs, ConvertDataset as Dataset
 from zea.cli_args import (
+    ConvertArgs,
     _Camus,
     _Cetus,
     _Echonet,
@@ -31,6 +31,7 @@ from zea.cli_args import (
     _Picmus,
     _Verasonics,
 )
+from zea.cli_args import ConvertDataset as Dataset
 from zea.internal.device import init_device
 
 __all__ = [
@@ -49,7 +50,7 @@ __all__ = [
 
 def main():
     """Parse command-line arguments and dispatch to the selected dataset conversion routine."""
-    args = tyro.cli(Dataset)  # ty: ignore[no-matching-overload]
+    args = tyro.cli(Dataset)
     args.run()
 
 

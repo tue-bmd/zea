@@ -233,6 +233,13 @@ docstring-code-line-length = "dynamic"
 # Minimum supported Python version (see `requires-python`).
 python-version = "3.10"
 
+[tool.ty.rules]
+# zea is multi-backend: jax / torch / tensorflow are optional and usually not
+# all installed in the (lightweight) type-checking environment, so their
+# conditional `import` statements would otherwise be flagged. Keep this visible
+# as a warning rather than a hard error so it never blocks CI.
+unresolved-import = "warn"
+
 [tool.ty.src]
 include = ["zea"]
 exclude = ["zea/ops/keras_ops.py"] # generated file (see _generate_keras_ops)
