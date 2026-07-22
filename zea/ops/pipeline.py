@@ -1,3 +1,4 @@
+import difflib
 import json
 from typing import TYPE_CHECKING, Any, Dict, List, Sequence, Union, cast
 
@@ -10,7 +11,6 @@ from zea import backend, log
 from zea.backend import func_on_device, jit
 from zea.config import Config
 from zea.func.tensor import vmap
-from zea.func.ultrasound import channels_to_complex, complex_to_channels
 from zea.internal.core import DataTypes, ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
 from zea.internal.core import Object as ZEAObject
 from zea.internal.ops_list import OperationList
@@ -20,11 +20,13 @@ from zea.ops.base import Operation, get_ops
 from zea.ops.keras_ops import Cast
 from zea.ops.tensor import Normalize
 from zea.ops.ultrasound import (
+    AlignedApodization,
     ApplyWindow,
     Demodulate,
     EnvelopeDetect,
     LogCompress,
     PfieldWeighting,
+    ReceiveApodization,
     ReshapeGrid,
     TOFCorrection,
 )
@@ -34,6 +36,50 @@ if TYPE_CHECKING:
     # Imported lazily at runtime (inside prepare_parameters) to avoid a circular
     # import: zea.parameters imports the data specs, which can pull in this module.
     from zea.parameters import Parameters
+
+
+class PipelineError(RuntimeError):
+    """Error raised when an operation inside a :class:`Pipeline` fails.
+
+    Subclass of :class:`RuntimeError` so existing ``except RuntimeError`` handlers
+    keep working. Instances carry a ``_zea_annotated`` marker so that enclosing
+    pipelines do not re-wrap (and thus double-annotate) an error that an inner
+    pipeline already reported.
+    """
+
+    _zea_annotated = True
+
+
+class PipelineKeyError(KeyError):
+    """Raised when a :class:`Pipeline` operation is missing a required input key.
+
+    Subclass of :class:`KeyError` so existing ``except KeyError`` handlers keep
+    working. ``__str__`` is overridden so the (multi-line) message renders as-is
+    instead of the ``repr``-quoted single line that :class:`KeyError` produces.
+    Carries the ``_zea_annotated`` marker to prevent double-wrapping.
+    """
+
+    _zea_annotated = True
+
+    def __str__(self) -> str:
+        return self.args[0] if self.args else ""
+
+
+def _summarize_inputs(inputs: Dict[str, Any]) -> str:
+    """Compact ``key: shape dtype`` summary of pipeline inputs for error messages.
+
+    Keeps large arrays out of tracebacks while still surfacing the shape/dtype
+    information needed to diagnose most pipeline failures.
+    """
+    parts = []
+    for key, value in inputs.items():
+        shape = getattr(value, "shape", None)
+        dtype = getattr(value, "dtype", None)
+        if shape is not None and dtype is not None:
+            parts.append(f"{key}: {tuple(shape)} {dtype}")
+        else:
+            parts.append(f"{key}: {type(value).__name__}")
+    return "{" + ", ".join(parts) + "}"
 
 
 @ops_registry("pipeline")
@@ -91,9 +137,6 @@ class Pipeline:
 
         self._pipeline_layers: List[Union[Operation, "Pipeline"]] = list(operations)
 
-        if jit_options not in ["pipeline", "ops", None]:
-            raise ValueError("jit_options must be 'pipeline', 'ops', or None")
-
         self.with_batch_dim = with_batch_dim
         self._validate_flag = validate
 
@@ -135,6 +178,10 @@ class Pipeline:
             }
 
         self.jit_kwargs = jit_kwargs
+        # True when an enclosing pipeline is JIT-compiled as a whole, so this
+        # pipeline already runs inside that trace. Updated by the parent via
+        # _configure_jit; defaults to False for a standalone/root pipeline.
+        self._inside_outer_jit = False
         self.jit_options = jit_options  # will handle the jit compilation
         self.device = device
 
@@ -202,6 +249,8 @@ class Pipeline:
         num_patches=100,
         baseband=False,
         enable_pfield=False,
+        enable_aligned_apodization=False,
+        enable_receive_apodization=False,
         timed=False,
         **kwargs,
     ) -> "Pipeline":
@@ -222,6 +271,13 @@ class Pipeline:
                 so input signal has a single channel dim and is still on carrier frequency.
             enable_pfield (bool): If True, apply PfieldWeighting. Defaults to False.
                 This will calculate pressure field and only beamform the data to those locations.
+            enable_aligned_apodization (bool): If True, apply AlignedApodization (a per-pixel,
+                per-transmit compounding weight) using ``parameters.flat_aligned_apodization``.
+                Defaults to False. Used e.g. for scanline (line-by-line) imaging with
+                ``parameters.enable_scanline = True``.
+            enable_receive_apodization (bool): If True, apply ReceiveApodization (a custom
+                per-pixel, per-element receive-aperture weight) using
+                ``parameters.flat_receive_apodization``. Defaults to False.
             timed (bool, optional): Whether to time each operation. Defaults to False.
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
@@ -241,6 +297,8 @@ class Pipeline:
                 beamformer=beamformer,
                 num_patches=num_patches,
                 enable_pfield=enable_pfield,
+                enable_aligned_apodization=enable_aligned_apodization,
+                enable_receive_apodization=enable_receive_apodization,
             ),
         )
 
@@ -356,22 +414,53 @@ class Pipeline:
         for operation in self._callable_layers:
             try:
                 outputs = operation(**inputs)
-            except KeyError as exc:
-                raise KeyError(
-                    f"[zea.Pipeline] Operation '{operation.__class__.__name__}' "
-                    f"requires input key '{exc.args[0]}', "
-                    "but it was not provided in the inputs.\n"
-                    "Check whether the objects (such as `zea.Parameters`) passed to "
-                    "`pipeline.prepare_parameters()` contain all required keys.\n"
-                    f"Current list of all passed keys: {list(inputs.keys())}\n"
-                    f"Valid keys for this pipeline: {self.valid_keys}"
-                ) from exc
             except Exception as exc:
-                raise RuntimeError(
-                    f"[zea.Pipeline] Error in operation '{operation.__class__.__name__}': {exc}"
-                )
+                # Already annotated by this or an inner pipeline: re-raise as-is so
+                # we do not wrap the message (and traceback) a second time.
+                if getattr(exc, "_zea_annotated", False):
+                    raise
+                if isinstance(exc, KeyError):
+                    self._raise_missing_key(operation, exc, inputs)
+                else:
+                    self._raise_operation_error(operation, exc, inputs)
             inputs = outputs
         return outputs
+
+    def _raise_missing_key(self, operation, exc: KeyError, inputs: Dict[str, Any]):
+        """Re-raise a bare ``KeyError`` from an operation with actionable context."""
+        missing = exc.args[0] if exc.args else "?"
+        unused = [k for k in (set(inputs.keys()) - self.valid_keys) if k != "kwargs"]
+        # If the caller passed something close to the missing key, it is likely a typo.
+        typo = difflib.get_close_matches(str(missing), unused, n=1, cutoff=0.6)
+        hint = (
+            f" You provided '{typo[0]}', which is unused — did you mean '{missing}'?"
+            if typo
+            else ""
+        )
+        raise PipelineKeyError(
+            f"[zea.Pipeline] Operation '{operation.__class__.__name__}' "
+            f"requires input key '{missing}', but it was not provided.{hint}\n"
+            "Check whether the objects (such as `zea.Parameters`) passed to "
+            "`pipeline.prepare_parameters()` contain all required keys.\n"
+            f"Provided keys: {sorted(inputs.keys())}\n"
+            f"Valid keys for this pipeline: {sorted(self.valid_keys - {'kwargs'})}"
+        ) from exc
+
+    def _raise_operation_error(self, operation, exc: Exception, inputs: Dict[str, Any]):
+        """Re-raise a generic operation failure as a :class:`PipelineError`.
+
+        Adds the failing operation name and a compact shape/dtype summary of its
+        inputs, and truncates the underlying message so a concrete (non-jit) array
+        is never dumped in full into the traceback.
+        """
+        original = str(exc)
+        if len(original) > 500:
+            original = original[:500] + "… (truncated)"
+        raise PipelineError(
+            f"[zea.Pipeline] Operation '{operation.__class__.__name__}' failed with "
+            f"{type(exc).__name__}: {original}\n"
+            f"Inputs: {_summarize_inputs(inputs)}"
+        ) from exc
 
     def __call__(
         self, return_numpy=False, device: Union[str, None] = None, **inputs
@@ -396,23 +485,39 @@ class Pipeline:
             raise ValueError(
                 "Parameters (and Probe/Config) objects should be first processed with "
                 "`Pipeline.prepare_parameters` before calling the pipeline. "
-                "e.g. inputs = pipeline.prepare_parameters(parameters, **overrides)"
+                "e.g. `inputs = pipeline.prepare_parameters(parameters, **overrides)`"
             )
 
         if any(isinstance(arg, str) for arg in inputs.values()):
             raise ValueError(
                 "Pipeline does not support string inputs. "
-                "Please ensure all inputs are convertible to tensors."
+                "Please ensure all inputs are convertible to tensors, or use "
+                "`inputs = Pipeline.prepare_parameters(parameters)` to convert "
+                "all your parameters for you."
             )
 
         if not self._logged_difference_keys:
             difference_keys = set(inputs.keys()) - self.valid_keys
             if difference_keys:
-                log.debug(
-                    f"[zea.Pipeline] The following input keys are not used by the pipeline: "
-                    f"{difference_keys}. Make sure this is intended. "
-                    "This warning will only be shown once."
-                )
+                # Separate likely typos (close to a key the pipeline actually uses)
+                # from benign pass-through keys (e.g. extra `zea.Parameters` fields).
+                candidates = self.valid_keys - {"kwargs"}
+                matches = {
+                    key: difflib.get_close_matches(key, candidates, n=1, cutoff=0.6)
+                    for key in difference_keys
+                }
+                typos = {key: match[0] for key, match in matches.items() if match}
+                benign = difference_keys - set(typos)
+                if typos:
+                    hints = ", ".join(f"'{k}' -> did you mean '{v}'?" for k, v in typos.items())
+                    log.warning(
+                        f"[zea.Pipeline] Some input keys look like typos and are ignored: {hints}"
+                    )
+                if benign:
+                    log.debug(
+                        f"[zea.Pipeline] Ignoring input keys not used by the pipeline: "
+                        f"{sorted(benign)}."
+                    )
                 self._logged_difference_keys = True
 
         ## PROCESSING
@@ -446,16 +551,34 @@ class Pipeline:
     @jit_options.setter
     def jit_options(self, value: Union[str, None]):
         """Set the jit_options property of the pipeline."""
+        self._configure_jit(value, inside_outer_jit=self._inside_outer_jit)
 
-        assert value in ["pipeline", "ops", None], "jit_options must be 'pipeline', 'ops', or None"
+    def _configure_jit(self, value: Union[str, None], inside_outer_jit: bool):
+        """Recursively configure JIT for this pipeline and all descendants.
+
+        Args:
+            value: jit_options for this pipeline ("pipeline", "ops", or None).
+            inside_outer_jit: True if an enclosing pipeline is JIT-compiled as a
+                whole, so this pipeline already runs inside a trace.
+        """
+        if value not in ("pipeline", "ops", None):
+            raise ValueError(f"jit_options must be 'pipeline', 'ops', or None, got {value!r}")
 
         self._jit_options = value
+        self._inside_outer_jit = inside_outer_jit
         self.set_jit(value == "pipeline")
+
+        # Children run inside a trace if we compile ourselves as a whole, or we
+        # already do. When that happens they must not add their own JIT, so their
+        # jit_options is forced to None.
+        child_inside_outer_jit = inside_outer_jit or value == "pipeline"
+        child_value = None if child_inside_outer_jit else value
         for operation in self.operations:
             if isinstance(operation, Pipeline):
-                operation.jit_options = value
+                operation._configure_jit(child_value, inside_outer_jit=child_inside_outer_jit)
             else:
-                operation.set_jit(value == "ops")
+                operation.set_jit(child_value == "ops")
+                operation._inside_outer_jit = child_inside_outer_jit
 
     def _jit(self):
         """JIT compile the pipeline."""
@@ -819,9 +942,8 @@ class Pipeline:
         override_keys = set(overrides.keys())
 
         if parameters is not None:
-            assert isinstance(parameters, Parameters), (
-                f"Expected an instance of `zea.Parameters`, got {type(parameters)}"
-            )
+            if not isinstance(parameters, Parameters):
+                raise TypeError(f"Expected an instance of `zea.Parameters`, got {type(parameters)}")
             # Only convert keys the pipeline needs and that are not overridden,
             # so we avoid deriving unnecessary parameters.
             needs_keys = self.needs_keys - override_keys
@@ -835,7 +957,9 @@ class Pipeline:
             tensor_overrides = dict_to_tensor(overrides, keep_as_is=self.static_params)
 
         # Overrides overwrite values taken from the parameters object.
-        return {**params_dict, **tensor_overrides}
+        prepared = {**params_dict, **tensor_overrides}
+
+        return prepared
 
 
 @ops_registry("map")
@@ -960,29 +1084,33 @@ class Map(Pipeline):
             chunks=self.chunks,
             batch_size=self.batch_size,
             fn_supports_batch=True,
-            disable_jit=not bool(self.jit_options),
+            disable_jit=not bool(self.jit_options) and not self._inside_outer_jit,
         )(*mapped_args)
 
         return out
 
-    @property
-    def jit_options(self):
-        """Get the jit_options property of the pipeline."""
-        return self._jit_options
+    def _configure_jit(self, value: Union[str, None], inside_outer_jit: bool):
+        """Configure JIT for this Map and its inner operations.
 
-    @jit_options.setter
-    def jit_options(self, value: Union[str, None]):
-        """Set the jit_options property of the pipeline."""
-
-        assert value in ["pipeline", "ops", None], "jit_options must be 'pipeline', 'ops', or None"
+        Map compiles its entire mapped call as a single unit whenever it self-jits
+        (any non-None ``jit_options``). Its inner operations never JIT themselves;
+        Map owns that scope. See :meth:`Pipeline._configure_jit`.
+        """
+        if value not in ("pipeline", "ops", None):
+            raise ValueError(f"jit_options must be 'pipeline', 'ops', or None, got {value!r}")
 
         self._jit_options = value
-        self.set_jit(value == "pipeline" or value == "ops")
+        self._inside_outer_jit = inside_outer_jit
+        self.set_jit(value is not None)
+
+        # Inner ops run inside a trace if Map self-jits or an outer pipeline does.
+        child_inside_outer_jit = value is not None or inside_outer_jit
         for operation in self.operations:
             if isinstance(operation, Pipeline):
-                operation.jit_options = None
+                operation._configure_jit(None, inside_outer_jit=child_inside_outer_jit)
             else:
                 operation.set_jit(False)
+                operation._inside_outer_jit = child_inside_outer_jit
 
     def _jit(self):
         """JIT compile the pipeline."""
@@ -1046,7 +1174,8 @@ class Map(Pipeline):
 @ops_registry("patched_grid")
 class PatchedGrid(Map):
     """
-    A pipeline that maps its operations over `flatgrid` and `flat_pfield` keys.
+    A pipeline that maps its operations over `flatgrid`, `flat_pfield`,
+    `flat_aligned_apodization`, and `flat_receive_apodization` keys.
 
     This can be used to reduce memory usage by processing data in chunks.
 
@@ -1054,7 +1183,17 @@ class PatchedGrid(Map):
     """
 
     def __init__(self, *args, num_patches=10, **kwargs):
-        super().__init__(*args, argnames=["flatgrid", "flat_pfield"], chunks=num_patches, **kwargs)
+        super().__init__(
+            *args,
+            argnames=[
+                "flatgrid",
+                "flat_pfield",
+                "flat_aligned_apodization",
+                "flat_receive_apodization",
+            ],
+            chunks=num_patches,
+            **kwargs,
+        )
         self.num_patches = num_patches
 
     def get_dict(self, compact=True):
@@ -1079,12 +1218,39 @@ class Beamform(Pipeline):
     Will run the following operations in sequence:
     - TOFCorrection (output type `DataTypes.ALIGNED_DATA`: `(n_tx, n_ax, n_el, n_ch)`)
     - PfieldWeighting (optional, output type `DataTypes.ALIGNED_DATA`: `(n_tx, n_ax, n_el, n_ch)`)
+    - ReceiveApodization (optional, output type `DataTypes.ALIGNED_DATA`: `(n_tx, n_ax, n_el, n_ch)`)
+    - AlignedApodization (optional, output type `DataTypes.ALIGNED_DATA`: `(n_tx, n_ax, n_el, n_ch)`)
     - Sum over channels (DAS)
     - Sum over transmits (Compounding) (output type `DataTypes.BEAMFORMED_DATA`: `(grid_size_z, grid_size_x, n_ch)`)
     - ReshapeGrid (flattened grid is also reshaped to `(grid_size_z, grid_size_x)`)
+
+    There are two distinct apodization stages, plus the built-in f-number mask
+    (fused inside ``TOFCorrection``):
+
+    - ``AlignedApodization`` weights the **transmit** axis (compounding) with a
+      per-pixel, per-transmit mask (``parameters.flat_aligned_apodization``).
+    - ``ReceiveApodization`` weights the **receive-element** axis with a custom
+      per-pixel, per-element mask (``parameters.flat_receive_apodization``), on
+      top of the built-in f-number receive-aperture mask.
+
+    Scanline (line-by-line) imaging is a special case of this pipeline: set
+    ``parameters.enable_scanline = True`` and ``enable_aligned_apodization=True``
+    so that each pixel's grid column is beamformed from its own owning transmit
+    only, with every other transmit masked to zero by
+    :class:`~zea.ops.AlignedApodization` (fed
+    :func:`zea.beamform.pixelgrid.scanline_aligned_apodization`) instead of
+    compounding all transmits onto a shared grid.
     """  # noqa: E501
 
-    def __init__(self, beamformer="delay_and_sum", num_patches=100, enable_pfield=False, **kwargs):
+    def __init__(
+        self,
+        beamformer="delay_and_sum",
+        num_patches=100,
+        enable_pfield=False,
+        enable_aligned_apodization=False,
+        enable_receive_apodization=False,
+        **kwargs,
+    ):
         """Initialize a Delay-and-Sum beamforming `zea.Pipeline`.
 
         Args:
@@ -1098,11 +1264,29 @@ class Beamform(Pipeline):
             num_patches (int): Number of patches to split the grid into for patch-wise
                 beamforming. If 1, no patching is performed.
             enable_pfield (bool): Whether to include pressure field weighting in the beamforming.
+                Mutually exclusive with ``enable_aligned_apodization``.
+            enable_aligned_apodization (bool): Whether to include an explicit per-pixel,
+                per-transmit compounding apodization mask
+                (``parameters.flat_aligned_apodization``) in the beamforming, e.g. to
+                reconstruct scanline imaging (see class docstring). Mutually exclusive with
+                ``enable_pfield`` (both weight the transmit axis).
+            enable_receive_apodization (bool): Whether to include a custom per-pixel,
+                per-element receive-aperture apodization mask
+                (``parameters.flat_receive_apodization``) in the beamforming. Applied in
+                addition to the built-in f-number mask; independent of and combinable with
+                ``enable_pfield`` / ``enable_aligned_apodization``.
         """
+        if enable_pfield and enable_aligned_apodization:
+            raise ValueError(
+                "enable_pfield and enable_aligned_apodization are mutually exclusive. "
+                "Please specify only one."
+            )
 
         self.beamformer_type = beamformer
         self.num_patches = num_patches
         self.enable_pfield = enable_pfield
+        self.enable_aligned_apodization = enable_aligned_apodization
+        self.enable_receive_apodization = enable_receive_apodization
 
         # for backwards compatibility
         name_mapping = {
@@ -1125,9 +1309,16 @@ class Beamform(Pipeline):
         # Get beamforming ops
         beamforming: List[Operation] = [
             TOFCorrection(),
-            # PfieldWeighting(),  # Inserted conditionally
+            # ReceiveApodization() / AlignedApodization() / PfieldWeighting(),
+            # inserted conditionally
             beamformer_registry[self.beamformer_type](),
         ]
+
+        if self.enable_receive_apodization:
+            beamforming.insert(1, ReceiveApodization())
+
+        if self.enable_aligned_apodization:
+            beamforming.insert(1, AlignedApodization())
 
         if self.enable_pfield:
             beamforming.insert(1, PfieldWeighting())
@@ -1163,7 +1354,8 @@ class Beamform(Pipeline):
 
         Unlike Pipeline.get_dict(), this does NOT include the internal
         operations list, since Beamform auto-generates its operations
-        from ``beamformer``, ``num_patches``, and ``enable_pfield``.
+        from ``beamformer``, ``num_patches``, ``enable_pfield``,
+        ``enable_aligned_apodization``, and ``enable_receive_apodization``.
         """
         config = super().get_dict(compact=compact)
         config.pop("operations", None)
@@ -1175,6 +1367,10 @@ class Beamform(Pipeline):
             params["num_patches"] = self.num_patches
         if not compact or self.enable_pfield:
             params["enable_pfield"] = self.enable_pfield
+        if not compact or self.enable_aligned_apodization:
+            params["enable_aligned_apodization"] = self.enable_aligned_apodization
+        if not compact or self.enable_receive_apodization:
+            params["enable_receive_apodization"] = self.enable_receive_apodization
 
         # Merge in the pipeline-level params from super().
         params.update(config.get("params", {}))
@@ -1252,13 +1448,13 @@ class DelayMultiplyAndSum(Operation):
             )
 
         # Compute the correlation matrix
-        data = channels_to_complex(data)
+        data = ops.view_as_complex(data)
 
         data = self._multiply(data)
         data = self._select_lower_triangle(data)
         data = ops.sum(data, axis=(0, 2, 3))
 
-        data = complex_to_channels(data)
+        data = ops.view_as_real(data)
 
         return data
 
@@ -1566,14 +1762,14 @@ class Refocus(Operation):
     def __init__(self, method="adjoint", param=None, **kwargs):
         if method not in self._VALID_METHODS:
             raise ValueError(f"method must be one of {self._VALID_METHODS}, got '{method}'")
-        # SVD is not supported by TF XLA; disable JIT for SVD-based methods.
+        # SVD is not supported by TF XLA, so SVD-based methods cannot be JIT-compiled
         if method != "adjoint":
-            if kwargs.get("jit_compile", True):
+            if kwargs.get("jittable", True):
                 log.warning(
                     f"Refocus method='{method}' uses SVD, which is not supported by the XLA "
-                    "JIT compiler. Setting jit_compile=False."
+                    "JIT compiler. Marking this operation as non-jittable."
                 )
-            kwargs["jit_compile"] = False
+            kwargs["jittable"] = False
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
@@ -1726,6 +1922,12 @@ class Refocus(Operation):
             * ``"t_peak"`` — shared transmit-waveform peak time ``(n_el,)``.
             * ``"flat_pfield"`` — ``None`` (resets pfield so downstream
               :class:`PfieldWeighting` becomes a no-op).
+            * ``"flat_aligned_apodization"`` — ``None`` (resets the compounding
+              apodization mask, which was sized for the old transmit count, so
+              downstream :class:`AlignedApodization` becomes a no-op).
+            * ``"flat_receive_apodization"`` — ``None`` (resets any custom
+              receive-aperture apodization, which was sized for the old grid, so
+              downstream :class:`ReceiveApodization` becomes a no-op).
         """
         data = kwargs[self.key]
 
@@ -1770,6 +1972,8 @@ class Refocus(Operation):
             "initial_times": sa_initial_times,
             "t_peak": sa_t_peak,
             "flat_pfield": None,
+            "flat_aligned_apodization": None,
+            "flat_receive_apodization": None,
         }
 
 
@@ -1809,9 +2013,11 @@ def make_operation_chain(
             chain.append(operation)
             continue
 
-        assert isinstance(operation, (str, dict, Config)), (
-            f"Operation {operation} should be a string, dict, Config object, Operation, or Pipeline"
-        )
+        if not isinstance(operation, (str, dict, Config)):
+            raise TypeError(
+                f"Operation {operation} should be a string, dict, Config object, Operation, "
+                "or Pipeline"
+            )
 
         if isinstance(operation, str):
             operation_instance = get_ops(operation)()

@@ -50,6 +50,25 @@ make docs-clean && make docs-serve
 
 This uses `sphinx-autobuild` to serve the docs at [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
+## 5. Check for broken links
+
+To check that all hyperlinks in the docs resolve (including links in the
+example notebooks under `docs/source/notebooks`, which nbsphinx renders into
+the same doctree as the rest of the docs), run:
+
+```sh
+make docs-linkcheck
+```
+
+When linking to another zea documentation page (an API reference or another
+notebook) from a notebook, use a path **relative** to the notebook's
+location, e.g. `[zea.Pipeline](../../_autosummary/zea.Pipeline.rst)` or
+`[pipeline docs](../../pipeline.rst)`, instead of a hardcoded
+`https://zea.readthedocs.io/...` URL. Relative links are checked for broken
+targets by the doc build itself and keep working across doc versions, whereas
+absolute links can silently rot; `notebook_clean_and_check.py` rejects
+hardcoded `readthedocs.io` links for this reason.
+
 ---
 
 For more information, see the [Sphinx documentation](https://www.sphinx-doc.org/).

@@ -10,23 +10,45 @@ import numpy as np
 import pytest
 
 from zea import Parameters
-from zea.data.file import CustomElement, File, load_file_all_data_types, validate_file
+from zea.data.file import CustomElement, File, validate_file
 from zea.data.file_operations import (
+    _prepare_output_path,
     compound_frames,
     compound_transmits,
     extract_frames_transmits,
     resave,
-    save_file,
     sum_data,
 )
+from zea.data.spec import Spec
 
 from . import generate_dummy_scan, generate_example_dataset
+
+HF_INPUT_PATH = "hf://zeahub/pytest/case_0.hdf5"
+HF_FOLDER_PATH = "hf://zeahub/pytest/folder"
 
 
 @pytest.fixture
 def tmp_hdf5_path(tmp_path) -> Generator[Path, None, None]:
     """Fixture to create a temporary HDF5 file."""
     yield Path(tmp_path, "test_case_dataset.hdf5")
+
+
+def _load_data_dict(path) -> dict:
+    """Read every data product of a single-track file into a dict.
+
+    Map-based products are returned as ``{"values": array}`` so that assertions read
+    the same way for plain arrays (``raw_data``) and maps (``image``).
+    """
+    with File(path) as f:
+        data = f._to_file_spec().data
+
+    data_dict = {}
+    for field_name in data.SCHEMA:
+        value = getattr(data, field_name)
+        if value is None:
+            continue
+        data_dict[field_name] = {"values": value.values} if isinstance(value, Spec) else value
+    return data_dict
 
 
 def test_file_operations_sum(tmp_hdf5_path):
@@ -70,8 +92,7 @@ def test_file_operations_extract(tmp_hdf5_path):
     extract_frames_transmits(
         input_path, output_path, frame_indices=slice(1), transmit_indices=[0, 3]
     )
-    data_dict, parameters = load_file_all_data_types(output_path)
-    data_dict = SimpleNamespace(**data_dict)
+    data_dict = SimpleNamespace(**_load_data_dict(output_path))
 
     _assert_descriptions_and_custom_elements_equal(input_path, output_path)
 
@@ -117,11 +138,7 @@ def test_file_operations_compound_frames(tmp_hdf5_path):
 
     _assert_descriptions_and_custom_elements_equal(input_path, output_path)
 
-    data_dict, parameters = load_file_all_data_types(output_path)
-    data_dict = SimpleNamespace(**data_dict)
-    for dataset in vars(data_dict).values():
-        if dataset is None:
-            continue
+    for dataset in _load_data_dict(output_path).values():
         arr = dataset["values"] if isinstance(dataset, dict) else dataset
         assert arr.shape[0] == 1  # Only one frame should remain
 
@@ -169,11 +186,11 @@ def test_file_operations_cli_sum(tmp_hdf5_path):
     output_path = tmp_hdf5_path.parent / "summed_dataset.hdf5"
 
     os.system(
-        "python -m zea.data.file_operations sum "
+        "python -m zea data sum "
         + str(path1)
         + " "
         + str(path2)
-        + " "
+        + " --output-path "
         + str(output_path)
     )
 
@@ -194,15 +211,14 @@ def test_file_operations_cli_extract(tmp_hdf5_path):
     generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
     os.system(
-        "python -m zea.data.file_operations extract "
+        "python -m zea data extract "
         + str(input_path)
         + " "
         + str(output_path)
         + " --frames 0-1 --transmits 0 3 4"
     )
 
-    data_dict, parameters = load_file_all_data_types(output_path)
-    data_dict = SimpleNamespace(**data_dict)
+    data_dict = SimpleNamespace(**_load_data_dict(output_path))
     assert data_dict.raw_data.shape[0] == 2
     assert data_dict.raw_data.shape[1] == 3
     assert data_dict.aligned_data["values"].shape[0] == 2
@@ -220,9 +236,7 @@ def test_file_operations_cli_resave(tmp_hdf5_path):
     # Create an example dataset
     generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
-    os.system(
-        "python -m zea.data.file_operations resave " + str(input_path) + " " + str(output_path)
-    )
+    os.system("python -m zea data resave " + str(input_path) + " " + str(output_path))
 
     # Validate the resaved dataset
     validate_file(output_path)
@@ -238,15 +252,9 @@ def test_file_operations_cli_compound_frames(tmp_hdf5_path):
     # Create an example dataset
     generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
-    os.system(
-        "python -m zea.data.file_operations compound_frames "
-        + str(input_path)
-        + " "
-        + str(output_path)
-    )
+    os.system("python -m zea data compound_frames " + str(input_path) + " " + str(output_path))
 
-    data_dict, parameters = load_file_all_data_types(output_path)
-    data_dict = SimpleNamespace(**data_dict)
+    data_dict = SimpleNamespace(**_load_data_dict(output_path))
     assert data_dict.raw_data.shape[0] == 1  # Only one frame should remain
     assert data_dict.aligned_data["values"].shape[0] == 1
     assert data_dict.beamformed_data["values"].shape[0] == 1
@@ -262,15 +270,9 @@ def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
     # Create an example dataset
     generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
-    os.system(
-        "python -m zea.data.file_operations compound_transmits "
-        + str(input_path)
-        + " "
-        + str(output_path)
-    )
+    os.system("python -m zea data compound_transmits " + str(input_path) + " " + str(output_path))
 
-    data_dict, parameters = load_file_all_data_types(output_path)
-    data_dict = SimpleNamespace(**data_dict)
+    data_dict = SimpleNamespace(**_load_data_dict(output_path))
     assert data_dict.raw_data.shape[1] == 1  # Only one transmit should remain
     assert data_dict.aligned_data["values"].shape[1] == 1
 
@@ -317,11 +319,9 @@ def test_file_operations_folder_compound_frames(tmp_path):
     for input_path in input_paths:
         output_path = output_folder / input_path.name
         assert output_path.is_file()
-        data_dict, _ = load_file_all_data_types(output_path)
-        for dataset in data_dict.values():
-            if dataset is not None:
-                arr = dataset["values"] if isinstance(dataset, dict) else dataset
-                assert arr.shape[0] == 1  # Only one frame should remain
+        for dataset in _load_data_dict(output_path).values():
+            arr = dataset["values"] if isinstance(dataset, dict) else dataset
+            assert arr.shape[0] == 1  # Only one frame should remain
 
 
 def test_file_operations_folder_sum(tmp_path):
@@ -345,6 +345,51 @@ def test_file_operations_folder_sum(tmp_path):
     with File(output_path) as f:
         raw_data = f["data/raw_data"][:]
         assert raw_data[0, 0, 0, 0, 0] == data0[0, 0, 0, 0, 0] + data1[0, 0, 0, 0, 0]
+
+
+def test_resave_accepts_hf_path(tmp_path, monkeypatch):
+    """resave resolves an 'hf://' input_path via File's existing hf:// resolution logic."""
+    downloaded = tmp_path / "downloaded.hdf5"
+    generate_example_dataset(downloaded, add_optional_dtypes=True)
+    output_path = tmp_path / "resaved.hdf5"
+
+    monkeypatch.setattr(
+        "zea.data.file_operations._hf_resolve_path", lambda hf_path, **kwargs: downloaded
+    )
+
+    resave(HF_INPUT_PATH, output_path)
+
+    validate_file(output_path)
+    _assert_descriptions_and_custom_elements_equal(downloaded, output_path)
+
+
+def test_compound_frames_accepts_hf_folder(tmp_path, monkeypatch):
+    """compound_frames resolves an 'hf://' folder input_path and mirrors it to output_path,
+    just like it already does for local folders."""
+    hf_snapshot_dir = tmp_path / "snapshot"
+    input_paths = [hf_snapshot_dir / "case_0.hdf5", hf_snapshot_dir / "case_1.hdf5"]
+    for path in input_paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        generate_example_dataset(path, add_optional_dtypes=True)
+    output_folder = tmp_path / "output"
+
+    monkeypatch.setattr(
+        "zea.data.file_operations._hf_resolve_path", lambda hf_path, **kwargs: hf_snapshot_dir
+    )
+
+    compound_frames(HF_FOLDER_PATH, output_folder)
+
+    for input_path in input_paths:
+        output_path = output_folder / input_path.name
+        assert output_path.is_file()
+        with File(output_path) as f:
+            assert f.data.raw_data.shape[0] == 1  # Only one frame should remain
+
+
+def test_prepare_output_path_refuses_hf_path():
+    """save_file must refuse to write to an 'hf://' path since it is read-only."""
+    with pytest.raises(ValueError, match="hf://"):
+        _prepare_output_path("hf://zeahub/pytest/out.hdf5", overwrite=True)
 
 
 def _create_dataset_with_custom(path, n_frames=2, n_tx=4, n_el=8, n_ax=64):
@@ -432,7 +477,7 @@ def _assert_beamformed_data_still_exists(path: Path):
 
 
 def _make_file_with_distinct_demod_freq(tmp_path, demod_freq=5e6, center_freq=7e6):
-    """Create a file via save_file with distinct demodulation / center frequencies."""
+    """Create a file with distinct demodulation / center frequencies, via Parameters."""
 
     n_tx, n_el, n_ax = 4, 16, 64
     scan_dict = generate_dummy_scan(n_tx=n_tx, n_el=n_el, center_frequency=center_freq)
@@ -444,12 +489,18 @@ def _make_file_with_distinct_demod_freq(tmp_path, demod_freq=5e6, center_freq=7e
     raw = np.zeros((2, n_tx, n_ax, n_el, 1), dtype=np.float32)
 
     path = tmp_path / "scan_demod.hdf5"
-    save_file(path=path, parameters=parameters, raw_data=raw)
+    File.create(
+        path=path,
+        data={"raw_data": raw},
+        scan=parameters.to_scan_dict(),
+        probe=parameters.to_probe_dict(),
+        overwrite=True,
+    )
     return path, demod_freq, center_freq
 
 
 def test_demodulation_frequency_saved_correctly(tmp_path):
-    """save_file must store demodulation_frequency from scan.demodulation_frequency,
+    """Saving must store demodulation_frequency from scan.demodulation_frequency,
     not from scan.center_frequency."""
     path, demod_freq, center_freq = _make_file_with_distinct_demod_freq(
         tmp_path, demod_freq=5e6, center_freq=7e6
@@ -512,7 +563,7 @@ def test_uint8_sum_no_truncation(tmp_path):
 
     sum_data([input1, input2], output)
 
-    result, _ = load_file_all_data_types(output)
+    result = _load_data_dict(output)
     pixel = result["image"]["values"][0, 0, 0]
 
     assert pixel == 200, f"Expected 200, got {pixel}"
@@ -542,49 +593,69 @@ def test_compound_frames_uint8_linear(tmp_path):
 
     compound_frames(input_path, output_path)
 
-    result, _ = load_file_all_data_types(output_path)
+    result = _load_data_dict(output_path)
     pixel = float(result["image"]["values"][0, 0, 0])
 
     assert pixel == pytest.approx(100, abs=1), f"Expected ~100, got {pixel}"
 
 
-def test_load_file_all_data_types_coordinates_indexed(tmp_path):
+def _image_map_with_coordinates(n_frames=4, height=8, width=8, frame_axis=True):
+    """An Image map whose values and coordinates both encode their frame index."""
+    # values: frame f is filled with -f dB, so a frame selection is visible in the values
+    values = np.array(
+        [np.full((height, width), -float(f), dtype=np.float32) for f in range(n_frames)]
+    )
+
+    if frame_axis:
+        coords = np.zeros((n_frames, height, width, 3), dtype=np.float32)
+        for f in range(n_frames):
+            coords[f, :, :, 0] = float(f) * 0.001  # unique x-value per frame (metres)
+    else:
+        # coordinates that omit the frame axis and broadcast across frames
+        coords = np.zeros((height, width, 3), dtype=np.float32)
+
+    return {"values": values, "coordinates": coords}
+
+
+def test_extract_slices_coordinates_in_sync_with_values(tmp_path):
     """Frame-indexed coordinates must be sliced in sync with the values dataset.
 
-    When load_file_all_data_types is called with frame indices, a coordinates
-    dataset that carries a leading frame axis must be sliced by the same frame
-    index rather than loaded whole.
+    A coordinates array that carries a leading frame axis must be sliced by the same
+    frame selection as values, rather than kept whole (which would leave the map
+    internally inconsistent).
     """
-    path = tmp_path / "coords.hdf5"
-    n_frames, H, W = 4, 8, 8
+    input_path, output_path = tmp_path / "coords_in.hdf5", tmp_path / "coords_out.hdf5"
+    image = _image_map_with_coordinates()
 
-    # values: each frame is filled with its frame index so we can verify slicing
-    values = np.array(
-        [np.full((H, W), float(f), dtype=np.float32) for f in range(n_frames)]
-    )  # (n_frames, H, W)
-
-    # coordinates: shape (n_frames, H, W, 3); x-component == frame index
-    coords = np.zeros((n_frames, H, W, 3), dtype=np.float32)
-    for f in range(n_frames):
-        coords[f, :, :, 0] = float(f) * 0.001  # unique x-value per frame (metres)
-
-    # Write directly with h5py to avoid spec validation complexity for this unit test
-    with h5py.File(path, "w") as hf:
-        hf.attrs["zea_version"] = "0.1.0"
-        tg = hf.require_group("tracks/track_0/data/image")
-        tg.create_dataset("values", data=values)
-        tg.create_dataset("coordinates", data=coords)
+    File.create(input_path, data={"image": image}, overwrite=True)
 
     frame_sel = [1, 3]
-    data_dict, _ = load_file_all_data_types(path, indices=(frame_sel,))
+    extract_frames_transmits(input_path, output_path, frame_indices=frame_sel)
 
-    loaded_values = data_dict["image"]["values"]
-    loaded_coords = data_dict["image"]["coordinates"]
+    with File(output_path) as f:
+        loaded = f._to_file_spec().data.image
 
-    assert loaded_values.shape[0] == len(frame_sel), "values must have selected frames"
-    assert loaded_coords.shape[0] == len(frame_sel), "coordinates must have selected frames"
-    np.testing.assert_array_equal(loaded_values, values[frame_sel])
-    np.testing.assert_array_equal(loaded_coords, coords[frame_sel])
+    assert loaded.values.shape[0] == len(frame_sel), "values must have selected frames"
+    assert loaded.coordinates.shape[0] == len(frame_sel), "coordinates must have selected frames"
+    np.testing.assert_array_equal(loaded.values, image["values"][frame_sel])
+    np.testing.assert_array_equal(loaded.coordinates, image["coordinates"][frame_sel])
+
+
+def test_extract_keeps_frame_broadcast_coordinates(tmp_path):
+    """Coordinates that omit the frame axis broadcast across frames, so extracting
+    frames must leave them untouched rather than indexing their spatial axis."""
+    input_path, output_path = tmp_path / "bcast_in.hdf5", tmp_path / "bcast_out.hdf5"
+    image = _image_map_with_coordinates(frame_axis=False)
+
+    File.create(input_path, data={"image": image}, overwrite=True)
+
+    extract_frames_transmits(input_path, output_path, frame_indices=[1, 3])
+
+    with File(output_path) as f:
+        loaded = f._to_file_spec().data.image
+
+    assert loaded.values.shape[0] == 2
+    np.testing.assert_array_equal(loaded.coordinates, image["coordinates"])
 
 
 def test_save_file_from_parameters_round_trip(tmp_path):

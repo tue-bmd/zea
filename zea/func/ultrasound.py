@@ -6,9 +6,12 @@ from keras import ops
 from zea import log
 from zea.func import split_seed
 from zea.func.tensor import (
+    extend_n_dims,
     resample,
     split_into_windows,
 )
+from zea.internal.utils import deprecated
+from zea.utils import ProgressBar
 
 
 def demodulate_not_jitable(
@@ -287,8 +290,13 @@ def get_low_pass_iq_filter(num_taps, sampling_frequency, center_frequency, bandw
     return lpf_complex
 
 
+@deprecated(replacement="keras.ops.view_as_real")
 def complex_to_channels(complex_data, axis=-1):
     """Unroll complex data to separate channels.
+
+    .. deprecated::
+        Use :func:`keras.ops.view_as_real` instead. Note that ``keras.ops.view_as_real``
+        always appends the real/imaginary components as the last axis.
 
     Args:
         complex_data (complex ndarray): complex input data.
@@ -309,9 +317,13 @@ def complex_to_channels(complex_data, axis=-1):
     return iq_data
 
 
+@deprecated(replacement="keras.ops.view_as_complex")
 def channels_to_complex(data):
     """Convert array with real and imaginary components at
     different channels to complex data array.
+
+    .. deprecated::
+        Use :func:`keras.ops.view_as_complex` instead.
 
     Args:
         data (ndarray): input data, with at 0 index of axis
@@ -480,7 +492,7 @@ def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3):
     iq_data_signal_complex = analytical_signal * ops.exp(phasor_exponent)
 
     # Split the complex signal into two channels
-    iq_data_two_channel = complex_to_channels(ops.squeeze(iq_data_signal_complex, axis=-1))
+    iq_data_two_channel = ops.view_as_real(ops.squeeze(iq_data_signal_complex, axis=-1))
 
     return iq_data_two_channel
 
@@ -522,31 +534,30 @@ def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency
     waveforms_iq_complex_channels = demodulate(
         waveform[..., None], center_frequency, waveform_sampling_frequency, axis=-1
     )
-    waveforms_iq_complex = channels_to_complex(waveforms_iq_complex_channels)
+    waveforms_iq_complex = ops.view_as_complex(waveforms_iq_complex_channels)
     envelope = ops.abs(waveforms_iq_complex)
     peak_idx = ops.argmax(envelope, axis=-1)
     t_peak = ops.cast(peak_idx, dtype="float32") / waveform_sampling_frequency
     return t_peak
 
 
-def envelope_detect(data, axis=-3):
-    """Envelope detection of RF signals.
-
-    If the input data is real, it first applies the Hilbert transform along the specified axis
-    and then computes the magnitude of the resulting complex signal.
-    If the input data is complex, it computes the magnitude directly.
+def channels_to_analytic(data, axis):
+    """Return the analytic signal (complex) from RF (``n_ch == 1``) or from
+    two-channel I/Q (``n_ch == 2``) data.
 
     Args:
-        - data (Tensor): The beamformed data of shape (..., grid_size_z, grid_size_x, n_ch).
-        - axis (int): Axis along which to apply the Hilbert transform. Defaults to -3.
+        data (Tensor): Tensor of shape ``(..., n_ch)`` with ``n_ch in {1, 2}``. For RF
+            the analytic signal is formed with a Hilbert transform along ``axis``; for
+            I/Q the two channels are read as real/imaginary parts.
+        axis (int): Fast-time (axial) axis along which to Hilbert-transform RF data.
 
     Returns:
-        - envelope_data (Tensor): The envelope detected data
-            of shape (..., grid_size_z, grid_size_x).
+        Tensor: Complex tensor with the channel axis removed.
     """
-    if data.shape[-1] == 2:
-        data = channels_to_complex(data)
-    else:
+    n_ch = data.shape[-1]
+    if n_ch == 2:
+        return ops.view_as_complex(data)
+    if n_ch == 1:
         n_ax = ops.shape(data)[axis]
 
         # Calculate next power of 2: M = 2^ceil(log2(n_ax))
@@ -558,10 +569,89 @@ def envelope_detect(data, axis=-3):
         indices = ops.arange(n_ax)
 
         data = ops.take(data, indices, axis=axis)
-        data = ops.squeeze(data, axis=-1)
+        return ops.squeeze(data, axis=-1)
+    raise ValueError(f"Expected data with n_ch in {{1, 2}} (last axis), got n_ch={n_ch}.")
 
-    data = ops.abs(data)
-    return data
+
+def envelope_detect(data, axis=-3):
+    """Envelope detection of RF signals.
+
+    If the input data is real, it first applies the Hilbert transform along the specified axis
+    and then computes the magnitude of the resulting complex signal.
+    If the input data is complex, it computes the magnitude directly.
+
+    Args:
+        data (Tensor): The beamformed data of shape (..., grid_size_z, grid_size_x, n_ch).
+        axis (int): Axis along which to apply the Hilbert transform. Defaults to -3.
+
+    Returns:
+        Tensor: The envelope detected data of shape (..., grid_size_z, grid_size_x).
+    """
+    return ops.abs(channels_to_analytic(data, axis))
+
+
+def apply_aligned_apodization(data, apodization, with_batch_dim):
+    """Multiply aligned data by a per-pixel, per-transmit weight.
+
+    Used by :class:`~zea.ops.PfieldWeighting` and
+    :class:`~zea.ops.AlignedApodization` to scale or mask out a transmit's
+    contribution to a pixel before the receive-aperture and transmit sums
+    (e.g. compounding, or scanline/line-by-line imaging where only one
+    transmit should contribute per pixel). This weights the *transmit* axis;
+    for per-element (receive-channel) weighting see
+    :func:`apply_receive_apodization`.
+
+    Args:
+        data (Tensor): Aligned data, ``((batch_size,) n_tx, n_pix, n_el, n_ch)``.
+        apodization (Tensor): Weight of shape ``(n_pix, n_tx)``.
+        with_batch_dim (bool): Whether `data` carries a leading batch dimension.
+
+    Returns:
+        Tensor: Weighted data, same shape as `data`.
+    """
+    # Swap (n_pix, n_tx) to (n_tx, n_pix)
+    apodization = ops.swapaxes(apodization, 0, 1)
+
+    # Add batch dimension if needed
+    if with_batch_dim:
+        apodization = ops.expand_dims(apodization, axis=0)
+
+    append_n_dims = ops.ndim(data) - ops.ndim(apodization)
+    apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
+
+    return data * apodization
+
+
+def apply_receive_apodization(data, apodization, with_batch_dim):
+    """Multiply aligned data by a per-pixel, per-element (receive-aperture) weight.
+
+    Used by :class:`~zea.ops.ReceiveApodization` to apply a custom
+    receive-aperture apodization: it weights each receive element's
+    contribution to a pixel before the receive-channel sum. This is the
+    element-wise counterpart of the built-in f-number mask
+    (:func:`zea.beamform.beamformer.fnumber_mask`), and is orthogonal to
+    :func:`apply_aligned_apodization`, which weights the *transmit* axis.
+
+    Args:
+        data (Tensor): Aligned data, ``((batch_size,) n_tx, n_pix, n_el, n_ch)``.
+        apodization (Tensor): Weight of shape ``(n_pix, n_el)``.
+        with_batch_dim (bool): Whether `data` carries a leading batch dimension.
+
+    Returns:
+        Tensor: Weighted data, same shape as `data`.
+    """
+    # (n_pix, n_el) -> insert the transmit axis in front of n_pix: (1, n_pix, n_el)
+    apodization = ops.expand_dims(apodization, axis=0)
+
+    # Add batch dimension if needed
+    if with_batch_dim:
+        apodization = ops.expand_dims(apodization, axis=0)
+
+    # Append the trailing channel axis/axes so it broadcasts over n_ch
+    append_n_dims = ops.ndim(data) - ops.ndim(apodization)
+    apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
+
+    return data * apodization
 
 
 def log_compress(data, eps=1e-16):
@@ -868,7 +958,7 @@ def dehaze_nuclear_diffusion(
     frame_tissue_preds = [[] for _ in range(int(seq_len))]
     frame_haze_preds = [[] for _ in range(int(seq_len))]
 
-    progbar = keras.utils.Progbar(len(windows), verbose=verbose, unit_name="window")
+    progbar = ProgressBar(len(windows), verbose=verbose, unit_name="window")
 
     # Process each window
     for window_idx, (window, frame_indices) in enumerate(zip(windows, window_indices)):
@@ -935,24 +1025,37 @@ def dehaze_nuclear_diffusion(
     return tissue_frames, haze_frames
 
 
-def suppress_tissue(data, cutoff: int = 5):
+def suppress_tissue(data, cutoff: int = 5, conjugate: bool = False):
     """
     Suppresses tissue using Direct SVD.
+
+    Builds the Casorati matrix (frames x pixels), takes the SVD of its temporal
+    Gram matrix, and projects the data onto the subspace orthogonal to the
+    ``cutoff`` strongest (tissue) components.
 
     Args:
         data (ops.Tensor): Shape (n_frames, ...)
         cutoff (int): Number of principal components (tissue) to reject.
+        conjugate (bool): Whether to use the conjugate (Hermitian) transpose when
+            forming the Gram matrix and the projector. Leave ``False`` for
+            real-valued input. Set to ``True`` for complex (baseband IQ) input:
+            the plain transpose builds ``XᵀX`` rather than ``XᴴX``, which is not
+            the temporal covariance of a complex signal and does not suppress the
+            tissue. Ignored for real input, where the two are identical.
     """
     if cutoff <= 0:
         return data
     if cutoff >= data.shape[0]:
         raise ValueError(f"Cutoff must be between 0 and n_frames-1, got {cutoff}.")
 
+    def _transpose(x):
+        return ops.conj(ops.transpose(x)) if conjugate else ops.transpose(x)
+
     original_shape = data.shape
     n_frames = original_shape[0]
     data_2d = ops.reshape(data, (n_frames, -1))
 
-    casorati_matrix = ops.matmul(data_2d, ops.transpose(data_2d))
+    casorati_matrix = ops.matmul(data_2d, _transpose(data_2d))
 
     # We call the data X
     # X = U @ S @ Vh
@@ -962,9 +1065,9 @@ def suppress_tissue(data, cutoff: int = 5):
     V, S, _ = ops.linalg.svd(casorati_matrix)
 
     # Remove the right singular vectors
-    reconstructed = ops.matmul(ops.transpose(data_2d), V)
+    reconstructed = ops.matmul(_transpose(data_2d), V)
 
     # Reconstruct with only part of the vectors
-    reconstructed = ops.matmul(reconstructed[:, cutoff:], ops.transpose(V[:, cutoff:]))
+    reconstructed = ops.matmul(reconstructed[:, cutoff:], _transpose(V[:, cutoff:]))
 
-    return ops.reshape(ops.transpose(reconstructed), original_shape)
+    return ops.reshape(_transpose(reconstructed), original_shape)

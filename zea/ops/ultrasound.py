@@ -8,13 +8,12 @@ from zea.display import scan_convert
 from zea.func.tensor import (
     apply_along_axis,
     correlate,
-    extend_n_dims,
     gaussian_filter,
     reshape_axis,
 )
 from zea.func.ultrasound import (
-    channels_to_complex,
-    complex_to_channels,
+    apply_aligned_apodization,
+    apply_receive_apodization,
     demodulate,
     envelope_detect,
     get_band_pass_filter,
@@ -28,6 +27,7 @@ from zea.internal.core import (
     DataTypes,
 )
 from zea.internal.registry import ops_registry
+from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
 from zea.simulator import simulate_rf
 from zea.utils import canonicalize_axis
@@ -108,10 +108,17 @@ class Simulate(Operation):
 
 @ops_registry("tof_correction")
 class TOFCorrection(Operation):
-    """Time-of-flight correction operation for ultrasound data."""
+    """Time-of-flight correction operation for ultrasound data.
+
+    Aligns raw channel data to each pixel and applies the built-in
+    receive-aperture apodization (the f-number mask, see
+    :func:`zea.beamform.beamformer.fnumber_mask`, controlled by ``f_number``).
+    For custom receive-aperture apodization use :class:`ReceiveApodization`;
+    for transmit-axis (compounding) apodization use :class:`AlignedApodization`.
+    """
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["f_number", "apply_lens_correction"]
+    STATIC_PARAMS = ["f_number", "apply_lens_correction", "focal_region_length"]
 
     def __init__(self, **kwargs):
         super().__init__(
@@ -141,6 +148,7 @@ class TOFCorrection(Operation):
         sos_map=None,
         sos_grid_x=None,
         sos_grid_z=None,
+        focal_region_length=None,
         **kwargs,
     ):
         """Perform time-of-flight correction on raw RF data.
@@ -166,6 +174,11 @@ class TOFCorrection(Operation):
             sos_map (Tensor): Speed-of-sound map of shape ``(Nz, Nx)`` in m/s.
             sos_grid_x (Tensor): x-coordinates of ``sos_map`` rows.
             sos_grid_z (Tensor): z-coordinates of ``sos_map`` columns.
+            focal_region_length (float): Full length in meters of the region
+                around the focal plane of focused transmits where first- and
+                last-arrival delays are linearly blended. This smooths the
+                focal-plane transition while preserving the same model outside
+                the region. ``None`` or ``0`` disables it.
 
         Returns:
             dict: Dictionary containing tof_corrected_data
@@ -193,6 +206,7 @@ class TOFCorrection(Operation):
             "sos_map": sos_map,
             "sos_grid_x": sos_grid_x,
             "sos_grid_z": sos_grid_z,
+            "focal_region_length": focal_region_length,
         }
 
         if not self.with_batch_dim:
@@ -231,20 +245,101 @@ class PfieldWeighting(Operation):
         if flat_pfield is None:
             return {self.output_key: data}
 
-        # Swap (n_pix, n_tx) to (n_tx, n_pix)
-        flat_pfield = ops.swapaxes(flat_pfield, 0, 1)
+        weighted_data = apply_aligned_apodization(data, flat_pfield, self.with_batch_dim)
 
-        # Add batch dimension if needed
-        if self.with_batch_dim:
-            pfield_expanded = ops.expand_dims(flat_pfield, axis=0)
-        else:
-            pfield_expanded = flat_pfield
+        return {self.output_key: weighted_data}
 
-        append_n_dims = ops.ndim(data) - ops.ndim(pfield_expanded)
-        pfield_expanded = extend_n_dims(pfield_expanded, axis=-1, n_dims=append_n_dims)
 
-        # Perform element-wise multiplication with the pressure weight mask
-        weighted_data = data * pfield_expanded
+@ops_registry("aligned_apodization")
+class AlignedApodization(Operation):
+    """Weighting aligned data with an arbitrary, directly-supplied per-pixel,
+    per-transmit apodization mask.
+
+    This weights the **transmit** axis (compounding): any transmit's
+    contribution to any pixel can be scaled or masked out before the
+    receive-channel and transmit sums. It is the same mechanism as
+    :class:`PfieldWeighting`, generalized to take the weight directly instead of
+    deriving it from a simulated pressure field, e.g. to reconstruct scanline
+    (one transmit per image line) imaging as a special case of pixel-based DAS:
+    weight 1 for a pixel's owning beam, 0 for every other transmit. See
+    :func:`zea.beamform.pixelgrid.scanline_aligned_apodization`.
+
+    .. note::
+        This is *not* receive-aperture apodization. For per-element
+        (receive-channel) weighting see :class:`ReceiveApodization` (custom) or
+        the built-in f-number mask
+        (:func:`zea.beamform.beamformer.fnumber_mask`).
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.ALIGNED_DATA,
+            **kwargs,
+        )
+
+    def call(self, flat_aligned_apodization=None, **kwargs):
+        """Weight data with a per-pixel, per-transmit apodization mask.
+
+        Args:
+            flat_aligned_apodization (ops.Tensor): Apodization weight of shape (n_pix, n_tx)
+
+        Returns:
+            dict: Dictionary containing weighted data
+        """
+        data = kwargs[self.key]  # must start with ((batch_size,) n_tx, n_pix, ...)
+
+        if flat_aligned_apodization is None:
+            return {self.output_key: data}
+
+        weighted_data = apply_aligned_apodization(
+            data, flat_aligned_apodization, self.with_batch_dim
+        )
+
+        return {self.output_key: weighted_data}
+
+
+@ops_registry("receive_apodization")
+class ReceiveApodization(Operation):
+    """Custom receive-aperture apodization: weight aligned data with a per-pixel,
+    per-element (receive-channel) mask.
+
+    This weights the **receive-element** axis, scaling each element's
+    contribution to a pixel before the receive-channel sum. It is the
+    user-supplied counterpart of the built-in f-number mask
+    (:func:`zea.beamform.beamformer.fnumber_mask`), and is applied *in addition*
+    to it — set ``f_number=0`` to disable the built-in mask and use a fully
+    custom receive apodization alone.
+
+    .. note::
+        This is distinct from :class:`AlignedApodization`, which weights the
+        *transmit* axis (compounding), not the receive channels.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.ALIGNED_DATA,
+            **kwargs,
+        )
+
+    def call(self, flat_receive_apodization=None, **kwargs):
+        """Weight data with a per-pixel, per-element apodization mask.
+
+        Args:
+            flat_receive_apodization (ops.Tensor): Apodization weight of shape (n_pix, n_el)
+
+        Returns:
+            dict: Dictionary containing weighted data
+        """
+        data = kwargs[self.key]  # must start with ((batch_size,) n_tx, n_pix, n_el, ...)
+
+        if flat_receive_apodization is None:
+            return {self.output_key: data}
+
+        weighted_data = apply_receive_apodization(
+            data, flat_receive_apodization, self.with_batch_dim
+        )
 
         return {self.output_key: weighted_data}
 
@@ -322,10 +417,13 @@ class ScanConvert(Operation):
 
         data = kwargs[self.key]
 
-        if self._jit_compile and self.jittable:
-            assert coordinates is not None, (
-                "coordinates must be provided to jit scan conversion."
-                "You can set ScanConvert(jit_compile=False) to disable jitting."
+        if self._is_jitted and self.jittable and coordinates is None:
+            # Computing coordinates calls ops.arange with tensor-derived bounds, which
+            # produces a data-dependent output shape that cannot be traced inside a JIT.
+            raise ValueError(
+                "coordinates must be provided when ScanConvert runs inside a JIT context "
+                "(jit_compile=True, or jit_options='ops'/'pipeline' on the enclosing pipeline). "
+                "Pre-compute coordinates and pass them explicitly, or disable JIT."
             )
 
         data_out, parameters = scan_convert(
@@ -443,7 +541,7 @@ class FirFilter(Operation):
                 "When using complex_channels=True, the complex channels are removed to convert"
                 " to complex numbers before filtering, so axis cannot be the last axis."
             )
-            signal = channels_to_complex(signal)
+            signal = ops.view_as_complex(signal)
 
         def _convolve(signal):
             """Apply the filter to the signal using correlation."""
@@ -452,7 +550,7 @@ class FirFilter(Operation):
         filtered_signal = apply_along_axis(_convolve, axis, signal)
 
         if self.complex_channels:
-            filtered_signal = complex_to_channels(filtered_signal)
+            filtered_signal = ops.view_as_real(filtered_signal)
 
         return {self.output_key: filtered_signal}
 
@@ -603,9 +701,7 @@ class BandPassFilter(FirFilter):
             f1 = demodulation_frequency - bandwidth / 2
             f2 = demodulation_frequency + bandwidth / 2
 
-        bpf = get_band_pass_filter(
-            self.num_taps, sampling_frequency, f1, f2, validate=not self._jit_compile
-        )
+        bpf = get_band_pass_filter(self.num_taps, sampling_frequency, f1, f2)
         kwargs[self.filter_key] = bpf
         return super().call(**kwargs)
 
@@ -634,21 +730,26 @@ class BandPassFilter(FirFilter):
 
 @ops_registry("channels_to_complex")
 class ChannelsToComplex(Operation):
+    @deprecated(replacement="zea.ops.keras_ops.ViewAsComplex")
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
     def call(self, **kwargs):
         data = kwargs[self.key]
-        output = channels_to_complex(data)
+        output = ops.view_as_complex(data)
         return {self.output_key: output}
 
 
 @ops_registry("complex_to_channels")
 class ComplexToChannels(Operation):
+    @deprecated(replacement="zea.ops.keras_ops.ViewAsReal")
     def __init__(self, axis=-1, **kwargs):
         super().__init__(**kwargs)
         self.axis = axis
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        output = complex_to_channels(data, axis=self.axis)
+        output = ops.moveaxis(ops.view_as_real(data), -1, self.axis)
         return {self.output_key: output}
 
 
@@ -859,7 +960,7 @@ class AnisotropicDiffusion(Operation):
     """Speckle Reducing Anisotropic Diffusion (SRAD) filter.
 
     Reference:
-    - https://www.researchgate.net/publication/5602035_Speckle_reducing_anisotropic_diffusion
+    - https://doi.org/10.1109/TIP.2002.804276
     - https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox
     """
 
@@ -988,7 +1089,7 @@ class UpMix(Operation):
             log.warning("Upmixing is not applicable to RF data.")
             return {self.output_key: data}
         elif data.shape[-1] == 2:
-            data = channels_to_complex(data)
+            data = ops.view_as_complex(data)
 
         data = upmix(data, sampling_frequency, demodulation_frequency, self.upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
@@ -1243,27 +1344,132 @@ class CommonMidpointPhaseError(Operation):
 
 @ops_registry("tissue_suppression")
 class TissueSuppression(Operation):
-    """Tissue suppression using SVD-based clutter filtering.
+    """Tissue suppression using SVD-based clutter filtering. Typically applied
+    after beamforming but before envelope detection, on beamformed RF or IQ data.
 
     Removes stationary tissue components from multi-frame ultrasound data
     by zeroing the dominant singular values of the Casorati matrix.
+
+    Two filter types are available:
+
+    * ``"svd"`` -- the real-valued Direct SVD filter, building the temporal Gram
+      matrix with a plain transpose (``XᵀX``). For real data.
+    * ``"svd_complex"`` -- the same filter using the conjugate (Hermitian)
+      transpose (``XᴴX``, the true temporal covariance), for IQ data.
+
+    By default ``filter_type=None`` picks between them from the channel axis --
+    ``n_ch=2`` means IQ and selects ``"svd_complex"``, otherwise
+    ``"svd"``.
+
+    .. note::
+        Unlike most operations, this one is temporal: axis 0 of the input is the
+        frame axis and is consumed jointly, so ``with_batch_dim`` does not apply
+        and is ignored. Input is always ``(n_frames, ...)``. To process several
+        acquisitions, loop the pipeline over them.
+
+    .. note::
+        On the TensorFlow backend the ``"svd_complex"`` path runs eagerly:
+        TensorFlow registers no XLA ``Svd`` kernel for complex dtypes. The other
+        backends JIT it.
     """
 
-    def __init__(self, cutoff: int = 5, **kwargs):
-        super().__init__(**kwargs)
-        self.cutoff = cutoff
+    FILTER_TYPES = ("svd", "svd_complex")
 
-    def suppress_tissue(self, data):
+    def __init__(self, cutoff: int | float = 5, filter_type: str | None = None, **kwargs):
+        """
+        Args:
+            cutoff (int or float): Number of principal (tissue) components to
+                reject. An ``int`` is a component count. A ``float`` in ``[0, 1)``
+                is a fraction of the number of frames, resolved at call time as
+                ``round(n_frames * cutoff)``.
+            filter_type (str or None): Which clutter filter to use, one of
+                :attr:`FILTER_TYPES`. Defaults to ``None``, which selects
+                ``"svd_complex"`` for IQ input (``n_ch=2``) and ``"svd"``
+                otherwise.
+        """
+        if filter_type is not None and filter_type not in self.FILTER_TYPES:
+            raise ValueError(
+                f"Unknown filter_type {filter_type!r}, expected one of "
+                f"{', '.join(map(repr, self.FILTER_TYPES))} or None (auto-detect)."
+            )
+        if isinstance(cutoff, float) and not 0 <= cutoff < 1:
+            raise ValueError(
+                f"A float cutoff is a fraction of the frames and must be in [0, 1), got {cutoff}."
+            )
+        # Set before super().__init__(), which calls set_jit() -> reads self.jittable.
+        self.cutoff = cutoff
+        self.filter_type = filter_type
+        super().__init__(**kwargs)
+
+    @property
+    def jittable(self):
+        """Whether this operation can be JIT compiled.
+
+        TensorFlow registers no XLA ``Svd`` kernel for complex dtypes, so the
+        ``"svd_complex"`` path has to run eagerly there. With ``filter_type=None``
+        the path is only known once the data's channel axis is seen, so on
+        TensorFlow we conservatively assume complex is possible and stay eager;
+        pass ``filter_type="svd"`` explicitly to keep the real filter jitted.
+        """
+        if self.filter_type != "svd" and keras.backend.backend() == "tensorflow":
+            return False
+        return super().jittable
+
+    def resolve_filter_type(self, data) -> str:
+        """Resolve which filter to use for ``data``.
+
+        Args:
+            data (ops.Tensor): Input of shape ``(n_frames, ..., n_ch)``.
+
+        Returns:
+            str: The configured ``filter_type``, or -- when it is ``None`` --
+            ``"svd_complex"`` if the channel axis marks the data as IQ
+            (``n_ch=2``, zea's convention) and ``"svd"`` otherwise.
+        """
+        if self.filter_type is not None:
+            return self.filter_type
+        return "svd_complex" if len(data.shape) > 1 and data.shape[-1] == 2 else "svd"
+
+    def resolve_cutoff(self, n_frames: int) -> int:
+        """Resolve a fractional ``cutoff`` into a component count.
+
+        Args:
+            n_frames (int): Number of frames in the data.
+
+        Returns:
+            int: Number of principal components to reject.
+        """
+        if isinstance(self.cutoff, float):
+            return min(int(round(n_frames * self.cutoff)), n_frames - 1)
+        return self.cutoff
+
+    def suppress_tissue(self, data, filter_type=None):
         """
         Suppresses tissue using Direct SVD.
 
         Args:
-            data (ops.Tensor): Shape (n_frames, ...)
+            data (ops.Tensor): Shape (n_frames, ...). Complex for the
+                ``"svd_complex"`` filter type, real otherwise.
+            filter_type (str or None): Filter to apply. Defaults to ``None``,
+                which resolves it from ``data`` via :meth:`resolve_filter_type`.
 
         """
-        return suppress_tissue(data, self.cutoff)
+        if filter_type is None:
+            filter_type = self.resolve_filter_type(data)
+        return suppress_tissue(
+            data,
+            self.resolve_cutoff(data.shape[0]),
+            conjugate=filter_type == "svd_complex",
+        )
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        filtered = self.suppress_tissue(ops.array(data))
+        filter_type = self.resolve_filter_type(data)
+        is_complex = filter_type == "svd_complex"
+
+        array = ops.view_as_complex(ops.array(data)) if is_complex else ops.array(data)
+        filtered = self.suppress_tissue(array, filter_type=filter_type)
+        if is_complex:
+            filtered = ops.view_as_real(filtered)
+
         return {self.output_key: ops.cast(ops.array(filtered), data.dtype)}

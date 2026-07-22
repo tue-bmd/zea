@@ -197,6 +197,89 @@ def test_channels_to_complex(size, axis):
 
 
 @pytest.mark.parametrize(
+    "size, axis",
+    [
+        ((2, 1, 128, 32), -1),
+        ((2, 20, 8), 1),
+        ((512, 512), -1),
+    ],
+)
+@backend_equality_check(decimal=5)
+def test_complex_channels_operations(size, axis):
+    """Round-trip the ComplexToChannels and ChannelsToComplex operations.
+
+    ``ComplexToChannels`` splits complex data into two real channels placed at
+    ``axis``, while ``ChannelsToComplex`` reads the two channels from the last
+    axis, so we move them back before converting to complex again.
+    """
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    complex_data = (rng.random(size) + 1j * rng.random(size)).astype("complex64")
+
+    channels = ops.ComplexToChannels(axis=axis)(data=keras.ops.convert_to_tensor(complex_data))[
+        "data"
+    ]
+    channels = keras.ops.convert_to_numpy(channels)
+    assert channels.shape[axis] == 2, "Real/imaginary channels should live on `axis`."
+
+    restored = ops.ChannelsToComplex()(
+        data=keras.ops.convert_to_tensor(np.moveaxis(channels, axis, -1))
+    )["data"]
+    restored = keras.ops.convert_to_numpy(restored)
+
+    np.testing.assert_almost_equal(restored, complex_data, decimal=5)
+    return restored
+
+
+# NOTE: torch is excluded because keras' correlate drops the complex dtype on the
+# torch backend, which the complex_channels path relies on.
+@backend_equality_check(decimal=4, backends=["tensorflow", "jax"])
+def test_fir_filter_complex_channels():
+    """FirFilter with complex_channels=True filters IQ data given as two real channels.
+
+    Because the filter taps are real, filtering the complex signal is equivalent to
+    filtering the real and imaginary channels independently, so the complex-channel
+    path must match a plain real-valued FirFilter applied along the same axis.
+    """
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    # (batch, n_ax, complex_channels) — filter along the n_ax axis.
+    signal = rng.standard_normal((2, 64, 2)).astype("float32")
+    taps = rng.standard_normal((7,)).astype("float32")
+    signal_tensor = keras.ops.convert_to_tensor(signal)
+    taps_tensor = keras.ops.convert_to_tensor(taps)
+
+    result = ops.FirFilter(axis=1, complex_channels=True, with_batch_dim=True)(
+        data=signal_tensor, fir_filter_taps=taps_tensor
+    )["data"]
+    result = keras.ops.convert_to_numpy(result)
+
+    assert result.shape == signal.shape, "Real/imaginary channels should be restored."
+    assert not np.allclose(result, signal), "Filtering should change the signal."
+
+    reference = ops.FirFilter(axis=1, complex_channels=False, with_batch_dim=True)(
+        data=signal_tensor, fir_filter_taps=taps_tensor
+    )["data"]
+    reference = keras.ops.convert_to_numpy(reference)
+
+    np.testing.assert_almost_equal(result, reference, decimal=4)
+
+    # Last axis holds the complex channels, so it may not be the filter axis.
+    with pytest.raises(AssertionError):
+        ops.FirFilter(axis=-1, complex_channels=True, with_batch_dim=True)(
+            data=signal_tensor, fir_filter_taps=taps_tensor
+        )
+
+    return result
+
+
+@pytest.mark.parametrize(
     "factor, batch_size",
     [
         (1, 2),
@@ -786,6 +869,36 @@ def test_band_pass_filter():
     return result_default
 
 
+def test_band_pass_filter_validates_in_eager_mode():
+    """Frequency validation in BandPassFilter.call must run in eager (non-JIT) mode."""
+    import keras
+
+    from zea import ops
+
+    data = keras.ops.ones((1, 2, 128, 4, 1), dtype="float32")
+
+    # Eager (jit_compile=False): invalid frequencies must raise.
+    op = ops.BandPassFilter(
+        axis=-3,
+        with_batch_dim=True,
+        passband=(100e6, 200e6),  # far above Nyquist — always invalid
+        jit_compile=False,
+    )
+    with pytest.raises(ValueError, match="Invalid cutoff frequency"):
+        op(data=data, sampling_frequency=40e6)
+
+    # jit_compile=True: values are abstract inside the JIT trace, so float() fails
+    # and the try/except in get_band_pass_filter silently skips validation. This is a
+    # known limitation — test that it at least does not crash with valid frequencies.
+    op_jit = ops.BandPassFilter(
+        axis=-3,
+        with_batch_dim=True,
+        passband=(3.5e6, 6.5e6),
+        jit_compile=True,
+    )
+    op_jit(data=data, sampling_frequency=40e6)  # must not raise
+
+
 def test_make_tgc_curve():
     """Test that TGC curve is monotonically increasing with depth."""
     n_ax = 1000
@@ -1010,6 +1123,140 @@ def test_common_midpoint_phase_error_coherent_data():
     return phase_error
 
 
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+@backend_equality_check(decimal=5)
+def test_apply_aligned_apodization(with_batch_dim):
+    """A per-pixel, per-transmit weight scales each transmit's contribution to a
+    pixel, e.g. a one-hot mask isolates a single owning transmit per pixel
+    (the scanline / line-by-line special case of pixel-based DAS)."""
+    from zea.func.ultrasound import apply_aligned_apodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    data = keras.ops.ones((n_tx, n_pix, n_el, n_ch))
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    # Pixel 0 belongs to transmit 0; pixel 1 belongs to transmit 2.
+    apodization = keras.ops.convert_to_tensor(
+        np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+    )
+
+    out = keras.ops.convert_to_numpy(apply_aligned_apodization(data, apodization, with_batch_dim))
+
+    expected = np.zeros((n_tx, n_pix, n_el, n_ch), dtype=np.float32)
+    expected[0, 0] = 1.0
+    expected[2, 1] = 1.0
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+    return out
+
+
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+def test_aligned_apodization_op(with_batch_dim):
+    """AlignedApodization applies flat_aligned_apodization to aligned data; with no
+    mask supplied (flat_aligned_apodization=None) it passes the data through
+    unchanged."""
+    from zea.ops import AlignedApodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    data = keras.ops.ones((n_tx, n_pix, n_el, n_ch))
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    op = AlignedApodization(with_batch_dim=with_batch_dim)
+
+    out_noop = op(data=data)["data"]
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(out_noop), keras.ops.convert_to_numpy(data)
+    )
+
+    apodization = keras.ops.convert_to_tensor(
+        np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+    )
+    out = keras.ops.convert_to_numpy(op(data=data, flat_aligned_apodization=apodization)["data"])
+
+    expected = np.zeros((n_tx, n_pix, n_el, n_ch), dtype=np.float32)
+    expected[0, 0] = 1.0
+    expected[2, 1] = 1.0
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+
+
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+@backend_equality_check(decimal=5)
+def test_apply_receive_apodization(with_batch_dim):
+    """A per-pixel, per-element weight scales each receive element's contribution
+    to a pixel (custom receive-aperture apodization), broadcasting uniformly over
+    the transmit and channel axes."""
+    from zea.func.ultrasound import apply_receive_apodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    data = keras.ops.ones((n_tx, n_pix, n_el, n_ch))
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    # Per-pixel taper over the receive elements (independent of transmit/channel).
+    apod_np = np.array([[1.0, 0.5, 0.0, 0.0], [0.0, 0.0, 0.5, 1.0]], dtype=np.float32)
+    apodization = keras.ops.convert_to_tensor(apod_np)
+
+    out = keras.ops.convert_to_numpy(apply_receive_apodization(data, apodization, with_batch_dim))
+
+    # Broadcast the (n_pix, n_el) weight over n_tx (leading) and n_ch (trailing).
+    expected = np.broadcast_to(apod_np[None, :, :, None], (n_tx, n_pix, n_el, n_ch)).copy()
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+    return out
+
+
+@pytest.mark.parametrize("with_batch_dim", [False, True])
+def test_receive_apodization_op(with_batch_dim):
+    """ReceiveApodization applies a custom per-pixel, per-element mask to aligned
+    data; with no mask supplied (flat_receive_apodization=None) it passes the data
+    through unchanged, and a uniform ones-weight is the identity."""
+    from zea.ops import ReceiveApodization
+
+    n_tx, n_pix, n_el, n_ch = 3, 2, 4, 2
+    rng = np.random.default_rng(0)
+    data_np = rng.standard_normal((n_tx, n_pix, n_el, n_ch)).astype(np.float32)
+    data = keras.ops.convert_to_tensor(data_np)
+    if with_batch_dim:
+        data = keras.ops.expand_dims(data, axis=0)
+
+    op = ReceiveApodization(with_batch_dim=with_batch_dim)
+
+    # None -> pass-through
+    out_noop = op(data=data)["data"]
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(out_noop), keras.ops.convert_to_numpy(data)
+    )
+
+    # Ones -> identity
+    ones = keras.ops.ones((n_pix, n_el))
+    out_ones = op(data=data, flat_receive_apodization=ones)["data"]
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(out_ones),
+        keras.ops.convert_to_numpy(data),
+        rtol=1e-5,
+    )
+
+    # Per-element taper -> scales the expected elements
+    apod_np = np.array([[1.0, 0.5, 0.0, 0.0], [0.0, 0.0, 0.5, 1.0]], dtype=np.float32)
+    apodization = keras.ops.convert_to_tensor(apod_np)
+    out = keras.ops.convert_to_numpy(op(data=data, flat_receive_apodization=apodization)["data"])
+
+    expected = data_np * apod_np[None, :, :, None]
+    if with_batch_dim:
+        expected = expected[None]
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+
+
 @backend_equality_check(decimal=2)
 def test_prepare_parameters_pfield_all_backends():
     """pipeline.prepare_parameters must work on all backends when pfield is enabled.
@@ -1056,6 +1303,9 @@ def test_prepare_parameters_pfield_all_backends():
     )
     parameters.grid_size_x = 8
     parameters.grid_size_z = 8
+    # default downsample=10 collapses this 8x8 grid to 1 point, making the field
+    # constant up to backend rounding noise, which flakes the quantile threshold.
+    parameters.pfield_kwargs = {"downsample": 2}
 
     # Disable the on-disk result cache so ops are actually executed in each backend
     # subprocess (the cache would serve a stale pickle and hide crashes).
@@ -1106,3 +1356,162 @@ def test_tissue_suppression():
     )
 
     return output
+
+
+def _complex_clutter_video(n_frames=40, n_z=16, n_x=16, seed=DEFAULT_TEST_SEED):
+    """Complex IQ video: strong phase-rotating tissue clutter + weak blood.
+
+    The tissue rotates in phase over time, which is what distinguishes the
+    Hermitian Gram matrix from the plain-transpose one.
+
+    Returns the video as a complex array (n_frames, n_z, n_x) and as real IQ
+    channels (n_frames, n_z, n_x, 2).
+    """
+    rng = np.random.default_rng(seed)
+
+    def _complex_normal(shape):
+        return (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)).astype(np.complex64)
+
+    spatial = _complex_normal((n_z, n_x)) * 10
+    phase = np.exp(1j * 2 * np.pi * 0.02 * np.arange(n_frames)).astype(np.complex64)
+    tissue = (phase[:, None, None] * spatial[None]).astype(np.complex64)
+    blood = (_complex_normal((n_frames, n_z, n_x)) * 0.1).astype(np.complex64)
+    data = (tissue + blood).astype(np.complex64)
+    data_channels = np.stack([data.real, data.imag], axis=-1).astype(np.float32)
+    return data, data_channels
+
+
+@backend_equality_check(allow_none=True)
+def test_tissue_suppression_complex():
+    """TissueSuppression with filter_type='svd_complex' suppresses complex IQ clutter.
+
+    The op takes IQ data as two real channels (n_frames, ..., 2), the zea
+    convention, and converts to/from complex internally.
+    """
+    import keras
+
+    from zea import ops
+
+    _, data_channels = _complex_clutter_video()
+
+    op = ops.TissueSuppression(cutoff=2, filter_type="svd_complex")
+    output = keras.ops.convert_to_numpy(op(data=keras.ops.convert_to_tensor(data_channels))["data"])
+
+    assert output.shape == data_channels.shape
+    assert output.dtype == data_channels.dtype, (
+        f"Expected dtype {data_channels.dtype}, got {output.dtype}"
+    )
+
+    # The clutter dominates the energy, so removing it must remove nearly all of it.
+    energy_ratio = np.mean(output**2) / np.mean(data_channels**2)
+    assert energy_ratio < 0.01, f"Expected clutter to be suppressed, energy ratio {energy_ratio}"
+
+
+def test_tissue_suppression_complex_needs_conjugate():
+    """The plain-transpose 'svd' filter fails on complex IQ; 'svd_complex' is required.
+
+    On complex data the plain transpose builds X^T X rather than the temporal
+    covariance X^H X, so the components it finds are not the tissue subspace.
+    Checked against the reference implementation: this is maths, not backend behaviour.
+    """
+    import keras
+
+    from zea.func.ultrasound import suppress_tissue
+
+    data, _ = _complex_clutter_video()  # complex array, not the real-channel one
+
+    def _energy_ratio(conjugate):
+        output = keras.ops.convert_to_numpy(suppress_tissue(data, 2, conjugate=conjugate))
+        return np.mean(np.abs(output) ** 2) / np.mean(np.abs(data) ** 2)
+
+    assert _energy_ratio(conjugate=True) < 0.01
+    # The plain transpose leaves the phase-rotating clutter essentially intact.
+    assert _energy_ratio(conjugate=False) > 0.5
+
+
+@backend_equality_check(allow_none=True)
+def test_tissue_suppression_conjugate_matches_plain_on_zero_imag_data():
+    """With a zero imaginary part, the conjugate transpose is a no-op."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    real_data = rng.standard_normal((10, 8, 8)).astype(np.float32)
+    channel_data = np.stack([real_data, np.zeros_like(real_data)], axis=-1)
+
+    real_output = keras.ops.convert_to_numpy(
+        ops.TissueSuppression(cutoff=3, filter_type="svd")(
+            data=keras.ops.convert_to_tensor(real_data)
+        )["data"]
+    )
+    complex_output = keras.ops.convert_to_numpy(
+        ops.TissueSuppression(cutoff=3, filter_type="svd_complex")(
+            data=keras.ops.convert_to_tensor(channel_data)
+        )["data"]
+    )
+
+    np.testing.assert_allclose(real_output, complex_output[..., 0], atol=1e-2)
+    np.testing.assert_allclose(complex_output[..., 1], 0, atol=1e-2)
+
+
+def test_tissue_suppression_fractional_cutoff():
+    """A float cutoff is resolved as a fraction of the number of frames."""
+    from zea import ops
+
+    assert ops.TissueSuppression(cutoff=0.05).resolve_cutoff(400) == 20
+    assert ops.TissueSuppression(cutoff=0.1).resolve_cutoff(95) == 10
+    # An int cutoff is used as-is, independent of the frame count.
+    assert ops.TissueSuppression(cutoff=5).resolve_cutoff(400) == 5
+
+
+def test_tissue_suppression_filter_type_autodetect():
+    """filter_type=None picks svd_complex for IQ (n_ch=2) and svd otherwise."""
+    import keras
+
+    from zea import ops
+
+    def _resolve(shape, filter_type=None):
+        data = keras.ops.convert_to_tensor(np.zeros(shape, dtype=np.float32))
+        return ops.TissueSuppression(cutoff=2, filter_type=filter_type).resolve_filter_type(data)
+
+    assert _resolve((10, 8, 8, 2)) == "svd_complex"  # IQ
+    assert _resolve((10, 8, 8, 1)) == "svd"  # RF
+    assert _resolve((10, 8, 8)) == "svd"  # real, no channel axis
+    assert _resolve((10,)) == "svd"  # 1-D, no channel axis to read
+
+    # An explicit filter_type always wins over auto-detection.
+    assert _resolve((10, 8, 8, 2), filter_type="svd") == "svd"
+    assert _resolve((10, 8, 8), filter_type="svd_complex") == "svd_complex"
+
+
+@backend_equality_check(allow_none=True)
+def test_tissue_suppression_autodetect_matches_explicit():
+    """Auto-detected IQ input gives the same result as filter_type='svd_complex'."""
+    import keras
+
+    from zea import ops
+
+    _, data_channels = _complex_clutter_video()
+    data_tensor = keras.ops.convert_to_tensor(data_channels)
+
+    outputs = [
+        keras.ops.convert_to_numpy(
+            ops.TissueSuppression(cutoff=2, filter_type=filter_type)(data=data_tensor)["data"]
+        )
+        for filter_type in (None, "svd_complex")
+    ]
+    np.testing.assert_allclose(outputs[0], outputs[1], atol=1e-5)
+
+
+def test_tissue_suppression_invalid_arguments():
+    """Invalid filter_type / cutoff are rejected at construction time."""
+    import pytest
+
+    from zea import ops
+
+    with pytest.raises(ValueError, match="Unknown filter_type"):
+        ops.TissueSuppression(filter_type="not_a_filter")
+
+    with pytest.raises(ValueError, match="fraction of the frames"):
+        ops.TissueSuppression(cutoff=1.5)

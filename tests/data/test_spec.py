@@ -9,6 +9,8 @@ from zea.data import spec as spec_module
 from zea.data.file import File
 from zea.data.spec import (
     Annotations,
+    AttenuationMap,
+    BeamformedData,
     DataSpec,
     FileSpec,
     Image,
@@ -24,6 +26,7 @@ from zea.data.spec import (
     SosMap,
     Spec,
     Subject,
+    TrackSpec,
 )
 
 
@@ -163,6 +166,10 @@ def _example_data(n_frames, n_tx, n_el, n_ax, n_ch):
             "values": np.full((n_frames, 16, 12, 1), 1540.0, dtype=np.float32),
             "coordinates": coords_3d,
         },
+        "attenuation_map": {
+            "values": np.full((n_frames, 16, 12, 1), 5e-5, dtype=np.float32),
+            "coordinates": coords_3d,
+        },
         "strain": {
             "values": np.zeros((n_frames, 16, 12, 1), dtype=np.float32),
             "coordinates": coords_3d,
@@ -300,6 +307,69 @@ def test_inconsistent_dimension_error_groups_fields_by_size():
     assert "t0_delays" in message and "tx_apodizations" in message
     size_2_line = next(line for line in message.splitlines() if line.strip().startswith("size 2:"))
     assert "t0_delays" in size_2_line
+
+
+def test_n_ch_is_independent_across_data_products():
+    """RF raw_data (n_ch=1) may coexist with IQ beamformed_data (n_ch=2).
+
+    The channel dimension is semantically independent between data products, so
+    it must not be cross-checked at the DataSpec level.
+    """
+    n_frames, n_tx, n_ax, n_el, z, x = 2, 4, 64, 8, 16, 16
+    data = DataSpec(
+        raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32),
+        beamformed_data={
+            "values": np.zeros((n_frames, z, x, 2), dtype=np.float32),
+            "coordinates": np.zeros((n_frames, z, x, 3), dtype=np.float32),
+        },
+    )
+    assert data.raw_data.shape[-1] == 1
+    assert data.beamformed_data.values.shape[-1] == 2
+    assert list(data.beamformed_data.labels) == ["I", "Q"]
+
+
+def test_n_spatial_ch_is_independent_across_maps():
+    """Two maps in the same DataSpec may have different channel counts."""
+    n_frames, z, x = 2, 16, 16
+    coordinates = np.zeros((n_frames, z, x, 3), dtype=np.float32)
+    data = DataSpec(
+        segmentation={
+            "values": np.zeros((n_frames, z, x, 3), dtype=np.bool_),
+            "labels": np.array(["a", "b", "c"], dtype=np.str_),
+            "coordinates": coordinates,
+        },
+        sos_map={
+            "values": np.zeros((n_frames, z, x, 2), dtype=np.float32),
+            "labels": np.array(["lo", "hi"], dtype=np.str_),
+            "coordinates": coordinates,
+        },
+    )
+    assert data.segmentation.values.shape[-1] == 3
+    assert data.sos_map.values.shape[-1] == 2
+
+
+def test_n_ch_still_consistent_within_a_single_map():
+    """values and labels within one Map must still agree on n_ch."""
+    n_frames, z, x = 2, 16, 16
+    with pytest.raises(ValueError, match="Dimension 'n_ch' has inconsistent sizes"):
+        BeamformedData(
+            values=np.zeros((n_frames, z, x, 2), dtype=np.float32),
+            coordinates=np.zeros((n_frames, z, x, 3), dtype=np.float32),
+            labels=np.array(["only_one"], dtype=np.str_),
+        )
+
+
+def test_shared_dimensions_still_cross_checked_across_data_products():
+    """Non-channel dimensions (e.g. n_frames) must still agree across products."""
+    z, x = 16, 16
+    with pytest.raises(ValueError, match="Dimension 'n_frames' has inconsistent sizes"):
+        DataSpec(
+            raw_data=np.zeros((2, 4, 64, 8, 1), dtype=np.float32),
+            beamformed_data={
+                "values": np.zeros((3, z, x, 1), dtype=np.float32),
+                "coordinates": np.zeros((3, z, x, 3), dtype=np.float32),
+            },
+        )
 
 
 def test_signal_nd_accepts_variable_trailing_dimensions_with_ellipsis():
@@ -812,6 +882,70 @@ class TestDataValidationErrors:
                 coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
             )
 
+    def test_attenuation_map_rejects_wrong_unit(self):
+        """AttenuationMap enforces a canonical unit of dB/m/Hz (not clinical dB/cm/MHz)."""
+        with pytest.raises(ValueError, match="Attenuation map unit should be 'dB/m/Hz'"):
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), 5e-5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+                unit="dB/cm/MHz",
+            )
+
+    def test_attenuation_map_accepts_canonical_unit(self):
+        """AttenuationMap accepts float32 values with the dB/m/Hz unit."""
+        att = AttenuationMap(
+            values=np.full((2, 16, 12, 1), 7e-5, dtype=np.float32),
+            coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            unit="dB/m/Hz",
+        )
+        assert att.values.dtype == np.float32
+
+    def test_attenuation_map_gamma_defaults_to_linear(self):
+        """gamma defaults to 1.0 (linear frequency dependence) and is stored as float32."""
+        att = AttenuationMap(
+            values=np.full((2, 16, 12, 1), 5e-5, dtype=np.float32),
+            coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+        )
+        assert att.gamma == 1.0
+        assert np.dtype(np.asarray(att.gamma).dtype) == np.float32
+
+    def test_attenuation_map_accepts_gamma(self):
+        """A non-linear power-law exponent (e.g. water gamma=2) is accepted and cast to float32."""
+        att = AttenuationMap(
+            values=np.full((2, 16, 12, 1), 5e-5, dtype=np.float32),
+            coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            gamma=2.0,
+        )
+        assert att.gamma == np.float32(2.0)
+
+    def test_attenuation_map_warns_on_implausible_gamma(self):
+        """A power-law exponent outside the physically typical (0, 2] range warns."""
+        with patch.object(spec_module.log, "warning") as mock_warning:
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), 5e-5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+                gamma=3.0,
+            )
+        assert any("gamma" in str(c) for c in mock_warning.call_args_list)
+
+    def test_attenuation_map_warns_on_clinical_unit_magnitude(self):
+        """Values sized like dB/cm/MHz (~0.5) are far too large for dB/m/Hz and warn."""
+        with patch.object(spec_module.log, "warning") as mock_warning:
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), 0.5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            )
+        assert any("dB/m/Hz" in str(c) for c in mock_warning.call_args_list)
+
+    def test_attenuation_map_warns_on_negative_values(self):
+        """Negative attenuation coefficients are physically unexpected and warn."""
+        with patch.object(spec_module.log, "warning") as mock_warning:
+            AttenuationMap(
+                values=np.full((2, 16, 12, 1), -5e-5, dtype=np.float32),
+                coordinates=np.zeros((2, 16, 12, 3), dtype=np.float32),
+            )
+        assert any("negative values" in str(c) for c in mock_warning.call_args_list)
+
     def test_image_wrong_pixel_dtype_raises(self):
         """Image is UnsignedIntMap – values must be float32 or uint8, not complex128."""
         with pytest.raises(TypeError, match="Image: field 'values'"):
@@ -946,6 +1080,97 @@ class TestMetadataAndMetricsValidationErrors:
         with pytest.raises(TypeError, match="age"):
             Subject(age="forty two")
 
+    def test_subject_bmi_out_of_range_raises(self):
+        """bmi must be within the physically-possible range (0, 100]."""
+        with pytest.raises(ValueError, match="BMI"):
+            Subject(bmi=np.float32(150.0))
+        with pytest.raises(ValueError, match="BMI"):
+            Subject(bmi=np.float32(0.0))
+        with pytest.raises(ValueError, match="BMI"):
+            Subject(bmi=np.float32(-1.0))
+
+    def test_subject_bmi_valid(self):
+        """A sensible bmi value passes validation without warning."""
+        with patch("zea.log.warning") as mock_warn:
+            subject = Subject(bmi=np.float32(23.4))
+        assert subject.bmi == np.float32(23.4)
+        assert not any("BMI" in str(c.args[0]) for c in mock_warn.call_args_list)
+
+    def test_subject_bmi_unusual_warns(self):
+        """Values outside the typical clinical range warn but do not raise."""
+        with patch("zea.log.warning") as mock_warn:
+            Subject(bmi=np.float32(75.0))
+        assert any("BMI" in str(c.args[0]) for c in mock_warn.call_args_list)
+
+    def test_subject_weight_out_of_range_raises(self):
+        """weight must be a positive, finite number of kilograms."""
+        with pytest.raises(ValueError, match="weight"):
+            Subject(weight=np.float32(0.0))
+        with pytest.raises(ValueError, match="weight"):
+            Subject(weight=np.float32(-1.0))
+        with pytest.raises(ValueError, match="weight"):
+            Subject(weight=np.float32("nan"))
+
+    def test_subject_weight_valid(self):
+        """A human-sized weight in kg passes validation without warning."""
+        with patch("zea.log.warning") as mock_warn:
+            subject = Subject(weight=np.float32(72.0))
+        assert subject.weight == np.float32(72.0)
+        assert not any("weight" in str(c.args[0]) for c in mock_warn.call_args_list)
+
+    def test_subject_small_animal_weight_valid(self):
+        """A mouse weighs a fraction of a kg and must not warn."""
+        with patch("zea.log.warning") as mock_warn:
+            subject = Subject(weight=np.float32(0.015))
+        assert subject.weight == pytest.approx(0.015)
+        assert not any("weight" in str(c.args[0]) for c in mock_warn.call_args_list)
+
+    def test_subject_weight_implausibly_large_warns(self):
+        """A gram value passed into the kg field warns, but does not raise."""
+        with patch("zea.log.warning") as mock_warn:
+            Subject(weight=np.float32(72000.0))
+        assert any("kilograms" in str(c.args[0]) for c in mock_warn.call_args_list)
+
+    def test_subject_weight_accepts_python_float(self):
+        """Native floats are cast to the float32 declared in SCHEMA."""
+        subject = Subject(weight=72.0)
+        assert subject.weight == np.float32(72.0)
+        assert subject.weight.dtype == np.float32
+
+    def test_subject_weight_wrong_dtype_raises(self):
+        with pytest.raises(TypeError, match="weight"):
+            Subject(weight="fifteen")
+
+    def test_subject_genetic_strain_empty_raises(self):
+        with pytest.raises(ValueError, match="genetic_strain"):
+            Subject(genetic_strain="   ")
+
+    def test_subject_genetic_strain_valid(self):
+        assert Subject(genetic_strain="C57BL/6N").genetic_strain == "C57BL/6N"
+
+    def test_subject_animal_metadata_round_trip_hdf5(self, tmp_path):
+        """An animal subject's genetic strain and weight survive a save/load round trip."""
+        path = tmp_path / "mouse.hdf5"
+        File.create(
+            path,
+            data={"raw_data": np.zeros((2, 2, 8, 4, 1), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=2, n_tx=2, n_el=4),
+            probe=_probe_minimal(n_el=4),
+            metadata={
+                "subject": {
+                    "type": "animal",
+                    "genetic_strain": "C57BL/6N",
+                    "sex": "F",
+                    "weight": np.float32(0.015),
+                }
+            },
+        )
+
+        loaded = File(str(path))._to_file_spec().metadata.subject
+        assert loaded.genetic_strain == "C57BL/6N"
+        assert loaded.weight == pytest.approx(0.015)
+        assert loaded.type == "animal"
+
     def test_signal_missing_required_field_raises(self):
         """Signal1D requires either sampling_frequency or timestamps."""
         with pytest.raises(ValueError, match="sampling_frequency|timestamps"):
@@ -975,15 +1200,43 @@ class TestMetadataAndMetricsValidationErrors:
                 },
             )
 
-    def test_annotations_n_frames_mismatch_against_later_track_raises(self):
-        """Metadata may agree with track 0 but conflict with a later track.
+    def test_annotations_may_match_one_of_several_tracks(self):
+        """Metadata annotates one acquisition, so it only needs to match one track.
 
-        Exercises the multi-track loop in ``FileSpec.__post_init__``: the
-        per-track consistency check must keep iterating past the matching
-        track and report which track disagrees.
+        A single-frame auxiliary track (e.g. a reference map) may coexist with a
+        multi-frame main track whose n_frames matches the annotations. Only the
+        main track needs to agree with the per-frame metadata.
         """
         n_tx, n_el, n_ax, n_ch = 2, 4, 8, 1
-        n_frames_match, n_frames_conflict = 3, 5
+        n_frames_main, n_frames_aux = 5, 1
+
+        def _track(n_frames):
+            return {
+                "data": {
+                    "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)
+                },
+                "scan": _scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+                "label": f"track_{n_frames}",
+            }
+
+        # Annotations match the main track (n_frames_main); the auxiliary track
+        # has a different n_frames and must not cause a failure.
+        spec = FileSpec(
+            tracks=[_track(n_frames_main), _track(n_frames_aux)],
+            track_schedule=np.zeros(1, dtype=np.int32),
+            probe=_probe_minimal(n_el=n_el),
+            metadata={
+                "annotations": {
+                    "view": np.array(["a4c"] * n_frames_main, dtype=np.str_),
+                }
+            },
+        )
+        assert len(spec.tracks) == 2
+
+    def test_annotations_matching_no_track_raises(self):
+        """Metadata whose n_frames matches none of the tracks is still an error."""
+        n_tx, n_el, n_ax, n_ch = 2, 4, 8, 1
+        n_frames_a, n_frames_b, n_frames_ann = 3, 1, 5
 
         def _track(n_frames):
             return {
@@ -996,22 +1249,22 @@ class TestMetadataAndMetricsValidationErrors:
 
         with pytest.raises(ValueError) as exc_info:
             FileSpec(
-                tracks=[_track(n_frames_match), _track(n_frames_conflict)],
+                tracks=[_track(n_frames_a), _track(n_frames_b)],
+                track_schedule=np.zeros(1, dtype=np.int32),
                 probe=_probe_minimal(n_el=n_el),
                 metadata={
                     "annotations": {
-                        "view": np.array(["a4c"] * n_frames_match, dtype=np.str_),
+                        "view": np.array(["a4c"] * n_frames_ann, dtype=np.str_),
                     }
                 },
             )
 
         message = str(exc_info.value)
         assert message.startswith("Dimension 'n_frames' has inconsistent sizes:")
-        # The message attributes the sizes to the metadata field and the
-        # conflicting track (not track 0, which matched the metadata).
+        # The message lists the metadata field and every track carrying the dim.
         assert "metadata.annotations.view" in message
+        assert "tracks[0]." in message
         assert "tracks[1]." in message
-        assert "tracks[0]." not in message
 
 
 class TestProbePoseValidation:
@@ -1341,7 +1594,10 @@ class TestSubjectFieldWarnings:
                 type="human",
                 age=np.uint8(42),
                 sex="f",
+                weight=np.float32(72.0),
+                genetic_strain="n/a",
                 fat_percentage=np.float32(17.5),
+                bmi=np.float32(23.4),
             )
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert not any("Optional Subject field" in m for m in messages)
@@ -1721,3 +1977,184 @@ def test_field_metadata_units_are_defined():
         + ", ".join(sorted(undefined))
         + ". Add the symbol to UNITS (it is the source of truth rendered in the docs)."
     )
+
+
+def _image_data(n_frames: int = 3):
+    """Minimal DataSpec dict with only an image map (no raw_data, so no scan required)."""
+    coords = _make_coordinates((n_frames, 16, 12))
+    return {
+        "image": {
+            "values": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+            "coordinates": coords,
+        }
+    }
+
+
+class TestTransmitOnlyTrack:
+    """A TrackSpec may omit ``data`` (transmit-only track) only when ``scan`` is provided
+    and ``transmit_only=True`` is explicitly set."""
+
+    def test_data_none_with_scan_and_transmit_only_is_allowed(self):
+        """A transmit-only track (scan but no data) is valid when explicitly flagged."""
+        track = TrackSpec(data=None, scan=_scan_minimal(), transmit_only=True)
+        assert track.data is None
+        assert isinstance(track.scan, ScanSpec)
+        assert bool(track.transmit_only) is True
+
+    def test_data_none_with_scan_without_transmit_only_raises(self):
+        """Omitting 'data' without setting 'transmit_only=True' is rejected."""
+        with pytest.raises(ValueError, match="'transmit_only' was not set to True"):
+            TrackSpec(data=None, scan=_scan_minimal())
+
+    def test_transmit_only_with_data_raises(self):
+        """'transmit_only=True' combined with non-None data is rejected."""
+        with pytest.raises(ValueError, match="must not carry data"):
+            TrackSpec(data=_image_data(), scan=None, transmit_only=True)
+
+    def test_data_none_without_scan_raises(self):
+        """A track with neither data nor scan is invalid."""
+        with pytest.raises(ValueError, match="at least one of 'data' or 'scan'"):
+            TrackSpec(data=None, scan=None)
+
+    def test_default_track_has_neither_and_raises(self):
+        """Constructing a TrackSpec with no arguments raises (both default to None)."""
+        with pytest.raises(ValueError, match="at least one of 'data' or 'scan'"):
+            TrackSpec()
+
+    def test_data_without_scan_still_allowed(self):
+        """Data without raw_data does not require a scan."""
+        track = TrackSpec(data=_image_data(), scan=None)
+        assert isinstance(track.data, DataSpec)
+        assert track.scan is None
+
+    def test_raw_data_still_requires_scan(self):
+        """A track whose data contains raw_data requires a scan."""
+        n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
+        data = {"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)}
+        with pytest.raises(ValueError, match="'scan' is required when 'raw_data'"):
+            TrackSpec(data=data, scan=None)
+
+    def test_transmit_only_track_roundtrips_through_filespec(self, tmp_path):
+        """A FileSpec with a transmit-only track stores and reloads without raw_data,
+        and the 'transmit_only' flag itself is persisted in the file."""
+        spec = FileSpec(tracks=[{"data": None, "scan": _scan_minimal(), "transmit_only": True}])
+        path = tmp_path / "transmit_only.hdf5"
+        spec.save(str(path), warn_missing_optional_fields=False)
+        with File(path) as f:
+            assert "scan" in f
+            assert "data" not in f
+            assert isinstance(f.scan, ScanSpec)
+            (track,) = f.tracks
+            assert "transmit_only" in track._group
+            assert bool(track._group["transmit_only"][()]) is True
+
+
+class TestCastNativeToNumpy:
+    """Unit tests for Spec._cast_native_to_numpy dtype-coercion helper."""
+
+    cast = staticmethod(spec_module.Spec._cast_native_to_numpy)
+
+    def test_none_is_passed_through(self):
+        assert self.cast(None, [np.float32]) is None
+
+    def test_native_str_kept_as_is(self):
+        value = "a4c"
+        result = self.cast(value, [np.str_])
+        assert result is value
+        assert isinstance(result, str)
+
+    def test_native_bytes_kept_as_is(self):
+        value = b"raw"
+        result = self.cast(value, [np.str_])
+        assert result is value
+        assert isinstance(result, bytes)
+
+    def test_list_converted_to_float32_array(self):
+        result = self.cast([1.0, 2.0, 3.0], [np.float32])
+        assert isinstance(result, np.ndarray)
+        assert result.dtype == np.float32
+        assert np.array_equal(result, np.array([1.0, 2.0, 3.0], dtype=np.float32))
+
+    def test_tuple_converted_to_first_numpy_dtype_when_no_float(self):
+        result = self.cast((1, 2, 3), [np.uint8])
+        assert isinstance(result, np.ndarray)
+        assert result.dtype == np.uint8
+
+    def test_list_prefers_float_dtype_over_other_numpy_dtypes(self):
+        # float32 appears after uint8, but a floating target must win.
+        result = self.cast([1, 2, 3], [np.uint8, np.float32])
+        assert result.dtype == np.float32
+
+    def test_list_kept_when_list_is_a_valid_native_type(self):
+        # When ``list`` itself is an accepted native type, the value is not
+        # converted to a numpy array even though numpy dtypes are also allowed.
+        value = [1, 2, 3]
+        result = self.cast(value, [list, np.float32])
+        assert result is value
+
+    def test_list_not_converted_without_numpy_dtypes(self):
+        # No numpy-convertible dtypes -> the list/tuple branch is skipped and,
+        # since ``list`` is a matching native type, it is returned unchanged.
+        value = [1, 2, 3]
+        result = self.cast(value, [list])
+        assert result is value
+
+    def test_float_array_downcast_to_expected_float_dtype(self):
+        value = np.zeros((2, 3), dtype=np.float64)
+        result = self.cast(value, [np.float32])
+        assert result.dtype == np.float32
+        assert result.shape == (2, 3)
+
+    def test_float_array_matching_dtype_returned_unchanged(self):
+        value = np.zeros((2, 3), dtype=np.float32)
+        result = self.cast(value, [np.float32])
+        assert result is value
+
+    def test_non_float_array_returned_unchanged(self):
+        # No float target -> array with a dtype attribute passes through as-is.
+        value = np.zeros((2, 3), dtype=np.uint8)
+        result = self.cast(value, [np.uint8])
+        assert result is value
+
+    def test_integer_array_not_cast_to_float_target(self):
+        # Only floating inputs are normalized to the float target; an integer
+        # array is left untouched (the dtype check happens downstream).
+        value = np.arange(3, dtype=np.int32)
+        result = self.cast(value, [np.float32])
+        assert result is value
+        assert result.dtype == np.int32
+
+    def test_numpy_scalar_float_downcast(self):
+        result = self.cast(np.float64(1.5), [np.float32])
+        assert result.dtype == np.float32
+        assert result == np.float32(1.5)
+
+    def test_native_int_matching_native_type_kept(self):
+        value = 42
+        result = self.cast(value, [int])
+        assert result is value
+        assert isinstance(result, int)
+
+    def test_native_float_cast_to_numpy_scalar(self):
+        result = self.cast(3.14, [np.float32])
+        assert isinstance(result, np.float32)
+        assert result == np.float32(3.14)
+
+    def test_native_int_cast_to_numpy_scalar(self):
+        result = self.cast(7, [np.uint8])
+        assert isinstance(result, np.uint8)
+        assert result == np.uint8(7)
+
+    def test_uncastable_value_returned_unchanged(self):
+        # An object that cannot be turned into any expected dtype is returned
+        # as-is rather than raising.
+        sentinel = object()
+        result = self.cast(sentinel, [np.float32])
+        assert result is sentinel
+
+    def test_non_numpy_dtypes_are_skipped_when_building_targets(self):
+        # A dtype entry that np.dtype cannot parse is ignored; the float target
+        # is still discovered from the remaining entries.
+        result = self.cast([1.0, 2.0], ["not-a-dtype", np.float32])
+        assert isinstance(result, np.ndarray)
+        assert result.dtype == np.float32

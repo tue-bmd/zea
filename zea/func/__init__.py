@@ -46,6 +46,9 @@ from .tensor import (
     vmap,
 )
 from .ultrasound import (
+    apply_aligned_apodization,
+    apply_receive_apodization,
+    channels_to_analytic,
     channels_to_complex,
     complex_to_channels,
     compute_time_to_peak,
@@ -61,6 +64,10 @@ from .ultrasound import (
     make_tgc_curve,
     suppress_tissue,
     upmix,
+)
+from .usct import (
+    straight_ray_times,
+    usct_reflectivity_das,
 )
 
 __all__ = [
@@ -105,6 +112,9 @@ __all__ = [
     "vmap",
     "split_into_windows",
     # Ultrasound functions
+    "apply_aligned_apodization",
+    "apply_receive_apodization",
+    "channels_to_analytic",
     "channels_to_complex",
     "complex_to_channels",
     "compute_time_to_peak",
@@ -120,4 +130,7 @@ __all__ = [
     "log_compress",
     "make_tgc_curve",
     "suppress_tissue",
+    # USCT functions
+    "straight_ray_times",
+    "usct_reflectivity_das",
 ]

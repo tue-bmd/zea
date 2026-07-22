@@ -25,7 +25,7 @@ import threading
 from collections.abc import Callable
 from itertools import product
 from pathlib import Path
-from typing import Any, List
+from typing import TYPE_CHECKING, Any, List
 
 import grain
 import keras
@@ -37,6 +37,9 @@ from zea.data.datasets import Dataset, H5FileHandleCache, count_samples_per_dire
 from zea.data.layers import Resizer
 from zea.func.tensor import translate
 from zea.utils import canonicalize_axis, map_negative_indices
+
+if TYPE_CHECKING:
+    from zea.data.file import File
 
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
 
@@ -256,6 +259,8 @@ class H5DataSource:
         cache: Cache loaded samples to RAM.
         validate: Validate dataset against the zea format.
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
+        file_filter: Keep only files whose content matches a predicate. See
+            :class:`Dataloader` for details. Defaults to ``None`` (no filtering).
     """
 
     def __init__(
@@ -279,6 +284,7 @@ class H5DataSource:
         revision: str | None = None,
         pad_incomplete_blocks: bool = False,
         axis_selections: dict | None = None,
+        file_filter: "Callable[[File], bool] | dict | None" = None,
         **kwargs,
     ):
         self.return_filename = return_filename
@@ -306,7 +312,12 @@ class H5DataSource:
                 "Use Dataset(..., lazy=True) directly for interactive use."
             )
         _dataset = Dataset(
-            file_paths, validate=validate, revision=revision, _suggest_lazy=False, **kwargs
+            file_paths,
+            validate=validate,
+            revision=revision,
+            file_filter=file_filter,
+            _suggest_lazy=False,
+            **kwargs,
         )
         self.file_paths = _dataset.file_paths
         self.file_shapes = _dataset.load_file_shapes(key)
@@ -387,7 +398,9 @@ class H5DataSource:
 
         if self.return_filename:
             file_data = {
-                "fullpath": file.filename,  # same as file.path, but str type
+                # For streamed hf:// files ``filename`` is a placeholder for the
+                # underlying file object, so prefer the original source path.
+                "fullpath": getattr(file, "_source_name", None) or file.filename,
                 "filename": file.stem,
                 "indices": indices,
             }
@@ -539,6 +552,13 @@ class Dataloader:
         axis_selections: Map of ``{axis: indices}`` applied at HDF5 read time to pre-filter
             non-frame axes. For example ``{1: [0, 2, 5]}`` loads only those indices along axis 1,
             avoiding reading unused data from disk. Default is ``None``.
+        file_filter: Keep only files whose content matches a predicate, discarding the rest
+            before any frames are indexed. Either a callable ``File -> bool`` (a file is kept
+            when it returns ``True``), or a declarative dotted-path dict mapping a path on the
+            :class:`~zea.data.file.File` to a condition: the :func:`~zea.data.datasets.EXISTS`
+            helper (field must be present), a plain value (equality), or a callable on the
+            resolved value. All dict entries are ANDed. Files whose predicate raises
+            (e.g. they have no ``metadata`` group) are excluded. Default is ``None`` (no filtering).
 
     Example:
         .. code-block:: python
@@ -553,6 +573,78 @@ class Dataloader:
             )
             for batch in loader:
                 ...  # batch.shape == (32, 256, 256, 1)
+
+    Filtering examples:
+        .. testsetup::
+
+            import os
+
+            import numpy as np
+
+            from zea import File
+
+            n_frames, n_tx, n_el, n_ax, grid = 2, 2, 8, 64, 16
+
+            def _make(path, fat, sex, center_frequency):
+                data = {
+                    "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32),
+                    "image": {"values": np.zeros((n_frames, grid, grid), dtype=np.uint8)},
+                }
+                scan = {
+                    "sampling_frequency": np.float32(40e6),
+                    "center_frequency": np.float32(center_frequency),
+                    "demodulation_frequency": np.float32(center_frequency),
+                    "initial_times": np.zeros(n_tx, dtype=np.float32),
+                    "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+                    "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+                    "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+                    "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+                    "polar_angles": np.zeros(n_tx, dtype=np.float32),
+                }
+                subject = {"sex": sex}
+                if fat is not None:
+                    subject["fat_percentage"] = np.float32(fat)
+                File.create(
+                    path,
+                    data=data,
+                    scan=scan,
+                    probe={"name": "demo", "probe_geometry": np.zeros((n_el, 3), dtype=np.float32)},
+                    metadata={"subject": subject},
+                    overwrite=True,
+                )
+
+            os.makedirs("filter-demo-dataset", exist_ok=True)
+            _make("filter-demo-dataset/a.hdf5", fat=17.5, sex="f", center_frequency=5e6)
+            _make("filter-demo-dataset/b.hdf5", fat=None, sex="m", center_frequency=9e6)
+
+        .. testcode::
+
+            from zea import Dataloader, EXISTS
+
+            # callable: keep only files that record a subject fat percentage
+            loader = Dataloader(
+                file_paths="filter-demo-dataset",
+                key="data/image/values",
+                file_filter=lambda f: f.metadata.subject is not None
+                and f.metadata.subject.fat_percentage is not None,
+            )
+
+            # dict: presence + equality + a value-level predicate (all ANDed)
+            loader = Dataloader(
+                file_paths="filter-demo-dataset",
+                key="data/image/values",
+                file_filter={
+                    "metadata.subject.fat_percentage": EXISTS,
+                    "metadata.subject.sex": "f",
+                    "scan.center_frequency": lambda v: 4e6 <= v <= 6e6,
+                },
+            )
+
+        .. testcleanup::
+
+            import shutil
+
+            shutil.rmtree("filter-demo-dataset")
     """
 
     def __init__(
@@ -597,6 +689,7 @@ class Dataloader:
         reshuffle_each_epoch: bool = True,
         convert_to_tensor: bool = True,
         axis_selections: dict | None = None,
+        file_filter: "Callable[[File], bool] | dict | None" = None,
         **kwargs,
     ):
         # ── Validation ────────────────────────────────────────────────
@@ -646,6 +739,7 @@ class Dataloader:
             revision=revision,
             pad_incomplete_blocks=pad_incomplete_blocks,
             axis_selections=axis_selections,
+            file_filter=file_filter,
             **kwargs,
         )
 

@@ -3,6 +3,7 @@
 import hashlib
 import importlib
 import pickle
+from pathlib import Path
 
 import h5py
 import keras
@@ -12,12 +13,13 @@ from keras import ops
 
 from zea.data.augmentations import RandomCircleInclusion
 from zea.data.dataloader import Dataloader, H5DataSource
-from zea.data.datasets import Dataset
+from zea.data.datasets import EXISTS, Dataset, compile_file_filter
 from zea.data.file import File
 from zea.data.layers import Resizer
 from zea.tools.hf import HFPath
 
 from .. import DEFAULT_TEST_SEED
+from . import generate_dummy_data_dict, generate_dummy_scan
 
 CAMUS_DATASET_PATH = HFPath("hf://zeahub/camus-sample")
 CAMUS_FILE = CAMUS_DATASET_PATH / "val/patient0401/patient0401_4CH_half_sequence.hdf5"
@@ -923,3 +925,214 @@ def test_axis_selections_via_dataloader(axis_selections_hdf5):
     )
     sample = np.asarray(next(iter(loader)))
     np.testing.assert_array_equal(sample, data[0, selection])
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# file_filter (metadata / scan based filtering)
+# ──────────────────────────────────────────────────────────────────────────
+
+FILTER_KEY = "data/image/values"
+FILTER_N_FRAMES = 4
+
+
+def _write_zea_file(path, *, metadata=None, center_frequency=7e6):
+    """Write a small but valid zea-format file with an ``image`` product."""
+    n_tx, n_ax, n_el, n_ch = 2, 64, 8, 1
+    grid = 16
+    data = generate_dummy_data_dict(
+        n_frames=FILTER_N_FRAMES,
+        n_ax=n_ax,
+        n_el=n_el,
+        n_tx=n_tx,
+        n_ch=n_ch,
+        grid_size_z=grid,
+        grid_size_x=grid,
+        add_optional_dtypes=True,
+    )
+    scan = generate_dummy_scan(n_tx=n_tx, n_el=n_el, center_frequency=center_frequency)
+    probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
+    probe_geometry[:, 0] = np.linspace(-0.02, 0.02, n_el)
+    File.create(
+        path,
+        data=data,
+        scan=scan,
+        probe={"name": "generic", "probe_geometry": probe_geometry},
+        metadata=metadata,
+        description="file_filter test",
+        overwrite=True,
+    )
+
+
+@pytest.fixture
+def metadata_folder(tmp_path):
+    """Folder with three zea files carrying different metadata / scan params.
+
+    - a: fat_percentage=17.5, sex='f', center_frequency=5e6
+    - b: sex='m', no fat_percentage,  center_frequency=7e6
+    - c: fat_percentage=30.0, sex='m', center_frequency=9e6
+    """
+    _write_zea_file(
+        tmp_path / "a.hdf5",
+        metadata={"subject": {"fat_percentage": np.float32(17.5), "sex": "f"}},
+        center_frequency=5e6,
+    )
+    _write_zea_file(
+        tmp_path / "b.hdf5",
+        metadata={"subject": {"sex": "m"}},
+        center_frequency=7e6,
+    )
+    _write_zea_file(
+        tmp_path / "c.hdf5",
+        metadata={"subject": {"fat_percentage": np.float32(30.0), "sex": "m"}},
+        center_frequency=9e6,
+    )
+    return tmp_path
+
+
+def _kept_names(dataset):
+    return sorted(Path(p).name for p in dataset.file_paths)
+
+
+def test_file_filter_callable_presence(metadata_folder):
+    """Callable predicate keeps only files that record a subject fat percentage."""
+    dataset = Dataset(
+        metadata_folder,
+        validate=False,
+        file_filter=lambda f: (
+            f.metadata.subject is not None and f.metadata.subject.fat_percentage is not None
+        ),
+    )
+    assert _kept_names(dataset) == ["a.hdf5", "c.hdf5"]
+
+
+def test_file_filter_callable_raising_excludes_file(metadata_folder):
+    """A predicate that raises for a file excludes it without crashing the scan."""
+
+    def predicate(f):
+        fat = f.metadata.subject.fat_percentage
+        if fat is None:
+            # b.hdf5 has no fat_percentage: raise to exercise the except path.
+            raise RuntimeError("no fat_percentage recorded")
+        return f.metadata.subject.sex == "m"
+
+    dataset = Dataset(metadata_folder, validate=False, file_filter=predicate)
+    # a excluded (sex='f'), b excluded (predicate raised), c kept.
+    assert _kept_names(dataset) == ["c.hdf5"]
+
+
+@pytest.mark.parametrize(
+    "file_filter, expected",
+    [
+        ({"metadata.subject.fat_percentage": EXISTS}, ["a.hdf5", "c.hdf5"]),
+        ({"metadata.subject.sex": "f"}, ["a.hdf5"]),
+        ({"metadata.subject.sex": "m"}, ["b.hdf5", "c.hdf5"]),
+        ({"scan.center_frequency": lambda v: 4e6 <= v <= 6e6}, ["a.hdf5"]),
+        ({"scan.center_frequency": lambda v: v >= 7e6}, ["b.hdf5", "c.hdf5"]),
+        # multiple entries are ANDed together
+        (
+            {"metadata.subject.sex": "m", "metadata.subject.fat_percentage": EXISTS},
+            ["c.hdf5"],
+        ),
+    ],
+)
+def test_file_filter_dict(metadata_folder, file_filter, expected):
+    """Declarative dotted-dict filters (EXISTS, equality, value-predicate, AND)."""
+    dataset = Dataset(metadata_folder, validate=False, file_filter=file_filter)
+    assert _kept_names(dataset) == expected
+
+
+def test_file_filter_excludes_file_without_metadata(tmp_path):
+    """A file with no metadata group is excluded (not crashed) by a metadata filter."""
+    _write_zea_file(
+        tmp_path / "with_meta.hdf5",
+        metadata={"subject": {"fat_percentage": np.float32(20.0)}},
+    )
+    # A bare h5py file with the data key but no metadata group.
+    with h5py.File(tmp_path / "no_meta.hdf5", "w") as f:
+        f.create_dataset(FILTER_KEY, data=np.zeros((FILTER_N_FRAMES, 16, 16)))
+
+    dataset = Dataset(
+        tmp_path,
+        validate=False,
+        file_filter={"metadata.subject.fat_percentage": EXISTS},
+    )
+    assert _kept_names(dataset) == ["with_meta.hdf5"]
+
+
+def test_file_filter_removing_all_raises(metadata_folder):
+    """A filter that matches nothing raises a clear ValueError."""
+    with pytest.raises(ValueError, match="removed all"):
+        Dataset(metadata_folder, validate=False, file_filter={"metadata.subject.sex": "zzz"})
+
+
+def test_file_filter_with_lazy(metadata_folder):
+    """file_filter works with lazy=True (remote files are streamed for metadata only)."""
+    dataset = Dataset(
+        metadata_folder,
+        validate=False,
+        lazy=True,
+        file_filter={"metadata.subject.fat_percentage": EXISTS},
+    )
+    assert _kept_names(dataset) == ["a.hdf5", "c.hdf5"]
+
+
+def test_file_filter_via_dataloader(metadata_folder):
+    """End-to-end: Dataloader forwards file_filter and drops files before indexing."""
+    loader = Dataloader(
+        metadata_folder,
+        key=FILTER_KEY,
+        batch_size=None,
+        shuffle=False,
+        validate=False,
+        file_filter={"metadata.subject.fat_percentage": EXISTS},
+    )
+    # Two files kept (a, c), each contributing FILTER_N_FRAMES samples.
+    assert _kept_names(loader.source) == ["a.hdf5", "c.hdf5"]
+    assert len(loader.source) == 2 * FILTER_N_FRAMES
+
+
+def test_file_filter_via_dataloader_path_list(tmp_path):
+    """file_filter applies across a list of input directories, not just one dir."""
+    dir_a = tmp_path / "dir_a"
+    dir_b = tmp_path / "dir_b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    _write_zea_file(
+        dir_a / "keep_a.hdf5",
+        metadata={"subject": {"fat_percentage": np.float32(17.5)}},
+    )
+    _write_zea_file(dir_a / "drop_a.hdf5", metadata={"subject": {"sex": "m"}})
+    _write_zea_file(
+        dir_b / "keep_b.hdf5",
+        metadata={"subject": {"fat_percentage": np.float32(30.0)}},
+    )
+    _write_zea_file(dir_b / "drop_b.hdf5", metadata={"subject": {"sex": "f"}})
+
+    loader = Dataloader(
+        [dir_a, dir_b],
+        key=FILTER_KEY,
+        batch_size=None,
+        shuffle=False,
+        validate=False,
+        file_filter={"metadata.subject.fat_percentage": EXISTS},
+    )
+    assert _kept_names(loader.source) == ["keep_a.hdf5", "keep_b.hdf5"]
+
+
+class TestCompileFileFilter:
+    def test_none_returns_none(self):
+        assert compile_file_filter(None) is None
+
+    def test_callable_passthrough(self):
+        def predicate(f):
+            return True
+
+        assert compile_file_filter(predicate) is predicate
+
+    def test_dict_returns_callable(self):
+        compiled = compile_file_filter({"metadata.subject.sex": "f"})
+        assert callable(compiled)
+
+    def test_invalid_type_raises(self):
+        with pytest.raises(TypeError):
+            compile_file_filter(42)

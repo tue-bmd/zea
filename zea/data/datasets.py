@@ -35,7 +35,7 @@ import multiprocessing
 import os
 from collections import OrderedDict
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Sequence
+from typing import TYPE_CHECKING, Any, Callable, List, Sequence
 
 import numpy as np
 import tqdm
@@ -69,6 +69,84 @@ FILE_HANDLE_CACHE_CAPACITY = 128
 FILE_TYPES = [".hdf5", ".h5"]
 
 
+def EXISTS(value: Any) -> bool:
+    """Condition for :func:`compile_file_filter` dict filters: field is present.
+
+    Use as the condition for a dotted path to keep only files where that field is
+    present (i.e. resolves to a non-``None`` value).  For example
+    ``{"metadata.subject.fat_percentage": EXISTS}`` keeps only files that record a
+    subject fat percentage.
+
+    It is a plain callable (so it survives module reloads and needs no special
+    casing), evaluated like any other value-level predicate.
+    """
+    return value is not None
+
+
+def _resolve_dotted_path(obj: Any, path: str) -> Any:
+    """Resolve a dotted attribute ``path`` on ``obj``, tolerating missing fields.
+
+    Walks each segment of ``path`` via :func:`getattr`.  Returns ``None`` as soon
+    as any segment is missing or already ``None`` (e.g. ``f.metadata`` raising
+    ``KeyError`` when there is no metadata group, or ``f.scan`` returning ``None``).
+    """
+    for part in path.split("."):
+        if obj is None:
+            return None
+        try:
+            obj = getattr(obj, part)
+        except (AttributeError, KeyError):
+            return None
+    return obj
+
+
+def _compile_dict_filter(spec: dict) -> Callable[["File"], bool]:
+    """Compile a dotted-path dict into a ``File -> bool`` predicate.
+
+    Each ``path -> condition`` entry is ANDed together. ``condition`` may be:
+
+    - a callable (e.g. :func:`EXISTS`, or a value-level lambda) — keep when
+      ``condition(value)`` is truthy. A ``None`` value (missing field) never
+      matches.
+    - any other value — keep when the resolved value equals it.
+    """
+    conditions = list(spec.items())
+
+    def predicate(file: "File") -> bool:
+        for path, condition in conditions:
+            value = _resolve_dotted_path(file, path)
+            if callable(condition):
+                if value is None or not condition(value):
+                    return False
+            else:
+                if value != condition:
+                    return False
+        return True
+
+    return predicate
+
+
+def compile_file_filter(
+    file_filter: "Callable[[File], bool] | dict | None",
+) -> "Callable[[File], bool] | None":
+    """Normalize ``file_filter`` into a ``File -> bool`` predicate (or ``None``).
+
+    Accepts either a callable predicate over an open :class:`~zea.data.file.File`,
+    or a declarative dotted-path dict (see :func:`_compile_dict_filter`). Returns
+    ``None`` when ``file_filter`` is ``None`` (no filtering).
+    """
+    if file_filter is None:
+        return None
+    if isinstance(file_filter, dict):
+        return _compile_dict_filter(file_filter)
+    if callable(file_filter):
+        return file_filter
+    raise TypeError(
+        "file_filter must be a callable 'File -> bool', a dotted-path dict, or None; "
+        f"got {type(file_filter).__name__}."
+    )
+
+
 class H5FileHandleCache:
     """Cache for HDF5 file handles.
 
@@ -91,13 +169,15 @@ class H5FileHandleCache:
 
     def get_file(self, file_path) -> File:
         """Open an HDF5 file and cache it."""
+        # Subclasses (e.g. Dataset) carry the requested HF revision
+        revision = getattr(self, "revision", None)
         # If file is already in cache, return it and move it to the end
         if file_path in self._file_handle_cache:
             self._file_handle_cache.move_to_end(file_path)
             file = self._file_handle_cache[file_path]
             # if file was closed, reopen:
             if not self._check_if_open(file):
-                file = File(file_path, "r")
+                file = File(file_path, "r", progress=False, revision=revision)
                 self._file_handle_cache[file_path] = file
         # If file is not in cache, open it and add it to the cache
         else:
@@ -105,7 +185,7 @@ class H5FileHandleCache:
             if len(self._file_handle_cache) >= self.file_handle_cache_capacity:
                 _, close_file = self._file_handle_cache.popitem(last=False)
                 close_file.close()
-            file = File(file_path, "r")
+            file = File(file_path, "r", progress=False, revision=revision)
             self._file_handle_cache[file_path] = file
 
         return self._file_handle_cache[file_path]
@@ -189,6 +269,63 @@ def _file_hash(filepaths):
             total_size += os.path.getsize(fp)
             modified_times.append(os.path.getmtime(fp))
     return hash_elements([total_size, modified_times])
+
+
+def _copy_h5_files(file_paths, base_path, to_path, key, mode=None, revision=None):
+    """Copy ``key`` (or all keys) from each file to ``to_path``, mirroring structure.
+
+    Each file's location relative to ``base_path`` is preserved under ``to_path``.
+    Shared implementation for :meth:`Folder.copy` and :meth:`Dataset.copy`.
+
+    Args:
+        file_paths (list): Paths to the source HDF5 files.
+        base_path (str or Path): Base directory the source files are made relative to
+            when constructing their destination paths.
+        to_path (str or Path): The destination directory where files will be copied.
+        key (str): The key to copy from the source files. If ``"all"`` or ``"*"``, all
+            keys are copied.
+        mode (str, optional): The mode in which to open the destination files. Defaults
+            to ``"a"`` (append), and ``"w"`` (write) if ``key`` is ``"all"`` or ``"*"``.
+        revision (str, optional): HuggingFace revision used to download ``hf://`` sources.
+    """
+    all_keys = key == "all" or key == "*"
+
+    if mode is None:
+        mode = "a" if not all_keys else "w"
+
+    if all_keys:
+        key_msg = "Including all keys."
+        if mode not in ["w", "x"]:
+            raise ValueError(
+                f"Invalid mode '{mode}' for copying all keys. Must be 'w' or 'x'."
+                "If you want to copy all keys, the destination file must be opened "
+                "in 'w' or 'x' mode, which means it will be overwritten or created."
+            )
+    else:
+        key_msg = f"Only copying key '{key}'."
+        if mode not in ["a", "w", "r+", "x"]:
+            raise ValueError(
+                f"Invalid mode '{mode}' for copying a specific key. "
+                "Must be one of 'a', 'w', 'r+', or 'x'."
+            )
+
+    base_path = Path(base_path)
+    to_path = Path(to_path)
+    to_path.mkdir(parents=True, exist_ok=True)
+
+    for file_path in tqdm.tqdm(
+        file_paths,
+        total=len(file_paths),
+        desc=f"Copying {len(file_paths)} file(s) from {base_path} to {to_path}. {key_msg}",
+    ):
+        dst_path = to_path / Path(file_path).relative_to(base_path)
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        with File(file_path, stream=False, revision=revision) as src, File(dst_path, mode) as dst:
+            if all_keys:
+                for obj in src.keys():
+                    src.copy(obj, dst)
+            else:
+                src.copy_key(key, dst)
 
 
 class Folder:
@@ -408,38 +545,7 @@ class Folder:
                 Defaults to 'a' (append mode), and 'w' (write mode) if key is 'all' or '*'.
                 See: https://docs.h5py.org/en/stable/high/file.html#opening-creating-files
         """
-        all_keys = key == "all" or key == "*"
-
-        if mode is None:
-            mode = "a" if not all_keys else "w"
-
-        if all_keys:
-            key_msg = "Including all keys."
-            assert mode in ["w", "x"], (
-                "If you want to copy all keys, the destination file must be opened "
-                "in 'w' or 'x' mode, which means it will be overwritten or created."
-            )
-        else:
-            key_msg = f"Only copying key '{key}'."
-            assert mode in ["a", "w", "r+", "x"], (
-                f"Invalid mode '{mode}'. Must be one of 'a', 'w', 'r+', or 'x'."
-            )
-
-        to_path = Path(to_path)
-        to_path.mkdir(parents=True, exist_ok=True)
-
-        for file_path in tqdm.tqdm(
-            self.file_paths,
-            total=self.n_files,
-            desc=f"Copying dataset from {self.folder_path} to {to_path}. {key_msg}",
-        ):
-            dst_path = Path(file_path).relative_to(self.folder_path)
-            with File(file_path) as src, File(to_path / dst_path, mode) as dst:
-                if all_keys:
-                    for obj in src.keys():
-                        src.copy(obj, dst)
-                else:
-                    src.copy_key(key, dst)
+        _copy_h5_files(self.file_paths, self.folder_path, to_path, key, mode=mode)
 
 
 class Dataset(H5FileHandleCache):
@@ -451,7 +557,8 @@ class Dataset(H5FileHandleCache):
         validate: bool = False,
         directory_splits: list | None = None,
         revision: str | None = None,
-        lazy: bool = False,
+        lazy: bool = True,
+        file_filter: "Callable[[File], bool] | dict | None" = None,
         _suggest_lazy: bool = True,
         **kwargs,
     ):
@@ -467,16 +574,30 @@ class Dataset(H5FileHandleCache):
             revision (str, optional): HuggingFace revision (branch, tag, or commit hash).
                 Only used when file_paths contains ``hf://`` paths. Defaults to ``None``
                 (uses HuggingFace Hub default, i.e. the ``main`` branch).
-            lazy (bool, optional): If True, ``hf://`` files are not downloaded at init — each
-                file is downloaded on first access. ``len(ds)`` returns the number of files
-                (not total frames). Defaults to False.
-
+            lazy (bool, optional): If True, ``hf://`` files are not downloaded at init —
+                each file is downloaded on first access. ``len(ds)`` returns the number of files
+                (not total frames). Defaults to True.
+            file_filter (callable or dict, optional): Keep only files whose content matches a
+                predicate. Either a callable ``File -> bool`` (a file is kept when it returns
+                ``True``), or a declarative dotted-path dict mapping a path on the
+                :class:`~zea.data.file.File` (e.g. ``"metadata.subject.fat_percentage"``,
+                ``"scan.center_frequency"``) to a condition: the :func:`EXISTS` helper
+                (field must be present), a plain value (equality), or a callable on the
+                resolved value. All dict entries are ANDed. Files whose predicate raises
+                (e.g. no ``metadata`` group) are excluded, except that I/O errors
+                (``OSError`` from HDF5/network reads) propagate rather than being treated
+                as a mismatch. Evaluating the predicate reads
+                each file; with ``lazy=True`` remote (``hf://``) files are streamed for just
+                the metadata/scan bytes rather than downloaded in full, and the surviving
+                files stay lazy. Defaults to ``None`` (no filtering).
         """
         super().__init__(**kwargs)
         self.validate = validate
         self.revision = revision
         self.lazy = lazy
+        self.file_filter = compile_file_filter(file_filter)
         self._suggest_lazy = _suggest_lazy
+
         self.file_paths = self.find_files(file_paths)
 
         if directory_splits is not None:
@@ -488,6 +609,48 @@ class Dataset(H5FileHandleCache):
             )
 
         assert self.n_files > 0, f"No files in file_paths: {file_paths}"
+
+        if self.file_filter is not None:
+            self.file_paths = self._apply_file_filter(self.file_paths)
+
+    def _apply_file_filter(self, file_paths: List[str]) -> List[str]:
+        """Return only the files for which ``self.file_filter`` returns ``True``.
+
+        Each file is opened and passed to the predicate. If the predicate raises
+        (e.g. the file has no ``metadata`` group), the file is excluded. I/O failures
+        (``OSError`` from HDF5/network reads) are not mismatches and propagate instead.
+        """
+        assert self.file_filter is not None, "file_filter must be set before applying it"
+        file_filter = self.file_filter
+        kept: List[str] = []
+        for path in file_paths:
+            # Opening the file is file access, not filtering: let open/download/
+            # permission failures propagate instead of silently dropping the file.
+            with File(path, revision=self.revision) as file:
+                try:
+                    keep = file_filter(file)
+                except OSError:
+                    # I/O failure (HDF5/network read while streaming a lazy remote
+                    # file) is not a filter mismatch: propagate rather than silently
+                    # dropping a file that may actually match.
+                    raise
+                except Exception as e:  # noqa: BLE001 — a predicate failure means "does not match"
+                    log.debug(f"file_filter excluded '{path}': {type(e).__name__}: {e}")
+                    continue
+            if keep:
+                kept.append(path)
+            else:
+                log.debug(f"file_filter excluded '{path}'.")
+
+        n_removed = len(file_paths) - len(kept)
+        if not kept:
+            raise ValueError(
+                f"file_filter removed all {len(file_paths)} files. "
+                "Check that the filter matches the dataset's metadata/scan fields."
+            )
+        if n_removed:
+            log.info(f"file_filter kept {len(kept)}/{len(file_paths)} files ({n_removed} removed).")
+        return kept
 
     def load_file_shapes(self, key: str):
         """Load the shapes of the datasets in each file."""
@@ -582,17 +745,45 @@ class Dataset(H5FileHandleCache):
         """Return number of files in dataset."""
         return len(self.file_paths)
 
-    def __getitem__(self, index) -> File:
-        """Retrieves an item from the dataset."""
-        path = self.file_paths[index]
-        if path.startswith(HF_PREFIX):
-            hf_kwargs = {}
-            if self.revision is not None:
-                hf_kwargs["revision"] = self.revision
-            local_path = str(_hf_resolve_path(path, **hf_kwargs))
-            self.file_paths[index] = local_path
-            path = local_path
-        return self.get_file(path)
+    def copy(self, to_path: str | Path, key: str, mode: str | None = None):
+        """Copy the data for all or a specific key to a new location.
+
+        Works for a dataset built from a single file, a list of files, or a folder. Each
+        file is written under ``to_path``, mirroring its location relative to the common
+        parent directory of the dataset's files (for a single file, its own name is used).
+
+        Has the option to copy all keys or only a specific key. By default, it only copies
+        if the destination file does not already contain the key. You can change the mode to
+        'w' to overwrite the destination file. Will always copy metadata such as dataset
+        attributes and scan object.
+
+        Args:
+            to_path (str or Path): The destination folder where files will be copied.
+            key (str): The key to copy from the source files.
+                If 'all' or '*', all keys will be copied.
+            mode (str, optional): The mode in which to open the destination files.
+                Defaults to 'a' (append mode), and 'w' (write mode) if key is 'all' or '*'.
+                See: https://docs.h5py.org/en/stable/high/file.html#opening-creating-files
+        """
+        if self.n_files == 1:
+            base_path = Path(self.file_paths[0]).parent
+        else:
+            base_path = Path(os.path.commonpath([str(p) for p in self.file_paths]))
+        _copy_h5_files(self.file_paths, base_path, to_path, key, mode=mode, revision=self.revision)
+
+    def __getitem__(self, index) -> "File":
+        """Retrieves an item from the dataset.
+
+        Returns a :class:`~zea.data.file.File`. Lazy ``hf://`` files are opened with
+        streaming enabled rather than downloaded in full: reads through the file
+        (``dataset[0].data.raw_data[0]``) fetch only the chunks they touch — see
+        :mod:`zea.data.chunk_reader`.
+        """
+        # Lazy datasets keep ``hf://`` URIs in ``file_paths``; pass them straight to
+        # ``get_file`` so ``File`` streams them (stream=True is the default for hf://
+        # paths) instead of resolving to a local path, which downloads the whole file.
+        # Non-lazy HF paths were already resolved at init, and non-HF paths are local.
+        return self.get_file(self.file_paths[index])
 
     def __iter__(self):
         """

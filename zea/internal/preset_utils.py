@@ -155,6 +155,8 @@ def _hf_resolve_path(
     - hf://org/repo/subdir/ - Downloads all files in subdirectory
     - hf://org/repo/file.h5 - Downloads specific file
     - hf://org/repo - Downloads all files in repo
+
+    Note that we also support streaming, so this should not be used that often!
     """
     repo_id, subpath = _hf_parse_path(hf_path)
     files = _hf_list_files(
@@ -206,3 +208,123 @@ def _hf_resolve_path(
             raise FileNotFoundError(f"No files found in repository {repo_id}")
 
         return _get_snapshot_dir_from_downloaded_file(downloaded_files[0])
+
+
+# Maps huggingface_hub ``repo_type`` values to the path prefix that
+# :class:`~huggingface_hub.HfFileSystem` expects.
+_HF_FS_PREFIX = {"dataset": "datasets/", "model": "", "space": "spaces/"}
+
+
+# This file object only serves h5py's metadata reads; chunk_reader fetches the array chunks
+# itself. The paged layout keeps that metadata to ~0.26 MB in one request, so the block just has
+# to cover it. Keep it aligned with chunk_cache.CachedFile's block size. Overridable via File().
+_HF_STREAM_CACHE_TYPE = "blockcache"
+_HF_STREAM_BLOCK_SIZE = 1024 * 1024  # 1 MiB
+
+
+# Host serving the file bytes. Range requests for chunk reads go straight here rather than
+# through :class:`~huggingface_hub.HfFileSystem`, which issues them one at a time.
+_HF_HOST = "https://huggingface.co"
+
+# The ``resolve`` endpoint of a repo type, as it appears in a download URL.
+_HF_URL_PREFIX = {"dataset": "datasets/", "model": "", "space": "spaces/"}
+
+
+def _hf_stream_url(
+    hf_path: str,
+    revision: str | None = None,
+    repo_type: str = "dataset",
+    **kwargs,
+) -> str:
+    """The HTTPS URL the bytes of an ``hf://`` file live at.
+
+    :func:`_hf_stream_open` streams through :class:`~huggingface_hub.HfFileSystem`, which
+    is a *sync* filesystem: its ``cat_ranges`` fetches ranges one after another. Concurrent
+    chunk reads (:mod:`zea.data.chunk_reader`) therefore address this URL directly through
+    fsspec's async HTTP filesystem instead — measured at one round trip for 16 ranges,
+    against sixteen through ``HfFileSystem``.
+
+    Args:
+        hf_path (str): An ``hf://org/repo/path/to/file`` path to a single file.
+        revision (str, optional): Branch, tag or commit hash. Defaults to the repository
+            default branch.
+        repo_type (str, optional): One of ``"dataset"``, ``"model"`` or ``"space"``.
+        **kwargs: Ignored (accepts the same kwargs as :func:`_hf_stream_open`).
+
+    Returns:
+        str: The ``resolve`` URL of the file.
+    """
+    repo_id, subpath = _hf_parse_path(hf_path)
+    if not subpath:
+        raise ValueError(f"Expected an 'hf://' path to a single file, got '{hf_path}'.")
+    prefix = _HF_URL_PREFIX.get(repo_type)
+    if prefix is None:  # "model" maps to "", so test membership, not truthiness
+        raise ValueError(
+            f"Unsupported repo_type '{repo_type}'. Expected one of {list(_HF_URL_PREFIX)}."
+        )
+    return f"{_HF_HOST}/{prefix}{repo_id}/resolve/{revision or 'main'}/{subpath}"
+
+
+def _hf_stream_open(
+    hf_path: str,
+    revision: str | None = None,
+    repo_type: str = "dataset",
+    block_size: int | None = None,
+    cache_type: str | None = None,
+    **kwargs,
+):
+    """Open a single Hugging Face file lazily for HTTP range-request streaming.
+
+    Unlike :func:`_hf_resolve_path`, this does **not** download the whole file.
+    It returns an open fsspec file object backed by
+    :class:`~huggingface_hub.HfFileSystem`; only the byte ranges actually read
+    (e.g. via ``h5py`` slicing) are fetched over HTTP.
+
+    Args:
+        hf_path (str): A ``hf://org/repo/path/to/file`` path pointing at a
+            single file (not a repo root or directory).
+        revision (str, optional): Branch, tag, or commit hash. Defaults to the
+            repository default branch.
+        repo_type (str, optional): One of ``"dataset"``, ``"model"`` or
+            ``"space"``. Defaults to ``"dataset"``.
+        block_size (int, optional): Block size in bytes for the fsspec cache.
+            Larger blocks coalesce more chunk reads per HTTP request (faster for
+            whole-frame reads, more over-fetch for sparse reads). Defaults to
+            :data:`_HF_STREAM_BLOCK_SIZE`.
+        cache_type (str, optional): fsspec cache strategy. Defaults to
+            :data:`_HF_STREAM_CACHE_TYPE` (``"blockcache"``), which caches touched
+            blocks so the many small chunks of a frame share a few requests.
+        **kwargs: Forwarded to :meth:`HfFileSystem.open`.
+
+    Returns:
+        An open, seekable binary file object. The caller is responsible for
+        closing it.
+    """
+    from huggingface_hub import HfFileSystem
+
+    repo_id, subpath = _hf_parse_path(hf_path)
+    if not subpath:
+        raise ValueError(
+            f"Streaming requires an 'hf://' path to a single file, got '{hf_path}'. "
+            "Point at a specific '.hdf5'/'.h5' file, or pass stream=False to download."
+        )
+
+    prefix = _HF_FS_PREFIX.get(repo_type)
+    if prefix is None:
+        raise ValueError(
+            f"Unsupported repo_type '{repo_type}'. Expected one of {list(_HF_FS_PREFIX)}."
+        )
+    ref = f"@{revision}" if revision else ""
+    fs_path = f"{prefix}{repo_id}{ref}/{subpath}"
+
+    if block_size is None:
+        block_size = _HF_STREAM_BLOCK_SIZE
+    if cache_type is None:
+        cache_type = _HF_STREAM_CACHE_TYPE
+
+    open_kwargs = {"cache_type": cache_type, "block_size": block_size, **kwargs}
+    try:
+        return HfFileSystem().open(fs_path, "rb", **open_kwargs)
+    except (RepositoryNotFoundError, HFValidationError, EntryNotFoundError):
+        _hf_login()
+        return HfFileSystem().open(fs_path, "rb", **open_kwargs)

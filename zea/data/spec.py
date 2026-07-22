@@ -1,6 +1,8 @@
+import math
 import os
 import tempfile
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
@@ -9,12 +11,19 @@ from pathlib import Path
 from typing import Any, ClassVar, List, NoReturn, Sequence, Tuple, cast
 
 import h5py
+import hdf5plugin
 import numpy as np
 
 from zea import log
 from zea.internal.typing import Scalar
 
+# Named dimensions whose sizes must agree wherever they appear.
 CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch", "n_spatial_ch"}
+
+# Subset that must only agree within a single spec, not across sibling data
+# products: channel counts are independent between products (e.g. RF raw_data
+# next to IQ beamformed_data), so they are not propagated across spec boundaries.
+LOCAL_CONSISTENCY_DIMENSIONS = {"n_ch", "n_spatial_ch"}
 
 UNITS = {
     "m/s": "meters per second",
@@ -25,11 +34,58 @@ UNITS = {
     "–": "unitless",
     "rad": "radians",
     "dB": "decibels",
+    "dB/m/Hz": "decibels per meter per hertz",
     "#": "count",
     "%": "percent",
+    "kg": "kilograms",
+    "kg/m²": "kilograms per square meter",
 }
 
-DEFAULT_COMPRESSION = "lzf"
+# Blosc(zstd) + bit-shuffle: the one codec zea.data.chunk_reader can decode concurrently.
+# Blosc2 compresses ~2% better but its binding holds the GIL, which costs ~30x on reads.
+# Bit-shuffle beats byte-shuffle on int16 (only two byte-planes to separate); clevel 9 writes
+# ~15x slower than 7 for ~1% more compression. Importing hdf5plugin also registers the filter.
+DEFAULT_COMPRESSION = hdf5plugin.Blosc(cname="zstd", clevel=7, shuffle=hdf5plugin.Blosc.BITSHUFFLE)
+
+# Threads Blosc uses on the blocks *within* one chunk. HDF5 runs the filter one chunk at a time
+# and single-threaded, so this is most of the write throughput: ~4x (105 -> 453 MB/s). The gain
+# reverses past ~8 (the blocks are small and go memory-bound), and writes are often already
+# parallel per-file, so keep it modest. setdefault: an explicit env var wins.
+BLOSC_NTHREADS = min(8, os.cpu_count() or 1)
+os.environ.setdefault("BLOSC_NTHREADS", str(BLOSC_NTHREADS))
+
+# Chunk size 1 on each of these dims: one frame per chunk, since a frame is what a read
+# subsamples first. Dims not present on a field are ignored.
+DEFAULT_CHUNK_AXES: tuple[str, ...] = ("n_frames",)
+
+# Ceiling on the uncompressed bytes of one chunk. A chunk is the unit of *parallelism*:
+# chunk_reader decodes each one in a single thread, so a whole-frame chunk (166 MB on a
+# 149-transmit scan) has nothing to parallelise — 102 ms to read one frame against 13 ms at
+# 8 MB. Too small costs round trips instead (149 chunks/frame = 1.3 s over HTTP). 8 MB sits
+# mid-plateau of a broad optimum (~2-16 MB), the same one for local and cloud, and costs
+# nothing on disk: the compression ratio is flat across chunk size.
+MAX_CHUNK_BYTES = 8 << 20  # 8 MiB
+
+# Paged file-space strategy: HDF5 allocates in fixed-size pages, which collects the
+# metadata that a reader must walk on open (superblock, group and chunk B-trees) into
+# few, adjacent pages instead of scattering it through the file. Over HTTP this cuts a
+# cold open from 3 requests to 2 and ~0.16 s to ~0.05 s, at ~2% file size for 64 KiB
+# pages (larger pages waste space and, past ~1 MiB, requests too).
+#
+# Requires HDF5 >= 1.10.1 on the reader, which the "v114" high bound below satisfies.
+# The high bound is pinned rather than left as "latest": h5py 3.16 started bundling
+# libhdf5 2.0, and "latest" resolves to whatever's bundled at write time. HDF5 2.0
+# writes newer object-header message versions (e.g. datatype messages) that HDF5
+# 1.14.x readers reject outright with "bad version number for datatype message" -
+# confirmed by round-tripping a file through h5py 3.16/libhdf5 2.0 and reading it
+# back with h5py 3.11/libhdf5 1.14.2. Capping at v114 keeps files readable by the
+# 1.14.x installs still in the wild without limiting which h5py *version* writes them.
+PAGED_LAYOUT = {
+    "libver": ("earliest", "v114"),
+    "fs_strategy": "page",
+    "fs_page_size": 64 * 1024,
+    "fs_persist": True,
+}
 
 # Default unit/description for every SCHEMA leaf field.  Subclasses may
 # override by defining their own FIELD_METADATA dict.
@@ -186,6 +242,10 @@ class Spec:
         nested_dim_to_field_sizes: defaultdict[str, dict[str, int]],
     ) -> None:
         for dim_name, nested_field_sizes in nested_dim_to_field_sizes.items():
+            # Channel dimensions are only consistent within a single spec, not
+            # across data products, so they are not propagated to the parent.
+            if dim_name in LOCAL_CONSISTENCY_DIMENSIONS:
+                continue
             dim_to_field_sizes[dim_name].update(nested_field_sizes)
 
     @staticmethod
@@ -233,6 +293,10 @@ class Spec:
         accepted and normalized to the first floating dtype in ``expected_dtype``
         (typically ``np.float32``).
         """
+        # Keep None
+        if value is None:
+            return value
+
         expected_np_dtypes = []
         for dt in expected_dtype:
             try:
@@ -428,42 +492,116 @@ class Spec:
         return False
 
     @staticmethod
+    def _resolve_chunks(
+        value: Any,
+        dim_names: tuple | None,
+        chunk_axes: tuple[str, ...] | None,
+        max_chunk_bytes: int | None = None,
+    ) -> tuple | None:
+        """Choose an HDF5 chunk shape aligned with common access patterns.
+
+        ``chunk_axes`` names the dimensions to chunk with size 1 (default
+        :data:`DEFAULT_CHUNK_AXES`, ``("n_frames",)``); every other axis is stored at
+        full extent, so partial/streaming reads fetch only the requested frames
+        instead of h5py's poorly-shaped auto-guess. Axes named in ``chunk_axes`` but
+        not present on this field are ignored (e.g. an ``image`` without ``n_tx`` is
+        chunked on ``n_frames`` only).
+
+        The result is capped to ``max_chunk_bytes`` (default :data:`MAX_CHUNK_BYTES`) by
+        splitting the outermost full axis — ``n_tx`` for ``raw_data`` — which keeps each
+        chunk a contiguous run of the array. Only that axis is split: if one index along
+        it already exceeds the budget, the chunk is left oversized rather than cutting
+        into ``n_ax``/``n_el``, which are read whole anyway.
+
+        Returns ``None`` (contiguous / h5py default) when ``chunk_axes`` is empty
+        or ``None``, the value is not a ≥2-D array, or the field's dimension names
+        are unknown.
+        """
+        if not chunk_axes or not isinstance(value, np.ndarray) or value.ndim < 2:
+            return None
+        if not (
+            dim_names is not None
+            and len(dim_names) == value.ndim
+            and all(isinstance(d, str) for d in dim_names)
+        ):
+            return None
+        mark = [d in chunk_axes for d in dim_names]
+        # Require a mix: at least one chunk axis present *and* at least one full
+        # axis, else the chunks would be scalar-sized (all ones).
+        if not (any(mark) and not all(mark)):
+            return None
+
+        shape = cast(Tuple[int, ...], value.shape)
+        chunks: list[int] = [1 if m else dim for m, dim in zip(mark, shape)]
+        if max_chunk_bytes is None:
+            max_chunk_bytes = MAX_CHUNK_BYTES
+        if not max_chunk_bytes:  # 0 / None disables the cap: one full frame per chunk
+            return tuple(chunks)
+
+        split = mark.index(False)  # outermost axis kept at full extent
+        # Bytes of one index along that axis, i.e. everything nested inside it.
+        inner = math.prod(chunks[split + 1 :]) * value.dtype.itemsize
+        if inner:
+            chunks[split] = min(chunks[split], max(1, max_chunk_bytes // inner))
+        return tuple(chunks)
+
+    @staticmethod
     def create_dataset(
         group: h5py.Group,
         field_name: str,
         value: Any,
-        compression: str | None = DEFAULT_COMPRESSION,
-        chunk_frames: bool = False,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
+        chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
+        dim_names: tuple | None = None,
     ) -> None:
         """Create a dataset in the given group for the specified field and value,
-        handling string and scalar values appropriately."""
+        handling string and scalar values appropriately.
+
+        ``compression`` may be an h5py filter name (e.g. ``"lzf"``, ``"gzip"``) or
+        a mapping of ``create_dataset`` keyword arguments, such as an
+        ``hdf5plugin`` filter object (``hdf5plugin.Blosc2(...)``) or an explicit
+        ``{"compression": "gzip", "compression_opts": 4}``. Reading such a file
+        back requires the corresponding filter to be available (for ``hdf5plugin``
+        filters, ``import hdf5plugin`` in the reading process).
+
+        When ``dim_names`` (the field's schema dimension names) is provided, the
+        chunk shape is derived from ``chunk_axes`` to match common subsampling
+        patterns; see :meth:`_resolve_chunks`.
+        """
         dataset_is_scalar = np.isscalar(value) or value.ndim == 0
-        compression = None if dataset_is_scalar else compression
-        chunks = None
-        if (
-            chunk_frames
-            and not dataset_is_scalar
-            and isinstance(value, np.ndarray)
-            and value.ndim >= 2
-        ):
-            chunks = (1,) + value.shape[1:]
+        chunks = None if dataset_is_scalar else Spec._resolve_chunks(value, dim_names, chunk_axes)
+        # Filters are meaningless for scalars; strings only take named codecs
+        # (plugin filters like Blosc reject variable-length string data).
+        if dataset_is_scalar:
+            comp_kwargs: dict = {}
+        elif isinstance(compression, Mapping):
+            comp_kwargs = dict(compression)
+        elif compression is not None:
+            comp_kwargs = {"compression": compression}
+        else:
+            comp_kwargs = {}
         if Spec._is_string_value(value):
             string_dtype = h5py.string_dtype(encoding="utf-8")
             string_value = np.asarray(value, dtype=object)
+            # Only named codecs apply to strings, and never to scalar datasets
+            # (h5py rejects chunk/filter options on scalars). Plugin filters
+            # (Mapping) are skipped — they reject variable-length string data.
+            use_str_codec = isinstance(compression, str) and not dataset_is_scalar
+            string_comp = {"compression": compression} if use_str_codec else {}
             group.create_dataset(
                 field_name,
                 data=string_value,
                 dtype=string_dtype,
-                compression=compression,
+                **string_comp,
             )
         else:
-            group.create_dataset(field_name, data=value, compression=compression, chunks=chunks)
+            group.create_dataset(field_name, data=value, chunks=chunks, **comp_kwargs)
 
     def store_in_group(
         self,
         group: h5py.Group,
-        compression: str | None = DEFAULT_COMPRESSION,
-        chunk_frames: bool = False,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
+        chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
         warn_missing_optional_fields: bool = True,
     ) -> None:
         """Store the data in the given group (e.g. hdf5 group)."""
@@ -489,7 +627,7 @@ class Spec:
                 value.store_in_group(
                     subgroup,
                     compression=compression,
-                    chunk_frames=chunk_frames,
+                    chunk_axes=chunk_axes,
                     warn_missing_optional_fields=warn_missing_optional_fields,
                 )
             else:
@@ -498,7 +636,8 @@ class Spec:
                     field_name,
                     value,
                     compression=compression,
-                    chunk_frames=chunk_frames,
+                    chunk_axes=chunk_axes,
+                    dim_names=field_info.get("shape"),
                 )
                 meta = field_metadata.get(field_name, {})
                 group[field_name].attrs["unit"] = meta.get("unit", _DEFAULT_FIELD_UNIT)
@@ -980,6 +1119,98 @@ class SosMap(FloatMap):
 
 
 @dataclass
+class AttenuationMap(FloatMap):
+    """Acoustic attenuation map with per-pixel Cartesian coordinates.
+
+    Acoustic attenuation describes the loss of acoustic energy as the wave
+    propagates through tissue (through absorption and scattering).  Attenuation
+    is frequency dependent and is modelled here with the usual power law
+
+    .. math::
+
+        \\alpha(f) = \\alpha_0 \\, f^{\\gamma},
+
+    where :math:`\\alpha_0` is the per-pixel attenuation coefficient stored in
+    ``values`` and :math:`\\gamma` is the (scalar) power-law exponent stored in
+    ``gamma``.  Reporting the coefficient normalized by frequency makes values
+    comparable across systems and transmit frequencies.
+
+    The coefficient is stored in the spec's base units of ``dB/m/Hz`` (rather
+    than the common clinical ``dB/cm/MHz``; note ``1 dB/cm/MHz = 1e-4 dB/m/Hz``).
+    Strictly, when :math:`\\gamma \\neq 1` the coefficient carries the exponent in
+    its units (``dB/m/Hz**gamma``); the ``dB/m/Hz`` label reflects the linear
+    (:math:`\\gamma = 1`) convention.
+
+    The exponent is close to 1 for most soft tissue (attenuation is roughly
+    linear in frequency), e.g. liver :math:`\\gamma \\approx 1.14`, breast
+    :math:`\\gamma \\approx 1.5`, while water / low-loss viscous media follow
+    :math:`\\gamma = 2`.  It defaults to ``1.0`` (linear), which reproduces the
+    plain frequency-normalized "attenuation coefficient slope".
+
+    Args:
+        values: The attenuation coefficient :math:`\\alpha_0` in ``dB/m/Hz`` of
+            shape ``(n_frames, z, x, y)`` and type float32.
+        coordinates: Per-pixel Cartesian positions in metres, shape
+            ``(n_frames, z, x, 3)`` or ``(n_frames, z, x, y, 3)``.
+            The leading frame axis may be omitted to broadcast one coordinate grid
+            across all frames.
+        gamma: Scalar power-law exponent :math:`\\gamma` of the frequency
+            dependence :math:`\\alpha(f) = \\alpha_0 f^{\\gamma}`.  Defaults to
+            ``1.0`` (linear frequency dependence).
+    """
+
+    gamma: float = 1.0
+
+    SCHEMA = {
+        **FloatMap.SCHEMA,
+        "gamma": {"dtype": np.float32, "shape": ()},
+    }
+
+    FIELD_METADATA = {
+        **Map.FIELD_METADATA,
+        "gamma": {
+            "unit": "–",
+            "description": (
+                "Power-law exponent of the frequency dependence alpha(f) = alpha_0 * f**gamma. "
+                "1.0 is linear (soft tissue ~1-1.5, e.g. liver ~1.14), 2.0 for water."
+            ),
+            "rare": True,
+        },
+    }
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.unit is not None and self.unit != "dB/m/Hz":
+            raise ValueError(f"Attenuation map unit should be 'dB/m/Hz', got '{self.unit}'")
+
+        # Attenuation coefficients describe energy loss and are therefore non-negative.
+        if np.any(self.values < 0):
+            log.warning(
+                "Attenuation map contains negative values, which is physically unexpected "
+                "for an attenuation coefficient. Please verify the values are in dB/m/Hz."
+            )
+
+        # Guard against the coefficient being supplied in the common clinical unit
+        # dB/cm/MHz (= 1e-4 dB/m/Hz) instead of the spec's dB/m/Hz base unit: even
+        # highly attenuating media stay well below 1e-2 dB/m/Hz.
+        max_abs = float(np.max(np.abs(self.values), initial=0.0))
+        if max_abs > 1e-2:
+            log.warning(
+                f"Attenuation map has a maximum absolute value of {max_abs:.4g} dB/m/Hz, which "
+                "is unusually high.  Please verify the values are in dB/m/Hz "
+                "(1 dB/cm/MHz = 1e-4 dB/m/Hz), not dB/cm/MHz."
+            )
+
+        # The power-law exponent is positive; soft tissue is ~1, water is 2.
+        if self.gamma is not None and (self.gamma <= 0 or self.gamma > 2.0):
+            log.warning(
+                f"Attenuation map gamma={self.gamma} is outside the physically typical range "
+                "(0, 2]. Soft tissue is around 1.0-1.5 and water is 2.0."
+            )
+
+
+@dataclass
 class StrainPercentageMap(FloatMap):
     """Strain map data with per-pixel Cartesian coordinates.
 
@@ -1063,6 +1294,7 @@ class DataSpec(Spec):
         - image: Reconstructed image data and per-pixel coordinates.
         - segmentation: Segmentation data and per-pixel coordinates.
         - sos_map: Speed-of-sound map data and per-pixel coordinates.
+        - attenuation_map: Acoustic attenuation map data and per-pixel coordinates.
         - strain_percentage_map: Strain map data and per-pixel coordinates.
         - shear_wave_elastography_map: Shear-wave elastography data and per-pixel coordinates.
         - tissue_doppler: Tissue Doppler data and per-pixel coordinates.
@@ -1081,6 +1313,7 @@ class DataSpec(Spec):
     image: Image | dict | None = None
     segmentation: Segmentation | dict | None = None
     sos_map: SosMap | dict | None = None
+    attenuation_map: AttenuationMap | dict | None = None
     strain_percentage_map: StrainPercentageMap | dict | None = None
     shear_wave_elastography_map: ShearWaveElastographyMap | dict | None = None
     tissue_doppler: TissueDopplerMap | dict | None = None
@@ -1099,6 +1332,7 @@ class DataSpec(Spec):
         "image": {"spec": Image},
         "segmentation": {"spec": Segmentation},
         "sos_map": {"spec": SosMap},
+        "attenuation_map": {"spec": AttenuationMap},
         "strain_percentage_map": {"spec": StrainPercentageMap},
         "shear_wave_elastography_map": {"spec": ShearWaveElastographyMap},
         "tissue_doppler": {"spec": TissueDopplerMap},
@@ -1113,6 +1347,7 @@ class DataSpec(Spec):
         "image": {"description": "Reconstructed image data.", "rare": True},
         "segmentation": {"description": "Segmentation data.", "rare": True},
         "sos_map": {"description": "Speed-of-sound map data.", "rare": True},
+        "attenuation_map": {"description": "Acoustic attenuation map data.", "rare": True},
         "strain_percentage_map": {"description": "Strain map data.", "rare": True},
         "shear_wave_elastography_map": {
             "description": "Shear-wave elastography data.",
@@ -1131,6 +1366,7 @@ class DataSpec(Spec):
         image: Image | dict | None = None,
         segmentation: Segmentation | dict | None = None,
         sos_map: SosMap | dict | None = None,
+        attenuation_map: AttenuationMap | dict | None = None,
         strain_percentage_map: StrainPercentageMap | dict | None = None,
         shear_wave_elastography_map: ShearWaveElastographyMap | dict | None = None,
         tissue_doppler: TissueDopplerMap | dict | None = None,
@@ -1144,6 +1380,7 @@ class DataSpec(Spec):
         self.image = image
         self.segmentation = segmentation
         self.sos_map = sos_map
+        self.attenuation_map = attenuation_map
         self.strain_percentage_map = strain_percentage_map
         self.shear_wave_elastography_map = shear_wave_elastography_map
         self.tissue_doppler = tissue_doppler
@@ -1224,9 +1461,22 @@ class ScanSpec(Spec):
             full contribution. Negative values indicate that the element was
             fired with opposite polarity.
         focus_distances: The transmit focus distances in meters of shape (n_tx,).
-            This is the distance from the origin point on the transducer to
-            where the beam comes to focus. For planewaves this is set to
-            infinity or zero.
+            This is the distance from the transmit origin on the transducer to
+            where the beam comes to focus. The sign and magnitude encode the
+            transmit type:
+
+            - **positive finite**: focused transmit; the beam focuses at this
+              distance in front of the array.
+            - **negative finite**: diverging transmit; the (virtual) source
+              lies this distance behind the array.
+            - **infinite** (``np.inf``): plane wave. This is the preferred,
+              canonical value for plane waves in zea. ``0.0`` is also accepted
+              as a plane-wave marker (e.g. raw Verasonics data stores ``0``),
+              but new data should use ``np.inf``.
+
+            See :meth:`zea.Parameters.find_transmits` for how these values are
+            used to classify transmits as ``"focused"``, ``"diverging"`` or
+            ``"plane"``.
         transmit_origins: The transmit origins of the transmit beams in meters of
             shape (n_tx, 3). This is the (x, y, z) position from which the beam
             is transmitted.
@@ -1299,8 +1549,21 @@ class ScanSpec(Spec):
         "demodulation_frequency": {"unit": "Hz", "description": "Demodulation frequency."},
         "initial_times": {"unit": "s", "description": "A/D converter start times per transmit."},
         "t0_delays": {"unit": "s", "description": "Transmit delays per element."},
-        "tx_apodizations": {"unit": "–", "description": "Transmit apodization per element."},
-        "focus_distances": {"unit": "m", "description": "Transmit focus distances."},
+        "tx_apodizations": {
+            "unit": "–",
+            "description": (
+                "Transmit apodization per element, in [-1, 1]. 0 = element did not "
+                "contribute, 1 = full contribution, negative = fired with opposite polarity."
+            ),
+        },
+        "focus_distances": {
+            "unit": "m",
+            "description": (
+                "Transmit focus distances. Positive = focused, negative = diverging "
+                "(virtual source behind the array), ``np.inf`` = plane wave (preferred; "
+                "``0`` is also accepted)."
+            ),
+        },
         "transmit_origins": {"unit": "m", "description": "Transmit beam origins (x, y, z)."},
         "polar_angles": {"unit": "rad", "description": "Polar angles of transmit beams."},
         "time_to_next_transmit": {"unit": "s", "description": "Time between transmit events."},
@@ -1443,7 +1706,7 @@ class ProbeSpec(Spec):
         "type": {"description": "Probe geometry type (linear, phased, curved, ...)."},
         "probe_center_frequency": {
             "unit": "Hz",
-            "description": "Probe nominal centre frequency.",
+            "description": ("Probe nominal centre frequency (midpoint of the probe's -6 dB band)."),
         },
         "probe_bandwidth_percent": {
             "unit": "%",
@@ -1530,21 +1793,30 @@ class Subject(Spec):
         type: Subject type, e.g. human, phantom, animal.
         age: Subject age in years.
         sex: Subject sex.
+        weight: Subject weight in kg.
+        genetic_strain: Genetic strain of an animal subject, e.g. C57BL/6N.
         fat_percentage: Subject fat percentage.
+        bmi: Subject body mass index in kg/m².
     """
 
     id: str | None = None
     type: str | None = None
     age: np.uint8 | None = None
     sex: str | None = None
+    weight: np.float32 | None = None
+    genetic_strain: str | None = None
     fat_percentage: np.float32 | None = None
+    bmi: np.float32 | None = None
 
     SCHEMA = {
         "id": {"dtype": str, "shape": ()},
         "type": {"dtype": str, "shape": ()},
         "age": {"dtype": np.uint8, "shape": ()},
         "sex": {"dtype": str, "shape": ()},
+        "weight": {"dtype": np.float32, "shape": ()},
+        "genetic_strain": {"dtype": str, "shape": ()},
         "fat_percentage": {"dtype": np.float32, "shape": ()},
+        "bmi": {"dtype": np.float32, "shape": ()},
     }
 
     FIELD_METADATA = {
@@ -1552,7 +1824,14 @@ class Subject(Spec):
         "type": {"unit": "–", "description": "Subject type, e.g. human, phantom, animal."},
         "age": {"unit": "–", "description": "Subject age in years.", "rare": True},
         "sex": {"unit": "–", "description": "Subject sex.", "rare": True},
+        "weight": {"unit": "kg", "description": "Subject weight.", "rare": True},
+        "genetic_strain": {
+            "unit": "–",
+            "description": "Genetic strain (inbred line) of an animal subject, e.g. C57BL/6N.",
+            "rare": True,
+        },
         "fat_percentage": {"unit": "%", "description": "Subject fat percentage.", "rare": True},
+        "bmi": {"unit": "kg/m²", "description": "Subject body mass index.", "rare": True},
     }
 
     def __post_init__(self):
@@ -1567,6 +1846,31 @@ class Subject(Spec):
             raise ValueError(
                 f"Subject fat percentage must be between 0 and 100, got {self.fat_percentage}"
             )
+
+        if self.genetic_strain is not None and not self.genetic_strain.strip():
+            raise ValueError("Subject genetic_strain cannot be an empty string")
+
+        if self.weight is not None:
+            if not np.isfinite(self.weight):
+                raise ValueError(f"Subject weight must be finite, got {self.weight}")
+            if self.weight <= 0:
+                raise ValueError(f"Subject weight must be positive, got {self.weight} kg")
+            if self.weight > 1000:
+                log.warning(
+                    f"Subject weight was specified as {self.weight} kg."
+                    "Please verify the value and that it is in kilograms, not grams."
+                )
+
+        if self.bmi is not None:
+            if not np.isfinite(self.bmi):
+                raise ValueError(f"Subject BMI must be finite, got {self.bmi}")
+            if self.bmi <= 0 or self.bmi > 100:
+                raise ValueError(f"Subject BMI must be between 0 and 100, got {self.bmi}")
+            if self.bmi < 10 or self.bmi > 60:
+                log.warning(
+                    f"Subject BMI of {self.bmi} kg/m² is outside the typical clinical range "
+                    "(10-60). Please verify the value and that it is in kg/m²."
+                )
 
 
 @dataclass
@@ -1775,18 +2079,19 @@ class SignalND(Signal):
 
 @dataclass
 class Annotations(Spec):
-    """Frame-level annotations, either per frame or broadcast labels.
+    """Frame-level annotations, either one per frame or a single broadcast value.
 
     Args:
-        anatomy: Anatomy label.
-        view: View label of shape (n_frames,).
-        label: Pathology or classification label of shape (n_frames,).
-        image_quality: Image quality label, e.g. low, mid, high.
+        anatomy (str): Anatomical structure imaged, e.g. carotid, liver, thyroid.
+        view (str): Imaging plane/orientation, e.g. longitudinal, transverse,
+            apical_4_chamber.
+        label (str): Pathology or classification label, e.g. benign, malignant.
+        image_quality (str): Image quality label, e.g. low, mid, high.
     """
 
     anatomy: np.ndarray | str | None = None
-    view: np.ndarray | None = None
-    label: np.ndarray | None = None
+    view: np.ndarray | str | None = None
+    label: np.ndarray | str | None = None
     image_quality: np.ndarray | str | None = None
 
     SCHEMA = {
@@ -1797,8 +2102,14 @@ class Annotations(Spec):
     }
 
     FIELD_METADATA = {
-        "anatomy": {"unit": "–", "description": "Anatomy label."},
-        "view": {"unit": "–", "description": "View label."},
+        "anatomy": {
+            "unit": "–",
+            "description": "Anatomical structure imaged (e.g. carotid, liver).",
+        },
+        "view": {
+            "unit": "–",
+            "description": "Imaging plane/orientation (e.g. longitudinal, apical_4_chamber).",
+        },
         "label": {"unit": "–", "description": "Pathology or classification label."},
         "image_quality": {"unit": "–", "description": "Image quality label.", "rare": True},
     }
@@ -1940,33 +2251,92 @@ class TrackSpec(Spec):
     field of the parent :class:`FileSpec`, if necessary.
     Single-track files may omit the label.
 
+    A track must carry at least one of ``data`` or ``scan``.  ``data`` may be
+    left as ``None`` to describe a transmit-only track (one that records the
+    transmit sequence via ``scan`` but stores no recorded data), but only when
+    ``scan`` is provided and ``transmit_only=True`` is explicitly passed.
+
+    A transmit-only track is useful when we want to store information about a
+    transmit event without any corresponding receive data, for example a shear
+    wave push pulse or therapeutic ultrasound.
+
     Args:
-        data (DataSpec | dict): The data for this track.
+        data (DataSpec | dict | None): The data for this track. May be ``None``
+            for a transmit-only track (e.g. to store a shear wave push pulse),
+            but only if ``scan`` is provided and ``transmit_only=True``.
         scan (ScanSpec | dict | None): The scan parameters for this track. Required when raw_data is
-            present in *data*.
+            present in *data*, and required when *data* is ``None``.
         label (str | None): Short human-readable name for this track (e.g. ``"focused"``
             or ``"planewave"``).  Required when the parent :class:`FileSpec`
             contains more than one track.
+        transmit_only (bool): Must be explicitly set to ``True`` to construct a
+            transmit-only track (``data=None`` with ``scan`` provided).
     """
 
-    data: DataSpec | dict
+    data: DataSpec | dict | None = None
     scan: ScanSpec | dict | None = None
     label: str | None = None
+    transmit_only: bool = False
 
     SCHEMA = {
         "data": {"spec": DataSpec},
         "scan": {"spec": ScanSpec},
         "label": {"dtype": str, "shape": ()},
+        "transmit_only": {"dtype": np.bool_, "shape": ()},
     }
 
     FIELD_METADATA = {
+        "data": {
+            "unit": "–",
+            "description": (
+                "Recorded data for this track; may be omitted for a transmit-only track."
+            ),
+        },
+        "scan": {
+            "unit": "–",
+            "description": (
+                "Scan acquisition parameters for this track; required when raw_data is "
+                "present in data, or when data is omitted."
+            ),
+        },
         # label is enforced by FileSpec for multi-track (ValueError), and legitimately
         # absent for single-track files — warning here is never useful.
         "label": {"unit": "–", "description": "Short human-readable track name.", "rare": True},
+        "transmit_only": {
+            "unit": "–",
+            "description": (
+                "Whether this track records only the transmit sequence with no "
+                "corresponding receive data (e.g. a shear wave push pulse or "
+                "therapeutic ultrasound)."
+            ),
+            "rare": True,
+        },
     }
 
     def __post_init__(self):
         super().__post_init__()
+
+        if self.data is None and self.scan is None:
+            raise ValueError(
+                "A track must have at least one of 'data' or 'scan'. "
+                "'data' may be None (a transmit-only track) only when 'scan' is provided "
+                "and 'transmit_only=True' is explicitly set."
+            )
+
+        if self.data is None and self.scan is not None and not self.transmit_only:
+            raise ValueError(
+                "'data' is None but 'transmit_only' was not set to True. "
+                "Pass 'transmit_only=True' to explicitly create a transmit-only track "
+                "(one that records only the transmit sequence via 'scan', with no "
+                "corresponding receive data, e.g. a shear wave push pulse or "
+                "therapeutic ultrasound exposure)."
+            )
+
+        if self.transmit_only and self.data is not None:
+            raise ValueError(
+                "'transmit_only=True' was set but 'data' is not None. "
+                "A transmit-only track must not carry data."
+            )
 
         data = self.data
         has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
@@ -1983,15 +2353,15 @@ class TrackSpec(Spec):
     def store_in_group(
         self,
         group: "h5py.Group",
-        compression: str | None = DEFAULT_COMPRESSION,
-        chunk_frames: bool = False,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
+        chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
         warn_missing_optional_fields: bool = True,
     ) -> None:
         """Store data, scan, and label in the HDF5 group."""
         super().store_in_group(
             group,
             compression=compression,
-            chunk_frames=chunk_frames,
+            chunk_axes=chunk_axes,
             warn_missing_optional_fields=warn_missing_optional_fields,
         )
 
@@ -2022,7 +2392,7 @@ class FileSpec(Spec):
         description: Free-text description.
         custom: Optional list of :class:`~zea.data.file.CustomElement` objects holding
             data that does not fit the zea format.  These are written to a ``custom``
-            group and read back via :attr:`zea.File.custom`.
+            group.
 
     Example:
         .. doctest::
@@ -2254,34 +2624,54 @@ class FileSpec(Spec):
         # Run base SCHEMA validation (metadata, metrics, scalars, track_schedule)
         super().__post_init__()
 
-        # Validate that dimensions which are present in both metadata and tracks
-        # are consistent across all tracks.
+        # Per-frame metadata (e.g. annotations) describes one acquisition, so for
+        # each shared dimension it must match at least one track - auxiliary tracks may
+        # legitimately differ.
         if isinstance(self.metadata, MetadataSpec):
             meta_dim_field_sizes = self.metadata._collect_dimension_info("metadata.")
-            for i, track in enumerate(self.tracks):
-                track_dim_field_sizes = track._collect_dimension_info(f"tracks[{i}].")
-                for dim in CONSISTENCY_DIMENSIONS:
-                    if dim in meta_dim_field_sizes and dim in track_dim_field_sizes:
-                        field_sizes = {**meta_dim_field_sizes[dim], **track_dim_field_sizes[dim]}
-                        if len(set(field_sizes.values())) > 1:
-                            raise ValueError(self._format_inconsistent_dimension(dim, field_sizes))
+            per_track_dim_field_sizes = [
+                track._collect_dimension_info(f"tracks[{i}].")
+                for i, track in enumerate(self.tracks)
+            ]
+            for dim in CONSISTENCY_DIMENSIONS:
+                # Nothing to validate if the metadata doesn't use this dimension.
+                if dim not in meta_dim_field_sizes:
+                    continue
 
-        # Validate custom elements are CustomElement instances (lazy import to
-        # avoid a circular dependency with zea.data.file).
+                # Nor if no track carries it - there's nothing to match against.
+                tracks_with_dim = [t[dim] for t in per_track_dim_field_sizes if dim in t]
+                if not tracks_with_dim:
+                    continue
+
+                # Metadata is internally consistent, so meta_values is a single
+                # size; it must match at least one track that carries this dim.
+                meta_sizes = meta_dim_field_sizes[dim]
+                meta_values = set(meta_sizes.values())
+                if any(meta_values == set(track_sizes.values()) for track_sizes in tracks_with_dim):
+                    continue
+                # No track matched: report the metadata field(s) alongside every
+                # track that carries the dimension.
+                field_sizes = dict(meta_sizes)
+                for track_sizes in tracks_with_dim:
+                    field_sizes.update(track_sizes)
+                raise ValueError(self._format_inconsistent_dimension(dim, field_sizes))
+
+        # Validate custom elements are CustomElement instances
         if self.custom:
-            from zea.data.file import CustomElement
+            from zea.data.file import CustomElement, _validate_custom_element_naming
 
             for i, element in enumerate(self.custom):
                 if not isinstance(element, CustomElement):
                     raise TypeError(
                         f"custom[{i}] must be a CustomElement, got {type(element).__name__}."
                     )
+                _validate_custom_element_naming(element, i)
 
     def _normalize_time_to_next_transmit(self) -> None:
         """Pad flat timing arrays and reshape to (n_frames * n_tx) by padding last
         frame with a zero."""
         for i, track in enumerate(self.tracks):
-            raw_data = track.data.raw_data
+            raw_data = track.data.raw_data if track.data is not None else None
             scan = track.scan
             if raw_data is None or scan is None or scan.time_to_next_transmit is None:
                 continue
@@ -2327,8 +2717,8 @@ class FileSpec(Spec):
     def save(
         self,
         path: str,
-        compression: str | None = DEFAULT_COMPRESSION,
-        chunk_frames: bool = False,
+        compression: "str | Mapping | None" = DEFAULT_COMPRESSION,
+        chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
         warn_missing_optional_fields: bool = True,
     ) -> None:
         """Save the dataset to the specified path."""
@@ -2336,6 +2726,17 @@ class FileSpec(Spec):
             _zea_version = _get_pkg_version("zea")
         except PackageNotFoundError:
             _zea_version = "dev"
+
+        # HDF5 requires chunked storage for compression. With no chunk_axes we
+        # emit contiguous datasets, so h5py would silently fall back to its
+        # (poorly-shaped) auto-guess when compression is on — warn instead.
+        if not chunk_axes and compression is not None:
+            log.warning(
+                f"chunk_axes is empty but compression={compression!r} is enabled; "
+                "HDF5 requires chunking for compression, so h5py will auto-pick chunk "
+                "shapes (often poor for partial/streamed reads). Pass compression=None "
+                "for contiguous storage, or set chunk_axes to the dimensions to chunk."
+            )
 
         _path = Path(path)
         _path.parent.mkdir(parents=True, exist_ok=True)
@@ -2373,7 +2774,7 @@ class FileSpec(Spec):
         tmp_path = Path(tmp_name)
         try:
             self._write_hdf5(
-                tmp_path, _zea_version, compression, chunk_frames, warn_missing_optional_fields
+                tmp_path, _zea_version, compression, chunk_axes, warn_missing_optional_fields
             )
             os.replace(tmp_path, _path)
         except BaseException:
@@ -2387,15 +2788,14 @@ class FileSpec(Spec):
         self,
         path: Path,
         zea_version: str,
-        compression: str | None,
-        chunk_frames: bool,
+        compression: "str | Mapping | None",
+        chunk_axes: tuple[str, ...] | None,
         warn_missing_optional_fields: bool,
     ) -> None:
         """Write all groups/datasets of this spec to a fresh HDF5 file at ``path``."""
-        # Lazy import to avoid circular dependency (spec.py is imported by file.py)
         from zea import File
 
-        with File(str(path), "w") as f:
+        with File(str(path), "w", **PAGED_LAYOUT) as f:
             f.attrs["zea_version"] = zea_version
 
             # Write scalar/array metadata fields (metadata, metrics, probe_name, etc.)
@@ -2408,6 +2808,7 @@ class FileSpec(Spec):
                     value.store_in_group(
                         group,
                         compression=compression,
+                        chunk_axes=chunk_axes,
                         warn_missing_optional_fields=warn_missing_optional_fields,
                     )
                 else:
@@ -2426,7 +2827,7 @@ class FileSpec(Spec):
                 track.store_in_group(
                     track_group,
                     compression=compression,
-                    chunk_frames=chunk_frames,
+                    chunk_axes=chunk_axes,
                     warn_missing_optional_fields=warn_missing_optional_fields,
                 )
 

@@ -20,6 +20,8 @@ Additionally, to support the :doc:`cognitive ultrasound framework <about>`, the 
 allow for flexible and efficient access to a part of the data (e.g. a single frame or transmit) without the need
 to load the entire file into memory.
 
+.. _working-with-zea-data-files:
+
 -------------------------------
 Working with zea data files
 -------------------------------
@@ -350,6 +352,8 @@ that do not fit the standard scan and probe fields can be stored as **custom ele
 see below:
 
 .. dropdown:: Custom spatial maps (``data`` group)
+   :name: custom-spatial-maps
+   :class-container: dropdown-accordion-custom-fields
 
    A custom map is a named entry in the ``data`` group that associates a pixel array with a
    per-pixel Cartesian coordinate grid.  Each map is then a function from Cartesian space to
@@ -407,6 +411,8 @@ see below:
       docstrings for full details.
 
 .. dropdown:: Custom metadata (``metadata`` group)
+   :name: custom-metadata
+   :class-container: dropdown-accordion-custom-fields
 
    Standard metadata fields (``credit``, ``annotations``, ``text_report``, ``subject``, ``ecg``, …)
    are validated by :class:`~zea.data.spec.MetadataSpec`.  Pass a plain dict to ``File.create``'s
@@ -486,12 +492,14 @@ see below:
    See :class:`~zea.data.spec.MetadataSpec` for the full list of supported standard fields.
 
 .. dropdown:: Custom elements (``custom`` group)
+   :name: custom-elements
+   :class-container: dropdown-accordion-custom-fields
 
    Sometimes you need to store data that does not fit the zea spec at all — neither a spatial map
    nor a metadata signal. Use :class:`~zea.data.CustomElement` for this: a named array (or
    scalar) with a ``description`` and ``unit``, optionally nested under a ``group_name``.  Pass a
    list of them to the ``custom`` argument of :meth:`~zea.File.create`; they are written to a
-   dedicated ``custom`` group and read back via :attr:`~zea.File.custom`.
+   dedicated ``custom`` group.
 
    .. doctest::
 
@@ -541,13 +549,11 @@ see below:
        ... )
 
        >>> with File("custom_elements.hdf5") as f:
-       ...     elements = {e.name: e for e in f.custom}
-       >>> sorted(elements)
-       ['lens_correction', 'profile']
-       >>> float(elements["lens_correction"].data)
+       ...     custom = f.custom
+       >>> float(custom.lens_correction.data)
        1.5
-       >>> elements["profile"].group_name
-       'lens'
+       >>> custom.lens.profile.unit
+       '-'
 
    .. testcleanup::
 
@@ -563,12 +569,12 @@ Supported datasets & conversion
 The ``zea`` toolbox includes conversion scripts for several public ultrasound datasets,
 available in :mod:`zea.data.convert`
 (`source on GitHub <https://github.com/tue-bmd/zea/tree/main/zea/data/convert/>`__).
-They are invoked as subcommands of ``python -m zea.data.convert``
+They are invoked as subcommands of ``zea convert``
 (see the full :doc:`CLI reference <cli>` for all options):
 
 .. code-block:: shell
 
-    python -m zea.data.convert <dataset> <source> <destination>
+    zea convert <dataset> <source> <destination>
 
 **Supported datasets:**
 
@@ -593,7 +599,7 @@ Record data with your Verasonics script, save the workspace to ``.mat``, then co
 
 .. code-block:: shell
 
-    python -m zea.data.convert verasonics <src> <dst>
+    zea convert verasonics <src> <dst>
 
 See :mod:`zea.data.convert.verasonics` for details.
 

@@ -6,7 +6,6 @@ Usage:
     python -m zea.data.app --server-port 7861
 """
 
-import argparse
 import base64
 import contextlib
 import html
@@ -18,9 +17,11 @@ import warnings
 from pathlib import Path
 
 import numpy as np
+import tyro
 from keras import ops
 
 from zea import display, io_lib
+from zea.cli_args import AppArgs
 from zea.config import Config
 from zea.data.dataloader import Dataloader
 from zea.data.datasets import Dataset
@@ -81,6 +82,7 @@ _DATA_KEYS = [
     "data/image/values",
     "data/segmentation/values",
     "data/sos_map/values",
+    "data/attenuation_map/values",
 ]
 
 # ── Presets ───────────────────────────────────────────────────────────────────
@@ -1861,17 +1863,8 @@ def build_interface() -> "gr.Blocks":
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 
-def get_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Launch the zea Gradio visualizer.")
-    parser.add_argument("--share", action="store_true", help="Create a public Gradio share link.")
-    parser.add_argument(
-        "--server-port", dest="server_port", type=int, default=None, help="Port to listen on."
-    )
-    return parser
-
-
 def main() -> None:
-    args = get_parser().parse_args()
+    args = tyro.cli(AppArgs)
     init_device()
     demo = build_interface()
     demo.launch(
