@@ -2279,6 +2279,19 @@ class TrackSpec(Spec):
     }
 
     FIELD_METADATA = {
+        "data": {
+            "unit": "–",
+            "description": (
+                "Recorded data for this track; may be omitted for a transmit-only track."
+            ),
+        },
+        "scan": {
+            "unit": "–",
+            "description": (
+                "Scan acquisition parameters for this track; required when raw_data is "
+                "present in data, or when data is omitted."
+            ),
+        },
         # label is enforced by FileSpec for multi-track (ValueError), and legitimately
         # absent for single-track files — warning here is never useful.
         "label": {"unit": "–", "description": "Short human-readable track name.", "rare": True},

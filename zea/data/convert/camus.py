@@ -259,7 +259,7 @@ def process_camus(source_path, output_path, overwrite=False):
                 "coordinates": coordinates,
             },
         },
-        probe={"name": "GE M5S"},
+        probe={"name": "GE M5S", "type": "phased"},
         metadata={
             "subject": {
                 "id": patient_name,
@@ -270,12 +270,14 @@ def process_camus(source_path, output_path, overwrite=False):
             "credit": CAMUS_CITATION,
             "text_report": text_report,
             "annotations": {
+                "anatomy": "heart",
                 "view": np.array([view] * n_frames, dtype=np.str_),
                 "label": frame_labels,
                 "image_quality": image_quality,
             },
         },
         description=CAMUS_DESCRIPTION,
+        ignore_warnings=True,
     )
 
 

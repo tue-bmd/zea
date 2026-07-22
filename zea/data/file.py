@@ -1486,11 +1486,14 @@ class File(h5py.File):
             overwrite: If *False* (default), raise if the file exists.
             ignore_warnings: If *True*, suppress all warnings emitted while
                 creating the file (missing optional metadata fields, custom keys,
-                PHI timestamp warning, etc.). Defaults to *False*. Note that some
-                rarely-used metadata fields (e.g. ``voice_narration``, ``ecg``) are
-                never warned about regardless of this flag.
-            warn_missing_optional_fields: If *True* (default), warn when optional
-                fields are missing from the saved spec.
+                PHI timestamp warning, etc.). Defaults to *False*. Takes precedence
+                over ``warn_missing_optional_fields``. Note that some rarely-used
+                metadata fields (e.g. ``voice_narration``, ``ecg``) are never
+                warned about regardless of this flag.
+            warn_missing_optional_fields: If *True* (default), warn about missing
+                optional fields specifically (a subset of ``ignore_warnings``).
+                ``ignore_warnings=True`` with this set to *False* raises
+                ``ValueError`` as redundant.
 
         Returns:
             None. The validated file is written to ``path``; open it with
@@ -1536,6 +1539,13 @@ class File(h5py.File):
         """
         if tracks is not None and (data is not None or scan is not None):
             raise ValueError("Provide either 'tracks' or 'data'/'scan', not both.")
+
+        if ignore_warnings and not warn_missing_optional_fields:
+            raise ValueError(
+                "warn_missing_optional_fields=False has no effect when ignore_warnings=True: "
+                "ignore_warnings already suppresses every warning, including missing-optional-"
+                "field warnings. Pass only one of the two."
+            )
 
         path = Path(path)
 
