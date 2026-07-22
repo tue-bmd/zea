@@ -1706,7 +1706,7 @@ class ProbeSpec(Spec):
         "type": {"description": "Probe geometry type (linear, phased, curved, ...)."},
         "probe_center_frequency": {
             "unit": "Hz",
-            "description": "Probe nominal centre frequency.",
+            "description": ("Probe nominal centre frequency (midpoint of the probe's -6 dB band)."),
         },
         "probe_bandwidth_percent": {
             "unit": "%",
@@ -2079,12 +2079,13 @@ class SignalND(Signal):
 
 @dataclass
 class Annotations(Spec):
-    """Frame-level annotations, either per frame or broadcast labels.
+    """Frame-level annotations, either one per frame or a single broadcast value.
 
     Args:
-        anatomy (str): Anatomy label.
-        view (str): View label.
-        label (str): Pathology or classification label.
+        anatomy (str): Anatomical structure imaged, e.g. carotid, liver, thyroid.
+        view (str): Imaging plane/orientation, e.g. longitudinal, transverse,
+            apical_4_chamber.
+        label (str): Pathology or classification label, e.g. benign, malignant.
         image_quality (str): Image quality label, e.g. low, mid, high.
     """
 
@@ -2101,8 +2102,14 @@ class Annotations(Spec):
     }
 
     FIELD_METADATA = {
-        "anatomy": {"unit": "–", "description": "Anatomy label."},
-        "view": {"unit": "–", "description": "View label."},
+        "anatomy": {
+            "unit": "–",
+            "description": "Anatomical structure imaged (e.g. carotid, liver).",
+        },
+        "view": {
+            "unit": "–",
+            "description": "Imaging plane/orientation (e.g. longitudinal, apical_4_chamber).",
+        },
         "label": {"unit": "–", "description": "Pathology or classification label."},
         "image_quality": {"unit": "–", "description": "Image quality label.", "rare": True},
     }
@@ -2279,6 +2286,19 @@ class TrackSpec(Spec):
     }
 
     FIELD_METADATA = {
+        "data": {
+            "unit": "–",
+            "description": (
+                "Recorded data for this track; may be omitted for a transmit-only track."
+            ),
+        },
+        "scan": {
+            "unit": "–",
+            "description": (
+                "Scan acquisition parameters for this track; required when raw_data is "
+                "present in data, or when data is omitted."
+            ),
+        },
         # label is enforced by FileSpec for multi-track (ValueError), and legitimately
         # absent for single-track files — warning here is never useful.
         "label": {"unit": "–", "description": "Short human-readable track name.", "rare": True},

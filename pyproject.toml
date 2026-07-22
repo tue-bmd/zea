@@ -85,7 +85,6 @@ docs = [
     "sphinx-autodoc-typehints",
     "sphinx-copybutton",
     "sphinx_design",
-    "sphinxcontrib-autoprogram",
     "sphinx-reredirects",
     "sphinxcontrib-bibtex>=2.6.5",
     "pybtex>=0.26.1",
@@ -279,3 +278,7 @@ omit = ["/tmp/__autograph_generated_file*.py"]
 
 [tool.coverage.report]
 omit = ["zea/ops/keras_ops.py", "zea/data/app.py"]
+exclude_also = [
+    # Module entry-point guards only run as `python -m ...`, not under pytest.
+    'if __name__ == .__main__.:',
+]

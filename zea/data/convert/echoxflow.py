@@ -6,8 +6,8 @@ laid out as ``<dst>/<exam_id>/<recording_id>.hdf5``.
 
 Usage::
 
-    python -m zea.data.convert echoxflow <src> <dst>
-    python -m zea.data.convert echoxflow <src> <dst> --limit 2
+    zea convert echoxflow <src> <dst>
+    zea convert echoxflow <src> <dst> --limit 2
 
 ``src`` is the EchoXFlow data root (e.g. ``/data/EchoXFlow/data``) containing a
 ``croissant.json`` catalog. Reading EchoXFlow recordings requires the optional
@@ -47,7 +47,7 @@ def _import_echoxflow():
 
     Returns the ``(find_recordings, load_croissant, open_recording)`` callables.
     Raises a clear :class:`ImportError` if the package is not installed, so that
-    ``python -m zea.data.convert --help`` keeps working without it.
+    ``zea convert --help`` keeps working without it.
     """
     try:
         from echoxflow import find_recordings, load_croissant, open_recording
@@ -147,7 +147,7 @@ This dataset was converted to zea format and uploaded using the
 [zea](https://github.com/tue-bmd/zea) data converter:
 
 ```bash
-python -m zea.data.convert echoxflow <src> <dst>
+zea convert echoxflow <src> <dst>
 ```
 
 ## Dataset structure
@@ -169,8 +169,8 @@ def convert_echoxflow(args):
 
     Usage::
 
-        python -m zea.data.convert echoxflow <src> <dst>
-        python -m zea.data.convert echoxflow <src> <dst> --limit 2
+        zea convert echoxflow <src> <dst>
+        zea convert echoxflow <src> <dst> --limit 2
 
     Args:
         args (argparse.Namespace): An object with attributes:

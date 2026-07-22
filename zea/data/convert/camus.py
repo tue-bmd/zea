@@ -42,13 +42,13 @@ Dataset splits:
 
 .. code-block:: console
 
-   python -m zea.data.convert camus ./raw ./output --download
+   zea convert camus ./raw ./output --download
 
 For testing purposes, you can also convert a reduced dataset containing only 6 half-sequence files:
 
 .. code-block:: console
 
-    python -m zea.data.convert camus ./raw ./output --download --reduced-dataset
+    zea convert camus ./raw ./output --download --reduced-dataset
 
 """
 
@@ -259,7 +259,7 @@ def process_camus(source_path, output_path, overwrite=False):
                 "coordinates": coordinates,
             },
         },
-        probe={"name": "GE M5S"},
+        probe={"name": "GE M5S", "type": "phased"},
         metadata={
             "subject": {
                 "id": patient_name,
@@ -270,12 +270,14 @@ def process_camus(source_path, output_path, overwrite=False):
             "credit": CAMUS_CITATION,
             "text_report": text_report,
             "annotations": {
+                "anatomy": "heart",
                 "view": np.array([view] * n_frames, dtype=np.str_),
                 "label": frame_labels,
                 "image_quality": image_quality,
             },
         },
         description=CAMUS_DESCRIPTION,
+        ignore_warnings=True,
     )
 
 
@@ -473,8 +475,8 @@ def convert_camus(args):
 
     Usage::
 
-        python -m zea.data.convert camus <source_folder> <destination_folder>
-        python -m zea.data.convert camus <source_folder> <destination_folder> --download
+        zea convert camus <source_folder> <destination_folder>
+        zea convert camus <source_folder> <destination_folder> --download
 
     Args:
         args (argparse.Namespace): An object with attributes:
@@ -662,7 +664,7 @@ This dataset was downloaded, converted to zea format, and uploaded using the
 [zea](https://github.com/tue-bmd/zea) data converter:
 
 ```bash
-python -m zea.data.convert camus <src> <dst> --download
+zea convert camus <src> <dst> --download
 ```
 
 ## Dataset structure
