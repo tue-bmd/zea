@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -U pip setuptools wheel
-          pip install ruff pre-commit
+          pip install pre-commit
 
       - name: Run pre-commit hooks
         id: precommithooks
