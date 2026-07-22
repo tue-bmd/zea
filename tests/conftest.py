@@ -131,8 +131,30 @@ def pytest_addoption(parser):
     )
 
 
+def _enable_subprocess_coverage():
+    """Let coverage follow into subprocesses spawned by tests.
+
+    Several tests exercise CLIs through ``subprocess`` (e.g.
+    ``python -m zea.data.convert ...``); without this the code executed there is
+    invisible to coverage. When the suite runs under ``pytest --cov`` we point
+    ``COVERAGE_PROCESS_START`` at our config so the repo-root ``sitecustomize.py``
+    starts coverage in each subprocess (parallel mode writes ``.coverage.*`` files
+    that pytest-cov combines). Outside a coverage run this is a no-op.
+    """
+    try:
+        import coverage
+    except ImportError:  # pragma: no cover - coverage is always installed during a coverage run
+        return
+    if coverage.Coverage.current() is None:  # pragma: no cover - only when coverage is inactive
+        return
+    config_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    os.environ["COVERAGE_PROCESS_START"] = str(config_path)
+
+
 def pytest_configure(config):
     """Validate backend availability before importing backend-dependent test modules."""
+    _enable_subprocess_coverage()
+
     for backend in ML_BACKENDS:
         config.addinivalue_line("markers", f"{backend}: test requires the {backend} backend")
 

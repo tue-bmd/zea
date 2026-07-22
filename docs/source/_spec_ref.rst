@@ -969,7 +969,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - ``float32``
            - scalar
            - Hz
-           - Probe nominal centre frequency.
+           - Probe nominal centre frequency (midpoint of the probe's -6 dB band).
            - |badge-opt|
          * - ``probe_bandwidth_percent``
            - ``float32``
@@ -1099,6 +1099,16 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
               - scalar
               - Subject sex.
               - |badge-opt|
+            * - ``weight``
+              - ``float32``
+              - scalar
+              - Subject weight.
+              - |badge-opt|
+            * - ``genetic_strain``
+              - ``str``
+              - scalar
+              - Genetic strain (inbred line) of an animal subject, e.g. C57BL/6N.
+              - |badge-opt|
             * - ``fat_percentage``
               - ``float32``
               - scalar
@@ -1115,7 +1125,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
 
       .. dropdown:: ``annotations`` — Annotations
 
-         Frame-level annotations, either per frame or broadcast labels.
+         Frame-level annotations, either one per frame or a single broadcast value.
 
          .. list-table::
             :header-rows: 1
@@ -1129,12 +1139,12 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
             * - ``anatomy``
               - ``str``
               - (n_frames) or scalar
-              - Anatomy label.
+              - Anatomical structure imaged (e.g. carotid, liver).
               - |badge-opt|
             * - ``view``
               - ``str``
               - (n_frames) or scalar
-              - View label.
+              - Imaging plane/orientation (e.g. longitudinal, apical_4_chamber).
               - |badge-opt|
             * - ``label``
               - ``str``

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zea"
-version = "0.1.2"
+version = "0.1.3"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
     { name = "Tristan Stevens", email = "t.s.w.stevens@tue.nl" },
@@ -85,7 +85,6 @@ docs = [
     "sphinx-autodoc-typehints",
     "sphinx-copybutton",
     "sphinx_design",
-    "sphinxcontrib-autoprogram",
     "sphinx-reredirects",
     "sphinxcontrib-bibtex>=2.6.5",
     "pybtex>=0.26.1",
@@ -279,3 +278,7 @@ omit = ["/tmp/__autograph_generated_file*.py"]
 
 [tool.coverage.report]
 omit = ["zea/ops/keras_ops.py", "zea/data/app.py"]
+exclude_also = [
+    # Module entry-point guards only run as `python -m ...`, not under pytest.
+    'if __name__ == .__main__.:',
+]

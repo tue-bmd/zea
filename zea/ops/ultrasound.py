@@ -1344,27 +1344,132 @@ class CommonMidpointPhaseError(Operation):
 
 @ops_registry("tissue_suppression")
 class TissueSuppression(Operation):
-    """Tissue suppression using SVD-based clutter filtering.
+    """Tissue suppression using SVD-based clutter filtering. Typically applied
+    after beamforming but before envelope detection, on beamformed RF or IQ data.
 
     Removes stationary tissue components from multi-frame ultrasound data
     by zeroing the dominant singular values of the Casorati matrix.
+
+    Two filter types are available:
+
+    * ``"svd"`` -- the real-valued Direct SVD filter, building the temporal Gram
+      matrix with a plain transpose (``XᵀX``). For real data.
+    * ``"svd_complex"`` -- the same filter using the conjugate (Hermitian)
+      transpose (``XᴴX``, the true temporal covariance), for IQ data.
+
+    By default ``filter_type=None`` picks between them from the channel axis --
+    ``n_ch=2`` means IQ and selects ``"svd_complex"``, otherwise
+    ``"svd"``.
+
+    .. note::
+        Unlike most operations, this one is temporal: axis 0 of the input is the
+        frame axis and is consumed jointly, so ``with_batch_dim`` does not apply
+        and is ignored. Input is always ``(n_frames, ...)``. To process several
+        acquisitions, loop the pipeline over them.
+
+    .. note::
+        On the TensorFlow backend the ``"svd_complex"`` path runs eagerly:
+        TensorFlow registers no XLA ``Svd`` kernel for complex dtypes. The other
+        backends JIT it.
     """
 
-    def __init__(self, cutoff: int = 5, **kwargs):
-        super().__init__(**kwargs)
-        self.cutoff = cutoff
+    FILTER_TYPES = ("svd", "svd_complex")
 
-    def suppress_tissue(self, data):
+    def __init__(self, cutoff: int | float = 5, filter_type: str | None = None, **kwargs):
+        """
+        Args:
+            cutoff (int or float): Number of principal (tissue) components to
+                reject. An ``int`` is a component count. A ``float`` in ``[0, 1)``
+                is a fraction of the number of frames, resolved at call time as
+                ``round(n_frames * cutoff)``.
+            filter_type (str or None): Which clutter filter to use, one of
+                :attr:`FILTER_TYPES`. Defaults to ``None``, which selects
+                ``"svd_complex"`` for IQ input (``n_ch=2``) and ``"svd"``
+                otherwise.
+        """
+        if filter_type is not None and filter_type not in self.FILTER_TYPES:
+            raise ValueError(
+                f"Unknown filter_type {filter_type!r}, expected one of "
+                f"{', '.join(map(repr, self.FILTER_TYPES))} or None (auto-detect)."
+            )
+        if isinstance(cutoff, float) and not 0 <= cutoff < 1:
+            raise ValueError(
+                f"A float cutoff is a fraction of the frames and must be in [0, 1), got {cutoff}."
+            )
+        # Set before super().__init__(), which calls set_jit() -> reads self.jittable.
+        self.cutoff = cutoff
+        self.filter_type = filter_type
+        super().__init__(**kwargs)
+
+    @property
+    def jittable(self):
+        """Whether this operation can be JIT compiled.
+
+        TensorFlow registers no XLA ``Svd`` kernel for complex dtypes, so the
+        ``"svd_complex"`` path has to run eagerly there. With ``filter_type=None``
+        the path is only known once the data's channel axis is seen, so on
+        TensorFlow we conservatively assume complex is possible and stay eager;
+        pass ``filter_type="svd"`` explicitly to keep the real filter jitted.
+        """
+        if self.filter_type != "svd" and keras.backend.backend() == "tensorflow":
+            return False
+        return super().jittable
+
+    def resolve_filter_type(self, data) -> str:
+        """Resolve which filter to use for ``data``.
+
+        Args:
+            data (ops.Tensor): Input of shape ``(n_frames, ..., n_ch)``.
+
+        Returns:
+            str: The configured ``filter_type``, or -- when it is ``None`` --
+            ``"svd_complex"`` if the channel axis marks the data as IQ
+            (``n_ch=2``, zea's convention) and ``"svd"`` otherwise.
+        """
+        if self.filter_type is not None:
+            return self.filter_type
+        return "svd_complex" if len(data.shape) > 1 and data.shape[-1] == 2 else "svd"
+
+    def resolve_cutoff(self, n_frames: int) -> int:
+        """Resolve a fractional ``cutoff`` into a component count.
+
+        Args:
+            n_frames (int): Number of frames in the data.
+
+        Returns:
+            int: Number of principal components to reject.
+        """
+        if isinstance(self.cutoff, float):
+            return min(int(round(n_frames * self.cutoff)), n_frames - 1)
+        return self.cutoff
+
+    def suppress_tissue(self, data, filter_type=None):
         """
         Suppresses tissue using Direct SVD.
 
         Args:
-            data (ops.Tensor): Shape (n_frames, ...)
+            data (ops.Tensor): Shape (n_frames, ...). Complex for the
+                ``"svd_complex"`` filter type, real otherwise.
+            filter_type (str or None): Filter to apply. Defaults to ``None``,
+                which resolves it from ``data`` via :meth:`resolve_filter_type`.
 
         """
-        return suppress_tissue(data, self.cutoff)
+        if filter_type is None:
+            filter_type = self.resolve_filter_type(data)
+        return suppress_tissue(
+            data,
+            self.resolve_cutoff(data.shape[0]),
+            conjugate=filter_type == "svd_complex",
+        )
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        filtered = self.suppress_tissue(ops.array(data))
+        filter_type = self.resolve_filter_type(data)
+        is_complex = filter_type == "svd_complex"
+
+        array = ops.view_as_complex(ops.array(data)) if is_complex else ops.array(data)
+        filtered = self.suppress_tissue(array, filter_type=filter_type)
+        if is_complex:
+            filtered = ops.view_as_real(filtered)
+
         return {self.output_key: ops.cast(ops.array(filtered), data.dtype)}

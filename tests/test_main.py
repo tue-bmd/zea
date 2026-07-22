@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+from unittest.mock import patch
 
 import pytest
 import tyro
@@ -139,6 +140,55 @@ def test_app_flags():
     args = cli_args.subcommand
     assert args.share is True
     assert args.server_port == 7861
+
+
+# ── convert subcommand ────────────────────────────────────────────────────────
+
+
+def test_convert_subcommand_exists():
+    """The 'convert' subcommand parses to ConvertArgs wrapping the dataset dataclass."""
+    from zea.cli_args import ConvertArgs, _Camus
+
+    cli_args = parse_args(["convert", "camus", "raw/", "out/"])
+    assert isinstance(cli_args.subcommand, ConvertArgs)
+    assert isinstance(cli_args.subcommand.subcommand, _Camus)
+    assert cli_args.subcommand.subcommand.download is False
+
+
+def test_convert_help_lists_datasets():
+    """zea convert --help should print the dataset subcommands and exit 0."""
+    buf = io.StringIO()
+    with pytest.raises(SystemExit) as exc_info, contextlib.redirect_stdout(buf):
+        parse_args(["convert", "--help"])
+    assert exc_info.value.code == 0
+    assert "echonet" in buf.getvalue()
+
+
+def test_convert_main_dispatches_without_preallocating(monkeypatch):
+    """zea.__main__.main() routes 'convert' to the converter with allow_preallocate=False."""
+    monkeypatch.setattr("sys.argv", ["zea", "convert", "camus", "raw/", "out/", "--download"])
+
+    captured = {}
+
+    def fake_init_device(device="auto:1", **kwargs):
+        captured["allow_preallocate"] = kwargs.get("allow_preallocate", True)
+
+    with (
+        patch("zea.internal.device.init_device", side_effect=fake_init_device),
+        patch("zea.data.convert.camus.convert_camus") as mock_convert,
+    ):
+        from zea.__main__ import main
+
+        main()
+
+    # Conversion must not preallocate the full GPU (mirrors the standalone entry point).
+    assert captured["allow_preallocate"] is False
+    assert mock_convert.call_count == 1
+    (called_args,), _ = mock_convert.call_args
+    from zea.cli_args import _Camus
+
+    assert isinstance(called_args, _Camus)
+    assert called_args.download is True
 
 
 @pytest.mark.parametrize(

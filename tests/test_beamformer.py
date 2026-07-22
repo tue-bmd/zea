@@ -8,7 +8,7 @@ from zea.beamform.beamformer import (
     apply_delays,
     calculate_delays,
     complex_rotate,
-    distance_Rx,
+    compute_receive_distances,
     tof_correction,
     transmit_delays,
 )
@@ -186,13 +186,13 @@ def test_complex_rotate_half_pi():
     return rotated
 
 
-# distance_Rx
+# compute_receive_distances
 
 
 @backend_equality_check()
 def test_distance_rx_output_shape(flatgrid, probe_geometry):
     """Output should be (n_pix, n_el)."""
-    dist = distance_Rx(
+    dist = compute_receive_distances(
         keras.ops.convert_to_tensor(flatgrid),
         keras.ops.convert_to_tensor(probe_geometry),
     )
@@ -204,7 +204,7 @@ def test_distance_rx_output_shape(flatgrid, probe_geometry):
 def test_distance_rx_positive(flatgrid, probe_geometry):
     """All distances must be non-negative."""
     dist = keras.ops.convert_to_numpy(
-        distance_Rx(
+        compute_receive_distances(
             keras.ops.convert_to_tensor(flatgrid),
             keras.ops.convert_to_tensor(probe_geometry),
         )
@@ -217,7 +217,7 @@ def test_distance_rx_positive(flatgrid, probe_geometry):
 def test_distance_rx_known_distance():
     """Element at origin, pixel at (0, 0, 1) → distance = 1 m."""
     dist = keras.ops.convert_to_numpy(
-        distance_Rx(
+        compute_receive_distances(
             keras.ops.convert_to_tensor([[0.0, 0.0, 1.0]]),
             keras.ops.convert_to_tensor([[0.0, 0.0, 0.0]]),
         )
@@ -281,7 +281,7 @@ def test_transmit_delays_planewave_zero_angle(flatgrid, probe_geometry):
     n_el = probe_geometry.shape[0]
     t0 = keras.ops.zeros((n_el,))
     tx_apod = keras.ops.ones((n_el,))
-    rx_delays = distance_Rx(flatgrid_t, probe_geometry_t) / SOUND_SPEED
+    rx_delays = compute_receive_distances(flatgrid_t, probe_geometry_t) / SOUND_SPEED
 
     txd = transmit_delays(
         flatgrid_t,
@@ -307,7 +307,7 @@ def test_transmit_delays_focused(flatgrid, probe_geometry):
     n_el = probe_geometry.shape[0]
     t0 = keras.ops.zeros((n_el,))
     tx_apod = keras.ops.ones((n_el,))
-    rx_delays = distance_Rx(flatgrid_t, probe_geometry_t) / SOUND_SPEED
+    rx_delays = compute_receive_distances(flatgrid_t, probe_geometry_t) / SOUND_SPEED
 
     txd = transmit_delays(
         flatgrid_t,
@@ -578,7 +578,7 @@ def test_focal_region_length_noop_for_planewave(flatgrid, probe_geometry):
     n_el = probe_geometry.shape[0]
     t0 = keras.ops.zeros((n_el,))
     tx_apod = keras.ops.ones((n_el,))
-    rx = distance_Rx(flatgrid_t, probe_t) / SOUND_SPEED
+    rx = compute_receive_distances(flatgrid_t, probe_t) / SOUND_SPEED
     common = dict(transmit_origin=keras.ops.zeros((3,)))
     base = transmit_delays(
         flatgrid_t, t0, tx_apod, rx, np.float32(np.inf), np.float32(0.0), np.float32(0.0), **common
@@ -675,6 +675,30 @@ def test_tof_correction_with_fnumber(probe_geometry, flatgrid):
     inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=n_tx, n_ax=n_ax)
     inputs["f_number"] = 1.0
     result = keras.ops.convert_to_numpy(tof_correction(**inputs))
+    assert np.any(result == 0.0), "Expected some masked-out values with f_number > 0"
+    return result
+
+
+@backend_equality_check()
+def test_tof_correction_convex_probe_fnumber(flatgrid):
+    """A curved (convex) probe runs end-to-end with per-element-normal masking.
+
+    The auto-derived element normals must not produce NaNs/Infs and must still
+    mask some channels (f_number > 0) for a non-flat geometry.
+    """
+    n_el = 48
+    phi = np.linspace(-0.5, 0.5, n_el).astype(np.float32)
+    radius = 40e-3
+    convex_geometry = np.stack(
+        [radius * np.sin(phi), np.zeros_like(phi), radius * (np.cos(phi) - 1.0)], axis=-1
+    ).astype(np.float32)
+
+    inputs = _make_tof_inputs(convex_geometry, flatgrid, n_tx=2, n_ax=64)
+    inputs["f_number"] = 1.0
+    result = keras.ops.convert_to_numpy(tof_correction(**inputs))
+
+    assert result.shape == (2, flatgrid.shape[0], n_el, 1)
+    assert np.all(np.isfinite(result))
     assert np.any(result == 0.0), "Expected some masked-out values with f_number > 0"
     return result
 

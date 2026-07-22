@@ -1,380 +1,56 @@
 """CLI for converting common open-source ultrasound datasets to the zea format.
 
-Usage::
+Use the ``zea convert`` subcommand::
 
-    python -m zea.data.convert <dataset> <src> <dst> [options]
+    zea convert <dataset> <src> <dst> [options]
 
 Examples::
 
-    python -m zea.data.convert camus ./raw ./output --download
-    python -m zea.data.convert cetus ./raw ./output --download
-    python -m zea.data.convert echonet ./raw ./output
-    python -m zea.data.convert echoxflow ./raw ./output
+    zea convert camus ./raw ./output --download
+    zea convert cetus ./raw ./output --download
+    zea convert echonet ./raw ./output
+    zea convert echoxflow ./raw ./output
 
-Run ``python -m zea.data.convert --help`` for all options.
+Run ``zea convert --help`` for all options.
+
+Running this module directly (``python -m zea.data.convert ...``) remains supported
+for backwards compatibility. The CLI dataclasses live in :mod:`zea.cli_args` (kept
+free of heavy imports so ``zea --help`` renders without loading an ML backend) and
+are re-exported here.
 """
 
-import argparse
-from pathlib import Path
+import tyro
 
+from zea.cli_args import ConvertArgs, ConvertDataset as Dataset
+from zea.cli_args import (
+    _Camus,
+    _Cetus,
+    _Echonet,
+    _EchonetLVH,
+    _EchoXFlow,
+    _Picmus,
+    _Verasonics,
+)
 from zea.internal.device import init_device
 
-
-def _add_parser_args_echonet(subparsers):
-    """Add Echonet specific arguments to the parser."""
-    echonet_parser = subparsers.add_parser("echonet", help="Convert Echonet dataset")
-    echonet_parser.add_argument("src", type=Path, help="Source folder path")
-    echonet_parser.add_argument("dst", type=Path, help="Destination folder path")
-    echonet_parser.add_argument(
-        "--split_path",
-        type=Path,
-        help="Path to the split.yaml file containing the dataset split if a split should be copied",
-    )
-    echonet_parser.add_argument(
-        "--no_hyperthreading",
-        action="store_true",
-        help="Disable hyperthreading for multiprocessing",
-    )
-
-
-def _add_parser_args_camus(subparsers):
-    """Add CAMUS specific arguments to the parser."""
-    camus_parser = subparsers.add_parser("camus", help="Convert CAMUS dataset")
-    camus_parser.add_argument(
-        "src",
-        type=Path,
-        help=(
-            "Source folder path, should contain either manually downloaded dataset "
-            "or will be target location for automated download with the --download flag"
-        ),
-    )
-    camus_parser.add_argument("dst", type=Path, help="Destination folder path")
-    camus_parser.add_argument(
-        "--download",
-        action="store_true",
-        help="Download the CAMUS dataset from the server, will be saved to the --src path",
-    )
-    camus_parser.add_argument(
-        "--no_hyperthreading",
-        action="store_true",
-        help="Disable hyperthreading for multiprocessing",
-    )
-    camus_parser.add_argument(
-        "--upload",
-        action="store_true",
-        help=(
-            "Upload the converted dataset to HuggingFace Hub (zeahub/camus or zeahub/camus-sample)"
-        ),
-    )
-    camus_parser.add_argument(
-        "--revision",
-        type=str,
-        default=None,
-        help=(
-            "Revision branch to upload to on HuggingFace Hub. "
-            "Required when --upload is set. Upload to 'main' is not allowed."
-        ),
-    )
-    camus_parser.add_argument(
-        "--reduced-dataset",
-        dest="reduced_dataset",
-        action="store_true",
-        help="Only convert and upload a small hardcoded sample subset (camus-sample).",
-    )
-
-
-def _add_parser_args_echonetlvh(subparsers):
-    """Add EchonetLVH specific arguments to the parser."""
-    echonetlvh_parser = subparsers.add_parser("echonetlvh", help="Convert EchonetLVH dataset")
-    echonetlvh_parser.add_argument("src", type=Path, help="Source folder path")
-    echonetlvh_parser.add_argument("dst", type=Path, help="Destination folder path")
-    echonetlvh_parser.add_argument(
-        "--no_rejection",
-        action="store_true",
-        help="Do not reject sequences in `manual_rejections.txt`",
-    )
-    echonetlvh_parser.add_argument(
-        "--rejection_path",
-        type=Path,
-        default=None,
-        help="Path to custom rejection txt file (defaults to `manual_rejections.txt` from zea)",
-    )
-    echonetlvh_parser.add_argument(
-        "--convert_measurements",
-        action="store_true",
-        help="Only convert measurements CSV file",
-    )
-    echonetlvh_parser.add_argument(
-        "--convert_images",
-        action="store_true",
-        help="Only convert image files",
-    )
-    echonetlvh_parser.add_argument(
-        "--max_files",
-        type=int,
-        default=None,
-        help="Maximum number of files to process (for testing)",
-    )
-    echonetlvh_parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force recomputation even if parameters already exist",
-    )
-    echonetlvh_parser.add_argument(
-        "--max_workers",
-        type=int,
-        default=4,
-        help="Maximum number of workers to use for precomputing cone parameters and dataloading.",
-    )
-
-
-def _add_parser_args_picmus(subparsers):
-    """Add PICMUS specific arguments to the parser."""
-    picmus_parser = subparsers.add_parser("picmus", help="Convert PICMUS dataset")
-    picmus_parser.add_argument(
-        "src",
-        type=Path,
-        help=(
-            "Source folder path. Should contain either a manually downloaded and "
-            "extracted archive (archive_to_download/ or picmus.zip) or will be used "
-            "as the download target when --download is given. An 'in_vivo/' "
-            "sub-directory, if present, is automatically included."
-        ),
-    )
-    picmus_parser.add_argument("dst", type=Path, help="Destination folder path")
-    picmus_parser.add_argument(
-        "--download",
-        action="store_true",
-        help=(
-            "Download both the main PICMUS dataset and the in-vivo partition "
-            "from the PICMUS challenge website before converting."
-        ),
-    )
-    picmus_parser.add_argument(
-        "--upload",
-        action="store_true",
-        help="Upload the converted dataset to HuggingFace Hub (zeahub/picmus).",
-    )
-    picmus_parser.add_argument(
-        "--revision",
-        type=str,
-        default=None,
-        help=(
-            "Revision branch to upload to on HuggingFace Hub. "
-            "Required when --upload is set. Upload to 'main' is not allowed."
-        ),
-    )
-
-
-def _add_parser_args_cetus(subparsers):
-    """Add CETUS specific arguments to the parser."""
-    cetus_parser = subparsers.add_parser("cetus", help="Convert CETUS dataset")
-    cetus_parser.add_argument(
-        "src",
-        type=Path,
-        help=(
-            "Source folder path, should contain either manually downloaded dataset "
-            "or will be target location for automated download with the --download flag"
-        ),
-    )
-    cetus_parser.add_argument("dst", type=Path, help="Destination folder path")
-    cetus_parser.add_argument(
-        "--download",
-        action="store_true",
-        help="Download the CETUS dataset from the server, will be saved to the --src path",
-    )
-    cetus_parser.add_argument(
-        "--no_hyperthreading",
-        action="store_true",
-        help="Disable hyperthreading for multiprocessing",
-    )
-    cetus_parser.add_argument(
-        "--upload",
-        action="store_true",
-        help="Upload the converted dataset to HuggingFace Hub (zeahub/cetus-miccai-2014).",
-    )
-    cetus_parser.add_argument(
-        "--revision",
-        type=str,
-        default=None,
-        help=(
-            "Revision branch to upload to on HuggingFace Hub. "
-            "Required when --upload is set. Upload to 'main' is not allowed."
-        ),
-    )
-
-
-def _add_parser_args_verasonics(subparsers):
-    verasonics_parser = subparsers.add_parser(
-        "verasonics", help="Convert Verasonics data to zea dataset"
-    )
-    verasonics_parser.add_argument("src", type=Path, help="Source folder path")
-    verasonics_parser.add_argument("dst", type=Path, help="Destination folder path")
-    verasonics_parser.add_argument(
-        "--frames",
-        type=str,
-        nargs="+",
-        help="The frames to add to the file. This can be a list of integers, a range "
-        "of integers (e.g. 4-8), or 'all'. Defaults to 'all', unless specified in a "
-        "convert.yaml file.",
-    )
-    verasonics_parser.add_argument(
-        "--allow_accumulate",
-        action="store_true",
-        help=(
-            "Sometimes, some transmits are already accumulated on the Verasonics system "
-            "(e.g. harmonic imaging through pulse inversion). In this case, the mode in the "
-            "Receive structure is set to 1 (accumulate). If this flag is set, such files "
-            "will be processed. Otherwise, an error is raised when such a mode is detected."
-        ),
-    )
-    verasonics_parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="Device to use for conversion (e.g., 'cpu' or 'gpu:0').",
-    )
-    verasonics_parser.add_argument(
-        "--upload",
-        action="store_true",
-        help="Upload the converted dataset to HuggingFace Hub after conversion. "
-        "Only for zea maintainers with push access to the repository.",
-    )
-    verasonics_parser.add_argument(
-        "--revision",
-        type=str,
-        default=None,
-        help="Required when --upload is set. Upload to 'main' is not allowed.",
-    )
-    verasonics_parser.add_argument(
-        "--hf_repo_id",
-        type=str,
-        default="",
-        help="HuggingFace repo ID for ownership checks and optional upload. "
-        "Required if --upload is set.",
-    )
-
-
-def _add_parser_args_echoxflow(subparsers):
-    """Add EchoXFlow specific arguments to the parser."""
-    echoxflow_parser = subparsers.add_parser("echoxflow", help="Convert EchoXFlow dataset")
-    echoxflow_parser.add_argument(
-        "src", type=str, help="EchoXFlow data root, e.g. /data/EchoXFlow/data"
-    )
-    echoxflow_parser.add_argument("dst", type=str, help="Destination folder path")
-    echoxflow_parser.add_argument(
-        "--croissant",
-        type=str,
-        default=None,
-        help="Path to croissant.json (default: <src>/croissant.json).",
-    )
-    echoxflow_parser.add_argument(
-        "--min-frames", type=int, default=10, help="Minimum B-mode frame count."
-    )
-    echoxflow_parser.add_argument(
-        "--min-fps", type=float, default=30.0, help="Minimum frame rate (Hz)."
-    )
-    echoxflow_parser.add_argument(
-        "--limit", type=int, default=None, help="Convert at most N recordings."
-    )
-    echoxflow_parser.add_argument(
-        "--overwrite", action="store_true", help="Overwrite existing output files."
-    )
-    echoxflow_parser.add_argument(
-        "--upload",
-        action="store_true",
-        help="Upload the converted dataset to HuggingFace Hub (zeahub/echoxflow).",
-    )
-    echoxflow_parser.add_argument(
-        "--revision",
-        type=str,
-        default=None,
-        help="Target branch on the Hub. Required when --upload is set; upload to 'main' "
-        "is blocked.",
-    )
-    echoxflow_parser.add_argument(
-        "--hf_repo_id",
-        type=str,
-        default="",
-        help="HuggingFace repo id for ownership checks and optional upload "
-        "(default: zeahub/echoxflow).",
-    )
-
-
-def get_parser():
-    """Build and parse command-line arguments for converting raw datasets to a zea dataset."""
-    parser = argparse.ArgumentParser(description="Convert raw data to a zea dataset.")
-    subparsers = parser.add_subparsers(dest="dataset", required=True)
-    _add_parser_args_echonet(subparsers)
-    _add_parser_args_echonetlvh(subparsers)
-    _add_parser_args_camus(subparsers)
-    _add_parser_args_cetus(subparsers)
-    _add_parser_args_picmus(subparsers)
-    _add_parser_args_verasonics(subparsers)
-    _add_parser_args_echoxflow(subparsers)
-    return parser
+__all__ = [
+    "ConvertArgs",
+    "Dataset",
+    "_Camus",
+    "_Cetus",
+    "_Echonet",
+    "_EchonetLVH",
+    "_EchoXFlow",
+    "_Picmus",
+    "_Verasonics",
+    "main",
+]
 
 
 def main():
-    """
-    Parse command-line arguments and dispatch to the selected dataset conversion routine.
-
-    This function obtains CLI arguments via get_args() and calls the corresponding converter.
-
-    Current supported datasets are:
-    - echonet
-    - echonetlvh
-    - camus
-    - cetus
-    - picmus
-    - verasonics
-    - echoxflow
-
-    Raises a ValueError if args.dataset is not one of the supported choices.
-    """
-    parser = get_parser()
-    args = parser.parse_args()
-
-    if args.dataset == "echonet":
-        from zea.data.convert.echonet import convert_echonet
-
-        convert_echonet(args)
-    elif args.dataset == "echonetlvh":
-        from zea.data.convert.echonetlvh import convert_echonetlvh
-
-        convert_echonetlvh(
-            args.src,
-            args.dst,
-            args.no_rejection,
-            args.rejection_path,
-            args.convert_measurements,
-            args.convert_images,
-            args.max_files,
-            args.force,
-            args.max_workers,
-        )
-    elif args.dataset == "camus":
-        from zea.data.convert.camus import convert_camus
-
-        convert_camus(args)
-    elif args.dataset == "cetus":
-        from zea.data.convert.cetus import convert_cetus
-
-        convert_cetus(args)
-    elif args.dataset == "picmus":
-        from zea.data.convert.picmus import convert_picmus
-
-        convert_picmus(args)
-    elif args.dataset == "verasonics":
-        from zea.data.convert.verasonics import convert_verasonics
-
-        convert_verasonics(args)
-    elif args.dataset == "echoxflow":
-        from zea.data.convert.echoxflow import convert_echoxflow
-
-        convert_echoxflow(args)
-    else:
-        raise ValueError(f"Unknown dataset: {args.dataset}")
+    """Parse command-line arguments and dispatch to the selected dataset conversion routine."""
+    args = tyro.cli(Dataset)  # ty: ignore[no-matching-overload]
+    args.run()
 
 
 if __name__ == "__main__":
