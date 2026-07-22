@@ -36,7 +36,7 @@ def _import_tf(force=False):
     if not force and keras.backend.backend() != "tensorflow":
         return None
     try:
-        import tensorflow as tf
+        import tensorflow as tf  # ty: ignore[unresolved-import]
 
         return tf
     except ImportError:
@@ -58,7 +58,7 @@ def _import_torch(force=False):
     if not force and keras.backend.backend() != "torch":
         return None
     try:
-        import torch
+        import torch  # ty: ignore[unresolved-import]
 
         return torch
     except ImportError:
@@ -249,7 +249,7 @@ def func_on_device(func, device, *args, **kwargs):
         return func(*args, **kwargs)
 
     if keras.backend.backend() == "torch":
-        import torch
+        import torch  # ty: ignore[unresolved-import]
 
         _device = torch.device(device.lower().replace("gpu", "cuda"))
 

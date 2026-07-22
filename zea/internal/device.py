@@ -355,13 +355,13 @@ def backend_cuda_available(backend):
     """Check if the selected backend is installed with CUDA support."""
     if backend == "torch":
         try:
-            import torch
+            import torch  # ty: ignore[unresolved-import]
         except Exception:
             return False
         return torch.cuda.is_available()
     if backend == "tensorflow":
         try:
-            import tensorflow as tf
+            import tensorflow as tf  # ty: ignore[unresolved-import]
         except Exception:
             return False
         return bool(tf.config.list_physical_devices("GPU"))
@@ -421,7 +421,7 @@ def selected_gpu_ids_to_device(selected_gpu_ids, backend, hide_others=True):
 def set_memory_growth_tf():
     """Attempts to allocate only as much GPU memory as needed for the runtime allocations"""
     try:
-        import tensorflow as tf
+        import tensorflow as tf  # ty: ignore[unresolved-import]
     except Exception:
         return
 

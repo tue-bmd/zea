@@ -7,4 +7,4 @@ from pathlib import PosixPath
 # this is necessary due to weird TF bug when importing
 sys.path = [str(p) if isinstance(p, PosixPath) else p for p in sys.path]
 
-import tensorflow as tf  # noqa: E402
+import tensorflow as tf  # noqa: E402  # ty: ignore[unresolved-import]

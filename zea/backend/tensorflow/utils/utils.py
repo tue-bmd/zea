@@ -1,7 +1,7 @@
 """Utility functions for zea tensorflow modules."""
 
 import numpy as np
-import tensorflow as tf
+import tensorflow as tf  # ty: ignore[unresolved-import]
 
 
 class DotDict(dict):

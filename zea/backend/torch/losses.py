@@ -1,7 +1,7 @@
 """Container for custom loss functions."""
 
-import torch
-from torch import nn
+import torch  # ty: ignore[unresolved-import]
+from torch import nn  # ty: ignore[unresolved-import]
 
 
 class SMSLE(nn.Module):

@@ -201,7 +201,7 @@ def boolean_mask(tensor, mask, size=None):
         indices = jnp.where(mask, size=size)  # Fixed size allows Jax tracing
         return tensor[indices]
     elif keras.backend.backend() == "tensorflow":
-        import tensorflow as tf
+        import tensorflow as tf  # ty: ignore[unresolved-import]
 
         return tf.boolean_mask(tensor, mask)
     else:
@@ -416,7 +416,7 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
 
     # Use native vmap for PyTorch backend when map_fn is not provided and _use_torch_vmap is True
     if keras.backend.backend() == "torch" and map_fn is None and _use_torch_vmap:
-        import torch
+        import torch  # ty: ignore[unresolved-import]
 
         return torch.vmap(fun, in_dims=in_axes, out_dims=out_axes)
 

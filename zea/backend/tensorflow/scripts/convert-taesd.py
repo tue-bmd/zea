@@ -27,9 +27,9 @@ flatbuffers>=23.5.26
 import time
 from pathlib import Path
 
-import torch
-from diffusers import AutoencoderTiny
-from onnx2tf import convert
+import torch  # ty: ignore[unresolved-import]
+from diffusers import AutoencoderTiny  # ty: ignore[unresolved-import]
+from onnx2tf import convert  # ty: ignore[unresolved-import]
 
 from zea import log
 
