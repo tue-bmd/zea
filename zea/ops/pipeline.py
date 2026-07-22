@@ -264,6 +264,7 @@ class Pipeline:
                 - "delay_multiply_and_sum"
                 - "coherence_factor"
                 - "generalized_coherence_factor"
+                - "minimum_variance"
                 Defaults to "delay_and_sum".
             num_patches (int): Number of patches for the PatchedGrid operation.
                 Defaults to 100. If you get an out of memory error, try to increase this number.
@@ -1261,6 +1262,7 @@ class Beamform(Pipeline):
                 - "delay_multiply_and_sum"
                 - "coherence_factor"
                 - "generalized_coherence_factor"
+                - "minimum_variance"
                 Defaults to "delay_and_sum".
             num_patches (int): Number of patches to split the grid into for patch-wise
                 beamforming. If 1, no patching is performed.
@@ -1320,6 +1322,10 @@ class Beamform(Pipeline):
             for name, param in inspect.signature(beamformer_cls.__init__).parameters.items()
             if name != "self" and param.kind != inspect.Parameter.VAR_KEYWORD
         }
+        # Never steal a keyword that the pipeline itself understands (e.g. `name`,
+        # `with_batch_dim`): those must keep reaching Pipeline / PatchedGrid.
+        pipeline_params = set(inspect.signature(Pipeline.__init__).parameters)
+        beamformer_params -= pipeline_params
         self.beamformer_kwargs = {k: kwargs.pop(k) for k in list(kwargs) if k in beamformer_params}
 
         # Get beamforming ops
@@ -1710,54 +1716,77 @@ class GeneralizedCoherenceFactor(Operation):
 @beamformer_registry("minimum_variance")
 @ops_registry("minimum_variance")
 class MinimumVariance(Operation):
-    r"""Minimum Variance (Capon/MVDR) beamformer with spatial smoothing.
+    r"""Minimum Variance (Capon/MVDR) beamformer.
 
-    Estimates a Hermitian sample covariance matrix per pixel using forward
-    spatial smoothing — :math:`L = N_{el} - M + 1` overlapping sub-apertures
-    of length *M* are averaged across all transmit events:
-
-    .. math::
-
-        \hat{\mathbf{R}}(p) = \frac{1}{N_\mathrm{tx}\,L}
-        \sum_{t,l} \mathbf{x}_{l}^*[t,p]\,\mathbf{x}_{l}^T[t,p]
-
-    Additive diagonal loading proportional to the covariance trace stabilises
-    the matrix inversion:
+    Each transmit is beamformed adaptively with its own weights and the results are
+    compounded afterwards, as in the reference implementations. Per transmit, the
+    sample covariance for each pixel is estimated by averaging the outer products of
+    the :math:`L = N_{el} - M + 1` overlapping sub-apertures of length :math:`M`, over
+    :math:`2K + 1` axially adjacent pixels:
 
     .. math::
 
-        \hat{\mathbf{R}}_\delta = \hat{\mathbf{R}} +
-        \delta\,\mathrm{tr}\!\left(\hat{\mathbf{R}}\right)\mathbf{I}_M
+        \hat{\mathbf{R}}_t(p) = \frac{1}{L (2K+1)}
+        \sum_{l,k} \mathbf{x}_{l}[t, p_k]\,\mathbf{x}_{l}^H[t, p_k]
 
-    The Capon weight vector minimising output power subject to a distortionless
-    constraint on the look direction is:
+    It is regularised with diagonal loading
+    :math:`\delta\,\mathrm{tr}(\hat{\mathbf{R}}_t)/M` before solving for the Capon
+    weights
 
     .. math::
 
-        \mathbf{w}(p) = \frac{\hat{\mathbf{R}}_\delta^{-1}\,\mathbf{e}}
-        {\mathbf{e}^H\,\hat{\mathbf{R}}_\delta^{-1}\,\mathbf{e}}, \quad
+        \mathbf{w}_t(p) = \frac{\hat{\mathbf{R}}_{t,\delta}^{-1}\,\mathbf{e}}
+        {\mathbf{e}^H\,\hat{\mathbf{R}}_{t,\delta}^{-1}\,\mathbf{e}}, \quad
         \mathbf{e} = \mathbf{1}_M
 
-    The linear system :math:`\hat{\mathbf{R}}_\delta\,\mathbf{x} = \mathbf{e}`
-    is solved by LU factorisation (no explicit matrix inverse is formed).
+    The output is :math:`\sum_t \mathbf{w}_t^H \mathbf{x}_t`, averaged over the
+    sub-apertures and summed over transmits, matching the compounding convention of
+    :class:`DelayAndSum`.
 
-    .. admonition:: Reference
+    .. warning::
 
-        Vignon, F. and Burcher, M. R., "Capon beamforming in medical
-        ultrasound imaging with focused beams," *IEEE Transactions on
-        Ultrasonics, Ferroelectrics, and Frequency Control* **55** (3), 2008.
-        https://doi.org/10.1109/TUFFC.2008.686
+        Spatial smoothing assumes every sub-aperture sees the same array, which a hard
+        receive-aperture mask breaks. Elements zeroed by the f-number mask span a null
+        space of :math:`\hat{\mathbf{R}}` that the loaded inverse fills with weight,
+        starving the live channels and collapsing the lateral near field into a
+        triangular bright region. Set ``parameters.f_number = 0`` so that MV sees the
+        full aperture and adapts it itself.
+
+    .. admonition:: References
+
+        Synnevåg, J.-F., Austeng, A. and Holm, S., "Adaptive beamforming applied to
+        medical ultrasound imaging," *IEEE Trans. Ultrason. Ferroelectr. Freq.
+        Control* **54** (8), 2007. https://doi.org/10.1109/TUFFC.2007.431
+
+        Vignon, F. and Burcher, M. R., "Capon beamforming in medical ultrasound
+        imaging with focused beams," *IEEE Trans. Ultrason. Ferroelectr. Freq.
+        Control* **55** (3), 2008. https://doi.org/10.1109/TUFFC.2008.686
 
     Args:
-        subarray_size (int or None): Sub-aperture length *M*.  ``None`` selects
-            ``M = N_{el} // 2``.
-        diagonal_loading (float): Relative loading coefficient δ — scales with
-            the trace of the covariance so it is signal-power invariant.
-            Larger values push the solution toward DAS.  Default: ``1e-2``.
+        subarray_size (int or None): Sub-aperture length :math:`M`. Should not exceed
+            ``n_el // 2``, or the covariance estimate becomes singular. Defaults to
+            ``n_el // 2``.
+        diagonal_loading (float): Loading :math:`\delta` as a fraction of the mean
+            eigenvalue :math:`\mathrm{tr}(\hat{\mathbf{R}})/M`. Larger values push
+            the solution toward DAS. Defaults to ``1e-2``.
+        axial_averaging (int): Half-width :math:`K` of the axial averaging window, in
+            pixels. Needs ``grid`` among the pipeline parameters, and enough axial
+            pixels per patch (lower ``num_patches`` if warned). ``0`` disables it.
+            Defaults to ``2``.
         **kwargs: Forwarded to :class:`~zea.ops.base.Operation`.
     """
 
-    def __init__(self, subarray_size=None, diagonal_loading=1e-2, **kwargs):
+    def __init__(self, subarray_size=None, diagonal_loading=1e-2, axial_averaging=2, **kwargs):
+        if subarray_size is not None and (not isinstance(subarray_size, int) or subarray_size < 1):
+            raise ValueError(
+                f"subarray_size must be a positive integer or None, got {subarray_size!r}."
+            )
+        if diagonal_loading < 0:
+            raise ValueError(f"diagonal_loading must be non-negative, got {diagonal_loading!r}.")
+        if not isinstance(axial_averaging, int) or axial_averaging < 0:
+            raise ValueError(
+                f"axial_averaging must be a non-negative integer, got {axial_averaging!r}."
+            )
         super().__init__(
             input_data_type=DataTypes.ALIGNED_DATA,
             output_data_type=DataTypes.BEAMFORMED_DATA,
@@ -1765,75 +1794,161 @@ class MinimumVariance(Operation):
         )
         self.subarray_size = subarray_size
         self.diagonal_loading = diagonal_loading
+        self.axial_averaging = axial_averaging
+        self._warned = False
 
-    def process_image(self, data):
-        """Apply MV beamforming with spatial smoothing to one image.
+    def _axial_average(self, matrices, stride):
+        """Average each pixel's matrix with its ``2K`` axial neighbours.
+
+        Axial neighbours sit ``stride`` apart in the flattened ``(n_z, n_x)`` grid.
+        Pixels near the edge of a patch average over fewer neighbours.
+        """
+        n_pix = matrices.shape[0]
+        width = self.axial_averaging * stride
+        padding = [[width, width]] + [[0, 0]] * (len(matrices.shape) - 1)
+        padded = ops.pad(matrices, padding)
+        weights = ops.pad(ops.ones_like(matrices[:, :1, :1]), padding)
+
+        total = padded[:n_pix]
+        count = weights[:n_pix]
+        for offset in range(stride, 2 * width + 1, stride):
+            total = total + padded[offset : offset + n_pix]
+            count = count + weights[offset : offset + n_pix]
+        return total / count
+
+    def process_image(self, data, axial_stride=None):
+        """Apply MV beamforming to one image.
 
         Args:
-            data (ops.Tensor): TOF-corrected channel data of shape
-                ``(n_tx, n_pix, n_el, 2)`` (I and Q channels).
+            data (ops.Tensor): TOF-corrected data of shape ``(n_tx, n_pix, n_el, 2)``.
+            axial_stride (int, optional): Flat-index distance between axially adjacent
+                pixels. Axial averaging is skipped when this is ``None``.
 
         Returns:
             ops.Tensor: Beamformed image of shape ``(n_pix, 2)``.
         """
-        n_el = data.shape[-2]
-        n_tx = ops.shape(data)[0]
-
-        if self.subarray_size is not None and not (1 <= self.subarray_size <= n_el):
+        if not data.shape[-1] == 2:
             raise ValueError(
-                f"subarray_size ({self.subarray_size}) must be between 1 and n_el ({n_el})."
+                "MinimumVariance operation requires IQ data with 2 channels. "
+                f"Got data with shape {data.shape}."
             )
+
+        n_el = data.shape[-2]
+        if self.subarray_size is not None and self.subarray_size > n_el:
+            raise ValueError(f"subarray_size ({self.subarray_size}) must not exceed n_el ({n_el}).")
 
         subarray_length = (
             self.subarray_size if self.subarray_size is not None else max(1, n_el // 2)
         )
+
+        # Each transmit gets its own weights. Mapped rather than batched so that only
+        # one transmit's covariance (n_pix, M, M) is in flight at a time.
+        per_transmit = ops.map(
+            lambda transmit: self._beamform_transmit(transmit, subarray_length, axial_stride),
+            data,
+        )
+        return ops.sum(per_transmit, axis=0)
+
+    def _beamform_transmit(self, data, subarray_length, axial_stride):
+        """Capon-beamform a single transmit of shape ``(n_pix, n_el, 2)``."""
+        n_el = data.shape[-2]
         num_subarrays = n_el - subarray_length + 1
 
-        # Complex IQ: (n_tx, n_pix, n_el) complex64
-        x_c = ops.cast(data[..., 0], "complex64") + ops.cast(data[..., 1], "complex64") * 1j
-
-        # Sub-apertures: (n_tx, n_pix, num_subarrays, subarray_length) complex64
+        x_c = ops.view_as_complex(data)
         sub_ap = ops.stack(
-            [x_c[:, :, length : length + subarray_length] for length in range(num_subarrays)],
-            axis=2,
+            [x_c[:, start : start + subarray_length] for start in range(num_subarrays)],
+            axis=1,
         )
 
-        # Hermitian sample covariance: (n_pix, subarray_length, subarray_length) complex64
-        # R[p,i,j] = Σ_t Σ_l sub_ap[t,p,l,i]^* sub_ap[t,p,l,j] / (n_tx * num_subarrays)
-        scale = ops.cast(n_tx * num_subarrays, "complex64")
-        covariance = ops.einsum("tpli,tplj->pij", ops.conj(sub_ap), sub_ap) / scale
+        # Hermitian sample covariance (n_pix, M, M). The normalisation cancels in the
+        # weights; it only keeps the magnitudes in a sane float32 range.
+        covariance = ops.einsum("pli,plj->pij", sub_ap, ops.conj(sub_ap)) / ops.cast(
+            ops.cast(num_subarrays, "float32"), "complex64"
+        )
+        R_re = ops.real(covariance)
+        R_im = ops.imag(covariance)
 
-        # Additive diagonal loading
-        # trace(R) is an upper bound on λ_max for PSD matrices (exact for rank-1 signals)
-        eye_c = ops.cast(ops.eye(subarray_length), "complex64")
-        # Clamp trace from below so boundary pixels (zero data → zero covariance)
-        trace = ops.maximum(
-            ops.real(ops.einsum("...ii->...", covariance)),
-            keras.backend.epsilon(),
-        )[..., None, None]
-        R_reg = covariance + ops.cast(self.diagonal_loading * trace, "complex64") * eye_c
+        if self.axial_averaging > 0 and axial_stride:
+            R_re = self._axial_average(R_re, axial_stride)
+            R_im = self._axial_average(R_im, axial_stride)
 
-        # Capon weights via batched LU solve: R_reg w = e
-        e_batch = ops.ones_like(R_reg[..., :1])
-        R_inv_e = ops.linalg.solve(R_reg, e_batch)[..., 0]
-        denom = ops.sum(R_inv_e, axis=-1, keepdims=True)
-        capon_weights = R_inv_e / (denom + keras.backend.epsilon())
+        # Diagonal loading relative to the mean eigenvalue tr(R)/M, so its effect does
+        # not change with subarray_size. The trace is clamped so that all-zero pixels
+        # outside the image stay invertible.
+        trace = ops.maximum(ops.einsum("...ii->...", R_re), keras.backend.epsilon())[
+            ..., None, None
+        ]
+        R_re = R_re + self.diagonal_loading * trace / subarray_length * ops.eye(subarray_length)
 
-        # Apply weights: compound over tx, average over subapertures
-        sub_summed = ops.sum(sub_ap, axis=0)
-        y = ops.einsum("pm,plm->p", ops.conj(capon_weights), sub_summed) / ops.cast(
-            n_tx * num_subarrays, "complex64"
+        # linalg.solve has no complex kernel under TF/XLA, so the Hermitian system
+        # (R_re + i R_im)(u + i v) = e is solved as the real symmetric 2M x 2M system
+        # [[R_re, -R_im], [R_im, R_re]] [u; v] = [e; 0].
+        block = ops.concatenate(
+            [
+                ops.concatenate([R_re, -R_im], axis=-1),
+                ops.concatenate([R_im, R_re], axis=-1),
+            ],
+            axis=-2,
+        )
+        rhs = ops.concatenate(
+            [ops.ones_like(R_re[..., :1]), ops.zeros_like(R_re[..., :1])], axis=-2
+        )
+        solution = ops.linalg.solve(block, rhs)[..., 0]
+        R_inv_e = ops.view_as_complex(
+            ops.stack([solution[..., :subarray_length], solution[..., subarray_length:]], axis=-1)
         )
 
-        return ops.stack([ops.real(y), ops.imag(y)], axis=-1)
+        # w = R^-1 e / (e^H R^-1 e). The denominator is real and positive for the loaded
+        # (positive definite) R, and an additive epsilon here would not be scale
+        # invariant, so it is divided out as is.
+        capon_weights = R_inv_e / ops.sum(R_inv_e, axis=-1, keepdims=True)
 
-    def call(self, **kwargs):
+        y = ops.einsum("pm,plm->p", ops.conj(capon_weights), sub_ap) / ops.cast(
+            num_subarrays, "complex64"
+        )
+        return ops.view_as_real(y)
+
+    def _resolve_axial_stride(self, grid, n_pix, f_number):
+        """Distance between axially adjacent pixels in the flattened grid."""
+        if f_number and not self._warned:
+            log.warning(
+                "MinimumVariance is used with f_number="
+                f"{f_number}. The f-number mask zeroes receive channels, which the "
+                "Capon inverse fills with weight, suppressing the lateral near field. "
+                "Set parameters.f_number = 0 to let MV adapt the aperture itself."
+            )
+        if self.axial_averaging == 0:
+            return None
+
+        stride = None
+        if grid is not None and len(grid.shape) == 3:
+            stride = grid.shape[1]
+        if not self._warned:
+            if stride is None:
+                log.warning(
+                    "MinimumVariance axial_averaging needs a 2D `grid` parameter to "
+                    "locate axially adjacent pixels; averaging is disabled."
+                )
+            elif n_pix < (2 * self.axial_averaging + 1) * stride:
+                log.warning(
+                    f"MinimumVariance axial_averaging={self.axial_averaging} needs "
+                    f"{2 * self.axial_averaging + 1} axial pixels per patch, but a patch "
+                    f"holds only {n_pix // stride}. Lower `num_patches` to use the full "
+                    "averaging window."
+                )
+        self._warned = True
+        return stride
+
+    def call(self, grid=None, f_number=None, **kwargs):
         """Apply MV beamforming to TOF-corrected data."""
         data = kwargs[self.key]
+        n_pix = data.shape[-3]
+        stride = self._resolve_axial_stride(grid, n_pix, f_number)
+
         if not self.with_batch_dim:
-            beamformed_data = self.process_image(data)
+            beamformed_data = self.process_image(data, stride)
         else:
-            beamformed_data = ops.map(self.process_image, data)
+            beamformed_data = ops.map(lambda image: self.process_image(image, stride), data)
         return {self.output_key: beamformed_data}
 
 
