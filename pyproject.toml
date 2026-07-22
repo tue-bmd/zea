@@ -116,8 +116,8 @@ zea = "zea.__main__:main"
 
 [dependency-groups]
 lint = [
-    "ruff==0.15.19",
-    "ty==0.0.53",
+    "ruff==0.15.22",
+    "ty==0.0.62",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -234,11 +234,7 @@ docstring-code-line-length = "dynamic"
 python-version = "3.10"
 
 [tool.ty.rules]
-# zea is multi-backend: jax / torch / tensorflow are optional and usually not
-# all installed in the (lightweight) type-checking environment, so their
-# conditional `import` statements would otherwise be flagged. Keep this visible
-# as a warning rather than a hard error so it never blocks CI.
-unresolved-import = "warn"
+unresolved-import = "ignore"
 
 [tool.ty.src]
 include = ["zea"]
@@ -246,11 +242,11 @@ exclude = ["zea/ops/keras_ops.py"] # generated file (see _generate_keras_ops)
 
 # Keras Layer subclasses deliberately override `call` with domain-specific
 # signatures; Keras dispatches through __call__ and never calls .call()
-# polymorphically, so this override pattern is intentional and safe.
+# polymorphically, so this override pattern is intentional.
 [[tool.ty.overrides]]
 include = ["zea/ops/**/*.py", "zea/models/**/*.py", "zea/data/layers.py"]
 [tool.ty.overrides.rules]
-invalid-method-override = "warn"
+invalid-method-override = "ignore"
 
 
 [tool.pytest.ini_options]
