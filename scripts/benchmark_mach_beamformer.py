@@ -126,7 +126,7 @@ def run_zea_das(data, parameters, iterations):
     return image, _title("zea DAS", data.shape, image.shape, per_iter_s, pts)
 
 
-def run_zea_mach(data, parameters, iterations):
+def run_zea_mach(data, parameters, iterations, precompute_arrivals=True):
     from zea.ops import (
         EnvelopeDetect,
         LogCompress,
@@ -144,10 +144,30 @@ def run_zea_mach(data, parameters, iterations):
     inputs = pipeline.prepare_parameters(parameters)
     inputs["data"] = data
 
-    result, per_iter_s = _time_call("zea + mach", lambda: pipeline(**inputs)["data"], iterations)
+    # Fast path: precompute the geometry-dependent transmit wave-arrivals once
+    # (the dominant per-frame cost otherwise) and reuse them across frames, the
+    # way mach itself is meant to be driven.
+    label = "zea + mach"
+    if precompute_arrivals:
+        inputs["tx_wave_arrivals_s"] = MachBeamform.compute_tx_wave_arrivals(
+            parameters.flatgrid,
+            parameters.probe_geometry,
+            parameters.sampling_frequency,
+            parameters.sound_speed,
+            parameters.initial_times,
+            parameters.t0_delays,
+            parameters.tx_apodizations,
+            parameters.focus_distances,
+            parameters.polar_angles,
+            parameters.t_peak,
+            parameters.transmit_origins,
+        )
+        label = "zea + mach (precomputed arrivals)"
+
+    result, per_iter_s = _time_call(label, lambda: pipeline(**inputs)["data"], iterations)
     image = _to_numpy(result)
     pts = _points_per_second(data, image, per_iter_s)
-    return image, _title("zea + mach", data.shape, image.shape, per_iter_s, pts)
+    return image, _title(label, data.shape, image.shape, per_iter_s, pts)
 
 
 def run_mach_api(data, parameters, iterations):
@@ -255,7 +275,12 @@ def main():
     print(f"Input data shape: {data.shape}")
 
     zea_img, zea_title = run_zea_das(data, parameters, args.iterations)
-    mach_img, mach_title = run_zea_mach(data, parameters, args.iterations)
+    # On-the-fly delays (recomputed every frame) vs the precomputed-arrivals
+    # fast path (delays computed once, reused across frames).
+    mach_slow_img, mach_slow_title = run_zea_mach(
+        data, parameters, args.iterations, precompute_arrivals=False
+    )
+    mach_img, mach_title = run_zea_mach(data, parameters, args.iterations, precompute_arrivals=True)
     api_img, api_title = run_mach_api(data, parameters, args.iterations)
 
     err_mach = _rel_error(zea_img, mach_img)
@@ -269,8 +294,8 @@ def main():
     )
     save_comparison(
         "mach_beamformer_comparison.png",
-        [zea_img, mach_img, api_img],
-        [zea_title, mach_title, api_title],
+        [zea_img, mach_slow_img, mach_img, api_img],
+        [zea_title, mach_slow_title, mach_title, api_title],
         extent,
         suptitle,
     )
