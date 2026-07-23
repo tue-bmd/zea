@@ -250,3 +250,52 @@ A minimal test creates the operation, runs it on some dummy data, and checks the
 
 Run the tests with ``pytest`` (or ``uv run pytest`` when using ``uv``). See the
 :ref:`running tests <running-tests>` section in the contributing guide for more details.
+
+.. _mach-beamforming:
+
+GPU-accelerated beamforming with mach
+-------------------------------------
+
+For fast inference on CUDA hardware, :class:`~zea.ops.MachBeamform` wraps the
+`mach <https://github.com/Forest-Neurotech/mach>`_ CUDA kernel, which fuses
+time-of-flight delay computation, channel-data interpolation, receive (f-number)
+apodization and coherent summation over elements and transmits into a single
+kernel launch. It therefore maps :attr:`~zea.internal.core.DataTypes.RAW_DATA`
+directly to :attr:`~zea.internal.core.DataTypes.BEAMFORMED_DATA`, replacing the
+whole :class:`~zea.ops.Beamform` block (``TOFCorrection`` → apodization → sum →
+compounding) with one operation. It accepts raw RF (``n_ch == 1``) or two-channel
+I/Q (``n_ch == 2``) data and consumes the same scan parameters as
+:class:`~zea.ops.TOFCorrection`, so a :class:`~zea.ops.Pipeline` can be driven
+straight from a file's parameters:
+
+.. code-block:: python
+
+    from zea.ops import (
+        Pipeline, Cast, ApplyWindow, Demodulate, MachBeamform,
+        ReshapeGrid, EnvelopeDetect, Normalize, LogCompress,
+    )
+
+    pipeline = Pipeline(
+        [
+            Cast("float32"),
+            ApplyWindow(),
+            Demodulate(),        # IQ; omit for RF / baseband input
+            MachBeamform(),
+            ReshapeGrid(),       # flat (n_pix, n_ch) -> image grid
+            EnvelopeDetect(),
+            Normalize(),
+            LogCompress(),
+        ],
+        with_batch_dim=False,
+    )
+    inputs = pipeline.prepare_parameters(parameters)
+    image = pipeline(data=data, **inputs)["data"]
+
+.. note::
+
+   :class:`~zea.ops.MachBeamform` requires a CUDA GPU (compute capability
+   >= 7.5) and the optional dependencies ``mach-beamform`` and a CUDA-matched
+   ``cupy``. Install with ``pip install 'zea[mach]'`` and, separately, a cupy
+   wheel matching your CUDA toolkit (e.g. ``pip install cupy-cuda12x``). The
+   imports are deferred to call time, so the operation can be constructed and
+   inspected on any machine; only running it needs the GPU.

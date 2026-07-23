@@ -93,6 +93,11 @@ docs = [
     "IPython",
 ]
 jax = ["jax[cuda12]>=0.4.35"]
+# GPU-accelerated beamforming via the mach CUDA kernel (zea.ops.MachBeamform).
+# Requires a CUDA GPU (compute capability >= 7.5). A CUDA-matched cupy is also
+# needed (e.g. `pip install cupy-cuda12x`); it is not pinned here because the
+# right wheel depends on the installed CUDA toolkit.
+mach = ["mach-beamform>=0.1"]
 display = ["opencv-python>=4"]
 display-headless = ["opencv-python-headless>=4"]
 # most models don't needs these optional dependencies
