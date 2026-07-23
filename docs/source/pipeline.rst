@@ -291,6 +291,29 @@ straight from a file's parameters:
     inputs = pipeline.prepare_parameters(parameters)
     image = pipeline(data=data, **inputs)["data"]
 
+For inference over many frames of a fixed acquisition, precompute the transmit
+wave-arrival times **once** and reuse them across frames (they are
+geometry-dependent but frame-independent). This skips the per-frame delay
+computation — the dominant cost — so the CUDA kernel dominates the runtime,
+mirroring the precomputed-``coordinates`` fast path of
+:class:`~zea.ops.ScanConvert`:
+
+.. code-block:: python
+
+    from zea.ops import MachBeamform
+
+    inputs = pipeline.prepare_parameters(parameters)
+    inputs["tx_wave_arrivals_s"] = MachBeamform.compute_tx_wave_arrivals(
+        parameters.flatgrid, parameters.probe_geometry,
+        parameters.sampling_frequency, parameters.sound_speed,
+        parameters.initial_times, parameters.t0_delays,
+        parameters.tx_apodizations, parameters.focus_distances,
+        parameters.polar_angles, parameters.t_peak,
+        parameters.transmit_origins,
+    )
+    for frame in frames:                     # per-frame: only the kernel runs
+        image = pipeline(data=frame, **inputs)["data"]
+
 .. note::
 
    :class:`~zea.ops.MachBeamform` requires a CUDA GPU (compute capability

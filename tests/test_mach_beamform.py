@@ -90,6 +90,30 @@ def test_mach_beamform_iq_requires_demodulation_frequency():
         op(data=data, **params)
 
 
+def test_compute_tx_wave_arrivals_shape():
+    """The precompute helper returns (n_pix, n_tx) seconds and needs no GPU."""
+    import keras
+
+    n_tx, n_el, n_pix = 2, 4, 8
+    _, params = _synthetic_inputs(n_tx=n_tx, n_el=n_el, n_pix=n_pix)
+    arrivals = ops.MachBeamform.compute_tx_wave_arrivals(
+        params["flatgrid"],
+        params["probe_geometry"],
+        params["sampling_frequency"],
+        params["sound_speed"],
+        params["initial_times"],
+        params["t0_delays"],
+        params["tx_apodizations"],
+        params["focus_distances"],
+        params["polar_angles"],
+        params["t_peak"],
+        params["transmit_origins"],
+    )
+    arrivals = keras.ops.convert_to_numpy(arrivals)
+    assert arrivals.shape == (n_pix, n_tx)
+    assert np.isfinite(arrivals).all()
+
+
 @pytest.mark.skipif(
     _MACH_AVAILABLE,
     reason="mach is installed; the informative ImportError path cannot be exercised",
@@ -106,10 +130,53 @@ def test_mach_beamform_importerror_without_mach():
         op(data=data, **params)
 
 
+@pytest.mark.skipif(
+    _MACH_AVAILABLE,
+    reason="mach is installed; the informative ImportError path cannot be exercised",
+)
+def test_mach_beamform_precomputed_arrivals_bypasses_delay_params():
+    """Passing tx_wave_arrivals_s skips the delay computation and its params.
+
+    Even with the delay parameters omitted, the precomputed-arrivals path must
+    reach the kernel launch (ImportError without mach), not the missing-params
+    ValueError.
+    """
+    data, params = _synthetic_inputs(n_tx=2, n_pix=8)
+    arrivals = ops.MachBeamform.compute_tx_wave_arrivals(
+        params["flatgrid"],
+        params["probe_geometry"],
+        params["sampling_frequency"],
+        params["sound_speed"],
+        params["initial_times"],
+        params["t0_delays"],
+        params["tx_apodizations"],
+        params["focus_distances"],
+        params["polar_angles"],
+        params["t_peak"],
+        params["transmit_origins"],
+    )
+    op = ops.MachBeamform(with_batch_dim=False)
+    with pytest.raises(ImportError, match=r"pip install"):
+        op(
+            data=data,
+            flatgrid=params["flatgrid"],
+            probe_geometry=params["probe_geometry"],
+            sampling_frequency=params["sampling_frequency"],
+            sound_speed=params["sound_speed"],
+            f_number=params["f_number"],
+            tx_wave_arrivals_s=arrivals,
+        )
+
+
 @pytest.mark.gpu
 @pytest.mark.parametrize("n_ch", [1, 2])
-def test_mach_beamform_runs_on_gpu(n_ch):
-    """End-to-end kernel run on a real GPU produces sane, finite output."""
+@pytest.mark.parametrize("precompute_arrivals", [False, True])
+def test_mach_beamform_runs_on_gpu(n_ch, precompute_arrivals):
+    """End-to-end kernel run on a real GPU produces sane, finite output.
+
+    Covers both the on-the-fly delay computation and the precomputed
+    ``tx_wave_arrivals_s`` fast path.
+    """
     if not _MACH_AVAILABLE:
         pytest.skip("mach and/or cupy not installed")
     import keras
@@ -118,6 +185,20 @@ def test_mach_beamform_runs_on_gpu(n_ch):
     data, params = _synthetic_inputs(n_pix=n_pix, n_ch=n_ch)
     if n_ch == 2:
         params["demodulation_frequency"] = 5e6
+    if precompute_arrivals:
+        params["tx_wave_arrivals_s"] = ops.MachBeamform.compute_tx_wave_arrivals(
+            params["flatgrid"],
+            params["probe_geometry"],
+            params["sampling_frequency"],
+            params["sound_speed"],
+            params["initial_times"],
+            params["t0_delays"],
+            params["tx_apodizations"],
+            params["focus_distances"],
+            params["polar_angles"],
+            params["t_peak"],
+            params["transmit_origins"],
+        )
 
     op = ops.MachBeamform(with_batch_dim=False)
     out = op(data=data, **params)["data"]
