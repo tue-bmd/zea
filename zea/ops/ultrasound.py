@@ -3,7 +3,8 @@ import numpy as np
 from keras import ops
 
 from zea import log
-from zea.beamform.beamformer import tof_correction
+from zea.backend import jit as backend_jit
+from zea.beamform.beamformer import calculate_delays, tof_correction
 from zea.display import scan_convert
 from zea.func.tensor import (
     apply_along_axis,
@@ -14,6 +15,7 @@ from zea.func.tensor import (
 from zea.func.ultrasound import (
     apply_aligned_apodization,
     apply_receive_apodization,
+    channels_to_complex,
     demodulate,
     envelope_detect,
     get_band_pass_filter,
@@ -218,6 +220,514 @@ class TOFCorrection(Operation):
             )
 
         return {self.output_key: tof_corrected}
+
+
+def _require_mach():
+    """Import the ``mach`` beamforming kernel or raise an informative error."""
+    try:
+        from mach import kernel as mach_kernel
+    except ImportError as exc:
+        raise ImportError(
+            "mach is not installed. Please run `pip install 'zea[mach]'` "
+            "(or `pip install mach-beamform`) to use MachBeamform. "
+            "mach requires a CUDA-capable GPU (compute capability >= 7.5)."
+        ) from exc
+    return mach_kernel
+
+
+def _require_cupy():
+    """Import ``cupy`` or raise an informative error."""
+    try:
+        import cupy as cp
+    except ImportError as exc:
+        raise ImportError(
+            "cupy is not installed. MachBeamform needs a CUDA-matched cupy "
+            "(e.g. `pip install cupy-cuda12x`) to move data to and from the GPU."
+        ) from exc
+    return cp
+
+
+@ops_registry("mach_beamform")
+class MachBeamform(Operation):
+    """GPU-accelerated fused time-of-flight delay-and-sum beamforming via `mach`.
+
+    This operation wraps the `mach <https://github.com/Forest-Neurotech/mach>`_
+    CUDA kernel, which fuses transmit/receive delay computation, channel-data
+    interpolation, receive (f-number) apodization and coherent summation over
+    elements and transmits into a **single** kernel launch. It therefore maps
+    :attr:`~zea.internal.core.DataTypes.RAW_DATA` straight to
+    :attr:`~zea.internal.core.DataTypes.BEAMFORMED_DATA`, replacing the whole
+    :class:`TOFCorrection` → apodization → sum → compounding chain of the
+    standard :class:`~zea.ops.Beamform` pipeline with one op.
+
+    Because the delay-and-sum is fused inside the CUDA kernel (rather than run on
+    the TOF-*aligned* data like the beamformers in
+    :data:`~zea.internal.registry.beamformer_registry`), it is used as a drop-in
+    replacement for the entire beamforming block::
+
+        Pipeline(
+            [
+                Cast("float32"),
+                ApplyWindow(),
+                Demodulate(),  # IQ; omit for RF / baseband input
+                MachBeamform(),
+                ReshapeGrid(),  # flat (n_pix, n_ch) -> image grid
+                EnvelopeDetect(),
+                Normalize(),
+                LogCompress(),
+            ]
+        )
+
+    It consumes the standard zea scan parameters (``flatgrid``,
+    ``probe_geometry``, ``t0_delays``, ``tx_apodizations``, ``focus_distances``,
+    ``polar_angles``, ``t_peak``, ``transmit_origins``, ``initial_times``,
+    ``sampling_frequency``, ``sound_speed``, ``f_number`` and, for IQ data,
+    ``demodulation_frequency``), so a :class:`~zea.ops.Pipeline` can be driven
+    straight from a file's parameters. Transmit wave-arrival times are computed
+    with :func:`zea.beamform.beamformer.calculate_delays`, matching the delay
+    model of :class:`TOFCorrection`.
+
+    Accepts raw RF (``n_ch == 1``, ``float32``) or two-channel I/Q
+    (``n_ch == 2``, converted to ``complex64`` internally).
+
+    .. note::
+
+       Requires a CUDA GPU (compute capability >= 7.5) and the optional
+       dependencies ``mach-beamform`` and a CUDA-matched ``cupy``. Install with
+       ``pip install 'zea[mach]'`` (and, separately, e.g.
+       ``pip install cupy-cuda12x`` to match your CUDA toolkit). The imports are
+       deferred to call time, so the op can be constructed and inspected on any
+       machine.
+
+    Args:
+        interp_type (str): Channel-data interpolation. One of ``"nearest"``,
+            ``"linear"`` (default) or ``"quadratic"``.
+        tukey_alpha (float): Tukey-window alpha for the receive apodization,
+            in ``[0, 1]``. Defaults to ``0`` (rectangular window).
+    """
+
+    STATIC_PARAMS = ["interp_type", "tukey_alpha"]
+
+    _INTERP_TYPES = ("nearest", "linear", "quadratic")
+
+    def __init__(self, interp_type: str = "linear", tukey_alpha: float = 0.0, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.RAW_DATA,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
+            jittable=False,
+            **kwargs,
+        )
+
+        if isinstance(interp_type, str) and interp_type.lower() not in self._INTERP_TYPES:
+            raise ValueError(
+                f"Unsupported interp_type '{interp_type}'. Use one of {self._INTERP_TYPES}."
+            )
+        self.interp_type = interp_type
+        self.tukey_alpha = float(tukey_alpha)
+        # Resolved lazily on first call (needs the mach import).
+        self._interp_type_enum = None
+
+        # The pure-tensor translation stages are backend-agnostic and JIT-able,
+        # even though the op as a whole is not (the CUDA kernel launch is not
+        # traceable). ``apply_lens_correction`` is a Python bool that drives
+        # control flow, so it must be a static argument under JAX.
+        self._prepare_inputs_jit = backend_jit(self._prepare_inputs, static_argnums=(12,))
+        self._prepare_outputs_jit = backend_jit(self._prepare_outputs, static_argnums=(1,))
+
+    def _resolve_interp_type(self):
+        """Resolve ``interp_type`` to a ``mach`` enum, importing mach lazily."""
+        if self._interp_type_enum is not None:
+            return self._interp_type_enum
+
+        from mach.kernel import InterpolationType
+
+        if not isinstance(self.interp_type, str):
+            # Already a mach enum (or compatible) — pass through.
+            self._interp_type_enum = self.interp_type
+            return self._interp_type_enum
+
+        interp_map = {
+            "nearest": InterpolationType.NearestNeighbor,
+            "linear": InterpolationType.Linear,
+            "quadratic": InterpolationType.Quadratic,
+        }
+        self._interp_type_enum = interp_map[self.interp_type.lower()]
+        return self._interp_type_enum
+
+    # ------------------------------------------------------------------
+    # Stage 1: Zea -> mach  (pure tensor ops, JIT-able)
+    # ------------------------------------------------------------------
+
+    def _prepare_inputs(
+        self,
+        data,
+        flatgrid,
+        probe_geometry,
+        sampling_frequency,
+        sound_speed,
+        initial_times_for_tx,
+        t0_delays,
+        tx_apodizations,
+        focus_distances,
+        polar_angles,
+        t_peak,
+        transmit_origins,
+        apply_lens_correction,
+        lens_thickness,
+        lens_sound_speed,
+    ):
+        """Translate pre-validated Zea parameters and data into mach kernel inputs.
+
+        Contains only pure tensor operations and is JIT-compiled in ``__init__``
+        via ``backend_jit``. All Python-level validation, None-resolution and
+        logging must be done by the caller before invoking this method.
+
+        Args:
+            data: Input tensor with the channel dimension already removed and IQ
+                data already converted to complex dtype. Shape is
+                ``([n_tx,] n_ax, n_el)`` (no batch) or
+                ``(n_frames, [n_tx,] n_ax, n_el)`` (batch).
+            flatgrid: ``(n_pix, 3)`` grid coordinates in metres.
+            probe_geometry: ``(n_el, 3)`` element positions in metres.
+            sampling_frequency: Sampling frequency in Hz.
+            sound_speed: Speed of sound in m/s.
+            initial_times_for_tx: Per-transmit time offsets ``(n_tx,)`` (already
+                zeroed-out when ``rx_start_s`` was externally set).
+            t0_delays: Transmit delays ``(n_tx, n_el)`` in seconds.
+            tx_apodizations: Transmit apodizations ``(n_tx, n_el)``.
+            focus_distances: Focus distances ``(n_tx,)``.
+            polar_angles: Polar angles ``(n_tx,)``.
+            t_peak: Waveform peak times ``(n_tx,)``.
+            transmit_origins: Transmit origins ``(n_tx, 3)``.
+            apply_lens_correction: Python bool — must be a static JAX arg.
+            lens_thickness: Lens thickness in metres (or ``None``).
+            lens_sound_speed: Lens sound speed in m/s (or ``None``).
+
+        Returns:
+            Tuple of ``(channel_data_list, tx_wave_arrivals_list, n_frames)``
+            where each list element corresponds to one transmit.
+        """
+        # ---- Compute transmit wave-arrival times ---------------------
+        # tx_delays: (n_pix, n_tx) in *samples*
+        n_tx = int(t0_delays.shape[0])
+        tx_delays, _ = calculate_delays(
+            flatgrid,
+            t0_delays,
+            tx_apodizations,
+            probe_geometry,
+            initial_times_for_tx,
+            sampling_frequency,
+            sound_speed,
+            focus_distances,
+            polar_angles,
+            t_peak,
+            transmit_origins,
+            apply_lens_correction,
+            lens_thickness,
+            lens_sound_speed,
+        )
+        # Convert samples -> seconds: (n_pix, n_tx)
+        tx_wave_arrivals_s = tx_delays / sampling_frequency
+
+        # ---- Reshape data to (n_tx, n_el, n_ax, n_frames) -----------
+        # Zea layout (no batch):  ([n_tx,] n_ax, n_el)
+        # Zea layout (batch):     (n_frames, [n_tx,] n_ax, n_el)
+        if self.with_batch_dim:
+            if data.ndim == 4:
+                # (n_frames, n_tx, n_ax, n_el) -> (n_tx, n_el, n_ax, n_frames)
+                data = ops.transpose(data, (1, 3, 2, 0))
+            else:
+                # (n_frames, n_ax, n_el) -> (1, n_el, n_ax, n_frames)
+                data = ops.transpose(data, (2, 1, 0))
+                data = ops.expand_dims(data, axis=0)
+        else:
+            if data.ndim == 3:
+                # (n_tx, n_ax, n_el) -> (n_tx, n_el, n_ax, 1)
+                data = ops.transpose(data, (0, 2, 1))
+                data = ops.expand_dims(data, axis=-1)
+            else:
+                # (n_ax, n_el) -> (1, n_el, n_ax, 1)
+                data = ops.transpose(data, (1, 0))
+                data = ops.expand_dims(data, axis=0)
+                data = ops.expand_dims(data, axis=-1)
+
+        # data is now (n_tx, n_el, n_ax, n_frames)
+        n_tx_data = int(data.shape[0])
+        n_frames = int(data.shape[3])
+
+        # Split along transmit axis -> list of (n_el, n_ax, n_frames) tensors
+        channel_data_list = [data[i] for i in range(n_tx_data)]
+        # Split wave arrivals -> list of (n_pix,) tensors
+        tx_wave_arrivals_list = [tx_wave_arrivals_s[:, i] for i in range(n_tx)]
+
+        return channel_data_list, tx_wave_arrivals_list, n_frames
+
+    # ------------------------------------------------------------------
+    # Stage 2: run CUDA kernel  (not JIT-able)
+    # ------------------------------------------------------------------
+
+    def _run_cuda_kernel(
+        self,
+        channel_data_list,
+        tx_wave_arrivals_list,
+        flatgrid,
+        probe_geometry,
+        rx_start_s,
+        sampling_frequency,
+        sound_speed,
+        f_number,
+        modulation_freq_hz,
+        n_frames,
+        is_iq,
+    ):
+        """Loop over transmits and accumulate the beamformed output on the GPU.
+
+        All CuPy / DLPack conversions are confined to this method so that
+        stages 1 and 3 remain backend-agnostic.
+
+        Returns:
+            CuPy array of shape ``(n_pix, n_frames)``, dtype ``complex64`` (IQ)
+            or ``float32`` (RF).
+        """
+        mach_kernel = _require_mach()
+        cp = _require_cupy()
+        interp_type_enum = self._resolve_interp_type()
+
+        def _to_cupy(arr):
+            """Zero-copy where possible: CuPy stays as-is, others use DLPack.
+
+            JAX/TF/Torch tensors expose ``__dlpack__``, so ``cp.from_dlpack``
+            handles them without an explicit per-framework branch.
+            """
+            if isinstance(arr, cp.ndarray):
+                return arr
+            try:
+                return cp.from_dlpack(arr)
+            except Exception:
+                return cp.asarray(ops.convert_to_numpy(arr))
+
+        scan_coords_m = cp.ascontiguousarray(_to_cupy(flatgrid).astype(cp.float32, copy=False))
+        rx_coords_m = cp.ascontiguousarray(_to_cupy(probe_geometry).astype(cp.float32, copy=False))
+
+        n_pix = scan_coords_m.shape[0]
+        output_dtype = cp.complex64 if is_iq else cp.float32
+        out = cp.zeros((n_pix, n_frames), dtype=output_dtype)
+
+        for single_data, arrivals in zip(channel_data_list, tx_wave_arrivals_list):
+            single_data_cp = cp.ascontiguousarray(
+                _to_cupy(single_data).astype(output_dtype, copy=False)
+            )
+            arrivals_cp = cp.ascontiguousarray(_to_cupy(arrivals).astype(cp.float32, copy=False))
+            mach_kernel.beamform(
+                channel_data=single_data_cp,
+                rx_coords_m=rx_coords_m,
+                scan_coords_m=scan_coords_m,
+                tx_wave_arrivals_s=arrivals_cp,
+                out=out,
+                rx_start_s=rx_start_s,
+                sampling_freq_hz=float(sampling_frequency),
+                f_number=float(f_number),
+                sound_speed_m_s=float(sound_speed),
+                modulation_freq_hz=modulation_freq_hz,
+                tukey_alpha=self.tukey_alpha,
+                interp_type=interp_type_enum,
+            )
+
+        cp.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0, copy=False)
+        return out
+
+    # ------------------------------------------------------------------
+    # Stage 3: mach -> Zea  (pure tensor ops, JIT-able)
+    # ------------------------------------------------------------------
+
+    def _prepare_outputs(self, output, is_iq):
+        """Convert a ``(n_pix, n_frames)`` framework tensor to Zea layout.
+
+        Pure tensor operations, JIT-compiled in ``__init__``. ``output`` must
+        already be a framework tensor (the caller converts the CuPy result via
+        ``ops.convert_to_tensor``). Under JAX, ``is_iq`` is static because it
+        drives Python control flow.
+
+        Returns:
+            dict with the output tensor in Zea layout:
+            - RF, no batch: ``(n_pix, 1)``; RF, batch: ``(n_frames, n_pix, 1)``
+            - IQ, no batch: ``(n_pix, 2)``; IQ, batch: ``(n_frames, n_pix, 2)``
+        """
+        if is_iq:
+            channel = ops.stack([ops.real(output), ops.imag(output)], axis=-1)
+        else:
+            channel = ops.expand_dims(output, axis=-1)
+        # channel: (n_pix, n_frames, n_ch)
+        if self.with_batch_dim:
+            channel = ops.transpose(channel, (1, 0, 2))
+        else:
+            channel = channel[:, 0, :]
+        return {self.output_key: channel}
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
+    def call(
+        self,
+        flatgrid,
+        probe_geometry,
+        sampling_frequency,
+        sound_speed,
+        f_number,
+        demodulation_frequency=None,
+        initial_times=None,
+        t0_delays=None,
+        tx_apodizations=None,
+        focus_distances=None,
+        polar_angles=None,
+        t_peak=None,
+        transmit_origins=None,
+        apply_lens_correction=False,
+        lens_thickness=None,
+        lens_sound_speed=None,
+        rx_start_s=None,
+        **kwargs,
+    ):
+        """Beamform raw RF/IQ data with the mach CUDA delay-and-sum kernel.
+
+        Args:
+            flatgrid: Flattened grid points of shape ``(n_pix, 3)``.
+            probe_geometry: Receive element positions of shape ``(n_el, 3)``.
+            sampling_frequency: Sampling frequency in Hz.
+            sound_speed: Speed of sound in m/s.
+            f_number: F-number for the dynamic receive aperture.
+            demodulation_frequency: Center frequency in Hz for IQ data (set to
+                ``0`` if the data is baseband). Ignored for RF data.
+            initial_times: Optional per-transmit receive start times ``(n_tx,)``.
+            t0_delays: Transmit delays in seconds of shape ``(n_tx, n_el)``.
+            tx_apodizations: Transmit apodizations of shape ``(n_tx, n_el)``.
+            focus_distances: Focus distances of shape ``(n_tx,)``.
+            polar_angles: Polar angles of shape ``(n_tx,)``.
+            t_peak: Transmit-peak times of shape ``(n_tx,)``.
+            transmit_origins: Transmit origins of shape ``(n_tx, 3)``.
+            apply_lens_correction: Whether to apply lens correction to the delays.
+            lens_thickness: Lens thickness in metres.
+            lens_sound_speed: Lens sound speed in m/s.
+            rx_start_s: Optional scalar receive start time in seconds.
+
+        Returns:
+            dict: Beamformed data under ``self.output_key`` with shape
+            ``([n_frames,] n_pix, n_ch)``.
+        """
+        data = kwargs[self.key]
+
+        # ---- Validation (not JIT-able: None checks, logging, raises) ----
+        required = {
+            "t0_delays": t0_delays,
+            "tx_apodizations": tx_apodizations,
+            "focus_distances": focus_distances,
+            "polar_angles": polar_angles,
+            "initial_times": initial_times,
+            "t_peak": t_peak,
+            "transmit_origins": transmit_origins,
+        }
+        missing = [name for name, val in required.items() if val is None]
+        if missing:
+            raise ValueError(
+                "Missing Zea scan parameters required to compute tx_wave_arrivals_s: "
+                + ", ".join(missing)
+                + "."
+            )
+
+        if not isinstance(apply_lens_correction, (bool, np.bool_)):
+            log.warning(
+                "apply_lens_correction must be a Python bool for MachBeamform; "
+                "defaulting to False for delay computation."
+            )
+            apply_lens_correction = False
+
+        # ---- IQ / RF detection (shape is concrete; raises must stay here) ----
+        n_ch = data.shape[-1]
+        if n_ch == 1:
+            data = ops.squeeze(data, axis=-1)
+            is_iq = False
+        elif n_ch == 2:
+            data = channels_to_complex(data)
+            is_iq = True
+        else:
+            raise ValueError(
+                f"MachBeamform expects RF (n_ch=1) or IQ (n_ch=2) data. Got last dimension {n_ch}."
+            )
+
+        if is_iq and demodulation_frequency is None:
+            raise ValueError(
+                "demodulation_frequency is required for IQ data. "
+                "Set it to 0 if the data is baseband."
+            )
+        modulation_freq_hz = (
+            0.0 if demodulation_frequency is None else float(demodulation_frequency)
+        )
+
+        # ---- Resolve rx_start_s / initial_times interaction ----------
+        # calculate_delays subtracts initial_times internally, so if the caller
+        # supplies a manual rx_start_s we zero-out initial_times to avoid
+        # double-counting.
+        if rx_start_s is None:
+            rx_start_s = 0.0
+            initial_times_for_tx = initial_times
+        else:
+            rx_start_s = float(rx_start_s)
+            if initial_times is not None:
+                log.warning(
+                    "rx_start_s provided; ignoring initial_times in tx delay "
+                    "computation to avoid double offsets."
+                )
+            initial_times_for_tx = ops.zeros_like(initial_times)
+
+        # ---- ndim validation (raise before JIT boundary) ----
+        expected_ndim = {True: (3, 4), False: (2, 3)}
+        if data.ndim not in expected_ndim[self.with_batch_dim]:
+            label = "with_batch_dim=True" if self.with_batch_dim else "with_batch_dim=False"
+            raise ValueError(
+                f"MachBeamform {label} expects data with "
+                f"{expected_ndim[self.with_batch_dim]} dims after channel squeeze, "
+                f"got shape {data.shape}."
+            )
+
+        # Stage 1 - translate Zea -> mach (JIT-compiled)
+        channel_data_list, tx_wave_arrivals_list, n_frames = self._prepare_inputs_jit(
+            data,
+            flatgrid,
+            probe_geometry,
+            sampling_frequency,
+            sound_speed,
+            initial_times_for_tx,
+            t0_delays,
+            tx_apodizations,
+            focus_distances,
+            polar_angles,
+            t_peak,
+            transmit_origins,
+            apply_lens_correction,
+            lens_thickness,
+            lens_sound_speed,
+        )
+
+        # Stage 2 - CUDA kernel (not JIT-compilable)
+        output = self._run_cuda_kernel(
+            channel_data_list,
+            tx_wave_arrivals_list,
+            flatgrid,
+            probe_geometry,
+            rx_start_s,
+            sampling_frequency,
+            sound_speed,
+            f_number,
+            modulation_freq_hz,
+            n_frames,
+            is_iq,
+        )
+
+        # Stage 3 - translate mach -> Zea (JIT-compiled)
+        # CuPy -> framework tensor conversion must happen outside JIT.
+        output = ops.convert_to_tensor(output)
+        return self._prepare_outputs_jit(output, is_iq)
 
 
 @ops_registry("pfield_weighting")
