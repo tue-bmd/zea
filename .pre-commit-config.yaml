@@ -22,25 +22,11 @@ repos:
     # Run the formatter.
     - id: ruff-format
 
-# ty (type checker) is run as a *local* hook using the `ty` from the active
-# environment rather than the upstream astral-sh/ty-pre-commit hook. The upstream
-# hook type-checks inside an isolated environment that does not contain zea's
-# dependencies (keras, numpy, h5py, ...), which makes ty unable to resolve them
-# and produces many false positives. Running `ty` from the active environment
-# (the dev container, or a local `.venv` with `pip install -e .[dev]`) gives it
-# access to the installed dependencies. `ty` is pinned via the `dev`/`tests`
-# extras in pyproject.toml.
 - repo: local
   hooks:
     - id: ty
       name: ty
       description: "Run 'ty' for fast Python type checking"
-      # --exit-zero-on-warning mirrors the `typecheck` job in .github/workflows/linter.yaml.
-      # It needs the `ty` from the `lint` group in uv.lock; a stale `ty` in the active
-      # environment errors with "unexpected argument" -- re-sync the env if you see that.
-      # Which optional backends (jax/torch/tensorflow) are installed differs per environment,
-      # so `unresolved-import` diagnostics are environment-dependent by nature; [tool.ty.rules]
-      # keeps them as warnings and neither CI nor this hook fails on them. Errors still fail.
       entry: ty check --exit-zero-on-warning
       language: system
       types_or: [python, pyi]
