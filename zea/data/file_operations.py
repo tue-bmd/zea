@@ -686,6 +686,7 @@ def copy(src: str | Path, dst: str | Path, key: str, mode: str | None = None):
     dataset.copy(dst, key, mode=mode)
 
 
+@_supports_folders
 def decode_hadamard_file_operation(input_path: Path, output_path: Path, overwrite=False):
     """Decodes Hadamard-encoded data in a zea file.
 
