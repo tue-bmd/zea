@@ -267,6 +267,9 @@ filterwarnings = [
     "ignore:.*__array__ implementation doesn't accept a copy keyword.*:DeprecationWarning",
     "ignore:.*os\\.fork\\(\\) was called.*:RuntimeWarning",
     "ignore:.*hf_xet.*:DeprecationWarning",
+    "ignore:'(oneOf|parseString|resetCache|enablePackrat)' deprecated:DeprecationWarning",  # matplotlib -> old pyparsing API
+    "ignore:invalid escape sequence:DeprecationWarning:SimpleITK.*",
+    "ignore:.*sentry_sdk.Hub. is deprecated:DeprecationWarning",  # wandb -> deprecated sentry Hub API
 ]
 
 [tool.coverage.run]
@@ -274,7 +277,11 @@ branch = true
 parallel = true
 concurrency = ["multiprocessing", "thread"]
 sigterm = true
-omit = ["/tmp/__autograph_generated_file*.py"]
+omit = [
+    "/tmp/__autograph_generated_file*.py",
+    # Synthetic module compiled in-memory by tests/test_log.py; never on disk.
+    "*/_fake_internal_module.py",
+]
 
 [tool.coverage.report]
 omit = ["zea/ops/keras_ops.py", "zea/data/app.py"]
