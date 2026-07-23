@@ -22,6 +22,7 @@ from zea.data.datasets import Dataset
 from zea.data.spec import (
     CONSISTENCY_DIMENSIONS,
     FileSpec,
+    ProbeSpec,
     ScanSpec,
     Spec,
     find_matched_shape,
@@ -744,22 +745,24 @@ def sa_to_virtual_focus(
         file_spec = f._to_file_spec()
 
     probe = file_spec.probe
+    if not isinstance(probe, ProbeSpec) or probe.probe_geometry is None:
+        raise ValueError("sa_to_virtual_focus requires a probe with a defined probe_geometry.")
+    probe_geometry = probe.probe_geometry
+    n_el = probe_geometry.shape[0]
     for track in file_spec.tracks:
         scan = track.scan
 
         if tx_apodization is None:
-            tx_apodization = ops.ones((1, probe.probe_geometry.shape[0]), dtype="float32")
+            tx_apodization = ops.ones((1, n_el), dtype="float32")
         elif tx_apodization == "kaiser":
             tx_apodization = ops.expand_dims(
-                ops.cast(ops.kaiser(probe.probe_geometry.shape[0], beta=5.0), "float32"), 0
+                ops.cast(ops.kaiser(n_el, beta=5.0), "float32"), 0
             )
         elif tx_apodization == "hanning":
-            tx_apodization = ops.expand_dims(
-                ops.cast(ops.hanning(probe.probe_geometry.shape[0]), "float32"), 0
-            )
+            tx_apodization = ops.expand_dims(ops.cast(ops.hanning(n_el), "float32"), 0)
         raw_data, t0_delays = construct_acquisition_from_synthetic_aperture(
             raw_data=getattr(track.data, "raw_data"),
-            probe_geometry=probe.probe_geometry,
+            probe_geometry=probe_geometry,
             sampling_frequency=scan.sampling_frequency,
             polar_angle=polar_angle,
             azimuth_angle=azimuth_angle,
