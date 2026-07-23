@@ -19,7 +19,6 @@ from tqdm import tqdm
 
 from zea import File, log
 from zea.data.datasets import Dataset
-from zea.data.file import File
 from zea.data.spec import (
     CONSISTENCY_DIMENSIONS,
     FileSpec,
