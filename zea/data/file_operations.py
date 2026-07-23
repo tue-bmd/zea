@@ -755,9 +755,7 @@ def sa_to_virtual_focus(
         if tx_apodization is None:
             tx_apodization = ops.ones((1, n_el), dtype="float32")
         elif tx_apodization == "kaiser":
-            tx_apodization = ops.expand_dims(
-                ops.cast(ops.kaiser(n_el, beta=5.0), "float32"), 0
-            )
+            tx_apodization = ops.expand_dims(ops.cast(ops.kaiser(n_el, beta=5.0), "float32"), 0)
         elif tx_apodization == "hanning":
             tx_apodization = ops.expand_dims(ops.cast(ops.hanning(n_el), "float32"), 0)
         raw_data, t0_delays = construct_acquisition_from_synthetic_aperture(
