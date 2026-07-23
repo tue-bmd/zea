@@ -720,6 +720,7 @@ def decode_hadamard_file_operation(input_path: Path, output_path: Path, overwrit
     )
 
 
+@_supports_folders
 def sa_to_virtual_focus(
     input_path: Path,
     output_path: Path,
