@@ -15,6 +15,7 @@ import tempfile
 import threading
 import warnings
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import tyro
@@ -47,6 +48,10 @@ warnings.filterwarnings(
     "ignore",
     message=r"'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated",
 )
+
+
+def _bind_gradio_event(component: Any, method: str, *args, **kwargs):
+    return getattr(component, method)(*args, **kwargs)
 
 
 # ── Logo ───────────────────────────────────────────────────────────────────────
@@ -1175,8 +1180,10 @@ def build_interface() -> "gr.Blocks":
         def _rev_toggle(path):
             return gr.update(interactive=_is_hf(path))
 
-        dataset_input.change(_rev_toggle, [dataset_input], [dataset_rev_input])
-        config_input.change(_rev_toggle, [config_input], [config_rev_input])
+        _bind_gradio_event(
+            dataset_input, "change", _rev_toggle, [dataset_input], [dataset_rev_input]
+        )
+        _bind_gradio_event(config_input, "change", _rev_toggle, [config_input], [config_rev_input])
 
         _TRACK_RESET = gr.update(choices=[("Track 0", 0)], value=0, visible=True, interactive=False)
 
@@ -1258,7 +1265,9 @@ def build_interface() -> "gr.Blocks":
                 _reset_key,
             )
 
-        dataset_input.blur(
+        _bind_gradio_event(
+            dataset_input,
+            "blur",
             _on_dataset_blur,
             inputs=[dataset_input],
             outputs=[
@@ -1312,7 +1321,9 @@ def build_interface() -> "gr.Blocks":
                 gr.Warning(f"Cannot access config: {short}")
                 return gr.update(interactive=False, choices=["main"], value=None)
 
-        config_input.blur(_on_config_blur, [config_input], [config_rev_input])
+        _bind_gradio_event(
+            config_input, "blur", _on_config_blur, [config_input], [config_rev_input]
+        )
 
         # Dataset revision change → refresh file list; auto-reload selected file at new revision
         def _on_dataset_rev_change_gen(rev, path, decoupled, current_file, key):
@@ -1383,7 +1394,9 @@ def build_interface() -> "gr.Blocks":
             )
             yield cfg_upd, gr.update(), fpaths, meta, trk, tlbls, run_upd, key_upd, sf, nf
 
-        dataset_rev_input.input(
+        _bind_gradio_event(
+            dataset_rev_input,
+            "input",
             _on_dataset_rev_change_gen,
             [dataset_rev_input, dataset_input, config_rev_decoupled, file_selector, key_input],
             [
@@ -1404,7 +1417,13 @@ def build_interface() -> "gr.Blocks":
         def _on_config_rev_input():
             return True, gr.update(label="Revision")
 
-        config_rev_input.input(_on_config_rev_input, [], [config_rev_decoupled, config_rev_input])
+        _bind_gradio_event(
+            config_rev_input,
+            "input",
+            _on_config_rev_input,
+            [],
+            [config_rev_decoupled, config_rev_input],
+        )
 
         # Preset → fill all fields + reset sync state (no file auto-load)
         def _apply_preset(name):
@@ -1442,7 +1461,9 @@ def build_interface() -> "gr.Blocks":
                 gr.update(interactive=False),  # run_btn — re-enabled after file is picked
             )
 
-        preset_selector.change(
+        _bind_gradio_event(
+            preset_selector,
+            "change",
             _apply_preset,
             [preset_selector],
             [
@@ -1546,7 +1567,9 @@ def build_interface() -> "gr.Blocks":
                 gr.update(interactive=_is_hf(config_path or "")),  # config_rev_input
             )
 
-        file_select_event = file_selector.change(
+        file_select_event = _bind_gradio_event(
+            file_selector,
+            "change",
             _on_file_select_gen,
             inputs=[file_selector, file_paths_state, key_input, dataset_rev_input, config_input],
             outputs=[
@@ -1569,7 +1592,9 @@ def build_interface() -> "gr.Blocks":
         )
 
         # Key chosen → enable run button (file is already loaded at this point)
-        key_input.change(
+        _bind_gradio_event(
+            key_input,
+            "change",
             lambda key, fname: gr.update(interactive=bool(key and fname)),
             inputs=[key_input, file_selector],
             outputs=[run_btn],
@@ -1606,7 +1631,9 @@ def build_interface() -> "gr.Blocks":
             except Exception:
                 return gr.update(), gr.update()
 
-        track_selector.change(
+        _bind_gradio_event(
+            track_selector,
+            "change",
             _on_track_change,
             [
                 track_selector,
@@ -1619,7 +1646,9 @@ def build_interface() -> "gr.Blocks":
         )
 
         # Config editor: mark when user types → editor contents now override the path
-        config_editor.input(
+        _bind_gradio_event(
+            config_editor,
+            "input",
             lambda: (gr.update(visible=True, value=_EDITOR_ACTIVE_HTML), True),
             [],
             [editor_indicator, editor_override_active],
@@ -1629,7 +1658,9 @@ def build_interface() -> "gr.Blocks":
         def _load_and_clear(path, revision):
             return _load_config_text(path, revision), gr.update(visible=False, value=""), False
 
-        load_config_btn.click(
+        _bind_gradio_event(
+            load_config_btn,
+            "click",
             _load_and_clear,
             [config_input, config_rev_input],
             [config_editor, editor_indicator, editor_override_active],
@@ -1641,11 +1672,19 @@ def build_interface() -> "gr.Blocks":
             return gr.update(visible=False, value=""), False
 
         for _component in (dataset_input, config_input):
-            _component.change(
-                _clear_editor_override, [], [editor_indicator, editor_override_active]
+            _bind_gradio_event(
+                _component,
+                "change",
+                _clear_editor_override,
+                [],
+                [editor_indicator, editor_override_active],
             )
-        preset_selector.change(
-            _clear_editor_override, [], [editor_indicator, editor_override_active]
+        _bind_gradio_event(
+            preset_selector,
+            "change",
+            _clear_editor_override,
+            [],
+            [editor_indicator, editor_override_active],
         )
 
         # Run generator
@@ -1777,7 +1816,9 @@ def build_interface() -> "gr.Blocks":
                     except OSError:
                         pass
 
-        run_event = run_btn.click(
+        run_event = _bind_gradio_event(
+            run_btn,
+            "click",
             _on_run,
             inputs=[
                 dataset_input,
@@ -1833,7 +1874,9 @@ def build_interface() -> "gr.Blocks":
             )
 
         # Stop cancels both run and file-loading events, and restores UI directly.
-        stop_btn.click(
+        _bind_gradio_event(
+            stop_btn,
+            "click",
             _on_stop,
             inputs=[key_input],
             outputs=[
@@ -1854,7 +1897,7 @@ def build_interface() -> "gr.Blocks":
             cancels=[run_event, file_select_event],
         )
 
-        status_output.change(fn=None, js=_SCROLL_JS)
+        _bind_gradio_event(status_output, "change", fn=None, js=_SCROLL_JS)
         demo.load(_load_config_text, inputs=[config_input], outputs=[config_editor])
 
     return demo

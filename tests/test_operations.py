@@ -765,6 +765,254 @@ def test_generalized_coherence_factor_m_zero_passthrough():
     return out_init
 
 
+def _reference_capon(x, subarray_size, diagonal_loading, axial_k=0, axial_stride=1):
+    """Textbook Capon/MVDR with forward spatial smoothing, in plain numpy.
+
+    Args:
+        x: complex array of shape ``(n_tx, n_pix, n_el)``.
+        axial_k: half-width of the axial covariance averaging window.
+        axial_stride: flat-index distance between axially adjacent pixels.
+
+    Returns:
+        Complex array of shape ``(n_pix,)``: sub-aperture-averaged, transmit-compounded.
+    """
+    n_tx, n_pix, n_el = x.shape
+    num_subarrays = n_el - subarray_size + 1
+    steering = np.ones(subarray_size, dtype=np.complex128)
+    out = np.zeros(n_pix, dtype=np.complex128)
+
+    # each transmit is beamformed with its own weights, then compounded
+    for tx in range(n_tx):
+        subs = [
+            np.array([x[tx, pix, start : start + subarray_size] for start in range(num_subarrays)])
+            for pix in range(n_pix)
+        ]
+        covariances = [np.einsum("li,lj->ij", s, s.conj()) / num_subarrays for s in subs]
+        for pix in range(n_pix):
+            neighbours = [
+                pix + k * axial_stride
+                for k in range(-axial_k, axial_k + 1)
+                if 0 <= pix + k * axial_stride < n_pix
+            ]
+            cov = sum(covariances[n] for n in neighbours) / len(neighbours)
+            # loading relative to the mean eigenvalue, i.e. trace / subarray_size
+            loading = diagonal_loading * np.trace(cov).real / subarray_size
+            cov_inv_a = np.linalg.solve(cov + loading * np.eye(subarray_size), steering)
+            weights = cov_inv_a / (steering.conj() @ cov_inv_a)
+            out[pix] += (weights.conj() @ subs[pix].sum(axis=0)) / num_subarrays
+    return out
+
+
+@pytest.mark.parametrize("subarray_size", [None, 3, 8])
+@backend_equality_check()
+def test_minimum_variance_matches_reference(subarray_size):
+    """MV output matches a plain-numpy Capon implementation, and has the right shape."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el = 3, 9, 8
+    complex_data = rng.standard_normal((n_tx, n_pix, n_el)) + 1j * rng.standard_normal(
+        (n_tx, n_pix, n_el)
+    )
+    data = np.stack([complex_data.real, complex_data.imag], axis=-1).astype(np.float32)
+
+    op = ops.MinimumVariance(subarray_size=subarray_size, axial_averaging=0, with_batch_dim=True)
+    out = op(data=keras.ops.convert_to_tensor(data[None]))["data"]
+    assert out.shape == (1, n_pix, 2)
+
+    expected = _reference_capon(
+        complex_data,
+        subarray_size if subarray_size is not None else n_el // 2,
+        op.diagonal_loading,
+    )
+    out_np = keras.ops.convert_to_numpy(out)[0]
+    assert np.allclose(out_np[:, 0], expected.real, atol=1e-4), "MV real part differs from Capon"
+    assert np.allclose(out_np[:, 1], expected.imag, atol=1e-4), "MV imag part differs from Capon"
+    return out
+
+
+@pytest.mark.parametrize("axial_averaging", [1, 2])
+@backend_equality_check()
+def test_minimum_variance_axial_averaging_matches_reference(axial_averaging):
+    """Axial covariance averaging matches the reference, including at the grid edges."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_el = 2, 8
+    grid_size_z, grid_size_x = 7, 3
+    n_pix = grid_size_z * grid_size_x
+    complex_data = rng.standard_normal((n_tx, n_pix, n_el)) + 1j * rng.standard_normal(
+        (n_tx, n_pix, n_el)
+    )
+    data = np.stack([complex_data.real, complex_data.imag], axis=-1).astype(np.float32)
+    # (n_z, n_x, 3); only its shape is used, to locate axially adjacent pixels
+    grid = np.zeros((grid_size_z, grid_size_x, 3), dtype=np.float32)
+
+    op = ops.MinimumVariance(subarray_size=4, axial_averaging=axial_averaging, with_batch_dim=True)
+    out = op(data=keras.ops.convert_to_tensor(data[None]), grid=grid)["data"]
+
+    expected = _reference_capon(
+        complex_data,
+        4,
+        op.diagonal_loading,
+        axial_k=axial_averaging,
+        axial_stride=grid_size_x,
+    )
+    out_np = keras.ops.convert_to_numpy(out)[0]
+    assert np.allclose(out_np[:, 0], expected.real, atol=1e-4), "MV real part differs from Capon"
+    assert np.allclose(out_np[:, 1], expected.imag, atol=1e-4), "MV imag part differs from Capon"
+    return out
+
+
+@backend_equality_check()
+def test_minimum_variance_axial_averaging_changes_output():
+    """Axial averaging is actually applied when a grid is available."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(0)
+    n_tx, n_el = 2, 8
+    grid_size_z, grid_size_x = 6, 4
+    data = rng.standard_normal((1, n_tx, grid_size_z * grid_size_x, n_el, 2)).astype(np.float32)
+    tensor = keras.ops.convert_to_tensor(data)
+    grid = np.zeros((grid_size_z, grid_size_x, 3), dtype=np.float32)
+
+    smoothed = ops.MinimumVariance(axial_averaging=2, with_batch_dim=True)(data=tensor, grid=grid)[
+        "data"
+    ]
+    plain = ops.MinimumVariance(axial_averaging=0, with_batch_dim=True)(data=tensor, grid=grid)[
+        "data"
+    ]
+    assert not np.allclose(
+        keras.ops.convert_to_numpy(smoothed), keras.ops.convert_to_numpy(plain)
+    ), "axial_averaging had no effect"
+    return smoothed
+
+
+@backend_equality_check()
+def test_minimum_variance_large_loading_tends_to_das():
+    """With heavy diagonal loading the Capon weights collapse to uniform, i.e. DAS."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el = 3, 7, 8
+    data = rng.standard_normal((1, n_tx, n_pix, n_el, 2)).astype(np.float32)
+    tensor = keras.ops.convert_to_tensor(data)
+
+    # A single sub-aperture spanning the full aperture makes the DAS limit exact:
+    # w -> 1/n_el, so the output is the DAS sum divided by n_el.
+    out = ops.MinimumVariance(subarray_size=n_el, diagonal_loading=1e8, with_batch_dim=True)(
+        data=tensor
+    )["data"]
+    das = ops.DelayAndSum(with_batch_dim=True)(data=tensor)["data"]
+
+    assert np.allclose(
+        keras.ops.convert_to_numpy(out),
+        keras.ops.convert_to_numpy(das) / n_el,
+        atol=1e-5,
+    ), "Heavily loaded MV should reduce to DAS"
+    return out
+
+
+@backend_equality_check()
+def test_minimum_variance_is_scale_equivariant():
+    """Scaling the input scales the output by the same factor.
+
+    The Capon weights are scale invariant (both the covariance and the trace-relative
+    diagonal loading scale with the signal power), so the beamformer must be linear in
+    the input amplitude. Any absolute epsilon in the weight normalisation breaks this.
+    """
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    data = rng.standard_normal((1, 3, 7, 8, 2)).astype(np.float32)
+    op = ops.MinimumVariance(with_batch_dim=True)
+
+    factor = 1e3
+    out = op(data=keras.ops.convert_to_tensor(data))["data"]
+    out_scaled = op(data=keras.ops.convert_to_tensor(data * factor))["data"]
+
+    assert np.allclose(
+        keras.ops.convert_to_numpy(out) * factor,
+        keras.ops.convert_to_numpy(out_scaled),
+        rtol=1e-3,
+    ), "MV output should scale linearly with the input amplitude"
+    return out
+
+
+@backend_equality_check()
+def test_minimum_variance_masked_aperture_is_finite():
+    """A partially masked receive aperture (f-number mask) must not produce NaN/Inf."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el = 4, 6, 16
+    data = rng.standard_normal((1, n_tx, n_pix, n_el, 2)).astype(np.float32)
+    data[..., n_el // 2 :, :] = 0.0  # half the aperture masked out
+    out = ops.MinimumVariance(subarray_size=8, with_batch_dim=True)(
+        data=keras.ops.convert_to_tensor(data)
+    )["data"]
+    assert np.all(np.isfinite(keras.ops.convert_to_numpy(out))), (
+        "MV produced non-finite values for a partially masked aperture"
+    )
+    return out
+
+
+def test_minimum_variance_requires_iq_data():
+    """MV should raise ValueError when given single-channel (RF) data."""
+    import keras
+
+    from zea import ops
+
+    data = keras.ops.zeros((1, 2, 5, 8, 1))
+    with pytest.raises(ValueError, match="requires IQ data"):
+        ops.MinimumVariance(with_batch_dim=True)(data=data)
+
+
+@pytest.mark.parametrize("kwargs", [{"subarray_size": 0}, {"subarray_size": 2.5}])
+def test_minimum_variance_invalid_subarray_size(kwargs):
+    """Invalid subarray_size is rejected at construction time."""
+    from zea import ops
+
+    with pytest.raises(ValueError, match="subarray_size"):
+        ops.MinimumVariance(**kwargs)
+
+
+@backend_equality_check()
+def test_minimum_variance_zero_data_is_finite():
+    """All-zero input (boundary pixels) must produce finite output, not NaN.
+
+    TOFCorrection returns zeros outside the image boundary.  The covariance for
+    those pixels is the zero matrix, whose trace is zero, so diagonal loading
+    collapses unless the trace is clamped away from zero.  This test exercises
+    that guard directly.
+    """
+    import keras
+
+    from zea import ops
+
+    n_tx, n_pix, n_el = 2, 5, 8
+    data = keras.ops.zeros((1, n_tx, n_pix, n_el, 2))
+    out = ops.MinimumVariance(with_batch_dim=True)(data=data)["data"]
+    out_np = keras.ops.convert_to_numpy(out)
+    assert np.all(np.isfinite(out_np)), (
+        f"MV produced non-finite values for all-zero input: "
+        f"nan={np.isnan(out_np).sum()}, inf={np.isinf(out_np).sum()}"
+    )
+    return out
+
+
 @pytest.mark.parametrize(
     "axis, size, start, end, window_type",
     [

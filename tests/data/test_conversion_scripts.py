@@ -1,6 +1,5 @@
 """Test dataset conversion scripts"""
 
-import argparse
 import csv
 import os
 import shutil
@@ -15,8 +14,10 @@ import imageio
 import numpy as np
 import pytest
 import SimpleITK as sitk
+import tyro
 import yaml
 
+from zea.data.convert.__main__ import Dataset
 from zea.data.convert.images import convert_image_dataset
 from zea.data.convert.utils import (
     check_output_dir_ownership,
@@ -96,9 +97,9 @@ def test_conversion_script(tmp_path_factory, dataset):
                 dataset,
                 str(src),
                 str(dst2),
-                "--split_path",
+                "--split-path",
                 str(dst),
-                "--no_hyperthreading",
+                "--no-hyperthreading",
             ],
             env=create_env_for_dataset(dataset),
         )
@@ -465,7 +466,7 @@ def create_camus_test_data(src):
             gt_image, str(patient_folder / f"{patient_name}_2CH_half_sequence_gt.nii.gz")
         )
 
-    return ["--no_hyperthreading"]  # for code coverage to hit
+    return ["--no-hyperthreading"]  # for code coverage to hit
 
 
 def create_cetus_test_data(src):
@@ -497,7 +498,7 @@ def create_cetus_test_data(src):
             gt_image.SetSpacing((0.0005763, 0.0005763, 0.0005763))
             sitk.WriteImage(gt_image, str(patient_dir / f"{patient_name}_{tp}_gt.nii.gz"))
 
-    return ["--no_hyperthreading"]  # for code coverage to hit
+    return ["--no-hyperthreading"]  # for code coverage to hit
 
 
 def create_picmus_test_data(src):
@@ -1031,18 +1032,7 @@ def test_echoxflow_conversion_script(tmp_path_factory, monkeypatch):
 
     expected = create_echoxflow_test_data(src, monkeypatch)
 
-    args = argparse.Namespace(
-        src=str(src),
-        dst=str(dst),
-        croissant=None,
-        min_frames=10,
-        min_fps=30.0,
-        limit=None,
-        overwrite=False,
-        upload=False,
-        revision=None,
-        hf_repo_id="",
-    )
+    args = tyro.cli(Dataset, args=["echoxflow", str(src), str(dst)])  # ty: ignore[no-matching-overload]
     convert_echoxflow(args)
 
     verify_converted_echoxflow_test_data(dst, expected)
@@ -1055,18 +1045,7 @@ def test_echoxflow_missing_package_raises(monkeypatch):
     # Ensure importing echoxflow fails even if it ever gets installed.
     monkeypatch.setitem(sys.modules, "echoxflow", None)
 
-    args = argparse.Namespace(
-        src="/tmp/echoxflow_src",
-        dst="/tmp/echoxflow_dst",
-        croissant=None,
-        min_frames=10,
-        min_fps=30.0,
-        limit=None,
-        overwrite=False,
-        upload=False,
-        revision=None,
-        hf_repo_id="",
-    )
+    args = tyro.cli(Dataset, args=["echoxflow", "/tmp/echoxflow_src", "/tmp/echoxflow_dst"])  # ty: ignore[no-matching-overload]
     with pytest.raises(ImportError, match="Install it from GitHub"):
         convert_echoxflow(args)
 
@@ -1360,15 +1339,9 @@ def test_verasonics_upload_requires_hf_repo_id(tmp_path, monkeypatch):
     src.mkdir()
     dst.mkdir()
 
-    args = argparse.Namespace(
-        src=str(src),
-        dst=str(dst),
-        frames=None,
-        allow_accumulate=False,
-        device="cpu",
-        upload=True,
-        hf_repo_id="",
-        revision="test-branch",
+    args = tyro.cli(  # ty: ignore[no-matching-overload]
+        Dataset,
+        args=["verasonics", str(src), str(dst), "--upload", "--revision", "test-branch"],
     )
 
     monkeypatch.setattr("zea.data.convert.verasonics.init_device", lambda *_: None)
@@ -1384,15 +1357,9 @@ def test_verasonics_upload_requires_revision(tmp_path, monkeypatch):
     src.mkdir()
     dst.mkdir()
 
-    args = argparse.Namespace(
-        src=str(src),
-        dst=str(dst),
-        frames=None,
-        allow_accumulate=False,
-        device="cpu",
-        upload=True,
-        hf_repo_id="zeahub/test-dataset",
-        revision=None,
+    args = tyro.cli(  # ty: ignore[no-matching-overload]
+        Dataset,
+        args=["verasonics", str(src), str(dst), "--upload", "--hf-repo-id", "zeahub/test-dataset"],
     )
 
     monkeypatch.setattr("zea.data.convert.verasonics.init_device", lambda *_: None)
