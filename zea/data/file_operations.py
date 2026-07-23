@@ -699,16 +699,19 @@ def decode_hadamard_file_operation(input_path: Path, output_path: Path, overwrit
     with File(input_path) as f:
         file_spec = f._to_file_spec()
 
-    if file_spec.tracks[0].data["raw_data"] is None:
-        raise ValueError("No raw_data found in the input file.")
+    for track in file_spec.tracks:
+        try:
+            raw_data = getattr(track.data, "raw_data")
+            if raw_data is None:
+                raise ValueError("No raw_data found in the input file.")
 
-    raw_data = file_spec.tracks[0].data["raw_data"]
-    tx_apodizations = file_spec.tracks[0].scan.tx_apodizations
-    raw_data = decode_hadamard(raw_data, tx_apodizations)
-    file_spec.tracks[0].data["raw_data"] = raw_data
-    file_spec.tracks[0].scan.tx_apodizations = np.eye(
-        file_spec.tracks[0].scan.tx_apodizations.shape[1]
-    )
+            tx_apodizations = track.scan.tx_apodizations
+            raw_data = decode_hadamard(raw_data, tx_apodizations)
+            track.scan.tx_apodizations = np.eye(track.scan.tx_apodizations.shape[1])
+
+            _set_data_array(track, "raw_data", raw_data)
+        except (ValueError, Exception):
+            pass
     if overwrite:
         _delete_file_if_exists(output_path)
 
@@ -736,9 +739,9 @@ def sa_to_virtual_focus(
     with File(input_path) as f:
         file_spec = f._to_file_spec()
 
+    probe = file_spec.probe
     for track in file_spec.tracks:
         scan = track.scan
-        probe = track.probe
 
         if tx_apodization is None:
             tx_apodization = ops.ones((1, probe.probe_geometry.shape[0]), dtype=np.float32)
@@ -748,9 +751,8 @@ def sa_to_virtual_focus(
             ]
         elif tx_apodization == "hanning":
             tx_apodization = ops.hanning(probe.probe_geometry.shape[0]).astype(np.float32)[None, :]
-
         raw_data, t0_delays = construct_acquisition_from_synthetic_aperture(
-            raw_data=track.data["raw_data"],
+            raw_data=getattr(track.data, "raw_data"),
             probe_geometry=probe.probe_geometry,
             sampling_frequency=scan.sampling_frequency,
             polar_angle=polar_angle,
@@ -761,9 +763,9 @@ def sa_to_virtual_focus(
             tx_apodization=tx_apodization,
         )
 
-        track.data["raw_data"] = ops.convert_to_numpy(raw_data)
+        _set_data_array(track, "raw_data", raw_data)
         track.scan.t0_delays = np.asarray(t0_delays)
-        track.scan.tx_apodizations = np.ones((1, track.probe.probe_geometry.shape[0]))
+        track.scan.tx_apodizations = np.ones((1, probe.probe_geometry.shape[0]))
         track.scan.polar_angles = np.array([polar_angle])
         track.scan.azimuth_angles = np.array([azimuth_angle])
         track.scan.focus_distances = np.array([focus_distance])
@@ -772,7 +774,7 @@ def sa_to_virtual_focus(
         track.scan.waveforms_one_way = track.scan.waveforms_one_way[:1]
         track.scan.waveforms_two_way = track.scan.waveforms_two_way[:1]
         track.scan.time_to_next_transmit = track.scan.time_to_next_transmit[:, :1]
-        track.scan.set_transmits([0])
+
     file_spec.save(
         path=str(output_path),
     )
