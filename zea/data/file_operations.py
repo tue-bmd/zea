@@ -695,6 +695,7 @@ def decode_hadamard_file_operation(input_path: Path, output_path: Path, overwrit
             data will be saved.
         overwrite: Whether to overwrite the output file if it exists.
     """
+    _prepare_output_path(str(output_path), overwrite)
 
     with File(input_path) as f:
         file_spec = f._to_file_spec()
@@ -737,6 +738,8 @@ def sa_to_virtual_focus(
     angles, focus distance, and transmit origin.
     """
 
+    _prepare_output_path(str(output_path), overwrite)
+
     with File(input_path) as f:
         file_spec = f._to_file_spec()
 
@@ -766,7 +769,7 @@ def sa_to_virtual_focus(
 
         _set_data_array(track, "raw_data", raw_data)
         track.scan.t0_delays = np.asarray(t0_delays)
-        track.scan.tx_apodizations = np.ones((1, probe.probe_geometry.shape[0]))
+        track.scan.tx_apodizations = ops.convert_to_numpy(tx_apodization)
         track.scan.polar_angles = np.array([polar_angle])
         track.scan.azimuth_angles = np.array([azimuth_angle])
         track.scan.focus_distances = np.array([focus_distance])
@@ -795,6 +798,7 @@ def _prepare_output_path(output_path: str, overwrite: bool):
 
     Also refuses to save to an ``hf://`` path, which is read-only.
     """
+
     if output_path.startswith(HF_PREFIX):
         raise ValueError(
             f"Cannot save to an 'hf://' path: {output_path}. 'hf://' paths are read-only; "
