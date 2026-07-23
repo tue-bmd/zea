@@ -1083,7 +1083,7 @@ def decode_hadamard(raw_data, tx_apodizations):
             n_ch).
         tx_apodizations (ops.Tensor): The transmit apodizations of shape (n_tx, n_tx).
     """
-    raw_data = np.einsum("ijklm,ja->iaklm", raw_data, tx_apodizations.T)
+    raw_data = ops.einsum("ijklm,ja->iaklm", raw_data, tx_apodizations.T)
     tx_apodizations_decoded = tx_apodizations @ tx_apodizations.T
     if not np.allclose(
         tx_apodizations_decoded / np.max(tx_apodizations_decoded),
