@@ -36,8 +36,8 @@ The dataset comprises three partitions:
 
 .. code-block:: console
 
-   python -m zea.data.convert picmus ./raw ./output --download
-   python -m zea.data.convert picmus ./raw ./output
+   zea convert picmus ./raw ./output --download
+   zea convert picmus ./raw ./output
 
 """
 
@@ -339,10 +339,10 @@ def convert_picmus(args):
     Usage::
 
         # Download and convert everything (main + in-vivo)
-        python -m zea.data.convert picmus <src> <dst> --download
+        zea convert picmus <src> <dst> --download
 
         # Convert from manually extracted archives
-        python -m zea.data.convert picmus <src> <dst>
+        zea convert picmus <src> <dst>
 
     Args:
         args (argparse.Namespace): An object with the following attributes.
@@ -495,7 +495,7 @@ This dataset was downloaded, converted to zea format, and uploaded using the
 [zea](https://github.com/tue-bmd/zea) data converter:
 
 ```bash
-python -m zea.data.convert picmus <src> <dst> --download
+zea convert picmus <src> <dst> --download
 ```
 
 ## Dataset structure

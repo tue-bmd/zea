@@ -3,12 +3,14 @@
 Contains both tests for zea.utils and zea.internal.utils.
 """
 
+import gc
 import re
 
 import numpy as np
 import pytest
 from keras import ops
 
+from zea import log
 from zea.backend import jit
 from zea.internal.utils import (
     calculate_file_hash,
@@ -17,6 +19,7 @@ from zea.internal.utils import (
     first_not_none_item,
 )
 from zea.utils import (
+    ProgressBar,
     block_until_ready,
     get_date_string,
     strtobool,
@@ -246,3 +249,34 @@ def test_block_until_ready_timing():
 
     print(f"Backend: {backend_name}")
     print("block_until_ready backend-specific function test completed!")
+
+
+def test_progressbar_registers_with_log_when_verbose():
+    bar = ProgressBar(5, verbose=1)
+    assert bar._dynamic_display, "test assumes a dynamic-display-capable environment"
+    assert bar in log._active_progress
+
+
+def test_progressbar_does_not_register_when_verbose_is_zero():
+    bar = ProgressBar(5, verbose=0)
+    assert bar not in log._active_progress
+
+
+def test_progressbar_unregisters_once_target_is_reached():
+    bar = ProgressBar(3, verbose=1)
+    bar.update(1)
+    assert bar in log._active_progress
+    bar.update(3)  # reaches target -> finalizes
+    assert bar not in log._active_progress
+
+
+def test_progressbar_is_garbage_collected_if_loop_breaks_before_target():
+    bar = ProgressBar(50, verbose=1)
+    bar.update(1)  # far from target, never finalized
+    assert bar in log._active_progress
+
+    del bar
+    gc.collect()
+    assert len(log._active_progress) == 0 or all(
+        not isinstance(b, ProgressBar) for b in log._active_progress
+    )

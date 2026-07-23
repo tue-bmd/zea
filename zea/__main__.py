@@ -5,6 +5,7 @@ Usage::
     zea process --dataset <path> --config <config.yaml> [options]  # batch beamform a dataset
     zea app [--share] [--server-port PORT]                         # launch the Gradio visualizer
     zea data <operation> [options]                                 # manipulate zea data files
+    zea convert <dataset> <src> <dst> [options]                    # convert raw datasets to zea
 
 """
 
@@ -19,7 +20,7 @@ if "ZEA_LOG_LEVEL" not in os.environ:
 
     log.set_level("WARNING")
 
-from zea.cli_args import AppArgs, DataArgs, ProcessArgs
+from zea.cli_args import AppArgs, ConvertArgs, DataArgs, ProcessArgs
 
 # subcommands that don't require a device
 _NO_DEVICE_FNS = [DataArgs]
@@ -34,6 +35,7 @@ class CLI:
             Annotated[ProcessArgs, tyro.conf.subcommand("process")],
             Annotated[AppArgs, tyro.conf.subcommand("app")],
             Annotated[DataArgs, tyro.conf.subcommand("data")],
+            Annotated[ConvertArgs, tyro.conf.subcommand("convert")],
         ]
     ]
     device: Annotated[
@@ -61,7 +63,9 @@ def main() -> None:
     if _check_if_device_needed(args):
         from zea.internal.device import init_device
 
-        init_device(cli_args.device)
+        # Conversion runs should not preallocate the full GPU, mirroring the
+        # standalone ``python -m zea.data.convert`` entry point.
+        init_device(cli_args.device, allow_preallocate=not isinstance(args, ConvertArgs))
 
     if isinstance(args, ProcessArgs):
         from zea.data.process import run_processing
@@ -99,7 +103,7 @@ def main() -> None:
             theme=gr.themes.Soft(primary_hue="violet", secondary_hue="yellow"),
             css=CSS,
         )
-    elif isinstance(args, DataArgs):
+    elif isinstance(args, (DataArgs, ConvertArgs)):
         args.run()
     else:
         raise ValueError(f"Unknown command: {args}")

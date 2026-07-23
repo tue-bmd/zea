@@ -4,7 +4,7 @@
 
 version: 2
 updates:
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -22,12 +22,33 @@ updates:
         versions:
           - ">6.0.0"
         # see https://github.com/tue-bmd/zea/issues/329
+      # The ML backends are pinned in the Dockerfile (ENV JAX_VERSION/TORCH_VERSION/TF_VERSION),
+      # which is what the images and CI actually install.
+      - dependency-name: "jax"
+      - dependency-name: "jaxlib"
+      - dependency-name: "tensorflow"
+      - dependency-name: "torch"
+      - dependency-name: "torchvision"
+      - dependency-name: "torchaudio"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     groups:
       github-actions:
+        patterns:
+          - "*"
+    assignees:
+       - "tristan-deep"
+    labels:
+       - "dev"
+    open-pull-requests-limit: 3
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      pre-commit:
         patterns:
           - "*"
     assignees:

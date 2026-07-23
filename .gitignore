@@ -31,7 +31,11 @@ __pycache__/
 .DS_Store
 /.ideas
 .devcontainer
-.claude
+# Ignore local/personal Claude Code state, but keep shared project config tracked.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+!.claude/hooks/**
 
 # C extensions
 *.so

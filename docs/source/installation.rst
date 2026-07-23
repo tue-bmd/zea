@@ -64,13 +64,34 @@ Backend
    :start-after: .. backend-installation-start
    :end-before: .. backend-installation-end
 
+.. dropdown:: Notes for Windows users
+   :name: windows-users
+   :class-container: dropdown-accordion-windows-users
+
+   ``zea`` installs and runs on Windows the same way as above, with a couple of caveats:
+
+   - **GPU support is limited.** JAX and TensorFlow only support GPU acceleration on
+     Windows through WSL2. Native Windows installs are CPU-only for those backends.
+     PyTorch is the exception and does support CUDA natively on Windows. See the backend
+     links above for each framework's current platform support. ``zea`` itself runs fine
+     on CPU, but beamforming and model inference are much slower without a GPU, so one is
+     recommended for anything beyond small experiments.
+   - **Streaming reads** (``hf://`` sources, see :ref:`working-with-zea-data-files`) fall
+     back to a lock-guarded read instead of ``zea``'s fully parallel path, since Windows
+     lacks ``os.pread``. This is still faster than downloading whole files, just not as
+     fast as on Linux/macOS.
+
+   If you need GPU acceleration and are on Windows, running ``zea`` inside WSL2 (or the
+   :ref:`Docker images <docker-information>` via WSL2's GPU passthrough) is the most
+   reliable path.
+
 
 .. _docker-information:
 
 Docker
 -------
 
-This repository provides multiple Docker images built and tested in our CI pipeline.
+This repository provides multiple `Docker images <https://hub.docker.com/r/zeahub>`_ built and tested in our CI pipeline.
 
 Pre-built images
 ~~~~~~~~~~~~~~~~
@@ -78,10 +99,10 @@ Pre-built images
 
 The following images are available on Docker Hub:
 
-- `zeahub/all`: This image includes support for all machine learning backends (TensorFlow, PyTorch, and JAX).
-- `zeahub/tensorflow`: This image includes support for TensorFlow.
-- `zeahub/torch`: This image includes support for PyTorch.
-- `zeahub/jax`: This image includes support for JAX.
+- `zeahub/all <https://hub.docker.com/r/zeahub/all>`_: This image includes support for all machine learning backends (TensorFlow, PyTorch, and JAX).
+- `zeahub/tensorflow <https://hub.docker.com/r/zeahub/tensorflow>`_: This image includes support for TensorFlow.
+- `zeahub/torch <https://hub.docker.com/r/zeahub/torch>`_: This image includes support for PyTorch.
+- `zeahub/jax <https://hub.docker.com/r/zeahub/jax>`_: This image includes support for JAX.
 
 These images are uploaded to Docker Hub via the CI pipeline and can be used directly in your projects via:
 

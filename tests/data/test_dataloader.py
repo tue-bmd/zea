@@ -1065,15 +1065,15 @@ def test_file_filter_removing_all_raises(metadata_folder):
         Dataset(metadata_folder, validate=False, file_filter={"metadata.subject.sex": "zzz"})
 
 
-def test_file_filter_incompatible_with_lazy(metadata_folder):
-    """file_filter cannot be combined with lazy=True."""
-    with pytest.raises(ValueError, match="lazy"):
-        Dataset(
-            metadata_folder,
-            validate=False,
-            lazy=True,
-            file_filter={"metadata.subject.fat_percentage": EXISTS},
-        )
+def test_file_filter_with_lazy(metadata_folder):
+    """file_filter works with lazy=True (remote files are streamed for metadata only)."""
+    dataset = Dataset(
+        metadata_folder,
+        validate=False,
+        lazy=True,
+        file_filter={"metadata.subject.fat_percentage": EXISTS},
+    )
+    assert _kept_names(dataset) == ["a.hdf5", "c.hdf5"]
 
 
 def test_file_filter_via_dataloader(metadata_folder):
