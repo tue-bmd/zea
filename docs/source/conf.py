@@ -3,6 +3,8 @@
 import os
 
 os.environ["KERAS_BACKEND"] = "numpy"
+os.environ.setdefault("JAX_PLATFORMS", "cpu")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
 import sys
 from importlib.metadata import version as get_version
