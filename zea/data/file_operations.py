@@ -707,7 +707,7 @@ def decode_hadamard_file_operation(input_path: Path, output_path: Path, overwrit
                 raise ValueError("No raw_data found in the input file.")
 
             tx_apodizations = track.scan.tx_apodizations
-            raw_data = decode_hadamard(raw_data, tx_apodizations)
+            raw_data = ops.convert_to_numpy(decode_hadamard(raw_data, tx_apodizations))
             track.scan.tx_apodizations = np.eye(track.scan.tx_apodizations.shape[1])
 
             _set_data_array(track, "raw_data", raw_data)
@@ -748,13 +748,15 @@ def sa_to_virtual_focus(
         scan = track.scan
 
         if tx_apodization is None:
-            tx_apodization = ops.ones((1, probe.probe_geometry.shape[0]), dtype=np.float32)
+            tx_apodization = ops.ones((1, probe.probe_geometry.shape[0]), dtype="float32")
         elif tx_apodization == "kaiser":
-            tx_apodization = ops.kaiser(probe.probe_geometry.shape[0], beta=5.0).astype(np.float32)[
-                None, :
-            ]
+            tx_apodization = ops.expand_dims(
+                ops.cast(ops.kaiser(probe.probe_geometry.shape[0], beta=5.0), "float32"), 0
+            )
         elif tx_apodization == "hanning":
-            tx_apodization = ops.hanning(probe.probe_geometry.shape[0]).astype(np.float32)[None, :]
+            tx_apodization = ops.expand_dims(
+                ops.cast(ops.hanning(probe.probe_geometry.shape[0]), "float32"), 0
+            )
         raw_data, t0_delays = construct_acquisition_from_synthetic_aperture(
             raw_data=getattr(track.data, "raw_data"),
             probe_geometry=probe.probe_geometry,
@@ -767,7 +769,7 @@ def sa_to_virtual_focus(
             tx_apodization=tx_apodization,
         )
 
-        _set_data_array(track, "raw_data", raw_data)
+        _set_data_array(track, "raw_data", ops.convert_to_numpy(raw_data))
         track.scan.t0_delays = np.asarray(t0_delays)
         track.scan.tx_apodizations = ops.convert_to_numpy(tx_apodization)
         track.scan.polar_angles = np.array([polar_angle])
