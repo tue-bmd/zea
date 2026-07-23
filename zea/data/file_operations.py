@@ -19,10 +19,9 @@ from tqdm import tqdm
 
 from zea import File, log
 from zea.data.datasets import Dataset
-from zea.data.file import File, load_file_all_data_types
+from zea.data.file import File
 from zea.data.spec import (
     CONSISTENCY_DIMENSIONS,
-    DEFAULT_COMPRESSION,
     FileSpec,
     ScanSpec,
     Spec,
@@ -696,28 +695,25 @@ def decode_hadamard_file_operation(input_path: Path, output_path: Path, overwrit
             data will be saved.
         overwrite: Whether to overwrite the output file if it exists.
     """
-    data_dict, parameters = load_file_all_data_types(input_path)
-    with File(input_path) as f:
-        description = f.description
-        custom_elements = f.custom
 
-    if data_dict["raw_data"] is None:
+    with File(input_path) as f:
+        file_spec = f._to_file_spec()
+
+    if file_spec.tracks[0].data["raw_data"] is None:
         raise ValueError("No raw_data found in the input file.")
 
-    raw_data = data_dict["raw_data"]
-    tx_apodizations = parameters.tx_apodizations
+    raw_data = file_spec.tracks[0].data["raw_data"]
+    tx_apodizations = file_spec.tracks[0].scan.tx_apodizations
     raw_data = decode_hadamard(raw_data, tx_apodizations)
-    data_dict["raw_data"] = raw_data
-    parameters.tx_apodizations = np.eye(parameters.tx_apodizations.shape[1])
+    file_spec.tracks[0].data["raw_data"] = raw_data
+    file_spec.tracks[0].scan.tx_apodizations = np.eye(
+        file_spec.tracks[0].scan.tx_apodizations.shape[1]
+    )
     if overwrite:
         _delete_file_if_exists(output_path)
 
-    save_file(
-        path=output_path,
-        **data_dict,
-        parameters=parameters,
-        custom_elements=custom_elements,
-        description=description,
+    file_spec.save(
+        path=str(output_path),
     )
 
 
@@ -737,48 +733,48 @@ def sa_to_virtual_focus(
     angles, focus distance, and transmit origin.
     """
 
-    data_dict, parameters = load_file_all_data_types(input_path)
+    with File(input_path) as f:
+        file_spec = f._to_file_spec()
 
-    if tx_apodization is None:
-        tx_apodization = ops.ones((1, parameters.probe_geometry.shape[0]), dtype=np.float32)
-    elif tx_apodization == "kaiser":
-        tx_apodization = ops.kaiser(parameters.probe_geometry.shape[0], beta=5.0).astype(
-            np.float32
-        )[None, :]
-    elif tx_apodization == "hanning":
-        tx_apodization = ops.hanning(parameters.probe_geometry.shape[0]).astype(np.float32)[None, :]
+    for track in file_spec.tracks:
+        scan = track.scan
+        probe = track.probe
 
-    raw_data, t0_delays = construct_acquisition_from_synthetic_aperture(
-        raw_data=data_dict["raw_data"],
-        probe_geometry=parameters.probe_geometry,
-        sampling_frequency=parameters.sampling_frequency,
-        polar_angle=polar_angle,
-        azimuth_angle=azimuth_angle,
-        focus_distance=focus_distance,
-        transmit_origin=transmit_origin,
-        sound_speed=parameters.sound_speed,
-        tx_apodization=tx_apodization,
-    )
+        if tx_apodization is None:
+            tx_apodization = ops.ones((1, probe.probe_geometry.shape[0]), dtype=np.float32)
+        elif tx_apodization == "kaiser":
+            tx_apodization = ops.kaiser(probe.probe_geometry.shape[0], beta=5.0).astype(np.float32)[
+                None, :
+            ]
+        elif tx_apodization == "hanning":
+            tx_apodization = ops.hanning(probe.probe_geometry.shape[0]).astype(np.float32)[None, :]
 
-    data_dict["raw_data"] = ops.convert_to_numpy(raw_data)
-    parameters.t0_delays = np.asarray(t0_delays)
-    parameters.tx_apodizations = np.ones((1, parameters.probe_geometry.shape[0]))
-    parameters.polar_angles = np.array([polar_angle])
-    parameters.azimuth_angles = np.array([azimuth_angle])
-    parameters.focus_distances = np.array([focus_distance])
-    parameters.transmit_origins = np.array([transmit_origin])
-    parameters.initial_times = parameters.initial_times[:1]
-    parameters.waveforms_one_way = parameters.waveforms_one_way[:1]
-    parameters.waveforms_two_way = parameters.waveforms_two_way[:1]
-    parameters.time_to_next_transmit = parameters.time_to_next_transmit[:, :1]
-    parameters.set_transmits([0])
-    save_file(
-        path=output_path,
-        **data_dict,
-        parameters=parameters,
-        custom_elements=None,
-        description="SA to virtual focus",
-        overwrite=overwrite,
+        raw_data, t0_delays = construct_acquisition_from_synthetic_aperture(
+            raw_data=track.data["raw_data"],
+            probe_geometry=probe.probe_geometry,
+            sampling_frequency=scan.sampling_frequency,
+            polar_angle=polar_angle,
+            azimuth_angle=azimuth_angle,
+            focus_distance=focus_distance,
+            transmit_origin=transmit_origin,
+            sound_speed=scan.sound_speed,
+            tx_apodization=tx_apodization,
+        )
+
+        track.data["raw_data"] = ops.convert_to_numpy(raw_data)
+        track.scan.t0_delays = np.asarray(t0_delays)
+        track.scan.tx_apodizations = np.ones((1, track.probe.probe_geometry.shape[0]))
+        track.scan.polar_angles = np.array([polar_angle])
+        track.scan.azimuth_angles = np.array([azimuth_angle])
+        track.scan.focus_distances = np.array([focus_distance])
+        track.scan.transmit_origins = np.array([transmit_origin])
+        track.scan.initial_times = track.scan.initial_times[:1]
+        track.scan.waveforms_one_way = track.scan.waveforms_one_way[:1]
+        track.scan.waveforms_two_way = track.scan.waveforms_two_way[:1]
+        track.scan.time_to_next_transmit = track.scan.time_to_next_transmit[:, :1]
+        track.scan.set_transmits([0])
+    file_spec.save(
+        path=str(output_path),
     )
 
 
