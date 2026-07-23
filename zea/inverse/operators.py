@@ -405,10 +405,13 @@ class ScattererSimulator:
 
         def _chunk_contribution(channel, waveform, tx_time, tx_gain, rx_time, rx_gain, magnitude):
             """Add one scatterer chunk's echoes to a transmit's channel data."""
-            tau = tx_time[:, None] + rx_time  # (chunk, n_el)
+            # Element-major layout: the echoes tensor is contracted over its
+            # contiguous last (scatterer) axis, which XLA lowers to an
+            # efficient batched reduction instead of a strided one.
+            tau = ops.transpose(tx_time[:, None] + rx_time)  # (n_el, chunk)
             echoes = self._interp_waveform(waveform, axial_times[None, :, None] - tau[:, None, :])
-            weights = (magnitude * tx_gain)[:, None] * rx_gain  # (chunk, n_el)
-            return channel + ops.einsum("cae,ce->ae", echoes, weights)
+            weights = ops.transpose((magnitude * tx_gain)[:, None] * rx_gain)  # (n_el, chunk)
+            return channel + ops.einsum("eac,ec->ae", echoes, weights)
 
         accumulate = keras.remat(_chunk_contribution)
 
