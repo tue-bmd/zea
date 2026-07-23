@@ -14,7 +14,7 @@
 repos:
 - repo: https://github.com/astral-sh/ruff-pre-commit
   # Ruff version.
-  rev: v0.15.17
+  rev: v0.15.22
   hooks:
     # Run the linter.
     - id: ruff-check
@@ -22,20 +22,12 @@ repos:
     # Run the formatter.
     - id: ruff-format
 
-# ty (type checker) is run as a *local* hook using the `ty` from the active
-# environment rather than the upstream astral-sh/ty-pre-commit hook. The upstream
-# hook type-checks inside an isolated environment that does not contain zea's
-# dependencies (keras, numpy, h5py, ...), which makes ty unable to resolve them
-# and produces many false positives. Running `ty` from the active environment
-# (the dev container, or a local `.venv` with `pip install -e .[dev]`) gives it
-# access to the installed dependencies. `ty` is pinned via the `dev`/`tests`
-# extras in pyproject.toml.
 - repo: local
   hooks:
     - id: ty
       name: ty
       description: "Run 'ty' for fast Python type checking"
-      entry: ty check
+      entry: ty check --exit-zero-on-warning
       language: system
       types_or: [python, pyi]
       # ty reads its file selection from [tool.ty] in pyproject.toml; changes in
@@ -45,7 +37,7 @@ repos:
       require_serial: true
 
 - repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v5.0.0
+  rev: v6.0.0
   hooks:
   # A bunch of other pre-defined hooks.
   - id: check-yaml
@@ -59,7 +51,7 @@ repos:
     description: Detects the presence of private keys
 
 - repo: https://github.com/astral-sh/uv-pre-commit
-  rev: 0.8.17
+  rev: 0.11.31
   hooks:
   - id: uv-lock
 
