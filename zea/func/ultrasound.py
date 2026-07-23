@@ -12,7 +12,6 @@ from zea.func.tensor import (
     split_into_windows,
 )
 from zea.internal.utils import deprecated
-from zea.log import logger
 from zea.utils import ProgressBar
 
 
@@ -1090,7 +1089,7 @@ def decode_hadamard(raw_data, tx_apodizations):
         tx_apodizations_decoded / np.max(tx_apodizations_decoded),
         np.eye(tx_apodizations_decoded.shape[0]),
     ):
-        logger.warning(
+        log.warning(
             "The Hadamard decoding may not be correct. The tx_apodizations matrix is not "
             "orthogonal."
         )
