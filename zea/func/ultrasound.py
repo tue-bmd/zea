@@ -1122,7 +1122,7 @@ def _find_participating_channels(apodizations):
 
 
 def _find_hadamard_matrix(apodizations, participating_channels):
-    
+
     n_tx = len(participating_channels)
     hadamard_matrix = ops.take(apodizations[:n_tx], participating_channels, axis=1)
     return hadamard_matrix
