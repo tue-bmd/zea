@@ -712,8 +712,11 @@ def decode_hadamard_file_operation(input_path: Path, output_path: Path, overwrit
             track.scan.tx_apodizations = np.eye(track.scan.tx_apodizations.shape[1])
 
             _set_data_array(track, "raw_data", raw_data)
-        except (ValueError, Exception):
-            pass
+        except ValueError:
+            log.warning(
+                f"Failed to decode Hadamard data for track {track}. "
+                "The raw_data will remain unchanged."
+            )
     if overwrite:
         _delete_file_if_exists(output_path)
 
@@ -777,10 +780,14 @@ def sa_to_virtual_focus(
         track.scan.azimuth_angles = np.array([azimuth_angle])
         track.scan.focus_distances = np.array([focus_distance])
         track.scan.transmit_origins = np.array([transmit_origin])
-        track.scan.initial_times = track.scan.initial_times[:1]
-        track.scan.waveforms_one_way = track.scan.waveforms_one_way[:1]
-        track.scan.waveforms_two_way = track.scan.waveforms_two_way[:1]
-        track.scan.time_to_next_transmit = track.scan.time_to_next_transmit[:, :1]
+        if track.scan.initial_times is not None:
+            track.scan.initial_times = track.scan.initial_times[:1]
+        if track.scan.waveforms_one_way is not None:
+            track.scan.waveforms_one_way = track.scan.waveforms_one_way[:1]
+        if track.scan.waveforms_two_way is not None:
+            track.scan.waveforms_two_way = track.scan.waveforms_two_way[:1]
+        if track.scan.time_to_next_transmit is not None:
+            track.scan.time_to_next_transmit = track.scan.time_to_next_transmit[:, :1]
 
     file_spec.save(
         path=str(output_path),

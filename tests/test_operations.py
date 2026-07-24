@@ -1635,7 +1635,7 @@ def test_decode_hadamard_warns_on_non_orthogonal_matrix():
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     data = rng.standard_normal((1, 2, 4, 2, 1))
     non_orthogonal = np.array([[1.0, 1.0], [1.0, 1.0]])
-    with mock.patch("zea.func.ultrasound.logger.warning") as warning:
+    with mock.patch("zea.log.warning") as warning:
         decode_hadamard(data, non_orthogonal)
     warning.assert_called_once()
 
