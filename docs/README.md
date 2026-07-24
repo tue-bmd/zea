@@ -6,7 +6,7 @@ To build the documentation for the `zea` package, follow these steps:
 Install the `zea` package with documentation dependencies:
 
 ```sh
-pip install -e .[docs]
+pip install -e . --group docs
 ```
 
 We also need to install `pandoc` to build the documentation:

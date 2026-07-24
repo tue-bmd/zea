@@ -46,15 +46,18 @@ WORKDIR /zea
 
 COPY pyproject.toml uv.lock README.md ./
 
-# Install all non-backend dependencies from the lockfile, installing dev extras only if
-# DEV is true. --no-install-project skips installing zea itself (added later as an
-# editable install), and --inexact keeps pip/setuptools available in the image.
+# Install all non-backend dependencies from the lockfile, installing the dev
+# dependency-group (tests + docs + lint + dev-only runtime pkgs) only if DEV is true.
+# uv installs the `dev` group by default, so the DEV=false branch must pass
+# --no-default-groups to keep dev tooling out of the production image.
+# --no-install-project skips installing zea itself (added later as an editable
+# install), and --inexact keeps pip/setuptools available in the image.
 ARG DEV
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ "$DEV" = "true" ]; then \
-    uv sync --frozen --no-install-project --inexact --extra dev; \
+    uv sync --frozen --no-install-project --inexact --group dev; \
     else \
-    uv sync --frozen --no-install-project --inexact; \
+    uv sync --frozen --no-install-project --inexact --no-default-groups; \
     fi
 
 # Install the selected backends in a single resolve. uv's --torch-backend selects the

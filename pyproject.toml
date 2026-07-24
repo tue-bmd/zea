@@ -58,14 +58,46 @@ dependencies = [
     "scikit-learn >=1.4",
 ]
 [project.optional-dependencies]
-dev = [
-    "zea[tests]",
-    "zea[docs]",
-    "zea[display-headless]",
-    "zea[models]",
-    "zea[app]",
-]
+jax = ["jax[cuda12]>=0.4.35"]
+display = ["opencv-python>=4"]
+display-headless = ["opencv-python-headless>=4"]
+# most models don't needs these optional dependencies
+# but some do, so we list them here
+models = ["onnxruntime>=1.15"]
+app = ["gradio>=6.0"]
+# these are just here for .readthedocs.yaml
+# please for proper install (with GPU support)
+# install manually
+backends = ["jax>=0.4.35", "tensorflow>=2.12.1", "torch>=2.2"]
 
+[project.urls]
+Homepage = "https://github.com/tue-bmd/zea/"
+Repository = "https://github.com/tue-bmd/zea/"
+Documentation = "https://zea.readthedocs.io"
+Issues = "https://github.com/tue-bmd/zea/issues"
+Contributing = "https://zea.readthedocs.io/en/latest/contributing.html"
+
+[project.scripts]
+zea = "zea.__main__:main"
+
+# Dev-only tooling lives in PEP 735 dependency-groups, not [project.optional-
+# dependencies] extras: extras publish to the wheel's Requires-Dist metadata and are
+# meant for optional *runtime* features an end user opts into (zea[jax], zea[app]);
+# groups never publish and are dev/CI-only. Consumers: CI uses `--only-group lint`
+# (minimal env, no zea runtime deps) and `--group tests`/`--group docs`; readthedocs
+# uses method: uv + command: sync + groups (see .readthedocs.yaml); local/Docker use
+# `--group dev`. Requires pip >= 25.1 / uv (both understand `--group`).
+#
+# We keep uv's default of installing the `dev` group on bare `uv sync` / `uv run` (we
+# do NOT set tool.uv.default-groups), so contributors get the full env without
+# surprises. Environments that must stay lean opt out explicitly: `--no-default-groups`
+# for the DEV=false Docker image and the typecheck CI job, `--only-group` for the lint
+# CI job, and the UV_NO_DEFAULT_GROUPS env var on readthedocs (set in its dashboard).
+[dependency-groups]
+lint = [
+    "ruff==0.15.22",
+    "ty==0.0.62",
+]
 tests = [
     "pytest>=9.0.3",
     "papermill>=2.4",
@@ -92,32 +124,16 @@ docs = [
     "PyStemmer",
     "IPython",
 ]
-jax = ["jax[cuda12]>=0.4.35"]
-display = ["opencv-python>=4"]
-display-headless = ["opencv-python-headless>=4"]
-# most models don't needs these optional dependencies
-# but some do, so we list them here
-models = ["onnxruntime>=1.15"]
-app = ["gradio>=6.0"]
-# these are just here for .readthedocs.yaml
-# please for proper install (with GPU support)
-# install manually
-backends = ["jax>=0.4.35", "tensorflow>=2.12.1", "torch>=2.2"]
-
-[project.urls]
-Homepage = "https://github.com/tue-bmd/zea/"
-Repository = "https://github.com/tue-bmd/zea/"
-Documentation = "https://zea.readthedocs.io"
-Issues = "https://github.com/tue-bmd/zea/issues"
-Contributing = "https://zea.readthedocs.io/en/latest/contributing.html"
-
-[project.scripts]
-zea = "zea.__main__:main"
-
-[dependency-groups]
-lint = [
-    "ruff==0.15.22",
-    "ty==0.0.62",
+# The full local/Docker dev environment: tooling groups plus the runtime extras the
+# old `dev` extra pulled in (display-headless -> opencv-python-headless, models ->
+# onnxruntime; app's gradio already comes via `tests`). A group cannot include a
+# project extra, so those two are inlined here — keep them in sync with the extras.
+dev = [
+    { include-group = "tests" },
+    { include-group = "docs" },
+    { include-group = "lint" },
+    "opencv-python-headless>=4",
+    "onnxruntime>=1.15",
 ]
 
 [tool.hatch.build.targets.wheel]
