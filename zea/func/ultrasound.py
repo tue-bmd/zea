@@ -1098,12 +1098,13 @@ def decode_hadamard(raw_data, tx_apodizations):
             f"Expected tx_apodizations with 2 dimensions (n_tx, n_el), "
             f"got {tx_apodizations.ndim} dimensions."
         )
-    hadamard_matrix = _find_hadamard_matrix(tx_apodizations)
+    participating_channels = _find_participating_channels(tx_apodizations)
+    hadamard_matrix = _find_hadamard_matrix(tx_apodizations, participating_channels)
     hadamard_matrix_t = ops.transpose(hadamard_matrix)
     raw_data = ops.moveaxis(raw_data, 1, -1)
     raw_data = ops.matmul(raw_data, hadamard_matrix_t)
     raw_data = ops.moveaxis(raw_data, -1, 1)
-    tx_apodizations_decoded = ops.matmul(tx_apodizations, hadamard_matrix_t)
+    tx_apodizations_decoded = ops.matmul(hadamard_matrix, hadamard_matrix_t)
     normalized = tx_apodizations_decoded / ops.max(tx_apodizations_decoded)
     identity = ops.eye(ops.shape(tx_apodizations_decoded)[0])
     if not ops.all(ops.isclose(normalized, identity)):
@@ -1120,8 +1121,8 @@ def _find_participating_channels(apodizations):
     return participating_channels
 
 
-def _find_hadamard_matrix(apodizations):
-    participating_channels = _find_participating_channels(apodizations)
+def _find_hadamard_matrix(apodizations, participating_channels):
+    
     n_tx = len(participating_channels)
     hadamard_matrix = ops.take(apodizations[:n_tx], participating_channels, axis=1)
     return hadamard_matrix
