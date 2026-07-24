@@ -7542,7 +7542,6 @@ models = [
 dev = [
     { name = "cloudpickle" },
     { name = "furo" },
-    { name = "gradio" },
     { name = "ipykernel" },
     { name = "ipython", version = "8.39.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "ipython", version = "9.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -7550,9 +7549,6 @@ dev = [
     { name = "myst-parser", version = "4.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "myst-parser", version = "5.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "nbsphinx" },
-    { name = "onnxruntime", version = "1.24.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "onnxruntime", version = "1.26.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "opencv-python-headless" },
     { name = "papermill" },
     { name = "pre-commit" },
     { name = "pybtex" },
@@ -7576,6 +7572,7 @@ dev = [
     { name = "sphinx-reredirects", version = "1.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "sphinxcontrib-bibtex" },
     { name = "ty" },
+    { name = "zea", extra = ["app", "display-headless", "models"] },
 ]
 docs = [
     { name = "furo" },
@@ -7607,7 +7604,6 @@ lint = [
 ]
 tests = [
     { name = "cloudpickle" },
-    { name = "gradio" },
     { name = "ipykernel" },
     { name = "ipywidgets" },
     { name = "papermill" },
@@ -7615,6 +7611,7 @@ tests = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "simpleitk" },
+    { name = "zea", extra = ["app"] },
 ]
 
 [package.metadata]
@@ -7654,14 +7651,11 @@ provides-extras = ["jax", "display", "display-headless", "models", "app", "backe
 dev = [
     { name = "cloudpickle", specifier = ">=3.1.1" },
     { name = "furo" },
-    { name = "gradio", specifier = ">=6.0" },
     { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "ipython" },
     { name = "ipywidgets" },
     { name = "myst-parser" },
     { name = "nbsphinx" },
-    { name = "onnxruntime", specifier = ">=1.15" },
-    { name = "opencv-python-headless", specifier = ">=4" },
     { name = "papermill", specifier = ">=2.4" },
     { name = "pre-commit" },
     { name = "pybtex", specifier = ">=0.26.1" },
@@ -7678,6 +7672,9 @@ dev = [
     { name = "sphinx-reredirects" },
     { name = "sphinxcontrib-bibtex", specifier = ">=2.6.5" },
     { name = "ty", specifier = "==0.0.62" },
+    { name = "zea", extras = ["app"] },
+    { name = "zea", extras = ["display-headless"] },
+    { name = "zea", extras = ["models"] },
 ]
 docs = [
     { name = "furo" },
@@ -7700,7 +7697,6 @@ lint = [
 ]
 tests = [
     { name = "cloudpickle", specifier = ">=3.1.1" },
-    { name = "gradio", specifier = ">=6.0" },
     { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "ipywidgets" },
     { name = "papermill", specifier = ">=2.4" },
@@ -7708,6 +7704,7 @@ tests = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov" },
     { name = "simpleitk", specifier = ">=2.2.1" },
+    { name = "zea", extras = ["app"] },
 ]
 
 [[package]]

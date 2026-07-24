@@ -201,6 +201,9 @@ jobs:
   # Guard against zea accidentally using functionality newer than the dependency
   # floors declared in pyproject.toml. Installs the *lowest* allowed versions of
   # zea's declared deps and runs the import tests against them.
+  # `.[app]` is named explicitly so lowest-direct pins gradio to its declared
+  # floor: reached only via the `tests` group's `zea[app]` self-reference it
+  # would count as transitive and resolve to the newest release instead.
   minimum-deps:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -221,7 +224,7 @@ jobs:
           UV_TORCH_BACKEND: cpu
         run: |
           uv venv
-          uv pip install --resolution lowest-direct --group tests -e "." \
+          uv pip install --resolution lowest-direct --group tests -e ".[app]" \
             "tensorflow-cpu>=2.12.1" "jax[cpu]>=0.4.35" "torch>=2.2"
           echo "::group::Resolved dependency versions"
           uv pip freeze

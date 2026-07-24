@@ -80,24 +80,11 @@ Contributing = "https://zea.readthedocs.io/en/latest/contributing.html"
 [project.scripts]
 zea = "zea.__main__:main"
 
-# Dev-only tooling lives in PEP 735 dependency-groups, not [project.optional-
-# dependencies] extras: extras publish to the wheel's Requires-Dist metadata and are
-# meant for optional *runtime* features an end user opts into (zea[jax], zea[app]);
-# groups never publish and are dev/CI-only. Consumers: CI uses `--only-group lint`
-# (minimal env, no zea runtime deps) and `--group tests`/`--group docs`; readthedocs
-# uses method: uv + command: sync + groups (see .readthedocs.yaml); local/Docker use
-# `--group dev`. Requires pip >= 25.1 / uv (both understand `--group`).
-#
-# We keep uv's default of installing the `dev` group on bare `uv sync` / `uv run` (we
-# do NOT set tool.uv.default-groups), so contributors get the full env without
-# surprises. Environments that must stay lean opt out explicitly: `--no-default-groups`
-# for the DEV=false Docker image and the typecheck CI job, `--only-group` for the lint
-# CI job, and the UV_NO_DEFAULT_GROUPS env var on readthedocs (set in its dashboard).
+# Dev-only tooling: unlike extras, groups are never published. Needs pip >= 25.1 / uv.
+# uv installs `dev` by default; lean envs opt out with --no-default-groups /
+# --only-group (readthedocs: UV_NO_DEFAULT_GROUPS, set in its dashboard).
 [dependency-groups]
-lint = [
-    "ruff==0.15.22",
-    "ty==0.0.62",
-]
+lint = ["ruff==0.15.22", "ty==0.0.62"]
 tests = [
     "pytest>=9.0.3",
     "papermill>=2.4",
@@ -107,7 +94,7 @@ tests = [
     "ipywidgets",
     "pre-commit",
     "pytest-cov",
-    "gradio>=6.0",
+    "zea[app]",
 ]
 docs = [
     "sphinx",
@@ -124,16 +111,13 @@ docs = [
     "PyStemmer",
     "IPython",
 ]
-# The full local/Docker dev environment: tooling groups plus the runtime extras the
-# old `dev` extra pulled in (display-headless -> opencv-python-headless, models ->
-# onnxruntime; app's gradio already comes via `tests`). A group cannot include a
-# project extra, so those two are inlined here — keep them in sync with the extras.
+# The full dev environment: the tooling groups plus the runtime extras
 dev = [
     { include-group = "tests" },
     { include-group = "docs" },
     { include-group = "lint" },
-    "opencv-python-headless>=4",
-    "onnxruntime>=1.15",
+    "zea[display-headless]",
+    "zea[models]",
 ]
 
 [tool.hatch.build.targets.wheel]
