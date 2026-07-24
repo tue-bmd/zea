@@ -93,7 +93,7 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
          .. code-block:: shell
 
-               pip install -e .
+               pip install -e . --group dev
                pre-commit install
 
 For local environments (uv or pip), you also need to install a machine learning
