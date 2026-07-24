@@ -1078,22 +1078,53 @@ def decode_hadamard(raw_data, tx_apodizations):
     """
     Decode Hadamard-encoded raw data using the provided transmit apodizations.
 
+    This function is compatible with partial Hadamard encoding, where some transmit channels may
+    not be used. It finds the participating transmit channels (those with non-zero apodization in
+    any transmit) and constructs the Hadamard matrix for those channels. The raw data is then
+    decoded by multiplying with the transpose of the Hadamard matrix.
+
     Args:
         raw_data (ops.Tensor): The Hadamard-encoded raw data of shape (n_frames, n_tx, n_ax, n_el,
             n_ch).
         tx_apodizations (ops.Tensor): The transmit apodizations of shape (n_tx, n_tx).
     """
-    raw_data = ops.einsum("ijklm,ja->iaklm", raw_data, tx_apodizations.T)
-    tx_apodizations_decoded = tx_apodizations @ tx_apodizations.T
-    if not np.allclose(
-        tx_apodizations_decoded / np.max(tx_apodizations_decoded),
-        np.eye(tx_apodizations_decoded.shape[0]),
-    ):
+    if not raw_data.ndim == 5:
+        raise ValueError(
+            f"Expected raw_data with 5 dimensions (n_frames, n_tx, n_ax, n_el, n_ch), "
+            f"got {raw_data.ndim} dimensions."
+        )
+    if not tx_apodizations.ndim == 2:
+        raise ValueError(
+            f"Expected tx_apodizations with 2 dimensions (n_tx, n_el), "
+            f"got {tx_apodizations.ndim} dimensions."
+        )
+    hadamard_matrix = _find_hadamard_matrix(tx_apodizations)
+    hadamard_matrix_t = ops.transpose(hadamard_matrix)
+    raw_data = ops.moveaxis(raw_data, 1, -1)
+    raw_data = ops.matmul(raw_data, hadamard_matrix_t)
+    raw_data = ops.moveaxis(raw_data, -1, 1)
+    tx_apodizations_decoded = ops.matmul(tx_apodizations, hadamard_matrix_t)
+    normalized = tx_apodizations_decoded / ops.max(tx_apodizations_decoded)
+    identity = ops.eye(ops.shape(tx_apodizations_decoded)[0])
+    if not ops.all(ops.isclose(normalized, identity)):
         log.warning(
             "The Hadamard decoding may not be correct. The tx_apodizations matrix is not "
             "orthogonal."
         )
     return raw_data
+
+
+def _find_participating_channels(apodizations):
+    apodizations = ops.sum(ops.abs(apodizations), axis=0)
+    participating_channels = ops.where(apodizations > 0)[0]
+    return participating_channels
+
+
+def _find_hadamard_matrix(apodizations):
+    participating_channels = _find_participating_channels(apodizations)
+    n_tx = len(participating_channels)
+    hadamard_matrix = ops.take(apodizations[:n_tx], participating_channels, axis=1)
+    return hadamard_matrix
 
 
 def construct_acquisition_from_synthetic_aperture(

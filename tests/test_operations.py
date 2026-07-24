@@ -27,6 +27,7 @@ from zea.func.ultrasound import (
 )
 from zea.ops import Pipeline, Simulate, beamformer_registry
 from zea.parameters import Parameters
+from zea.simulator import simulate_rf
 
 from . import DEFAULT_TEST_SEED, backend_equality_check
 
@@ -1618,16 +1619,46 @@ def hadamard_encode(data, hadamard_matrix):
 
 def test_decode_hadamard():
     """Hadamard encoding followed by decoding recovers the original data up to a factor n_tx."""
-    rng = np.random.default_rng(DEFAULT_TEST_SEED)
-    n_frames, n_tx, n_ax, n_el, n_ch = 2, 4, 16, 8, 1
-    data = rng.standard_normal((n_frames, n_tx, n_ax, n_el, n_ch))
-    hadamard_matrix = hadamard(n_tx).astype(np.float64)
-
-    encoded = hadamard_encode(data, hadamard_matrix)
-    decoded = decode_hadamard(encoded, hadamard_matrix)
-
-    assert decoded.shape == data.shape
-    np.testing.assert_allclose(decoded / n_tx, data, atol=1e-12)
+    n_el = 32
+    hadamard_size = 32
+    n_tx = hadamard_size
+    participating_channels = np.random.choice(n_el, size=hadamard_size, replace=False)
+    hadamard_matrix = hadamard(hadamard_size).astype(np.float32)
+    tx_apodizations_hadamard = np.zeros((hadamard_size, n_el), dtype=np.float32)
+    tx_apodizations_hadamard[:, participating_channels] = hadamard_matrix
+    tx_apodizations_synthetic_aperture = np.zeros((hadamard_size, n_el), dtype=np.float32)
+    tx_apodizations_synthetic_aperture[:, participating_channels] = np.eye(hadamard_size)
+    center_frequency = 5e6
+    sampling_frequency = 4 * center_frequency
+    sound_speed = 1540.0
+    wavelength = sound_speed / center_frequency
+    element_width = wavelength / 2 * 0.9
+    shared_kwargs = dict(
+        scatterer_positions=np.array([[0.0, 0.0, 3e-3]], dtype=np.float32),
+        scatterer_magnitudes=np.array([1.0], dtype=np.float32),
+        probe_geometry=linear_probe_geometry(n_elements=n_el, pitch=wavelength / 2).astype(
+            np.float32
+        ),
+        apply_lens_correction=False,
+        lens_thickness=0.0,
+        lens_sound_speed=1000.0,
+        sound_speed=sound_speed,
+        n_ax=256,
+        center_frequency=center_frequency,
+        sampling_frequency=sampling_frequency,
+        t0_delays=np.zeros((n_tx, n_el), dtype=np.float32),
+        initial_times=np.zeros((n_tx,), dtype=np.float32),
+        element_width=element_width,
+        attenuation_coef=0.0,
+    )
+    raw_data_encoded = simulate_rf(tx_apodizations=tx_apodizations_hadamard, **shared_kwargs)[None]
+    raw_data_synthetic_aperture = simulate_rf(
+        tx_apodizations=tx_apodizations_synthetic_aperture, **shared_kwargs
+    )[None]
+    raw_data_decoded = decode_hadamard(raw_data_encoded, hadamard_matrix)
+    np.testing.assert_allclose(
+        raw_data_decoded, raw_data_synthetic_aperture * hadamard_size, rtol=1e-5, atol=1e-5
+    )
 
 
 def test_decode_hadamard_warns_on_non_orthogonal_matrix():
@@ -1638,6 +1669,122 @@ def test_decode_hadamard_warns_on_non_orthogonal_matrix():
     with mock.patch("zea.log.warning") as warning:
         decode_hadamard(data, non_orthogonal)
     warning.assert_called_once()
+
+
+def test_sa_to_virtual_focus(tmp_path):
+    """sa_to_virtual_focus converts a synthetic aperture file into a single-transmit
+    virtual-focus file, wiring the scan metadata and raw data through
+    construct_acquisition_from_synthetic_aperture."""
+    from zea.data.file import File, validate_file
+    from zea.data.file_operations import sa_to_virtual_focus
+
+    from .data import generate_example_dataset
+
+    # Synthetic aperture data has one transmit per element (n_tx == n_el).
+    n_el = 8
+    input_path = tmp_path / "sa.hdf5"
+    output_path = tmp_path / "virtual_focus.hdf5"
+    generate_example_dataset(input_path, n_el=n_el, n_tx=n_el, n_ax=128, n_frames=1)
+
+    focus_distance = 20e-3
+    sa_to_virtual_focus(
+        input_path,
+        output_path,
+        polar_angle=0.0,
+        azimuth_angle=0.0,
+        focus_distance=focus_distance,
+        tx_apodization="hanning",
+    )
+
+    validate_file(output_path)
+
+    with File(input_path) as f:
+        raw_data = f.data.raw_data[:]
+        parameters = f.load_parameters()
+
+    tx_apodization = keras.ops.expand_dims(keras.ops.cast(keras.ops.hanning(n_el), "float32"), 0)
+    expected_raw_data, expected_t0_delays = construct_acquisition_from_synthetic_aperture(
+        raw_data=raw_data,
+        probe_geometry=parameters["probe_geometry"],
+        sampling_frequency=parameters["sampling_frequency"],
+        polar_angle=0.0,
+        azimuth_angle=0.0,
+        focus_distance=focus_distance,
+        transmit_origin=(0.0, 0.0, 0.0),
+        sound_speed=parameters["sound_speed"],
+        tx_apodization=tx_apodization,
+    )
+    expected_raw_data = keras.ops.convert_to_numpy(expected_raw_data)
+
+    with File(output_path) as f:
+        out_raw_data = f.data.raw_data[:]
+        out_parameters = f.load_parameters()
+
+    # A single transmit remains, and its data matches the directly-constructed acquisition.
+    assert out_raw_data.shape == (1, 1, 128, n_el, 1)
+    np.testing.assert_allclose(out_raw_data, expected_raw_data, atol=1e-4)
+
+    # The transmit scheme metadata reflects the requested virtual focus.
+    np.testing.assert_allclose(out_parameters["t0_delays"], np.asarray(expected_t0_delays))
+    np.testing.assert_allclose(out_parameters["polar_angles"], [0.0])
+    np.testing.assert_allclose(out_parameters["focus_distances"], [focus_distance])
+    np.testing.assert_allclose(out_parameters["transmit_origins"], [[0.0, 0.0, 0.0]])
+    assert out_parameters["tx_apodizations"].shape == (1, n_el)
+
+
+def test_sa_to_virtual_focus_requires_probe_geometry(tmp_path):
+    """sa_to_virtual_focus raises when the input file has no probe_geometry."""
+    from zea.data.file import File
+    from zea.data.file_operations import sa_to_virtual_focus
+
+    # A file with only an image has no probe, so probe_geometry is undefined.
+    input_path = tmp_path / "no_probe.hdf5"
+    output_path = tmp_path / "out.hdf5"
+    File.create(
+        input_path,
+        data={"image": {"values": np.zeros((1, 16, 16), dtype=np.float32)}},
+        overwrite=True,
+    )
+
+    with pytest.raises(ValueError, match="requires a probe with a defined probe_geometry"):
+        sa_to_virtual_focus(
+            input_path,
+            output_path,
+            polar_angle=0.0,
+            azimuth_angle=0.0,
+            focus_distance=np.inf,
+        )
+
+
+def test_sa_to_virtual_focus_refuses_existing_output(tmp_path):
+    """An existing output path is only overwritten when overwrite=True."""
+    from zea.data.file import File
+    from zea.data.file_operations import sa_to_virtual_focus
+
+    from .data import generate_example_dataset
+
+    n_el = 8
+    input_path = tmp_path / "sa.hdf5"
+    output_path = tmp_path / "existing.hdf5"
+    generate_example_dataset(input_path, n_el=n_el, n_tx=n_el, n_ax=64, n_frames=1)
+    output_path.touch()  # pre-existing output file
+
+    convert = lambda **kwargs: sa_to_virtual_focus(
+        input_path,
+        output_path,
+        polar_angle=0.0,
+        azimuth_angle=0.0,
+        focus_distance=np.inf,
+        **kwargs,
+    )
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        convert()
+
+    # With overwrite=True the existing file is replaced by a valid virtual-focus file.
+    convert(overwrite=True)
+    with File(output_path) as f:
+        assert f.data.raw_data[:].shape[1] == 1
 
 
 def linear_probe_geometry(n_elements, pitch):
