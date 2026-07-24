@@ -35,8 +35,8 @@ if TYPE_CHECKING:
     from .internal.device import init_device
     from .internal.setup_zea import setup, setup_config
     from .ops import Pipeline
-    from .probes import Probe
     from .parameters import Parameters
+    from .probes import Probe
 
 try:
     # dynamically add __version__ attribute (see pyproject.toml)
@@ -80,6 +80,14 @@ def _bootstrap_backend():
 
         # Error if no backends are installed
         if not installed_backends:
+            if effective_backend == "numpy":
+                raise ImportError(
+                    f"No ML backend (torch, tensorflow, jax) installed in current "
+                    f"environment. KERAS_BACKEND is set to 'numpy', but Keras' numpy "
+                    f"backend is not standalone: jax must be installed as well. Install it with "
+                    f"`pip install {__package__}[jax]` (GPU) or `pip install 'jax[cpu]'` "
+                    f"(CPU-only). For more information, see: {DOCS_URL}"
+                )
             if backend_env:
                 backend_status = f"KERAS_BACKEND is set to '{backend_env}'"
             else:
