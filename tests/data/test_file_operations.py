@@ -733,12 +733,11 @@ def test_decode_hadamard_file_operation(tmp_path):
     factor n_tx) and resets tx_apodizations to the identity."""
     from scipy.linalg import hadamard
 
+    n_el = 8
     hadamard_size = 4
     hadamard_matrix = hadamard(hadamard_size).astype(np.float32)
     rng = np.random.default_rng(0)
-    synthetic_aperture_data = rng.standard_normal((2, hadamard_size, 8, hadamard_size, 1)).astype(
-        np.float32
-    )
+    synthetic_aperture_data = rng.standard_normal((2, hadamard_size, 8, n_el, 1)).astype(np.float32)
 
     input_path = tmp_path / "hadamard_in.hdf5"
     output_path = tmp_path / "hadamard_out.hdf5"
