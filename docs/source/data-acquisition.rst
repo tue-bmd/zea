@@ -20,6 +20,8 @@ Additionally, to support the :doc:`cognitive ultrasound framework <about>`, the 
 allow for flexible and efficient access to a part of the data (e.g. a single frame or transmit) without the need
 to load the entire file into memory.
 
+.. _working-with-zea-data-files:
+
 -------------------------------
 Working with zea data files
 -------------------------------
@@ -567,12 +569,12 @@ Supported datasets & conversion
 The ``zea`` toolbox includes conversion scripts for several public ultrasound datasets,
 available in :mod:`zea.data.convert`
 (`source on GitHub <https://github.com/tue-bmd/zea/tree/main/zea/data/convert/>`__).
-They are invoked as subcommands of ``python -m zea.data.convert``
+They are invoked as subcommands of ``zea convert``
 (see the full :doc:`CLI reference <cli>` for all options):
 
 .. code-block:: shell
 
-    python -m zea.data.convert <dataset> <source> <destination>
+    zea convert <dataset> <source> <destination>
 
 **Supported datasets:**
 
@@ -597,7 +599,7 @@ Record data with your Verasonics script, save the workspace to ``.mat``, then co
 
 .. code-block:: shell
 
-    python -m zea.data.convert verasonics <src> <dst>
+    zea convert verasonics <src> <dst>
 
 See :mod:`zea.data.convert.verasonics` for details.
 

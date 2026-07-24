@@ -72,9 +72,16 @@ MAX_CHUNK_BYTES = 8 << 20  # 8 MiB
 # cold open from 3 requests to 2 and ~0.16 s to ~0.05 s, at ~2% file size for 64 KiB
 # pages (larger pages waste space and, past ~1 MiB, requests too).
 #
-# Requires HDF5 >= 1.10.1 on the reader, which `libver="latest"` implies anyway.
+# Requires HDF5 >= 1.10.1 on the reader, which the "v114" high bound below satisfies.
+# The high bound is pinned rather than left as "latest": h5py 3.16 started bundling
+# libhdf5 2.0, and "latest" resolves to whatever's bundled at write time. HDF5 2.0
+# writes newer object-header message versions (e.g. datatype messages) that HDF5
+# 1.14.x readers reject outright with "bad version number for datatype message" -
+# confirmed by round-tripping a file through h5py 3.16/libhdf5 2.0 and reading it
+# back with h5py 3.11/libhdf5 1.14.2. Capping at v114 keeps files readable by the
+# 1.14.x installs still in the wild without limiting which h5py *version* writes them.
 PAGED_LAYOUT = {
-    "libver": "latest",
+    "libver": ("earliest", "v114"),
     "fs_strategy": "page",
     "fs_page_size": 64 * 1024,
     "fs_persist": True,
@@ -1699,7 +1706,7 @@ class ProbeSpec(Spec):
         "type": {"description": "Probe geometry type (linear, phased, curved, ...)."},
         "probe_center_frequency": {
             "unit": "Hz",
-            "description": "Probe nominal centre frequency.",
+            "description": ("Probe nominal centre frequency (midpoint of the probe's -6 dB band)."),
         },
         "probe_bandwidth_percent": {
             "unit": "%",
@@ -2072,12 +2079,13 @@ class SignalND(Signal):
 
 @dataclass
 class Annotations(Spec):
-    """Frame-level annotations, either per frame or broadcast labels.
+    """Frame-level annotations, either one per frame or a single broadcast value.
 
     Args:
-        anatomy (str): Anatomy label.
-        view (str): View label.
-        label (str): Pathology or classification label.
+        anatomy (str): Anatomical structure imaged, e.g. carotid, liver, thyroid.
+        view (str): Imaging plane/orientation, e.g. longitudinal, transverse,
+            apical_4_chamber.
+        label (str): Pathology or classification label, e.g. benign, malignant.
         image_quality (str): Image quality label, e.g. low, mid, high.
     """
 
@@ -2094,8 +2102,14 @@ class Annotations(Spec):
     }
 
     FIELD_METADATA = {
-        "anatomy": {"unit": "–", "description": "Anatomy label."},
-        "view": {"unit": "–", "description": "View label."},
+        "anatomy": {
+            "unit": "–",
+            "description": "Anatomical structure imaged (e.g. carotid, liver).",
+        },
+        "view": {
+            "unit": "–",
+            "description": "Imaging plane/orientation (e.g. longitudinal, apical_4_chamber).",
+        },
         "label": {"unit": "–", "description": "Pathology or classification label."},
         "image_quality": {"unit": "–", "description": "Image quality label.", "rare": True},
     }
@@ -2272,6 +2286,19 @@ class TrackSpec(Spec):
     }
 
     FIELD_METADATA = {
+        "data": {
+            "unit": "–",
+            "description": (
+                "Recorded data for this track; may be omitted for a transmit-only track."
+            ),
+        },
+        "scan": {
+            "unit": "–",
+            "description": (
+                "Scan acquisition parameters for this track; required when raw_data is "
+                "present in data, or when data is omitted."
+            ),
+        },
         # label is enforced by FileSpec for multi-track (ValueError), and legitimately
         # absent for single-track files — warning here is never useful.
         "label": {"unit": "–", "description": "Short human-readable track name.", "rare": True},

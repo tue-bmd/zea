@@ -258,7 +258,7 @@ class EchoNetLVH(BaseModel):
                     pt2,
                     color=1,
                     thickness=2,
-                )  # ty: ignore[no-matching-overload]
+                )
 
                 # Apply line to overlay
                 for c in range(3):

@@ -10,6 +10,7 @@ import keras
 import numpy as np
 from keras import ops
 
+from zea.beamform.geometry import compute_element_normals
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.tensor import vmap
 from zea.internal.checks import _check_raw_data
@@ -769,7 +770,7 @@ def transmit_delays(
     return tx_delay
 
 
-def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):
+def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn, element_normals=None):
     """Receive-aperture apodization mask based on the f-number.
 
     This is the **built-in** receive-aperture (per-element) apodization.
@@ -778,6 +779,16 @@ def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):
     defined by the f-number.  The transition within the cone is controlled
     by *fnum_window_fn* (e.g. :func:`fnum_window_fn_rect`,
     :func:`fnum_window_fn_hann`, :func:`fnum_window_fn_tukey`).
+
+    The acceptance cone is measured relative to **each element's own surface
+    normal**.  For a flat linear array every normal is ``+z`` and this is the
+    familiar depth-axis cone; for a **curved/convex** array the peripheral
+    elements are tilted outward, so measuring the cone from their true normal
+    (rather than the global ``+z`` axis) keeps their aperture from being
+    clipped at the edges of the sector.  When *element_normals* is not given it
+    is derived from ``probe_geometry`` via
+    :func:`zea.beamform.geometry.compute_element_normals`, which is an exact
+    no-op (``+z``) for flat arrays.
 
     For a *custom* receive-aperture apodization (arbitrary per-pixel,
     per-element weights) use :class:`zea.ops.ReceiveApodization`, which is
@@ -793,18 +804,27 @@ def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):
         fnum_window_fn (callable): Window function mapping normalized
             angles in ``[0, 1]`` to weights.  Must return ``0`` for inputs
             ``> 1``.
+        element_normals (Tensor, optional): Unit surface normals of shape
+            ``(n_el, 3)``.  Defaults to ``None``, in which case they are
+            derived from ``probe_geometry``.
 
     Returns:
         Tensor: Mask of shape ``(n_pix, n_el, 1)``.
     """
+    if element_normals is None:
+        element_normals = compute_element_normals(probe_geometry)
 
     grid_relative_to_probe = flatgrid[:, None] - probe_geometry[None]
 
     grid_relative_to_probe_norm = ops.linalg.norm(grid_relative_to_probe, axis=-1)
 
-    grid_relative_to_probe_z = grid_relative_to_probe[..., 2] / (grid_relative_to_probe_norm + 1e-6)
+    # Unit element -> pixel direction (same +1e-6 guard as before, so a +z
+    # normal reproduces the legacy depth-axis cone bit-for-bit).
+    unit_direction = grid_relative_to_probe / (grid_relative_to_probe_norm[..., None] + 1e-6)
 
-    alpha = ops.arccos(grid_relative_to_probe_z)
+    # Angle between the element -> pixel direction and the element's normal.
+    cos_alpha = ops.sum(unit_direction * element_normals[None], axis=-1)
+    alpha = ops.arccos(ops.clip(cos_alpha, -1.0, 1.0))
 
     # The f-number is f_number = z/aperture = 1/(2 * tan(alpha))
     # Rearranging gives us alpha = arctan(1/(2 * f_number))
