@@ -11,13 +11,10 @@ fi
 
 cd "$CLAUDE_PROJECT_DIR"
 
-# Mirrors `uv sync --group dev` from docs/source/contributing.rst. --frozen keeps
-# this from touching uv.lock. The `dev` dependency-group carries tests + docs + lint
-# (ruff/ty) plus the dev-only runtime pkgs (see [dependency-groups] in pyproject.toml).
-# jax[cpu] is installed separately (not part of the `dev` group) as the cheapest
-# backend to exercise `zea`, matching the JAX-only jobs in CI.
+# Mirrors contributing.rst; --frozen keeps this from touching uv.lock. jax[cpu] is
+# installed separately (not in `dev`) as the cheapest backend to exercise zea.
 export UV_TORCH_BACKEND=cpu
-uv sync --frozen --group dev
+uv sync --frozen
 uv pip install --python .venv/bin/python "jax[cpu]"
 
 uv run --no-sync pre-commit install >/dev/null

@@ -55,9 +55,9 @@ COPY pyproject.toml uv.lock README.md ./
 ARG DEV
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ "$DEV" = "true" ]; then \
-    uv sync --frozen --no-install-project --inexact --group dev; \
+    uv sync --frozen --no-install-project --inexact --dev; \
     else \
-    uv sync --frozen --no-install-project --inexact --no-default-groups; \
+    uv sync --frozen --no-install-project --inexact --no-dev; \
     fi
 
 # Install the selected backends in a single resolve. uv's --torch-backend selects the

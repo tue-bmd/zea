@@ -75,14 +75,14 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
          .. code-block:: shell
 
-               uv sync --group dev
+               uv sync
                uv run pre-commit install
 
          This creates a ``.venv`` with the exact locked dependencies and installs
          ``zea`` itself in **editable** mode, so your changes to the source take
-         effect immediately without reinstalling. The ``dev`` dependency-group bundles
-         the ``tests``, ``docs`` and ``lint`` groups. Prefix commands with ``uv run``
-         (e.g. ``uv run pytest``) or activate the environment with
+         effect immediately without reinstalling. This will also install the ``dev`` 
+         dependency-group, i.e. the ``tests``, ``docs`` and ``lint`` groups. Prefix commands 
+         with ``uv run`` (e.g. ``uv run pytest``) or activate the environment with
          ``source .venv/bin/activate``.
 
     .. tab-item:: pip
@@ -93,7 +93,7 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
          .. code-block:: shell
 
-               pip install -e . --group dev
+               pip install -e .
                pre-commit install
 
 For local environments (uv or pip), you also need to install a machine learning
