@@ -352,7 +352,7 @@ jobs:
             -w /zea/docs \
             ${{ needs.image.outputs.docker_image }} \
             sh -c "\
-              uv pip install --system --group ../pyproject.toml:docs -e .. && \
+              uv pip install --system --group docs -e .. && \
               export PATH=\"/tmp/.local/bin:\$PATH\" && \
               export ZEA_LOG_LEVEL=ERROR && \
               make docs-clean && \
