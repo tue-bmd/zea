@@ -108,25 +108,39 @@ def upload_folder_to_hf(
     return f"https://huggingface.co/{repo_id}"
 
 
+# Python 3.12 moved path parsing out of ``PurePath.__new__`` and into ``__init__``, which
+# receives the arguments the caller passed rather than the ones ``__new__`` normalized.
+_PUREPATH_PARSES_IN_INIT = PurePosixPath.__init__ is not object.__init__
+
+
 class HFPath(PurePosixPath):
     """A path-like object that preserves the hf:// scheme and mimics Path API."""
 
     _scheme = HF_PREFIX
 
-    def __new__(cls, *args):
-        # Strip "hf://" from all arguments and normalize
+    @classmethod
+    def _join_without_scheme(cls, args):
+        """Join the arguments into one path, dropping any ``hf://`` prefix."""
         parts = []
         for arg in args:
             s = str(arg)
             if s.startswith(cls._scheme):
                 s = s[len(cls._scheme) :]
             parts.append(s.strip("/"))
-        combined = "/".join(parts)
+        return "/".join(parts)
+
+    def __new__(cls, *args):
         # Store path without scheme
-        self = super().__new__(cls, combined)
+        self = super().__new__(cls, cls._join_without_scheme(args))
         # Mark this as an HF path that needs a scheme when stringified
         self._needs_scheme = True
         return self
+
+    def __init__(self, *args):
+        # On Python < 3.12 ``__new__`` above already parsed the normalized path, and
+        # ``PurePath`` has no ``__init__`` to hand it to.
+        if _PUREPATH_PARSES_IN_INIT:
+            super().__init__(self._join_without_scheme(args))
 
     def __str__(self):
         # Get the raw path string without any scheme

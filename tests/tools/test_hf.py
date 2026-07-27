@@ -174,6 +174,26 @@ def test_hf_parse_path():
         _hf_parse_path("invalid://path")
 
 
+@pytest.mark.parametrize(
+    "hf_path, expected",
+    [
+        ("hf://zeahub/camus-sample/val/", "val"),
+        ("hf://zeahub/camus-sample/val//", "val"),
+        ("hf://zeahub/camus-sample/", None),
+        ("hf://zeahub/camus-sample//", None),
+    ],
+)
+def test_hf_parse_path_ignores_trailing_slash(hf_path, expected):
+    """A trailing slash names the same directory, so it must not reach the subpath.
+
+    Repository entries never carry one, so `hf://org/repo/subdir/` used to resolve to
+    the subpath `subdir/`, which matched no entry and could not be downloaded.
+    """
+    repo_id, subpath = _hf_parse_path(hf_path)
+    assert repo_id == "zeahub/camus-sample"
+    assert subpath == expected
+
+
 def test_download_files_in_path(fake_files, monkeypatch):
     """Test file filtering and download logic."""
 

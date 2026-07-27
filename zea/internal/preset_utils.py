@@ -65,7 +65,7 @@ def _hf_parse_path(hf_path: str):
     """Parse hf://repo_id[/subpath] into (repo_id, subpath or None)."""
     if not hf_path.startswith(HF_PREFIX):
         raise ValueError(f"Invalid hf_path: {hf_path}. It must start with '{HF_PREFIX}'.")
-    path = hf_path.removeprefix(HF_PREFIX)
+    path = hf_path.removeprefix(HF_PREFIX).rstrip("/")
     parts = path.split("/")
     repo_id = "/".join(parts[:2])
     subpath = "/".join(parts[2:]) if len(parts) > 2 else None
