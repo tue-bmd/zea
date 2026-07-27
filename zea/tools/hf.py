@@ -194,5 +194,5 @@ class HFPath(PurePosixPath):
         if not subpath:
             return True
         # If any file starts with subpath + '/', it's a directory
-        prefix = subpath.rstrip("/") + "/"
+        prefix = subpath + "/"
         return any(f.startswith(prefix) for f in files)

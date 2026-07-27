@@ -321,7 +321,7 @@ def _hf_list_h5_files(hf_path: str, **kwargs) -> list[tuple[str, int]]:
     if subpath and subpath in entries:
         matched = [subpath]
     elif subpath:
-        prefix = subpath.rstrip("/") + "/"
+        prefix = subpath + "/"
         matched = [f for f in entries if f.startswith(prefix) and f.endswith(_HF_H5_EXTENSIONS)]
     else:
         matched = [f for f in entries if f.endswith(_HF_H5_EXTENSIONS)]
@@ -350,9 +350,6 @@ def _hf_resolve_path(
     )
 
     if subpath:
-        # A trailing slash is how you spell "the directory" (and the docstring
-        # advertises it), so strip it like `_hf_list_h5_files` does.
-        subpath = subpath.rstrip("/")
         prefix = subpath + "/"
         # Directory case
         if any(f.startswith(prefix) for f in files):

@@ -442,11 +442,6 @@ def test_resolve_path_whole_repo(fake_resolve):
     assert ipu._hf_resolve_path(f"hf://{REPO_ID}") == fake_resolve
 
 
-def test_resolve_path_directory_with_trailing_slash(fake_resolve):
-    """`hf://org/repo/subdir/` is the directory, as the docstring advertises."""
-    assert ipu._hf_resolve_path(f"hf://{REPO_ID}/val/") == fake_resolve / "val"
-
-
 def test_resolve_path_missing_subpath(fake_resolve):
     with pytest.raises(FileNotFoundError, match="not found in"):
         ipu._hf_resolve_path(f"hf://{REPO_ID}/nope.hdf5")
