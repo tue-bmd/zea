@@ -5,7 +5,13 @@ from pathlib import Path, PurePosixPath
 from huggingface_hub import HfApi, snapshot_download
 
 from zea import log
-from zea.internal.preset_utils import HF_PREFIX, _hf_list_files, _hf_login, _hf_parse_path
+from zea.internal.preset_utils import (
+    HF_PREFIX,
+    _hf_clear_caches,
+    _hf_list_files,
+    _hf_login,
+    _hf_parse_path,
+)
 
 
 def load_model_from_hf(repo_id, revision="main", verbose=True):
@@ -89,6 +95,9 @@ def upload_folder_to_hf(
 
     if tag:
         api.create_tag(repo_id, repo_type="model", tag=tag)
+
+    # The repo just changed, so anything we remembered about it is stale.
+    _hf_clear_caches()
 
     if verbose:
         msg = f"Uploaded files from '{local_dir}' to 'https://huggingface.co/{repo_id}'."

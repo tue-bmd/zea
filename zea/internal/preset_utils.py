@@ -22,6 +22,7 @@ from huggingface_hub.utils import (
     RepositoryNotFoundError,
 )
 
+from zea import log
 from zea.internal.cache import ZEA_CACHE_DIR
 
 HF_SCHEME = "hf"
@@ -41,6 +42,11 @@ _HF_CACHE_DIRS = {"dataset": HF_DATASETS_DIR, "model": HF_MODELS_DIR}
 _HF_REPO_TYPE_PREFIX = {"dataset": "datasets/", "model": "", "space": "spaces/"}
 
 
+# ``login()`` writes the token file, and concurrent downloads can all fail
+# authentication at once, so only one of them gets to log in.
+_LOGIN_LOCK = threading.Lock()
+
+
 def _hf_login() -> None:
     """Authenticate using a token from the environment, if available.
 
@@ -51,7 +57,8 @@ def _hf_login() -> None:
     """
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     if token:
-        login(token=token, skip_if_logged_in=True)
+        with _LOGIN_LOCK:
+            login(token=token, skip_if_logged_in=True)
 
 
 def _hf_parse_path(hf_path: str):
@@ -99,12 +106,30 @@ def _hf_call(func, *args, retry_on=_HF_LOGIN_RETRY_ERRORS, **kwargs):
         return func(*args, **kwargs)
 
 
+_DEFAULT_HF_CACHE_TTL = 300.0
+
+
+def _hf_cache_ttl() -> float:
+    """How long hub answers may be reused, from ``ZEA_HF_CACHE_TTL`` (seconds)."""
+    value = os.environ.get("ZEA_HF_CACHE_TTL")
+    if value is None:
+        return _DEFAULT_HF_CACHE_TTL
+    try:
+        return float(value)
+    except ValueError:
+        log.warning(
+            f"Ignoring ZEA_HF_CACHE_TTL={value!r}: expected a number of seconds. "
+            f"Falling back to {_DEFAULT_HF_CACHE_TTL}."
+        )
+        return _DEFAULT_HF_CACHE_TTL
+
+
 # Repository listings and resolved download paths are stable over the lifetime of a
 # single operation, which asks for them repeatedly (a dataset scan lists the same repo
 # once per path it inspects, and loading a preset asks for `config.json` once to check
 # that it exists and once to read it). Memoizing them briefly turns those into a single
 # hub round trip. Set ``ZEA_HF_CACHE_TTL=0`` to disable.
-_HF_CACHE_TTL = float(os.environ.get("ZEA_HF_CACHE_TTL", 300))
+_HF_CACHE_TTL = _hf_cache_ttl()
 
 
 class _TTLCache:
@@ -136,8 +161,12 @@ class _TTLCache:
                 return value
 
         value = func()
+        now = time.monotonic()
         with self._lock:
-            self._entries[key] = (time.monotonic() + self.ttl, value)
+            # Expired entries are only dropped here, so a long-lived process (the data
+            # explorer, a dataset scan over thousands of files) does not accumulate them.
+            self._entries = {k: v for k, v in self._entries.items() if v[0] > now}
+            self._entries[key] = (now + self.ttl, value)
         return value
 
     def clear(self):
@@ -213,6 +242,10 @@ def _hf_download(repo_id, filename, cache_dir=None, repo_type="dataset", **kwarg
             **kwargs,
         )
 
+    if kwargs.get("force_download"):
+        # An explicit re-download is exactly what a memoized path would skip.
+        return _download()
+
     key = _cache_key(repo_id, filename, str(cache_dir), repo_type, **kwargs)
     return _DOWNLOAD_CACHE.get_or_call(key, _download, valid=os.path.exists)
 
@@ -231,8 +264,7 @@ def _get_snapshot_dir_from_downloaded_file(downloaded_file_path: str | Path) -> 
     raise FileNotFoundError(f"Could not find snapshot directory for {downloaded_file_path}")
 
 
-# Downloads are network-bound, so a small pool overlaps their round trips instead of
-# paying for them one after another. Matches huggingface_hub's own default for snapshots.
+# Same default huggingface_hub uses for snapshot downloads.
 _HF_DOWNLOAD_WORKERS = 8
 
 
@@ -240,7 +272,7 @@ def _download_files_in_path(
     repo_id: str,
     files: list,
     path_filter: str | None = None,
-    cache_dir=HF_DATASETS_DIR,
+    cache_dir=None,
     repo_type="dataset",
     **kwargs,
 ) -> list[str]:
@@ -263,8 +295,9 @@ def _download_files_in_path(
         return [_download(filename) for filename in matched]
 
     with ThreadPoolExecutor(max_workers=min(_HF_DOWNLOAD_WORKERS, len(matched))) as pool:
-        # ``map`` keeps the input order and re-raises the first failure, like the
-        # sequential loop it replaces.
+        # ``map`` keeps the input order and raises the first failure, as the sequential
+        # loop did. Unlike that loop it does not stop at the first one: the downloads
+        # already in flight run to completion before the error surfaces.
         return list(pool.map(_download, matched))
 
 

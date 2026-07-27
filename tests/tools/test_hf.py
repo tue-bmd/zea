@@ -306,9 +306,15 @@ def test_upload_folder_to_hf(monkeypatch, tmp_path):
 
     monkeypatch.setattr(hf, "HfApi", FakeApi)
 
+    # A stale listing must not survive the upload that invalidates it.
+    from zea.internal import preset_utils as ipu
+
+    ipu._LISTING_CACHE.get_or_call(("zeahub/taesdxl", "model"), lambda: {"old.txt": 1})
+
     url = hf.upload_folder_to_hf(tmp_path, "zeahub/taesdxl", tag="v1")
 
     assert url == "https://huggingface.co/zeahub/taesdxl"
+    assert ipu._LISTING_CACHE._entries == {}
     assert calls["branch"] == ("zeahub/taesdxl", "model", "main", True)
     assert calls["upload"][0] == str(tmp_path)
     assert calls["upload"][2] == f"Upload files from {tmp_path.name}"

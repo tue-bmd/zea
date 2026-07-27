@@ -15,7 +15,7 @@ import httpx
 import keras
 import numpy as np
 import pytest
-from huggingface_hub import RepoFile
+from huggingface_hub import RepoFile, RepoFolder
 from huggingface_hub.utils import (
     EntryNotFoundError,
     HFValidationError,
@@ -103,20 +103,40 @@ def test_hf_call_does_not_retry_other_errors(monkeypatch):
     assert logins == []
 
 
-def test_hf_call_download_retry_set_excludes_missing_entries(monkeypatch):
-    """`check_file_exists` must fail fast: a missing file is not retried."""
+def test_download_of_a_missing_file_is_not_retried(monkeypatch):
+    """`check_file_exists` must fail fast: a missing file is not worth a login."""
     logins = []
     monkeypatch.setattr(ipu, "_hf_login", lambda: logins.append(1))
     calls = []
 
-    def missing():
+    def missing(**kwargs):
         calls.append(1)
         raise EntryNotFoundError("404 Client Error")
 
+    monkeypatch.setattr(ipu, "hf_hub_download", missing)
+
     with pytest.raises(EntryNotFoundError):
-        ipu._hf_call(missing, retry_on=ipu._HF_DOWNLOAD_RETRY_ERRORS)
+        ipu._hf_download(REPO_ID, "config.json")
     assert len(calls) == 1
     assert logins == []
+
+
+def test_download_of_an_unreachable_repo_is_retried(monkeypatch):
+    """A repo that 404s anonymously may just need a token."""
+    logins = []
+    monkeypatch.setattr(ipu, "_hf_login", lambda: logins.append(1))
+    calls = []
+
+    def unreachable(**kwargs):
+        calls.append(1)
+        raise _repo_not_found()
+
+    monkeypatch.setattr(ipu, "hf_hub_download", unreachable)
+
+    with pytest.raises(RepositoryNotFoundError):
+        ipu._hf_download(REPO_ID, "config.json")
+    assert len(calls) == 2
+    assert len(logins) == 1
 
 
 # _hf_login
@@ -179,11 +199,12 @@ def test_ttl_cache_disabled_with_zero_ttl():
     assert len(calls) == 2
 
 
-def test_ttl_cache_bypassed_for_unhashable_key():
+def test_ttl_cache_bypassed_without_a_key():
+    """A `None` key (what `_cache_key` returns for unhashable arguments) skips the cache."""
     cache = ipu._TTLCache(ttl=60)
     calls = []
     for _ in range(2):
-        cache.get_or_call(None, lambda: calls.append(1))
+        cache.get_or_call(ipu._cache_key("repo", allow_patterns=["*.h5"]), lambda: calls.append(1))
     assert len(calls) == 2
 
 
@@ -226,6 +247,8 @@ def fake_tree(monkeypatch):
         RepoFile(path="val/b.h5", size=20, oid="2"),
         RepoFile(path="val/notes.txt", size=1, oid="3"),
         RepoFile(path="train/c.hdf5", size=30, oid="4"),
+        # A recursive tree also yields the directories, which are not files.
+        RepoFolder(path="val", oid="5"),
     ]
     calls = []
 
@@ -565,7 +588,7 @@ def test_get_file_hf_missing_entry(monkeypatch):
 
 
 @pytest.fixture
-def registered_presets():
+def registered_presets(local_preset):
     """Register throwaway presets and clean up the global registry afterwards."""
 
     class _Dummy:
@@ -573,7 +596,7 @@ def registered_presets():
 
     presets = {
         "_pytest_hf": {"hf_handle": "hf://zeahub/_pytest", "metadata": {}},
-        "_pytest_local": {"path": "/tmp/_pytest_preset", "metadata": {}},
+        "_pytest_local": {"path": str(local_preset), "metadata": {}},
     }
     mpu.register_presets(presets, _Dummy)
     yield _Dummy, presets
@@ -593,14 +616,16 @@ def test_builtin_preset_resolves_to_hf_handle(registered_presets, fake_model_dow
     assert fake_model_download[0]["repo_id"] == "zeahub/_pytest"
 
 
-def test_builtin_preset_resolves_to_path(registered_presets):
-    """A preset registered with a `path` resolves to that (here missing) directory."""
-    with pytest.raises(ValueError, match="Unknown preset identifier"):
-        mpu.get_file("_pytest_local", "config.json")
+def test_builtin_preset_resolves_to_path(registered_presets, local_preset):
+    """A preset registered with a `path` reads from that directory."""
+    assert mpu.get_file("_pytest_local", "config.json") == str(local_preset / "config.json")
 
 
 def test_model_presets_property_lists_builtins():
-    assert "dense" in DenseNet.presets or DenseNet.presets == {}
+    """`cls.presets` exposes what `register_presets` recorded for that class."""
+    from zea.models.presets import dense_presets
+
+    assert DenseNet.presets == dense_presets
 
 
 # Config helpers
@@ -1209,3 +1234,56 @@ def test_sharded_save_and_load_round_trip(tmp_path, monkeypatch):
 
     assert np.allclose(expected, np.array(reloaded(inputs)))
     assert set(shards).issubset(requested)
+
+
+def test_get_file_local_follows_symlinks(tmp_path):
+    """A snapshot directory is a valid preset: its files are symlinks into `blobs/`."""
+    blobs = tmp_path / "blobs"
+    blobs.mkdir()
+    (blobs / "sha123").write_text(json.dumps({"registered_name": "Functional"}))
+    snapshot = tmp_path / "snapshots" / "abc123"
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").symlink_to(blobs / "sha123")
+
+    assert mpu.get_file(str(snapshot), "config.json") == str(snapshot / "config.json")
+    assert mpu.load_json(str(snapshot)) == {"registered_name": "Functional"}
+
+
+def test_download_with_force_download_is_not_memoized(fake_hub_download):
+    """`force_download` means re-fetch, which a memoized path would quietly skip."""
+    ipu._hf_download(REPO_ID, "config.json", force_download=True)
+    ipu._hf_download(REPO_ID, "config.json", force_download=True)
+    assert len(fake_hub_download) == 2
+
+
+def test_ttl_cache_drops_expired_entries():
+    """Expired entries do not pile up in a long-running process."""
+    cache = ipu._TTLCache(ttl=0.02)
+    cache.get_or_call("first", lambda: "value")
+    time.sleep(0.05)
+    cache.get_or_call("second", lambda: "value")
+    assert list(cache._entries) == ["second"]
+
+
+def test_cache_ttl_falls_back_on_an_unparseable_value(monkeypatch):
+    monkeypatch.setenv("ZEA_HF_CACHE_TTL", "off")
+    assert ipu._hf_cache_ttl() == ipu._DEFAULT_HF_CACHE_TTL
+
+    monkeypatch.setenv("ZEA_HF_CACHE_TTL", "0")
+    assert ipu._hf_cache_ttl() == 0
+
+
+def test_streaming_does_not_go_through_the_caches(monkeypatch):
+    """Streamed reads must reach the hub every time; they are not downloads."""
+    opens = []
+
+    class FakeFS:
+        def open(self, path, mode, **kwargs):
+            opens.append(path)
+            return "FILEOBJ"
+
+    monkeypatch.setattr("huggingface_hub.HfFileSystem", FakeFS)
+
+    for _ in range(2):
+        ipu._hf_stream_open(f"hf://{REPO_ID}/val/a.hdf5")
+    assert len(opens) == 2

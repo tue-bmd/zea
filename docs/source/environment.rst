@@ -44,6 +44,13 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - ``auto:1``
      - Any valid device name as accepted by :func:`zea.init_device`. For example, ``cpu``,
        ``cuda:0``, ``auto:1``, etc.
+   * - ``ZEA_HF_CACHE_TTL``
+     - Seconds a Hugging Face repository listing or resolved download path may be reused before
+       ``zea`` asks the hub again. Keeps a dataset scan or preset load from repeating the same
+       request; set to ``0`` if you need every call to hit the hub (e.g. a repo being written to
+       from elsewhere while you read it).
+     - ``300``
+     - Any number of seconds, ``0`` to disable.
    * - ``ZEA_CHUNK_CACHE``
      - Cache chunks fetched while streaming (``hf://``) under ``ZEA_CACHE_DIR/chunks``, so a
        repeated read is served from disk instead of re-downloaded. Keyed by content hash, so a

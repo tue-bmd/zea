@@ -21,8 +21,8 @@ from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 import zea
 import zea.models.base
 from zea.internal.preset_utils import (
-    HF_MODELS_DIR,
-    HF_PREFIX,  # noqa: F401 — re-exported, this module used to define it
+    HF_MODELS_DIR,  # noqa: F401 — re-exported, this module used to define it
+    HF_PREFIX,  # noqa: F401 — idem
     HF_SCHEME,
     _hf_download,
     _hf_parse_path,
@@ -82,7 +82,7 @@ def _get_hf_file(preset, path):
     repo_id, subpath = _hf_parse_path(preset)
     filename = f"{subpath}/{path}" if subpath else path
     try:
-        return _hf_download(repo_id, filename, cache_dir=HF_MODELS_DIR, repo_type="model")
+        return _hf_download(repo_id, filename, repo_type="model")
     except HFValidationError as e:
         raise ValueError(
             "Unexpected Hugging Face preset. Hugging Face model handles "
@@ -99,15 +99,18 @@ def _get_hf_file(preset, path):
 
 def _get_local_file(preset, path):
     """Return the local path of ``path`` inside a local preset directory."""
-    preset_dir = Path(preset).resolve()
-    local_path = (preset_dir / path).resolve()
+    local_path = Path(preset) / path
     # Guard against a `path` that escapes the preset directory (keras-hub does the
-    # same for its cache directory, see keras-team/keras-hub#2716).
-    if preset_dir != local_path and preset_dir not in local_path.parents:
+    # same for its cache directory, see keras-team/keras-hub#2716). Compare the
+    # paths lexically like upstream: an HF snapshot directory is a valid preset and
+    # stores its files as symlinks into a sibling `blobs/`, which resolving would
+    # (wrongly) read as an escape.
+    preset_dir = os.path.abspath(preset)
+    if os.path.commonpath([preset_dir, os.path.abspath(local_path)]) != preset_dir:
         raise ValueError(f"Invalid path: '{path}'. It escapes the preset directory.")
     if not local_path.exists():
         raise FileNotFoundError(f"`{path}` doesn't exist in preset directory `{preset}`.")
-    return str(Path(preset) / path)
+    return str(local_path)
 
 
 def get_file(preset, path):
