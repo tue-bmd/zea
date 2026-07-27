@@ -330,6 +330,7 @@ def test_upload_folder_to_hf(monkeypatch, tmp_path):
     from zea.internal import preset_utils as ipu
 
     ipu._LISTING_CACHE.get_or_call(("zeahub/taesdxl", "model"), lambda: {"old.txt": 1})
+    assert ipu._LISTING_CACHE._entries, "listing was not seeded, the assert below is vacuous"
 
     url = hf.upload_folder_to_hf(tmp_path, "zeahub/taesdxl", tag="v1")
 

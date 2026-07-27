@@ -239,12 +239,21 @@ def _assert_file_exists(preset, path):
         ) from e
 
 
+# What to assume for a dtype we cannot size (`complex64`, `float8_e4m3fn`, ...). This
+# only feeds the shard-size estimate, so guessing beats keras-hub's uncaught ValueError
+# out of `save_to_preset`.
+_DEFAULT_DTYPE_BITS = 32
+
+
 def _dtype_size_in_bits(dtype):
     """Size of a dtype in bits, e.g. ``"float32"`` -> 32."""
     dtype = keras.backend.standardize_dtype(dtype)
     if dtype == "bool":
         return 1
-    return int(re.sub(r"bfloat|float|uint|int", "", dtype))
+    try:
+        return int(re.sub(r"bfloat|float|uint|int", "", dtype))
+    except ValueError:
+        return _DEFAULT_DTYPE_BITS
 
 
 def _variables_size_in_bytes(variables):

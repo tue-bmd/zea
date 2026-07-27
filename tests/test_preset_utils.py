@@ -442,6 +442,11 @@ def test_resolve_path_whole_repo(fake_resolve):
     assert ipu._hf_resolve_path(f"hf://{REPO_ID}") == fake_resolve
 
 
+def test_resolve_path_directory_with_trailing_slash(fake_resolve):
+    """`hf://org/repo/subdir/` is the directory, as the docstring advertises."""
+    assert ipu._hf_resolve_path(f"hf://{REPO_ID}/val/") == fake_resolve / "val"
+
+
 def test_resolve_path_missing_subpath(fake_resolve):
     with pytest.raises(FileNotFoundError, match="not found in"):
         ipu._hf_resolve_path(f"hf://{REPO_ID}/nope.hdf5")
@@ -1296,3 +1301,9 @@ def test_streaming_does_not_go_through_the_caches(monkeypatch):
     for _ in range(2):
         ipu._hf_stream_open(f"hf://{REPO_ID}/val/a.hdf5")
     assert len(opens) == 2
+
+
+def test_dtype_size_falls_back_for_unsizeable_dtypes():
+    """An exotic dtype must not turn `save_to_preset` into a ValueError."""
+    assert mpu._dtype_size_in_bits("complex64") == mpu._DEFAULT_DTYPE_BITS
+    assert mpu._dtype_size_in_bits("float8_e4m3fn") == mpu._DEFAULT_DTYPE_BITS
