@@ -47,9 +47,7 @@ def _clear_hf_caches():
     ipu._hf_clear_caches()
 
 
-# --------------------------------------------------------------------------------------
 # _hf_call: login-and-retry
-# --------------------------------------------------------------------------------------
 
 
 def test_hf_call_returns_without_login(monkeypatch):
@@ -121,9 +119,7 @@ def test_hf_call_download_retry_set_excludes_missing_entries(monkeypatch):
     assert logins == []
 
 
-# --------------------------------------------------------------------------------------
 # _hf_login
-# --------------------------------------------------------------------------------------
 
 
 def test_hf_login_without_token_is_noop(monkeypatch):
@@ -150,9 +146,7 @@ def test_hf_login_uses_token_from_env(monkeypatch, env_var):
     assert calls == [{"token": "hf_dummy_token", "skip_if_logged_in": True}]
 
 
-# --------------------------------------------------------------------------------------
 # _TTLCache / _cache_key
-# --------------------------------------------------------------------------------------
 
 
 def test_ttl_cache_returns_cached_value():
@@ -221,9 +215,7 @@ def test_cache_key_is_none_for_unhashable_arguments():
     assert ipu._cache_key("repo", allow_patterns=["*.h5"]) is None
 
 
-# --------------------------------------------------------------------------------------
 # Repository listings
-# --------------------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -291,9 +283,7 @@ def test_list_h5_files_unknown_subdirectory_is_empty(fake_tree):
     assert ipu._hf_list_h5_files(f"hf://{REPO_ID}/nope") == []
 
 
-# --------------------------------------------------------------------------------------
 # Downloads
-# --------------------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -384,9 +374,7 @@ def test_download_files_in_path_runs_concurrently(monkeypatch):
     assert state["peak"] > 1
 
 
-# --------------------------------------------------------------------------------------
 # Path resolution
-# --------------------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -438,9 +426,7 @@ def test_snapshot_dir_lookup_without_snapshots_dir(tmp_path):
         ipu._get_snapshot_dir_from_downloaded_file(tmp_path / "a.hdf5")
 
 
-# --------------------------------------------------------------------------------------
 # repo_type prefixes and stream URLs
-# --------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -495,9 +481,7 @@ def test_stream_open_retries_after_login(monkeypatch):
     assert len(logins) == 1
 
 
-# --------------------------------------------------------------------------------------
 # zea.models.preset_utils — get_file
-# --------------------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -577,9 +561,7 @@ def test_get_file_hf_missing_entry(monkeypatch):
         mpu.get_file("hf://zeahub/taesdxl", "config.json")
 
 
-# --------------------------------------------------------------------------------------
 # Built-in preset registry
-# --------------------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -621,9 +603,7 @@ def test_model_presets_property_lists_builtins():
     assert "dense" in DenseNet.presets or DenseNet.presets == {}
 
 
-# --------------------------------------------------------------------------------------
 # Config helpers
-# --------------------------------------------------------------------------------------
 
 
 def test_load_json(local_preset):
@@ -687,9 +667,7 @@ def test_keras_to_zea_registry():
     assert model_registry[mpu.keras_to_zea_registry("DenseNet", model_registry)] is DenseNet
 
 
-# --------------------------------------------------------------------------------------
 # jax_memory_cleanup
-# --------------------------------------------------------------------------------------
 
 
 class _FakeValue:
@@ -730,9 +708,7 @@ def test_jax_memory_cleanup_noop_on_other_backends(monkeypatch):
     assert plain.deleted is False
 
 
-# --------------------------------------------------------------------------------------
 # Loader / saver
-# --------------------------------------------------------------------------------------
 
 
 def test_get_preset_loader_returns_keras_loader(local_preset):
@@ -881,9 +857,7 @@ def test_load_model_builds_from_input_shape(monkeypatch, local_preset):
     assert loaded_from == [str(local_preset / mpu.MODEL_WEIGHTS_FILE)]
 
 
-# --------------------------------------------------------------------------------------
 # Converters and preprocessors
-# --------------------------------------------------------------------------------------
 
 
 def test_get_model_kwargs_forwards_dtype_and_image_shape():
@@ -1010,9 +984,7 @@ def test_save_preprocessor_uses_config_file_and_saves_sublayers(tmp_path):
     assert saved_to == [str(tmp_path)]
 
 
-# --------------------------------------------------------------------------------------
 # zea.models.base — the preset entry points
-# --------------------------------------------------------------------------------------
 
 
 @model_registry(name="_preset_utils_test_submodel")
