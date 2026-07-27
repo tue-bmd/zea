@@ -259,3 +259,69 @@ def test_get_snapshot_dir_from_downloaded_file():
         result = _get_snapshot_dir_from_downloaded_file(str(mock_file))
         assert result == snapshot_hash_dir
         assert result.name == "abc123def"
+
+
+def test_load_model_from_hf(monkeypatch, tmp_path):
+    """The model snapshot is downloaded and its directory returned."""
+    from datetime import datetime, timezone
+
+    import zea.tools.hf as hf
+
+    logins = []
+    monkeypatch.setattr(hf, "_hf_login", lambda: logins.append(1))
+    monkeypatch.setattr(hf, "snapshot_download", lambda **kwargs: str(tmp_path))
+
+    class FakeCommit:
+        title = "Add weights"
+        created_at = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
+
+    class FakeApi:
+        def list_repo_commits(self, repo_id, revision=None):
+            return [FakeCommit()]
+
+    monkeypatch.setattr(hf, "HfApi", FakeApi)
+
+    model_dir = hf.load_model_from_hf("zeahub/taesdxl")
+
+    assert model_dir == Path(tmp_path)
+    assert logins == [1]
+
+
+def test_upload_folder_to_hf(monkeypatch, tmp_path):
+    """A local directory is uploaded to the given repo, branch and tag."""
+    import zea.tools.hf as hf
+
+    monkeypatch.setattr(hf, "_hf_login", lambda: None)
+    calls = {}
+
+    class FakeApi:
+        def create_branch(self, repo_id, repo_type=None, branch=None, exist_ok=False):
+            calls["branch"] = (repo_id, repo_type, branch, exist_ok)
+
+        def upload_folder(self, folder_path=None, repo_id=None, **kwargs):
+            calls["upload"] = (str(folder_path), repo_id, kwargs.get("commit_message"))
+
+        def create_tag(self, repo_id, repo_type=None, tag=None):
+            calls["tag"] = (repo_id, repo_type, tag)
+
+    monkeypatch.setattr(hf, "HfApi", FakeApi)
+
+    url = hf.upload_folder_to_hf(tmp_path, "zeahub/taesdxl", tag="v1")
+
+    assert url == "https://huggingface.co/zeahub/taesdxl"
+    assert calls["branch"] == ("zeahub/taesdxl", "model", "main", True)
+    assert calls["upload"][0] == str(tmp_path)
+    assert calls["upload"][2] == f"Upload files from {tmp_path.name}"
+    assert calls["tag"] == ("zeahub/taesdxl", "model", "v1")
+
+
+def test_hfpath_joinpath_and_scheme_handling(folder):
+    """joinpath keeps the hf:// scheme, and an already-prefixed part is not doubled."""
+    joined = folder.joinpath("val", "patient0401")
+    assert str(joined) == f"{FOLDER_STR}/val/patient0401"
+    assert str(HFPath(FOLDER_STR, f"{HFPath._scheme}val")) == f"{FOLDER_STR}/val"
+
+
+def test_hfpath_repo_id_requires_org_and_repo():
+    with pytest.raises(ValueError, match="cannot extract repo_id"):
+        HFPath("hf://only-org").repo_id
