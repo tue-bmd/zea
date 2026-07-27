@@ -87,12 +87,11 @@ def _get_hf_file(preset, path):
             f"'hf://username/bert_base_en'. Received: preset={preset}."
         ) from e
     except EntryNotFoundError as e:
-        message = str(e)
-        if message.find("403 Client Error"):
-            raise FileNotFoundError(
-                f"`{path}` doesn't exist in preset directory `{preset}`."
-            ) from e
-        raise ValueError(message) from e
+        # The hub raises this when the file is not in the repo, which is exactly
+        # what `check_file_exists` asks about. (keras-hub branches on a
+        # `403 Client Error` here, but its condition is `str.find(...)`, which is
+        # truthy at -1 too, so that branch never runs there either.)
+        raise FileNotFoundError(f"`{path}` doesn't exist in preset directory `{preset}`.") from e
 
 
 def _get_local_file(preset, path):
