@@ -20,16 +20,8 @@ from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 
 import zea
 import zea.models.base
-from zea.internal.preset_utils import (
-    HF_MODELS_DIR,  # noqa: F401 — re-exported, this module used to define it
-    HF_PREFIX,  # noqa: F401 — idem
-    HF_SCHEME,
-    _hf_download,
-    _hf_parse_path,
-)
+from zea.internal.preset_utils import HF_SCHEME, _hf_download, _hf_parse_path
 from zea.internal.registry import model_registry
-
-ASSET_DIR = "assets"
 
 # Config file names.
 CONFIG_FILE = "config.json"
@@ -40,10 +32,6 @@ METADATA_FILE = "metadata.json"
 # Weight file names.
 MODEL_WEIGHTS_FILE = "model.weights.h5"
 SHARDED_MODEL_WEIGHTS_CONFIG_FILE = "model.weights.json"
-
-# HuggingFace filenames.
-README_FILE = "README.md"
-HF_CONFIG_FILE = "config.json"
 
 # Global state for preset registry.
 BUILTIN_PRESETS = {}
@@ -90,10 +78,8 @@ def _get_hf_file(preset, path):
             f"'hf://username/bert_base_en'. Received: preset={preset}."
         ) from e
     except EntryNotFoundError as e:
-        # The hub raises this when the file is not in the repo, which is exactly
-        # what `check_file_exists` asks about. (keras-hub branches on a
-        # `403 Client Error` here, but its condition is `str.find(...)`, which is
-        # truthy at -1 too, so that branch never runs there either.)
+        # The hub raises this when the file is not in the repo, which is what
+        # `check_file_exists` asks about.
         raise FileNotFoundError(f"`{path}` doesn't exist in preset directory `{preset}`.") from e
 
 
@@ -157,7 +143,6 @@ def load_serialized_object(config, cls, **kwargs):
     config = set_dtype_in_config(config, dtype)
 
     config["config"] = {**config["config"], **kwargs}
-    # return keras.saving.deserialize_keras_object(config)
     return zea.models.base.deserialize_zea_object(config, cls)
 
 
@@ -166,19 +151,7 @@ def check_config_class(config):
     registered_name = config["registered_name"]
     if registered_name in ("Functional", "Sequential"):
         return keras.Model
-    # cls = keras.saving.get_registered_object(registered_name)
-    name = keras_to_zea_registry(registered_name, model_registry)
-
-    cls = model_registry[name]
-
-    if cls is None:
-        raise ValueError(
-            f"Attempting to load class {registered_name} with "
-            "`from_preset()`, but there is no class registered with zea "
-            f"for {registered_name}. Make sure to register any custom "
-            "classes with `zea.registry.model_registry()`."
-        )
-    return cls
+    return model_registry[keras_to_zea_registry(registered_name, model_registry)]
 
 
 def jax_memory_cleanup(layer):

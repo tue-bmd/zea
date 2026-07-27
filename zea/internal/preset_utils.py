@@ -82,22 +82,20 @@ def _hf_repo_type_prefix(repo_type: str) -> str:
     return prefix
 
 
-# The hub answers 404 (rather than 403) for repos an anonymous client may not see, so a
-# "not found" can really mean "not authenticated". Retrying once after a login turns
-# those into a successful call whenever a token is available.
+# The hub answers 404 for repos an anonymous client may not see, so "not found" can
+# really mean "not authenticated".
 _HF_LOGIN_RETRY_ERRORS = (RepositoryNotFoundError, HFValidationError, EntryNotFoundError)
 
-# A missing *file* in a repo we can already reach is a genuine 404, and
-# ``check_file_exists`` relies on it being reported quickly, so downloads only retry on
-# errors that a login can plausibly fix.
+# A missing *file* in a repo we can reach is a genuine 404, and `check_file_exists`
+# needs it reported quickly.
 _HF_DOWNLOAD_RETRY_ERRORS = (RepositoryNotFoundError,)
 
 
 def _hf_call(func, *args, retry_on=_HF_LOGIN_RETRY_ERRORS, **kwargs):
     """Call a hub function, retrying it once after a login attempt.
 
-    :func:`_hf_login` is a no-op when no token is available and never prompts
-    interactively, so a failure it cannot fix is simply raised again by the retry.
+    :func:`_hf_login` is a no-op without a token and never prompts interactively, so a
+    failure it cannot fix is raised again by the retry.
     """
     try:
         return func(*args, **kwargs)
@@ -124,11 +122,8 @@ def _hf_cache_ttl() -> float:
         return _DEFAULT_HF_CACHE_TTL
 
 
-# Repository listings and resolved download paths are stable over the lifetime of a
-# single operation, which asks for them repeatedly (a dataset scan lists the same repo
-# once per path it inspects, and loading a preset asks for `config.json` once to check
-# that it exists and once to read it). Memoizing them briefly turns those into a single
-# hub round trip. Set ``ZEA_HF_CACHE_TTL=0`` to disable.
+# A single operation asks for the same listing or file repeatedly (a dataset scan lists
+# the repo once per path it inspects), so hub answers are reused briefly.
 _HF_CACHE_TTL = _hf_cache_ttl()
 
 
@@ -163,8 +158,7 @@ class _TTLCache:
         value = func()
         now = time.monotonic()
         with self._lock:
-            # Expired entries are only dropped here, so a long-lived process (the data
-            # explorer, a dataset scan over thousands of files) does not accumulate them.
+            # The only place expired entries are dropped, so they cannot pile up.
             self._entries = {k: v for k, v in self._entries.items() if v[0] > now}
             self._entries[key] = (now + self.ttl, value)
         return value
@@ -283,21 +277,14 @@ def _download_files_in_path(
     matched = [f for f in files if path_filter is None or f.startswith(path_filter)]
 
     def _download(filename):
-        return _hf_download(
-            repo_id,
-            filename,
-            cache_dir=cache_dir,
-            repo_type=repo_type,
-            **kwargs,
-        )
+        return _hf_download(repo_id, filename, cache_dir=cache_dir, repo_type=repo_type, **kwargs)
 
     if len(matched) <= 1:
         return [_download(filename) for filename in matched]
 
     with ThreadPoolExecutor(max_workers=min(_HF_DOWNLOAD_WORKERS, len(matched))) as pool:
-        # ``map`` keeps the input order and raises the first failure, as the sequential
-        # loop did. Unlike that loop it does not stop at the first one: the downloads
-        # already in flight run to completion before the error surfaces.
+        # ``map`` keeps the input order and raises the first failure, though unlike the
+        # sequential loop it lets the downloads already in flight finish first.
         return list(pool.map(_download, matched))
 
 
@@ -329,9 +316,7 @@ def _hf_list_h5_files(hf_path: str, **kwargs) -> list[tuple[str, int]]:
     return [(f, entries[f]) for f in matched]
 
 
-def _hf_resolve_path(
-    hf_path: str, cache_dir=HF_DATASETS_DIR, repo_type="dataset", **kwargs
-) -> Path:
+def _hf_resolve_path(hf_path: str, cache_dir=None, repo_type="dataset", **kwargs) -> Path:
     """Resolve a Hugging Face path to a local cache directory path.
 
     Downloads files from a HuggingFace dataset repository and returns
@@ -343,11 +328,7 @@ def _hf_resolve_path(
     Note that we also support streaming, so this should not be used that often!
     """
     repo_id, subpath = _hf_parse_path(hf_path)
-    files = _hf_list_files(
-        repo_id,
-        repo_type=repo_type,
-        **kwargs,
-    )
+    files = _hf_list_files(repo_id, repo_type=repo_type, **kwargs)
 
     if subpath:
         prefix = subpath + "/"
