@@ -350,6 +350,9 @@ def _hf_resolve_path(
     )
 
     if subpath:
+        # A trailing slash is how you spell "the directory" (and the docstring
+        # advertises it), so strip it like `_hf_list_h5_files` does.
+        subpath = subpath.rstrip("/")
         prefix = subpath + "/"
         # Directory case
         if any(f.startswith(prefix) for f in files):
@@ -492,5 +495,6 @@ def _hf_stream_open(
         cache_type = _HF_STREAM_CACHE_TYPE
 
     open_kwargs = {"cache_type": cache_type, "block_size": block_size, **kwargs}
-    # A fresh filesystem is built per attempt so the retry picks up the new credentials.
+    # We never pass a token, so `HfFileSystem` resolves one per request: the retry
+    # picks up a login even though fsspec may hand back the same cached instance.
     return _hf_call(lambda: HfFileSystem().open(fs_path, "rb", **open_kwargs))
