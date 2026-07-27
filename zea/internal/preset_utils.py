@@ -1,12 +1,21 @@
-"""Preset utils for zea datasets hosted on Hugging Face.
+"""Shared Hugging Face plumbing for zea presets (models and datasets).
+
+Both halves of zea resolve ``hf://`` handles: :mod:`zea.models.preset_utils` loads Keras
+presets from model repos, and the data stack (:mod:`zea.data.datasets`,
+:mod:`zea.data.file`, :mod:`zea.data.file_operations`) loads HDF5 files from dataset
+repos. Everything they have in common lives here — handle parsing, authentication,
+repository listings, downloads and streaming — so the two sides cannot drift apart.
 
 See https://huggingface.co/zeahub/
 """
 
 import os
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from huggingface_hub import RepoFile, hf_hub_download, list_repo_files, list_repo_tree, login
+from huggingface_hub import RepoFile, hf_hub_download, list_repo_tree, login
 from huggingface_hub.utils import (
     EntryNotFoundError,
     HFValidationError,
@@ -15,11 +24,21 @@ from huggingface_hub.utils import (
 
 from zea.internal.cache import ZEA_CACHE_DIR
 
-HF_DATASETS_DIR = ZEA_CACHE_DIR / "huggingface" / "datasets"
-HF_DATASETS_DIR.mkdir(parents=True, exist_ok=True)
-
 HF_SCHEME = "hf"
 HF_PREFIX = "hf://"
+
+HF_DATASETS_DIR = ZEA_CACHE_DIR / "huggingface" / "datasets"
+HF_MODELS_DIR = ZEA_CACHE_DIR / "huggingface" / "models"
+for _cache_dir in (HF_DATASETS_DIR, HF_MODELS_DIR):
+    _cache_dir.mkdir(parents=True, exist_ok=True)
+
+# Default local cache directory per huggingface_hub ``repo_type``, so a model download
+# never lands in the dataset cache (and vice versa) when no ``cache_dir`` is given.
+_HF_CACHE_DIRS = {"dataset": HF_DATASETS_DIR, "model": HF_MODELS_DIR}
+
+# Maps huggingface_hub ``repo_type`` values to the path prefix used by both
+# :class:`~huggingface_hub.HfFileSystem` and the ``resolve`` download URLs.
+_HF_REPO_TYPE_PREFIX = {"dataset": "datasets/", "model": "", "space": "spaces/"}
 
 
 def _hf_login() -> None:
@@ -46,23 +65,156 @@ def _hf_parse_path(hf_path: str):
     return repo_id, subpath
 
 
-def _hf_list_files(repo_id, repo_type="dataset", **kwargs):
+def _hf_repo_type_prefix(repo_type: str) -> str:
+    """The path prefix for a ``repo_type``, validated."""
+    prefix = _HF_REPO_TYPE_PREFIX.get(repo_type)
+    if prefix is None:  # "model" maps to "", so test membership, not truthiness
+        raise ValueError(
+            f"Unsupported repo_type '{repo_type}'. Expected one of {list(_HF_REPO_TYPE_PREFIX)}."
+        )
+    return prefix
+
+
+# The hub answers 404 (rather than 403) for repos an anonymous client may not see, so a
+# "not found" can really mean "not authenticated". Retrying once after a login turns
+# those into a successful call whenever a token is available.
+_HF_LOGIN_RETRY_ERRORS = (RepositoryNotFoundError, HFValidationError, EntryNotFoundError)
+
+# A missing *file* in a repo we can already reach is a genuine 404, and
+# ``check_file_exists`` relies on it being reported quickly, so downloads only retry on
+# errors that a login can plausibly fix.
+_HF_DOWNLOAD_RETRY_ERRORS = (RepositoryNotFoundError,)
+
+
+def _hf_call(func, *args, retry_on=_HF_LOGIN_RETRY_ERRORS, **kwargs):
+    """Call a hub function, retrying it once after a login attempt.
+
+    :func:`_hf_login` is a no-op when no token is available and never prompts
+    interactively, so a failure it cannot fix is simply raised again by the retry.
+    """
     try:
-        files = list_repo_files(repo_id, repo_type=repo_type, **kwargs)
-    except (RepositoryNotFoundError, HFValidationError, EntryNotFoundError):
+        return func(*args, **kwargs)
+    except retry_on:
         _hf_login()
-        files = list_repo_files(repo_id, repo_type=repo_type, **kwargs)
-    return files
+        return func(*args, **kwargs)
 
 
-def _hf_download(repo_id, filename, cache_dir=HF_DATASETS_DIR, repo_type="dataset", **kwargs):
-    return hf_hub_download(
-        repo_id=repo_id,
-        filename=filename,
-        cache_dir=cache_dir,
-        repo_type=repo_type,
-        **kwargs,
-    )
+# Repository listings and resolved download paths are stable over the lifetime of a
+# single operation, which asks for them repeatedly (a dataset scan lists the same repo
+# once per path it inspects, and loading a preset asks for `config.json` once to check
+# that it exists and once to read it). Memoizing them briefly turns those into a single
+# hub round trip. Set ``ZEA_HF_CACHE_TTL=0`` to disable.
+_HF_CACHE_TTL = float(os.environ.get("ZEA_HF_CACHE_TTL", 300))
+
+
+class _TTLCache:
+    """Minimal thread-safe cache whose entries expire after ``ttl`` seconds."""
+
+    def __init__(self, ttl: float):
+        self.ttl = ttl
+        self._entries: dict = {}
+        self._lock = threading.Lock()
+
+    def get_or_call(self, key, func, valid=None):
+        """Return the value cached under ``key``, else call ``func()`` and cache it.
+
+        Args:
+            key: Hashable cache key, or ``None`` to bypass the cache entirely.
+            func (callable): Zero-argument callable producing the value.
+            valid (callable, optional): Predicate re-checked on a cache hit; a value
+                it rejects (e.g. a downloaded file that has since been deleted) is
+                dropped and recomputed.
+        """
+        if self.ttl <= 0 or key is None:
+            return func()
+
+        with self._lock:
+            entry = self._entries.get(key)
+        if entry is not None:
+            expires_at, value = entry
+            if expires_at > time.monotonic() and (valid is None or valid(value)):
+                return value
+
+        value = func()
+        with self._lock:
+            self._entries[key] = (time.monotonic() + self.ttl, value)
+        return value
+
+    def clear(self):
+        """Drop all entries."""
+        with self._lock:
+            self._entries.clear()
+
+
+_LISTING_CACHE = _TTLCache(_HF_CACHE_TTL)
+_DOWNLOAD_CACHE = _TTLCache(_HF_CACHE_TTL)
+
+
+def _hf_clear_caches() -> None:
+    """Drop the memoized repository listings and resolved download paths."""
+    _LISTING_CACHE.clear()
+    _DOWNLOAD_CACHE.clear()
+
+
+def _cache_key(*parts, **kwargs):
+    """Build a hashable cache key, or ``None`` if the arguments cannot be hashed."""
+    key = tuple(parts) + tuple(sorted(kwargs.items()))
+    try:
+        hash(key)
+    except TypeError:
+        return None
+    return key
+
+
+def _hf_repo_files(repo_id, repo_type="dataset", **kwargs) -> dict:
+    """Map every file in a repo to its size in bytes (memoized).
+
+    ``list_repo_tree`` already carries the sizes that ``list_repo_files`` throws away,
+    so one listing serves both the callers that only want names
+    (:func:`_hf_list_files`) and the ones that need sizes (:func:`_hf_list_h5_files`).
+
+    The returned mapping is shared between callers and must not be mutated.
+    """
+
+    def _list():
+        entries = _hf_call(list_repo_tree, repo_id, recursive=True, repo_type=repo_type, **kwargs)
+        return {entry.path: entry.size for entry in entries if isinstance(entry, RepoFile)}
+
+    return _LISTING_CACHE.get_or_call(_cache_key(repo_id, repo_type, **kwargs), _list)
+
+
+def _hf_list_files(repo_id, repo_type="dataset", **kwargs) -> list:
+    """List the paths of all files in a Hugging Face repository."""
+    return list(_hf_repo_files(repo_id, repo_type=repo_type, **kwargs))
+
+
+def _hf_download(repo_id, filename, cache_dir=None, repo_type="dataset", **kwargs):
+    """Download a single file from a repo and return its local path (memoized).
+
+    Args:
+        repo_id (str): The ``{org}/{repo}`` identifier.
+        filename (str): Path of the file inside the repository.
+        cache_dir (str or Path, optional): Local cache directory. Defaults to the zea
+            cache for ``repo_type``.
+        repo_type (str, optional): One of ``"dataset"``, ``"model"`` or ``"space"``.
+        **kwargs: Forwarded to :func:`~huggingface_hub.hf_hub_download`.
+    """
+    if cache_dir is None:
+        cache_dir = _HF_CACHE_DIRS.get(repo_type, HF_DATASETS_DIR)
+
+    def _download():
+        return _hf_call(
+            hf_hub_download,
+            retry_on=_HF_DOWNLOAD_RETRY_ERRORS,
+            repo_id=repo_id,
+            filename=filename,
+            cache_dir=cache_dir,
+            repo_type=repo_type,
+            **kwargs,
+        )
+
+    key = _cache_key(repo_id, filename, str(cache_dir), repo_type, **kwargs)
+    return _DOWNLOAD_CACHE.get_or_call(key, _download, valid=os.path.exists)
 
 
 def _get_snapshot_dir_from_downloaded_file(downloaded_file_path: str | Path) -> Path:
@@ -79,6 +231,11 @@ def _get_snapshot_dir_from_downloaded_file(downloaded_file_path: str | Path) -> 
     raise FileNotFoundError(f"Could not find snapshot directory for {downloaded_file_path}")
 
 
+# Downloads are network-bound, so a small pool overlaps their round trips instead of
+# paying for them one after another. Matches huggingface_hub's own default for snapshots.
+_HF_DOWNLOAD_WORKERS = 8
+
+
 def _download_files_in_path(
     repo_id: str,
     files: list,
@@ -87,20 +244,28 @@ def _download_files_in_path(
     repo_type="dataset",
     **kwargs,
 ) -> list[str]:
-    """Download all files matching the path filter."""
-    downloaded_files = []
-    for f in files:
-        if path_filter is None or f.startswith(path_filter):
-            downloaded_path = _hf_download(
-                repo_id,
-                f,
-                cache_dir=cache_dir,
-                repo_type=repo_type,
-                **kwargs,
-            )
-            downloaded_files.append(downloaded_path)
+    """Download all files matching the path filter, concurrently.
 
-    return downloaded_files
+    Returns the local paths in the same order as the matching entries of ``files``.
+    """
+    matched = [f for f in files if path_filter is None or f.startswith(path_filter)]
+
+    def _download(filename):
+        return _hf_download(
+            repo_id,
+            filename,
+            cache_dir=cache_dir,
+            repo_type=repo_type,
+            **kwargs,
+        )
+
+    if len(matched) <= 1:
+        return [_download(filename) for filename in matched]
+
+    with ThreadPoolExecutor(max_workers=min(_HF_DOWNLOAD_WORKERS, len(matched))) as pool:
+        # ``map`` keeps the input order and re-raises the first failure, like the
+        # sequential loop it replaces.
+        return list(pool.map(_download, matched))
 
 
 _HF_H5_EXTENSIONS = (".hdf5", ".h5")
@@ -118,29 +283,15 @@ def _hf_list_h5_files(hf_path: str, **kwargs) -> list[tuple[str, int]]:
     - hf://org/repo/file.h5   — [(file.h5, size)] if it exists as a single file
     """
     repo_id, subpath = _hf_parse_path(hf_path)
-    try:
-        entries = {
-            e.path: e.size
-            for e in list_repo_tree(repo_id, recursive=True, repo_type="dataset", **kwargs)
-            if isinstance(e, RepoFile)
-        }
-    except (RepositoryNotFoundError, HFValidationError, EntryNotFoundError):
-        _hf_login()
-        entries = {
-            e.path: e.size
-            for e in list_repo_tree(repo_id, recursive=True, repo_type="dataset", **kwargs)
-            if isinstance(e, RepoFile)
-        }
+    entries = _hf_repo_files(repo_id, repo_type="dataset", **kwargs)
 
-    all_files = list(entries)
-
-    if subpath and any(f == subpath for f in all_files):
+    if subpath and subpath in entries:
         matched = [subpath]
     elif subpath:
         prefix = subpath.rstrip("/") + "/"
-        matched = [f for f in all_files if f.startswith(prefix) and f.endswith(_HF_H5_EXTENSIONS)]
+        matched = [f for f in entries if f.startswith(prefix) and f.endswith(_HF_H5_EXTENSIONS)]
     else:
-        matched = [f for f in all_files if f.endswith(_HF_H5_EXTENSIONS)]
+        matched = [f for f in entries if f.endswith(_HF_H5_EXTENSIONS)]
 
     return [(f, entries[f]) for f in matched]
 
@@ -166,12 +317,13 @@ def _hf_resolve_path(
     )
 
     if subpath:
+        prefix = subpath + "/"
         # Directory case
-        if any(f.startswith(subpath + "/") for f in files):
+        if any(f.startswith(prefix) for f in files):
             downloaded_files = _download_files_in_path(
                 repo_id,
                 files,
-                subpath + "/",
+                prefix,
                 cache_dir=cache_dir,
                 repo_type=repo_type,
                 **kwargs,
@@ -210,11 +362,6 @@ def _hf_resolve_path(
         return _get_snapshot_dir_from_downloaded_file(downloaded_files[0])
 
 
-# Maps huggingface_hub ``repo_type`` values to the path prefix that
-# :class:`~huggingface_hub.HfFileSystem` expects.
-_HF_FS_PREFIX = {"dataset": "datasets/", "model": "", "space": "spaces/"}
-
-
 # This file object only serves h5py's metadata reads; chunk_reader fetches the array chunks
 # itself. The paged layout keeps that metadata to ~0.26 MB in one request, so the block just has
 # to cover it. Keep it aligned with chunk_cache.CachedFile's block size. Overridable via File().
@@ -225,9 +372,6 @@ _HF_STREAM_BLOCK_SIZE = 1024 * 1024  # 1 MiB
 # Host serving the file bytes. Range requests for chunk reads go straight here rather than
 # through :class:`~huggingface_hub.HfFileSystem`, which issues them one at a time.
 _HF_HOST = "https://huggingface.co"
-
-# The ``resolve`` endpoint of a repo type, as it appears in a download URL.
-_HF_URL_PREFIX = {"dataset": "datasets/", "model": "", "space": "spaces/"}
 
 
 def _hf_stream_url(
@@ -257,11 +401,7 @@ def _hf_stream_url(
     repo_id, subpath = _hf_parse_path(hf_path)
     if not subpath:
         raise ValueError(f"Expected an 'hf://' path to a single file, got '{hf_path}'.")
-    prefix = _HF_URL_PREFIX.get(repo_type)
-    if prefix is None:  # "model" maps to "", so test membership, not truthiness
-        raise ValueError(
-            f"Unsupported repo_type '{repo_type}'. Expected one of {list(_HF_URL_PREFIX)}."
-        )
+    prefix = _hf_repo_type_prefix(repo_type)
     return f"{_HF_HOST}/{prefix}{repo_id}/resolve/{revision or 'main'}/{subpath}"
 
 
@@ -309,11 +449,7 @@ def _hf_stream_open(
             "Point at a specific '.hdf5'/'.h5' file, or pass stream=False to download."
         )
 
-    prefix = _HF_FS_PREFIX.get(repo_type)
-    if prefix is None:
-        raise ValueError(
-            f"Unsupported repo_type '{repo_type}'. Expected one of {list(_HF_FS_PREFIX)}."
-        )
+    prefix = _hf_repo_type_prefix(repo_type)
     ref = f"@{revision}" if revision else ""
     fs_path = f"{prefix}{repo_id}{ref}/{subpath}"
 
@@ -323,8 +459,5 @@ def _hf_stream_open(
         cache_type = _HF_STREAM_CACHE_TYPE
 
     open_kwargs = {"cache_type": cache_type, "block_size": block_size, **kwargs}
-    try:
-        return HfFileSystem().open(fs_path, "rb", **open_kwargs)
-    except (RepositoryNotFoundError, HFValidationError, EntryNotFoundError):
-        _hf_login()
-        return HfFileSystem().open(fs_path, "rb", **open_kwargs)
+    # A fresh filesystem is built per attempt so the retry picks up the new credentials.
+    return _hf_call(lambda: HfFileSystem().open(fs_path, "rb", **open_kwargs))

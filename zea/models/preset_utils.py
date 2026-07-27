@@ -1,4 +1,10 @@
-"""Mostly from keras_hub.src.models import preset_utils"""
+"""Loading and saving of zea model presets.
+
+Mostly from ``keras_hub.src.utils.preset_utils``, trimmed to what zea needs and
+routed through the zea model registry. The Hugging Face plumbing (handle parsing,
+authentication, downloading) is shared with the data stack and lives in
+:mod:`zea.internal.preset_utils`.
+"""
 
 import collections
 import datetime
@@ -7,19 +13,19 @@ import json
 import os
 from pathlib import Path
 
-import huggingface_hub
 import keras
 from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 
 import zea
 import zea.models.base
-from zea.internal.cache import ZEA_CACHE_DIR
-from zea.internal.preset_utils import _hf_login, _hf_parse_path
+from zea.internal.preset_utils import (
+    HF_MODELS_DIR,
+    HF_PREFIX,  # noqa: F401 — re-exported, this module used to define it
+    HF_SCHEME,
+    _hf_download,
+    _hf_parse_path,
+)
 from zea.internal.registry import model_registry
-
-HF_PREFIX = "hf://"
-
-HF_SCHEME = "hf"
 
 ASSET_DIR = "assets"
 
@@ -35,9 +41,6 @@ MODEL_WEIGHTS_FILE = "model.weights.h5"
 # HuggingFace filenames.
 README_FILE = "README.md"
 HF_CONFIG_FILE = "config.json"
-
-HF_MODELS_DIR = ZEA_CACHE_DIR / "huggingface" / "models"
-HF_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Global state for preset registry.
 BUILTIN_PRESETS = {}
@@ -63,64 +66,64 @@ def builtin_presets(cls):
     return presets
 
 
+def _resolve_builtin_preset(preset):
+    """Resolve a built-in preset identifier to its handle or local path."""
+    entry = BUILTIN_PRESETS.get(preset)
+    if entry is None:
+        return preset
+    return entry["hf_handle"] if "hf_handle" in entry else entry["path"]
+
+
+def _get_hf_file(preset, path):
+    """Download ``path`` from a ``hf://`` preset and return the local path."""
+    repo_id, subpath = _hf_parse_path(preset)
+    filename = f"{subpath}/{path}" if subpath else path
+    try:
+        return _hf_download(repo_id, filename, cache_dir=HF_MODELS_DIR, repo_type="model")
+    except HFValidationError as e:
+        raise ValueError(
+            "Unexpected Hugging Face preset. Hugging Face model handles "
+            "should have the form 'hf://{org}/{model}'. For example, "
+            f"'hf://username/bert_base_en'. Received: preset={preset}."
+        ) from e
+    except EntryNotFoundError as e:
+        message = str(e)
+        if message.find("403 Client Error"):
+            raise FileNotFoundError(
+                f"`{path}` doesn't exist in preset directory `{preset}`."
+            ) from e
+        raise ValueError(message) from e
+
+
+def _get_local_file(preset, path):
+    """Return the local path of ``path`` inside a local preset directory."""
+    preset_dir = Path(preset).resolve()
+    local_path = (preset_dir / path).resolve()
+    # Guard against a `path` that escapes the preset directory (keras-hub does the
+    # same for its cache directory).
+    if preset_dir != local_path and preset_dir not in local_path.parents:
+        raise ValueError(f"Invalid path: '{path}'. It escapes the preset directory.")
+    if not local_path.exists():
+        raise FileNotFoundError(f"`{path}` doesn't exist in preset directory `{preset}`.")
+    return str(Path(preset) / path)
+
+
 def get_file(preset, path):
     """Download a preset file in necessary and return the local path."""
     if not isinstance(preset, str):
         raise ValueError(f"A preset identifier must be a string. Received: preset={preset}")
 
-    if preset in BUILTIN_PRESETS:
-        if "hf_handle" in BUILTIN_PRESETS[preset]:
-            preset = BUILTIN_PRESETS[preset]["hf_handle"]
-        else:
-            preset = BUILTIN_PRESETS[preset]["path"]
+    preset = _resolve_builtin_preset(preset)
 
     scheme = None
     if "://" in preset:
         scheme = preset.split("://")[0].lower()
 
     if scheme == HF_SCHEME:
-        if huggingface_hub is None:
-            raise ImportError(
-                f"`from_preset()` requires the `huggingface_hub` package to load from '{preset}'. "
-                "Please install with `pip install huggingface_hub`."
-            )
-        repo_id, subpath = _hf_parse_path(preset)
-        filename = f"{subpath}/{path}" if subpath else path
-
-        def _download_from_hf(repo_id, filename):
-            return huggingface_hub.hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                cache_dir=HF_MODELS_DIR,
-            )
-
-        try:
-            # Try without login first
-            return _download_from_hf(repo_id, filename)
-        except huggingface_hub.utils.RepositoryNotFoundError:
-            # Retry after login; _hf_login is a no-op when no token is available
-            # and never prompts interactively, so re-raise if login didn't help.
-            _hf_login()
-            return _download_from_hf(repo_id, filename)
-        except HFValidationError as e:
-            raise ValueError(
-                "Unexpected Hugging Face preset. Hugging Face model handles "
-                "should have the form 'hf://{org}/{model}'. For example, "
-                f"'hf://username/bert_base_en'. Received: preset={preset}."
-            ) from e
-        except EntryNotFoundError as e:
-            message = str(e)
-            if message.find("403 Client Error"):
-                raise FileNotFoundError(
-                    f"`{path}` doesn't exist in preset directory `{preset}`."
-                ) from e
-            raise ValueError(message) from e
+        return _get_hf_file(preset, path)
     elif Path(preset).exists():
         # Assume a local filepath
-        local_path = Path(preset) / path
-        if not local_path.exists():
-            raise FileNotFoundError(f"`{path}` doesn't exist in preset directory `{preset}`.")
-        return str(local_path)
+        return _get_local_file(preset, path)
     else:
         raise ValueError(
             "Unknown preset identifier. A preset must be a one of:\n"
@@ -180,8 +183,11 @@ def jax_memory_cleanup(layer):
     # variable types and do not need this fix.
     if keras.config.backend() == "jax":
         for weight in layer.weights:
-            if getattr(weight, "_value", None) is not None:
-                weight._value.delete()
+            value = getattr(weight, "_value", None)
+            # Do not delete sharded arrays, as they may be referenced in JAX's
+            # distributed computation graph and deletion can cause errors.
+            if value is not None and getattr(value, "sharding", None) is None:
+                value.delete()
 
 
 def set_dtype_in_config(config, dtype=None):

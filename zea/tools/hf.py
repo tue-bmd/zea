@@ -5,9 +5,7 @@ from pathlib import Path, PurePosixPath
 from huggingface_hub import HfApi, snapshot_download
 
 from zea import log
-from zea.internal.preset_utils import _hf_list_files, _hf_login, _hf_parse_path
-
-HF_PREFIX = "hf://"
+from zea.internal.preset_utils import HF_PREFIX, _hf_list_files, _hf_login, _hf_parse_path
 
 
 def load_model_from_hf(repo_id, revision="main", verbose=True):
