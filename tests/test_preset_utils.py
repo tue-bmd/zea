@@ -1161,3 +1161,79 @@ def test_preset_with_build_config_loads_weights(tmp_path):
     reloaded = _TinyPresetModel.from_preset(str(tmp_path))
     assert reloaded.built is True
     assert np.allclose(expected, np.array(reloaded(inputs)))
+
+
+# Sharded weights (mirrors keras-team/keras-hub#2218).
+
+
+@pytest.mark.parametrize(
+    "dtype, bits", [("float32", 32), ("bfloat16", 16), ("int8", 8), ("uint8", 8), ("bool", 1)]
+)
+def test_dtype_size_in_bits(dtype, bits):
+    assert mpu._dtype_size_in_bits(dtype) == bits
+
+
+def test_variables_size_in_bytes_counts_shared_variables_once():
+    variable = keras.Variable(np.zeros((4, 8), dtype="float32"))
+    assert mpu._variables_size_in_bytes([variable]) == 4 * 8 * 4
+    assert mpu._variables_size_in_bytes([variable, variable]) == 4 * 8 * 4
+
+
+def test_get_sharded_filenames_handles_list_values(tmp_path):
+    """A weight can be spread over several shards, so values may be lists."""
+    config_path = tmp_path / mpu.SHARDED_MODEL_WEIGHTS_CONFIG_FILE
+    config_path.write_text(
+        json.dumps(
+            {
+                "weight_map": {
+                    "a": "model_00000.weights.h5",
+                    "b": ["model_00000.weights.h5", "model_00001.weights.h5"],
+                }
+            }
+        )
+    )
+    loader = mpu.KerasPresetLoader(str(tmp_path), {})
+    assert loader._get_sharded_filenames(str(config_path)) == [
+        "model_00000.weights.h5",
+        "model_00001.weights.h5",
+    ]
+
+
+@pytest.mark.parametrize("max_shard_size", [10, None])
+def test_small_model_is_saved_as_a_single_weights_file(tmp_path, max_shard_size):
+    model = _TinyPresetModel(units=3)
+    model(np.zeros((1, 5), dtype="float32"))
+    model.save_to_preset(str(tmp_path), max_shard_size=max_shard_size)
+
+    assert (tmp_path / mpu.MODEL_WEIGHTS_FILE).exists()
+    assert not (tmp_path / mpu.SHARDED_MODEL_WEIGHTS_CONFIG_FILE).exists()
+
+
+def test_sharded_save_and_load_round_trip(tmp_path, monkeypatch):
+    """A model saved as shards reloads with identical weights."""
+    model = _TinyPresetModel(units=3)
+    inputs = np.random.rand(2, 5).astype("float32")
+    expected = np.array(model(inputs))
+
+    # 64 bytes: above the largest single variable, below the model total.
+    model.save_to_preset(str(tmp_path), max_shard_size=64 / 1024**3)
+
+    assert (tmp_path / mpu.SHARDED_MODEL_WEIGHTS_CONFIG_FILE).exists()
+    assert not (tmp_path / mpu.MODEL_WEIGHTS_FILE).exists()
+    shards = sorted(p.name for p in tmp_path.glob("*.weights.h5"))
+    assert len(shards) > 1
+
+    # Every shard has to be fetched, not just the index (they are separate
+    # downloads for an `hf://` preset).
+    requested = []
+    real_get_file = mpu.get_file
+    monkeypatch.setattr(
+        mpu,
+        "get_file",
+        lambda preset, path: (requested.append(path), real_get_file(preset, path))[1],
+    )
+
+    reloaded = _TinyPresetModel.from_preset(str(tmp_path))
+
+    assert np.allclose(expected, np.array(reloaded(inputs)))
+    assert set(shards).issubset(requested)

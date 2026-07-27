@@ -10,7 +10,9 @@ import collections
 import datetime
 import inspect
 import json
+import math
 import os
+import re
 from pathlib import Path
 
 import keras
@@ -37,6 +39,7 @@ METADATA_FILE = "metadata.json"
 
 # Weight file names.
 MODEL_WEIGHTS_FILE = "model.weights.h5"
+SHARDED_MODEL_WEIGHTS_CONFIG_FILE = "model.weights.json"
 
 # HuggingFace filenames.
 README_FILE = "README.md"
@@ -99,7 +102,7 @@ def _get_local_file(preset, path):
     preset_dir = Path(preset).resolve()
     local_path = (preset_dir / path).resolve()
     # Guard against a `path` that escapes the preset directory (keras-hub does the
-    # same for its cache directory).
+    # same for its cache directory, see keras-team/keras-hub#2716).
     if preset_dir != local_path and preset_dir not in local_path.parents:
         raise ValueError(f"Invalid path: '{path}'. It escapes the preset directory.")
     if not local_path.exists():
@@ -184,7 +187,8 @@ def jax_memory_cleanup(layer):
         for weight in layer.weights:
             value = getattr(weight, "_value", None)
             # Do not delete sharded arrays, as they may be referenced in JAX's
-            # distributed computation graph and deletion can cause errors.
+            # distributed computation graph and deletion can cause errors
+            # (keras-team/keras-hub#2431).
             if value is not None and getattr(value, "sharding", None) is None:
                 value.delete()
 
@@ -230,6 +234,23 @@ def _assert_file_exists(preset, path):
             "directory you are trying to load is a valid KerasHub preset and "
             "and that you have permissions to read/download from this location."
         ) from e
+
+
+def _dtype_size_in_bits(dtype):
+    """Size of a dtype in bits, e.g. ``"float32"`` -> 32."""
+    dtype = keras.backend.standardize_dtype(dtype)
+    if dtype == "bool":
+        return 1
+    return int(re.sub(r"bfloat|float|uint|int", "", dtype))
+
+
+def _variables_size_in_bytes(variables):
+    """Total size of ``variables`` in bytes, counting shared variables once."""
+    unique_variables = {id(v): (v.shape, v.dtype) for v in variables}
+    total_bits = sum(
+        math.prod(shape) * _dtype_size_in_bits(dtype) for shape, dtype in unique_variables.values()
+    )
+    return total_bits / 8
 
 
 def keras_to_zea_registry(keras_name, zea_registry):
@@ -316,9 +337,30 @@ class KerasPresetLoader(PresetLoader):
                     "Model could not be built. Make sure to add a build_config to the json "
                     "or set the input_shape or image_shape attribute before loading weights."
                 )
-        model.load_weights(get_file(self.preset, MODEL_WEIGHTS_FILE))
+        self._load_model_weights(model)
 
         return model
+
+    def _get_sharded_filenames(self, config_path):
+        """The shard files listed in a sharded weights config."""
+        with open(config_path, encoding="utf-8") as config_file:
+            weight_map = json.load(config_file)["weight_map"]
+        filenames = set()
+        for value in weight_map.values():
+            filenames.update(value if isinstance(value, list) else [value])
+        return sorted(filenames)
+
+    def _load_model_weights(self, model):
+        """Load the preset weights, whether they are a single file or sharded."""
+        if check_file_exists(self.preset, MODEL_WEIGHTS_FILE):
+            filepath = get_file(self.preset, MODEL_WEIGHTS_FILE)
+        else:
+            # Sharded: the config maps each weight to the shard holding it, and
+            # Keras expects every shard to sit next to the config when loading.
+            filepath = get_file(self.preset, SHARDED_MODEL_WEIGHTS_CONFIG_FILE)
+            for shard in self._get_sharded_filenames(filepath):
+                get_file(self.preset, shard)
+        model.load_weights(filepath)
 
     def load_image_converter(self, cls, **kwargs):
         """Load an image converter from the preset."""
@@ -353,12 +395,28 @@ class KerasPresetSaver:
         os.makedirs(preset_dir, exist_ok=True)
         self.preset_dir = preset_dir
 
-    def save_model(self, model):
-        """Save a model to a preset."""
+    def save_model(self, model, max_shard_size=10):
+        """Save a model to a preset.
+
+        Args:
+            model (keras.Model): The model to save.
+            max_shard_size (int or float, optional): Maximum size in GB of each
+                weights file. Models larger than this are saved as shards next to a
+                ``model.weights.json`` index. ``None`` always writes a single file.
+                Defaults to ``10``.
+        """
         self._save_serialized_object(model, config_file=CONFIG_FILE)
-        model_weight_path = os.path.join(self.preset_dir, MODEL_WEIGHTS_FILE)
-        model.save_weights(model_weight_path)
+        self._save_model_weights(model, max_shard_size)
         self._save_metadata(model)
+
+    def _save_model_weights(self, model, max_shard_size):
+        """Write the weights as a single file, or as shards when too large."""
+        size_in_gb = _variables_size_in_bytes(model.variables) / (1024**3)
+        if max_shard_size is not None and size_in_gb > max_shard_size:
+            weights_path = os.path.join(self.preset_dir, SHARDED_MODEL_WEIGHTS_CONFIG_FILE)
+            model.save_weights(weights_path, max_shard_size=max_shard_size)
+        else:
+            model.save_weights(os.path.join(self.preset_dir, MODEL_WEIGHTS_FILE))
 
     def save_image_converter(self, converter):
         """Save an image converter to a preset."""
