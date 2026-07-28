@@ -757,6 +757,4 @@ def test_decode_hadamard_file_operation(tmp_path):
     )
     # Each decoded transmit activates a single participating channel, so the decoded
     # apodizations form an identity over the participating (first ``hadamard_size``) channels.
-    np.testing.assert_array_equal(
-        tx_apodizations, np.eye(hadamard_size, n_el, dtype=np.float32)
-    )
+    np.testing.assert_array_equal(tx_apodizations, np.eye(hadamard_size, n_el, dtype=np.float32))
