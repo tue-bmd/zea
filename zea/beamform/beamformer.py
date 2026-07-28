@@ -839,7 +839,7 @@ def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn, element_nor
     grid_relative_to_probe_norm = ops.linalg.norm(grid_relative_to_probe, axis=-1)
 
     # Unit element -> pixel direction (same +1e-6 guard as before, so a +z
-    # normal reproduces the legacy depth-axis cone bit-for-bit).
+    # normal reproduces the legacy depth-axis cone up to float32 rounding).
     unit_direction = grid_relative_to_probe / (grid_relative_to_probe_norm[..., None] + 1e-6)
 
     # Angle between the element -> pixel direction and the element's normal.

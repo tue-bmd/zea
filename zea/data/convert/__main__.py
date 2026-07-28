@@ -52,7 +52,7 @@ def main():
     """Parse command-line arguments and dispatch to the selected dataset conversion routine."""
     # ty cannot match tyro.cli's `TypeForm[OutT]` overload against a subcommand
     # `Union[Annotated[...], ...]`; this is tyro's documented pattern.
-    args = tyro.cli(Dataset)
+    args = tyro.cli(Dataset)  # ty: ignore[no-matching-overload]
     args.run()
 
 

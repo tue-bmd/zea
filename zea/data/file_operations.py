@@ -861,7 +861,7 @@ def main():
 
     # ty cannot match tyro.cli's `TypeForm[OutT]` overload against a subcommand
     # `Union[Annotated[...], ...]`; this is tyro's documented pattern.
-    args = tyro.cli(DataCommand)
+    args = tyro.cli(DataCommand)  # ty: ignore[no-matching-overload]
     _run_data_command(args)
 
 
