@@ -352,3 +352,31 @@ def test_hfpath_joinpath_and_scheme_handling(folder):
 def test_hfpath_repo_id_requires_org_and_repo():
     with pytest.raises(ValueError, match="cannot extract repo_id"):
         HFPath("hf://only-org").repo_id
+
+
+def test_upload_folder_to_hf_invalidates_cache_even_if_tagging_fails(monkeypatch, tmp_path):
+    """The upload landed, so the stale listing has to go regardless of the tag."""
+    import zea.tools.hf as hf
+    from zea.internal import preset_utils as ipu
+
+    monkeypatch.setattr(hf, "_hf_login", lambda: None)
+
+    class FakeApi:
+        def create_branch(self, *args, **kwargs):
+            pass
+
+        def upload_folder(self, **kwargs):
+            pass
+
+        def create_tag(self, *args, **kwargs):
+            raise RuntimeError("tag already exists")
+
+    monkeypatch.setattr(hf, "HfApi", FakeApi)
+
+    ipu._LISTING_CACHE.get_or_call(("zeahub/taesdxl", "model"), lambda: {"old.txt": 1})
+    assert ipu._LISTING_CACHE._entries, "listing was not seeded, the assert below is vacuous"
+
+    with pytest.raises(RuntimeError):
+        hf.upload_folder_to_hf(tmp_path, "zeahub/taesdxl", tag="v1")
+
+    assert ipu._LISTING_CACHE._entries == {}

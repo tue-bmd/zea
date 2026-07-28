@@ -93,11 +93,12 @@ def upload_folder_to_hf(
         revision=revision,
     )
 
+    # The repo just changed, so anything we remembered about it is stale. Do this
+    # before tagging, which is optional and must not be able to skip it.
+    _hf_clear_caches()
+
     if tag:
         api.create_tag(repo_id, repo_type="model", tag=tag)
-
-    # The repo just changed, so anything we remembered about it is stale.
-    _hf_clear_caches()
 
     if verbose:
         msg = f"Uploaded files from '{local_dir}' to 'https://huggingface.co/{repo_id}'."
