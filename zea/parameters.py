@@ -302,6 +302,7 @@ class Parameters(BaseParameters):
         "pfield_kwargs": {"dtype": dict, "default": {}},
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
         "enable_scanline": {"dtype": bool, "default": False},  # native dtype on purpose
+        "flat_aligned_apodization": {"dtype": (type(None), np.ndarray)},
         "flat_receive_apodization": {"dtype": (type(None), np.ndarray), "default": None},
         "focal_region_length": {"dtype": np.float32, "default": 0.0},
         "grid_type": {"dtype": str, "default": "cartesian"},
@@ -434,7 +435,7 @@ class Parameters(BaseParameters):
                 "'cartesian' and 'polar'."
             )
 
-    @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z")
+    @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z", "selected_transmits")
     def flat_aligned_apodization(self):
         """Per-pixel, per-transmit compounding apodization weight of shape (n_pix, n_tx).
 
@@ -446,6 +447,8 @@ class Parameters(BaseParameters):
         This weights the *transmit* axis (compounding), not the receive channels;
         for custom receive-aperture apodization see ``flat_receive_apodization``.
         """
+        if "flat_aligned_apodization" in self._params:
+            return self._params["flat_aligned_apodization"][:, self.selected_transmits]
         if not self.enable_scanline:
             return None
         return scanline_aligned_apodization(self.n_tx, self.grid_size_z)
