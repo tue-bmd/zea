@@ -35,6 +35,7 @@ def parse_args():
         help="Use the TensorFlow backend instead of the default JAX backend.",
     )
     parser.add_argument("--data", default=DATA_PATH, help="Path to a zea file with raw_data.")
+    parser.add_argument("--jit-options", default="pipeline", help="[ops/pipeline]")
     parser.add_argument(
         "--config", default=CONFIG_PATH, help="Path to a zea config file (parameters + pipeline)."
     )
@@ -57,8 +58,8 @@ def parse_args():
         default=None,
         help="Override pressure-field weighting (enable_pfield). Default uses the config value.",
     )
-    parser.add_argument("--warmup", type=int, default=3, help="Warmup calls after compilation.")
-    parser.add_argument("--repeats", type=int, default=20, help="Timed steady-state calls.")
+    parser.add_argument("--warmup", type=int, default=2, help="Warmup calls after compilation.")
+    parser.add_argument("--repeats", type=int, default=5, help="Timed steady-state calls.")
     parser.add_argument("--device", default="auto:1", help="Device passed to init_device.")
     parser.add_argument(
         "--per-op",
@@ -214,6 +215,7 @@ def main():
     pipeline = zea.Pipeline.from_config(
         config,
         with_batch_dim=False,
+        jit_options=args.jit_options,
     )
     # prepare the inputs (converts the needed parameters to tensors)
     inputs = pipeline.prepare_parameters(parameters)
