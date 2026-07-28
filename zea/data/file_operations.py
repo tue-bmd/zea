@@ -14,6 +14,7 @@ from typing import TypeVar
 
 import numpy as np
 import tyro
+from keras import ops
 from tqdm import tqdm
 
 from zea import File, log
@@ -21,10 +22,12 @@ from zea.data.datasets import Dataset
 from zea.data.spec import (
     CONSISTENCY_DIMENSIONS,
     FileSpec,
+    ProbeSpec,
     ScanSpec,
     Spec,
     find_matched_shape,
 )
+from zea.func.ultrasound import construct_acquisition_from_synthetic_aperture, decode_hadamard
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 
@@ -47,6 +50,8 @@ OPERATION_NAMES = [
     "extract",
     "summary",
     "copy",
+    "decode_hadamard",
+    "sa_to_virtual_focus",
 ]
 
 
@@ -681,6 +686,114 @@ def copy(src: str | Path, dst: str | Path, key: str, mode: str | None = None):
     dataset.copy(dst, key, mode=mode)
 
 
+@_supports_folders
+def decode_hadamard_file_operation(input_path: Path, output_path: Path, overwrite=False):
+    """Decodes Hadamard-encoded data in a zea file.
+
+    Args:
+        input_path: Path to the input zea data file, or a folder of files.
+        output_path: Path to the output file (or folder) where the decoded
+            data will be saved.
+        overwrite: Whether to overwrite the output file if it exists.
+    """
+    _prepare_output_path(str(output_path), overwrite)
+
+    with File(input_path) as f:
+        file_spec = f._to_file_spec()
+
+    for track in file_spec.tracks:
+        try:
+            raw_data = getattr(track.data, "raw_data")
+            if raw_data is None:
+                raise ValueError("No raw_data found in the input file.")
+
+            tx_apodizations = track.scan.tx_apodizations
+            raw_data, tx_apodizations = decode_hadamard(raw_data, tx_apodizations)
+            track.scan.tx_apodizations = ops.convert_to_numpy(tx_apodizations)
+
+            _set_data_array(track, "raw_data", ops.convert_to_numpy(raw_data))
+        except ValueError:
+            log.warning(
+                f"Failed to decode Hadamard data for track {track}. "
+                "The raw_data will remain unchanged."
+            )
+    if overwrite:
+        _delete_file_if_exists(output_path)
+
+    file_spec.save(
+        path=str(output_path),
+    )
+
+
+@_supports_folders
+def sa_to_virtual_focus(
+    input_path: Path,
+    output_path: Path,
+    polar_angle: float,
+    azimuth_angle: float,
+    focus_distance: float,
+    transmit_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    tx_apodization: str = "kaiser",
+    overwrite=False,
+):
+    """
+    Constructs a new zea file with the given transmit scheme from a synthetic aperture (SA)
+    acquisition. The new file will have a single transmit with the specified polar and azimuth
+    angles, focus distance, and transmit origin.
+    """
+
+    _prepare_output_path(str(output_path), overwrite)
+
+    with File(input_path) as f:
+        file_spec = f._to_file_spec()
+
+    probe = file_spec.probe
+    if not isinstance(probe, ProbeSpec) or probe.probe_geometry is None:
+        raise ValueError("sa_to_virtual_focus requires a probe with a defined probe_geometry.")
+    probe_geometry = probe.probe_geometry
+    n_el = probe_geometry.shape[0]
+    for track in file_spec.tracks:
+        scan = track.scan
+
+        if tx_apodization is None:
+            tx_apodization = ops.ones((1, n_el), dtype="float32")
+        elif tx_apodization == "kaiser":
+            tx_apodization = ops.expand_dims(ops.cast(ops.kaiser(n_el, beta=5.0), "float32"), 0)
+        elif tx_apodization == "hanning":
+            tx_apodization = ops.expand_dims(ops.cast(ops.hanning(n_el), "float32"), 0)
+        raw_data, t0_delays = construct_acquisition_from_synthetic_aperture(
+            raw_data=getattr(track.data, "raw_data"),
+            probe_geometry=probe_geometry,
+            sampling_frequency=scan.sampling_frequency,
+            polar_angle=polar_angle,
+            azimuth_angle=azimuth_angle,
+            focus_distance=focus_distance,
+            transmit_origin=transmit_origin,
+            sound_speed=scan.sound_speed,
+            tx_apodization=tx_apodization,
+        )
+
+        _set_data_array(track, "raw_data", ops.convert_to_numpy(raw_data))
+        track.scan.t0_delays = np.asarray(t0_delays)
+        track.scan.tx_apodizations = ops.convert_to_numpy(tx_apodization)
+        track.scan.polar_angles = np.array([polar_angle])
+        track.scan.azimuth_angles = np.array([azimuth_angle])
+        track.scan.focus_distances = np.array([focus_distance])
+        track.scan.transmit_origins = np.array([transmit_origin])
+        if track.scan.initial_times is not None:
+            track.scan.initial_times = track.scan.initial_times[:1]
+        if track.scan.waveforms_one_way is not None:
+            track.scan.waveforms_one_way = track.scan.waveforms_one_way[:1]
+        if track.scan.waveforms_two_way is not None:
+            track.scan.waveforms_two_way = track.scan.waveforms_two_way[:1]
+        if track.scan.time_to_next_transmit is not None:
+            track.scan.time_to_next_transmit = track.scan.time_to_next_transmit[:, :1]
+
+    file_spec.save(
+        path=str(output_path),
+    )
+
+
 def _delete_file_if_exists(path: Path):
     """Deletes a file if it exists."""
     if path.exists():
@@ -695,6 +808,7 @@ def _prepare_output_path(output_path: str, overwrite: bool):
 
     Also refuses to save to an ``hf://`` path, which is read-only.
     """
+
     if output_path.startswith(HF_PREFIX):
         raise ValueError(
             f"Cannot save to an 'hf://' path: {output_path}. 'hf://' paths are read-only; "
