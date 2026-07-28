@@ -114,6 +114,7 @@ from zea.beamform.pixelgrid import (
 )
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
+from zea.func.ultrasound import compute_time_to_peak_stack
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated
 from zea.probes import Probe
@@ -329,6 +330,11 @@ class Parameters(BaseParameters):
     # Add some defaults that are not stored in a file
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
     VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
+    # Give these a default of None (rather than leaving them unset) so that they can be
+    # declared as dependencies of computed properties (e.g. t_peak, n_waveforms) without
+    # tripping MissingDependencyError
+    VALID_PARAMS["waveforms_one_way"]["default"] = None
+    VALID_PARAMS["waveforms_two_way"]["default"] = None
 
     @cache_with_dependencies("probe_geometry")
     def aperture_size(self):
@@ -911,12 +917,22 @@ class Parameters(BaseParameters):
 
         return 1
 
-    @cache_with_dependencies("center_frequency", "selected_transmits")
+    @cache_with_dependencies("center_frequency", "selected_transmits", "waveforms_two_way")
     def t_peak(self):
-        """The time of the peak of the pulse in seconds of shape (n_tx,)."""
+        """The time of the peak of the pulse in seconds of shape (n_tx,).
+
+        If not set explicitly and ``waveforms_two_way`` (the two-way,
+        pulse-echo transmit waveform) is available, this is estimated from it
+        via :func:`~zea.func.ultrasound.compute_time_to_peak_stack`. Otherwise
+        it defaults to ``1 / center_frequency``.
+        """
         t_peak = self._params.get("t_peak")
         if t_peak is None:
-            t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
+            waveforms = self._params.get("waveforms_two_way")
+            if waveforms is not None:
+                t_peak = np.asarray(compute_time_to_peak_stack(waveforms, self.center_frequency))
+            else:
+                t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
 
         return t_peak[self.selected_transmits]
 

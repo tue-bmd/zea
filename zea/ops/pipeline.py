@@ -1,3 +1,5 @@
+import difflib
+import inspect
 import json
 from typing import TYPE_CHECKING, Any, Dict, List, Sequence, Union, cast
 
@@ -10,7 +12,6 @@ from zea import backend, log
 from zea.backend import func_on_device, jit
 from zea.config import Config
 from zea.func.tensor import vmap
-from zea.func.ultrasound import channels_to_complex, complex_to_channels
 from zea.internal.core import DataTypes, ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
 from zea.internal.core import Object as ZEAObject
 from zea.internal.ops_list import OperationList
@@ -36,6 +37,50 @@ if TYPE_CHECKING:
     # Imported lazily at runtime (inside prepare_parameters) to avoid a circular
     # import: zea.parameters imports the data specs, which can pull in this module.
     from zea.parameters import Parameters
+
+
+class PipelineError(RuntimeError):
+    """Error raised when an operation inside a :class:`Pipeline` fails.
+
+    Subclass of :class:`RuntimeError` so existing ``except RuntimeError`` handlers
+    keep working. Instances carry a ``_zea_annotated`` marker so that enclosing
+    pipelines do not re-wrap (and thus double-annotate) an error that an inner
+    pipeline already reported.
+    """
+
+    _zea_annotated = True
+
+
+class PipelineKeyError(KeyError):
+    """Raised when a :class:`Pipeline` operation is missing a required input key.
+
+    Subclass of :class:`KeyError` so existing ``except KeyError`` handlers keep
+    working. ``__str__`` is overridden so the (multi-line) message renders as-is
+    instead of the ``repr``-quoted single line that :class:`KeyError` produces.
+    Carries the ``_zea_annotated`` marker to prevent double-wrapping.
+    """
+
+    _zea_annotated = True
+
+    def __str__(self) -> str:
+        return self.args[0] if self.args else ""
+
+
+def _summarize_inputs(inputs: Dict[str, Any]) -> str:
+    """Compact ``key: shape dtype`` summary of pipeline inputs for error messages.
+
+    Keeps large arrays out of tracebacks while still surfacing the shape/dtype
+    information needed to diagnose most pipeline failures.
+    """
+    parts = []
+    for key, value in inputs.items():
+        shape = getattr(value, "shape", None)
+        dtype = getattr(value, "dtype", None)
+        if shape is not None and dtype is not None:
+            parts.append(f"{key}: {tuple(shape)} {dtype}")
+        else:
+            parts.append(f"{key}: {type(value).__name__}")
+    return "{" + ", ".join(parts) + "}"
 
 
 @ops_registry("pipeline")
@@ -219,6 +264,7 @@ class Pipeline:
                 - "delay_multiply_and_sum"
                 - "coherence_factor"
                 - "generalized_coherence_factor"
+                - "minimum_variance"
                 Defaults to "delay_and_sum".
             num_patches (int): Number of patches for the PatchedGrid operation.
                 Defaults to 100. If you get an out of memory error, try to increase this number.
@@ -370,22 +416,53 @@ class Pipeline:
         for operation in self._callable_layers:
             try:
                 outputs = operation(**inputs)
-            except KeyError as exc:
-                raise KeyError(
-                    f"[zea.Pipeline] Operation '{operation.__class__.__name__}' "
-                    f"requires input key '{exc.args[0]}', "
-                    "but it was not provided in the inputs.\n"
-                    "Check whether the objects (such as `zea.Parameters`) passed to "
-                    "`pipeline.prepare_parameters()` contain all required keys.\n"
-                    f"Current list of all passed keys: {list(inputs.keys())}\n"
-                    f"Valid keys for this pipeline: {self.valid_keys}"
-                ) from exc
             except Exception as exc:
-                raise RuntimeError(
-                    f"[zea.Pipeline] Error in operation '{operation.__class__.__name__}': {exc}"
-                )
+                # Already annotated by this or an inner pipeline: re-raise as-is so
+                # we do not wrap the message (and traceback) a second time.
+                if getattr(exc, "_zea_annotated", False):
+                    raise
+                if isinstance(exc, KeyError):
+                    self._raise_missing_key(operation, exc, inputs)
+                else:
+                    self._raise_operation_error(operation, exc, inputs)
             inputs = outputs
         return outputs
+
+    def _raise_missing_key(self, operation, exc: KeyError, inputs: Dict[str, Any]):
+        """Re-raise a bare ``KeyError`` from an operation with actionable context."""
+        missing = exc.args[0] if exc.args else "?"
+        unused = [k for k in (set(inputs.keys()) - self.valid_keys) if k != "kwargs"]
+        # If the caller passed something close to the missing key, it is likely a typo.
+        typo = difflib.get_close_matches(str(missing), unused, n=1, cutoff=0.6)
+        hint = (
+            f" You provided '{typo[0]}', which is unused — did you mean '{missing}'?"
+            if typo
+            else ""
+        )
+        raise PipelineKeyError(
+            f"[zea.Pipeline] Operation '{operation.__class__.__name__}' "
+            f"requires input key '{missing}', but it was not provided.{hint}\n"
+            "Check whether the objects (such as `zea.Parameters`) passed to "
+            "`pipeline.prepare_parameters()` contain all required keys.\n"
+            f"Provided keys: {sorted(inputs.keys())}\n"
+            f"Valid keys for this pipeline: {sorted(self.valid_keys - {'kwargs'})}"
+        ) from exc
+
+    def _raise_operation_error(self, operation, exc: Exception, inputs: Dict[str, Any]):
+        """Re-raise a generic operation failure as a :class:`PipelineError`.
+
+        Adds the failing operation name and a compact shape/dtype summary of its
+        inputs, and truncates the underlying message so a concrete (non-jit) array
+        is never dumped in full into the traceback.
+        """
+        original = str(exc)
+        if len(original) > 500:
+            original = original[:500] + "… (truncated)"
+        raise PipelineError(
+            f"[zea.Pipeline] Operation '{operation.__class__.__name__}' failed with "
+            f"{type(exc).__name__}: {original}\n"
+            f"Inputs: {_summarize_inputs(inputs)}"
+        ) from exc
 
     def __call__(
         self, return_numpy=False, device: Union[str, None] = None, **inputs
@@ -410,23 +487,39 @@ class Pipeline:
             raise ValueError(
                 "Parameters (and Probe/Config) objects should be first processed with "
                 "`Pipeline.prepare_parameters` before calling the pipeline. "
-                "e.g. inputs = pipeline.prepare_parameters(parameters, **overrides)"
+                "e.g. `inputs = pipeline.prepare_parameters(parameters, **overrides)`"
             )
 
         if any(isinstance(arg, str) for arg in inputs.values()):
             raise ValueError(
                 "Pipeline does not support string inputs. "
-                "Please ensure all inputs are convertible to tensors."
+                "Please ensure all inputs are convertible to tensors, or use "
+                "`inputs = Pipeline.prepare_parameters(parameters)` to convert "
+                "all your parameters for you."
             )
 
         if not self._logged_difference_keys:
             difference_keys = set(inputs.keys()) - self.valid_keys
             if difference_keys:
-                log.debug(
-                    f"[zea.Pipeline] The following input keys are not used by the pipeline: "
-                    f"{difference_keys}. Make sure this is intended. "
-                    "This warning will only be shown once."
-                )
+                # Separate likely typos (close to a key the pipeline actually uses)
+                # from benign pass-through keys (e.g. extra `zea.Parameters` fields).
+                candidates = self.valid_keys - {"kwargs"}
+                matches = {
+                    key: difflib.get_close_matches(key, candidates, n=1, cutoff=0.6)
+                    for key in difference_keys
+                }
+                typos = {key: match[0] for key, match in matches.items() if match}
+                benign = difference_keys - set(typos)
+                if typos:
+                    hints = ", ".join(f"'{k}' -> did you mean '{v}'?" for k, v in typos.items())
+                    log.warning(
+                        f"[zea.Pipeline] Some input keys look like typos and are ignored: {hints}"
+                    )
+                if benign:
+                    log.debug(
+                        f"[zea.Pipeline] Ignoring input keys not used by the pipeline: "
+                        f"{sorted(benign)}."
+                    )
                 self._logged_difference_keys = True
 
         ## PROCESSING
@@ -1169,6 +1262,7 @@ class Beamform(Pipeline):
                 - "delay_multiply_and_sum"
                 - "coherence_factor"
                 - "generalized_coherence_factor"
+                - "minimum_variance"
                 Defaults to "delay_and_sum".
             num_patches (int): Number of patches to split the grid into for patch-wise
                 beamforming. If 1, no patching is performed.
@@ -1184,6 +1278,10 @@ class Beamform(Pipeline):
                 (``parameters.flat_receive_apodization``) in the beamforming. Applied in
                 addition to the built-in f-number mask; independent of and combinable with
                 ``enable_pfield`` / ``enable_aligned_apodization``.
+            **kwargs: Any keyword accepted by the chosen ``beamformer``'s own constructor
+                (e.g. ``subarray_size`` / ``diagonal_loading`` for ``"minimum_variance"``)
+                is forwarded to it. Remaining keywords are forwarded to the underlying
+                ``Pipeline`` / ``PatchedGrid``.
         """
         if enable_pfield and enable_aligned_apodization:
             raise ValueError(
@@ -1215,12 +1313,27 @@ class Beamform(Pipeline):
                 f"Supported types are: {beamformer_registry.registered_names()}."
             )
 
+        # Pull out any kwargs meant for the beamformer op itself (e.g. `subarray_size` /
+        # `diagonal_loading` for "minimum_variance"), so they don't leak into the
+        # Pipeline / PatchedGrid kwargs below.
+        beamformer_cls = beamformer_registry[self.beamformer_type]
+        beamformer_params = {
+            name
+            for name, param in inspect.signature(beamformer_cls.__init__).parameters.items()
+            if name != "self" and param.kind != inspect.Parameter.VAR_KEYWORD
+        }
+        # Never steal a keyword that the pipeline itself understands (e.g. `name`,
+        # `with_batch_dim`): those must keep reaching Pipeline / PatchedGrid.
+        pipeline_params = set(inspect.signature(Pipeline.__init__).parameters)
+        beamformer_params -= pipeline_params
+        self.beamformer_kwargs = {k: kwargs.pop(k) for k in list(kwargs) if k in beamformer_params}
+
         # Get beamforming ops
         beamforming: List[Operation] = [
             TOFCorrection(),
             # ReceiveApodization() / AlignedApodization() / PfieldWeighting(),
             # inserted conditionally
-            beamformer_registry[self.beamformer_type](),
+            beamformer_cls(**self.beamformer_kwargs),
         ]
 
         if self.enable_receive_apodization:
@@ -1280,6 +1393,7 @@ class Beamform(Pipeline):
             params["enable_aligned_apodization"] = self.enable_aligned_apodization
         if not compact or self.enable_receive_apodization:
             params["enable_receive_apodization"] = self.enable_receive_apodization
+        params.update(self.beamformer_kwargs)
 
         # Merge in the pipeline-level params from super().
         params.update(config.get("params", {}))
@@ -1365,7 +1479,7 @@ class DelayMultiplyAndSum(Operation):
         # with y_i = x_i / sqrt(|x_i|) (the complex signed-sqrt magnitude), for which
         # y_i y_j = x_i x_j / sqrt(|x_i x_j|) is exactly the normalized product. This is
         # two O(n_el) reductions per pixel and never materializes the element matrix.
-        data = channels_to_complex(data)  # (n_tx, n_pix, n_el)
+        data = ops.view_as_complex(data)  # (n_tx, n_pix, n_el)
 
         # y_i = x_i / sqrt(|x_i|); eps guards |x_i| == 0 (then y_i -> 0).
         eps = keras.backend.epsilon()
@@ -1378,7 +1492,7 @@ class DelayMultiplyAndSum(Operation):
         # Compound over transmits.
         data = ops.sum(per_tx, axis=0)  # (n_pix,)
 
-        return complex_to_channels(data)
+        return ops.view_as_real(data)
 
     def call(self, **kwargs):
         """Performs DMAS beamforming on tof-corrected input.
@@ -1591,6 +1705,243 @@ class GeneralizedCoherenceFactor(Operation):
         """
         data = kwargs[self.key]
         return {self.output_key: self.process_image(data, m_zero=m_zero)}
+
+
+@beamformer_registry("minimum_variance")
+@ops_registry("minimum_variance")
+class MinimumVariance(Operation):
+    r"""Minimum Variance (Capon/MVDR) beamformer.
+
+    Instead of summing the delayed channels with unit weights (delay-and-sum), the
+    weights :math:`\mathbf{w}` are chosen per pixel to minimise the output power
+    :math:`\mathbf{w}^H \hat{\mathbf{R}} \mathbf{w}` while passing the look direction
+    undistorted (:math:`\mathbf{w}^H \mathbf{e} = 1`, with :math:`\mathbf{e} =
+    \mathbf{1}`). This adapts the receive aperture to suppress off-axis energy,
+    improving lateral resolution and clutter rejection over delay-and-sum.
+
+    The covariance :math:`\hat{\mathbf{R}}` is estimated with spatial smoothing:
+    :math:`L = N_{el} - M + 1` overlapping sub-apertures of length :math:`M` are
+    averaged, optionally together with :math:`2K + 1` axially adjacent pixels,
+
+    .. math::
+
+        \hat{\mathbf{R}}(p) = \frac{1}{L (2K+1)}
+        \sum_{l,k} \mathbf{x}_{l}[p_k]\,\mathbf{x}_{l}^H[p_k],
+
+    diagonally loaded by :math:`\delta\,\mathrm{tr}(\hat{\mathbf{R}})/M` to keep the
+    inverse well conditioned. The weights follow in closed form,
+
+    .. math::
+
+        \mathbf{w}(p) = \frac{\hat{\mathbf{R}}_\delta^{-1}\,\mathbf{e}}
+        {\mathbf{e}^H\,\hat{\mathbf{R}}_\delta^{-1}\,\mathbf{e}}.
+
+    Each transmit is beamformed with its own weights and the results are summed
+    (compounded), as in :class:`DelayAndSum`.
+
+    .. warning::
+
+        Spatial smoothing assumes every sub-aperture sees the full array. Zeroing
+        receive channels breaks that: elements masked out by a nonzero ``f_number``
+        span a null space of :math:`\hat{\mathbf{R}}` that the loaded inverse fills
+        with weight, starving the live channels and darkening the lateral near field
+        into a triangular artefact. Set ``parameters.f_number = 0`` and let MV adapt
+        the aperture itself.
+
+    .. admonition:: References
+
+        Synnevåg, J.-F., Austeng, A. and Holm, S., "Adaptive beamforming applied to
+        medical ultrasound imaging," *IEEE Trans. Ultrason. Ferroelectr. Freq.
+        Control* **54** (8), 2007. https://doi.org/10.1109/TUFFC.2007.431
+
+        Vignon, F. and Burcher, M. R., "Capon beamforming in medical ultrasound
+        imaging with focused beams," *IEEE Trans. Ultrason. Ferroelectr. Freq.
+        Control* **55** (3), 2008. https://doi.org/10.1109/TUFFC.2008.686
+
+    Args:
+        subarray_size (int or None): Sub-aperture length :math:`M`. Smaller values are
+            more robust (shallow targets need this); ``n_el // 2`` is the maximum
+            before the covariance turns singular. Defaults to ``n_el // 2``.
+        diagonal_loading (float): Loading :math:`\delta` as a fraction of the mean
+            eigenvalue :math:`\mathrm{tr}(\hat{\mathbf{R}})/M`. Larger values are more
+            robust and tend toward delay-and-sum. Defaults to ``1e-2``.
+        axial_averaging (int): Half-width :math:`K` of the axial covariance averaging
+            window, in pixels. Requires a 2D ``grid`` pipeline parameter and enough
+            axial pixels per patch. ``0`` disables it. Defaults to ``2``.
+        **kwargs: Forwarded to :class:`~zea.ops.base.Operation`.
+    """
+
+    def __init__(self, subarray_size=None, diagonal_loading=1e-2, axial_averaging=2, **kwargs):
+        if subarray_size is not None and (not isinstance(subarray_size, int) or subarray_size < 1):
+            raise ValueError(
+                f"subarray_size must be a positive integer or None, got {subarray_size!r}."
+            )
+        if diagonal_loading < 0:
+            raise ValueError(f"diagonal_loading must be non-negative, got {diagonal_loading!r}.")
+        if not isinstance(axial_averaging, int) or axial_averaging < 0:
+            raise ValueError(
+                f"axial_averaging must be a non-negative integer, got {axial_averaging!r}."
+            )
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
+            **kwargs,
+        )
+        self.subarray_size = subarray_size
+        self.diagonal_loading = diagonal_loading
+        self.axial_averaging = axial_averaging
+        self._warned = False
+
+    def _axial_average(self, matrices, stride):
+        """Average each pixel's matrix with its ``2K`` axial neighbours.
+
+        Axial neighbours sit ``stride`` apart in the flattened ``(n_z, n_x)`` grid;
+        pixels near a patch edge average over fewer of them.
+        """
+        n_pix = matrices.shape[0]
+        width = self.axial_averaging * stride
+        padding = [[width, width]] + [[0, 0]] * (len(matrices.shape) - 1)
+        padded = ops.pad(matrices, padding)
+        weights = ops.pad(ops.ones_like(matrices[:, :1, :1]), padding)
+
+        total = padded[:n_pix]
+        count = weights[:n_pix]
+        for offset in range(stride, 2 * width + 1, stride):
+            total = total + padded[offset : offset + n_pix]
+            count = count + weights[offset : offset + n_pix]
+        return total / count
+
+    def process_image(self, data, axial_stride=None):
+        """Apply MV beamforming to one image.
+
+        Args:
+            data (ops.Tensor): TOF-corrected data of shape ``(n_tx, n_pix, n_el, 2)``.
+            axial_stride (int, optional): Flat-index distance between axially adjacent
+                pixels. Axial averaging is skipped when this is ``None``.
+
+        Returns:
+            ops.Tensor: Beamformed image of shape ``(n_pix, 2)``.
+        """
+        if not data.shape[-1] == 2:
+            raise ValueError(
+                "MinimumVariance operation requires IQ data with 2 channels. "
+                f"Got data with shape {data.shape}."
+            )
+
+        n_el = data.shape[-2]
+        if self.subarray_size is not None and self.subarray_size > n_el:
+            raise ValueError(f"subarray_size ({self.subarray_size}) must not exceed n_el ({n_el}).")
+
+        subarray_length = (
+            self.subarray_size if self.subarray_size is not None else max(1, n_el // 2)
+        )
+
+        # One transmit at a time keeps only a single (n_pix, M, M) covariance in memory.
+        per_transmit = ops.map(
+            lambda transmit: self._beamform_transmit(transmit, subarray_length, axial_stride),
+            data,
+        )
+        return ops.sum(per_transmit, axis=0)
+
+    def _beamform_transmit(self, data, subarray_length, axial_stride):
+        """Capon-beamform a single transmit of shape ``(n_pix, n_el, 2)``."""
+        n_el = data.shape[-2]
+        num_subarrays = n_el - subarray_length + 1
+
+        x_c = ops.view_as_complex(data)
+        sub_ap = ops.stack(
+            [x_c[:, start : start + subarray_length] for start in range(num_subarrays)],
+            axis=1,
+        )
+
+        # Hermitian sample covariance (n_pix, M, M). The 1/L scaling cancels in the
+        # weights; it only keeps magnitudes in float32 range.
+        covariance = ops.einsum("pli,plj->pij", sub_ap, ops.conj(sub_ap)) / ops.cast(
+            ops.cast(num_subarrays, "float32"), "complex64"
+        )
+        R_re = ops.real(covariance)
+        R_im = ops.imag(covariance)
+
+        if self.axial_averaging > 0 and axial_stride:
+            R_re = self._axial_average(R_re, axial_stride)
+            R_im = self._axial_average(R_im, axial_stride)
+
+        # Loading relative to the mean eigenvalue tr(R)/M, so it is independent of M.
+        # The trace is clamped so all-zero pixels outside the image stay invertible.
+        trace = ops.maximum(ops.einsum("...ii->...", R_re), keras.backend.epsilon())[
+            ..., None, None
+        ]
+        R_re = R_re + self.diagonal_loading * trace / subarray_length * ops.eye(subarray_length)
+
+        # linalg.solve has no complex kernel under TF/XLA, so the Hermitian system
+        # (R_re + i R_im)(u + i v) = e is recast as the real 2M x 2M system
+        # [[R_re, -R_im], [R_im, R_re]] [u; v] = [e; 0].
+        block = ops.concatenate(
+            [
+                ops.concatenate([R_re, -R_im], axis=-1),
+                ops.concatenate([R_im, R_re], axis=-1),
+            ],
+            axis=-2,
+        )
+        rhs = ops.concatenate(
+            [ops.ones_like(R_re[..., :1]), ops.zeros_like(R_re[..., :1])], axis=-2
+        )
+        solution = ops.linalg.solve(block, rhs)[..., 0]
+        R_inv_e = ops.view_as_complex(
+            ops.stack([solution[..., :subarray_length], solution[..., subarray_length:]], axis=-1)
+        )
+
+        # w = R^-1 e / (e^H R^-1 e). The denominator is real and positive (R is loaded
+        # to positive definite); no epsilon guard, which would break scale invariance.
+        capon_weights = R_inv_e / ops.sum(R_inv_e, axis=-1, keepdims=True)
+
+        y = ops.einsum("pm,plm->p", ops.conj(capon_weights), sub_ap) / ops.cast(
+            num_subarrays, "complex64"
+        )
+        return ops.view_as_real(y)
+
+    def _resolve_axial_stride(self, grid, n_pix, f_number):
+        """Distance between axially adjacent pixels in the flattened grid."""
+        if f_number and not self._warned:
+            log.warning(
+                "MinimumVariance is used with f_number="
+                f"{f_number}. The f-number mask zeroes receive channels, which the "
+                "Capon inverse fills with weight, suppressing the lateral near field. "
+                "Set parameters.f_number = 0 to let MV adapt the aperture itself."
+            )
+        if self.axial_averaging == 0:
+            return None
+
+        stride = None
+        if grid is not None and len(grid.shape) == 3:
+            stride = grid.shape[1]
+        if not self._warned:
+            if stride is None:
+                log.warning(
+                    "MinimumVariance axial_averaging needs a 2D `grid` parameter to "
+                    "locate axially adjacent pixels; averaging is disabled."
+                )
+            elif n_pix < (2 * self.axial_averaging + 1) * stride:
+                log.warning(
+                    f"MinimumVariance axial_averaging={self.axial_averaging} needs "
+                    f"{2 * self.axial_averaging + 1} axial pixels per patch, but a patch "
+                    f"holds only {n_pix // stride}. Lower `num_patches` to use the full "
+                    "averaging window."
+                )
+        self._warned = True
+        return stride
+
+    def call(self, grid=None, f_number=None, **kwargs):
+        """Apply MV beamforming to TOF-corrected data."""
+        data = kwargs[self.key]
+        n_pix = data.shape[-3]
+        stride = self._resolve_axial_stride(grid, n_pix, f_number)
+
+        if not self.with_batch_dim:
+            beamformed_data = self.process_image(data, stride)
+        else:
+            beamformed_data = ops.map(lambda image: self.process_image(image, stride), data)
+        return {self.output_key: beamformed_data}
 
 
 @ops_registry("refocus")

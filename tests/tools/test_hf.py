@@ -11,6 +11,7 @@ from zea.internal.preset_utils import (
     _get_snapshot_dir_from_downloaded_file,
     _hf_parse_path,
     _hf_resolve_path,
+    _hf_stream_open,
 )
 from zea.tools.hf import HFPath
 
@@ -192,6 +193,53 @@ def test_download_files_in_path(fake_files, monkeypatch):
     assert len(result) == 2
     assert len(downloaded_files) == 2
     assert all(f.startswith("val/patient0401/") for f in downloaded_files)
+
+
+@pytest.mark.parametrize(
+    "hf_path, kwargs, expected_fs_path",
+    [
+        (FILE_STR, {}, f"datasets/{REPO_ID}/{FILE_SUBPATH}"),
+        (FILE_STR, {"repo_type": "model"}, f"{REPO_ID}/{FILE_SUBPATH}"),
+        (FILE_STR, {"repo_type": "space"}, f"spaces/{REPO_ID}/{FILE_SUBPATH}"),
+        (
+            FILE_STR,
+            {"revision": "v0.1.0"},
+            f"datasets/{REPO_ID}@v0.1.0/{FILE_SUBPATH}",
+        ),
+    ],
+)
+def test_hf_stream_open_path_construction(hf_path, kwargs, expected_fs_path, monkeypatch):
+    """The fsspec path (prefix + repo + revision + subpath) is built correctly."""
+    opened = {}
+
+    class FakeFS:
+        def open(self, path, mode, block_size=None, **kw):
+            opened["path"] = path
+            opened["mode"] = mode
+            opened["block_size"] = block_size
+            return "FAKE_FILEOBJ"
+
+    monkeypatch.setattr("huggingface_hub.HfFileSystem", FakeFS)
+
+    result = _hf_stream_open(hf_path, block_size=1234, **kwargs)
+    assert result == "FAKE_FILEOBJ"
+    assert opened["path"] == expected_fs_path
+    assert opened["mode"] == "rb"
+    assert opened["block_size"] == 1234
+
+
+def test_hf_stream_open_requires_file(monkeypatch):
+    """Streaming a repo root / directory (no subpath) raises a clear error."""
+    monkeypatch.setattr("huggingface_hub.HfFileSystem", object)
+    with pytest.raises(ValueError, match="single file"):
+        _hf_stream_open(FOLDER_STR)
+
+
+def test_hf_stream_open_rejects_bad_repo_type(monkeypatch):
+    """An unknown repo_type is rejected before any network access."""
+    monkeypatch.setattr("huggingface_hub.HfFileSystem", object)
+    with pytest.raises(ValueError, match="repo_type"):
+        _hf_stream_open(FILE_STR, repo_type="banana")
 
 
 def test_get_snapshot_dir_from_downloaded_file():

@@ -236,11 +236,13 @@ from .pipeline import (
     DelayMultiplyAndSum,
     GeneralizedCoherenceFactor,
     Map,
+    MinimumVariance,
     PatchedGrid,
     Pipeline,
     Refocus,
 )
 from .tensor import GaussianBlur, Normalize, Pad, Threshold
+from .usct import USCTReflectivityDAS
 from .ultrasound import (
     AlignedApodization,
     AnisotropicDiffusion,
@@ -282,6 +284,7 @@ __all__ = [
     "DelayMultiplyAndSum",
     "CoherenceFactor",
     "GeneralizedCoherenceFactor",
+    "MinimumVariance",
     "Beamform",
     "Map",
     "PatchedGrid",
@@ -315,6 +318,7 @@ __all__ = [
     "TOFCorrection",
     "TissueSuppression",
     "UpMix",
+    "USCTReflectivityDAS",
     "CommonMidpointPhaseError",
     # Keras operations
     "keras_ops",

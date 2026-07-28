@@ -665,6 +665,62 @@ def polar_to_cartesian_matrix(
     """
     assert "float" in ops.dtype(polar_matrix), "Input image must be float type"
 
+    dtype = ops.dtype(polar_matrix)
+    n_rho, n_theta = ops.shape(polar_matrix)[-2], ops.shape(polar_matrix)[-1]
+
+    coordinates = polar_to_cartesian_coordinates(
+        cartesian_shape,
+        n_rho,
+        n_theta,
+        tip=tip,
+        r_max=r_max,
+        theta_range=theta_range,
+        pitch=pitch,
+        dtype=dtype,
+    )
+    cartesian, _ = scan_convert_2d(
+        polar_matrix, coordinates=coordinates, fill_value=fill_value, order=order
+    )
+    return cartesian
+
+
+def polar_to_cartesian_coordinates(
+    cartesian_shape: Tuple[int, int],
+    n_rho: int,
+    n_theta: int,
+    tip: Union[Tuple[float, float], None] = None,
+    r_max: Union[float, None] = None,
+    theta_range: Union[Tuple[float, float], None] = None,
+    pitch: float = 1.0,
+    dtype: str = "float32",
+):
+    """(rho, theta) sampling grid that pins a polar cone's apex at pixel ``tip``.
+
+    Shared core of :func:`polar_to_cartesian_matrix`: builds the fractional index grid that
+    resamples an ``(n_rho, n_theta)`` polar image onto a ``cartesian_shape`` canvas, with the
+    apex at pixel ``tip`` and ``pitch`` units per pixel. Pass the result as ``coordinates`` to
+    :func:`scan_convert_2d` (or the :class:`~zea.ops.ScanConvert` operation) to run the same
+    resampling inside a pipeline. Unlike :func:`compute_scan_convert_2d_coordinates`, this uses
+    the ``arctan2`` mapping in :func:`_polar_sampling_coordinates`, so it covers a full circle
+    rather than only a narrow (``|theta| < pi/2``) sector.
+
+    Args:
+        cartesian_shape (tuple): Output ``(rows, cols)`` = ``(n_z, n_x)``.
+        n_rho (int): Radial samples of the polar image the indices address.
+        n_theta (int): Angular samples of the polar image the indices address.
+        tip (tuple, optional): ``(col, row)`` pixel location of the cone apex in the output.
+            Defaults to the centre-top ``(cols / 2, 0)``.
+        r_max (float, optional): Radius spanned by the polar image, in the same units as
+            ``pitch`` (pixels by default). Defaults to ``rows``.
+        theta_range (tuple, optional): angular extent in radians; the order must match the
+            column order of the polar image. Defaults to (45, -45) degrees.
+        pitch (float, optional): Output units per pixel (radial units of ``r_max``).
+            Defaults to 1.0, i.e. ``tip`` and ``r_max`` are in pixels.
+        dtype (str, optional): Compute dtype for the axes. Defaults to ``"float32"``.
+
+    Returns:
+        coords (Array): ``(2, cols, rows)`` stack of ``[rho_idx, theta_idx]`` sampling indices.
+    """
     cart_rows, cart_cols = cartesian_shape
     if tip is None:
         tip = (cart_cols / 2, 0.0)
@@ -674,20 +730,13 @@ def polar_to_cartesian_matrix(
         theta_range = (np.deg2rad(45), -np.deg2rad(45))
 
     tip_x, tip_y = tip
-    dtype = ops.dtype(polar_matrix)
-    n_rho, n_theta = ops.shape(polar_matrix)[-2], ops.shape(polar_matrix)[-1]
-
     rho = ops.linspace(0.0, r_max, n_rho, dtype=dtype)
     theta = ops.linspace(theta_range[0], theta_range[1], n_theta, dtype=dtype)
 
     x_vec = (tip_x - ops.cast(ops.arange(cart_cols), dtype)) * pitch
     z_vec = (ops.cast(ops.arange(cart_rows), dtype) - tip_y) * pitch
 
-    coordinates = _polar_sampling_coordinates(x_vec, z_vec, rho, theta)
-    cartesian, _ = scan_convert_2d(
-        polar_matrix, coordinates=coordinates, fill_value=fill_value, order=order
-    )
-    return cartesian
+    return _polar_sampling_coordinates(x_vec, z_vec, rho, theta)
 
 
 def inverse_scan_convert_2d(

@@ -303,7 +303,9 @@ New tutorial or example notebooks are always welcome! Please add them to the
 `docs/source/notebooks <https://github.com/tue-bmd/zea/tree/main/docs/source/notebooks>`_
 directory. Make sure to follow the naming conventions and structure of existing
 notebooks. If you are adding a new tutorial, please also update :doc:`examples`
-to check if your notebook is included.
+to check if your notebook is included. See the `docs README
+<https://github.com/tue-bmd/zea/tree/main/docs#readme>`_ for notebook link
+conventions and how to check the docs for broken links.
 
 Adding to ``zea.models``
 ~~~~~~~~~~~~~~~~~~~~~~~~

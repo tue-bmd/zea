@@ -180,7 +180,11 @@ def operations_list(value: Any) -> list:
                 raise ValueError(f"operation {op!r} must have a string 'name'")
             unexpected = set(op) - {"name", "params"}
             if unexpected:
-                raise ValueError(f"operation {op!r} has unexpected keys {sorted(unexpected)}")
+                # keys of an arbitrary mapping are not necessarily comparable, so
+                # sort on their string form to keep the message deterministic.
+                raise ValueError(
+                    f"operation {op!r} has unexpected keys {sorted(map(str, unexpected))}"
+                )
             if "params" in op and not isinstance(op["params"], dict):
                 raise ValueError(f"operation {op!r} 'params' must be a dict")
             continue

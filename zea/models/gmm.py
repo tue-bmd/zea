@@ -6,6 +6,7 @@ from keras import ops
 
 from zea.func.tensor import linear_sum_assignment
 from zea.models.generative import GenerativeModel
+from zea.utils import ProgressBar
 
 
 class GaussianMixtureModel(GenerativeModel):
@@ -117,7 +118,7 @@ class GaussianMixtureModel(GenerativeModel):
             self._initialize(X)
 
         prev_ll = None
-        progbar = keras.utils.Progbar(max_iter, verbose=verbose)
+        progbar = ProgressBar(max_iter, verbose=verbose)
         for i in range(max_iter):
             # E-step
             gamma = self._e_step(X)
