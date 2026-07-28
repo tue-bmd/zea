@@ -1655,10 +1655,13 @@ def test_decode_hadamard():
     raw_data_synthetic_aperture = simulate_rf(
         tx_apodizations=tx_apodizations_synthetic_aperture, **shared_kwargs
     )[None]
-    raw_data_decoded = decode_hadamard(raw_data_encoded, hadamard_matrix)
+    raw_data_decoded, tx_apodizations_decoded = decode_hadamard(
+        raw_data_encoded, hadamard_matrix
+    )
     np.testing.assert_allclose(
         raw_data_decoded, raw_data_synthetic_aperture * hadamard_size, rtol=1e-5, atol=1e-5
     )
+    np.testing.assert_array_equal(tx_apodizations_decoded, np.eye(hadamard_size))
 
 
 def test_decode_hadamard_warns_on_non_orthogonal_matrix():

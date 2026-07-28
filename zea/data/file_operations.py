@@ -708,10 +708,10 @@ def decode_hadamard_file_operation(input_path: Path, output_path: Path, overwrit
                 raise ValueError("No raw_data found in the input file.")
 
             tx_apodizations = track.scan.tx_apodizations
-            raw_data = ops.convert_to_numpy(decode_hadamard(raw_data, tx_apodizations))
-            track.scan.tx_apodizations = np.eye(track.scan.tx_apodizations.shape[1])
+            raw_data, tx_apodizations = decode_hadamard(raw_data, tx_apodizations)
+            track.scan.tx_apodizations = ops.convert_to_numpy(tx_apodizations)
 
-            _set_data_array(track, "raw_data", raw_data)
+            _set_data_array(track, "raw_data", ops.convert_to_numpy(raw_data))
         except ValueError:
             log.warning(
                 f"Failed to decode Hadamard data for track {track}. "

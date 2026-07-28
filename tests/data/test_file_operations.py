@@ -716,14 +716,17 @@ def _hadamard_encode(synthetic_aperture_data, hadamard_matrix):
 def _create_hadamard_encoded_file(path, hadamard_matrix, synthetic_aperture_data):
     """Create a zea file with Hadamard-encoded raw_data and matching tx_apodizations."""
     n_tx = hadamard_matrix.shape[0]
-    scan = generate_dummy_scan(n_tx=n_tx, n_el=n_tx)
-    scan["tx_apodizations"] = hadamard_matrix
+    n_el = synthetic_aperture_data.shape[2]
+    scan = generate_dummy_scan(n_tx=n_tx, n_el=n_el)
+    tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
+    tx_apodizations[:, :n_tx] = hadamard_matrix
+    scan["tx_apodizations"] = tx_apodizations
     encoded = _hadamard_encode(synthetic_aperture_data, hadamard_matrix)
     File.create(
         path,
         data={"raw_data": encoded.astype(np.float32)},
         scan=scan,
-        probe={"name": "generic", "probe_geometry": np.zeros((n_tx, 3), dtype=np.float32)},
+        probe={"name": "generic", "probe_geometry": np.zeros((n_el, 3), dtype=np.float32)},
         overwrite=True,
     )
 
@@ -752,4 +755,8 @@ def test_decode_hadamard_file_operation(tmp_path):
     np.testing.assert_allclose(
         decoded, synthetic_aperture_data * hadamard_size, rtol=1e-4, atol=1e-4
     )
-    np.testing.assert_array_equal(tx_apodizations, np.eye(hadamard_size, dtype=np.float32))
+    # Each decoded transmit activates a single participating channel, so the decoded
+    # apodizations form an identity over the participating (first ``hadamard_size``) channels.
+    np.testing.assert_array_equal(
+        tx_apodizations, np.eye(hadamard_size, n_el, dtype=np.float32)
+    )

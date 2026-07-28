@@ -1086,8 +1086,24 @@ def decode_hadamard(raw_data, tx_apodizations):
     Args:
         raw_data (ops.Tensor): The Hadamard-encoded raw data of shape (n_frames, n_tx, n_ax, n_el,
             n_ch).
-        tx_apodizations (ops.Tensor): The transmit apodizations of shape (n_tx, n_tx).
+        tx_apodizations (ops.Tensor): The transmit apodizations of shape (n_tx, n_el).
+
+    Returns:
+        tuple: The decoded raw data with the same shape as the input, and the decoded transmit
+        apodizations of shape (n_tx, n_el). After decoding each transmit activates a single
+        participating channel, so the decoded apodizations form an identity over the participating
+        channels.
     """
+    _validate_decode_hadamard_inputs(raw_data, tx_apodizations)
+    participating_channels = _find_participating_channels(tx_apodizations)
+    hadamard_matrix = _find_hadamard_matrix(tx_apodizations, participating_channels)
+    _warn_if_hadamard_not_orthogonal(hadamard_matrix)
+    raw_data_decoded = _apply_hadamard_decoding(raw_data, hadamard_matrix)
+    tx_apodizations_decoded = _decode_tx_apodizations(tx_apodizations, participating_channels)
+    return raw_data_decoded, tx_apodizations_decoded
+
+
+def _validate_decode_hadamard_inputs(raw_data, tx_apodizations):
     if not raw_data.ndim == 5:
         raise ValueError(
             f"Expected raw_data with 5 dimensions (n_frames, n_tx, n_ax, n_el, n_ch), "
@@ -1098,21 +1114,29 @@ def decode_hadamard(raw_data, tx_apodizations):
             f"Expected tx_apodizations with 2 dimensions (n_tx, n_el), "
             f"got {tx_apodizations.ndim} dimensions."
         )
-    participating_channels = _find_participating_channels(tx_apodizations)
-    hadamard_matrix = _find_hadamard_matrix(tx_apodizations, participating_channels)
+
+
+def _apply_hadamard_decoding(raw_data, hadamard_matrix):
     hadamard_matrix_t = ops.transpose(hadamard_matrix)
     raw_data = ops.moveaxis(raw_data, 1, -1)
     raw_data = ops.matmul(raw_data, hadamard_matrix_t)
-    raw_data = ops.moveaxis(raw_data, -1, 1)
-    tx_apodizations_decoded = ops.matmul(hadamard_matrix, hadamard_matrix_t)
-    normalized = tx_apodizations_decoded / ops.max(tx_apodizations_decoded)
-    identity = ops.eye(ops.shape(tx_apodizations_decoded)[0])
+    return ops.moveaxis(raw_data, -1, 1)
+
+
+def _decode_tx_apodizations(tx_apodizations, participating_channels):
+    n_el = tx_apodizations.shape[1]
+    return ops.one_hot(participating_channels, n_el)
+
+
+def _warn_if_hadamard_not_orthogonal(hadamard_matrix):
+    gram = ops.matmul(hadamard_matrix, ops.transpose(hadamard_matrix))
+    normalized = gram / ops.max(gram)
+    identity = ops.eye(ops.shape(gram)[0])
     if not ops.all(ops.isclose(normalized, identity)):
         log.warning(
             "The Hadamard decoding may not be correct. The tx_apodizations matrix is not "
             "orthogonal."
         )
-    return raw_data
 
 
 def _find_participating_channels(apodizations):
@@ -1122,7 +1146,6 @@ def _find_participating_channels(apodizations):
 
 
 def _find_hadamard_matrix(apodizations, participating_channels):
-
     n_tx = len(participating_channels)
     hadamard_matrix = ops.take(apodizations[:n_tx], participating_channels, axis=1)
     return hadamard_matrix
