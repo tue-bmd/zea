@@ -280,14 +280,7 @@ def tof_correction(
         # through the heterogeneous beamformer (e.g. SOS estimation).
         mask = ops.stop_gradient(mask)
 
-    # ---- Precompute the receive-side phase rotation (IQ only) ----------
-    # The rotation angle theta = 2*pi*f_demod * (rxdel + txdel) / fs separates
-    # into a receive term (per pixel/element, identical for every transmit) and
-    # a transmit term (per pixel, one scalar per transmit). Computing cos/sin of
-    # the receive term once here — instead of cos/sin of the full (n_pix, n_el)
-    # angle inside every transmit — replaces O(n_tx * n_pix * n_el) transcendentals
-    # with O(n_pix * n_el) + O(n_tx * n_pix). The transmit term is combined per
-    # transmit with the cos/sin angle-addition identities (exact up to rounding).
+    # Precompute the receive-side phase rotation (same for all transmits)
     is_iq = data.shape[-1] == 2
     if is_iq:
         phase_scale = 2 * np.pi * demodulation_frequency / sampling_frequency
