@@ -710,6 +710,39 @@ def test_coherence_factor_coherent_signal():
 
 
 @backend_equality_check()
+def test_coherence_factor_effective_aperture_and_exponent():
+    """Masked-out channels are excluded from N, and the exponent shapes the weight."""
+
+    import keras
+
+    from zea import ops
+
+    n_tx, n_pix, n_el, n_ch = 3, 7, 4, 2
+    # Half the aperture is masked out, e.g. by the f-number mask in TOF correction
+    data = keras.ops.concatenate(
+        [
+            keras.ops.ones((1, n_tx, n_pix, n_el // 2, n_ch)),
+            keras.ops.zeros((1, n_tx, n_pix, n_el // 2, n_ch)),
+        ],
+        axis=-2,
+    )
+    das_out = keras.ops.convert_to_numpy(ops.DelayAndSum(with_batch_dim=True)(data=data)["data"])
+
+    # The contributing channels are perfectly coherent, so CF is 1 over the
+    # effective aperture, but only n_el_eff / n_el = 0.5 over the full one.
+    effective_out = ops.CoherenceFactor(effective_aperture=True, with_batch_dim=True)(data=data)[
+        "data"
+    ]
+    full_out = ops.CoherenceFactor(with_batch_dim=True)(data=data)["data"]
+    squared_out = ops.CoherenceFactor(exponent=2.0, with_batch_dim=True)(data=data)["data"]
+
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(effective_out), das_out, rtol=1e-5)
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(full_out), 0.5 * das_out, rtol=1e-5)
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(squared_out), 0.25 * das_out, rtol=1e-5)
+    return effective_out
+
+
+@backend_equality_check()
 def test_generalized_coherence_factor_coherent_signal():
     """GCF weight is 1 for a perfectly coherent signal, so output matches DAS across backends."""
 
