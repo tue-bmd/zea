@@ -1470,15 +1470,8 @@ class DelayMultiplyAndSum(Operation):
                 f"Got data with shape {data.shape}."
             )
 
-        # DMAS compounds the signed-sqrt-normalized cross product of every distinct
-        # element pair: sum_tx sum_{i<j} x_i x_j / sqrt(|x_i x_j|). The naive form builds
-        # the full (n_el, n_el) product matrix per (tx, pixel) and masks out the diagonal
-        # and upper triangle -- O(n_el^2) work and memory, most of it discarded.
-        #
-        # Instead use the identity  sum_{i<j} y_i y_j = 1/2 [(sum_i y_i)^2 - sum_i y_i^2]
-        # with y_i = x_i / sqrt(|x_i|) (the complex signed-sqrt magnitude), for which
-        # y_i y_j = x_i x_j / sqrt(|x_i x_j|) is exactly the normalized product. This is
-        # two O(n_el) reductions per pixel and never materializes the element matrix.
+        # Avoid building the full (n_el, n_el) pairwise product matrix: rewrite
+        # sum_{i<j} y_i y_j as 1/2 [(sum y_i)^2 - sum y_i^2]; O(n_el) instead of O(n_el^2).
         data = ops.view_as_complex(data)  # (n_tx, n_pix, n_el)
 
         # y_i = x_i / sqrt(|x_i|); eps guards |x_i| == 0 (then y_i -> 0).
