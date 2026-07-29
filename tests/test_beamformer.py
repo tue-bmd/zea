@@ -186,6 +186,55 @@ def test_complex_rotate_half_pi():
     return rotated
 
 
+@backend_equality_check()
+def test_complex_rotate_precomputed_cos_sin_matches_theta_receive_only():
+    """verify that complex_rotate produces the same output for the precomputed and for the
+    on-the-fly path."""
+    rng = np.random.default_rng(seed=42)
+    n_pix, n_el = 6, 4
+    iq = keras.ops.convert_to_tensor(rng.standard_normal((n_pix, n_el, 2)).astype(np.float32))
+    theta_rx = keras.ops.convert_to_tensor(
+        np.linspace(-2.3, 2.3, n_pix * n_el).reshape(n_pix, n_el).astype(np.float32)
+    )
+
+    direct = keras.ops.convert_to_numpy(complex_rotate(iq, theta_rx))
+    precomputed = keras.ops.convert_to_numpy(
+        complex_rotate(
+            iq, None, cos_theta=keras.ops.cos(theta_rx), sin_theta=keras.ops.sin(theta_rx)
+        )
+    )
+    np.testing.assert_allclose(precomputed, direct, atol=1e-5)
+    return precomputed
+
+
+@backend_equality_check()
+def test_complex_rotate_precomputed_cos_sin_matches_theta_receive_plus_transmit():
+    """Verify that the optimized beamforming path preserves the correct rotation when using the
+    shared precomputed transmit angles."""
+    rng = np.random.default_rng(seed=42)
+    n_pix, n_el = 5, 3
+    iq = keras.ops.convert_to_tensor(rng.standard_normal((n_pix, n_el, 2)).astype(np.float32))
+
+    theta_rx = keras.ops.convert_to_tensor(
+        np.linspace(-1.7, 1.7, n_pix * n_el).reshape(n_pix, n_el).astype(np.float32)
+    )
+    theta_tx = keras.ops.convert_to_tensor(
+        np.linspace(0.3, -0.9, n_pix).reshape(n_pix, 1).astype(np.float32)
+    )
+
+    cos_rx, sin_rx = keras.ops.cos(theta_rx), keras.ops.sin(theta_rx)
+    cos_tx, sin_tx = keras.ops.cos(theta_tx), keras.ops.sin(theta_tx)
+    cos_theta = cos_rx * cos_tx - sin_rx * sin_tx
+    sin_theta = sin_rx * cos_tx + cos_rx * sin_tx
+
+    combined = keras.ops.convert_to_numpy(
+        complex_rotate(iq, None, cos_theta=cos_theta, sin_theta=sin_theta)
+    )
+    direct = keras.ops.convert_to_numpy(complex_rotate(iq, theta_rx + theta_tx))
+    np.testing.assert_allclose(combined, direct, atol=1e-5)
+    return combined
+
+
 # compute_receive_distances
 
 
@@ -255,6 +304,34 @@ def test_apply_delays_interpolation_midpoint():
     delays = keras.ops.convert_to_tensor([[2.5]])
     result = keras.ops.convert_to_numpy(apply_delays(data, delays, clip_min=0, clip_max=n_ax - 1))
     np.testing.assert_allclose(result[0, 0, 0], 0.5, atol=1e-6)
+    return result
+
+
+@backend_equality_check()
+def test_apply_delays_fractional_distinct_per_element_and_channel():
+    """Fractional, non-midpoint delays that differ per element must interpolate
+    each element/channel independently, verifying the flattened gather keeps
+    element and channel alignment intact."""
+    n_ax, n_el, n_ch = 10, 3, 2
+    # Distinct values per (axial, element, channel) so any misalignment in the
+    # flattened gather changes the result.
+    data_np = np.arange(n_ax * n_el * n_ch, dtype=np.float32).reshape(n_ax, n_el, n_ch)
+    data_np *= np.array([1.0, 10.0, 100.0]).reshape(1, n_el, 1)  # scale per element
+    data = keras.ops.convert_to_tensor(data_np)
+
+    # One pixel, distinct fractional non-midpoint delay per element.
+    delays_per_el = np.array([2.3, 5.7, 1.25], dtype=np.float32)
+    delays = keras.ops.convert_to_tensor(delays_per_el[None, :])
+
+    result = keras.ops.convert_to_numpy(apply_delays(data, delays, clip_min=0, clip_max=n_ax - 1))
+    assert result.shape == (1, n_el, n_ch)
+
+    for e in range(n_el):
+        d = delays_per_el[e]
+        d0, d1 = int(np.floor(d)), int(np.floor(d)) + 1
+        expected = (d1 - d) * data_np[d0, e, :] + (d - d0) * data_np[d1, e, :]
+        np.testing.assert_allclose(result[0, e, :], expected, atol=1e-5)
+
     return result
 
 
