@@ -66,6 +66,14 @@ DEFAULT_CHUNK_AXES: tuple[str, ...] = ("n_frames",)
 # nothing on disk: the compression ratio is flat across chunk size.
 MAX_CHUNK_BYTES = 8 << 20  # 8 MiB
 
+# Floor on splitting: an array this small is stored as a *single* chunk, whatever its axes
+# mean. Below ~1 MB there is nothing to win — one range request fetches the lot and Blosc
+# decodes it in well under a millisecond — while splitting costs B-tree entries, a worse
+# compression ratio per chunk, and extra round trips. It is what keeps the small metadata
+# arrays whole: h5py's auto-guess cuts a (5000, 3) probe pose into 8 chunks *across* the
+# x/y/z axis, and per-frame chunking would cut (n_frames, n_tx) timing into 384-byte chunks.
+SINGLE_CHUNK_BYTES = 1 << 20  # 1 MiB
+
 # Paged file-space strategy: HDF5 allocates in fixed-size pages, which collects the
 # metadata that a reader must walk on open (superblock, group and chunk B-trees) into
 # few, adjacent pages instead of scattering it through the file. Over HTTP this cuts a
@@ -492,6 +500,31 @@ class Spec:
         return False
 
     @staticmethod
+    def _axis_dim_names(value: Any, shape_spec: Any) -> tuple[str | None, ...] | None:
+        """Resolve a SCHEMA ``"shape"`` entry to one dimension name per axis of ``value``.
+
+        A shape spec is either a single tuple of dimension names or several alternative
+        tuples (``Image.values`` is 2-D or 3-D, say); the alternative matching the value's
+        actual shape is selected. A ``"..."`` wildcard expands to the axes it absorbs and
+        literal sizes (the ``3`` of ``coordinates``) stay unnamed — both come back as
+        ``None``, which no ``chunk_axes`` entry can match, so those axes are kept whole.
+
+        Returns ``None`` when no alternative matches.
+        """
+        if not shape_spec:
+            return None
+        matched = find_matched_shape(value, Spec._expected_shapes(shape_spec))
+        if matched is None:
+            return None
+        if "..." in matched:
+            pos = matched.index("...")
+            absorbed = value.ndim - (len(matched) - 1)
+            matched = matched[:pos] + (None,) * absorbed + matched[pos + 1 :]
+        if len(matched) != value.ndim:
+            return None
+        return tuple(d if isinstance(d, str) else None for d in matched)
+
+    @staticmethod
     def _resolve_chunks(
         value: Any,
         dim_names: tuple | None,
@@ -500,6 +533,9 @@ class Spec:
     ) -> tuple | None:
         """Choose an HDF5 chunk shape aligned with common access patterns.
 
+        ``dim_names`` is the field's SCHEMA ``"shape"`` entry; see :meth:`_axis_dim_names`
+        for how it is matched against the value's actual shape.
+
         ``chunk_axes`` names the dimensions to chunk with size 1 (default
         :data:`DEFAULT_CHUNK_AXES`, ``("n_frames",)``); every other axis is stored at
         full extent, so partial/streaming reads fetch only the requested frames
@@ -507,35 +543,42 @@ class Spec:
         not present on this field are ignored (e.g. an ``image`` without ``n_tx`` is
         chunked on ``n_frames`` only).
 
-        The result is capped to ``max_chunk_bytes`` (default :data:`MAX_CHUNK_BYTES`) by
-        splitting the outermost full axis — ``n_tx`` for ``raw_data`` — which keeps each
-        chunk a contiguous run of the array. Only that axis is split: if one index along
-        it already exceeds the budget, the chunk is left oversized rather than cutting
-        into ``n_ax``/``n_el``, which are read whole anyway.
+        Arrays of at most :data:`SINGLE_CHUNK_BYTES` are stored as one chunk and never
+        split — they are read whole, so a frame axis is nothing to divide on.
 
-        Returns ``None`` (contiguous / h5py default) when ``chunk_axes`` is empty
-        or ``None``, the value is not a ≥2-D array, or the field's dimension names
-        are unknown.
+        The result is capped to ``max_chunk_bytes`` (default :data:`MAX_CHUNK_BYTES`) by
+        splitting the outermost full axis — ``n_tx`` for ``raw_data``, ``z`` for an image
+        or map — which keeps each chunk a contiguous run of the array. Only that axis is
+        split: if one index along it already exceeds the budget, the chunk is left
+        oversized rather than cutting into ``n_ax``/``n_el`` (or ``x``/``y``), which are
+        read whole anyway.
+
+        A field with no chunk axis at all — probe geometry, transmit waveforms, a
+        coordinate grid broadcast across frames — is one capped chunk rather than
+        h5py's guess, which would cut it into small pieces across its innermost axis.
+        The same holds when the dimension names cannot be resolved: an unnamed axis is
+        never a chunk axis, so those arrays stay whole too.
+
+        Returns ``None`` (contiguous / h5py default) only when ``chunk_axes`` is empty
+        or ``None``, the value is not an array, or it is empty.
         """
-        if not chunk_axes or not isinstance(value, np.ndarray) or value.ndim < 2:
+        if not chunk_axes or not isinstance(value, np.ndarray) or value.size == 0:
             return None
-        if not (
-            dim_names is not None
-            and len(dim_names) == value.ndim
-            and all(isinstance(d, str) for d in dim_names)
-        ):
-            return None
-        mark = [d in chunk_axes for d in dim_names]
-        # Require a mix: at least one chunk axis present *and* at least one full
-        # axis, else the chunks would be scalar-sized (all ones).
-        if not (any(mark) and not all(mark)):
+        if value.nbytes <= SINGLE_CHUNK_BYTES:
+            return cast(Tuple[int, ...], value.shape)
+        axis_names = Spec._axis_dim_names(value, dim_names)
+        # Unresolvable dimension names mean no axis is known to be a chunk axis, which
+        # lands on the whole-array-in-one-capped-chunk path below.
+        mark = [False] * value.ndim if axis_names is None else [d in chunk_axes for d in axis_names]
+        # Every axis a chunk axis would mean scalar-sized chunks (all ones); leave it to h5py.
+        if all(mark):
             return None
 
         shape = cast(Tuple[int, ...], value.shape)
         chunks: list[int] = [1 if m else dim for m, dim in zip(mark, shape)]
         if max_chunk_bytes is None:
             max_chunk_bytes = MAX_CHUNK_BYTES
-        if not max_chunk_bytes:  # 0 / None disables the cap: one full frame per chunk
+        if not max_chunk_bytes:  # 0 disables the cap: a full frame (or array) per chunk
             return tuple(chunks)
 
         split = mark.index(False)  # outermost axis kept at full extent
@@ -564,9 +607,10 @@ class Spec:
         back requires the corresponding filter to be available (for ``hdf5plugin``
         filters, ``import hdf5plugin`` in the reading process).
 
-        When ``dim_names`` (the field's schema dimension names) is provided, the
-        chunk shape is derived from ``chunk_axes`` to match common subsampling
-        patterns; see :meth:`_resolve_chunks`.
+        When ``dim_names`` (the field's schema ``"shape"`` entry, one tuple of
+        dimension names or several alternatives) is provided, the chunk shape is
+        derived from ``chunk_axes`` to match common subsampling patterns; see
+        :meth:`_resolve_chunks`.
         """
         dataset_is_scalar = np.isscalar(value) or value.ndim == 0
         chunks = None if dataset_is_scalar else Spec._resolve_chunks(value, dim_names, chunk_axes)
