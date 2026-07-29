@@ -238,9 +238,10 @@ def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
         response = ops.ones_like(theta)
         return response
 
-    wavelength = sound_speed / f
-
-    response = sinc(element_width / wavelength * ops.sin(theta))
+    # element_width / wavelength == element_width * f / sound_speed. Using the
+    # latter avoids dividing by f, so the DC bin (f == 0) stays finite: the
+    # argument is 0 and sinc(0) == 1 (isotropic directivity), the correct limit.
+    response = sinc(element_width * f / sound_speed * ops.sin(theta))
     if not rigid_baffle:
         response *= ops.cos(theta)
     return response
@@ -300,7 +301,11 @@ def hann_fd(f, width):
     """The fourier transform of a hann window in the time domain with given width."""
     denom = 1.0 - (f * width) ** 2
     num = 0.5 * sinc(f * width)
-    result = num / denom
+    # denom == 0 at f * width == +/-1 is a removable singularity where the Hann
+    # window transform equals 0.25. Divide only away from it (using a dummy 1.0
+    # at the singular points) and fill the limit in explicitly, so no 0/0 occurs.
+    singular = denom == 0
+    result = ops.where(singular, 0.25, num / ops.where(singular, 1.0, denom))
     result = ops.where(ops.abs(result) > 1.1, 0.25, result)
     return ops.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.25)
 
