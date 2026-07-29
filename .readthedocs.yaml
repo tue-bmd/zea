@@ -11,18 +11,20 @@ build:
     python: "3.12"
   apt_packages:
     - pandoc
+  jobs:
+    # Runs instead of `python.install` below, which supports uv natively but
+    # cannot pass extra arguments to it, and we use `--no-default-groups` to avoid
+    # installing dev dependencies in the docs build.
+    install:
+      - uv sync --no-default-groups --group docs --extra jax
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:
-   configuration: docs/source/conf.py
+  configuration: docs/source/conf.py
 
-# Optionally, but recommended,
-# declare the Python requirements required to build your documentation
-# See https://docs.readthedocs.io/en/stable/guides/reproducible-builds.html
+# Read the Docs only switches the build into uv mode when it sees a uv
+# entry here. This entry is never executed -- build.jobs.install above replaces it!
 python:
   install:
-    - method: pip
-      path: .
-      extra_requirements:
-        - docs
-        - jax
+    - method: uv
+      command: sync

@@ -3,10 +3,11 @@
 To build the documentation for the `zea` package, follow these steps:
 
 ## 1. Install dependencies
-Install the `zea` package with documentation dependencies:
+
+Install the `zea` package with documentation dependencies (requires uv or pip >=25.1):
 
 ```sh
-pip install -e .[docs]
+pip install -e . --group docs
 ```
 
 We also need to install `pandoc` to build the documentation:
