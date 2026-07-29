@@ -15,6 +15,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Value
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import yaml
@@ -25,6 +26,15 @@ from zea import log
 from zea.data.convert.utils import load_avi, unzip
 from zea.data.file import File
 from zea.func.tensor import translate
+
+if TYPE_CHECKING:
+    from multiprocessing.sharedctypes import Synchronized
+
+# Process-shared counter, bound per worker process by ``count_init`` (see below)
+# and read by ``H5Processor``. Annotation-only on purpose: the name genuinely
+# does not exist until an initializer runs, but declaring it here gives the
+# ``global COUNTER`` statement a module-scope declaration to rebind.
+COUNTER: "Synchronized[int]"
 
 
 def segment(tensor, number_erasing=0, min_clip=0):

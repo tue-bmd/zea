@@ -295,6 +295,66 @@ def test_default_write_is_paged(tmp_hdf5_path):
         assert np.array_equal(file["tracks/track_0/data/raw_data"][:], DATA["raw_data"])
 
 
+@pytest.mark.heavy
+def test_paged_file_readable_by_oldest_supported_h5py(tmp_hdf5_path, tmp_path_factory):
+    """A file written with the currently installed h5py opens under the oldest one we support.
+
+    PAGED_LAYOUT caps ``libver`` at "v114" instead of "latest" precisely so that files
+    stay portable across h5py/HDF5 releases: "latest" resolves to whatever HDF5 the
+    *writer's* h5py bundles, and h5py 3.16 jumped to bundling HDF5 2.0, which writes
+    object-header message versions that HDF5 1.14.x (h5py's own floor, ``h5py >=3.11``
+    in pyproject.toml) can't parse -- surfacing as "bad version number for datatype/layout
+    message" on read. Regression-tested here by installing h5py 3.11.0 into a throwaway
+    venv (never touches the environment running the test suite) and reading the file back
+    with it in a subprocess.
+    """
+    File.create(path=tmp_hdf5_path, data=DATA, scan=SCAN, probe=PROBE)
+
+    venv_dir = tmp_path_factory.mktemp("old_h5py_venv")
+    subprocess.run(
+        [sys.executable, "-m", "venv", str(venv_dir)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    venv_python = venv_dir / "bin" / "python"
+    pip_install = subprocess.run(
+        [str(venv_python), "-m", "pip", "install", "-q", "h5py==3.11.0", "hdf5plugin"],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert pip_install.returncode == 0, (
+        f"could not provision oldest-supported-h5py venv (no network access?): {pip_install.stderr}"
+    )
+
+    read_script = (
+        "import hdf5plugin, h5py, sys\n"
+        "def walk(g):\n"
+        "    for key in g.keys():\n"
+        "        item = g[key]\n"
+        "        if isinstance(item, h5py.Group):\n"
+        "            walk(item)\n"
+        "        else:\n"
+        "            item[()] if item.shape == () else item[...]\n"
+        f"with h5py.File({str(tmp_hdf5_path)!r}, 'r') as f:\n"
+        "    walk(f)\n"
+        "print('h5py', h5py.__version__)\n"
+    )
+    read_result = subprocess.run(
+        [str(venv_python), "-c", read_script],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert read_result.returncode == 0, (
+        f"h5py 3.11 (HDF5 1.14.x) could not read a file written by the current "
+        f"h5py: {read_result.stderr}"
+    )
+    assert "h5py 3.11.0" in read_result.stdout
+
+
 def test_existing_path(tmp_hdf5_path):
     """Tests if passing a path that already exists raises an error."""
     # Ensure that the file exists

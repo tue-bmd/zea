@@ -177,7 +177,7 @@ jobs:
             -v "${{ github.workspace }}:/zea" \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
-            sh -c "uv pip install --system -e .[tests] && pytest --cov --cov-branch --cov-report=xml --junitxml=junit.xml -o junit_family=legacy -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
+            sh -c "uv pip install --system --group tests -e . && pytest --cov --cov-branch --cov-report=xml --junitxml=junit.xml -o junit_family=legacy -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -185,18 +185,25 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ env.MAIN_REPO }}
           flags: unit
+          verbose: true
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ env.MAIN_REPO }}
           flags: unit
+          report_type: test_results
+          files: ./junit.xml
+          verbose: true
 
   # Guard against zea accidentally using functionality newer than the dependency
   # floors declared in pyproject.toml. Installs the *lowest* allowed versions of
   # zea's declared deps and runs the import tests against them.
+  # `.[app]` is named explicitly so lowest-direct pins gradio to its declared
+  # floor: reached only via the `tests` group's `zea[app]` self-reference it
+  # would count as transitive and resolve to the newest release instead.
   minimum-deps:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -217,7 +224,7 @@ jobs:
           UV_TORCH_BACKEND: cpu
         run: |
           uv venv
-          uv pip install --resolution lowest-direct -e ".[tests]" \
+          uv pip install --resolution lowest-direct --group tests -e ".[app]" \
             "tensorflow-cpu>=2.12.1" "jax[cpu]>=0.4.35" "torch>=2.2"
           echo "::group::Resolved dependency versions"
           uv pip freeze
@@ -265,14 +272,18 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ env.MAIN_REPO }}
           flags: heavy
+          verbose: true
 
       - name: Upload heavy test results to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ env.MAIN_REPO }}
           flags: heavy
+          report_type: test_results
+          files: ./junit.xml
+          verbose: true
 
   notebook-tests:
     name: notebook-tests (${{ matrix.label }})
@@ -337,18 +348,19 @@ jobs:
           needs_artifact: ${{ needs.image.outputs.needs_artifact }}
           docker_image: ${{ needs.image.outputs.docker_image }}
 
-      - name: Build documentation with Sphinx (fails on warnings)
+      - name: Build documentation with Sphinx (fails on warnings, linkcheck warns only)
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
             -w /zea/docs \
             ${{ needs.image.outputs.docker_image }} \
             sh -c "\
-              uv pip install --system -e ..[docs] && \
+              uv pip install --system --group docs -e .. && \
               export PATH=\"/tmp/.local/bin:\$PATH\" && \
               export ZEA_LOG_LEVEL=ERROR && \
               make docs-clean && \
               make docs-build SPHINXOPTS='-W --keep-going' && \
               make docs-test && \
-              make docs-linkcheck SPHINXOPTS='--keep-going' \
+              { make docs-linkcheck SPHINXOPTS='--keep-going' || \
+                echo '::warning title=Docs linkcheck failed::Sphinx linkcheck reported unreachable links. This can be a false positive (rate limiting, transient network issues, bot protection). See the step log for the offending URLs.'; } \
             "

@@ -41,7 +41,7 @@ Dataset splits:
 
 .. code-block:: console
 
-   python -m zea.data.convert cetus ./raw ./output --download
+   zea convert cetus ./raw ./output --download
 
 """
 
@@ -296,7 +296,7 @@ def convert_cetus(args):
 
     Usage::
 
-        python -m zea.data.convert cetus <source_folder> <destination_folder> --download
+        zea convert cetus <source_folder> <destination_folder> --download
 
     Args:
         args (argparse.Namespace): An object with attributes:
@@ -469,7 +469,7 @@ This dataset was downloaded, converted to zea format, and uploaded using the
 [zea](https://github.com/tue-bmd/zea) data converter:
 
 ```bash
-python -m zea.data.convert cetus <src> <dst> --download
+zea convert cetus <src> <dst> --download
 ```
 
 ## Dataset structure
