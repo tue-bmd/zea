@@ -78,16 +78,25 @@ def _bootstrap_backend():
             backend for backend in ML_BACKENDS if importlib.util.find_spec(backend) is not None
         ]
 
+        # Keras' numpy backend is not standalone: it imports jax internally (see
+        # keras/src/backend/numpy/nn.py), so jax is required no matter which other
+        # backends happen to be installed.
+        if effective_backend == "numpy" and "jax" not in installed_backends:
+            if installed_backends:
+                backend_status = f"Installed backends: {', '.join(installed_backends)}."
+            else:
+                backend_status = (
+                    "No ML backend (torch, tensorflow, jax) installed in current environment."
+                )
+            raise ImportError(
+                f"{backend_status} KERAS_BACKEND is set to 'numpy', but Keras' numpy "
+                f"backend is not standalone: jax must be installed as well. Install it with "
+                f"`pip install {__package__}[jax]` (GPU) or `pip install 'jax[cpu]'` "
+                f"(CPU-only). For more information, see: {DOCS_URL}"
+            )
+
         # Error if no backends are installed
         if not installed_backends:
-            if effective_backend == "numpy":
-                raise ImportError(
-                    f"No ML backend (torch, tensorflow, jax) installed in current "
-                    f"environment. KERAS_BACKEND is set to 'numpy', but Keras' numpy "
-                    f"backend is not standalone: jax must be installed as well. Install it with "
-                    f"`pip install {__package__}[jax]` (GPU) or `pip install 'jax[cpu]'` "
-                    f"(CPU-only). For more information, see: {DOCS_URL}"
-                )
             if backend_env:
                 backend_status = f"KERAS_BACKEND is set to '{backend_env}'"
             else:
