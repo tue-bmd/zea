@@ -348,7 +348,7 @@ jobs:
           needs_artifact: ${{ needs.image.outputs.needs_artifact }}
           docker_image: ${{ needs.image.outputs.docker_image }}
 
-      - name: Build documentation with Sphinx (fails on warnings)
+      - name: Build documentation with Sphinx (fails on warnings, linkcheck warns only)
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
@@ -361,5 +361,6 @@ jobs:
               make docs-clean && \
               make docs-build SPHINXOPTS='-W --keep-going' && \
               make docs-test && \
-              make docs-linkcheck SPHINXOPTS='--keep-going' \
+              { make docs-linkcheck SPHINXOPTS='--keep-going' || \
+                echo '::warning title=Docs linkcheck failed::Sphinx linkcheck reported unreachable links. This can be a false positive (rate limiting, transient network issues, bot protection). See the step log for the offending URLs.'; } \
             "
