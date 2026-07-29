@@ -28,6 +28,7 @@ from zea.internal.registry import model_registry
 from zea.models.base import BaseModel
 from zea.models.preset_utils import get_preset_loader, register_presets
 from zea.models.presets import taesdxl_decoder_presets, taesdxl_encoder_presets, taesdxl_presets
+from zea.models.utils import onnx2tf_saved_model_kwargs
 
 
 @model_registry(name="taesdxl")
@@ -276,7 +277,11 @@ def convert_original_weights(model_name="madebyollin/taesdxl", output_dir=None):
     extra packages that are not part of the ``zea`` dependencies::
 
         pip install torch diffusers[torch] onnx==1.16.1 onnxruntime==1.18.1 onnx2tf \\
-            onnx-graphsurgeon onnxsim==0.4.33 sne4onnx sng4onnx tf-keras
+            onnx-graphsurgeon onnxsim sne4onnx sng4onnx tf-keras
+
+    onnxsim is not optional despite onnx2tf only warning when it is missing: it folds
+    the shape arithmetic that the TensorFlow exporter cannot handle dynamically. It is
+    left unpinned because 0.4.x has no wheel for recent Python versions.
 
     .. note::
         torch and TensorFlow have to coexist in one process here, which not every
@@ -333,7 +338,18 @@ def convert_original_weights(model_name="madebyollin/taesdxl", output_dir=None):
             # default) emits graphs onnx2tf cannot convert.
             dynamo=False,
         )
-        convert(onnx_path, output_folder_path=str(output_dir / name), output_keras_v3=True)
+        model_dir = output_dir / name
+        convert(
+            onnx_path,
+            output_folder_path=str(model_dir),
+            output_keras_v3=True,
+            **onnx2tf_saved_model_kwargs(),
+        )
+        if not list(model_dir.glob("*.keras")):
+            raise RuntimeError(
+                f"onnx2tf reported success but wrote no Keras model to {model_dir}. "
+                "See zea.models.utils.onnx2tf_saved_model_kwargs."
+            )
 
     log.success(f"Models saved to {log.yellow(str(output_dir))}")
     return output_dir

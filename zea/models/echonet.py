@@ -42,6 +42,7 @@ from zea.internal.registry import model_registry
 from zea.models.base import BaseModel
 from zea.models.preset_utils import get_preset_loader, register_presets
 from zea.models.presets import echonet_dynamic_presets
+from zea.models.utils import onnx2tf_saved_model_kwargs
 
 INFERENCE_SIZE = 112
 
@@ -230,7 +231,12 @@ def convert_original_weights(output_dir=None, weights_folder=None):  # pragma: n
     extra packages that are not part of the ``zea`` dependencies::
 
         pip install torch torchvision onnx==1.16.1 onnxruntime==1.18.1 onnx2tf \\
-            onnx-graphsurgeon onnxsim==0.4.33 sne4onnx sng4onnx tf-keras
+            onnx-graphsurgeon onnxsim sne4onnx sng4onnx tf-keras
+
+    onnxsim is not optional despite onnx2tf only warning when it is missing: without
+    it the ASPP pooling branch keeps a dynamically sized Resize that the TensorFlow
+    exporter rejects. It is left unpinned because 0.4.x has no wheel for recent
+    Python versions.
 
     .. note::
         torch and TensorFlow have to coexist in one process here, which not every
@@ -293,12 +299,19 @@ def convert_original_weights(output_dir=None, weights_folder=None):  # pragma: n
         dynamo=False,
     )
 
+    saved_model_dir = output_dir / "tensorflow"
     convert(
         onnx_path,
-        output_folder_path=str(output_dir / "tensorflow"),
+        output_folder_path=str(saved_model_dir),
         output_keras_v3=False,
         output_signaturedefs=False,
+        **onnx2tf_saved_model_kwargs(),
     )
+    if not (saved_model_dir / "saved_model.pb").is_file():
+        raise RuntimeError(
+            f"onnx2tf reported success but wrote no SavedModel to {saved_model_dir}. "
+            "See zea.models.utils.onnx2tf_saved_model_kwargs."
+        )
 
     log.success(f"Model saved to {log.yellow(str(output_dir))}")
     return output_dir
