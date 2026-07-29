@@ -302,6 +302,8 @@ def convert_original_weights(model_name="madebyollin/taesdxl", output_dir=None):
     from diffusers import AutoencoderTiny
     from onnx2tf import convert
 
+    # Unpinned, so this follows upstream: the published presets carry the pre-1.3
+    # decoder, while main has been 1.3 since 2024-11-07.
     vae = AutoencoderTiny.from_pretrained(model_name, torch_dtype=torch.float32)
     vae.eval()
 
