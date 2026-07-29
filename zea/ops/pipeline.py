@@ -1470,35 +1470,22 @@ class DelayMultiplyAndSum(Operation):
                 f"Got data with shape {data.shape}."
             )
 
-        # Compute the correlation matrix
-        data = ops.view_as_complex(data)
+        # Avoid building the full (n_el, n_el) pairwise product matrix: rewrite
+        # sum_{i<j} y_i y_j as 1/2 [(sum y_i)^2 - sum y_i^2]; O(n_el) instead of O(n_el^2).
+        data = ops.view_as_complex(data)  # (n_tx, n_pix, n_el)
 
-        data = self._multiply(data)
-        data = self._select_lower_triangle(data)
-        data = ops.sum(data, axis=(0, 2, 3))
-
-        data = ops.view_as_real(data)
-
-        return data
-
-    def _select_lower_triangle(self, data):
-        """Select only the lower triangle of the correlation matrix."""
-        n_el = data.shape[3]
-        mask = ops.ones((n_el, n_el), dtype=data.dtype) - ops.eye(n_el, dtype=data.dtype)
-        data = data * mask[None, None, :, :] / 2
-        return data
-
-    def _multiply(self, data):
-        """Apply the DMAS multiplication step."""
-        channel_products = data[:, :, :, None] * data[:, :, None, :]
-
-        # Signed square root: sign(z) * sqrt(|z|) == z / sqrt(|z|).
-        # Written this way to avoid ops.sign on complex data (torch.sign
-        # does not support complex numbers; use torch.sgn instead).
+        # y_i = x_i / sqrt(|x_i|); eps guards |x_i| == 0 (then y_i -> 0).
         eps = keras.backend.epsilon()
-        safe_sqrt = ops.cast(ops.sqrt(ops.abs(channel_products) + eps**2), channel_products.dtype)
-        data = channel_products / safe_sqrt
-        return data
+        y = data / ops.cast(ops.sqrt(ops.abs(data)) + eps, data.dtype)
+
+        sum_y = ops.sum(y, axis=-1)  # sum_i y_i        -> (n_tx, n_pix)
+        sum_y2 = ops.sum(y * y, axis=-1)  # sum_i y_i^2 -> (n_tx, n_pix)
+        per_tx = 0.5 * (sum_y * sum_y - sum_y2)  # sum_{i<j} y_i y_j
+
+        # Compound over transmits.
+        data = ops.sum(per_tx, axis=0)  # (n_pix,)
+
+        return ops.view_as_real(data)
 
     def call(self, **kwargs):
         """Performs DMAS beamforming on tof-corrected input.
