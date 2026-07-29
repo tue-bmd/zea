@@ -70,17 +70,7 @@ def test_all_zea_modules_importable():
     # dependency is missing -- not a failure of zea's declared dependencies.
     EXCLUDED = {"zea.backend.tf2jax"}
 
-    # Exclude backend subpackages if their dependencies are not available
-    backend_modules = {
-        "jax": "zea.backend.jax",
-    }
     excluded_prefixes = []
-    for backend_name, backend_module in backend_modules.items():
-        try:
-            __import__(backend_name)
-        except ImportError:
-            EXCLUDED.add(backend_module)
-            excluded_prefixes.append(backend_module)
 
     failures = {}
 

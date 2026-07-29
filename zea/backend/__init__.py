@@ -20,6 +20,10 @@ Public API
     Run a callable with its tensor arguments moved to a target device.
     For ``torch`` this also calls ``.to(device)`` on every input tensor.
 
+:func:`str_to_jax_device`
+    Resolve a zea device string to the ``jax.Device`` it refers to, for the
+    rare cases where a JAX device object is needed instead of a string.
+
 :class:`AutoGrad`
     Backend-agnostic automatic differentiation wrapper.
 """
@@ -226,6 +230,48 @@ class device:
 # Private alias so func_on_device can reference the class without clashing
 # with its own `device` parameter.
 _DeviceContext = device
+
+
+def str_to_jax_device(device: str):
+    """Resolve a device string to the :class:`jax.Device` object it refers to.
+
+    Accepts the same strings as :class:`zea.device` (``'gpu:0'``, ``'cuda:0'``,
+    ``'cpu'``, ...) and resolves them against the devices JAX actually sees.
+    Only needed where a JAX device object is required rather than a string;
+    prefer :class:`zea.device` for placing ops on a device.
+
+    Args:
+        device (str): Device string, e.g. ``'gpu:0'`` or ``'cpu'``. Without an
+            index the first device of that type is returned.
+
+    Returns:
+        jax.Device: The corresponding JAX device.
+
+    Raises:
+        ImportError: If JAX is not installed.
+        ValueError: If the string is malformed, or names a device JAX cannot see.
+    """
+    jax = _import_jax(force=True)
+    if jax is None:
+        raise ImportError("JAX is not installed. Please install it to resolve JAX devices.")
+
+    if not isinstance(device, str):
+        raise ValueError(f"Device must be a string, got {type(device)}")
+
+    # Share one definition of what a device string means with ``zea.device``.
+    device_type, _, device_number = _DeviceContext._normalize(device).partition(":")
+
+    try:
+        device_number = int(device_number) if device_number else 0
+    except ValueError:
+        raise ValueError(f"Device number in '{device}' is not an integer.") from None
+
+    available = jax.devices(device_type)
+    if not available:
+        raise ValueError(f"No JAX devices available for type '{device_type}'.")
+    if device_number < 0 or device_number >= len(available):
+        raise ValueError(f"Device '{device}' is not available; JAX devices found: {available}")
+    return available[device_number]
 
 
 def func_on_device(func, device, *args, **kwargs):

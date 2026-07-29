@@ -233,7 +233,7 @@ class TestStrToJaxDevice:
         """Both ``'cpu'`` and ``'cpu:0'`` resolve to the first CPU device."""
         import jax
 
-        from zea.backend.jax import str_to_jax_device
+        from zea.backend import str_to_jax_device
 
         assert str_to_jax_device("cpu") == jax.devices("cpu")[0]
         assert str_to_jax_device("cpu:0") == jax.devices("cpu")[0]
@@ -244,7 +244,7 @@ class TestStrToJaxDevice:
         """Device strings are normalised to lowercase."""
         import jax
 
-        from zea.backend.jax import str_to_jax_device
+        from zea.backend import str_to_jax_device
 
         assert str_to_jax_device("CPU:0") == jax.devices("cpu")[0]
 
@@ -254,7 +254,7 @@ class TestStrToJaxDevice:
         """A non-string device raises a ValueError."""
         import pytest
 
-        from zea.backend.jax import str_to_jax_device
+        from zea.backend import str_to_jax_device
 
         with pytest.raises(ValueError, match="must be a string"):
             str_to_jax_device(0)
@@ -265,7 +265,7 @@ class TestStrToJaxDevice:
         """A device type that jax cannot initialize propagates its RuntimeError."""
         import pytest
 
-        from zea.backend.jax import str_to_jax_device
+        from zea.backend import str_to_jax_device
 
         with pytest.raises(RuntimeError):
             str_to_jax_device("tpu:0")
@@ -276,7 +276,7 @@ class TestStrToJaxDevice:
         """Requesting a device index that does not exist raises a ValueError."""
         import pytest
 
-        from zea.backend.jax import str_to_jax_device
+        from zea.backend import str_to_jax_device
 
         with pytest.raises(ValueError, match="not available"):
             str_to_jax_device("cpu:99")
