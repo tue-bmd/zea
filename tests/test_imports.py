@@ -72,8 +72,6 @@ def test_all_zea_modules_importable():
 
     # Exclude backend subpackages if their dependencies are not available
     backend_modules = {
-        "torch": "zea.backend.torch",
-        "tensorflow": "zea.backend.tensorflow",
         "jax": "zea.backend.jax",
     }
     excluded_prefixes = []

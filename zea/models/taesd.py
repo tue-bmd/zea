@@ -22,6 +22,7 @@ from pathlib import Path
 import keras
 from keras import backend, ops
 
+from zea import log
 from zea.backend import _import_tf
 from zea.internal.registry import model_registry
 from zea.models.base import BaseModel
@@ -263,3 +264,65 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
 register_presets(taesdxl_presets, TinyAutoencoder)
 register_presets(taesdxl_encoder_presets, TinyEncoder)
 register_presets(taesdxl_decoder_presets, TinyDecoder)
+
+
+def convert_original_weights(model_name="madebyollin/taesdxl", output_dir=None):  # pragma: no cover
+    """Convert the original PyTorch TAESD weights to TensorFlow / Keras v3 models.
+
+    This is how the ``taesdxl`` presets on the Hugging Face Hub were created; it is
+    kept here for reproducibility and is not needed to *use* the model.
+
+    The conversion goes PyTorch -> ONNX -> TensorFlow and therefore needs a few
+    extra packages that are not part of the ``zea`` dependencies::
+
+        pip install torch diffusers[torch] onnx==1.16.1 onnxruntime==1.18.1 onnx2tf \\
+            onnx-graphsurgeon onnxsim==0.4.33 sne4onnx sng4onnx tf-keras
+
+    Args:
+        model_name (str, optional): Hugging Face model id of the original PyTorch
+            autoencoder. Defaults to ``"madebyollin/taesdxl"``.
+        output_dir (str | Path, optional): Folder to write the converted models to.
+            Defaults to a timestamped folder under ``./temp/zea``.
+
+    Returns:
+        Path: Folder containing the converted ``encoder`` and ``decoder`` models.
+    """
+    import time
+
+    # Imported here (not at module level) so that merely importing this module never
+    # pulls in torch or the onnx toolchain: they are only needed for the conversion.
+    import torch
+    from diffusers import AutoencoderTiny
+    from onnx2tf import convert
+
+    vae = AutoencoderTiny.from_pretrained(model_name, torch_dtype=torch.float32)
+    vae.eval()
+
+    if output_dir is None:
+        output_dir = Path(
+            f"./temp/zea/{model_name.split('/')[-1]}-{time.strftime('%Y%m%d-%H%M%S')}"
+        )
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Both halves are exported separately: zea loads them as TinyEncoder / TinyDecoder.
+    dynamic_axes = {
+        "input": {0: "batch_size", 2: "height", 3: "width"},
+        "output": {0: "batch_size", 2: "height", 3: "width"},
+    }
+    for name, submodel, example_input in [
+        ("encoder", vae.encoder, torch.rand((1, 3, 256, 256), dtype=torch.float32)),
+        ("decoder", vae.decoder, torch.rand((1, 4, 32, 32), dtype=torch.float32)),
+    ]:
+        onnx_path = str(output_dir / f"{name}.onnx")
+        torch.onnx.export(
+            submodel,
+            (example_input,),
+            onnx_path,
+            input_names=["input"],
+            dynamic_axes=dynamic_axes,
+        )
+        convert(onnx_path, output_folder_path=str(output_dir / name), output_keras_v3=True)
+
+    log.success(f"Models saved to {log.yellow(str(output_dir))}")
+    return output_dir

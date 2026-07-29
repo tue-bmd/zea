@@ -1073,3 +1073,72 @@ def test_split_seed_rejects_unknown_seed_type():
 
     with pytest.raises(TypeError):
         split_seed("not-a-seed", 2)
+
+
+@pytest.mark.parametrize("axis", [0, -1])
+@backend_equality_check(decimal=5)
+def test_unwrap(axis):
+    """``unwrap`` matches ``np.unwrap``, the reference implementation."""
+    from zea.func.tensor import unwrap
+
+    rng = default_rng(DEFAULT_TEST_SEED)
+    phase = np.mod(rng.uniform(-20, 20, (8, 16)), 2 * np.pi).astype("float32")
+
+    unwrapped = unwrap(ops.convert_to_tensor(phase), axis=axis)
+
+    np.testing.assert_allclose(
+        ops.convert_to_numpy(unwrapped), np.unwrap(phase, axis=axis), rtol=1e-5, atol=1e-5
+    )
+    # Unwrapping only adds whole periods, so the result stays congruent modulo 2 pi
+    np.testing.assert_allclose(
+        np.mod(ops.convert_to_numpy(unwrapped), 2 * np.pi), phase, rtol=1e-4, atol=1e-4
+    )
+    return unwrapped
+
+
+def test_unwrap_custom_period():
+    """A custom period unwraps e.g. degrees instead of radians."""
+    from zea.func.tensor import unwrap
+
+    degrees = np.array([0.0, 170.0, 340.0, 150.0, 320.0], dtype="float32")
+    np.testing.assert_allclose(
+        ops.convert_to_numpy(unwrap(degrees, period=360)),
+        np.unwrap(degrees, period=360),
+        rtol=1e-5,
+        atol=1e-4,
+    )
+
+
+def test_unwrap_leaves_continuous_phase_untouched():
+    """Phases without discontinuities are returned unchanged."""
+    from zea.func.tensor import unwrap
+
+    phase = np.linspace(0, 3, 20).astype("float32")
+    np.testing.assert_allclose(ops.convert_to_numpy(unwrap(phase)), phase, rtol=1e-6, atol=1e-6)
+
+
+@backend_equality_check(decimal=4)
+def test_complex_resize():
+    """``complex_resize`` resizes magnitude and phase, preserving both on a no-op resize."""
+    from zea.func.tensor import complex_resize
+
+    rng = default_rng(DEFAULT_TEST_SEED)
+    data = (rng.standard_normal((2, 8, 8, 1)) + 1j * rng.standard_normal((2, 8, 8, 1))).astype(
+        "complex64"
+    )
+    tensor = ops.convert_to_tensor(data)
+
+    # Resizing to the same size is a no-op (up to interpolation round-off)
+    same = ops.convert_to_numpy(complex_resize(tensor, (8, 8)))
+    np.testing.assert_allclose(np.abs(same), np.abs(data), rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(np.angle(same), np.angle(data), rtol=1e-4, atol=1e-4)
+
+    upsampled = complex_resize(tensor, (16, 16))
+    assert upsampled.shape == (2, 16, 16, 1)
+    assert "complex" in str(upsampled.dtype)
+
+    # Magnitudes are interpolated, so they stay within the original range
+    magnitude = np.abs(ops.convert_to_numpy(upsampled))
+    assert magnitude.max() <= np.abs(data).max() + 1e-4
+
+    return ops.abs(upsampled)

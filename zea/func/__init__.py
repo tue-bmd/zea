@@ -12,6 +12,7 @@ from .tensor import (
     batch_cov,
     boolean_mask,
     check_patches_fit,
+    complex_resize,
     compute_required_patch_overlap,
     compute_required_patch_shape,
     correlate,
@@ -43,6 +44,7 @@ from .tensor import (
     split_volume_data_from_axis,
     stack_volume_data_along_axis,
     translate,
+    unwrap,
     vmap,
 )
 from .ultrasound import (
@@ -64,6 +66,7 @@ from .ultrasound import (
     hilbert,
     log_compress,
     make_tgc_curve,
+    square_wave_apodization,
     suppress_tissue,
     upmix,
 )
@@ -81,6 +84,7 @@ __all__ = [
     "batch_cov",
     "boolean_mask",
     "check_patches_fit",
+    "complex_resize",
     "compute_required_patch_overlap",
     "compute_required_patch_shape",
     "correlate",
@@ -111,6 +115,7 @@ __all__ = [
     "split_volume_data_from_axis",
     "stack_volume_data_along_axis",
     "translate",
+    "unwrap",
     "vmap",
     "split_into_windows",
     # Ultrasound functions
@@ -131,6 +136,7 @@ __all__ = [
     "upmix",
     "log_compress",
     "make_tgc_curve",
+    "square_wave_apodization",
     "suppress_tissue",
     "decode_hadamard",
     "construct_acquisition_from_synthetic_aperture",

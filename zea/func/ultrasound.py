@@ -591,6 +591,40 @@ def envelope_detect(data, axis=-3):
     return ops.abs(channels_to_analytic(data, axis))
 
 
+def square_wave_apodization(n_el: int, block_size: float):
+    """Return a square wave apodization of alternating ``+1`` / ``-1`` blocks.
+
+    Used for incoherent beamforming.
+
+    Args:
+        n_el (int): Total number of elements in the array.
+        block_size (float): Number of elements that will be high/low. Can be a float.
+
+    Returns:
+        Tensor: Apodization of shape ``(n_el,)`` with values in ``{-1, +1}``.
+
+    Example:
+        .. code-block:: text
+
+            +1 +1 +1 +1             +1 +1 +1 +1
+                        -1 -1 -1 -1
+
+            <----------> block_size = 4, n_el = 12
+    """
+    wavelength = 2 * block_size / n_el
+    frequency = 1 / wavelength
+    t = ops.linspace(0.0, 1.0, n_el)
+
+    # Square wave with 50% duty cycle: high on the first half of every period.
+    phase = ops.mod(frequency * t, 1.0)
+    apod = ops.where(phase < 0.5, 1.0, -1.0)
+
+    # The final sample lands exactly on a period boundary, so it belongs to the
+    # next block rather than the one it is rounded into; flip it back.
+    flip_last = ops.concatenate([ops.ones((n_el - 1,)), -ops.ones((1,))], axis=0)
+    return apod * flip_last
+
+
 def apply_aligned_apodization(data, apodization, with_batch_dim):
     """Multiply aligned data by a per-pixel, per-transmit weight.
 
