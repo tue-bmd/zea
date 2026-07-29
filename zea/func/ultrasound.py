@@ -611,6 +611,9 @@ def square_wave_apodization(n_el: int, block_size: float):
 
             <----------> block_size = 4, n_el = 12
     """
+    if not block_size > 0:  # also rejects NaN
+        raise ValueError(f"block_size must be a positive number, got {block_size}.")
+
     # Which block each element falls in; even blocks are high, odd blocks are low.
     # Indexing the elements directly (rather than sampling a square wave over a
     # normalized axis) keeps every block exactly `block_size` wide, including a

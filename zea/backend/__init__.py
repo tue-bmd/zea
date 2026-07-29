@@ -266,7 +266,12 @@ def str_to_jax_device(device: str):
     except ValueError:
         raise ValueError(f"Device number in '{device}' is not an integer.") from None
 
-    available = jax.devices(device_type)
+    try:
+        available = jax.devices(device_type)
+    except RuntimeError as exc:
+        # jax raises for a device type it cannot initialize (e.g. 'tpu' without
+        # libtpu). From here that is just an unavailable device, like any other.
+        raise ValueError(f"No JAX devices available for type '{device_type}': {exc}") from exc
     if not available:
         raise ValueError(f"No JAX devices available for type '{device_type}'.")
     if device_number < 0 or device_number >= len(available):

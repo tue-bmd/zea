@@ -2088,4 +2088,10 @@ def test_square_wave_apodization():
     odd = keras.ops.convert_to_numpy(square_wave_apodization(7, 2))
     np.testing.assert_allclose(odd, [1, 1, -1, -1, 1, 1, -1])
 
+    # A non-positive block size has no meaningful pattern and is rejected rather
+    # than silently dividing by zero
+    for invalid in (0, -4, float("nan")):
+        with pytest.raises(ValueError, match="block_size must be a positive number"):
+            square_wave_apodization(n_el, invalid)
+
     return apod

@@ -267,7 +267,9 @@ register_presets(taesdxl_encoder_presets, TinyEncoder)
 register_presets(taesdxl_decoder_presets, TinyDecoder)
 
 
-def convert_original_weights(model_name="madebyollin/taesdxl", output_dir=None):  # pragma: no cover
+def convert_original_weights(
+    model_name="madebyollin/taesdxl", output_dir=None, revision=None
+):  # pragma: no cover
     """Convert the original PyTorch TAESD weights to TensorFlow / Keras v3 models.
 
     This is how the ``taesdxl`` presets on the Hugging Face Hub were created; it is
@@ -288,6 +290,9 @@ def convert_original_weights(model_name="madebyollin/taesdxl", output_dir=None):
     Args:
         model_name (str, optional): Hugging Face model id of the original PyTorch
             autoencoder. Defaults to ``"madebyollin/taesdxl"``.
+        revision (str, optional): Git revision of `model_name` to convert. Defaults
+            to None, i.e. whatever upstream currently has on its default branch;
+            pass a commit or tag to reproduce one specific set of weights.
         output_dir (str | Path, optional): Folder to write the converted models to.
             Defaults to a timestamped folder under ``./temp/zea``.
 
@@ -302,9 +307,10 @@ def convert_original_weights(model_name="madebyollin/taesdxl", output_dir=None):
     from diffusers import AutoencoderTiny
     from onnx2tf import convert
 
-    # Unpinned, so this follows upstream: the published presets carry the pre-1.3
-    # decoder, while main has been 1.3 since 2024-11-07.
-    vae = AutoencoderTiny.from_pretrained(model_name, torch_dtype=torch.float32)
+    # Unpinned by default, so this follows upstream: the published presets carry the
+    # pre-1.3 decoder, while main has been 1.3 since 2024-11-07. Pass `revision` to
+    # convert one specific commit instead.
+    vae = AutoencoderTiny.from_pretrained(model_name, revision=revision, torch_dtype=torch.float32)
     vae.eval()
 
     if output_dir is None:

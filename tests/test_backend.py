@@ -262,12 +262,12 @@ class TestStrToJaxDevice:
     @staticmethod
     @run_in_backend("jax")
     def test_rejects_unavailable_device_type():
-        """A device type that jax cannot initialize propagates its RuntimeError."""
+        """A device type jax cannot initialize is reported as an unavailable device."""
         import pytest
 
         from zea.backend import str_to_jax_device
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(ValueError, match="No JAX devices available"):
             str_to_jax_device("tpu:0")
 
     @staticmethod
