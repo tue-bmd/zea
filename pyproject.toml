@@ -58,40 +58,6 @@ dependencies = [
     "scikit-learn >=1.4",
 ]
 [project.optional-dependencies]
-dev = [
-    "zea[tests]",
-    "zea[docs]",
-    "zea[display-headless]",
-    "zea[models]",
-    "zea[app]",
-]
-
-tests = [
-    "pytest>=9.0.3",
-    "papermill>=2.4",
-    "ipykernel>=6.29.5",
-    "cloudpickle>=3.1.1",
-    "simpleitk>=2.2.1",
-    "ipywidgets",
-    "pre-commit",
-    "pytest-cov",
-    "gradio>=6.0",
-]
-docs = [
-    "sphinx",
-    "sphinx-autobuild",
-    "sphinx-autodoc-typehints",
-    "sphinx-copybutton",
-    "sphinx_design",
-    "sphinx-reredirects",
-    "sphinxcontrib-bibtex>=2.6.5",
-    "pybtex>=0.26.1",
-    "myst-parser",
-    "nbsphinx",
-    "furo",
-    "PyStemmer",
-    "IPython",
-]
 jax = ["jax[cuda12]>=0.4.35"]
 display = ["opencv-python>=4"]
 display-headless = ["opencv-python-headless>=4"]
@@ -114,10 +80,44 @@ Contributing = "https://zea.readthedocs.io/en/latest/contributing.html"
 [project.scripts]
 zea = "zea.__main__:main"
 
+# Dev-only tooling: unlike extras, groups are never published. Needs pip >= 25.1 / uv.
+# uv installs `dev` by default; lean envs opt out with --no-default-groups /
+# --only-group (readthedocs: UV_NO_DEFAULT_GROUPS, set in its dashboard).
 [dependency-groups]
-lint = [
-    "ruff==0.15.22",
-    "ty==0.0.62",
+lint = ["ruff==0.15.22", "ty==0.0.62"]
+tests = [
+    "pytest>=9.0.3",
+    "papermill>=2.4",
+    "ipykernel>=6.29.5",
+    "cloudpickle>=3.1.1",
+    "simpleitk>=2.2.1",
+    "ipywidgets",
+    "pre-commit",
+    "pytest-cov",
+    "zea[app]",
+]
+docs = [
+    "sphinx",
+    "sphinx-autobuild",
+    "sphinx-autodoc-typehints",
+    "sphinx-copybutton",
+    "sphinx_design",
+    "sphinx-reredirects",
+    "sphinxcontrib-bibtex>=2.6.5",
+    "pybtex>=0.26.1",
+    "myst-parser",
+    "nbsphinx",
+    "furo",
+    "PyStemmer",
+    "IPython",
+]
+# The full dev environment: the tooling groups plus the runtime extras
+dev = [
+    { include-group = "tests" },
+    { include-group = "docs" },
+    { include-group = "lint" },
+    "zea[display-headless]",
+    "zea[models]",
 ]
 
 [tool.hatch.build.targets.wheel]
