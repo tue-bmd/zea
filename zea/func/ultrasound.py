@@ -611,18 +611,12 @@ def square_wave_apodization(n_el: int, block_size: float):
 
             <----------> block_size = 4, n_el = 12
     """
-    wavelength = 2 * block_size / n_el
-    frequency = 1 / wavelength
-    t = ops.linspace(0.0, 1.0, n_el)
-
-    # Square wave with 50% duty cycle: high on the first half of every period.
-    phase = ops.mod(frequency * t, 1.0)
-    apod = ops.where(phase < 0.5, 1.0, -1.0)
-
-    # The final sample lands exactly on a period boundary, so it belongs to the
-    # next block rather than the one it is rounded into; flip it back.
-    flip_last = ops.concatenate([ops.ones((n_el - 1,)), -ops.ones((1,))], axis=0)
-    return apod * flip_last
+    # Which block each element falls in; even blocks are high, odd blocks are low.
+    # Indexing the elements directly (rather than sampling a square wave over a
+    # normalized axis) keeps every block exactly `block_size` wide, including a
+    # partial trailing block when `n_el` is not a multiple of `block_size`.
+    block_index = ops.floor(ops.arange(n_el, dtype="float32") / block_size)
+    return ops.where(ops.mod(block_index, 2.0) == 0.0, 1.0, -1.0)
 
 
 def apply_aligned_apodization(data, apodization, with_batch_dim):

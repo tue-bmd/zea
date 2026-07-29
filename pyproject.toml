@@ -67,7 +67,8 @@ app = ["gradio>=6.0"]
 # these are just here for .readthedocs.yaml
 # please for proper install (with GPU support)
 # install manually
-backends = ["jax>=0.4.35", "tensorflow>=2.12.1", "torch>=2.2"]
+# TensorFlow only ships Keras 3 from 2.16.1 onwards; older versions pin keras <3.
+backends = ["jax>=0.4.35", "tensorflow>=2.16.1", "torch>=2.2"]
 
 [project.urls]
 Homepage = "https://github.com/tue-bmd/zea/"

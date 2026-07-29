@@ -278,6 +278,12 @@ def convert_original_weights(model_name="madebyollin/taesdxl", output_dir=None):
         pip install torch diffusers[torch] onnx==1.16.1 onnxruntime==1.18.1 onnx2tf \\
             onnx-graphsurgeon onnxsim==0.4.33 sne4onnx sng4onnx tf-keras
 
+    .. note::
+        torch and TensorFlow have to coexist in one process here, which not every
+        combination of wheels survives. Prefer the ``zeahub/all`` container, and
+        import torch before this module if you hit a crash while building the
+        torch model.
+
     Args:
         model_name (str, optional): Hugging Face model id of the original PyTorch
             autoencoder. Defaults to ``"madebyollin/taesdxl"``.
@@ -306,6 +312,7 @@ def convert_original_weights(model_name="madebyollin/taesdxl", output_dir=None):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Both halves are exported separately: zea loads them as TinyEncoder / TinyDecoder.
+    # dynamic_axes keys must match input_names / output_names, or they are ignored.
     dynamic_axes = {
         "input": {0: "batch_size", 2: "height", 3: "width"},
         "output": {0: "batch_size", 2: "height", 3: "width"},
@@ -320,7 +327,11 @@ def convert_original_weights(model_name="madebyollin/taesdxl", output_dir=None):
             (example_input,),
             onnx_path,
             input_names=["input"],
+            output_names=["output"],
             dynamic_axes=dynamic_axes,
+            # Legacy TorchScript exporter: the dynamo exporter (torch >= 2.9
+            # default) emits graphs onnx2tf cannot convert.
+            dynamo=False,
         )
         convert(onnx_path, output_folder_path=str(output_dir / name), output_keras_v3=True)
 

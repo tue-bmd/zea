@@ -232,6 +232,12 @@ def convert_original_weights(output_dir=None, weights_folder=None):  # pragma: n
         pip install torch torchvision onnx==1.16.1 onnxruntime==1.18.1 onnx2tf \\
             onnx-graphsurgeon onnxsim==0.4.33 sne4onnx sng4onnx tf-keras
 
+    .. note::
+        torch and TensorFlow have to coexist in one process here, which not every
+        combination of wheels survives. Prefer the ``zeahub/all`` container, and
+        import torch before this module if you hit a crash while building the
+        torch model.
+
     Args:
         output_dir (str | Path, optional): Folder to write the converted model to.
             Defaults to a timestamped folder under ``./temp/zea``.
@@ -251,7 +257,11 @@ def convert_original_weights(output_dir=None, weights_folder=None):  # pragma: n
 
     checkpoint_path = download_original_weights(weights_folder)
 
-    model = torchvision.models.segmentation.deeplabv3_resnet50(weights=None, aux_loss=False)
+    # No pretrained weights at all: the checkpoint below overwrites both the
+    # backbone and the classifier, so downloading ImageNet weights is wasted work.
+    model = torchvision.models.segmentation.deeplabv3_resnet50(
+        weights=None, weights_backbone=None, aux_loss=False
+    )
     model.classifier[-1] = torch.nn.Conv2d(
         model.classifier[-1].in_channels,
         1,
@@ -276,7 +286,11 @@ def convert_original_weights(output_dir=None, weights_folder=None):  # pragma: n
         input_names=["input"],
         output_names=["segmentation"],
         # Only the batch axis is dynamic: ResizeBilinear fixes the spatial dimensions.
-        dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
+        # Keys must match input_names / output_names, or they are silently ignored.
+        dynamic_axes={"input": {0: "batch_size"}, "segmentation": {0: "batch_size"}},
+        # Legacy TorchScript exporter: the dynamo exporter (torch >= 2.9 default)
+        # emits a dynamically sized upsample that onnx2tf cannot convert.
+        dynamo=False,
     )
 
     convert(

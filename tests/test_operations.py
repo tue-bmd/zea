@@ -2081,4 +2081,11 @@ def test_square_wave_apodization():
     half = keras.ops.convert_to_numpy(square_wave_apodization(8, 4))
     np.testing.assert_allclose(half, [1, 1, 1, 1, -1, -1, -1, -1])
 
+    # Blocks stay exactly `block_size` wide when the aperture does not divide
+    # evenly: the trailing block is simply truncated.
+    partial = keras.ops.convert_to_numpy(square_wave_apodization(10, 4))
+    np.testing.assert_allclose(partial, [1, 1, 1, 1, -1, -1, -1, -1, 1, 1])
+    odd = keras.ops.convert_to_numpy(square_wave_apodization(7, 2))
+    np.testing.assert_allclose(odd, [1, 1, -1, -1, 1, 1, -1])
+
     return apod
