@@ -53,6 +53,8 @@ from .ultrasound import (
     complex_to_channels,
     compute_time_to_peak,
     compute_time_to_peak_stack,
+    construct_acquisition_from_synthetic_aperture,
+    decode_hadamard,
     dehaze_nuclear_diffusion,
     demodulate,
     demodulate_not_jitable,
@@ -130,6 +132,8 @@ __all__ = [
     "log_compress",
     "make_tgc_curve",
     "suppress_tissue",
+    "decode_hadamard",
+    "construct_acquisition_from_synthetic_aperture",
     # USCT functions
     "straight_ray_times",
     "usct_reflectivity_das",

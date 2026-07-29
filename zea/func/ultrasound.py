@@ -4,6 +4,7 @@ import scipy.signal
 from keras import ops
 
 from zea import log
+from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
 from zea.func import split_seed
 from zea.func.tensor import (
     extend_n_dims,
@@ -1077,3 +1078,190 @@ def suppress_tissue(data, cutoff: int = 5, conjugate: bool = False):
     reconstructed = ops.matmul(reconstructed[:, cutoff:], _transpose(V[:, cutoff:]))
 
     return ops.reshape(_transpose(reconstructed), original_shape)
+
+
+def decode_hadamard(raw_data, tx_apodizations):
+    """
+    Decode Hadamard-encoded raw data using the provided transmit apodizations.
+
+    This function is compatible with partial Hadamard encoding, where some transmit channels may
+    not be used. It finds the participating transmit channels (those with non-zero apodization in
+    any transmit) and constructs the Hadamard matrix for those channels. The raw data is then
+    decoded by multiplying with the transpose of the Hadamard matrix.
+
+    Args:
+        raw_data (ops.Tensor): The Hadamard-encoded raw data of shape (n_frames, n_tx, n_ax, n_el,
+            n_ch).
+        tx_apodizations (ops.Tensor): The transmit apodizations of shape (n_tx, n_el).
+
+    Returns:
+        tuple: The decoded raw data with the same shape as the input, and the decoded transmit
+        apodizations of shape (n_tx, n_el). After decoding each transmit activates a single
+        participating channel, so the decoded apodizations form an identity over the participating
+        channels.
+    """
+    _validate_decode_hadamard_inputs(raw_data, tx_apodizations)
+    participating_channels = _find_participating_channels(tx_apodizations)
+    hadamard_matrix = _find_hadamard_matrix(tx_apodizations, participating_channels)
+    _warn_if_hadamard_not_orthogonal(hadamard_matrix)
+    raw_data_decoded = _apply_hadamard_decoding(raw_data, hadamard_matrix)
+    tx_apodizations_decoded = _decode_tx_apodizations(tx_apodizations, participating_channels)
+    return raw_data_decoded, tx_apodizations_decoded
+
+
+def _validate_decode_hadamard_inputs(raw_data, tx_apodizations):
+    if not raw_data.ndim == 5:
+        raise ValueError(
+            f"Expected raw_data with 5 dimensions (n_frames, n_tx, n_ax, n_el, n_ch), "
+            f"got {raw_data.ndim} dimensions."
+        )
+    if not tx_apodizations.ndim == 2:
+        raise ValueError(
+            f"Expected tx_apodizations with 2 dimensions (n_tx, n_el), "
+            f"got {tx_apodizations.ndim} dimensions."
+        )
+
+
+def _apply_hadamard_decoding(raw_data, hadamard_matrix):
+    hadamard_matrix_t = ops.transpose(hadamard_matrix)
+    raw_data = ops.moveaxis(raw_data, 1, -1)
+    raw_data = ops.matmul(raw_data, hadamard_matrix_t)
+    return ops.moveaxis(raw_data, -1, 1)
+
+
+def _decode_tx_apodizations(tx_apodizations, participating_channels):
+    n_el = tx_apodizations.shape[1]
+    return ops.one_hot(participating_channels, n_el)
+
+
+def _warn_if_hadamard_not_orthogonal(hadamard_matrix):
+    gram = ops.matmul(hadamard_matrix, ops.transpose(hadamard_matrix))
+    normalized = gram / ops.max(gram)
+    identity = ops.eye(ops.shape(gram)[0])
+    if not ops.all(ops.isclose(normalized, identity)):
+        log.warning(
+            "The Hadamard decoding may not be correct. The tx_apodizations matrix is not "
+            "orthogonal."
+        )
+
+
+def _find_participating_channels(apodizations):
+    apodizations = ops.sum(ops.abs(apodizations), axis=0)
+    participating_channels = ops.where(apodizations > 0)[0]
+    return participating_channels
+
+
+def _find_hadamard_matrix(apodizations, participating_channels):
+    n_tx = len(participating_channels)
+    hadamard_matrix = ops.take(apodizations[:n_tx], participating_channels, axis=1)
+    return hadamard_matrix
+
+
+def construct_acquisition_from_synthetic_aperture(
+    raw_data,
+    probe_geometry,
+    polar_angle: float,
+    azimuth_angle: float,
+    focus_distance: float,
+    sampling_frequency: float,
+    transmit_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    sound_speed: float = 1540.0,
+    tx_apodization=None,
+    transmit_chunk_size: int = 32,
+):
+    """
+    Construct a specific acquisition from synthetic aperture data by applying time delays to the
+    raw data.
+
+    Args:
+        raw_data (ops.Tensor): The synthetic aperture raw data.
+        probe_geometry (ops.Tensor): The probe geometry.
+        polar_angle: The polar angle of the transmit.
+        azimuth_angle: The azimuth angle of the transmit.
+        focus_distance: The focus distance of the transmit. Set to np.inf for plane wave transmit.
+        transmit_origin: The origin of the transmit in 3D space.
+        sampling_frequency: The sampling frequency of the raw data.
+        tx_apodization (ops.Tensor, optional): The transmit apodization to apply to the raw
+            data. If None, no apodization is applied.
+        transmit_chunk_size: Number of transmits to process per FFT chunk. Lower values reduce
+            peak memory usage.
+
+    Returns:
+        raw_data (ops.Tensor): The constructed raw data of shape (n_frames, 1, n_ax, n_el, n_ch).
+        t0_delays (ops.Tensor): t0 delays of shape (1, n_el).
+    """
+    if not np.isinf(focus_distance):
+        t0_delays = compute_t0_delays_focused(
+            transmit_origins=np.array([transmit_origin]),
+            focus_distances=np.array([focus_distance]),
+            probe_geometry=probe_geometry,
+            polar_angles=np.array([polar_angle]),
+            azimuth_angles=np.array([azimuth_angle]),
+            sound_speed=sound_speed,
+        )
+    else:
+        t0_delays = compute_t0_delays_planewave(
+            probe_geometry=probe_geometry,
+            polar_angles=np.array([polar_angle]),
+            azimuth_angles=np.array([azimuth_angle]),
+            sound_speed=sound_speed,
+        )
+
+    if tx_apodization is None:
+        tx_apodization = ops.ones((1, raw_data.shape[1]), dtype=raw_data.dtype)
+
+    n_ax = raw_data.shape[2]
+    n_tx = raw_data.shape[1]
+    n_fft = n_ax + n_ax // 2
+
+    # Delay phasors exp(-2j * pi * f * t0) per transmit, applied in the frequency domain
+    frequencies = np.fft.fftfreq(n_fft, d=1 / sampling_frequency)
+    phase = ops.convert_to_tensor(
+        (-2 * np.pi * frequencies[None, :] * np.asarray(t0_delays)[0][:, None]).astype(np.float32)
+    )
+
+    # Process the transmits in chunks to bound peak memory during the FFT
+    spectrum_real, spectrum_imag = 0.0, 0.0
+    for start in range(0, n_tx, transmit_chunk_size):
+        end = min(start + transmit_chunk_size, n_tx)
+        chunk_real, chunk_imag = _delayed_transmit_spectrum(
+            raw_data[:, start:end], phase[start:end], n_fft - n_ax
+        )
+        spectrum_real += chunk_real
+        spectrum_imag += chunk_imag
+
+    apodization = tx_apodization[0][None, None, :, None, None]
+    spectrum_real = spectrum_real * apodization
+    spectrum_imag = spectrum_imag * apodization
+
+    # Inverse FFT via the conjugate trick: real(ifft(X)) = real(fft(conj(X))) / n_fft
+    raw_data = ops.fft((spectrum_real, -spectrum_imag))[0] / n_fft
+
+    # Restore the original axis order and remove the padding
+    raw_data = ops.transpose(raw_data, (0, 1, 4, 2, 3))[:, :, :n_ax]
+    return raw_data, t0_delays
+
+
+def _delayed_transmit_spectrum(raw_data, phase, n_pad):
+    """FFTs transmits along the axial axis, applies delay phasors, and sums over transmits.
+
+    Args:
+        raw_data (ops.Tensor): Raw data chunk of shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        phase (ops.Tensor): Delay phases of shape (n_tx, n_fft).
+        n_pad: Number of zeros to pad the axial axis with to reach n_fft samples.
+
+    Returns:
+        Real and imaginary spectra of shape (n_frames, 1, n_el, n_ch, n_fft), where the
+        axial axis has been moved to the end because ops.fft operates on the last axis.
+    """
+    raw_data = ops.pad(raw_data, ((0, 0), (0, 0), (0, n_pad), (0, 0), (0, 0)))
+    raw_data = ops.transpose(raw_data, (0, 1, 3, 4, 2))
+    fft_real, fft_imag = ops.fft((raw_data, ops.zeros_like(raw_data)))
+    delay_real = ops.cos(phase)[None, :, None, None, :]
+    delay_imag = ops.sin(phase)[None, :, None, None, :]
+    delayed_real = fft_real * delay_real - fft_imag * delay_imag
+    delayed_imag = fft_real * delay_imag + fft_imag * delay_real
+    return (
+        ops.sum(delayed_real, axis=1, keepdims=True),
+        ops.sum(delayed_imag, axis=1, keepdims=True),
+    )
