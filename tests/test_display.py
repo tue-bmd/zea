@@ -453,3 +453,193 @@ def test_overlay_masks_non_L_mask():
     assert isinstance(result, Image.Image)
     assert result.mode == "RGB"
     assert result.size == (w, h)
+
+
+def _speckle(rng, size=(128, 128), scale=1.0):
+    """Log-compressed fully developed speckle, i.e. a log-Rayleigh distributed image (dB)."""
+    return 20 * np.log10(rng.rayleigh(scale, size))
+
+
+def _quantile_error(image, reference, n_levels=100):
+    """Largest difference between the quantile functions of two images (dB)."""
+    levels = np.linspace(0, 1, n_levels)
+    return np.abs(np.quantile(image, levels) - np.quantile(reference, levels)).max()
+
+
+def test_histogram_match_exact_matches_skimage():
+    """Exact (rank) matching equals skimage's match_histograms on continuous input."""
+    from skimage.exposure import match_histograms
+
+    from zea.display import histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image, reference = _speckle(rng, scale=0.1), _speckle(rng, scale=1.0)
+
+    matched, params = histogram_match(image, reference, mode="exact")
+
+    assert params == {}
+    np.testing.assert_allclose(matched, match_histograms(image, reference))
+    # Rank transport reproduces the reference distribution exactly, not just closely.
+    np.testing.assert_allclose(np.sort(matched.ravel()), np.sort(reference.ravel()))
+
+
+@pytest.mark.parametrize("mode", ["full", "partial", "exact"])
+def test_histogram_match_is_monotone(mode):
+    """Every mode is a monotone map, so the ranking of pixel values is preserved."""
+    from zea.display import histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image, reference = _speckle(rng, scale=0.1), _speckle(rng, scale=1.0)
+
+    matched, _ = histogram_match(image, reference, mode=mode)
+
+    assert matched.shape == image.shape
+    order = np.argsort(image.ravel())
+    assert np.all(np.diff(matched.ravel()[order]) >= 0)
+
+
+def test_histogram_match_full_matches_distribution():
+    """A full match reproduces the reference distribution, also for differently sized images."""
+    from zea.display import histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = _speckle(rng, size=(128, 128), scale=0.1)
+    reference = _speckle(rng, size=(64, 96), scale=1.0)
+
+    matched, params = histogram_match(image, reference, n_levels=256)
+
+    assert _quantile_error(image, reference) > 10, "Unmatched images should differ a lot"
+    assert _quantile_error(matched, reference) < 0.5
+    xs, ys = params["knots"]
+    assert len(xs) == len(ys) == 256
+
+
+def test_histogram_match_partial_recovers_known_transform():
+    """A partial (affine) match undoes a scale and offset applied to the reference."""
+    from zea.display import histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    reference = _speckle(rng)
+    image = (reference - 3.0) / 2.0  # e.g. a square law detector, doubled after compression
+
+    matched, params = histogram_match(image, reference, mode="partial")
+
+    assert params["slope"] == pytest.approx(2.0)
+    assert params["offset"] == pytest.approx(3.0)
+    np.testing.assert_allclose(matched, reference)
+
+
+def test_histogram_match_partial_preserves_ssnr():
+    """The partial match matches mean and variance, hence the sSNR, of the fitted region."""
+    from zea.display import histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image, reference = _speckle(rng, scale=0.1), _speckle(rng, scale=1.0)
+    # Compounding-like: a different distribution shape, not just a shifted or scaled one.
+    image = 0.5 * (image + _speckle(rng, scale=0.1))
+
+    roi = np.zeros(image.shape, dtype=bool)
+    roi[32:96, 32:96] = True
+    matched, _ = histogram_match(image, reference, mode="partial", roi=roi)
+
+    assert matched[roi].mean() == pytest.approx(reference[roi].mean())
+    assert matched[roi].std() == pytest.approx(reference[roi].std())
+    # Shape differences remain: that is what a full match is for.
+    assert _quantile_error(matched[roi], reference[roi]) > 1
+
+
+def test_histogram_match_roi_is_fit_on_roi_and_extends_linearly():
+    """With an ROI the fit uses only that region, and brighter pixels stay brighter."""
+    from zea.display import histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image, reference = _speckle(rng, scale=0.1), _speckle(rng, scale=1.0)
+
+    roi = np.zeros(image.shape, dtype=bool)
+    roi[32:96, 32:96] = True
+    # A point target outside the ROI, brighter than any speckle pixel in it.
+    image[10, 10] = image[roi].max() + 20
+
+    matched, _ = histogram_match(image, reference, roi=roi)
+
+    assert _quantile_error(matched[roi], reference[roi]) < 0.5
+    # Linear extension rather than clipping: the point target remains the brightest pixel.
+    assert matched[10, 10] > matched[roi].max()
+
+
+def test_histogram_match_ignores_dead_pixels():
+    """The log(0) sentinel neither anchors the mapping nor turns into a bright pixel."""
+    from zea.display import DEAD_PIXEL_DB, histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image, reference = _speckle(rng, scale=0.1), _speckle(rng, scale=1.0)
+
+    # Two images with the same valid pixels, differing only in how the invalid ones are
+    # marked: NaN (always excluded) versus zea's log_compress sentinel for zeros.
+    image[:2] = np.nan
+    dead = image.copy()
+    dead[:2] = 20 * np.log10(1e-16)
+
+    matched, _ = histogram_match(image, reference)
+    matched_dead, _ = histogram_match(dead, reference)
+
+    np.testing.assert_allclose(matched_dead[2:], matched[2:])
+    assert np.all(np.isnan(matched[:2])), "Non-finite pixels should be passed through"
+    assert np.all(matched_dead[:2] < DEAD_PIXEL_DB), "Sentinel pixels should stay below the floor"
+
+
+def test_histogram_match_extension_is_bounded_for_clipped_images():
+    """An image piled up on its clipping floor collapses knots; the extension stays sane."""
+    from zea.display import histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = np.clip(_speckle(rng, scale=0.1), -20, None)  # ~40% of the pixels on the floor
+    reference = _speckle(rng, scale=1.0)
+
+    roi = np.zeros(image.shape, dtype=bool)
+    roi[32:96, 32:96] = True
+    image[0, 0] = -30.0  # a dark pixel 10 dB below the collapsed bottom knot
+
+    matched, params = histogram_match(image, reference, roi=roi)
+
+    xs, ys = params["knots"]
+    assert xs[0] == xs[1] == -20, "Test premise: the bottom knots collapse onto the atom"
+    assert np.isfinite(matched).all()
+    # Extending with the secant between the collapsed knots would send this pixel hundreds
+    # of dB down instead of the ~10 dB the input is below the knot.
+    assert ys[0] - 50 < matched[0, 0] < ys[0]
+
+
+def test_histogram_match_accepts_tensors():
+    """Tensor images and masks are accepted, like elsewhere in this module."""
+    from keras import ops
+
+    from zea.display import histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image, reference = _speckle(rng, scale=0.1), _speckle(rng, scale=1.0)
+    roi = np.zeros(image.shape, dtype=bool)
+    roi[32:96, 32:96] = True
+
+    expected, _ = histogram_match(image, reference, roi=roi)
+    matched, _ = histogram_match(
+        ops.convert_to_tensor(image),
+        ops.convert_to_tensor(reference),
+        roi=ops.convert_to_tensor(roi),
+    )
+
+    np.testing.assert_allclose(matched, expected, rtol=1e-6)
+
+
+def test_histogram_match_invalid_arguments():
+    """Unknown modes and too small fitting regions raise informative errors."""
+    from zea.display import histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image, reference = _speckle(rng, size=(8, 8)), _speckle(rng, size=(8, 8))
+
+    with pytest.raises(ValueError, match="Unknown mode"):
+        histogram_match(image, reference, mode="adaptive")
+
+    with pytest.raises(ValueError, match="Too few valid pixels"):
+        histogram_match(image, reference, n_levels=256)
