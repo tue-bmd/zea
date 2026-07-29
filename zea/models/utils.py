@@ -4,22 +4,15 @@ import keras
 
 
 def onnx2tf_saved_model_kwargs():  # pragma: no cover
-    """Extra ``onnx2tf.convert`` arguments needed to still get a TensorFlow export.
+    """Arguments needed to still get a SavedModel out of :func:`onnx2tf.convert`.
 
-    onnx2tf 2.6 made ``flatbuffer_direct`` the default backend, and that one only
-    emits TFLite: the conversion helpers in this package ask for a SavedModel or a
-    Keras v3 file and silently get neither. Selecting the classic exporter restores
-    the pre-2.6 behaviour. Older onnx2tf versions have no such option and always
-    write one, so the argument is only passed when it is understood.
-
-    Returns:
-        dict: Keyword arguments to splat into :func:`onnx2tf.convert`.
+    onnx2tf 2.6 made ``flatbuffer_direct`` the default backend, which emits TFLite
+    only: the call succeeds but writes no SavedModel, which is what the presets ship.
+    Older versions do not have the option, so it is only passed when understood.
     """
     import inspect
 
-    # The public convert() of recent versions is a ``**kwargs`` passthrough, so the
-    # implementation is what has to be introspected. Both re-export the same object.
-    from onnx2tf.onnx2tf import convert
+    from onnx2tf.onnx2tf import convert  # the public convert() is a kwargs passthrough
 
     if "tflite_backend" in inspect.signature(convert).parameters:
         return {"tflite_backend": "tf_converter"}
