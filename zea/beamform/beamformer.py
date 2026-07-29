@@ -280,6 +280,14 @@ def tof_correction(
         # through the heterogeneous beamformer (e.g. SOS estimation).
         mask = ops.stop_gradient(mask)
 
+    # Precompute the receive-side phase rotation (same for all transmits)
+    is_iq = data.shape[-1] == 2
+    if is_iq:
+        phase_scale = 2 * np.pi * demodulation_frequency / sampling_frequency
+        theta_rx = phase_scale * rxdel  # (n_pix, n_el)
+        cos_rx = ops.cos(theta_rx)
+        sin_rx = ops.sin(theta_rx)
+
     # ---- Correct a single transmit (closure) ---------------------------
     def _correct_single_tx(data_tx, txdel_tx, mask_tx=None):
         """Apply delay-and-interpolate for one transmit event.
@@ -304,11 +312,16 @@ def tof_correction(
         else:
             tof_tx = tof_tx * mask
 
-        # Phase rotation for IQ data (see complex_rotate docstring)
-        if data_tx.shape[-1] == 2:
-            total_delay_seconds = delays / sampling_frequency
-            theta = 2 * np.pi * demodulation_frequency * total_delay_seconds
-            tof_tx = complex_rotate(tof_tx, theta)
+        # Phase rotation for IQ data (see complex_rotate docstring). Combine the
+        # precomputed receive rotation with this transmit's rotation via
+        # cos(a+b) = cos a cos b - sin a sin b, sin(a+b) = sin a cos b + cos a sin b.
+        if is_iq:
+            theta_tx = phase_scale * txdel_tx  # (n_pix, 1)
+            cos_tx = ops.cos(theta_tx)
+            sin_tx = ops.sin(theta_tx)
+            cos_theta = cos_rx * cos_tx - sin_rx * sin_tx
+            sin_theta = sin_rx * cos_tx + cos_rx * sin_tx
+            tof_tx = complex_rotate(tof_tx, None, cos_theta=cos_theta, sin_theta=sin_theta)
 
         return tof_tx
 
@@ -503,41 +516,35 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
     Returns:
         Tensor: Interpolated samples of shape ``(n_pix, n_el, n_ch)``.
     """
+    n_ax, n_el = data.shape[0], data.shape[1]
 
-    # Add a dummy channel dimension to the delays tensor to ensure it has the
-    # same number of dimensions as the data. The new shape is (n_pix, n_el, 1)
-    delays = delays[..., None]
-
-    # Get the integer values above and below the exact delay values
-    # Floor to get the integers below
-    # (num_elements, num_pixels, 1)
-    d0 = ops.floor(delays)
-
-    # Cast to integer to be able to use as indices
-    d0 = ops.cast(d0, "int32")
-    # Add 1 to find the integers above the exact delay values
+    # Get the integer sample indices below and above the exact delay values.
+    d0 = ops.cast(ops.floor(delays), "int32")
     d1 = d0 + 1
 
     # Apply clipping of delays clipping to ensure correct behavior on cpu
     if clip_min != -1 and clip_max != -1:
-        clip_min = ops.cast(clip_min, d0.dtype)
-        clip_max = ops.cast(clip_max, d0.dtype)
+        clip_min = ops.cast(clip_min, "int32")
+        clip_max = ops.cast(clip_max, "int32")
         d0 = ops.clip(d0, clip_min, clip_max)
         d1 = ops.clip(d1, clip_min, clip_max)
+        i0, i1 = d0, d1
+    else:
+        i0 = ops.clip(d0, 0, n_ax - 1)
+        i1 = ops.clip(d1, 0, n_ax - 1)
 
-    if data.shape[-1] == 2:
-        d0 = ops.concatenate([d0, d0], axis=-1)
-        d1 = ops.concatenate([d1, d1], axis=-1)
+    # Gather pixel values with a single linear index to keep the data in
+    # a contiguous slice.
+    flat = ops.reshape(data, (n_ax * n_el, data.shape[-1]))
+    el = ops.expand_dims(ops.arange(n_el, dtype="int32"), 0)  # (1, n_el)
+    data0 = ops.take(flat, i0 * n_el + el, axis=0)
+    data1 = ops.take(flat, i1 * n_el + el, axis=0)
 
-    # Gather pixel values
-    # Here we extract for each transducer element the sample containing the
-    # reflection from each pixel. These are of shape `(n_pix, n_el, n_ch)`.
-    data0 = ops.take_along_axis(data, d0, 0)
-    data1 = ops.take_along_axis(data, d1, 0)
+    # Add a dummy channel dimension so the delays broadcast
+    delays = delays[..., None]
 
-    # Compute interpolated pixel value
-    d0 = ops.cast(d0, delays.dtype)  # Cast to float
-    d1 = ops.cast(d1, delays.dtype)  # Cast to float
+    d0 = ops.cast(d0, delays.dtype)[..., None]  # Cast to float
+    d1 = ops.cast(d1, delays.dtype)[..., None]  # Cast to float
     data0 = ops.cast(data0, delays.dtype)  # Cast to float
     data1 = ops.cast(data1, delays.dtype)  # Cast to float
     reflection_samples = (d1 - delays) * data0 + (delays - d0) * data1
@@ -545,7 +552,7 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
     return reflection_samples
 
 
-def complex_rotate(iq, theta):
+def complex_rotate(iq, theta, cos_theta=None, sin_theta=None):
     r"""Phase-rotate IQ data by angle *theta*.
 
     When delaying IQ-demodulated data it is not sufficient to interpolate the
@@ -560,7 +567,13 @@ def complex_rotate(iq, theta):
     Args:
         iq (Tensor): IQ data of shape ``(..., 2)``.
         theta (Tensor or float): Rotation angle in radians (broadcastable to
-            ``iq[..., 0]``).
+            ``iq[..., 0]``). Ignored when both ``cos_theta`` and ``sin_theta``
+            are supplied.
+        cos_theta (Tensor, optional): Precomputed ``cos(theta)``, broadcastable
+            to ``iq[..., 0]``. Avoids recomputing the transcendental when the
+            caller can obtain it more cheaply. Defaults to ``None``.
+        sin_theta (Tensor, optional): Precomputed ``sin(theta)``. Defaults to
+            ``None``.
 
     Returns:
         Tensor: Rotated IQ data of shape ``(..., 2)``.
@@ -599,13 +612,20 @@ def complex_rotate(iq, theta):
         "The last dimension of the input tensor should be 2, "
         f"got {iq.shape[-1]} dimensions and shape {iq.shape}."
     )
+    # Allow passing precomputed cos/sin of theta to avoid recomputing the
+    # transcendentals (e.g. when the caller factors theta into cheaper terms).
+    if cos_theta is None:
+        cos_theta = ops.cos(theta)
+    if sin_theta is None:
+        sin_theta = ops.sin(theta)
+
     # Select i and q channels
     i = iq[..., 0]
     q = iq[..., 1]
 
     # Compute rotated components
-    ir = i * ops.cos(theta) - q * ops.sin(theta)
-    qr = q * ops.cos(theta) + i * ops.sin(theta)
+    ir = i * cos_theta - q * sin_theta
+    qr = q * cos_theta + i * sin_theta
 
     # Reintroduce channel dimension
     ir = ir[..., None]
@@ -819,7 +839,7 @@ def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn, element_nor
     grid_relative_to_probe_norm = ops.linalg.norm(grid_relative_to_probe, axis=-1)
 
     # Unit element -> pixel direction (same +1e-6 guard as before, so a +z
-    # normal reproduces the legacy depth-axis cone bit-for-bit).
+    # normal reproduces the legacy depth-axis cone up to float32 rounding).
     unit_direction = grid_relative_to_probe / (grid_relative_to_probe_norm[..., None] + 1e-6)
 
     # Angle between the element -> pixel direction and the element's normal.
