@@ -92,9 +92,9 @@ def _quantile_pairs(x, y, n_bins):
     """One quantile of each distribution per bin, i.e. eq. (13): ``h[i] = j`` such that
     ``F_X[i] = F_Y[j]``. The pairs are the knots the mapping is interpolated through.
 
-    The reference implementation bins equispaced in *amplitude*, which on log-compressed
-    data spends nearly all of its resolution on the tail towards the noise floor. Binning
-    equispaced in *probability* instead puts equal mass in every bin, so the resolution
+    The reference implementation (histmatch.m) bins equispaced in *amplitude*, which on
+    log-compressed data spends nearly all of its resolution on the tail towards the noise floor.
+    Binning equispaced in *probability* instead puts equal mass in every bin, so the resolution
     follows the data (the paper's own remark in Sec. V that bins should be chosen after
     dynamic range compression). Hence the bins are counted out in probability, as the
     ``n_bins`` levels at which both CDFs are read.
