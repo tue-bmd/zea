@@ -235,8 +235,11 @@ class TestAdam:
 
         start, minimum, step_size, steps = (1.5, -0.7, 0.3), (3.0, 0.5, -2.0), 0.05, 25
         minimum = np.array(minimum, dtype="float32")
+        # Pinned on both sides: the two implementations do not share a default
+        # (1e-8 here, 1e-7 in keras), and keras is free to change its own.
+        epsilon = 1e-8
 
-        init, update, get_params = adam(step_size=step_size)
+        init, update, get_params = adam(step_size=step_size, eps=epsilon)
         state = init(keras.ops.convert_to_tensor(np.array(start, dtype="float32")))
         ours = []
         for _ in range(steps):
@@ -245,7 +248,7 @@ class TestAdam:
             ours.append(keras.ops.convert_to_numpy(get_params(state)).copy())
 
         variable = keras.Variable(np.array(start, dtype="float32"))
-        optimizer = keras.optimizers.Adam(learning_rate=step_size)
+        optimizer = keras.optimizers.Adam(learning_rate=step_size, epsilon=epsilon)
         reference = []
         for _ in range(steps):
             gradient = 2.0 * (keras.ops.convert_to_numpy(variable) - minimum)
@@ -254,8 +257,8 @@ class TestAdam:
             )
             reference.append(keras.ops.convert_to_numpy(variable).copy())
 
-        # Not exact: keras folds the bias correction into the step size, so epsilon
-        # enters at a slightly different point than in this implementation.
+        # Not exact even with epsilon pinned: keras folds the bias correction into
+        # the step size, so epsilon divides a differently scaled quantity.
         np.testing.assert_allclose(np.array(ours), np.array(reference), rtol=1e-4, atol=1e-4)
 
 
@@ -297,14 +300,42 @@ class TestStrToJaxDevice:
 
     @staticmethod
     @run_in_backend("jax")
-    def test_rejects_unavailable_device_type():
-        """A device type jax cannot initialize is reported as an unavailable device."""
+    def test_rejects_device_type_that_fails_to_initialize():
+        """A backend jax cannot initialize is reported as an unavailable device.
+
+        ``jax.devices`` is mocked rather than asking for a real ``tpu``, so the
+        translation is exercised the same way on a runner that happens to have one.
+        """
+        import unittest.mock
+
+        import jax
         import pytest
 
         from zea.backend import str_to_jax_device
 
-        with pytest.raises(ValueError, match="No JAX devices available"):
-            str_to_jax_device("tpu:0")
+        failure = RuntimeError("Backend 'tpu' failed to initialize: no libtpu")
+        with unittest.mock.patch.object(jax, "devices", side_effect=failure):
+            with pytest.raises(ValueError, match="No JAX devices available") as excinfo:
+                str_to_jax_device("tpu:0")
+
+        # The original jax message is kept, and chained as the cause
+        assert "failed to initialize" in str(excinfo.value)
+        assert excinfo.value.__cause__ is failure
+
+    @staticmethod
+    @run_in_backend("jax")
+    def test_rejects_device_type_without_devices():
+        """A device type jax knows but has no devices for is rejected."""
+        import unittest.mock
+
+        import jax
+        import pytest
+
+        from zea.backend import str_to_jax_device
+
+        with unittest.mock.patch.object(jax, "devices", return_value=[]):
+            with pytest.raises(ValueError, match="No JAX devices available"):
+                str_to_jax_device("gpu")
 
     @staticmethod
     @run_in_backend("jax")
