@@ -73,8 +73,8 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     return image
 
 
-def _fitting_pixels(image, roi=None, minimum=2):
-    """Pixels a transform may be fitted on: measured, and inside ``roi`` if one is given."""
+def _masked_pixels(image, roi=None, minimum=2):
+    """Mask out the pixels a transform may not use: unmeasured, or outside ``roi`` if given."""
     mask = np.isfinite(image) & (image > DEAD_PIXEL_DB)
     if roi is not None:
         mask &= roi
@@ -88,20 +88,22 @@ def _fitting_pixels(image, roi=None, minimum=2):
     return pixels
 
 
-def _quantile_pairs(x, y, n_levels):
-    """Q-Q pairs of both distributions, i.e. eq. (13): ``h[i] = j`` such that ``F_X[i] = F_Y[j]``.
+def _quantile_pairs(x, y, n_bins):
+    """One quantile of each distribution per bin, i.e. eq. (13): ``h[i] = j`` such that
+    ``F_X[i] = F_Y[j]``. The pairs are the knots the mapping is interpolated through.
 
     The reference implementation bins equispaced in *amplitude*, which on log-compressed
     data spends nearly all of its resolution on the tail towards the noise floor. Binning
     equispaced in *probability* instead puts equal mass in every bin, so the resolution
     follows the data (the paper's own remark in Sec. V that bins should be chosen after
-    dynamic range compression).
+    dynamic range compression). Hence the bins are counted out in probability, as the
+    ``n_bins`` levels at which both CDFs are read.
 
-    At ``n_levels = x.size`` the quantiles of ``x`` are its order statistics, so the pairs
+    At ``n_bins = x.size`` the quantiles of ``x`` are its order statistics, so the pairs
     become the rank transport of Sec. III.C.1: one pixel per bin, with the quantile function
     of ``y`` resampled onto the ranks of ``x`` when the two differ in size.
     """
-    levels = np.linspace(0, 1, n_levels)
+    levels = np.linspace(0, 1, n_bins)
 
     def quantiles(v):
         # `np.quantile` selects rather than sorts, which is quadratic in the number of
@@ -147,7 +149,7 @@ def _end_slopes(xs, ys, frac=0.125, max_ratio=4.0):
 
 
 def _monotone_map(image, xs, ys):
-    """Monotone interpolation through the Q-Q knots, extended linearly at the ends."""
+    """Monotone interpolation through the knots, one per bin, extended linearly at the ends."""
     # The end slopes are read off the knots before merging, which loses how much mass each
     # of them carries and with it the meaning of "the outer `frac` of the distribution".
     slope_low, slope_high = _end_slopes(xs, ys)
@@ -164,7 +166,7 @@ def histogram_match(
     image,
     reference,
     mode: str = "full",
-    n_levels: Union[int, str] = 256,
+    n_bins: Union[int, str] = 256,
     roi=None,
 ) -> np.ndarray:
     """Match the histogram of an image to a reference image, for fair visual comparison.
@@ -182,22 +184,22 @@ def histogram_match(
             - ``"partial"``: affine match (Sec. III.A), the scale and offset that match
               mean and variance. It leaves the *shape* of the image's own distribution
               intact, so pick it when that shape is the thing under comparison, when the
-              fitted region contains structure rather than plain speckle, or when the sSNR
-              of the fitted region, the CNR and the gCNR must survive matching (Tbl. I).
-            - ``"full"``: any monotone mapping (Sec. III.B), through ``n_levels`` Q-Q
-              pairs. It matches the shape of the distribution too, hence undoes non-linear
+              fitted region contains structure rather than plain speckle, or when the CNR
+              must survive the matching.
+            - ``"full"``: any monotone mapping (Sec. III.B), the one that carries the
+              histogram of the image onto that of the reference, estimated on ``n_bins``
+              bins. It matches the shape of the distribution too, hence undoes non-linear
               compression, so pick it to compare methods whose transformations differ in
               more than scale and offset, or are unknown ("black box" images, Sec. III.C.2).
               Together with a speckle ``roi``, the paper's expected common use (Sec. V).
 
-        n_levels (int or str, optional): Number of quantile levels the mapping of a
-            ``"full"`` match is estimated on; ignored by ``"partial"``, which needs no
-            binning. Defaults to 256, the number of bins used in the paper, which it found
-            enough for consistent results. Pass ``"all"`` for one level per fitted pixel,
-            the limit of the binning process (Sec. III.C.1) and the ``'point'`` match of
-            ``histmatch.m``: it reproduces the reference distribution down to its outliers,
-            which replicates them in the matched image and makes it a poor choice for
-            display, but rules the histogram out as a variable altogether.
+        n_bins (int or str, optional): Number of bins the mapping of a ``"full"`` match is
+            estimated on; ignored by ``"partial"``. Defaults to 256, the number of bins used
+            in the paper, which it found enough for consistent results.
+            Pass ``"all"`` for one bin per fitted pixel, the limit of the binning process
+            (Sec. III.C.1): it reproduces the reference distribution down to its outliers,
+            which replicates them in the matched image. This is what
+            `skimage.exposure.match_histograms` does.
         roi (ndarray, optional): Boolean mask, of the shape of both images, selecting a
             homogeneous speckle region (Sec. III.C.3, the paper's expected common use).
             The mapping is fit inside the mask and applied to the whole image, extended
@@ -249,19 +251,19 @@ def histogram_match(
     """
     if mode not in ("full", "partial"):
         raise ValueError(f"Unknown mode {mode!r}, expected 'full' or 'partial'.")
-    every_pixel = n_levels == "all"
-    if not every_pixel and not (isinstance(n_levels, (int, np.integer)) and n_levels >= 2):
-        raise ValueError(f"Invalid n_levels {n_levels!r}, expected an integer >= 2 or 'all'.")
+    every_pixel = n_bins == "all"
+    if not every_pixel and not (isinstance(n_bins, (int, np.integer)) and n_bins >= 2):
+        raise ValueError(f"Invalid n_bins {n_bins!r}, expected an integer >= 2 or 'all'.")
 
     image = ops.convert_to_numpy(image)
     reference = ops.convert_to_numpy(reference)
     if roi is not None:
         roi = ops.convert_to_numpy(roi).astype(bool)
 
-    # A level has to be worth estimating: ask for as many pixels as there are levels.
-    minimum = 2 if mode == "partial" or every_pixel else n_levels
-    x = _fitting_pixels(image, roi, minimum)
-    y = _fitting_pixels(reference, roi, minimum)
+    # A bin has to be worth estimating: ask for as many pixels as there are bins.
+    minimum = 2 if mode == "partial" or every_pixel else n_bins
+    x = _masked_pixels(image, roi, minimum)
+    y = _masked_pixels(reference, roi, minimum)
 
     image = image.astype(np.float64)
     if mode == "partial":
@@ -269,7 +271,7 @@ def histogram_match(
         slope = y.std() / x.std()
         return slope * image + (y.mean() - slope * x.mean())
 
-    xs, ys = _quantile_pairs(x, y, x.size if every_pixel else n_levels)
+    xs, ys = _quantile_pairs(x, y, x.size if every_pixel else n_bins)
     return _monotone_map(image, xs, ys)
 
 

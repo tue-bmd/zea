@@ -467,7 +467,7 @@ def _quantile_error(image, reference, n_levels=100):
 
 
 # The matching variations of the paper, as keyword arguments to `histogram_match`.
-MATCHES = {"partial": {"mode": "partial"}, "full": {}, "exact": {"n_levels": "all"}}
+MATCHES = {"partial": {"mode": "partial"}, "full": {}, "exact": {"n_bins": "all"}}
 MONOTONE_MATCHES = {name: MATCHES[name] for name in ("full", "exact")}
 
 
@@ -475,7 +475,7 @@ def test_histogram_match_all_levels_matches_skimage():
     """One level per pixel is rank transport, i.e. skimage's match_histograms.
 
     ``match_histograms`` bins with ``np.unique`` for anything but integer dtype, which on dB
-    floats is one bin per pixel, i.e. the limit ``n_levels="all"`` asks for.
+    floats is one bin per pixel, i.e. the limit ``n_bins="all"`` asks for.
     """
     from skimage.exposure import match_histograms
 
@@ -484,7 +484,7 @@ def test_histogram_match_all_levels_matches_skimage():
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     image, reference = _speckle(rng, scale=0.1), _speckle(rng, scale=1.0)
 
-    matched = histogram_match(image, reference, n_levels="all")
+    matched = histogram_match(image, reference, n_bins="all")
 
     np.testing.assert_allclose(matched, match_histograms(image, reference))
     # Rank transport reproduces the reference distribution exactly, not just closely.
@@ -657,7 +657,7 @@ def test_histogram_match_accepts_tensors():
 
 
 def test_histogram_match_invalid_arguments():
-    """Unknown modes, levels and too small fitting regions raise informative errors."""
+    """Unknown modes, bin counts and too small fitting regions raise informative errors."""
     from zea.display import histogram_match
 
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
@@ -666,11 +666,11 @@ def test_histogram_match_invalid_arguments():
     with pytest.raises(ValueError, match="Unknown mode"):
         histogram_match(image, reference, mode="adaptive")
 
-    with pytest.raises(ValueError, match="Invalid n_levels"):
-        histogram_match(image, reference, n_levels="every")
+    with pytest.raises(ValueError, match="Invalid n_bins"):
+        histogram_match(image, reference, n_bins="every")
 
     with pytest.raises(ValueError, match="Too few valid pixels"):
-        histogram_match(image, reference, n_levels=256)
+        histogram_match(image, reference, n_bins=256)
 
     # Fitting a transform needs something to fit: an image of one value has no distribution.
     flat, speckle = np.zeros((32, 32)), _speckle(rng, size=(32, 32))
