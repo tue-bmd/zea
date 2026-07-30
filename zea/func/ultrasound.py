@@ -193,12 +193,6 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
     return ops.cast(rf_data, "float32")
 
 
-def _sinc(x):
-    """Return the normalized sinc function. Equivalent to np.sinc(x)."""
-    y = np.pi * ops.where(x == 0, 1.0e-20, x)
-    return ops.sin(y) / y
-
-
 def get_band_pass_filter(num_taps, sampling_frequency, f1, f2, validate=True):
     """Band pass filter
 
@@ -244,7 +238,7 @@ def get_band_pass_filter(num_taps, sampling_frequency, f1, f2, validate=True):
     # Build up the coefficients.
     alpha = 0.5 * (num_taps - 1)
     m = ops.arange(0, num_taps, dtype="float32") - alpha
-    h = f2 * _sinc(f2 * m) - f1 * _sinc(f1 * m)
+    h = f2 * ops.sinc(f2 * m) - f1 * ops.sinc(f1 * m)
 
     # Get and apply the window function.
     win = np.hamming(num_taps)

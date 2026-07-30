@@ -1656,11 +1656,6 @@ def linear_sum_assignment(cost):
     return np.array(row_ind), np.array(col_ind)
 
 
-def sinc(x, eps=keras.config.epsilon()):
-    """Sinc function."""
-    return ops.sin(x + eps) / (x + eps)
-
-
 def apply_along_axis(func1d, axis, arr, *args, **kwargs):
     """Apply a function to 1D array slices along an axis.
 
