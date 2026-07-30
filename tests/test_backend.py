@@ -222,6 +222,42 @@ class TestAdam:
 
         assert run(0.5) > run(0.05)
 
+    def test_matches_keras_adam(self):
+        """Every step matches ``keras.optimizers.Adam`` given the same gradients.
+
+        Runs on whichever backend the session uses, so the reference is Keras'
+        own implementation on that backend rather than a specific framework.
+        """
+        import keras
+        import numpy as np
+
+        from zea.backend.optimizer import adam
+
+        start, minimum, step_size, steps = (1.5, -0.7, 0.3), (3.0, 0.5, -2.0), 0.05, 25
+        minimum = np.array(minimum, dtype="float32")
+
+        init, update, get_params = adam(step_size=step_size)
+        state = init(keras.ops.convert_to_tensor(np.array(start, dtype="float32")))
+        ours = []
+        for _ in range(steps):
+            gradient = 2.0 * (keras.ops.convert_to_numpy(get_params(state)) - minimum)
+            state = update(keras.ops.convert_to_tensor(gradient.astype("float32")), state)
+            ours.append(keras.ops.convert_to_numpy(get_params(state)).copy())
+
+        variable = keras.Variable(np.array(start, dtype="float32"))
+        optimizer = keras.optimizers.Adam(learning_rate=step_size)
+        reference = []
+        for _ in range(steps):
+            gradient = 2.0 * (keras.ops.convert_to_numpy(variable) - minimum)
+            optimizer.apply_gradients(
+                [(keras.ops.convert_to_tensor(gradient.astype("float32")), variable)]
+            )
+            reference.append(keras.ops.convert_to_numpy(variable).copy())
+
+        # Not exact: keras folds the bias correction into the step size, so epsilon
+        # enters at a slightly different point than in this implementation.
+        np.testing.assert_allclose(np.array(ours), np.array(reference), rtol=1e-4, atol=1e-4)
+
 
 @pytest.mark.jax
 class TestStrToJaxDevice:
