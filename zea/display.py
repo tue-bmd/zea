@@ -197,7 +197,7 @@ def histogram_match(
             estimated on; ignored by ``"partial"``. Defaults to 256, the number of bins used
             in the paper, which it found enough for consistent results.
             Pass ``"all"`` for one bin per fitted pixel, the limit of the binning process
-            (Sec. III.C.1): it reproduces the reference distribution down to its outliers,
+            (Sec. III.C.1): it reproduces the reference distribution down to its outliers and tails,
             which replicates them in the matched image. This is what
             `skimage.exposure.match_histograms` does.
         roi (ndarray, optional): Boolean mask, of the shape of both images, selecting a
@@ -212,8 +212,7 @@ def histogram_match(
     .. note::
         Every mode fits on finite pixels above `DEAD_PIXEL_DB` only, so that zea's
         ``log(0)`` sentinel neither anchors the bottom of the mapping nor is lifted into
-        the displayed range. Sec. III.C.2 needs no such exclusion for clipped values: under
-        a full match the same fraction of the distribution maps to the clipped value.
+        the displayed range.
 
     .. note::
         Which image is matched to which is a choice (Sec. V): matching to B-mode is natural
