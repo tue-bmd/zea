@@ -83,6 +83,8 @@ def _fitting_pixels(image, roi=None, minimum=2):
         raise ValueError(
             f"Too few valid pixels to fit a transform: {pixels.size}, need at least {minimum}."
         )
+    if pixels.min() == pixels.max():
+        raise ValueError("Cannot fit a transform: the valid pixels all have the same value.")
     return pixels
 
 
@@ -94,17 +96,42 @@ def _quantile_pairs(x, y, n_levels):
     equispaced in *probability* instead puts equal mass in every bin, so the resolution
     follows the data (the paper's own remark in Sec. V that bins should be chosen after
     dynamic range compression).
+
+    At ``n_levels = x.size`` the quantiles of ``x`` are its order statistics, so the pairs
+    become the rank transport of Sec. III.C.1: one pixel per bin, with the quantile function
+    of ``y`` resampled onto the ranks of ``x`` when the two differ in size.
     """
     levels = np.linspace(0, 1, n_levels)
-    return np.quantile(x, levels), np.quantile(y, levels)
+
+    def quantiles(v):
+        # `np.quantile` selects rather than sorts, which is quadratic in the number of
+        # levels; this is its linear method, interpolating between the order statistics.
+        v = np.sort(v)
+        return np.interp(levels, np.linspace(0, 1, v.size), v)
+
+    return quantiles(x), quantiles(y)
+
+
+def _merge_ties(xs, ys):
+    """Collapse knots that share an ``x``, which PCHIP cannot accept, onto a single ``y``.
+
+    Knots collapse wherever the image distribution has an atom, i.e. a value carrying a
+    finite fraction of the mass: a pile-up at the edge of the range the image was clipped
+    to, or a repeated level in a quantized image. A monotone map has to send an atom to one
+    value, and this takes the lowest of the reference values it spans, which is the CDF read
+    just below the atom. A clipping floor then stays at the bottom of the matched range
+    rather than being lifted into the middle of it.
+    """
+    xs, first = np.unique(xs, return_index=True)
+    return xs, ys[first]
 
 
 def _end_slopes(xs, ys, frac=0.125, max_ratio=4.0):
     """Slopes for linear extension of the mapping past the first and last knot."""
-    # Secants between adjacent knots are unusable: quantile knots collapse onto each other
-    # wherever the distribution has an atom (e.g. a pile-up at the edge of the range the
-    # image was clipped to), which makes the secant explode. Measure across the outer
-    # `frac` of the knots instead, and cap the result relative to the overall slope.
+    # Secants between adjacent knots are unusable: an atom collapses knots onto each other
+    # (see `_merge_ties`), which makes the secant explode. Measure across the outer `frac`
+    # of the knots instead, which because they are equispaced in probability is the outer
+    # `frac` of the mass, and cap the result relative to the overall slope.
     slope = (ys[-1] - ys[0]) / (xs[-1] - xs[0])
     k = max(2, round(frac * xs.size))
 
@@ -121,42 +148,25 @@ def _end_slopes(xs, ys, frac=0.125, max_ratio=4.0):
 
 def _monotone_map(image, xs, ys):
     """Monotone interpolation through the Q-Q knots, extended linearly at the ends."""
-    # PCHIP requires strictly increasing knots; a tiny ramp breaks the ties that atoms in
-    # the image distribution produce.
-    xs = np.maximum.accumulate(xs + np.arange(xs.size) * 1e-9)
+    # The end slopes are read off the knots before merging, which loses how much mass each
+    # of them carries and with it the meaning of "the outer `frac` of the distribution".
+    slope_low, slope_high = _end_slopes(xs, ys)
+    xs, ys = _merge_ties(xs, ys)
     out = scipy.interpolate.PchipInterpolator(xs, ys)(image)
     # Cubic extrapolation can fold back on itself and break monotonicity, so replace it by
     # a linear extension (Sec. III.C.3): a point target brighter than anything in the ROI
     # should stay the brightest instead of piling onto the top knot.
-    slope_low, slope_high = _end_slopes(xs, ys)
     out = np.where(image < xs[0], ys[0] + slope_low * (image - xs[0]), out)
     return np.where(image > xs[-1], ys[-1] + slope_high * (image - xs[-1]), out)
-
-
-def _rank_match(image, reference):
-    """Rank transport: the i-th darkest pixel takes the i-th darkest reference value.
-
-    Equivalent to ``skimage.exposure.match_histograms`` for continuous-valued input: that
-    function bins with ``np.unique`` for anything but integer dtype, which on dB floats is
-    one bin per pixel, i.e. this. They only differ where values repeat, since it then
-    interpolates between reference levels instead of copying them.
-    """
-    x = image.reshape(-1).astype(np.float64)
-    y = np.sort(reference.reshape(-1).astype(np.float64))
-    if y.size != x.size:
-        # Resample the reference quantile function so that the ranks line up.
-        y = np.interp(np.linspace(0, 1, x.size), np.linspace(0, 1, y.size), y)
-    # Interpolating rather than scattering by argsort keeps tied pixels tied.
-    return np.interp(x, np.sort(x), y).reshape(image.shape)
 
 
 def histogram_match(
     image,
     reference,
     mode: str = "full",
-    n_levels: int = 256,
+    n_levels: Union[int, str] = 256,
     roi=None,
-) -> Tuple[np.ndarray, dict]:
+) -> np.ndarray:
     """Match the histogram of an image to a reference image, for fair visual comparison.
 
     Image formation methods apply different dynamic range transformations, which biases
@@ -165,39 +175,48 @@ def histogram_match(
 
     Args:
         image (ndarray): Image to transform, typically log-compressed (dB).
-        reference (ndarray): Image to match to. Only ``mode="exact"`` benefits from equal
-            shapes; otherwise only the distributions are compared.
-        mode (str, optional): Matching transform. Defaults to ``"full"``.
+        reference (ndarray): Image to match to. Its shape need not equal that of ``image``,
+            as only the distributions are compared, unless an ``roi`` indexes both.
+        mode (str, optional): Class of transform to match with. Defaults to ``"full"``.
 
-            - ``"full"``: any monotone mapping (Sec. III.B), interpolated through
-              ``n_levels`` Q-Q pairs. Matches the shape of the distribution as well.
-            - ``"partial"``: partial, i.e. affine match (Sec. III.A), the scale and offset
-              that match mean and variance. Preserves the sSNR of the fitted region, as
-              well as CNR and gCNR (their Tbl. I), but cannot correct differences in
-              distribution shape. Appropriate when the fitted region contains structure.
-            - ``"exact"``: rank transport (Sec. III.C.1), the limit of one pixel per bin.
-              Reproduces the reference distribution exactly, but replicates its outliers.
-              Named the ``'point'`` match by Bottenus, in the paper and in ``histmatch.m``.
+            - ``"partial"``: affine match (Sec. III.A), the scale and offset that match
+              mean and variance. It leaves the *shape* of the image's own distribution
+              intact, so pick it when that shape is the thing under comparison, when the
+              fitted region contains structure rather than plain speckle, or when the sSNR
+              of the fitted region, the CNR and the gCNR must survive matching (Tbl. I).
+            - ``"full"``: any monotone mapping (Sec. III.B), through ``n_levels`` Q-Q
+              pairs. It matches the shape of the distribution too, hence undoes non-linear
+              compression, so pick it to compare methods whose transformations differ in
+              more than scale and offset, or are unknown ("black box" images, Sec. III.C.2).
+              Together with a speckle ``roi``, the paper's expected common use (Sec. V).
 
-        n_levels (int, optional): Number of quantile levels used to estimate the mapping.
-            Defaults to 256, the number of bins used in the paper. Only used by ``"full"``.
+        n_levels (int or str, optional): Number of quantile levels the mapping of a
+            ``"full"`` match is estimated on; ignored by ``"partial"``, which needs no
+            binning. Defaults to 256, the number of bins used in the paper, which it found
+            enough for consistent results. Pass ``"all"`` for one level per fitted pixel,
+            the limit of the binning process (Sec. III.C.1) and the ``'point'`` match of
+            ``histmatch.m``: it reproduces the reference distribution down to its outliers,
+            which replicates them in the matched image and makes it a poor choice for
+            display, but rules the histogram out as a variable altogether.
         roi (ndarray, optional): Boolean mask, of the shape of both images, selecting a
             homogeneous speckle region (Sec. III.C.3, the paper's expected common use).
             The mapping is fit inside the mask and applied to the whole image, extended
             linearly outside the fitted range. Defaults to None (fit on the whole image).
 
     Returns:
-        tuple:
-            - **matched** (ndarray): Transformed image (float64), unclipped: clipping to a
-              display range is left to the caller (`to_8bit`, or ``vmin``/``vmax``).
-            - **params** (dict): Fitted transform, i.e. the ``knots`` of the mapping for
-              ``"full"`` and the ``slope`` and ``offset`` for ``"partial"``.
+        ndarray: Transformed image (float64), unclipped: clipping to a display range is
+        left to the caller (`to_8bit`, or ``vmin``/``vmax``).
 
     .. note::
-        The ``"full"`` and ``"partial"`` fits ignore non-finite pixels and pixels at or
-        below `DEAD_PIXEL_DB`, so that zea's ``log(0)`` sentinel does not anchor the bottom
-        of the mapping. Sec. III.C.2 needs no such exclusion for clipped values: under a
-        full match the same fraction of the distribution simply maps to the clipped value.
+        Every mode fits on finite pixels above `DEAD_PIXEL_DB` only, so that zea's
+        ``log(0)`` sentinel neither anchors the bottom of the mapping nor is lifted into
+        the displayed range. Sec. III.C.2 needs no such exclusion for clipped values: under
+        a full match the same fraction of the distribution maps to the clipped value.
+
+    .. note::
+        Which image is matched to which is a choice (Sec. V): matching to B-mode is natural
+        for a reader used to B-mode, but features outside its dynamic range are lost in the
+        process, and matching in the other direction then shows them off better.
 
     Example:
         .. doctest::
@@ -213,7 +232,7 @@ def histogram_match(
             >>> round(image.mean() - reference.mean())  # the image is 20 dB darker
             -20
 
-            >>> matched, params = histogram_match(image, reference)
+            >>> matched = histogram_match(image, reference)
             >>> round(matched.mean() - reference.mean())
             0
 
@@ -228,17 +247,19 @@ def histogram_match(
         https://github.com/nbottenus/histogram_matching/blob/main/histmatch.m
 
     """
-    if mode not in ("full", "partial", "exact"):
-        raise ValueError(f"Unknown mode {mode!r}, expected 'full', 'partial' or 'exact'.")
+    if mode not in ("full", "partial"):
+        raise ValueError(f"Unknown mode {mode!r}, expected 'full' or 'partial'.")
+    every_pixel = n_levels == "all"
+    if not every_pixel and not (isinstance(n_levels, (int, np.integer)) and n_levels >= 2):
+        raise ValueError(f"Invalid n_levels {n_levels!r}, expected an integer >= 2 or 'all'.")
 
     image = ops.convert_to_numpy(image)
     reference = ops.convert_to_numpy(reference)
-    if mode == "exact":
-        return _rank_match(image, reference), {}
     if roi is not None:
         roi = ops.convert_to_numpy(roi).astype(bool)
 
-    minimum = n_levels if mode == "full" else 2
+    # A level has to be worth estimating: ask for as many pixels as there are levels.
+    minimum = 2 if mode == "partial" or every_pixel else n_levels
     x = _fitting_pixels(image, roi, minimum)
     y = _fitting_pixels(reference, roi, minimum)
 
@@ -246,11 +267,10 @@ def histogram_match(
     if mode == "partial":
         # eq. (8)-(9): the scale and offset that match mean and variance.
         slope = y.std() / x.std()
-        offset = y.mean() - slope * x.mean()
-        return slope * image + offset, {"slope": slope, "offset": offset}
+        return slope * image + (y.mean() - slope * x.mean())
 
-    xs, ys = _quantile_pairs(x, y, n_levels)
-    return _monotone_map(image, xs, ys), {"knots": (xs, ys)}
+    xs, ys = _quantile_pairs(x, y, x.size if every_pixel else n_levels)
+    return _monotone_map(image, xs, ys)
 
 
 def overlay_masks(
