@@ -29,16 +29,21 @@ from zea.internal.core import (
 from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
-from zea.simulator import simulate_rf
+from zea.simulator import simulate_rf, simulate_rf_fast
 from zea.utils import canonicalize_axis
 
 
 @ops_registry("simulate_rf")
 class Simulate(Operation):
-    """Simulate RF data."""
+    """Simulate RF data.
+
+    Set the static parameter ``fast=True`` to use the faster time-domain
+    simulator :func:`zea.simulator.simulate_rf_fast` instead of the default
+    frequency-domain :func:`zea.simulator.simulate_rf`.
+    """
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["n_ax", "apply_lens_correction"]
+    STATIC_PARAMS = ["n_ax", "apply_lens_correction", "fast"]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
     def __init__(self, **kwargs):
@@ -64,8 +69,10 @@ class Simulate(Operation):
         element_width,
         attenuation_coef,
         tx_apodizations,
+        fast=False,
         **kwargs,
     ):
+        simulate = simulate_rf_fast if fast else simulate_rf
         simulate_kwargs = {
             "probe_geometry": probe_geometry,
             "apply_lens_correction": apply_lens_correction,
@@ -82,14 +89,14 @@ class Simulate(Operation):
             "tx_apodizations": tx_apodizations,
         }
         if not self.with_batch_dim:
-            simulated_rf = simulate_rf(
+            simulated_rf = simulate(
                 scatterer_positions=scatterer_positions,
                 scatterer_magnitudes=scatterer_magnitudes,
                 **simulate_kwargs,
             )
         else:
             simulated_rf = ops.map(
-                lambda inputs: simulate_rf(
+                lambda inputs: simulate(
                     scatterer_positions=inputs["positions"],
                     scatterer_magnitudes=inputs["magnitudes"],
                     **simulate_kwargs,
