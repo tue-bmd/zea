@@ -244,7 +244,20 @@ def configure_console_logger(
 
     # stdout stream handler if this logger doesn't already have one of its own
     if not new_logger.handlers:
-        console = _ProgressAwareStreamHandler(stream=sys.stdout)
+        stream = sys.stdout
+        # On Windows, stdout is often attached to a legacy codepage (e.g. cp1252)
+        # rather than UTF-8. Log messages throughout the codebase use Unicode
+        # characters (arrows, checkmarks, ...); without this, emitting one of
+        # them raises a UnicodeEncodeError from inside the logging module itself
+        # (visible as a "--- Logging error ---" traceback) instead of just
+        # printing the message. Reconfigure to substitute unencodable
+        # characters rather than crash.
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(errors="backslashreplace")
+            except ValueError:
+                pass
+        console = _ProgressAwareStreamHandler(stream=stream)
         console.setFormatter(formatter)
         console.setLevel(level)
         new_logger.addHandler(console)
