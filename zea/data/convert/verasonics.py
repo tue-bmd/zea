@@ -388,9 +388,7 @@ class VerasonicsFile(h5py.File):
         indices = np.asarray(indices).reshape(-1)
         if n_samples <= 0 or indices.size <= n_samples:
             return indices
-        picks = np.unique(
-            np.linspace(0, indices.size - 1, n_samples).round().astype(int)
-        )
+        picks = np.unique(np.linspace(0, indices.size - 1, n_samples).round().astype(int))
         return indices[picks]
 
     def _read_scalar_field(self, group_name, field_name):
@@ -557,17 +555,16 @@ class VerasonicsFile(h5py.File):
         event_tx_all = np.round(self._read_scalar_field("Event", "tx")).astype(np.int64)
         event_rcv_all = np.round(self._read_scalar_field("Event", "rcv")).astype(np.int64)
         receive_mode_all = np.round(self._read_scalar_field("Receive", "mode")).astype(np.int64)
-        receive_framenum_all = np.round(
-            self._read_scalar_field("Receive", "framenum")
-        ).astype(np.int64)
+        receive_framenum_all = np.round(self._read_scalar_field("Receive", "framenum")).astype(
+            np.int64
+        )
 
         # An event contributes only if it has BOTH a transmit and a receive.
         has_tx = event_tx_all != 0
         has_rcv = event_rcv_all != 0
         if np.any(has_tx != has_rcv):
             log.warning(
-                "Some events have a transmit but no receive or vice versa; "
-                "these are skipped."
+                "Some events have a transmit but no receive or vice versa; these are skipped."
             )
         valid = has_tx & has_rcv
 
@@ -668,15 +665,13 @@ class VerasonicsFile(h5py.File):
         is_ttna = np.zeros(n_seq, dtype=bool)
         ttna_value = np.zeros(n_seq, dtype=np.float64)
         for j in range(n_seq):
-            command = self.decode_string(
-                self.dereference_index(self["SeqControl"]["command"], j)
-            )
+            command = self.decode_string(self.dereference_index(self["SeqControl"]["command"], j))
             if command == "timeToNextAcq":
                 is_ttna[j] = True
                 ttna_value[j] = (
-                    np.asarray(
-                        self.dereference_index(self["SeqControl"]["argument"], j)
-                    ).reshape(-1)[0]
+                    np.asarray(self.dereference_index(self["SeqControl"]["argument"], j)).reshape(
+                        -1
+                    )[0]
                     * 1e-6
                 )
 
@@ -1529,9 +1524,7 @@ class VerasonicsFile(h5py.File):
 
         sample_mode = set()
         for i in probe:
-            sample_mode.add(
-                self.decode_string(self.dereference_index(sample_mode_dataset, int(i)))
-            )
+            sample_mode.add(self.decode_string(self.dereference_index(sample_mode_dataset, int(i))))
 
         # Ensure only a single sample mode is used
         assert len(sample_mode) == 1, (

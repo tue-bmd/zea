@@ -19,6 +19,7 @@ Example usage
 import contextlib
 import contextvars
 import inspect
+import io
 import logging
 import os
 import re
@@ -250,13 +251,12 @@ def configure_console_logger(
         # characters (arrows, checkmarks, ...); without this, emitting one of
         # them raises a UnicodeEncodeError from inside the logging module itself
         # (visible as a "--- Logging error ---" traceback) instead of just
-        # printing the message. Reconfigure to substitute unencodable
-        # characters rather than crash.
-        if hasattr(stream, "reconfigure"):
-            try:
+        # printing the message. Reconfigure to substitute unencodable characters
+        # rather than crash. Only a TextIOWrapper exposes reconfigure(); a
+        # captured/redirected stdout is left as-is.
+        if isinstance(stream, io.TextIOWrapper):
+            with contextlib.suppress(ValueError):
                 stream.reconfigure(errors="backslashreplace")
-            except ValueError:
-                pass
         console = _ProgressAwareStreamHandler(stream=stream)
         console.setFormatter(formatter)
         console.setLevel(level)
