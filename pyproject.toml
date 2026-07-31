@@ -252,9 +252,7 @@ invalid-method-override = "ignore"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-# Dump every thread's stack for any test still running after 5 minutes, then let it
-# carry on. Nothing here should take that long, so the dump is the only record we
-# would otherwise get of a test that wedges until CI kills the job.
+# Dump stacks for any test still running after 5 minutes; nothing here is that slow.
 faulthandler_timeout = 300
 markers = [
     "performance: marks tests as performance (deselect with '-m \"not performance\"')",

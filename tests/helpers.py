@@ -16,24 +16,23 @@ import pytest
 
 from .backend_utils import format_backend_skip_reason, missing_required_backends
 
-# How long to wait for a worker to answer. Generous, because the first job sent to
-# a backend also pays for spawning the process and importing jax/torch/tensorflow
-# inside it, which under coverage is far from instant.
+# Generous: the first job to a backend also pays for spawning the process and
+# importing the framework in it.
 WORKER_TIMEOUT = 60
 
 
 def debugger_attached():
     """Whether a debugger is driving the session, in which case timeouts are off.
 
-    ``sys.gettrace()`` on its own is not a debugger check: ``pytest --cov`` installs
-    coverage's trace function, so treating any trace function as a debugger disables
-    every worker timeout on CI, and a worker that dies there hangs the run until CI
-    kills the job.
+    Not simply ``sys.gettrace()``: ``pytest --cov`` installs a trace function too, and
+    counting that as a debugger would disable every worker timeout on CI.
     """
     if debugpy.is_client_connected():
         return True
-    trace = sys.gettrace()
-    return trace is not None and not type(trace).__module__.startswith("coverage")
+    if sys.gettrace() is None:
+        return False
+    coverage = sys.modules.get("coverage")
+    return coverage is None or coverage.Coverage.current() is None
 
 
 def _decorate_with_required_backends(decorator_func, required_backends):
@@ -119,11 +118,8 @@ class BackendEqualityCheck:
                 result_queue.put((job_id, result))
             except Exception as e:
                 tb = traceback.format_exc()
-                # Send a plain stand-in rather than the exception itself, which is not
-                # necessarily picklable -- torch's compile errors hold module
-                # references, for one. `put` only buffers, so a failed pickle dies in
-                # the queue's feeder thread and the parent waits on a result that can
-                # never arrive. The traceback below carries the real detail anyway.
+                # Not `e` itself: one that fails to pickle (torch compile errors hold
+                # modules) dies in the feeder thread, leaving the parent waiting forever.
                 result_queue.put((job_id, (RuntimeError(f"{type(e).__name__}: {e}"), tb)))
 
     def start_workers(self, backends, seed=42):
@@ -168,10 +164,7 @@ class BackendEqualityCheck:
                 job_ids.append(job_id)
                 results[backend] = result
             except Empty:
-                # A worker can be silent either because it is still busy or because it
-                # is gone (killed by the OOM killer, say). Only the second case has an
-                # exit code, and pytest captures the output of a test that never
-                # finishes, so that code is the only clue worth reporting.
+                # Silence can mean busy or dead; only a dead worker has an exit code.
                 process = self.processes.get(backend)
                 gone = process is not None and not process.is_alive()
                 exitcode = process.exitcode if gone else None
@@ -182,10 +175,7 @@ class BackendEqualityCheck:
                     "possibly also from other backends."
                 )
                 if gone:
-                    msg += (
-                        f" Its worker process is gone (exit code {exitcode}); "
-                        "a negative code means it was killed, e.g. by the OOM killer."
-                    )
+                    msg += f" Its worker is gone (exit code {exitcode}; negative means killed)."
                 self.stop_workers()
                 pytest.fail(msg)
         assert len(set(job_ids)) in [
@@ -205,9 +195,8 @@ class BackendEqualityCheck:
             try:
                 job_queue.put_nowait(None)
             except Full:
-                # A worker that died without consuming its job leaves the queue full.
-                # The sentinel is moot then, and blocking on it would hang cleanup --
-                # which is precisely the path taken when a worker has just died.
+                # A worker that died before taking its job leaves the queue full;
+                # blocking on the sentinel would hang cleanup.
                 pass
         for process in self.processes.values():
             if force:
