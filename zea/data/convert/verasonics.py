@@ -273,6 +273,25 @@ def _validate_convert_config(data):
     return data
 
 
+def _is_reference_dataset(dataset) -> bool:
+    """Whether an HDF5 dataset stores object references.
+
+    MATLAB v7.3 stores cell arrays (e.g. ``RcvData``) and struct-array fields
+    (e.g. ``Receive.bufnum``) as datasets of HDF5 object references. This is
+    detected from the dtype via :func:`h5py.check_dtype`, which is robust across
+    writers - unlike inspecting ``dataset.fillvalue``, which is only a null
+    reference for writers that set an explicit fill value (MATLAB does; datasets
+    created through h5py's high-level API leave it ``None``).
+
+    Args:
+        dataset (h5py.Dataset): The dataset to inspect.
+
+    Returns:
+        bool: True if the dataset's elements are HDF5 object references.
+    """
+    return h5py.check_dtype(ref=dataset.dtype) is not None
+
+
 class VerasonicsFile(h5py.File):
     """HDF5 File class for Verasonics MATLAB workspace files.
 
@@ -327,7 +346,7 @@ class VerasonicsFile(h5py.File):
             dataset (h5py.Dataset): The dataset to read the element from.
             index (int): The index of the element to read.
         """
-        if isinstance(dataset.fillvalue, h5py.h5r.Reference):
+        if _is_reference_dataset(dataset):
             # Flatten so a single logical index works for both (N, 1) column
             # vectors and (1, N) row vectors (e.g. RcvData). Indexing the raw
             # dataset directly would return a whole row for a (1, N) array and
@@ -416,7 +435,7 @@ class VerasonicsFile(h5py.File):
             return cache[key]
 
         dataset = self[group_name][field_name]
-        if isinstance(dataset.fillvalue, h5py.h5r.Reference):
+        if _is_reference_dataset(dataset):
             references = np.asarray(dataset[:]).reshape(-1)
             # Resolve each reference. h5py requires per-reference resolution, but
             # we do it in a single tight pass and only once (then cache).
@@ -445,7 +464,7 @@ class VerasonicsFile(h5py.File):
         used in :meth:`dereference_index`. A non-reference dataset represents a
         single stored element, so its size is 1.
         """
-        if isinstance(dataset.fillvalue, h5py.h5r.Reference):
+        if _is_reference_dataset(dataset):
             return int(np.asarray(dataset[:]).size)
         else:
             return 1
@@ -677,7 +696,7 @@ class VerasonicsFile(h5py.File):
 
         # Bulk-read the per-event seqControl references once. Each event's
         # seqControl is typically a scalar index but can be a short vector.
-        if isinstance(seq_control_dataset.fillvalue, h5py.h5r.Reference):
+        if _is_reference_dataset(seq_control_dataset):
             seq_refs = np.asarray(seq_control_dataset[:]).reshape(-1)
             resolve = self
         else:
@@ -1580,7 +1599,7 @@ class VerasonicsFile(h5py.File):
             np.ndarray: 1-D array of the TGC control samples.
         """
         waveform_ds = self["TGC"]["Waveform"]
-        if not isinstance(waveform_ds.fillvalue, h5py.h5r.Reference):
+        if not _is_reference_dataset(waveform_ds):
             # Single TGC struct: plain (n_samples, 1) matrix.
             return np.asarray(waveform_ds[:])[:, 0]
 
