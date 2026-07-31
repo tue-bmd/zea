@@ -595,13 +595,100 @@ Besides supported existing public datasets, you can also convert your own acquis
 
 **Verasonics**
 
-Record data with your Verasonics script, save the workspace to ``.mat``, then convert:
+Record data with your Verasonics script, save the workspace to ``.mat`` (HDF5,
+i.e. ``save(..., '-v7.3')``), then convert:
 
 .. code-block:: shell
 
     zea convert verasonics <src> <dst>
 
 See :mod:`zea.data.convert.verasonics` for details.
+
+*Multiple RF buffers.*  A Verasonics acquisition may fill several RF buffers
+(``RcvData{1}``, ``RcvData{2}``, …) — for example a wide-beam B-mode buffer and
+a Doppler / shear-wave buffer, or subsequent measurements (imaging, then
+Doppler). Each buffer is converted to its own zea file. From Python:
+
+.. code-block:: python
+
+    from zea.data.convert.verasonics import VerasonicsFile
+
+    with VerasonicsFile("raw_data.mat") as vf:
+        vf.to_zea("buffer1.hdf5", buffer_index=0)   # one specific RF buffer
+        vf.to_zea_all("out_dir")                     # every buffer -> out_dir/*_buffer{k}.hdf5
+
+The RF buffer and the image buffer (``ImgDataP`` / ``Resource.ImageBuffer``) are
+indexed independently, so ``to_zea(buffer_index=1, image_buffer_index=3)`` pairs
+RF buffer 2 with image buffer 4.
+
+.. dropdown:: Saving large acquisitions as external RF binaries (``.bin``)
+
+   Writing the full ``RcvData`` into a ``-v7.3`` ``.mat`` is slow for large RF
+   buffers. Instead, each buffer's RF can be written to a raw binary file and
+   only the (small) metadata kept in the ``.mat``. The converter reads this
+   layout directly — a source **directory** containing ``RF_data_*.bin`` files is
+   detected as one multi-buffer acquisition and converted to one zea file per
+   saved buffer:
+
+   .. code-block:: shell
+
+       zea convert verasonics <measurement_dir> <out_dir>
+
+   (A directory *without* ``.bin`` files keeps the default behaviour: every
+   ``.mat`` in it is converted to one zea file.)
+
+   **On-disk format.**  A measurement directory holds exactly one metadata
+   ``.mat`` (any name) and one binary per *saved* buffer:
+
+   .. code-block:: text
+
+       measurement_dir/
+       ├── Parameters.mat        # Trans, TX, TW, Receive, Event, SeqControl,
+       │                         #   Resource, TGC, ImgDataP, …  (no RcvData), plus:
+       │      RF_rows   (1,nBuf)  #   fast-time samples per buffer (RcvData rows)
+       │      RF_cols   (1,nBuf)  #   number of *saved* channels per buffer
+       │      RF_frames (1,nBuf)  #   frames per buffer
+       │      NonzeroRFcolumns {1,nBuf}  # per-buffer logical channel mask; its
+       │                         #   length is the full hardware-channel count and
+       │                         #   it is true for every channel written to the .bin
+       ├── RF_data_1.bin         # buffer 1 (matches RcvData{1}), int16, MATLAB
+       ├── RF_data_2.bin         #   column-major: rows × savedChannels × frames
+       └── …
+
+   Notes on the contract:
+
+   - ``RF_data_{k}.bin`` uses the **1-based** MATLAB buffer number ``k`` and
+     stores **only the saved (non-zero) channels**, ``int16``, in MATLAB
+     column-major order ``(RF_rows × RF_cols × RF_frames)``.
+   - ``NonzeroRFcolumns{k}`` maps those saved columns back onto the full set of
+     hardware channels (zero-filling the rest), so a probe with fewer elements
+     than channels reconstructs correctly.
+   - The ``.mat`` must **not** contain ``RcvData`` (its presence makes the
+     converter read the RF from the ``.mat`` and ignore the binaries). A buffer
+     that was allocated but never acquired simply has no ``.bin`` and is treated
+     as *present but not saved*.
+
+   **Producing the files.**  Any script that writes the layout above works; a
+   reference MATLAB saver (``WriteRFbuffersBin``) can be wired to a save button
+   in a Verasonics setup script:
+
+   .. code-block:: matlab
+
+       % In the setup script, alongside the other UI(...) definitions:
+       import vsv.seq.uicontrol.VsButtonControl
+       UI(n).Control  = VsButtonControl('LocationCode','UserB6','Label','Save RF');
+       UI(n).Callback = @WriteRFbuffersBin;
+
+   The callback copies the RF buffers (``runAcq('copyBuffers')`` during a live
+   acquisition, or straight from the base workspace after ``VSX`` exits), writes
+   one ``RF_data_{k}.bin`` per saved buffer, and saves the metadata ``.mat``.
+
+   The full reference implementation:
+
+   .. dropdown:: ``WriteRFbuffersBin.m`` (reference MATLAB saver)
+
+      .. literalinclude:: _examples/WriteRFbuffersBin.m
+         :language: matlab
 
 **us4us**
 
