@@ -6,7 +6,7 @@ import os
 import sys
 import traceback
 from contextlib import nullcontext
-from queue import Empty
+from queue import Empty, Full
 
 import cloudpickle as pickle
 import debugpy
@@ -16,7 +16,24 @@ import pytest
 
 from .backend_utils import format_backend_skip_reason, missing_required_backends
 
-debugging = sys.gettrace() or debugpy.is_client_connected() is not None
+# How long to wait for a worker to answer. Generous, because the first job sent to
+# a backend also pays for spawning the process and importing jax/torch/tensorflow
+# inside it, which under coverage is far from instant.
+WORKER_TIMEOUT = 60
+
+
+def debugger_attached():
+    """Whether a debugger is driving the session, in which case timeouts are off.
+
+    ``sys.gettrace()`` on its own is not a debugger check: ``pytest --cov`` installs
+    coverage's trace function, so treating any trace function as a debugger disables
+    every worker timeout on CI, and a worker that dies there hangs the run until CI
+    kills the job.
+    """
+    if debugpy.is_client_connected():
+        return True
+    trace = sys.gettrace()
+    return trace is not None and not type(trace).__module__.startswith("coverage")
 
 
 def _decorate_with_required_backends(decorator_func, required_backends):
@@ -129,15 +146,15 @@ class BackendEqualityCheck:
         job_queue = self.job_queues[backend]
         job_queue.put((job_id, pickle.dumps(func), pickle.dumps(args), pickle.dumps(kwargs)))
 
-    def collect_results(self, result_queues, timeout: int = 30):
+    def collect_results(self, result_queues, timeout: int = WORKER_TIMEOUT):
         """
         Collect results from the result queues of the workers.
-        Will wait for all backends to return a result or raise a TimeoutError.
+        Will wait for all backends to return a result or fail the test.
 
         Returns:
             dict: Results for each backend in `result_queues.keys()`.
         """
-        timeout = timeout if not debugging else None
+        timeout = timeout if not debugger_attached() else None
         results = {}
         job_ids = []
         for backend, result_queue in result_queues.items():
@@ -145,16 +162,26 @@ class BackendEqualityCheck:
                 job_id, result = result_queue.get(timeout=timeout)
                 job_ids.append(job_id)
                 results[backend] = result
-            except Empty as exc:
+            except Empty:
+                # A killed worker (the OOM killer on CI) never puts anything on its
+                # queue, and pytest captures the output of a test that never
+                # finishes, so its exit code is the only clue left behind.
+                process = self.processes.get(backend)
+                gone = process is not None and not process.is_alive()
+                exitcode = process.exitcode if gone else None
                 # stop all the workers
                 # this can be done in a more elegant way, e.g. only stopping the backend that fails
-                self.stop_workers()
                 msg = (
                     f"Timeout occurred while waiting for results from backend {backend}, "
-                    + "possibly also from other backends."
+                    "possibly also from other backends."
                 )
+                if gone:
+                    msg += (
+                        f" Its worker process is gone (exit code {exitcode}); "
+                        "a negative code means it was killed, e.g. by the OOM killer."
+                    )
+                self.stop_workers()
                 pytest.fail(msg)
-                raise TimeoutError(msg) from exc
         assert len(set(job_ids)) in [
             0,
             1,
@@ -169,11 +196,17 @@ class BackendEqualityCheck:
     def stop_workers(self, force=True):
         """Stop all workers. This should be called at the end of the test session."""
         for job_queue in self.job_queues.values():
-            job_queue.put(None)
+            try:
+                job_queue.put_nowait(None)
+            except Full:
+                # A worker that died without consuming its job leaves the queue full.
+                # The sentinel is moot then, and blocking on it would hang cleanup --
+                # which is precisely the path taken when a worker has just died.
+                pass
         for process in self.processes.values():
             if force:
                 process.terminate()
-            process.join()
+            process.join(timeout=30)
         self.result_queues = {}
         self.processes = {}
         self.job_queues = {}
@@ -194,7 +227,7 @@ class BackendEqualityCheck:
         backends: list | None = None,
         gt_backend: str = "numpy",
         verbose: bool = False,
-        timeout: int = 30,
+        timeout: int = WORKER_TIMEOUT,
         allow_none: bool = False,
     ):
         """Test the processing functions of different libraries (on CPU).
