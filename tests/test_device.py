@@ -21,6 +21,8 @@ import zea
 from zea.backend import func_on_device
 from zea.internal.device import (
     _cuda_visible_devices_disables_gpus,
+    _visible_to_physical_ids,
+    get_device,
     get_gpu_memory,
     init_device,
 )
@@ -109,6 +111,90 @@ class TestGetGpuMemory:
         monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,-1")
         with _mock_smi(monkeypatch, _SMI_TWO_GPUS):
             assert get_gpu_memory(verbose=False) == [1000]
+
+
+_SMI_THREE_GPUS = b"1000\n2000\n3000\n"
+
+
+class TestVisibleToPhysicalIds:
+    """Unit tests for the ``_visible_to_physical_ids`` helper."""
+
+    @pytest.mark.parametrize(
+        "cuda_visible,visible_ids,expected",
+        [
+            (None, [0, 1], [0, 1]),  # unset → positional ids are already physical
+            ("2", [0], [2]),  # single remapped GPU
+            ("3,1", [0, 1], [3, 1]),  # order follows CUDA_VISIBLE_DEVICES, not sorting
+            ("3,1", [1], [1]),  # subset of the visible GPUs
+            ("GPU-abc123", [0], [0]),  # UUID tokens → fall back to positional
+            ("2", [0, 5], [2]),  # out-of-range visible ids are dropped
+        ],
+    )
+    def test_translation(self, monkeypatch, cuda_visible, visible_ids, expected):
+        if cuda_visible is None:
+            monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        else:
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", cuda_visible)
+        assert _visible_to_physical_ids(visible_ids) == expected
+
+
+class TestRepeatedSelection:
+    """Selecting a device twice in one process must be cheap and stable."""
+
+    def test_get_device_queries_nvidia_smi_once(self, monkeypatch):
+        """One selection must shell out to nvidia-smi once, not once per helper."""
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        with _mock_smi(monkeypatch, _SMI_THREE_GPUS) as mocked_smi:
+            get_device("auto:1", verbose=False)
+            assert mocked_smi.call_count == 1
+
+    def test_repeated_selection_stays_on_same_physical_gpu(self, monkeypatch):
+        """``CUDA_VISIBLE_DEVICES`` holds physical ids, so re-selecting must not drift.
+
+        The second call sees only the already-selected GPU, which is renumbered
+        to 0 inside the process. Writing that 0 back out verbatim would silently
+        move the process onto physical GPU 0.
+        """
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        with _mock_smi(monkeypatch, _SMI_THREE_GPUS):
+            get_device("auto:1", verbose=False)
+            # GPU 2 has the most free memory
+            assert os.environ["CUDA_VISIBLE_DEVICES"] == "2"
+            get_device("auto:1", verbose=False)
+            assert os.environ["CUDA_VISIBLE_DEVICES"] == "2"
+
+    def test_init_device_reuses_cached_result(self, monkeypatch):
+        """A repeat call with identical arguments must not redo device selection."""
+        monkeypatch.setattr("zea.internal.device._INIT_DEVICE_CACHE", {})
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+
+        calls = []
+        monkeypatch.setattr(
+            "zea.internal.device.get_device",
+            lambda *args, **kwargs: calls.append(args) or None,  # None → 'cpu'
+        )
+
+        kwargs = {"device": "auto:1", "backend": "jax", "verbose": False}
+        assert init_device(**kwargs) == "cpu"
+        assert init_device(**kwargs) == "cpu"
+        assert len(calls) == 1, "Second init_device call should have hit the cache"
+
+    def test_init_device_cache_invalidated_by_env_change(self, monkeypatch):
+        """Cache must not be trusted once ``CUDA_VISIBLE_DEVICES`` changes underneath."""
+        monkeypatch.setattr("zea.internal.device._INIT_DEVICE_CACHE", {})
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+
+        calls = []
+        monkeypatch.setattr(
+            "zea.internal.device.get_device",
+            lambda *args, **kwargs: calls.append(args) or None,
+        )
+
+        kwargs = {"device": "auto:1", "backend": "jax", "verbose": False}
+        init_device(**kwargs)
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1")
+        init_device(**kwargs)
+        assert len(calls) == 2
 
 
 class TestInitDevice:

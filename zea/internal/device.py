@@ -13,7 +13,7 @@ def check_nvidia_smi():
     return shutil.which("nvidia-smi") is not None
 
 
-def hide_gpus(gpu_ids=None, verbose=True):
+def hide_gpus(gpu_ids=None, verbose=True, num_gpus=None):
     """Hides the specified GPUs from the system by setting the
     CUDA_VISIBLE_DEVICES environment variable.
 
@@ -21,8 +21,18 @@ def hide_gpus(gpu_ids=None, verbose=True):
     to be useful for training, or when some GPUs are reserved for
     other tasks.
 
+    ``gpu_ids`` are *visible* (positional) ids, i.e. indices into the GPUs that
+    are currently visible to the process, matching the convention used by
+    :func:`get_gpu_memory`.  They are translated back to *physical* ids before
+    being written to ``CUDA_VISIBLE_DEVICES``, so calling this repeatedly does
+    not drift onto the wrong GPU.
+
     Args:
-        gpu_ids (list): list of GPU ids to hide.
+        gpu_ids (list): list of visible GPU ids to hide.
+        verbose (bool): prints output if True.
+        num_gpus (int, optional): number of currently visible GPUs. When
+            ``None`` this is queried via ``nvidia-smi``; pass it when the
+            caller already knows it to avoid a redundant subprocess call.
     """
     if gpu_ids is None:
         return
@@ -33,14 +43,18 @@ def hide_gpus(gpu_ids=None, verbose=True):
         gpu_ids = [gpu_ids]
 
     hide_gpu_ids = gpu_ids
-    all_gpu_ids = list(range(len(get_gpu_memory(verbose=False))))
+    if num_gpus is None:
+        num_gpus = len(get_gpu_memory(verbose=False))
+    all_gpu_ids = list(range(num_gpus))
     keep_gpu_ids = [x for x in all_gpu_ids if x not in hide_gpu_ids]
 
     if len(keep_gpu_ids) == 0:
         log.warning("All GPUs are hidden. Setting CUDA_VISIBLE_DEVICES to an empty string.")
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
     else:
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, keep_gpu_ids))
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(
+            map(str, _visible_to_physical_ids(keep_gpu_ids))
+        )
         if len(hide_gpu_ids) > 0:
             if verbose:
                 print(f"Hiding GPUs {hide_gpu_ids} from the system.")
@@ -71,6 +85,23 @@ def _iter_cuda_device_ids():
             yield int(token)
         except ValueError:
             pass  # Non-integer tokens (e.g. GPU UUIDs) are skipped
+
+
+def _visible_to_physical_ids(visible_ids):
+    """Translate visible (positional) GPU ids to physical ids.
+
+    ``CUDA_VISIBLE_DEVICES`` renumbers the GPUs it exposes 0..N-1, so a
+    positional id only means a physical id when the variable is unset. Without
+    this translation, hiding GPUs twice in one process would map e.g. visible
+    id 0 back onto physical GPU 0 instead of the GPU actually selected.
+
+    Falls back to returning ``visible_ids`` unchanged when the variable is
+    unset or holds no integer tokens (e.g. GPU UUIDs).
+    """
+    physical_ids = list(_iter_cuda_device_ids())
+    if not physical_ids:
+        return visible_ids
+    return [physical_ids[i] for i in visible_ids if i < len(physical_ids)]
 
 
 def _cuda_visible_devices_disables_gpus():
@@ -278,7 +309,9 @@ def select_gpus(available_gpu_ids, memory_free, device=None, verbose=True, hide_
     # Hide other GPUs from the system
     if hide_others:
         hide_gpu_ids = [x for x in available_gpu_ids if x not in gpu_ids]
-        hide_gpus(hide_gpu_ids, verbose=verbose)
+        # available_gpu_ids is already 0..N-1 over the visible GPUs, so pass the
+        # count along instead of letting hide_gpus re-run nvidia-smi.
+        hide_gpus(hide_gpu_ids, verbose=verbose, num_gpus=len(available_gpu_ids))
 
     return gpu_ids
 
@@ -433,6 +466,12 @@ def set_memory_growth_tf():
         print(e)
 
 
+# Maps init_device arguments -> (resolved device, CUDA_VISIBLE_DEVICES we set).
+# Device selection is process-global side effects, so repeating it is both slow
+# (two nvidia-smi calls) and pointless.
+_INIT_DEVICE_CACHE = {}
+
+
 def init_device(
     device: Union[str, int, list] = "auto:1",
     backend: Union[str, None] = "auto",
@@ -480,7 +519,19 @@ def init_device(
             a list of device strings (e.g. ``['gpu:0', 'gpu:1']``) when
             multiple GPUs were selected.  Returns ``'cpu'`` when no GPU is
             available or ``device='cpu'`` was requested.
+
+    Note:
+        The result is cached per argument combination, so scripts that import
+        modules which also call ``init_device`` at module level only pay for
+        the device query once. The cache is invalidated whenever
+        ``CUDA_VISIBLE_DEVICES`` no longer matches what the cached call set.
     """
+    cache_key = (repr(device), backend, repr(hide_devices), hide_others, allow_preallocate)
+    if cache_key in _INIT_DEVICE_CACHE:
+        cached_device, cached_cuda_visible = _INIT_DEVICE_CACHE[cache_key]
+        if os.environ.get("CUDA_VISIBLE_DEVICES") == cached_cuda_visible:
+            return cached_device
+
     if hide_devices is not None:
         hide_gpus(hide_devices)
 
@@ -500,9 +551,13 @@ def init_device(
     else:
         raise ValueError(f"Unknown backend ({backend}).")
 
+    def _cache_and_return(resolved):
+        _INIT_DEVICE_CACHE[cache_key] = (resolved, os.environ.get("CUDA_VISIBLE_DEVICES"))
+        return resolved
+
     # Early exit if device is CPU
     if device == "cpu":
-        return device
+        return _cache_and_return(device)
 
     # Set if jax and tensorflow should preallocate memory
     if not allow_preallocate:
@@ -515,4 +570,4 @@ def init_device(
     if not backend_cuda_available(backend):
         device = "cpu"
 
-    return device
+    return _cache_and_return(device)
