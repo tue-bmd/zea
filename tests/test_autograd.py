@@ -128,10 +128,10 @@ def test_verbose_reports_backend(capsys):
     assert keras.backend.backend() in capsys.readouterr().out
 
 
-# torch is left out on purpose: its branch is `torch.compile`, which does not
-# finish inside the spawned backend workers -- they are daemonic, so inductor
-# cannot start its own compile workers. `get_gradient_and_value_jit_fn` already
-# raises NotImplementedError for torch for the same reason.
+# torch is left out on purpose: its branch is `torch.compile`, which fails inside
+# the spawned backend workers -- they are daemonic, so inductor cannot start the
+# compile workers it needs. `get_gradient_and_value_jit_fn` already raises
+# NotImplementedError for torch for the same reason.
 @backend_equality_check(
     backends=["tensorflow"],
     gt_backend=GT_BACKEND,

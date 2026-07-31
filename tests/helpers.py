@@ -119,7 +119,12 @@ class BackendEqualityCheck:
                 result_queue.put((job_id, result))
             except Exception as e:
                 tb = traceback.format_exc()
-                result_queue.put((job_id, (e, tb)))
+                # Send a plain stand-in rather than the exception itself, which is not
+                # necessarily picklable -- torch's compile errors hold module
+                # references, for one. `put` only buffers, so a failed pickle dies in
+                # the queue's feeder thread and the parent waits on a result that can
+                # never arrive. The traceback below carries the real detail anyway.
+                result_queue.put((job_id, (RuntimeError(f"{type(e).__name__}: {e}"), tb)))
 
     def start_workers(self, backends, seed=42):
         """Start workers for the specified backends."""
@@ -163,9 +168,10 @@ class BackendEqualityCheck:
                 job_ids.append(job_id)
                 results[backend] = result
             except Empty:
-                # A killed worker (the OOM killer on CI) never puts anything on its
-                # queue, and pytest captures the output of a test that never
-                # finishes, so its exit code is the only clue left behind.
+                # A worker can be silent either because it is still busy or because it
+                # is gone (killed by the OOM killer, say). Only the second case has an
+                # exit code, and pytest captures the output of a test that never
+                # finishes, so that code is the only clue worth reporting.
                 process = self.processes.get(backend)
                 gone = process is not None and not process.is_alive()
                 exitcode = process.exitcode if gone else None
