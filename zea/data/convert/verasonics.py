@@ -61,9 +61,7 @@ The data is stored in the ``data`` group and the scan parameters are stored in t
 import os
 import re
 import sys
-import time
 import traceback
-from contextlib import contextmanager
 from pathlib import Path
 
 import h5py
@@ -143,36 +141,6 @@ def classify_ordered_geometry(geometry, rtol=1e-3):
 
 
 _FRAMES_RANGE_RE = re.compile(r"^\d+(-\d+)?$")
-
-
-# Lightweight profiling. Enable by setting the environment variable
-# ZEA_VERASONICS_PROFILE=1 (or true/yes). The flag is read at call time (not at
-# import time) so it works regardless of whether the environment variable is set
-# before or after this module is imported.
-def _profile_enabled():
-    return strtobool(os.environ.get("ZEA_VERASONICS_PROFILE", "0"))
-
-
-@contextmanager
-def _profile(label, store=None):
-    """Context manager that logs the wall-clock time of a labelled block.
-
-    Args:
-        label (str): Name of the stage being timed.
-        store (dict, optional): If given, the elapsed time is also recorded under
-            ``store[label]`` so callers can build a summary.
-    """
-    if not _profile_enabled():
-        yield
-        return
-    start = time.perf_counter()
-    try:
-        yield
-    finally:
-        elapsed = time.perf_counter() - start
-        if store is not None:
-            store[label] = store.get(label, 0.0) + elapsed
-        log.info(f"[profile] {label}: {elapsed:.3f} s")
 
 
 def estimate_lens_probe_params(
@@ -1605,6 +1573,49 @@ class VerasonicsFile(h5py.File):
         """If the data is captured in 'BS100BW' or 'BS50BW' mode (all buffers)."""
         return self.get_is_baseband_mode()
 
+    def _read_tgc_waveform(self, buffer_index=None):
+        """Read the raw ``TGC.Waveform`` samples for the selected buffer.
+
+        A single-TGC acquisition stores ``TGC.Waveform`` as a plain
+        ``(n_samples, 1)`` matrix. An acquisition with several TGC structs (e.g.
+        one per RF buffer) instead stores it as an array of HDF5 references, one
+        per TGC entry, and each ``Receive`` selects one via its 1-based ``TGC``
+        field. In that case the TGC waveform used by the selected buffer's
+        receives is returned.
+
+        Returns:
+            np.ndarray: 1-D array of the TGC control samples.
+        """
+        waveform_ds = self["TGC"]["Waveform"]
+        if not isinstance(waveform_ds.fillvalue, h5py.h5r.Reference):
+            # Single TGC struct: plain (n_samples, 1) matrix.
+            return np.asarray(waveform_ds[:])[:, 0]
+
+        # Multiple TGC structs: pick the one this buffer's receives reference.
+        n_tgc = self.get_reference_size(waveform_ds)
+        tgc_index = 0
+        if "TGC" in self["Receive"]:
+            if buffer_index is not None:
+                recv_idx = self.receive_indices_for_buffer(buffer_index)
+            else:
+                recv_idx = np.arange(self.get_reference_size(self["Receive"]["TGC"]))
+            tgc_values = np.unique(
+                np.round(self._read_scalar_field("Receive", "TGC")[recv_idx]).astype(int)
+            )
+            if tgc_values.size != 1:
+                log.warning(
+                    f"Receives for buffer_index={buffer_index} reference multiple TGC "
+                    f"waveforms {tgc_values.tolist()}; using the first."
+                )
+            tgc_index = int(tgc_values[0]) - 1  # Verasonics TGC numbers are 1-based
+        if tgc_index < 0 or tgc_index >= n_tgc:
+            log.warning(
+                f"TGC index {tgc_index} is out of range for {n_tgc} TGC waveform(s); "
+                "using the first."
+            )
+            tgc_index = 0
+        return np.asarray(self.dereference_index(waveform_ds, tgc_index)).reshape(-1)
+
     def get_tgc_gain_curve(self, buffer_index=None):
         """The TGC gain curve interpolated to the number of axial samples (n_ax,).
 
@@ -1615,7 +1626,7 @@ class VerasonicsFile(h5py.File):
                 ``None`` (default), all receive events are considered.
         """
 
-        gain_curve = self["TGC"]["Waveform"][:][:, 0]
+        gain_curve = self._read_tgc_waveform(buffer_index)
 
         # Normalize the gain_curve to [0, 40]dB
         gain_curve = gain_curve / 1023 * 40
@@ -1768,56 +1779,37 @@ class VerasonicsFile(h5py.File):
         if frames is None:
             frames = convert_config.get("frames", "all")
 
-        with _profile("  read_transmit_events (event loop over all events)"):
-            tx_order, rcv_order, time_to_next_transmit = self.read_transmit_events(
-                frames=frames, allow_accumulate=allow_accumulate, buffer_index=buffer_index
-            )
-        with _profile("  read_initial_times"):
-            initial_times = self.read_initial_times(rcv_order)
+        tx_order, rcv_order, time_to_next_transmit = self.read_transmit_events(
+            frames=frames, allow_accumulate=allow_accumulate, buffer_index=buffer_index
+        )
+        initial_times = self.read_initial_times(rcv_order)
 
         # Read both steering angles in a single pass. read_polar_angles and
         # read_azimuth_angles would each re-run the full per-transmit dereference
         # loop over TX.Steer; reading (theta, alpha) once and slicing halves it.
-        with _profile("  read_beamsteering_angles"):
-            beamsteering_angles = self.read_beamsteering_angles(tx_order)
-            polar_angles = beamsteering_angles[:, 0]
-            azimuth_angles = beamsteering_angles[:, 1]
-        with _profile("  read_t0_delays_apod"):
-            t0_delays, tx_apodizations = self.read_t0_delays_apod(tx_order)
-        with _profile("  read_focus_distances"):
-            focus_distances = self.read_focus_distances(tx_order)
-        with _profile("  read_transmit_origins"):
-            transmit_origins = self.read_transmit_origins(tx_order)
+        beamsteering_angles = self.read_beamsteering_angles(tx_order)
+        polar_angles = beamsteering_angles[:, 0]
+        azimuth_angles = beamsteering_angles[:, 1]
+        t0_delays, tx_apodizations = self.read_t0_delays_apod(tx_order)
+        focus_distances = self.read_focus_distances(tx_order)
+        transmit_origins = self.read_transmit_origins(tx_order)
 
-        with _profile("  read_waveforms"):
-            waveforms_one_way_list, waveforms_two_way_list = self.read_waveforms()
-        with _profile("  read_tx_waveform_indices"):
-            tx_waveform_indices = self.read_tx_waveform_indices(tx_order)
+        waveforms_one_way_list, waveforms_two_way_list = self.read_waveforms()
+        tx_waveform_indices = self.read_tx_waveform_indices(tx_order)
 
         # stack waveforms to (n_tx, n_samples) using the tx_waveform_indices
-        with _profile("  stack waveforms"):
-            waveforms_one_way = np.stack(
-                [waveforms_one_way_list[i] for i in tx_waveform_indices]
-            )
-            waveforms_two_way = np.stack(
-                [waveforms_two_way_list[i] for i in tx_waveform_indices]
-            )
+        waveforms_one_way = np.stack([waveforms_one_way_list[i] for i in tx_waveform_indices])
+        waveforms_two_way = np.stack([waveforms_two_way_list[i] for i in tx_waveform_indices])
 
-        with _profile("  read_center_frequencies"):
-            center_frequency = self.read_center_frequencies(tx_waveform_indices)
-        with _profile("  planewave_focal_distance_to_inf"):
-            focus_distances = self.planewave_focal_distance_to_inf(
-                focus_distances, t0_delays, tx_apodizations
-            )
+        center_frequency = self.read_center_frequencies(tx_waveform_indices)
+        focus_distances = self.planewave_focal_distance_to_inf(
+            focus_distances, t0_delays, tx_apodizations
+        )
 
-        with _profile("  get_sampling_frequency"):
-            sampling_frequency = self.get_sampling_frequency(buffer_index)
-        with _profile("  get_demodulation_frequency"):
-            demodulation_frequency = self.get_demodulation_frequency(buffer_index)
-        with _profile("  sound_speed"):
-            sound_speed = self.sound_speed
-        with _profile("  get_tgc_gain_curve"):
-            tgc_gain_curve = self.get_tgc_gain_curve(buffer_index)
+        sampling_frequency = self.get_sampling_frequency(buffer_index)
+        demodulation_frequency = self.get_demodulation_frequency(buffer_index)
+        sound_speed = self.sound_speed
+        tgc_gain_curve = self.get_tgc_gain_curve(buffer_index)
 
         return {
             "time_to_next_transmit": time_to_next_transmit,
@@ -1881,21 +1873,17 @@ class VerasonicsFile(h5py.File):
         if frames is None:
             frames = convert_config.get("frames", "all")
 
-        _timings = {}
+        scan_dict = self.read_scan(
+            frames=frames,
+            allow_accumulate=allow_accumulate,
+            buffer_index=buffer_index,
+        )
 
-        with _profile("read_scan (delays, apod, timing, geometry)", _timings):
-            scan_dict = self.read_scan(
-                frames=frames,
-                allow_accumulate=allow_accumulate,
-                buffer_index=buffer_index,
-            )
-
-        with _profile("read_raw_data (RF read + reshape)", _timings):
-            raw_data = self.read_raw_data(
-                frames=frames,
-                buffer_index=buffer_index,
-                first_frame_idx=convert_config.get("first_frame", None),
-            )
+        raw_data = self.read_raw_data(
+            frames=frames,
+            buffer_index=buffer_index,
+            first_frame_idx=convert_config.get("first_frame", None),
+        )
 
         custom_elements = []
 
@@ -2079,32 +2067,25 @@ class VerasonicsFile(h5py.File):
             "receives per buffer; set VerasonicsFile.CONSTANT_FIELD_CHECK_SAMPLES = 0 "
             "to check every receive exhaustively.)"
         )
-        _total_start = time.perf_counter()
-        with _profile("read_verasonics_file (TOTAL metadata + RF read)"):
-            data_dict, scan_dict, probe_dict, custom_elements = self.read_verasonics_file(
-                frames=frames,
-                allow_accumulate=allow_accumulate,
-                buffer_index=buffer_index,
-                additional_functions=additional_functions,
-                lens_sound_speed=lens_sound_speed,
-                image_buffer_index=image_buffer_index,
-            )
+        data_dict, scan_dict, probe_dict, custom_elements = self.read_verasonics_file(
+            frames=frames,
+            allow_accumulate=allow_accumulate,
+            buffer_index=buffer_index,
+            additional_functions=additional_functions,
+            lens_sound_speed=lens_sound_speed,
+            image_buffer_index=image_buffer_index,
+        )
 
         # Generate the zea dataset
         log.info("Generating zea dataset...")
-        with _profile("File.create (HDF5 write)"):
-            File.create(
-                path=output_path,
-                data=data_dict,
-                scan=scan_dict,
-                probe=probe_dict,
-                description="Verasonics data",
-                custom=custom_elements,
-            )
-        if _profile_enabled():
-            log.info(
-                f"[profile] to_zea TOTAL: {time.perf_counter() - _total_start:.3f} s"
-            )
+        File.create(
+            path=output_path,
+            data=data_dict,
+            scan=scan_dict,
+            probe=probe_dict,
+            description="Verasonics data",
+            custom=custom_elements,
+        )
 
     def to_zea_all(
         self,
