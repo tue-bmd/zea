@@ -118,6 +118,9 @@ class HFPath(PurePosixPath):
     """A path-like object that preserves the hf:// scheme and mimics Path API."""
 
     _scheme = HF_PREFIX
+    # Set in ``__new__``; declared here because ``PurePath`` is slotted and does not
+    # declare it, so the assignment alone gives the type checker nothing to bind to.
+    _needs_scheme: bool
 
     @classmethod
     def _join_without_scheme(cls, args):
