@@ -19,6 +19,14 @@ Pipeline
 
     notebooks/pipeline
 
+Inversion
+---------
+
+.. toctree::
+    :maxdepth: 2
+
+    notebooks/inverse
+
 Models
 ------
 

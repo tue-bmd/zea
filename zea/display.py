@@ -21,7 +21,7 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
         pillow (bool, optional): Whether to return PIL image. Defaults to True.
 
     Returns:
-        image (ndarray): Output 8 bit image(s) [0, 255].
+        ndarray: Output 8 bit image(s) [0, 255].
 
     .. note::
         If dynamic_range is None, it is assumed that the input image is already in the range

@@ -64,6 +64,7 @@ def simulate_rf(
     element_width,
     attenuation_coef,
     tx_apodizations,
+    pulse_spectrum_fn=None,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -86,6 +87,14 @@ def simulate_rf(
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
         tx_apodizations (array-like): The apodizations of the transmitting elements of
             shape (n_tx, n_el).
+        pulse_spectrum_fn (callable, optional): Function mapping frequencies
+            [Hz] to the (complex) transmit-pulse spectrum. Defaults to
+            ``None``, which uses a parametric Hann-windowed sine of four
+            periods at ``center_frequency``
+            (:func:`get_pulse_spectrum_fn`). Pass
+            :func:`get_measured_pulse_spectrum_fn` of a stored scan waveform
+            (e.g. ``parameters.waveforms_two_way[0]``) to simulate with the
+            measured pulse instead.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -114,7 +123,8 @@ def simulate_rf(
             ) from exc
         element_width = pitch * 0.9  # 90% of the pitch
 
-    pulse_spectrum_fn = get_pulse_spectrum_fn(center_frequency, n_period=4)
+    if pulse_spectrum_fn is None:
+        pulse_spectrum_fn = get_pulse_spectrum_fn(center_frequency, n_period=4)
 
     if not apply_lens_correction:
         dist = ops.linalg.norm(probe_geometry[None] - scatterer_positions[:, None], axis=-1)
@@ -315,6 +325,48 @@ def get_pulse_spectrum_fn(center_frequency, n_period=3.0):
         return ops.array(1 / 2, "complex64") * ops.cast(
             (hann_fd(f - center_frequency, period) + hann_fd(f + center_frequency, period)),
             "complex64",
+        )
+
+    return spectrum_fn
+
+
+def get_measured_pulse_spectrum_fn(waveform, sampling_frequency):
+    """Builds a spectrum function for a sampled (measured) waveform.
+
+    Evaluates the discrete-time Fourier transform of ``waveform`` at arbitrary
+    frequencies, so :func:`simulate_rf` can be driven by the waveforms stored
+    with a scan (e.g. ``parameters.waveforms_two_way``) instead of a
+    parametric pulse — which matters when simulated data is compared against,
+    or inverted from, real acquisitions.
+
+    The first sample of ``waveform`` is time zero, matching the convention of
+    :class:`zea.inverse.ScattererSimulator`: the pulse's time-to-peak is not
+    removed here, and the beamformer accounts for it separately via
+    ``t_peak``.
+
+    Args:
+        waveform (array-like): Sampled pulse of shape ``(n_samples,)``.
+        sampling_frequency (float): Sampling frequency of ``waveform`` in Hz
+            (``250e6`` for waveforms stored in zea files).
+
+    Returns:
+        spectrum_fn (callable): A function that computes the (complex)
+        spectrum of the pulse for the input frequencies in Hz.
+    """
+    waveform = ops.cast(ops.convert_to_tensor(waveform), "float32")
+    dt = 1.0 / sampling_frequency
+    times = ops.arange(int(waveform.shape[0]), dtype="float32") * dt
+
+    def spectrum_fn(f):
+        f = ops.cast(ops.convert_to_tensor(f), "float32")
+        shape = ops.shape(f)
+        phase = -2.0 * np.pi * ops.reshape(f, (-1,))[:, None] * times[None, :]
+        real = dt * ops.sum(waveform * ops.cos(phase), axis=-1)
+        imag = dt * ops.sum(waveform * ops.sin(phase), axis=-1)
+        return ops.reshape(
+            ops.cast(real, "complex64")
+            + ops.array(1j, dtype="complex64") * ops.cast(imag, "complex64"),
+            shape,
         )
 
     return spectrum_fn

@@ -143,20 +143,30 @@ def legacy_scan(scan_parameters: dict):
     scan_parameters.pop("n_frames", None)
     scan_parameters.pop("bandwidth_percent", None)
     scan_parameters.pop("element_width", None)
+    # Legacy jaxus-style files store lens parameters in the scan group; the
+    # current format keeps them with the probe, so drop them here.
+    scan_parameters.pop("lens_correction", None)
+    scan_parameters.pop("lens_thickness", None)
+    scan_parameters.pop("lens_sound_speed", None)
     tx_waveform_indices = scan_parameters.pop("tx_waveform_indices", None)
+    if tx_waveform_indices is not None:
+        # Legacy files may store the indices as floats; casting keeps them usable
+        # as list indices below.
+        tx_waveform_indices = np.asarray(tx_waveform_indices).astype(int)
 
-    if "waveforms_one_way" in scan_parameters:
+    # Without tx_waveform_indices (files that already store one waveform per
+    # transmit) the waveforms are kept as-is.
+    if "waveforms_one_way" in scan_parameters and tx_waveform_indices is not None:
         waveforms_one_way_list = scan_parameters["waveforms_one_way"]
         scan_parameters["waveforms_one_way"] = np.stack(
             [waveforms_one_way_list[i] for i in tx_waveform_indices]
         )
 
-    if "waveforms_two_way" in scan_parameters:
+    if "waveforms_two_way" in scan_parameters and tx_waveform_indices is not None:
         waveforms_two_way_list = scan_parameters["waveforms_two_way"]
         scan_parameters["waveforms_two_way"] = np.stack(
             [waveforms_two_way_list[i] for i in tx_waveform_indices]
         )
-        np.stack([waveforms_one_way_list[i] for i in tx_waveform_indices])
 
     if "demodulation_frequency" not in scan_parameters:
         if "center_frequency" in scan_parameters:

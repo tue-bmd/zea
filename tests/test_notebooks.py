@@ -92,6 +92,21 @@ NOTEBOOK_PARAMETERS = {
         "num_iterations": 2,
         "step_size": 1,
     },
+    "fish_example.ipynb": {
+        "n_plane_waves": 3,
+        "n_speckle": 1500,
+        "n_scatterers": 800,
+        "n_iter_direct": 5,
+        "n_iter_scatterers": 5,
+    },
+    "cirs_example.ipynb": {
+        "n_iter": 3,
+        "n_scatterers": 2000,
+    },
+    "carotid_example.ipynb": {
+        # Skip on CI: 411 MB download + a long inversion
+        "run_inversion": False,
+    },
     "nuclear_dehazing_example.ipynb": {
         "n_unconditional_samples": 1,
         "n_unconditional_steps": 2,

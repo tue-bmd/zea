@@ -41,11 +41,21 @@ class Simulate(Operation):
     STATIC_PARAMS = ["n_ax", "apply_lens_correction"]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
-    def __init__(self, **kwargs):
+    def __init__(self, pulse_spectrum_fn=None, **kwargs):
+        """
+        Args:
+            pulse_spectrum_fn (callable, optional): Function mapping
+                frequencies [Hz] to the (complex) transmit-pulse spectrum,
+                see :func:`zea.simulator.simulate_rf`. Defaults to ``None``
+                (parametric Hann-windowed sine); use
+                :func:`zea.simulator.get_measured_pulse_spectrum_fn` to
+                simulate with a scan's stored waveform.
+        """
         super().__init__(
             output_data_type=DataTypes.RAW_DATA,
             **kwargs,
         )
+        self.pulse_spectrum_fn = pulse_spectrum_fn
 
     def call(
         self,
@@ -80,6 +90,7 @@ class Simulate(Operation):
             "element_width": element_width,
             "attenuation_coef": attenuation_coef,
             "tx_apodizations": tx_apodizations,
+            "pulse_spectrum_fn": self.pulse_spectrum_fn,
         }
         if not self.with_batch_dim:
             simulated_rf = simulate_rf(
@@ -120,12 +131,21 @@ class TOFCorrection(Operation):
     # Define operation-specific static parameters
     STATIC_PARAMS = ["f_number", "apply_lens_correction", "focal_region_length"]
 
-    def __init__(self, **kwargs):
+    def __init__(self, fnum_window_fn=None, **kwargs):
+        """
+        Args:
+            fnum_window_fn (callable, optional): Window function applied to the
+                f-number mask, mapping a normalized angle to a weight (see
+                :func:`zea.beamform.beamformer.fnumber_mask`). Defaults to
+                ``None``, which uses the :func:`tof_correction` default
+                (:func:`zea.beamform.beamformer.fnum_window_fn_rect`).
+        """
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
             **kwargs,
         )
+        self.fnum_window_fn = fnum_window_fn
 
     def call(
         self,
@@ -208,6 +228,8 @@ class TOFCorrection(Operation):
             "sos_grid_z": sos_grid_z,
             "focal_region_length": focal_region_length,
         }
+        if self.fnum_window_fn is not None:
+            tof_kwargs["fnum_window_fn"] = self.fnum_window_fn
 
         if not self.with_batch_dim:
             tof_corrected = tof_correction(raw_data, **tof_kwargs)

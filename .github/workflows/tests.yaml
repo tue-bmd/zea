@@ -303,6 +303,9 @@ jobs:
           - name: pipeline
             dirs: pipeline
             label: pipeline
+          - name: inverse
+            dirs: inverse
+            label: inverse
           - name: data-metrics
             dirs: "data metrics"
             label: data+metrics
