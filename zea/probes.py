@@ -214,20 +214,48 @@ def fit_curved_probe_radius(probe_geometry) -> float:
     same centre of curvature.
 
     Elements are assumed to lie on an arc of radius R centred at ``(0, 0, -R)`` (apex at
-    the origin, zea's curved-probe convention), so ``x^2 + (z + R)^2 = R^2``  =>
-    ``x^2 + z^2 + 2 R z = 0``. Solved as a least-squares fit over all elements rather
-    than per-element, which is ill-conditioned for the elements nearest the apex
-    (``z -> 0``).
+    the origin, zea's curved-probe convention -- see :func:`create_curved_probe_geometry`),
+    so ``x^2 + (z + R)^2 = R^2``  =>  ``x^2 + z^2 + 2 R z = 0``. Solved as a least-squares
+    fit over all elements rather than per-element, which is ill-conditioned for the
+    elements nearest the apex (``z -> 0``).
 
     Args:
-        probe_geometry (np.ndarray): Element positions, shape (n_el, 3).
+        probe_geometry (np.ndarray): Element positions, shape (n_el, 3), in zea's
+            apex-at-origin curved-probe frame. Re-centre first if ``probe_geometry``
+            uses a different origin.
 
     Returns:
         float: Fitted radius of curvature in metres.
+
+    Raises:
+        ValueError: If ``probe_geometry`` is empty, flat (no curvature to fit), or
+            laterally off-centre (mean ``x`` far from 0) -- the latter means it isn't in
+            the apex-at-origin frame this function assumes, and the fit would silently
+            be wrong (a shifted arc still "fits" a circle, just the wrong one).
     """
+    if len(probe_geometry) == 0:
+        raise ValueError("Cannot fit a radius of curvature: probe_geometry is empty.")
+
     x = probe_geometry[:, 0].astype(np.float64)
     z = probe_geometry[:, 2].astype(np.float64)
-    return float(-np.sum(z * (x**2 + z**2)) / (2.0 * np.sum(z**2)))
+    denom = 2.0 * np.sum(z**2)
+    if np.isclose(denom, 0.0):
+        raise ValueError(
+            "Cannot fit a radius of curvature: all elements have z = 0 "
+            "(a flat/linear array has no curvature)."
+        )
+
+    aperture = float(x.max() - x.min())
+    if abs(x.mean()) > 0.02 * aperture:
+        raise ValueError(
+            f"Cannot fit a radius of curvature: probe_geometry is not centred on x = 0 "
+            f"(mean x = {x.mean() * 1e3:.2f} mm, aperture = {aperture * 1e3:.2f} mm). "
+            "fit_curved_probe_radius assumes zea's apex-at-origin curved-probe convention "
+            "(see create_curved_probe_geometry) -- re-centre probe_geometry to that frame "
+            "first if it uses a different origin."
+        )
+
+    return float(-np.sum(z * (x**2 + z**2)) / denom)
 
 
 class Probe(ProbeSpec):

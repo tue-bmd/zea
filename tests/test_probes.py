@@ -144,6 +144,33 @@ def test_verasonics_c5_2v_curved_probe():
     assert np.allclose(pg, regenerated)
 
 
+def test_fit_curved_probe_radius():
+    """fit_curved_probe_radius is the inverse of create_curved_probe_geometry."""
+    from zea.probes import create_curved_probe_geometry, fit_curved_probe_radius
+
+    radius = 49.57e-3
+    pg = create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=radius)
+    assert fit_curved_probe_radius(pg) == pytest.approx(radius, rel=1e-6)
+
+
+def test_fit_curved_probe_radius_errors():
+    """fit_curved_probe_radius raises on empty, flat, or off-frame geometry."""
+    from zea.probes import create_curved_probe_geometry, fit_curved_probe_radius
+
+    with pytest.raises(ValueError, match="probe_geometry is empty"):
+        fit_curved_probe_radius(np.zeros((0, 3), dtype=np.float32))
+
+    flat = np.zeros((64, 3), dtype=np.float32)
+    flat[:, 0] = np.arange(64) * 0.3e-3
+    with pytest.raises(ValueError, match="flat/linear array"):
+        fit_curved_probe_radius(flat)
+
+    pg = create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=49.57e-3)
+    pg[:, 0] += 20e-3  # translate off zea's apex-at-origin frame
+    with pytest.raises(ValueError, match="not centred on x = 0"):
+        fit_curved_probe_radius(pg)
+
+
 def test_verasonics_p4_2v_phased_probe():
     """The P4-2v built-in is a 64-element flat phased array."""
     probe = Probe.from_name("verasonics_p4_2v")
