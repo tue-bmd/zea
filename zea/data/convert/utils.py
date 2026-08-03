@@ -440,14 +440,17 @@ def upload_dataset_to_hf(  # pragma: no cover
             uploaded.  Use this to scope an upload to specific files.
         yes: Skip the interactive confirmation prompts and create the revision
             branch without asking.  For unattended batch migrations; leave at
-            ``False`` for interactive use.
+            ``False`` for interactive use.  Requires an already configured
+            Hugging Face token (``HF_TOKEN`` or ``hf auth login``).
 
     Raises:
         ValueError: If *revision* is ``"main"``.
         FileNotFoundError: If no files matching *file_glob* are found
             under *folder*.
+        RuntimeError: If *yes* is ``True`` but no Hugging Face token is
+            configured.
     """
-    from huggingface_hub import HfApi, login
+    from huggingface_hub import HfApi, get_token, login
 
     if revision == "main":
         raise ValueError(
@@ -484,8 +487,19 @@ def upload_dataset_to_hf(  # pragma: no cover
             log.info("Upload cancelled.")
             return
 
-    login()
-    api = HfApi()
+    # With no token, login() drops into an interactive token prompt, which would hang
+    # the unattended run that yes=True exists for. Demand the token up front instead.
+    token = get_token() if yes else None
+    if yes:
+        if token is None:
+            raise RuntimeError(
+                "yes=True requires a Hugging Face token to be configured already: "
+                "set HF_TOKEN or run `hf auth login` before an unattended upload."
+            )
+    else:
+        login()
+
+    api = HfApi(token=token)
 
     # Check if the revision (branch) exists; if not, prompt to create it.
     try:

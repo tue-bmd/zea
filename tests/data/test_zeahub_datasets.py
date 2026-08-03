@@ -40,14 +40,10 @@ DATASETS = {
 
 SIZE_TOLERANCE = 0.25
 
+# Auth, rate limiting and server-side failures say nothing about the datasets.
+_INFRA_STATUS_CODES = frozenset({401, 403, 429, 500, 502, 503, 504})
+
 _INFRA_ERRORS = (
-    "401",
-    "403",
-    "429",
-    "500",
-    "502",
-    "503",
-    "504",
     "connection",
     "timeout",
     "timed out",
@@ -59,6 +55,10 @@ _INFRA_ERRORS = (
 
 def _parse(version) -> tuple[int, ...]:
     """Numeric prefix of a version string: ``'0.1.0a1'`` -> ``(0, 1, 0)``."""
+    if isinstance(version, (bytes, bytearray)):
+        # h5py hands back fixed-length string attributes as bytes; str() on those
+        # would yield "b'0.1.4'" and parse to nonsense.
+        version = version.decode("utf-8", "replace")
     parts = []
     for piece in str(version).split(".")[:3]:
         digits = ""
@@ -66,12 +66,16 @@ def _parse(version) -> tuple[int, ...]:
             if not char.isdigit():
                 break
             digits += char
-        if digits:
-            parts.append(int(digits))
+        if not digits:
+            break  # stop, rather than skip, so the remaining parts stay aligned
+        parts.append(int(digits))
     return tuple(parts)
 
 
 def _is_infrastructure_error(exc: Exception) -> bool:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status in _INFRA_STATUS_CODES:
+        return True
     text = f"{type(exc).__name__} {exc}".lower()
     return any(marker in text for marker in _INFRA_ERRORS)
 
@@ -91,7 +95,7 @@ def test_published_dataset_is_healthy(repo_id, expected):
         entries = [
             entry
             for entry in api.list_repo_tree(repo_id, recursive=True, repo_type="dataset")
-            if hasattr(entry, "blob_id")
+            if isinstance(entry, huggingface_hub.RepoFile)
         ]
         hdf5 = [e for e in entries if e.path.endswith((".hdf5", ".h5"))]
         total_gb = sum(e.size or 0 for e in entries) / 1e9
