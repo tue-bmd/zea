@@ -10,6 +10,7 @@ See the following dropdown for a list of available models:
     - :class:`zea.models.carotid_segmenter.CarotidSegmenter`: A model for carotid artery segmentation.
     - :class:`zea.models.echonetlvh.EchoNetLVH`: A model for left ventricle hypertrophy segmentation.
     - :class:`zea.models.unet.UNet`: A simple U-Net implementation.
+    - :class:`zea.models.lista.LISTA`: An unfolded convolutional ISTA (LISTA) model.
     - :class:`zea.models.lpips.LPIPS`: A model implementing the perceptual similarity metric.
     - :class:`zea.models.taesd.TinyAutoencoder`: A tiny autoencoder model for image compression.
     - :class:`zea.models.regional_quality.MobileNetv2RegionalQuality`: A scoring model for myocardial regions in apical views.
@@ -87,6 +88,7 @@ from . import (
     gmm,
     hvae,
     layers,
+    lista,
     lpips,
     lv_segmentation,
     presets,
