@@ -45,6 +45,7 @@ import numpy as np
 from keras import ops
 
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
+from zea.func.ultrasound import directivity
 
 
 def simulate_rf(
@@ -217,34 +218,6 @@ def simulate_rf(
     rf_data = rf_data[..., None]
     rf_data = rf_data[:, :n_ax, :, :]
     return rf_data
-
-
-def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
-    """Computes the directivity of a single element.
-
-    Args:
-        f (array-like): The input frequencies [Hz].
-        theta (array-like): The angles [rad].
-        element_width (float): The width of the element [m].
-        sound_speed (float): The speed of sound [m/s].
-        rigid_baffle (bool): Whether the element is mounted on a rigid baffle,
-            impacting the directivity.
-
-    Returns:
-        array-like: The directivity of the element.
-    """
-
-    if element_width is None:
-        response = ops.ones_like(theta)
-        return response
-
-    # element_width / wavelength == element_width * f / sound_speed. Using the
-    # latter avoids dividing by f, so the DC bin (f == 0) stays finite: the
-    # argument is 0 and sinc(0) == 1 (isotropic directivity), the correct limit.
-    response = ops.sinc(element_width * f / sound_speed * ops.sin(theta))
-    if not rigid_baffle:
-        response *= ops.cos(theta)
-    return response
 
 
 def delay2(f, tau, n_fft, sampling_frequency):
