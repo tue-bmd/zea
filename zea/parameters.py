@@ -573,11 +573,10 @@ class Parameters(BaseParameters):
         """
         xlims = (self.grid[..., 0].min(), self.grid[..., 0].max())
         ylims = (self.grid[..., 1].min(), self.grid[..., 1].max())
+        # self.grid is already apex-relative (z = 0 at the apex) for polar grids by
+        # construction (polar_pixel_grid's ray origins sit at -distance_to_apex), so no
+        # further shift is needed here.
         zlims = (self.grid[..., 2].min(), self.grid[..., 2].max())
-
-        # For polar grids, adjust zlims to account for distance to apex
-        if self.grid_type == "polar":
-            zlims = (zlims[0] + self.distance_to_apex, zlims[1])
 
         return np.array(
             [
@@ -995,7 +994,9 @@ class Parameters(BaseParameters):
     @cache_with_dependencies("zlims", "distance_to_apex")
     def rho_range(self):
         """A tuple specifying the range of rho values (min_rho, max_rho). Defined in mm.
-        Used for scan conversion."""
+        Used for scan conversion. Matches :func:`~zea.beamform.pixelgrid.polar_pixel_grid`'s
+        ``rlims`` convention: ``zlims[0]`` is already a true rho (only ``zlims[1]`` gets
+        ``distance_to_apex`` added here)."""
         value = self._params.get("rho_range")
         if value is None:
             return (self.zlims[0], self.zlims[1] + self.distance_to_apex)
@@ -1025,7 +1026,6 @@ class Parameters(BaseParameters):
             self.rho_range,
             self.theta_range,
             self.resolution,
-            distance_to_apex=self.distance_to_apex,
         )
         return coords
 

@@ -166,7 +166,12 @@ def polar_pixel_grid(
 
     Args:
         polar_limits (tuple): Polar limits of pixel grid ([polar_min, polar_max])
-        zlims (tuple): Depth limits of pixel grid ([zmin, zmax])
+        zlims (tuple): Depth limits of pixel grid ([zmin, zmax]). ``zlims[0]`` is a
+            true radius from the centre of curvature (i.e. already includes
+            ``distance_to_apex`` if nonzero); ``zlims[1]`` is apex-relative and gets
+            ``distance_to_apex`` added here. (Asymmetric on purpose -- matches
+            :attr:`~zea.Parameters.rho_range`; see ``Parameters.coordinates_2d`` for
+            why scan conversion must not re-apply ``distance_to_apex`` on top of this.)
         num_radial_pixels (int, optional): Number of depth pixels.
         num_polar_pixels (int, optional): Number of polar pixels.
         distance_to_apex (float, optional): Distance from transducer to apex of pixel grid.

@@ -204,6 +204,32 @@ def create_curved_probe_geometry(n_el, pitch, radius):
     return probe_geometry
 
 
+def fit_curved_probe_radius(probe_geometry) -> float:
+    """Recover a curved probe's radius of curvature from its element positions.
+
+    Inverse of :func:`create_curved_probe_geometry`, for curved probes whose geometry
+    is only known from ``probe_geometry`` (e.g. read from a converted file) rather than
+    built from an explicit radius. Also serves as the polar beamforming/scan-conversion
+    grid's ``distance_to_apex`` (see :class:`~zea.Parameters`), since both describe the
+    same centre of curvature.
+
+    Elements are assumed to lie on an arc of radius R centred at ``(0, 0, -R)`` (apex at
+    the origin, zea's curved-probe convention), so ``x^2 + (z + R)^2 = R^2``  =>
+    ``x^2 + z^2 + 2 R z = 0``. Solved as a least-squares fit over all elements rather
+    than per-element, which is ill-conditioned for the elements nearest the apex
+    (``z -> 0``).
+
+    Args:
+        probe_geometry (np.ndarray): Element positions, shape (n_el, 3).
+
+    Returns:
+        float: Fitted radius of curvature in metres.
+    """
+    x = probe_geometry[:, 0].astype(np.float64)
+    z = probe_geometry[:, 2].astype(np.float64)
+    return float(-np.sum(z * (x**2 + z**2)) / (2.0 * np.sum(z**2)))
+
+
 class Probe(ProbeSpec):
     """Probe class which is a container for ultrasound transducer parameters.
 
