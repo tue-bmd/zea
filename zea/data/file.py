@@ -1485,9 +1485,10 @@ class File(h5py.File):
                 ``image`` without ``n_tx`` is chunked on ``n_frames`` only). Set to a
                 single axis (e.g. ``("n_frames",)``) for one full frame per chunk, or
                 to ``None``/``()`` for contiguous storage (use with
-                ``compression=None``). Small arrays (scan parameters, probe geometry,
-                probe pose) are stored as one chunk regardless, since they are read
-                whole. See :meth:`zea.data.spec.Spec._resolve_chunks`.
+                ``compression=None``), which stores every field contiguously. As long as
+                chunking is on, small arrays (scan parameters, probe geometry, probe
+                pose) are stored as one chunk whatever the axes given, since they are
+                read whole. See :meth:`zea.data.spec.Spec._resolve_chunks`.
             overwrite: If *False* (default), raise if the file exists.
             ignore_warnings: If *True*, suppress all warnings emitted while
                 creating the file (missing optional metadata fields, custom keys,

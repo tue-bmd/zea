@@ -560,7 +560,8 @@ class Spec:
         never a chunk axis, so those arrays stay whole too.
 
         Returns ``None`` (contiguous / h5py default) only when ``chunk_axes`` is empty
-        or ``None``, the value is not an array, or it is empty.
+        or ``None``, the value is not an array, it is empty, or every resolved axis is a
+        chunk axis — the latter would mean scalar-sized chunks, so h5py decides instead.
         """
         if not chunk_axes or not isinstance(value, np.ndarray) or value.size == 0:
             return None
