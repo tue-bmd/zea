@@ -25,12 +25,8 @@ from keras import ops
 
 from zea.backend import jit
 from zea.func.tensor import vmap
+from zea.func.ultrasound import directivity
 from zea.internal.cache import cache_output
-
-
-def _unnormalized_sinc(x):
-    """``sin(x) / x``. ``keras.ops.sinc`` is the normalized ``sin(pi x) / (pi x)``."""
-    return ops.sinc(x / np.pi)
 
 
 @cache_output(verbose=True)
@@ -125,7 +121,6 @@ def compute_pfield(
 
     # pulse params
     num_waveforms = 1  # number of waveforms in the pulse
-    center_wavenumber = 2 * np.pi * center_frequency / sound_speed
 
     # array params
     pitch = ops.abs(probe_geometry[1, 0] - probe_geometry[0, 0])  # element pitch
@@ -176,7 +171,12 @@ def compute_pfield(
     # the point and the transducer
     epsilon = keras.config.epsilon()
     theta = ops.arcsin(ops.clip(delta_x / distance, -1.0, 1.0)) - element_theta
-    sin_theta = ops.sin(theta)
+
+    # Directivity of a sub-element. Frequency-independent, so it is computed once here
+    # rather than inside the (batched, per-frequency) loop below.
+    sub_element_directivity = ops.cast(
+        directivity(center_frequency, theta, seg_length, sound_speed), "complex64"
+    )
 
     # Clamp distance from below at λ/2; the 1/sqrt(r) Green's function is singular
     # below this scale and the far-field approximation breaks down there.
@@ -184,23 +184,25 @@ def compute_pfield(
     distance = ops.maximum(distance, min_distance)
 
     pulse_width = num_waveforms / center_frequency  # temporal pulse width
-    center_angular_freq = 2 * np.pi * center_frequency
 
-    def pulse_spectrum(w):
-        imag = _unnormalized_sinc(pulse_width * (w - center_angular_freq) / 2) - _unnormalized_sinc(
-            pulse_width * (w + center_angular_freq) / 2
+    # Both spectra are written in ordinary frequency (Hz) rather than angular frequency:
+    # the sinc arguments then carry no factors of pi, since keras.ops.sinc is the
+    # normalized sin(pi x) / (pi x).
+    def pulse_spectrum(f):
+        imag = ops.sinc(pulse_width * (f - center_frequency)) - ops.sinc(
+            pulse_width * (f + center_frequency)
         )
         return 1j * ops.cast(imag, "complex64")
 
     # FREQUENCY RESPONSE of the ensemble PZT + probe
-    w_bandwidth = probe_bandwidth_percent * center_angular_freq / 100  # angular frequency bandwidth
-    p_shape = ops.log(126) / ops.log(epsilon + 2 * center_angular_freq / w_bandwidth)
+    bandwidth = probe_bandwidth_percent * center_frequency / 100  # bandwidth in Hz
+    p_shape = ops.log(126) / ops.log(epsilon + 2 * center_frequency / bandwidth)
 
-    def probe_spectrum(w):
+    def probe_spectrum(f):
         # Calculate the normalized frequency difference
-        freq_diff = ops.abs(w - center_angular_freq)
+        freq_diff = ops.abs(f - center_frequency)
         # Calculate the denominator for normalization
-        denom = (w_bandwidth / 2) / (ops.log(2) ** (1 / p_shape))
+        denom = (bandwidth / 2) / (ops.log(2) ** (1 / p_shape))
         # Raise the normalized difference to the power of p_shape
         exponent = (freq_diff / denom) ** p_shape
         # Apply the negative sign and exponential
@@ -224,16 +226,14 @@ def compute_pfield(
     freq = ops.arange(0, num_freq, dtype="float32") * freq_step
 
     # keep the significant components only by using db_thresh
-    spectrum = ops.abs(
-        pulse_spectrum(2 * np.pi * freq) * ops.cast(probe_spectrum(2 * np.pi * freq), "complex64")
-    )
+    spectrum = ops.abs(pulse_spectrum(freq) * ops.cast(probe_spectrum(freq), "complex64"))
     gain_db = 20 * ops.log10(keras.config.epsilon() + spectrum / (ops.max(spectrum)))
     idx = gain_db > db_thresh
 
     freq = freq[idx]
 
-    pulse_spect = pulse_spectrum(2 * np.pi * freq)
-    probe_spect = probe_spectrum(2 * np.pi * freq)
+    pulse_spect = pulse_spectrum(freq)
+    probe_spect = probe_spectrum(freq)
 
     # Exponential arrays of size [numel(x) n_el num_sub_elements]
     wavenumber = 2 * np.pi * freq[0] / sound_speed
@@ -247,7 +247,7 @@ def compute_pfield(
     attenuation_wavenumber_step = ops.cast(attenuation_wavenumber_step, dtype="complex64")
 
     @jit
-    def _pfield_freq_loop(distance, sin_theta):
+    def _pfield_freq_loop(distance, sub_element_directivity):
         """Calculates the pressure field using frequency loop method.
 
         Returns:
@@ -266,8 +266,7 @@ def compute_pfield(
         exp_arr = exp_arr / ops.sqrt(distance_complex)
         exp_arr = exp_arr * ops.cast(ops.sqrt(min_distance), "complex64")
 
-        directivity = _unnormalized_sinc(center_wavenumber * seg_length / 2 * sin_theta)
-        exp_arr = exp_arr * ops.cast(directivity, "complex64")
+        exp_arr = exp_arr * sub_element_directivity
 
         monochromatic_pressure = exp_arr / exp_freq_step
 
@@ -301,7 +300,9 @@ def compute_pfield(
         batch_size=point_batch_size,
     )
 
-    pressure_squared = _pfield_freq_loop_mapped(distance, sin_theta)  # shape (num_points, n_tx)
+    pressure_squared = _pfield_freq_loop_mapped(
+        distance, sub_element_directivity
+    )  # shape (num_points, n_tx)
 
     # Zero out pressure behind the transducer (z < 0)
     pressure_squared = ops.where(grid_z[:, None] < 0, 0, pressure_squared)
