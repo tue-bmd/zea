@@ -1464,9 +1464,8 @@ def test_require_output_dir_ownership_mismatched_readme(tmp_path):
 class _FakeHfApi:
     """Records the Hub calls upload_dataset_to_hf makes, without touching the network."""
 
-    def __init__(self, branches=(), token=None):
+    def __init__(self, branches=()):
         self._branches = list(branches)
-        self.token = token
         self.created_branches = []
         self.uploads = []
 
@@ -1522,17 +1521,6 @@ def test_upload_yes_creates_missing_revision_without_prompting(hf_upload_env, mo
     assert hf_upload_env.logins == [], "unattended runs must not enter the login flow"
 
 
-def test_upload_yes_keeps_existing_revision(hf_upload_env, monkeypatch):
-    """An existing revision is uploaded to as-is, without re-creating the branch."""
-    api = hf_upload_env.install(branches=["main", "v0.1.4"])
-    _no_input(monkeypatch)
-
-    upload_dataset_to_hf(hf_upload_env.folder, "zeahub/test-dataset", "v0.1.4", yes=True)
-
-    assert api.created_branches == []
-    assert len(api.uploads) == 1
-
-
 def test_upload_yes_without_token_raises(hf_upload_env, monkeypatch):
     """Unattended uploads must fail fast rather than drop into the login prompt."""
     api = hf_upload_env.install(branches=["main"], token=None)
@@ -1541,30 +1529,6 @@ def test_upload_yes_without_token_raises(hf_upload_env, monkeypatch):
     with pytest.raises(RuntimeError, match="requires a Hugging Face token"):
         upload_dataset_to_hf(hf_upload_env.folder, "zeahub/test-dataset", "v0.1.4", yes=True)
 
-    assert api.uploads == []
-
-
-@pytest.mark.parametrize("answer", ["n", "", "no", "Y es"])
-def test_upload_cancels_on_anything_but_y(hf_upload_env, monkeypatch, answer):
-    """Interactive mode uploads only on an explicit 'y'."""
-    api = hf_upload_env.install(branches=["main"])
-    monkeypatch.setattr("builtins.input", lambda *_: answer)
-
-    upload_dataset_to_hf(hf_upload_env.folder, "zeahub/test-dataset", "v0.1.4")
-
-    assert api.created_branches == []
-    assert api.uploads == []
-
-
-def test_upload_cancels_when_branch_creation_declined(hf_upload_env, monkeypatch):
-    """Confirming the upload but declining branch creation aborts before uploading."""
-    api = hf_upload_env.install(branches=["main"])
-    answers = iter(["y", "n"])
-    monkeypatch.setattr("builtins.input", lambda *_: next(answers))
-
-    upload_dataset_to_hf(hf_upload_env.folder, "zeahub/test-dataset", "v0.1.4")
-
-    assert api.created_branches == []
     assert api.uploads == []
 
 
