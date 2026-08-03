@@ -77,6 +77,13 @@ def _masked_pixels(image, roi=None, minimum=2):
     """Mask out the pixels a transform may not use: unmeasured, or outside ``roi`` if given."""
     mask = np.isfinite(image) & (image > DEAD_PIXEL_DB)
     if roi is not None:
+        # Without this, a mask of a broadcastable shape (a row, a column) selects pixels
+        # nobody asked for rather than failing.
+        if roi.shape != image.shape:
+            raise ValueError(
+                f"roi shape {roi.shape} does not match the shape {image.shape} of the image "
+                "it selects in; an roi has to index both the image and the reference."
+            )
         mask &= roi
     pixels = image[mask].astype(np.float64)
     if pixels.size < minimum:
@@ -148,13 +155,21 @@ def _end_slopes(xs, ys, frac=0.125, max_ratio=4.0):
     )
 
 
-def _monotone_map(image, xs, ys):
-    """Monotone interpolation through the knots, one per bin, extended linearly at the ends."""
+def _monotone_map(image, xs, ys, spline=True):
+    """Monotone interpolation through the knots, one per bin, extended linearly at the ends.
+
+    A spline shapes the mapping *between* the knots, which is what a bin pooling many pixels
+    into one knot leaves undetermined. At one knot per pixel (``spline=False``) there is no
+    such gap to shape, so the knots are joined by straight lines instead.
+    """
     # The end slopes are read off the knots before merging, which loses how much mass each
     # of them carries and with it the meaning of "the outer `frac` of the distribution".
     slope_low, slope_high = _end_slopes(xs, ys)
     xs, ys = _merge_ties(xs, ys)
-    out = scipy.interpolate.PchipInterpolator(xs, ys)(image)
+    if spline:
+        out = scipy.interpolate.PchipInterpolator(xs, ys)(image)
+    else:
+        out = np.interp(image, xs, ys)
     # Cubic extrapolation can fold back on itself and break monotonicity, so replace it by
     # a linear extension (Sec. III.C.3): a point target brighter than anything in the ROI
     # should stay the brightest instead of piling onto the top knot.
@@ -210,9 +225,10 @@ def histogram_match(
         left to the caller (`to_8bit`, or ``vmin``/``vmax``).
 
     .. note::
-        Every mode fits on finite pixels above `DEAD_PIXEL_DB` only, so that zea's
-        ``log(0)`` sentinel neither anchors the bottom of the mapping nor is lifted into
-        the displayed range.
+        Every mode fits on, and applies to, finite pixels above `DEAD_PIXEL_DB` only, so
+        that zea's ``log(0)`` sentinel neither anchors the bottom of the mapping nor is
+        lifted into the displayed range by it. Pixels holding no measurement are returned
+        as they came in, sentinel or non-finite alike.
 
     .. note::
         Which image is matched to which is a choice (Sec. V): matching to B-mode is natural
@@ -265,13 +281,22 @@ def histogram_match(
     y = _masked_pixels(reference, roi, minimum)
 
     image = image.astype(np.float64)
+    # Pixels that hold no measurement are kept out of the transform as well as out of the fit:
+    # a mapping they never informed would place them anywhere, and a slope below one is enough
+    # to lift the sentinel out of the bottom of the range and into the displayed one.
+    unmeasured = image <= DEAD_PIXEL_DB
+
     if mode == "partial":
         # eq. (8)-(9): the scale and offset that match mean and variance.
         slope = y.std() / x.std()
-        return slope * image + (y.mean() - slope * x.mean())
+        matched = slope * image + (y.mean() - slope * x.mean())
+    else:
+        xs, ys = _quantile_pairs(x, y, x.size if every_pixel else n_bins)
+        matched = _monotone_map(image, xs, ys, spline=not every_pixel)
 
-    xs, ys = _quantile_pairs(x, y, x.size if every_pixel else n_bins)
-    return _monotone_map(image, xs, ys)
+    # Non-finite pixels are not `unmeasured` (a comparison against NaN is False), and pass
+    # through the transform itself: NaN in, NaN out.
+    return np.where(unmeasured, image, matched)
 
 
 def overlay_masks(

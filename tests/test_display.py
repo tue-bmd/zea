@@ -592,7 +592,33 @@ def test_histogram_match_ignores_dead_pixels(kwargs):
 
     np.testing.assert_allclose(matched_dead[2:], matched[2:])
     assert np.all(np.isnan(matched[:2])), "Non-finite pixels should be passed through"
+    # Passed through rather than mapped: a fitted slope below one would otherwise lift the
+    # sentinel out of the bottom of the range and into the displayed one.
+    np.testing.assert_array_equal(matched_dead[:2], dead[:2])
     assert np.all(matched_dead[:2] < DEAD_PIXEL_DB), "Sentinel pixels should stay below the floor"
+
+
+@pytest.mark.parametrize("kwargs", MATCHES.values(), ids=MATCHES)
+def test_histogram_match_dead_pixels_survive_a_shrinking_transform(kwargs):
+    """Dead pixels are passed through rather than carried along by the mapping.
+
+    Fitting without them leaves where the mapping would put them arbitrary. An image whose
+    dB range is wider than the reference's gets compressed onto it, and a sentinel left in
+    the mapping's hands is compressed along with it, into the middle of the displayed range.
+    The two log-Rayleigh images of the test above have near-equal spread, so their mapping
+    barely scales and hides this.
+    """
+    from zea.display import histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image, reference = 4 * _speckle(rng), 0.2 * _speckle(rng)
+    sentinel = 20 * np.log10(1e-16)
+    image[:2] = sentinel
+
+    matched = histogram_match(image, reference, **kwargs)
+
+    assert np.ptp(matched[2:]) < 0.2 * np.ptp(image[2:]), "Test premise: a shrinking transform"
+    np.testing.assert_array_equal(matched[:2], sentinel)
 
 
 @pytest.mark.parametrize("kwargs", MATCHES.values(), ids=MATCHES)
@@ -671,6 +697,11 @@ def test_histogram_match_invalid_arguments():
 
     with pytest.raises(ValueError, match="Too few valid pixels"):
         histogram_match(image, reference, n_bins=256)
+
+    # An roi has to index the images, not merely broadcast against them: a bare row would
+    # otherwise silently select a fitting region nobody asked for.
+    with pytest.raises(ValueError, match="roi shape"):
+        histogram_match(image, reference, mode="partial", roi=np.ones(8, dtype=bool))
 
     # Fitting a transform needs something to fit: an image of one value has no distribution.
     flat, speckle = np.zeros((32, 32)), _speckle(rng, size=(32, 32))
