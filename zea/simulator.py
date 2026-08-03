@@ -241,7 +241,7 @@ def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
     # element_width / wavelength == element_width * f / sound_speed. Using the
     # latter avoids dividing by f, so the DC bin (f == 0) stays finite: the
     # argument is 0 and sinc(0) == 1 (isotropic directivity), the correct limit.
-    response = sinc(element_width * f / sound_speed * ops.sin(theta))
+    response = ops.sinc(element_width * f / sound_speed * ops.sin(theta))
     if not rigid_baffle:
         response *= ops.cos(theta)
     return response
@@ -300,7 +300,7 @@ def spread(dist, mindist=1e-4):
 def hann_fd(f, width):
     """The fourier transform of a hann window in the time domain with given width."""
     denom = 1.0 - (f * width) ** 2
-    num = 0.5 * sinc(f * width)
+    num = 0.5 * ops.sinc(f * width)
     # denom == 0 at f * width == +/-1 is a removable singularity where the Hann
     # window transform equals 0.25. Divide only away from it (using a dummy 1.0
     # at the singular points) and fill the limit in explicitly, so no 0/0 occurs.
@@ -363,12 +363,6 @@ def get_transducer_bandwidth_fn(probe_center_frequency, bandwidth):
         return hann_unnormalized(ops.abs(f) - probe_center_frequency, bandwidth)
 
     return bandwidth_fn
-
-
-def sinc(x):
-    """The normalized sinc function with a small offset to prevent division by zero."""
-    x = ops.abs(np.pi * x) + 1e-9
-    return ops.sin(x) / x
 
 
 def _round_up_to_power_of_two(x):

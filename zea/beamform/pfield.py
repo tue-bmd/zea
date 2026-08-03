@@ -24,12 +24,13 @@ import numpy as np
 from keras import ops
 
 from zea.backend import jit
-from zea.func.tensor import sinc, vmap
+from zea.func.tensor import vmap
 from zea.internal.cache import cache_output
 
 
-def _abs_sinc(x):
-    return sinc(ops.abs(x))
+def _unnormalized_sinc(x):
+    """``sin(x) / x``. ``keras.ops.sinc`` is the normalized ``sin(pi x) / (pi x)``."""
+    return ops.sinc(x / np.pi)
 
 
 @cache_output(verbose=True)
@@ -186,7 +187,7 @@ def compute_pfield(
     center_angular_freq = 2 * np.pi * center_frequency
 
     def pulse_spectrum(w):
-        imag = _abs_sinc(pulse_width * (w - center_angular_freq) / 2) - _abs_sinc(
+        imag = _unnormalized_sinc(pulse_width * (w - center_angular_freq) / 2) - _unnormalized_sinc(
             pulse_width * (w + center_angular_freq) / 2
         )
         return 1j * ops.cast(imag, "complex64")
@@ -265,7 +266,7 @@ def compute_pfield(
         exp_arr = exp_arr / ops.sqrt(distance_complex)
         exp_arr = exp_arr * ops.cast(ops.sqrt(min_distance), "complex64")
 
-        directivity = _abs_sinc(center_wavenumber * seg_length / 2 * sin_theta)
+        directivity = _unnormalized_sinc(center_wavenumber * seg_length / 2 * sin_theta)
         exp_arr = exp_arr * ops.cast(directivity, "complex64")
 
         monochromatic_pressure = exp_arr / exp_freq_step
