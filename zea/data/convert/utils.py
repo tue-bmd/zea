@@ -416,6 +416,7 @@ def upload_dataset_to_hf(  # pragma: no cover
     file_glob: str = "*.hdf5",
     commit_message: str | None = None,
     allow_patterns: "list[str] | None" = None,
+    yes: bool = False,
 ) -> None:
     """Upload a converted dataset to a HuggingFace Hub revision branch.
 
@@ -437,6 +438,9 @@ def upload_dataset_to_hf(  # pragma: no cover
         allow_patterns: Optional list of glob patterns limiting which files in
             *folder* are uploaded.  When ``None`` (default) the whole folder is
             uploaded.  Use this to scope an upload to specific files.
+        yes: Skip the interactive confirmation prompts and create the revision
+            branch without asking.  For unattended batch migrations; leave at
+            ``False`` for interactive use.
 
     Raises:
         ValueError: If *revision* is ``"main"``.
@@ -474,10 +478,11 @@ def upload_dataset_to_hf(  # pragma: no cover
     log.info("=" * 60)
     log.info("")
 
-    answer = input("Proceed with upload? [y/N] ").strip().lower()
-    if answer != "y":
-        log.info("Upload cancelled.")
-        return
+    if not yes:
+        answer = input("Proceed with upload? [y/N] ").strip().lower()
+        if answer != "y":
+            log.info("Upload cancelled.")
+            return
 
     login()
     api = HfApi()
@@ -488,7 +493,9 @@ def upload_dataset_to_hf(  # pragma: no cover
         branch_names = {b.name for b in refs.branches}
         if revision not in branch_names:
             create = (
-                input(
+                "y"
+                if yes
+                else input(
                     f"Revision (branch) '{revision}' does not exist on {repo_id}. Create it? [y/N] "
                 )
                 .strip()
