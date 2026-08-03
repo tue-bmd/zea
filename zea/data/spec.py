@@ -69,9 +69,7 @@ MAX_CHUNK_BYTES = 8 << 20  # 8 MiB
 # Floor on splitting: an array this small is stored as a *single* chunk, whatever its axes
 # mean. Below ~1 MB there is nothing to win — one range request fetches the lot and Blosc
 # decodes it in well under a millisecond — while splitting costs B-tree entries, a worse
-# compression ratio per chunk, and extra round trips. It is what keeps the small metadata
-# arrays whole: h5py's auto-guess cuts a (5000, 3) probe pose into 8 chunks *across* the
-# x/y/z axis, and per-frame chunking would cut (n_frames, n_tx) timing into 384-byte chunks.
+# compression ratio per chunk, and extra round trips.
 SINGLE_CHUNK_BYTES = 1 << 20  # 1 MiB
 
 # Paged file-space strategy: HDF5 allocates in fixed-size pages, which collects the
