@@ -8,6 +8,7 @@ import pytest
 
 import zea
 from zea import Parameters
+from zea.beamform.pixelgrid import aliasing_limits, check_for_aliasing
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.internal.dummy_scan import get_parameters
 
@@ -178,33 +179,63 @@ def test_scan_erroneous_set_transmits():
         parameters.set_transmits("invalid_string")
 
 
-def test_grid_warns_on_aliasing():
-    """An under-sized cartesian grid (pixel pitch > wavelength/2) warns about aliasing."""
-    # scan_args sets grid_size_x=64, grid_size_z=128, which under-sample the imaging region.
+def test_check_for_aliasing_rf_grid():
+    """An under-sized cartesian grid carrying RF warns on both axes."""
+    # scan_args sets grid_size_x=64, grid_size_z=128, which under-sample the region.
     parameters = Parameters(**scan_args)
-    with patch("zea.beamform.pixelgrid.log.warning") as mock_warn:
-        _ = parameters.grid
-    msgs = " ".join(str(c.args[0]) for c in mock_warn.call_args_list)
-    assert "wavelength/2" in msgs
+    msgs = check_for_aliasing(parameters, demodulated=False)
+    assert any("Lateral" in m for m in msgs)
+    assert any("Axial" in m and "wavelength / 2" in m for m in msgs)
 
 
-def test_grid_no_aliasing_warning_when_well_sampled():
+def test_check_for_aliasing_no_warning_when_well_sampled():
     """A sufficiently dense cartesian grid does not warn."""
     args = scan_args.copy()
-    args["grid_size_x"] = 512
-    args["grid_size_z"] = 512
+    args["grid_size_x"] = 1024
+    args["grid_size_z"] = 1024
+    assert check_for_aliasing(Parameters(**args), demodulated=False) == []
+
+
+def test_check_for_aliasing_axial_relaxed_by_demodulation():
+    """Demodulation removes the carrier, so the axial limit follows the bandwidth.
+
+    The lateral limit has no carrier to remove and must be unaffected.
+    """
+    args = scan_args.copy()
+    args["grid_size_z"] = 128  # dz = 312 um: aliases at 7 MHz RF (110 um)...
     parameters = Parameters(**args)
-    with patch("zea.beamform.pixelgrid.log.warning") as mock_warn:
-        _ = parameters.grid
-    assert mock_warn.call_count == 0
+
+    rf = check_for_aliasing(parameters, demodulated=False)
+    assert any("Axial" in m for m in rf)
+
+    # ...but c / (2 * 2 MHz) = 385 um is comfortably coarser than dz.
+    iq = check_for_aliasing(parameters, demodulated=True, bandwidth=2e6)
+    assert not any("Axial" in m for m in iq)
+    assert any("Lateral" in m for m in iq)
 
 
-def test_polar_grid_no_aliasing_warning():
-    """The cartesian aliasing check is not applied to polar grids."""
-    parameters = Parameters(**scan_args, grid_type="polar")
-    with patch("zea.beamform.pixelgrid.log.warning") as mock_warn:
-        _ = parameters.grid
-    assert mock_warn.call_count == 0
+def test_aliasing_limits_transmit_angle_from_geometry():
+    """The lateral limit uses the real transmit aperture, not a symmetric guess."""
+    parameters = Parameters(**scan_args)
+    limits = aliasing_limits(parameters, demodulated=True, bandwidth=2e6)
+    # 38 mm aperture focused at 40 mm -> sin(theta_t) = 19 / hypot(40, 19).
+    assert limits["sin_theta_t"] == pytest.approx(19 / np.hypot(40, 19), rel=1e-6)
+    # f_number defaults to 1.0 -> sin(theta_r) = 1 / sqrt(5).
+    assert limits["sin_theta_r"] == pytest.approx(1 / np.sqrt(5), rel=1e-6)
+
+
+def test_aliasing_limits_symmetric_fallback_without_transmit_geometry():
+    """Without transmit geometry the textbook symmetric aperture is assumed."""
+    parameters = Parameters(
+        xlims=scan_args["xlims"],
+        zlims=scan_args["zlims"],
+        grid_size_x=64,
+        grid_size_z=128,
+        center_frequency=7e6,
+        sound_speed=1540.0,
+    )
+    limits = aliasing_limits(parameters, demodulated=False)
+    assert limits["sin_theta_t"] == limits["sin_theta_r"]
 
 
 def test_set_transmits_focused_excludes_plane_waves():
