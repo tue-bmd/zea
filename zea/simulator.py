@@ -87,7 +87,7 @@ def simulate_rf(
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
         tx_apodizations (array-like): The apodizations of the transmitting elements of
             shape (n_tx, n_el).
-        t_peak (array-like): The time of the peak of the transmit pulse [s].
+        t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
