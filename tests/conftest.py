@@ -7,13 +7,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-# Pin the matplotlib backend for the whole suite, before pyplot is imported anywhere in
-# this process. An interactive MPLBACKEND exported in a developer's shell is otherwise
-# inherited by the papermill kernels in test_notebooks.py, where it survives ipykernel's
-# ``if not os.environ.get("MPLBACKEND")`` guard and fails the notebook with "Failed to
-# import any of the following Qt binding modules". matplotlib's backend_fallback hides
-# this on headless machines and in CI, so it only shows up on a workstation with a
-# display.
+# Must be set before pyplot is imported, and inherited by the papermill kernels in
+# test_notebooks.py, which would otherwise pick up an interactive backend from the shell.
 os.environ["MPLBACKEND"] = "Agg"
 
 import pytest  # noqa: E402
