@@ -37,6 +37,7 @@ more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_e
     ...     element_width=0.2e-3,
     ...     attenuation_coef=0.5,
     ...     tx_apodizations=np.ones((1, 64)),
+    ...     t_peak=np.full(1, 1 / 5e6),
     ... )
 
 """
