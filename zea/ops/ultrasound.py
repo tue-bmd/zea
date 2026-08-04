@@ -64,6 +64,7 @@ class Simulate(Operation):
         element_width,
         attenuation_coef,
         tx_apodizations,
+        t_peak,
         **kwargs,
     ):
         simulate_kwargs = {
@@ -80,6 +81,7 @@ class Simulate(Operation):
             "element_width": element_width,
             "attenuation_coef": attenuation_coef,
             "tx_apodizations": tx_apodizations,
+            "t_peak": t_peak,
         }
         if not self.with_batch_dim:
             simulated_rf = simulate_rf(

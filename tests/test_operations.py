@@ -1651,6 +1651,7 @@ def test_decode_hadamard():
         initial_times=np.zeros((n_tx,), dtype=np.float32),
         element_width=element_width,
         attenuation_coef=0.0,
+        t_peak=np.full((n_tx,), 1.0 / center_frequency, dtype=np.float32),
     )
     raw_data_encoded = simulate_rf(tx_apodizations=tx_apodizations_hadamard, **shared_kwargs)[None]
     raw_data_synthetic_aperture = simulate_rf(
