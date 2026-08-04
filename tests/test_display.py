@@ -512,10 +512,11 @@ def test_histogram_match_reproduces_distribution(kwargs):
     from zea.display import histogram_match
 
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    # Differently sized: only the distributions are compared, not the pixels pairwise.
     image = _speckle(rng, size=(128, 128), scale=0.1)
     reference = _speckle(rng, size=(64, 96), scale=1.0)
 
-    matched = histogram_match(image, reference, **kwargs)
+    matched = histogram_match(image, reference, allow_unequal_shapes=True, **kwargs)
 
     assert _quantile_error(image, reference) > 10, "Unmatched images should differ a lot"
     assert _quantile_error(matched, reference) < 0.5
@@ -633,7 +634,7 @@ def test_histogram_match_ignores_dead_reference_pixels(kwargs):
     dead[:2] = np.nan  # e.g. the fill value of a scan conversion
     dead[2:4] = 20 * np.log10(1e-16)
 
-    matched = histogram_match(image, reference[4:], **kwargs)
+    matched = histogram_match(image, reference[4:], allow_unequal_shapes=True, **kwargs)
     matched_dead = histogram_match(image, dead, **kwargs)
 
     np.testing.assert_allclose(matched_dead, matched)
@@ -702,6 +703,11 @@ def test_histogram_match_invalid_arguments():
     # otherwise silently select a fitting region nobody asked for.
     with pytest.raises(ValueError, match="roi shape"):
         histogram_match(image, reference, mode="partial", roi=np.ones(8, dtype=bool))
+
+    # Matching against a reference of another shape is well defined, but has to be asked for.
+    with pytest.raises(ValueError, match="does not match reference shape"):
+        histogram_match(image, reference[:4], mode="partial")
+    histogram_match(image, reference[:4], mode="partial", allow_unequal_shapes=True)
 
     # Fitting a transform needs something to fit: an image of one value has no distribution.
     flat, speckle = np.zeros((32, 32)), _speckle(rng, size=(32, 32))
