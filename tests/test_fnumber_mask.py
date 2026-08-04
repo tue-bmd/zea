@@ -111,9 +111,11 @@ def test_compute_element_normals_convex_arc():
 def test_fnumber_mask_flat_linear_is_legacy_noop(probe_geometry, flatgrid, fnum_window_fn):
     """On a flat array the per-element-normal mask equals the old global-+z mask.
 
-    The reference is the legacy angle-relative-to-global-+z formula computed
-    with the same backend ops, so any difference would be a real change in
-    behaviour rather than a norm-implementation rounding difference.
+    The reference is the legacy angle-relative-to-global-+z formula computed with
+    the same backend ops, so a difference beyond float32 rounding would be a real
+    change in behaviour. Rounding is not zero: the mask reaches the same angle
+    through a dot product with the element normal, which a backend may fuse and
+    round differently than reading the z component directly.
     """
     rel = flatgrid[:, None] - probe_geometry[None]
     rel_norm = ops.linalg.norm(rel, axis=-1)
@@ -124,7 +126,7 @@ def test_fnumber_mask_flat_linear_is_legacy_noop(probe_geometry, flatgrid, fnum_
     mask = ops.convert_to_numpy(
         fnumber_mask(flatgrid, probe_geometry, f_number=0.5, fnum_window_fn=fnum_window_fn)
     )
-    assert np.array_equal(mask, reference)
+    np.testing.assert_allclose(mask, reference, atol=1e-6)
 
 
 def test_fnumber_mask_convex_widens_field_of_view():

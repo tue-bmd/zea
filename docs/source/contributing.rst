@@ -60,12 +60,13 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
     .. tab-item:: Docker
 
          See the :ref:`Docker <docker-information>` section of the installation guide
-         for build and run instructions. Once inside the container, install the dev
-         dependencies:
+         for build and run instructions. Images built with ``DEV=true`` (the default)
+         already include the ``dev`` dependency-group (tests, docs and lint tools). If
+         you're in a container built with ``DEV=false``, install it first:
 
          .. code-block:: shell
 
-               pip install -e .[dev]
+               pip install -e . --group dev
                pre-commit install
 
     .. tab-item:: uv
@@ -74,23 +75,25 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
          .. code-block:: shell
 
-               uv sync --extra dev
+               uv sync
                uv run pre-commit install
 
          This creates a ``.venv`` with the exact locked dependencies and installs
          ``zea`` itself in **editable** mode, so your changes to the source take
-         effect immediately without reinstalling. Prefix commands with ``uv run``
-         (e.g. ``uv run pytest``) or activate the environment with
+         effect immediately without reinstalling. This will also install the ``dev`` 
+         dependency-group, i.e. the ``tests``, ``docs`` and ``lint`` groups. Prefix commands 
+         with ``uv run`` (e.g. ``uv run pytest``) or activate the environment with
          ``source .venv/bin/activate``.
 
     .. tab-item:: pip
 
          Install into any existing environment (``venv``, ``conda``, ...) with plain
-         ``pip``. The ``-e`` flag makes the install editable:
+         ``pip`` (requires pip >= 25.1 for ``--group`` support). The ``-e`` flag makes
+         the install editable:
 
          .. code-block:: shell
 
-               pip install -e .[dev]
+               pip install -e . --group dev
                pre-commit install
 
 For local environments (uv or pip), you also need to install a machine learning
@@ -244,7 +247,7 @@ The overall structure of the documentation is manually designed, but the API doc
 .. code-block:: shell
 
    # if you didn't install the dependencies earlier
-   pip install -e .[docs]
+   pip install -e . --group docs
    cd docs
    make docs-clean && make docs-build
    # you can also serve the docs locally

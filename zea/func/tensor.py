@@ -1514,6 +1514,88 @@ def resample(x, n_samples, axis=-2, order=1):
     return resampled
 
 
+def unwrap(phase, axis=-1, discont=None, period=2 * np.pi):
+    """Unwrap a phase tensor by changing jumps larger than ``discont`` to their complement.
+
+    Backend-agnostic equivalent of :func:`numpy.unwrap`. The first sample along
+    ``axis`` is left untouched, all following samples are shifted by whole
+    periods so that consecutive differences stay below ``discont``.
+
+    Args:
+        phase (Tensor): Input tensor of phase values.
+        axis (int, optional): Axis along which to unwrap. Defaults to -1.
+        discont (float, optional): Maximum discontinuity between values. Defaults to
+            ``period / 2``, which is the smallest value that keeps the result
+            congruent to the input modulo ``period``.
+        period (float, optional): Size of the range over which the input wraps.
+            Defaults to ``2 * pi``.
+
+    Returns:
+        Tensor: Unwrapped tensor, with the same shape and dtype as `phase`.
+
+    Example:
+        .. doctest::
+
+            >>> import numpy as np
+            >>> from zea.func.tensor import unwrap
+            >>> phase = np.array([0.0, 3.0, 6.0, 9.0]) % (2 * np.pi)
+            >>> [round(float(value), 3) for value in unwrap(phase)]
+            [0.0, 3.0, 6.0, 9.0]
+    """
+    if discont is None:
+        discont = period / 2
+
+    half_period = period / 2
+    diff = ops.diff(phase, axis=axis)
+
+    # Wrap every difference into [-period/2, period/2), keeping +period/2 where the
+    # jump is positive so that exactly-half-period jumps do not flip sign.
+    wrapped_diff = ops.mod(diff + half_period, period) - half_period
+    wrapped_diff = ops.where(
+        ops.logical_and(wrapped_diff == -half_period, diff > 0), half_period, wrapped_diff
+    )
+
+    correction = wrapped_diff - diff
+    correction = ops.where(ops.abs(diff) < discont, ops.zeros_like(correction), correction)
+
+    # The first sample is never corrected, so prepend a zero before accumulating.
+    pad_shape = list(ops.shape(correction))
+    pad_shape[axis] = 1
+    correction = ops.concatenate(
+        [ops.zeros(pad_shape, dtype=correction.dtype), correction], axis=axis
+    )
+    return phase + ops.cumsum(correction, axis=axis)
+
+
+def complex_resize(tensor, size, interpolation="bilinear"):
+    """Resize a complex tensor by interpolating magnitude and unwrapped phase separately.
+
+    Interpolating the real and imaginary parts directly would create artifacts
+    wherever the phase wraps, so the tensor is resized in polar form instead.
+
+    Args:
+        tensor (Tensor): Complex tensor of shape ``((batch,) height, width, channels)``.
+        size (tuple): Target ``(height, width)``.
+        interpolation (str, optional): Interpolation method passed to
+            :func:`keras.ops.image.resize`. Defaults to ``"bilinear"``.
+
+    Returns:
+        Tensor: Resized complex tensor.
+    """
+    magnitude = ops.abs(tensor)
+    # Unwrap along the height axis before interpolating, so phase wraps do not
+    # get smeared out by the interpolation.
+    phase = unwrap(ops.angle(tensor), axis=-3)
+
+    magnitude = ops.image.resize(magnitude, size, interpolation=interpolation)
+    phase = ops.image.resize(phase, size, interpolation=interpolation)
+
+    # complex = magnitude * exp(1j * phase)
+    magnitude = ops.cast(magnitude, "complex64")
+    phase = ops.cast(phase, "complex64")
+    return magnitude * ops.exp(1j * phase)
+
+
 def fori_loop(lower, upper, body_fun, init_val, disable_jit=False):
     """For loop allowing for non-jitted for loop with same signature as jax.
 
@@ -1572,11 +1654,6 @@ def linear_sum_assignment(cost):
         col_ind.append(idx)
         assigned_true = keras.ops.scatter_update(assigned_true, [[idx]], [True])
     return np.array(row_ind), np.array(col_ind)
-
-
-def sinc(x, eps=keras.config.epsilon()):
-    """Sinc function."""
-    return ops.sin(x + eps) / (x + eps)
 
 
 def apply_along_axis(func1d, axis, arr, *args, **kwargs):

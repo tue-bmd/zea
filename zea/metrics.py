@@ -163,103 +163,101 @@ def ssim(
     filter_sigma: float = 1.5,
     k1: float = 0.01,
     k2: float = 0.03,
-    return_map: bool = False,
-    filter_fn=None,
 ):
     """Computes the structural similarity index (SSIM) between image pairs.
 
-    This function is based on the standard SSIM implementation from:
-    Z. Wang, A. C. Bovik, H. R. Sheikh and E. P. Simoncelli,
+    Thin wrapper around :func:`keras.ops.image.ssim`, which implements the standard
+    SSIM from: Z. Wang, A. C. Bovik, H. R. Sheikh and E. P. Simoncelli,
     "Image quality assessment: from error visibility to structural similarity",
     in IEEE Transactions on Image Processing, vol. 13, no. 4, pp. 600-612, 2004.
-
-    This function copied from [`dm_pix.ssim`](https://dm-pix.readthedocs.io/en/latest/api.html#dm_pix.ssim),
-    which is part of the DeepMind's `dm_pix` library. They modeled their implementation
-    after the `tf.image.ssim` function.
 
     Note: the true SSIM is only defined on grayscale. This function does not
     perform any colorspace transform. If the input is in a color space, then it
     will compute the average SSIM.
 
     Args:
-        a: First image (or set of images).
-        b: Second image (or set of images).
+        a: First image (or batch of images), of shape ``((batch,) height, width, channels)``.
+        b: Second image (or batch of images), with the same shape as `a`.
         max_val: The maximum magnitude that `a` or `b` can have.
         filter_size: Window size (>= 1). Image dims must be at least this small.
         filter_sigma: The bandwidth of the Gaussian used for filtering (> 0.).
         k1: One of the SSIM dampening parameters (> 0.).
         k2: One of the SSIM dampening parameters (> 0.).
-        return_map: If True, will cause the per-pixel SSIM "map" to be returned.
-        filter_fn: An optional argument for overriding the filter function used by
-            SSIM, which would otherwise be a 2D Gaussian blur specified by filter_size
-            and filter_sigma.
 
     Returns:
-        Each image's mean SSIM, or a tensor of individual values if `return_map`.
+        Each image's mean SSIM: a scalar for a single image, or one value per image
+        in the batch.
     """
+    return ops.image.ssim(
+        a,
+        b,
+        max_val=max_val,
+        filter_size=filter_size,
+        filter_sigma=filter_sigma,
+        k1=k1,
+        k2=k2,
+        data_format="channels_last",
+    )
 
-    if filter_fn is None:
-        # Construct a 1D Gaussian blur filter.
-        hw = filter_size // 2
-        shift = (2 * hw - filter_size + 1) / 2
-        f_i = ((ops.cast(ops.arange(filter_size), "float32") - hw + shift) / filter_sigma) ** 2
-        filt = ops.exp(-0.5 * f_i)
-        filt /= ops.sum(filt)
 
-        # Construct a 1D convolution.
-        def filter_fn_1(z):
-            return tensor.correlate(z, ops.flip(filt), mode="valid")
+@metrics_registry(name="smsle", paired=True, jittable=True)
+def smsle(y_true, y_pred, *, dynamic_range: float = 60.0):
+    r"""Signed Mean Squared Logarithmic Error (SMSLE).
 
-        # Apply the vectorized filter along the y axis.
-        def filter_fn_y(z):
-            z_flat = ops.reshape(ops.moveaxis(z, -3, -1), (-1, z.shape[-3]))
-            z_filtered_shape = ((z.shape[-4],) if z.ndim == 4 else ()) + (
-                z.shape[-2],
-                z.shape[-1],
-                -1,
-            )
-            _z_filtered = ops.vectorized_map(filter_fn_1, z_flat)
-            z_filtered = ops.moveaxis(ops.reshape(_z_filtered, z_filtered_shape), -1, -3)
-            return z_filtered
+    Loss for regressing radio-frequency data, where a plain MSE is dominated by the
+    few high-amplitude samples. SMSLE instead compares the signals after log
+    compression, which weighs the low-amplitude samples that carry the speckle
+    texture just as heavily. The positive and negative half-waves are compressed
+    separately, so the sign of the signal (and with it the phase information needed
+    for further processing) is preserved.
 
-        # Apply the vectorized filter along the x axis.
-        def filter_fn_x(z):
-            z_flat = ops.reshape(ops.moveaxis(z, -2, -1), (-1, z.shape[-2]))
-            z_filtered_shape = ((z.shape[-4],) if z.ndim == 4 else ()) + (
-                z.shape[-3],
-                z.shape[-1],
-                -1,
-            )
-            _z_filtered = ops.vectorized_map(filter_fn_1, z_flat)
-            z_filtered = ops.moveaxis(ops.reshape(_z_filtered, z_filtered_shape), -1, -2)
-            return z_filtered
+    Writing :math:`L_D(x) = \mathrm{clip}\left(20 \log_{10}
+    \frac{\mathrm{clip}(x, \epsilon, \max|x|)}{\max|x|}, -D, 0\right)` for log
+    compression to a dynamic range of :math:`D` dB:
 
-        # Apply the blur in both x and y.
-        filter_fn = lambda z: filter_fn_y(filter_fn_x(z))
+    .. math::
 
-    mu0 = filter_fn(a)
-    mu1 = filter_fn(b)
-    mu00 = mu0 * mu0
-    mu11 = mu1 * mu1
-    mu01 = mu0 * mu1
-    sigma00 = filter_fn(a**2) - mu00
-    sigma11 = filter_fn(b**2) - mu11
-    sigma01 = filter_fn(a * b) - mu01
+        \mathrm{SMSLE} = \tfrac{1}{2} \mathrm{MSE}\big(L_D(y), L_D(\hat{y})\big)
+        + \tfrac{1}{2} \mathrm{MSE}\big(L_D(-y), L_D(-\hat{y})\big)
 
-    # Clip the variances and covariances to valid values.
-    # Variance must be non-negative:
-    epsilon = keras.config.epsilon()
-    sigma00 = ops.maximum(epsilon, sigma00)
-    sigma11 = ops.maximum(epsilon, sigma11)
-    sigma01 = ops.sign(sigma01) * ops.minimum(ops.sqrt(sigma00 * sigma11), ops.abs(sigma01))
+    Both inputs are normalized by their own maximum absolute value before log
+    compression, so the metric is invariant to the overall scale of either input.
 
-    c1 = (k1 * max_val) ** 2
-    c2 = (k2 * max_val) ** 2
-    numer = (2 * mu01 + c1) * (2 * sigma01 + c2)
-    denom = (mu00 + mu11 + c1) * (sigma00 + sigma11 + c2)
-    ssim_map = numer / denom
-    ssim_value = ops.mean(ssim_map, axis=tuple(range(-3, 0)))
-    return ssim_map if return_map else ssim_value
+    .. admonition:: Reference
+
+        Luijten, B., Cohen, R., de Bruijn, F. J., Schmeitz, H. A. W., Mischi, M.,
+        Eldar, Y. C., & van Sloun, R. J. G. (2020). Adaptive Ultrasound Beamforming
+        Using Deep Learning. *IEEE Transactions on Medical Imaging, 39*\\ (12),
+        3967-3978. https://doi.org/10.1109/TMI.2020.3008537
+
+    Args:
+        y_true (tensor): Ground truth values.
+        y_pred (tensor): Predicted values.
+        dynamic_range (float): Dynamic range :math:`D` in dB used to clip the
+            log-compressed signals. Defaults to 60.
+
+    Returns:
+        (float): SMSLE loss value.
+    """
+    eps = keras.config.epsilon()
+
+    def _log_compress(x, x_max):
+        return ops.clip(
+            20 * ops.log10(ops.clip(x / x_max, eps, 1)),
+            -dynamic_range,
+            0,
+        )
+
+    y_pred_max = ops.maximum(ops.max(ops.abs(y_pred)), eps)
+    y_true_max = ops.maximum(ops.max(ops.abs(y_true)), eps)
+
+    positive = ops.mean(
+        ops.square(_log_compress(y_pred, y_pred_max) - _log_compress(y_true, y_true_max))
+    )
+    negative = ops.mean(
+        ops.square(_log_compress(-y_pred, y_pred_max) - _log_compress(-y_true, y_true_max))
+    )
+    return 0.5 * positive + 0.5 * negative
 
 
 @metrics_registry(name="ncc", paired=True, jittable=True)

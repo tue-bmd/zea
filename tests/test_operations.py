@@ -24,6 +24,7 @@ from zea.func.ultrasound import (
     construct_acquisition_from_synthetic_aperture,
     decode_hadamard,
     make_tgc_curve,
+    square_wave_apodization,
 )
 from zea.ops import Pipeline, Simulate, beamformer_registry
 from zea.parameters import Parameters
@@ -2091,3 +2092,39 @@ def test_tissue_suppression_invalid_arguments():
 
     with pytest.raises(ValueError, match="fraction of the frames"):
         ops.TissueSuppression(cutoff=1.5)
+
+
+@backend_equality_check(decimal=6)
+def test_square_wave_apodization():
+    """Test the square wave apodization used for incoherent beamforming."""
+    n_el, block_size = 12, 4
+    apod = square_wave_apodization(n_el, block_size)
+
+    assert apod.shape == (n_el,)
+
+    # Alternating blocks of `block_size` elements, starting high (see docstring example)
+    expected = np.array([1, 1, 1, 1, -1, -1, -1, -1, 1, 1, 1, 1], dtype="float32")
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(apod), expected)
+
+    # Values are strictly +1 / -1
+    unique = np.unique(keras.ops.convert_to_numpy(apod))
+    np.testing.assert_allclose(unique, [-1.0, 1.0])
+
+    # A block size of half the aperture gives a single flip
+    half = keras.ops.convert_to_numpy(square_wave_apodization(8, 4))
+    np.testing.assert_allclose(half, [1, 1, 1, 1, -1, -1, -1, -1])
+
+    # Blocks stay exactly `block_size` wide when the aperture does not divide
+    # evenly: the trailing block is simply truncated.
+    partial = keras.ops.convert_to_numpy(square_wave_apodization(10, 4))
+    np.testing.assert_allclose(partial, [1, 1, 1, 1, -1, -1, -1, -1, 1, 1])
+    odd = keras.ops.convert_to_numpy(square_wave_apodization(7, 2))
+    np.testing.assert_allclose(odd, [1, 1, -1, -1, 1, 1, -1])
+
+    # A non-positive block size has no meaningful pattern and is rejected rather
+    # than silently dividing by zero
+    for invalid in (0, -4, float("nan")):
+        with pytest.raises(ValueError, match="block_size must be a positive number"):
+            square_wave_apodization(n_el, invalid)
+
+    return apod

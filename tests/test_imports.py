@@ -70,19 +70,7 @@ def test_all_zea_modules_importable():
     # dependency is missing -- not a failure of zea's declared dependencies.
     EXCLUDED = {"zea.backend.tf2jax"}
 
-    # Exclude backend subpackages if their dependencies are not available
-    backend_modules = {
-        "torch": "zea.backend.torch",
-        "tensorflow": "zea.backend.tensorflow",
-        "jax": "zea.backend.jax",
-    }
     excluded_prefixes = []
-    for backend_name, backend_module in backend_modules.items():
-        try:
-            __import__(backend_name)
-        except ImportError:
-            EXCLUDED.add(backend_module)
-            excluded_prefixes.append(backend_module)
 
     failures = {}
 
@@ -124,9 +112,12 @@ def test_package_does_not_import_ml_libs():
         importlib.import_module("zea")
 
 
-def _subprocess_import_zea_with_only_backend(backend):  # pragma: no cover
+def _subprocess_import_zea_with_only_backend(backend, keras_backend=None):  # pragma: no cover
     """
     This function is run in a subprocess to test zea import with only one backend available.
+
+    ``keras_backend`` sets KERAS_BACKEND independently of the available backend (used to
+    test e.g. KERAS_BACKEND=numpy); it defaults to ``backend``.
     """
     import builtins
     import importlib.util
@@ -137,8 +128,10 @@ def _subprocess_import_zea_with_only_backend(backend):  # pragma: no cover
     all_backends = ["tensorflow", "torch", "jax"]
 
     # Set KERAS_BACKEND before any imports
-    if backend is not None:
-        os.environ["KERAS_BACKEND"] = backend
+    if keras_backend is None:
+        keras_backend = backend
+    if keras_backend is not None:
+        os.environ["KERAS_BACKEND"] = keras_backend
 
     import_orig = builtins.__import__
 
@@ -191,14 +184,14 @@ def _subprocess_import_zea_with_only_backend(backend):  # pragma: no cover
     sys.exit(0)
 
 
-def run_import_zea_with_only_backend(backend):
+def run_import_zea_with_only_backend(backend, keras_backend=None):
     """
     Run a subprocess that tries to import zea with only one backend available.
     All other backends will raise ImportError.
     """
     # Get the source code of the subprocess function, dedent, and add call at the end
     code = textwrap.dedent(inspect.getsource(_subprocess_import_zea_with_only_backend))
-    code += f"\n_subprocess_import_zea_with_only_backend({repr(backend)})\n"
+    code += f"\n_subprocess_import_zea_with_only_backend({repr(backend)}, {repr(keras_backend)})\n"
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     return result
 
@@ -236,6 +229,29 @@ def test_import_zea_with_backend_subprocess(backend, should_succeed):
     else:
         if result.returncode == 0:
             assert False, "zea should not import if all backends are missing"
+
+
+@pytest.mark.parametrize("backend,should_succeed", [("jax", True), ("torch", False)])
+def test_import_zea_numpy_backend_requires_jax(backend, should_succeed):
+    """KERAS_BACKEND=numpy requires jax, even when another backend is installed.
+
+    Keras' numpy backend is not standalone, so zea should refuse to import with a clear
+    dependency error when jax is missing, regardless of torch/tensorflow being available.
+    """
+    result = run_import_zea_with_only_backend(backend, keras_backend="numpy")
+    output = result.stdout + result.stderr
+    if should_succeed:
+        assert result.returncode == 0, (
+            f"zea should import with KERAS_BACKEND=numpy and jax available.\n{output}"
+        )
+    else:
+        assert result.returncode != 0, (
+            f"zea should not import with KERAS_BACKEND=numpy while jax is missing "
+            f"(only {backend} installed)."
+        )
+        assert "jax must be installed as well" in output, (
+            f"Expected the numpy/jax dependency error, got:\n{output}"
+        )
 
 
 def test_all_model_modules_imported():

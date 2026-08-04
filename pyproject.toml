@@ -20,14 +20,13 @@ authors = [
 ]
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["ultrasound", "machine learning", "beamforming"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -35,7 +34,7 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "keras >=3.12.1",
+    "keras >=3.15.0",
     "h5py >=3.11",
     "hdf5plugin >=4.4",
     "numcodecs >=0.13",
@@ -58,14 +57,34 @@ dependencies = [
     "scikit-learn >=1.4",
 ]
 [project.optional-dependencies]
-dev = [
-    "zea[tests]",
-    "zea[docs]",
-    "zea[display-headless]",
-    "zea[models]",
-    "zea[app]",
-]
+jax = ["jax[cuda12]>=0.4.35"]
+display = ["opencv-python>=4"]
+display-headless = ["opencv-python-headless>=4"]
+# most models don't needs these optional dependencies
+# but some do, so we list them here
+models = ["onnxruntime>=1.15"]
+app = ["gradio>=6.0"]
+# these are just here for .readthedocs.yaml
+# please for proper install (with GPU support)
+# install manually
+# TensorFlow only ships Keras 3 from 2.16.1 onwards; older versions pin keras <3.
+backends = ["jax>=0.4.35", "tensorflow>=2.16.1", "torch>=2.2"]
 
+[project.urls]
+Homepage = "https://github.com/tue-bmd/zea/"
+Repository = "https://github.com/tue-bmd/zea/"
+Documentation = "https://zea.readthedocs.io"
+Issues = "https://github.com/tue-bmd/zea/issues"
+Contributing = "https://zea.readthedocs.io/en/latest/contributing.html"
+
+[project.scripts]
+zea = "zea.__main__:main"
+
+# Dev-only tooling: unlike extras, groups are never published. Needs pip >= 25.1 / uv.
+# uv installs `dev` by default; lean envs opt out with --no-default-groups /
+# --only-group (readthedocs: UV_NO_DEFAULT_GROUPS, set in its dashboard).
+[dependency-groups]
+lint = ["ruff==0.16.0", "ty==0.0.64"]
 tests = [
     "pytest>=9.0.3",
     "papermill>=2.4",
@@ -75,7 +94,7 @@ tests = [
     "ipywidgets",
     "pre-commit",
     "pytest-cov",
-    "gradio>=6.0",
+    "zea[app]",
 ]
 docs = [
     "sphinx",
@@ -92,32 +111,13 @@ docs = [
     "PyStemmer",
     "IPython",
 ]
-jax = ["jax[cuda12]>=0.4.35"]
-display = ["opencv-python>=4"]
-display-headless = ["opencv-python-headless>=4"]
-# most models don't needs these optional dependencies
-# but some do, so we list them here
-models = ["onnxruntime>=1.15"]
-app = ["gradio>=6.0"]
-# these are just here for .readthedocs.yaml
-# please for proper install (with GPU support)
-# install manually
-backends = ["jax>=0.4.35", "tensorflow>=2.12.1", "torch>=2.2"]
-
-[project.urls]
-Homepage = "https://github.com/tue-bmd/zea/"
-Repository = "https://github.com/tue-bmd/zea/"
-Documentation = "https://zea.readthedocs.io"
-Issues = "https://github.com/tue-bmd/zea/issues"
-Contributing = "https://zea.readthedocs.io/en/latest/contributing.html"
-
-[project.scripts]
-zea = "zea.__main__:main"
-
-[dependency-groups]
-lint = [
-    "ruff==0.15.22",
-    "ty==0.0.62",
+# The full dev environment: the tooling groups plus the runtime extras
+dev = [
+    { include-group = "tests" },
+    { include-group = "docs" },
+    { include-group = "lint" },
+    "zea[display-headless]",
+    "zea[models]",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -165,7 +165,7 @@ line-length = 100
 indent-width = 4
 
 # minimum target python version
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
@@ -231,7 +231,7 @@ docstring-code-line-length = "dynamic"
 
 [tool.ty.environment]
 # Minimum supported Python version (see `requires-python`).
-python-version = "3.10"
+python-version = "3.11"
 
 [tool.ty.rules]
 unresolved-import = "ignore"
@@ -252,6 +252,8 @@ invalid-method-override = "ignore"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+# Dump stacks for any test still running after 5 minutes; nothing here is that slow.
+faulthandler_timeout = 300
 markers = [
     "performance: marks tests as performance (deselect with '-m \"not performance\"')",
     "heavy: marks tests as heavy (deselect with '-m \"not heavy\"')",
@@ -267,6 +269,9 @@ filterwarnings = [
     "ignore:.*__array__ implementation doesn't accept a copy keyword.*:DeprecationWarning",
     "ignore:.*os\\.fork\\(\\) was called.*:RuntimeWarning",
     "ignore:.*hf_xet.*:DeprecationWarning",
+    "ignore:'(oneOf|parseString|resetCache|enablePackrat)' deprecated:DeprecationWarning",  # matplotlib -> old pyparsing API
+    "ignore:invalid escape sequence:DeprecationWarning",
+    "ignore:.*sentry_sdk.Hub. is deprecated:DeprecationWarning",  # wandb -> deprecated sentry Hub API
 ]
 
 [tool.coverage.run]
@@ -274,7 +279,11 @@ branch = true
 parallel = true
 concurrency = ["multiprocessing", "thread"]
 sigterm = true
-omit = ["/tmp/__autograph_generated_file*.py"]
+omit = [
+    "/tmp/__autograph_generated_file*.py",
+    # Synthetic module compiled in-memory by tests/test_log.py; never on disk.
+    "*/_fake_internal_module.py",
+]
 
 [tool.coverage.report]
 omit = ["zea/ops/keras_ops.py", "zea/data/app.py"]

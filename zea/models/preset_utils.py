@@ -1,27 +1,27 @@
-"""Mostly from keras_hub.src.models import preset_utils"""
+"""Loading and saving of zea model presets.
+
+Mostly from ``keras_hub.src.utils.preset_utils``, trimmed to what zea needs and
+routed through the zea model registry. The Hugging Face plumbing (handle parsing,
+authentication, downloading) is shared with the data stack and lives in
+:mod:`zea.internal.preset_utils`.
+"""
 
 import collections
 import datetime
 import inspect
 import json
+import math
 import os
+import re
 from pathlib import Path
 
-import huggingface_hub
 import keras
 from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 
 import zea
 import zea.models.base
-from zea.internal.cache import ZEA_CACHE_DIR
-from zea.internal.preset_utils import _hf_login, _hf_parse_path
+from zea.internal.preset_utils import HF_SCHEME, _hf_download, _hf_parse_path
 from zea.internal.registry import model_registry
-
-HF_PREFIX = "hf://"
-
-HF_SCHEME = "hf"
-
-ASSET_DIR = "assets"
 
 # Config file names.
 CONFIG_FILE = "config.json"
@@ -31,13 +31,7 @@ METADATA_FILE = "metadata.json"
 
 # Weight file names.
 MODEL_WEIGHTS_FILE = "model.weights.h5"
-
-# HuggingFace filenames.
-README_FILE = "README.md"
-HF_CONFIG_FILE = "config.json"
-
-HF_MODELS_DIR = ZEA_CACHE_DIR / "huggingface" / "models"
-HF_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+SHARDED_MODEL_WEIGHTS_CONFIG_FILE = "model.weights.json"
 
 # Global state for preset registry.
 BUILTIN_PRESETS = {}
@@ -63,64 +57,64 @@ def builtin_presets(cls):
     return presets
 
 
+def _resolve_builtin_preset(preset):
+    """Resolve a built-in preset identifier to its handle or local path."""
+    entry = BUILTIN_PRESETS.get(preset)
+    if entry is None:
+        return preset
+    return entry["hf_handle"] if "hf_handle" in entry else entry["path"]
+
+
+def _get_hf_file(preset, path):
+    """Download ``path`` from a ``hf://`` preset and return the local path."""
+    repo_id, subpath = _hf_parse_path(preset)
+    filename = f"{subpath}/{path}" if subpath else path
+    try:
+        return _hf_download(repo_id, filename, repo_type="model")
+    except HFValidationError as e:
+        raise ValueError(
+            "Unexpected Hugging Face preset. Hugging Face model handles "
+            "should have the form 'hf://{org}/{model}'. For example, "
+            f"'hf://username/bert_base_en'. Received: preset={preset}."
+        ) from e
+    except EntryNotFoundError as e:
+        # The hub raises this when the file is not in the repo, which is what
+        # `check_file_exists` asks about.
+        raise FileNotFoundError(f"`{path}` doesn't exist in preset directory `{preset}`.") from e
+
+
+def _get_local_file(preset, path):
+    """Return the local path of ``path`` inside a local preset directory."""
+    local_path = Path(preset) / path
+    # Guard against a `path` that escapes the preset directory (keras-hub does the
+    # same for its cache directory, see keras-team/keras-hub#2716). Compare the
+    # paths lexically like upstream: an HF snapshot directory is a valid preset and
+    # stores its files as symlinks into a sibling `blobs/`, which resolving would
+    # (wrongly) read as an escape.
+    preset_dir = os.path.abspath(preset)
+    if os.path.commonpath([preset_dir, os.path.abspath(local_path)]) != preset_dir:
+        raise ValueError(f"Invalid path: '{path}'. It escapes the preset directory.")
+    if not local_path.exists():
+        raise FileNotFoundError(f"`{path}` doesn't exist in preset directory `{preset}`.")
+    return str(local_path)
+
+
 def get_file(preset, path):
     """Download a preset file in necessary and return the local path."""
     if not isinstance(preset, str):
         raise ValueError(f"A preset identifier must be a string. Received: preset={preset}")
 
-    if preset in BUILTIN_PRESETS:
-        if "hf_handle" in BUILTIN_PRESETS[preset]:
-            preset = BUILTIN_PRESETS[preset]["hf_handle"]
-        else:
-            preset = BUILTIN_PRESETS[preset]["path"]
+    preset = _resolve_builtin_preset(preset)
 
     scheme = None
     if "://" in preset:
         scheme = preset.split("://")[0].lower()
 
     if scheme == HF_SCHEME:
-        if huggingface_hub is None:
-            raise ImportError(
-                f"`from_preset()` requires the `huggingface_hub` package to load from '{preset}'. "
-                "Please install with `pip install huggingface_hub`."
-            )
-        repo_id, subpath = _hf_parse_path(preset)
-        filename = f"{subpath}/{path}" if subpath else path
-
-        def _download_from_hf(repo_id, filename):
-            return huggingface_hub.hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                cache_dir=HF_MODELS_DIR,
-            )
-
-        try:
-            # Try without login first
-            return _download_from_hf(repo_id, filename)
-        except huggingface_hub.utils.RepositoryNotFoundError:
-            # Retry after login; _hf_login is a no-op when no token is available
-            # and never prompts interactively, so re-raise if login didn't help.
-            _hf_login()
-            return _download_from_hf(repo_id, filename)
-        except HFValidationError as e:
-            raise ValueError(
-                "Unexpected Hugging Face preset. Hugging Face model handles "
-                "should have the form 'hf://{org}/{model}'. For example, "
-                f"'hf://username/bert_base_en'. Received: preset={preset}."
-            ) from e
-        except EntryNotFoundError as e:
-            message = str(e)
-            if message.find("403 Client Error"):
-                raise FileNotFoundError(
-                    f"`{path}` doesn't exist in preset directory `{preset}`."
-                ) from e
-            raise ValueError(message) from e
+        return _get_hf_file(preset, path)
     elif Path(preset).exists():
         # Assume a local filepath
-        local_path = Path(preset) / path
-        if not local_path.exists():
-            raise FileNotFoundError(f"`{path}` doesn't exist in preset directory `{preset}`.")
-        return str(local_path)
+        return _get_local_file(preset, path)
     else:
         raise ValueError(
             "Unknown preset identifier. A preset must be a one of:\n"
@@ -149,7 +143,6 @@ def load_serialized_object(config, cls, **kwargs):
     config = set_dtype_in_config(config, dtype)
 
     config["config"] = {**config["config"], **kwargs}
-    # return keras.saving.deserialize_keras_object(config)
     return zea.models.base.deserialize_zea_object(config, cls)
 
 
@@ -158,19 +151,7 @@ def check_config_class(config):
     registered_name = config["registered_name"]
     if registered_name in ("Functional", "Sequential"):
         return keras.Model
-    # cls = keras.saving.get_registered_object(registered_name)
-    name = keras_to_zea_registry(registered_name, model_registry)
-
-    cls = model_registry[name]
-
-    if cls is None:
-        raise ValueError(
-            f"Attempting to load class {registered_name} with "
-            "`from_preset()`, but there is no class registered with zea "
-            f"for {registered_name}. Make sure to register any custom "
-            "classes with `zea.registry.model_registry()`."
-        )
-    return cls
+    return model_registry[keras_to_zea_registry(registered_name, model_registry)]
 
 
 def jax_memory_cleanup(layer):
@@ -180,8 +161,12 @@ def jax_memory_cleanup(layer):
     # variable types and do not need this fix.
     if keras.config.backend() == "jax":
         for weight in layer.weights:
-            if getattr(weight, "_value", None) is not None:
-                weight._value.delete()
+            value = getattr(weight, "_value", None)
+            # Do not delete sharded arrays, as they may be referenced in JAX's
+            # distributed computation graph and deletion can cause errors
+            # (keras-team/keras-hub#2431).
+            if value is not None and getattr(value, "sharding", None) is None:
+                value.delete()
 
 
 def set_dtype_in_config(config, dtype=None):
@@ -225,6 +210,32 @@ def _assert_file_exists(preset, path):
             "directory you are trying to load is a valid KerasHub preset and "
             "and that you have permissions to read/download from this location."
         ) from e
+
+
+# What to assume for a dtype we cannot size (`complex64`, `float8_e4m3fn`, ...). This
+# only feeds the shard-size estimate, so guessing beats keras-hub's uncaught ValueError
+# out of `save_to_preset`.
+_DEFAULT_DTYPE_BITS = 32
+
+
+def _dtype_size_in_bits(dtype):
+    """Size of a dtype in bits, e.g. ``"float32"`` -> 32."""
+    dtype = keras.backend.standardize_dtype(dtype)
+    if dtype == "bool":
+        return 1
+    try:
+        return int(re.sub(r"bfloat|float|uint|int", "", dtype))
+    except ValueError:
+        return _DEFAULT_DTYPE_BITS
+
+
+def _variables_size_in_bytes(variables):
+    """Total size of ``variables`` in bytes, counting shared variables once."""
+    unique_variables = {id(v): (v.shape, v.dtype) for v in variables}
+    total_bits = sum(
+        math.prod(shape) * _dtype_size_in_bits(dtype) for shape, dtype in unique_variables.values()
+    )
+    return total_bits / 8
 
 
 def keras_to_zea_registry(keras_name, zea_registry):
@@ -311,9 +322,30 @@ class KerasPresetLoader(PresetLoader):
                     "Model could not be built. Make sure to add a build_config to the json "
                     "or set the input_shape or image_shape attribute before loading weights."
                 )
-        model.load_weights(get_file(self.preset, MODEL_WEIGHTS_FILE))
+        self._load_model_weights(model)
 
         return model
+
+    def _get_sharded_filenames(self, config_path):
+        """The shard files listed in a sharded weights config."""
+        with open(config_path, encoding="utf-8") as config_file:
+            weight_map = json.load(config_file)["weight_map"]
+        filenames = set()
+        for value in weight_map.values():
+            filenames.update(value if isinstance(value, list) else [value])
+        return sorted(filenames)
+
+    def _load_model_weights(self, model):
+        """Load the preset weights, whether they are a single file or sharded."""
+        if check_file_exists(self.preset, MODEL_WEIGHTS_FILE):
+            filepath = get_file(self.preset, MODEL_WEIGHTS_FILE)
+        else:
+            # Sharded: the config maps each weight to the shard holding it, and
+            # Keras expects every shard to sit next to the config when loading.
+            filepath = get_file(self.preset, SHARDED_MODEL_WEIGHTS_CONFIG_FILE)
+            for shard in self._get_sharded_filenames(filepath):
+                get_file(self.preset, shard)
+        model.load_weights(filepath)
 
     def load_image_converter(self, cls, **kwargs):
         """Load an image converter from the preset."""
@@ -348,12 +380,28 @@ class KerasPresetSaver:
         os.makedirs(preset_dir, exist_ok=True)
         self.preset_dir = preset_dir
 
-    def save_model(self, model):
-        """Save a model to a preset."""
+    def save_model(self, model, max_shard_size=10):
+        """Save a model to a preset.
+
+        Args:
+            model (keras.Model): The model to save.
+            max_shard_size (int or float, optional): Maximum size in GB of each
+                weights file. Models larger than this are saved as shards next to a
+                ``model.weights.json`` index. ``None`` always writes a single file.
+                Defaults to ``10``.
+        """
         self._save_serialized_object(model, config_file=CONFIG_FILE)
-        model_weight_path = os.path.join(self.preset_dir, MODEL_WEIGHTS_FILE)
-        model.save_weights(model_weight_path)
+        self._save_model_weights(model, max_shard_size)
         self._save_metadata(model)
+
+    def _save_model_weights(self, model, max_shard_size):
+        """Write the weights as a single file, or as shards when too large."""
+        size_in_gb = _variables_size_in_bytes(model.variables) / (1024**3)
+        if max_shard_size is not None and size_in_gb > max_shard_size:
+            weights_path = os.path.join(self.preset_dir, SHARDED_MODEL_WEIGHTS_CONFIG_FILE)
+            model.save_weights(weights_path, max_shard_size=max_shard_size)
+        else:
+            model.save_weights(os.path.join(self.preset_dir, MODEL_WEIGHTS_FILE))
 
     def save_image_converter(self, converter):
         """Save an image converter to a preset."""
