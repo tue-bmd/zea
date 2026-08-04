@@ -183,6 +183,7 @@ def histogram_match(
     mode: str = "full",
     n_bins: Union[int, str] = 256,
     roi=None,
+    allow_unequal_shapes: bool = False,
 ) -> np.ndarray:
     """Match the histogram of an image to a reference image, for fair visual comparison.
 
@@ -192,8 +193,8 @@ def histogram_match(
 
     Args:
         image (ndarray): Image to transform, typically log-compressed (dB).
-        reference (ndarray): Image to match to. Its shape need not equal that of ``image``,
-            as only the distributions are compared, unless an ``roi`` indexes both.
+        reference (ndarray): Image to match to. Has to be of the shape of ``image``, unless
+            ``allow_unequal_shapes`` says otherwise.
         mode (str, optional): Class of transform to match with. Defaults to ``"full"``.
 
             - ``"partial"``: affine match (Sec. III.A), the scale and offset that match
@@ -219,6 +220,13 @@ def histogram_match(
             homogeneous speckle region (Sec. III.C.3, the paper's expected common use).
             The mapping is fit inside the mask and applied to the whole image, extended
             linearly outside the fitted range. Defaults to None (fit on the whole image).
+        allow_unequal_shapes (bool, optional): Whether ``reference`` may be of a shape other
+            than that of ``image``. Only the two distributions are compared, so a match is
+            well defined either way, but images of different shapes are more often a mistake
+            (a stray transpose, the wrong frame of a sequence) than an intent. Defaults to
+            False. Pass True to match against a reference deliberately not of the shape of
+            the image, e.g. a region cut out of a larger acquisition. An ``roi`` has to index
+            both images regardless, so it cannot be combined with unequal shapes.
 
     Returns:
         ndarray: Transformed image (float64), unclipped: clipping to a display range is
@@ -272,6 +280,11 @@ def histogram_match(
 
     image = ops.convert_to_numpy(image)
     reference = ops.convert_to_numpy(reference)
+    if not allow_unequal_shapes and image.shape != reference.shape:
+        raise ValueError(
+            f"image shape {image.shape} does not match reference shape {reference.shape}; "
+            "pass allow_unequal_shapes=True to match against a reference of another shape."
+        )
     if roi is not None:
         roi = ops.convert_to_numpy(roi).astype(bool)
 
