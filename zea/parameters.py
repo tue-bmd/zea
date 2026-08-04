@@ -412,7 +412,10 @@ class Parameters(BaseParameters):
             )
         elif self.grid_type == "polar":
             if self.is_3d:
-                raise NotImplementedError("3D polar grids are not yet supported.")
+                raise NotImplementedError(
+                    "3D polar grids are not yet supported. Set grid_type='cartesian', "
+                    "or drop ylims/grid_size_y to build a 2D polar grid."
+                )
             return polar_pixel_grid(
                 self.polar_limits,
                 self.zlims,
@@ -517,14 +520,16 @@ class Parameters(BaseParameters):
         """Calculate the wavelength based on sound speed and transmit center frequency."""
         return self.sound_speed / self.center_frequency
 
-    @cache_with_dependencies("zlims", "polar_limits", "probe_geometry")
+    @cache_with_dependencies("zlims", "polar_limits", "probe_geometry", "distance_to_apex")
     def xlims(self):
         """The x-limits of the beamforming grid [m]. If not explicitly set, it is computed based
         on the polar limits and probe geometry.
         """
         xlims = self._params.get("xlims")
         if xlims is None:
-            radius = max(self.zlims)
+            # The sector fans out from the apex, so its half-width at the deepest pixel is
+            # set by the radius to that pixel, not by its depth below the transducer.
+            radius = max(self.zlims) + self.distance_to_apex
             xlims_polar = (
                 radius * np.cos(-np.pi / 2 + self.polar_limits[0]),
                 radius * np.cos(-np.pi / 2 + self.polar_limits[1]),
@@ -539,7 +544,9 @@ class Parameters(BaseParameters):
             )
         return xlims
 
-    @cache_with_dependencies("zlims", "grid_type", "azimuth_limits", "probe_geometry")
+    @cache_with_dependencies(
+        "zlims", "grid_type", "azimuth_limits", "probe_geometry", "distance_to_apex"
+    )
     def ylims(self):
         """The y-limits of the beamforming grid [m]. If not explicitly set, it is computed based
         on the azimuth limits and probe geometry.
@@ -549,7 +556,7 @@ class Parameters(BaseParameters):
             return ylims
 
         # If ylims not set, compute based on azimuth limits and probe geometry
-        radius = max(self.zlims)
+        radius = max(self.zlims) + self.distance_to_apex
         ylims_azimuth = (
             (0.0, 0.0)  # avoid numerical imprecision with np.cos(np.pi/2)
             if self.azimuth_limits is None or self.azimuth_limits[0] == self.azimuth_limits[1]
@@ -1027,10 +1034,13 @@ class Parameters(BaseParameters):
         "resolution",
         "grid_size_z",
         "grid_size_x",
-        "distance_to_apex",
     )
     def coordinates_2d(self):
-        """The coordinates for scan conversion."""
+        """The coordinates for scan conversion.
+
+        These index the polar image, so they live in the apex frame and need no
+        ``distance_to_apex`` correction; :attr:`rho_range` already carries it.
+        """
         coords, _ = compute_scan_convert_2d_coordinates(
             (self.grid_size_z, self.grid_size_x),
             self.rho_range,
@@ -1043,7 +1053,10 @@ class Parameters(BaseParameters):
     def coordinates(self):
         """Get the coordinates for scan conversion."""
         if self.is_3d:
-            raise NotImplementedError
+            raise NotImplementedError(
+                "Scan conversion of 3D grids is not supported. Use "
+                "zea.display.scan_convert_3d directly on the volume."
+            )
         return self.coordinates_2d
 
     @cache_with_dependencies("time_to_next_transmit")

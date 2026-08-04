@@ -183,8 +183,16 @@ def compute_scan_convert_2d_coordinates(
     theta_range: Tuple[float, float],
     resolution: Union[float, None] = None,
     dtype: str = "float32",
+    distance_to_apex: float = 0.0,
 ):
-    """Precompute coordinates for 2d scan conversion from polar coordinates"""
+    """Precompute coordinates for 2d scan conversion from polar coordinates.
+
+    ``rho`` is measured from the apex of the polar grid. ``distance_to_apex`` says how far
+    the transducer sits in front of that apex, and is used only to report ``z_lim`` as a
+    depth below the transducer (matching :attr:`~zea.Parameters.extent`). It must not
+    enter the sampling grid: the returned coordinates index the polar image, so they stay
+    in the apex frame.
+    """
     assert len(rho_range) == 2, "rho_range should be a tuple of length 2"
     assert len(theta_range) == 2, "theta_range should be a tuple of length 2"
     assert rho_range[0] < rho_range[1], "min_rho should be less than max_rho"
@@ -215,7 +223,7 @@ def compute_scan_convert_2d_coordinates(
     parameters = {
         "resolution": resolution,
         "x_lim": x_lim,
-        "z_lim": z_lim,
+        "z_lim": [z_lim[0] - distance_to_apex, z_lim[1] - distance_to_apex],
         "rho_range": rho_range,
         "theta_range": theta_range,
         "d_rho": d_rho,
@@ -232,6 +240,7 @@ def scan_convert_2d(
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,
     order: int = 1,
+    distance_to_apex: float = 0.0,
     **kwargs,
 ):
     """
@@ -254,6 +263,10 @@ def scan_convert_2d(
             outside the input image ranges. Defaults to 0.0. When set to NaN,
             no interpolation at the edges will happen.
         order (int, optional): The order of the spline interpolation. Defaults to 1.
+        distance_to_apex (float, optional): Distance from the apex ``rho`` is measured
+            from to the transducer surface. Only shifts the reported ``z_lim`` so it
+            reads as a depth below the transducer; the image itself is unchanged.
+            Defaults to 0.0.
 
     Returns:
         ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
@@ -282,6 +295,7 @@ def scan_convert_2d(
             theta_range,
             resolution,
             dtype=image.dtype,
+            distance_to_apex=distance_to_apex,
         )
 
     scan_converted = _interpolate_batch(image, coordinates, fill_value, order=order, **kwargs)
@@ -449,6 +463,7 @@ def scan_convert(
     fill_value: float = 0.0,
     order: int = 1,
     with_batch_dim: bool = False,
+    distance_to_apex: float = 0.0,
 ):
     """Scan convert image based on number of dimensions."""
     if len(image.shape) == 2 + int(with_batch_dim):
@@ -460,6 +475,7 @@ def scan_convert(
             coordinates,
             fill_value,
             order,
+            distance_to_apex=distance_to_apex,
         )
     elif len(image.shape) == 3 + int(with_batch_dim):
         return scan_convert_3d(

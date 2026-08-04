@@ -120,7 +120,7 @@ def cartesian_pixel_grid(
     return grid
 
 
-def radial_pixel_grid(rlims, dr, oris, dirs):
+def radial_pixel_grid(rlims, dr, oris, dirs, num_radial_pixels=None):
     """Generate a focused pixel grid based on input parameters.
 
     To accommodate the multitude of ways of defining a focused transmit grid, we define
@@ -128,19 +128,27 @@ def radial_pixel_grid(rlims, dr, oris, dirs):
     The position along the ray is defined by its limits (rlims) and spacing (dr).
 
     Args:
-        rlims (tuple): Radial limits of pixel grid ([rmin, rmax]) with respect to each ray origin
+        rlims (tuple): Radial limits of pixel grid ([rmin, rmax]) with respect to each ray
+            origin. Both ends are included when ``dr`` divides the range evenly, matching
+            :func:`cartesian_pixel_grid`'s treatment of ``zlims``.
         dr (float): Pixel spacing in radius
         oris (np.ndarray): Origin of each ray in Cartesian coordinates (x, y, z)
             with shape (nrays, 3)
         dirs (np.ndarray): Steering direction of each ray in azimuth, in units of
             radians (nrays, 2)
+        num_radial_pixels (int, optional): Number of samples along each ray. Derived from
+            ``rlims`` and ``dr`` when not given.
 
     Returns:
         grid (np.ndarray): Pixel grid of size (nr, nrays, 3) in
             Cartesian coordinates (x, y, z), with nr being the number of radial pixels.
     """
-    # Get focusing positions in rho-theta coordinates
-    r = np.arange(rlims[0], rlims[1], dr)  # Depth rho
+    # Get focusing positions in rho-theta coordinates. Counting the samples (rather than
+    # np.arange over a float range) keeps rmax in the grid instead of dropping it to a
+    # rounding error, so rlims are the radii of the first and last sample exactly.
+    if num_radial_pixels is None:
+        num_radial_pixels = int(np.floor((rlims[1] - rlims[0]) / dr + 1e-9)) + 1
+    r = rlims[0] + np.arange(num_radial_pixels) * dr  # Depth rho
     t = dirs[:, 0]  # Use azimuthal angle theta (ignore elevation angle)
     tt, rr = np.meshgrid(t, r, indexing="ij")
 
@@ -184,7 +192,7 @@ def polar_pixel_grid(
 
     # Radii are measured from the apex, depths from the transducer surface.
     rlims = (zlims[0] + distance_to_apex, zlims[1] + distance_to_apex)
-    dr = (rlims[1] - rlims[0]) / num_radial_pixels
+    dr = (rlims[1] - rlims[0]) / max(num_radial_pixels - 1, 1)
 
     oris = np.array([0, 0, -distance_to_apex])
     oris = np.tile(oris, (num_polar_pixels, 1))
@@ -193,10 +201,7 @@ def polar_pixel_grid(
     dirs_el = np.zeros(num_polar_pixels)
     dirs = np.vstack((dirs_az, dirs_el)).T
 
-    grid = radial_pixel_grid(rlims, dr, oris, dirs).transpose(1, 0, 2)
-
-    # In case of rounding errors, trim the grid to the correct number of radial pixels
-    return grid[:num_radial_pixels, :, :]
+    return radial_pixel_grid(rlims, dr, oris, dirs, num_radial_pixels).transpose(1, 0, 2)
 
 
 def scanline_pixel_grid(
