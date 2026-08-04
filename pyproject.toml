@@ -64,9 +64,8 @@ display-headless = ["opencv-python-headless>=4"]
 # but some do, so we list them here
 models = ["onnxruntime>=1.15"]
 app = ["gradio>=6.0"]
-# these are just here for .readthedocs.yaml
-# please for proper install (with GPU support)
-# install manually
+# Unpinned extras for `pip install zea[backends]`; development uses the pinned
+# jax-*/torch-*/tf-* dependency-groups below instead.
 # TensorFlow only ships Keras 3 from 2.16.1 onwards; older versions pin keras <3.
 backends = ["jax>=0.4.35", "tensorflow>=2.16.1", "torch>=2.2"]
 
@@ -118,6 +117,48 @@ dev = [
     { include-group = "lint" },
     "zea[display-headless]",
     "zea[models]",
+    "pip", # uv does not seed pip into the venvs it creates
+]
+
+# ML backends, pinned by uv.lock rather than the Dockerfile, so that
+# `uv sync --group jax-gpu ...` installs them in place -- no image rebuild. The bounds
+# are floors; `uv lock --upgrade-package jax` (etc.) moves the locked versions.
+jax-cpu = ["jax>=0.10.2"]
+jax-gpu = ["jax[cuda12]>=0.10.2"]
+torch-cpu = ["torch>=2.2", "torchvision", "torchaudio"]
+torch-gpu = ["torch>=2.2", "torchvision", "torchaudio"]
+tf-cpu = ["tensorflow>=2.21"]
+tf-gpu = ["tensorflow[and-cuda]>=2.21"]
+
+[tool.uv]
+# torch-cpu and torch-gpu are the same package from different indexes, so uv has to fork.
+conflicts = [[{ group = "torch-cpu" }, { group = "torch-gpu" }]]
+
+# One index per compute backend; `explicit` keeps everything else on PyPI. To move to
+# another CUDA generation, run ./scripts/resolve_backend_versions.sh.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+# PyTorch ships no CUDA wheels for macOS, so torch-gpu falls back to PyPI there.
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", group = "torch-cpu" },
+    { index = "pytorch-cu129", group = "torch-gpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+    { index = "pytorch-cpu", group = "torch-cpu" },
+    { index = "pytorch-cu129", group = "torch-gpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchaudio = [
+    { index = "pytorch-cpu", group = "torch-cpu" },
+    { index = "pytorch-cu129", group = "torch-gpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 [tool.hatch.build.targets.wheel]

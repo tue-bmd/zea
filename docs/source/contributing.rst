@@ -80,10 +80,17 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
          This creates a ``.venv`` with the exact locked dependencies and installs
          ``zea`` itself in **editable** mode, so your changes to the source take
-         effect immediately without reinstalling. This will also install the ``dev`` 
-         dependency-group, i.e. the ``tests``, ``docs`` and ``lint`` groups. Prefix commands 
+         effect immediately without reinstalling. This will also install the ``dev``
+         dependency-group, i.e. the ``tests``, ``docs`` and ``lint`` groups. Prefix commands
          with ``uv run`` (e.g. ``uv run pytest``) or activate the environment with
          ``source .venv/bin/activate``.
+
+         Backends are groups too, so add the ones you want — ``cpu`` or ``gpu``, and a
+         single backend is enough to run the test suite:
+
+         .. code-block:: shell
+
+               uv sync --group jax-cpu     # or jax-gpu, torch-cpu, tf-gpu, ...
 
     .. tab-item:: pip
 
@@ -96,8 +103,9 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
                pip install -e . --group dev
                pre-commit install
 
-For local environments (uv or pip), you also need to install a machine learning
-backend: JAX, PyTorch, or TensorFlow. See the
+The Docker images already come with a machine learning backend. For the uv and ``pip``
+routes you need one of JAX, PyTorch or TensorFlow: with uv use the backend groups shown
+above, with ``pip`` install it yourself — see the
 :ref:`backend installation <backend-installation>` guide.
 
 .. _running-tests:

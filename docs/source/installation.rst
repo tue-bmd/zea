@@ -128,6 +128,18 @@ To build the full image including all backends with GPU support:
 
 Note that these build arguments can be set to either `cpu` or `gpu` depending on your needs.
 
+The versions the image installs -- backends included -- come from ``uv.lock``, not from
+the ``Dockerfile``. So when the lockfile changes, a running container can catch up
+without a rebuild: with the repository mounted at ``/zea``, run ``uv sync`` inside it,
+naming the same backend groups the image was built with (``cpu`` instead of ``gpu`` for
+the CPU images, and only the backends that image has):
+
+.. code-block:: shell
+
+   uv sync --group jax-gpu --group torch-gpu --group tf-gpu
+
+This updates the image's environment in place.
+
 Run
 ~~~
 

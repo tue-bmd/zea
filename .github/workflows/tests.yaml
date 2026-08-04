@@ -177,7 +177,7 @@ jobs:
             -v "${{ github.workspace }}:/zea" \
             -w /zea \
             ${{ needs.image.outputs.docker_image }} \
-            sh -c "uv pip install --system --group tests -e . && pytest --cov --cov-branch --cov-report=xml --junitxml=junit.xml -o junit_family=legacy -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
+            sh -c "uv pip install --group tests -e . && pytest --cov --cov-branch --cov-report=xml --junitxml=junit.xml -o junit_family=legacy -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -355,7 +355,7 @@ jobs:
             -w /zea/docs \
             ${{ needs.image.outputs.docker_image }} \
             sh -c "\
-              uv pip install --system --group docs -e .. && \
+              uv pip install --group docs -e .. && \
               export PATH=\"/tmp/.local/bin:\$PATH\" && \
               export ZEA_LOG_LEVEL=ERROR && \
               make docs-clean && \

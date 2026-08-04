@@ -57,4 +57,15 @@ printf '%s %s %s %s%storch          %s\n' \
     "$OT" "$OT" "$OT" "$PT"  "$G"  "$(yn "${INSTALL_TORCH}")"
 printf '%s %s %s %s%stensorflow     %s\n' \
     "$ET" "$OT" "$OT" "$ET"  "$G"  "$(yn "${INSTALL_TF}")"
+
+# ── sync hint ─────────────────────────────────────────────────────────────────
+# Everything above comes from uv.lock, so a lockfile change (a rebased branch, an
+# updated backend) is applied in place with this command -- no image rebuild.
+SYNC=''
+[ "$DEV" = "true" ] || SYNC="$SYNC --no-default-groups"
+[ "$INSTALL_JAX" != "false" ] && SYNC="$SYNC --group jax-${INSTALL_JAX}"
+[ "$INSTALL_TORCH" != "false" ] && SYNC="$SYNC --group torch-${INSTALL_TORCH}"
+[ "$INSTALL_TF" != "false" ] && SYNC="$SYNC --group tf-${INSTALL_TF}"
+printf '\n%ssync with uv.lock:%s %suv sync%s%s\n' \
+    "$GY$DM" "$RS"  "$CY" "$SYNC" "$RS"
 printf '\n'

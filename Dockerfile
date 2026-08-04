@@ -18,93 +18,92 @@ ARG DEV=true
 ##############################
 # 1) Builder: all deps (non-backend + selected backends)
 ##############################
-FROM python:3.12-slim-bullseye AS builder
-
-# Backend versions, to re-resolve to newer versions, run ./scripts/resolve_backend_versions.sh
-# and paste its output here.
-ENV JAX_VERSION=0.10.2 \
-    TORCH_VERSION=2.12.1 \
-    TORCHVISION_VERSION=0.27.1 \
-    TORCHAUDIO_VERSION=2.11.0 \
-    TF_VERSION=2.21.0
-
-ARG CU_BACKEND=cu129
+FROM python:3.12-slim-trixie AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
-# Install into the system env (/usr/local) so the runtime stage can copy it. UV_LINK_MODE=copy
-# lets uv copy out of the --mount=type=cache on each uv RUN (a separate filesystem).
+# Install into a venv at /opt/venv: a single self-contained tree the runtime stage copies
+# in one go, at a fixed path outside any bind-mounted workspace. UV_LINK_MODE=copy lets uv
+# copy out of the --mount=type=cache on each uv RUN (a separate filesystem).
 ENV PYTHONDONTWRITEBYTECODE=1 \
     LC_ALL=C \
-    UV_PROJECT_ENVIRONMENT=/usr/local \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
 # Install uv from the official image
-COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.1 /uv /usr/local/bin/uv
 
 WORKDIR /zea
 
 COPY pyproject.toml uv.lock README.md ./
 
-# Install all non-backend dependencies from the lockfile, installing the dev
+# Install all non-backend dependencies from the lockfile, including the dev
 # dependency-group (tests + docs + lint + dev-only runtime pkgs) only if DEV is true.
-# uv installs the `dev` group by default, so the DEV=false branch must pass
+# uv installs the `dev` group by default, so the DEV=false branch passes
 # --no-default-groups to keep dev tooling out of the production image.
-# --no-install-project skips installing zea itself (added later as an editable
-# install), and --inexact keeps pip/setuptools available in the image.
+# --no-install-project skips installing zea itself (added later as an editable install).
+# uv does not seed pip into the venv; the dev group carries it, so only non-dev images
+# need it installed explicitly. This layer depends on DEV alone, so all the per-backend
+# image variants share it.
 ARG DEV
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ "$DEV" = "true" ]; then \
-    uv sync --frozen --no-install-project --inexact --dev; \
+    uv sync --frozen --no-install-project --group dev; \
     else \
-    uv sync --frozen --no-install-project --inexact --no-dev; \
+    uv sync --frozen --no-install-project --no-default-groups && \
+    uv pip install --python /opt/venv/bin/python pip; \
     fi
 
-# Install the selected backends in a single resolve. uv's --torch-backend selects the
-# right PyTorch index (CPU vs CUDA), so there is no need for per-variant build stages or
-# manual index URLs / +cpu suffixes. CPU vs GPU is uniform across backends per build.
+# Install the selected backends, one dependency-group each. Their versions and their
+# CPU/CUDA wheels are pinned by pyproject.toml + uv.lock (see the `*-cpu` / `*-gpu`
+# groups and the PyTorch indexes there), so the image and a later `uv sync` inside it
+# install exactly the same stack -- no rebuild needed to pick up a lockfile change.
+# --inexact keeps the packages installed by the layer above (and pip) in place.
 ARG INSTALL_JAX
 ARG INSTALL_TORCH
 ARG INSTALL_TF
 RUN --mount=type=cache,target=/root/.cache/uv \
     set -e; \
-    case "${INSTALL_JAX}${INSTALL_TORCH}${INSTALL_TF}" in \
-    *gpu*) TORCH_BACKEND="${CU_BACKEND}" ;; \
-    *)     TORCH_BACKEND="cpu" ;; \
-    esac; \
-    PKGS=""; \
-    [ "$INSTALL_TORCH" != "false" ] && PKGS="$PKGS torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION}"; \
-    [ "$INSTALL_TF"  = "cpu" ] && PKGS="$PKGS tensorflow==${TF_VERSION}"; \
-    [ "$INSTALL_TF"  = "gpu" ] && PKGS="$PKGS tensorflow[and-cuda]==${TF_VERSION}"; \
-    [ "$INSTALL_JAX" = "cpu" ] && PKGS="$PKGS jax==${JAX_VERSION}"; \
-    [ "$INSTALL_JAX" = "gpu" ] && PKGS="$PKGS jax[cuda12]==${JAX_VERSION}"; \
-    if [ -n "$PKGS" ]; then \
-    uv pip install --system --torch-backend="$TORCH_BACKEND" $PKGS; \
+    GROUPS=""; \
+    [ "$INSTALL_JAX" != "false" ] && GROUPS="$GROUPS --group jax-${INSTALL_JAX}"; \
+    [ "$INSTALL_TORCH" != "false" ] && GROUPS="$GROUPS --group torch-${INSTALL_TORCH}"; \
+    [ "$INSTALL_TF" != "false" ] && GROUPS="$GROUPS --group tf-${INSTALL_TF}"; \
+    if [ -n "$GROUPS" ]; then \
+    uv sync --frozen --no-install-project --no-default-groups --inexact $GROUPS; \
     fi
 
 ##############################
 # 2) Final runtime image
 ##############################
-FROM python:3.12-slim-bullseye AS runtime
+FROM python:3.12-slim-trixie AS runtime
 
+# tk8.6 (not python3-tk) supplies the Tcl/Tk shared libraries matplotlib's TkAgg backend
+# needs; python3-tk would additionally pull in Debian's own Python, whose tkinter module
+# this image's interpreter cannot import anyway.
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends --fix-missing \
-    python3-tk \
+    tk8.6 \
     ffmpeg imagemagick \
     make pandoc \
     openssh-client git sudo && \
-    ln -s /usr/bin/python3 /usr/bin/python && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /zea
 
-# Copy over installed Python packages and entrypoints from builder (includes uv)
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+# The environment is one self-contained tree, so a single copy brings over site-packages,
+# console scripts and Jupyter kernelspecs alike.
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=ghcr.io/astral-sh/uv:0.12.1 /uv /usr/local/bin/uv
 
-# Copy over Jupyter configuration and kernelspecs
-COPY --from=builder /usr/local/share/jupyter /usr/local/share/jupyter
+# Putting the venv first on PATH and exporting VIRTUAL_ENV is what lets `python`, `pip` and
+# `uv pip install` find it unaided; UV_PROJECT_ENVIRONMENT points uv's project commands at
+# it too, so `uv sync`/`uv run` in a bind-mounted workspace update this env instead of
+# silently creating a shadow .venv next to the source.
+ENV PATH=/opt/venv/bin:$PATH \
+    VIRTUAL_ENV=/opt/venv \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_LINK_MODE=copy
 
 # preserve runtime flags
 ARG INSTALL_JAX
@@ -119,13 +118,19 @@ ENV INSTALL_JAX=${INSTALL_JAX} \
 ENV PYTHONDONTWRITEBYTECODE=1 \
     LC_ALL=C
 
+# TF 2.21.0's libtensorflow_framework.so.2 has RUNPATH entries for every bundled CUDA lib
+# except cusolver (2.19 still had it), so TF silently falls back to CPU with a "Cannot
+# dlopen some GPU libraries" warning. Put that one directory on the loader path; harmless
+# when TF/CUDA is not installed. Drop this once the upstream wheel is fixed.
+ENV LD_LIBRARY_PATH=/opt/venv/lib/python3.12/site-packages/nvidia/cusolver/lib
+
 # Install zea
 
 # Copy source code to /zea (needed for editable install)
 COPY . .
 # in editable mode WITHOUT installing dependencies (which are already installed by uv)
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --no-deps -e .
+    uv pip install --no-deps -e .
 
 # Set KERAS_BACKEND in bashrc before motd.sh is called
 RUN echo 'export KERAS_BACKEND=$( \
