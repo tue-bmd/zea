@@ -178,10 +178,10 @@ def create_curved_probe_geometry(n_el, pitch, radius):
     """Create the geometry of a convex (curved) array.
 
     Elements lie on an arc of the given radius of curvature in the ``x-z`` plane
-    (``y = 0``), with the apex element at the origin facing ``+z`` and the
-    peripheral elements curving back toward ``-z`` (zea's convention: the medium
-    is at ``+z``). ``pitch`` is the arc spacing between adjacent elements, so the
-    per-element angular step is ``pitch / radius``.
+    (``y = 0``), centred on ``(0, 0, -radius)``. The middle of the array sits at the
+    origin facing ``+z`` and the peripheral elements curve back toward ``-z`` (zea's
+    convention: the medium is at ``+z``). ``pitch`` is the arc spacing between adjacent
+    elements, so the per-element angular step is ``pitch / radius``.
 
     Args:
         n_el (int): Number of elements in the probe.
@@ -204,58 +204,61 @@ def create_curved_probe_geometry(n_el, pitch, radius):
     return probe_geometry
 
 
-def fit_curved_probe_radius(probe_geometry) -> float:
+def fit_curved_probe_radius(probe_geometry, tol: float = 0.5) -> float:
     """Recover a curved probe's radius of curvature from its element positions.
 
-    Inverse of :func:`create_curved_probe_geometry`, for curved probes whose geometry
-    is only known from ``probe_geometry`` (e.g. read from a converted file) rather than
-    built from an explicit radius. Also serves as the polar beamforming/scan-conversion
-    grid's ``distance_to_apex`` (see :class:`~zea.Parameters`), since both describe the
-    same centre of curvature.
+    Inverse of :func:`create_curved_probe_geometry`, for curved probes whose radius is
+    only known through ``probe_geometry`` (e.g. read from a converted file) rather than
+    built from an explicit radius. For such a probe the radius is also the polar grid's
+    :attr:`~zea.Parameters.distance_to_apex`, because the centre of curvature is exactly
+    the apex the beams fan out from.
 
-    Elements are assumed to lie on an arc of radius R centred at ``(0, 0, -R)`` (apex at
-    the origin, zea's curved-probe convention -- see :func:`create_curved_probe_geometry`),
-    so ``x^2 + (z + R)^2 = R^2``  =>  ``x^2 + z^2 + 2 R z = 0``. Solved as a least-squares
+    Elements are assumed to lie on an arc of radius ``R`` centred at ``(0, 0, -R)``, so
+    ``x^2 + (z + R)^2 = R^2``  =>  ``x^2 + z^2 + 2 R z = 0``. Solved as a least-squares
     fit over all elements rather than per-element, which is ill-conditioned for the
-    elements nearest the apex (``z -> 0``).
+    elements nearest the middle of the array (``z -> 0``).
+
+    .. note::
+        The apex is the centre of curvature, at ``(0, 0, -R)``. It is not the middle of
+        the array, which sits at the origin, hence ``distance_to_apex`` for a curved
+        probe is its radius of curvature rather than zero.
 
     Args:
-        probe_geometry (np.ndarray): Element positions, shape (n_el, 3), in zea's
-            apex-at-origin curved-probe frame. Re-centre first if ``probe_geometry``
-            uses a different origin.
+        probe_geometry (np.ndarray): Element positions in metres, shape (n_el, 3), in
+            zea's curved-probe frame (see :func:`create_curved_probe_geometry`).
+        tol (float, optional): How far an element may sit from the fitted arc before the
+            fit is rejected, as a fraction of the element pitch. Defaults to 0.5, which
+            comfortably admits the irregularity of measured and simulated geometries
+            while still rejecting an array that is off-frame by a single element.
 
     Returns:
         float: Fitted radius of curvature in metres.
 
     Raises:
-        ValueError: If ``probe_geometry`` is empty, flat (no curvature to fit), or
-            laterally off-centre (mean ``x`` far from 0) -- the latter means it isn't in
-            the apex-at-origin frame this function assumes, and the fit would silently
-            be wrong (a shifted arc still "fits" a circle, just the wrong one).
+        ValueError: If the elements do not lie on such an arc, either because the array
+            is not curved or because ``probe_geometry`` uses a different origin -- a
+            translated arc still fits *a* circle, just not one centred at ``(0, 0, -R)``.
     """
-    if len(probe_geometry) == 0:
-        raise ValueError("Cannot fit a radius of curvature: probe_geometry is empty.")
-
     x = probe_geometry[:, 0].astype(np.float64)
     z = probe_geometry[:, 2].astype(np.float64)
-    denom = 2.0 * np.sum(z**2)
-    if np.isclose(denom, 0.0):
-        raise ValueError(
-            "Cannot fit a radius of curvature: all elements have z = 0 "
-            "(a flat/linear array has no curvature)."
-        )
 
-    aperture = float(x.max() - x.min())
-    if abs(x.mean()) > 0.02 * aperture:
-        raise ValueError(
-            f"Cannot fit a radius of curvature: probe_geometry is not centred on x = 0 "
-            f"(mean x = {x.mean() * 1e3:.2f} mm, aperture = {aperture * 1e3:.2f} mm). "
-            "fit_curved_probe_radius assumes zea's apex-at-origin curved-probe convention "
-            "(see create_curved_probe_geometry) -- re-centre probe_geometry to that frame "
-            "first if it uses a different origin."
-        )
+    denominator = 2.0 * np.sum(z**2)
+    radius = -np.sum(z * (x**2 + z**2)) / denominator if denominator > 0 else np.inf
 
-    return float(-np.sum(z * (x**2 + z**2)) / denom)
+    # Check the fit instead of trusting it: this catches a flat array (nothing to fit) as
+    # well as a geometry in a different frame, which would otherwise fit the wrong circle.
+    if np.isfinite(radius):
+        deviation = np.max(np.abs(np.hypot(x, z + radius) - radius))
+        pitch = np.median(np.linalg.norm(np.diff(probe_geometry, axis=0), axis=1))
+        if deviation <= tol * pitch:
+            return float(radius)
+
+    raise ValueError(
+        "Cannot fit a radius of curvature: the elements do not lie on an arc centred at "
+        "(0, 0, -R). Either the array is not curved, or probe_geometry uses a different "
+        "origin and needs re-centring onto zea's curved-probe frame "
+        "(see create_curved_probe_geometry)."
+    )
 
 
 class Probe(ProbeSpec):

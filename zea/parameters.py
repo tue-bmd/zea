@@ -117,7 +117,7 @@ from zea.display import compute_scan_convert_2d_coordinates
 from zea.func.ultrasound import compute_time_to_peak_stack
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated
-from zea.probes import Probe
+from zea.probes import Probe, fit_curved_probe_radius
 
 
 class Parameters(BaseParameters):
@@ -324,7 +324,7 @@ class Parameters(BaseParameters):
         "rho_range": {"dtype": np.float32, "shape": (2,)},
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
-        "distance_to_apex": {"dtype": np.float32, "default": 0.0},
+        "distance_to_apex": {"dtype": (np.float32, type(None)), "default": None},
     }
 
     # Add some defaults that are not stored in a file
@@ -349,19 +349,26 @@ class Parameters(BaseParameters):
             return np.array([aperture_width, aperture_height, aperture_depth])
         return None
 
-    @cache_with_dependencies("polar_limits", "aperture_size")
+    @cache_with_dependencies("probe_geometry")
     def distance_to_apex(self):
-        """Calculate the distance from the transducer to the apex of the pixel grid."""
-        if "distance_to_apex" in self._params:
-            return self._params["distance_to_apex"]
-        if self.aperture_size is not None:
-            max_angle = np.max(np.abs(self.polar_limits))
-            t = np.tan(max_angle)
-            if np.isclose(t, 0.0):
-                return 0.0
-            distance_to_apex = (self.aperture_size[0] / 2) / t
-            return distance_to_apex
-        return 0.0
+        """The distance from the transducer surface to the apex of the polar pixel grid.
+
+        The apex is the point the beams fan out from. For a curved array it is the centre
+        of curvature, so this is the probe's radius of curvature, fitted from
+        :attr:`probe_geometry`. A flat array has no centre of curvature and its beams
+        originate at the array itself, giving 0. Set it explicitly to override the fit.
+        """
+        value = self._params.get("distance_to_apex")
+        if value is not None:
+            return value
+
+        probe_geometry = self._params.get("probe_geometry")
+        if probe_geometry is None:
+            return np.float32(0.0)
+        try:
+            return np.float32(fit_curved_probe_radius(probe_geometry))
+        except ValueError:  # not a curved array
+            return np.float32(0.0)
 
     @cache_with_dependencies(
         "xlims",
@@ -566,16 +573,15 @@ class Parameters(BaseParameters):
             return [0, self.sound_speed * self.n_ax / self.sampling_frequency / 2]
         return zlims
 
-    @cache_with_dependencies("grid", "grid_type", "distance_to_apex")
+    @cache_with_dependencies("grid")
     def extent(self):
         """
         The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
         """
+        # self.grid holds transducer-frame coordinates for every grid type (polar grids
+        # place their ray origins at -distance_to_apex), so this needs no correction.
         xlims = (self.grid[..., 0].min(), self.grid[..., 0].max())
         ylims = (self.grid[..., 1].min(), self.grid[..., 1].max())
-        # self.grid is already apex-relative (z = 0 at the apex) for polar grids by
-        # construction (polar_pixel_grid's ray origins sit at -distance_to_apex), so no
-        # further shift is needed here.
         zlims = (self.grid[..., 2].min(), self.grid[..., 2].max())
 
         return np.array(
@@ -994,12 +1000,16 @@ class Parameters(BaseParameters):
     @cache_with_dependencies("zlims", "distance_to_apex")
     def rho_range(self):
         """A tuple specifying the range of rho values (min_rho, max_rho). Defined in mm.
-        Used for scan conversion. Matches :func:`~zea.beamform.pixelgrid.polar_pixel_grid`'s
-        ``rlims`` convention: ``zlims[0]`` is already a true rho (only ``zlims[1]`` gets
-        ``distance_to_apex`` added here)."""
+        Used for scan conversion. Rho is measured from the apex of the polar grid, so
+        :attr:`zlims` (depths below the transducer) are shifted by
+        :attr:`distance_to_apex`, matching the ``rlims`` of
+        :func:`~zea.beamform.pixelgrid.polar_pixel_grid`."""
         value = self._params.get("rho_range")
         if value is None:
-            return (self.zlims[0], self.zlims[1] + self.distance_to_apex)
+            return (
+                self.zlims[0] + self.distance_to_apex,
+                self.zlims[1] + self.distance_to_apex,
+            )
         return value
 
     @cache_with_dependencies("polar_limits")

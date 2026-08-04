@@ -166,15 +166,14 @@ def polar_pixel_grid(
 
     Args:
         polar_limits (tuple): Polar limits of pixel grid ([polar_min, polar_max])
-        zlims (tuple): Depth limits of pixel grid ([zmin, zmax]). ``zlims[0]`` is a
-            true radius from the centre of curvature (i.e. already includes
-            ``distance_to_apex`` if nonzero); ``zlims[1]`` is apex-relative and gets
-            ``distance_to_apex`` added here. (Asymmetric on purpose -- matches
-            :attr:`~zea.Parameters.rho_range`; see ``Parameters.coordinates_2d`` for
-            why scan conversion must not re-apply ``distance_to_apex`` on top of this.)
+        zlims (tuple): Depth limits of pixel grid ([zmin, zmax]), measured from the
+            transducer surface (``z = 0``) just like for a Cartesian grid.
         num_radial_pixels (int, optional): Number of depth pixels.
         num_polar_pixels (int, optional): Number of polar pixels.
-        distance_to_apex (float, optional): Distance from transducer to apex of pixel grid.
+        distance_to_apex (float, optional): Distance from the transducer surface to the
+            apex of the pixel grid, the point the rays fan out from. For a curved probe
+            that point is the centre of curvature, so this equals the probe's radius of
+            curvature (see :func:`~zea.probes.fit_curved_probe_radius`).
 
     Returns:
         grid (np.ndarray): Pixel grid of size (num_radial_pixels, num_polar_pixels, 3)
@@ -183,7 +182,8 @@ def polar_pixel_grid(
     assert len(polar_limits) == 2, "polar_limits must be a tuple of length 2."
     assert len(zlims) == 2, "zlims must be a tuple of length 2."
 
-    rlims = (zlims[0], zlims[1] + distance_to_apex)
+    # Radii are measured from the apex, depths from the transducer surface.
+    rlims = (zlims[0] + distance_to_apex, zlims[1] + distance_to_apex)
     dr = (rlims[1] - rlims[0]) / num_radial_pixels
 
     oris = np.array([0, 0, -distance_to_apex])

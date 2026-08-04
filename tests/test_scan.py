@@ -606,3 +606,62 @@ def test_custom_parameters_passthrough_to_tensor():
     assert "my_custom_parameter" in tensors
     # Derived properties still compute (custom params don't interfere).
     assert parameters.wavelength == parameters.sound_speed / parameters.center_frequency
+
+
+# --- distance_to_apex ---
+
+
+def test_distance_to_apex_fitted_from_curved_probe():
+    """Left unset, the apex distance is the curved probe's radius of curvature."""
+    from zea.probes import create_curved_probe_geometry
+
+    radius = 49.57e-3
+    parameters = Parameters(
+        probe_geometry=create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=radius)
+    )
+    assert parameters.distance_to_apex == pytest.approx(radius, rel=1e-5)
+
+
+def test_distance_to_apex_is_zero_for_a_flat_probe():
+    """A linear or phased array fans out from the transducer surface itself."""
+    from zea.probes import create_probe_geometry
+
+    parameters = Parameters(probe_geometry=create_probe_geometry(n_el=128, pitch=0.3e-3))
+    assert parameters.distance_to_apex == 0.0
+
+
+def test_distance_to_apex_is_zero_without_probe_geometry():
+    """Nothing to fit, so fall back to an apex at the transducer surface."""
+    assert Parameters().distance_to_apex == 0.0
+
+
+def test_distance_to_apex_explicit_value_wins():
+    """An explicit value overrides the fit, and both paths agree bit for bit."""
+    from zea.probes import create_curved_probe_geometry
+
+    probe_geometry = create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=49.57e-3)
+    assert Parameters(probe_geometry=probe_geometry, distance_to_apex=0.0).distance_to_apex == 0.0
+
+    fitted = Parameters(probe_geometry=probe_geometry).distance_to_apex
+    explicit = Parameters(probe_geometry=probe_geometry, distance_to_apex=fitted)
+    assert explicit.distance_to_apex == fitted
+
+
+def test_polar_grid_uses_the_fitted_apex():
+    """The fitted apex reaches the grid: rays start one zlims[0] below the transducer."""
+    from zea.probes import create_curved_probe_geometry
+
+    radius = 49.57e-3
+    parameters = Parameters(
+        probe_geometry=create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=radius),
+        grid_type="polar",
+        polar_limits=(-0.3, 0.3),
+        zlims=(0.005, 0.07),
+        grid_size_z=256,
+        grid_size_x=128,
+        center_frequency=3.5e6,
+    )
+    assert parameters.distance_to_apex == pytest.approx(radius, rel=1e-5)
+    assert parameters.rho_range[0] == pytest.approx(0.005 + radius, rel=1e-5)
+    # Centre ray starts at zlims[0] below the transducer, not at the apex.
+    assert parameters.grid[0, 64, 2] == pytest.approx(0.005, abs=1e-6)
