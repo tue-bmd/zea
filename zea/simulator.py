@@ -64,6 +64,7 @@ def simulate_rf(
     element_width,
     attenuation_coef,
     tx_apodizations,
+    t_peak,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -86,6 +87,7 @@ def simulate_rf(
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
         tx_apodizations (array-like): The apodizations of the transmitting elements of
             shape (n_tx, n_el).
+        t_peak (array-like): The time of the peak of the transmit pulse [s].
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -145,7 +147,10 @@ def simulate_rf(
 
         # [n_scat, n_txel, n_rxel]
         tau_total = (
-            (dist_total / sound_speed) + t0_delays[tx_idx][None, :, None] - initial_times[tx_idx]
+            (dist_total / sound_speed)
+            + t0_delays[tx_idx][None, :, None]
+            - initial_times[tx_idx]
+            + t_peak[tx_idx]
         )
 
         scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
