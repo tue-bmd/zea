@@ -7,10 +7,18 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import pytest
+# Pin the matplotlib backend for the whole suite, before pyplot is imported anywhere in
+# this process. An interactive MPLBACKEND exported in a developer's shell is otherwise
+# inherited by the papermill kernels in test_notebooks.py, where it survives ipykernel's
+# ``if not os.environ.get("MPLBACKEND")`` guard and fails the notebook with "Failed to
+# import any of the following Qt binding modules". matplotlib's backend_fallback hides
+# this on headless machines and in CI, so it only shows up on a workstation with a
+# display.
+os.environ["MPLBACKEND"] = "Agg"
 
-from .data import generate_example_dataset
+import pytest  # noqa: E402
+
+from .data import generate_example_dataset  # noqa: E402
 
 
 def _gpu_available() -> bool:
@@ -72,8 +80,6 @@ from .backend_utils import (  # noqa: E402
     missing_required_backends,
     unavailable_test_backends,
 )
-
-plt.rcParams["backend"] = "agg"
 
 
 def _skip_unavailable_backends_enabled(config):
