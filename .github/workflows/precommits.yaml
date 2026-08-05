@@ -1,3 +1,5 @@
+# Runs the repo's pre-commit hooks in CI, so a PR from a contributor who has not
+# installed the hooks locally still gets caught.
 name: Precommithooks
 
 on:

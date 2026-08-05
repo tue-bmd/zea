@@ -1,3 +1,6 @@
+# The main PR gate: unit tests with coverage, a minimum-dependency-floor check,
+# heavy and notebook tests on self-hosted GPU runners, the docs build, and a
+# Dockerfile build + smoke test.
 name: Tests
 
 on:
