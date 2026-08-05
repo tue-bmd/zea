@@ -1,6 +1,7 @@
 """Test generating and validating zea data format."""
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -453,20 +454,42 @@ def test_paged_file_readable_by_oldest_supported_h5py(tmp_hdf5_path, tmp_path_fa
     File.create(path=tmp_hdf5_path, data=DATA, scan=SCAN, probe=PROBE)
 
     venv_dir = tmp_path_factory.mktemp("old_h5py_venv")
-    subprocess.run(
-        [sys.executable, "-m", "venv", str(venv_dir)],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
     venv_python = venv_dir / "bin" / "python"
-    pip_install = subprocess.run(
-        [str(venv_python), "-m", "pip", "install", "-q", "h5py==3.11.0", "hdf5plugin"],
-        capture_output=True,
-        text=True,
-        timeout=300,
+    uv = shutil.which("uv")
+    if uv:
+        # uv brings its own interpreter and installer, so it works where `python -m venv`
+        # does not: that path goes through ensurepip, which is missing from some base
+        # Pythons (the CI runners among them) and fails the venv creation outright.
+        # 3.12 is the newest Python h5py 3.11.0 ships wheels for -- ask for it explicitly
+        # so the test does not try to build h5py from source on a newer interpreter.
+        create_cmd = [uv, "venv", "--python", "3.12", str(venv_dir)]
+        install_cmd = [
+            uv,
+            "pip",
+            "install",
+            "--python",
+            str(venv_python),
+            "-q",
+            "h5py==3.11.0",
+            "hdf5plugin",
+        ]
+    else:
+        create_cmd = [sys.executable, "-m", "venv", str(venv_dir)]
+        install_cmd = [
+            str(venv_python),
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "h5py==3.11.0",
+            "hdf5plugin",
+        ]
+
+    create_venv = subprocess.run(create_cmd, capture_output=True, text=True, timeout=300)
+    assert create_venv.returncode == 0, (
+        f"could not create oldest-supported-h5py venv with {create_cmd}: {create_venv.stderr}"
     )
+    pip_install = subprocess.run(install_cmd, capture_output=True, text=True, timeout=300)
     assert pip_install.returncode == 0, (
         f"could not provision oldest-supported-h5py venv (no network access?): {pip_install.stderr}"
     )
