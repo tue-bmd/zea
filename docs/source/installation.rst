@@ -128,7 +128,6 @@ To build the full image including all backends with GPU support:
 
 Note that these build arguments can be set to either `cpu` or `gpu` depending on your needs.
 
-
 Run
 ~~~
 

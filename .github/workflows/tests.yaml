@@ -98,8 +98,10 @@ jobs:
     env:
       # Caches on the runner's persistent disk, so repeated runs download nothing:
       # model weights, datasets, and uv's wheel cache. `actions/checkout` cleans the
-      # workspace every run, so .venv is still rebuilt each time -- but from local
-      # wheels, which is mostly hardlinking.
+      # workspace every run, so .venv is still rebuilt each time -- but populated from
+      # the local cache rather than the network.
+      # These paths must be writable by the runner user: unlike the old container-based
+      # jobs, nothing here runs as root any more.
       HF_HOME: /cache/huggingface
       HUGGINGFACE_HUB_CACHE: /cache/huggingface
       ZEA_CACHE_DIR: /cache/zea
