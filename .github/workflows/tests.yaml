@@ -96,23 +96,25 @@ jobs:
       group: heavy-tests-${{ github.ref }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     env:
-      # Caches on the runner's persistent disk, so repeated runs download nothing:
-      # model weights, datasets, and uv's wheel cache. `actions/checkout` cleans the
-      # workspace every run, so .venv is still rebuilt each time -- but populated from
-      # the local cache rather than the network.
-      # These paths must be writable by the runner user: unlike the old container-based
-      # jobs, nothing here runs as root any more.
+      # The runners are ephemeral ARC pods -- one job per pod -- so nothing survives in
+      # the container filesystem. Only these two PersistentVolumes do, which is why the
+      # uv cache lives *inside* the zea one rather than at a path of its own: an
+      # unmounted /cache/uv would be discarded with the pod, and the runner user cannot
+      # create it anyway (/cache itself is root-owned inside the pod).
+      # HF_HOME and ZEA_CACHE_DIR are also set on the RunnerDeployment; repeated here so
+      # the job is readable on its own.
       HF_HOME: /cache/huggingface
       HUGGINGFACE_HUB_CACHE: /cache/huggingface
       ZEA_CACHE_DIR: /cache/zea
-      UV_CACHE_DIR: /cache/uv
+      UV_CACHE_DIR: /cache/zea/uv
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-zea
         with:
-          # UV_CACHE_DIR above already survives between runs.
+          # UV_CACHE_DIR above is on a PersistentVolume, so it already survives
+          # between runs -- no need to ship the cache to the Actions cache service.
           enable-cache: "false"
 
       - name: Run heavy tests
@@ -163,11 +165,12 @@ jobs:
       group: notebook-tests-${{ matrix.name }}-${{ github.ref }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     env:
-      # See heavy-tests for why these point at the runner's persistent disk.
+      # See heavy-tests for why these are the only paths that persist, and why the uv
+      # cache sits inside the zea one.
       HF_HOME: /cache/huggingface
       HUGGINGFACE_HUB_CACHE: /cache/huggingface
       ZEA_CACHE_DIR: /cache/zea
-      UV_CACHE_DIR: /cache/uv
+      UV_CACHE_DIR: /cache/zea/uv
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
