@@ -66,6 +66,7 @@ def simulate_rf(
     attenuation_coef,
     tx_apodizations,
     t_peak,
+    factored=True,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -89,9 +90,12 @@ def simulate_rf(
         tx_apodizations (array-like): The apodizations of the transmitting elements of
             shape (n_tx, n_el).
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
+        factored (bool): Approximate the geometric spreading with a factorizable term. Slight
+            amplitude error for scatterers near a large linear probe, but much faster.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
+
     """
 
     n_tx = t0_delays.shape[0]
@@ -143,17 +147,6 @@ def simulate_rf(
     for tx in range(n_tx):
         tx_idx = ops.array(tx)
 
-        # [n_scat, n_txel, rxel]
-        dist_total = dist[:, None] + dist[:, :, None]
-
-        # [n_scat, n_txel, n_rxel]
-        tau_total = (
-            (dist_total / sound_speed)
-            + t0_delays[tx_idx][None, :, None]
-            - initial_times[tx_idx]
-            + t_peak[tx_idx]
-        )
-
         scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
 
         # Compute 3D directivity
@@ -173,51 +166,108 @@ def simulate_rf(
             element_width,
             sound_speed,
         )
-        directivity_rx = directivity(
-            freqs[None, None, None],
-            theta[:, None, :, None],
-            element_width,
-            sound_speed,
-        ) * directivity(
-            freqs[None, None, None],
-            phi[:, None, :, None],
-            element_width,
-            sound_speed,
-        )
+        if factored:
+            # [n_scat, n_el, n_freq]
+            attenuation = attenuate(
+                freqs[None, None],
+                attenuation_coef=attenuation_coef,
+                dist=dist[..., None],
+            )
 
-        attenuation = attenuate(
-            freqs[None, None, None],
-            attenuation_coef=attenuation_coef,
-            dist=dist_total[..., None],
-        )
+            # sqrt such that one_way * other_way together yield mindist/(2sqrt(d_tx*d_rx))
+            spread_atten = ops.sqrt(spread(2 * dist[..., None]))
 
-        spread_atten = spread(dist_total[..., None])
-
-        result = (
-            waveform_spectrum[None, None, None]
-            * delay2(
-                freqs[None, None, None],
-                tau_total[..., None],
+            one_way_response = ops.cast(
+                directivity_tx[:, :, 0] * attenuation * spread_atten,
+                "complex64",
+            ) * delay2(
+                freqs[None, None],
+                dist[..., None] / sound_speed,
                 n_fft=n_ax_rounded,
                 sampling_frequency=sampling_frequency,
             )
-            * ops.cast(
-                scatterer_magnitudes[:, None, None, None]
-                * tx_apodizations[tx, None, :, None, None]
-                * directivity_tx
-                * directivity_rx
-                * attenuation
-                * spread_atten,
-                "complex64",
+
+            # When each element fires, relative to the start of the recording. [n_txel, 1]
+            tx_firing_times = t0_delays[tx][:, None] - initial_times[tx] + t_peak[tx]
+
+            # Apodization and firing phase per transmitting element. [n_txel, n_freq]
+            tx_element_weights = ops.cast(tx_apodizations[tx][:, None], "complex64") * delay2(
+                freqs[None],
+                tx_firing_times,
+                n_fft=n_ax_rounded,
+                sampling_frequency=sampling_frequency,
             )
-        )
 
-        # Sum over all transmitting elements and scatterers
-        result = ops.sum(result, axis=[0, 1])
+            # necessary because delay2 never sees the full round-trip distance in this branch
+            record_length = n_ax_rounded / sampling_frequency
+            round_trip_time = 2 * ops.mean(dist, axis=1) / sound_speed + ops.mean(tx_firing_times)
+            within_record = ops.cast(round_trip_time < record_length, "float32")
+            magnitudes = scatterer_magnitudes * within_record
 
-        result = ops.irfft((ops.real(result), ops.imag(result)))
+            # Explicitly sum over tx dimension before the receive axis exists.
+            incident_field = ops.sum(one_way_response * tx_element_weights[None], axis=1)
+            scattered_field = incident_field * ops.cast(magnitudes[:, None], "complex64")
+            received_field = scattered_field[:, None] * one_way_response
+            rf_spectrum = waveform_spectrum * ops.sum(received_field, axis=0)
+            result = ops.irfft((ops.real(rf_spectrum), ops.imag(rf_spectrum)))
+            parts.append(result)
+        else:
+            directivity_rx = directivity(
+                freqs[None, None, None],
+                theta[:, None, :, None],
+                element_width,
+                sound_speed,
+            ) * directivity(
+                freqs[None, None, None],
+                phi[:, None, :, None],
+                element_width,
+                sound_speed,
+            )
 
-        parts.append(result)
+            # [n_scat, n_txel, rxel]
+            dist_total = dist[:, None] + dist[:, :, None]
+
+            # [n_scat, n_txel, n_rxel]
+            tau_total = (
+                (dist_total / sound_speed)
+                + t0_delays[tx_idx][None, :, None]
+                - initial_times[tx_idx]
+                + t_peak[tx_idx]
+            )
+
+            attenuation = attenuate(
+                freqs[None, None, None],
+                attenuation_coef=attenuation_coef,
+                dist=dist_total[..., None],
+            )
+
+            spread_atten = spread(dist_total[..., None])
+
+            result = (
+                waveform_spectrum[None, None, None]
+                * delay2(
+                    freqs[None, None, None],
+                    tau_total[..., None],
+                    n_fft=n_ax_rounded,
+                    sampling_frequency=sampling_frequency,
+                )
+                * ops.cast(
+                    scatterer_magnitudes[:, None, None, None]
+                    * tx_apodizations[tx, None, :, None, None]
+                    * directivity_tx
+                    * directivity_rx
+                    * attenuation
+                    * spread_atten,
+                    "complex64",
+                )
+            )
+
+            # Sum over all transmitting elements and scatterers
+            result = ops.sum(result, axis=[0, 1])
+
+            result = ops.irfft((ops.real(result), ops.imag(result)))
+
+            parts.append(result)
 
     rf_data = ops.stack(parts, axis=0)
     rf_data = ops.transpose(rf_data, (0, 2, 1))

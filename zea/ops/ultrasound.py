@@ -1,3 +1,5 @@
+from functools import partial
+
 import keras
 import numpy as np
 from keras import ops
@@ -32,18 +34,27 @@ from zea.ops.base import Filter, Operation
 from zea.simulator import simulate_rf, simulate_rf_fast
 from zea.utils import canonicalize_axis
 
+simulator_settings = {
+    "exact": partial(simulate_rf, factored=False),
+    "factored": partial(simulate_rf, factored=True),
+    "fast": simulate_rf_fast,
+}
+
 
 @ops_registry("simulate_rf")
 class Simulate(Operation):
     """Simulate RF data.
 
-    Set the static parameter ``fast=True`` to use the faster time-domain
-    simulator :func:`zea.simulator.simulate_rf_fast` instead of the default
-    frequency-domain :func:`zea.simulator.simulate_rf`.
+    Set the static parameter ``method`` to ``"exact"`` for most accurate results. ``"factored"``
+    approximates spread with geometric instead of arithmetic mean so that attenuation factors;
+    this yields 30~500x speedup, but is slightly less accurate close to large probes. ``"fast"``
+    solves in the time domain; faster than ``"factored"`` in some cases, but less accurate.
+    After beamforming, images from ``"factored"`` yield 70~90dB PSNR compared to ``"exact"``;
+    ``"fast"`` yields 10~20dB.
     """
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["n_ax", "apply_lens_correction", "fast"]
+    STATIC_PARAMS = ["n_ax", "apply_lens_correction", "method"]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
     def __init__(self, **kwargs):
@@ -70,10 +81,12 @@ class Simulate(Operation):
         attenuation_coef,
         tx_apodizations,
         t_peak,
-        fast=False,
+        method="factored",
         **kwargs,
     ):
-        simulate = simulate_rf_fast if fast else simulate_rf
+        if method not in simulator_settings:
+            raise ValueError(f"method must be one of {tuple(simulator_settings)}, got {method!r}")
+        simulate = simulator_settings[method]
         simulate_kwargs = {
             "probe_geometry": probe_geometry,
             "apply_lens_correction": apply_lens_correction,
