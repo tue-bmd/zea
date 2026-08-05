@@ -16,8 +16,10 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 # No tk package: uv's managed Python bundles Tcl/Tk, so tkinter (and matplotlib's TkAgg
 # backend) already work.
+# ca-certificates is not in the base image but is needed for pre-commit hooks and other HTTPS requests.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends --fix-missing \
+    ca-certificates \
     ffmpeg \
     make pandoc \
     openssh-client git sudo && \
