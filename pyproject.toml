@@ -322,6 +322,8 @@ concurrency = ["multiprocessing", "thread"]
 sigterm = true
 omit = [
     "/tmp/__autograph_generated_file*.py",
+    # CI syncs the environment into the workspace, so it would otherwise be measured.
+    "*/.venv/*",
     # Synthetic module compiled in-memory by tests/test_log.py; never on disk.
     "*/_fake_internal_module.py",
 ]

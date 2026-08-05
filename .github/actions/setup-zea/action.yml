@@ -1,0 +1,39 @@
+name: Set up zea
+description: >
+  Installs uv and syncs the locked zea environment -- dev tooling plus all three ML
+  backends on CPU -- into .venv, and puts it on PATH. This replaces the prebuilt CI
+  Docker image: that image only ever carried this same locked environment, and the jobs
+  using it re-installed on top of it anyway.
+inputs:
+  python-version:
+    description: Python version to build the environment against.
+    required: false
+    default: "3.12"
+  groups:
+    description: >
+      Dependency-group flags passed to `uv sync`. Override to build a leaner
+      environment (e.g. a single backend).
+    required: false
+    default: --group dev --group jax-cpu --group torch-cpu --group tf-cpu
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v7
+      with:
+        python-version: ${{ inputs.python-version }}
+        enable-cache: true
+        # The lockfile alone determines what gets installed, so it alone keys the cache.
+        cache-dependency-glob: uv.lock
+        # Everything here is a prebuilt wheel from PyPI or the PyTorch index, which is
+        # exactly what `uv cache prune --ci` throws away -- and re-downloading the
+        # backends is the slow part. Keep the whole cache instead.
+        prune-cache: false
+
+    - name: Sync locked environment
+      shell: bash
+      run: uv sync --frozen ${{ inputs.groups }}
+
+    # On PATH so later steps call `pytest`, `sphinx-build` and friends directly.
+    - name: Put the environment on PATH
+      shell: bash
+      run: echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"

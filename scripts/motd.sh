@@ -3,7 +3,8 @@
 # Env vars set by /etc/bash.bashrc before this runs:
 #   KERAS_BACKEND  INSTALL_JAX  INSTALL_TORCH  INSTALL_TF  DEV
 
-ZEA_VERSION=$(pip show zea 2>/dev/null | awk '/^Version/{print $2}')
+# `uv pip`, not `pip`: uv does not seed pip into the venv and only the dev group adds it.
+ZEA_VERSION=$(uv pip show zea 2>/dev/null | awk '/^Version/{print $2}')
 ZEA_VERSION=${ZEA_VERSION:-dev}
 DEV_STATUS=no; [ "$DEV" = "true" ] && DEV_STATUS=yes
 
