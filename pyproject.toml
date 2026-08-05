@@ -117,7 +117,6 @@ dev = [
     { include-group = "lint" },
     "zea[display-headless]",
     "zea[models]",
-    "pip", # uv does not seed pip into the venvs it creates
 ]
 
 # ML backends, pinned by uv.lock rather than the Dockerfile, so that

@@ -3,7 +3,6 @@
 # Env vars set by /etc/bash.bashrc before this runs:
 #   KERAS_BACKEND  INSTALL_JAX  INSTALL_TORCH  INSTALL_TF  DEV
 
-# `uv pip`, not `pip`: uv does not seed pip into the venv and only the dev group adds it.
 ZEA_VERSION=$(uv pip show zea 2>/dev/null | awk '/^Version/{print $2}')
 ZEA_VERSION=${ZEA_VERSION:-dev}
 DEV_STATUS=no; [ "$DEV" = "true" ] && DEV_STATUS=yes
@@ -62,7 +61,10 @@ printf '%s %s %s %s%stensorflow     %s\n' \
 # ── sync hint ─────────────────────────────────────────────────────────────────
 # Everything above comes from uv.lock, so a lockfile change (a rebased branch, an
 # updated backend) is applied in place with this command -- no image rebuild.
-SYNC=''
+# --inexact: pip (and anything else installed by hand) is not in uv.lock, and a plain
+# `uv sync` prunes whatever the lockfile does not mention. There is no system Python in
+# this image, so losing pip would leave none at all.
+SYNC=' --inexact'
 [ "$DEV" = "true" ] || SYNC="$SYNC --no-default-groups"
 [ "$INSTALL_JAX" != "false" ] && SYNC="$SYNC --group jax-${INSTALL_JAX}"
 [ "$INSTALL_TORCH" != "false" ] && SYNC="$SYNC --group torch-${INSTALL_TORCH}"

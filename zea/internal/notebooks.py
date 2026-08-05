@@ -47,8 +47,6 @@ def animate_images(
     plt.close(fig)
     fps = max(1, 1000 // interval)
 
-    # Pillow writes GIFs from within Python; the imagemagick writer would need the
-    # `convert` binary installed on the host.
     ani.save(path, writer="pillow", fps=fps)
 
 

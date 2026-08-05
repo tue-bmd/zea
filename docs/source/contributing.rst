@@ -41,6 +41,8 @@ Most contributors will not have write access to the main repository. Instead, yo
 
    gh repo fork tue-bmd/zea --clone
 
+.. _dev-environment:
+
 3. Setup environment
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -62,12 +64,24 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
          See the :ref:`Docker <docker-information>` section of the installation guide
          for build and run instructions. Images built with ``DEV=true`` (the default)
          already include the ``dev`` dependency-group (tests, docs and lint tools). If
-         you're in a container built with ``DEV=false``, install it first:
+         you're in a container built with ``DEV=false``, add it first:
 
          .. code-block:: shell
 
-               pip install -e . --group dev
+               uv sync --inexact
                pre-commit install
+
+         The versions an image installs -- backends included -- come from ``uv.lock``. So when the lockfile changes (a rebased branch, an
+         updated backend), a running container can catch up in place without a rebuild.
+         Name the same backend groups the image was built with — the message of the day
+         printed on every shell spells out the exact command for that image:
+
+         .. code-block:: shell
+
+               uv sync --inexact --group jax-gpu --group torch-gpu --group tf-gpu
+
+         ``--inexact`` is what keeps ``uv sync`` from pruning packages the lockfile does
+         not mention — notably ``pip``, which the image installs as a convenience.
 
     .. tab-item:: uv
 

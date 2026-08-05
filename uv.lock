@@ -3980,15 +3980,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pip"
-version = "26.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/db/96/e6f8e9d9d7b9cc4457092712a7e919c3186aa2c2fa9ffed2c5d29cc947e8/pip-26.2.tar.gz", hash = "sha256:2d8542afcc84cdd8e846c2b36b2861fad1da376dd98f8e7113e9108a3c331690", size = 1848845, upload-time = "2026-07-29T21:57:56.407Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/62/36/a3aed958d60531cb442b7ab4596cda7b3621cfb916f8ae1d6769795c7dc1/pip-26.2-py3-none-any.whl", hash = "sha256:931c303696af6fa3417112103b1cad26890e5a07eccb5b99783700e33f2b8aad", size = 1816475, upload-time = "2026-07-29T21:57:54.763Z" },
-]
-
-[[package]]
 name = "platformdirs"
 version = "4.10.0"
 source = { registry = "https://pypi.org/simple" }
@@ -6746,7 +6737,6 @@ dev = [
     { name = "myst-parser" },
     { name = "nbsphinx" },
     { name = "papermill" },
-    { name = "pip" },
     { name = "pre-commit" },
     { name = "pybtex" },
     { name = "pystemmer" },
@@ -6872,7 +6862,6 @@ dev = [
     { name = "myst-parser" },
     { name = "nbsphinx" },
     { name = "papermill", specifier = ">=2.4" },
-    { name = "pip" },
     { name = "pre-commit" },
     { name = "pybtex", specifier = ">=0.26.1" },
     { name = "pystemmer" },
