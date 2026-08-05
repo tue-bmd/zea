@@ -15,13 +15,21 @@ inputs:
       environment (e.g. a single backend).
     required: false
     default: --group dev --group jax-cpu --group torch-cpu --group tf-cpu
+  enable-cache:
+    description: >
+      Store uv's cache in the GitHub Actions cache. Right for GitHub-hosted runners,
+      which start empty every time. Turn it off on self-hosted runners that point
+      UV_CACHE_DIR at a persistent local directory: there the cache is already on disk
+      and the download/upload round-trip is pure overhead.
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
     - uses: astral-sh/setup-uv@v7
       with:
         python-version: ${{ inputs.python-version }}
-        enable-cache: true
+        enable-cache: ${{ inputs.enable-cache }}
         # The lockfile alone determines what gets installed, so it alone keys the cache.
         cache-dependency-glob: uv.lock
         # Everything here is a prebuilt wheel from PyPI or the PyTorch index, which is

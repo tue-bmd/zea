@@ -96,16 +96,22 @@ jobs:
       group: heavy-tests-${{ github.ref }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     env:
-      # Model and dataset caches on the runner's persistent disk, so repeated runs
-      # do not re-download gigabytes of weights.
+      # Caches on the runner's persistent disk, so repeated runs download nothing:
+      # model weights, datasets, and uv's wheel cache. `actions/checkout` cleans the
+      # workspace every run, so .venv is still rebuilt each time -- but from local
+      # wheels, which is mostly hardlinking.
       HF_HOME: /cache/huggingface
       HUGGINGFACE_HUB_CACHE: /cache/huggingface
       ZEA_CACHE_DIR: /cache/zea
+      UV_CACHE_DIR: /cache/uv
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-zea
+        with:
+          # UV_CACHE_DIR above already survives between runs.
+          enable-cache: "false"
 
       - name: Run heavy tests
         run: |
@@ -155,14 +161,18 @@ jobs:
       group: notebook-tests-${{ matrix.name }}-${{ github.ref }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     env:
+      # See heavy-tests for why these point at the runner's persistent disk.
       HF_HOME: /cache/huggingface
       HUGGINGFACE_HUB_CACHE: /cache/huggingface
       ZEA_CACHE_DIR: /cache/zea
+      UV_CACHE_DIR: /cache/uv
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-zea
+        with:
+          enable-cache: "false"
 
       - name: Run ${{ matrix.name }} notebook tests
         run: |
