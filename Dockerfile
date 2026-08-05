@@ -88,7 +88,7 @@ RUN echo 'export KERAS_BACKEND=$( \
     elif [ "$INSTALL_TORCH" != "false" ]; then \
     echo torch; \
     elif [ "$INSTALL_TF" != "false" ]; then \
-    echo tf; \
+    echo tensorflow; \
     else \
     echo numpy; \
     fi )' >> /etc/bash.bashrc && \
