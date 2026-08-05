@@ -51,8 +51,7 @@ COPY pyproject.toml uv.lock README.md ./
 ARG DEV=true
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project \
-    $([ "$DEV" = "true" ] || echo --no-dev) && \
-    uv pip install pip
+    $([ "$DEV" = "true" ] || echo --no-dev)
 
 # One dependency-group per backend. Versions and CPU/CUDA wheels come from uv.lock, so a
 # later `uv sync` inside the image installs the same stack -- no rebuild to pick up a

@@ -60,11 +60,9 @@ printf '%s %s %s %s%stensorflow     %s\n' \
 
 # ── sync hint ─────────────────────────────────────────────────────────────────
 # Everything above comes from uv.lock, so a lockfile change (a rebased branch, an
-# updated backend) is applied in place with this command -- no image rebuild.
-# --inexact: pip (and anything else installed by hand) is not in uv.lock, and a plain
-# `uv sync` prunes whatever the lockfile does not mention. There is no system Python in
-# this image, so losing pip would leave none at all.
-SYNC=' --inexact'
+# updated backend) is applied in place with this command -- no image rebuild. Naming the
+# image's own backend groups is what keeps `uv sync` from pruning them.
+SYNC=''
 [ "$DEV" = "true" ] || SYNC="$SYNC --no-default-groups"
 [ "$INSTALL_JAX" != "false" ] && SYNC="$SYNC --group jax-${INSTALL_JAX}"
 [ "$INSTALL_TORCH" != "false" ] && SYNC="$SYNC --group torch-${INSTALL_TORCH}"

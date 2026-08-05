@@ -117,6 +117,7 @@ dev = [
     { include-group = "lint" },
     "zea[display-headless]",
     "zea[models]",
+    "pip",
 ]
 
 # ML backends, pinned by uv.lock rather than the Dockerfile, so that
@@ -311,7 +312,7 @@ filterwarnings = [
     "ignore:.*hf_xet.*:DeprecationWarning",
     "ignore:'(oneOf|parseString|resetCache|enablePackrat)' deprecated:DeprecationWarning",  # matplotlib -> old pyparsing API
     "ignore:invalid escape sequence:DeprecationWarning",
-    "ignore:.*sentry_sdk.Hub. is deprecated:DeprecationWarning",  # wandb -> deprecated sentry Hub API
+    "ignore:.*sentry_sdk.Hub. is deprecated:DeprecationWarning",                            # wandb -> deprecated sentry Hub API
 ]
 
 [tool.coverage.run]

@@ -66,20 +66,15 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
          .. code-block:: shell
 
-               uv sync --inexact
+               uv sync --group jax-gpu --group torch-gpu --group tf-gpu
                pre-commit install
 
-         The versions an image installs -- backends included -- come from ``uv.lock``. So when the lockfile changes (a rebased branch, an
-         updated backend), a running container can catch up in place without a rebuild.
-         Name the same backend groups the image was built with — the message of the day
-         printed on every shell spells out the exact command for that image:
-
-         .. code-block:: shell
-
-               uv sync --inexact --group jax-gpu --group torch-gpu --group tf-gpu
-
-         ``--inexact`` is what keeps ``uv sync`` from pruning packages the lockfile does
-         not mention — notably ``pip``, which the image installs as a convenience.
+         The versions an image installs -- backends included -- come from ``uv.lock``, so
+         when the lockfile changes (a rebased branch, an updated backend) a running
+         container can catch up in place without a rebuild. The same command does both.
+         Name the backend groups the image was built with, or ``uv sync`` will prune
+         them; the message of the day printed on every shell spells out the exact
+         command for that image.
 
     .. tab-item:: uv
 
