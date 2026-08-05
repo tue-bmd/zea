@@ -57,7 +57,11 @@ dependencies = [
     "scikit-learn >=1.4",
 ]
 [project.optional-dependencies]
-jax = ["jax[cuda12]>=0.4.35"]
+jax = [
+    "jax[cuda12]>=0.4.35; sys_platform == 'linux'",
+    "jax>=0.4.35; sys_platform != 'linux'",
+]
+jax-cpu = ["jax>=0.4.35"]
 display = ["opencv-python>=4"]
 display-headless = ["opencv-python-headless>=4"]
 # most models don't needs these optional dependencies

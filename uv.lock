@@ -2,34 +2,46 @@ version = 1
 revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 conflicts = [[
     { package = "zea", group = "torch-cpu" },
@@ -251,8 +263,8 @@ name = "array-record"
 version = "0.8.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "absl-py", marker = "sys_platform != 'win32' or extra == 'group-3-zea-torch-cpu' or extra == 'group-3-zea-torch-gpu'" },
-    { name = "etils", extra = ["epath"], marker = "sys_platform != 'win32' or extra == 'group-3-zea-torch-cpu' or extra == 'group-3-zea-torch-gpu'" },
+    { name = "absl-py", marker = "sys_platform != 'win32' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "etils", extra = ["epath"], marker = "sys_platform != 'win32' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/44/e0/90048c75afdbb7e49526fee93f7e113986565a0b36b7c779eb35f745ec7e/array_record-0.8.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:8a0caee17d2583638391fb9f90c9c12a43f9665576f18ec3604ba49d62bd2dcc", size = 3988901, upload-time = "2025-11-13T16:15:29.35Z" },
@@ -850,13 +862,13 @@ name = "cuda-bindings"
 version = "12.9.7"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform == 'win32')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'win32')",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
 ]
 dependencies = [
-    { name = "cuda-pathfinder", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "cuda-pathfinder", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/40/f3/f9d1095f90d2a4df24cfcafe7487fd9444c6dacb94e3722be6fedd8ac26c/cuda_bindings-12.9.7-cp311-cp311-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:16043ef5b15ab88fe9954c5c2061b1d8007591b27f2c916331056de0ebc6187e", size = 7114834, upload-time = "2026-05-27T18:44:07.746Z" },
@@ -884,13 +896,13 @@ name = "cuda-bindings"
 version = "13.3.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
 ]
 dependencies = [
-    { name = "cuda-pathfinder", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "cuda-pathfinder", marker = "(sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/6b/457ca12dad3ee9bfcc9a545cfd6b64b359ba49de40f776f6e028e678f262/cuda_bindings-13.3.1-cp311-cp311-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c5879712accf6e14bb01aa5e67440eb84998b8d104b509cc7a6dc0b8f656a474", size = 6053539, upload-time = "2026-05-29T23:11:43.19Z" },
@@ -923,10 +935,10 @@ name = "cuda-toolkit"
 version = "12.9.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform == 'win32')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'win32')",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7c/8f/a28e7da158e96ad61f7e1035e53851fafaddf22445300d664e68ec657fdc/cuda_toolkit-12.9.1-py2.py3-none-any.whl", hash = "sha256:0c8636dfacbecfe9867a949a211864f080a805bc54023ce4a361aa4e1fd8738b", size = 2303, upload-time = "2025-08-13T02:03:10.699Z" },
@@ -934,37 +946,37 @@ wheels = [
 
 [package.optional-dependencies]
 cublas = [
-    { name = "nvidia-cublas-cu12", version = "12.9.1.4", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cublas-cu12", version = "12.9.1.4", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 cudart = [
-    { name = "nvidia-cuda-runtime-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cuda-runtime-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 cufft = [
-    { name = "nvidia-cufft-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cufft-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 cufile = [
     { name = "nvidia-cufile-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 cupti = [
-    { name = "nvidia-cuda-cupti-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cuda-cupti-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 curand = [
-    { name = "nvidia-curand-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-curand-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 cusolver = [
-    { name = "nvidia-cusolver-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cusolver-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 cusparse = [
-    { name = "nvidia-cusparse-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cusparse-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 nvjitlink = [
-    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 nvrtc = [
-    { name = "nvidia-cuda-nvrtc-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cuda-nvrtc-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 nvtx = [
-    { name = "nvidia-nvtx-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-nvtx-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 
 [[package]]
@@ -972,10 +984,10 @@ name = "cuda-toolkit"
 version = "13.0.3.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/c7/a79086a62c98befcdb8349656c6f114e2db3b8b2422f6e25c97a7f2a9a3c/cuda_toolkit-13.0.3.0-py2.py3-none-any.whl", hash = "sha256:d693caaa261214ddd7dbb60d68e71cbed884e68c2be7509778f3051da0b91c3f", size = 2512, upload-time = "2026-04-14T00:50:08.173Z" },
@@ -1827,13 +1839,16 @@ name = "jax"
 version = "0.10.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "jaxlib", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -1858,27 +1873,36 @@ name = "jax"
 version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "jaxlib", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -1903,13 +1927,16 @@ name = "jax-cuda12-pjrt"
 version = "0.10.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bf/b0/e1d392ee24ecd53caa202194746cb12058befde5882d1f3307922829783f/jax_cuda12_pjrt-0.10.2-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:b6f2d66548ee1ee910a836b5fe3d0ebbe1da04a62d0f468ba4822189036a32b3", size = 169847949, upload-time = "2026-06-17T23:42:44.729Z" },
@@ -1921,27 +1948,36 @@ name = "jax-cuda12-pjrt"
 version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9f/f5/d3c0db11be08d5180d4634327e996597ef7847fcfa0c5e53282dd9256485/jax_cuda12_pjrt-0.11.0-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:67ec5915e7e494775d5dc0d73d1e33cb74a47b6a6bb1089eef7b517e4e873e33", size = 170618370, upload-time = "2026-07-16T18:58:28.763Z" },
@@ -1953,13 +1989,16 @@ name = "jax-cuda12-plugin"
 version = "0.10.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "jax-cuda12-pjrt", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -2004,27 +2043,36 @@ name = "jax-cuda12-plugin"
 version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "jax-cuda12-pjrt", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -2065,13 +2113,16 @@ name = "jaxlib"
 version = "0.10.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "ml-dtypes", marker = "python_full_version < '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -2108,27 +2159,36 @@ name = "jaxlib"
 version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "ml-dtypes", marker = "python_full_version >= '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -3035,7 +3095,7 @@ name = "nvidia-cublas"
 version = "13.1.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cuda-nvrtc", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cuda-nvrtc", marker = "(sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/a1/0bd24ee8c8d03adac032fd2909426a00c88f8c57961b1277ded97f91119f/nvidia_cublas-13.1.1.3-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:b7a210458267ac818974c53038fbec2e969d5c99f305ab15c72522fa9f001dd5", size = 542848918, upload-time = "2026-04-08T18:46:22.985Z" },
@@ -3048,10 +3108,10 @@ name = "nvidia-cublas-cu12"
 version = "12.9.1.4"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform == 'win32')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'win32')",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/82/6c/90d3f532f608a03a13c1d6c16c266ffa3828e8011b1549d3b61db2ad59f5/nvidia_cublas_cu12-12.9.1.4-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:7a950dae01add3b415a5a5cdc4ec818fb5858263e9cca59004bb99fdbbd3a5d6", size = 575006342, upload-time = "2025-06-05T20:04:16.902Z" },
@@ -3064,33 +3124,45 @@ name = "nvidia-cublas-cu12"
 version = "12.9.2.10"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
-    { name = "nvidia-cuda-nvrtc-cu12", marker = "(sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'linux' and extra != 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'win32' and extra != 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cuda-nvrtc-cu12", marker = "sys_platform != 'linux' or extra == 'group-3-zea-torch-cpu' or extra != 'group-3-zea-torch-gpu'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f7/a2/c96163a0fff1839c0c9548bbdeae7b853b867009e33b9b9264adc238b1cf/nvidia_cublas_cu12-12.9.2.10-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:5572131a59c3eebeeb1c4c8144f772d49372c20124916e072a0e3fc30df421d5", size = 575012079, upload-time = "2026-04-08T18:51:47.303Z" },
@@ -3183,13 +3255,13 @@ name = "nvidia-cudnn-cu12"
 version = "9.20.0.48"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform == 'win32')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'win32')",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
 ]
 dependencies = [
-    { name = "nvidia-cublas-cu12", version = "12.9.1.4", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cublas-cu12", version = "12.9.1.4", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0c/77/1c382fdc5de163b2ff14d6174d12dc318c0a42302f5e3a4fbc5114ab0501/nvidia_cudnn_cu12-9.20.0.48-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:d9da9c15344323afae571751393552652c52486eab0b886530997bef664e29de", size = 664659972, upload-time = "2026-03-09T19:27:37.986Z" },
@@ -3202,33 +3274,45 @@ name = "nvidia-cudnn-cu12"
 version = "9.23.1.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
-    { name = "nvidia-cublas-cu12", version = "12.9.2.10", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'linux' and extra != 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'win32' and extra != 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cublas-cu12", version = "12.9.2.10", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' or extra == 'group-3-zea-torch-cpu' or extra != 'group-3-zea-torch-gpu'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/10/30/ecca1c8194c8077c4b57a3d96b56d96f15852551b01b919bae6429d92218/nvidia_cudnn_cu12-9.23.1.3-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:6dbc18f05aab2a323a4ffd43d985410608f7db7db9a8596e189cddbd3e527441", size = 778220760, upload-time = "2026-06-09T19:38:19.281Z" },
@@ -3241,7 +3325,7 @@ name = "nvidia-cudnn-cu13"
 version = "9.20.0.48"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cublas", marker = "(sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/56/c5/83384d846b2fd17c44bd499b36c75a45ed4f095fbbb2252294e89cea5c5c/nvidia_cudnn_cu13-9.20.0.48-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:e31454ae00094b0c55319d9d15b6fa2fc50a9e1c0f5c8c80fb75258234e731e1", size = 444574296, upload-time = "2026-03-09T19:28:27.751Z" },
@@ -3254,7 +3338,7 @@ name = "nvidia-cufft"
 version = "12.0.0.61"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-nvjitlink", marker = "(sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8b/ae/f417a75c0259e85c1d2f83ca4e960289a5f814ed0cea74d18c353d3e989d/nvidia_cufft-12.0.0.61-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:2708c852ef8cd89d1d2068bdbece0aa188813a0c934db3779b9b1faa8442e5f5", size = 214053554, upload-time = "2025-09-04T08:31:38.196Z" },
@@ -3318,9 +3402,9 @@ name = "nvidia-cusolver"
 version = "12.0.4.66"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
-    { name = "nvidia-cusparse", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
-    { name = "nvidia-nvjitlink", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cublas", marker = "(sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cusparse", marker = "(sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-nvjitlink", marker = "(sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/c3/b30c9e935fc01e3da443ec0116ed1b2a009bb867f5324d3f2d7e533e776b/nvidia_cusolver-12.0.4.66-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:02c2457eaa9e39de20f880f4bd8820e6a1cfb9f9a34f820eb12a155aa5bc92d2", size = 223467760, upload-time = "2025-09-04T08:33:04.222Z" },
@@ -3333,8 +3417,8 @@ name = "nvidia-cusolver-cu12"
 version = "11.7.5.82"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", version = "12.9.1.4", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
-    { name = "nvidia-cublas-cu12", version = "12.9.2.10", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'linux' and extra != 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'win32' and extra != 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cublas-cu12", version = "12.9.1.4", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cublas-cu12", version = "12.9.2.10", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' or extra == 'group-3-zea-torch-cpu' or extra != 'group-3-zea-torch-gpu'" },
     { name = "nvidia-cusparse-cu12" },
     { name = "nvidia-nvjitlink-cu12" },
 ]
@@ -3349,7 +3433,7 @@ name = "nvidia-cusparse"
 version = "12.6.3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-nvjitlink", marker = "(sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f8/94/5c26f33738ae35276672f12615a64bd008ed5be6d1ebcb23579285d960a9/nvidia_cusparse-12.6.3.3-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:80bcc4662f23f1054ee334a15c72b8940402975e0eab63178fc7e670aa59472c", size = 162155568, upload-time = "2025-09-04T08:33:42.864Z" },
@@ -3395,10 +3479,10 @@ name = "nvidia-nccl-cu12"
 version = "2.29.7"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform == 'win32')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'win32')",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/20/cc/f48875411d1f176bce58e6343fd5d4131fc1db5420719ff25944bdc006c6/nvidia_nccl_cu12-2.29.7-py3-none-manylinux_2_18_aarch64.whl", hash = "sha256:0cf032ee22b560447daf0456108a75e32bd74a4de6c6b64725637a359fa48cd8", size = 293563644, upload-time = "2026-03-03T05:34:46.166Z" },
@@ -3410,30 +3494,42 @@ name = "nvidia-nccl-cu12"
 version = "2.30.7"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8f/8c/554bb020501d6c04ad8127d83f728137f8f9123f991666efbdcf9095a221/nvidia_nccl_cu12-2.30.7-py3-none-manylinux_2_18_aarch64.whl", hash = "sha256:03ecd776fd1d58fd2c9a0a687dcf8db9ecd0057382dba646fa3d65786d4a9ea1", size = 303277471, upload-time = "2026-06-09T03:24:16.327Z" },
@@ -3474,10 +3570,10 @@ name = "nvidia-nvshmem-cu12"
 version = "3.4.5"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform == 'win32')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'win32')",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1d/6a/03aa43cc9bd3ad91553a88b5f6fb25ed6a3752ae86ce2180221962bc2aa5/nvidia_nvshmem_cu12-3.4.5-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:0b48363fc6964dede448029434c6abed6c5e37f823cb43c3bcde7ecfc0457e15", size = 138936938, upload-time = "2025-09-06T00:32:05.589Z" },
@@ -3489,17 +3585,13 @@ name = "nvidia-nvshmem-cu12"
 version = "3.7.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
 ]
 dependencies = [
-    { name = "nvidia-cuda-cccl-cu12", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'linux' and extra != 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cuda-cccl-cu12", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'linux' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/29/4f/2d705ab9a090fe946dc2be0a3c30f9241e99c49058d2f9c269459b445edc/nvidia_nvshmem_cu12-3.7.0-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:06426cd421093a63529d90a95e57ddf884c9ca43f93016d7a27b903f0a0acaed", size = 230116748, upload-time = "2026-06-11T12:40:27.683Z" },
@@ -3887,7 +3979,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'emscripten' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'emscripten' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "ptyprocess", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'emscripten' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'emscripten' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
@@ -5134,13 +5226,16 @@ name = "sphinx"
 version = "9.0.4"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "alabaster", marker = "python_full_version < '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -5171,27 +5266,36 @@ name = "sphinx"
 version = "9.1.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "alabaster", marker = "python_full_version >= '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -5240,13 +5344,16 @@ name = "sphinx-autodoc-typehints"
 version = "3.6.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -5261,27 +5368,36 @@ name = "sphinx-autodoc-typehints"
 version = "3.10.5"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "sphinx", version = "9.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -5504,20 +5620,20 @@ wheels = [
 
 [package.optional-dependencies]
 and-cuda = [
-    { name = "nvidia-cublas-cu12", version = "12.9.1.4", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
-    { name = "nvidia-cublas-cu12", version = "12.9.2.10", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'linux' and extra != 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'win32' and extra != 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cublas-cu12", version = "12.9.1.4", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cublas-cu12", version = "12.9.2.10", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' or extra == 'group-3-zea-torch-cpu' or extra != 'group-3-zea-torch-gpu'" },
     { name = "nvidia-cuda-cupti-cu12" },
     { name = "nvidia-cuda-nvcc-cu12" },
     { name = "nvidia-cuda-nvrtc-cu12" },
     { name = "nvidia-cuda-runtime-cu12" },
-    { name = "nvidia-cudnn-cu12", version = "9.20.0.48", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
-    { name = "nvidia-cudnn-cu12", version = "9.23.1.3", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'linux' and extra != 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'win32' and extra != 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cudnn-cu12", version = "9.20.0.48", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-cudnn-cu12", version = "9.23.1.3", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' or extra == 'group-3-zea-torch-cpu' or extra != 'group-3-zea-torch-gpu'" },
     { name = "nvidia-cufft-cu12" },
     { name = "nvidia-curand-cu12" },
     { name = "nvidia-cusolver-cu12" },
     { name = "nvidia-cusparse-cu12" },
-    { name = "nvidia-nccl-cu12", version = "2.29.7", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
-    { name = "nvidia-nccl-cu12", version = "2.30.7", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'linux' and extra != 'group-3-zea-torch-gpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'win32' and extra != 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-nccl-cu12", version = "2.29.7", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "nvidia-nccl-cu12", version = "2.30.7", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' or extra == 'group-3-zea-torch-cpu' or extra != 'group-3-zea-torch-gpu'" },
     { name = "nvidia-nvjitlink-cu12" },
 ]
 
@@ -5544,13 +5660,16 @@ name = "tifffile"
 version = "2026.3.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "numpy", marker = "python_full_version < '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -5565,27 +5684,36 @@ name = "tifffile"
 version = "2026.6.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
-    "(python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu')",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "numpy", marker = "python_full_version >= '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -5708,16 +5836,20 @@ resolution-markers = [
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
     "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu'",
 ]
 dependencies = [
     { name = "cuda-bindings", version = "13.3.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.15' and sys_platform == 'linux' and extra != 'group-3-zea-torch-cpu' and extra != 'group-3-zea-torch-gpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -5763,10 +5895,14 @@ name = "torch"
 version = "2.13.0+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform == 'win32')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'win32')",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version >= '3.14' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
 ]
 dependencies = [
     { name = "filelock", marker = "(sys_platform == 'linux' and extra == 'group-3-zea-torch-cpu') or (sys_platform == 'win32' and extra == 'group-3-zea-torch-cpu') or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -5812,10 +5948,14 @@ name = "torch"
 version = "2.13.0+cu129"
 source = { registry = "https://download.pytorch.org/whl/cu129" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform == 'win32')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'win32')",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version >= '3.14' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
 ]
 dependencies = [
     { name = "cuda-bindings", version = "12.9.7", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.15' and sys_platform == 'linux' and extra == 'group-3-zea-torch-gpu') or (python_full_version >= '3.15' and extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (sys_platform != 'linux' and extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
@@ -5911,10 +6051,14 @@ name = "torchaudio"
 version = "2.11.0+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform == 'win32')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'win32')",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version >= '3.14' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torchaudio-2.11.0%2Bcpu-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:7a5ecdd20fb26d8eb1d62135ddc6db0f806b17667c10e82df913fd509d1f5cfe", upload-time = "2026-03-23T15:50:10Z" },
@@ -5942,10 +6086,14 @@ name = "torchaudio"
 version = "2.11.0+cu129"
 source = { registry = "https://download.pytorch.org/whl/cu129" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform == 'win32')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'win32')",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version >= '3.14' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cu129/torchaudio-2.11.0%2Bcu129-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:74f6267dddf9a4c168027c93ef8969ff864b7c9feb6fbf9e202c3446c7d1ef75", upload-time = "2026-03-23T15:50:25Z" },
@@ -6028,10 +6176,14 @@ name = "torchvision"
 version = "0.28.0+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform == 'win32')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'win32')",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version >= '3.14' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
 ]
 dependencies = [
     { name = "numpy", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
@@ -6061,10 +6213,14 @@ name = "torchvision"
 version = "0.28.0+cu129"
 source = { registry = "https://download.pytorch.org/whl/cu129" }
 resolution-markers = [
-    "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version == '3.13.*' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform == 'win32')",
-    "(python_full_version == '3.12.*' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'win32')",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version >= '3.14' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
 ]
 dependencies = [
     { name = "numpy", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
@@ -6729,8 +6885,14 @@ display-headless = [
     { name = "opencv-python-headless" },
 ]
 jax = [
-    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "python_full_version < '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
-    { name = "jax", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "python_full_version >= '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version >= '3.12' and extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (sys_platform != 'linux' and extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "jax", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "jax", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "(python_full_version >= '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (sys_platform != 'linux' and extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+]
+jax-cpu = [
+    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
+    { name = "jax", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
 models = [
     { name = "onnxruntime" },
@@ -6839,8 +7001,10 @@ requires-dist = [
     { name = "hdf5plugin", specifier = ">=4.4" },
     { name = "huggingface-hub", specifier = ">=1.2" },
     { name = "imageio", extras = ["ffmpeg"], specifier = ">=2.0" },
+    { name = "jax", marker = "sys_platform != 'linux' and extra == 'jax'", specifier = ">=0.4.35" },
     { name = "jax", marker = "extra == 'backends'", specifier = ">=0.4.35" },
-    { name = "jax", extras = ["cuda12"], marker = "extra == 'jax'", specifier = ">=0.4.35" },
+    { name = "jax", marker = "extra == 'jax-cpu'", specifier = ">=0.4.35" },
+    { name = "jax", extras = ["cuda12"], marker = "sys_platform == 'linux' and extra == 'jax'", specifier = ">=0.4.35" },
     { name = "keras", specifier = ">=3.15.0" },
     { name = "matplotlib", specifier = ">=3.10" },
     { name = "numcodecs", specifier = ">=0.13" },
@@ -6860,7 +7024,7 @@ requires-dist = [
     { name = "wandb", specifier = ">=0.18" },
     { name = "wget", specifier = ">=3.2" },
 ]
-provides-extras = ["jax", "display", "display-headless", "models", "app", "backends"]
+provides-extras = ["jax", "jax-cpu", "display", "display-headless", "models", "app", "backends"]
 
 [package.metadata.requires-dev]
 dev = [
