@@ -16,9 +16,13 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Git
         run: git config --global safe.directory $GITHUB_WORKSPACE
@@ -64,6 +68,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -92,6 +98,8 @@ jobs:
   heavy-tests:
     runs-on: self-hosted
     timeout-minutes: 120
+    permissions:
+      contents: read
     concurrency:
       group: heavy-tests-${{ github.ref }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -110,6 +118,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-zea
         with:
@@ -145,6 +155,8 @@ jobs:
     name: notebook-tests (${{ matrix.label }})
     runs-on: self-hosted
     timeout-minutes: 120
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -174,6 +186,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-zea
         with:
@@ -187,9 +201,13 @@ jobs:
   test-docs-build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Git
         run: git config --global safe.directory $GITHUB_WORKSPACE
@@ -243,7 +261,7 @@ jobs:
           # Compare against the just-fetched tip (FETCH_HEAD). On the shallow
           # checkout used here the remote-tracking ref origin/$BASE_REF is not
           # updated by `git fetch origin "$BASE_REF"` and may be stale or absent.
-          if git diff --quiet FETCH_HEAD -- Dockerfile pyproject.toml uv.lock scripts/motd.sh; then
+          if git diff --quiet FETCH_HEAD -- Dockerfile .dockerignore pyproject.toml uv.lock scripts/motd.sh; then
             echo "build=false" >> $GITHUB_OUTPUT
             echo "No image-relevant files changed — skipping"
           else

@@ -69,12 +69,16 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
                uv sync --group jax-gpu --group torch-gpu --group tf-gpu
                pre-commit install
 
+         Name the backend groups the image was built with -- the ones above are for the
+         all-GPU image -- or ``uv sync`` will prune them. The message of the day printed
+         on every shell lists what the image has.
+
          The versions an image installs -- backends included -- come from ``uv.lock``, so
          when the lockfile changes (a rebased branch, an updated backend) a running
-         container can catch up in place without a rebuild. The same command does both.
-         Name the backend groups the image was built with, or ``uv sync`` will prune
-         them; the message of the day printed on every shell spells out the exact
-         command for that image.
+         container can catch up in place without a rebuild: run the ``uv sync`` command
+         the motd prints. On a ``DEV=false`` image that command carries
+         ``--no-default-groups``, which keeps the image lean but leaves out the ``dev``
+         group -- drop the flag if you want the dev tooling too.
 
     .. tab-item:: uv
 
