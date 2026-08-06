@@ -305,6 +305,14 @@ def compute_pfield(
     # Zero out pressure behind the transducer (z < 0)
     pressure_squared = ops.where(grid_z[:, None] < 0, 0, pressure_squared)
 
+    # Mean over the retained frequency samples, not their sum: the scan accumulates
+    # |P(f_k)|^2 with no df factor, so a sum scales with the sample count, i.e. with
+    # 1/freq_step -- which is set above from max(t0_delays) and so depends on which
+    # transmits are in the stack. The mean keeps the field a true RMS over the
+    # retained band, and comparable across transmit subsets (~2e-3 apart, from the
+    # differing grids). No effect when norm=True: a global factor cancels below.
+    pressure_squared = pressure_squared / ops.cast(ops.shape(freq)[0], "float32")
+
     # RMS acoustic pressure, reshaped to (n_tx, grid_size_z, grid_size_x)
     pressure = ops.transpose(ops.sqrt(pressure_squared), (1, 0))
     pressure = ops.reshape(pressure, (-1, *size_downsampled))
