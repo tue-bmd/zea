@@ -1,35 +1,213 @@
 """Pixel grid calculation for ultrasound beamforming."""
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from zea import log
 
+if TYPE_CHECKING:
+    from zea.parameters import Parameters
+
 eps = 1e-10
 
 
-def check_for_aliasing(parameters):
-    """Checks if the :class:`~zea.Parameters` will cause spatial aliasing due to a too low pixel
-    density. If so, a warning is printed with a suggestion to increase the pixel density by either
-    increasing the number of pixels, or decreasing the pixel spacing, depending on which parameter
-    was set by the user."""
-    width = parameters.xlims[1] - parameters.xlims[0]
-    depth = parameters.zlims[1] - parameters.zlims[0]
-    wvln = parameters.wavelength
+def transmit_sin_theta(parameters: "Parameters") -> float | None:
+    """Largest transmit-side aperture angle ``sin(theta_t)`` over the selected transmits.
 
-    if width / parameters.grid_size_x > wvln / 2:
-        log.warning(
-            f"width/grid_size_x = {width / parameters.grid_size_x:.7f} > "
-            f"wavelength/2 = {wvln / 2:.7f}. "
-            f"Consider increasing grid_size_x to {int(np.ceil(width / (wvln / 2)))} "
-            "or more, or unsetting it to size the grid automatically."
+    This is the transmit half of the lateral bandwidth (see
+    :func:`aliasing_limits`). Two cases, both taken from the transmit geometry:
+
+    * **focused / diverging** -- the active aperture ``W`` (the elements with
+      non-zero ``tx_apodizations``) seen from the focus at depth ``z_f``:
+      ``sin(theta_t) = (W/2) / hypot(z_f, W/2)``.
+    * **plane** -- a single steered direction, so ``sin(theta_t) = |sin(angle)|``.
+
+    .. note::
+        For focused transmits this is evaluated **at the focal depth**, which is
+        where the beam is laterally tightest and where the image is judged. The
+        same aperture subtends a much wider angle in the near field (e.g. 0.43
+        instead of 0.23 at a quarter of the focal depth), so the true bound is
+        depth-dependent and this returns its *focal-plane* value. Sampling the
+        near field to the letter would demand a grid several times finer than
+        any that is used in practice, and the transmit deposits little energy
+        there anyway.
+
+    Returns:
+        float or None: ``None`` when the transmit geometry is unavailable, in
+        which case callers should fall back to the symmetric assumption.
+    """
+    try:
+        focus_distances = np.asarray(parameters.focus_distances, dtype=float)
+        probe_geometry = np.asarray(parameters.probe_geometry, dtype=float)
+        tx_apodizations = np.asarray(parameters.tx_apodizations, dtype=float)
+        polar_angles = parameters.polar_angles
+    except Exception:
+        # Best-effort geometry probe feeding a warn-only diagnostic: any parameter
+        # set that cannot answer (unset, unresolved transmit selection, ...) simply
+        # falls back to the symmetric assumption rather than breaking the run.
+        return None
+
+    if focus_distances.size == 0 or tx_apodizations.ndim != 2:
+        return None
+
+    polar_angles = None if polar_angles is None else np.asarray(polar_angles, dtype=float)
+
+    sin_thetas = []
+    for tx, focus in enumerate(focus_distances):
+        if not np.isfinite(focus) or focus == 0.0:
+            # Plane wave: a single steered direction, no aperture spread.
+            angle = 0.0 if polar_angles is None else float(polar_angles[tx])
+            sin_thetas.append(abs(np.sin(angle)))
+            continue
+        active = np.nonzero(np.abs(tx_apodizations[tx]) > eps)[0]
+        if active.size == 0:
+            continue
+        half_width = (probe_geometry[active, 0].max() - probe_geometry[active, 0].min()) / 2
+        if half_width <= 0:
+            continue
+        sin_thetas.append(half_width / np.hypot(abs(float(focus)), half_width))
+
+    return max(sin_thetas) if sin_thetas else None
+
+
+def aliasing_limits(
+    parameters: "Parameters",
+    demodulated: bool = False,
+    bandwidth: float | None = None,
+) -> dict:
+    """Largest pixel pitch the beamforming grid can carry without spatial aliasing.
+
+    The two axes are limited by different things, and only the axial one is
+    helped by demodulation.
+
+    **Axial.** A grid holding RF carries the round-trip carrier, so its axial
+    spatial frequency reaches ``2 * f_c / c``. Demodulation removes that carrier
+    and leaves only the band around it: for baseband IQ filtered to ``bandwidth``
+    the support is ``|k_z| <= B / c``, hence ``dz <= c / (2 B)``. That is a much
+    weaker requirement -- at ``B = 4.5 MHz`` and ``c = 1540 m/s`` it is 171 um,
+    against 99 um for the carrier at 7.8 MHz.
+
+    **Lateral.** There is no carrier to remove here, so demodulation buys
+    nothing. The pulse-echo lateral bandwidth is set by the aperture angles on
+    both sides at the *shortest* retained wavelength::
+
+        |k_x| <= (sin(theta_t) + sin(theta_r)) / lambda_min
+        dx    <= lambda_min / (2 * (sin(theta_t) + sin(theta_r)))
+
+    with ``sin(theta_r) = 1 / sqrt(1 + 4 F^2)`` from the receive ``f_number``
+    and ``sin(theta_t)`` from :func:`transmit_sin_theta`. Paraxially
+    (``sin(theta) ~ 1/2F``) this is the textbook ``dx <= lambda_min / (1/F_tx +
+    1/F_rx)``, and ``dx <= lambda_min * F / 2`` for a symmetric aperture. When
+    the transmit geometry is unavailable the symmetric case is assumed.
+
+    Args:
+        parameters: The :class:`~zea.Parameters` describing the grid and probe.
+        demodulated: Whether the data reaching the grid is baseband IQ.
+        bandwidth: The RF band retained by the pipeline's band-pass, in Hz.
+            ``None`` means unknown, and the carrier is used instead.
+
+    Returns:
+        dict: ``dx_max`` / ``dz_max`` in metres plus the ``lambda_min``,
+        ``sin_theta_t``, ``sin_theta_r`` and ``axial_basis`` used, so callers can
+        report *why* a limit is what it is.
+    """
+    sound_speed = float(parameters.sound_speed)
+
+    if demodulated and bandwidth is not None:
+        dz_max = sound_speed / (2.0 * float(bandwidth))
+        axial_basis = f"baseband IQ, c / (2 * bandwidth) with bandwidth = {bandwidth / 1e6:.2f} MHz"
+    else:
+        # Historical zea criterion: 2 pixels per wavelength. This is one octave
+        # looser than the round-trip Nyquist (lambda/4) that `pixels_per_wavelength`
+        # uses to auto-size the grid; kept so that hand-set RF grids that were
+        # accepted before stay accepted.
+        dz_max = float(parameters.wavelength) / 2
+        axial_basis = "RF carrier, wavelength / 2"
+
+    # The lateral limit needs the shortest *RF* wavelength, so it needs the band's
+    # position on the RF axis. Either frequency can legitimately read 0 --
+    # `demodulation_frequency` when the data was stored at baseband,
+    # `center_frequency` once `Demodulate` has zeroed it -- so take whichever is
+    # still carrying the carrier.
+    band_center = float(parameters.demodulation_frequency)
+    if band_center <= 0:
+        band_center = float(parameters.center_frequency)
+    f_max = band_center + (float(bandwidth) / 2 if bandwidth is not None else 0.0)
+    lambda_min = sound_speed / f_max if f_max > 0 else np.inf
+
+    f_number = float(parameters.f_number)
+    sin_theta_r = 1.0 / np.sqrt(1.0 + 4.0 * f_number**2) if f_number > 0 else 1.0
+    sin_theta_t = transmit_sin_theta(parameters)
+    if sin_theta_t is None:
+        sin_theta_t = sin_theta_r  # symmetric aperture: the textbook lambda * F / 2
+
+    total_sin = sin_theta_t + sin_theta_r
+    dx_max = lambda_min / (2.0 * total_sin) if total_sin > 0 else np.inf
+
+    return {
+        "dx_max": dx_max,
+        "dz_max": dz_max,
+        "lambda_min": lambda_min,
+        "sin_theta_t": sin_theta_t,
+        "sin_theta_r": sin_theta_r,
+        "axial_basis": axial_basis,
+    }
+
+
+def check_for_aliasing(
+    parameters: "Parameters",
+    demodulated: bool = False,
+    bandwidth: float | None = None,
+) -> list:
+    """Warn when the beamforming grid under-samples the data it is about to carry.
+
+    Compares the grid's pixel pitch against :func:`aliasing_limits`. Content
+    beyond these limits cannot be represented by *any* image on this grid, so it
+    folds back as aliasing (and, in an inverse problem, sits in the residual as a
+    bias that no image can explain).
+
+    Only meaningful once it is known what lands on the grid -- in particular
+    whether the pipeline demodulates, which is why this is driven from
+    :meth:`zea.ops.Pipeline.check_parameters` rather than from the grid itself.
+
+    Args:
+        parameters: The :class:`~zea.Parameters` describing the grid and probe.
+        demodulated: Whether the data reaching the grid is baseband IQ.
+        bandwidth: The RF band retained by the pipeline's band-pass, in Hz.
+
+    Returns:
+        list of str: The messages emitted; empty when the grid is adequate.
+    """
+    limits = aliasing_limits(parameters, demodulated=demodulated, bandwidth=bandwidth)
+
+    width = float(parameters.xlims[1] - parameters.xlims[0])
+    depth = float(parameters.zlims[1] - parameters.zlims[0])
+    dx = width / parameters.grid_size_x
+    dz = depth / parameters.grid_size_z
+
+    messages = []
+    if dx > limits["dx_max"]:
+        messages.append(
+            f"Lateral grid pitch {dx * 1e6:.1f} um exceeds {limits['dx_max'] * 1e6:.1f} um "
+            f"(lambda_min = {limits['lambda_min'] * 1e6:.1f} um, "
+            f"sin(theta_t) = {limits['sin_theta_t']:.3f} + "
+            f"sin(theta_r) = {limits['sin_theta_r']:.3f}). "
+            f"Consider increasing grid_size_x to {int(np.ceil(width / limits['dx_max']))} or more, "
+            "unsetting it to size the grid automatically, or narrowing the apertures "
+            "(f_number / transmit steering) so the data stays inside the grid's lateral band."
         )
-    if depth / parameters.grid_size_z > wvln / 2:
-        log.warning(
-            f"depth/grid_size_z = {depth / parameters.grid_size_z:.7f} > "
-            f"wavelength/2 = {wvln / 2:.7f}. "
-            f"Consider increasing grid_size_z to {int(np.ceil(depth / (wvln / 2)))} "
-            "or more, or unsetting it to size the grid automatically."
+    if dz > limits["dz_max"]:
+        messages.append(
+            f"Axial grid pitch {dz * 1e6:.1f} um exceeds {limits['dz_max'] * 1e6:.1f} um "
+            f"({limits['axial_basis']}). "
+            f"Consider increasing grid_size_z to {int(np.ceil(depth / limits['dz_max']))} or more, "
+            "unsetting it to size the grid automatically, or band-limiting the data further."
         )
+
+    for message in messages:
+        log.warning_once(message, key=message)
+    return messages
 
 
 def cartesian_pixel_grid(

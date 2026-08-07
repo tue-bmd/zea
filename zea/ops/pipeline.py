@@ -97,6 +97,7 @@ class Pipeline:
         jit_kwargs: dict | None = None,
         name="pipeline",
         validate=True,
+        check_parameters: bool = True,
         timed: bool = False,
         device: Union[str, None] = None,
     ):
@@ -122,7 +123,14 @@ class Pipeline:
 
             jit_kwargs (dict, optional): Additional keyword arguments for the JIT compiler.
             name (str, optional): The name of the pipeline. Defaults to "pipeline".
-            validate (bool, optional): Whether to validate the pipeline. Defaults to True.
+            validate (bool, optional): Whether to validate the pipeline *structure*
+                (operation data-type compatibility) at construction. Defaults to True.
+            check_parameters (bool, optional): Whether :meth:`prepare_parameters` also
+                runs :meth:`check_parameters`, which inspects the incoming
+                :class:`~zea.Parameters` for problems this pipeline would hit at
+                run time (currently: grid aliasing). Warns only, never raises.
+                Set to ``False`` to silence it, or override per call with
+                ``prepare_parameters(..., check=False)``. Defaults to True.
             timed (bool, optional): Whether to time each operation. Defaults to False.
             device (str, optional): Default device for all pipeline calls, e.g.
                 ``'cpu'``, ``'gpu:0'``, ``'cuda:1'``.  Can be overridden per-call
@@ -140,6 +148,7 @@ class Pipeline:
 
         self.with_batch_dim = with_batch_dim
         self._validate_flag = validate
+        self._check_parameters_flag = check_parameters
 
         # Setup timer
         if jit_options == "pipeline" and timed:
@@ -652,6 +661,115 @@ class Pipeline:
                     f"of operation {operations[i + 1].__class__.__name__}"
                 )
 
+    def _flat_operations(self):
+        """Yield the operations in execution order, flattening nested pipelines."""
+        for operation in self.operations:
+            if isinstance(operation, Pipeline):
+                yield from operation._flat_operations()
+            else:
+                yield operation
+
+    def _grid_input_is_demodulated(self, parameters: Union["Parameters", None] = None):
+        """Whether the data has been demodulated by the time it first hits the grid.
+
+        Answered by walking the operations rather than by inspecting tensors: the
+        op that maps channel data onto the grid (:class:`~zea.ops.TOFCorrection`)
+        always runs inside a JIT trace -- it sits in the nested ``Beamform`` /
+        ``PatchedGrid`` pipeline, which compiles itself as a whole even at
+        ``jit_options="ops"`` -- so at that point every value is a tracer and
+        nothing about it can be tested eagerly.
+
+        A pipeline may also be *handed* baseband IQ rather than demodulating it
+        itself -- beamformer-only pipelines that start at
+        :class:`~zea.ops.TOFCorrection` do exactly that -- so when this pipeline
+        contains no :class:`~zea.ops.Demodulate` the caller's ``n_ch`` decides:
+        ``2`` is zea's IQ convention, and is what ``Demodulate`` itself sets.
+
+        Args:
+            parameters: The :class:`~zea.Parameters` about to be fed in, used
+                only for the ``n_ch`` fallback. May be ``None``.
+
+        Returns:
+            bool or None: ``None`` when this pipeline never forms a grid, in
+            which case there is nothing to check.
+        """
+        forms_grid = False
+        for operation in self._flat_operations():
+            if isinstance(operation, Demodulate):
+                return True
+            if isinstance(operation, TOFCorrection):
+                forms_grid = True
+                break
+        if not forms_grid:
+            return None
+
+        n_ch = None if parameters is None else getattr(parameters, "n_ch", None)
+        return n_ch is not None and int(n_ch) == 2
+
+    def check_parameters(
+        self,
+        parameters: "Parameters",
+        demodulated: Union[bool, None] = None,
+        **overrides,
+    ) -> list:
+        """Check incoming parameters against what this pipeline will do to them.
+
+        A separate step from :meth:`validate`, which checks the pipeline's own
+        structure: this one looks at the :class:`~zea.Parameters` the caller is
+        about to feed in. It warns and never raises, so a questionable
+        configuration still runs.
+
+        Currently it checks the beamforming grid for spatial aliasing
+        (:func:`~zea.beamform.pixelgrid.check_for_aliasing`). That check lives
+        here because it is undecidable anywhere earlier: whether a given pitch
+        under-samples depends on whether this pipeline demodulates, and on the
+        band its band-pass keeps -- neither of which ``Parameters`` knows.
+        Running it here also means it runs eagerly on concrete values, before
+        anything is traced.
+
+        Args:
+            parameters: The :class:`~zea.Parameters` to check.
+            demodulated: Whether the data reaching the grid is baseband IQ.
+                ``None`` (default) infers it from the operations and ``n_ch``;
+                pass it explicitly when that inference cannot see the truth.
+            **overrides: The same overrides passed to :meth:`prepare_parameters`;
+                they take priority over ``parameters``, exactly as they do there.
+
+        Returns:
+            list of str: The warnings emitted; empty when nothing looks wrong.
+        """
+        # Imported here, not at module scope: `zea.internal.parameters` reaches
+        # back into `zea.ops` via the data specs, so a top-level import is circular.
+        from zea.beamform.pixelgrid import check_for_aliasing
+
+        if demodulated is None:
+            demodulated = self._grid_input_is_demodulated(parameters)
+        if demodulated is None:
+            return []
+
+        def resolve(key):
+            if key in overrides:
+                return overrides[key]
+            try:
+                return getattr(parameters, key)
+            except Exception:  # unset, or underivable from what is available
+                return None
+
+        if resolve("grid_type") != "cartesian" or resolve("enable_scanline"):
+            # `check_for_aliasing` is written for a regular cartesian grid.
+            return []
+
+        try:
+            return check_for_aliasing(
+                parameters,
+                demodulated=demodulated,
+                bandwidth=resolve("bandwidth"),
+            )
+        except Exception as exc:
+            # A diagnostic must never be the reason a run fails.
+            log.debug(f"[zea.Pipeline] Skipping parameter checks: {exc!r}")
+            return []
+
     def set_params(self, **params):
         """Set parameters for the operations in the pipeline by adding them to the cache."""
         for operation in self.operations:
@@ -907,6 +1025,7 @@ class Pipeline:
         self,
         parameters: Union["Parameters", None] = None,
         device: Union[str, None] = None,
+        check: Union[bool, None] = None,
         **overrides,
     ) -> Dict[str, Any]:
         """Prepare a :class:`~zea.Parameters` object for the pipeline.
@@ -923,6 +1042,8 @@ class Pipeline:
                 converted, so derivation is lazy and minimal.
             device: Device to place the tensors on. Defaults to the pipeline
                 device.
+            check: Whether to also run :meth:`check_parameters`. ``None``
+                (default) uses the pipeline's ``check_parameters`` setting.
             **overrides: Additional parameters to include in the inputs
                 (converted to tensors). These overwrite values taken from
                 ``parameters``.
@@ -939,6 +1060,11 @@ class Pipeline:
         from zea.parameters import Parameters
 
         _device = device if device is not None else self.device
+
+        # Deliberately before the tensor conversion below: the checks need
+        # concrete values, and this is the last point at which they are.
+        if parameters is not None and (self._check_parameters_flag if check is None else check):
+            self.check_parameters(parameters, **overrides)
 
         params_dict = {}
         override_keys = set(overrides.keys())
