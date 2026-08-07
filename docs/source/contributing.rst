@@ -61,24 +61,21 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
          See the :ref:`Docker <docker-information>` section of the installation guide
          for build and run instructions. Images built with ``DEV=true`` (the default)
-         already include the ``dev`` dependency-group (tests, docs and lint tools). If
-         you're in a container built with ``DEV=false``, add it first:
+         already include the ``dev`` dependency-group (tests, docs and lint tools).
+
+         Every shell prints a message of the day ending in the ``uv sync`` command for
+         that image. Use that one rather than copying from here: it names the backend
+         groups the image was built with, and ``uv sync`` removes any group you leave
+         out. Run it whenever ``uv.lock`` changes, after a rebase or a backend bump, to
+         update a running container without rebuilding it.
+
+         On a ``DEV=false`` image the command also has ``--no-default-groups``. Drop that
+         flag to add the ``dev`` group. For ``zeahub/all`` it becomes:
 
          .. code-block:: shell
 
                uv sync --group jax-gpu --group torch-gpu --group tf-gpu
                pre-commit install
-
-         Name the backend groups the image was built with -- the ones above are for the
-         all-GPU image -- or ``uv sync`` will prune them. The message of the day printed
-         on every shell lists what the image has.
-
-         The versions an image installs -- backends included -- come from ``uv.lock``, so
-         when the lockfile changes (a rebased branch, an updated backend) a running
-         container can catch up in place without a rebuild: run the ``uv sync`` command
-         the motd prints. On a ``DEV=false`` image that command carries
-         ``--no-default-groups``, which keeps the image lean but leaves out the ``dev``
-         group -- drop the flag if you want the dev tooling too.
 
     .. tab-item:: uv
 

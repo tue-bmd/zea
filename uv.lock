@@ -6890,10 +6890,6 @@ jax = [
     { name = "jax", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
     { name = "jax", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "(python_full_version >= '3.12' and sys_platform == 'linux') or (python_full_version < '3.12' and extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu') or (sys_platform != 'linux' and extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
 ]
-jax-cpu = [
-    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
-    { name = "jax", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'group-3-zea-torch-cpu' and extra == 'group-3-zea-torch-gpu')" },
-]
 models = [
     { name = "onnxruntime" },
 ]
@@ -7003,7 +6999,6 @@ requires-dist = [
     { name = "imageio", extras = ["ffmpeg"], specifier = ">=2.0" },
     { name = "jax", marker = "sys_platform != 'linux' and extra == 'jax'", specifier = ">=0.4.35" },
     { name = "jax", marker = "extra == 'backends'", specifier = ">=0.4.35" },
-    { name = "jax", marker = "extra == 'jax-cpu'", specifier = ">=0.4.35" },
     { name = "jax", extras = ["cuda12"], marker = "sys_platform == 'linux' and extra == 'jax'", specifier = ">=0.4.35" },
     { name = "keras", specifier = ">=3.15.0" },
     { name = "matplotlib", specifier = ">=3.10" },
@@ -7024,7 +7019,7 @@ requires-dist = [
     { name = "wandb", specifier = ">=0.18" },
     { name = "wget", specifier = ">=3.2" },
 ]
-provides-extras = ["jax", "jax-cpu", "display", "display-headless", "models", "app", "backends"]
+provides-extras = ["jax", "display", "display-headless", "models", "app", "backends"]
 
 [package.metadata.requires-dev]
 dev = [

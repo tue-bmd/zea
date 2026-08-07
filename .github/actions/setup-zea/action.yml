@@ -6,7 +6,9 @@ description: >
   using it re-installed on top of it anyway.
 inputs:
   python-version:
-    description: Python version to build the environment against.
+    description: >
+      Python version to build the environment against. Keep in step with the
+      Dockerfile's PYTHON_VERSION so CI and the images test the same interpreter.
     required: false
     default: "3.12"
   groups:

@@ -246,6 +246,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Decide whether to build
         id: check
@@ -257,6 +259,8 @@ jobs:
             echo "Push build — always building"
             exit 0
           fi
+          # Unauthenticated (persist-credentials: false); fine because the repo is
+          # public, and a loud fetch failure if that ever changes.
           git fetch origin "$BASE_REF"
           # Compare against the just-fetched tip (FETCH_HEAD). On the shallow
           # checkout used here the remote-tracking ref origin/$BASE_REF is not
