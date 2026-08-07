@@ -72,10 +72,11 @@ def compute_pfield(
         downmix (int, optional): Downmixing the frequency to facilitate a smaller grid.
             Default is 4. Higher requires lower number of grid points but is less accurate.
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Higher is sharper.
-            Only works when norm is True. Default is 1.
+            Default is 1.
         percentile (int, optional): minimum percentile threshold to keep in the weighting.
-            Only works when norm is True. Higher is more aggressive. Default is 10.
-        norm (bool, optional): per pixel normalization (True) or unnormalized (False)
+            Higher is more aggressive. Default is 10.
+        norm (bool, optional): per pixel normalization over the transmit axis (True)
+            or unnormalized (False).
         point_batch_size (int, optional): Batch size for the pressure field computation.
             Higher is slightly faster, but requires more memory. Default is 2048.
         interpolation (str, optional): Interpolation used to resize the pressure
@@ -323,28 +324,23 @@ def compute_pfield(
         ops.image.resize(pressure[..., None], size_orig, interpolation=interpolation), axis=-1
     )
 
-    if norm:
-        normalized_pfield = normalize_pressure_field(p_arr, alpha=alpha, percentile=percentile)
-    else:
-        normalized_pfield = p_arr
+    p_arr = shape_pressure_field(p_arr, alpha=alpha, percentile=percentile)
 
-    return normalized_pfield
+    return normalize_pressure_field(p_arr) if norm else p_arr
 
 
-def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.0):
-    """
-    Normalize the input array of intensities by zeroing out values below a given percentile.
+def shape_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.0):
+    """Per-transmit shaping of a pressure field: floor the dim tail, sharpen the beam.
 
     Args:
-        pfield (array): The unnormalized pressure field array
-            of shape (n_tx, grid_size_z, grid_size_x).
+        pfield (array): Pressure field of shape (n_tx, grid_size_z, grid_size_x).
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting.
-            Higher values result in sharper weighting. Default is 1.0.
-        percentile (int, optional): minimum percentile threshold to keep in the weighting.
-            Higher is more aggressive. Default is 10.
+            Higher values result in sharper weighting. Default is 1.0 (no change).
+        percentile (int, optional): minimum percentile threshold to keep in the
+            weighting, per transmit. Higher is more aggressive. Default is 10.
 
     Returns:
-        ops.array: Normalized intensity array.
+        ops.array: Shaped pressure field, same shape.
     """
     # Convert percentile to quantile (0–1 range)
     q = percentile / 100.0
@@ -356,12 +352,21 @@ def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.
     pfield = ops.where(pfield < threshold, 0, pfield)
 
     # Sharpen the beam
-    pfield = ops.power(pfield, alpha)
+    return ops.power(pfield, alpha)
 
-    # Normalize over transmit events (axis=0)
-    normalized_pfield = pfield / (keras.config.epsilon() + ops.sum(pfield, axis=0, keepdims=True))
 
-    return normalized_pfield
+def normalize_pressure_field(pfield):
+    """Normalize a pressure field per pixel, over the transmit axis.
+
+    Turns the field into compounding weights that sum to 1 at every pixel.
+
+    Args:
+        pfield (array): Pressure field of shape (n_tx, grid_size_z, grid_size_x).
+
+    Returns:
+        ops.array: Normalized intensity array.
+    """
+    return pfield / (keras.config.epsilon() + ops.sum(pfield, axis=0, keepdims=True))
 
 
 def _pfield_freq_step(
