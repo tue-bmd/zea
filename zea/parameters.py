@@ -995,6 +995,7 @@ class Parameters(BaseParameters):
             grid=self.grid,
             t0_delays=self.t0_delays,
             probe_bandwidth_percent=self.probe_bandwidth_percent,
+            element_width=self.element_width if hasattr(self, "element_width") else None,
             **self.pfield_kwargs,
         )
         return ops.convert_to_numpy(pfield)

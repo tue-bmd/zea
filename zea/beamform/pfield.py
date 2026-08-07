@@ -39,6 +39,7 @@ def compute_pfield(
     tx_apodizations,
     grid,
     t0_delays,
+    element_width=None,
     frequency_step=4,
     db_thresh=-1.0,
     downsample=10,
@@ -108,12 +109,7 @@ def compute_pfield(
     grid_x = ops.convert_to_tensor(grid[:, :, 0], dtype="float32")
     grid_z = ops.convert_to_tensor(grid[:, :, 2], dtype="float32")
     t0_delays = ops.convert_to_tensor(t0_delays, dtype="float32")
-    tx_apodizations = ops.convert_to_tensor(tx_apodizations, dtype="float32")
-
-    # formatting
-    t0_delays = ops.where(ops.isnan(t0_delays), 0, t0_delays)
-    tx_apodizations = ops.where(ops.isnan(tx_apodizations), 0, tx_apodizations)
-    tx_apodizations = ops.cast(tx_apodizations, "complex64")
+    tx_apodizations = ops.convert_to_tensor(tx_apodizations, dtype="complex64")
 
     # probe params
     fc_original = center_frequency
@@ -123,10 +119,12 @@ def compute_pfield(
     num_waveforms = 1  # number of waveforms in the pulse
 
     # array params
-    pitch = ops.abs(probe_geometry[1, 0] - probe_geometry[0, 0])  # element pitch
+    if element_width is None:
+        from zea.probes import Probe
 
-    kerf = 0.1 * pitch  # for now this is hardcoded
-    element_width = pitch - kerf
+        pitch = Probe.get_pitch(probe_geometry)
+        kerf = 0.1 * pitch
+        element_width = pitch - kerf
 
     # %------------------------------------%
     # % POINT LOCATIONS, DISTANCES & GRIDS %
@@ -148,8 +146,8 @@ def compute_pfield(
     grid_z = ops.reshape(grid_z, (-1,))
 
     # Centers of the transducer elements (x- and z-coordinates)
-    element_x = (ops.arange(0.0, n_el) - (n_el - 1) / 2) * pitch
-    element_z = ops.zeros(n_el)
+    element_x = probe_geometry[:, 0]
+    element_z = probe_geometry[:, 2]
     element_theta = ops.zeros(n_el)
 
     # Centroids of the sub-elements
@@ -205,8 +203,9 @@ def compute_pfield(
         denom = (bandwidth / 2) / (ops.log(2) ** (1 / p_shape))
         # Raise the normalized difference to the power of p_shape
         exponent = (freq_diff / denom) ** p_shape
-        # Apply the negative sign and exponential
-        return ops.cast(ops.exp(-exponent), "complex64")
+        # The bandwidth is a pulse-echo (two-way) bandwidth; the one-way transmit
+        # response is the square root of the two-way response, hence the factor 1/2.
+        return ops.cast(ops.exp(-exponent / 2), "complex64")
 
     # The frequency response is a pulse-echo (transmit + receive) response.
     # The spectrum of the pulse (pulse_spectrum) will be then multiplied
@@ -306,6 +305,14 @@ def compute_pfield(
 
     # Zero out pressure behind the transducer (z < 0)
     pressure_squared = ops.where(grid_z[:, None] < 0, 0, pressure_squared)
+
+    # Mean over the retained frequency samples, not their sum: the scan accumulates
+    # |P(f_k)|^2 with no df factor, so a sum scales with the sample count, i.e. with
+    # 1/freq_step -- which is set above from max(t0_delays) and so depends on which
+    # transmits are in the stack. The mean keeps the field a true RMS over the
+    # retained band, and comparable across transmit subsets (~2e-3 apart, from the
+    # differing grids). No effect when norm=True: a global factor cancels below.
+    pressure_squared = pressure_squared / ops.cast(ops.shape(freq)[0], "float32")
 
     # RMS acoustic pressure, reshaped to (n_tx, grid_size_z, grid_size_x)
     pressure = ops.transpose(ops.sqrt(pressure_squared), (1, 0))
