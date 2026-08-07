@@ -21,6 +21,8 @@ import zea
 from zea.backend import func_on_device
 from zea.internal.device import (
     _cuda_visible_devices_disables_gpus,
+    _visible_to_physical_ids,
+    get_device,
     get_gpu_memory,
     init_device,
 )
@@ -109,6 +111,72 @@ class TestGetGpuMemory:
         monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,-1")
         with _mock_smi(monkeypatch, _SMI_TWO_GPUS):
             assert get_gpu_memory(verbose=False) == [1000]
+
+
+_SMI_THREE_GPUS = b"1000\n2000\n3000\n"
+
+
+class TestVisibleToPhysicalIds:
+    """Unit tests for the ``_visible_to_physical_ids`` helper."""
+
+    @pytest.mark.parametrize(
+        "cuda_visible,visible_ids,expected",
+        [
+            (None, [0, 1], [0, 1]),  # unset → positional ids are already physical
+            ("2", [0], [2]),  # single remapped GPU
+            ("3,1", [0, 1], [3, 1]),  # order follows CUDA_VISIBLE_DEVICES, not sorting
+            ("3,1", [1], [1]),  # subset of the visible GPUs
+            ("GPU-abc123", [0], [0]),  # UUID tokens → fall back to positional
+            ("2", [0, 5], [2]),  # out-of-range visible ids are dropped
+        ],
+    )
+    def test_translation(self, monkeypatch, cuda_visible, visible_ids, expected):
+        if cuda_visible is None:
+            monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        else:
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", cuda_visible)
+        assert _visible_to_physical_ids(visible_ids) == expected
+
+
+class TestSelectionWritesPhysicalIds:
+    """``CUDA_VISIBLE_DEVICES`` is read by the driver, so it must hold physical ids."""
+
+    def test_get_device_queries_nvidia_smi_once(self, monkeypatch):
+        """One selection must shell out to nvidia-smi once, not once per helper."""
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        with _mock_smi(monkeypatch, _SMI_THREE_GPUS) as mocked_smi:
+            get_device("auto:1", verbose=False)
+            assert mocked_smi.call_count == 1
+
+    def test_preset_cuda_visible_devices_is_not_reinterpreted(self, monkeypatch):
+        """A pre-set allocation (SLURM, Docker, ...) must survive a single selection.
+
+        ``get_gpu_memory`` reports the *visible* GPUs renumbered 0..N-1, so the id
+        that selection works with is positional. Writing it back verbatim
+        reinterprets it as physical and moves the process onto a GPU that was never
+        allocated to it -- here, off allocated GPU 7 and onto GPU 3.
+        """
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "4,5,6,7")
+        # 8 physical GPUs; of the four allocated, physical 7 has the most free memory.
+        smi = b"1000\n2000\n3000\n4000\n5000\n6000\n7000\n9000\n"
+        with _mock_smi(monkeypatch, smi):
+            get_device("auto:1", verbose=False)
+        assert os.environ["CUDA_VISIBLE_DEVICES"] == "7"
+
+    def test_repeated_selection_stays_on_same_physical_gpu(self, monkeypatch):
+        """Selection is idempotent: a second call must not drift off the first choice.
+
+        The second call sees only the already-selected GPU, which is renumbered to 0
+        inside the process. Writing that 0 back out verbatim would silently move the
+        process onto physical GPU 0.
+        """
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        with _mock_smi(monkeypatch, _SMI_THREE_GPUS):
+            get_device("auto:1", verbose=False)
+            # GPU 2 has the most free memory
+            assert os.environ["CUDA_VISIBLE_DEVICES"] == "2"
+            get_device("auto:1", verbose=False)
+            assert os.environ["CUDA_VISIBLE_DEVICES"] == "2"
 
 
 class TestInitDevice:
