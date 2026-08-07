@@ -94,6 +94,12 @@ def test_scan_convert_in_process_smoke():
     )
     assert np.asarray(out2d_novec).ndim == 2
 
+    # distance_to_apex only relabels z_lim, but keep the branch covered in-process too.
+    _, params_apex = display.scan_convert_2d(
+        img2d, rho_range=(0.5, 1), theta_range=(-0.5, 0.5), distance_to_apex=0.25
+    )
+    assert isinstance(params_apex, dict)
+
     vol3d = rng.standard_normal((16, 10, 10)).astype(np.float32)
     out3d, params3d = display.scan_convert_3d(
         vol3d, rho_range=(0, 1), theta_range=(-0.4, 0.4), phi_range=(-0.4, 0.4)
@@ -307,6 +313,7 @@ def test_converting_to_image(size, dynamic_range):
         ("float32", 2),
     ],
 )
+@backend_equality_check(decimal=2)
 def test_map_coordinates_dtype(dtype, order):
     """Test map_coordinates with different data types and interpolation orders.
 
@@ -357,6 +364,8 @@ def test_map_coordinates_dtype(dtype, order):
     assert np.all(result_np >= 0) and np.all(result_np <= 1), (
         f"Interpolated values out of expected range [0, 1]: {result_np}"
     )
+
+    return result_np
 
 
 @pytest.mark.parametrize(
@@ -453,6 +462,98 @@ def test_overlay_masks_non_L_mask():
     assert isinstance(result, Image.Image)
     assert result.mode == "RGB"
     assert result.size == (w, h)
+
+
+@backend_equality_check(decimal=6)
+def test_scan_convert_2d_distance_to_apex_only_relabels_z_lim():
+    """``distance_to_apex`` reports z as a depth below the transducer rather than from
+    the apex rho is measured from. It must not touch the image itself."""
+    from keras import ops
+
+    from zea import display
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    img = rng.standard_normal((64, 32)).astype(np.float32)
+    rho_range, theta_range = (0.055, 0.14), (-0.4, 0.4)
+    distance_to_apex = 0.05
+
+    apex, params_apex = display.scan_convert_2d(img, rho_range, theta_range)
+    shifted, params_shifted = display.scan_convert_2d(
+        img, rho_range, theta_range, distance_to_apex=distance_to_apex
+    )
+
+    np.testing.assert_array_equal(ops.convert_to_numpy(apex), ops.convert_to_numpy(shifted))
+    np.testing.assert_allclose(
+        [ops.convert_to_numpy(value) for value in params_shifted["z_lim"]],
+        [ops.convert_to_numpy(value) - distance_to_apex for value in params_apex["z_lim"]],
+        atol=1e-9,
+    )
+    # Lateral position is shared by both frames: the apex sits directly below x = 0.
+    np.testing.assert_array_equal(
+        [ops.convert_to_numpy(value) for value in params_shifted["x_lim"]],
+        [ops.convert_to_numpy(value) for value in params_apex["x_lim"]],
+    )
+
+    # The reported extent is pure geometry, so every backend must agree on it exactly.
+    return np.array(
+        [
+            ops.convert_to_numpy(value)
+            for value in (*params_shifted["z_lim"], *params_shifted["x_lim"])
+        ]
+    )
+
+
+@pytest.mark.parametrize("i, j", [(0, 64), (60, 30), (255, 100), (200, 127)])
+@backend_equality_check(decimal=3)
+def test_scan_conversion_lands_where_the_grid_says_it_should(i, j):
+    """End-to-end frame check for curved probes: a point at polar index ``(i, j)`` must
+    scan-convert to the physical position ``Parameters.grid[i, j]`` reports for it, read
+    back through ``Parameters.extent_imshow``.
+
+    This ties the three places ``distance_to_apex`` is applied — the polar grid, the
+    scan-conversion rho range, and the reported extent — to a single observable, so any
+    one of them drifting into the wrong frame fails here. The deepest indices also pin
+    the radial endpoint: ``rho_range`` must describe the radius of the *last* sample, not
+    one sample past it, or the sector stretches with depth.
+    """
+    from keras import ops
+
+    from zea import Parameters, display
+    from zea.probes import create_curved_probe_geometry
+
+    radius = 49.57e-3
+    parameters = Parameters(
+        probe_geometry=create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=radius),
+        grid_type="polar",
+        polar_limits=(-0.4, 0.4),
+        zlims=(0.005, 0.09),
+        grid_size_z=256,
+        grid_size_x=128,
+        center_frequency=3.5e6,
+    )
+    assert parameters.distance_to_apex == pytest.approx(radius, rel=1e-5)
+
+    polar_image = np.zeros((256, 128), dtype=np.float32)
+    polar_image[i, j] = 1.0
+    expected = parameters.grid[i, j]
+
+    converted, params = display.scan_convert_2d(
+        polar_image, rho_range=parameters.rho_range, theta_range=parameters.theta_range
+    )
+    converted = ops.convert_to_numpy(converted)
+    row, col = np.unravel_index(np.argmax(converted), converted.shape)
+
+    x_left, x_right, z_bottom, z_top = parameters.extent_imshow
+    x_found = x_left + (x_right - x_left) * col / (converted.shape[1] - 1)
+    z_found = z_top + (z_bottom - z_top) * row / (converted.shape[0] - 1)
+
+    # Within one output pixel of where the beamforming grid places that sample.
+    resolution = ops.convert_to_numpy(params["resolution"])
+    assert abs(x_found - expected[0]) < resolution
+    assert abs(z_found - expected[2]) < resolution
+
+    # Every backend must place the sample in the same output pixel.
+    return np.array([x_found, z_found])
 
 
 def _speckle(rng, size=(128, 128), scale=1.0):
