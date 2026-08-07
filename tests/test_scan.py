@@ -305,6 +305,46 @@ def test_selected_transmits_affects_shape(attr, expected_shape):
     assert val.shape[0] == val_tensor.shape[0] == 3
 
 
+def test_flat_aligned_apodization_derived():
+    """Derived: None, unless scanline mode, where it is the one-hot transmit mask."""
+    assert Parameters(**scan_args).flat_aligned_apodization is None
+
+    scanline = Parameters(**scan_args, enable_scanline=True)
+    n_tx, grid_size_z = scan_args["n_tx"], scan_args["grid_size_z"]
+    assert scanline.flat_aligned_apodization.shape == (grid_size_z * n_tx, n_tx)
+
+
+@pytest.mark.parametrize("enable_scanline", [False, True])
+def test_flat_aligned_apodization_explicit_value_wins(enable_scanline):
+    """An explicit mask overrides both derived defaults, and follows the selection.
+
+    It is stored over the full transmit axis, so a transmit selection slices it
+    (and invalidates the cached value).
+    """
+    n_tx, n_pix = scan_args["n_tx"], 32
+    apodization = np.arange(n_pix * n_tx, dtype=np.float32).reshape(n_pix, n_tx)
+
+    parameters = Parameters(
+        **scan_args,
+        enable_scanline=enable_scanline,
+        flat_aligned_apodization=apodization,
+    )
+    np.testing.assert_array_equal(parameters.flat_aligned_apodization, apodization)
+
+    parameters.set_transmits([1, 3])
+    np.testing.assert_array_equal(parameters.flat_aligned_apodization, apodization[:, [1, 3]])
+
+    parameters.set_transmits("all")
+    np.testing.assert_array_equal(parameters.flat_aligned_apodization, apodization)
+
+    # Explicitly unsetting it falls back to the derived value.
+    parameters.flat_aligned_apodization = None
+    if enable_scanline:
+        assert parameters.flat_aligned_apodization.shape[1] == n_tx
+    else:
+        assert parameters.flat_aligned_apodization is None
+
+
 def test_set_attributes():
     """Test setting attributes of Parameters class."""
     parameters = Parameters(**scan_args)

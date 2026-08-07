@@ -449,16 +449,20 @@ class Parameters(BaseParameters):
     def flat_aligned_apodization(self):
         """Per-pixel, per-transmit compounding apodization weight of shape (n_pix, n_tx).
 
-        Only defined when ``enable_scanline`` is ``True``, where it is the one-hot
-        mask (see :func:`~zea.beamform.pixelgrid.scanline_aligned_apodization`)
-        that isolates each pixel's owning transmit. ``None`` otherwise, which
-        makes :class:`~zea.ops.AlignedApodization` a no-op.
+        Can be set explicitly to any weighting, in which case it is stored over
+        the full transmit axis and read back sliced by ``selected_transmits``.
+        When left unset, it is the one-hot mask (see
+        :func:`~zea.beamform.pixelgrid.scanline_aligned_apodization`) that
+        isolates each pixel's owning transmit if ``enable_scanline`` is ``True``,
+        and ``None`` otherwise, which makes :class:`~zea.ops.AlignedApodization`
+        a no-op.
 
         This weights the *transmit* axis (compounding), not the receive channels;
         for custom receive-aperture apodization see ``flat_receive_apodization``.
         """
-        if "flat_aligned_apodization" in self._params:
-            return self._params["flat_aligned_apodization"][:, self.selected_transmits]
+        value = self._params.get("flat_aligned_apodization")
+        if value is not None:
+            return value[:, self.selected_transmits]
         if not self.enable_scanline:
             return None
         return scanline_aligned_apodization(self.n_tx, self.grid_size_z)
