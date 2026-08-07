@@ -232,7 +232,6 @@ def test_gmm_posterior_sample():
 
 def test_diffusion_posterior_sample_shape():
     """Test DiffusionModel.posterior_sample returns correct shape."""
-    n_measurements = 3
     n_features = 2
     n_samples = 5
 
@@ -246,8 +245,8 @@ def test_diffusion_posterior_sample_shape():
         network_kwargs={"widths": [8], "output_dim": n_features},
     )
     # No training needed for shape test
-    measurements = keras.random.uniform((n_measurements, n_features), minval=-1, maxval=1)
-    mask = keras.random.uniform((n_measurements, n_features)) > 0.5
+    measurements = keras.random.uniform((n_features,), minval=-1, maxval=1)
+    mask = keras.random.uniform((n_features,)) > 0.5
     mask = keras.ops.cast(mask, "float32")
     out = model.posterior_sample(
         measurements=measurements,
@@ -258,7 +257,19 @@ def test_diffusion_posterior_sample_shape():
         seed=seed_gen,
         verbose=False,
     )
-    assert out.shape == (n_measurements, n_samples, n_features)
+    assert out.shape == (n_samples, n_features)
+
+    # Per-sample measurements are accepted as-is, without being broadcast again.
+    out = model.posterior_sample(
+        measurements=keras.ops.broadcast_to(measurements, (n_samples, n_features)),
+        n_samples=n_samples,
+        mask=mask,
+        n_steps=2,
+        omega=1.0,
+        seed=seed_gen,
+        verbose=False,
+    )
+    assert out.shape == (n_samples, n_features)
 
 
 def test_dehaze_nuclear_diffusion_shape_logic():
