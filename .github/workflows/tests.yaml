@@ -261,7 +261,7 @@ jobs:
           # Compare against the just-fetched tip (FETCH_HEAD). On the shallow
           # checkout used here the remote-tracking ref origin/$BASE_REF is not
           # updated by `git fetch origin "$BASE_REF"` and may be stale or absent.
-          if git diff --quiet FETCH_HEAD -- Dockerfile .dockerignore pyproject.toml uv.lock scripts/motd.sh; then
+          if git diff --quiet FETCH_HEAD -- Dockerfile .dockerignore pyproject.toml uv.lock README.md scripts/motd.sh; then
             echo "build=false" >> $GITHUB_OUTPUT
             echo "No image-relevant files changed — skipping"
           else
