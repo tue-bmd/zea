@@ -42,8 +42,8 @@ class GenerativeModel(abc.ABC):
             **kwargs: Additional arguments to pass to the sampling procedure.
 
         Returns:
-            Samples $z$ from the posterior $p(z \mid x)$, of shape
-            `(n_samples, *input_shape)`.
+            Samples $z$ from the posterior $p(z \mid x)$, with `n_samples` as the
+            leading dimension. The remaining dimensions are model-specific.
         """
         raise NotImplementedError("posterior_sample() must be implemented in subclasses.")
 

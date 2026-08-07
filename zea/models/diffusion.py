@@ -260,9 +260,10 @@ class DiffusionModel(DeepGenerativeModel):
             measurements: Input measurements, typically of shape `(*self.input_shape)`, but can also
                 be of shape `(n_samples, *self.input_shape)` if you want to provide different
                 measurements for each sample.
-            n_samples: Number of posterior samples to generate.
-                Will generate ``n_samples`` samples for each measurement
-                in the ``measurements`` batch.
+            n_samples: Number of posterior samples to generate, and the leading
+                dimension of the output. ``measurements`` is either a single
+                measurement shared by every sample, or exactly one measurement
+                per requested sample.
             n_steps: Number of diffusion steps.
             initial_step: Step at which to begin the reverse diffusion loop.
                 ``0`` runs all ``diffusion_steps`` steps from maximum noise.
