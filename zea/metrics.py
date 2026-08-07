@@ -268,7 +268,9 @@ def ncc(x, y):
     return num / ops.maximum(denom, keras.config.epsilon())
 
 
-@metrics_registry(name="lpips", paired=True, jittable=True, torch_vmappable=False)
+@metrics_registry(
+    name="lpips", paired=True, jittable=True, torch_vmappable=False, torch_jittable=False
+)
 def get_lpips(image_range, clip=False):
     """
     Get the Learned Perceptual Image Patch Similarity (LPIPS) metric.
@@ -364,7 +366,10 @@ class Metrics:
             jittable = metrics_registry.get_parameter(m, "jittable")
             metric_fn = get_metric(m, **reduce_to_signature(metrics_registry[m], kwargs))
             if jit_compile and jittable:
-                metric_fn = jit(metric_fn)
+                metric_fn = jit(
+                    metric_fn,
+                    torch=metrics_registry.get_parameter(m, "torch_jittable", default=True),
+                )
             self.metrics[m] = metric_fn
             self.torch_vmappable[m] = metrics_registry.get_parameter(
                 m, "torch_vmappable", default=True

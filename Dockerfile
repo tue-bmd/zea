@@ -92,7 +92,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends --fix-missing \
     python3-tk \
     ffmpeg imagemagick \
-    make pandoc \
+    make g++ pandoc \
     openssh-client git sudo && \
     ln -s /usr/bin/python3 /usr/bin/python && \
     apt-get clean && rm -rf /var/lib/apt/lists/*

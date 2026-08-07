@@ -311,7 +311,11 @@ def serialize_elements(key_elements: list) -> str:
     """
 
     def _serialize(element) -> str:
-        return pickle.dumps(element).hex()
+        try:
+            return pickle.dumps(element).hex()
+        except Exception:
+            # Compiled callables are unpicklable but derived from the rest of the state.
+            return f"{type(element).__module__}.{type(element).__qualname__}"
 
     def _serialize_element(element) -> str:
         if isinstance(element, (list, tuple)):

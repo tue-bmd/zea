@@ -9,8 +9,8 @@ Public API
 ----------
 
 :func:`jit`
-    Unified JIT compilation for JAX (``jax.jit``) and TensorFlow
-    (``tf.function``).  A no-op for the ``torch`` backend.
+    Unified JIT compilation for JAX (``jax.jit``), TensorFlow
+    (``tf.function``) and PyTorch (``torch.compile``).
 
 :class:`device`
     Context manager that pins all Keras ops to a specific device.
@@ -84,14 +84,15 @@ def _get_backend():
 backend = _get_backend()
 tf_mod = _import_tf()
 jax_mod = _import_jax()
+torch_mod = _import_torch()
 
 
 def tf_function(func=None, jit_compile=False, **kwargs):
     """Applies default tf.function to the given function. Only in TensorFlow backend."""
-    return jit(func, jax=False, jit_compile=jit_compile, **kwargs)
+    return jit(func, jax=False, torch=False, jit_compile=jit_compile, **kwargs)
 
 
-def jit(func=None, jax=True, tensorflow=True, **kwargs):
+def jit(func=None, jax=True, tensorflow=True, torch=True, **kwargs):
     """
     Applies JIT compilation to the given function based on the current Keras backend.
     Can be used as a decorator or as a function.
@@ -100,6 +101,7 @@ def jit(func=None, jax=True, tensorflow=True, **kwargs):
         func (callable): The function to be JIT compiled.
         jax (bool): Whether to enable JIT compilation in the JAX backend.
         tensorflow (bool): Whether to enable JIT compilation in the TensorFlow backend.
+        torch (bool): Whether to enable JIT compilation in the PyTorch backend.
         **kwargs: Keyword arguments to be passed to the JIT compiler.
 
     Returns:
@@ -108,11 +110,11 @@ def jit(func=None, jax=True, tensorflow=True, **kwargs):
     if func is None:
 
         def decorator(func):
-            return _jit_compile(func, jax=jax, tensorflow=tensorflow, **kwargs)
+            return _jit_compile(func, jax=jax, tensorflow=tensorflow, torch=torch, **kwargs)
 
         return decorator
     else:
-        return _jit_compile(func, jax=jax, tensorflow=tensorflow, **kwargs)
+        return _jit_compile(func, jax=jax, tensorflow=tensorflow, torch=torch, **kwargs)
 
 
 _jit_not_supported_warned = False
@@ -128,13 +130,13 @@ def _warn_jit_not_supported(backend_name: str) -> None:
         _jit_not_supported_warned = True
         log.warning(
             f"JIT compilation not currently supported for backend {backend_name}. "
-            "Supported backends are 'tensorflow' and 'jax'. "
+            "Supported backends are 'tensorflow', 'jax' and 'torch'. "
             "Initialize zea.Pipeline with jit_options=None to suppress this warning. "
             "Falling back to non-compiled mode."
         )
 
 
-def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
+def _jit_compile(func, jax=True, tensorflow=True, torch=True, **kwargs):
     backend = keras.backend.backend()
 
     if backend == "tensorflow" and tensorflow:
@@ -146,9 +148,11 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
         if jax_mod is None:
             raise ImportError("JAX is not installed. Please install it to use this backend.")
         return jax_mod.jit(func, **kwargs)
-    elif backend == "tensorflow" and not tensorflow:
-        return func
-    elif backend == "jax" and not jax:
+    elif backend == "torch" and torch:
+        if torch_mod is None:
+            raise ImportError("PyTorch is not installed. Please install it to use this backend.")
+        return torch_mod.compile(func, **kwargs)
+    elif backend in ("tensorflow", "jax", "torch"):
         return func
     else:
         # Return a lazy wrapper that warns only on first invocation.
