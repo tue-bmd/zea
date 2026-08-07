@@ -44,11 +44,6 @@ class GenerativeModel(abc.ABC):
         Returns:
             Samples $z$ from the posterior $p(z \mid x)$, of shape
             `(n_samples, *input_shape)`.
-
-        Note:
-            There is deliberately no batch axis over measurements: a call draws
-            `n_samples` from the posterior of *one* measurement. Batch several
-            measurements by mapping over them.
         """
         raise NotImplementedError("posterior_sample() must be implemented in subclasses.")
 
