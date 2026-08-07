@@ -123,34 +123,44 @@ class HierarchicalVAE(DeepGenerativeModel):
 
     def posterior_sample(self, measurements, n_samples=1, **kwargs):
         """
-        Performs posterior sampling on a batch of measurements.
-        Only does a single encoder pass since it is deterministic,
-        but does n_samples decoder passes to create posterior samples.
+        Performs posterior sampling for a single measurement.
+
+        The encoder is deterministic, so one measurement needs only a single
+        encoder pass; the n_samples decoder passes are what produce distinct
+        posterior samples.
 
         Args:
-            measurements (tensor): Input measurements of shape [B, 256, 256, 3].
+            measurements (tensor): Input measurements of shape [256, 256, 3] in
+                [-1, 1], or [n_samples, 256, 256, 3] to condition each sample on
+                a different measurement (which costs one encoder pass each).
             n_samples (int, optional): Number of posterior samples to generate. Defaults to 1.
 
         Returns:
-            output (tensor): Posterior samples of shape [B, n_samples, 256, 256, 3].
+            output (tensor): Posterior samples of shape [n_samples, 256, 256, 3].
         """
+        measurements, per_sample = self._as_measurement_batch(measurements)
 
-        # Measurements is [B, 256, 256, 3] in [-1, 1]
-        b = ops.shape(measurements)[0]
-        # Only need a single deterministic encoder pass
         activations = self.network.encoder(measurements)
-        # Repeat the tensors in the list of activations n_samples amount of times
-        # This repeats elementwise, so: [1, 2, 3] -> [1, 1, 2, 2, 3, 3]
-        activations = [ops.repeat(a, repeats=n_samples, axis=0) for a in activations]
+        if not per_sample:
+            # One encoder pass shared by every sample: repeat its activations.
+            activations = [ops.repeat(a, repeats=n_samples, axis=0) for a in activations]
 
-        # Logits are of shape [B * n_samples, 256, 256, 100]
+        # Logits are of shape [n_samples, 256, 256, 100]
         logits, _, _ = self.network.decoder.call(activations)
-        # Samples are of shape [B * n_samples, 256, 256, 3] in [-1, 1]
-        samples = self.network.sample_from_mol(logits)
+        # Samples are of shape [n_samples, 256, 256, 3] in [-1, 1]
+        return self.network.sample_from_mol(logits)
 
-        # Split the samples into [B, n_samples, 256, 256, 3]
-        output = ops.stack(ops.split(samples, b, axis=0), axis=0)
-        return output
+    @staticmethod
+    def _as_measurement_batch(measurements):
+        """Give `measurements` a leading axis, and say whether it was already there.
+
+        Returns:
+            tuple: ``(measurements, per_sample)``, where ``per_sample`` is True
+            when the caller supplied one measurement per sample.
+        """
+        measurements = ops.convert_to_tensor(measurements)
+        per_sample = len(measurements.shape) == 4
+        return (measurements if per_sample else measurements[None]), per_sample
 
     def call(self, measurements):
         """
@@ -176,13 +186,15 @@ class HierarchicalVAE(DeepGenerativeModel):
         after which it continues in the decoder with multiple prior streams.
 
         Args:
-            measurements (tensor): Input measurements of shape [B, 256, 256, 3].
+            measurements (tensor): Input measurements of shape [256, 256, 3], or
+                [n_samples, 256, 256, 3] to condition each sample on a different
+                measurement.
             num_layers (float or int): If float, fraction of total layers to use from the top.
                 If int, number of layers to use from the top.
             n_samples (int): Number of posterior samples to generate.
 
         Returns:
-            output (tensor): Posterior samples of shape [B, n_samples, 256, 256, 3].
+            output (tensor): Posterior samples of shape [n_samples, 256, 256, 3].
         """
         # Make sure num_layers is a float between 0 and 1 or an integer between 1 and depth
         if isinstance(num_layers, float):
@@ -193,26 +205,28 @@ class HierarchicalVAE(DeepGenerativeModel):
         else:
             raise ValueError("num_layers must be either a float or an int.")
 
-        b = ops.shape(measurements)[0]
-        # Only need a single deterministic encoder pass
+        measurements, per_sample = self._as_measurement_batch(measurements)
+        # Deterministic encoder: a single measurement needs one pass, whose
+        # activations are then repeated across the samples.
+        repeats = 1 if per_sample else n_samples
         activations = self.network.encoder(measurements)
 
         # Single pass through the top num_layers of the decoder
         # Adding the same latent to z_stage n_samples times
         x = ops.zeros_like(activations[-1])
-        z = ops.tile(ops.zeros([1, *self.z_out]), (b * n_samples, 1, 1, 1))
+        z = ops.tile(ops.zeros([1, *self.z_out]), (n_samples, 1, 1, 1))
         current_layer = 0
         for dec_stage, act in zip(self.network.decoder.stages.layers, reversed(activations)):
             for dec_block in dec_stage.blocks.layers:
                 if current_layer < num_layers:
                     # Use posterior sampling for the first num_layers
                     x, z_block, _ = dec_block.call(x, act)
-                    z += ops.repeat(z_block, repeats=n_samples, axis=0)
+                    z += ops.repeat(z_block, repeats=repeats, axis=0)
                 else:
                     # Use prior sampling for the remaining layers
                     if current_layer == num_layers:
                         # At the threshold, we duplicate the rest of the chain
-                        x = ops.repeat(x, repeats=n_samples, axis=0)
+                        x = ops.repeat(x, repeats=repeats, axis=0)
                     x, z_block = dec_block.call_uncond(x)
                     z += z_block
                 current_layer += 1
@@ -223,9 +237,7 @@ class HierarchicalVAE(DeepGenerativeModel):
         for out_block in self.network.decoder.output_blocks.layers:
             px_z = out_block(px_z)
         px_z = self.network.decoder.last_conv(px_z)
-        px_z = self.network.sample_from_mol(px_z)
-
-        return ops.stack(ops.split(px_z, b, axis=0), axis=0)
+        return self.network.sample_from_mol(px_z)
 
     def log_density(self, measurements, **kwargs):
         """

@@ -211,7 +211,6 @@ def test_gmm_posterior_sample():
     """Test GMM posterior_sample returns correct shape and values."""
     n_components = 3
     n_features = 2
-    n_measurements = 5
     n_samples = 4
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     seed_gen = keras.random.SeedGenerator(DEFAULT_TEST_SEED)
@@ -223,10 +222,17 @@ def test_gmm_posterior_sample():
     gmm.vars = keras.ops.ones((n_components, n_features))
     gmm.pi = keras.ops.ones((n_components,)) / n_components
     gmm._initialized = True
-    measurements = rng.normal(size=(n_measurements, n_features)).astype("float32")
+    measurements = rng.normal(size=(n_features,)).astype("float32")
     comp_idx = gmm.posterior_sample(measurements, n_samples=n_samples, seed=seed_gen)
     arr = keras.ops.convert_to_numpy(comp_idx)
-    assert arr.shape == (n_measurements, n_samples)
+    assert arr.shape == (n_samples,)
+    assert ((arr >= 0) & (arr < n_components)).all()
+
+    # Per-sample measurements are accepted as-is, one draw from each.
+    per_sample = rng.normal(size=(n_samples, n_features)).astype("float32")
+    comp_idx = gmm.posterior_sample(per_sample, n_samples=n_samples, seed=seed_gen)
+    arr = keras.ops.convert_to_numpy(comp_idx)
+    assert arr.shape == (n_samples,)
     assert ((arr >= 0) & (arr < n_components)).all()
 
 

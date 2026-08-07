@@ -33,15 +33,22 @@ class GenerativeModel(abc.ABC):
         r"""Draw samples $z \sim p(z \mid x)$ from the posterior given measurements.
 
         Args:
-            measurements: The measurements $x$ to condition the posterior on.
-            n_samples: Number of posterior samples to generate. This will add
-                an additional dimension to the output. For instance,
-                if `measurements` has shape `(batch_size, ...)`, the output will
-                have shape `(batch_size, n_samples, ...)`.
+            measurements: The measurements $x$ to condition the posterior on, of
+                shape `(*input_shape)`. May also be given as `(n_samples,
+                *input_shape)` to condition each sample on a different
+                measurement.
+            n_samples: Number of posterior samples to generate. This is the
+                leading dimension of the output.
             **kwargs: Additional arguments to pass to the sampling procedure.
 
         Returns:
-            Samples $z$ from the posterior $p(z \mid x)$.
+            Samples $z$ from the posterior $p(z \mid x)$, of shape
+            `(n_samples, *input_shape)`.
+
+        Note:
+            There is deliberately no batch axis over measurements: a call draws
+            `n_samples` from the posterior of *one* measurement. Batch several
+            measurements by mapping over them.
         """
         raise NotImplementedError("posterior_sample() must be implemented in subclasses.")
 
