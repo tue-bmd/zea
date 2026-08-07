@@ -1536,15 +1536,26 @@ class CoherenceFactor(Operation):
         Coherence factor of speckle from a multi-row probe. IEEE Ultrasonics Symposium.
 
     Args:
+        exponent (float): Raise the CF to this power before weighting. Values
+            below 1 soften the weighting, values above 1 make it more
+            aggressive. Defaults to ``1.0``.
+        effective_aperture (bool): Count only the channels that actually
+            contribute (non-zero after f-number masking and apodization) as
+            :math:`N`, instead of the full ``n_el``. With the fixed
+            :math:`N = n_{el}`, pixels for which most of the aperture is masked
+            out get a CF capped well below 1, which shows up as depth-dependent
+            shading. Defaults to ``False``, i.e. the textbook definition above.
         **kwargs: Additional arguments passed to the Operation base class.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, exponent: float = 1.0, effective_aperture: bool = False, **kwargs):
         super().__init__(
             input_data_type=DataTypes.ALIGNED_DATA,
             output_data_type=DataTypes.BEAMFORMED_DATA,
             **kwargs,
         )
+        self.exponent = exponent
+        self.effective_aperture = effective_aperture
 
     def process_image(self, data):
         """Applies CF weighting and compounding on tof-corrected input.
@@ -1557,21 +1568,28 @@ class CoherenceFactor(Operation):
             ops.Tensor: Beamformed image of shape ``(n_pix, n_ch)``,
                 with optional batch dimension.
         """
-        n_el = ops.shape(data)[-2]
-
         # DAS per transmit: sum over elements
         das_per_tx = ops.sum(data, axis=-2)
+
+        # Power per channel, summed over RF (n_ch=1) or IQ (n_ch=2) components
+        channel_power = ops.sum(ops.square(data), axis=-1)
+
+        if self.effective_aperture:
+            n_el = ops.sum(ops.cast(channel_power > 0, das_per_tx.dtype), axis=-1, keepdims=True)
+        else:
+            n_el = ops.shape(data)[-2]
 
         # Coherent power: |sum_i(x_i)|^2, works for both RF (n_ch=1) and IQ (n_ch=2)
         coherent_power = ops.sum(ops.square(das_per_tx), axis=-1, keepdims=True)
 
         # Incoherent power: N * sum_i(|x_i|^2)
-        incoherent_power = n_el * ops.sum(
-            ops.sum(ops.square(data), axis=-1), axis=-1, keepdims=True
-        )
+        incoherent_power = n_el * ops.sum(channel_power, axis=-1, keepdims=True)
 
         # CF weight, clipped to [0, 1] by construction when incoherent_power > 0
         cf_weight = coherent_power / (incoherent_power + keras.backend.epsilon())
+
+        if self.exponent != 1.0:
+            cf_weight = ops.power(cf_weight, self.exponent)
 
         # Apply weight per transmit, then compound
         return ops.sum(das_per_tx * cf_weight, axis=-3)
