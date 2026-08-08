@@ -88,28 +88,25 @@ ENV INSTALL_JAX=${INSTALL_JAX} \
     INSTALL_TF=${INSTALL_TF} \
     DEV=${DEV}
 
-# KERAS_BACKEND has to come from bashrc: ENV cannot hold a value computed from build args,
-# and `docker exec` -- how dev containers open every terminal -- bypasses ENTRYPOINT/CMD.
-RUN echo 'export KERAS_BACKEND=$( \
-    if [ "$INSTALL_JAX" != "false" ]; then \
-    echo jax; \
-    elif [ "$INSTALL_TORCH" != "false" ]; then \
-    echo torch; \
-    elif [ "$INSTALL_TF" != "false" ]; then \
-    echo tensorflow; \
-    else \
-    echo numpy; \
-    fi )' >> /etc/bash.bashrc && \
-    echo '[ ! -z "$TERM" -a -r /etc/motd.sh ] && KERAS_BACKEND=$KERAS_BACKEND INSTALL_JAX=$INSTALL_JAX INSTALL_TORCH=$INSTALL_TORCH INSTALL_TF=$INSTALL_TF DEV=$DEV bash /etc/motd.sh' \
-    >> /etc/bash.bashrc
+# KERAS_BACKEND cannot be a plain ENV: it is derived from the INSTALL_* args and ENV takes
+# no conditionals. zea-backend.sh holds that logic once; it is sourced from two places
+# because neither hook alone covers every entry path -- ENTRYPOINT is skipped by
+# `docker exec` (how dev containers open every terminal), and /etc/bash.bashrc is read only
+# by interactive bash, not by `docker run <img> python ...`.
+COPY scripts/zea-backend.sh /etc/zea-backend.sh
+COPY scripts/entrypoint.sh /usr/local/bin/zea-entrypoint
 
 # Message of the day, shown on every interactive shell
 COPY scripts/motd.sh /etc/motd.sh
-RUN chmod +x /etc/motd.sh
+RUN chmod +x /etc/motd.sh /usr/local/bin/zea-entrypoint && \
+    echo '. /etc/zea-backend.sh' >> /etc/bash.bashrc && \
+    echo '[ ! -z "$TERM" -a -r /etc/motd.sh ] && KERAS_BACKEND=$KERAS_BACKEND INSTALL_JAX=$INSTALL_JAX INSTALL_TORCH=$INSTALL_TORCH INSTALL_TF=$INSTALL_TF DEV=$DEV bash /etc/motd.sh' \
+    >> /etc/bash.bashrc
 
 # Last, so a source-only change rebuilds nothing above. --no-deps: already installed.
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps -e .
 
+ENTRYPOINT ["zea-entrypoint"]
 CMD ["/bin/bash"]
