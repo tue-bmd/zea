@@ -259,8 +259,7 @@ jobs:
             echo "Push build — always building"
             exit 0
           fi
-          # Unauthenticated (persist-credentials: false); fine because the repo is
-          # public, and a loud fetch failure if that ever changes.
+          # Unauthenticated fetch (persist-credentials: false); fine on a public repo.
           git fetch origin "$BASE_REF"
           # Compare against the just-fetched tip (FETCH_HEAD). On the shallow
           # checkout used here the remote-tracking ref origin/$BASE_REF is not

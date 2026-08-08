@@ -30,9 +30,8 @@ RUN apt-get update && \
 # UV_PROJECT_ENVIRONMENT points `uv sync`/`uv run` at it too. UV_PYTHON_INSTALL_DIR must
 # sit outside any cache mount so the venv's interpreter symlink survives.
 # UV_LINK_MODE=copy: the cache mount is a separate filesystem.
-# PYTHON_VERSION is the single place to bump the interpreter: it drives UV_PYTHON and the
-# site-packages path in LD_LIBRARY_PATH below, which have to stay in step. Give it as X.Y,
-# not X.Y.Z -- it also names the venv's lib/pythonX.Y directory.
+# PYTHON_VERSION drives UV_PYTHON and the site-packages path in LD_LIBRARY_PATH below.
+# Give it as X.Y: it also names the venv's lib/pythonX.Y directory.
 ARG PYTHON_VERSION=3.12
 ENV UV_PYTHON=${PYTHON_VERSION} \
     UV_PYTHON_INSTALL_DIR=/opt/python \
@@ -77,8 +76,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # TF 2.21.0's libtensorflow_framework.so.2 lost its cusolver RUNPATH entry (2.19 had it),
 # so TF silently falls back to CPU. Harmless without TF/CUDA; drop once fixed upstream.
-# The guard turns a PYTHON_VERSION/venv mismatch into a build failure -- otherwise the
-# path would just be wrong and TF would quietly drop to CPU again.
 RUN test -d "/opt/venv/lib/python${PYTHON_VERSION}/site-packages" || { \
     echo "PYTHON_VERSION=${PYTHON_VERSION} does not match the venv in /opt/venv/lib" >&2; \
     exit 1; \
