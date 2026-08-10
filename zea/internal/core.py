@@ -297,6 +297,38 @@ class ZEADecoderJSON(json.JSONDecoder):
         return obj
 
 
+# Attributes that expose the underlying function of a known JIT-compiled
+# callable wrapper: torch.compile, tf.function, and functools.wraps-based
+# wrappers (e.g. jax.jit) respectively.
+_COMPILED_CALLABLE_ATTRS = (
+    "_torchdynamo_orig_callable",  # torch.compile
+    "python_function",  # tf.function
+    "__wrapped__",  # functools.wraps-based wrappers
+)
+
+
+def _unwrap_compiled_callable(element):
+    """Return the underlying function of a known compiled-callable wrapper.
+
+    Returns ``None`` when ``element`` is not a recognized compiled callable.
+    """
+    seen = set()
+    unwrapped = False
+    while id(element) not in seen:
+        seen.add(id(element))
+        for attr in _COMPILED_CALLABLE_ATTRS:
+            original = getattr(element, attr, None)
+            if callable(original):
+                element = original
+                unwrapped = True
+                break
+        else:
+            # No (further) wrapper found: return the underlying function, or
+            # None when ``element`` was never a compiled callable to begin with.
+            return element if unwrapped else None
+    return None
+
+
 def serialize_elements(key_elements: list) -> str:
     """Serialize elements of a list to a string.
 
@@ -313,9 +345,18 @@ def serialize_elements(key_elements: list) -> str:
     def _serialize(element) -> str:
         try:
             return pickle.dumps(element).hex()
-        except Exception:
-            # Compiled callables are unpicklable but derived from the rest of the state.
-            return f"{type(element).__module__}.{type(element).__qualname__}"
+        except Exception as exc:
+            # Compiled callables (torch.compile / tf.function / jax.jit wrappers)
+            # are unpicklable, but fully derived from the function they wrap and
+            # the rest of the state.
+            original = _unwrap_compiled_callable(element)
+            if original is None:
+                raise TypeError(
+                    "Cannot serialize element of type "
+                    f"{type(element).__module__}.{type(element).__qualname__}: "
+                    "pickling failed and it is not a recognized compiled callable."
+                ) from exc
+            return f"compiled:{original.__module__}.{original.__qualname__}"
 
     def _serialize_element(element) -> str:
         if isinstance(element, (list, tuple)):

@@ -283,9 +283,7 @@ def tof_correction(
     # Precompute the receive-side phase rotation (same for all transmits)
     is_iq = data.shape[-1] == 2
     if is_iq:
-        phase_scale = ops.convert_to_tensor(
-            2 * np.pi * demodulation_frequency / sampling_frequency, dtype=flatgrid.dtype
-        )
+        phase_scale = 2 * np.pi * demodulation_frequency / sampling_frequency
         theta_rx = phase_scale * rxdel  # (n_pix, n_el)
         cos_rx = ops.cos(theta_rx)
         sin_rx = ops.sin(theta_rx)
