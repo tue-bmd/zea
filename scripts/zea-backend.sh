@@ -17,3 +17,8 @@ if [ -z "${KERAS_BACKEND:-}" ]; then
     fi
     export KERAS_BACKEND
 fi
+
+# Silences TF's absl/oneDNN import warning; TF_CPP_MIN_LOG_LEVEL can't (fires too early).
+if [ "${INSTALL_TF:-false}" != "false" ]; then
+    export TF_ENABLE_ONEDNN_OPTS="${TF_ENABLE_ONEDNN_OPTS:-0}"
+fi
