@@ -111,13 +111,24 @@ docs = [
     "PyStemmer",
     "IPython",
 ]
-# The full dev environment: the tooling groups plus the runtime extras
+# The full dev environment: the tooling groups plus the runtime extras. Takes
+# opencv-python-headless directly, not via `zea[display-headless]`: uv only activates a
+# conflicting extra when it is named, so the indirection would leave `uv sync` without cv2.
 dev = [
     { include-group = "tests" },
     { include-group = "docs" },
     { include-group = "lint" },
-    "zea[display-headless]",
+    "opencv-python-headless>=4",
     "zea[models]",
+]
+
+# Both extras provide `cv2`, so co-installing them leaves whichever landed last, and
+# uninstalling either takes the shared `cv2/` with it. `dev` already brings the headless
+# build, hence the second pair.
+[tool.uv]
+conflicts = [
+    [{ extra = "display" }, { extra = "display-headless" }],
+    [{ extra = "display" }, { group = "dev" }],
 ]
 
 [tool.hatch.build.targets.wheel]
