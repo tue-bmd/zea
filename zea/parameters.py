@@ -451,6 +451,10 @@ class Parameters(BaseParameters):
 
         Can be set explicitly to any weighting, in which case it is stored over
         the full transmit axis and read back sliced by ``selected_transmits``.
+        This requires ``enable_scanline`` to be ``False``: a scanline grid has
+        one column per *selected* transmit, so its pixel axis is defined by the
+        transmit selection and a mask stored over the full transmit axis cannot
+        stay aligned with it.
         When left unset, it is the one-hot mask (see
         :func:`~zea.beamform.pixelgrid.scanline_aligned_apodization`) that
         isolates each pixel's owning transmit if ``enable_scanline`` is ``True``,
@@ -462,6 +466,20 @@ class Parameters(BaseParameters):
         """
         value = self._params.get("flat_aligned_apodization")
         if value is not None:
+            if self.enable_scanline:
+                raise ValueError(
+                    "``flat_aligned_apodization`` cannot be set explicitly when "
+                    "``enable_scanline`` is True: the scanline grid holds one column per "
+                    "selected transmit, so its pixel axis follows the transmit selection and "
+                    "a mask stored over the full transmit axis cannot stay aligned with it. "
+                    "Set ``enable_scanline=False`` to supply a custom mask."
+                )
+            _ = self.n_tx  # raises a clear error if no transmit selection is resolved yet
+            if value.shape[1] != self.n_tx_total:
+                raise ValueError(
+                    "``flat_aligned_apodization`` is stored over the full transmit axis, so "
+                    f"it must have {self.n_tx_total} columns, got shape {value.shape}."
+                )
             return value[:, self.selected_transmits]
         if not self.enable_scanline:
             return None
