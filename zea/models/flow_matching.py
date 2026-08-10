@@ -12,6 +12,15 @@ schedule and a velocity-field prediction objective.
     - Lipman et al., *Flow Matching for Generative Modeling*, 2022. https://arxiv.org/abs/2210.02747
     - Esser et al., *Scaling Rectified Flow Transformers for High-Resolution Image Synthesis*, 2024.
       https://arxiv.org/abs/2403.03206
+    - Albergo et al., *Stochastic Interpolants: A Unifying Framework for Flows and Diffusions*,
+      2023. https://arxiv.org/abs/2303.08797 (marginal-preserving SDE family; basis for the
+      stochastic sampler in :meth:`FlowMatchingModel.reverse_diffusion_step`).
+    - Ma et al., *SiT: Exploring Flow and Diffusion-based Generative Models with Scalable
+      Interpolant Transformers*, 2024. https://arxiv.org/abs/2401.08740 (reverse SDE sampler
+      and diffusion-coefficient choices, e.g. :math:`w_t = \\sigma_t`).
+    - Karras et al., *Elucidating the Design Space of Diffusion-Based Generative Models*
+      (EDM), 2022. https://arxiv.org/abs/2206.00364 (stochastic "churn" sampler: Euler step
+      plus score-corrected noise injection).
 
 """
 
@@ -186,8 +195,8 @@ class FlowMatchingModel(DiffusionModel):
         velocity network and requires no retraining.
 
         Stochastic sampling falls back to the first-order Euler–Maruyama update
-        inherited from :class:`~zea.models.diffusion.DiffusionModel`, since the
-        deterministic Heun corrector does not apply to the Langevin SDE.
+        of :meth:`reverse_diffusion_step` (the marginal-preserving reverse
+        SDE), since the deterministic Heun corrector does not apply to the SDE.
 
         Args:
             noisy_images: Current noisy images ``x_t``.
@@ -334,21 +343,43 @@ class FlowMatchingModel(DiffusionModel):
     ):
         """A single reverse flow-matching step.
 
-        The deterministic (ODE) step is inherited unchanged from the parent.
-        The stochastic step adds isotropic Langevin noise on top of the Euler
-        update, turning the probability-flow ODE into a Langevin SDE:
+        The deterministic branch is the Euler discretisation of the
+        probability-flow ODE (identical to the parent's DDIM update under the
+        linear schedule).  The stochastic branch instead integrates a
+        **reverse-time SDE that shares the same marginals** as that ODE
+        (Anderson, 1982; Albergo et al., 2023; Ma et al., 2024):
+
+        .. math::
+
+            dx = \\big[v_\\theta(x_t, t) - \\tfrac{1}{2} w_t\\, s(x_t, t)\\big]\\,dt
+                 + \\sqrt{w_t}\\; d\\bar{W}_t,
+
+        integrated backwards from :math:`t` to :math:`t - \\Delta t`.  Here
+        :math:`w_t \\ge 0` is a freely chosen diffusion coefficient: **any**
+        choice leaves the marginals :math:`p_t` unchanged, so it is a pure
+        inference-time knob (Albergo et al., 2023).  Under the linear schedule
+        the score is available in closed form from the network outputs,
+
+        .. math::
+
+            s(x_t, t) = \\nabla_x \\log p_t(x_t) = -\\frac{\\hat{\\varepsilon}}{t},
+
+        where :math:`\\hat{\\varepsilon}` is ``pred_noises``.
+
+        We take :math:`w_t = \\sigma_t = t` (the singularity-free default of
+        Ma et al., 2024), which cancels the :math:`1/t` in the score and keeps
+        the update finite as :math:`t \\to 0`.  With
+        :math:`\\Delta t = \\alpha_{t-\\Delta t} - \\alpha_t =`
+        ``next_signal_rates - signal_rates`` (positive during reverse
+        sampling) and :math:`t = 1 - \\alpha_t`, the Euler--Maruyama update is
 
         .. math::
 
             x_{t - \\Delta t}
-                = x_t - \\Delta t\\, v_\\theta(x_t, t)
-                + \\sqrt{2\\,\\Delta t}\\; \\mathbf{z},
-            \\qquad \\mathbf{z} \\sim \\mathcal{N}(0, I)
-
-        Under the linear schedule :math:`\\alpha_t = 1 - t`, the time step is
-        recovered as :math:`\\Delta t = \\alpha_{t-\\Delta t} - \\alpha_t`
-        (i.e. ``next_signal_rates - signal_rates``), which is always positive
-        during reverse sampling.
+                = \\underbrace{x_t - \\Delta t\\, v_\\theta}_{\\text{Euler}}
+                  - \\tfrac{1}{2}\\,\\Delta t\\, \\hat{\\varepsilon}
+                  + \\sqrt{t\\,\\Delta t}\\; z,
+            \\qquad z \\sim \\mathcal{N}(0, I).
 
         Args:
             shape: Shape of the output tensor.
@@ -372,10 +403,15 @@ class FlowMatchingModel(DiffusionModel):
         if not stochastic_sampling:
             return next_noisy_images
 
-        # Δt = α_{t−Δt} − α_t  (positive; signal_rate = 1−t increases as t decreases)
-        dt = next_signal_rates - signal_rates
+        # Reverse-time SDE that shares the ODE marginals, with diffusion
+        # coefficient w_t = σ_t = t and score s = −ε̂ / t (see docstring):
+        #     x_{t−Δt} = (Euler step) − ½·Δt·ε̂ + √(t·Δt)·z
+        # The −½·Δt·ε̂ term is the −½ w_t s drift correction; without it the
+        # noise injection would not preserve the target marginals.
+        t = 1.0 - signal_rates  # current flow time (= noise_rates under linear schedule)
+        dt = next_signal_rates - signal_rates  # Δt = α_{t−Δt} − α_t  (> 0 in reverse)
         z = keras.random.normal(shape=shape, seed=seed)
-        return next_noisy_images + ops.sqrt(2.0 * dt) * z
+        return next_noisy_images - 0.5 * dt * pred_noises + ops.sqrt(t * dt) * z
 
     @property
     def metrics(self):
