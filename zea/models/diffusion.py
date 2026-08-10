@@ -709,7 +709,7 @@ class DiffusionModel(DeepGenerativeModel):
         stochastic_sampling: bool = False,
         seed=None,
         verbose: bool = False,
-        track_progress_type: Literal[None, "x_0", "x_t"] = "x_0",
+        track_progress_type: Literal[None, "x_0", "x_t"] = None,
         disable_jit=False,
         **kwargs,
     ):
