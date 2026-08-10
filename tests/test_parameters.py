@@ -446,6 +446,22 @@ def test_update_accepts_positional_mapping(dummy_params):
     assert dummy_params.param1 == 7
 
 
+def test_parameters_compare_by_content():
+    """Parameters are equal when they hold the same parameters, and are unhashable."""
+    params = DummyParameters(param1=1, param2=2, param4=3.0)
+    same = DummyParameters(param1=1, param2=2, param4=3.0)
+    other = DummyParameters(param1=9, param2=2, param4=3.0)
+
+    assert params == same
+    assert params != other
+    assert params != "not a parameters object"
+
+    # Content-based equality means content-based hashing would be wrong (the hash
+    # would change under mutation), so these are unhashable, like Pipeline/Operation.
+    with pytest.raises(TypeError):
+        hash(params)
+
+
 def test_update_ndarray_equality_skips_recompute():
     """Test update uses array equality and skips updates for equal ndarrays."""
     params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))

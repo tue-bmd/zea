@@ -14,7 +14,7 @@ from zea.io_lib import matplotlib_figure_to_numpy, save_video
 from zea.models.diffusion import DDS, DPS, DiffusionModel, NuclearDiffusion
 from zea.models.gmm import GaussianMixtureModel, match_means_covariances
 
-from . import DEFAULT_TEST_SEED
+from . import DEFAULT_TEST_SEED, run_in_backend
 
 
 @pytest.fixture(params=[2, 3])
@@ -259,6 +259,55 @@ def test_diffusion_posterior_sample_shape():
         verbose=False,
     )
     assert out.shape == (n_measurements, n_samples, n_features)
+
+
+def _posterior_sample_for_tracing(model, measurements, mask, seed):
+    """Kept at module level so autograph can read its source and convert the call."""
+    return model.posterior_sample(
+        measurements=measurements,
+        n_samples=2,
+        mask=mask,
+        n_steps=2,
+        omega=1.0,
+        seed=seed,
+        # The progress bar and the intermediate tracking cannot be traced themselves.
+        verbose=False,
+        track_progress_type=None,
+        # The jitted loop carries the seed generator through `fori_loop`, which
+        # `tf.while_loop` cannot make a loop variable of. Set this to False once
+        # the loop derives its seed from the step index instead (PR #555).
+        disable_jit=True,
+    )
+
+
+@run_in_backend("tensorflow")
+def test_diffusion_posterior_sample_is_traceable():
+    """posterior_sample can be traced by `tf.function` with autograph enabled.
+
+    Autograph rewrites the guidance call as `ag__.converted_call(...)` and hashes the
+    callee for its conversion cache. While `zea.internal.core.Object` hashed by pickling,
+    that serialized the whole `DiffusionGuidance` -- Keras model included -- inside a
+    graph context, and tracing died with "numpy() is only available when eager execution
+    is enabled".
+    """
+    import tensorflow as tf
+
+    n_features = 2
+
+    keras.utils.set_random_seed(DEFAULT_TEST_SEED)
+    seed_gen = keras.random.SeedGenerator(DEFAULT_TEST_SEED)
+
+    model = DiffusionModel(
+        input_shape=(n_features,),
+        network_name="dense_time_conditional",
+        network_kwargs={"widths": [8], "output_dim": n_features},
+    )
+    measurements = keras.random.uniform((1, n_features), minval=-1, maxval=1, seed=seed_gen)
+    mask = keras.ops.ones((1, n_features))
+
+    traced = tf.function(_posterior_sample_for_tracing)  # autograph is on by default
+
+    assert tuple(traced(model, measurements, mask, seed_gen).shape) == (1, 2, n_features)
 
 
 def test_dehaze_nuclear_diffusion_shape_logic():

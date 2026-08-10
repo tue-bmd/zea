@@ -71,7 +71,7 @@ class classproperty(property):
 
 
 class Object:
-    """Base class for all data objects in the toolbox"""
+    """Base class for all data objects in the toolbox."""
 
     def __init__(self):
         self._serialized = None
@@ -92,14 +92,6 @@ class Object:
         if name != "_serialized":  # Avoid resetting when setting _serialized itself
             self._serialized = None
         super().__setattr__(name, value)
-
-    def __eq__(self, other):
-        if not isinstance(other, self.__class__):
-            return False
-        return self.serialized == other.serialized
-
-    def __hash__(self):
-        return hash(self.serialized)
 
     def copy(self):
         """Return a copied version of the object"""

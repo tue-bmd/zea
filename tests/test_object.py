@@ -1,7 +1,5 @@
 """Tests for the core Object class."""
 
-import timeit
-
 import numpy as np
 
 from zea.internal.core import Object
@@ -19,48 +17,25 @@ class SomeObj(Object):
         self.vars2 = 0
 
 
-def test_equality():
-    """Test the equality of the Object class"""
-    # Create 3 objects, 2 of which are equal
+def test_serialized_is_content_based():
+    """`serialized` is the content checksum the caching machinery relies on."""
+    # Create 3 objects, 2 of which hold the same data
     np.random.seed(DEFAULT_TEST_SEED)
     obj1 = SomeObj()
     np.random.seed(DEFAULT_TEST_SEED)
     obj2 = SomeObj()
     obj3 = SomeObj()
 
-    assert obj1 == obj2
-    assert obj1 != obj3
+    assert obj1.serialized == obj2.serialized
+    assert obj1.serialized != obj3.serialized
 
 
-def test_timing():
-    """Test the timing of the equality comparison"""
-    # TODO: this test only prints, no assertions
-
-    # Create 3 objects, 2 of which are equal
+def test_serialized_invalidated_on_mutation():
+    """Mutating an object invalidates the cached checksum."""
     np.random.seed(DEFAULT_TEST_SEED)
-    obj1 = SomeObj()
-    np.random.seed(DEFAULT_TEST_SEED)
-    obj2 = SomeObj()
-    obj3 = SomeObj()
+    obj = SomeObj()
 
-    print(f"obj1 == obj2: {obj1 == obj2}")
-    print(f"obj1 == obj3: {obj1 == obj3}")
+    before = obj.serialized
+    obj.vars2 += 1
 
-    print("timing the comparison:")
-
-    N = 1
-
-    # compare without changing the object
-    time_cached = timeit.timeit(lambda: obj1 == obj2, number=N)
-    print(f"obj1 == obj2: {time_cached:.2f}, or: {time_cached / N * 1000:.2f}(ms) per comparison")
-
-    # compare while changing the object in between
-    def _time_with_change(obj1, obj2):
-        obj1.vars2 += 1
-        return obj1 == obj2
-
-    time_non_cached = timeit.timeit(lambda: _time_with_change(obj1, obj2), number=N)
-    print(
-        f"obj1 == obj2: {time_non_cached:.2f}, or: "
-        f"{time_non_cached / N * 1000:.2f}(ms) per comparison"
-    )
+    assert obj.serialized != before

@@ -262,6 +262,12 @@ class BaseParameters(ZeaObject):
             self._serialized = serialize_elements([self._params, self._custom_params])
         return self._serialized
 
+    def __eq__(self, other):
+        """Two parameter objects are equal when they hold the same parameters."""
+        if not isinstance(other, self.__class__):
+            return False
+        return self.serialized == other.serialized
+
     @classmethod
     def _is_property_with_dependencies(cls, name):
         """Check if a class attribute is a property with dependencies."""
