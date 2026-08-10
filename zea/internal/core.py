@@ -297,36 +297,33 @@ class ZEADecoderJSON(json.JSONDecoder):
         return obj
 
 
-# Attributes that expose the underlying function of a known JIT-compiled
-# callable wrapper: torch.compile, tf.function, and functools.wraps-based
-# wrappers (e.g. jax.jit) respectively.
-_COMPILED_CALLABLE_ATTRS = (
-    "_torchdynamo_orig_callable",  # torch.compile
-    "python_function",  # tf.function
-    "__wrapped__",  # functools.wraps-based wrappers
-)
-
-
 def _unwrap_compiled_callable(element):
-    """Return the underlying function of a known compiled-callable wrapper.
+    """Return the target of a ``torch.compile`` / ``tf.function`` / ``jax.jit``
+    wrapper, or ``None`` when ``element`` is not such a wrapper.
 
-    Returns ``None`` when ``element`` is not a recognized compiled callable.
+    ``__wrapped__`` is only followed for actual ``jax.jit`` wrappers and for
+    the local ``functools.wraps`` trampoline that JIT compilers place around
+    non-function callables (e.g. ``functools.partial``) — never for generic
+    user decorators, whose state must not be dropped from the key.
     """
-    seen = set()
-    unwrapped = False
-    while id(element) not in seen:
+    original, seen = None, set()
+    while element is not None and id(element) not in seen:
         seen.add(id(element))
-        for attr in _COMPILED_CALLABLE_ATTRS:
-            original = getattr(element, attr, None)
-            if callable(original):
-                element = original
-                unwrapped = True
-                break
-        else:
-            # No (further) wrapper found: return the underlying function, or
-            # None when ``element`` was never a compiled callable to begin with.
-            return element if unwrapped else None
-    return None
+        nxt = getattr(element, "_torchdynamo_orig_callable", None)  # torch.compile
+        if nxt is None:
+            nxt = getattr(element, "python_function", None)  # tf.function
+        if nxt is None and getattr(element, "_is_jax_jit_wrapper", False):
+            nxt = getattr(element, "__wrapped__", None)  # jax.jit
+        if (
+            nxt is None
+            and original is not None
+            and "<locals>" in getattr(element, "__qualname__", "")
+        ):
+            nxt = getattr(element, "__wrapped__", None)  # JIT wraps trampoline
+        if not callable(nxt):
+            break
+        original = element = nxt
+    return original
 
 
 def serialize_elements(key_elements: list) -> str:
@@ -346,17 +343,31 @@ def serialize_elements(key_elements: list) -> str:
         try:
             return pickle.dumps(element).hex()
         except Exception as exc:
-            # Compiled callables (torch.compile / tf.function / jax.jit wrappers)
-            # are unpicklable, but fully derived from the function they wrap and
-            # the rest of the state.
-            original = _unwrap_compiled_callable(element)
-            if original is None:
-                raise TypeError(
-                    "Cannot serialize element of type "
-                    f"{type(element).__module__}.{type(element).__qualname__}: "
-                    "pickling failed and it is not a recognized compiled callable."
-                ) from exc
-            return f"compiled:{original.__module__}.{original.__qualname__}"
+            # JIT-compiled callables are unpicklable but derived from their
+            # wrapped target, so serialize the target instead. Anything else
+            # must not silently collapse to a non-injective fallback.
+            target = _unwrap_compiled_callable(element)
+            if target is not None:
+                try:
+                    return "compiled:" + pickle.dumps(target).hex()
+                except Exception:
+                    # e.g. bound methods with unpicklable instances: fall back
+                    # to module and qualname of the unbound function.
+                    module = getattr(target, "__module__", None)
+                    qualname = getattr(target, "__qualname__", None)
+                    if (
+                        isinstance(module, str)
+                        and isinstance(qualname, str)
+                        and "<locals>" not in qualname
+                        and "<lambda>" not in qualname
+                    ):
+                        return f"compiled:{module}.{qualname}"
+            raise TypeError(
+                "Cannot serialize unpicklable element of type "
+                f"{type(element).__module__}.{type(element).__qualname__}: "
+                "not a recognized compiled callable "
+                "(torch.compile, tf.function or jax.jit) with a stable target."
+            ) from exc
 
     def _serialize_element(element) -> str:
         if isinstance(element, (list, tuple)):

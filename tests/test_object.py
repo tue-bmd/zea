@@ -3,10 +3,49 @@
 import timeit
 
 import numpy as np
+import pytest
 
-from zea.internal.core import Object
+from zea.internal.core import Object, serialize_elements
 
 from . import DEFAULT_TEST_SEED
+
+
+def _plain_function(x):
+    """Module-level (thus picklable) function for serialization tests."""
+    return x + 1
+
+
+class _Unpicklable:
+    """Callable that always fails pickling."""
+
+    def __reduce__(self):
+        raise RuntimeError("cannot pickle")
+
+    def __call__(self):
+        return None
+
+
+class _UnpicklableWrapped(_Unpicklable):
+    """Non-JIT callable that merely carries a ``__wrapped__`` attribute."""
+
+    __wrapped__ = _plain_function
+
+    def __call__(self, x):
+        return self.__wrapped__(x)
+
+
+class _JitObj(Object):
+    """Object holding a ``torch.compile``d bound method (like ``DDS._call``)."""
+
+    def __init__(self, k):
+        super().__init__()
+        import torch
+
+        self.k = k
+        self._call = torch.compile(self.call)
+
+    def call(self, x):
+        return x * self.k
 
 
 class SomeObj(Object):
@@ -64,3 +103,35 @@ def test_timing():
         f"obj1 == obj2: {time_non_cached:.2f}, or: "
         f"{time_non_cached / N * 1000:.2f}(ms) per comparison"
     )
+
+
+def test_serialize_torch_compiled_function():
+    """A ``torch.compile``d function serializes like the function it wraps."""
+    torch = pytest.importorskip("torch")
+
+    compiled = torch.compile(_plain_function)
+    serialized = serialize_elements([compiled])
+    assert serialized == "compiled:" + serialize_elements([_plain_function])
+    # Stable across separate compilations of the same target
+    assert serialize_elements([torch.compile(_plain_function)]) == serialized
+
+
+def test_serialize_object_with_compiled_method():
+    """An Object with a ``torch.compile``d bound method still serializes."""
+    pytest.importorskip("torch")
+
+    assert f"compiled:{__name__}._JitObj.call" in _JitObj(2).serialized
+    assert _JitObj(2).serialized != _JitObj(3).serialized
+
+
+def test_serialize_unpicklable_object_raises_type_error():
+    """Unpicklable, non-compiled elements raise TypeError (no silent fallback)."""
+    with pytest.raises(TypeError, match="not a recognized compiled callable"):
+        serialize_elements([_Unpicklable()])
+
+
+def test_serialize_non_jit_wrapped_raises_type_error():
+    """Regression: ``__wrapped__`` is not JIT-only; a generic wrapped callable
+    must raise TypeError rather than collapse to the inner function's key."""
+    with pytest.raises(TypeError, match="not a recognized compiled callable"):
+        serialize_elements([_UnpicklableWrapped()])

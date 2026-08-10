@@ -1,5 +1,6 @@
 """Tests for AutoGrad."""
 
+import functools
 import time
 
 import keras
@@ -177,3 +178,35 @@ def test_get_gradient_and_value_jit_fn_torch():
 
     np.testing.assert_allclose(keras.ops.convert_to_numpy(grad), [3.0, 12.0, 27.0], rtol=1e-5)
     np.testing.assert_allclose(keras.ops.convert_to_numpy(out), 36.0, rtol=1e-5)
+
+
+def _cube_sum_for_serialization(x):
+    """Module-level target so ``functools.partial`` of it stays picklable."""
+    return keras.ops.sum(x**3)
+
+
+@pytest.mark.torch
+@run_in_backend("torch")
+def test_compiled_partial_serializes_like_plain_partial():
+    """A compiled ``functools.partial`` (the torch gradient_and_value path)
+    serializes like an equivalent plain partial, bound args included."""
+    from zea.internal.core import _unwrap_compiled_callable, serialize_elements
+
+    wrapper = AutoGrad()
+    wrapper.set_function(_cube_sum_for_serialization)
+    compiled = wrapper.get_gradient_and_value_jit_fn(has_aux=True)
+
+    # The unwrap recovers a partial with the bound has_aux flag
+    target = _unwrap_compiled_callable(compiled)
+    assert isinstance(target, functools.partial)
+    assert target.keywords == {"has_aux": True}
+    assert target.func == wrapper.gradient_and_value
+
+    # The key contains the full pickled partial, bound arguments included
+    serialized = serialize_elements([compiled])
+    assert serialized == "compiled:" + serialize_elements([target])
+
+    equal = wrapper.get_gradient_and_value_jit_fn(has_aux=True)
+    different = wrapper.get_gradient_and_value_jit_fn(has_aux=False)
+    assert serialize_elements([equal]) == serialized
+    assert serialize_elements([different]) != serialized
