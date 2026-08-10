@@ -25,7 +25,7 @@ from keras import ops
 
 from zea.backend import _import_tf, jit
 from zea.backend.autograd import AutoGrad
-from zea.func.tensor import L2, fori_loop, split_seed
+from zea.func.tensor import L2, fold_seed, fori_loop, materialize_seed, split_seed
 from zea.internal.core import Object
 from zea.internal.operators import Operator
 from zea.internal.registry import diffusion_guidance_registry, model_registry, operator_registry
@@ -640,11 +640,19 @@ class DiffusionModel(DeepGenerativeModel):
             step_size,
         )
 
+        # Materialize outside the loop: a stateful seed generator cannot be advanced
+        # from within a jitted loop body.
+        seed = materialize_seed(seed)
+
         def step_fn(step, loop_state):
-            noisy_images, pred_images, seed = loop_state
+            noisy_images, pred_images = loop_state
+
+            # `step` is an integer tensor once the loop is traced, and TF will not
+            # implicitly promote it to the float dtype of the schedule.
+            elapsed_time = ops.cast(step, base_diffusion_times.dtype) * step_size
 
             # separate the current noisy image to its components
-            diffusion_times = base_diffusion_times - step * step_size
+            diffusion_times = base_diffusion_times - elapsed_time
             noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
 
             # remix the predicted components using the next signal and noise rates
@@ -659,7 +667,7 @@ class DiffusionModel(DeepGenerativeModel):
             else:
                 network = None
 
-            seed, seed1 = split_seed(seed, 2)
+            step_seed = fold_seed(seed, step)
 
             next_noisy_images, pred_images = self.solver_step(
                 noisy_images=noisy_images,
@@ -670,7 +678,7 @@ class DiffusionModel(DeepGenerativeModel):
                 shape=(num_images, *input_shape),
                 network=network,
                 training=training,
-                seed=seed1,
+                seed=step_seed,
                 stochastic_sampling=stochastic_sampling,
             )
 
@@ -680,18 +688,17 @@ class DiffusionModel(DeepGenerativeModel):
 
             self.store_progress(step, track_progress_type, next_noisy_images, pred_images)
 
-            loop_state = (next_noisy_images, pred_images, seed)
+            loop_state = (next_noisy_images, pred_images)
 
             return loop_state
 
-        _, pred_images, _ = fori_loop(
+        _, pred_images = fori_loop(
             initial_step,
             diffusion_steps,
             step_fn,
             (
                 next_noisy_images,
                 ops.zeros_like(initial_noise),
-                seed,
             ),
             # can't jit this with progbar or tracking intermediate values
             disable_jit=verbose or track_progress_type or disable_jit,
@@ -772,10 +779,18 @@ class DiffusionModel(DeepGenerativeModel):
             step_size,
         )
 
-        def step_fn(step, loop_state):
-            noisy_images, pred_images, seed = loop_state
+        # Materialize outside the loop: a stateful seed generator cannot be advanced
+        # from within a jitted loop body.
+        seed = materialize_seed(seed)
 
-            diffusion_times = base_diffusion_times - step * step_size
+        def step_fn(step, loop_state):
+            noisy_images, pred_images = loop_state
+
+            # `step` is an integer tensor once the loop is traced, and TF will not
+            # implicitly promote it to the float dtype of the schedule.
+            elapsed_time = ops.cast(step, base_diffusion_times.dtype) * step_size
+
+            diffusion_times = base_diffusion_times - elapsed_time
             noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
 
             # remix the predicted components using the next signal and noise rates
@@ -790,7 +805,7 @@ class DiffusionModel(DeepGenerativeModel):
                 **kwargs,
             )
 
-            seed, seed1 = split_seed(seed, 2)
+            step_seed = fold_seed(seed, step)
             next_noisy_images = self.reverse_diffusion_step(
                 shape=(num_images, *input_shape),
                 pred_images=pred_images,
@@ -798,7 +813,7 @@ class DiffusionModel(DeepGenerativeModel):
                 signal_rates=signal_rates,
                 next_signal_rates=next_signal_rates,
                 next_noise_rates=next_noise_rates,
-                seed=seed1,
+                seed=step_seed,
                 stochastic_sampling=stochastic_sampling,
             )
 
@@ -811,18 +826,17 @@ class DiffusionModel(DeepGenerativeModel):
 
             self.store_progress(step, track_progress_type, next_noisy_images, pred_images)
 
-            loop_state = (next_noisy_images, pred_images, seed)
+            loop_state = (next_noisy_images, pred_images)
 
             return loop_state
 
-        _, pred_images, _ = fori_loop(
+        _, pred_images = fori_loop(
             initial_step,
             diffusion_steps,
             step_fn,
             (
                 next_noisy_images,
                 ops.zeros_like(initial_noise),
-                seed,
             ),
             # can't jit this with progbar or tracking intermediate values
             disable_jit=verbose or track_progress_type or disable_jit,
