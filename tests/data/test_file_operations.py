@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Generator
+from unittest.mock import patch
 
 import h5py
 import numpy as np
@@ -17,6 +18,7 @@ from zea.data.file_operations import (
     compound_transmits,
     decode_hadamard_file_operation,
     extract_frames_transmits,
+    main,
     resave,
     sum_data,
 )
@@ -276,6 +278,24 @@ def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
     data_dict = SimpleNamespace(**_load_data_dict(output_path))
     assert data_dict.raw_data.shape[1] == 1  # Only one transmit should remain
     assert data_dict.aligned_data["values"].shape[1] == 1
+
+
+def test_file_operations_main_dispatches_to_run(tmp_path, monkeypatch):
+    """zea.data.file_operations.main() (``python -m zea.data``) parses argv and runs the
+    selected subcommand. The other CLI tests above shell out, so this is the only one that
+    exercises the in-process entry point."""
+    output_path = tmp_path / "summed_dataset.hdf5"
+    monkeypatch.setattr(
+        "sys.argv", ["zea-data", "sum", "a.hdf5", "b.hdf5", "--output-path", str(output_path)]
+    )
+
+    with patch("zea.data.file_operations.sum_data") as mock_sum:
+        main()
+
+    assert mock_sum.call_count == 1
+    _, kwargs = mock_sum.call_args
+    assert kwargs["input_paths"] == ["a.hdf5", "b.hdf5"]
+    assert kwargs["output_path"] == str(output_path)
 
 
 def test_file_operations_folder_resave(tmp_path):

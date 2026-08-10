@@ -75,6 +75,7 @@ class Simulate(Operation):
         element_width,
         attenuation_coef,
         tx_apodizations,
+        t_peak,
         **kwargs,
     ):
         simulate_kwargs = {
@@ -100,6 +101,7 @@ class Simulate(Operation):
             "transmit_origins": kwargs.get("transmit_origins"),
             "polar_angles": kwargs.get("polar_angles"),
             "azimuth_angles": kwargs.get("azimuth_angles"),
+            "t_peak": t_peak,
         }
         if not self.with_batch_dim:
             simulated_rf = simulate_rf(
@@ -413,6 +415,7 @@ class ScanConvert(Operation):
         resolution=None,
         coordinates=None,
         fill_value=None,
+        distance_to_apex=0.0,
         **kwargs,
     ):
         """Scan convert images to cartesian coordinates.
@@ -430,6 +433,9 @@ class ScanConvert(Operation):
                 based on rho_range, theta_range, phi_range and resolution. If provided, this
                 operation can be jitted.
             fill_value (float): Value to fill the image with outside the defined region.
+            distance_to_apex (float): Distance from the apex of the polar grid to the
+                transducer surface. Only shifts the reported ``z_lim`` so it reads as a
+                depth below the transducer; the image itself is unchanged.
 
         """
         if fill_value is None:
@@ -456,6 +462,7 @@ class ScanConvert(Operation):
             fill_value,
             self.order,
             with_batch_dim=self.with_batch_dim,
+            distance_to_apex=distance_to_apex,
         )
 
         return {self.output_key: data_out, **parameters}

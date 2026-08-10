@@ -4,7 +4,6 @@ import scipy.signal
 from keras import ops
 
 from zea import log
-from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
 from zea.func import split_seed
 from zea.func.tensor import (
     extend_n_dims,
@@ -193,12 +192,6 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
     return ops.cast(rf_data, "float32")
 
 
-def _sinc(x):
-    """Return the normalized sinc function. Equivalent to np.sinc(x)."""
-    y = np.pi * ops.where(x == 0, 1.0e-20, x)
-    return ops.sin(y) / y
-
-
 def get_band_pass_filter(num_taps, sampling_frequency, f1, f2, validate=True):
     """Band pass filter
 
@@ -244,7 +237,7 @@ def get_band_pass_filter(num_taps, sampling_frequency, f1, f2, validate=True):
     # Build up the coefficients.
     alpha = 0.5 * (num_taps - 1)
     m = ops.arange(0, num_taps, dtype="float32") - alpha
-    h = f2 * _sinc(f2 * m) - f1 * _sinc(f1 * m)
+    h = f2 * ops.sinc(f2 * m) - f1 * ops.sinc(f1 * m)
 
     # Get and apply the window function.
     win = np.hamming(num_taps)
@@ -589,6 +582,65 @@ def envelope_detect(data, axis=-3):
         Tensor: The envelope detected data of shape (..., grid_size_z, grid_size_x).
     """
     return ops.abs(channels_to_analytic(data, axis))
+
+
+def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
+    """Computes the directivity of a single element.
+
+    Args:
+        f (array-like): The input frequencies [Hz].
+        theta (array-like): The angles [rad].
+        element_width (float): The width of the element [m].
+        sound_speed (float): The speed of sound [m/s].
+        rigid_baffle (bool): Whether the element is mounted on a rigid baffle,
+            impacting the directivity.
+
+    Returns:
+        array-like: The directivity of the element.
+    """
+
+    if element_width is None:
+        response = ops.ones_like(theta)
+        return response
+
+    # element_width / wavelength == element_width * f / sound_speed. Using the
+    # latter avoids dividing by f, so the DC bin (f == 0) stays finite: the
+    # argument is 0 and sinc(0) == 1 (isotropic directivity), the correct limit.
+    response = ops.sinc(element_width * f / sound_speed * ops.sin(theta))
+    if not rigid_baffle:
+        response *= ops.cos(theta)
+    return response
+
+
+def square_wave_apodization(n_el: int, block_size: float):
+    """Return a square wave apodization of alternating ``+1`` / ``-1`` blocks.
+
+    Used for incoherent beamforming.
+
+    Args:
+        n_el (int): Total number of elements in the array.
+        block_size (float): Number of elements that will be high/low. Can be a float.
+
+    Returns:
+        Tensor: Apodization of shape ``(n_el,)`` with values in ``{-1, +1}``.
+
+    Example:
+        .. code-block:: text
+
+            +1 +1 +1 +1             +1 +1 +1 +1
+                        -1 -1 -1 -1
+
+            <----------> block_size = 4, n_el = 12
+    """
+    if not block_size > 0:  # also rejects NaN
+        raise ValueError(f"block_size must be a positive number, got {block_size}.")
+
+    # Which block each element falls in; even blocks are high, odd blocks are low.
+    # Indexing the elements directly (rather than sampling a square wave over a
+    # normalized axis) keeps every block exactly `block_size` wide, including a
+    # partial trailing block when `n_el` is not a multiple of `block_size`.
+    block_index = ops.floor(ops.arange(n_el, dtype="float32") / block_size)
+    return ops.where(ops.mod(block_index, 2.0) == 0.0, 1.0, -1.0)
 
 
 def apply_aligned_apodization(data, apodization, with_batch_dim):
@@ -1184,6 +1236,10 @@ def construct_acquisition_from_synthetic_aperture(
         raw_data (ops.Tensor): The constructed raw data of shape (n_frames, 1, n_ax, n_el, n_ch).
         t0_delays (ops.Tensor): t0 delays of shape (1, n_el).
     """
+    # Imported here rather than at module level: zea.beamform imports from zea.func
+    # (see zea.beamform.pfield), so a top-level import would be circular.
+    from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
+
     if not np.isinf(focus_distance):
         t0_delays = compute_t0_delays_focused(
             transmit_origins=np.array([transmit_origin]),

@@ -37,6 +37,7 @@ more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_e
     ...     element_width=0.2e-3,
     ...     attenuation_coef=0.5,
     ...     tx_apodizations=np.ones((1, 64)),
+    ...     t_peak=np.full(1, 1 / 5e6),
     ... )
 
 """
@@ -45,6 +46,7 @@ import numpy as np
 from keras import ops
 
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
+from zea.func.ultrasound import directivity
 
 
 def simulate_rf(
@@ -63,6 +65,7 @@ def simulate_rf(
     element_width,
     attenuation_coef,
     tx_apodizations,
+    t_peak,
     wavefront_only=False,
     focus_distances=None,
     transmit_origins=None,
@@ -130,6 +133,7 @@ def simulate_rf(
             ``focus_distances``). Defaults to zeros when ``None``.
         azimuth_angles (array-like, optional): The transmit azimuth angles [rad] of
             shape (n_tx,). Only used by the wavefront-only model. Defaults to zeros.
+        t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -240,7 +244,12 @@ def simulate_rf(
         dist_total = dist[:, None] + dist_tx[:, :, None]
 
         # [n_scat, n_txel, n_rxel]
-        tau_total = (dist_total / sound_speed) + t0_delays_tx[..., None] - initial_times[tx_idx]
+        tau_total = (
+            (dist_total / sound_speed)
+            + t0_delays_tx[..., None]
+            - initial_times[tx_idx]
+            + t_peak[tx_idx]
+        )
 
         scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
 
@@ -377,34 +386,6 @@ def _before_focus_mask(
     return before[:, None]
 
 
-def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
-    """Computes the directivity of a single element.
-
-    Args:
-        f (array-like): The input frequencies [Hz].
-        theta (array-like): The angles [rad].
-        element_width (float): The width of the element [m].
-        sound_speed (float): The speed of sound [m/s].
-        rigid_baffle (bool): Whether the element is mounted on a rigid baffle,
-            impacting the directivity.
-
-    Returns:
-        array-like: The directivity of the element.
-    """
-
-    if element_width is None:
-        response = ops.ones_like(theta)
-        return response
-
-    # element_width / wavelength == element_width * f / sound_speed. Using the
-    # latter avoids dividing by f, so the DC bin (f == 0) stays finite: the
-    # argument is 0 and sinc(0) == 1 (isotropic directivity), the correct limit.
-    response = sinc(element_width * f / sound_speed * ops.sin(theta))
-    if not rigid_baffle:
-        response *= ops.cos(theta)
-    return response
-
-
 def delay2(f, tau, n_fft, sampling_frequency):
     """
     Applies a delay in the frequency domain without phase wrapping.
@@ -458,7 +439,7 @@ def spread(dist, mindist=1e-4):
 def hann_fd(f, width):
     """The fourier transform of a hann window in the time domain with given width."""
     denom = 1.0 - (f * width) ** 2
-    num = 0.5 * sinc(f * width)
+    num = 0.5 * ops.sinc(f * width)
     # denom == 0 at f * width == +/-1 is a removable singularity where the Hann
     # window transform equals 0.25. Divide only away from it (using a dummy 1.0
     # at the singular points) and fill the limit in explicitly, so no 0/0 occurs.
@@ -521,12 +502,6 @@ def get_transducer_bandwidth_fn(probe_center_frequency, bandwidth):
         return hann_unnormalized(ops.abs(f) - probe_center_frequency, bandwidth)
 
     return bandwidth_fn
-
-
-def sinc(x):
-    """The normalized sinc function with a small offset to prevent division by zero."""
-    x = ops.abs(np.pi * x) + 1e-9
-    return ops.sin(x) / x
 
 
 def _round_up_to_power_of_two(x):
