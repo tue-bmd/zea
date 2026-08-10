@@ -50,7 +50,7 @@ def split_seed(seed, n):
 def fold_seed(seed, data):
     """Derive a seed for a single loop iteration from the iteration index.
 
-    A stateful `keras.random.SeedGenerator <https://keras.io/api/random/seed_generator/`_
+    A stateful `keras.random.SeedGenerator <https://keras.io/api/random/seed_generator/>`_
     cannot be part of a jitted loop state, so loop bodies derive their seed from the
     iteration index rather than threading a seed through the loop. JAX keys are folded
     with the index, all other seeds are either stateful or ``None`` and can be reused
