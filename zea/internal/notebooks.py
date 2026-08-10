@@ -1,9 +1,14 @@
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import animation
 
 from zea.io_lib import save_to_gif
 from zea.parameters import Parameters
+
+# Animated formats matplotlib's pillow writer can write.
+_PILLOW_ANIMATION_SUFFIXES = frozenset({".gif", ".apng", ".png", ".webp"})
 
 
 def animate_images(
@@ -15,11 +20,21 @@ def animate_images(
     figsize=(5, 4.6),
     dpi=80,
 ):
-    """Helper function to animate a list of images."""
+    """Helper function to animate a list of images.
+
+    Writes with matplotlib's pillow writer, so ``path`` must name one of the
+    animated formats Pillow can write: ``.gif``, ``.apng``, ``.png`` or ``.webp``.
+    """
     if interval <= 0:
         raise ValueError("interval must be a positive integer (milliseconds).")
     if len(images) == 0:
         raise ValueError("images must be a non-empty sequence.")
+    suffix = Path(path).suffix.lower()
+    if suffix not in _PILLOW_ANIMATION_SUFFIXES:
+        raise ValueError(
+            f"Unsupported output format '{suffix or path}'. animate_images writes with "
+            f"the pillow writer; use one of {sorted(_PILLOW_ANIMATION_SUFFIXES)}."
+        )
     fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
     if parameters is not None:
         extent = (
@@ -47,7 +62,7 @@ def animate_images(
     plt.close(fig)
     fps = max(1, 1000 // interval)
 
-    ani.save(path, writer="imagemagick", fps=fps)
+    ani.save(path, writer="pillow", fps=fps)
 
 
 def animate_volume_mip(
