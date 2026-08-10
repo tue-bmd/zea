@@ -96,7 +96,7 @@ jobs:
         run: uv run --no-sync pytest -p no:cacheprovider ./tests/test_imports.py
 
   heavy-tests:
-    runs-on: self-hosted
+    runs-on: [self-hosted, self-hosted-zea-tests]
     timeout-minutes: 120
     permissions:
       contents: read
@@ -153,7 +153,7 @@ jobs:
 
   notebook-tests:
     name: notebook-tests (${{ matrix.label }})
-    runs-on: self-hosted
+    runs-on: [self-hosted, self-hosted-zea-tests]
     timeout-minutes: 120
     permissions:
       contents: read
