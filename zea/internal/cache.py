@@ -6,10 +6,9 @@
 > it is better to not cache the result.
 
 >[!NOTE]
-> It can be useful to inherit custom classes from `zea.core.Object`, as
-> these classes will be serialized properly, just like regular python objects. Otherwise
-> custom classes will not be recognized as equal if they have the same attributes by the
-> caching mechanism.
+> It can be useful to inherit custom classes from `zea.core.Object`, as the cache key is
+> then built from their `serialized` property rather than their default pickle
+> representation.
 
 >[!NOTE]
 > For large experiments, it can be recommended to either set a custom cache directory
