@@ -65,7 +65,7 @@ class TestCudaVisibleDevicesDisablesGpus:
             ("0", False),  # valid GPU
             ("0,-1", False),  # mixed: at least one valid
             (" -1 ", True),  # whitespace around negative
-            ("GPU-abc123,GPU-def456", False),  # UUID tokens → not integer, return False
+            ("GPU-abc123,GPU-def456", False),  # no integer entries → let nvidia-smi decide
         ],
     )
     def test_various_values(self, monkeypatch, value, expected):
@@ -116,6 +116,45 @@ class TestGetGpuMemory:
 _SMI_THREE_GPUS = b"1000\n2000\n3000\n"
 
 
+class TestUnsupportedCudaVisibleDevices:
+    """Non-integer ``CUDA_VISIBLE_DEVICES`` entries are skipped, but not silently.
+
+    zea only understands integer indices, so a GPU named by UUID or MIG id
+    cannot be used. Behaviour matches ``main`` -- such entries are ignored, and
+    a value holding nothing else falls back to CPU -- with a warning so the
+    ignored GPU is not a mystery.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "GPU-abc123",  # UUID only, e.g. as set by the Kubernetes device plugin
+            "MIG-GPU-abc123/1/0",  # MIG device id
+            "not-a-device",  # malformed
+        ],
+    )
+    def test_warns_and_falls_back_to_cpu(self, monkeypatch, attach_caplog_warnings, value):
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", value)
+        with _mock_smi(monkeypatch, _SMI_THREE_GPUS):
+            assert get_gpu_memory(verbose=False) == []
+        assert any(value in record.message for record in attach_caplog_warnings.records)
+
+    def test_integer_entries_still_used(self, monkeypatch, attach_caplog_warnings):
+        """A UUID next to an index warns, but the index is still honoured."""
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "GPU-abc123,1")
+        with _mock_smi(monkeypatch, _SMI_THREE_GPUS):
+            assert get_gpu_memory(verbose=False) == [2000]
+        assert any("GPU-abc123" in record.message for record in attach_caplog_warnings.records)
+
+    def test_warns_once_per_value(self, monkeypatch, attach_caplog_warnings):
+        """The helper runs several times per selection; the warning should not repeat."""
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "GPU-abc123")
+        with _mock_smi(monkeypatch, _SMI_THREE_GPUS):
+            get_gpu_memory(verbose=False)
+            get_gpu_memory(verbose=False)
+        assert sum("GPU-abc123" in record.message for record in attach_caplog_warnings.records) == 1
+
+
 class TestVisibleToPhysicalIds:
     """Unit tests for the ``_visible_to_physical_ids`` helper."""
 
@@ -126,7 +165,8 @@ class TestVisibleToPhysicalIds:
             ("2", [0], [2]),  # single remapped GPU
             ("3,1", [0, 1], [3, 1]),  # order follows CUDA_VISIBLE_DEVICES, not sorting
             ("3,1", [1], [1]),  # subset of the visible GPUs
-            ("GPU-abc123", [0], [0]),  # UUID tokens → fall back to positional
+            ("GPU-abc123", [0], [0]),  # no integer entries → fall back to positional
+            ("GPU-abc123,3", [0], [3]),  # the ignored UUID leaves only physical GPU 3
             ("2", [0, 5], [2]),  # out-of-range visible ids are dropped
         ],
     )

@@ -6,7 +6,6 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-import zea
 from zea import Parameters
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.internal.dummy_scan import get_parameters
@@ -370,7 +369,7 @@ def test_t_peak_default_and_waveform_derived():
     assert np.allclose(parameters.t_peak, 1 / center_frequency)
 
 
-def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
+def test_missing_transmit_defaults_warn_once_on_access(monkeypatch, reset_warning_once):
     local_scan_args = scan_args.copy()
     local_scan_args.pop("azimuth_angles", None)
     local_scan_args.pop("t0_delays", None)
@@ -381,9 +380,6 @@ def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
     local_scan_args.pop("tgc_gain_curve", None)
 
     warnings = []
-
-    # Reset warning_once state to make this test deterministic.
-    zea.log._warned_locations.clear()
 
     def _capture_warning(message, *args, **kwargs):
         warnings.append(message)
@@ -415,13 +411,11 @@ def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
     assert warnings.count("No ``tgc_gain_curve`` provided, using ones") == 1
 
 
-def test_missing_defaults_warn_once_per_scan_instance(monkeypatch):
+def test_missing_defaults_warn_once_per_scan_instance(monkeypatch, reset_warning_once):
     local_scan_args = scan_args.copy()
     local_scan_args.pop("azimuth_angles", None)
 
     warnings = []
-
-    zea.log._warned_locations.clear()
 
     def _capture_warning(message, *args, **kwargs):
         warnings.append(message)
