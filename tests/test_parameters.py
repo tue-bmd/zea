@@ -525,6 +525,19 @@ def test_serialized_distinguishes_classes():
     assert DummyArrayParameters(arr=arr).serialized != OtherArrayParameters(arr=arr).serialized
 
 
+def test_serialized_distinguishes_classes_across_modules():
+    """Same class name in two modules must not share a cache key."""
+
+    class SameName(DummyArrayParameters):
+        """Stand-in for the same class name defined in another module."""
+
+    SameName.__qualname__ = DummyArrayParameters.__qualname__
+    SameName.__module__ = "some.other.module"
+
+    arr = np.array([1.0, 2.0, 3.0])
+    assert DummyArrayParameters(arr=arr).serialized != SameName(arr=arr).serialized
+
+
 def test_update_ndarray_equality_skips_recompute():
     """Test update uses array equality and skips updates for equal ndarrays."""
     params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))

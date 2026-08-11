@@ -259,7 +259,9 @@ class BaseParameters:
         """Checksum of the parameters' current contents, used as a cache key."""
 
         # not cached -> avoids a stale checksum if the parameters are mutated in-place
-        return serialize_elements([type(self).__qualname__, self._params, self._custom_params])
+        cls = type(self)
+        class_id = f"{cls.__module__}.{cls.__qualname__}"
+        return serialize_elements([class_id, self._params, self._custom_params])
 
     def __eq__(self, other):
         """Two parameter objects are equal when they hold the same parameters."""
