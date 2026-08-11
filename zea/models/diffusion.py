@@ -26,7 +26,6 @@ from keras import ops
 from zea.backend import _import_tf, jit
 from zea.backend.autograd import AutoGrad
 from zea.func.tensor import L2, fori_loop, split_seed
-from zea.internal.core import Object
 from zea.internal.operators import Operator
 from zea.internal.registry import diffusion_guidance_registry, model_registry, operator_registry
 from zea.internal.utils import fn_requires_argument
@@ -996,7 +995,7 @@ class DiffusionModel(DeepGenerativeModel):
 register_presets(diffusion_model_presets, DiffusionModel)
 
 
-class DiffusionGuidance(abc.ABC, Object):
+class DiffusionGuidance(abc.ABC):
     """Base class for diffusion guidance methods."""
 
     def __init__(

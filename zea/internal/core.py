@@ -4,13 +4,9 @@ import enum
 import hashlib
 import json
 import pickle
-from copy import deepcopy
 
 import keras
 import numpy as np
-
-from zea.internal.utils import reduce_to_signature
-from zea.utils import update_dictionary
 
 CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, tuple, bool)
 BASE_FLOAT_PRECISION = "float32"
@@ -70,98 +66,6 @@ class classproperty(property):
         return self.fget(owner_cls)
 
 
-class Object:
-    """Base class for all data objects in the toolbox."""
-
-    def __init__(self):
-        self._serialized = None
-
-    @property
-    def serialized(self):
-        """Compute the checksum of the object only if not already done"""
-        if self._serialized is None:
-            attributes = self.__dict__.copy()
-            attributes.pop(
-                "_serialized", None
-            )  # Remove the cached serialized attribute to avoid recursion
-            self._serialized = serialize_elements([attributes])
-        return self._serialized
-
-    def __setattr__(self, name: str, value):
-        """Reset the serialized data if the object is modified"""
-        if name != "_serialized":  # Avoid resetting when setting _serialized itself
-            self._serialized = None
-        super().__setattr__(name, value)
-
-    def copy(self):
-        """Return a copied version of the object"""
-        return deepcopy(self)
-
-    def update(self, **kwargs):
-        """Update the attributes of the object if they exist"""
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-
-    def __getitem__(self, key):
-        return getattr(self, key)
-
-    def __setitem__(self, key, value):
-        setattr(self, key, value)
-
-    def __delitem__(self, key):
-        delattr(self, key)
-
-    @classmethod
-    def safe_initialize(cls, **kwargs):
-        """Safely initialize a class by removing any invalid arguments."""
-        reduced_params = reduce_to_signature(cls.__init__, kwargs)
-        return cls(**reduced_params)
-
-    @classmethod
-    def merge(cls, obj1: dict, obj2: dict, safe: bool = False):
-        """Merge multiple objects and safely initialize a new object.
-
-        Optionally can safely initialize the object, which removes any invalid
-        arguments.
-        """
-        # TODO: support actual zea.core.Objects, now we only support dictionaries
-        params = update_dictionary(obj1, obj2)
-        if not safe:
-            return cls(**params)
-        else:
-            return cls.safe_initialize(**params)
-
-    @classmethod
-    def _tree_unflatten(cls, aux, children):
-        if cls is not Object:
-            raise NotImplementedError(f"{cls.__name__} must implement _tree_unflatten.")
-        return cls(*children)
-
-    def _tree_flatten(self):
-        if not isinstance(self, Object):
-            raise NotImplementedError(f"{type(self).__name__} must implement _tree_flatten.")
-        return (), ()
-
-    @classmethod
-    def register_pytree_node(cls):
-        """Register the object as a PyTree node for JAX.
-        https://docs.jax.dev/en/latest/_autosummary/jax.tree_util.register_pytree_node.html
-        """
-        try:
-            from jax import tree_util
-        except ImportError as exc:
-            raise ImportError(
-                "JAX is not installed. Please install JAX to use `register_pytree_node`."
-            ) from exc
-
-        tree_util.register_pytree_node(
-            cls,
-            cls._tree_flatten,
-            cls._tree_unflatten,
-        )
-
-
 def _skip_to_tensor(value):
     """Check if the value should be skipped for conversion to tensor."""
     # Skip str (because JIT does not support it)
@@ -182,7 +86,7 @@ def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
         # Get the value from the dictionary
         value = dictionary[key]
 
-        if isinstance(value, Object) and hasattr(value, "to_tensor"):
+        if hasattr(value, "to_tensor"):
             snapshot[key] = value.to_tensor(keep_as_is=keep_as_is)
             continue
 
@@ -309,8 +213,11 @@ def serialize_elements(key_elements: list) -> str:
         if isinstance(element, (list, tuple)):
             # If element is a list or tuple, serialize its elements recursively
             element = serialize_elements(element)
-        elif isinstance(element, Object) and hasattr(element, "serialized"):
-            # Use the serialized attribute if it exists
+        elif hasattr(element, "serialized"):
+            # Objects opt in to content-based keys by exposing a `serialized` property
+            # (see :class:`zea.internal.parameters.BaseParameters`). Their own pickle
+            # representation would depend on attribute insertion order and on derived
+            # state such as caches.
             element = str(element.serialized)
         elif isinstance(element, keras.random.SeedGenerator):
             # If element is a SeedGenerator, use the state

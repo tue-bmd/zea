@@ -462,6 +462,69 @@ def test_parameters_compare_by_content():
         hash(params)
 
 
+def test_parameters_compare_after_in_place_mutation():
+    """Equality reflects the current contents, also after in-place mutation.
+
+    In-place mutation does not go through `__setattr__`, so it cannot be caught by
+    invalidation; the checksum has to be recomputed on every read.
+    """
+    params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+    same = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+
+    assert params == same
+
+    params.arr[0] = 99.0
+
+    assert params != same
+
+
+def test_serialized_is_content_based():
+    """`serialized` is the cache key the caching machinery relies on (zea.internal.cache)."""
+    params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+    same = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+    other = DummyArrayParameters(arr=np.array([1.0, 2.0, 4.0]))
+
+    assert params.serialized == same.serialized
+    assert params.serialized != other.serialized
+
+
+def test_serialized_tracks_mutation():
+    """Both assignment and in-place mutation change the cache key.
+
+    In-place mutation never reaches `__setattr__`, so the checksum cannot be cached.
+    """
+    params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+
+    before = params.serialized
+    params.arr[0] = 99.0
+    assert params.serialized != before
+
+    before = params.serialized
+    params.arr = np.array([4.0, 5.0, 6.0])
+    assert params.serialized != before
+
+
+def test_serialized_ignores_derived_state():
+    """Computing a cached property must not change the cache key."""
+    params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+
+    before = params.serialized
+    _ = params.arr_sum
+
+    assert params._cache  # the computed property really was cached
+    assert params.serialized == before
+
+
+def test_serialized_distinguishes_classes():
+    """Distinct classes holding identical parameters get distinct cache keys."""
+
+    class OtherArrayParameters(DummyArrayParameters):
+        """Same parameters, different class."""
+
+    arr = np.array([1.0, 2.0, 3.0])
+    assert DummyArrayParameters(arr=arr).serialized != OtherArrayParameters(arr=arr).serialized
+
+
 def test_update_ndarray_equality_skips_recompute():
     """Test update uses array equality and skips updates for equal ndarrays."""
     params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
