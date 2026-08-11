@@ -305,6 +305,77 @@ def test_selected_transmits_affects_shape(attr, expected_shape):
     assert val.shape[0] == val_tensor.shape[0] == 3
 
 
+def test_flat_aligned_apodization_derived():
+    """Derived: None, unless scanline mode, where it is the one-hot transmit mask."""
+    assert Parameters(**scan_args).flat_aligned_apodization is None
+
+    scanline = Parameters(**scan_args, enable_scanline=True)
+    n_tx, grid_size_z = scan_args["n_tx"], scan_args["grid_size_z"]
+    assert scanline.flat_aligned_apodization.shape == (grid_size_z * n_tx, n_tx)
+
+
+def test_flat_aligned_apodization_explicit_value_wins():
+    """An explicit mask overrides the derived default, and follows the selection.
+
+    It is stored over the full transmit axis, so a transmit selection slices it
+    (and invalidates the cached value). The pixel axis matches the grid, which
+    does not depend on the selection outside of scanline mode.
+    """
+    n_tx = scan_args["n_tx"]
+    n_pix = scan_args["grid_size_z"] * scan_args["grid_size_x"]
+    apodization = np.arange(n_pix * n_tx, dtype=np.float32).reshape(n_pix, n_tx)
+
+    parameters = Parameters(**scan_args, flat_aligned_apodization=apodization)
+    np.testing.assert_array_equal(parameters.flat_aligned_apodization, apodization)
+
+    selection = [1, 3]
+    parameters.set_transmits(selection)
+    np.testing.assert_array_equal(parameters.flat_aligned_apodization, apodization[:, selection])
+    # The mask stays aligned with the active grid: (n_pix, n_tx).
+    assert parameters.flat_aligned_apodization.shape == (
+        np.prod(parameters.grid.shape[:-1]),
+        parameters.n_tx,
+    )
+
+    parameters.set_transmits("all")
+    np.testing.assert_array_equal(parameters.flat_aligned_apodization, apodization)
+
+    # Explicitly unsetting it falls back to the derived value.
+    parameters.flat_aligned_apodization = None
+    assert parameters.flat_aligned_apodization is None
+
+
+def test_flat_aligned_apodization_rejected_in_scanline_mode():
+    """A scanline grid derives its own mask; an explicit one cannot stay aligned with it."""
+    n_tx, grid_size_z = scan_args["n_tx"], scan_args["grid_size_z"]
+    apodization = np.ones((grid_size_z * n_tx, n_tx), dtype=np.float32)
+
+    parameters = Parameters(
+        **scan_args,
+        enable_scanline=True,
+        flat_aligned_apodization=apodization,
+    )
+    with pytest.raises(ValueError, match="enable_scanline"):
+        _ = parameters.flat_aligned_apodization
+
+    # Unsetting it (or disabling scanline mode) resolves the conflict either way.
+    parameters.flat_aligned_apodization = None
+    assert parameters.flat_aligned_apodization.shape == (grid_size_z * n_tx, n_tx)
+
+
+def test_flat_aligned_apodization_transmit_axis_is_validated():
+    """A mask over the selection instead of the full transmit axis is rejected."""
+    n_pix = scan_args["grid_size_z"] * scan_args["grid_size_x"]
+
+    parameters = Parameters(
+        **scan_args,
+        flat_aligned_apodization=np.ones((n_pix, 2), dtype=np.float32),
+    )
+    parameters.set_transmits([1, 3])
+    with pytest.raises(ValueError, match="full transmit axis"):
+        _ = parameters.flat_aligned_apodization
+
+
 def test_set_attributes():
     """Test setting attributes of Parameters class."""
     parameters = Parameters(**scan_args)
