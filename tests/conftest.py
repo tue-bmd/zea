@@ -7,10 +7,13 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import pytest
+# Must be set before pyplot is imported, and inherited by the papermill kernels in
+# test_notebooks.py, which would otherwise pick up an interactive backend from the shell.
+os.environ["MPLBACKEND"] = "Agg"
 
-from .data import generate_example_dataset
+import pytest  # noqa: E402
+
+from .data import generate_example_dataset  # noqa: E402
 
 
 def _gpu_available() -> bool:
@@ -72,8 +75,6 @@ from .backend_utils import (  # noqa: E402
     missing_required_backends,
     unavailable_test_backends,
 )
-
-plt.rcParams["backend"] = "agg"
 
 
 def _skip_unavailable_backends_enabled(config):
