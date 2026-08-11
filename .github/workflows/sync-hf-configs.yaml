@@ -1,3 +1,6 @@
+# Mirrors `configs/` to the zeahub/configs dataset on Hugging Face, so users can
+# load them by name. Pushes to main sync the main branch; releases sync a branch
+# named after the release tag.
 name: Sync Configs to Hugging Face
 
 on:
