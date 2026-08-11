@@ -16,22 +16,6 @@ _ZEA_PACKAGE_DIR = zea.__file__.rsplit("/", 1)[0]
 
 
 @pytest.fixture
-def attach_caplog(caplog):
-    """Attaches pytest's caplog handler directly to zea's logger.
-
-    ``zea.log``'s logger has ``propagate = False``, so the default caplog
-    mechanism (which relies on records bubbling up to the root logger) can't
-    see it. Attaching the handler directly sidesteps that.
-    """
-    caplog.set_level(logging.DEBUG)
-    log.logger.addHandler(caplog.handler)
-    try:
-        yield caplog
-    finally:
-        log.logger.removeHandler(caplog.handler)
-
-
-@pytest.fixture
 def file_logger_capture():
     """Points ``log.file_logger`` at an in-memory logger for the duration of a test.
 
@@ -55,13 +39,8 @@ def file_logger_capture():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_warned_locations():
-    """Prevents ``warning_once`` dedup state from leaking between tests."""
-    saved = set(log._warned_locations)
-    log._warned_locations.clear()
-    yield
-    log._warned_locations.clear()
-    log._warned_locations.update(saved)
+def _isolate_warned_locations(reset_warning_once):
+    """Prevents ``warning_once`` dedup state from leaking between tests in this module."""
 
 
 def _compile_in_fake_zea_module(src, fake_basename):

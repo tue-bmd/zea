@@ -1,3 +1,5 @@
+# Runs the repo's pre-commit hooks in CI, so a PR from a contributor who has not
+# installed the hooks locally still gets caught.
 name: Precommithooks
 
 on:
@@ -14,24 +16,17 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          pip install -U pip setuptools wheel
-          pip install pre-commit
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
 
       - name: Run pre-commit hooks
         id: precommithooks
         run: |
-          pre-commit run check-yaml --all-files
-          pre-commit run check-merge-conflict --all-files
-          pre-commit run detect-private-key --all-files
-          pre-commit run uv-lock --all-files
-          pre-commit run notebook-clean-and-check --all-files
+          uvx pre-commit run check-yaml --all-files
+          uvx pre-commit run check-merge-conflict --all-files
+          uvx pre-commit run detect-private-key --all-files
+          uvx pre-commit run uv-lock --all-files
+          uvx pre-commit run notebook-clean-and-check --all-files
         continue-on-error: true
 
       - name: Check pre-commit result
