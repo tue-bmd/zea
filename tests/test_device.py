@@ -21,6 +21,8 @@ import zea
 from zea.backend import func_on_device
 from zea.internal.device import (
     _cuda_visible_devices_disables_gpus,
+    _visible_to_physical_ids,
+    get_device,
     get_gpu_memory,
     init_device,
 )
@@ -63,7 +65,7 @@ class TestCudaVisibleDevicesDisablesGpus:
             ("0", False),  # valid GPU
             ("0,-1", False),  # mixed: at least one valid
             (" -1 ", True),  # whitespace around negative
-            ("GPU-abc123,GPU-def456", False),  # UUID tokens → not integer, return False
+            ("GPU-abc123,GPU-def456", False),  # no integer entries → let nvidia-smi decide
         ],
     )
     def test_various_values(self, monkeypatch, value, expected):
@@ -109,6 +111,112 @@ class TestGetGpuMemory:
         monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,-1")
         with _mock_smi(monkeypatch, _SMI_TWO_GPUS):
             assert get_gpu_memory(verbose=False) == [1000]
+
+
+_SMI_THREE_GPUS = b"1000\n2000\n3000\n"
+
+
+class TestUnsupportedCudaVisibleDevices:
+    """Non-integer ``CUDA_VISIBLE_DEVICES`` entries are skipped, but not silently.
+
+    zea only understands integer indices, so a GPU named by UUID or MIG id
+    cannot be used. Behaviour matches ``main`` -- such entries are ignored, and
+    a value holding nothing else falls back to CPU -- with a warning so the
+    ignored GPU is not a mystery.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "GPU-abc123",  # UUID only, e.g. as set by the Kubernetes device plugin
+            "MIG-GPU-abc123/1/0",  # MIG device id
+            "not-a-device",  # malformed
+        ],
+    )
+    def test_warns_and_falls_back_to_cpu(self, monkeypatch, attach_caplog_warnings, value):
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", value)
+        with _mock_smi(monkeypatch, _SMI_THREE_GPUS):
+            assert get_gpu_memory(verbose=False) == []
+        assert any(value in record.message for record in attach_caplog_warnings.records)
+
+    def test_integer_entries_still_used(self, monkeypatch, attach_caplog_warnings):
+        """A UUID next to an index warns, but the index is still honoured."""
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "GPU-abc123,1")
+        with _mock_smi(monkeypatch, _SMI_THREE_GPUS):
+            assert get_gpu_memory(verbose=False) == [2000]
+        assert any("GPU-abc123" in record.message for record in attach_caplog_warnings.records)
+
+    def test_warns_once_per_value(self, monkeypatch, attach_caplog_warnings):
+        """The helper runs several times per selection; the warning should not repeat."""
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "GPU-abc123")
+        with _mock_smi(monkeypatch, _SMI_THREE_GPUS):
+            get_gpu_memory(verbose=False)
+            get_gpu_memory(verbose=False)
+        assert sum("GPU-abc123" in record.message for record in attach_caplog_warnings.records) == 1
+
+
+class TestVisibleToPhysicalIds:
+    """Unit tests for the ``_visible_to_physical_ids`` helper."""
+
+    @pytest.mark.parametrize(
+        "cuda_visible,visible_ids,expected",
+        [
+            (None, [0, 1], [0, 1]),  # unset → positional ids are already physical
+            ("2", [0], [2]),  # single remapped GPU
+            ("3,1", [0, 1], [3, 1]),  # order follows CUDA_VISIBLE_DEVICES, not sorting
+            ("3,1", [1], [1]),  # subset of the visible GPUs
+            ("GPU-abc123", [0], [0]),  # no integer entries → fall back to positional
+            ("GPU-abc123,3", [0], [3]),  # the ignored UUID leaves only physical GPU 3
+            ("2", [0, 5], [2]),  # out-of-range visible ids are dropped
+        ],
+    )
+    def test_translation(self, monkeypatch, cuda_visible, visible_ids, expected):
+        if cuda_visible is None:
+            monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        else:
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", cuda_visible)
+        assert _visible_to_physical_ids(visible_ids) == expected
+
+
+class TestSelectionWritesPhysicalIds:
+    """``CUDA_VISIBLE_DEVICES`` is read by the driver, so it must hold physical ids."""
+
+    def test_get_device_queries_nvidia_smi_once(self, monkeypatch):
+        """One selection must shell out to nvidia-smi once, not once per helper."""
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        with _mock_smi(monkeypatch, _SMI_THREE_GPUS) as mocked_smi:
+            get_device("auto:1", verbose=False)
+            assert mocked_smi.call_count == 1
+
+    def test_preset_cuda_visible_devices_is_not_reinterpreted(self, monkeypatch):
+        """A pre-set allocation (SLURM, Docker, ...) must survive a single selection.
+
+        ``get_gpu_memory`` reports the *visible* GPUs renumbered 0..N-1, so the id
+        that selection works with is positional. Writing it back verbatim
+        reinterprets it as physical and moves the process onto a GPU that was never
+        allocated to it -- here, off allocated GPU 7 and onto GPU 3.
+        """
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "4,5,6,7")
+        # 8 physical GPUs; of the four allocated, physical 7 has the most free memory.
+        smi = b"1000\n2000\n3000\n4000\n5000\n6000\n7000\n9000\n"
+        with _mock_smi(monkeypatch, smi):
+            get_device("auto:1", verbose=False)
+        assert os.environ["CUDA_VISIBLE_DEVICES"] == "7"
+
+    def test_repeated_selection_stays_on_same_physical_gpu(self, monkeypatch):
+        """Selection is idempotent: a second call must not drift off the first choice.
+
+        The second call sees only the already-selected GPU, which is renumbered to 0
+        inside the process. Writing that 0 back out verbatim would silently move the
+        process onto physical GPU 0.
+        """
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        with _mock_smi(monkeypatch, _SMI_THREE_GPUS):
+            get_device("auto:1", verbose=False)
+            # GPU 2 has the most free memory
+            assert os.environ["CUDA_VISIBLE_DEVICES"] == "2"
+            get_device("auto:1", verbose=False)
+            assert os.environ["CUDA_VISIBLE_DEVICES"] == "2"
 
 
 class TestInitDevice:
