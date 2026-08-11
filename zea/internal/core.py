@@ -2,6 +2,7 @@
 
 import enum
 import hashlib
+import inspect
 import json
 import pickle
 
@@ -74,6 +75,17 @@ def _skip_to_tensor(value):
     return isinstance(value, str) or callable(value) or isinstance(value, bytes)
 
 
+def _supports_zea_to_tensor(value) -> bool:
+    """Check if `value` implements zea's `to_tensor(keep_as_is=...)` protocol."""
+    to_tensor = getattr(value, "to_tensor", None)
+    if not callable(to_tensor):
+        return False
+    try:
+        return "keep_as_is" in inspect.signature(to_tensor).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
     """Convert an object to a dictionary of tensors."""
     snapshot = {}
@@ -86,7 +98,7 @@ def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
         # Get the value from the dictionary
         value = dictionary[key]
 
-        if hasattr(value, "to_tensor"):
+        if _supports_zea_to_tensor(value):
             snapshot[key] = value.to_tensor(keep_as_is=keep_as_is)
             continue
 
