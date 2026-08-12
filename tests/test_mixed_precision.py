@@ -129,8 +129,9 @@ def test_apply_delays_preserves_float_dtype():
     assert keras.backend.standardize_dtype(out.dtype) == "bfloat16"
 
 
-def test_apply_delays_int16_promotes_and_matches_float32():
+def test_apply_delays_int16_promotes_and_matches_float32(restore_policy):
     """int16 RF gathered directly is promoted and matches the float32 result."""
+    keras.mixed_precision.set_global_policy("float32")
     rng = np.random.default_rng(1)
     data_f32 = (rng.standard_normal((80, N_EL, 1)) * 2000.0).astype(np.float32)
     data_i16 = data_f32.astype(np.int16)

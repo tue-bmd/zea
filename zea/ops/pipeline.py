@@ -391,7 +391,7 @@ class Pipeline:
         Example::
 
             pipeline.keys()
-            # ['cast', 'apply_window', 'demodulate', 'beamform', ...]
+            # ['apply_window', 'demodulate', 'beamform', ...]
         """
         return OperationList(self._pipeline_layers).keys()
 
