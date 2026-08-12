@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from zea import log
+from zea.backend import jit
 from zea.func.ultrasound import dehaze_nuclear_diffusion
 from zea.internal.operators import InpaintingOperator, LinearInterpOperator
 from zea.io_lib import matplotlib_figure_to_numpy, save_video
@@ -601,3 +602,61 @@ class TestGenerativeModelInterface:
         assert isinstance(model, GenerativeModel)
         assert isinstance(model, keras.Model)
         assert model.name == "deep_generative_model"
+
+
+class TestAsMeasurementBatch:
+    """The leading-axis contract shared by every ``posterior_sample``."""
+
+    EVENT_SHAPE = (2, 3)
+    N_SAMPLES = 4
+
+    @staticmethod
+    def _traced(n_samples):
+        """``_as_measurement_batch`` behind the active backend's compiler."""
+
+        def fn(measurements):
+            batch, per_sample = GenerativeModel._as_measurement_batch(
+                measurements, n_samples, event_ndim=2
+            )
+            return batch, per_sample
+
+        # torch.compile only falls back to eager here, and traces static shapes anyway.
+        return jit(fn, torch=False)
+
+    @pytest.mark.parametrize("leading", [None, 1, N_SAMPLES])
+    def test_accepted_leading_sizes_survive_tracing(self, leading):
+        """No axis and a singleton axis are shared; ``n_samples`` is per-sample."""
+        shape = self.EVENT_SHAPE if leading is None else (leading, *self.EVENT_SHAPE)
+        measurements = keras.ops.zeros(shape)
+
+        batch, per_sample = self._traced(self.N_SAMPLES)(measurements)
+
+        expected_leading = self.N_SAMPLES if leading == self.N_SAMPLES else 1
+        assert tuple(batch.shape) == (expected_leading, *self.EVENT_SHAPE)
+        # HVAE repeats its encoder activations exactly when this is False.
+        assert bool(per_sample) is (leading == self.N_SAMPLES)
+
+    def test_invalid_leading_size_is_rejected_while_tracing(self):
+        """A batch of measurements is neither shared nor per-sample: point to vmap."""
+        measurements = keras.ops.zeros((self.N_SAMPLES + 1, *self.EVENT_SHAPE))
+
+        with pytest.raises(ValueError, match="vmap"):
+            self._traced(self.N_SAMPLES)(measurements)
+
+    @pytest.mark.skipif(
+        keras.backend.backend() != "tensorflow",
+        reason="Only the TensorFlow backend traces unknown dimensions.",
+    )
+    def test_unknown_leading_size_is_left_unvalidated(self):
+        """An unknown leading axis cannot be checked, so it is taken at face value."""
+        import tensorflow as tf
+
+        traced = tf.function(
+            lambda m: GenerativeModel._as_measurement_batch(m, self.N_SAMPLES, event_ndim=2),
+            input_signature=[tf.TensorSpec((None, *self.EVENT_SHAPE), tf.float32)],
+        )
+
+        batch, per_sample = traced(keras.ops.zeros((self.N_SAMPLES, *self.EVENT_SHAPE)))
+
+        assert tuple(batch.shape) == (self.N_SAMPLES, *self.EVENT_SHAPE)
+        assert bool(per_sample) is True

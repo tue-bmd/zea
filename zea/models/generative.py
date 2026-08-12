@@ -72,11 +72,12 @@ class GenerativeModel(abc.ABC):
 
         Raises:
             ValueError: If `measurements` has neither the rank of a single
-                measurement nor that of a batch of them, or if a leading axis is
-                present but conditions neither every sample (size 1) nor one sample
+                measurement nor that of a batch of them, or if a leading axis of
+                known size conditions neither every sample (size 1) nor one sample
                 each (size `n_samples`).
         """
         measurements = ops.convert_to_tensor(measurements)
+        # Rank is static on every Keras backend, so it is safe to branch on.
         ndim = ops.ndim(measurements)
         if ndim == event_ndim:
             return measurements[None], False
@@ -88,12 +89,16 @@ class GenerativeModel(abc.ABC):
                 f"{tuple(measurements.shape)}."
             )
 
+        # Read the leading size off the static shape rather than `ops.shape`, which
+        # returns a dynamic tensor for unknown dimensions under `tf.function` that
+        # cannot be compared here. An unknown size is simply left unvalidated.
+        batch_size = measurements.shape[0]
+        if batch_size is None:
+            return measurements, True
         # A singleton leading axis is shared by every sample, just like no axis.
-        batch_size = ops.shape(measurements)[0]
         if batch_size == 1:
             return measurements, False
-        # A dynamic leading axis (None under tracing) cannot be checked here.
-        if batch_size is not None and batch_size != n_samples:
+        if batch_size != n_samples:
             raise ValueError(
                 f"Expected a leading axis of n_samples={n_samples} (one measurement per "
                 f"sample) or of 1 (shared by every sample), but got {batch_size}. "
