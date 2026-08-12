@@ -22,6 +22,7 @@ import pickle
 
 from keras import ops
 
+from zea.func.tensor import split_seed
 from zea.internal.registry import model_registry
 from zea.models.generative import DeepGenerativeModel
 from zea.models.hvae.model import VAE
@@ -106,58 +107,66 @@ class HierarchicalVAE(DeepGenerativeModel):
         self.stage_depth = params.dec_num_blocks
         self.z_out = params.z_out
 
-    def sample(self, n_samples=1, **kwargs):
+    def sample(self, n_samples=1, seed=None, **kwargs):
         """
         Samples from the prior distribution.
 
         Args:
             n_samples (int): Number of samples to generate.
+            seed: Random seed generator. When ``None``, the model falls back to the
+                internal seed generators of its blocks.
 
         Returns:
             tensor: Generated samples of shape ``(n_samples, 256, 256, 3)`` in ``[-1, 1]``.
         """
-        logits = self.network.decoder.call_uncond(n_samples, **kwargs)
+        seed_decoder, seed_mol = split_seed(seed, 2)
+        logits = self.network.decoder.call_uncond(n_samples, seed=seed_decoder, **kwargs)
         # Returns a 100 channel mixture of logistic functions (logits).
-        samples = self.network.sample_from_mol(logits)
+        samples = self.network.sample_from_mol(logits, seed=seed_mol)
         return samples
 
-    def posterior_sample(self, measurements, n_samples=1, **kwargs):
+    def posterior_sample(self, measurements, n_samples=1, seed=None):
         """
-        Performs posterior sampling on a batch of measurements.
-        Only does a single encoder pass since it is deterministic,
-        but does n_samples decoder passes to create posterior samples.
+        Performs posterior sampling for a single measurement.
+
+        The encoder is deterministic, so one measurement needs only a single
+        encoder pass; the n_samples decoder passes are what produce distinct
+        posterior samples.
 
         Args:
-            measurements (tensor): Input measurements of shape [B, 256, 256, 3].
+            measurements (tensor): Input measurements of shape [256, 256, 3] in
+                [-1, 1], or [n_samples, 256, 256, 3] to condition each sample on
+                a different measurement (which costs one encoder pass each).
             n_samples (int, optional): Number of posterior samples to generate. Defaults to 1.
+            seed: Random seed generator. When ``None``, the model falls back to the
+                internal seed generators of its blocks, which are shared across a
+                :func:`zea.func.vmap` batch; pass one seed per mapped measurement to
+                keep their samples independent.
 
         Returns:
-            output (tensor): Posterior samples of shape [B, n_samples, 256, 256, 3].
+            output (tensor): Posterior samples of shape [n_samples, 256, 256, 3].
         """
+        seed_decoder, seed_mol = split_seed(seed, 2)
+        measurements, per_sample = self._as_measurement_batch(measurements, n_samples, event_ndim=3)
 
-        # Measurements is [B, 256, 256, 3] in [-1, 1]
-        b = ops.shape(measurements)[0]
-        # Only need a single deterministic encoder pass
         activations = self.network.encoder(measurements)
-        # Repeat the tensors in the list of activations n_samples amount of times
-        # This repeats elementwise, so: [1, 2, 3] -> [1, 1, 2, 2, 3, 3]
-        activations = [ops.repeat(a, repeats=n_samples, axis=0) for a in activations]
+        if not per_sample:
+            # One encoder pass shared by every sample: repeat its activations.
+            activations = [ops.repeat(a, repeats=n_samples, axis=0) for a in activations]
 
-        # Logits are of shape [B * n_samples, 256, 256, 100]
-        logits, _, _ = self.network.decoder.call(activations)
-        # Samples are of shape [B * n_samples, 256, 256, 3] in [-1, 1]
-        samples = self.network.sample_from_mol(logits)
+        # Logits are of shape [n_samples, 256, 256, 100]
+        logits, _, _ = self.network.decoder.call(activations, seed=seed_decoder)
+        # Samples are of shape [n_samples, 256, 256, 3] in [-1, 1]
+        return self.network.sample_from_mol(logits, seed=seed_mol)
 
-        # Split the samples into [B, n_samples, 256, 256, 3]
-        output = ops.stack(ops.split(samples, b, axis=0), axis=0)
-        return output
-
-    def call(self, measurements):
+    def call(self, measurements, seed=None):
         """
         Returns a reconstruction of the input, together with the latent samples and KL divergences.
 
         Args:
             measurements (tensor): Input measurements of shape [B, 256, 256, 3].
+            seed: Random seed generator. When ``None``, the model falls back to the
+                internal seed generators of its blocks.
 
         Returns:
             recon (tensor): Reconstructed output of shape [B, 256, 256, 3],
@@ -165,24 +174,29 @@ class HierarchicalVAE(DeepGenerativeModel):
             at each latent layer.
 
         """
+        seed_network, seed_mol = split_seed(seed, 2)
         # Returns reconstruction, latent samples, kl divergences
-        recon, z_samples, kl = self.network.call(measurements)
-        recon = self.network.sample_from_mol(recon)
+        recon, z_samples, kl = self.network.call(measurements, seed=seed_network)
+        recon = self.network.sample_from_mol(recon, seed=seed_mol)
         return recon, z_samples, kl
 
-    def partial_inference(self, measurements, num_layers=0.5, n_samples=1, **kwargs):
+    def partial_inference(self, measurements, num_layers=0.5, n_samples=1, seed=None, **kwargs):
         """
         Performs TopDown inference with the HVAE up until a certain layer,
         after which it continues in the decoder with multiple prior streams.
 
         Args:
-            measurements (tensor): Input measurements of shape [B, 256, 256, 3].
+            measurements (tensor): Input measurements of shape [256, 256, 3], or
+                [n_samples, 256, 256, 3] to condition each sample on a different
+                measurement.
             num_layers (float or int): If float, fraction of total layers to use from the top.
                 If int, number of layers to use from the top.
             n_samples (int): Number of posterior samples to generate.
+            seed: Random seed generator. When ``None``, the model falls back to the
+                internal seed generators of its blocks.
 
         Returns:
-            output (tensor): Posterior samples of shape [B, n_samples, 256, 256, 3].
+            output (tensor): Posterior samples of shape [n_samples, 256, 256, 3].
         """
         # Make sure num_layers is a float between 0 and 1 or an integer between 1 and depth
         if isinstance(num_layers, float):
@@ -193,27 +207,35 @@ class HierarchicalVAE(DeepGenerativeModel):
         else:
             raise ValueError("num_layers must be either a float or an int.")
 
-        b = ops.shape(measurements)[0]
-        # Only need a single deterministic encoder pass
+        seed_blocks, seed_mol = split_seed(seed, 2)
+        measurements, per_sample = self._as_measurement_batch(measurements, n_samples, event_ndim=3)
+        # Deterministic encoder: a single measurement needs one pass, whose
+        # activations are then repeated across the samples.
+        repeats = 1 if per_sample else n_samples
         activations = self.network.encoder(measurements)
+        n_blocks = sum(
+            len(dec_stage.blocks.layers) for dec_stage in self.network.decoder.stages.layers
+        )
+        block_seeds = iter(split_seed(seed_blocks, n_blocks))
 
         # Single pass through the top num_layers of the decoder
         # Adding the same latent to z_stage n_samples times
         x = ops.zeros_like(activations[-1])
-        z = ops.tile(ops.zeros([1, *self.z_out]), (b * n_samples, 1, 1, 1))
+        z = ops.tile(ops.zeros([1, *self.z_out]), (n_samples, 1, 1, 1))
         current_layer = 0
         for dec_stage, act in zip(self.network.decoder.stages.layers, reversed(activations)):
             for dec_block in dec_stage.blocks.layers:
+                block_seed = next(block_seeds)
                 if current_layer < num_layers:
                     # Use posterior sampling for the first num_layers
-                    x, z_block, _ = dec_block.call(x, act)
-                    z += ops.repeat(z_block, repeats=n_samples, axis=0)
+                    x, z_block, _ = dec_block.call(x, act, seed=block_seed)
+                    z += ops.repeat(z_block, repeats=repeats, axis=0)
                 else:
                     # Use prior sampling for the remaining layers
                     if current_layer == num_layers:
                         # At the threshold, we duplicate the rest of the chain
-                        x = ops.repeat(x, repeats=n_samples, axis=0)
-                    x, z_block = dec_block.call_uncond(x)
+                        x = ops.repeat(x, repeats=repeats, axis=0)
+                    x, z_block = dec_block.call_uncond(x, seed=block_seed)
                     z += z_block
                 current_layer += 1
             x = dec_stage.pool(x)
@@ -223,9 +245,7 @@ class HierarchicalVAE(DeepGenerativeModel):
         for out_block in self.network.decoder.output_blocks.layers:
             px_z = out_block(px_z)
         px_z = self.network.decoder.last_conv(px_z)
-        px_z = self.network.sample_from_mol(px_z)
-
-        return ops.stack(ops.split(px_z, b, axis=0), axis=0)
+        return self.network.sample_from_mol(px_z, seed=seed_mol)
 
     def log_density(self, measurements, **kwargs):
         """

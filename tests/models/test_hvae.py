@@ -17,6 +17,7 @@ import pytest
 from keras import ops
 
 import zea.models.hvae as hvae_module
+from zea.func import vmap
 from zea.models.hvae import SUPPORTED_VERSIONS, HierarchicalVAE
 from zea.models.hvae.model import VAE, Block, PoolLayer
 from zea.models.hvae.utils import (
@@ -27,6 +28,8 @@ from zea.models.hvae.utils import (
     SoftPlus,
     cone_loss_mask,
 )
+
+from .. import DEFAULT_TEST_SEED
 
 IMAGE_SIZE = 4
 NUM_STAGES = 3
@@ -136,6 +139,12 @@ def model(tiny_preset):
 def images(rng):
     """A batch of images in the [-1, 1] range the model works in."""
     return rng.uniform(-1, 1, (BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE, CHANNELS)).astype("float32")
+
+
+@pytest.fixture
+def image(images):
+    """A single image, which is what posterior sampling conditions on."""
+    return images[0]
 
 
 # ---------------------------------------------------------------- zea.models.hvae.utils
@@ -606,10 +615,32 @@ class TestHierarchicalVAE:
         assert len(z_samples) == len(kl) == NUM_STAGES
 
     @pytest.mark.parametrize("n_samples", [1, 3])
-    def test_posterior_sample_adds_a_sample_axis(self, model, images, n_samples):
-        samples = model.posterior_sample(images, n_samples=n_samples)
+    def test_posterior_sample_is_led_by_the_sample_axis(self, model, image, n_samples):
+        """A single measurement, and one encoder pass shared by every sample."""
+        samples = model.posterior_sample(image, n_samples=n_samples)
 
-        assert samples.shape == (BATCH_SIZE, n_samples, IMAGE_SIZE, IMAGE_SIZE, CHANNELS)
+        assert samples.shape == (n_samples, IMAGE_SIZE, IMAGE_SIZE, CHANNELS)
+
+    def test_posterior_sample_accepts_one_measurement_per_sample(self, model, images):
+        """A leading axis of ``n_samples`` conditions each sample on its own image,
+        which costs an encoder pass each instead of repeating a single one."""
+        samples = model.posterior_sample(images, n_samples=BATCH_SIZE)
+
+        assert samples.shape == (BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE, CHANNELS)
+
+    def test_posterior_sample_maps_over_a_batch_with_vmap(self, model, images):
+        """The batch axis the model no longer takes itself is recovered with vmap."""
+        samples = vmap(lambda image: model.posterior_sample(image, n_samples=2))(images)
+
+        assert samples.shape == (BATCH_SIZE, 2, IMAGE_SIZE, IMAGE_SIZE, CHANNELS)
+
+    def test_posterior_sample_is_reproducible_given_a_seed(self, model, image):
+        """The seed is split down to every block, so it fixes the whole sample."""
+        samples = [
+            model.posterior_sample(image, n_samples=2, seed=DEFAULT_TEST_SEED) for _ in range(2)
+        ]
+
+        assert np.array_equal(*[ops.convert_to_numpy(s) for s in samples])
 
     def test_log_density_is_the_negative_elbo(self, model, images):
         log_density = model.log_density(images)
@@ -617,11 +648,17 @@ class TestHierarchicalVAE:
         assert float(log_density) < 0  # the ELBO is a positive loss here
 
     @pytest.mark.parametrize("num_layers", [0.5, 1.0, 1, NUM_STAGES])
-    def test_partial_inference(self, model, images, num_layers):
+    def test_partial_inference(self, model, image, num_layers):
         """Posterior sampling for the top layers, prior sampling below."""
-        samples = model.partial_inference(images, num_layers=num_layers, n_samples=2)
+        samples = model.partial_inference(image, num_layers=num_layers, n_samples=2)
 
-        assert samples.shape == (BATCH_SIZE, 2, IMAGE_SIZE, IMAGE_SIZE, CHANNELS)
+        assert samples.shape == (2, IMAGE_SIZE, IMAGE_SIZE, CHANNELS)
+
+    def test_partial_inference_accepts_one_measurement_per_sample(self, model, images):
+        """With one measurement per sample the top layers are not repeated either."""
+        samples = model.partial_inference(images, num_layers=0.5, n_samples=BATCH_SIZE)
+
+        assert samples.shape == (BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE, CHANNELS)
 
     @pytest.mark.parametrize(
         ("num_layers", "error", "match"),
@@ -634,7 +671,7 @@ class TestHierarchicalVAE:
         ],
     )
     def test_partial_inference_rejects_an_out_of_range_depth(
-        self, model, images, num_layers, error, match
+        self, model, image, num_layers, error, match
     ):
         with pytest.raises(error, match=match):
-            model.partial_inference(images, num_layers=num_layers)
+            model.partial_inference(image, num_layers=num_layers)

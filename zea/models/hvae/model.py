@@ -16,6 +16,7 @@ import random as pythonrandom
 import numpy as np
 from keras import Model, Sequential, Variable, layers, ops, random
 
+from zea.func.tensor import split_seed
 from zea.models.hvae.utils import GaussianAnalyticalKL, SoftPlus
 
 
@@ -110,13 +111,15 @@ class VAE(Model):
 
         return elbo, recon_total, kl_total
 
-    def call(self, x):
+    def call(self, x, seed=None):
         """
         Performs a forward pass through the encoder and decoder,
         returning the reconstructed output, latent samples, and KL divergences.
 
         Args:
             x (tensor): Input tensor of shape [B, 256, 256, 3].
+            seed: Random seed generator. When ``None``, each block falls back to
+                its own internal seed generator.
 
         Returns:
             px_z (tensor): Output logits of shape [B, 256, 256, 100],
@@ -124,10 +127,10 @@ class VAE(Model):
 
         """
         activations = self.encoder(x)
-        px_z, z, kl = self.decoder(activations)
+        px_z, z, kl = self.decoder(activations, seed=seed)
         return px_z, z, kl
 
-    def sample_from_mol(self, logits, t=1.0):
+    def sample_from_mol(self, logits, t=1.0, seed=None):
         """
         Samples from a mixture of logistics parameterized by the logits.
         In this implementation, usually converts the 100-channel mixture
@@ -136,10 +139,13 @@ class VAE(Model):
         Args:
             logits (tensor): Logits of shape [B, 256, 256, 100].
             t (float, optional): Temperature for sampling. Defaults to 1.0.
+            seed: Random seed generator. When ``None``, the global Keras random
+                state is used.
 
         Returns:
             x (tensor): Sampled image of shape [B, 256, 256, 3] in [-1, 1].
         """
+        seed_mixture, seed_logistic = split_seed(seed, 2)
 
         # Same thing as in the DiscMixLogisticLoss
         B, H, W, _ = ops.shape(logits)
@@ -155,7 +161,10 @@ class VAE(Model):
         gumbel_noise = -ops.log(
             -ops.log(
                 random.uniform(
-                    (B, H, W, self.params.num_output_mixtures), minval=1e-5, maxval=1.0 - 1e-5
+                    (B, H, W, self.params.num_output_mixtures),
+                    minval=1e-5,
+                    maxval=1.0 - 1e-5,
+                    seed=seed_mixture,
                 )
             )
         )  # B, H, W, M
@@ -190,7 +199,9 @@ class VAE(Model):
         )  # B, H, W, C
 
         # Sample from logistic
-        u = random.uniform((B, H, W, self.params.data_width), minval=1e-5, maxval=1.0 - 1e-5)
+        u = random.uniform(
+            (B, H, W, self.params.data_width), minval=1e-5, maxval=1.0 - 1e-5, seed=seed_logistic
+        )
         x = means + ops.exp(log_scales) * t * (ops.log(u) - ops.log(1.0 - u))  # B, H, W, C
 
         # Auto-regressive sampling RGB and clip
@@ -427,11 +438,13 @@ class Decoder(layers.Layer):
         for out_block in self.output_blocks.layers:
             out_block.build()
 
-    def call(self, activations):
+    def call(self, activations, seed=None):
         """
         Creates an output image from the encoder activations.
         args:
             activations: List of encoder activations at different resolutions.
+            seed: Random seed generator, split across the decoder stages. When
+                ``None``, each block falls back to its own internal seed generator.
         returns:
             Reconstructed image, latent samples, KL divergences.
 
@@ -453,8 +466,11 @@ class Decoder(layers.Layer):
                 b = ops.shape(activations[-1])[0]
                 x = ops.repeat(self.init_bias, b, axis=0)
 
-            for dec_stage, act in zip(self.stages.layers, reversed(activations)):
-                x, z, kl = dec_stage(x, act)
+            stage_seeds = split_seed(seed, len(self.stages.layers))
+            for dec_stage, act, stage_seed in zip(
+                self.stages.layers, reversed(activations), stage_seeds
+            ):
+                x, z, kl = dec_stage(x, act, seed=stage_seed)
                 z_stages.append(z)
                 kl_stages.append(kl)
 
@@ -467,7 +483,7 @@ class Decoder(layers.Layer):
 
         return px_z, z_stages, kl_stages
 
-    def call_uncond(self, num_images=16, t=1):
+    def call_uncond(self, num_images=16, t=1, seed=None):
         """
         Generates an image from the prior of every stage.
         """
@@ -484,8 +500,9 @@ class Decoder(layers.Layer):
             x = (x, vp, kp)
 
         z_stages = []
-        for dec_stage in self.stages.layers:
-            x, z = dec_stage.call_uncond(x, t)
+        stage_seeds = split_seed(seed, len(self.stages.layers))
+        for dec_stage, stage_seed in zip(self.stages.layers, stage_seeds):
+            x, z = dec_stage.call_uncond(x, t, seed=stage_seed)
             z_stages.append(z)
 
         z_out = sum(z_stages) / ops.sqrt(self.model_depth)
@@ -631,12 +648,13 @@ class DecoderStage(layers.Layer):
             dec_block.build()
         self.pool.build()
 
-    def call(self, x, act):
+    def call(self, x, act, seed=None):
         B = ops.shape(x[0])[0] if self.use_depthwise_attention else ops.shape(x)[0]
         z_blocks = ops.tile(ops.zeros([1, *self.z_out]), (B, 1, 1, 1))
         kl_blocks = []
-        for dec_block in self.blocks.layers:
-            x, z, kl = dec_block.call(x, act)
+        block_seeds = split_seed(seed, len(self.blocks.layers))
+        for dec_block, block_seed in zip(self.blocks.layers, block_seeds):
+            x, z, kl = dec_block.call(x, act, seed=block_seed)
             z_blocks += z
             kl_blocks.append(kl)
 
@@ -647,11 +665,12 @@ class DecoderStage(layers.Layer):
             x = (self.pool(dec), self.attn_pool(vp), self.attn_pool(kp))
         return x, z_blocks, kl_blocks
 
-    def call_uncond(self, x, t=1):
+    def call_uncond(self, x, t=1, seed=None):
         B = ops.shape(x[0])[0] if self.use_depthwise_attention else ops.shape(x)[0]
         z_blocks = ops.tile(ops.zeros([1, *self.z_out]), (B, 1, 1, 1))
-        for dec_block in self.blocks.layers:
-            x, z = dec_block.call_uncond(x, t)
+        block_seeds = split_seed(seed, len(self.blocks.layers))
+        for dec_block, block_seed in zip(self.blocks.layers, block_seeds):
+            x, z = dec_block.call_uncond(x, t, seed=block_seed)
             z_blocks += z
 
         if not self.use_depthwise_attention:
@@ -929,7 +948,7 @@ class DecBlock(layers.Layer):
             weights[0] *= np.sqrt(1 / self.model_depth)
             self.z_proj.set_weights(weights)
 
-    def sample(self, x, act):
+    def sample(self, x, act, seed=None):
         # Calculate all attention outputs
         q_out = self.q(ops.concatenate([x, act], axis=-1))
         qm, q_std = ops.split(q_out, 2, axis=3)
@@ -947,7 +966,7 @@ class DecBlock(layers.Layer):
         q_std = self.sp(q_std)
         p_std = self.sp(p_std)
 
-        noise = random.normal(ops.shape(q_std), seed=self.seed_gen)
+        noise = random.normal(ops.shape(q_std), seed=self.seed_gen if seed is None else seed)
 
         z0 = ops.add(qm, ops.multiply(q_std, noise))
 
@@ -959,7 +978,7 @@ class DecBlock(layers.Layer):
             kl = self.kl.call(qm, q_std, pm, p_std)
             return x, z0, kl
 
-    def sample_uncond(self, x, t=1):
+    def sample_uncond(self, x, t=1, seed=None):
         if self.use_depthwise_attention:
             pass
         else:
@@ -972,12 +991,12 @@ class DecBlock(layers.Layer):
             x = ops.add(x, vpl)
 
         p_std = self.sp(p_std)
-        noise = random.normal(ops.shape(p_std), seed=self.seed_gen)
+        noise = random.normal(ops.shape(p_std), seed=self.seed_gen if seed is None else seed)
         z = pm + p_std * noise * t
         return x, z
 
-    def call(self, x, act):
-        x, z, kl = self.sample(x, act)
+    def call(self, x, act, seed=None):
+        x, z, kl = self.sample(x, act, seed=seed)
         if self.use_depthwise_attention:
             x, vp, kp = x
         if not self.last_block:
@@ -990,8 +1009,8 @@ class DecBlock(layers.Layer):
         z = self.z_out_up(z)
         return x, z, kl
 
-    def call_uncond(self, x, t=1):
-        x, z = self.sample_uncond(x, t)
+    def call_uncond(self, x, t=1, seed=None):
+        x, z = self.sample_uncond(x, t, seed=seed)
         if self.use_depthwise_attention:
             x, vp, kp = x
         if not self.last_block:
