@@ -25,6 +25,7 @@ from zea.data.convert.utils import (
     require_output_dir_ownership,
     sitk_load,
     unzip,
+    upload_dataset_to_hf,
 )
 from zea.data.convert.verasonics import (
     VerasonicsFile,
@@ -1458,6 +1459,77 @@ def test_require_output_dir_ownership_mismatched_readme(tmp_path):
     # Should raise ValueError when repo_id doesn't match
     with pytest.raises(ValueError, match="does not declare 'zea_repo_id"):
         require_output_dir_ownership(output_dir, "zeahub/test_dataset")
+
+
+class _FakeHfApi:
+    """Records the Hub calls upload_dataset_to_hf makes, without touching the network."""
+
+    def __init__(self, branches=()):
+        self._branches = list(branches)
+        self.created_branches = []
+        self.uploads = []
+
+    def list_repo_refs(self, repo_id, repo_type):
+        branches = [types.SimpleNamespace(name=name) for name in self._branches]
+        return types.SimpleNamespace(branches=branches)
+
+    def create_branch(self, repo_id, branch, repo_type):
+        self.created_branches.append(branch)
+
+    def upload_large_folder(self, **kwargs):
+        self.uploads.append(kwargs)
+
+
+@pytest.fixture
+def hf_upload_env(tmp_path, monkeypatch):
+    """Patch huggingface_hub and stage a folder with one file to 'upload'."""
+    folder = tmp_path / "dataset"
+    folder.mkdir()
+    (folder / "data.hdf5").write_bytes(b"0" * 16)
+
+    logins = []
+
+    def _install(branches=(), token="hf_token"):
+        api = _FakeHfApi(branches=branches)
+        monkeypatch.setattr("huggingface_hub.HfApi", lambda **kwargs: api)
+        monkeypatch.setattr("huggingface_hub.get_token", lambda: token)
+        monkeypatch.setattr("huggingface_hub.login", lambda *a, **k: logins.append(k))
+        return api
+
+    return types.SimpleNamespace(folder=folder, install=_install, logins=logins)
+
+
+def _no_input(monkeypatch):
+    """Make any input() call an outright test failure."""
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("input() called in a non-interactive run")
+
+    monkeypatch.setattr("builtins.input", _boom)
+
+
+def test_upload_yes_creates_missing_revision_without_prompting(hf_upload_env, monkeypatch):
+    """yes=True creates the branch and uploads, never touching input()."""
+    api = hf_upload_env.install(branches=["main"])
+    _no_input(monkeypatch)
+
+    upload_dataset_to_hf(hf_upload_env.folder, "zeahub/test-dataset", "v0.1.4", yes=True)
+
+    assert api.created_branches == ["v0.1.4"]
+    assert len(api.uploads) == 1
+    assert api.uploads[0]["revision"] == "v0.1.4"
+    assert hf_upload_env.logins == [], "unattended runs must not enter the login flow"
+
+
+def test_upload_yes_without_token_raises(hf_upload_env, monkeypatch):
+    """Unattended uploads must fail fast rather than drop into the login prompt."""
+    api = hf_upload_env.install(branches=["main"], token=None)
+    _no_input(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="requires a Hugging Face token"):
+        upload_dataset_to_hf(hf_upload_env.folder, "zeahub/test-dataset", "v0.1.4", yes=True)
+
+    assert api.uploads == []
 
 
 class TestEstimateLensProbeParams:

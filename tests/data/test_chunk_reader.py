@@ -12,7 +12,6 @@ layouts and selections where it could plausibly diverge. The cases that earn the
 """
 
 import http.server
-import logging
 import os
 import socketserver
 import threading
@@ -285,20 +284,9 @@ class TestFallbackNotes:
     """
 
     @pytest.fixture
-    def notes(self, caplog):
-        """Capture ``zea.log`` (``propagate=False``) and isolate the once-only dedupe set."""
-        from zea import log
-
-        caplog.set_level(logging.WARNING)
-        log.logger.addHandler(caplog.handler)
-        saved = set(log._warned_locations)
-        log._warned_locations.clear()
-        try:
-            yield caplog
-        finally:
-            log.logger.removeHandler(caplog.handler)
-            log._warned_locations.clear()
-            log._warned_locations.update(saved)
+    def notes(self, attach_caplog_warnings):
+        """The notes a read emitted: ``attach_caplog_warnings`` under a local name."""
+        return attach_caplog_warnings
 
     def test_lzf_nudges_to_resave_even_without_progress(self, tmp_path, notes):
         path = _write(tmp_path / "lzf.hdf5", _structured(), compression="lzf")
