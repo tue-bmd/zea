@@ -6,7 +6,6 @@ model and the data stack) and the Keras preset loading/saving in
 """
 
 import json
-import logging
 import threading
 import time
 from pathlib import Path
@@ -23,7 +22,6 @@ from huggingface_hub.utils import (
 )
 
 import zea
-from zea import log
 from zea.internal import preset_utils as ipu
 from zea.internal.registry import model_registry
 from zea.models import preset_utils as mpu
@@ -1024,17 +1022,6 @@ def test_save_preprocessor_uses_config_file_and_saves_sublayers(tmp_path):
 @model_registry(name="_preset_utils_test_submodel")
 class _SubTinyPresetModel(_TinyPresetModel):
     """Registered subclass, to exercise the class-mismatch branches of from_preset."""
-
-
-@pytest.fixture
-def attach_caplog(caplog):
-    """Attach pytest's caplog handler to zea's (non-propagating) logger."""
-    caplog.set_level(logging.DEBUG)
-    log.logger.addHandler(caplog.handler)
-    try:
-        yield caplog
-    finally:
-        log.logger.removeHandler(caplog.handler)
 
 
 @pytest.fixture

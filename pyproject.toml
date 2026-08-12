@@ -57,16 +57,18 @@ dependencies = [
     "scikit-learn >=1.4",
 ]
 [project.optional-dependencies]
-jax = ["jax[cuda12]>=0.4.35"]
+jax = [
+    "jax[cuda12]>=0.4.35; sys_platform == 'linux'",
+    "jax>=0.4.35; sys_platform != 'linux'",
+]
 display = ["opencv-python>=4"]
 display-headless = ["opencv-python-headless>=4"]
 # most models don't needs these optional dependencies
 # but some do, so we list them here
 models = ["onnxruntime>=1.15"]
 app = ["gradio>=6.0"]
-# these are just here for .readthedocs.yaml
-# please for proper install (with GPU support)
-# install manually
+# Unpinned extras for `pip install zea[backends]`; development uses the pinned
+# jax-*/torch-*/tf-* dependency-groups below instead.
 # TensorFlow only ships Keras 3 from 2.16.1 onwards; older versions pin keras <3.
 backends = ["jax>=0.4.35", "tensorflow>=2.16.1", "torch>=2.2"]
 
@@ -84,7 +86,7 @@ zea = "zea.__main__:main"
 # uv installs `dev` by default; lean envs opt out with --no-default-groups /
 # --only-group (readthedocs: UV_NO_DEFAULT_GROUPS, set in its dashboard).
 [dependency-groups]
-lint = ["ruff==0.16.0", "ty==0.0.64"]
+lint = ["ruff==0.16.2", "ty==0.0.69"]
 tests = [
     "pytest>=9.0.3",
     "papermill>=2.4",
@@ -111,13 +113,64 @@ docs = [
     "PyStemmer",
     "IPython",
 ]
-# The full dev environment: the tooling groups plus the runtime extras
+# The full dev environment: the tooling groups plus the runtime extras. Takes
+# opencv-python-headless directly, not via `zea[display-headless]`: uv only activates a
+# conflicting extra when it is named, so the indirection would leave `uv sync` without cv2.
 dev = [
     { include-group = "tests" },
     { include-group = "docs" },
     { include-group = "lint" },
-    "zea[display-headless]",
+    "opencv-python-headless>=4",
     "zea[models]",
+    "pip",
+]
+
+# ML backends, pinned by uv.lock rather than the Dockerfile, so that
+# `uv sync --group jax-gpu ...` installs them in place -- no image rebuild. The bounds
+# are floors; `uv lock --upgrade-package jax` (etc.) moves the locked versions.
+jax-cpu = ["jax>=0.10.2"]
+jax-gpu = ["jax[cuda12]>=0.10.2"]
+torch-cpu = ["torch>=2.2", "torchvision", "torchaudio"]
+torch-gpu = ["torch>=2.2", "torchvision", "torchaudio"]
+tf-cpu = ["tensorflow>=2.21"]
+tf-gpu = ["tensorflow[and-cuda]>=2.21"]
+
+[tool.uv]
+conflicts = [
+    # torch-cpu and torch-gpu are the same package from different indexes, so uv has to fork.
+    [{ group = "torch-cpu" }, { group = "torch-gpu" }],
+    # Both opencv extras provide `cv2`, so co-installing them leaves whichever landed last,
+    # and uninstalling either takes the shared `cv2/` with it. `dev` already brings the
+    # headless build, hence the second pair.
+    [{ extra = "display" }, { extra = "display-headless" }],
+    [{ extra = "display" }, { group = "dev" }],
+]
+
+# One index per compute backend; `explicit` keeps everything else on PyPI. To move to
+# another CUDA generation, run ./scripts/resolve_backend_versions.sh.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+# PyTorch ships no CUDA wheels for macOS, so torch-gpu falls back to PyPI there.
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", group = "torch-cpu" },
+    { index = "pytorch-cu129", group = "torch-gpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+    { index = "pytorch-cpu", group = "torch-cpu" },
+    { index = "pytorch-cu129", group = "torch-gpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchaudio = [
+    { index = "pytorch-cpu", group = "torch-cpu" },
+    { index = "pytorch-cu129", group = "torch-gpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -271,7 +324,7 @@ filterwarnings = [
     "ignore:.*hf_xet.*:DeprecationWarning",
     "ignore:'(oneOf|parseString|resetCache|enablePackrat)' deprecated:DeprecationWarning",  # matplotlib -> old pyparsing API
     "ignore:invalid escape sequence:DeprecationWarning",
-    "ignore:.*sentry_sdk.Hub. is deprecated:DeprecationWarning",  # wandb -> deprecated sentry Hub API
+    "ignore:.*sentry_sdk.Hub. is deprecated:DeprecationWarning",                            # wandb -> deprecated sentry Hub API
 ]
 
 [tool.coverage.run]
@@ -281,6 +334,8 @@ concurrency = ["multiprocessing", "thread"]
 sigterm = true
 omit = [
     "/tmp/__autograph_generated_file*.py",
+    # CI syncs the environment into the workspace, so it would otherwise be measured.
+    "*/.venv/*",
     # Synthetic module compiled in-memory by tests/test_log.py; never on disk.
     "*/_fake_internal_module.py",
 ]

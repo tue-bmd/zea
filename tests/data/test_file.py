@@ -2066,9 +2066,8 @@ class TestLegacyFileLoading:
         """Path to the real legacy picmus file on zeahub."""
         return _LEGACY_PICMUS_PATH
 
-    def test_legacy_warning_fires(self, legacy_file):
+    def test_legacy_warning_fires(self, legacy_file, reset_warning_once):
         """Opening a legacy file emits the version warning."""
-        zea.log._warned_locations.clear()
         with patch("zea.data.file.log.warning") as mock_warn:
             with File(legacy_file, revision=_LEGACY_PICMUS_REVISION):
                 pass
