@@ -126,8 +126,9 @@ def _up_block(x, skip, filters, block, convs=2, final_conv_filters=None):
     for i in range(2, convs + 2):
         x = Conv2D(filters, 3, activation="relu", padding="same", name=f"Conv{block}_{i}")(x)
         x = BatchNormalization(name=f"BN{block}_{i}")(x)
-    # For block 9, add Conv9_4 with 2 filters and BN9_4
-    if final_conv_filters is not None:
+    # For block 9, add Conv9_4 with 2 filters and BN9_4. The published architecture
+    # spells that block out below instead, so this path is unused.
+    if final_conv_filters is not None:  # pragma: no cover
         x = Conv2D(
             final_conv_filters,
             3,

@@ -182,8 +182,11 @@ class EchoNetDynamic(BaseModel):
 register_presets(echonet_dynamic_presets, EchoNetDynamic)
 
 
-def download_original_weights(weights_folder=None):
+def download_original_weights(weights_folder=None):  # pragma: no cover
     """Download the original weights from the EchoNet Github repository.
+
+    Only used by :func:`convert_original_weights` to reproduce the published
+    preset; using the model needs neither.
 
     Args:
         weights_folder (str | Path, optional): Folder to download the weights into.

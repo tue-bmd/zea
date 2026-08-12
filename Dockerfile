@@ -1,154 +1,112 @@
 # syntax=docker/dockerfile:1
-# By default no backend is installed. Explicitly pass build-args to enable each one.
-# INSTALL_{BACKEND} accepts: cpu | gpu | false (default: false = not installed)
-# Example – all backends with GPU:
-# docker build -t zeahub/all:latest \
-#   --build-arg INSTALL_JAX=gpu --build-arg INSTALL_TORCH=gpu --build-arg INSTALL_TF=gpu .
-# Example – JAX only (GPU):
-# docker build -t zeahub/jax:latest --build-arg INSTALL_JAX=gpu .
+# Backends are opt-in: INSTALL_{JAX,TORCH,TF} take cpu | gpu | false (default false).
+#   docker build -t zeahub/jax:latest --build-arg INSTALL_JAX=gpu .
+#   docker build -t zeahub/all:latest --build-arg INSTALL_JAX=gpu \
+#     --build-arg INSTALL_TORCH=gpu --build-arg INSTALL_TF=gpu .
+#
+# Single stage: uv installs wheels and caches to --mount=type=cache, so a builder stage
+# would have nothing to strip. Installing deps before `COPY . .` gives the same layer
+# caching, and keeps the backends in their own layer so the variants share the rest.
 
-##############################
-# 0) Declare build-time args
-##############################
-ARG INSTALL_JAX=false
-ARG INSTALL_TORCH=false
-ARG INSTALL_TF=false
-ARG DEV=true
-
-##############################
-# 1) Builder: all deps (non-backend + selected backends)
-##############################
-FROM python:3.12-slim-bullseye AS builder
-
-# Backend versions, to re-resolve to newer versions, run ./scripts/resolve_backend_versions.sh
-# and paste its output here.
-ENV JAX_VERSION=0.10.2 \
-    TORCH_VERSION=2.12.1 \
-    TORCHVISION_VERSION=0.27.1 \
-    TORCHAUDIO_VERSION=2.11.0 \
-    TF_VERSION=2.21.0
-
-ARG CU_BACKEND=cu129
+# uv's Debian image, not python:*-slim: it ships uv and no system Python, so /opt/venv
+# holds the only interpreter and the only pip. One pinned tag covers both the OS and uv.
+FROM ghcr.io/astral-sh/uv:0.12.1-trixie-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
-# Install into the system env (/usr/local) so the runtime stage can copy it. UV_LINK_MODE=copy
-# lets uv copy out of the --mount=type=cache on each uv RUN (a separate filesystem).
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    LC_ALL=C \
-    UV_PROJECT_ENVIRONMENT=/usr/local \
-    UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
 
-# Install uv from the official image
-COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /usr/local/bin/uv
+# No tk package: uv's managed Python bundles Tcl/Tk, so tkinter (and matplotlib's TkAgg
+# backend) already work.
+# ca-certificates is not in the base image but is needed for pre-commit hooks and other HTTPS requests.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --fix-missing \
+    ca-certificates \
+    ffmpeg \
+    make pandoc \
+    openssh-client git sudo && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# /opt/venv rather than .venv: the workspace is bind-mounted over in dev containers, which
+# would shadow it. PATH + VIRTUAL_ENV let `python`/`pip` find it unaided;
+# UV_PROJECT_ENVIRONMENT points `uv sync`/`uv run` at it too. UV_PYTHON_INSTALL_DIR must
+# sit outside any cache mount so the venv's interpreter symlink survives.
+# UV_LINK_MODE=copy: the cache mount is a separate filesystem.
+# PYTHON_VERSION drives UV_PYTHON and the site-packages path in LD_LIBRARY_PATH below.
+# Give it as X.Y: it also names the venv's lib/pythonX.Y directory.
+ARG PYTHON_VERSION=3.12
+ENV UV_PYTHON=${PYTHON_VERSION} \
+    UV_PYTHON_INSTALL_DIR=/opt/python \
+    PATH=/opt/venv/bin:$PATH \
+    VIRTUAL_ENV=/opt/venv \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONDONTWRITEBYTECODE=1 \
+    LC_ALL=C
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv python install
 
 WORKDIR /zea
 
 COPY pyproject.toml uv.lock README.md ./
 
-# Install all non-backend dependencies from the lockfile, installing the dev
-# dependency-group (tests + docs + lint + dev-only runtime pkgs) only if DEV is true.
-# uv installs the `dev` group by default, so the DEV=false branch must pass
-# --no-default-groups to keep dev tooling out of the production image.
-# --no-install-project skips installing zea itself (added later as an editable
-# install), and --inexact keeps pip/setuptools available in the image.
-ARG DEV
+# Non-backend deps from the lockfile. uv installs the `dev` group by default, so DEV=false
+# opts out to keep tests/docs/lint tooling out of production images. --no-install-project:
+# zea itself goes in last. Depends on DEV alone, so all backend variants share this layer.
+ARG DEV=true
 RUN --mount=type=cache,target=/root/.cache/uv \
-    if [ "$DEV" = "true" ]; then \
-    uv sync --frozen --no-install-project --inexact --dev; \
-    else \
-    uv sync --frozen --no-install-project --inexact --no-dev; \
-    fi
+    uv sync --frozen --no-install-project \
+    $([ "$DEV" = "true" ] || echo --no-dev)
 
-# Install the selected backends in a single resolve. uv's --torch-backend selects the
-# right PyTorch index (CPU vs CUDA), so there is no need for per-variant build stages or
-# manual index URLs / +cpu suffixes. CPU vs GPU is uniform across backends per build.
-ARG INSTALL_JAX
-ARG INSTALL_TORCH
-ARG INSTALL_TF
+# One dependency-group per backend. Versions and CPU/CUDA wheels come from uv.lock, so a
+# later `uv sync` inside the image installs the same stack -- no rebuild to pick up a
+# lockfile change. --inexact keeps the layer above in place.
+ARG INSTALL_JAX=false
+ARG INSTALL_TORCH=false
+ARG INSTALL_TF=false
 RUN --mount=type=cache,target=/root/.cache/uv \
     set -e; \
-    case "${INSTALL_JAX}${INSTALL_TORCH}${INSTALL_TF}" in \
-    *gpu*) TORCH_BACKEND="${CU_BACKEND}" ;; \
-    *)     TORCH_BACKEND="cpu" ;; \
-    esac; \
-    PKGS=""; \
-    [ "$INSTALL_TORCH" != "false" ] && PKGS="$PKGS torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION}"; \
-    [ "$INSTALL_TF"  = "cpu" ] && PKGS="$PKGS tensorflow==${TF_VERSION}"; \
-    [ "$INSTALL_TF"  = "gpu" ] && PKGS="$PKGS tensorflow[and-cuda]==${TF_VERSION}"; \
-    [ "$INSTALL_JAX" = "cpu" ] && PKGS="$PKGS jax==${JAX_VERSION}"; \
-    [ "$INSTALL_JAX" = "gpu" ] && PKGS="$PKGS jax[cuda12]==${JAX_VERSION}"; \
-    if [ -n "$PKGS" ]; then \
-    uv pip install --system --torch-backend="$TORCH_BACKEND" $PKGS; \
+    GROUPS=""; \
+    [ "$INSTALL_JAX" != "false" ] && GROUPS="$GROUPS --group jax-${INSTALL_JAX}"; \
+    [ "$INSTALL_TORCH" != "false" ] && GROUPS="$GROUPS --group torch-${INSTALL_TORCH}"; \
+    [ "$INSTALL_TF" != "false" ] && GROUPS="$GROUPS --group tf-${INSTALL_TF}"; \
+    if [ -n "$GROUPS" ]; then \
+    uv sync --frozen --no-install-project --no-default-groups --inexact $GROUPS; \
     fi
 
-##############################
-# 2) Final runtime image
-##############################
-FROM python:3.12-slim-bullseye AS runtime
+# TF 2.21.0's libtensorflow_framework.so.2 lost its cusolver RUNPATH entry (2.19 had it),
+# so TF silently falls back to CPU. Harmless without TF/CUDA; drop once fixed upstream.
+RUN test -d "/opt/venv/lib/python${PYTHON_VERSION}/site-packages" || { \
+    echo "PYTHON_VERSION=${PYTHON_VERSION} does not match the venv in /opt/venv/lib" >&2; \
+    exit 1; \
+    }
+ENV LD_LIBRARY_PATH=/opt/venv/lib/python${PYTHON_VERSION}/site-packages/nvidia/cusolver/lib
 
-ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends --fix-missing \
-    python3-tk \
-    ffmpeg imagemagick \
-    make pandoc \
-    openssh-client git sudo && \
-    ln -s /usr/bin/python3 /usr/bin/python && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /zea
-
-# Copy over installed Python packages and entrypoints from builder (includes uv)
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-
-# Copy over Jupyter configuration and kernelspecs
-COPY --from=builder /usr/local/share/jupyter /usr/local/share/jupyter
-
-# preserve runtime flags
-ARG INSTALL_JAX
-ARG INSTALL_TORCH
-ARG INSTALL_TF
-ARG DEV
+# Kept for the motd and the KERAS_BACKEND default below.
 ENV INSTALL_JAX=${INSTALL_JAX} \
     INSTALL_TORCH=${INSTALL_TORCH} \
     INSTALL_TF=${INSTALL_TF} \
     DEV=${DEV}
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    LC_ALL=C
+# KERAS_BACKEND cannot be a plain ENV: it is derived from the INSTALL_* args and ENV takes
+# no conditionals. zea-backend.sh holds that logic once; it is sourced from two places
+# because neither hook alone covers every entry path -- ENTRYPOINT is skipped by
+# `docker exec` (how dev containers open every terminal), and /etc/bash.bashrc is read only
+# by interactive bash, not by `docker run <img> python ...`.
+COPY scripts/zea-backend.sh /etc/zea-backend.sh
+COPY scripts/entrypoint.sh /usr/local/bin/zea-entrypoint
 
-# TF 2.21.0's libtensorflow_framework.so.2 has RUNPATH entries for every bundled CUDA lib
-# except cusolver (2.19 still had it), so TF silently falls back to CPU with a "Cannot
-# dlopen some GPU libraries" warning. Put that one directory on the loader path; harmless
-# when TF/CUDA is not installed. Drop this once the upstream wheel is fixed.
-ENV LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cusolver/lib
-
-# Install zea
-
-# Copy source code to /zea (needed for editable install)
-COPY . .
-# in editable mode WITHOUT installing dependencies (which are already installed by uv)
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --no-deps -e .
-
-# Set KERAS_BACKEND in bashrc before motd.sh is called
-RUN echo 'export KERAS_BACKEND=$( \
-    if [ "$INSTALL_JAX" != "false" ]; then \
-    echo jax; \
-    elif [ "$INSTALL_TORCH" != "false" ]; then \
-    echo torch; \
-    elif [ "$INSTALL_TF" != "false" ]; then \
-    echo tf; \
-    else \
-    echo numpy; \
-    fi )' >> /etc/bash.bashrc && \
+# Message of the day, shown on every interactive shell
+COPY scripts/motd.sh /etc/motd.sh
+RUN chmod +x /etc/motd.sh /usr/local/bin/zea-entrypoint && \
+    echo '. /etc/zea-backend.sh' >> /etc/bash.bashrc && \
     echo '[ ! -z "$TERM" -a -r /etc/motd.sh ] && KERAS_BACKEND=$KERAS_BACKEND INSTALL_JAX=$INSTALL_JAX INSTALL_TORCH=$INSTALL_TORCH INSTALL_TF=$INSTALL_TF DEV=$DEV bash /etc/motd.sh' \
     >> /etc/bash.bashrc
 
-# Source working/installation directory and add motd (message of the day)
-COPY scripts/motd.sh /etc/motd.sh
-RUN chmod +x /etc/motd.sh
+# Last, so a source-only change rebuilds nothing above. --no-deps: already installed.
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --no-deps -e .
 
+ENTRYPOINT ["zea-entrypoint"]
 CMD ["/bin/bash"]

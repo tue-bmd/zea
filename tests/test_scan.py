@@ -6,7 +6,6 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-import zea
 from zea import Parameters
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.internal.dummy_scan import get_parameters
@@ -305,6 +304,77 @@ def test_selected_transmits_affects_shape(attr, expected_shape):
     assert val.shape[0] == val_tensor.shape[0] == 3
 
 
+def test_flat_aligned_apodization_derived():
+    """Derived: None, unless scanline mode, where it is the one-hot transmit mask."""
+    assert Parameters(**scan_args).flat_aligned_apodization is None
+
+    scanline = Parameters(**scan_args, enable_scanline=True)
+    n_tx, grid_size_z = scan_args["n_tx"], scan_args["grid_size_z"]
+    assert scanline.flat_aligned_apodization.shape == (grid_size_z * n_tx, n_tx)
+
+
+def test_flat_aligned_apodization_explicit_value_wins():
+    """An explicit mask overrides the derived default, and follows the selection.
+
+    It is stored over the full transmit axis, so a transmit selection slices it
+    (and invalidates the cached value). The pixel axis matches the grid, which
+    does not depend on the selection outside of scanline mode.
+    """
+    n_tx = scan_args["n_tx"]
+    n_pix = scan_args["grid_size_z"] * scan_args["grid_size_x"]
+    apodization = np.arange(n_pix * n_tx, dtype=np.float32).reshape(n_pix, n_tx)
+
+    parameters = Parameters(**scan_args, flat_aligned_apodization=apodization)
+    np.testing.assert_array_equal(parameters.flat_aligned_apodization, apodization)
+
+    selection = [1, 3]
+    parameters.set_transmits(selection)
+    np.testing.assert_array_equal(parameters.flat_aligned_apodization, apodization[:, selection])
+    # The mask stays aligned with the active grid: (n_pix, n_tx).
+    assert parameters.flat_aligned_apodization.shape == (
+        np.prod(parameters.grid.shape[:-1]),
+        parameters.n_tx,
+    )
+
+    parameters.set_transmits("all")
+    np.testing.assert_array_equal(parameters.flat_aligned_apodization, apodization)
+
+    # Explicitly unsetting it falls back to the derived value.
+    parameters.flat_aligned_apodization = None
+    assert parameters.flat_aligned_apodization is None
+
+
+def test_flat_aligned_apodization_rejected_in_scanline_mode():
+    """A scanline grid derives its own mask; an explicit one cannot stay aligned with it."""
+    n_tx, grid_size_z = scan_args["n_tx"], scan_args["grid_size_z"]
+    apodization = np.ones((grid_size_z * n_tx, n_tx), dtype=np.float32)
+
+    parameters = Parameters(
+        **scan_args,
+        enable_scanline=True,
+        flat_aligned_apodization=apodization,
+    )
+    with pytest.raises(ValueError, match="enable_scanline"):
+        _ = parameters.flat_aligned_apodization
+
+    # Unsetting it (or disabling scanline mode) resolves the conflict either way.
+    parameters.flat_aligned_apodization = None
+    assert parameters.flat_aligned_apodization.shape == (grid_size_z * n_tx, n_tx)
+
+
+def test_flat_aligned_apodization_transmit_axis_is_validated():
+    """A mask over the selection instead of the full transmit axis is rejected."""
+    n_pix = scan_args["grid_size_z"] * scan_args["grid_size_x"]
+
+    parameters = Parameters(
+        **scan_args,
+        flat_aligned_apodization=np.ones((n_pix, 2), dtype=np.float32),
+    )
+    parameters.set_transmits([1, 3])
+    with pytest.raises(ValueError, match="full transmit axis"):
+        _ = parameters.flat_aligned_apodization
+
+
 def test_set_attributes():
     """Test setting attributes of Parameters class."""
     parameters = Parameters(**scan_args)
@@ -370,7 +440,7 @@ def test_t_peak_default_and_waveform_derived():
     assert np.allclose(parameters.t_peak, 1 / center_frequency)
 
 
-def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
+def test_missing_transmit_defaults_warn_once_on_access(monkeypatch, reset_warning_once):
     local_scan_args = scan_args.copy()
     local_scan_args.pop("azimuth_angles", None)
     local_scan_args.pop("t0_delays", None)
@@ -381,9 +451,6 @@ def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
     local_scan_args.pop("tgc_gain_curve", None)
 
     warnings = []
-
-    # Reset warning_once state to make this test deterministic.
-    zea.log._warned_locations.clear()
 
     def _capture_warning(message, *args, **kwargs):
         warnings.append(message)
@@ -415,13 +482,11 @@ def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
     assert warnings.count("No ``tgc_gain_curve`` provided, using ones") == 1
 
 
-def test_missing_defaults_warn_once_per_scan_instance(monkeypatch):
+def test_missing_defaults_warn_once_per_scan_instance(monkeypatch, reset_warning_once):
     local_scan_args = scan_args.copy()
     local_scan_args.pop("azimuth_angles", None)
 
     warnings = []
-
-    zea.log._warned_locations.clear()
 
     def _capture_warning(message, *args, **kwargs):
         warnings.append(message)
