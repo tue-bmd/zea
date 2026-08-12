@@ -4,7 +4,7 @@ codecov:
     # (self-hosted, up to 2h). Wait for both before notifying, otherwise Codecov
     # reports as soon as `unit` lands while `heavy` is still running.
     after_n_builds: 2
-  require_ci_to_pass: true  # Don't post a coverage status if the CI run itself failed
+  require_ci_to_pass: false
   max_report_age: off
 
 coverage:
