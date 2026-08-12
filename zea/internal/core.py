@@ -88,6 +88,10 @@ def _supports_zea_to_tensor(value) -> bool:
 
 def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
     """Convert an object to a dictionary of tensors."""
+    from zea.config import Config
+    from zea.parameters import Parameters
+    from zea.probes import Probe
+
     snapshot = {}
 
     for key in dictionary:
@@ -98,7 +102,7 @@ def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
         # Get the value from the dictionary
         value = dictionary[key]
 
-        if _supports_zea_to_tensor(value):
+        if isinstance(value, (Config, Probe, Parameters)):
             snapshot[key] = value.to_tensor(keep_as_is=keep_as_is)
             continue
 
@@ -221,21 +225,25 @@ def serialize_elements(key_elements: list) -> str:
     def _serialize(element) -> str:
         return pickle.dumps(element).hex()
 
+    _MISSING = object()
+
     def _serialize_element(element) -> str:
         if isinstance(element, (list, tuple)):
             # If element is a list or tuple, serialize its elements recursively
-            element = serialize_elements(element)
-        elif hasattr(element, "serialized"):
-            # Objects opt in to content-based keys by exposing a `serialized` property
-            # (see :class:`zea.internal.parameters.BaseParameters`). Their own pickle
-            # representation would depend on attribute insertion order and on derived
-            # state such as caches.
-            element = str(element.serialized)
-        elif isinstance(element, keras.random.SeedGenerator):
+            return serialize_elements(element)
+
+        # Objects opt in to content-based keys by exposing a `serialized` property.
+        # Their own pickle representation would depend on attribute insertion order
+        # and on derived state such as caches. Read the property once, it may be expensive.
+        serialized = getattr(element, "serialized", _MISSING)
+        if serialized is not _MISSING:
+            return str(serialized)
+
+        if isinstance(element, keras.random.SeedGenerator):
             # If element is a SeedGenerator, use the state
-            element = keras.ops.convert_to_numpy(element.state.value)
-            element = _serialize(element)
-        elif isinstance(element, dict):
+            return _serialize(keras.ops.convert_to_numpy(element.state.value))
+
+        if isinstance(element, dict):
             # If element is a dictionary, sort its keys and serialize its values recursively.
             # This is needed to ensure the internal state and ordering of the dictionary does
             # not affect the serialization.
@@ -243,12 +251,10 @@ def serialize_elements(key_elements: list) -> str:
             values = [element[k] for k in keys]
             keys = serialize_elements(keys)
             values = serialize_elements(values)
-            element = f"k_{keys}_v_{values}"
-        else:
-            # Otherwise, serialize the element directly
-            element = _serialize(element)
+            return f"k_{keys}_v_{values}"
 
-        return element
+        # Otherwise, serialize the element directly
+        return _serialize(element)
 
     serialized_elements = []
     for element in key_elements:
