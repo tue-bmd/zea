@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from keras import ops
 
 from zea.models.lista import LISTA, Prox
 
@@ -39,7 +40,7 @@ class TestLISTA:
         """The final activation is applied to the output."""
         model = LISTA(input_shape=(8, 8, 1), folds=2, activation="relu")
         x = rng.standard_normal((1, 8, 8, 1)).astype("float32")
-        assert np.all(np.asarray(model(x)) >= 0)
+        assert np.all(ops.convert_to_numpy(model(x)) >= 0)
 
     def test_config_roundtrip(self, rng):
         """The model can be rebuilt from its config."""

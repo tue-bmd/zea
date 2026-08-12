@@ -136,6 +136,15 @@ class TestFromPreset:
 
         assert model(x).shape == (BATCH_SIZE, 32, 32, 1)
 
+    def test_channel_handling_does_not_leak_between_calls(self, taesd_preset, stub_load_layer, rng):
+        """A grayscale image must not make the next RGB image come back grayscale."""
+        model = TinyAutoencoder.from_preset(taesd_preset)
+        grayscale = rng.random((1, 32, 32, 1)).astype("float32")
+        rgb = rng.random((1, 32, 32, 3)).astype("float32")
+
+        assert model(grayscale).shape == (1, 32, 32, 1)
+        assert model(rgb).shape == (1, 32, 32, 3)
+
     def test_encode_downsamples_to_the_latent(self, taesd_preset, stub_load_layer, rng):
         """encode() returns the latent, decode() maps it back to an image."""
         model = TinyAutoencoder.from_preset(taesd_preset)

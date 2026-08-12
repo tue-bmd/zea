@@ -98,6 +98,16 @@ class TestExpectedCoordinate:
 
         np.testing.assert_allclose(ops.convert_to_numpy(coordinate), [[2.0, 3.0]], atol=1e-4)
 
+    def test_an_all_negative_heatmap_falls_back_to_a_finite_coordinate(self, model):
+        """Nothing positive to weigh: the result must be finite rather than NaN."""
+        grid = ops.stack(ops.cast(ops.convert_to_tensor(np.indices((8, 8))), "float32"), axis=-1)
+        mask = np.full((1, 8, 8), -1.0, dtype="float32")
+
+        coordinate = ops.convert_to_numpy(model.expected_coordinate(mask, grid))
+
+        assert np.all(np.isfinite(coordinate))
+        np.testing.assert_allclose(coordinate, [[0.0, 0.0]], atol=1e-6)
+
     def test_negative_values_are_ignored(self, model):
         """Negative logits are clipped away rather than pulling the centre of mass."""
         grid = ops.stack(ops.cast(ops.convert_to_tensor(np.indices((8, 8))), "float32"), axis=-1)

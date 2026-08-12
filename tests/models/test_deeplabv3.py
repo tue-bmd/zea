@@ -7,6 +7,7 @@ keeps their shape arithmetic readable without another backbone build.
 
 import numpy as np
 import pytest
+from keras import ops
 
 from zea.models.deeplabv3 import (
     DeeplabV3Plus,
@@ -38,7 +39,7 @@ def test_convolution_block_keeps_the_spatial_size(rng, num_filters, kernel_size,
 
     assert out.shape == (1, 16, 16, num_filters)
     # Conv -> BatchNorm -> ReLU, so nothing negative survives.
-    assert np.all(np.asarray(out) >= 0)
+    assert np.all(ops.convert_to_numpy(out) >= 0)
 
 
 def test_dilated_spatial_pyramid_pooling_merges_five_branches(rng):

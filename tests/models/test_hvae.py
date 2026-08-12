@@ -278,11 +278,16 @@ class TestDiscMixLogistic:
         assert ops.convert_to_numpy(loss.call(targets, logits)).shape == (1,)
 
     def test_only_rgb_or_grayscale_targets(self, loss_fn, rng):
-        targets = rng.uniform(-1, 1, (1, IMAGE_SIZE, IMAGE_SIZE, 2)).astype("float32")
-        logits = rng.standard_normal((1, IMAGE_SIZE, IMAGE_SIZE, 14)).astype("float32")
+        """Two-channel targets are rejected; everything else about the call is valid."""
+        logits = rng.standard_normal(
+            (1, IMAGE_SIZE, IMAGE_SIZE, NUM_MIXTURES * (3 * CHANNELS + 1))
+        ).astype("float32")
+        good = rng.uniform(-1, 1, (1, IMAGE_SIZE, IMAGE_SIZE, CHANNELS)).astype("float32")
+        assert loss_fn.call(good, logits) is not None  # same logits, valid target
 
+        two_channel = rng.uniform(-1, 1, (1, IMAGE_SIZE, IMAGE_SIZE, 2)).astype("float32")
         with pytest.raises(AssertionError):
-            loss_fn.call(targets, logits)
+            loss_fn.call(two_channel, logits)
 
 
 def test_gradient_norms_metric_tracks_the_last_value():
@@ -619,17 +624,17 @@ class TestHierarchicalVAE:
         assert samples.shape == (BATCH_SIZE, 2, IMAGE_SIZE, IMAGE_SIZE, CHANNELS)
 
     @pytest.mark.parametrize(
-        ("num_layers", "error"),
+        ("num_layers", "error", "match"),
         [
-            (0.0, AssertionError),
-            (1.5, AssertionError),
-            (0, AssertionError),
-            (NUM_STAGES + 1, AssertionError),
-            ("half", ValueError),
+            (0.0, AssertionError, "float must be in"),
+            (1.5, AssertionError, "float must be in"),
+            (0, AssertionError, "int must be in"),
+            (NUM_STAGES + 1, AssertionError, "int must be in"),
+            ("half", ValueError, "either a float or an int"),
         ],
     )
     def test_partial_inference_rejects_an_out_of_range_depth(
-        self, model, images, num_layers, error
+        self, model, images, num_layers, error, match
     ):
-        with pytest.raises(error):
+        with pytest.raises(error, match=match):
             model.partial_inference(images, num_layers=num_layers)

@@ -454,11 +454,12 @@ class DiffusionModel(DeepGenerativeModel):
         (``noise_rates ** 2 + signal_rates ** 2 == 1``), so the two are
         interchangeable.
 
-        Note:
+        .. note::
+
             This is not the linear *beta* schedule of `Ho et al. (2020)
             <https://arxiv.org/abs/2006.11239>`_, which is a cumulative product
-            over a discrete grid of timesteps. zea's schedules are continuous in
-            ``t`` and parameterized by the signal rate at either end.
+            over a discrete grid of timesteps. ``zea``'s schedules are continuous
+            in ``t`` and parameterized by the signal rate at either end.
 
         Args:
             diffusion_times: Tensor of diffusion times in ``[min_t, max_t]``.

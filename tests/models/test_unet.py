@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from keras import ops
 
 from zea.models.unet import (
     UNet,
@@ -108,7 +109,7 @@ class TestUNet:
         """The output convolution is zero-initialized."""
         x = rng.standard_normal((1, *IMAGE_SHAPE)).astype("float32")
 
-        np.testing.assert_allclose(np.asarray(model(x)), 0.0)
+        np.testing.assert_allclose(ops.convert_to_numpy(model(x)), 0.0)
 
     def test_config_roundtrip(self, model):
         config = model.get_config()

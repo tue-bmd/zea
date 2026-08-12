@@ -1,11 +1,14 @@
 """Network definition of the hierarchical VAE.
 
-This is a snippet of the full model at https://github.com/swpenninga/hvae:
-normalizing flows and (spatial / depthwise) attention are not part of it. The
-arguments and branches for those features are kept so that a checkpoint from
-the original code still deserializes, but the presets zea ships never enable
-them, and the layers they would need do not exist here. Those branches are
-therefore marked ``# pragma: no cover``.
+This is a snippet of the `full model <https://github.com/swpenninga/hvae>`_:
+normalizing flows and (spatial / depthwise) attention are not part of it.
+
+.. note::
+
+    The arguments and branches for those features are kept so that a checkpoint
+    from the original code still deserializes, but the presets ``zea`` ships
+    never enable them, and the layers they would need do not exist here. Those
+    branches are therefore marked ``# pragma: no cover``.
 """
 
 import random as pythonrandom
