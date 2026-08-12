@@ -17,7 +17,6 @@ import numpy as np
 
 from zea import log
 from zea.data.spec import Spec, check_dtype
-from zea.internal.core import Object as ZeaObject
 from zea.internal.core import _to_tensor, hash_elements, serialize_elements
 
 
@@ -82,7 +81,7 @@ class NoDependencyError(ValueError):
         super().__init__(f"'{name}' is not a computed property with dependencies.")
 
 
-class BaseParameters(ZeaObject):
+class BaseParameters:
     """Base class for parameters with dependencies.
 
     This class provides a robust parameter management system,
@@ -244,23 +243,24 @@ class BaseParameters(ZeaObject):
 
         return value
 
-    @staticmethod
-    def _human_readable_type(type):
-        """Convert a type or tuple of types to a human-readable string."""
-        return (
-            type.__name__ if not isinstance(type, tuple) else ", ".join([t.__name__ for t in type])
-        )
-
     def copy(self):
         """Return a deep copy of the parameters object (including custom params)."""
         return self.__class__(**deepcopy(self._params), **deepcopy(self._custom_params))
 
     @property
     def serialized(self):
-        """Compute the checksum of the object only if not already done"""
-        if self._serialized is None:
-            self._serialized = serialize_elements([self._params, self._custom_params])
-        return self._serialized
+        """Checksum of the parameters' current contents, used as a cache key."""
+
+        # not cached -> avoids a stale checksum if the parameters are mutated in-place
+        cls = type(self)
+        class_id = f"{cls.__module__}.{cls.__qualname__}"
+        return serialize_elements([class_id, self._params, self._custom_params])
+
+    def __eq__(self, other):
+        """Two parameter objects are equal when they hold the same parameters."""
+        if not isinstance(other, self.__class__):
+            return False
+        return self.serialized == other.serialized
 
     @classmethod
     def _is_property_with_dependencies(cls, name):
@@ -365,7 +365,6 @@ class BaseParameters(ZeaObject):
         # Custom params are never type-checked and never participate in derivation.
         if name not in self.VALID_PARAMS:
             self._custom_params[name] = value
-            self._serialized = None  # see core object
             return
 
         # Validate new value
@@ -407,7 +406,6 @@ class BaseParameters(ZeaObject):
                     continue
                 # Genuine custom passthrough parameter.
                 self._custom_params[key] = new_val
-                self._serialized = None
                 continue
 
             if not force:
@@ -448,7 +446,6 @@ class BaseParameters(ZeaObject):
             self._invalidate(name)
         elif name in self._custom_params:
             del self._custom_params[name]
-            self._serialized = None
         elif name in self.VALID_PARAMS:
             raise ValueError(f"Cannot delete parameter '{name}' because it is not set.")
         else:
@@ -503,7 +500,6 @@ class BaseParameters(ZeaObject):
         self._cache.pop(key, None)
         self._dependency_versions.pop(key, None)
         self._tensor_cache.pop(key, None)
-        self._serialized = None  # see core object
         self._invalidate_dependents(key)
 
     def _invalidate_dependents(self, changed_key):
@@ -680,12 +676,14 @@ class BaseParameters(ZeaObject):
             log.info(f"Could not find proper scan parameters in {kwargs}.")
         return cls(**params)
 
-    # ------------------------------------------------------------------
-    # Flat dict-like interface
-    # The object behaves as a read-only flat dict over the union of
-    # ``_params`` and ``_custom_params``.  ``__getitem__`` / ``__setitem__``
-    # / ``__delitem__`` are inherited from :class:`~zea.internal.core.Object`.
-    # ------------------------------------------------------------------
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+    def __setitem__(self, key, value):
+        setattr(self, key, value)
+
+    def __delitem__(self, key):
+        delattr(self, key)
 
     def _flat(self) -> dict:
         """Merged view of stored params and custom params (the flat dict)."""

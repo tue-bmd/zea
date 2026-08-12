@@ -4,13 +4,9 @@ import enum
 import hashlib
 import json
 import pickle
-from copy import deepcopy
 
 import keras
 import numpy as np
-
-from zea.internal.utils import reduce_to_signature
-from zea.utils import update_dictionary
 
 CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, tuple, bool)
 BASE_FLOAT_PRECISION = "float32"
@@ -70,106 +66,6 @@ class classproperty(property):
         return self.fget(owner_cls)
 
 
-class Object:
-    """Base class for all data objects in the toolbox"""
-
-    def __init__(self):
-        self._serialized = None
-
-    @property
-    def serialized(self):
-        """Compute the checksum of the object only if not already done"""
-        if self._serialized is None:
-            attributes = self.__dict__.copy()
-            attributes.pop(
-                "_serialized", None
-            )  # Remove the cached serialized attribute to avoid recursion
-            self._serialized = serialize_elements([attributes])
-        return self._serialized
-
-    def __setattr__(self, name: str, value):
-        """Reset the serialized data if the object is modified"""
-        if name != "_serialized":  # Avoid resetting when setting _serialized itself
-            self._serialized = None
-        super().__setattr__(name, value)
-
-    def __eq__(self, other):
-        if not isinstance(other, self.__class__):
-            return False
-        return self.serialized == other.serialized
-
-    def __hash__(self):
-        return hash(self.serialized)
-
-    def copy(self):
-        """Return a copied version of the object"""
-        return deepcopy(self)
-
-    def update(self, **kwargs):
-        """Update the attributes of the object if they exist"""
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-
-    def __getitem__(self, key):
-        return getattr(self, key)
-
-    def __setitem__(self, key, value):
-        setattr(self, key, value)
-
-    def __delitem__(self, key):
-        delattr(self, key)
-
-    @classmethod
-    def safe_initialize(cls, **kwargs):
-        """Safely initialize a class by removing any invalid arguments."""
-        reduced_params = reduce_to_signature(cls.__init__, kwargs)
-        return cls(**reduced_params)
-
-    @classmethod
-    def merge(cls, obj1: dict, obj2: dict, safe: bool = False):
-        """Merge multiple objects and safely initialize a new object.
-
-        Optionally can safely initialize the object, which removes any invalid
-        arguments.
-        """
-        # TODO: support actual zea.core.Objects, now we only support dictionaries
-        params = update_dictionary(obj1, obj2)
-        if not safe:
-            return cls(**params)
-        else:
-            return cls.safe_initialize(**params)
-
-    @classmethod
-    def _tree_unflatten(cls, aux, children):
-        if cls is not Object:
-            raise NotImplementedError(f"{cls.__name__} must implement _tree_unflatten.")
-        return cls(*children)
-
-    def _tree_flatten(self):
-        if not isinstance(self, Object):
-            raise NotImplementedError(f"{type(self).__name__} must implement _tree_flatten.")
-        return (), ()
-
-    @classmethod
-    def register_pytree_node(cls):
-        """Register the object as a PyTree node for JAX.
-        https://docs.jax.dev/en/latest/_autosummary/jax.tree_util.register_pytree_node.html
-        """
-        try:
-            from jax import tree_util
-        except ImportError as exc:
-            raise ImportError(
-                "JAX is not installed. Please install JAX to use `register_pytree_node`."
-            ) from exc
-
-        tree_util.register_pytree_node(
-            cls,
-            cls._tree_flatten,
-            cls._tree_unflatten,
-        )
-
-
 def _skip_to_tensor(value):
     """Check if the value should be skipped for conversion to tensor."""
     # Skip str (because JIT does not support it)
@@ -180,6 +76,10 @@ def _skip_to_tensor(value):
 
 def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
     """Convert an object to a dictionary of tensors."""
+    from zea.config import Config
+    from zea.parameters import Parameters
+    from zea.probes import Probe
+
     snapshot = {}
 
     for key in dictionary:
@@ -190,7 +90,7 @@ def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
         # Get the value from the dictionary
         value = dictionary[key]
 
-        if isinstance(value, Object) and hasattr(value, "to_tensor"):
+        if isinstance(value, (Config, Probe, Parameters)):
             snapshot[key] = value.to_tensor(keep_as_is=keep_as_is)
             continue
 
@@ -205,20 +105,31 @@ def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
 
 
 def _to_tensor(key: str, val, keep_as_is: list | None = None):
+    """Convert a single value to a keras tensor with a zea base precision.
+
+    Floats become ``float32``, ints ``int32`` and booleans stay boolean, so that
+    values originating from Python natives or numpy get a consistent dtype.
+
+    Args:
+        key (str): Name of the value, used to check against ``keep_as_is``.
+        val: The value to convert. Values whose type is not in
+            ``CONVERT_TO_KERAS_TYPES`` (such as ``None``, dicts and strings) are
+            returned unchanged.
+        keep_as_is (list, optional): Names that must not be converted.
+
+    Returns:
+        The converted tensor, or ``val`` itself when it is not converted.
+    """
     if keep_as_is is None:
         keep_as_is = []
 
     if key in keep_as_is:
         return val
 
+    # Anything outside the convertible types (including None and dicts) is passed through
     if not isinstance(val, CONVERT_TO_KERAS_TYPES):
         return val
 
-    if val is None:
-        return None
-    # Recursively handle dicts
-    if isinstance(val, dict):
-        return {k: _to_tensor(k, v, keep_as_is=keep_as_is) for k, v in val.items()}
     # Use float precision for all floats (including np.float32/64)
     if isinstance(val, float) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, float)):
         dtype = BASE_FLOAT_PRECISION
@@ -369,18 +280,25 @@ def serialize_elements(key_elements: list) -> str:
                 "(torch.compile, tf.function or jax.jit) with a stable target."
             ) from exc
 
+    _MISSING = object()
+
     def _serialize_element(element) -> str:
         if isinstance(element, (list, tuple)):
             # If element is a list or tuple, serialize its elements recursively
-            element = serialize_elements(element)
-        elif isinstance(element, Object) and hasattr(element, "serialized"):
-            # Use the serialized attribute if it exists
-            element = str(element.serialized)
-        elif isinstance(element, keras.random.SeedGenerator):
+            return serialize_elements(element)
+
+        # Objects opt in to content-based keys by exposing a `serialized` property.
+        # Their own pickle representation would depend on attribute insertion order
+        # and on derived state such as caches. Read the property once, it may be expensive.
+        serialized = getattr(element, "serialized", _MISSING)
+        if serialized is not _MISSING:
+            return str(serialized)
+
+        if isinstance(element, keras.random.SeedGenerator):
             # If element is a SeedGenerator, use the state
-            element = keras.ops.convert_to_numpy(element.state.value)
-            element = _serialize(element)
-        elif isinstance(element, dict):
+            return _serialize(keras.ops.convert_to_numpy(element.state.value))
+
+        if isinstance(element, dict):
             # If element is a dictionary, sort its keys and serialize its values recursively.
             # This is needed to ensure the internal state and ordering of the dictionary does
             # not affect the serialization.
@@ -388,12 +306,10 @@ def serialize_elements(key_elements: list) -> str:
             values = [element[k] for k in keys]
             keys = serialize_elements(keys)
             values = serialize_elements(values)
-            element = f"k_{keys}_v_{values}"
-        else:
-            # Otherwise, serialize the element directly
-            element = _serialize(element)
+            return f"k_{keys}_v_{values}"
 
-        return element
+        # Otherwise, serialize the element directly
+        return _serialize(element)
 
     serialized_elements = []
     for element in key_elements:

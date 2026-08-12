@@ -13,7 +13,6 @@ from zea.backend import func_on_device, jit
 from zea.config import Config
 from zea.func.tensor import vmap
 from zea.internal.core import DataTypes, ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
-from zea.internal.core import Object as ZEAObject
 from zea.internal.ops_list import OperationList
 from zea.internal.registry import beamformer_registry, ops_registry
 from zea.internal.utils import deprecated
@@ -480,9 +479,10 @@ class Pipeline:
                 default, meaning no explicit device placement).
             **inputs: Tensor inputs forwarded to the operations.
         """
+        from zea.internal.parameters import BaseParameters
 
         if any(key in inputs for key in ["probe", "scan", "config", "parameters"]) or any(
-            isinstance(arg, ZEAObject) for arg in inputs.values()
+            isinstance(arg, BaseParameters) for arg in inputs.values()
         ):
             raise ValueError(
                 "Parameters (and Probe/Config) objects should be first processed with "

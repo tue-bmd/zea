@@ -10,7 +10,7 @@ import pytest
 
 import zea.internal.cache as cache_mod
 from zea.internal.cache import cache_output, cache_summary, clear_cache, get_function_source
-from zea.internal.core import Object
+from zea.internal.core import serialize_elements
 
 from . import DEFAULT_TEST_SEED
 
@@ -70,13 +70,17 @@ def _expensive_nested_operation(x, y):
     return result
 
 
-class CustomObject(Object):
-    """Custom core object for testing caching"""
+class CustomObject:
+    """Custom class opting into a content-based cache key via `serialized`."""
 
     def __init__(self, x, y):
-        super().__init__()
         self.x = x
         self.y = y
+
+    @property
+    def serialized(self):
+        """Checksum of the current contents, picked up by `serialize_elements`."""
+        return serialize_elements([type(self).__qualname__, self.__dict__])
 
 
 @pytest.fixture(scope="module", autouse=True)
