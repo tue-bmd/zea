@@ -360,7 +360,7 @@ def test_diffusion_posterior_sample_is_traceable():
 
     traced = tf.function(_posterior_sample_for_tracing)  # autograph is on by default
 
-    assert tuple(traced(model, measurements, mask, seed_gen).shape) == (1, 2, n_features)
+    assert tuple(traced(model, measurements, mask, seed_gen).shape) == (2, n_features)
 
 
 def test_dehaze_nuclear_diffusion_shape_logic():
