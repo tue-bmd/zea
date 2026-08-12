@@ -5,6 +5,8 @@ import pytest
 
 from zea.internal.core import dict_to_tensor, serialize_elements
 
+from . import run_in_backend
+
 
 def _plain_function(x):
     """Module-level (thus picklable) function for serialization tests."""
@@ -56,9 +58,13 @@ def test_dict_to_tensor_ignores_framework_to_tensor_methods():
     assert np.asarray(result["value"]) == 1.0
 
 
+# The torch tests run in a worker process: `triton`, which `torch.compile` pulls in on
+# first use, segfaults when loaded into a process that already imported TensorFlow --
+# as the test above does.
+@run_in_backend("torch")
 def test_serialize_torch_compiled_function():
     """A ``torch.compile``d function serializes like the function it wraps."""
-    torch = pytest.importorskip("torch")
+    import torch
 
     compiled = torch.compile(_plain_function)
     serialized = serialize_elements([compiled])
@@ -67,6 +73,7 @@ def test_serialize_torch_compiled_function():
     assert serialize_elements([torch.compile(_plain_function)]) == serialized
 
 
+@run_in_backend("torch")
 def test_serialize_compiled_bound_method_of_unpicklable_instance():
     """A ``torch.compile``d bound method still serializes, via its module and qualname.
 
@@ -74,8 +81,6 @@ def test_serialize_compiled_bound_method_of_unpicklable_instance():
     itself is unpicklable too and the key falls back to the unbound function's
     module and qualname.
     """
-    pytest.importorskip("torch")
-
     assert serialize_elements([_JitObj(2)._call]) == f"compiled:{__name__}._JitObj.call"
 
     # That constant fallback must not swallow the rest of the object's state.
