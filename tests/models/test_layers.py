@@ -34,15 +34,8 @@ class TestResidualBlock:
 
         assert out.shape == (2, 8, 8, 16)
 
-    def test_reuses_the_input_as_skip_when_the_width_matches(self, rng):
-        x = rng.standard_normal((2, 8, 8, 16)).astype("float32")
-
-        out = ResidualBlock(16)(x)
-
-        assert out.shape == (2, 8, 8, 16)
-
     @pytest.mark.parametrize("normalization", ["batch_norm", "group_norm"])
-    def test_supports_both_normalizations(self, rng, normalization):
+    def test_reuses_the_input_as_skip_when_the_width_matches(self, rng, normalization):
         x = rng.standard_normal((2, 8, 8, 32)).astype("float32")
 
         out = ResidualBlock(32, normalization=normalization)(x)

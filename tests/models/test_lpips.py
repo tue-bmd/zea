@@ -129,7 +129,7 @@ class TestCall:
         assert ops.convert_to_numpy(model([x, x])).shape == (1,)
 
 
-def test_custom_load_weights_reads_both_halves_from_the_preset(model, local_preset):
+def test_custom_load_weights_reads_both_halves_from_the_preset(model, local_preset, monkeypatch):
     """The VGG backbone and the learned linear head are separate files in the preset."""
     preset = local_preset(LPIPS)
     for name in ("vgg/vgg.weights.h5", "lin/lin.weights.h5"):
@@ -138,12 +138,11 @@ def test_custom_load_weights_reads_both_halves_from_the_preset(model, local_pres
         path.touch()
 
     loaded = {}
-    model.net.load_weights = lambda filepath, **kwargs: loaded.setdefault("net", filepath)
-    model.lin.load_weights = lambda filepath, **kwargs: loaded.setdefault("lin", filepath)
-    try:
-        model.custom_load_weights(preset)
-    finally:
-        del model.net.load_weights, model.lin.load_weights
+    for half, key in ((model.net, "net"), (model.lin, "lin")):
+        monkeypatch.setattr(
+            half, "load_weights", lambda path, key=key, **kw: loaded.setdefault(key, path)
+        )
+    model.custom_load_weights(preset)
 
     assert loaded["net"].endswith("vgg/vgg.weights.h5")
     assert loaded["lin"].endswith("lin/lin.weights.h5")

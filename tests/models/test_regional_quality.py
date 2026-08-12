@@ -21,32 +21,6 @@ N_REGIONS = len(REGION_LABELS)
 SLOPE, INTERCEPT = 2.0, 1.0
 
 
-class StubOnnxSession:
-    """Minimal stand-in for ``onnxruntime.InferenceSession``."""
-
-    def __init__(self, path, output=None):
-        self.path = path
-        self.output = output
-        self.seen = []
-
-    class _IO:
-        def __init__(self, name):
-            self.name = name
-
-    def get_inputs(self):
-        return [self._IO("input")]
-
-    def get_outputs(self):
-        return [self._IO("output")]
-
-    def run(self, output_names, feed):
-        self.seen.append(feed["input"])
-        if self.output is not None:
-            return [self.output]
-        batch = feed["input"].shape[0]
-        return [np.zeros((batch, N_REGIONS), dtype="float32")]
-
-
 @pytest.fixture
 def quality_preset(local_preset):
     """A local preset directory with a dummy ONNX file and a bias correction."""
@@ -60,11 +34,9 @@ def quality_preset(local_preset):
 
 
 @pytest.fixture
-def stub_onnxruntime(monkeypatch):
-    """Replaces ``onnxruntime.InferenceSession`` with :class:`StubOnnxSession`."""
-    import onnxruntime
-
-    monkeypatch.setattr(onnxruntime, "InferenceSession", StubOnnxSession)
+def stub_onnxruntime(install_stub_onnx):
+    """The stubbed session returns one raw quality score per region."""
+    install_stub_onnx((N_REGIONS,))
 
 
 def test_region_labels_and_classes_are_consistent():

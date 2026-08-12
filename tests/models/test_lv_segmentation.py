@@ -15,32 +15,6 @@ import pytest
 from zea.models.lv_segmentation import INFERENCE_SIZE, AugmentedCamusSeg
 
 
-class StubOnnxSession:
-    """Minimal stand-in for ``onnxruntime.InferenceSession``."""
-
-    def __init__(self, path, output=None):
-        self.path = path
-        self.output = output
-        self.seen = []
-
-    class _IO:
-        def __init__(self, name):
-            self.name = name
-
-    def get_inputs(self):
-        return [self._IO("input")]
-
-    def get_outputs(self):
-        return [self._IO("output")]
-
-    def run(self, output_names, feed):
-        self.seen.append(feed["input"])
-        if self.output is not None:
-            return [self.output]
-        batch = feed["input"].shape[0]
-        return [np.zeros((batch, 3, INFERENCE_SIZE, INFERENCE_SIZE), dtype="float32")]
-
-
 @pytest.fixture
 def onnx_preset(local_preset):
     """A local preset directory holding a (dummy) ``model.onnx``."""
@@ -50,11 +24,9 @@ def onnx_preset(local_preset):
 
 
 @pytest.fixture
-def stub_onnxruntime(monkeypatch):
-    """Replaces ``onnxruntime.InferenceSession`` with :class:`StubOnnxSession`."""
-    import onnxruntime
-
-    monkeypatch.setattr(onnxruntime, "InferenceSession", StubOnnxSession)
+def stub_onnxruntime(install_stub_onnx):
+    """The stubbed session returns background / LV / myocardium logits."""
+    install_stub_onnx((3, INFERENCE_SIZE, INFERENCE_SIZE))
 
 
 def test_call_raises_without_loaded_weights():

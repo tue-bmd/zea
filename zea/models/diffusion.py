@@ -445,16 +445,33 @@ class DiffusionModel(DeepGenerativeModel):
         return noise_rates, signal_rates
 
     def linear_diffusion_schedule(self, diffusion_times):
-        """Create a linear diffusion schedule"""
+        """Linear diffusion schedule.
 
-        def _compute_alpha_t(t):
-            """Compute alpha_t for linear diffusion schedule"""
-            return ops.prod(1 - diffusion_times[:t], axis=diffusion_times.shape[1:])
+        The counterpart of :meth:`diffusion_schedule`: where the cosine schedule
+        interpolates the *angle* linearly from ``arccos(max_signal_rate)`` to
+        ``arccos(min_signal_rate)``, this interpolates the signal rate itself.
+        Both share those endpoints and stay variance preserving
+        (``noise_rates ** 2 + signal_rates ** 2 == 1``), so the two are
+        interchangeable.
 
-        alphas = ops.vectorized_map(_compute_alpha_t, ops.arange(len(diffusion_times)))
-        signal_rates = ops.sqrt(alphas)
-        noise_rates = ops.sqrt(1 - alphas)
-        return signal_rates, noise_rates
+        Note:
+            This is not the linear *beta* schedule of `Ho et al. (2020)
+            <https://arxiv.org/abs/2006.11239>`_, which is a cumulative product
+            over a discrete grid of timesteps. zea's schedules are continuous in
+            ``t`` and parameterized by the signal rate at either end.
+
+        Args:
+            diffusion_times: Tensor of diffusion times in ``[min_t, max_t]``.
+
+        Returns:
+            A ``(noise_rates, signal_rates)`` tuple of tensors with the
+            same shape as ``diffusion_times``.
+        """
+        signal_rates = self.max_signal_rate + diffusion_times * (
+            self.min_signal_rate - self.max_signal_rate
+        )
+        noise_rates = ops.sqrt(1.0 - signal_rates**2)
+        return noise_rates, signal_rates
 
     def denoise(
         self,

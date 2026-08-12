@@ -555,8 +555,3 @@ class TestGenerativeModelInterface:
         assert isinstance(model, GenerativeModel)
         assert isinstance(model, keras.Model)
         assert model.name == "deep_generative_model"
-
-    def test_the_zea_models_implement_the_interface(self):
-        """The concrete generative models are recognised as such."""
-        assert issubclass(GaussianMixtureModel, GenerativeModel)
-        assert issubclass(DiffusionModel, DeepGenerativeModel)

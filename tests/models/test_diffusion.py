@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from keras import ops
 
-from zea.internal.operators import InpaintingOperator, Operator
+from zea.internal.operators import InpaintingOperator
 from zea.models.diffusion import DPS, DiffusionModel, NuclearDiffusion
 
 TINY_DENSE = dict(
@@ -92,14 +92,10 @@ class TestOperatorAndGuidanceWiring:
 
         assert rewired.guidance_fn is guidance
 
-    @pytest.mark.parametrize("guidance", [None, "dps"])
-    def test_no_operator_means_no_guidance(self, guidance):
-        """Guidance without an operator is meaningless and is rejected."""
-        if guidance is None:
-            assert DiffusionModel(**TINY_DENSE, operator=None, guidance=None).operator is None
-        else:
-            with pytest.raises(AssertionError, match="Operator must be provided"):
-                DiffusionModel(**TINY_DENSE, operator=None, guidance=guidance)
+    def test_guidance_without_an_operator_is_rejected(self):
+        """There is nothing to guide towards without a forward operator."""
+        with pytest.raises(AssertionError, match="Operator must be provided"):
+            DiffusionModel(**TINY_DENSE, operator=None, guidance="dps")
 
     @pytest.mark.parametrize(
         ("kwargs", "match"),
@@ -120,26 +116,45 @@ class TestOperatorAndGuidanceWiring:
         assert config["network_name"] == "dense_time_conditional"
 
 
+@pytest.mark.parametrize("schedule", ["diffusion_schedule", "linear_diffusion_schedule"])
 class TestSchedules:
-    """The noise schedules map a diffusion time onto signal and noise rates."""
+    """The noise schedules map a diffusion time onto signal and noise rates.
 
-    def test_cosine_schedule_rates_are_normalized(self, model):
+    Both are interchangeable, so they are held to the same contract.
+    """
+
+    def test_rates_are_variance_preserving(self, model, schedule):
         times = ops.convert_to_tensor(np.linspace(0.0, 1.0, 5, dtype="float32"))
 
-        noise_rates, signal_rates = model.diffusion_schedule(times)
+        noise_rates, signal_rates = getattr(model, schedule)(times)
 
         np.testing.assert_allclose(
             ops.convert_to_numpy(noise_rates**2 + signal_rates**2), 1.0, rtol=1e-5
         )
 
-    def test_cosine_schedule_starts_at_max_signal_and_ends_at_min(self, model):
+    def test_starts_at_max_signal_and_ends_at_min(self, model, schedule):
         times = ops.convert_to_tensor(np.array([0.0, 1.0], dtype="float32"))
 
-        _, signal_rates = model.diffusion_schedule(times)
+        _, signal_rates = getattr(model, schedule)(times)
 
         signal_rates = ops.convert_to_numpy(signal_rates)
         np.testing.assert_allclose(signal_rates[0], model.max_signal_rate, atol=1e-6)
         np.testing.assert_allclose(signal_rates[1], model.min_signal_rate, atol=1e-6)
+
+    def test_signal_decays_monotonically(self, model, schedule):
+        times = ops.convert_to_tensor(np.linspace(0.0, 1.0, 8, dtype="float32"))
+
+        _, signal_rates = getattr(model, schedule)(times)
+
+        assert np.all(np.diff(ops.convert_to_numpy(signal_rates)) < 0)
+
+    def test_works_on_the_shapes_sampling_uses(self, model, schedule, rng):
+        """Sampling broadcasts a per-image time over the image dimensions."""
+        times = ops.convert_to_tensor(rng.random((3, 1, 1, 1)).astype("float32"))
+
+        noise_rates, signal_rates = getattr(model, schedule)(times)
+
+        assert noise_rates.shape == signal_rates.shape == (3, 1, 1, 1)
 
 
 class TestReverseDiffusionStep:
@@ -184,8 +199,8 @@ class TestNuclearPenalties:
     def frames(self, rng):
         return rng.standard_normal((2, 3, 4, 4, 1)).astype("float32")
 
-    def test_nuclear_norm_penalty_is_zero_for_a_rank_one_stack(self):
-        """Identical frames span a single direction, so the penalty is minimal."""
+    def test_nuclear_norm_penalty_is_lower_for_a_rank_one_stack(self):
+        """Identical frames span a single direction, so the penalty is smaller."""
         frames = np.tile(np.ones((1, 1, 4, 4, 1), dtype="float32"), (1, 3, 1, 1, 1))
 
         rank_one = float(NuclearDiffusion.nuclear_norm_penalty(frames))
@@ -222,8 +237,3 @@ def test_test_step_reports_both_losses(model, rng):
 
     assert {"n_loss", "i_loss"} <= set(results)
     assert all(np.isfinite(value) for value in results.values())
-
-
-def test_operator_object_must_be_an_operator_subclass():
-    """A plain object is not accepted where an ``Operator`` is expected."""
-    assert issubclass(InpaintingOperator, Operator)

@@ -16,8 +16,8 @@ def speckle2self_model():
     return Speckle2Self()
 
 
-def test_speckle2self_call_nchw(speckle2self_model, rng):
-    """Test Speckle2Self forward pass with (N, 1, H, W) input."""
+def test_speckle2self_call(speckle2self_model, rng):
+    """Test Speckle2Self forward pass at the native inference size."""
     x = rng.random((BATCH_SIZE, *IMAGE_SHAPE)).astype("float32")
     out = speckle2self_model(x)
     assert out.shape == (BATCH_SIZE, *IMAGE_SHAPE)
