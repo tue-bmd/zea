@@ -1,4 +1,9 @@
-"""Tests for generative models in zea."""
+"""Tests for the generative models in zea.
+
+Covers the shared :class:`~zea.models.generative.GenerativeModel` API and the models that
+implement it: the Gaussian mixture model and the diffusion model together
+with its posterior-sampling guidance strategies.
+"""
 
 from unittest.mock import MagicMock
 
@@ -12,9 +17,10 @@ from zea.func.ultrasound import dehaze_nuclear_diffusion
 from zea.internal.operators import InpaintingOperator, LinearInterpOperator
 from zea.io_lib import matplotlib_figure_to_numpy, save_video
 from zea.models.diffusion import DDS, DPS, DiffusionModel, NuclearDiffusion
+from zea.models.generative import DeepGenerativeModel, GenerativeModel
 from zea.models.gmm import GaussianMixtureModel, match_means_covariances
 
-from . import DEFAULT_TEST_SEED, run_in_backend
+from .. import DEFAULT_TEST_SEED, run_in_backend
 
 
 @pytest.fixture(params=[2, 3])
@@ -568,3 +574,33 @@ def test_nuclear_diffusion_guidance_call():
     assert np.isfinite(float(error))
     # aux = (pred_noises_tissue, pred_tissue, pred_haze, l2_error, nuclear_penalty)
     assert len(aux) == 5
+
+
+class TestGenerativeModelInterface:
+    """The abstract interface every generative model in zea shares."""
+
+    class BareModel(GenerativeModel):
+        """A subclass that implements nothing, to check the defaults."""
+
+    @pytest.mark.parametrize(
+        ("method", "args"),
+        [
+            ("fit", (np.zeros((2, 2)),)),
+            ("sample", ()),
+            ("posterior_sample", (np.zeros((2, 2)),)),
+            ("log_density", (np.zeros((2, 2)),)),
+        ],
+    )
+    def test_unimplemented_methods_say_so(self, method, args):
+        """Every entry point points the subclass author at what to implement."""
+        model = self.BareModel()
+        with pytest.raises(NotImplementedError, match=method):
+            getattr(model, method)(*args)
+
+    def test_deep_generative_model_is_also_a_keras_model(self):
+        """``DeepGenerativeModel`` adds Keras features (weights, presets) on top."""
+        model = DeepGenerativeModel()
+
+        assert isinstance(model, GenerativeModel)
+        assert isinstance(model, keras.Model)
+        assert model.name == "deep_generative_model"

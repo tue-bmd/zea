@@ -889,6 +889,91 @@ def test_load_model_builds_from_input_shape(monkeypatch, local_preset):
     assert loaded_from == [str(local_preset / mpu.MODEL_WEIGHTS_FILE)]
 
 
+# load_model: models that load their own weights (`custom_load_weights`)
+
+
+@pytest.fixture()
+def custom_weights_loader(tmp_path):
+    """A KerasPresetLoader backed by a minimal config.json in a temp directory."""
+    config = {
+        "class_name": "DummyModel",
+        "registered_name": "DummyModel",
+        "config": {},
+        "module": "builtins",
+        "build_config": None,
+    }
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    return mpu.KerasPresetLoader(str(tmp_path), config)
+
+
+class _DummyModelBase:
+    """Minimal stand-in for a Keras model (no weights, already built)."""
+
+    weights = []
+    built = True
+
+
+def test_custom_load_weights_with_load_weights_param(monkeypatch, custom_weights_loader):
+    """custom_load_weights that accepts load_weights receives it forwarded."""
+    calls = []
+
+    class DummyModel(_DummyModelBase):
+        def custom_load_weights(self, preset, load_weights=True):
+            calls.append(load_weights)
+
+    dummy = DummyModel()
+    monkeypatch.setattr(mpu, "load_serialized_object", lambda *a, **kw: dummy)
+
+    result = custom_weights_loader.load_model(cls=object, load_weights=False)
+
+    assert result is dummy
+    assert calls == [False], f"load_weights should be forwarded as False, got {calls}"
+
+
+def test_custom_load_weights_without_param_skipped_when_false(monkeypatch, custom_weights_loader):
+    """custom_load_weights without load_weights param is NOT called when load_weights=False."""
+    calls = []
+
+    class DummyModel(_DummyModelBase):
+        def custom_load_weights(self, preset, **kwargs):
+            calls.append(True)
+
+    dummy = DummyModel()
+    monkeypatch.setattr(mpu, "load_serialized_object", lambda *a, **kw: dummy)
+
+    result = custom_weights_loader.load_model(cls=object, load_weights=False)
+
+    assert result is dummy
+    assert calls == [], "custom_load_weights should NOT be called when load_weights=False"
+
+
+def test_custom_load_weights_without_param_called_when_true(monkeypatch, custom_weights_loader):
+    """custom_load_weights without load_weights param IS called when load_weights=True."""
+    calls = []
+
+    class DummyModel(_DummyModelBase):
+        def custom_load_weights(self, preset, **kwargs):
+            calls.append(True)
+
+    dummy = DummyModel()
+    monkeypatch.setattr(mpu, "load_serialized_object", lambda *a, **kw: dummy)
+
+    result = custom_weights_loader.load_model(cls=object, load_weights=True)
+
+    assert result is dummy
+    assert calls == [True], "custom_load_weights should be called when load_weights=True"
+
+
+def test_model_without_custom_load_weights_returned_as_is(monkeypatch, custom_weights_loader):
+    """Model without custom_load_weights is returned as-is when load_weights=False."""
+    dummy = _DummyModelBase()
+    monkeypatch.setattr(mpu, "load_serialized_object", lambda *a, **kw: dummy)
+
+    result = custom_weights_loader.load_model(cls=object, load_weights=False)
+
+    assert result is dummy
+
+
 # Converters and preprocessors
 
 
