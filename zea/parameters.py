@@ -967,7 +967,9 @@ class Parameters(BaseParameters):
         if t_peak is None:
             waveforms = self._params.get("waveforms_two_way")
             if waveforms is not None:
-                t_peak = np.asarray(compute_time_to_peak_stack(waveforms, self.center_frequency))
+                t_peak = ops.convert_to_numpy(
+                    compute_time_to_peak_stack(waveforms, self.center_frequency)
+                )
             else:
                 t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
 
