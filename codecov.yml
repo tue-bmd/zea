@@ -1,0 +1,27 @@
+codecov:
+  notify:
+    after_n_builds: 1
+  require_ci_to_pass: false  # Do not block if CI is failing
+  max_report_age: off
+
+coverage:
+  precision: 2
+  round: down
+  range: 60..90  # Visual color range in PR comments
+
+  status:
+    project:
+      default:
+        threshold: 0.5       # Warn if drop > 0.5%
+    patch:
+      default:
+        threshold: 1.0       # Allow small drops on new code
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
+
+ignore:
+    - "tests/*"
+    - "**/__init__.py"
