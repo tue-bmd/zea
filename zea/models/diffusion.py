@@ -129,6 +129,9 @@ class DiffusionModel(DeepGenerativeModel):
         self.track_progress_interval = 1
         self.track_progress = []
 
+        # Build eagerly: torch.compile cannot trace Keras' lazy first-call build.
+        self.build((None, *self.input_shape))
+
         # for guidance / conditional sampling
         self.guidance_fn = None
         self.operator = None
@@ -1120,8 +1123,7 @@ class DDS(DiffusionGuidance):
 
     def setup(self):
         """Setup DDS guidance function."""
-        if not self.disable_jit:
-            self.call = jit(self.call)
+        self._call = self.call if self.disable_jit else jit(self.call)
 
     def Acg(self, x, **op_kwargs):
         # we transform the operator from A(x) to A.T(A(x)) to get the normal equations,
@@ -1264,7 +1266,7 @@ class DDS(DiffusionGuidance):
             A ``(gradients, (measurement_error, (pred_noises, pred_images)))``
             tuple (see :meth:`call`).
         """
-        return self.call(
+        return self._call(
             noisy_images,
             measurements,
             noise_rates,
