@@ -104,7 +104,7 @@ class EchoNetLVH(BaseModel):
 
         Returns:
             Tensor: Key point coordinates of shape [B, 4, 2] where each point
-                   is in (x, y) format
+            is a ``(row, col)`` index into the heatmap.
         """
         # Create coordinate grid for the current logit dimensions
         input_shape = ops.shape(logits)[1:3]
@@ -115,13 +115,14 @@ class EchoNetLVH(BaseModel):
         # Transpose logits to [B, 4, H, W] for vectorized processing
         logits_batchified = ops.transpose(logits, (0, 3, 1, 2))
 
-        # Extract expected coordinates for each channel
+        # Extract expected coordinates for each channel. `expected_coordinate`
+        # returns (x, y), so flip back to (row, col) indices.
         return ops.flip(
             ops.vectorized_map(
                 lambda logit: self.expected_coordinate(logit, input_space_coordinate_grid),
                 logits_batchified,
             ),
-            axis=-1,  # Flip to convert from (y, x) to (x, y)
+            axis=-1,
         )
 
     def expected_coordinate(self, mask, coordinate_grid=None):
@@ -136,7 +137,7 @@ class EchoNetLVH(BaseModel):
         Args:
             mask (Tensor): Heatmap of shape [B, H, W]
             coordinate_grid (Tensor, optional): Grid of coordinates. If None,
-                                              uses self.coordinate_grid
+                uses :attr:`coordinate_grid`.
 
         Returns:
             Tensor: Expected coordinates of shape [B, 2] in (x, y) format
@@ -144,9 +145,13 @@ class EchoNetLVH(BaseModel):
         if coordinate_grid is None:
             coordinate_grid = self.coordinate_grid
 
-        # Ensure mask values are non-negative and normalized
-        mask_clipped = ops.clip(mask, 0, None)
-        mask_normed = mask_clipped / ops.max(mask_clipped)
+        # Ensure mask values are non-negative and normalized. `ops.maximum` rather
+        # than a one-sided `ops.clip`, which the TensorFlow backend rejects.
+        mask_clipped = ops.maximum(mask, 0.0)
+        # A heatmap with no positive value clips to all zeros; guard the division so
+        # it falls back to a finite coordinate instead of NaN. `safe_normalize` below
+        # renormalizes per image, so the guard cannot change a non-degenerate result.
+        mask_normed = mask_clipped / ops.maximum(ops.max(mask_clipped), 1e-12)
 
         def safe_normalize(m):
             mask_sum = ops.sum(m)
