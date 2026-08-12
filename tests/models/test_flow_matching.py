@@ -7,7 +7,7 @@ import pytest
 from zea.models.diffusion import DPS
 from zea.models.flow_matching import FlowMatchingModel
 
-from . import DEFAULT_TEST_SEED
+from .. import DEFAULT_TEST_SEED
 
 
 def _make_minimal_flow_model(input_shape, guidance=None, operator=None):
