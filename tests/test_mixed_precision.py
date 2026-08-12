@@ -20,10 +20,17 @@ from zea.beamform.beamformer import apply_delays, complex_rotate, tof_correction
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.beamform.pixelgrid import cartesian_pixel_grid
 from zea.internal.precision import (
+    LOW_PRECISION_DTYPES,
     is_mixed_precision,
     signal_compute_dtype,
 )
-from zea.ops import DelayAndSum, TOFCorrection
+from zea.ops import (
+    CoherenceFactor,
+    DelayAndSum,
+    DelayMultiplyAndSum,
+    GeneralizedCoherenceFactor,
+    TOFCorrection,
+)
 
 N_EL = 16
 SOUND_SPEED = 1540.0
@@ -213,6 +220,29 @@ def test_das_mixed_precision_matches_float32(restore_policy, n_ch):
     cos = _cosine_similarity(ref, mixed)
     assert rel < 5e-2, f"DAS mixed-precision rel L2 error too high: {rel}"
     assert cos > 0.999, f"DAS mixed-precision cosine similarity too low: {cos}"
+
+
+@pytest.mark.parametrize("dtype", LOW_PRECISION_DTYPES)
+@pytest.mark.parametrize(
+    "op_cls",
+    [DelayMultiplyAndSum, CoherenceFactor, GeneralizedCoherenceFactor],
+)
+def test_low_precision_beamformer_upcasts_and_matches_float32(op_cls, dtype):
+    """bfloat16/float16 aligned data is up-cast to float32 internally, so the
+    result stays numerically close to running the same op on float32 data."""
+    n_tx, n_pix, n_el, n_ch = 3, 5, 8, 2
+    rng = np.random.default_rng(7)
+    data = (rng.standard_normal((1, n_tx, n_pix, n_el, n_ch)) * 10.0).astype(np.float32)
+    data_f32 = ops.convert_to_tensor(data)
+    data_low = ops.cast(data_f32, dtype)
+    assert keras.backend.standardize_dtype(data_low.dtype) in LOW_PRECISION_DTYPES
+
+    operation = op_cls(with_batch_dim=True)
+    out_f32 = ops.convert_to_numpy(operation(data=data_f32)["data"])
+    out_low = ops.convert_to_numpy(operation(data=data_low)["data"])
+
+    rel = _rel_l2(out_f32, out_low)
+    assert rel < 5e-2, f"{op_cls.__name__} {dtype} up-cast rel L2 error too high: {rel}"
 
 
 def test_das_int16_input(restore_policy):
