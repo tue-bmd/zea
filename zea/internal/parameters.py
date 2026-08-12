@@ -243,13 +243,6 @@ class BaseParameters:
 
         return value
 
-    @staticmethod
-    def _human_readable_type(type):
-        """Convert a type or tuple of types to a human-readable string."""
-        return (
-            type.__name__ if not isinstance(type, tuple) else ", ".join([t.__name__ for t in type])
-        )
-
     def copy(self):
         """Return a deep copy of the parameters object (including custom params)."""
         return self.__class__(**deepcopy(self._params), **deepcopy(self._custom_params))

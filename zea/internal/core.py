@@ -2,7 +2,6 @@
 
 import enum
 import hashlib
-import inspect
 import json
 import pickle
 
@@ -75,17 +74,6 @@ def _skip_to_tensor(value):
     return isinstance(value, str) or callable(value) or isinstance(value, bytes)
 
 
-def _supports_zea_to_tensor(value) -> bool:
-    """Check if `value` implements zea's `to_tensor(keep_as_is=...)` protocol."""
-    to_tensor = getattr(value, "to_tensor", None)
-    if not callable(to_tensor):
-        return False
-    try:
-        return "keep_as_is" in inspect.signature(to_tensor).parameters
-    except (TypeError, ValueError):
-        return False
-
-
 def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
     """Convert an object to a dictionary of tensors."""
     from zea.config import Config
@@ -117,20 +105,31 @@ def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
 
 
 def _to_tensor(key: str, val, keep_as_is: list | None = None):
+    """Convert a single value to a keras tensor with a zea base precision.
+
+    Floats become ``float32``, ints ``int32`` and booleans stay boolean, so that
+    values originating from Python natives or numpy get a consistent dtype.
+
+    Args:
+        key (str): Name of the value, used to check against ``keep_as_is``.
+        val: The value to convert. Values whose type is not in
+            ``CONVERT_TO_KERAS_TYPES`` (such as ``None``, dicts and strings) are
+            returned unchanged.
+        keep_as_is (list, optional): Names that must not be converted.
+
+    Returns:
+        The converted tensor, or ``val`` itself when it is not converted.
+    """
     if keep_as_is is None:
         keep_as_is = []
 
     if key in keep_as_is:
         return val
 
+    # Anything outside the convertible types (including None and dicts) is passed through
     if not isinstance(val, CONVERT_TO_KERAS_TYPES):
         return val
 
-    if val is None:
-        return None
-    # Recursively handle dicts
-    if isinstance(val, dict):
-        return {k: _to_tensor(k, v, keep_as_is=keep_as_is) for k, v in val.items()}
     # Use float precision for all floats (including np.float32/64)
     if isinstance(val, float) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, float)):
         dtype = BASE_FLOAT_PRECISION
