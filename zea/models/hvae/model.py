@@ -1,3 +1,13 @@
+"""Network definition of the hierarchical VAE.
+
+This is a snippet of the full model at https://github.com/swpenninga/hvae:
+normalizing flows and (spatial / depthwise) attention are not part of it. The
+arguments and branches for those features are kept so that a checkpoint from
+the original code still deserializes, but the presets zea ships never enable
+them, and the layers they would need do not exist here. Those branches are
+therefore marked ``# pragma: no cover``.
+"""
+
 import random as pythonrandom
 
 import numpy as np
@@ -229,7 +239,7 @@ class VAE(Model):
         for stage_num, stage in enumerate(self.decoder.stages.layers):
             stage_params = 0
             for block in stage.blocks.layers:
-                if self.params.use_depthwise_attention:
+                if self.params.use_depthwise_attention:  # pragma: no cover
                     stage_params += block.queries.count_params()
                     if block.combine_queries:
                         stage_params += block.queries_comb_q.count_params()
@@ -273,7 +283,7 @@ class VAE(Model):
         print("------  Flows  ------")
         if self.params.flow_type == "none":
             print(f"        {None}")
-        else:
+        else:  # pragma: no cover
             for stage_num, stage in enumerate(self.decoder.stages.layers):
                 stage_params = 0
                 for block in stage.blocks.layers:
@@ -315,10 +325,10 @@ class VAE(Model):
 
         print("---- Attention parameters ----")
         print(f"spatial_attention:   {self.params.use_spatial_attention}")
-        if self.params.use_spatial_attention:
+        if self.params.use_spatial_attention:  # pragma: no cover
             print(f"s_a_width:           {self.params.enc_sa_width}")
         print(f"depthwise_attention: {self.params.use_depthwise_attention}")
-        if self.params.use_depthwise_attention:
+        if self.params.use_depthwise_attention:  # pragma: no cover
             print(f"query_width:         {self.params.query_width}")
             print(f"num_queries:         {self.params.num_queries}\n")
 
@@ -463,7 +473,7 @@ class Decoder(layers.Layer):
         else:
             x = ops.repeat(self.init_bias, num_images, axis=0)
 
-        if self.use_depthwise_attention:
+        if self.use_depthwise_attention:  # pragma: no cover
             # vp and kp get overwritten in first call, these are placeholders
             vp = ops.zeros(1)
             kp = ops.zeros(1)
@@ -663,7 +673,7 @@ class EncoderStage(layers.Layer):
         self.sa_width = params.enc_sa_width[stage_num]
 
         self.use_depthwise_attention = params.use_depthwise_attention
-        if self.use_depthwise_attention:
+        if self.use_depthwise_attention:  # pragma: no cover
             self.key_width = params.query_width
             self.lw_v = layers.LayerNormalization(axis=[1, 2, 3])
 
@@ -805,7 +815,7 @@ class DecBlock(layers.Layer):
             self.use_flow = False
 
         p_out_width = 2 * self.zdim + in_width
-        if self.use_depthwise_attention:
+        if self.use_depthwise_attention:  # pragma: no cover
             self.query_width = query_width
             self.num_queries = num_queries
             p_out_width += self.query_width
@@ -906,7 +916,7 @@ class DecBlock(layers.Layer):
     def build(self):
         self.q.build()
         self.p.build()
-        if self.use_flow:
+        if self.use_flow:  # pragma: no cover
             self.flows.build()
 
         if not self.last_block:

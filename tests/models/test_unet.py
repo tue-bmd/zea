@@ -3,9 +3,12 @@
 import numpy as np
 import pytest
 
-from zea.models.unet import get_time_conditional_unetwork, get_unetwork
-
-from . import DEFAULT_TEST_SEED
+from zea.models.unet import (
+    UNet,
+    UNetTimeConditional,
+    get_time_conditional_unetwork,
+    get_unetwork,
+)
 
 IMAGE_SHAPE = (32, 32, 1)
 BATCH_SIZE = 2
@@ -15,12 +18,6 @@ WIDTHS_AND_DEPTHS = [
     ([8, 16, 32], 2),
     ([16, 32], 3),
 ]
-
-
-@pytest.fixture
-def rng():
-    """Random number generator for reproducible tests."""
-    return np.random.default_rng(DEFAULT_TEST_SEED)
 
 
 @pytest.fixture(params=WIDTHS_AND_DEPTHS, ids=lambda p: f"w{len(p[0])}_d{p[1]}")
@@ -84,3 +81,66 @@ def test_time_conditional_unetwork_custom_embedding(rng):
     noise_variances = rng.standard_normal((BATCH_SIZE, 1, 1, 1)).astype("float32")
     y = model([x, noise_variances])
     assert y.shape == (BATCH_SIZE, *IMAGE_SHAPE)
+
+
+def test_time_conditional_unetwork_group_norm(rng):
+    """The residual blocks can normalize per group instead of per batch."""
+    model = get_time_conditional_unetwork(IMAGE_SHAPE, [32, 64], 2, normalization="group_norm")
+    x = rng.standard_normal((BATCH_SIZE, *IMAGE_SHAPE)).astype("float32")
+    noise_variances = rng.standard_normal((BATCH_SIZE, 1, 1, 1)).astype("float32")
+
+    assert model([x, noise_variances]).shape == (BATCH_SIZE, *IMAGE_SHAPE)
+
+
+class TestUNet:
+    """The registered model wrapping :func:`get_unetwork`."""
+
+    @pytest.fixture
+    def model(self):
+        return UNet(input_shape=IMAGE_SHAPE, widths=[16, 32], block_depth=2, input_range=(0, 1))
+
+    def test_output_shape(self, model, rng):
+        x = rng.standard_normal((BATCH_SIZE, *IMAGE_SHAPE)).astype("float32")
+
+        assert model(x).shape == (BATCH_SIZE, *IMAGE_SHAPE)
+
+    def test_untrained_model_predicts_zeros(self, model, rng):
+        """The output convolution is zero-initialized."""
+        x = rng.standard_normal((1, *IMAGE_SHAPE)).astype("float32")
+
+        np.testing.assert_allclose(np.asarray(model(x)), 0.0)
+
+    def test_config_roundtrip(self, model):
+        config = model.get_config()
+        restored = UNet.from_config(config)
+
+        assert restored.get_config() == config
+        assert config["input_shape"] == IMAGE_SHAPE
+        assert config["input_range"] == (0, 1)
+
+
+class TestUNetTimeConditional:
+    """The registered model wrapping :func:`get_time_conditional_unetwork`."""
+
+    @pytest.fixture
+    def model(self):
+        return UNetTimeConditional(
+            image_shape=IMAGE_SHAPE,
+            widths=[16, 32],
+            block_depth=2,
+            image_range=(0, 1),
+            embedding_dims=16,
+        )
+
+    def test_output_shape(self, model, rng):
+        x = rng.standard_normal((BATCH_SIZE, *IMAGE_SHAPE)).astype("float32")
+        noise_variances = rng.random((BATCH_SIZE, 1, 1, 1)).astype("float32")
+
+        assert model([x, noise_variances]).shape == (BATCH_SIZE, *IMAGE_SHAPE)
+
+    def test_config_roundtrip(self, model):
+        config = model.get_config()
+        restored = UNetTimeConditional.from_config(config)
+
+        assert restored.get_config() == config
+        assert config["embedding_dims"] == 16

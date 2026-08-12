@@ -103,8 +103,8 @@ class EchoNetLVH(BaseModel):
             logits (Tensor): Model output logits of shape [B, H, W, 4]
 
         Returns:
-            Tensor: Key point coordinates of shape [B, 4, 2] where each point
-                   is in (x, y) format
+            Tensor: Key point coordinates of shape [B, 4, 2] where each point is a
+                   ``(row, col)`` index into the heatmap.
         """
         # Create coordinate grid for the current logit dimensions
         input_shape = ops.shape(logits)[1:3]
@@ -115,13 +115,14 @@ class EchoNetLVH(BaseModel):
         # Transpose logits to [B, 4, H, W] for vectorized processing
         logits_batchified = ops.transpose(logits, (0, 3, 1, 2))
 
-        # Extract expected coordinates for each channel
+        # Extract expected coordinates for each channel. `expected_coordinate`
+        # returns (x, y), so flip back to (row, col) indices.
         return ops.flip(
             ops.vectorized_map(
                 lambda logit: self.expected_coordinate(logit, input_space_coordinate_grid),
                 logits_batchified,
             ),
-            axis=-1,  # Flip to convert from (y, x) to (x, y)
+            axis=-1,
         )
 
     def expected_coordinate(self, mask, coordinate_grid=None):
@@ -144,8 +145,9 @@ class EchoNetLVH(BaseModel):
         if coordinate_grid is None:
             coordinate_grid = self.coordinate_grid
 
-        # Ensure mask values are non-negative and normalized
-        mask_clipped = ops.clip(mask, 0, None)
+        # Ensure mask values are non-negative and normalized. `ops.maximum` rather
+        # than a one-sided `ops.clip`, which the TensorFlow backend rejects.
+        mask_clipped = ops.maximum(mask, 0.0)
         mask_normed = mask_clipped / ops.max(mask_clipped)
 
         def safe_normalize(m):
