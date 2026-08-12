@@ -21,7 +21,7 @@ coverage:
       default:
         target: auto         # Same bar as the project check: don't drag the overall
                               # average down, rather than requiring near-100% on every
-                              # diff (that default is what caused the false failures).
+                              # diff.
         threshold: 1.0       # Same 1pt buffer as the project check.
 
 flag_management:
@@ -36,5 +36,5 @@ comment:
   after_n_builds: 2
 
 ignore:
-  - "tests/*"
+  - "tests/**"
 
