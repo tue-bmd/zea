@@ -179,7 +179,7 @@ def test_dict_to_tensor_dispatches_zea_objects():
     result = dict_to_tensor({"cfg": Config(alpha=1.0), "value": 2.0}, keep_as_is=["value"])
 
     assert isinstance(result["cfg"], dict)
-    assert np.asarray(result["cfg"]["alpha"]) == 1.0
+    assert keras.ops.convert_to_numpy(result["cfg"]["alpha"]) == 1.0
     # keep_as_is propagates into the nested object and applies at the top level
     assert result["value"] == 2.0
 
