@@ -235,6 +235,11 @@ def test_gmm_posterior_sample():
     assert arr.shape == (n_samples,)
     assert ((arr >= 0) & (arr < n_components)).all()
 
+    # A batch of measurements is neither shared nor per-sample: point to vmap.
+    batch = rng.normal(size=(n_samples + 1, n_features)).astype("float32")
+    with pytest.raises(ValueError, match="vmap"):
+        gmm.posterior_sample(batch, n_samples=n_samples, seed=seed_gen)
+
 
 def test_diffusion_posterior_sample_shape():
     """Test DiffusionModel.posterior_sample returns correct shape."""
@@ -276,6 +281,30 @@ def test_diffusion_posterior_sample_shape():
         verbose=False,
     )
     assert out.shape == (n_samples, n_features)
+
+    # A batch of measurements is neither shared nor per-sample: point to vmap.
+    with pytest.raises(ValueError, match="vmap"):
+        model.posterior_sample(
+            measurements=keras.ops.broadcast_to(measurements, (n_samples + 1, n_features)),
+            n_samples=n_samples,
+            mask=mask,
+            n_steps=2,
+            omega=1.0,
+            seed=seed_gen,
+            verbose=False,
+        )
+
+    # So is a measurement of the wrong rank altogether.
+    with pytest.raises(ValueError, match="rank"):
+        model.posterior_sample(
+            measurements=keras.ops.broadcast_to(measurements, (1, n_samples, n_features)),
+            n_samples=n_samples,
+            mask=mask,
+            n_steps=2,
+            omega=1.0,
+            seed=seed_gen,
+            verbose=False,
+        )
 
 
 def test_dehaze_nuclear_diffusion_shape_logic():

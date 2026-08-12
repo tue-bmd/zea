@@ -163,7 +163,8 @@ class GaussianMixtureModel(GenerativeModel):
         Args:
             measurements: Input data of shape (n_features,), or
                 (n_samples, n_features) to condition each sample on a
-                different measurement.
+                different measurement. Use :func:`zea.func.vmap` to sample from
+                a batch of measurements.
             n_samples: Number of posterior samples to generate.
             seed: Random seed.
 
@@ -171,6 +172,7 @@ class GaussianMixtureModel(GenerativeModel):
             Component indices, shape (n_samples,).
         """
         X = ops.convert_to_tensor(measurements, dtype="float32")
+        X, _ = self._as_measurement_batch(X, n_samples, event_ndim=1)
         X = ops.broadcast_to(X, (n_samples, ops.shape(X)[-1]))
         gamma = self._e_step(X)  # (n_samples, n_components)
         # One draw per sample, from that sample's own responsibilities

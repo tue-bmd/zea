@@ -263,7 +263,8 @@ class DiffusionModel(DeepGenerativeModel):
             n_samples: Number of posterior samples to generate, and the leading
                 dimension of the output. ``measurements`` is either a single
                 measurement shared by every sample, or exactly one measurement
-                per requested sample.
+                per requested sample. Use :func:`zea.func.vmap` to sample from a
+                batch of measurements.
             n_steps: Number of diffusion steps.
             initial_step: Step at which to begin the reverse diffusion loop.
                 ``0`` runs all ``diffusion_steps`` steps from maximum noise.
@@ -296,6 +297,9 @@ class DiffusionModel(DeepGenerativeModel):
             seed=seed1,
         )
 
+        measurements, _ = self._as_measurement_batch(
+            measurements, n_samples, event_ndim=len(self.input_shape)
+        )
         measurements = ops.broadcast_to(measurements, (n_samples, *self.input_shape))
 
         return self.reverse_conditional_diffusion(

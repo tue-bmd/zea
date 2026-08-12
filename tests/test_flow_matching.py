@@ -213,6 +213,18 @@ def test_flow_matching_posterior_sample_shape():
     )
     assert out.shape == (n_samples, n_features)
 
+    # A batch of measurements is neither shared nor per-sample: point to vmap.
+    with pytest.raises(ValueError, match="vmap"):
+        model.posterior_sample(
+            measurements=keras.ops.broadcast_to(measurements, (n_samples + 1, n_features)),
+            n_samples=n_samples,
+            mask=mask,
+            n_steps=2,
+            omega=1.0,
+            seed=seed_gen,
+            verbose=False,
+        )
+
 
 def test_flow_matching_test_step_returns_losses():
     """test_step returns a dict with v_loss and i_loss keys."""

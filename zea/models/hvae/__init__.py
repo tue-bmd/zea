@@ -147,7 +147,7 @@ class HierarchicalVAE(DeepGenerativeModel):
             output (tensor): Posterior samples of shape [n_samples, 256, 256, 3].
         """
         seed_decoder, seed_mol = split_seed(seed, 2)
-        measurements, per_sample = self._as_measurement_batch(measurements, n_samples)
+        measurements, per_sample = self._as_measurement_batch(measurements, n_samples, event_ndim=3)
 
         activations = self.network.encoder(measurements)
         if not per_sample:
@@ -158,34 +158,6 @@ class HierarchicalVAE(DeepGenerativeModel):
         logits, _, _ = self.network.decoder.call(activations, seed=seed_decoder)
         # Samples are of shape [n_samples, 256, 256, 3] in [-1, 1]
         return self.network.sample_from_mol(logits, seed=seed_mol)
-
-    @staticmethod
-    def _as_measurement_batch(measurements, n_samples):
-        """Give `measurements` a leading axis, and say whether it was already there.
-
-        Returns:
-            tuple: ``(measurements, per_sample)``, where ``per_sample`` is True
-            when the caller supplied one measurement per sample.
-
-        Raises:
-            ValueError: If a leading axis is present but conditions neither every
-                sample (size 1) nor one sample each (size ``n_samples``).
-        """
-        measurements = ops.convert_to_tensor(measurements)
-        if len(measurements.shape) != 4:
-            return measurements[None], False
-
-        # A singleton leading axis is shared by every sample, just like no axis.
-        batch_size = measurements.shape[0]
-        if batch_size == 1:
-            return measurements, False
-        if batch_size != n_samples:
-            raise ValueError(
-                f"Expected a leading axis of n_samples={n_samples} (one measurement per "
-                f"sample) or of 1 (shared by every sample), but got {batch_size}. "
-                "Use zea.func.vmap to sample from a batch of measurements."
-            )
-        return measurements, True
 
     def call(self, measurements, seed=None):
         """
@@ -236,7 +208,7 @@ class HierarchicalVAE(DeepGenerativeModel):
             raise ValueError("num_layers must be either a float or an int.")
 
         seed_blocks, seed_mol = split_seed(seed, 2)
-        measurements, per_sample = self._as_measurement_batch(measurements, n_samples)
+        measurements, per_sample = self._as_measurement_batch(measurements, n_samples, event_ndim=3)
         # Deterministic encoder: a single measurement needs one pass, whose
         # activations are then repeated across the samples.
         repeats = 1 if per_sample else n_samples
