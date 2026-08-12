@@ -47,6 +47,32 @@ def split_seed(seed, n):
     raise TypeError("seed must be None, an int, keras.random.SeedGenerator, or a JAX key.")
 
 
+def fold_seed(seed, data):
+    """Derive a seed for a single loop iteration from the iteration index.
+
+    A stateful `keras.random.SeedGenerator <https://keras.io/api/random/seed_generator/>`_
+    cannot be part of a jitted loop state, so loop bodies derive their seed from the
+    iteration index rather than threading a seed through the loop. JAX keys are folded
+    with the index, all other seeds are either stateful or ``None`` and can be reused
+    as-is.
+
+    Args:
+        seed: None, jax.Array, int, or keras.random.SeedGenerator.
+        data: Integer (or scalar tensor) to fold into the seed, typically a loop index.
+
+    Returns:
+        A seed for this iteration (a JAX key, SeedGenerator, or None).
+    """
+    seed = materialize_seed(seed)
+
+    if is_jax_key(seed):
+        import jax
+
+        return jax.random.fold_in(seed, data)
+
+    return seed
+
+
 def materialize_seed(seed):
     """Convert stateful seeds into backend-native explicit seeds when needed.
 
