@@ -9,6 +9,45 @@ Pipeline
    :no-special-members:
    :no-index:
 
+.. _mixed-precision:
+
+Mixed precision and int16 data
+------------------------------
+
+RF data is usually stored as ``int16``, while most operations need floating
+point. A :class:`~zea.ops.Pipeline` handles both natively and can run the
+beamformer in **mixed precision** (``bfloat16``) for a substantial speed-up
+without a meaningful loss of image quality.
+
+Mixed precision is enabled through the standard Keras global policy — no
+pipeline changes are required:
+
+.. code-block:: python
+
+    import keras
+    import zea
+
+    keras.mixed_precision.set_global_policy("mixed_bfloat16")
+
+    pipeline = zea.Pipeline.from_default(beamformer="delay_and_sum")
+    bmode = pipeline(data=raw_data, **pipeline.prepare_parameters(parameters))["data"]
+
+    keras.mixed_precision.set_global_policy("float32")  # reset when done
+
+Under the policy the beamformer runs the **signal** path — the time-of-flight
+gather, interpolation, apodization and pressure-field weighting — in
+``bfloat16``, while **geometry and delays are always kept in float32** (sample
+indices and interpolation weights need the full dynamic range) and the
+delay-and-sum is **accumulated in float32**. Because only the well-conditioned
+signal path is lowered, the reconstruction stays faithful to the float32
+baseline. The compute dtype is resolved by
+:func:`zea.internal.precision.signal_compute_dtype`.
+
+``int16`` RF data is accepted directly: the beamformer and/or demodulate operations promotes 
+it to the compute dtype internally, so no explicit cast is needed before beamforming.
+
+See ``benchmarks/benchmark_mixed_precision.py`` for a speed/accuracy comparison.
+
 .. _custom-ops:
 
 Custom operations

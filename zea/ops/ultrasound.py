@@ -489,14 +489,6 @@ class Demodulate(Operation):
     def call(self, demodulation_frequency=None, sampling_frequency=None, **kwargs):
         data = kwargs[self.key]
 
-        dtype = str(ops.dtype(data))
-        if dtype == "int16":
-            raise ValueError(
-                "Demodulate received int16 raw_data. Add a Cast operation before Demodulate, "
-                "for example: Pipeline([Cast(dtype='float32'), Demodulate(), ...]). "
-                "Tip: Pipeline.from_default() already includes this cast."
-            )
-
         data = ops.cast(data, "float32")
 
         # Split the complex signal into two channels
