@@ -1227,7 +1227,9 @@ def test_simulate_elevation_lens_under_jax_jit():
 
     code = textwrap.dedent(inspect.getsource(_subprocess_simulate_elevation_lens_under_jit))
     code += "\n_subprocess_simulate_elevation_lens_under_jit()\n"
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=30
+    )
     assert result.returncode == 0, (
         f"Simulation with elevation_lens crashed with jax jit.\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -1236,7 +1238,6 @@ def test_simulate_elevation_lens_under_jax_jit():
 
 def _subprocess_simulate_elevation_bucket_compile_counts():  # pragma: no cover
     """XLA compiles per call to check `elevation_slab_bucket` caches correctly."""
-    import logging
     import os
 
     os.environ["KERAS_BACKEND"] = "jax"
@@ -1289,18 +1290,21 @@ def _subprocess_simulate_elevation_bucket_compile_counts():  # pragma: no cover
         "element_height": element_height,
     }
 
-    events = []
-    logging.getLogger("jax._src.dispatch").addHandler(
-        type("H", (logging.Handler,), {"emit": lambda self, record: events.append(record)})()
-    )
+    compile_count = 0
+
+    def _on_compile(event, duration_secs, **kwargs):
+        nonlocal compile_count
+        if event == "/jax/core/compile/backend_compile_duration":
+            compile_count += 1
+
+    jax.monitoring.register_event_duration_secs_listener(_on_compile)
 
     n_compiles = {}
-    with jax.log_compiles():
-        for n_inside in (300, 400, 500, 900):
-            before = len(events)
-            positions, magnitudes = cloud(n_inside, 2000, seed=n_inside)
-            op(scatterer_positions=positions, scatterer_magnitudes=magnitudes, **args)
-            n_compiles[n_inside] = len(events) - before
+    for n_inside in (300, 400, 500, 900):
+        before = compile_count
+        positions, magnitudes = cloud(n_inside, 2000, seed=n_inside)
+        op(scatterer_positions=positions, scatterer_magnitudes=magnitudes, **args)
+        n_compiles[n_inside] = compile_count - before
 
     print(f"compiles per call: {n_compiles}")
     if n_compiles[300] == 0:
@@ -1319,7 +1323,9 @@ def test_simulate_elevation_bucket_reuses_compiled_shapes():
 
     code = textwrap.dedent(inspect.getsource(_subprocess_simulate_elevation_bucket_compile_counts))
     code += "\n_subprocess_simulate_elevation_bucket_compile_counts()\n"
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=600
+    )
     assert result.returncode == 0, (
         f"elevation slab bucketing did not reuse compiled shapes.\n"
         f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"

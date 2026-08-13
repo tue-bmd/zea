@@ -3,6 +3,7 @@ Simulate and beamform the fish phantom with a planewave, then check that every s
 up as a bright dot. For approximations, check that the image is close to the exact mode results.
 """
 
+import keras
 import numpy as np
 import pytest
 
@@ -170,8 +171,14 @@ def test_elevation_lens_prunes_out_of_plane_scatterers():
 
     inside = np.array([[0.0, 0.5 * element_height, 30e-3]], dtype=np.float32)
     outside = np.array([[0.0, 1.5 * element_height, 30e-3]], dtype=np.float32)
-    assert np.abs(np.asarray(simulate_rf(scatterer_positions=inside, **args))).max() > 0
-    assert np.abs(np.asarray(simulate_rf(scatterer_positions=outside, **args))).max() == 0
+    assert (
+        np.abs(keras.ops.convert_to_numpy(simulate_rf(scatterer_positions=inside, **args))).max()
+        > 0
+    )
+    assert (
+        np.abs(keras.ops.convert_to_numpy(simulate_rf(scatterer_positions=outside, **args))).max()
+        == 0
+    )
 
     both = np.concatenate([inside, outside], axis=0)
     positions, magnitudes = select_elevation_slab(
@@ -182,9 +189,9 @@ def test_elevation_lens_prunes_out_of_plane_scatterers():
 
     # Check if pruning and masking results in the same rf.
     args["scatterer_magnitudes"] = np.ones(2, dtype=np.float32)
-    pruned = np.asarray(simulate_rf(scatterer_positions=both, **args))
+    pruned = keras.ops.convert_to_numpy(simulate_rf(scatterer_positions=both, **args))
     args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
-    reference = np.asarray(simulate_rf(scatterer_positions=inside, **args))
+    reference = keras.ops.convert_to_numpy(simulate_rf(scatterer_positions=inside, **args))
     assert np.allclose(pruned, reference)
 
 
@@ -227,8 +234,12 @@ def test_elevation_slab_bucket_rounds_up_and_is_a_noop_when_inapplicable():
     positions, magnitudes = _slab_cloud(100, 900, element_height)
     no_lens = {**kwargs, "elevation_lens": False}
     no_height = {**kwargs, "element_height": None}
-    lensless_bucket = elevation_slab_bucket(positions, magnitudes, **no_lens)
-    heightless_bucket = elevation_slab_bucket(positions, magnitudes, **no_height)
+    lensless_bucket = elevation_slab_bucket(
+        scatterer_positions=positions, scatterer_magnitudes=magnitudes, **no_lens
+    )
+    heightless_bucket = elevation_slab_bucket(
+        scatterer_positions=positions, scatterer_magnitudes=magnitudes, **no_height
+    )
     assert lensless_bucket == {}
     assert heightless_bucket == {}
     # Check that passing irrelevant simulator params do not raise errors.
@@ -274,10 +285,10 @@ def test_elevation_slab_bucket_matches_unpruned_simulation():
     )
     assert pruned["scatterer_positions"].shape[0] == 32
 
-    reference = np.asarray(
+    reference = keras.ops.convert_to_numpy(
         simulate_rf(scatterer_positions=positions, scatterer_magnitudes=magnitudes, **args)
     )
-    bucketed = np.asarray(simulate_rf(**pruned, **args))
+    bucketed = keras.ops.convert_to_numpy(simulate_rf(**pruned, **args))
     assert np.allclose(reference, bucketed, atol=1e-3 * np.abs(reference).max())
 
 
@@ -312,7 +323,7 @@ def test_simulate_op_prunes_elevation_slab_without_leaking_pruned_cloud():
         element_height=element_height,
     )
 
-    assert np.abs(np.asarray(outputs[op.output_key])).max() > 0
+    assert np.abs(keras.ops.convert_to_numpy(outputs[op.output_key])).max() > 0
     assert outputs["scatterer_positions"].shape == positions.shape
     assert outputs["scatterer_magnitudes"].shape == magnitudes.shape
 
@@ -344,5 +355,5 @@ def test_record_length_gate_uses_worst_case_element_pair():
         "t_peak": np.zeros(1, dtype=np.float32),
     }
 
-    rf = np.asarray(simulate_rf(**args))
+    rf = keras.ops.convert_to_numpy(simulate_rf(**args))
     assert np.abs(rf).max() == 0, "Out-of-record element pair was included; implies aliased energy."
