@@ -164,7 +164,7 @@ def simulate_rf(
             * sound_speed
         )
 
-    n_ax_rounded = _round_up_to_power_of_two(int(n_ax)).astype("float32")
+    n_ax_rounded = float(_round_up_to_power_of_two(int(n_ax)))
 
     freqs = ops.arange(n_ax_rounded // 2 + 1, dtype="float32") / n_ax_rounded * sampling_frequency
 
