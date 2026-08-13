@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 import keras
 import numpy as np
 from keras import ops
@@ -738,16 +740,14 @@ class BandPassFilter(FirFilter):
         """Validate passband and return (f1, f2)."""
         passband_error_message = "passband must be an iterable of two numeric values"
 
-        try:
-            passband_values = tuple(selected_passband)
-            f1 = passband_values[0]
-            f2 = passband_values[1]
-        except (TypeError, IndexError) as exc:
-            raise ValueError(passband_error_message) from exc
+        if not isinstance(selected_passband, Iterable):
+            raise ValueError(passband_error_message)
 
+        passband_values = tuple(selected_passband)
         if len(passband_values) != 2:
             raise ValueError(passband_error_message)
 
+        f1, f2 = passband_values
         if not all(
             isinstance(f, (int, float, np.number)) and not isinstance(f, bool) for f in (f1, f2)
         ):
