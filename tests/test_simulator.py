@@ -11,7 +11,12 @@ from zea import Parameters, Probe, display
 from zea.beamform import phantoms
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.metrics import psnr
-from zea.simulator import select_elevation_slab, simulate_rf, simulate_rf_fast
+from zea.simulator import (
+    elevation_slab_bucket,
+    select_elevation_slab,
+    simulate_rf,
+    simulate_rf_fast,
+)
 
 N_EL = 80
 APERTURE = 32e-3
@@ -181,3 +186,163 @@ def test_elevation_lens_prunes_out_of_plane_scatterers():
     args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
     reference = np.asarray(simulate_rf(scatterer_positions=inside, **args))
     assert np.allclose(pruned, reference)
+
+
+def _slab_cloud(n_inside, n_outside, element_height, seed=0):
+    """A cloud split into scatterers inside and outside the elevation slab."""
+    rng = np.random.default_rng(seed)
+    n = n_inside + n_outside
+    y = np.concatenate(
+        [
+            rng.uniform(-0.4, 0.4, n_inside) * element_height,
+            rng.uniform(1.5, 3.0, n_outside) * element_height,
+        ]
+    )
+    positions = np.stack(
+        [rng.uniform(-5e-3, 5e-3, n), y, rng.uniform(15e-3, 30e-3, n)], axis=1
+    ).astype(np.float32)
+    return positions, rng.uniform(0.5, 1.5, n).astype(np.float32)
+
+
+def test_elevation_slab_bucket_rounds_up_and_is_a_noop_when_inapplicable():
+    n_el = 16
+    probe_geometry = np.stack(
+        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+    element_height = 5e-3
+    kwargs = {
+        "probe_geometry": probe_geometry,
+        "element_height": element_height,
+        "elevation_lens": True,
+    }
+
+    for n_inside in (5000, 7000):
+        positions, magnitudes = _slab_cloud(n_inside, 20000 - n_inside, element_height)
+        out = elevation_slab_bucket(
+            scatterer_positions=positions, scatterer_magnitudes=magnitudes, **kwargs
+        )
+        assert out["scatterer_positions"].shape == (8192, 3)
+        assert int((out["scatterer_magnitudes"] > 0).sum()) == n_inside
+
+    positions, magnitudes = _slab_cloud(100, 900, element_height)
+    no_lens = {**kwargs, "elevation_lens": False}
+    no_height = {**kwargs, "element_height": None}
+    lensless_bucket = elevation_slab_bucket(positions, magnitudes, **no_lens)
+    heightless_bucket = elevation_slab_bucket(positions, magnitudes, **no_height)
+    assert lensless_bucket == {}
+    assert heightless_bucket == {}
+    # Check that passing irrelevant simulator params do not raise errors.
+    assert elevation_slab_bucket(
+        scatterer_positions=positions,
+        scatterer_magnitudes=magnitudes,
+        sound_speed=SOUND_SPEED,
+        n_ax=1024,
+        **kwargs,
+    )
+
+
+def test_elevation_slab_bucket_matches_unpruned_simulation():
+    """Pruning to a padded bucket must not change the RF."""
+    n_el = 16
+    probe_geometry = np.stack(
+        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+    element_height = 5e-3
+    positions, magnitudes = _slab_cloud(20, 300, element_height)
+
+    args = {
+        "probe_geometry": probe_geometry,
+        "apply_lens_correction": False,
+        "lens_thickness": 1e-3,
+        "lens_sound_speed": 1000.0,
+        "sound_speed": SOUND_SPEED,
+        "n_ax": 1024,
+        "center_frequency": CENTER_FREQUENCY,
+        "sampling_frequency": CENTER_FREQUENCY * 4,
+        "t0_delays": np.zeros((1, n_el), dtype=np.float32),
+        "initial_times": np.zeros(1, dtype=np.float32),
+        "element_width": 1e-3,
+        "attenuation_coef": 0.0,
+        "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
+        "t_peak": np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
+        "elevation_lens": True,
+        "element_height": element_height,
+    }
+
+    pruned = elevation_slab_bucket(
+        scatterer_positions=positions, scatterer_magnitudes=magnitudes, **args
+    )
+    assert pruned["scatterer_positions"].shape[0] == 32
+
+    reference = np.asarray(
+        simulate_rf(scatterer_positions=positions, scatterer_magnitudes=magnitudes, **args)
+    )
+    bucketed = np.asarray(simulate_rf(**pruned, **args))
+    assert np.allclose(reference, bucketed, atol=1e-3 * np.abs(reference).max())
+
+
+def test_simulate_op_prunes_elevation_slab_without_leaking_pruned_cloud():
+    """The `Simulate` op prunes before its jitted `call`, but must hand the full cloud on."""
+    n_el = 16
+    probe_geometry = np.stack(
+        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+    element_height = 5e-3
+    positions, magnitudes = _slab_cloud(20, 300, element_height)
+
+    op = zea.ops.Simulate(jit_compile=True, with_batch_dim=False)
+    outputs = op(
+        scatterer_positions=positions,
+        scatterer_magnitudes=magnitudes,
+        probe_geometry=probe_geometry,
+        apply_lens_correction=False,
+        lens_thickness=1e-3,
+        lens_sound_speed=1000.0,
+        sound_speed=SOUND_SPEED,
+        n_ax=1024,
+        center_frequency=CENTER_FREQUENCY,
+        sampling_frequency=CENTER_FREQUENCY * 4,
+        t0_delays=np.zeros((1, n_el), dtype=np.float32),
+        initial_times=np.zeros(1, dtype=np.float32),
+        element_width=1e-3,
+        attenuation_coef=0.0,
+        tx_apodizations=np.ones((1, n_el), dtype=np.float32),
+        t_peak=np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
+        elevation_lens=True,
+        element_height=element_height,
+    )
+
+    assert np.abs(np.asarray(outputs[op.output_key])).max() > 0
+    assert outputs["scatterer_positions"].shape == positions.shape
+    assert outputs["scatterer_magnitudes"].shape == magnitudes.shape
+
+
+def test_record_length_gate_uses_worst_case_element_pair():
+    """
+    A scatterer with one in-record and one out-of-record element must be gated out to prevent
+    aliasing.
+    """
+    probe_geometry = np.array([[-8e-3, 0.0, 0.0], [8e-3, 0.0, 0.0]], dtype=np.float32)
+    scatterer_positions = np.array([[9.375e-3, 0.0, 9.905e-3]], dtype=np.float32)
+
+    args = {
+        "scatterer_positions": scatterer_positions,
+        "scatterer_magnitudes": np.ones(1, dtype=np.float32),
+        "probe_geometry": probe_geometry,
+        "apply_lens_correction": False,
+        "lens_thickness": 1e-3,
+        "lens_sound_speed": 1000.0,
+        "sound_speed": SOUND_SPEED,
+        "n_ax": 256,
+        "center_frequency": CENTER_FREQUENCY,
+        "sampling_frequency": CENTER_FREQUENCY * 4,
+        "t0_delays": np.zeros((1, 2), dtype=np.float32),
+        "initial_times": np.zeros(1, dtype=np.float32),
+        "element_width": 1e-3,
+        "attenuation_coef": 0.0,
+        "tx_apodizations": np.ones((1, 2), dtype=np.float32),
+        "t_peak": np.zeros(1, dtype=np.float32),
+    }
+
+    rf = np.asarray(simulate_rf(**args))
+    assert np.abs(rf).max() == 0, "Out-of-record element pair was included; implies aliased energy."

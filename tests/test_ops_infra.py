@@ -2,6 +2,9 @@
 
 import inspect
 import json
+import subprocess
+import sys
+import textwrap
 
 import keras
 import numpy as np
@@ -27,6 +30,7 @@ from zea.parameters import Parameters
 from zea.probes import Probe
 
 from . import DEFAULT_TEST_SEED, run_in_backend
+from .backend_utils import format_backend_skip_reason, missing_required_backends
 
 """Some operations for testing"""
 
@@ -1157,6 +1161,169 @@ def test_simulator(ultrasound_probe, ultrasound_parameters, ultrasound_scatterer
     )
     expected_shape = (1,) + expected_shape if with_batch_dim else expected_shape
     assert output["data"].shape == expected_shape
+
+
+def _subprocess_simulate_elevation_lens_under_jit():  # pragma: no cover
+    """`elevation_lens` is branched on with a Python `if` in `simulate_rf`, so it must be in
+    `Simulate.STATIC_PARAMS` or it raises `TracerBoolConversionError` under jit."""
+    import os
+
+    os.environ["KERAS_BACKEND"] = "jax"
+
+    import numpy as np
+
+    from zea import ops
+    from zea.beamform.delays import compute_t0_delays_planewave
+    from zea.ops.pipeline import Pipeline
+    from zea.parameters import Parameters
+
+    n_el = 16
+    probe_geometry = np.stack(
+        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+    angles = np.zeros(1)
+    parameters = Parameters(
+        n_tx=1,
+        n_ax=128,
+        n_el=n_el,
+        center_frequency=3e6,
+        sampling_frequency=12e6,
+        probe_geometry=probe_geometry,
+        t0_delays=compute_t0_delays_planewave(
+            probe_geometry=probe_geometry, polar_angles=angles, sound_speed=1540.0
+        ),
+        tx_apodizations=np.ones((1, n_el), dtype=np.float32),
+        element_width=np.linalg.norm(probe_geometry[1] - probe_geometry[0]),
+        apply_lens_correction=False,
+        sound_speed=1540.0,
+        lens_sound_speed=1000.0,
+        lens_thickness=1e-3,
+        initial_times=np.ones((1,)) * 1e-6,
+        attenuation_coef=0.2,
+        n_ch=1,
+        selected_transmits="all",
+        focus_distances=np.ones(1) * np.inf,
+        polar_angles=angles,
+        xlims=(-15e-3, 15e-3),
+        zlims=(0, 35e-3),
+    )
+
+    pipeline = Pipeline([ops.Simulate(jit_compile=True)], with_batch_dim=False)
+    inputs = pipeline.prepare_parameters(parameters)
+    pipeline(
+        **inputs,
+        scatterer_positions=np.array([[0.0, 0.0, 20e-3]], dtype=np.float32),
+        scatterer_magnitudes=np.ones(1, dtype=np.float32),
+        elevation_lens=True,
+        element_height=5e-3,
+    )
+
+
+def test_simulate_elevation_lens_under_jax_jit():
+    """Needs a subprocess, as `run_in_backend` disables jit."""
+    missing = missing_required_backends(["jax"])
+    if missing:
+        pytest.skip(format_backend_skip_reason(missing))
+
+    code = textwrap.dedent(inspect.getsource(_subprocess_simulate_elevation_lens_under_jit))
+    code += "\n_subprocess_simulate_elevation_lens_under_jit()\n"
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, (
+        f"Simulation with elevation_lens crashed with jax jit.\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+
+
+def _subprocess_simulate_elevation_bucket_compile_counts():  # pragma: no cover
+    """XLA compiles per call to check `elevation_slab_bucket` caches correctly."""
+    import logging
+    import os
+
+    os.environ["KERAS_BACKEND"] = "jax"
+
+    import jax
+    import numpy as np
+
+    from zea import ops
+
+    n_el, element_height = 16, 5e-3
+    probe_geometry = np.stack(
+        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+
+    def cloud(n_inside, n_total, seed):
+        rng = np.random.default_rng(seed)
+        y = np.concatenate(
+            [
+                rng.uniform(-0.4, 0.4, n_inside) * element_height,
+                rng.uniform(1.5, 3.0, n_total - n_inside) * element_height,
+            ]
+        )
+        positions = np.stack(
+            [
+                rng.uniform(-5e-3, 5e-3, n_total),
+                y,
+                rng.uniform(15e-3, 30e-3, n_total),
+            ],
+            axis=1,
+        ).astype(np.float32)
+        return positions, rng.uniform(0.5, 1.5, n_total).astype(np.float32)
+
+    op = ops.Simulate(jit_compile=True, with_batch_dim=False)
+    args = {
+        "probe_geometry": probe_geometry,
+        "apply_lens_correction": False,
+        "lens_thickness": 1e-3,
+        "lens_sound_speed": 1000.0,
+        "sound_speed": 1540.0,
+        "n_ax": 256,
+        "center_frequency": 3e6,
+        "sampling_frequency": 12e6,
+        "t0_delays": np.zeros((1, n_el), dtype=np.float32),
+        "initial_times": np.zeros(1, dtype=np.float32),
+        "element_width": 1e-3,
+        "attenuation_coef": 0.0,
+        "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
+        "t_peak": np.full(1, 1 / 3e6, dtype=np.float32),
+        "elevation_lens": True,
+        "element_height": element_height,
+    }
+
+    events = []
+    logging.getLogger("jax._src.dispatch").addHandler(
+        type("H", (logging.Handler,), {"emit": lambda self, record: events.append(record)})()
+    )
+
+    n_compiles = {}
+    with jax.log_compiles():
+        for n_inside in (300, 400, 500, 900):
+            before = len(events)
+            positions, magnitudes = cloud(n_inside, 2000, seed=n_inside)
+            op(scatterer_positions=positions, scatterer_magnitudes=magnitudes, **args)
+            n_compiles[n_inside] = len(events) - before
+
+    print(f"compiles per call: {n_compiles}")
+    if n_compiles[300] == 0:
+        raise AssertionError("The first call should compile.")
+    if n_compiles[400] or n_compiles[500]:
+        raise AssertionError(f"clouds in the same bucket should reuse: {n_compiles}")
+    if n_compiles[900] == 0:
+        raise AssertionError(f"clouds in different buckets should recompile: {n_compiles}")
+
+
+def test_simulate_elevation_bucket_reuses_compiled_shapes():
+    """Neighbouring in-slab counts must hit one compiled shape, or bucketing buys nothing."""
+    missing = missing_required_backends(["jax"])
+    if missing:
+        pytest.skip(format_backend_skip_reason(missing))
+
+    code = textwrap.dedent(inspect.getsource(_subprocess_simulate_elevation_bucket_compile_counts))
+    code += "\n_subprocess_simulate_elevation_bucket_compile_counts()\n"
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, (
+        f"elevation slab bucketing did not reuse compiled shapes.\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
 
 
 @pytest.mark.heavy

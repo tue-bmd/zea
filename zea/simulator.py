@@ -68,6 +68,7 @@ def simulate_rf(
     t_peak,
     elevation_lens=False,
     element_height=None,
+    max_chunk_gb=10.0,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -93,8 +94,12 @@ def simulate_rf(
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
         elevation_lens (bool): Whether the probe has an elevation lens. See :func:`spread`.
             When True, ignore scatterers outside the elevation slab defined by element_height.
+            Calling `simulate_rf` directly with an elevation lens only masks when using jit;
+            efficient pruning needs :class:`zea.ops.Simulate`.
         element_height (float): The elevation height of the elements [m].
             If None, defaults to element_width.
+        max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
+            :func:`simulate_rf_fast` share a call signature. See :func:`simulate_rf_fast`.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -132,6 +137,15 @@ def simulate_rf(
         scatterer_positions, magnitudes = _apply_elevation_slab(
             scatterer_positions, magnitudes, probe_geometry, element_height
         )
+
+    # tensorflow can't reduce over an empty axis.
+    if scatterer_positions.shape[0] == 0:
+        shape = (t0_delays.shape[0], int(n_ax), probe_geometry.shape[0], 1)
+        return ops.zeros(shape, dtype="float32")
+
+    # Phantoms build float64 clouds; tensorflow won't promote them against float32 params.
+    scatterer_positions = ops.cast(scatterer_positions, "float32")
+    magnitudes = ops.cast(magnitudes, "float32")
 
     pulse_spectrum_fn = get_pulse_spectrum_fn(center_frequency, n_period=4)
 
@@ -187,8 +201,9 @@ def simulate_rf(
         tx_delay = delay2(freqs[None], tx_firing_times, n_ax_rounded, sampling_frequency)
         tx_element_weights = ops.cast(tx_apodizations[tx][:, None], "complex64") * tx_delay
 
-        # necessary because delay2 never sees the full round-trip distance here
-        round_trip_time = 2 * ops.mean(dist, axis=1) / sound_speed + ops.mean(tx_firing_times)
+        # delay2 only gates one-way delays. Worst case over elements: drops some in-record
+        # pairs, but never aliases in ops.irfft.
+        round_trip_time = 2 * ops.max(dist, axis=1) / sound_speed + ops.max(tx_firing_times)
         within_record = ops.cast(round_trip_time < record_length, "float32")
 
         # Explicitly sum over tx dimension before the receive axis exists.
@@ -226,6 +241,7 @@ def simulate_rf_fast(
     t_peak,
     elevation_lens=False,
     element_height=None,
+    max_chunk_gb=10.0,
 ):
     """Time-domain (splat-and-convolve) RF simulator.
 
@@ -258,8 +274,15 @@ def simulate_rf_fast(
         tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el).
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
         elevation_lens (bool): Whether the probe has an elevation lens. See :func:`spread`.
+            When True, ignore scatterers outside the elevation slab defined by element_height.
+            Calling `simulate_rf_fast` directly with an elevation lens only masks when using jit;
+            efficient pruning needs :class:`zea.ops.Simulate`.
         element_height (float): The elevation height of the elements [m]. Only used when
             ``elevation_lens`` is True.
+        max_chunk_gb (float): Approximate memory budget [GB] for the (chunk, n_el, n_el)
+            tensors held at once while iterating over scatterers. Scatterers are processed
+            in chunks sized to this budget, so peak memory no longer scales with the total
+            scatterer count. Must be a static (Python) value, not a traced array.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -268,38 +291,46 @@ def simulate_rf_fast(
     n_ax = int(n_ax)
     n_tx = t0_delays.shape[0]
     n_el = probe_geometry.shape[0]
+    n_scat = scatterer_positions.shape[0]
 
     pulse = get_pulse_waveform(center_frequency, sampling_frequency)
-    base_gain, two_way_time = _precompute_scatterer_response(
-        scatterer_positions,
-        scatterer_magnitudes,
-        probe_geometry,
-        apply_lens_correction,
-        lens_thickness,
-        lens_sound_speed,
-        sound_speed,
-        center_frequency,
-        element_width,
-        attenuation_coef,
-        elevation_lens,
-        element_height,
-    )
 
-    parts = []
-    for tx in range(n_tx):
-        spike_map = _simulate_transmit(
-            base_gain,
-            two_way_time,
-            t0_delays[tx],
-            initial_times[tx],
-            tx_apodizations[tx],
-            t_peak[tx],
-            sampling_frequency,
-            n_ax,
-            n_el,
+    # Chunk so the (n_scat, n_el, n_el) tensors never materialize at once. The factor is
+    # approximate memory use after jit fusion, not a count of intermediate tensors.
+    bytes_per_scatterer = n_el * n_el * 4 * 6
+    chunk_size = max(1, int(max_chunk_gb * 1e9) // max(bytes_per_scatterer, 1))
+
+    spike_maps = [ops.zeros((n_ax, n_el), dtype="float32") for _ in range(n_tx)]
+    for start in range(0, n_scat, chunk_size):
+        stop = min(start + chunk_size, n_scat)
+        base_gain, two_way_time = _precompute_scatterer_response(
+            scatterer_positions[start:stop],
+            scatterer_magnitudes[start:stop],
+            probe_geometry,
+            apply_lens_correction,
+            lens_thickness,
+            lens_sound_speed,
+            sound_speed,
+            center_frequency,
+            element_width,
+            attenuation_coef,
+            elevation_lens,
+            element_height,
         )
-        parts.append(_convolve_pulse_over_channels(spike_map, pulse))
+        for tx in range(n_tx):
+            spike_maps[tx] = spike_maps[tx] + _simulate_transmit(
+                base_gain,
+                two_way_time,
+                t0_delays[tx],
+                initial_times[tx],
+                tx_apodizations[tx],
+                t_peak[tx],
+                sampling_frequency,
+                n_ax,
+                n_el,
+            )
 
+    parts = [_convolve_pulse_over_channels(spike_map, pulse) for spike_map in spike_maps]
     rf_data = ops.stack(parts, axis=0)
     return rf_data[..., None]
 
@@ -353,6 +384,10 @@ def _precompute_scatterer_response(
             probe_geometry,
             element_width if element_height is None else element_height,
         )
+
+    # See the matching cast in `simulate_rf`.
+    scatterer_positions = ops.cast(scatterer_positions, "float32")
+    magnitudes = ops.cast(magnitudes, "float32")
 
     one_way_distance = _one_way_distances(
         probe_geometry,
@@ -596,8 +631,8 @@ def select_elevation_slab(
 ):
     """Drop the scatterers an elevation lens never insonifies.
 
-    Jittable version of :func:`elevation_slab_mask`; drop scatterers instead of setting
-    magnitudes to zero.
+    Not jittable: the output length is data dependent. Under jit use
+    :func:`elevation_slab_mask`, which zeroes magnitudes instead and keeps a static shape.
 
     Returns:
         tuple: the (positions, magnitudes) inside the slab.
@@ -607,10 +642,73 @@ def select_elevation_slab(
     return scatterer_positions[keep], scatterer_magnitudes[keep]
 
 
+def elevation_slab_bucket(
+    scatterer_positions=None,
+    scatterer_magnitudes=None,
+    probe_geometry=None,
+    element_height=None,
+    elevation_lens=False,
+    bucket_growth=2.0,
+    **kwargs,
+):
+    """
+    Prune scatterers outside of the elevation slab. Round up to a power of 2 so jit can cache
+    the approximate shape.
+
+    Returns:
+        dict: pruned scatterers, or ``{}`` if the input is traced or pruning is disabled.
+    """
+    del kwargs
+    if not elevation_lens or element_height is None:
+        return {}
+    if scatterer_positions is None or scatterer_magnitudes is None or probe_geometry is None:
+        return {}
+
+    try:
+        positions = ops.convert_to_numpy(scatterer_positions)
+        magnitudes = ops.convert_to_numpy(scatterer_magnitudes)
+        geometry = ops.convert_to_numpy(probe_geometry)
+    except (RuntimeError, ValueError, TypeError):
+        return {}  # traced, fall back to masking
+
+    batched = positions.ndim == 3
+    if not batched:
+        positions, magnitudes = positions[None], magnitudes[None]
+
+    n_scat = positions.shape[1]
+    center = geometry[:, 1].mean()
+    inside = np.abs(positions[..., 1] - center) <= element_height / 2
+
+    # ops.map needs a uniform shape when using batched mode
+    n_keep = int(inside.sum(axis=1).max())
+    if n_keep >= n_scat:
+        return {}
+    steps = np.ceil(np.log(max(n_keep, 1)) / np.log(bucket_growth))
+    bucket = min(n_scat, max(1, int(bucket_growth**steps)))
+
+    index = np.zeros((positions.shape[0], bucket), dtype=np.int64)
+    pad_mask = np.ones((positions.shape[0], bucket), dtype=bool)
+    for item, row in enumerate(inside):
+        kept = np.flatnonzero(row)[:bucket]
+        index[item, : len(kept)] = kept
+        pad_mask[item, : len(kept)] = False
+
+    positions = np.take_along_axis(positions, index[..., None], axis=1)
+    magnitudes = np.where(pad_mask, 0.0, np.take_along_axis(magnitudes, index, axis=1))
+
+    if not batched:
+        positions, magnitudes = positions[0], magnitudes[0]
+    return {"scatterer_positions": positions, "scatterer_magnitudes": magnitudes}
+
+
 def _apply_elevation_slab(
     scatterer_positions, scatterer_magnitudes, probe_geometry, element_height
 ):
-    """Prune to the elevation slab, falling back to masking if positions are traced."""
+    """Prune to the elevation slab, falling back to masking if positions are traced.
+
+    Under jit `elevation_slab_bucket` has usually pruned already, so the mask only re-zeroes
+    padding.
+    """
     try:
         return select_elevation_slab(
             scatterer_positions, scatterer_magnitudes, probe_geometry, element_height

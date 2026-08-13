@@ -29,7 +29,7 @@ from zea.internal.core import (
 from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
-from zea.simulator import simulate_rf, simulate_rf_fast
+from zea.simulator import elevation_slab_bucket, simulate_rf, simulate_rf_fast
 from zea.utils import canonicalize_axis
 
 simulator_settings = {
@@ -51,7 +51,7 @@ class Simulate(Operation):
     """
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["n_ax", "apply_lens_correction", "method"]
+    STATIC_PARAMS = ["n_ax", "apply_lens_correction", "method", "elevation_lens", "max_chunk_gb"]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
     def __init__(self, **kwargs):
@@ -59,6 +59,13 @@ class Simulate(Operation):
             output_data_type=DataTypes.RAW_DATA,
             **kwargs,
         )
+
+    def __call__(self, **kwargs):
+        # Drop out-of-slab scatterers here, because `call` is traced.
+        merged = {**self._input_cache, **kwargs}
+        pruned = {} if self._inside_outer_jit else elevation_slab_bucket(**merged)
+        outputs = super().__call__(**{**merged, **pruned})
+        return {**outputs, **{key: merged[key] for key in pruned}}
 
     def call(
         self,
@@ -81,6 +88,7 @@ class Simulate(Operation):
         method="exact",
         elevation_lens=False,
         element_height=None,
+        max_chunk_gb=10.0,
         **kwargs,
     ):
         if method not in simulator_settings:
@@ -103,6 +111,7 @@ class Simulate(Operation):
             "t_peak": t_peak,
             "elevation_lens": elevation_lens,
             "element_height": element_height,
+            "max_chunk_gb": max_chunk_gb,
         }
         if not self.with_batch_dim:
             simulated_rf = simulate(
