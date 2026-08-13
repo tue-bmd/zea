@@ -66,9 +66,7 @@ def simulate_rf(
     attenuation_coef,
     tx_apodizations,
     t_peak,
-    elevation_lens=False,
-    element_height=None,
-    max_chunk_gb=10.0,
+    factored=True,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -92,14 +90,8 @@ def simulate_rf(
         tx_apodizations (array-like): The apodizations of the transmitting elements of
             shape (n_tx, n_el).
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
-        elevation_lens (bool): Whether the probe has an elevation lens. See :func:`spread`.
-            When True, ignore scatterers outside the elevation slab defined by element_height.
-            Calling `simulate_rf` directly with an elevation lens only masks when using jit;
-            efficient pruning needs :class:`zea.ops.Simulate`.
-        element_height (float): The elevation height of the elements [m].
-            If None, defaults to element_width.
-        max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
-            :func:`simulate_rf_fast` share a call signature. See :func:`simulate_rf_fast`.
+        factored (bool): Approximate the geometric spreading with a factorizable term. Slight
+            amplitude error for scatterers near a large linear probe, but much faster.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -129,23 +121,9 @@ def simulate_rf(
             ) from exc
         element_width = pitch * 0.9  # 90% of the pitch
 
-    if element_height is None:
-        element_height = element_width
-
-    magnitudes = scatterer_magnitudes
-    if elevation_lens:
-        scatterer_positions, magnitudes = _apply_elevation_slab(
-            scatterer_positions, magnitudes, probe_geometry, element_height
-        )
-
-    # tensorflow can't reduce over an empty axis.
-    if scatterer_positions.shape[0] == 0:
-        shape = (t0_delays.shape[0], int(n_ax), probe_geometry.shape[0], 1)
-        return ops.zeros(shape, dtype="float32")
-
-    # Phantoms build float64 clouds; tensorflow won't promote them against float32 params.
+    # Phantoms are float64. Cast manually so tensorflow doesn't complain.
     scatterer_positions = ops.cast(scatterer_positions, "float32")
-    magnitudes = ops.cast(magnitudes, "float32")
+    scatterer_magnitudes = ops.cast(scatterer_magnitudes, "float32")
 
     pulse_spectrum_fn = get_pulse_spectrum_fn(center_frequency, n_period=4)
 
@@ -169,51 +147,131 @@ def simulate_rf(
     freqs = ops.arange(n_ax_rounded // 2 + 1, dtype="float32") / n_ax_rounded * sampling_frequency
 
     waveform_spectrum = pulse_spectrum_fn(freqs)
-    scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
-    theta = ops.arctan2(scat_pos_relative_to_probe[..., 0], scat_pos_relative_to_probe[..., 2])
-    phi = ops.arctan2(scat_pos_relative_to_probe[..., 1], scat_pos_relative_to_probe[..., 2])
-
-    # [n_scat, n_el, n_freq]
-    directivity_x = directivity(freqs[None, None], theta[..., None], element_width, sound_speed)
-    directivity_y = directivity(freqs[None, None], phi[..., None], element_width, sound_speed)
-    element_directivity = directivity_x * directivity_y
-    attenuation = attenuate(freqs[None, None], attenuation_coef, dist[..., None])
-    one_way_phase = delay2(
-        freqs[None, None],
-        dist[..., None] / sound_speed,
-        n_ax_rounded,
-        sampling_frequency,
-    )
-    shared_response = ops.cast(element_directivity * attenuation, "complex64") * one_way_phase
-
-    if elevation_lens:
-        tx_response = shared_response * ops.cast(spread(dist[..., None], 0.5), "complex64")
-        rx_response = shared_response * ops.cast(spread(dist[..., None], 1.0), "complex64")
-    else:
-        tx_response = shared_response * ops.cast(spread(dist[..., None], 1.0), "complex64")
-        rx_response = tx_response
-
-    record_length = n_ax_rounded / sampling_frequency
     parts = []
     for tx in range(n_tx):
-        tx_firing_times = t0_delays[tx][:, None] - initial_times[tx] + t_peak[tx]
+        tx_idx = ops.array(tx)
 
-        tx_delay = delay2(freqs[None], tx_firing_times, n_ax_rounded, sampling_frequency)
-        tx_element_weights = ops.cast(tx_apodizations[tx][:, None], "complex64") * tx_delay
+        scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
 
-        # delay2 only gates one-way delays. Worst case over elements: drops some in-record
-        # pairs, but never aliases in ops.irfft.
-        round_trip_time = 2 * ops.max(dist, axis=1) / sound_speed + ops.max(tx_firing_times)
-        within_record = ops.cast(round_trip_time < record_length, "float32")
-
-        # Explicitly sum over tx dimension before the receive axis exists.
-        incident_field = ops.sum(tx_response * tx_element_weights[None], axis=1)
-        scattered_field = incident_field * ops.cast(
-            (magnitudes * within_record)[:, None], "complex64"
+        # Compute 3D directivity
+        theta = ops.arctan2(
+            scat_pos_relative_to_probe[:, :, 0], scat_pos_relative_to_probe[:, :, 2]
         )
-        received_field = scattered_field[:, None] * rx_response
-        rf_spectrum = waveform_spectrum * ops.sum(received_field, axis=0)
-        parts.append(ops.irfft((ops.real(rf_spectrum), ops.imag(rf_spectrum))))
+        phi = ops.arctan2(scat_pos_relative_to_probe[:, :, 1], scat_pos_relative_to_probe[:, :, 2])
+
+        directivity_tx = directivity(
+            freqs[None, None, None],
+            theta[..., None, None],
+            element_width,
+            sound_speed,
+        ) * directivity(
+            freqs[None, None, None],
+            phi[..., None, None],
+            element_width,
+            sound_speed,
+        )
+        if factored:
+            # [n_scat, n_el, n_freq]
+            attenuation = attenuate(
+                freqs[None, None],
+                attenuation_coef=attenuation_coef,
+                dist=dist[..., None],
+            )
+
+            # sqrt such that one_way * other_way together yield mindist/(2sqrt(d_tx*d_rx))
+            spread_atten = ops.sqrt(spread(2 * dist[..., None]))
+
+            one_way_response = ops.cast(
+                directivity_tx[:, :, 0] * attenuation * spread_atten,
+                "complex64",
+            ) * delay2(
+                freqs[None, None],
+                dist[..., None] / sound_speed,
+                n_fft=n_ax_rounded,
+                sampling_frequency=sampling_frequency,
+            )
+
+            # When each element fires, relative to the start of the recording. [n_txel, 1]
+            tx_firing_times = t0_delays[tx][:, None] - initial_times[tx] + t_peak[tx]
+
+            # Apodization and firing phase per transmitting element. [n_txel, n_freq]
+            tx_element_weights = ops.cast(tx_apodizations[tx][:, None], "complex64") * delay2(
+                freqs[None],
+                tx_firing_times,
+                n_fft=n_ax_rounded,
+                sampling_frequency=sampling_frequency,
+            )
+
+            # necessary because delay2 never sees the full round-trip distance in this branch
+            record_length = n_ax_rounded / sampling_frequency
+            round_trip_time = 2 * ops.mean(dist, axis=1) / sound_speed + ops.mean(tx_firing_times)
+            within_record = ops.cast(round_trip_time < record_length, "float32")
+            magnitudes = scatterer_magnitudes * within_record
+
+            # Explicitly sum over tx dimension before the receive axis exists.
+            incident_field = ops.sum(one_way_response * tx_element_weights[None], axis=1)
+            scattered_field = incident_field * ops.cast(magnitudes[:, None], "complex64")
+            received_field = scattered_field[:, None] * one_way_response
+            rf_spectrum = waveform_spectrum * ops.sum(received_field, axis=0)
+            result = ops.irfft((ops.real(rf_spectrum), ops.imag(rf_spectrum)))
+            parts.append(result)
+        else:
+            directivity_rx = directivity(
+                freqs[None, None, None],
+                theta[:, None, :, None],
+                element_width,
+                sound_speed,
+            ) * directivity(
+                freqs[None, None, None],
+                phi[:, None, :, None],
+                element_width,
+                sound_speed,
+            )
+
+            # [n_scat, n_txel, rxel]
+            dist_total = dist[:, None] + dist[:, :, None]
+
+            # [n_scat, n_txel, n_rxel]
+            tau_total = (
+                (dist_total / sound_speed)
+                + t0_delays[tx_idx][None, :, None]
+                - initial_times[tx_idx]
+                + t_peak[tx_idx]
+            )
+
+            attenuation = attenuate(
+                freqs[None, None, None],
+                attenuation_coef=attenuation_coef,
+                dist=dist_total[..., None],
+            )
+
+            spread_atten = spread(dist_total[..., None])
+
+            result = (
+                waveform_spectrum[None, None, None]
+                * delay2(
+                    freqs[None, None, None],
+                    tau_total[..., None],
+                    n_fft=n_ax_rounded,
+                    sampling_frequency=sampling_frequency,
+                )
+                * ops.cast(
+                    scatterer_magnitudes[:, None, None, None]
+                    * tx_apodizations[tx, None, :, None, None]
+                    * directivity_tx
+                    * directivity_rx
+                    * attenuation
+                    * spread_atten,
+                    "complex64",
+                )
+            )
+
+            # Sum over all transmitting elements and scatterers
+            result = ops.sum(result, axis=[0, 1])
+
+            result = ops.irfft((ops.real(result), ops.imag(result)))
+
+            parts.append(result)
 
     rf_data = ops.stack(parts, axis=0)
     rf_data = ops.transpose(rf_data, (0, 2, 1))
@@ -239,9 +297,6 @@ def simulate_rf_fast(
     attenuation_coef,
     tx_apodizations,
     t_peak,
-    elevation_lens=False,
-    element_height=None,
-    max_chunk_gb=10.0,
 ):
     """Time-domain (splat-and-convolve) RF simulator.
 
@@ -273,16 +328,6 @@ def simulate_rf_fast(
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
         tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el).
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
-        elevation_lens (bool): Whether the probe has an elevation lens. See :func:`spread`.
-            When True, ignore scatterers outside the elevation slab defined by element_height.
-            Calling `simulate_rf_fast` directly with an elevation lens only masks when using jit;
-            efficient pruning needs :class:`zea.ops.Simulate`.
-        element_height (float): The elevation height of the elements [m]. Only used when
-            ``elevation_lens`` is True.
-        max_chunk_gb (float): Approximate memory budget [GB] for the (chunk, n_el, n_el)
-            tensors held at once while iterating over scatterers. Scatterers are processed
-            in chunks sized to this budget, so peak memory no longer scales with the total
-            scatterer count. Must be a static (Python) value, not a traced array.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -291,46 +336,36 @@ def simulate_rf_fast(
     n_ax = int(n_ax)
     n_tx = t0_delays.shape[0]
     n_el = probe_geometry.shape[0]
-    n_scat = scatterer_positions.shape[0]
 
     pulse = get_pulse_waveform(center_frequency, sampling_frequency)
+    base_gain, two_way_time = _precompute_scatterer_response(
+        scatterer_positions,
+        scatterer_magnitudes,
+        probe_geometry,
+        apply_lens_correction,
+        lens_thickness,
+        lens_sound_speed,
+        sound_speed,
+        center_frequency,
+        element_width,
+        attenuation_coef,
+    )
 
-    # Chunk so the (n_scat, n_el, n_el) tensors never materialize at once. The factor is
-    # approximate memory use after jit fusion, not a count of intermediate tensors.
-    bytes_per_scatterer = n_el * n_el * 4 * 6
-    chunk_size = max(1, int(max_chunk_gb * 1e9) // max(bytes_per_scatterer, 1))
-
-    spike_maps = [ops.zeros((n_ax, n_el), dtype="float32") for _ in range(n_tx)]
-    for start in range(0, n_scat, chunk_size):
-        stop = min(start + chunk_size, n_scat)
-        base_gain, two_way_time = _precompute_scatterer_response(
-            scatterer_positions[start:stop],
-            scatterer_magnitudes[start:stop],
-            probe_geometry,
-            apply_lens_correction,
-            lens_thickness,
-            lens_sound_speed,
-            sound_speed,
-            center_frequency,
-            element_width,
-            attenuation_coef,
-            elevation_lens,
-            element_height,
+    parts = []
+    for tx in range(n_tx):
+        spike_map = _simulate_transmit(
+            base_gain,
+            two_way_time,
+            t0_delays[tx],
+            initial_times[tx],
+            tx_apodizations[tx],
+            t_peak[tx],
+            sampling_frequency,
+            n_ax,
+            n_el,
         )
-        for tx in range(n_tx):
-            spike_maps[tx] = spike_maps[tx] + _simulate_transmit(
-                base_gain,
-                two_way_time,
-                t0_delays[tx],
-                initial_times[tx],
-                tx_apodizations[tx],
-                t_peak[tx],
-                sampling_frequency,
-                n_ax,
-                n_el,
-            )
+        parts.append(_convolve_pulse_over_channels(spike_map, pulse))
 
-    parts = [_convolve_pulse_over_channels(spike_map, pulse) for spike_map in spike_maps]
     rf_data = ops.stack(parts, axis=0)
     return rf_data[..., None]
 
@@ -365,8 +400,6 @@ def _precompute_scatterer_response(
     center_frequency,
     element_width,
     attenuation_coef,
-    elevation_lens=False,
-    element_height=None,
 ):
     """Compute the transmit-independent gain and two-way travel time tensors.
 
@@ -376,18 +409,9 @@ def _precompute_scatterer_response(
         two_way_time (array-like): The (n_scat, n_tx_el, n_rx_el) round-trip travel
             time [s], excluding transmit delays and initial times.
     """
-    magnitudes = scatterer_magnitudes
-    if elevation_lens:
-        scatterer_positions, magnitudes = _apply_elevation_slab(
-            scatterer_positions,
-            magnitudes,
-            probe_geometry,
-            element_width if element_height is None else element_height,
-        )
-
     # See the matching cast in `simulate_rf`.
     scatterer_positions = ops.cast(scatterer_positions, "float32")
-    magnitudes = ops.cast(magnitudes, "float32")
+    scatterer_magnitudes = ops.cast(scatterer_magnitudes, "float32")
 
     one_way_distance = _one_way_distances(
         probe_geometry,
@@ -404,13 +428,11 @@ def _precompute_scatterer_response(
         scatterer_positions, probe_geometry, element_width, sound_speed, center_frequency
     )
     directivity_pair = element_directivity[:, :, None] * element_directivity[:, None, :]
-    spread_attenuation = (
-        spread(one_way_distance[:, :, None], 0.5 if elevation_lens else 1.0)
-        * spread(one_way_distance[:, None, :], 1.0)
-        * attenuate(center_frequency, attenuation_coef, two_way_distance)
+    spread_attenuation = spread(two_way_distance) * attenuate(
+        center_frequency, attenuation_coef, two_way_distance
     )
 
-    base_gain = magnitudes[:, None, None] * directivity_pair * spread_attenuation
+    base_gain = scatterer_magnitudes[:, None, None] * directivity_pair * spread_attenuation
     two_way_time = travel_time[:, :, None] + travel_time[:, None, :]
     return base_gain, two_way_time
 
@@ -440,7 +462,7 @@ def _one_way_distances(
 def _element_directivity(
     scatterer_positions, probe_geometry, element_width, sound_speed, frequency
 ):
-    """3D directivity from each element to each scatterer."""
+    """Compute the 3D directivity from each scatterer to each element."""
     relative = scatterer_positions[:, None] - probe_geometry[None]
     theta = ops.arctan2(relative[..., 0], relative[..., 2])
     phi = ops.arctan2(relative[..., 1], relative[..., 2])
@@ -598,124 +620,18 @@ def attenuate(f, attenuation_coef, dist):
     return ops.exp(-ops.log(10) * attenuation_coef / 20 * dist * 100 * ops.abs(f) * 1e-6)
 
 
-def spread(dist, exponent=1.0, mindist=1e-3):
-    """Geometric spreading of the wavefront.
+def spread(dist, mindist=1e-4):
+    """Function modeling geometric spreading of the wavefront.
 
     Args:
         dist (array-like): The distance the wave has traveled.
-        exponent (float): 1 for spherical, 0.5 for cylindrical.
-        mindist (float): Distance that corresponds with unit gain.
+        mindist (float): The minimum distance to prevent division by zero.
 
     Returns:
-        array-like: An amplitude factor in the shape of `dist`.
+        array-like: The geometric spreading factor of same shape as `dist`.
     """
     dist = ops.clip(dist, mindist, float("inf"))
-    return (mindist / dist) ** exponent
-
-
-def elevation_slab_mask(scatterer_positions, probe_geometry, element_height):
-    """Zero out the scatterers an elevation lens never insonifies.
-
-    Returns:
-        array-like: 1 inside the slab and 0 outside, of shape (n_scat,).
-    """
-    if element_height is None:
-        raise ValueError("elevation_lens=True requires element_height to be provided.")
-    elevation_center = ops.mean(probe_geometry[:, 1])
-    offset = ops.abs(scatterer_positions[:, 1] - elevation_center)
-    return ops.cast(offset <= element_height / 2, "float32")
-
-
-def select_elevation_slab(
-    scatterer_positions, scatterer_magnitudes, probe_geometry, element_height
-):
-    """Drop the scatterers an elevation lens never insonifies.
-
-    Not jittable: the output length is data dependent. Under jit use
-    :func:`elevation_slab_mask`, which zeroes magnitudes instead and keeps a static shape.
-
-    Returns:
-        tuple: the (positions, magnitudes) inside the slab.
-    """
-    mask = elevation_slab_mask(scatterer_positions, probe_geometry, element_height)
-    keep = ops.convert_to_numpy(mask) > 0
-    return scatterer_positions[keep], scatterer_magnitudes[keep]
-
-
-def elevation_slab_bucket(
-    scatterer_positions=None,
-    scatterer_magnitudes=None,
-    probe_geometry=None,
-    element_height=None,
-    elevation_lens=False,
-    bucket_growth=2.0,
-    **kwargs,
-):
-    """
-    Prune scatterers outside of the elevation slab. Round up to a power of 2 so jit can cache
-    the approximate shape.
-
-    Returns:
-        dict: pruned scatterers, or ``{}`` if the input is traced or pruning is disabled.
-    """
-    del kwargs
-    if not elevation_lens or element_height is None:
-        return {}
-    if scatterer_positions is None or scatterer_magnitudes is None or probe_geometry is None:
-        return {}
-
-    try:
-        positions = ops.convert_to_numpy(scatterer_positions)
-        magnitudes = ops.convert_to_numpy(scatterer_magnitudes)
-        geometry = ops.convert_to_numpy(probe_geometry)
-    except (RuntimeError, ValueError, TypeError):
-        return {}  # traced, fall back to masking
-
-    batched = positions.ndim == 3
-    if not batched:
-        positions, magnitudes = positions[None], magnitudes[None]
-
-    n_scat = positions.shape[1]
-    center = geometry[:, 1].mean()
-    inside = np.abs(positions[..., 1] - center) <= element_height / 2
-
-    # ops.map needs a uniform shape when using batched mode
-    n_keep = int(inside.sum(axis=1).max())
-    if n_keep >= n_scat:
-        return {}
-    steps = np.ceil(np.log(max(n_keep, 1)) / np.log(bucket_growth))
-    bucket = min(n_scat, max(1, int(bucket_growth**steps)))
-
-    index = np.zeros((positions.shape[0], bucket), dtype=np.int64)
-    pad_mask = np.ones((positions.shape[0], bucket), dtype=bool)
-    for item, row in enumerate(inside):
-        kept = np.flatnonzero(row)[:bucket]
-        index[item, : len(kept)] = kept
-        pad_mask[item, : len(kept)] = False
-
-    positions = np.take_along_axis(positions, index[..., None], axis=1)
-    magnitudes = np.where(pad_mask, 0.0, np.take_along_axis(magnitudes, index, axis=1))
-
-    if not batched:
-        positions, magnitudes = positions[0], magnitudes[0]
-    return {"scatterer_positions": positions, "scatterer_magnitudes": magnitudes}
-
-
-def _apply_elevation_slab(
-    scatterer_positions, scatterer_magnitudes, probe_geometry, element_height
-):
-    """Prune to the elevation slab, falling back to masking if positions are traced.
-
-    Under jit `elevation_slab_bucket` has usually pruned already, so the mask only re-zeroes
-    padding.
-    """
-    try:
-        return select_elevation_slab(
-            scatterer_positions, scatterer_magnitudes, probe_geometry, element_height
-        )
-    except (RuntimeError, ValueError, TypeError):
-        mask = elevation_slab_mask(scatterer_positions, probe_geometry, element_height)
-        return scatterer_positions, scatterer_magnitudes * mask
+    return mindist / dist
 
 
 def hann_fd(f, width):
