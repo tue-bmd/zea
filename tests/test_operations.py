@@ -23,6 +23,7 @@ from zea.func.ultrasound import (
     compute_time_to_peak_stack,
     construct_acquisition_from_synthetic_aperture,
     decode_hadamard,
+    get_low_pass_iq_filter,
     make_tgc_curve,
     square_wave_apodization,
 )
@@ -286,6 +287,60 @@ def test_fir_filter_complex_channels():
     return result
 
 
+def test_get_low_pass_iq_filter():
+    """Filter taps are complex, of the requested length, and reject out-of-band tones."""
+    num_taps, sampling_frequency = 63, 12.5e6
+    taps = get_low_pass_iq_filter(num_taps, sampling_frequency, 0.0, 2e6)
+
+    assert taps.shape == (num_taps,)
+    assert np.iscomplexobj(taps)
+
+    # At center_frequency 0 the modulation is a no-op, so the taps stay real-valued
+    # and sum to unit DC gain.
+    np.testing.assert_allclose(taps.imag, 0, atol=1e-12)
+    np.testing.assert_allclose(np.sum(taps.real), 1.0, atol=1e-6)
+
+    for bandwidth in (0.0, -1e6, 2 * sampling_frequency):
+        with pytest.raises(ValueError, match="Cutoff frequency"):
+            get_low_pass_iq_filter(num_taps, sampling_frequency, 0.0, bandwidth)
+
+
+@backend_equality_check(decimal=4, backends=["tensorflow", "jax"])
+def test_low_pass_filter_iq():
+    """LowPassFilterIQ keeps a baseband IQ tone and rejects one outside the passband."""
+    import keras
+
+    from zea import ops
+
+    n_ax, n_el = 256, 4
+    sampling_frequency, bandwidth = 12.5e6, 2e6
+
+    t = np.arange(n_ax) / sampling_frequency
+    in_band = np.exp(1j * 2 * np.pi * 0.3e6 * t)
+    out_band = np.exp(1j * 2 * np.pi * 5e6 * t)
+    iq = np.stack([in_band + out_band] * n_el, axis=-1)
+    data = np.stack([iq.real, iq.imag], axis=-1).reshape(1, n_ax, n_el, 2).astype("float32")
+
+    output = ops.LowPassFilterIQ(num_taps=63)(
+        data=keras.ops.convert_to_tensor(data),
+        bandwidth=bandwidth,
+        sampling_frequency=sampling_frequency,
+        center_frequency=0.0,
+    )["data"]
+    output = keras.ops.convert_to_numpy(output)
+    assert output.shape == data.shape
+
+    filtered = output[..., 0] + 1j * output[..., 1]
+    # Skip the edges, where the FIR transient dominates.
+    middle = slice(64, 192)
+    kept = np.abs(np.mean(filtered[0, middle, 0] * np.conj(in_band[middle])))
+    rejected = np.abs(np.mean(filtered[0, middle, 0] * np.conj(out_band[middle])))
+    assert kept > 0.9, f"passband tone attenuated to {kept:.3f}."
+    assert rejected < 0.05, f"stopband tone only attenuated to {rejected:.3f}."
+
+    return output
+
+
 @pytest.mark.parametrize(
     "factor, batch_size",
     [
@@ -399,6 +454,53 @@ def test_up_and_down_conversion(factor, batch_size):
         f"downmix-> upmix not cycle-consistent: {error:.2%} of peak "
         f"exceeds {tolerance:.2%} tolerance at {factor}x."
     )
+
+
+@pytest.mark.parametrize("factor", [1, 2, 4])
+@backend_equality_check(decimal=4, backends=["tensorflow", "jax"])
+def test_demodulate_upmix_roundtrip(factor):
+    """
+    Same as test_up_and_down_conversion, but without the simulator in the loop. Force eager
+    execution so codecov doesn't falsely flag it as not covered (codecov doesn't detect tensorflow
+    jit code properly)
+    """
+    import keras
+
+    from zea import ops
+
+    tolerance = {1: 1e-3, 2: 0.08, 4: 0.25}[factor]
+
+    n_ax, n_el = 256, 8
+    sampling_frequency, center_frequency = 12.5e6, 3.125e6
+
+    t = np.arange(n_ax) / sampling_frequency
+    envelope = np.exp(-(((t - t[n_ax // 2]) * center_frequency / 2) ** 2))
+    burst = envelope * np.sin(2 * np.pi * center_frequency * t)
+    # Stagger the elements so the axes are not interchangeable.
+    rf = np.stack([np.roll(burst, 3 * el) for el in range(n_el)], axis=-1)
+    rf = rf.reshape(1, n_ax, n_el, 1).astype("float32")
+
+    pipeline = ops.Pipeline(
+        [
+            ops.Demodulate(),
+            ops.Downsample(factor=factor),
+            ops.UpMix(upsampling_rate=factor),
+        ]
+    )
+    output = pipeline(
+        data=keras.ops.convert_to_tensor(rf),
+        sampling_frequency=sampling_frequency,
+        demodulation_frequency=center_frequency,
+    )["data"]
+    output = keras.ops.convert_to_numpy(output)
+
+    error = np.max(np.abs(output - rf)) / np.max(np.abs(rf))
+    assert error < tolerance, (
+        f"downmix-> upmix not cycle-consistent: {error:.2%} of peak "
+        f"exceeds {tolerance:.2%} tolerance at {factor}x."
+    )
+
+    return output
 
 
 @pytest.mark.parametrize(
