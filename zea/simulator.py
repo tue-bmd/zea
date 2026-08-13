@@ -143,7 +143,7 @@ def simulate_rf(
         shape = (t0_delays.shape[0], int(n_ax), probe_geometry.shape[0], 1)
         return ops.zeros(shape, dtype="float32")
 
-    # Phantoms build float64 clouds; tensorflow won't promote them against float32 params.
+    # Phantoms are float64. Cast manually so tensorflow doesn't complain.
     scatterer_positions = ops.cast(scatterer_positions, "float32")
     magnitudes = ops.cast(magnitudes, "float32")
 
