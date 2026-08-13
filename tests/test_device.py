@@ -300,6 +300,25 @@ class TestInitDevice:
         monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "-1")
         assert init_device(device="auto:1", backend=backend, verbose=False) == "cpu"
 
+    @pytest.mark.parametrize("backend", ["tensorflow", "torch", "jax"])
+    def test_warns_when_backend_lacks_cuda_support(
+        self, monkeypatch, attach_caplog_warnings, backend
+    ):
+        """A GPU is selected (e.g. by nvidia-smi) but the backend itself has no CUDA
+        support installed (e.g. a CPU-only wheel) -- must warn and fall back to CPU.
+
+        This differs from ``test_falls_back_to_cpu_when_gpus_disabled``: there,
+        ``get_device`` already returns 'cpu' and ``init_device`` early-exits before
+        reaching the ``backend_cuda_available`` check exercised here.
+        """
+        monkeypatch.setattr("zea.internal.device.get_device", lambda *a, **k: [0])
+        monkeypatch.setattr("zea.internal.device.backend_cuda_available", lambda backend: False)
+        assert init_device(device="auto:1", backend=backend, verbose=False) == "cpu"
+        assert any(
+            "not installed with CUDA support" in record.message
+            for record in attach_caplog_warnings.records
+        )
+
 
 class TestOnDevice:
     """Tests for the ``device`` context manager and ``func_on_device``."""
