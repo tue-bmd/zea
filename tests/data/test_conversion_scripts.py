@@ -1369,6 +1369,35 @@ def test_verasonics_upload_requires_revision(tmp_path, monkeypatch):
         convert_verasonics(args)
 
 
+def copy_verasonics_mat_without_img_data_p(destination_dir):
+    """Copy the Verasonics test .mat and strip its ImgDataP buffer.
+
+    Not every Verasonics workspace reconstructs images, so the ImgDataP buffer can be
+    absent. Removing it from a copy reproduces such a workspace.
+    """
+    mat_file = _hf_resolve_path("hf://zeahub/pytest/verasonics_conversion_test_zea.mat")
+    stripped_file = destination_dir / mat_file.name
+    shutil.copy(mat_file, stripped_file)
+
+    stripped_file.chmod(0o644)
+    with h5py.File(stripped_file, "r+") as file:
+        del file["ImgDataP"]
+    return stripped_file
+
+
+@pytest.mark.heavy
+def test_verasonics_read_without_img_data_p(tmp_path):
+    """Reading a Verasonics file without ImgDataP omits the image buffer element."""
+    stripped_file = copy_verasonics_mat_without_img_data_p(tmp_path)
+
+    with VerasonicsFile(stripped_file, "r") as verasonics_file:
+        assert verasonics_file.read_image_data_p() is None
+        _, _, _, custom_elements = verasonics_file.read_verasonics_file()
+
+    element_names = [element.name for element in custom_elements]
+    assert "verasonics_image_buffer" not in element_names
+
+
 def test_check_output_dir_ownership_empty_dir(tmp_path):
     """test check_output_dir_ownership with empty directory (should pass)."""
 
