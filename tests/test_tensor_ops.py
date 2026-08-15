@@ -1183,3 +1183,25 @@ def test_complex_resize():
     assert magnitude.max() <= np.abs(data).max() + 1e-4
 
     return ops.abs(upsampled)
+
+
+@backend_equality_check(decimal=4)
+def test_resample_complex():
+    """``resample`` interpolates complex input without discarding the imaginary part."""
+    from zea.func.tensor import resample
+
+    rng = default_rng(DEFAULT_TEST_SEED)
+    data = (rng.standard_normal((2, 16, 3)) + 1j * rng.standard_normal((2, 16, 3))).astype(
+        "complex64"
+    )
+    tensor = ops.convert_to_tensor(data)
+
+    same = ops.convert_to_numpy(resample(tensor, 16, axis=1))
+    np.testing.assert_allclose(same, data, rtol=1e-4, atol=1e-4)
+
+    upsampled = resample(tensor, 32, axis=1)
+    assert upsampled.shape == (2, 32, 3)
+    assert "complex" in str(upsampled.dtype)
+    assert np.any(np.imag(ops.convert_to_numpy(upsampled)) != 0)
+
+    return ops.stack([ops.real(upsampled), ops.imag(upsampled)])

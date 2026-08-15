@@ -14,10 +14,10 @@ from zea.config import Config
 from zea.func.tensor import vmap
 from zea.internal.core import DataTypes, ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
 from zea.internal.ops_list import OperationList
+from zea.internal.precision import LOW_PRECISION_DTYPES
 from zea.internal.registry import beamformer_registry, ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Operation, get_ops
-from zea.ops.keras_ops import Cast
 from zea.ops.tensor import Normalize
 from zea.ops.ultrasound import (
     AlignedApodization,
@@ -283,7 +283,7 @@ class Pipeline:
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
         """
-        operations: List[Union[Operation, "Pipeline"]] = [Cast(dtype="float32")]
+        operations: List[Union[Operation, "Pipeline"]] = []
 
         # Add the demodulate operation
         if not baseband:
@@ -391,7 +391,7 @@ class Pipeline:
         Example::
 
             pipeline.keys()
-            # ['cast', 'apply_window', 'demodulate', 'beamform', ...]
+            # ['apply_window', 'demodulate', 'beamform', ...]
         """
         return OperationList(self._pipeline_layers).keys()
 
@@ -1430,7 +1430,13 @@ class DelayAndSum(Operation):
                 of shape `(prod(grid.shape), n_ch)`
                 with optional batch dimension.
         """
-        data = kwargs[self.key]
+        # Accumulate the delay-and-sum in float32. Under a mixed-precision policy
+        # the aligned data is bfloat16 (produced cheaply by the TOF gather); summing
+        # ~n_el * n_tx terms in bfloat16 would accumulate significant error, so the
+        # reduction is up-cast. XLA fuses the cast into the reduction, so the input
+        # is still read as bfloat16 (half the memory bandwidth) but accumulated in
+        # float32. Under the default float32 policy this cast is a no-op.
+        data = ops.cast(kwargs[self.key], "float32")
 
         # Sum over the channels (n_el), i.e. DAS
         beamformed_data = ops.sum(data, -2)
@@ -1472,6 +1478,11 @@ class DelayMultiplyAndSum(Operation):
 
         # Avoid building the full (n_el, n_el) pairwise product matrix: rewrite
         # sum_{i<j} y_i y_j as 1/2 [(sum y_i)^2 - sum y_i^2]; O(n_el) instead of O(n_el^2).
+        # There is no complex bfloat16, and under a mixed-precision policy the aligned
+        # data arrives as bfloat16, so up-cast before the complex view. Only touch
+        # low-precision input: a custom pipeline may already hand this op float32/float64.
+        if keras.backend.standardize_dtype(data.dtype) in LOW_PRECISION_DTYPES:
+            data = ops.cast(data, "float32")
         data = ops.view_as_complex(data)  # (n_tx, n_pix, n_el)
 
         # y_i = x_i / sqrt(|x_i|); eps guards |x_i| == 0 (then y_i -> 0).
@@ -1557,6 +1568,13 @@ class CoherenceFactor(Operation):
             ops.Tensor: Beamformed image of shape ``(n_pix, n_ch)``,
                 with optional batch dimension.
         """
+        # Coherence-factor power ratios are accumulated in float32 for stability;
+        # under a mixed-precision policy the aligned data arrives as bfloat16. Only
+        # touch low-precision input: a custom pipeline may already hand this op
+        # float32/float64 (or complex) data.
+        if keras.backend.standardize_dtype(data.dtype) in LOW_PRECISION_DTYPES:
+            data = ops.cast(data, "float32")
+
         n_el = ops.shape(data)[-2]
 
         # DAS per transmit: sum over elements
@@ -1649,6 +1667,13 @@ class GeneralizedCoherenceFactor(Operation):
         """
         if m_zero is None:
             m_zero = self.m_zero
+
+        # GCF uses a spatial FFT and power ratios; run it in float32 (bfloat16 FFT
+        # is unsupported / inaccurate). Under a mixed-precision policy the aligned
+        # data arrives as bfloat16, so up-cast at entry. Only touch low-precision
+        # input: a custom pipeline may already hand this op float32/float64 data.
+        if keras.backend.standardize_dtype(data.dtype) in LOW_PRECISION_DTYPES:
+            data = ops.cast(data, "float32")
 
         n_el = ops.shape(data)[-2]
         n_ch = data.shape[-1]  # static Python int — safe for branching
