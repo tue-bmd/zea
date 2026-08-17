@@ -25,6 +25,9 @@ XLIMS = (-24e-3, 24e-3)
 ZLIMS = (10e-3, 35e-3)
 DYNAMIC_RANGE = (-50.0, 0.0)
 
+# Exact mode OOMs the non-heavy runners.
+pytestmark = pytest.mark.heavy
+
 SIMULATORS = {
     "exact": partial(simulate_rf, factored=False),
     "factored": partial(simulate_rf, factored=True),
