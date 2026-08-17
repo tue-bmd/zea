@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         models,
         ops,
         simulator,
+        simulator_time_domain,
         utils,
         visualize,
     )
@@ -159,6 +160,7 @@ _LAZY_SUBMODULES = (
     "models",
     "ops",
     "simulator",
+    "simulator_time_domain",
     "utils",
     "visualize",
 )

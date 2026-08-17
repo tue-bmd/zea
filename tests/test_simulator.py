@@ -13,7 +13,8 @@ from zea import Parameters, Probe, display
 from zea.beamform import phantoms
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.metrics import psnr
-from zea.simulator import simulate_rf, simulate_rf_fast
+from zea.simulator import simulate_rf
+from zea.simulator_time_domain import simulate_rf_td
 
 N_EL = 80
 APERTURE = 32e-3
@@ -27,7 +28,7 @@ DYNAMIC_RANGE = (-50.0, 0.0)
 SIMULATORS = {
     "exact": partial(simulate_rf, factored=False),
     "factored": partial(simulate_rf, factored=True),
-    "fast": simulate_rf_fast,
+    "fast": simulate_rf_td,
 }
 
 # Minimum PSNR [dB] of each approximation against the exact simulator, after beamforming.
