@@ -362,6 +362,13 @@ def get_pulse_waveform(center_frequency, sampling_frequency, n_period=4, n_sampl
         array-like: The pulse waveform of shape (n_samples,).
     """
     width = n_period / center_frequency
+    support_samples = width * sampling_frequency
+    if support_samples > n_samples:
+        raise ValueError(
+            f"Hann window support ({support_samples:.1f} samples) exceeds n_samples "
+            f"({n_samples}); the pulse would be truncated. Increase n_samples or "
+            "reduce sampling_frequency / n_period."
+        )
     times = (ops.arange(n_samples, dtype="float32") - n_samples // 2) / sampling_frequency
     window = hann_unnormalized(times, width)
     return window * ops.cos(2 * np.pi * center_frequency * times)
