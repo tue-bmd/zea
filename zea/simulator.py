@@ -181,19 +181,20 @@ def simulate_rf(
             )
 
             # When each element fires, relative to the start of the recording. [n_txel, 1]
-            tx_delay_offsets = t0_delays[tx][:, None] - initial_times[tx] + t_peak[tx]
+            shifts_not_travel_related = t0_delays[tx][:, None] - initial_times[tx] + t_peak[tx]
 
             # Apodization and firing phase per transmitting element. [n_txel, n_freq]
             tx_element_weights = ops.cast(tx_apodizations[tx][:, None], "complex64") * delay2(
                 freqs[None],
-                tx_delay_offsets,
+                shifts_not_travel_related,
                 n_fft=n_ax_rounded,
                 sampling_frequency=sampling_frequency,
             )
 
             # necessary because delay2 never sees the full round-trip distance in this branch
             record_length = n_ax_rounded / sampling_frequency
-            round_trip_time = 2 * ops.mean(dist, axis=1) / sound_speed + ops.mean(tx_delay_offsets)
+            raw_round_trip_time = 2 * ops.mean(dist, axis=1) / sound_speed
+            round_trip_time = raw_round_trip_time + ops.mean(shifts_not_travel_related)
             within_record = ops.cast(round_trip_time < record_length, "float32")
             magnitudes = scatterer_magnitudes * within_record
 
