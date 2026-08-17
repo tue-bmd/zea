@@ -146,7 +146,13 @@ def simulate_rf(
 
     freqs = ops.arange(n_ax_rounded // 2 + 1, dtype="float32") / n_ax_rounded * sampling_frequency
 
-    waveform_spectrum = pulse_spectrum_fn(freqs)
+    # `pulse_spectrum_fn` gets rescaled by n_fft / sampling_frequency. Normalize to remove the link
+    # between sampling frequency and amplitude.
+    nonnorm_spectrum = pulse_spectrum_fn(freqs)
+    pulse = ops.irfft((ops.real(nonnorm_spectrum), ops.imag(nonnorm_spectrum)))
+    peak = ops.max(ops.abs(pulse))
+    waveform_spectrum = nonnorm_spectrum / ops.cast(peak, "complex64")
+
     parts = []
     for tx in range(n_tx):
         tx_idx = ops.array(tx)
