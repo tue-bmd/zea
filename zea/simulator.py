@@ -274,17 +274,20 @@ def _resolve_element_width(probe_geometry, element_width):
     """Return the element width, inferring it from the probe pitch when not given."""
     if element_width is not None:
         return element_width
-    if ops.is_tensor(probe_geometry):
+    try:
+        geometry = ops.convert_to_numpy(probe_geometry)
+    except (RuntimeError, ValueError, TypeError) as exc:
         raise ValueError(
             "Element width is not provided, and automatic inference is not available for "
             "traced/symbolic probe geometry (for example under JAX JIT or TensorFlow graph "
             "mode). Please provide `element_width` explicitly in the scan/probe parameters."
-        )
+        ) from exc
+
     try:
         from zea.probes import Probe
 
-        pitch = Probe.get_pitch(probe_geometry)
-    except ValueError as exc:
+        pitch = Probe.get_pitch(geometry)
+    except (ValueError, IndexError, AttributeError) as exc:
         raise ValueError(
             "Element width is not provided and automatic estimation failed from probe "
             "geometry. Please provide `element_width` explicitly or ensure the probe "
