@@ -1981,7 +1981,7 @@ class Refocus(Operation):
     where :math:`\tau_{t,e}` is the transmit delay in samples and
     :math:`a_{t,e}` is the apodization.
 
-    At each temporal frequency the received RF spectrum is decoded by
+    At each temporal frequency the received RF/IQ spectrum is decoded by
     multiplying with the pseudo-inverse :math:`H^{-1}`:
 
     .. math::
