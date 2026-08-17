@@ -31,13 +31,14 @@ from zea.internal.core import (
 from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
-from zea.simulator import elevation_slab_bucket, simulate_rf, simulate_rf_fast
+from zea.simulator import elevation_slab_bucket, simulate_rf
+from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
 
 simulator_settings = {
     "exact": simulate_rf,
     "frequency_approximation": simulate_rf,
-    "time_approximation": simulate_rf_fast,
+    "time_approximation": simulate_rf_td,
 }
 
 

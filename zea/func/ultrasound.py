@@ -153,7 +153,7 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
     Returns:
         rf_data (ndarray): output real valued rf data.
     """
-    assert iq_data.dtype in [
+    assert ops.dtype(iq_data) in [
         "complex64",
         "complex128",
     ], "IQ must contain all complex signals."
@@ -187,7 +187,7 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
     carrier = ops.reshape(carrier, (*[1] * (n_dim - 2), n_ax_up, 1))
 
     rf_data = iq_data_upsampled * carrier
-    rf_data = ops.real(rf_data) * ops.sqrt(2)
+    rf_data = ops.real(rf_data)
 
     return ops.cast(rf_data, "float32")
 

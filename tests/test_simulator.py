@@ -16,8 +16,8 @@ from zea.simulator import (
     elevation_slab_bucket,
     select_elevation_slab,
     simulate_rf,
-    simulate_rf_fast,
 )
+from zea.simulator_time_domain import simulate_rf_td
 
 N_EL = 80
 APERTURE = 32e-3
@@ -106,7 +106,7 @@ def images(fish_scan):
     _, simulation_args, beamform = fish_scan
     return {
         "exact": beamform(simulate_rf(**simulation_args)),
-        "fast": beamform(simulate_rf_fast(**simulation_args)),
+        "fast": beamform(simulate_rf_td(**simulation_args)),
     }
 
 
