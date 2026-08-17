@@ -1504,6 +1504,12 @@ def resample(x, n_samples, axis=-2, order=1):
     Returns:
         Resampled tensor.
     """
+    # map_coordinates is real-only on tensorflow, so interpolate the two parts separately.
+    if "complex" in ops.dtype(x):
+        real = resample(ops.real(x), n_samples, axis=axis, order=order)
+        imag = resample(ops.imag(x), n_samples, axis=axis, order=order)
+        return ops.cast(real, ops.dtype(x)) + 1j * ops.cast(imag, ops.dtype(x))
+
     shape = ops.shape(x)
     rank = len(shape)
 
