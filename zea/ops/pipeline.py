@@ -2101,6 +2101,8 @@ class Refocus(Operation):
             data: ``(n_tx, n_ax, n_el, n_ch)`` float32 array.
             delays_samples: ``(n_tx, n_el)`` transmit delays in samples.
             apod: ``(n_tx, n_el)`` transmit apodization.
+            demodulation_frequency (float): Demodulation frequency
+            sampling_frequency (float): Sampling frequency
 
         Returns:
             decoded: ``(n_el, n_ax, n_el, n_ch)`` float32 array.
@@ -2218,9 +2220,9 @@ class Refocus(Operation):
         self,
         t0_delays,
         sampling_frequency,
-        demodulation_frequency,
         probe_geometry,
         initial_times,
+        demodulation_frequency=None,
         tx_apodizations=None,
         **kwargs,
     ):
