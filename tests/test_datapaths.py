@@ -229,22 +229,36 @@ def test_set_data_paths_system_mismatch_raises():
         set_data_paths(config)
 
 
-def test_set_data_paths_ignores_unknown_keys():
-    """Keys other than ``data_root`` and ``output`` are ignored, not validated."""
-    config = {"data_root": "/some/data", "some_other_key": ["not", "a", "path"]}
+def test_set_data_paths_ignores_other_user_sections():
+    """User and machine sections that do not apply here are skipped, not validated."""
+    config = {"data_root": "/some/data", "someone_else": {"data_root": "/their/data"}}
     assert set_data_paths(config).data_root == Path("/some/data")
 
 
+def test_set_data_paths_rejects_unknown_scalar_key():
+    """A stray key that is not a user or machine section is a schema error."""
+    config = {"data_root": "/some/data", "some_other_key": ["not", "a", "path"]}
+    with pytest.raises(ValueError, match="expected a mapping for a user or machine section"):
+        set_data_paths(config)
+
+
 def test_set_data_paths_invalid_path_type_raises():
-    """A data root that is neither a string nor a dict is rejected."""
-    with pytest.raises(AssertionError, match="should be either a string or a dict"):
+    """A data root that is neither a path nor a local/remote mapping is rejected."""
+    with pytest.raises(ValueError, match="must be a string or path"):
         set_data_paths({"data_root": 42})
 
 
 def test_set_data_paths_invalid_local_remote_subkey_raises():
     """Only ``local`` and ``remote`` are accepted as sub keys."""
-    with pytest.raises(AssertionError, match="should be either a string or a dict"):
+    with pytest.raises(ValueError, match=r"unexpected keys \['somewhere_else'\]"):
         set_data_paths({"data_root": {"somewhere_else": "/some/data"}})
+
+
+def test_set_data_paths_schema_error_names_the_file(tmp_path):
+    """A schema error from a users.yaml points at the file it came from."""
+    config_path = _write_yaml(tmp_path / "users.yaml", {"data_root": {"typo": "/some/data"}})
+    with pytest.raises(ValueError, match=f"Invalid user config in `{config_path}`"):
+        set_data_paths(config_path)
 
 
 @pytest.mark.parametrize("user_config", [42, ["data_root"], Path("users.yaml")])
@@ -308,9 +322,19 @@ def test_set_data_paths_unknown_username_warns():
     assert data_paths.data_root == Path(_fallback_to_default_data_root(data_paths.system))
 
 
-def test_set_data_paths_unknown_hostname_warns():
-    """A known user on an unknown machine raises the hostname specific warning."""
-    config = {USERNAME: {"some-other-machine": {"data_root": "/other/data"}}}
+@pytest.mark.parametrize(
+    "config",
+    [
+        pytest.param({USERNAME: {"some-other-machine": {"data_root": "/x"}}}, id="hostname-absent"),
+        pytest.param({USERNAME: {HOSTNAME: {"system": "linux"}}}, id="hostname-without-data-root"),
+    ],
+)
+def test_set_data_paths_known_user_without_data_root_warns_about_the_hostname(config):
+    """A known user we cannot resolve a data root for is a *hostname* problem.
+
+    Getting this wrong makes ``create_new_user`` append a second top-level block for
+    the same user; PyYAML keeps the last duplicate, shadowing their other machines.
+    """
     with pytest.warns(UnknownHostnameWarning, match=f"hostname={HOSTNAME}"):
         data_paths = set_data_paths(config)
     assert data_paths.data_root == Path(_fallback_to_default_data_root(data_paths.system))
@@ -757,6 +781,59 @@ def test_create_new_user_declined_hostname_update(tmp_path, answers, monkeypatch
     create_new_user("users.yaml", local=None)
 
     assert (tmp_path / "users.yaml").read_text(encoding="utf-8") == before
+
+
+def test_create_new_user_updates_hostname_without_data_root(tmp_path, answers, monkeypatch):
+    """A hostname entry that carries no data root is filled in, not duplicated."""
+    monkeypatch.chdir(tmp_path)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    _write_yaml(
+        tmp_path / "users.yaml",
+        {USERNAME: {HOSTNAME: {"system": "linux"}, "some-other-machine": {"data_root": "/other"}}},
+    )
+
+    answers.set(str(data_root), "")
+    create_new_user("users.yaml", local=None)
+
+    config = _to_read_yaml_file("users.yaml")
+    assert config[USERNAME][HOSTNAME]["data_root"] == str(data_root)
+    assert config[USERNAME]["some-other-machine"]["data_root"] == "/other"
+    assert set_data_paths("users.yaml").data_root == data_root
+
+
+def test_to_write_yaml_file_refuses_non_mapping(tmp_path):
+    """Writing a non-dict would replace the whole users.yaml with ``null``."""
+    config_path = tmp_path / "users.yaml"
+    _write_yaml(config_path, {USERNAME: {"data_root": "/some/data"}})
+    before = config_path.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Refusing to write NoneType"):
+        _to_write_yaml_file(None, str(config_path))
+    assert config_path.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize("local", [None, False])
+def test_create_new_user_does_not_clobber_an_unreadable_yaml(tmp_path, answers, monkeypatch, local):
+    """If users.yaml cannot be re-read, leave it alone instead of writing ``null``."""
+    monkeypatch.chdir(tmp_path)
+    if local is None:
+        config = {USERNAME: {"some-other-machine": {"data_root": "/other/data"}}}
+    else:
+        config = {USERNAME: {HOSTNAME: {"data_root": {"local": "/local/data"}}}}
+    _write_yaml(tmp_path / "users.yaml", config)
+    before = (tmp_path / "users.yaml").read_text(encoding="utf-8")
+
+    messages = []
+    monkeypatch.setattr("zea.datapaths.log.warning", messages.append)
+    # Simulate a file we can load once but not re-read for the update.
+    monkeypatch.setattr("zea.datapaths._to_read_yaml_file", lambda path_str: None)
+
+    create_new_user("users.yaml", local=local)
+
+    assert not answers.prompts, "should bail out before prompting for a data root"
+    assert (tmp_path / "users.yaml").read_text(encoding="utf-8") == before
+    assert any("will not be updated" in message for message in messages)
 
 
 def test_create_new_user_existing_profile_is_left_alone(tmp_path, answers, monkeypatch):

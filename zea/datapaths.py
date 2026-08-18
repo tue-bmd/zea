@@ -52,6 +52,7 @@ import yaml
 
 from zea import log
 from zea.config import Config
+from zea.internal.config.users import validate_users_config
 from zea.internal.preset_utils import HF_PREFIX
 from zea.tools.hf import HFPath
 from zea.utils import strtobool
@@ -143,22 +144,14 @@ def _verify_user_config_and_get_paths(config, system, local):
     for key in unknown_keys:
         del config[key]
 
-    def _error_msg(key):
-        return (
-            f"{key} key should be either a string or a dict containing "
-            "local and / or remote keys with data_root paths as values."
-        )
-
     paths = {}
-    # config will contain the data_root and optionally output paths
+    # config will contain the data_root and optionally output paths. Their shape is
+    # already guaranteed by the users.yaml schema (see zea.internal.config.users).
     for key, path in config.items():
-        assert isinstance(path, (str, dict)), _error_msg(key)
-
-        if isinstance(path, str):
+        if not isinstance(path, dict):
             paths[key] = path
             continue
 
-        assert set(path.keys()) <= set(["local", "remote"]), _error_msg(key)
         if local is True:
             if "local" in path:
                 paths[key] = path["local"]
@@ -315,11 +308,20 @@ def set_data_paths(
     # If user_config is a dictionary, use it as the config
     if isinstance(user_config, dict):
         config = copy.deepcopy(user_config)
+        source = "user config"
     # If user_config is a string, load the yaml file
     elif isinstance(user_config, str):
         config = _load_users_yaml(user_config, local, username, hostname)
+        source = f"`{user_config}`"
     else:
         raise ValueError("user_config should be a string or dictionary.")
+
+    # Check the file against the users.yaml schema before resolving anything, so a
+    # typo is reported as such instead of silently falling back to the defaults.
+    try:
+        config = validate_users_config(config)
+    except ValueError as exc:
+        raise ValueError(f"Invalid user config in {source}: {exc}") from exc
 
     # Check if username is in the config, if so, select that part of the config
     username_found = username in config
@@ -327,16 +329,16 @@ def set_data_paths(
         config = config[username]
 
     # Check if hostname is in the config, if so, select that part of the config
-    hostname_found = hostname in config
-    if hostname_found:
+    if hostname in config:
         config = config[hostname]
 
     # Ensure that the remaining config contains a `data_root` key
     if "data_root" not in config:
         default_data_root = _fallback_to_default_data_root(system)
-        # Distinguish "we don't know this user at all" from "we know this user, but not
-        # on this machine", so that `create_new_user` can add just the missing entry.
-        if username_found and not hostname_found:
+        # Distinguish "we don't know this user at all" from "we know this user, but we
+        # cannot resolve a data_root for this machine", so that `create_new_user` updates
+        # the existing profile in place instead of appending a second, shadowing one.
+        if username_found:
             warning_type = UnknownHostnameWarning
             reason = (
                 f"Cannot find data_root for hostname={hostname} under username={username} "
@@ -448,6 +450,10 @@ def _to_write_yaml_file(data, path_str):
     if not path.is_file():
         raise ValueError("YAML file path provided does not lead to a file.")
 
+    if not isinstance(data, dict):
+        # Writing e.g. None here would replace the whole users.yaml with `null`.
+        raise ValueError(f"Refusing to write {type(data).__name__} to {path_str}, expected a dict.")
+
     if _check_for_comments_yaml_file(path_str):
         log.warning(
             f"YAML file {path_str} contains comments. "
@@ -477,6 +483,22 @@ def _check_for_comments_yaml_file(path_str):
         lines = file.readlines()
         # just look for # anywhere
         return any("#" in line for line in lines)
+
+
+def _read_users_yaml_for_update(user_config_path):
+    """Read ``users.yaml`` for an in-place update, or return None if that failed.
+
+    Guards the update flows in :func:`create_new_user`: writing back what we could
+    not read would replace the user's file with ``null``.
+    """
+    users_yaml_dict = _try(_to_read_yaml_file, {"path_str": user_config_path})
+    if isinstance(users_yaml_dict, dict):
+        return users_yaml_dict
+    log.warning(
+        f"Could not read `{user_config_path}`, so it will not be updated. "
+        "Please check the file for corruptions."
+    )
+    return None
 
 
 def _resolve_config_section(config, username, hostname):
@@ -569,10 +591,13 @@ def create_new_user(user_config_path: "str | Path | None" = None, local: bool | 
                 "ℹ️ Follow the instructions below to create a new "
                 f"entry for hostname: '{data_paths['hostname']}:"
             )
+            users_yaml_dict = _read_users_yaml_for_update(user_config_path)
+            if users_yaml_dict is None:
+                return data_paths
             data_root = _acquire_and_validate_data_root()
             data_paths["data_root"] = data_root
-            users_yaml_dict = _try(_to_read_yaml_file, {"path_str": user_config_path})
-            users_yaml_dict[data_paths["username"]][data_paths["hostname"]] = {
+            section = _resolve_config_section(users_yaml_dict, data_paths["username"], None)
+            section[data_paths["hostname"]] = {
                 "system": data_paths["system"],
                 "data_root": data_root,
             }
@@ -598,9 +623,11 @@ def create_new_user(user_config_path: "str | Path | None" = None, local: bool | 
                 "ℹ️ Follow the instructions below to create a new entry for "
                 f"data_root for location: {local_remote_str}:"
             )
+            users_yaml_dict = _read_users_yaml_for_update(user_config_path)
+            if users_yaml_dict is None:
+                return data_paths
             data_root = _acquire_and_validate_data_root()
             data_paths["data_root"] = data_root
-            users_yaml_dict = _try(_to_read_yaml_file, {"path_str": user_config_path})
             ## now update the data_root for the user and hostname in the yaml file
             ## use local or remote subkey depending on the local parameter. The data_root
             ## can live at the top level as well, so look up where it actually is.
