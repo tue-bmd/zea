@@ -73,8 +73,8 @@ def simulate_rf(
     elevation_lens=False,
     element_height=None,
     max_chunk_gb=10.0,
-    noise_level_db=-50.0,
-    tgc_max_db=50.0,
+    noise_level_db=None,
+    tgc_max_db=0.0,
     noise_seed=0,
 ):
     """
@@ -105,8 +105,10 @@ def simulate_rf(
             elevation directivity and the elevation slab. If None, defaults to element_width.
         max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
             :func:`zea.simulator_time_domain.simulate_rf_td` share a call signature.
-        noise_level_db (float): Electronic noise level relative to the noiseless RF maximum.
-        tgc_max_db (float): Time gain compensation at the last axial sample.
+        noise_level_db (float): Electronic noise level in dB relative to the noiseless RF
+            maximum. None disables the noise. Must be static under jit.
+        tgc_max_db (float): Time gain compensation in dB at the last axial sample, ramped
+            linearly in dB from 0 at the first. 0 disables it. Must be static under jit.
         noise_seed (int): Stateless seed for the noise, varied across transmit batches.
 
     Returns:
@@ -218,14 +220,16 @@ def simulate_rf(
 
 
 def apply_receive_chain(
-    rf_data, noise_level_db=-60.0, tgc_max_db=50.0, noise_seed=0, noise_reference=None
+    rf_data, noise_level_db=None, tgc_max_db=0.0, noise_seed=0, noise_reference=None
 ):
     """Add electronic noise and time gain compensation to noiseless RF.
 
     Args:
         rf_data (array-like): Noiseless RF of shape (n_tx, n_ax, n_el, 1).
-        noise_level_db (float): Noise floor below the peak of ``rf_data``.
-        tgc_max_db (float): Gain at the last axial sample.
+        noise_level_db (float): Noise floor in dB below the peak of ``rf_data``. None disables
+            the noise. Gates a host-side branch, so it must be static under jit.
+        tgc_max_db (float): Gain in dB at the last axial sample. 0 disables it. Gates a host-side
+            branch, so it must be static under jit.
         noise_seed (int): Stateless seed for the noise. The same seed gives the same realisation,
             so vary it across transmit batches. None is treated as 0.
         noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
