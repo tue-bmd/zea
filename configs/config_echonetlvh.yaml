@@ -6,7 +6,7 @@ data:
   # (hf://org/repo/path/to/file.hdf5).
   path: echonetlvh_v2025/train/0X1017398D3C3F5FF9.hdf5
   # true: use local data on this device, false: use data from a remote location.
-  # null when the users.yaml data_root is a single path shared by both.
+  # null when the users.yaml paths are single paths, shared by both.
   local: false
   # Indices into the data to load. null loads the default, 'all' loads every
   # frame, int loads a single frame, list loads specific frames.

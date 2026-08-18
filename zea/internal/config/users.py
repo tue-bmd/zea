@@ -23,8 +23,9 @@ or machine section, validated with the same spec::
     data_root: /mnt/shared/data         # fallback for everybody else
 
 Unlike the zea config schema, defaults are **not** filled in when serializing
-back to a dict: an absent key here is meaningful, it means "fall back to the
-level above", which is different from an explicit ``null``.
+back to a dict: an unset key here is meaningful, it means "fall back to the level
+above". An explicit ``null`` says the same thing and is treated identically, so
+neither is carried into the validated output.
 """
 
 from dataclasses import dataclass
@@ -105,9 +106,10 @@ class UserProfileSpec(ConfigSpec):
     def to_dict(self) -> dict[str, Any]:
         """Return a plain dict, keeping only the keys this section actually sets.
 
-        Defaults are deliberately not filled in: an absent ``data_root`` means
-        "fall back to the level above", which :func:`zea.datapaths.set_data_paths`
-        distinguishes from an explicit ``null``.
+        Defaults are deliberately not filled in: an unset ``data_root`` means "fall
+        back to the level above", and :func:`zea.datapaths.set_data_paths` resolves it
+        against the enclosing sections. An explicit ``null`` expresses the same intent,
+        so it is dropped here rather than kept as a value that overrides the fallback.
         """
         result = super().to_dict()
         declared = set(self.field_names())

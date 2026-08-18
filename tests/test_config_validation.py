@@ -177,6 +177,24 @@ def test_users_config_keeps_only_the_keys_that_are_set():
     assert "output" not in result and "system" not in result
 
 
+@pytest.mark.parametrize(
+    "users_config",
+    [
+        pytest.param({"data_root": None}, id="root"),
+        pytest.param({"alice": {"data_root": None}}, id="username"),
+        pytest.param({"alice": {"laptop": {"data_root": None}}}, id="hostname"),
+    ],
+)
+def test_users_config_drops_explicit_null(users_config):
+    """An explicit null says "fall back", same as leaving the key out, so it is dropped."""
+    result = validate_users_config(users_config)
+    section = result
+    for key in ("alice", "laptop"):
+        if key in section:
+            section = section[key]
+    assert "data_root" not in section
+
+
 def test_users_config_expands_nested_sections():
     """Nested user / machine sections come back as plain dicts, not spec objects."""
     result = validate_users_config({"alice": {"laptop": {"data_root": "/d"}}})

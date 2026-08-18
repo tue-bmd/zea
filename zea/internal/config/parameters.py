@@ -10,7 +10,7 @@ PARAMETER_DESCRIPTIONS = {
         ),
         "local": (
             "true: use local data on this device, false: use data from a remote location. "
-            "null when the users.yaml data_root is a single path shared by both."
+            "null when the users.yaml paths are single paths, shared by both."
         ),
         "indices": (
             "Indices into the data to load. null loads the default, 'all' loads every frame, "

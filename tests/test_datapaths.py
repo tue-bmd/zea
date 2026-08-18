@@ -314,6 +314,46 @@ def test_set_data_paths_falls_back_to_user_level_data_root():
     assert not _warning_type_was_thrown(UnknownHostnameWarning, recorded)
 
 
+def test_set_data_paths_inherits_from_the_user_level():
+    """A machine section only needs to set what it changes; the rest is inherited."""
+    config = {
+        USERNAME: {
+            "data_root": "/user/data",
+            "output": "/user/output",
+            HOSTNAME: {"system": "linux"},
+        }
+    }
+    data_paths = set_data_paths(config)
+    assert data_paths.data_root == Path("/user/data")
+    assert data_paths.output == Path("/user/output")
+
+
+def test_set_data_paths_inherits_from_the_shared_level():
+    """A user without their own data_root falls back to the userless one."""
+    config = {"data_root": "/shared/data", USERNAME: {"output": "/user/output"}}
+    data_paths = set_data_paths(config)
+    assert data_paths.data_root == Path("/shared/data")
+    assert data_paths.output == Path("/user/output")
+
+
+def test_set_data_paths_inherits_per_key():
+    """Each key is resolved on its own; the machine only overrides data_root here."""
+    config = {
+        "data_root": "/shared/data",
+        "output": "/shared/output",
+        USERNAME: {HOSTNAME: {"data_root": "/machine/data"}},
+    }
+    data_paths = set_data_paths(config)
+    assert data_paths.data_root == Path("/machine/data")
+    assert data_paths.output == Path("/shared/output")
+
+
+def test_set_data_paths_explicit_null_falls_back_like_an_unset_key():
+    """An explicit `null` means the same as leaving the key out."""
+    config = {"data_root": "/shared/data", USERNAME: {"data_root": None}}
+    assert set_data_paths(config).data_root == Path("/shared/data")
+
+
 def test_set_data_paths_unknown_username_warns():
     """An unknown user without fallback warns and uses the OS default."""
     config = {"some_other_user": {"data_root": "/other/data"}}
@@ -790,7 +830,12 @@ def test_create_new_user_updates_hostname_without_data_root(tmp_path, answers, m
     data_root.mkdir()
     _write_yaml(
         tmp_path / "users.yaml",
-        {USERNAME: {HOSTNAME: {"system": "linux"}, "some-other-machine": {"data_root": "/other"}}},
+        {
+            USERNAME: {
+                HOSTNAME: {"system": "linux", "output": "/my/output"},
+                "some-other-machine": {"data_root": "/other"},
+            }
+        },
     )
 
     answers.set(str(data_root), "")
@@ -798,6 +843,8 @@ def test_create_new_user_updates_hostname_without_data_root(tmp_path, answers, m
 
     config = _to_read_yaml_file("users.yaml")
     assert config[USERNAME][HOSTNAME]["data_root"] == str(data_root)
+    # filling in the missing data_root must not drop what the machine already had
+    assert config[USERNAME][HOSTNAME]["output"] == "/my/output"
     assert config[USERNAME]["some-other-machine"]["data_root"] == "/other"
     assert set_data_paths("users.yaml").data_root == data_root
 

@@ -52,7 +52,7 @@ import yaml
 
 from zea import log
 from zea.config import Config
-from zea.internal.config.users import validate_users_config
+from zea.internal.config.users import UserProfileSpec, validate_users_config
 from zea.internal.preset_utils import HF_PREFIX
 from zea.tools.hf import HFPath
 from zea.utils import strtobool
@@ -63,6 +63,9 @@ DEFAULT_DATA_ROOT = {
     "darwin": "/mnt/z/data",
     None: "/mnt/z/data",  # for other system
 }
+
+#: The keys a users.yaml section may set directly; anything else is a user or machine.
+_PROFILE_FIELDS = UserProfileSpec.field_names()
 
 DEFAULT_LINUX_DATA_ROOT = DEFAULT_DATA_ROOT["linux"]
 DEFAULT_USERS_CONFIG_PATH = "./users.yaml"
@@ -120,6 +123,28 @@ def _default_output_path(data_root):
     return Path(DEFAULT_OUTPUT_PATH.format(data_root=data_root))
 
 
+def _resolve_profile(config, username, hostname):
+    """Return the paths that apply to this user and machine, and whether the user is known.
+
+    A ``users.yaml`` has up to three levels that can carry paths: the shared, userless
+    root, a username section, and a hostname section inside it (or at the root, when the
+    user has no section of their own). They are overlaid in that order, so a section that
+    sets only some of the keys inherits the rest from the level above -- a machine that
+    only pins ``system`` still gets the user's ``data_root`` and ``output``.
+    """
+    levels = [config]
+    username_found = isinstance(config.get(username), dict)
+    if username_found:
+        levels.append(config[username])
+    if isinstance(levels[-1].get(hostname), dict):
+        levels.append(levels[-1][hostname])
+
+    profile = {}
+    for level in levels:
+        profile.update({key: value for key, value in level.items() if key in _PROFILE_FIELDS})
+    return profile, username_found
+
+
 def _verify_user_config_and_get_paths(config, system, local):
     """
     Get the user configuration and verify the paths.
@@ -138,11 +163,6 @@ def _verify_user_config_and_get_paths(config, system, local):
             f"Current OS {system} does not match user settings: {config['system']}"
         )
         config.pop("system")
-
-    # Only keep data_root and output keys, the rest are ignored.
-    unknown_keys = [x for x in config.keys() if x not in ["data_root", "output"]]
-    for key in unknown_keys:
-        del config[key]
 
     paths = {}
     # config will contain the data_root and optionally output paths. Their shape is
@@ -249,8 +269,8 @@ def set_data_paths(
             structured as shown below.
         local (bool, optional): Whether to pick the ``local`` or the ``remote`` path for
             entries that define both (e.g. a local disk and a remote share). Default is True.
-            Set to None when the paths are plain strings, i.e. shared between local
-            and remote.
+            Set to None when every path that applies is a plain string, i.e. shared
+            between local and remote.
         verify (bool, optional): Verify that the paths exist and are directories.
             Default is True.
 
@@ -278,7 +298,10 @@ def set_data_paths(
         other_username:
           data_root: ...
 
-    These will take precedence over the ``data_root`` that is userless and machineless.
+    The machine section takes precedence over the user section, which takes precedence
+    over the userless and machineless one at the bottom. Precedence is per key, so a
+    section only needs to set what it changes: a machine that pins just ``system``
+    still inherits ``data_root`` and ``output`` from the levels above it.
 
     Returns:
         Config: Absolute paths to location of data. Stores the following parameters:
@@ -323,16 +346,10 @@ def set_data_paths(
     except ValueError as exc:
         raise ValueError(f"Invalid user config in {source}: {exc}") from exc
 
-    # Check if username is in the config, if so, select that part of the config
-    username_found = username in config
-    if username_found:
-        config = config[username]
+    # Overlay the shared, user and machine sections that apply here
+    config, username_found = _resolve_profile(config, username, hostname)
 
-    # Check if hostname is in the config, if so, select that part of the config
-    if hostname in config:
-        config = config[hostname]
-
-    # Ensure that the remaining config contains a `data_root` key
+    # Ensure that the resolved profile contains a `data_root` key
     if "data_root" not in config:
         default_data_root = _fallback_to_default_data_root(system)
         # Distinguish "we don't know this user at all" from "we know this user, but we
@@ -597,7 +614,11 @@ def create_new_user(user_config_path: "str | Path | None" = None, local: bool | 
             data_root = _acquire_and_validate_data_root()
             data_paths["data_root"] = data_root
             section = _resolve_config_section(users_yaml_dict, data_paths["username"], None)
+            # Keep whatever the machine already had (an `output`, for instance); we are
+            # only filling in the data_root it was missing.
+            existing = section.get(data_paths["hostname"])
             section[data_paths["hostname"]] = {
+                **(existing if isinstance(existing, dict) else {}),
                 "system": data_paths["system"],
                 "data_root": data_root,
             }
