@@ -62,6 +62,9 @@ class Simulate(Operation):
         "max_chunk_gb",
         "center_frequency",
         "sampling_frequency",
+        "noise_level_db",
+        "tgc_max_db",
+        "noise_seed",
     ]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
@@ -100,6 +103,9 @@ class Simulate(Operation):
         elevation_lens=False,
         element_height=None,
         max_chunk_gb=10.0,
+        noise_level_db=None,
+        tgc_max_db=0.0,
+        noise_seed=0,
         **kwargs,
     ):
         if method not in simulator_settings:
@@ -123,6 +129,9 @@ class Simulate(Operation):
             "elevation_lens": elevation_lens,
             "element_height": element_height,
             "max_chunk_gb": max_chunk_gb,
+            "noise_level_db": noise_level_db,
+            "tgc_max_db": tgc_max_db,
+            "noise_seed": noise_seed,
         }
         if not self.with_batch_dim:
             simulated_rf = simulate(

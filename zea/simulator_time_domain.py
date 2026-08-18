@@ -119,7 +119,8 @@ def simulate_rf_td(
             maximum. None disables the noise. Must be static under jit.
         tgc_max_db (float): Time gain compensation in dB at the last axial sample, ramped
             linearly in dB from 0 at the first. 0 disables it. Must be static under jit.
-        noise_seed (int): Stateless seed for the noise, varied across transmit batches.
+        noise_seed (int | SeedGenerator | jax.random.key, optional): Seed for the noise. Vary it
+            across transmit batches to keep the realisations independent.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).

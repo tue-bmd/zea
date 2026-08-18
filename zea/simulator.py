@@ -109,7 +109,8 @@ def simulate_rf(
             maximum. None disables the noise. Must be static under jit.
         tgc_max_db (float): Time gain compensation in dB at the last axial sample, ramped
             linearly in dB from 0 at the first. 0 disables it. Must be static under jit.
-        noise_seed (int): Stateless seed for the noise, varied across transmit batches.
+        noise_seed (int | SeedGenerator | jax.random.key, optional): Seed for the noise. Vary it
+            across transmit batches to keep the realisations independent.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -230,8 +231,9 @@ def apply_receive_chain(
             the noise. Gates a host-side branch, so it must be static under jit.
         tgc_max_db (float): Gain in dB at the last axial sample. 0 disables it. Gates a host-side
             branch, so it must be static under jit.
-        noise_seed (int): Stateless seed for the noise. The same seed gives the same realisation,
-            so vary it across transmit batches. None is treated as 0.
+        noise_seed (int | SeedGenerator | jax.random.key, optional): Seed for the noise. An int
+            is stateless, so the same value gives the same realisation; vary it across transmit
+            batches. None draws from the global generator and cannot be traced under jit.
         noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
             ``rf_data`` maximum. Pass a fixed reference to avoid the noise level changing per
             transmit batch.
@@ -245,10 +247,7 @@ def apply_receive_chain(
         if noise_reference is None:
             noise_reference = ops.max(ops.abs(rf_data))
         sigma = noise_reference * 10.0 ** (noise_level_db / 20.0)
-        # seed=None would draw from the global generator, which JAX refuses to trace.
-        noise = keras.random.normal(
-            ops.shape(rf_data), dtype=dtype, seed=0 if noise_seed is None else noise_seed
-        )
+        noise = keras.random.normal(ops.shape(rf_data), dtype=dtype, seed=noise_seed)
         rf_data = rf_data + ops.cast(sigma, dtype) * noise
 
     if tgc_max_db:
