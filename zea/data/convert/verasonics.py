@@ -1181,8 +1181,9 @@ class VerasonicsFile(h5py.File):
             custom_elements.append(additional_function(self))
 
         # Add Verasonics ImgDataP buffer to additional elements
-        try:
-            verasonics_image_buffer = self.read_image_data_p(frames=frames)
+        verasonics_image_buffer = self.read_image_data_p(frames=frames)
+
+        if verasonics_image_buffer is not None:
             verasonics_image_buffer = CustomElement(
                 name="verasonics_image_buffer",
                 data=verasonics_image_buffer,
@@ -1194,8 +1195,6 @@ class VerasonicsFile(h5py.File):
                 unit="unitless",
             )
             custom_elements.append(verasonics_image_buffer)
-        except Exception as e:
-            log.error(f"Could not read Verasonics ImgDataP buffer: {e}, skipping.")
 
         probe_dict = self.probe.to_probe_spec()
         f_c = self.probe.center_frequency
