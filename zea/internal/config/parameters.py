@@ -9,7 +9,7 @@ PARAMETER_DESCRIPTIONS = {
             "(hf://org/repo/path/to/file.hdf5)."
         ),
         "local": (
-            "true: use local data on this device, false: use data from NAS. "
+            "true: use local data on this device, false: use data from a remote location. "
             "null when the users.yaml data_root is a single path shared by both."
         ),
         "indices": (

@@ -248,7 +248,7 @@ def set_data_paths(
             If None, uses ``./users.yaml`` as the default file. Can also be a dictionary
             structured as shown below.
         local (bool, optional): Whether to pick the ``local`` or the ``remote`` path for
-            entries that define both (e.g. a local disk and a NAS). Default is True.
+            entries that define both (e.g. a local disk and a remote share). Default is True.
             Set to None when the paths are plain strings, i.e. shared between local
             and remote.
         verify (bool, optional): Verify that the paths exist and are directories.
@@ -521,7 +521,7 @@ def create_new_user(user_config_path: "str | Path | None" = None, local: bool | 
     Args:
         user_config_path (str or Path, optional): Path that points to yaml file with user
             info. Defaults to None. In that case ``./users.yaml`` is taken.
-        local (bool): Use local dataset or get from remote (NAS).
+        local (bool): Use the local dataset, or the one at the remote location.
             Per machine, the data_root can be set to a local or remote path.
             Each user can also have a different data_root for each machine.
             Default is None, which means that the data_root is shared for either

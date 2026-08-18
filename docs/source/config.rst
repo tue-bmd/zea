@@ -88,7 +88,7 @@ Supported keys
        (``hf://org/repo/path/to/file.hdf5``).
    * - ``local``
      - ``true``
-     - Whether to use local data (``true``) or a network/NAS location (``false``).
+     - Whether to use local data (``true``) or data at a remote location (``false``).
    * - ``indices``
      - ``null``
      - Which frames to load: ``null`` (default), ``'all'``, a single ``int``, or
