@@ -101,7 +101,7 @@
     </clipPath>
   </defs>
   <g id="b" data-name="background">
-    <rect class="bg" width="605" height="605.11" rx="126.45" ry="126.45"/>
+    <rect class="bg" width="605" height="605.11"/>
   </g>
   <g id="c" data-name="probe">
     <g>
