@@ -48,6 +48,7 @@ from zea.simulator import (
     attenuate,
     hann_unnormalized,
     spread,
+    apply_receive_chain,
 )
 
 
@@ -71,6 +72,9 @@ def simulate_rf_td(
     elevation_lens=False,
     element_height=None,
     max_chunk_gb=10.0,
+    noise_level_db=-50.0,
+    tgc_max_db=50.0,
+    noise_seed=0,
 ):
     """Time-domain (splat-and-convolve) RF simulator.
 
@@ -111,6 +115,9 @@ def simulate_rf_td(
             tensors held at once while iterating over scatterers. Scatterers are processed
             in chunks sized to this budget, so peak memory no longer scales with the total
             scatterer count. Must be a static (Python) value, not a traced array.
+        noise_level_db (float): Electronic noise level relative to the noiseless RF maximum.
+        tgc_max_db (float): Time gain compensation at the last axial sample.
+        noise_seed (int): Stateless seed for the noise, varied across transmit batches.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -162,7 +169,9 @@ def simulate_rf_td(
 
     parts = [_convolve_pulse_over_channels(spike_map, pulse) for spike_map in spike_maps]
     rf_data = ops.stack(parts, axis=0)
-    return rf_data[..., None]
+    rf_data = rf_data[..., None]
+    rf_data = rf_data[:, :n_ax, :, :]
+    return apply_receive_chain(rf_data, noise_level_db, tgc_max_db, noise_seed)
 
 
 def _simulate_transmit(

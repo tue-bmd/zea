@@ -54,7 +54,15 @@ class Simulate(Operation):
     """
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["n_ax", "apply_lens_correction", "method", "elevation_lens", "max_chunk_gb"]
+    STATIC_PARAMS = [
+        "n_ax",
+        "apply_lens_correction",
+        "method",
+        "elevation_lens",
+        "max_chunk_gb",
+        "center_frequency",
+        "sampling_frequency",
+    ]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
     def __init__(self, **kwargs):

@@ -44,6 +44,7 @@ more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_e
 
 """
 
+import keras
 import numpy as np
 from keras import ops
 
@@ -72,6 +73,9 @@ def simulate_rf(
     elevation_lens=False,
     element_height=None,
     max_chunk_gb=10.0,
+    noise_level_db=-50.0,
+    tgc_max_db=50.0,
+    noise_seed=0,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -101,6 +105,9 @@ def simulate_rf(
             elevation directivity and the elevation slab. If None, defaults to element_width.
         max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
             :func:`zea.simulator_time_domain.simulate_rf_td` share a call signature.
+        noise_level_db (float): Electronic noise level relative to the noiseless RF maximum.
+        tgc_max_db (float): Time gain compensation at the last axial sample.
+        noise_seed (int): Stateless seed for the noise, varied across transmit batches.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -207,6 +214,44 @@ def simulate_rf(
     rf_data = ops.transpose(rf_data, (0, 2, 1))
     rf_data = rf_data[..., None]
     rf_data = rf_data[:, :n_ax, :, :]
+    return apply_receive_chain(rf_data, noise_level_db, tgc_max_db, noise_seed)
+
+
+def apply_receive_chain(
+    rf_data, noise_level_db=-60.0, tgc_max_db=50.0, noise_seed=0, noise_reference=None
+):
+    """Add electronic noise and time gain compensation to noiseless RF.
+
+    Args:
+        rf_data (array-like): Noiseless RF of shape (n_tx, n_ax, n_el, 1).
+        noise_level_db (float): Noise floor below the peak of ``rf_data``.
+        tgc_max_db (float): Gain at the last axial sample.
+        noise_seed (int): Stateless seed for the noise. The same seed gives the same realisation,
+            so vary it across transmit batches. None is treated as 0.
+        noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
+            ``rf_data`` maximum. Pass a fixed reference to avoid the noise level changing per
+            transmit batch.
+
+    Returns:
+        array-like: RF with same shape as ``rf_data``.
+    """
+    dtype = keras.backend.standardize_dtype(rf_data.dtype)
+
+    if noise_level_db is not None and noise_level_db > -float("inf"):
+        if noise_reference is None:
+            noise_reference = ops.max(ops.abs(rf_data))
+        sigma = noise_reference * 10.0 ** (noise_level_db / 20.0)
+        # seed=None would draw from the global generator, which JAX refuses to trace.
+        noise = keras.random.normal(
+            ops.shape(rf_data), dtype=dtype, seed=0 if noise_seed is None else noise_seed
+        )
+        rf_data = rf_data + ops.cast(sigma, dtype) * noise
+
+    if tgc_max_db:
+        n_ax = int(ops.shape(rf_data)[1])
+        ramp = ops.arange(n_ax, dtype=dtype) / max(n_ax - 1, 1)
+        rf_data = rf_data * 10.0 ** (tgc_max_db * ramp / 20.0)[None, :, None, None]
+
     return rf_data
 
 
