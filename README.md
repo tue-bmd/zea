@@ -1,4 +1,4 @@
-# zea <img src="https://raw.githubusercontent.com/tue-bmd/zea/main/docs/_static/zea-logo.png" width="120" height="120" align="right" alt="zea Logo" />
+# zea <img src="https://raw.githubusercontent.com/tue-bmd/zea/feature/fix-logo/docs/_static/zea-logo-readme.svg" width="120" height="120" align="right" alt="zea Logo" />
 
 
 [![PyPI version](https://img.shields.io/pypi/v/zea)](https://pypi.org/project/zea/)
