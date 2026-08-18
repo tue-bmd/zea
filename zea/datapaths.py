@@ -4,6 +4,11 @@ This module provides utilities for managing local and remote data paths in ``zea
 It supports user- and machine-specific configuration via a ``users.yaml`` file, allowing
 dynamic resolution of data roots for portable and reproducible workflows.
 
+The main entry point is :func:`set_data_paths`, which resolves the ``data_root`` and
+``output`` paths for the current user and machine. :func:`format_data_path` then turns
+the relative paths used in ``zea`` configs into absolute ones. To set up a ``users.yaml``
+interactively, run ``python -m zea.datapaths`` (see :func:`create_new_user`).
+
 See the notebook :doc:`../notebooks/data/zea_local_data` for an extensive example of how
 to set up your local data paths.
 
@@ -38,8 +43,8 @@ import importlib.resources
 import os
 import platform
 import socket
+import sys
 import warnings
-from functools import reduce
 from pathlib import Path
 from typing import Union
 
@@ -93,6 +98,15 @@ def _create_empty_yaml(path):
     # Create empty file if it does not exist
     with open(path, "a", encoding="utf-8"):
         pass
+
+
+def _is_interactive():
+    """Returns True iff we can prompt the user for input on stdin."""
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        # stdin can be replaced (notebooks, papermill) or already closed
+        return False
 
 
 def _fallback_to_default_data_root(system):
@@ -203,12 +217,15 @@ def _load_users_yaml(user_config, local, username, hostname):
 
         _create_empty_yaml(config_path)
 
-        try:
-            create_new_user(local=local)
-        except Exception:
-            log.warning(
-                f"Could not create user profile for {username} on {hostname}, using default."
-            )
+        # Only prompt when there is someone at the keyboard to answer. Non-interactive
+        # runs (CI, notebooks, scripts) silently fall back to the defaults below.
+        if _is_interactive():
+            try:
+                create_new_user(str(config_path), local=local)
+            except Exception:
+                log.warning(
+                    f"Could not create user profile for {username} on {hostname}, using default."
+                )
 
     # Load YAML file with user info
     with open(config_path, "r", encoding="utf-8") as file:
@@ -230,14 +247,17 @@ def _load_users_yaml(user_config, local, username, hostname):
 
 def set_data_paths(
     user_config: Union[str, dict, None] = None, local: bool | None = True, verify: bool = True
-) -> dict:
+) -> Config:
     """Get data paths (absolute paths to location of data).
 
     Args:
         user_config (str or dict, optional): Path to a YAML file with user info.
             If None, uses ``./users.yaml`` as the default file. Can also be a dictionary
             structured as shown below.
-        local (bool, optional): Use local dataset or get from NAS.
+        local (bool, optional): Whether to pick the ``local`` or the ``remote`` path for
+            entries that define both (e.g. a local disk and a NAS). Default is True.
+            Set to None when the paths are plain strings, i.e. shared between local
+            and remote.
         verify (bool, optional): Verify that the paths exist and are directories.
             Default is True.
 
@@ -268,8 +288,19 @@ def set_data_paths(
     These will take precedence over the ``data_root`` that is userless and machineless.
 
     Returns:
-        dict: Absolute paths to location of data. Stores the following parameters:
+        Config: Absolute paths to location of data. Stores the following parameters:
             ``data_root``, ``zea_root``, ``output``, ``system``, ``username``, ``hostname``
+
+    Raises:
+        ValueError: If ``user_config`` is not a string, dictionary or None.
+
+    Note:
+        When ``user_config`` points to a YAML file that does not exist yet, an empty one
+        is created and -- when running interactively -- you are offered to set up a
+        profile, see :func:`create_new_user`. When no ``data_root`` can be resolved for
+        the current user and machine, a warning is raised and a default path for the
+        current operating system is used. When no ``output`` is given, it defaults to
+        ``data_root/output``.
 
     """
     username = getpass.getuser()
@@ -291,25 +322,41 @@ def set_data_paths(
         raise ValueError("user_config should be a string or dictionary.")
 
     # Check if username is in the config, if so, select that part of the config
-    if username in config:
+    username_found = username in config
+    if username_found:
         config = config[username]
 
     # Check if hostname is in the config, if so, select that part of the config
-    if hostname in config:
+    hostname_found = hostname in config
+    if hostname_found:
         config = config[hostname]
 
     # Ensure that the remaining config contains a `data_root` key
     if "data_root" not in config:
+        default_data_root = _fallback_to_default_data_root(system)
+        # Distinguish "we don't know this user at all" from "we know this user, but not
+        # on this machine", so that `create_new_user` can add just the missing entry.
+        if username_found and not hostname_found:
+            warning_type = UnknownHostnameWarning
+            reason = (
+                f"Cannot find data_root for hostname={hostname} under username={username} "
+                "in user file. Also no default data_root found for this user."
+            )
+        else:
+            warning_type = UnknownUsernameWarning
+            reason = (
+                f"Cannot find data_root for username={username} "
+                f"and hostname={hostname} in user file. Also no default data_root found."
+            )
         warnings.warn(
             (
-                f"Cannot find data_root for username={username} "
-                f"and hostname={hostname} in user file. Also no default data_root found. "
-                f"Falling back to default path for {system}: {DEFAULT_DATA_ROOT[system]}. "
+                f"{reason} "
+                f"Falling back to default path for {system}: {default_data_root}. "
                 f"Please update the `{user_config}` with your data-path settings."
             ),
-            UnknownUsernameWarning,
+            warning_type,
         )
-        data_root = _fallback_to_default_data_root(system)
+        data_root = default_data_root
         output = _default_output_path(data_root)
     else:
         data_root, output = _verify_user_config_and_get_paths(config, system, local)
@@ -383,11 +430,7 @@ def _warning_type_was_thrown(warning_type, list_of_warnings):
     """Returns True iff list_of_warnings contains a warning of type warning_type"""
     if not list_of_warnings:
         return False
-    return reduce(
-        lambda acc, w: acc and isinstance(w.message, warning_type),
-        list_of_warnings,
-        True,
-    )
+    return any(isinstance(w.message, warning_type) for w in list_of_warnings)
 
 
 def _to_read_yaml_file(path_str):
@@ -402,15 +445,15 @@ def _to_read_yaml_file(path_str):
 
 def _to_write_yaml_file(data, path_str):
     path = Path(path_str)
+    if not path.is_file():
+        raise ValueError("YAML file path provided does not lead to a file.")
+
     if _check_for_comments_yaml_file(path_str):
         log.warning(
             f"YAML file {path_str} contains comments. "
             "These will be removed if you write to the file."
         )
         input("Press Enter to continue or Ctrl+C to cancel.")
-
-    if not path.is_file():
-        raise ValueError("YAML file path provided does not lead to a file.")
 
     with open(path, "w", encoding="utf-8") as file:
         yaml.dump(data, file, default_flow_style=False, sort_keys=False)
@@ -436,26 +479,46 @@ def _check_for_comments_yaml_file(path_str):
         return any("#" in line for line in lines)
 
 
-def create_new_user(user_config_path: str | None = None, local: bool | None = None):
+def _resolve_config_section(config, username, hostname):
+    """Returns the part of the ``users.yaml`` dict that applies to this user and machine.
+
+    Mirrors the lookup order of :func:`set_data_paths`: first the username, then the
+    hostname, falling back to the level above whenever a key is missing.
+    """
+    section = config if isinstance(config, dict) else {}
+    if username in section and isinstance(section[username], dict):
+        section = section[username]
+    if hostname in section and isinstance(section[hostname], dict):
+        section = section[hostname]
+    return section
+
+
+def create_new_user(user_config_path: "str | Path | None" = None, local: bool | None = None):
     """Creates a new user profile in `users.yaml` if one does not already exist.
 
     Args:
-        user_config_path (str, optional): Path that points to yaml file with user info.
-            Defaults to None. In that case `./users.yaml` is taken
+        user_config_path (str or Path, optional): Path that points to yaml file with user
+            info. Defaults to None. In that case ``./users.yaml`` is taken.
         local (bool): Use local dataset or get from remote (NAS).
             Per machine, the data_root can be set to a local or remote path.
             Each user can also have a different data_root for each machine.
             Default is None, which means that the data_root is shared for either
             local or remote (i.e. this parameter is ignored), see doc set_data_paths().
+
+    Returns:
+        Config: The data paths for the (possibly newly created) user profile,
+            as returned by :func:`set_data_paths`.
     """
+    if user_config_path is None:
+        user_config_path = DEFAULT_USERS_CONFIG_PATH
+    user_config_path = str(user_config_path)
+
     # Create empty file if it does not exist
     _create_empty_yaml(user_config_path)
 
     with warnings.catch_warnings(record=True) as list_of_warnings:
+        warnings.simplefilter("always")
         data_paths = set_data_paths(user_config=user_config_path, local=local)
-        if user_config_path is None:
-            user_config_path = DEFAULT_USERS_CONFIG_PATH
-        assert isinstance(user_config_path, str), "user_config_path should be a string."
 
         # Display any warnings that were thrown during set_data_paths
         if list_of_warnings:
@@ -539,13 +602,19 @@ def create_new_user(user_config_path: str | None = None, local: bool | None = No
             data_paths["data_root"] = data_root
             users_yaml_dict = _try(_to_read_yaml_file, {"path_str": user_config_path})
             ## now update the data_root for the user and hostname in the yaml file
-            ## use local or remote subkey depending on the local parameter
-            users_yaml_dict[data_paths["username"]][data_paths["hostname"]]["data_root"].update(
-                {local_remote_str: data_root}
+            ## use local or remote subkey depending on the local parameter. The data_root
+            ## can live at the top level as well, so look up where it actually is.
+            section = _resolve_config_section(
+                users_yaml_dict, data_paths["username"], data_paths["hostname"]
             )
+            existing = section.get("data_root")
+            section["data_root"] = {
+                **(existing if isinstance(existing, dict) else {}),
+                local_remote_str: data_root,
+            }
             user_response = input(
                 "\n"
-                + yaml.dump(users_yaml_dict[data_paths["username"]])
+                + yaml.dump(users_yaml_dict)
                 + "\nℹ️ Would you like to update your user profile "
                 + "with the user info above? [y]: "
             )
@@ -559,18 +628,35 @@ def create_new_user(user_config_path: str | None = None, local: bool | None = No
     return data_paths
 
 
-def format_data_path(path: str, user: "Config | None" = None) -> "Path | HFPath":
-    """If the path is not absolute, prepend the data_root to it."""
+def format_data_path(path: "str | Path | HFPath", user: "Config | None" = None) -> "Path | HFPath":
+    """Resolve a dataset path against the user's ``data_root``.
+
+    Absolute paths and ``hf://`` paths are returned as-is, relative paths are
+    interpreted relative to ``user.data_root``.
+
+    Args:
+        path (str, Path or HFPath): Path to the dataset. Can be absolute, relative
+            to the user's ``data_root``, or a ``hf://`` path.
+        user (Config, optional): User config as returned by :func:`set_data_paths`.
+            Only required for relative paths.
+
+    Returns:
+        Path or HFPath: The resolved path. An :class:`~zea.tools.hf.HFPath` is
+        returned for ``hf://`` paths, a :class:`pathlib.Path` otherwise.
+
+    Raises:
+        AssertionError: If ``path`` is relative and no ``user`` is provided.
+    """
+    if str(path).startswith(HF_PREFIX):
+        return HFPath(path)
     if Path(path).is_absolute():
         return Path(path)
-    elif str(path).startswith(HF_PREFIX):
-        return HFPath(path)
-    else:
-        assert user is not None, (
-            "The dataset folder is relative, but no user is provided. "
-            "Please provide a user to load the dataset relative to "
-            "the user's data_root."
-        )
+
+    assert user is not None, (
+        "The dataset folder is relative, but no user is provided. "
+        "Please provide a user to load the dataset relative to "
+        "the user's data_root."
+    )
     return Path(user.data_root) / path
 
 
