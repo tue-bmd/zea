@@ -30,7 +30,7 @@ DYNAMIC_RANGE = (-50.0, 0.0)
 
 
 def _parameters(probe_geometry):
-    angles = np.linspace(-5, 5, N_TX) * np.pi / 180
+    angles = np.linspace(-15, 15, N_TX) * np.pi / 180
     wavelength = SOUND_SPEED / CENTER_FREQUENCY
     return Parameters(
         n_tx=N_TX,
@@ -357,3 +357,48 @@ def test_record_length_gate_uses_worst_case_element_pair():
 
     rf = keras.ops.convert_to_numpy(simulate_rf(**args))
     assert np.abs(rf).max() == 0, "Out-of-record element pair was included; implies aliased energy."
+
+
+def _receive_chain_image(fish_scan, **receive_chain_kwargs):
+    _, simulation_args, beamform = fish_scan
+    return beamform(simulate_rf(**simulation_args, noise_seed=0, **receive_chain_kwargs))
+
+
+def test_tgc_brightens_the_deepest_scatterers(fish_scan):
+    """TGC compensates spreading loss, so the deep scatterers gain on the shallow ones."""
+    positions, _, _ = fish_scan
+    by_depth = np.argsort(positions[:, 2])
+    quartile = len(positions) // 4
+    deepest, shallowest = positions[by_depth[-quartile:]], positions[by_depth[:quartile]]
+
+    without = _receive_chain_image(fish_scan, noise_level_db=None, tgc_max_db=0.0)
+    with_tgc = _receive_chain_image(fish_scan, noise_level_db=None, tgc_max_db=50.0)
+
+    dim = _dot_brightness(without, deepest).mean()
+    bright = _dot_brightness(with_tgc, deepest).mean()
+    assert dim < bright, (
+        f"Deepest scatterers are not brighter with TGC: {dim:.1f} without, {bright:.1f} with"
+    )
+
+    # Depth ratio isolates the gain ramp from any global brightness shift.
+    without_ratio = dim / _dot_brightness(without, shallowest).mean()
+    with_ratio = bright / _dot_brightness(with_tgc, shallowest).mean()
+    assert without_ratio < 1.0 < with_ratio, (
+        f"TGC did not invert the deep/shallow brightness ratio: {without_ratio:.2f} without, "
+        f"{with_ratio:.2f} with"
+    )
+
+
+def test_noise_lowers_relative_scatterer_amplitude(fish_scan):
+    """Electronic noise lifts the background, so scatterers stand out less above the mean."""
+    positions, _, _ = fish_scan
+
+    noiseless = _receive_chain_image(fish_scan, noise_level_db=-float("inf"), tgc_max_db=50.0)
+    noisy = _receive_chain_image(fish_scan, noise_level_db=-30.0, tgc_max_db=50.0)
+
+    clean = _dot_brightness(noiseless / noiseless.mean(), positions).mean()
+    degraded = _dot_brightness(noisy / noisy.mean(), positions).mean()
+    assert degraded < clean, (
+        f"Noise did not lower the relative scatterer amplitude: {clean:.1f}x noiseless, "
+        f"{degraded:.1f}x at -30 dB"
+    )
