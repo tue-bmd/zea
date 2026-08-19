@@ -5,6 +5,10 @@ Kept free of heavy imports (keras, ``zea.data``, …) so that ``zea --help`` and
 module lives at the top level of the package (rather than under ``zea.data``)
 because importing ``zea.data`` eagerly pulls in keras. The actual processing
 code lives in :mod:`zea.data.process`.
+
+Every subcommand dataclass exposes a ``run()`` method that imports its implementation
+lazily and dispatches to it, so :mod:`zea.__main__` only has to parse and call ``run()``,
+and each module's own ``python -m`` entry point can reuse the same dispatch.
 """
 
 import importlib.util
@@ -36,6 +40,24 @@ class AppArgs:
             "port starting at 7860. Defaults to None."
         ),
     ] = None
+
+    def run(self) -> None:
+        """Launch the Gradio dataset visualizer."""
+        try:
+            import gradio as gr
+        except ImportError as exc:
+            raise ImportError(
+                "gradio is required for the zea app. Install with: pip install 'zea[app]'"
+            ) from exc
+
+        from zea.data.app import CSS, build_interface
+
+        build_interface().launch(
+            share=self.share,
+            server_port=self.server_port,
+            theme=gr.themes.Soft(primary_hue="violet", secondary_hue="yellow"),
+            css=CSS,
+        )
 
 
 @dataclass
@@ -126,6 +148,26 @@ class ProcessArgs:
             "Only valid when --save-as hdf5."
         ),
     ] = False
+
+    def run(self) -> None:
+        """Beamform the dataset with the configured pipeline."""
+        from zea.data.process import run_processing
+
+        run_processing(
+            dataset_path=self.dataset,
+            config_path=self.config,
+            key=self.key,
+            n_frames=self.n_frames,
+            save_dir=self.save_dir,
+            save_as=self.save_as,
+            keep_keys=self.keep_keys,
+            timings=self.timings,
+            num_threads=self.num_threads,
+            overwrite=self.overwrite,
+            keep_dynamic_range=self.keep_dynamic_range,
+            revision=self.revision,
+            config_revision=self.config_revision,
+        )
 
 
 # ── Data file manipulation subcommands (``zea data …``) ───────────────────────
@@ -395,6 +437,106 @@ class DataArgs:
 
     def run(self) -> None:
         _run_data_command(self.subcommand)
+
+
+# ── Interactive tooling subcommands (``zea tools …``) ─────────────────────────
+#
+# Only the tools in :mod:`zea.tools` that are meant to be driven from a terminal are
+# exposed here. The heavy implementation is imported lazily inside ``run`` so that
+# ``zea --help`` / ``zea tools --help`` stay free of keras and matplotlib imports.
+
+
+@dataclass
+class _Select:
+    """Interactively select regions of interest in images or a sequence.
+
+    With one or more images, two regions are selected in the first image and compared
+    across all of them with ``--metric``. With a single video, gif or zea file, a number
+    of key frames are annotated, the masks are interpolated over all frames and written
+    next to the input as a zea HDF5 file (image + segmentation), together with a preview
+    animation.
+
+    Any option that is omitted is asked for interactively, so ``zea tools select``
+    without arguments walks you through the whole process.
+    """
+
+    files: tyro.conf.Positional[list[str]] = field(default_factory=list)
+    """Input images (png/jpg), or a single video / gif or zea HDF5 file. zea files also
+    accept an 'hf://' path (parsed as a str so the '//' is not collapsed). Omit to pick
+    files through a file dialog."""
+    selector: Literal["rectangle", "lasso"] | None = None
+    """Shape of the selection tool. Asked for interactively when omitted."""
+    title: str | None = None
+    """Name of what is being selected. Used as the segmentation label and in the output
+    filenames (sequence mode only). Asked for interactively when omitted."""
+    num_selections: int | None = None
+    """Number of key frames to annotate before interpolating (sequence mode only). Asked
+    for interactively when omitted."""
+    fps: int | None = None
+    """Frame rate of the saved preview animation (sequence mode only). Asked for
+    interactively when omitted."""
+    metric: str | None = "gcnr"
+    """Metric from ``zea.metrics`` computed between the two selections (image mode
+    only). Pass ``None`` to skip the metric."""
+    output_dir: Path | None = None
+    """Directory the annotations and animation are written to. Defaults to the folder of
+    the input file, or the working directory for 'hf://' inputs."""
+    animation: bool = True
+    """Save a preview gif of the interpolated masks (sequence mode only)."""
+    confirm: bool = True
+    """Ask for confirmation after each selection. Needs tkinter; pass ``--no-confirm``
+    on systems without it."""
+    overwrite: bool = False
+    """Overwrite existing output files."""
+
+    def run(self):
+        from zea.tools.selection_tool import run_selection_tool
+
+        run_selection_tool(
+            files=self.files,
+            selector=self.selector,
+            title=self.title,
+            num_selections=self.num_selections,
+            fps=self.fps,
+            metric=self.metric,
+            output_dir=self.output_dir,
+            save_animation=self.animation,
+            confirm_selection=self.confirm,
+            overwrite=self.overwrite,
+        )
+
+
+ToolsCommand = Union[
+    Annotated[_Select, tyro.conf.subcommand("select")],
+    # A one-element ``Union`` collapses to the element itself, which would inline the
+    # tool's arguments into ``zea tools`` rather than put them behind ``select``. The
+    # suppressed ``None`` keeps this a real subcommand union; drop it once a second
+    # tool is added here.
+    Annotated[None, tyro.conf.Suppress],
+]
+
+
+@dataclass
+class ToolsArgs:
+    """Interactive tools from :mod:`zea.tools`.
+
+    These are GUI-driven helpers rather than batch operations; they open matplotlib
+    windows and file dialogs, so they need a display::
+
+        zea tools select                  # pick files through a dialog
+        zea tools select a.png b.png      # compare two images with gCNR
+        zea tools select clip.mp4         # annotate a video
+        zea tools select scan.hdf5        # annotate a zea file
+
+    Run ``zea tools <tool> --help`` for the per-tool options.
+    """
+
+    subcommand: tyro.conf.OmitSubcommandPrefixes[ToolsCommand]
+
+    def run(self) -> None:
+        # The `None` padding in ToolsCommand is suppressed, so tyro never selects it.
+        assert self.subcommand is not None, "No tool selected."
+        self.subcommand.run()
 
 
 # ── Dataset conversion subcommands (``zea convert …``) ────────────────────────

@@ -310,22 +310,8 @@ def run_processing(
 
 
 def main() -> None:
-    args = tyro.cli(ProcessArgs)
-    run_processing(
-        args.dataset,
-        args.config,
-        args.key,
-        args.n_frames,
-        args.save_dir,
-        args.save_as,
-        args.keep_keys,
-        args.timings,
-        args.num_threads,
-        args.overwrite,
-        args.keep_dynamic_range,
-        args.revision,
-        args.config_revision,
-    )
+    """Entry point for ``python -m zea.data.process``, equivalent to ``zea process``."""
+    tyro.cli(ProcessArgs).run()
 
 
 if __name__ == "__main__":

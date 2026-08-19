@@ -1907,15 +1907,10 @@ def build_interface() -> "gr.Blocks":
 
 
 def main() -> None:
+    """Entry point for ``python -m zea.data.app``, equivalent to ``zea app``."""
     args = tyro.cli(AppArgs)
     init_device()
-    demo = build_interface()
-    demo.launch(
-        share=args.share,
-        server_port=args.server_port,
-        theme=gr.themes.Soft(primary_hue="violet", secondary_hue="yellow"),
-        css=CSS,
-    )
+    args.run()
 
 
 if __name__ == "__main__":

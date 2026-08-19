@@ -1,22 +1,58 @@
-"""Interactive selection tools.
+"""Interactive region-of-interest (ROI) selection.
 
-This module provides interactive tools for selecting regions of interest (ROIs)
-from 2D arrays or images displayed with matplotlib. It is designed for use in
-ultrasound and image processing workflows where manual or semi-automatic selection
-of regions is required.
+This module provides interactive tools for selecting regions of interest from 2D
+arrays or images displayed with matplotlib. It is designed for ultrasound and image
+processing workflows where manual or semi-automatic selection of regions is required.
 
-Key Features
+Key features
 ------------
-- Interactive selection using rectangle or lasso tools via matplotlib widgets.
-- Support for cropping, masking, and extracting selected regions from images.
-- Polygon and rectangle extraction, interpolation, and mask reconstruction.
-- Utilities for batch selection, mask interpolation across frames, and animation.
-- Integration with tkinter dialogs for user-friendly selection and confirmation.
-- Metric computation (e.g., GCNR) on selected patches.
+- Interactive selection with a rectangle or lasso tool, via matplotlib widgets.
+- Cropping, masking and extracting the selected regions from images.
+- Polygon and rectangle extraction, interpolation and mask reconstruction.
+- Mask interpolation across the frames of a sequence, plus animation of the result.
+- Metric computation (e.g. gCNR) between two selected patches.
+- Reading and writing zea HDF5 files, storing the annotations as a
+  :class:`~zea.data.spec.Segmentation` map alongside the images.
 
+Command line interface
+----------------------
 
-Example
--------
+The module is exposed through the ``zea`` CLI as ``zea tools select``::
+
+    zea tools select                              # pick files through a file dialog
+    zea tools select frame.png other.png          # compare two images with gCNR
+    zea tools select clip.mp4 --num-selections 3  # annotate a video and interpolate
+
+Run ``zea tools select --help`` for all options. Any option that is omitted is asked
+for interactively, so the command can be used without arguments as well.
+
+Annotating a zea dataset
+------------------------
+
+Any zea file with image data (``data/image``) can be annotated directly, including
+files on the Hugging Face Hub. For example, on a CAMUS recording::
+
+    zea tools select hf://zeahub/camus/val/patient0409/patient0409_4CH.hdf5 \
+        --selector lasso --title lv_endo --num-selections 3 --fps 20
+
+Pick the left-ventricle border in each of the three key frames; the masks are
+interpolated across all frames and written to
+``patient0409_4CH_lv_endo_annotations.hdf5`` (plus a ``.gif`` preview) in the working
+directory. The result is a regular zea file, so it reads back like any other dataset::
+
+    from zea import File
+
+    with File("patient0409_4CH_lv_endo_annotations.hdf5") as file:
+        images = file.data.image.values[:]              # (n_frames, H, W)
+        masks = file.data.segmentation.values[..., 0]   # (n_frames, H, W), bool
+        labels = file.data.segmentation.labels[:]       # ["lv_endo"]
+
+Since the tool only produces images and segmentations, the warnings about the
+acquisition fields it cannot fill in (scan parameters, probe geometry, …) are
+suppressed when saving.
+
+Python API
+----------
 
 .. doctest::
 
@@ -31,9 +67,10 @@ Example
 
 """
 
-from collections.abc import Iterable
-from pathlib import Path
-from typing import Union
+import re
+from collections.abc import Iterable, Sequence
+from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 import matplotlib
 import matplotlib.axes
@@ -51,18 +88,36 @@ from sklearn.metrics import pairwise_distances
 
 from zea import log
 from zea.func.tensor import translate
+from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.viewer import (
     filename_from_window_dialog,
     get_matplotlib_figure_props,
     move_matplotlib_figure,
 )
-from zea.io_lib import _SUPPORTED_VID_TYPES, load_image, load_video
-from zea.metrics import get_metric
+from zea.io_lib import (
+    _SUPPORTED_IMG_TYPES,
+    _SUPPORTED_VID_TYPES,
+    _SUPPORTED_ZEA_TYPES,
+    load_image,
+    load_video,
+)
 from zea.visualize import plot_rectangle_from_mask, plot_shape_from_mask
+
+#: Selection tools that can be used to draw a region of interest.
+SELECTORS = ("rectangle", "lasso")
 
 
 def crop_array(array, value=None):
-    """Crop an array to remove all rows and columns containing only a given value."""
+    """Crop an array to remove all rows and columns containing only a given value.
+
+    Args:
+        array (ndarray): 2D input array.
+        value: Value that marks a row/column as empty. With the default (``None``)
+            nothing matches and the array is returned unchanged.
+
+    Returns:
+        np.ndarray: The cropped 2D array.
+    """
     array = np.array(array)
     assert array.ndim == 2, f"Array must be 2D, not {array.ndim}D."
     mask = np.all(np.equal(array, value), axis=1)  # ty: ignore[no-matching-overload]
@@ -85,22 +140,25 @@ def interactive_selector(
     """Interactively select part of an array displayed as an image with matplotlib.
 
     Args:
-        data (ndarray): input array. should be 2D.
-        ax (plt.ax): existing matplotlib figure ax to select region on.
-        selector (str, optional): type of selector. Defaults to 'rectangle'.
-            For `lasso` use `LassoSelector`; for `rectangle`, use `RectangleSelector`.
-        extent (list): extent of axis where selection is made. Used to transform
-            coordinates back to pixel values. Defaults to None.
-        verbose (bool): verbosity of print statements. Defaults to False.
-        num_selections (int): number of selections to make. Defaults to None.
-        confirm_selection (bool): whether to confirm selection before moving on.
-            Defaults to True.
+        data (ndarray): Input array, must be 2D.
+        ax (matplotlib.axes.Axes): Existing matplotlib axis to select a region on.
+        selector (str, optional): Type of selector, one of :data:`SELECTORS`.
+            Defaults to ``"rectangle"``. ``"lasso"`` uses matplotlib's
+            ``LassoSelector``, ``"rectangle"`` its ``RectangleSelector``.
+        extent (list, optional): Extent of the axis the selection is made on. Used to
+            transform coordinates back to pixel values. Defaults to None.
+        verbose (bool, optional): Whether to log progress messages. Defaults to True.
+        num_selections (int, optional): Number of selections to make. When omitted the
+            user presses Enter in the terminal to signal they are done.
+        confirm_selection (bool, optional): Whether to ask for confirmation (through a
+            tkinter dialog) before returning. Defaults to True.
 
     Returns:
-        patches (list): list of selected parts of data
-        masks (list): list of boolean masks for selected parts of data
+        tuple: ``(patches, masks)``, where ``patches`` is a list of the selected parts
+        of ``data`` and ``masks`` a list of the corresponding boolean masks.
     """
     assert data.ndim == 2, f"Data must be 2D, not {data.ndim}D."
+    assert selector in SELECTORS, f"Selector must be one of {SELECTORS}, not {selector!r}."
 
     x, y = np.meshgrid(np.arange(data.shape[1], dtype=int), np.arange(data.shape[0], dtype=int))
     pix = np.vstack((x.flatten(), y.flatten())).T
@@ -114,7 +172,7 @@ def interactive_selector(
     def _onselect_lasso(verts):
         nonlocal select_idx
         if verbose:
-            print(f"Selection {select_idx} done")
+            log.info(f"Selection {select_idx} done")
         select_idx += 1
         verts = np.array(verts)
         # if axis is drawn with extent argument, first translate coordinates to pixels
@@ -128,7 +186,7 @@ def interactive_selector(
     def _onselect_rectangle(start, end):
         nonlocal select_idx
         if verbose:
-            print(f"Selection {select_idx} done")
+            log.info(f"Selection {select_idx} done")
         select_idx += 1
         # if axis is drawn with extent argument, first translate coordinates to pixels
         start.xdata, start.ydata = _translate_coordinates(start.xdata, start.ydata)
@@ -157,8 +215,19 @@ def interactive_selector(
     }
     kwargs_dict = {LassoSelector: {}, RectangleSelector: {"interactive": True}}
 
+    # Selection state, shared with the callbacks above and reset on every round.
+    mask = np.tile(False, data.shape)
+    masks = []
+    select_idx = 0
+
     def _execute_selector():
-        lasso = selector_cls(
+        """Run one round of selecting and return the patches it produced."""
+        nonlocal mask, masks, select_idx
+        mask = np.tile(False, data.shape)
+        masks = []
+        select_idx = 0
+
+        widget = selector_cls(
             ax,
             onselect_dict[selector_cls],  # ty: ignore[invalid-argument-type]
             **kwargs_dict[selector_cls],  # ty: ignore[invalid-argument-type]
@@ -166,26 +235,28 @@ def interactive_selector(
 
         if num_selections:
             if verbose:
-                print(f"...Plot will close after {num_selections} selections...")
+                log.info(f"...Plot will close after {num_selections} selections...")
             plt.show(block=False)
-            while not select_idx >= num_selections:
+            figure = ax.get_figure()
+            while select_idx < num_selections:
+                # Closing the window used to spin here forever; stop with what we have.
+                if not plt.fignum_exists(figure.number):
+                    log.warning(
+                        f"Plot was closed after {select_idx} of {num_selections} selections."
+                    )
+                    break
                 plt.pause(0.1)
         else:
             plt.show(block=False)
             input("Press Enter to continue (don't close plot)...\n")
 
-        lasso.disconnect_events()
-        lasso.set_visible(False)
-        lasso.update()
+        widget.disconnect_events()
+        widget.set_visible(False)
+        widget.update()
 
-    mask = np.tile(False, data.shape)
-    masks = []
-    select_idx = 0
-    _execute_selector()
+        return [crop_array(data * selected, value=0) for selected in masks]
 
-    patches = []
-    for mask in masks:
-        patches.append(crop_array(data * mask, value=0))
+    patches = _execute_selector()
 
     # Early return if no confirmation is required
     if not confirm_selection:
@@ -204,24 +275,17 @@ def interactive_selector(
 
     like_selection = False
     while not like_selection:
-        print(f"You have made {len(patches)} selection(s).")
+        log.info(f"You have made {len(patches)} selection(s).")
         # draw masks on top of data
         for current_mask in masks:
-            plot_shape_from_mask(ax, current_mask, alpha=0.5)
+            plot_mask(ax, current_mask, selector)
         plt.draw()
 
         like_selection = messagebox.askyesno("Like Selection", "Do you like your selection?")
 
         if not like_selection:
             remove_masks_from_axs(ax)
-            mask = np.tile(False, data.shape)
-            masks = []
-            select_idx = 0
-            _execute_selector()
-
-            patches = []
-            for current_mask in masks:
-                patches.append(crop_array(data * current_mask, value=0))
+            patches = _execute_selector()
 
     root.destroy()
 
@@ -231,51 +295,64 @@ def interactive_selector(
 def interactive_selector_with_plot_and_metric(
     data,
     ax=None,
-    selector="rectangle",
-    metric=None,
-    cmap="gray",
-    plot=True,
-    mask_plot=False,
-    selection_axis=0,
+    selector: str = "rectangle",
+    metric: str | None = None,
+    cmap: str = "gray",
+    plot: bool = True,
+    mask_plot: bool = False,
+    selection_axis: int = 0,
     **kwargs,
 ):
-    """Wrapper for interactive_selector to plot the selected regions.
+    """Select two regions in one image and compare them across a list of images.
+
+    The selection is made on a single image (``data[selection_axis]``) and the resulting
+    masks are applied to every image in ``data``, so the same two regions are compared
+    in each of them.
 
     Args:
-        data (ndarray or list of ndarray): input data.
-        ax (plt.ax or list of plt.ax, optional): axis corresponding to input data.
-            Defaults to None. In that case function plots data first to create axis.
-        selector (str, optional): type of selection tool. Defaults to 'rectangle'.
-        metric (str, optional): metric to compute. Defaults to None.
-        cmap (str, optional): color map to display data in. Defaults to 'gray'.
-        plot (bool, optional): whether to plot selections / metrics on top of axis.
-            Defaults to True.
-        mask_plot (bool, optional): whether to also plot the masks in a separate plot.
+        data (ndarray or list of ndarray): Input data.
+        ax (matplotlib.axes.Axes or list, optional): Axis (or axes) corresponding to the
+            input data. Defaults to None, in which case the data is plotted first to
+            create the axes.
+        selector (str, optional): Type of selection tool, one of :data:`SELECTORS`.
+            Defaults to ``"rectangle"``.
+        metric (str, optional): Name of a metric in :mod:`zea.metrics` to compute between
+            the two patches (e.g. ``"gcnr"``). Defaults to None, i.e. no metric.
+        cmap (str, optional): Colormap to display the data in. Defaults to ``"gray"``.
+        plot (bool, optional): Whether to plot the selections / metrics on top of the
+            axes. Defaults to True.
+        mask_plot (bool, optional): Whether to also plot the masks in a separate figure.
             Can be useful to isolate the patches and see the selections more clearly.
             Defaults to False.
-        selection_axis (int, optional): axis on which to make selection. Defaults to 0.
+        selection_axis (int, optional): Index of the image the selection is made on.
+            Defaults to 0.
+        **kwargs: Forwarded to :func:`interactive_selector`.
+
+    Returns:
+        list: The computed metric scores, one per image in ``data``. Empty when
+        ``metric`` is None.
 
     Raises:
-        ValueError: Can only select two patches to compute metric with. More patches
-            don't make sense in this context.
+        ValueError: If the user did not make exactly two selections. More or fewer
+            patches don't make sense in this context.
     """
     if not isinstance(data, list):
         data = [data]
 
     if ax is None:
-        fig, ax = plt.subplots(1, len(data))
-        for _data, _ax in zip(data, ax):
+        _, ax = plt.subplots(1, len(data))
+        for _data, _ax in zip(data, np.atleast_1d(ax)):
             _ax.imshow(_data, cmap=cmap, aspect="auto")
 
     if not isinstance(ax, Iterable):
         ax = [ax]
 
     # create selector for first axis only
-    patches, masks = interactive_selector(
+    _, masks = interactive_selector(
         data[selection_axis], ax[selection_axis], selector, num_selections=2, **kwargs
     )
 
-    if len(patches) != 2:
+    if len(masks) != 2:
         raise ValueError("exactly 2 patches are required for using this wrapper function")
 
     # get patches for all data in data list using the selection made
@@ -286,11 +363,13 @@ def interactive_selector_with_plot_and_metric(
     # compute metrics
     scores = []
     if metric:
+        from zea.metrics import get_metric
+
         for i in range(len(data)):
             idx = i * len(masks)
             score = get_metric(metric)(patches[idx], patches[idx + 1])
             scores.append(score)
-            print(f"{metric}: {score:.3f}")
+            log.info(f"{metric}: {score:.3f}")
 
     # plot on top of existing plot
     if plot:
@@ -298,10 +377,7 @@ def interactive_selector_with_plot_and_metric(
             title = _ax.get_title()
             _ax.set_title(title + "\n" + f"{metric}: {score:.3f}")
             for mask in masks:
-                if selector == "rectangle":
-                    plot_rectangle_from_mask(_ax, mask, alpha=0.5)
-                else:
-                    plot_shape_from_mask(_ax, mask, alpha=0.5)
+                plot_mask(_ax, mask, selector)
             plt.tight_layout()
 
     # plot patches and masks
@@ -314,8 +390,7 @@ def interactive_selector_with_plot_and_metric(
             ax_new[1].imshow(patch, cmap=cmap, aspect="auto")
             ax_new[2].imshow(mask, aspect="auto")
 
-            if selector == "rectangle":
-                plot_rectangle_from_mask(ax_base, mask)
+            plot_mask(ax_base, mask, selector)
 
             for _ax in ax_new:
                 _ax.axis("off")
@@ -326,11 +401,14 @@ def interactive_selector_with_plot_and_metric(
 
 
 def extract_rectangle_from_mask(image):
-    """Find corner points of rectangle in binary mask.
+    """Find the corner points of the rectangle in a binary mask.
+
     Args:
-        image (np.ndarray): 2D binary mask
+        image (np.ndarray): 2D binary mask.
+
     Returns:
-        Tuple of the form ((x1, y1), (x2, y2)) with the corner points of the rectangle.
+        tuple | None: ``((x1, y1), (x2, y2))`` with the corner points of the rectangle,
+        or None when the mask is empty.
     """
     image = np.array(image)
     indices = np.argwhere(image == 1)
@@ -361,17 +439,17 @@ def reconstruct_mask_from_rectangle(corner_points, image_shape):
 
 
 def interpolate_rectangles(rectangles, x_indices, y_indices):
-    """Interpolate between arbitrary number of rectangles.
+    """Interpolate between an arbitrary number of rectangles.
 
     Args:
         rectangles (list): List with any number of rectangles as tuples of the form
-            ((x1, y1), (x2, y2)). Size of the list must be equal to the number of x indices.
+            ``((x1, y1), (x2, y2))``. Its length must equal the number of x indices.
         x_indices (np.ndarray): Array with x indices for interpolation.
         y_indices (np.ndarray): Array with y indices for interpolation.
 
     Returns:
-        List with interpolated rectangles as tuples of the form ((x1, y1), (x2, y2)).
-            Size of the list is equal to the number of y indices.
+        list: Interpolated rectangles as tuples of the form ``((x1, y1), (x2, y2))``.
+        Its length equals the number of y indices.
     """
     new_rectangles = []
     x1 = [rect[0][0] for rect in rectangles]
@@ -389,15 +467,21 @@ def interpolate_rectangles(rectangles, x_indices, y_indices):
 
 
 def extract_polygon_from_mask(mask, tolerance: float = 0.01, verbose: bool = True):
-    """Find largest contour in a binary mask and fit polygon.
+    """Find the largest contour in a binary mask and fit a polygon to it.
 
-    Polygon approximation will reduce contour points, unless tolerance is 0.
+    Polygon approximation will reduce the number of contour points, unless ``tolerance``
+    is 0.
 
     Args:
-        mask (np.ndarray): 2D binary mask
-        tolerance (float): Approximation tolerance for polygonal contour
+        mask (np.ndarray): 2D binary mask.
+        tolerance (float, optional): Approximation tolerance for the polygonal contour.
+            Defaults to 0.01.
+        verbose (bool, optional): Whether to warn when zero or multiple contours are
+            found. Defaults to True.
+
     Returns:
-        Numpy array of shape (N, 2) with vertices of the polygon.
+        np.ndarray | None: Array of shape (N, 2) with the vertices of the polygon, or
+        None when the mask contains no contour.
     """
     contours = find_contours(mask, 0.5, fully_connected="high")
     # return the largest contour
@@ -405,10 +489,10 @@ def extract_polygon_from_mask(mask, tolerance: float = 0.01, verbose: bool = Tru
         contour_lengths = [len(contour) for contour in contours]
         contour = contours[np.argmax(contour_lengths)]
         if verbose:
-            log.warning("Warning: multiple contours found. Returning the largest contour.")
+            log.warning("Multiple contours found. Returning the largest contour.")
     elif len(contours) == 0:
         if verbose:
-            log.warning("Warning: no contours found. Returning None.")
+            log.warning("No contours found. Returning None.")
         return None
     else:
         contour = contours[0]
@@ -419,12 +503,14 @@ def extract_polygon_from_mask(mask, tolerance: float = 0.01, verbose: bool = Tru
 def reconstruct_mask_from_polygon(vertices, image_size):
     """Reconstruct a binary mask from a polygon.
 
-    Fills in regions defined by the polygon contour.
+    Fills in the region defined by the polygon contour.
+
     Args:
         vertices (np.ndarray): Vertices of the polygon as an array of shape (N, 2).
         image_size (tuple): Size of the image (height, width).
+
     Returns:
-        np.ndarray (height, width) with the reconstructed mask.
+        np.ndarray: Array of shape (height, width) with the reconstructed mask.
     """
     # Create a path for the polygon
     mask = Image.new("L", (image_size[1], image_size[0]), 0)
@@ -446,12 +532,17 @@ def reconstruct_mask_from_polygon(vertices, image_size):
 
 def interpolate_polygons(polygon1, polygon2, t):
     """Interpolate between two polygons.
+
     Args:
         polygon1 (np.ndarray): First polygon as an array of shape (N, 2).
         polygon2 (np.ndarray): Second polygon as an array of shape (N, 2).
-        t (float): Interpolation parameter, where 0 <= t <= 1.
+        t (float): Interpolation parameter, where ``0 <= t <= 1``.
+
     Returns:
-        Interpolated polygon as an array of shape (N, 2).
+        np.ndarray: Interpolated polygon as an array of shape (N, 2).
+
+    Raises:
+        ValueError: If the polygons do not have the same number of vertices.
     """
     # Ensure both polygons have the same number of vertices
     if polygon1.shape[0] != polygon2.shape[0]:
@@ -464,16 +555,17 @@ def interpolate_polygons(polygon1, polygon2, t):
 
 
 def match_polygons(polygon1, polygon2):
-    """Match two polygons by minimizing the total distance between vertices.
+    """Match two polygons by minimizing the total distance between their vertices.
 
     The vertices of the first polygon are shifted circularly to find the best match.
-    Order of vertices is preserved.
+    The order of the vertices is preserved.
 
     Args:
         polygon1 (np.ndarray): First polygon as an array of shape (N, 2).
         polygon2 (np.ndarray): Second polygon as an array of shape (N, 2).
+
     Returns:
-        Tuple of the form (poly1, poly2), where poly1 and poly2 are the matched polygons.
+        tuple: ``(poly1, poly2)``, the matched polygons.
     """
 
     distances = pairwise_distances(polygon1, polygon2, metric="euclidean")
@@ -495,64 +587,68 @@ def match_polygons(polygon1, polygon2):
     return polygon1, polygon2
 
 
-def equalize_polygons(polygons, mode="max"):
+def equalize_polygons(polygons, mode: str = "max"):
     """Make sure all polygons have the same number of vertices.
 
     Args:
         polygons (list): List with any number of polygons as arrays of shape (N, 2).
-        mode (str): Method for equalizing the number of vertices. Either 'max' or 'min'.
-            with 'max' the number of vertices is equal to the polygon with the most vertices.
-            with 'min' the number of vertices is equal to the polygon with the least vertices.
+        mode (str, optional): Method for equalizing the number of vertices, either
+            ``"max"`` (match the polygon with the most vertices, by interpolation) or
+            ``"min"`` (match the polygon with the fewest vertices, by subsampling).
+            Defaults to ``"max"``.
+
     Returns:
-        A tuple of the form (poly1, poly2, ...), where poly1, poly2, ...
-            are the trimmed polygons with the same number of vertices as the
-            polygon with the fewest / most vertices, depending on the mode.
+        list: The polygons, all with the same number of vertices.
     """
-    assert mode in ["max", "min"], f"Mode must be either 'max' or 'min', not {mode}."
-    if mode == "max":
-        num_vertices = max(polygon.shape[0] for polygon in polygons)
-    elif mode == "min":
-        num_vertices = min(polygon.shape[0] for polygon in polygons)
-    else:
-        raise ValueError(f"Mode must be either 'max' or 'min', not {mode}.")
+    assert mode in ("max", "min"), f"Mode must be either 'max' or 'min', not {mode}."
+    reduce = max if mode == "max" else min
+    num_vertices = reduce(polygon.shape[0] for polygon in polygons)
 
     # give warning if difference in min / max vertices is large
     if num_vertices < 0.8 * max(polygon.shape[0] for polygon in polygons):
         log.warning(
-            "Warning: difference in number of vertices is large. "
+            "Difference in number of vertices is large. "
             "Possibly due to large difference in polygon size."
         )
 
     if mode == "min":
+        # subsample the contours
         trimmed_polygons = []
         for polygon in polygons:
             indices = np.linspace(0, len(polygon) - 1, num_vertices).astype(int)
             trimmed_polygons.append(polygon[indices])
-
         return trimmed_polygons
-    elif mode == "max":
-        # interpolate the contours
-        interpolated_polygons = []
-        for polygon in polygons:
-            if polygon.shape[0] < num_vertices:
-                # interp2d
-                indices = np.linspace(0, len(polygon) - 1, num_vertices)
 
-                # create a function to interpolate the x and y coordinates separately
-                f_x = interp1d(np.arange(len(polygon)), polygon[:, 0], kind="linear")
-                f_y = interp1d(np.arange(len(polygon)), polygon[:, 1], kind="linear")
+    # interpolate the contours
+    interpolated_polygons = []
+    for polygon in polygons:
+        if polygon.shape[0] < num_vertices:
+            indices = np.linspace(0, len(polygon) - 1, num_vertices)
 
-                # evaluate the functions at the interpolated indices
-                interpolated_polygons.append(np.column_stack((f_x(indices), f_y(indices))))
-            else:
-                interpolated_polygons.append(polygon)
-        return interpolated_polygons
+            # create a function to interpolate the x and y coordinates separately
+            f_x = interp1d(np.arange(len(polygon)), polygon[:, 0], kind="linear")
+            f_y = interp1d(np.arange(len(polygon)), polygon[:, 1], kind="linear")
+
+            # evaluate the functions at the interpolated indices
+            interpolated_polygons.append(np.column_stack((f_x(indices), f_y(indices))))
+        else:
+            interpolated_polygons.append(polygon)
+    return interpolated_polygons
 
 
-def interpolate_masks(
-    masks: Union[list, np.ndarray], num_frames: int, rectangle: bool = False
-) -> list:
-    """Interpolate between arbitrary number of masks."""
+def interpolate_masks(masks: list | np.ndarray, num_frames: int, rectangle: bool = False) -> list:
+    """Interpolate between an arbitrary number of masks.
+
+    Args:
+        masks (list or np.ndarray): At least two binary masks of equal shape.
+        num_frames (int): Number of masks to interpolate to.
+        rectangle (bool, optional): Whether the masks are rectangular, in which case the
+            faster rectangle interpolation is used instead of polygon interpolation.
+            Defaults to False.
+
+    Returns:
+        list: ``num_frames`` interpolated masks.
+    """
     assert isinstance(masks, (list, np.ndarray)), "Masks must be a list of numpy arrays."
     assert num_frames > 1, "At least two frames are required for interpolation."
     number_of_masks = len(masks)
@@ -610,50 +706,29 @@ def interpolate_masks(
     return interpolated_masks
 
 
-def interactive_selector_for_dataset():
-    """To be added. UI for generating and saving masks for entire dataset.
-    In an efficient and user friendly way.
+def plot_mask(ax: matplotlib.axes.Axes, mask: np.ndarray, selector: str = "rectangle", **kwargs):
+    """Draw a mask on an axis the way its selector drew it.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis to draw on.
+        mask (np.ndarray): 2D boolean mask.
+        selector (str, optional): One of :data:`SELECTORS`. ``"rectangle"`` draws the
+            bounding box, anything else the mask's own outline. Defaults to
+            ``"rectangle"``.
+        **kwargs: Forwarded to the underlying plotting function. ``alpha`` defaults to
+            0.5 so the image stays visible underneath.
+
+    Returns:
+        The matplotlib patch(es) that were added, or None for an empty rectangle mask.
     """
-    raise NotImplementedError
-
-
-def ask_for_selection_tool():
-    """Ask user for which selection tool to use."""
-    while True:
-        selector = input("Which selection tool do you want to use? [rectangle/lasso]): ")
-        if selector in ["rectangle", "lasso"]:
-            break
-        print("Please enter either 'rectangle' or 'lasso'")
-    return selector
-
-
-def ask_for_num_selections():
-    """Ask user for number of selections to make."""
-    while True:
-        num_selections = input("How many selections do you want to make? ")
-        try:
-            num_selections = int(num_selections)
-            if num_selections < 1:
-                raise ValueError
-            break
-        except ValueError:
-            print("Please enter a positive integer")
-    return num_selections
-
-
-def ask_save_animation_with_fps():
-    """Ask user for fps to save animation with."""
-    while True:
-        try:
-            fps = int(input("Save animation as gif? Enter fps: "))
-            break
-        except ValueError:
-            print("Please enter a positive integer")
-    return fps
+    kwargs.setdefault("alpha", 0.5)
+    if selector == "rectangle":
+        return plot_rectangle_from_mask(ax, mask, **kwargs)
+    return plot_shape_from_mask(ax, mask, **kwargs)
 
 
 def remove_masks_from_axs(axs: matplotlib.axes.Axes) -> None:
-    """Remove all masks from the given axes object."""
+    """Remove all mask patches from the given axes object."""
     for obj in axs.findobj():
         if isinstance(obj, (PathPatch, Rectangle)):
             try:
@@ -671,8 +746,7 @@ def update_imshow_with_mask(
     selector: str,
     **kwargs,
 ) -> tuple:
-    """Updates the imshow object with the image from the given frame and
-    overlays the corresponding mask on top of it.
+    """Update an imshow object with one frame and overlay the corresponding mask.
 
     This function is designed for animation where each frame has one associated mask.
     It removes any existing masks from the axes before plotting the new one.
@@ -684,155 +758,612 @@ def update_imshow_with_mask(
         images (numpy.ndarray): An array of images with shape (num_frames, height, width).
         masks (numpy.ndarray): An array of masks with shape (num_frames, height, width),
             where each mask corresponds to one frame in the images array.
-        selector (str): The type of selector to use for plotting the mask.
-            Can be either "rectangle" or "shape".
+        selector (str): The type of selector used, one of :data:`SELECTORS`. Rectangles
+            are drawn as a bounding box, anything else as an arbitrary shape.
+        **kwargs: Forwarded to the plotting function.
 
     Returns:
-        tuple: A tuple containing the updated imshow object and the mask object
-            (the matplotlib patch that was plotted).
+        tuple: The updated imshow object and the mask object (the matplotlib patch that
+        was plotted).
     """
     imshow_obj.set_array(images[frame_no])
     remove_masks_from_axs(axs)
-    if selector == "rectangle":
-        mask_obj = plot_rectangle_from_mask(axs, masks[frame_no], **kwargs)
-    else:
-        mask_obj = plot_shape_from_mask(axs, masks[frame_no], alpha=0.5, **kwargs)
+    mask_obj = plot_mask(axs, masks[frame_no], selector, **kwargs)
     return imshow_obj, mask_obj
 
 
-def ask_for_title():
-    print("What are you selecting?")
-    title = input("Enter a title for the selection: ")
+# ── User prompts ──────────────────────────────────────────────────────────────
+#
+# These are only used for options that were not passed on the command line, so that
+# ``zea tools select`` works both fully interactively and fully non-interactively.
+
+
+def normalize_title(title: str) -> str:
+    """Normalize a user supplied title to a snake_case name.
+
+    The result is used both as a segmentation label and as part of the output filename,
+    so anything outside ``[a-z0-9_-]`` is collapsed into underscores.
+
+    Args:
+        title (str): Raw title, e.g. ``"Left Ventricle"``.
+
+    Returns:
+        str: The normalized title, e.g. ``"left_ventricle"``.
+
+    Raises:
+        ValueError: If the title is empty (or contains nothing usable).
+    """
+    title = re.sub(r"[^a-z0-9_-]+", "_", title.strip().lower()).strip("_")
     if not title:
         raise ValueError("Title cannot be empty.")
-    # Convert title to snake_case
-    title = title.strip().replace(" ", "_").lower()
-    print(f"Title set to: {title}")
     return title
 
 
-def main():
-    """Main function for interactive selector on multiple images."""
-    print(
-        "Select as many images as you like, OR select 1 video / gif, "
-        "and close window to continue..."
+def ask_for_title() -> str:
+    """Ask the user for a title describing what is being selected."""
+    log.info("What are you selecting?")
+    while True:
+        try:
+            title = normalize_title(input("Enter a title for the selection: "))
+            break
+        except ValueError:
+            log.error("Please enter a non-empty title")
+    log.info(f"Title set to: {log.yellow(title)}")
+    return title
+
+
+def ask_for_selection_tool() -> str:
+    """Ask the user which selection tool to use."""
+    while True:
+        selector = input(f"Which selection tool do you want to use? [{'/'.join(SELECTORS)}]: ")
+        if selector in SELECTORS:
+            return selector
+        log.error(f"Please enter one of {SELECTORS}")
+
+
+def ask_for_num_selections() -> int:
+    """Ask the user how many key frames to annotate."""
+    while True:
+        try:
+            num_selections = int(input("How many selections do you want to make? "))
+            if num_selections < 1:
+                raise ValueError
+            return num_selections
+        except ValueError:
+            log.error("Please enter a positive integer")
+
+
+def ask_save_animation_with_fps() -> int:
+    """Ask the user for the frame rate to save the preview animation with."""
+    while True:
+        try:
+            fps = int(input("Frames per second for the preview animation: "))
+            if fps < 1:
+                raise ValueError
+            return fps
+        except ValueError:
+            log.error("Please enter a positive integer")
+
+
+# ── Input handling ────────────────────────────────────────────────────────────
+
+#: File types that hold a whole sequence, and are therefore annotated on their own.
+_SEQUENCE_TYPES = tuple(suffix.lower() for suffix in _SUPPORTED_VID_TYPES + _SUPPORTED_ZEA_TYPES)
+#: File types that hold a single image. ``_SUPPORTED_IMG_TYPES`` lists some suffixes
+#: twice (``.png`` and ``.PNG``); matching on the lower-cased suffix covers every casing.
+_IMAGE_TYPES = tuple(sorted({suffix.lower() for suffix in _SUPPORTED_IMG_TYPES}))
+
+
+def _suffix(file: str | Path) -> str:
+    """Lower-case suffix of a local path or an ``hf://`` URI."""
+    return PurePosixPath(str(file)).suffix.lower()
+
+
+def collect_files_from_dialog() -> list[Path]:
+    """Collect input files through repeated file dialogs.
+
+    Keeps asking for image files until the user cancels the dialog. Selecting a video,
+    gif or zea file immediately stops the loop, since a sequence is annotated on its own.
+
+    Returns:
+        list[Path]: The selected files.
+
+    Raises:
+        ValueError: If the user did not select any file.
+    """
+    log.info(
+        "Select as many images as you like, OR select 1 video / gif / zea file. "
+        "Cancel the dialog to continue..."
     )
-    images = []
-    file_names = []
-    try:
-        while True:
-            file = filename_from_window_dialog("Choose image / video file")
-            if file.suffix in [".png", ".jpg", ".jpeg"]:
-                image = load_image(file)
-                images.append(image)
-                file_names.append(file.name)
-                same_images = True
-            elif file.suffix in _SUPPORTED_VID_TYPES:
-                images.extend(load_video(file))
-                same_images = False
-                break
-    except Exception as e:
-        if len(images) == 0:
-            raise e
-        print("No more images selected. Continuing...")
+    files: list[Path] = []
+    while True:
+        try:
+            file = filename_from_window_dialog("Choose image / video / zea file")
+        except ValueError:
+            break
+        files.append(file)
+        if _suffix(file) in _SEQUENCE_TYPES:
+            break
 
-    title = ask_for_title()
-    selector = ask_for_selection_tool()
+    if not files:
+        raise ValueError("No files selected.")
+    return files
 
-    if same_images is True:
-        figs, axs = [], []
-        for i, (image, file_name) in enumerate(zip(images[::-1], file_names[::-1])):
-            fig, ax = plt.subplots()
-            ax.imshow(image, cmap="gray")
-            if i == len(images) - 1:
-                ax.set_title(f"Make selection in this plot\n {file_name}")
-            else:
-                ax.set_title(file_name)
-            ax.axis("off")
-            axs.append(ax)
-            figs.append(fig)
 
-        axs = axs[::-1]
-        figs = figs[::-1]
+def _load_zea_file(path: str | Path) -> tuple[np.ndarray, np.ndarray | None]:
+    """Read the image map of a zea HDF5 file.
 
-        interactive_selector_with_plot_and_metric(
-            images,
-            axs,
-            selector=selector,
-            metric="gcnr",
+    Args:
+        path (str | Path): Path to a zea file. Also accepts an ``hf://`` URI.
+
+    Returns:
+        tuple: ``(values, coordinates)``. ``coordinates`` is None when the file's image
+        map has none.
+
+    Raises:
+        ValueError: If the file has no image data, or if the images are not 2D.
+    """
+    from zea.data.file import File
+
+    path = str(path)
+    if path.startswith(HF_PREFIX):
+        path = _hf_resolve_path(path)
+
+    with File(path) as file:
+        if "image" not in file.data.keys():
+            raise ValueError(
+                f"{path} has no 'data/image' group. The selection tool annotates images, "
+                "so the file must contain (beamformed and log-compressed) image data. "
+                "Use `zea process` to reconstruct images from raw data first."
+            )
+        image = file.data.image
+        values = image.values[:]
+        coordinates = image.coordinates[:] if "coordinates" in image.keys() else None
+
+    if values.ndim != 3:
+        raise ValueError(
+            f"Expected 2D images of shape (n_frames, z, x) in {path}, got shape "
+            f"{values.shape}. Volumetric data is not supported by the selection tool."
         )
+    return values, coordinates
 
-    else:
-        if len(images) > 3:
-            print(f"Found sequence of {len(images)} images. ")
 
-            num_selections = ask_for_num_selections()
+class SelectionInputs(NamedTuple):
+    """The images to annotate, and where they came from.
 
-            selection_idx = np.linspace(0, len(images) - 1, int(num_selections)).astype(int)
-            selection_images = [images[idx] for idx in selection_idx]
-            selection_masks = []
-            pos, size = None, None
-            for image in selection_images:
-                fig, axs = plt.subplots()
-                fig.tight_layout()
-                # set window size to what user selected for plot before
-                if pos is not None:
-                    move_matplotlib_figure(fig, pos, size)
+    Attributes:
+        images (list[np.ndarray]): The 2D images to annotate.
+        file_names (list[str]): Name of the file each image came from.
+        is_sequence (bool): True when the images are consecutive frames of one recording,
+            which are annotated by interpolating between key frames. False when they are
+            separate images, which are compared with a metric.
+        coordinates (np.ndarray | None): Per-pixel Cartesian coordinates carried over
+            from a zea input file, so the saved annotations line up with the source grid.
+    """
 
-                axs.imshow(image, cmap="gray")
+    images: list[np.ndarray]
+    file_names: list[str]
+    is_sequence: bool
+    coordinates: np.ndarray | None = None
 
-                while True:
-                    _, mask = interactive_selector(image, axs, selector=selector, num_selections=1)
-                    # check if mask is empty else retry
-                    if mask[0].sum() == 0:
-                        print("Empty mask. Try again, make sure to make a descent selection...")
-                    else:
-                        break
 
-                pos, size = get_matplotlib_figure_props(fig)
+def load_input_files(files: Sequence[str | Path]) -> SelectionInputs:
+    """Load a set of images, the frames of a single video / gif, or a zea file.
 
-                if selector == "rectangle":
-                    plot_rectangle_from_mask(axs, mask[0], alpha=0.5)
-                else:
-                    plot_shape_from_mask(axs, mask[0], alpha=0.5)
-                plt.close()
-                selection_masks.append(mask[0])
+    Args:
+        files (Sequence[str | Path]): Image files, or a single video / gif or zea HDF5
+            file. zea files also accept an ``hf://`` URI.
 
-        # small hack to make sure that there is always at least two masks for interpolation
-        if len(selection_masks) == 1:
-            selection_masks.append(selection_masks[0])
+    Returns:
+        SelectionInputs: The loaded images and where they came from.
 
-        interpolated_masks = interpolate_masks(
-            selection_masks, num_frames=len(images), rectangle=(selector == "rectangle")
-        )
+    Raises:
+        ValueError: If no files were given, if a file type is unsupported, or if a video
+            / zea file was combined with other files.
+    """
+    # Paths are kept as strings: `Path('hf://zeahub/camus')` collapses the double slash
+    # to `hf:/zeahub/camus`, which breaks the Hugging Face prefix checks downstream.
+    files = [str(file) for file in files]
+    if not files:
+        raise ValueError("No input files given.")
 
-        fig, axs = plt.subplots()
-
-        imshow_obj = axs.imshow(images[0], cmap="gray")
-
-        if selector == "rectangle":
-            plot_rectangle_from_mask(axs, interpolated_masks[0])
+    sequences = [file for file in files if _suffix(file) in _SEQUENCE_TYPES]
+    if sequences:
+        if len(files) > 1:
+            raise ValueError(
+                f"Select either a single video / zea file or one or more images, got "
+                f"{len(files)} files including a sequence."
+            )
+        source = sequences[0]
+        coordinates = None
+        if _suffix(source) in _SUPPORTED_ZEA_TYPES:
+            values, coordinates = _load_zea_file(source)
+            frames = list(values)
         else:
-            plot_shape_from_mask(axs, interpolated_masks[0], alpha=0.5)
+            frames = list(load_video(source))
+        name = PurePosixPath(source).name
+        # A single frame cannot be interpolated, so treat it as a plain image.
+        return SelectionInputs(frames, [name] * len(frames), len(frames) > 1, coordinates)
 
-        filestem = Path(file.parent / f"{file.stem}_{title}_annotations.gif")
-        np.save(filestem.with_suffix(".npy"), interpolated_masks)
-        print(
-            f"Successfully saved interpolated masks to {log.yellow(filestem.with_suffix('.npy'))}"
+    images, file_names = [], []
+    for file in files:
+        if _suffix(file) not in _IMAGE_TYPES:
+            raise ValueError(
+                f"Unsupported file type {PurePosixPath(file).suffix!r}. Supported types are "
+                f"{', '.join(_IMAGE_TYPES + _SEQUENCE_TYPES)}."
+            )
+        images.append(load_image(file))
+        file_names.append(PurePosixPath(file).name)
+    return SelectionInputs(images, file_names, False)
+
+
+# ── High level routines ───────────────────────────────────────────────────────
+
+
+def compare_images(
+    images: Sequence[np.ndarray],
+    file_names: Sequence[str],
+    selector: str = "rectangle",
+    metric: str | None = "gcnr",
+    confirm_selection: bool = True,
+) -> list:
+    """Select two regions in one image and compare them across all images.
+
+    Every image is plotted in its own figure; the selection is made in the first one.
+
+    Args:
+        images (Sequence[np.ndarray]): The images to compare.
+        file_names (Sequence[str]): Names shown as the title of each figure.
+        selector (str, optional): Type of selection tool. Defaults to ``"rectangle"``.
+        metric (str, optional): Metric to compute between the two patches. Defaults to
+            ``"gcnr"``.
+        confirm_selection (bool, optional): Whether to ask for confirmation (through a
+            tkinter dialog) after selecting. Defaults to True.
+
+    Returns:
+        list: The computed metric scores, one per image.
+    """
+    axs = []
+    # Plot in reverse so that the figure the selection is made in ends up on top.
+    for i, (image, file_name) in enumerate(zip(images[::-1], file_names[::-1])):
+        _, ax = plt.subplots()
+        ax.imshow(image, cmap="gray")
+        if i == len(images) - 1:
+            ax.set_title(f"Make selection in this plot\n {file_name}")
+        else:
+            ax.set_title(file_name)
+        ax.axis("off")
+        axs.append(ax)
+
+    return interactive_selector_with_plot_and_metric(
+        list(images),
+        axs[::-1],
+        selector=selector,
+        metric=metric,
+        confirm_selection=confirm_selection,
+    )
+
+
+def annotate_sequence(
+    images: Sequence[np.ndarray],
+    selector: str = "rectangle",
+    num_selections: int = 2,
+    confirm_selection: bool = True,
+) -> list[np.ndarray]:
+    """Annotate evenly spaced key frames of a sequence and interpolate in between.
+
+    Args:
+        images (Sequence[np.ndarray]): Frames of the sequence.
+        selector (str, optional): Type of selection tool. Defaults to ``"rectangle"``.
+        num_selections (int, optional): Number of key frames to annotate. Defaults to 2.
+        confirm_selection (bool, optional): Whether to ask for confirmation (through a
+            tkinter dialog) after each key frame. Defaults to True.
+
+    Returns:
+        list[np.ndarray]: One interpolated mask per frame in ``images``.
+    """
+    assert len(images) > 1, "At least two frames are required to annotate a sequence."
+    num_selections = min(num_selections, len(images))
+
+    key_frames = np.linspace(0, len(images) - 1, num_selections).astype(int)
+    masks = []
+    pos, size = None, None
+    for idx in key_frames:
+        image = images[idx]
+        fig, axs = plt.subplots()
+        fig.tight_layout()
+        # set window size to what the user selected for the previous plot
+        if pos is not None:
+            move_matplotlib_figure(fig, pos, size)
+
+        axs.imshow(image, cmap="gray")
+
+        while True:
+            _, mask = interactive_selector(
+                image,
+                axs,
+                selector=selector,
+                num_selections=1,
+                confirm_selection=confirm_selection,
+            )
+            # check if mask is empty else retry
+            if mask[0].sum() == 0:
+                log.warning("Empty mask. Try again, make sure to make a decent selection...")
+            else:
+                break
+
+        pos, size = get_matplotlib_figure_props(fig)
+
+        plot_mask(axs, mask[0], selector)
+        plt.close(fig)
+        masks.append(mask[0])
+
+    # interpolation needs at least two masks, so duplicate a single selection
+    if len(masks) == 1:
+        masks.append(masks[0])
+
+    return interpolate_masks(masks, num_frames=len(images), rectangle=(selector == "rectangle"))
+
+
+def save_mask_animation(
+    images: Sequence[np.ndarray],
+    masks: Sequence[np.ndarray],
+    filename: str | Path,
+    selector: str = "rectangle",
+    fps: int = 20,
+) -> Path:
+    """Save an animation of the images with their masks overlaid.
+
+    Args:
+        images (Sequence[np.ndarray]): Frames of the sequence.
+        masks (Sequence[np.ndarray]): One mask per frame.
+        filename (str | Path): Output path of the gif.
+        selector (str, optional): Type of selection tool the masks came from, which
+            determines how they are drawn. Defaults to ``"rectangle"``.
+        fps (int, optional): Frames per second of the animation. Defaults to 20.
+
+    Returns:
+        Path: The path the animation was written to.
+    """
+    assert len(images) == len(masks), (
+        f"Number of images ({len(images)}) and masks ({len(masks)}) must match."
+    )
+    filename = Path(filename)
+    filename.parent.mkdir(parents=True, exist_ok=True)
+
+    fig, axs = plt.subplots()
+    imshow_obj = axs.imshow(images[0], cmap="gray")
+
+    ani = FuncAnimation(
+        fig,
+        update_imshow_with_mask,
+        frames=len(images),
+        fargs=(axs, imshow_obj, images, masks, selector),
+        interval=1000 / fps,
+    )
+    ani.save(filename, writer="pillow")
+    plt.close(fig)
+    log.info(f"Successfully saved animation as {log.yellow(filename)}")
+    return filename
+
+
+def save_masks(
+    masks: Sequence[np.ndarray] | np.ndarray,
+    filename: str | Path,
+    images: Sequence[np.ndarray] | np.ndarray,
+    label: str = "roi",
+    coordinates: np.ndarray | None = None,
+    description: str | None = None,
+    overwrite: bool = False,
+) -> Path:
+    """Save annotations as a zea HDF5 file with an image and a segmentation map.
+
+    The result is a regular zea file (see :class:`~zea.data.spec.FileSpec`) holding the
+    annotated images under ``data/image`` and the masks as a single-label boolean
+    :class:`~zea.data.spec.Segmentation` under ``data/segmentation``, so it can be read
+    back with :class:`zea.File` like any other zea dataset.
+
+    Since the selection tool only produces images and segmentations, the warnings about
+    the acquisition fields it cannot fill in (scan parameters, probe geometry, …) are
+    suppressed.
+
+    Args:
+        masks (Sequence[np.ndarray]): One boolean mask per image.
+        filename (str | Path): Output path; the ``.hdf5`` suffix is enforced.
+        images (Sequence[np.ndarray]): The annotated images, of equal shape as the masks.
+        label (str, optional): Name of the segmentation label. Defaults to ``"roi"``.
+        coordinates (np.ndarray, optional): Per-pixel Cartesian coordinates of the image
+            grid, carried over from a zea input file. Defaults to None.
+        description (str, optional): Free-text description stored in the file.
+        overwrite (bool, optional): Whether to overwrite an existing file. Defaults to
+            False.
+
+    Returns:
+        Path: The path the file was written to.
+    """
+    from zea.data.file import File
+
+    image_values = np.asarray(images)
+    mask_values = np.asarray(masks, dtype=np.bool_)
+    assert image_values.shape == mask_values.shape, (
+        f"Images {image_values.shape} and masks {mask_values.shape} must have the same shape."
+    )
+
+    # zea images are uint8 or float32 (in dB); anything else is a plain array we
+    # normalized ourselves, so store it as uint8.
+    if image_values.dtype not in (np.uint8, np.float32):
+        image_values = image_values.astype(np.uint8)
+
+    filename = Path(filename).with_suffix(".hdf5")
+    filename.parent.mkdir(parents=True, exist_ok=True)
+
+    image_map = {"values": image_values}
+    segmentation_map = {
+        # (n_frames, z, x) -> (n_frames, z, x, n_labels) with a single label
+        "values": mask_values[..., None],
+        "labels": np.array([label], dtype=np.str_),
+    }
+    if coordinates is not None:
+        coordinates = np.asarray(coordinates, dtype=np.float32)
+        image_map["coordinates"] = coordinates
+        segmentation_map["coordinates"] = coordinates
+
+    File.create(
+        path=filename,
+        data={"image": image_map, "segmentation": segmentation_map},
+        description=description or f"Regions of interest ('{label}') from zea tools select.",
+        overwrite=overwrite,
+        ignore_warnings=True,
+    )
+    log.info(f"Successfully saved annotations to {log.yellow(filename)}")
+    return filename
+
+
+def _output_stem(source: str, title: str, output_dir: str | Path | None) -> Path:
+    """Build the output path (without suffix) for the annotations of ``source``."""
+    if output_dir is not None:
+        directory = Path(output_dir)
+    elif source.startswith(HF_PREFIX):
+        # Remote inputs are read-only, so write next to where the tool was started.
+        directory = Path.cwd()
+    else:
+        directory = Path(source).parent
+    return directory / f"{PurePosixPath(source).stem}_{title}_annotations"
+
+
+def _check_outputs_free(paths: Sequence[Path], overwrite: bool) -> None:
+    """Raise unless every output path is free, mirroring the ``zea data`` guards."""
+    if overwrite:
+        return
+    existing = [path for path in paths if path.exists()]
+    if existing:
+        raise FileExistsError(
+            f"Output file(s) already exist: {', '.join(str(path) for path in existing)}. "
+            "Use overwrite=True (--overwrite) to overwrite them."
         )
 
-        fps = ask_save_animation_with_fps()
 
-        ani = FuncAnimation(
-            fig,
-            update_imshow_with_mask,
-            frames=len(images),
-            fargs=(axs, imshow_obj, images, interpolated_masks, selector),
-            interval=1000 / fps,
+def run_selection_tool(
+    files: Sequence[str | Path] | None = None,
+    selector: str | None = None,
+    title: str | None = None,
+    num_selections: int | None = None,
+    fps: int | None = None,
+    metric: str | None = "gcnr",
+    output_dir: str | Path | None = None,
+    save_animation: bool = True,
+    confirm_selection: bool = True,
+    overwrite: bool = False,
+):
+    """Run the interactive selection tool.
+
+    This is the entry point behind ``zea tools select``. Depending on the input it runs
+    in one of two modes:
+
+    - **Images**: two regions are selected in the first image and compared across all
+      images using ``metric``.
+    - **Sequence** (video, gif or a zea file with more than one frame):
+      ``num_selections`` key frames are annotated, the masks are interpolated over all
+      frames, written to a zea HDF5 file as a ``segmentation`` map next to the images,
+      and optionally previewed as an animated gif.
+
+    Any argument left as None is asked for interactively.
+
+    Args:
+        files (Sequence[str | Path], optional): Input images, or a single video / gif or
+            zea HDF5 file (an ``hf://`` URI works too). Defaults to None, i.e. ask
+            through a file dialog.
+        selector (str, optional): Type of selection tool, one of :data:`SELECTORS`.
+        title (str, optional): Name of what is being selected. Used as the segmentation
+            label and in the output filenames. Only used in sequence mode.
+        num_selections (int, optional): Number of key frames to annotate. Only used in
+            sequence mode.
+        fps (int, optional): Frame rate of the preview animation. Only used in sequence
+            mode, and only when ``save_animation`` is True.
+        metric (str, optional): Metric to compute between the two patches. Only used in
+            image mode. Defaults to ``"gcnr"``.
+        output_dir (str | Path, optional): Directory to write the annotations and
+            animation to. Defaults to the folder of the input file, or the working
+            directory for ``hf://`` inputs.
+        save_animation (bool, optional): Whether to save a preview gif in sequence mode.
+            Defaults to True.
+        confirm_selection (bool, optional): Whether to ask for confirmation (through a
+            tkinter dialog) after each selection. Defaults to True.
+        overwrite (bool, optional): Whether to overwrite existing output files. Checked
+            before the annotating starts, so no work is lost. Defaults to False.
+
+    Returns:
+        list: The metric scores in image mode, or the interpolated masks in sequence
+        mode.
+
+    Raises:
+        FileExistsError: If an output file exists and ``overwrite`` is False.
+    """
+    files = list(files) if files else collect_files_from_dialog()
+    inputs = load_input_files(files)
+    images = inputs.images
+
+    if selector is None:
+        selector = ask_for_selection_tool()
+    assert selector in SELECTORS, f"Selector must be one of {SELECTORS}, not {selector!r}."
+
+    if not inputs.is_sequence:
+        return compare_images(
+            images,
+            inputs.file_names,
+            selector=selector,
+            metric=metric,
+            confirm_selection=confirm_selection,
         )
-        filename = filestem.with_suffix(".gif")
-        ani.save(filename, writer="pillow")
-        print(f"Successfully saved animation as {log.yellow(filename)}")
+
+    log.info(f"Found sequence of {len(images)} frames.")
+    if title is None:
+        title = ask_for_title()
+    else:
+        title = normalize_title(title)
+    if num_selections is None:
+        num_selections = ask_for_num_selections()
+
+    source = str(files[0])
+    stem = _output_stem(source, title, output_dir)
+    outputs = [stem.with_suffix(".hdf5")]
+
+    animation_path, animation_fps = None, 0
+    if save_animation:
+        animation_path = stem.with_suffix(".gif")
+        animation_fps = fps if fps is not None else ask_save_animation_with_fps()
+        outputs.append(animation_path)
+
+    # Check the outputs before annotating, so a name clash never throws away the
+    # selections the user just made.
+    _check_outputs_free(outputs, overwrite)
+
+    masks = annotate_sequence(
+        images,
+        selector=selector,
+        num_selections=num_selections,
+        confirm_selection=confirm_selection,
+    )
+
+    save_masks(
+        masks,
+        stem,
+        images=images,
+        label=title,
+        coordinates=inputs.coordinates,
+        description=f"Regions of interest ('{title}') selected in {PurePosixPath(source).name}.",
+        overwrite=overwrite,
+    )
+
+    if animation_path is not None:
+        save_mask_animation(images, masks, animation_path, selector=selector, fps=animation_fps)
+
+    return masks
+
+
+def main():
+    """Entry point for ``python -m zea.tools.selection_tool``."""
+    run_selection_tool()
 
 
 if __name__ == "__main__":
