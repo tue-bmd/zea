@@ -695,14 +695,9 @@ def _load_group_dict(group: "h5py.Group", fetcher) -> dict:
     ``fetcher`` may be ``None``, in which case every read falls back to h5py. Reads too
     small to be worth the concurrent path fall back too, so wrapping is free for the
     scalars that make up a scan or metadata group.
-
-    The item list is materialised **before** any read. ``h5py.Group.items()`` is a
-    generator that holds h5py's global lock across its yields, and reading a whole data
-    group can take a while — no reason to keep every other thread's h5py call waiting on
-    it. The read itself is safe either way (see :func:`~zea.data.chunk_reader.read`).
     """
     ans = {}
-    for key, item in list(group.items()):
+    for key, item in group.items():
         if isinstance(item, h5py.Dataset):
             if h5py.check_string_dtype(item.dtype) is not None:
                 val = item.asstr()[()]
