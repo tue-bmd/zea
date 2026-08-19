@@ -106,6 +106,7 @@ class Simulate(Operation):
         noise_level_db=None,
         tgc_max_db=0.0,
         noise_seed=0,
+        noise_reference=None,
         **kwargs,
     ):
         if method not in simulator_settings:
@@ -132,6 +133,7 @@ class Simulate(Operation):
             "noise_level_db": noise_level_db,
             "tgc_max_db": tgc_max_db,
             "noise_seed": noise_seed,
+            "noise_reference": noise_reference,
         }
         if not self.with_batch_dim:
             simulated_rf = simulate(

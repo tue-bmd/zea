@@ -76,6 +76,7 @@ def simulate_rf(
     noise_level_db=None,
     tgc_max_db=0.0,
     noise_seed=0,
+    noise_reference=None,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -111,6 +112,9 @@ def simulate_rf(
             linearly in dB from 0 at the first. 0 disables it. Must be static under jit.
         noise_seed (int | SeedGenerator | jax.random.key, optional): Seed for the noise. Vary it
             across transmit batches to keep the realisations independent.
+        noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
+            noiseless RF maximum. Pass a fixed reference to avoid the noise level changing per
+            transmit batch. See :func:`apply_receive_chain`.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -134,7 +138,13 @@ def simulate_rf(
     # tensorflow can't reduce over an empty axis.
     if scatterer_positions.shape[0] == 0:
         shape = (t0_delays.shape[0], int(n_ax), probe_geometry.shape[0], 1)
-        return ops.zeros(shape, dtype="float32")
+        return apply_receive_chain(
+            ops.zeros(shape, dtype="float32"),
+            noise_level_db,
+            tgc_max_db,
+            noise_seed,
+            noise_reference,
+        )
 
     # Phantoms are float64. Cast manually so tensorflow doesn't complain.
     scatterer_positions = ops.cast(scatterer_positions, "float32")
@@ -217,7 +227,7 @@ def simulate_rf(
     rf_data = ops.transpose(rf_data, (0, 2, 1))
     rf_data = rf_data[..., None]
     rf_data = rf_data[:, :n_ax, :, :]
-    return apply_receive_chain(rf_data, noise_level_db, tgc_max_db, noise_seed)
+    return apply_receive_chain(rf_data, noise_level_db, tgc_max_db, noise_seed, noise_reference)
 
 
 def apply_receive_chain(
@@ -228,9 +238,9 @@ def apply_receive_chain(
     Args:
         rf_data (array-like): Noiseless RF of shape (n_tx, n_ax, n_el, 1).
         noise_level_db (float): Noise floor in dB below the peak of ``rf_data``. None disables
-            the noise. Gates a host-side branch, so it must be static under jit.
-        tgc_max_db (float): Gain in dB at the last axial sample. 0 disables it. Gates a host-side
-            branch, so it must be static under jit.
+            the noise. Must be static when using jit compilation.
+        tgc_max_db (float): Gain in dB at the last axial sample. 0 disables it. Must be static when
+            using jit compilation.
         noise_seed (int | SeedGenerator | jax.random.key, optional): Seed for the noise. An int
             is stateless, so the same value gives the same realisation; vary it across transmit
             batches. None draws from the global generator and cannot be traced under jit.
