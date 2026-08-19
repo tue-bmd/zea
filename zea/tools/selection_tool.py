@@ -868,8 +868,8 @@ def confirm_in_figure(fig, num_selections: int) -> bool:
 
 
 def _keys(keys: Sequence[str]) -> str:
-    """Render key names for a prompt, e.g. ``"'enter' / 'y'"``."""
-    return " / ".join(f"'{key}'" for key in keys)
+    """Render key names for a prompt, e.g. ``"'enter'/'y'"``."""
+    return "/".join(f"'{key}'" for key in keys)
 
 
 # ── Terminal prompts ──────────────────────────────────────────────────────────
@@ -1535,32 +1535,25 @@ def run_selection_tool(
     fig = preview_figure(images, masks, selector, title=title)
     status = show_status(fig, "Saving annotations...")
 
-    written = [
-        save_masks(
-            masks,
-            stem,
-            images=images,
-            label=title,
-            source=inputs.source,
-            description=(
-                f"Regions of interest ('{title}') selected in {PurePosixPath(source).name}."
-            ),
-            overwrite=overwrite,
-        )
-    ]
+    save_masks(
+        masks,
+        stem,
+        images=images,
+        label=title,
+        source=inputs.source,
+        description=f"Regions of interest ('{title}') selected in {PurePosixPath(source).name}.",
+        overwrite=overwrite,
+    )
 
     if animation_path is not None:
         status = show_status(fig, "Saving preview animation...", status)
-        written.append(
-            save_mask_animation(images, masks, animation_path, selector=selector, fps=animation_fps)
-        )
+        save_mask_animation(images, masks, animation_path, selector=selector, fps=animation_fps)
 
+    # The banner has to fit under the figure; save_masks and save_mask_animation
+    # already log where they wrote to.
     status.remove()
-    saved = f"Saved {' and '.join(path.name for path in written)} to {stem.parent}/"
     if confirm_selection:
-        wait_for_key(fig, f"{saved} Press {_keys(ACCEPT_KEYS)} to close.")
-    else:
-        log.info(saved)
+        wait_for_key(fig, f"Saved. Press {_keys(ACCEPT_KEYS)} to close.")
     plt.close(fig)
 
     return masks
