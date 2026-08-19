@@ -123,21 +123,30 @@ def _default_output_path(data_root):
     return Path(DEFAULT_OUTPUT_PATH.format(data_root=data_root))
 
 
-def _resolve_profile(config, username, hostname):
-    """Return the paths that apply to this user and machine, and whether the user is known.
+def _config_levels(config, username, hostname):
+    """The ``users.yaml`` sections that apply here, from most general to most specific.
 
     A ``users.yaml`` has up to three levels that can carry paths: the shared, userless
     root, a username section, and a hostname section inside it (or at the root, when the
-    user has no section of their own). They are overlaid in that order, so a section that
-    sets only some of the keys inherits the rest from the level above -- a machine that
-    only pins ``system`` still gets the user's ``data_root`` and ``output``.
+    user has no section of their own).
     """
-    levels = [config]
-    username_found = isinstance(config.get(username), dict)
-    if username_found:
-        levels.append(config[username])
+    levels = [config if isinstance(config, dict) else {}]
+    if isinstance(levels[-1].get(username), dict):
+        levels.append(levels[-1][username])
     if isinstance(levels[-1].get(hostname), dict):
         levels.append(levels[-1][hostname])
+    return levels
+
+
+def _resolve_profile(config, username, hostname):
+    """Return the paths that apply to this user and machine, and whether the user is known.
+
+    The levels are overlaid from general to specific, so a section that sets only some of
+    the keys inherits the rest from the level above -- a machine that only pins ``system``
+    still gets the user's ``data_root`` and ``output``.
+    """
+    levels = _config_levels(config, username, hostname)
+    username_found = len(levels) > 1 and levels[1] is config.get(username)
 
     profile = {}
     for level in levels:
@@ -375,8 +384,11 @@ def set_data_paths(
             ),
             warning_type,
         )
-        data_root = default_data_root
-        output = _default_output_path(data_root)
+        # Only the data_root is missing; a configured output still applies, so resolve
+        # it the usual way rather than forcing <default_data_root>/output.
+        data_root, output = _verify_user_config_and_get_paths(
+            {**config, "data_root": default_data_root}, system, local
+        )
     else:
         data_root, output = _verify_user_config_and_get_paths(config, system, local)
 
@@ -518,18 +530,20 @@ def _read_users_yaml_for_update(user_config_path):
     return None
 
 
-def _resolve_config_section(config, username, hostname):
-    """Returns the part of the ``users.yaml`` dict that applies to this user and machine.
+def _resolve_config_section(config, username, hostname, owns=None):
+    """Returns the part of the ``users.yaml`` dict to write this user's paths back to.
 
-    Mirrors the lookup order of :func:`set_data_paths`: first the username, then the
-    hostname, falling back to the level above whenever a key is missing.
+    Follows the same levels as :func:`set_data_paths`. With ``owns`` set to a key, the
+    section that actually supplies that key is returned instead of the most specific one,
+    so that updating an inherited value edits it where it lives. Writing it to a deeper
+    section would shadow the rest of the original mapping rather than extend it.
     """
-    section = config if isinstance(config, dict) else {}
-    if username in section and isinstance(section[username], dict):
-        section = section[username]
-    if hostname in section and isinstance(section[hostname], dict):
-        section = section[hostname]
-    return section
+    levels = _config_levels(config, username, hostname)
+    if owns is not None:
+        for level in reversed(levels):
+            if owns in level:
+                return level
+    return levels[-1]
 
 
 def create_new_user(user_config_path: "str | Path | None" = None, local: bool | None = None):
@@ -653,7 +667,7 @@ def create_new_user(user_config_path: "str | Path | None" = None, local: bool | 
             ## use local or remote subkey depending on the local parameter. The data_root
             ## can live at the top level as well, so look up where it actually is.
             section = _resolve_config_section(
-                users_yaml_dict, data_paths["username"], data_paths["hostname"]
+                users_yaml_dict, data_paths["username"], data_paths["hostname"], owns="data_root"
             )
             existing = section.get("data_root")
             section["data_root"] = {

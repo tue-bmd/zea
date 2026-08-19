@@ -2,6 +2,7 @@
 
 import builtins
 import getpass
+import platform
 import socket
 import warnings
 from pathlib import Path
@@ -35,6 +36,8 @@ from zea.tools.hf import HFPath
 
 USERNAME = getpass.getuser()
 HOSTNAME = socket.gethostname()
+# set_data_paths asserts a configured `system` matches the machine it runs on.
+SYSTEM = platform.system().lower()
 
 user_config0 = {
     USERNAME: {
@@ -320,7 +323,7 @@ def test_set_data_paths_inherits_from_the_user_level():
         USERNAME: {
             "data_root": "/user/data",
             "output": "/user/output",
-            HOSTNAME: {"system": "linux"},
+            HOSTNAME: {"system": SYSTEM},
         }
     }
     data_paths = set_data_paths(config)
@@ -354,6 +357,22 @@ def test_set_data_paths_explicit_null_falls_back_like_an_unset_key():
     assert set_data_paths(config).data_root == Path("/shared/data")
 
 
+@pytest.mark.parametrize(
+    "config",
+    [
+        pytest.param({"output": "/configured/output"}, id="shared"),
+        pytest.param({USERNAME: {"output": "/configured/output"}}, id="user"),
+        pytest.param({USERNAME: {HOSTNAME: {"output": "/configured/output"}}}, id="machine"),
+    ],
+)
+def test_set_data_paths_keeps_configured_output_when_data_root_falls_back(config):
+    """Only the data_root is missing, so a configured output still applies."""
+    with pytest.warns((UnknownUsernameWarning, UnknownHostnameWarning)):
+        data_paths = set_data_paths(config)
+    assert data_paths.data_root == Path(_fallback_to_default_data_root(data_paths.system))
+    assert data_paths.output == Path("/configured/output")
+
+
 def test_set_data_paths_unknown_username_warns():
     """An unknown user without fallback warns and uses the OS default."""
     config = {"some_other_user": {"data_root": "/other/data"}}
@@ -366,7 +385,7 @@ def test_set_data_paths_unknown_username_warns():
     "config",
     [
         pytest.param({USERNAME: {"some-other-machine": {"data_root": "/x"}}}, id="hostname-absent"),
-        pytest.param({USERNAME: {HOSTNAME: {"system": "linux"}}}, id="hostname-without-data-root"),
+        pytest.param({USERNAME: {HOSTNAME: {"system": SYSTEM}}}, id="hostname-without-data-root"),
     ],
 )
 def test_set_data_paths_known_user_without_data_root_warns_about_the_hostname(config):
@@ -598,6 +617,23 @@ def test_resolve_config_section(config, expected):
         assert section["data_root"] == "/user"
     else:
         assert section == expected
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        pytest.param({"data_root": "/shared"}, {"data_root": "/shared"}, id="owned-by-root"),
+        pytest.param(
+            {"data_root": "/shared", USERNAME: {"data_root": "/user"}},
+            {"data_root": "/user"},
+            id="owned-by-user",
+        ),
+        pytest.param({USERNAME: {"output": "/o"}}, {"output": "/o"}, id="nobody-owns-it"),
+    ],
+)
+def test_resolve_config_section_owns(config, expected):
+    """``owns`` finds the section supplying a key, else the most specific one."""
+    assert _resolve_config_section(config, USERNAME, HOSTNAME, owns="data_root") == expected
 
 
 def test_yaml_read_write_roundtrip(tmp_path):
@@ -832,7 +868,7 @@ def test_create_new_user_updates_hostname_without_data_root(tmp_path, answers, m
         tmp_path / "users.yaml",
         {
             USERNAME: {
-                HOSTNAME: {"system": "linux", "output": "/my/output"},
+                HOSTNAME: {"system": SYSTEM, "output": "/my/output"},
                 "some-other-machine": {"data_root": "/other"},
             }
         },
@@ -881,6 +917,28 @@ def test_create_new_user_does_not_clobber_an_unreadable_yaml(tmp_path, answers, 
     assert not answers.prompts, "should bail out before prompting for a data root"
     assert (tmp_path / "users.yaml").read_text(encoding="utf-8") == before
     assert any("will not be updated" in message for message in messages)
+
+
+def test_create_new_user_updates_the_section_owning_the_data_root(tmp_path, answers, monkeypatch):
+    """An inherited data_root is extended where it lives, not shadowed further down."""
+    monkeypatch.chdir(tmp_path)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    _write_yaml(
+        tmp_path / "users.yaml",
+        {"data_root": {"local": "/local/data"}, USERNAME: {"output": "/my/output"}},
+    )
+
+    answers.set(str(data_root), "")
+    create_new_user("users.yaml", local=False)
+
+    config = _to_read_yaml_file("users.yaml")
+    # the remote path joins the shared mapping instead of creating a user-level one
+    assert config["data_root"] == {"local": "/local/data", "remote": str(data_root)}
+    assert "data_root" not in config[USERNAME]
+    # and the inherited local path still resolves afterwards
+    assert set_data_paths("users.yaml", local=True).data_root == Path("/local/data")
+    assert set_data_paths("users.yaml", local=False).data_root == data_root
 
 
 def test_create_new_user_existing_profile_is_left_alone(tmp_path, answers, monkeypatch):
