@@ -999,15 +999,11 @@ class SourceMetadata(NamedTuple):
     The bulk arrays (raw data, beamformed data, ...) are deliberately left behind: the
     annotation file holds only the images that were annotated and their masks, so it
     stays small and can be written without streaming gigabytes back out.
-
-    Attributes:
-        file_fields (dict): Keyword arguments for :meth:`zea.File.create`, e.g.
-            ``metadata``, ``metrics``, ``probe``, ``us_machine``, ``acquisition_time``.
-        map_fields (dict): Extra fields for the copied image map, e.g. ``coordinates``,
-            ``unit``, ``min``, ``max``, ``timestamps``.
     """
 
+    #: Keyword arguments for :meth:`zea.File.create`, e.g. ``metadata``, ``probe``.
     file_fields: dict
+    #: Extra fields for the copied image map, e.g. ``coordinates``, ``timestamps``.
     map_fields: dict
 
 
@@ -1080,22 +1076,18 @@ def _load_zea_file(path: str | Path) -> tuple[np.ndarray, SourceMetadata]:
 
 
 class SelectionInputs(NamedTuple):
-    """The images to annotate, and where they came from.
+    """The images to annotate, and where they came from."""
 
-    Attributes:
-        images (list[np.ndarray]): The 2D images to annotate.
-        file_names (list[str]): Name of the file each image came from.
-        is_sequence (bool): True when the images are consecutive frames of one recording,
-            which are annotated by interpolating between key frames. False when they are
-            separate images, which are compared with a metric.
-        source (SourceMetadata | None): Fields carried over from a zea input file, so the
-            saved annotations line up with (and describe) the source. None for images,
-            videos and gifs, which carry no such metadata.
-    """
-
+    #: The 2D images to annotate.
     images: list[np.ndarray]
+    #: Name of the file each image came from.
     file_names: list[str]
+    #: True when the images are consecutive frames of one recording, annotated by
+    #: interpolating between key frames. False when they are separate images, compared
+    #: with a metric.
     is_sequence: bool
+    #: Fields carried over from a zea input file, so the saved annotations line up with
+    #: (and describe) the source. None for images, videos and gifs.
     source: SourceMetadata | None = None
 
 
