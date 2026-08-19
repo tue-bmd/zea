@@ -17,6 +17,7 @@ Or to run a specific notebook:
 """
 
 import os
+import shutil
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
@@ -148,6 +149,31 @@ def _notebook_case(notebook):
 
 
 NOTEBOOK_CASES = [_notebook_case(notebook) for notebook in NOTEBOOKS]
+
+
+# Files the notebooks write into the working directory to be self-contained. They are
+# part of what the notebook demonstrates, so they belong in the notebook rather than in
+# a fixture -- but a test run should not leave them behind in a checkout.
+NOTEBOOK_ARTIFACTS = (Path("users.yaml"), Path("zea-data"))
+
+
+@pytest.fixture(autouse=True)
+def clean_notebook_artifacts():
+    """Remove working-directory files a notebook created, keeping anything pre-existing.
+
+    ``zea_local_data.ipynb`` writes a ``users.yaml`` and a data folder so that it runs
+    warning-free on a machine that has never seen zea. Anything already present belongs
+    to the developer running the tests and is left untouched.
+    """
+    pre_existing = {path for path in NOTEBOOK_ARTIFACTS if path.exists()}
+    yield
+    for path in NOTEBOOK_ARTIFACTS:
+        if path in pre_existing or not path.exists():
+            continue
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
 
 
 @pytest.mark.notebook
