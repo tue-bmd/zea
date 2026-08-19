@@ -692,27 +692,25 @@ class Track:
 def _load_group_dict(group: "h5py.Group", fetcher) -> dict:
     """Recursively load *group* into a dict, reading arrays through *fetcher*.
 
-    ``fetcher`` may be ``None``, in which case every read falls back to h5py.
+    ``fetcher`` may be ``None``, in which case every read falls back to h5py. Reads too
+    small to be worth the concurrent path fall back too, so wrapping is free for the
+    scalars that make up a scan or metadata group.
 
-    Only datasets big enough for the concurrent path to matter are routed through it: a
-    scan or metadata group is scalars, which :mod:`~zea.data.chunk_reader` would hand
-    straight back to h5py — after logging a note about the storage layout that would be
-    pure noise for a 4-byte float.
+    The item list is materialised **before** any read. ``h5py.Group.items()`` is a
+    generator holding h5py's global lock across its yields, and the concurrent reader's
+    decode threads cannot make progress while it is held — reading inside the loop
+    deadlocks, silently and forever, on any dataset big enough to reach the thread pool.
     """
-    from zea.data.chunk_reader import MIN_BYTES
-
     ans = {}
-    for key, item in group.items():
+    for key, item in list(group.items()):
         if isinstance(item, h5py.Dataset):
             if h5py.check_string_dtype(item.dtype) is not None:
                 val = item.asstr()[()]
                 if isinstance(val, np.ndarray) and val.dtype == object:
                     val = val.astype(np.str_)
                 ans[key] = val
-            elif item.nbytes >= MIN_BYTES:
-                ans[key] = ChunkedDataset(item, fetcher)[()]
             else:
-                ans[key] = item[()]
+                ans[key] = ChunkedDataset(item, fetcher)[()]
         elif isinstance(item, h5py.Group):
             ans[key] = _load_group_dict(item, fetcher)
     return ans

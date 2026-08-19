@@ -395,8 +395,14 @@ def _fallback_note(
     silence each other. The name is the file — that is what a user would actually act on —
     with the dataset's path in brackets (as the user indexes it, see :func:`_display_path`),
     so notes for different datasets of the same file read as distinct rather than as repeats.
+    Datasets below :data:`MIN_BYTES` are silent: every read of one is served by h5py anyway
+    (see :func:`read`), so neither resaving nor reshaping the selection would change how it
+    is read — the note would be noise. A scan or metadata group is entirely such scalars.
+
     Anything that could break here is swallowed; a message is never worth failing a read over.
     """
+    if dset.nbytes < MIN_BYTES:
+        return
     try:
         from zea import log
 
