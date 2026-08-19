@@ -48,7 +48,6 @@ dependencies = [
     "decorator >=5",
     "huggingface_hub >=1.2",
     "tyro >=1.0",
-    "wandb >=0.18",
     "wget >=3.2",
     "imageio[ffmpeg] >=2.0",
     "grain >= 0.2.8",
@@ -324,7 +323,6 @@ filterwarnings = [
     "ignore:.*hf_xet.*:DeprecationWarning",
     "ignore:'(oneOf|parseString|resetCache|enablePackrat)' deprecated:DeprecationWarning",  # matplotlib -> old pyparsing API
     "ignore:invalid escape sequence:DeprecationWarning",
-    "ignore:.*sentry_sdk.Hub. is deprecated:DeprecationWarning",                            # wandb -> deprecated sentry Hub API
 ]
 
 [tool.coverage.run]
