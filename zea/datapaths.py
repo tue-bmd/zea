@@ -37,9 +37,11 @@ Example usage
 
 """
 
+import contextlib
 import copy
 import getpass
 import importlib.resources
+import importlib.util
 import os
 import platform
 import socket
@@ -67,8 +69,10 @@ DEFAULT_DATA_ROOT = {
 #: The keys a users.yaml section may set directly; anything else is a user or machine.
 _PROFILE_FIELDS = UserProfileSpec.field_names()
 
-DEFAULT_LINUX_DATA_ROOT = DEFAULT_DATA_ROOT["linux"]
 DEFAULT_USERS_CONFIG_PATH = "./users.yaml"
+
+#: Mentioned in the prompts only when the platform can actually tab-complete paths.
+_COMPLETION_HINT = "Tab completes" if importlib.util.find_spec("readline") else None
 
 
 class NoYamlFileError(Warning):
@@ -448,6 +452,32 @@ def _pretty_print_data_paths(data_paths):
         print(f"  {label}  {log.yellow(value) if value is not None else log.dim('not set')}")
 
 
+@contextlib.contextmanager
+def _path_completion():
+    """Let ``input()`` tab-complete filesystem paths, where the platform supports it.
+
+    ``readline`` completes filenames itself when no completer function is installed, so
+    this only has to bind Tab and put any existing completer back afterwards -- without
+    that, a call from a REPL would lose its own completion.
+    """
+    try:
+        import readline
+    except ImportError:  # no readline on some platforms (notably Windows)
+        yield
+        return
+
+    previous = readline.get_completer()
+    readline.set_completer(None)
+    readline.set_completer_delims(" \t\n")
+    # macOS often links libedit, which spells the binding differently to GNU readline.
+    libedit = "libedit" in (readline.__doc__ or "")
+    readline.parse_and_bind("bind ^I rl_complete" if libedit else "tab: complete")
+    try:
+        yield
+    finally:
+        readline.set_completer(previous)
+
+
 def _prompt(question, default=None, hint=None):
     """Ask one question on stdin, styled like the rest of the zea CLI.
 
@@ -455,25 +485,28 @@ def _prompt(question, default=None, hint=None):
         question (str): What to ask.
         default: Value to return when the answer is empty.
         hint (str, optional): Shown dimmed after the question, describing what
-            pressing Enter does. Defaults to naming ``default``.
+            pressing Enter does.
 
     Returns:
         The typed answer, stripped, or ``default`` when nothing was typed.
     """
-    if hint is None and default is not None:
-        hint = f"Enter for {default}"
     suffix = log.dim(f" ({hint})") if hint else ""
-    answer = input(f"  {log.bold(log.blue('?'))} {question}{suffix}: ").strip()
+    with _path_completion():
+        answer = input(f"  {log.bold(log.blue('?'))} {question}{suffix}: ").strip()
     return answer or default
 
 
 def _acquire_and_validate_data_root():
-    """Ask for the data root until it points at a directory that exists."""
+    """Ask for the data root until it points at a directory that exists.
+
+    There is no default worth offering here -- where your data lives is the one thing
+    only you know -- so an empty answer is asked again rather than guessed at.
+    """
     while True:
-        data_root = _prompt(
-            "Path to your data directory",
-            default=DEFAULT_LINUX_DATA_ROOT,
-        )
+        data_root = _prompt("Path to your data directory", hint=_COMPLETION_HINT)
+        if not data_root:
+            log.error("A data directory is required.")
+            continue
         data_root = os.path.expanduser(str(data_root))
         if os.path.isdir(data_root):
             return data_root
@@ -497,11 +530,8 @@ def _confirm(question, preview=None):
 
 def _acquire_output_path():
     """Ask for the optional output directory; an empty answer leaves it unset."""
-    output = _prompt(
-        "Path for zea output",
-        default="",
-        hint="optional, Enter to skip",
-    )
+    hint = ", ".join(filter(None, ("optional, Enter to skip", _COMPLETION_HINT)))
+    output = _prompt("Path for zea output", default="", hint=hint)
     output = os.path.expanduser(str(output)) if output else ""
     if output and not os.path.isdir(output):
         log.warning(f"{log.yellow(output)} does not exist yet; zea will create it when writing.")

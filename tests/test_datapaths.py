@@ -19,11 +19,13 @@ from zea.datapaths import (
     UnknownLocalRemoteWarning,
     UnknownUsernameWarning,
     _build_user_profile_string,
+    _acquire_and_validate_data_root,
     _acquire_output_path,
     _check_for_comments_yaml_file,
     _confirm,
     _fallback_to_default_data_root,
     _is_interactive,
+    _path_completion,
     _resolve_config_section,
     _to_read_yaml_file,
     _to_write_yaml_file,
@@ -721,6 +723,40 @@ def test_confirm_shows_the_preview(answers, capsys):
     answers.set("")
     _confirm("Add this?", "alice:\n  data_root: /some/data")
     assert "data_root: /some/data" in capsys.readouterr().out
+
+
+def test_acquire_data_root_requires_an_answer(answers, monkeypatch, tmp_path):
+    """There is no sensible default for where your data lives, so Enter is not enough."""
+    messages = []
+    monkeypatch.setattr("zea.datapaths.log.error", messages.append)
+    answers.set("", str(tmp_path))
+
+    assert _acquire_and_validate_data_root() == str(tmp_path)
+    assert len(answers.prompts) == 2, "an empty answer should be asked again"
+    assert any("required" in message for message in messages)
+
+
+def test_path_completion_restores_the_previous_completer():
+    """Tab completion is borrowed for the prompt, not taken over permanently."""
+    readline = pytest.importorskip("readline")
+
+    def _sentinel(text, state):  # pragma: no cover - never called
+        return None
+
+    readline.set_completer(_sentinel)
+    try:
+        with _path_completion():
+            assert readline.get_completer() is None, "readline completes filenames itself"
+        assert readline.get_completer() is _sentinel
+    finally:
+        readline.set_completer(None)
+
+
+def test_path_completion_without_readline(monkeypatch):
+    """Platforms without readline just get a plain prompt."""
+    monkeypatch.setitem(__import__("sys").modules, "readline", None)
+    with _path_completion():
+        pass
 
 
 def test_acquire_output_path_warns_for_a_missing_directory(answers, monkeypatch, tmp_path):
