@@ -346,6 +346,52 @@ def _format_selection(selection) -> str:
     return _format_one(selection)
 
 
+#: Datasets already pointed at the fast path, by HDF5 path. Keyed by path rather than by
+#: file so that iterating a whole dataset warns once, not once per file.
+_SLOW_READ_WARNED: set[str] = set()
+
+#: Only datasets at least this large are worth a pointer: below it h5py's serial read is
+#: not the bottleneck, and :mod:`zea.data.chunk_reader` would hand back to it anyway.
+_SLOW_READ_WARN_BYTES = 8 << 20  # 8 MiB
+
+
+class _BareDataset(h5py.Dataset):
+    """An ``h5py.Dataset`` that points at the fast path the first time it is read.
+
+    ``file["data/raw_data"]`` hands back h5py's own dataset, whose reads are serial: one
+    chunk decoded at a time, and over HTTP one round trip each. :meth:`File.dataset` and
+    ``file.data.<key>`` return the same data through :mod:`zea.data.chunk_reader` instead,
+    which fetches the chunk byte ranges itself and decodes them concurrently.
+
+    Subclassing keeps ``isinstance(file[key], h5py.Dataset)`` true and leaves the read
+    itself untouched — only large chunked datasets are wrapped, and only reads are
+    intercepted, so shape/dtype/attribute access stays silent.
+    """
+
+    def __getitem__(self, args):
+        name = self.name
+        if name is not None and name not in _SLOW_READ_WARNED:
+            _SLOW_READ_WARNED.add(name)
+            key = re.sub(r"^/?tracks/track_\d+/", "", name).lstrip("/")
+            log.warning(
+                f"Reading '{key}' through file[...] uses h5py's serial read path. "
+                f"Use file.dataset({key!r})[...] or file.data.{key.split('/')[-1]}[...] "
+                "for concurrent chunk reads."
+            )
+        return super().__getitem__(args)
+
+
+def _wrap_bare_dataset(child):
+    """Wrap *child* in :class:`_BareDataset` when the fast path would be worth using."""
+    if (
+        type(child) is h5py.Dataset
+        and child.chunks is not None
+        and child.nbytes >= _SLOW_READ_WARN_BYTES
+    ):
+        return _BareDataset(child.id)
+    return child
+
+
 class _GroupProxy:
     """Lazy proxy for an h5py.Group that exposes children as attributes.
 
@@ -1128,13 +1174,8 @@ class File(h5py.File):
             return False
         return False
 
-    def __getitem__(self, name):
-        """Open an object in the file.
-
-        Extends the h5py default to redirect ``"data"`` and ``"scan"`` (and
-        sub-paths like ``"data/segmentation"``) to the tracks layout for
-        single-track new-format files.  Multi-track files raise :exc:`AttributeError`.
-        """
+    def _resolve(self, name):
+        """Open an object in the file, applying the tracks remapping. No wrapping."""
         parts = name.split("/", 1)
         if parts[0] in ("data", "scan") and not super().__contains__(name):
             n = self._n_tracks
@@ -1145,6 +1186,17 @@ class File(h5py.File):
             if n == 1:
                 return super().__getitem__(f"tracks/track_0/{name}")
         return super().__getitem__(name)
+
+    def __getitem__(self, name):
+        """Open an object in the file.
+
+        Extends the h5py default to redirect ``"data"`` and ``"scan"`` (and
+        sub-paths like ``"data/segmentation"``) to the tracks layout for
+        single-track new-format files.  Multi-track files raise :exc:`AttributeError`.
+
+        Reads go through h5py's serial path; see :meth:`dataset` for the concurrent one.
+        """
+        return _wrap_bare_dataset(self._resolve(name))
 
     @property
     def path(self):
@@ -1674,7 +1726,7 @@ class File(h5py.File):
         Returns:
             The dataset, wrapped for concurrent reads where possible.
         """
-        child = self[key]
+        child = self._resolve(key)
         if isinstance(child, h5py.Group):
             return _GroupProxy(child, self._chunk_fetcher)
         if h5py.check_string_dtype(child.dtype):
