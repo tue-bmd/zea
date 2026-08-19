@@ -545,29 +545,46 @@ class Parameters(BaseParameters):
         """Calculate the wavelength based on sound speed and transmit center frequency."""
         return self.sound_speed / self.center_frequency
 
-    @cache_with_dependencies("zlims", "polar_limits", "probe_geometry", "distance_to_apex")
+    @cache_with_dependencies(
+        "zlims",
+        "probe_geometry",
+        "distance_to_apex",
+        "focus_distances",
+        "polar_angles",
+        "f_number",
+    )
     def xlims(self):
-        """The x-limits of the beamforming grid [m]. If not explicitly set, it is computed based
-        on the polar limits and probe geometry.
+        """The lateral (x) limits of the beamforming grid in meters.
+
+        If not explicitly provided, the limits are derived from the probe geometry, the
+        transmits and the receive :attr:`f_number`:
+
+        If all transmits are unsteered focused or plane waves (e.g. walking aperture scans), the
+        limits hug the probe width. Otherwise, the limits add ``max(zlims) / (2 * f_number)`` on
+        both sides, so the xlims match the f-number aperture angle. If f_number is 0, a 45 degree
+        cone is used instead.
         """
         xlims = self._params.get("xlims")
-        if xlims is None:
-            # The sector fans out from the apex, so its half-width at the deepest pixel is
-            # set by the radius to that pixel, not by its depth below the transducer.
-            radius = max(self.zlims) + self.distance_to_apex
-            xlims_polar = (
-                radius * np.cos(-np.pi / 2 + self.polar_limits[0]),
-                radius * np.cos(-np.pi / 2 + self.polar_limits[1]),
-            )
-            xlims_plane = (
-                min(self.probe_geometry[:, 0]),
-                max(self.probe_geometry[:, 0]),
-            )
-            xlims = (
-                min(xlims_polar[0], xlims_plane[0]),
-                max(xlims_polar[1], xlims_plane[1]),
-            )
-        return xlims
+        if xlims is not None:
+            return xlims
+
+        aperture_x = self.probe_geometry[:, 0]
+        xmin, xmax = float(np.min(aperture_x)), float(np.max(aperture_x))
+
+        focus_distances = self.focus_distances
+        polar_angles = self.polar_angles
+        if polar_angles is None:
+            polar_angles = np.zeros_like(focus_distances)
+
+        unsteered = np.all(polar_angles == 0) and np.all(
+            (focus_distances >= 0) | np.isinf(focus_distances)
+        )
+        if unsteered and self.distance_to_apex == 0:
+            return (xmin, xmax)
+
+        f_number = float(self.f_number)
+        reach = max(self.zlims) / (2 * f_number) if f_number > 0 else max(self.zlims)
+        return (xmin - reach, xmax + reach)
 
     @cache_with_dependencies(
         "zlims", "grid_type", "azimuth_limits", "probe_geometry", "distance_to_apex"
