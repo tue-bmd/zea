@@ -7,7 +7,7 @@ dynamic resolution of data roots for portable and reproducible workflows.
 The main entry point is :func:`set_data_paths`, which resolves the ``data_root`` and
 ``output`` paths for the current user and machine. :func:`format_data_path` then turns
 the relative paths used in ``zea`` configs into absolute ones. To set up a ``users.yaml``
-interactively, run ``python -m zea.datapaths`` (see :func:`create_new_user`).
+interactively, run ``zea datapaths`` (see :func:`create_new_user`).
 
 See the notebook :doc:`../notebooks/data/zea_local_data` for an extensive example of how
 to set up your local data paths.
@@ -69,7 +69,6 @@ _PROFILE_FIELDS = UserProfileSpec.field_names()
 
 DEFAULT_LINUX_DATA_ROOT = DEFAULT_DATA_ROOT["linux"]
 DEFAULT_USERS_CONFIG_PATH = "./users.yaml"
-DEFAULT_OUTPUT_PATH = "{data_root}/output"
 
 
 class NoYamlFileError(Warning):
@@ -117,10 +116,6 @@ def _fallback_to_default_data_root(system):
     if system not in DEFAULT_DATA_ROOT:
         system = None
     return DEFAULT_DATA_ROOT[system]
-
-
-def _default_output_path(data_root):
-    return Path(DEFAULT_OUTPUT_PATH.format(data_root=data_root))
 
 
 def _config_levels(config, username, hostname):
@@ -207,18 +202,22 @@ def _verify_user_config_and_get_paths(config, system, local):
                 f"Current value, 'data_root': {path}."
             )
 
-    # Set output path if not set
-    if "output" not in paths:
-        paths["output"] = _default_output_path(paths["data_root"])
-        log.warning("No output path set, using data_root/output as output path.")
-
-    return paths["data_root"], paths["output"]
+    # `output` is optional; leaving it unset is a normal way to use zea, so it stays
+    # None rather than pointing at a made-up directory nobody created.
+    return paths["data_root"], paths.get("output")
 
 
-def _verify_paths(data_path):
-    """Verify that the paths exist and are directories."""
-    for key in ["data_root", "output"]:
+def _verify_paths(data_path, keys=("data_root", "output")):
+    """Warn about configured paths that do not exist.
+
+    Only paths that ``users.yaml`` actually sets are worth reporting: an unset path is
+    a legitimate choice, and a path we fell back to ourselves has already been reported
+    by the warning that announced the fallback.
+    """
+    for key in keys:
         path = data_path[key]
+        if path is None:
+            continue
         if not Path(path).is_dir():
             log.warning(
                 f"{key} path `{path}` does not exist, please update your "
@@ -233,7 +232,7 @@ def _load_users_yaml(user_config, local, username, hostname):
     if not config_path.is_file():
         warnings.warn(
             f"No {user_config} file found, creating a new one. "
-            "Consider running `python -m zea.datapaths` to setup your paths. ",
+            "Consider running `zea datapaths` to set up your paths. ",
             NoYamlFileError,
         )
 
@@ -385,24 +384,27 @@ def set_data_paths(
             warning_type,
         )
         # Only the data_root is missing; a configured output still applies, so resolve
-        # it the usual way rather than forcing <default_data_root>/output.
+        # it the usual way rather than forcing <default_data_root>/output. The warning
+        # above already covers the data_root, so do not re-report it as non-existent.
         data_root, output = _verify_user_config_and_get_paths(
             {**config, "data_root": default_data_root}, system, local
         )
+        verify_keys = ("output",)
     else:
         data_root, output = _verify_user_config_and_get_paths(config, system, local)
+        verify_keys = ("data_root", "output")
 
     data_path = {
         "data_root": Path(data_root),
         "zea_root": zea_root,
-        "output": Path(output),
+        "output": Path(output) if output is not None else None,
         "system": system,
         "username": username,
         "hostname": hostname,
     }
 
     if verify:
-        _verify_paths(data_path)
+        _verify_paths(data_path, verify_keys)
 
     return Config(data_path)
 
@@ -413,48 +415,97 @@ def set_data_paths(
 def _build_user_profile_string(data_paths, local: bool | None = None):
     """Builds a string that can be written to users.yaml to create a new user profile."""
     tab = "    "  # 4 spaces required in yaml
-    base_string = (
-        f"'{data_paths['username']}':\n"
-        + f"  {data_paths['hostname']}:\n"
-        + f"    system: {data_paths['system']}\n"
-    )
+    lines = [
+        f"'{data_paths['username']}':",
+        f"  {data_paths['hostname']}:",
+        f"{tab}system: {data_paths['system']}",
+    ]
     if local is None:
-        return base_string + f"{tab}data_root: {data_paths['data_root']}"
+        lines.append(f"{tab}data_root: {data_paths['data_root']}")
     elif local is False:
-        return base_string + (f"{tab}data_root:\n" + f"{tab}{tab}remote: {data_paths['data_root']}")
+        lines += [f"{tab}data_root:", f"{tab}{tab}remote: {data_paths['data_root']}"]
     elif local is True:
-        return base_string + (f"{tab}data_root:\n" + f"{tab}{tab}local: {data_paths['data_root']}")
+        lines += [f"{tab}data_root:", f"{tab}{tab}local: {data_paths['data_root']}"]
     else:
         raise ValueError("local should set to a boolean or None.")
+
+    # `output` is optional, so it only appears when the user actually chose one.
+    if data_paths.get("output"):
+        lines.append(f"{tab}output: {data_paths['output']}")
+    return "\n".join(lines)
 
 
 def _to_write_user_profile_to_file(user_profile_string, user_config_path=DEFAULT_USERS_CONFIG_PATH):
     with open(user_config_path, "a", encoding="utf-8") as file:
         file.write("\n\n" + user_profile_string + "\n")
-    print(f"\n✅ Your user profile was successfully added to `{user_config_path}`.\n")
+    log.success(f"Added your profile to {log.yellow(user_config_path)}")
 
 
 def _pretty_print_data_paths(data_paths):
+    width = max(len(str(key)) for key in data_paths)
     for key, value in data_paths.items():
-        print(f"\t{key}: {log.yellow(value)}")
-    print()
+        label = log.dim(f"{key:>{width}}")
+        print(f"  {label}  {log.yellow(value) if value is not None else log.dim('not set')}")
 
 
-def _prompt_user_for_data_root():
-    data_root_input = input(
-        "\nℹ️  Please enter the path to your data directory, "
-        "or press Enter to use the default Linux path "
-        f"`{DEFAULT_LINUX_DATA_ROOT}`: "
-    )
-    return DEFAULT_LINUX_DATA_ROOT if data_root_input == "" else data_root_input
+def _prompt(question, default=None, hint=None):
+    """Ask one question on stdin, styled like the rest of the zea CLI.
+
+    Args:
+        question (str): What to ask.
+        default: Value to return when the answer is empty.
+        hint (str, optional): Shown dimmed after the question, describing what
+            pressing Enter does. Defaults to naming ``default``.
+
+    Returns:
+        The typed answer, stripped, or ``default`` when nothing was typed.
+    """
+    if hint is None and default is not None:
+        hint = f"Enter for {default}"
+    suffix = log.dim(f" ({hint})") if hint else ""
+    answer = input(f"  {log.bold(log.blue('?'))} {question}{suffix}: ").strip()
+    return answer or default
 
 
 def _acquire_and_validate_data_root():
-    data_root_input = _prompt_user_for_data_root()
-    while not os.path.isdir(data_root_input):
-        print("\n The path you entered does not point to a directory, please try again.")
-        data_root_input = _prompt_user_for_data_root()
-    return data_root_input
+    """Ask for the data root until it points at a directory that exists."""
+    while True:
+        data_root = _prompt(
+            "Path to your data directory",
+            default=DEFAULT_LINUX_DATA_ROOT,
+        )
+        data_root = os.path.expanduser(str(data_root))
+        if os.path.isdir(data_root):
+            return data_root
+        log.error(f"{log.yellow(data_root)} is not an existing directory, please try again.")
+
+
+def _confirm(question, preview=None):
+    """Show ``preview`` and ask ``question``, defaulting to yes on an empty answer."""
+    if preview:
+        print()
+        for line in preview.rstrip().splitlines():
+            print(f"    {log.dim(line)}")
+        print()
+    answer = _prompt(question, default="y", hint="Y/n")
+    try:
+        return strtobool(str(answer))
+    except ValueError:
+        log.error(f"Not a yes/no answer: {answer!r}. Nothing was changed.")
+        return False
+
+
+def _acquire_output_path():
+    """Ask for the optional output directory; an empty answer leaves it unset."""
+    output = _prompt(
+        "Path for zea output",
+        default="",
+        hint="optional, Enter to skip",
+    )
+    output = os.path.expanduser(str(output)) if output else ""
+    if output and not os.path.isdir(output):
+        log.warning(f"{log.yellow(output)} does not exist yet; zea will create it when writing.")
+    return output or None
 
 
 def _warning_type_was_thrown(warning_type, list_of_warnings):
@@ -573,15 +624,6 @@ def create_new_user(user_config_path: "str | Path | None" = None, local: bool | 
         warnings.simplefilter("always")
         data_paths = set_data_paths(user_config=user_config_path, local=local)
 
-        # Display any warnings that were thrown during set_data_paths
-        if list_of_warnings:
-            for w in list_of_warnings:
-                print(f"🚨 {w.message}")
-        else:
-            log.info("Data paths set successfully.")
-            log.info("Here's a summary of your data paths:")
-            _pretty_print_data_paths(data_paths)
-
         # If there was no profile found in users.yaml for the current user,
         # give them the option to create a user profile automatically
         user_warning_was_thrown = _warning_type_was_thrown(UnknownUsernameWarning, list_of_warnings)
@@ -593,19 +635,30 @@ def create_new_user(user_config_path: "str | Path | None" = None, local: bool | 
         )
         no_yaml_file_error_was_thrown = _warning_type_was_thrown(NoYamlFileError, list_of_warnings)
 
+        # A missing profile is the reason you run this tool, so do not shout about it --
+        # the branch that handles it says what it is doing. Anything else is worth seeing.
+        handled = (
+            user_warning_was_thrown
+            or hostname_warning_was_thrown
+            or local_remote_warning_was_thrown
+            or no_yaml_file_error_was_thrown
+        )
+        if not list_of_warnings:
+            log.success("Your data paths are already set up:")
+            _pretty_print_data_paths(data_paths)
+        elif not handled:
+            for w in list_of_warnings:
+                log.warning(str(w.message))
+
         if user_warning_was_thrown or no_yaml_file_error_was_thrown:
-            print("ℹ️  Follow the instructions below to create your user profile.")
-            data_root = _acquire_and_validate_data_root()
-            data_paths["data_root"] = data_root
-            user_profile_string = _build_user_profile_string(data_paths, local=local)
-            user_response = input(
-                "\n"
-                + user_profile_string
-                + "\n"
-                + "\nℹ️  Would you like to automatically create your user"
-                + "profile with the details above? [y]: "
+            log.info(
+                f"Setting up a profile for {log.yellow(data_paths['username'])} on "
+                f"{log.yellow(data_paths['hostname'])}."
             )
-            if user_response == "" or strtobool(user_response):
+            data_paths["data_root"] = _acquire_and_validate_data_root()
+            data_paths["output"] = _acquire_output_path()
+            user_profile_string = _build_user_profile_string(data_paths, local=local)
+            if _confirm(f"Add this to {log.yellow(user_config_path)}?", user_profile_string):
                 _try(
                     _to_write_user_profile_to_file,
                     {
@@ -614,13 +667,9 @@ def create_new_user(user_config_path: "str | Path | None" = None, local: bool | 
                     },
                 )
         elif hostname_warning_was_thrown:
-            print(
-                f"ℹ️ The hostname '{data_paths['hostname']}' was "
-                f"not found for username '{data_paths['username']}'.\n"
-            )
-            print(
-                "ℹ️ Follow the instructions below to create a new "
-                f"entry for hostname: '{data_paths['hostname']}:"
+            log.info(
+                f"No data paths for {log.yellow(data_paths['hostname'])} under "
+                f"{log.yellow(data_paths['username'])} yet, adding an entry for it."
             )
             users_yaml_dict = _read_users_yaml_for_update(user_config_path)
             if users_yaml_dict is None:
@@ -636,27 +685,20 @@ def create_new_user(user_config_path: "str | Path | None" = None, local: bool | 
                 "system": data_paths["system"],
                 "data_root": data_root,
             }
-            user_response = input(
-                "\n"
-                + yaml.dump(users_yaml_dict[data_paths["username"]])
-                + "\nℹ️ Would you like to update your user profile "
-                + "with the user info above? [y]: "
-            )
-            if user_response == "" or strtobool(user_response):
+            if _confirm(
+                f"Update {log.yellow(user_config_path)}?",
+                yaml.dump(users_yaml_dict[data_paths["username"]]),
+            ):
                 _try(
                     _to_write_yaml_file,
                     {"data": users_yaml_dict, "path_str": user_config_path},
                 )
-                log.success("Profile updated successfully.")
+                log.success("Profile updated.")
         elif local_remote_warning_was_thrown:
             local_remote_str = "local" if local else "remote"
-            print(
-                f"ℹ️ The data_root for '{data_paths['username']}' was "
-                f"not found for location: {local_remote_str}.\n"
-            )
-            print(
-                "ℹ️ Follow the instructions below to create a new entry for "
-                f"data_root for location: {local_remote_str}:"
+            log.info(
+                f"No {log.yellow(local_remote_str)} data_root for "
+                f"{log.yellow(data_paths['username'])} yet, adding one."
             )
             users_yaml_dict = _read_users_yaml_for_update(user_config_path)
             if users_yaml_dict is None:
@@ -674,18 +716,12 @@ def create_new_user(user_config_path: "str | Path | None" = None, local: bool | 
                 **(existing if isinstance(existing, dict) else {}),
                 local_remote_str: data_root,
             }
-            user_response = input(
-                "\n"
-                + yaml.dump(users_yaml_dict)
-                + "\nℹ️ Would you like to update your user profile "
-                + "with the user info above? [y]: "
-            )
-            if user_response == "" or strtobool(user_response):
+            if _confirm(f"Update {log.yellow(user_config_path)}?", yaml.dump(users_yaml_dict)):
                 _try(
                     _to_write_yaml_file,
                     {"data": users_yaml_dict, "path_str": user_config_path},
                 )
-                log.success("Profile updated successfully.")
+                log.success("Profile updated.")
 
     return data_paths
 
@@ -723,4 +759,6 @@ def format_data_path(path: "str | Path | HFPath", user: "Config | None" = None) 
 
 
 if __name__ == "__main__":
-    create_new_user("users.yaml", local=None)
+    # `zea datapaths` is the documented entry point; this keeps `python -m zea.datapaths`
+    # working for anyone who already has it in their fingers.
+    create_new_user(DEFAULT_USERS_CONFIG_PATH, local=None)

@@ -19,8 +19,9 @@ from zea.datapaths import (
     UnknownLocalRemoteWarning,
     UnknownUsernameWarning,
     _build_user_profile_string,
+    _acquire_output_path,
     _check_for_comments_yaml_file,
-    _default_output_path,
+    _confirm,
     _fallback_to_default_data_root,
     _is_interactive,
     _resolve_config_section,
@@ -182,11 +183,14 @@ def test_set_data_paths_from_yaml_file(tmp_path):
     assert from_file.output == from_dict.output == Path("/some/output")
 
 
-def test_set_data_paths_default_output_is_data_root_subfolder():
-    """Without an ``output`` key the output defaults to ``data_root/output``."""
-    data_paths = set_data_paths({"data_root": "/some/data"})
-    assert data_paths.output == Path("/some/data/output")
-    assert data_paths.output == _default_output_path("/some/data")
+def test_set_data_paths_output_is_optional():
+    """Leaving ``output`` unset is fine: it stays None, with nothing invented for it."""
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        data_paths = set_data_paths({"data_root": "/some/data"})
+
+    assert data_paths.output is None
+    assert not recorded, "an unset output is normal usage and must not warn"
 
 
 @pytest.mark.parametrize(
@@ -702,6 +706,54 @@ def test_is_interactive_with_a_terminal(monkeypatch):
     assert _is_interactive() is True
 
 
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [("", True), ("y", True), ("n", False), ("maybe", False)],
+)
+def test_confirm(answers, answer, expected):
+    """Enter means yes; anything unparseable is treated as no rather than guessed."""
+    answers.set(answer)
+    assert _confirm("Go ahead?") is expected
+
+
+def test_confirm_shows_the_preview(answers, capsys):
+    """The preview is what the user is agreeing to, so it is printed before asking."""
+    answers.set("")
+    _confirm("Add this?", "alice:\n  data_root: /some/data")
+    assert "data_root: /some/data" in capsys.readouterr().out
+
+
+def test_acquire_output_path_warns_for_a_missing_directory(answers, monkeypatch, tmp_path):
+    """An output directory that does not exist yet is allowed, but flagged."""
+    messages = []
+    monkeypatch.setattr("zea.datapaths.log.warning", messages.append)
+    answers.set(str(tmp_path / "not_created_yet"))
+
+    assert _acquire_output_path() == str(tmp_path / "not_created_yet")
+    assert any("does not exist yet" in message for message in messages)
+
+
+def test_create_new_user_surfaces_unrelated_warnings(tmp_path, answers, monkeypatch):
+    """Warnings the setup flow cannot act on are still shown to the user."""
+    monkeypatch.chdir(tmp_path)
+    _write_yaml(tmp_path / "users.yaml", {USERNAME: {"data_root": str(tmp_path)}})
+
+    real = set_data_paths
+
+    def _noisy(*args, **kwargs):
+        warnings.warn("something else entirely", UserWarning)
+        return real(*args, **kwargs)
+
+    messages = []
+    monkeypatch.setattr("zea.datapaths.log.warning", messages.append)
+    monkeypatch.setattr("zea.datapaths.set_data_paths", _noisy)
+
+    create_new_user("users.yaml", local=None)
+
+    assert not answers.prompts, "an unrelated warning is not something to prompt about"
+    assert any("something else entirely" in message for message in messages)
+
+
 def test_try_reports_errors_without_raising(capsys):
     """``_try`` swallows errors so a failed write does not crash the CLI."""
 
@@ -723,7 +775,7 @@ def test_create_new_user_writes_profile(tmp_path, answers, monkeypatch):
     data_root = tmp_path / "data"
     data_root.mkdir()
 
-    answers.set(str(data_root), "")  # data root, then confirm
+    answers.set(str(data_root), "", "")  # data root, skip output, confirm
     create_new_user("users.yaml", local=None)
 
     assert not answers.queue, "not all scripted answers were used"
@@ -739,7 +791,7 @@ def test_create_new_user_defaults_to_users_yaml(tmp_path, answers, monkeypatch):
     data_root = tmp_path / "data"
     data_root.mkdir()
 
-    answers.set(str(data_root), "")
+    answers.set(str(data_root), "", "")
     create_new_user(local=None)
 
     assert (tmp_path / DEFAULT_USERS_CONFIG_PATH).is_file()
@@ -748,13 +800,42 @@ def test_create_new_user_defaults_to_users_yaml(tmp_path, answers, monkeypatch):
     )
 
 
+def test_create_new_user_records_an_output_when_given(tmp_path, answers, monkeypatch):
+    """Answering the output prompt writes it into the profile."""
+    monkeypatch.chdir(tmp_path)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    output = tmp_path / "out"
+    output.mkdir()
+
+    answers.set(str(data_root), str(output), "")
+    create_new_user("users.yaml", local=None)
+
+    config = _to_read_yaml_file("users.yaml")
+    assert config[USERNAME][HOSTNAME]["output"] == str(output)
+    assert set_data_paths("users.yaml").output == output
+
+
+def test_create_new_user_skipped_output_is_left_out(tmp_path, answers, monkeypatch):
+    """Pressing Enter at the output prompt leaves the key out of the profile."""
+    monkeypatch.chdir(tmp_path)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+
+    answers.set(str(data_root), "", "")
+    create_new_user("users.yaml", local=None)
+
+    assert "output" not in _to_read_yaml_file("users.yaml")[USERNAME][HOSTNAME]
+    assert set_data_paths("users.yaml").output is None
+
+
 def test_create_new_user_declined(tmp_path, answers, monkeypatch):
     """Answering no leaves the users.yaml untouched."""
     monkeypatch.chdir(tmp_path)
     data_root = tmp_path / "data"
     data_root.mkdir()
 
-    answers.set(str(data_root), "n")
+    answers.set(str(data_root), "", "n")
     create_new_user("users.yaml", local=None)
 
     assert (tmp_path / "users.yaml").read_text(encoding="utf-8") == ""
@@ -766,7 +847,7 @@ def test_create_new_user_retries_on_invalid_data_root(tmp_path, answers, monkeyp
     data_root = tmp_path / "data"
     data_root.mkdir()
 
-    answers.set(str(tmp_path / "does_not_exist"), str(data_root), "")
+    answers.set(str(tmp_path / "does_not_exist"), str(data_root), "", "")
     create_new_user("users.yaml", local=None)
 
     assert not answers.queue
