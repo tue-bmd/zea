@@ -587,7 +587,7 @@ class Track:
                 f"Track {self._index} has no 'scan' group. "
                 f"Available keys: {list(self._group.keys())}"
             )
-        scan_dict = load_dict_from_hdf5_group(self._group["scan"])
+        scan_dict = _load_group_dict(self._group["scan"], self._fetcher)
 
         return ScanSpec(**scan_dict)
 
@@ -689,18 +689,18 @@ class Track:
         return f"<Track[{self._index}]{label_part} data={keys}>"
 
 
-def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
-    """Recursively load the contents of an HDF5 group into a plain dict.
+def _load_group_dict(group: "h5py.Group", fetcher) -> dict:
+    """Recursively load *group* into a dict, reading arrays through *fetcher*.
 
-    Datasets are returned as numpy arrays or scalars; nested groups are
-    converted recursively.  String datasets are decoded to ``np.str_``.
+    ``fetcher`` may be ``None``, in which case every read falls back to h5py.
 
-    Args:
-        group: An open :class:`h5py.Group` (or :class:`h5py.File`).
-
-    Returns:
-        dict: Nested dictionary mirroring the group structure.
+    Only datasets big enough for the concurrent path to matter are routed through it: a
+    scan or metadata group is scalars, which :mod:`~zea.data.chunk_reader` would hand
+    straight back to h5py — after logging a note about the storage layout that would be
+    pure noise for a 4-byte float.
     """
+    from zea.data.chunk_reader import MIN_BYTES
+
     ans = {}
     for key, item in group.items():
         if isinstance(item, h5py.Dataset):
@@ -709,10 +709,12 @@ def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
                 if isinstance(val, np.ndarray) and val.dtype == object:
                     val = val.astype(np.str_)
                 ans[key] = val
+            elif item.nbytes >= MIN_BYTES:
+                ans[key] = ChunkedDataset(item, fetcher)[()]
             else:
                 ans[key] = item[()]
         elif isinstance(item, h5py.Group):
-            ans[key] = load_dict_from_hdf5_group(item)
+            ans[key] = _load_group_dict(item, fetcher)
     return ans
 
 
@@ -1276,7 +1278,7 @@ class File(h5py.File):
         # scan parameters with probe_geometry, element_width, etc.
         probe_dict: "dict | None" = None
         if super().__contains__("probe"):
-            probe_dict = load_dict_from_hdf5_group(self["probe"])
+            probe_dict = self.load_group("probe")
         tracks: list[Track] = []
         i = 0
         while f"track_{i}" in tracks_group:
@@ -1733,6 +1735,25 @@ class File(h5py.File):
             return _StringDataset(child)
         return ChunkedDataset(child, self._chunk_fetcher)
 
+    def load_group(self, group: "str | h5py.Group") -> dict:
+        """Recursively load an HDF5 group into a plain dict, on the fast read path.
+
+        The dict mirrors the group structure: datasets become numpy arrays or scalars
+        (strings decoded to ``np.str_``), nested groups become nested dicts. Reads go
+        through :mod:`zea.data.chunk_reader` rather than h5py's serial path, which is what
+        makes loading a whole ``data`` group affordable.
+
+        Args:
+            group: Either a key resolved like ``file[key]`` (e.g. ``"metadata"``), or an
+                already-opened :class:`h5py.Group` belonging to this file.
+
+        Returns:
+            dict: Nested dictionary mirroring the group structure.
+        """
+        if isinstance(group, str):
+            group = self._resolve(group)
+        return _load_group_dict(group, self._chunk_fetcher)
+
     @property
     def _is_legacy_file(self) -> bool:
         return _is_legacy_file(self)
@@ -1996,7 +2017,7 @@ class File(h5py.File):
             log.warning("Could not find scan parameters in file.")
             return {}
 
-        scan_parameters = load_dict_from_hdf5_group(scan_group)
+        scan_parameters = self.load_group(scan_group)
 
         return scan_parameters
 
@@ -2124,7 +2145,7 @@ class File(h5py.File):
         from zea.probes import Probe
 
         if "probe" in self.keys():
-            probe_dict = self.recursively_load_dict_contents_from_group("probe")
+            probe_dict = self.load_group("probe")
         elif _is_legacy_file(self):
             scan_dict = self.get_scan_parameters()
             probe_dict = legacy_probe(scan_dict)
@@ -2161,7 +2182,7 @@ class File(h5py.File):
         """
         if "metadata" not in self:
             raise KeyError("No 'metadata' group in this file.")
-        raw = load_dict_from_hdf5_group(self["metadata"])
+        raw = self.load_group("metadata")
         return MetadataSpec(**raw)
 
     @property
@@ -2182,22 +2203,8 @@ class File(h5py.File):
         """
         if "metrics" not in self:
             raise KeyError("No 'metrics' group in this file.")
-        raw = load_dict_from_hdf5_group(self["metrics"])
+        raw = self.load_group("metrics")
         return MetricsSpec(**raw)
-
-    def recursively_load_dict_contents_from_group(self, path: str) -> dict:
-        """Load dict from contents of group.
-
-        .. deprecated::
-            Use the module-level :func:`load_dict_from_hdf5_group` function instead,
-            passing an :class:`h5py.Group` directly.
-
-        Args:
-            path (str): path to group
-        Returns:
-            dict: dictionary with contents of group
-        """
-        return load_dict_from_hdf5_group(self[path])
 
     def has_key(self, key: str) -> bool:
         """Check if the file has a specific key.
@@ -2292,7 +2299,7 @@ class File(h5py.File):
         if "tracks" not in self:
             track: dict = {}
             if super().__contains__("data"):
-                data = load_dict_from_hdf5_group(self["data"])
+                data = self.load_group("data")
                 track["data"] = legacy_data(data) if _is_legacy_file(self) else data
             if self.scan is not None:
                 track["scan"] = self.scan
@@ -2303,7 +2310,7 @@ class File(h5py.File):
         for track in self.tracks:
             track_dict: dict = {"label": track.label}
             if "data" in track._group:
-                track_dict["data"] = load_dict_from_hdf5_group(track._group["data"])
+                track_dict["data"] = self.load_group(track._group["data"])
             if "scan" in track._group:
                 track_dict["scan"] = track.scan
             # Preserve transmit-only tracks (data=None); without this the rebuilt TrackSpec

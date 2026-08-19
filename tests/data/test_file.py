@@ -156,7 +156,7 @@ def test_recursively_load_dict(complex_h5_file):
     """Test recursively loading dict contents from group."""
 
     with File(complex_h5_file) as file:
-        dict_contents = file.recursively_load_dict_contents_from_group("/")
+        dict_contents = file.load_group("/")
         assert list(dict_contents.keys()) == ["dummy_dataset", "dummy_dataset2"]
         assert dict_contents["dummy_dataset"].shape == (10, 20)
         assert dict_contents["dummy_dataset2"].shape == (5,)

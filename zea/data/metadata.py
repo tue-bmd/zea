@@ -35,7 +35,7 @@ import h5py
 import numpy as np
 
 from zea.data.datasets import _resolve_dotted_path
-from zea.data.file import File, load_dict_from_hdf5_group
+from zea.data.file import File
 from zea.data.spec import DataSpec, FileSpec, ScanSpec, Spec
 
 __all__ = ["has_per_frame_paths", "normalize_metadata_paths", "read_metadata", "slice_metadata"]
@@ -167,7 +167,7 @@ def _read_path(file: File, path: str):
         obj = None
 
     if isinstance(obj, h5py.Group):
-        return load_dict_from_hdf5_group(obj)
+        return file.load_group(obj)
     if obj is not None:
         return _read_dataset(obj)
 
