@@ -83,14 +83,13 @@ def camus_file():
     return CAMUS_FILE
 
 
-def _get_h5_data_source(file_path, key, n_frames, insert_frame_axis, validate=True, revision=None):
+def _get_h5_data_source(file_path, key, n_frames, validate=True, revision=None):
     file_paths = [file_path]
 
     generator = H5DataSource(
         file_paths=file_paths,
         key=key,
         n_frames=n_frames,
-        insert_frame_axis=insert_frame_axis,
         validate=validate,
         revision=revision,
     )
@@ -98,20 +97,18 @@ def _get_h5_data_source(file_path, key, n_frames, insert_frame_axis, validate=Tr
 
 
 @pytest.mark.parametrize(
-    "file_path, key, n_frames, insert_frame_axis",
+    "file_path, key, n_frames",
     [
-        ("dummy_hdf5", "data", 1, True),
-        ("dummy_hdf5", "data", 3, True),
-        ("dummy_hdf5", "data", 1, False),
-        ("dummy_hdf5", "data", 3, False),
-        ("camus_file", CAMUS_KEY, 1, True),
-        ("camus_file", CAMUS_KEY, 3, True),
-        ("camus_file", CAMUS_KEY, 1, False),
-        ("camus_file", CAMUS_KEY, 3, False),
-        ("camus_file", CAMUS_KEY, 15, False),
+        ("dummy_hdf5", "data", None),
+        ("dummy_hdf5", "data", 1),
+        ("dummy_hdf5", "data", 3),
+        ("camus_file", CAMUS_KEY, None),
+        ("camus_file", CAMUS_KEY, 1),
+        ("camus_file", CAMUS_KEY, 3),
+        ("camus_file", CAMUS_KEY, 15),
     ],
 )
-def test_h5_data_source(file_path, key, n_frames, insert_frame_axis, request):
+def test_h5_data_source(file_path, key, n_frames, request):
     """Test the H5DataSource class"""
 
     is_camus = file_path == "camus_file"
@@ -122,22 +119,61 @@ def test_h5_data_source(file_path, key, n_frames, insert_frame_axis, request):
         file_path,
         key,
         n_frames,
-        insert_frame_axis,
         validate=validate,
         revision=CAMUS_REVISION if is_camus else None,
     )
 
     batch_shape = data_source[0].shape
-    if insert_frame_axis:
+    if n_frames is None:
+        # No frame axis at all: the sample is a single frame in the file's own layout.
+        assert len(batch_shape) == 2, (
+            f"With n_frames=None the sample should be a bare frame, got shape {batch_shape}"
+        )
+    else:
         assert batch_shape[-1] == n_frames, (
             f"Something went wrong as the last dimension of the batch shape {batch_shape[-1]}"
             " is not equal to the number of frames {n_frames}"
         )
-    else:
-        assert (batch_shape[-1] / n_frames) == (batch_shape[-1] // n_frames), (
-            f"Something went wrong as the last dimension of the batch shape {batch_shape[-1]}"
-            " is not divisible by the number of frames {n_frames}"
+
+
+@pytest.fixture
+def spec_shaped_hdf5(tmp_path):
+    """A file with a spec-named data field and a spec-named field that has no frames."""
+    file_path = tmp_path / "spec_shaped_0_0.hdf5"
+    with h5py.File(file_path, "w") as f:
+        f.create_dataset("data/image/values", data=np.zeros((4, 8, 6), dtype=np.float32))
+        f.create_dataset("probe/probe_geometry", data=np.zeros((5, 3), dtype=np.float32))
+    return file_path
+
+
+def test_frame_axis_comes_from_spec(spec_shaped_hdf5):
+    """The frame axis is resolved from the spec, and fields without one still load."""
+    frames = H5DataSource(file_paths=[spec_shaped_hdf5], key="data/image/values", validate=False)
+    assert frames.source_frame_axis == 0
+    assert len(frames) == 4
+
+    # probe_geometry is (n_el, 3) in the spec: no frame axis, so one sample per file.
+    geometry = H5DataSource(
+        file_paths=[spec_shaped_hdf5], key="probe/probe_geometry", validate=False
+    )
+    assert geometry.source_frame_axis is None
+    assert len(geometry) == 1
+    assert geometry[0].shape == (5, 3)
+
+    with pytest.raises(ValueError, match="no frame axis"):
+        H5DataSource(
+            file_paths=[spec_shaped_hdf5],
+            key="probe/probe_geometry",
+            n_frames=2,
+            validate=False,
         )
+
+
+def test_frame_axis_unknown_key_falls_back_to_axis_zero(dummy_hdf5):
+    """A key outside the spec warns and assumes the usual leading frame axis."""
+    source = H5DataSource(file_paths=[dummy_hdf5], key="data", validate=False)
+    assert source.source_frame_axis == 0
+    assert len(source) == DUMMY_N_FRAMES
 
 
 def test_pad_incomplete_blocks(dummy_hdf5):
@@ -172,12 +208,14 @@ def test_pad_incomplete_blocks(dummy_hdf5):
 
 
 @pytest.mark.parametrize(
-    "directory, key, n_frames, insert_frame_axis, num_files, total_samples",
+    "directory, key, n_frames, num_files, total_samples",
     [
-        ("camus_dataset", CAMUS_KEY, 1, True, 6, 101),
-        ("fake_directory", "data", 1, True, 3, 9 * 3),
-        ("camus_dataset", CAMUS_KEY, 5, False, 6, 101),
-        ("fake_directory", "data", 5, False, 3, 9 * 3),
+        ("camus_dataset", CAMUS_KEY, None, 6, 101),
+        ("fake_directory", "data", None, 3, 9 * 3),
+        ("camus_dataset", CAMUS_KEY, 1, 6, 101),
+        ("fake_directory", "data", 1, 3, 9 * 3),
+        ("camus_dataset", CAMUS_KEY, 5, 6, 101),
+        ("fake_directory", "data", 5, 3, 9 * 3),
     ],
 )
 def test_dataloader(
@@ -185,7 +223,6 @@ def test_dataloader(
     directory,
     key,
     n_frames,
-    insert_frame_axis,
     num_files,
     total_samples,
     request,
@@ -212,16 +249,13 @@ def test_dataloader(
     with Dataset(directory, revision=revision) as dataset_test:
         file_lengths = [len(file[key]) for file in dataset_test]
 
-    expected_len_dataset = sum(
-        [length // n_frames if not insert_frame_axis else length for length in file_lengths]
-    )
+    expected_len_dataset = sum(length // (n_frames or 1) for length in file_lengths)
 
     dataset = Dataloader(
         directory,
         batch_size=1,
         key=key,
         n_frames=n_frames,
-        insert_frame_axis=insert_frame_axis,
         shuffle=True,
         seed=DEFAULT_TEST_SEED,
         image_range=image_range,
@@ -229,16 +263,16 @@ def test_dataloader(
     )
     batch_shape = next(iter(dataset)).shape
 
-    if insert_frame_axis:
+    if n_frames is None:
+        # The sample itself has no frame axis, but Dataloader restores a trailing
+        # channel dim on 2-D samples so batching produces uniform shapes.
+        assert batch_shape[-1] == 1, (
+            f"With n_frames=None a 2-D sample should batch as (batch, h, w, 1), got {batch_shape}"
+        )
+    else:
         assert batch_shape[-1] == n_frames, (
             f"Something went wrong as the last dimension of the batch shape {batch_shape[-1]}"
             " is not equal to the number of frames {n_frames}"
-        )
-    else:
-        assert (batch_shape[-2] / n_frames) == (batch_shape[-2] // n_frames), (
-            "Something went wrong as the second to last dimension of "
-            f"the batch shape {batch_shape[-2]} "
-            f"is not divisible by the number of frames {n_frames}"
         )
 
     real_len_dataset = len(dataset)
@@ -264,19 +298,18 @@ def test_dataloader(
 
 
 @pytest.mark.parametrize(
-    "directory, key, n_frames, insert_frame_axis, image_size, batch_size",
+    "directory, key, n_frames, image_size, batch_size",
     [
-        ("camus_dataset", CAMUS_KEY, 1, True, (20, 20), 2),
-        ("dummy_hdf5", "data", 1, True, (20, 20), 2),
-        ("camus_dataset", CAMUS_KEY, 5, False, (20, 20), 1),
-        ("dummy_hdf5", "data", 5, False, (20, 20), 1),
+        ("camus_dataset", CAMUS_KEY, 1, (20, 20), 2),
+        ("dummy_hdf5", "data", 1, (20, 20), 2),
+        ("camus_dataset", CAMUS_KEY, 5, (20, 20), 1),
+        ("dummy_hdf5", "data", 5, (20, 20), 1),
     ],
 )
 def test_h5_dataset_return_metadata(
     directory,
     key,
     n_frames,
-    insert_frame_axis,
     image_size,
     batch_size,
     request,
@@ -293,7 +326,6 @@ def test_h5_dataset_return_metadata(
         key=key,
         image_size=image_size,
         n_frames=n_frames,
-        insert_frame_axis=insert_frame_axis,
         shuffle=True,
         seed=DEFAULT_TEST_SEED,
         return_metadata=True,
@@ -405,17 +437,15 @@ def test_crop_or_pad():
 
 @pytest.mark.parametrize(
     (
-        "key, n_frames, insert_frame_axis, additional_axes_iter, "
-        "frame_axis, initial_frame_axis, frame_index_stride, "
+        "key, n_frames, additional_axes_iter, "
+        "frame_axis, frame_index_stride, "
         "resize_type, image_size, batch_size"
     ),
     [
         (
             "data",
             1,
-            True,
             (1, 3),
-            0,
             0,
             1,
             "resize",
@@ -424,11 +454,9 @@ def test_crop_or_pad():
         ),
         (
             "data",
-            3,
-            False,
+            None,
             (2, 3),
             -1,
-            0,
             2,
             "center_crop",
             (20, 20),
@@ -437,10 +465,8 @@ def test_crop_or_pad():
         (
             "data",
             5,
-            True,
             (2, 3),
             -1,
-            0,
             1,
             "random_crop",
             (20, 20),
@@ -452,10 +478,8 @@ def test_ndim_hdf5_dataset(
     ndim_hdf5_dataset_path,  # pytest fixture
     key,
     n_frames,
-    insert_frame_axis,
     additional_axes_iter,
     frame_axis,
-    initial_frame_axis,
     frame_index_stride,
     resize_type,
     image_size,
@@ -468,9 +492,7 @@ def test_ndim_hdf5_dataset(
         key=key,
         image_size=image_size,
         n_frames=n_frames,
-        insert_frame_axis=insert_frame_axis,
         frame_axis=frame_axis,
-        initial_frame_axis=initial_frame_axis,
         frame_index_stride=frame_index_stride,
         batch_size=batch_size,
         additional_axes_iter=additional_axes_iter,
@@ -885,15 +907,14 @@ def test_axis_selections_list_prefilters_disk_read(axis_selections_hdf5):
     source = H5DataSource(
         file_paths=[str(file_path)],
         key="data/raw_data",
-        n_frames=1,
-        insert_frame_axis=False,
+        n_frames=None,
         validate=False,
         axis_selections={1: selection},
     )
     assert len(source) == data.shape[0]
     sample = source[0]
-    # insert_frame_axis=False concatenates the single frame axis away, so the
-    # remaining shape is (selected_transmits, elems, samples, ch).
+    # n_frames=None loads a single frame without a frame axis, so the remaining
+    # shape is (selected_transmits, elems, samples, ch).
     assert sample.shape == (len(selection), 5, 6, 1)
     np.testing.assert_array_equal(sample, data[0, selection])
 
@@ -904,8 +925,7 @@ def test_axis_selections_slice(axis_selections_hdf5):
     source = H5DataSource(
         file_paths=[str(file_path)],
         key="data/raw_data",
-        n_frames=1,
-        insert_frame_axis=False,
+        n_frames=None,
         validate=False,
         axis_selections={1: slice(1, 6, 2)},
     )
@@ -920,8 +940,7 @@ def test_axis_selections_negative_axis(axis_selections_hdf5):
     source = H5DataSource(
         file_paths=[str(file_path)],
         key="data/raw_data",
-        n_frames=1,
-        insert_frame_axis=False,
+        n_frames=None,
         validate=False,
         axis_selections={-2: [0, 3]},
     )
@@ -938,8 +957,7 @@ def test_axis_selections_non_monotonic_raises(axis_selections_hdf5):
         H5DataSource(
             file_paths=[str(file_path)],
             key="data/raw_data",
-            n_frames=1,
-            insert_frame_axis=False,
+            n_frames=None,
             validate=False,
             axis_selections={1: [2, 0, 4]},
         )
@@ -952,22 +970,20 @@ def test_axis_selections_duplicate_raises(axis_selections_hdf5):
         H5DataSource(
             file_paths=[str(file_path)],
             key="data/raw_data",
-            n_frames=1,
-            insert_frame_axis=False,
+            n_frames=None,
             validate=False,
             axis_selections={1: [0, 2, 2, 4]},
         )
 
 
 def test_axis_selections_conflict_with_frame_axis_raises(axis_selections_hdf5):
-    """axis_selections must not target initial_frame_axis."""
+    """axis_selections must not target the frame axis."""
     file_path, _ = axis_selections_hdf5
-    with pytest.raises(ValueError, match="conflicts with initial_frame_axis"):
+    with pytest.raises(ValueError, match="conflicts with the frame axis"):
         H5DataSource(
             file_paths=[str(file_path)],
             key="data/raw_data",
-            n_frames=1,
-            insert_frame_axis=False,
+            n_frames=None,
             validate=False,
             axis_selections={0: [0, 1]},
         )
@@ -982,8 +998,7 @@ def test_axis_selections_via_dataloader(axis_selections_hdf5):
         key="data/raw_data",
         batch_size=None,
         shuffle=False,
-        n_frames=1,
-        insert_frame_axis=False,
+        n_frames=None,
         validate=False,
         axis_selections={1: selection},
     )
@@ -1345,19 +1360,3 @@ def test_return_metadata_read_once_per_file(metadata_dataset):
 
     assert len(source) == 2 * METADATA_N_FRAMES
     assert n_calls == 2, "metadata should be read once per file"
-
-
-def test_return_filename_is_deprecated(dummy_hdf5):
-    """``return_filename`` still works but warns and nests identity under 'file'."""
-    with pytest.deprecated_call(match="return_filename"):
-        loader = Dataloader(
-            dummy_hdf5,
-            key="data",
-            batch_size=1,
-            shuffle=False,
-            validate=False,
-            return_filename=True,
-        )
-    _, metadata = next(iter(loader))
-    loader.close()
-    assert set(metadata["file"]) == {"filename", "fullpath", "indices"}

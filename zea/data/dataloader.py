@@ -22,7 +22,6 @@ Example:
 
 import re
 import threading
-import warnings
 from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from itertools import product
@@ -48,6 +47,7 @@ from zea.data.metadata import (
     read_metadata,
     slice_metadata,
 )
+from zea.data.spec import dim_names_for_key
 from zea.func.tensor import translate
 from zea.utils import canonicalize_axis, map_negative_indices
 
@@ -73,7 +73,7 @@ def _normalize_axis_selections(
         axis = canonicalize_axis(int(raw_axis), num_dims)
         if axis in reserved_axes:
             raise ValueError(
-                f"axis_selections axis {raw_axis} conflicts with initial_frame_axis "
+                f"axis_selections axis {raw_axis} conflicts with the frame axis "
                 "or additional_axes_iter"
             )
         if isinstance(sel, slice):
@@ -96,10 +96,10 @@ def _normalize_axis_selections(
 def generate_h5_indices(
     file_paths: List[str],
     file_shapes: list,
-    n_frames: int,
+    n_frames: int | None,
     frame_index_stride: int,
     key: str = "data/image",
-    initial_frame_axis: int = 0,
+    source_frame_axis: int | None = 0,
     additional_axes_iter: List[int] | None = None,
     sort_files: bool = True,
     overlapping_blocks: bool = False,
@@ -116,10 +116,13 @@ def generate_h5_indices(
     Args:
         file_paths (list): List of file paths.
         file_shapes (list): List of file shapes.
-        n_frames (int): Number of frames to load from each hdf5 file.
+        n_frames (int, optional): Number of frames per sample. ``None`` selects single
+            frames with an integer index, so the frame axis is dropped from the result.
         frame_index_stride (int): Interval between frames to load.
         key (str, optional): Key of hdf5 dataset to grab data from. Defaults to "data/image".
-        initial_frame_axis (int, optional): Axis to iterate over. Defaults to 0.
+        source_frame_axis (int, optional): Axis of the file's arrays that stores frames, or
+            ``None`` when the data has no frame axis, in which case every file yields a
+            single sample. Defaults to 0.
         additional_axes_iter (list, optional): Additional axes to iterate over in the dataset.
             Defaults to None.
         sort_files (bool, optional): Sort files by number. Defaults to True.
@@ -148,15 +151,18 @@ def generate_h5_indices(
                 (
                     "/folder/path_to_file.hdf5",
                     "data/image",
-                    (slice(0, 1, 1), slice(None, 256, None), slice(None, 256, None)),
+                    (slice(0, 2, 1), slice(None, 256, None), slice(None, 256, None)),
                 ),
                 (
                     "/folder/path_to_file.hdf5",
                     "data/image",
-                    (slice(1, 2, 1), slice(None, 256, None), slice(None, 256, None)),
+                    (slice(2, 4, 1), slice(None, 256, None), slice(None, 256, None)),
                 ),
                 ...,
             ]
+
+        With ``n_frames=None`` the frame entry is a plain int instead of a slice, so
+        the frame axis never enters the loaded array.
     """
     if limit_n_frames is None:
         frame_limit: float = np.inf
@@ -167,9 +173,8 @@ def generate_h5_indices(
     assert len(file_paths) == len(file_shapes), "file_paths and file_shapes must have same length"
 
     if additional_axes_iter:
-        # cannot contain initial_frame_axis
-        assert initial_frame_axis not in additional_axes_iter, (
-            "initial_frame_axis cannot be in additional_axes_iter. "
+        assert source_frame_axis not in additional_axes_iter, (
+            f"The frame axis (axis {source_frame_axis}) cannot be in additional_axes_iter. "
             "We are already iterating over that axis."
         )
     else:
@@ -188,7 +193,7 @@ def generate_h5_indices(
             log.warning("Could not sort file_paths by number.")
 
     # block size with stride included
-    block_size = n_frames * frame_index_stride
+    block_size = (n_frames or 1) * frame_index_stride
 
     if not overlapping_blocks:
         block_step_size = block_size
@@ -196,37 +201,45 @@ def generate_h5_indices(
         # now blocks overlap by n_frames - 1
         block_step_size = 1
 
-    def axis_indices_files():
-        # For every file
-        for shape in file_shapes:
-            total_frames_in_file = shape[initial_frame_axis]
-            effective_end = int(min(total_frames_in_file, offset_n_frames + frame_limit))
-            indices = [
-                slice(i, i + block_size, frame_index_stride)
-                for i in range(offset_n_frames, effective_end - block_size + 1, block_step_size)
-            ]
-            if not indices and pad_incomplete_blocks and effective_end > offset_n_frames:
-                indices = [slice(offset_n_frames, effective_end, frame_index_stride)]
-            yield [indices]
+    def frame_selections(shape):
+        """Frame selections for one file, empty when it cannot fill a single block."""
+        total_frames_in_file = shape[source_frame_axis]
+        effective_end = int(min(total_frames_in_file, offset_n_frames + frame_limit))
+        # An int rather than a slice when n_frames is None: h5py then drops the axis
+        # on read, so single-frame samples never grow a length-1 frame dimension.
+        selections = [
+            i if n_frames is None else slice(i, i + block_size, frame_index_stride)
+            for i in range(offset_n_frames, effective_end - block_size + 1, block_step_size)
+        ]
+        if not selections and pad_incomplete_blocks and effective_end > offset_n_frames:
+            selections = [slice(offset_n_frames, effective_end, frame_index_stride)]
+        return selections
+
+    # The frame axis leads the product when there is one; without it (a field the spec
+    # gives no n_frames axis) every file contributes exactly one sample.
+    iter_axes = ([] if source_frame_axis is None else [source_frame_axis]) + list(
+        additional_axes_iter
+    )
 
     indices = []
     skipped_files = 0
-    for file, shape, axis_indices in zip(file_paths, file_shapes, list(axis_indices_files())):
-        # remove all the files that have empty list at initial_frame_axis
-        # this can happen if the file is too small to fit a block
-        if not axis_indices[0]:  # initial_frame_axis is the first entry in axis_indices
-            skipped_files += 1
-            continue
+    for file, shape in zip(file_paths, file_shapes):
+        axis_indices = []
+        if source_frame_axis is not None:
+            selections = frame_selections(shape)
+            # drop files that are too small to fit a single block
+            if not selections:
+                skipped_files += 1
+                continue
+            axis_indices.append(selections)
 
         if additional_axes_iter:
             axis_indices += [list(range(shape[axis])) for axis in additional_axes_iter]
 
-        axis_indices = product(*axis_indices)
-
-        for axis_index in axis_indices:
+        for axis_index in product(*axis_indices):
             full_indices = [slice(size) for size in shape]
-            for i, axis in enumerate([initial_frame_axis] + list(additional_axes_iter)):
-                full_indices[axis] = axis_index[i]
+            for axis, selection in zip(iter_axes, axis_index):
+                full_indices[axis] = selection
             if axis_selections:
                 for axis, sel in axis_selections.items():
                     full_indices[axis] = sel
@@ -238,31 +251,32 @@ def generate_h5_indices(
             f"which is about {skipped_files / len(file_paths) * 100:.2f}% of the "
             f"dataset. This can be fine if you expect set `n_frames` and "
             "`frame_index_stride` to be high. Minimum frames in a file needs to be at "
-            f"least n_frames * frame_index_stride = {n_frames * frame_index_stride}. "
+            f"least n_frames * frame_index_stride = {block_size}. "
         )
 
     return indices
 
 
-def _resolve_return_metadata(return_metadata, return_filename) -> tuple[str, ...] | None:
-    """Reconcile ``return_metadata`` with the deprecated ``return_filename`` flag.
+def _resolve_source_frame_axis(key: str, num_dims: int) -> int | None:
+    """Locate the axis that stores frames for ``key``, per the zea file spec.
 
-    Returns ``None`` when samples are plain arrays, otherwise a (possibly empty)
-    tuple of dotted metadata paths to load alongside the file identity.
+    Returns the axis index, or ``None`` when the spec names every axis of the field
+    and none of them is ``n_frames`` -- an array that simply has no frames, such as
+    ``probe/probe_geometry``.  Data the spec cannot speak for (custom keys, a
+    wildcard shape) falls back to axis 0, the convention everywhere in the spec.
     """
-    if return_filename is not None:
-        warnings.warn(
-            "`return_filename` is deprecated and will be removed in a future release; "
-            "use `return_metadata` instead. `return_metadata=True` returns the same "
-            "file identity under a 'file' key, and a list of dotted paths (e.g. "
-            "`return_metadata=['scan.sampling_frequency']`) additionally loads metadata "
-            "from the file.",
-            DeprecationWarning,
-            stacklevel=3,
+    if num_dims == 0:
+        return 0
+    dim_names = dim_names_for_key(key, num_dims)
+    if dim_names is None:
+        log.warning(
+            f"Key '{key}' with {num_dims} dimensions does not match any field of the zea "
+            "file spec, so the axis that stores frames is unknown. Assuming axis 0."
         )
-        if return_metadata is None:
-            return_metadata = return_filename
-    return normalize_metadata_paths(return_metadata)
+        return 0
+    if "n_frames" in dim_names:
+        return dim_names.index("n_frames")
+    return None
 
 
 class H5DataSource:
@@ -279,20 +293,18 @@ class H5DataSource:
     Args:
         file_paths: Path(s) to HDF5 directory(ies) or file(s).
         key: HDF5 dataset key, e.g. ``"data/image"``.
-        n_frames: Number of consecutive frames per sample.
+        n_frames: Number of consecutive frames per sample, or ``None`` (default) for
+            single frames without a frame axis. See :class:`Dataloader`.
         frame_index_stride: Stride between frames.
-        frame_axis: Axis along which frames are stacked in the output. Defaults to
+        frame_axis: Axis the frame block is placed on in the output. Defaults to
             ``-1`` so frames land in the channel position for image data; see
-            :class:`Dataloader`.
-        insert_frame_axis: Whether to insert a new axis for frames.
-        initial_frame_axis: Source axis that stores frames in the file.
+            :class:`Dataloader`. Unused when ``n_frames is None``.
         additional_axes_iter: Extra axes to iterate over.
         sort_files: Sort files numerically.
         overlapping_blocks: Allow overlapping frame blocks.
         limit_n_examples: Cap the number of examples (dataset length).
         limit_n_frames: Cap frames loaded per file.
         return_metadata: Return a ``(sample, metadata)`` tuple. See :class:`Dataloader`.
-        return_filename: Deprecated alias for ``return_metadata``.
         cache: Cache loaded samples to RAM.
         validate: Validate dataset against the zea format.
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
@@ -304,11 +316,9 @@ class H5DataSource:
         self,
         file_paths: List[str] | str,
         key: str = "data/image",
-        n_frames: int = 1,
+        n_frames: int | None = None,
         frame_index_stride: int = 1,
         frame_axis: int = -1,
-        insert_frame_axis: bool = True,
-        initial_frame_axis: int = 0,
         additional_axes_iter: tuple | None = None,
         sort_files: bool = True,
         overlapping_blocks: bool = False,
@@ -316,7 +326,6 @@ class H5DataSource:
         limit_n_frames: int | None = None,
         offset_n_frames: int = 0,
         return_metadata: bool | str | Sequence[str] | None = None,
-        return_filename: bool | None = None,
         cache: bool = False,
         validate: bool = False,
         revision: str | None = None,
@@ -325,10 +334,8 @@ class H5DataSource:
         file_filter: "Callable[[File], bool] | dict | None" = None,
         **kwargs,
     ):
-        self.return_metadata = _resolve_return_metadata(return_metadata, return_filename)
+        self.return_metadata = normalize_metadata_paths(return_metadata)
         self.returns_metadata = self.return_metadata is not None
-        # Deprecated alias, kept so existing code reading the attribute keeps working.
-        self.return_filename = self.returns_metadata
         self.cache = cache
         self._data_cache = {}
         # Metadata is constant per file, so cache it per path rather than per sample.
@@ -337,15 +344,20 @@ class H5DataSource:
         self.pad_incomplete_blocks = pad_incomplete_blocks
 
         self.key = key
-        self.n_frames = int(n_frames)
+        self.n_frames = None if n_frames is None else int(n_frames)
         self.frame_index_stride = int(frame_index_stride)
         self.frame_axis = int(frame_axis)
-        self.insert_frame_axis = insert_frame_axis
 
         assert self.frame_index_stride > 0, (
             f"`frame_index_stride` must be > 0, got {self.frame_index_stride}"
         )
-        assert self.n_frames > 0, f"`n_frames` must be > 0, got {self.n_frames}"
+        assert self.n_frames is None or self.n_frames > 0, (
+            f"`n_frames` must be > 0 or None, got {self.n_frames}"
+        )
+        assert not (pad_incomplete_blocks and self.n_frames is None), (
+            "`pad_incomplete_blocks` pads samples up to `n_frames`, so it needs an "
+            "`n_frames` to pad to. Set n_frames, or drop pad_incomplete_blocks."
+        )
 
         # Discover files and shapes (reuses Dataset machinery)
         lazy = kwargs.pop("lazy", False)
@@ -368,19 +380,35 @@ class H5DataSource:
         _dataset.close()
 
         num_dims = len(self.file_shapes[0]) if self.file_shapes else 0
-        self.initial_frame_axis = canonicalize_axis(int(initial_frame_axis), num_dims)
+        self.source_frame_axis = _resolve_source_frame_axis(self.key, num_dims)
         self.additional_axes_iter = map_negative_indices(list(additional_axes_iter or []), num_dims)
 
-        self._file_n_frames = {
-            path: shape[self.initial_frame_axis]
-            for path, shape in zip(self.file_paths, self.file_shapes)
-        }
+        if self.source_frame_axis is None and self.n_frames is not None:
+            raise ValueError(
+                f"'{key}' has no frame axis in the zea file spec (its dimensions are "
+                f"{dim_names_for_key(key, num_dims)}), so frames cannot be grouped into "
+                f"blocks of n_frames={self.n_frames}. Use n_frames=None to load one "
+                "sample per file."
+            )
+
+        self._file_n_frames = (
+            {
+                path: shape[self.source_frame_axis]
+                for path, shape in zip(self.file_paths, self.file_shapes)
+            }
+            if self.source_frame_axis is not None
+            else {}
+        )
         self._slice_metadata_per_frame = bool(
-            self.return_metadata and has_per_frame_paths(self.return_metadata)
+            self.return_metadata
+            and has_per_frame_paths(self.return_metadata)
+            and self.source_frame_axis is not None
         )
 
         # Validate and normalize axis_selections
-        reserved_axes = {self.initial_frame_axis} | set(self.additional_axes_iter)
+        reserved_axes = set(self.additional_axes_iter)
+        if self.source_frame_axis is not None:
+            reserved_axes.add(self.source_frame_axis)
         self.normalized_axis_selections = (
             _normalize_axis_selections(axis_selections, num_dims, reserved_axes)
             if axis_selections and num_dims > 0
@@ -394,7 +422,7 @@ class H5DataSource:
             n_frames=self.n_frames,
             frame_index_stride=self.frame_index_stride,
             key=self.key,
-            initial_frame_axis=self.initial_frame_axis,
+            source_frame_axis=self.source_frame_axis,
             additional_axes_iter=self.additional_axes_iter,
             sort_files=sort_files,
             overlapping_blocks=overlapping_blocks,
@@ -437,20 +465,23 @@ class H5DataSource:
             file = file_handle_cache.get_file(file_name)
             images = file.dataset(key)[indices]
 
-        if self.insert_frame_axis:
-            initial = self.initial_frame_axis
+        # With n_frames=None the read used an int index, so there is no frame axis to
+        # place and nothing to pad -- the sample already has the file's own layout.
+        if self.n_frames is not None:
+            # __init__ rejects n_frames without a frame axis, so this is never None here.
+            assert self.source_frame_axis is not None
+            source = self.source_frame_axis
             if self.additional_axes_iter:
-                initial -= sum(ax < self.initial_frame_axis for ax in self.additional_axes_iter)
-            images = np.moveaxis(images, initial, self.frame_axis)
-        else:
-            images = np.concatenate(images, axis=self.frame_axis)
+                # Axes iterated with an int index are gone from the loaded array.
+                source -= sum(ax < self.source_frame_axis for ax in self.additional_axes_iter)
+            images = np.moveaxis(images, source, self.frame_axis)
 
-        if self.pad_incomplete_blocks:
-            n_loaded = images.shape[self.frame_axis]
-            if n_loaded < self.n_frames:
-                pad_width = [(0, 0)] * images.ndim
-                pad_width[self.frame_axis] = (0, self.n_frames - n_loaded)
-                images = np.pad(images, pad_width)
+            if self.pad_incomplete_blocks:
+                n_loaded = images.shape[self.frame_axis]
+                if n_loaded < self.n_frames:
+                    pad_width = [(0, 0)] * images.ndim
+                    pad_width[self.frame_axis] = (0, self.n_frames - n_loaded)
+                    images = np.pad(images, pad_width)
 
         if self.returns_metadata:
             result = (images, self._build_metadata(file, file_name, indices))
@@ -473,9 +504,11 @@ class H5DataSource:
         if self.return_metadata:
             metadata = self._get_file_metadata(file, file_name)
             if self._slice_metadata_per_frame:
+                # Only set when the key has a frame axis, see __init__.
+                assert self.source_frame_axis is not None
                 metadata = slice_metadata(
                     metadata,
-                    indices[self.initial_frame_axis],
+                    indices[self.source_frame_axis],
                     self._file_n_frames.get(file_name),
                 )
             else:
@@ -560,8 +593,15 @@ class Dataloader:
         key: HDF5 dataset key. Default is ``"data/image"``.
         batch_size: Batch size. Set to ``None`` to disable batching.
             Default is ``16``.
-        n_frames: Number of consecutive frames per sample. Default is ``1``.
-            When ``n_frames > 1``, frames are grouped into blocks.
+        n_frames: Number of consecutive frames per sample, placed on ``frame_axis``.
+            Default is ``None``, which loads single frames *without* a frame axis, so a
+            sample keeps the file's own layout for one frame. Set an int to group
+            consecutive frames into blocks -- including ``n_frames=1``, which gives a
+            length-1 frame axis. Frames are read from whichever axis the zea file spec
+            names ``n_frames`` for ``key``; a field the spec gives no such axis is only
+            loadable with ``n_frames=None``, one sample per file. Note that a 2-D sample
+            still picks up a trailing channel axis on its way through the pipeline, so
+            for plain images ``n_frames=None`` and ``n_frames=1`` batch identically.
         shuffle: Shuffle dataset each epoch. Default is ``True``.
         return_metadata: Return a ``(sample, metadata)`` tuple instead of a bare
             sample. ``False`` (default) returns arrays only. ``True`` returns just
@@ -589,10 +629,6 @@ class Dataloader:
             supply the same structure and shapes; use ``batch_size=None`` for
             metadata that varies in shape between files. Per-frame metadata is not
             zero-padded along with the images when ``pad_incomplete_blocks=True``.
-        return_filename: Deprecated. Use ``return_metadata`` instead.
-            ``return_filename=True`` behaves like ``return_metadata=True``, except
-            that the file identity used to be returned at the top level and is now
-            under the ``"file"`` key.
         seed: Random seed used for dataloader (e.g. shuffling). Default is ``None``.
             If ``None`` a random seed is generated.
         limit_n_examples: Cap the total number of examples the loader yields, across
@@ -636,23 +672,20 @@ class Dataloader:
         cache: Cache loaded samples in RAM. Default is ``False``.
             Note that with ``overlapping_blocks=True``, the same frame can be part of multiple
             samples, so caching will consume more memory.
-        additional_axes_iter: Additional axes to iterate over in addition to
-            ``initial_frame_axis``. Default is ``None``.
+        additional_axes_iter: Additional axes to iterate over, on top of the frame axis.
+            Each becomes an integer index, so those axes are dropped from the sample.
+            Default is ``None``.
         sort_files: Sort files numerically before indexing. Default is ``True``.
         overlapping_blocks: If ``True``, frame blocks overlap by ``n_frames - 1``.
-            Has no effect when ``n_frames == 1``. Default is ``False``.
+            Has no effect unless ``n_frames > 1``. Default is ``False``.
         pad_incomplete_blocks: If ``True``, keep files shorter than a full block and zeropad
-            their samples up to ``n_frames``. Default is ``False``.
+            their samples up to ``n_frames``. Requires ``n_frames``. Default is ``False``.
         augmentation: Callable applied to each batch after normalization.
             Default is ``None``.
-        initial_frame_axis: Axis in file data that represents frames.
-            Default is ``0``.
-        insert_frame_axis: If ``True``, keep per-frame samples and move/insert
-            the frame dimension at ``frame_axis``. If ``False``, loaded frames
-            are concatenated along ``frame_axis``. Default is ``True``.
         frame_index_stride: Step between selected frames in a block.
             Default is ``1``.
-        frame_axis: Axis along which frames are stacked/placed in output.
+        frame_axis: Axis the frame block is placed on in the output. Only applies when
+            ``n_frames`` is set; with ``n_frames=None`` there is no frame axis to place.
             Default is ``-1``, which puts frames in the trailing, channel-like
             position: an image batch comes out as ``(batch, height, width, n_frames)``,
             the channels-last layout ``Resizer`` and Keras expect. That is why
@@ -663,8 +696,7 @@ class Dataloader:
             For raw channel data there is no channel axis to double as, and the
             trailing frame axis scrambles the ``(n_tx, n_ax, n_el, n_ch)`` layout the
             processing pipeline wants. Set ``frame_axis=0`` there, so blocks keep the
-            file's own ``(n_frames, n_tx, n_ax, n_el, n_ch)`` order (or drop the dummy
-            axis with ``sample[..., 0]`` when ``n_frames=1``).
+            file's own ``(n_frames, n_tx, n_ax, n_el, n_ch)`` order.
         validate: Validate discovered files against the zea format.
             Default is ``False``.
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
@@ -803,10 +835,9 @@ class Dataloader:
         file_paths: List[str] | str,
         key: str = "data/image",
         batch_size: int | None = 16,
-        n_frames: int = 1,
+        n_frames: int | None = None,
         shuffle: bool = True,
         return_metadata: bool | str | Sequence[str] | None = None,
-        return_filename: bool | None = None,
         seed: int | None = None,
         limit_n_examples: int | None = None,
         limit_n_frames: int | None = None,
@@ -828,8 +859,6 @@ class Dataloader:
         overlapping_blocks: bool = False,
         augmentation: Callable | None = None,
         pad_incomplete_blocks: bool = False,
-        initial_frame_axis: int = 0,
-        insert_frame_axis: bool = True,
         frame_index_stride: int = 1,
         frame_axis: int = -1,
         validate: bool = False,
@@ -858,10 +887,8 @@ class Dataloader:
 
         # ── Store config ──────────────────────────────────────────────
         self.batch_size = batch_size
-        self.return_metadata = _resolve_return_metadata(return_metadata, return_filename)
+        self.return_metadata = normalize_metadata_paths(return_metadata)
         self.returns_metadata = self.return_metadata is not None
-        # Deprecated alias, kept so existing code reading the attribute keeps working.
-        self.return_filename = self.returns_metadata
         self.num_threads = num_threads
         self.prefetch_buffer_size = prefetch_buffer_size
         self.prefetch = prefetch
@@ -881,8 +908,6 @@ class Dataloader:
             n_frames=n_frames,
             frame_index_stride=frame_index_stride,
             frame_axis=frame_axis,
-            insert_frame_axis=insert_frame_axis,
-            initial_frame_axis=initial_frame_axis,
             additional_axes_iter=additional_axes_iter,
             sort_files=sort_files,
             overlapping_blocks=overlapping_blocks,

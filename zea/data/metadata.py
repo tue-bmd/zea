@@ -36,16 +36,9 @@ import numpy as np
 
 from zea.data.datasets import _resolve_dotted_path
 from zea.data.file import File
-from zea.data.spec import DataSpec, FileSpec, ScanSpec, Spec
+from zea.data.spec import ROOT_SPECS, FileSpec, Spec
 
 __all__ = ["has_per_frame_paths", "normalize_metadata_paths", "read_metadata", "slice_metadata"]
-
-#: Top-level roots of a dotted metadata path. ``FileSpec.SCHEMA`` covers
-#: ``metadata`` / ``metrics`` / ``probe`` / ``track_schedule`` / ``us_machine`` /
-#: ``description`` / ``acquisition_time``; ``data`` and ``scan`` are the
-#: single-track shorthands that :meth:`File.__getitem__` remaps onto
-#: ``tracks/track_0/``.
-_ROOT_SPECS: dict[str, type[Spec]] = {"data": DataSpec, "scan": ScanSpec}
 
 
 def _iter_shape_alternatives(shape) -> tuple[tuple, ...]:
@@ -90,7 +83,7 @@ def _collect_per_frame_paths() -> dict[str, tuple[tuple, ...]]:
                 out[path] = alternatives
 
     walk(FileSpec, "", frozenset())
-    for root, spec_cls in _ROOT_SPECS.items():
+    for root, spec_cls in ROOT_SPECS.items():
         walk(spec_cls, f"{root}.", frozenset())
     return out
 

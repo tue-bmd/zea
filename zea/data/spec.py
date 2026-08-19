@@ -1,5 +1,6 @@
 import math
 import os
+import re
 import tempfile
 from collections import defaultdict
 from collections.abc import Mapping
@@ -2892,3 +2893,80 @@ class FileSpec(Spec):
                     )
                     group[element.name].attrs["description"] = element.description
                     group[element.name].attrs["unit"] = element.unit
+
+
+#: Roots of a path into a zea file that are not fields of :class:`FileSpec` itself:
+#: ``data`` and ``scan`` are the single-track shorthands that
+#: :meth:`zea.File.__getitem__` remaps onto ``tracks/track_0/``.
+ROOT_SPECS: dict[str, type[Spec]] = {"data": DataSpec, "scan": ScanSpec}
+
+_TRACK_RE = re.compile(r"track_\d+")
+
+
+def _walk_to_schema_entry(parts: Sequence[str]) -> dict | None:
+    """Follow ``parts`` down the spec tree, returning the SCHEMA entry it lands on."""
+    spec_cls: type[Spec] | None = FileSpec
+    entry: dict | None = None
+    if parts and parts[0] in ROOT_SPECS:
+        spec_cls, parts = ROOT_SPECS[parts[0]], parts[1:]
+    for part in parts:
+        if spec_cls is None:
+            return None  # a leaf was reached with path segments left over
+        entry = getattr(spec_cls, "SCHEMA", {}).get(part)
+        if entry is None:
+            return None
+        spec_cls = entry.get("spec")
+    if spec_cls is not None:
+        # Landed on a group (``data/image``); the array itself lives in ``values``.
+        entry = getattr(spec_cls, "SCHEMA", {}).get("values")
+    return entry
+
+
+def dim_names_for_key(key: str, ndim: int) -> tuple[str | None, ...] | None:
+    """Resolve a path into a zea file to one dimension name per axis of its array.
+
+    Lets a reader ask *what does this axis mean* — most usefully, which axis (if
+    any) holds frames — without opening a file.  The path is the same one
+    :meth:`zea.File.__getitem__` takes: ``"data/raw_data"``,
+    ``"data/image/values"``, or the group ``"data/image"``, which resolves to the
+    group's ``values`` field.  Dots and slashes are interchangeable and a
+    ``tracks/track_N/`` prefix is stripped.
+
+    Args:
+        key: Path to a data array within the file.
+        ndim: Rank of the array actually stored there, used to pick between the
+            alternative shapes a field may declare (``Image.values`` is 2-D or 3-D
+            plus frames, say).
+
+    Returns:
+        One name per axis, ``None`` for axes the spec gives no name (a literal
+        size, such as the trailing ``3`` of ``coordinates``).  ``None`` instead of
+        a tuple when the spec cannot say: the path is not part of the spec, no
+        declared shape has this rank, or the matching shape uses a ``"..."``
+        wildcard, which leaves the meaning of the absorbed axes unknown.
+
+    Example:
+        .. doctest::
+
+            >>> from zea.data.spec import dim_names_for_key
+            >>> dim_names_for_key("data/raw_data", 5)
+            ('n_frames', 'n_tx', 'n_ax', 'n_el', 'n_ch')
+            >>> dim_names_for_key("data/image", 3)
+            ('n_frames', 'z', 'x')
+            >>> dim_names_for_key("probe/probe_geometry", 2)
+            ('n_el', None)
+            >>> dim_names_for_key("custom/my_array", 3) is None
+            True
+    """
+    parts = [part for part in key.replace(".", "/").split("/") if part]
+    if len(parts) >= 2 and parts[0] == "tracks" and _TRACK_RE.fullmatch(parts[1]):
+        parts = parts[2:]
+    entry = _walk_to_schema_entry(parts)
+    if entry is None:
+        return None
+    for alternative in Spec._expected_shapes(entry.get("shape")):
+        if "..." in alternative:
+            continue  # the wildcard absorbs an unknown number of unnamed axes
+        if len(alternative) == ndim:
+            return tuple(dim if isinstance(dim, str) else None for dim in alternative)
+    return None
