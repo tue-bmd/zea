@@ -23,7 +23,7 @@ from zea.tools.selection_tool import (  # noqa: E402
     ask_for_selection_tool,
     ask_for_title,
     ask_save_animation_with_fps,
-    collect_files_from_dialog,
+    ask_for_files,
     crop_array,
     equalize_polygons,
     extract_polygon_from_mask,
@@ -408,7 +408,7 @@ def test_load_input_files_images(image_paths):
     assert len(inputs.images) == 2
     assert inputs.file_names == [path.name for path in image_paths]
     assert all(image.shape == (24, 32) for image in inputs.images)
-    assert inputs.coordinates is None
+    assert inputs.source is None
 
 
 def test_load_input_files_video(gif_path):
@@ -436,40 +436,34 @@ def test_load_input_files_rejects_empty():
         load_input_files([])
 
 
-def test_collect_files_from_dialog_stops_on_cancel(monkeypatch, image_paths):
-    """The dialog loop keeps collecting images until the user cancels it."""
-    replies = [*image_paths, ValueError("No file selected.")]
-
-    def fake_dialog(*_args, **_kwargs):
-        reply = replies.pop(0)
-        if isinstance(reply, Exception):
-            raise reply
-        return reply
-
-    monkeypatch.setattr(selection_tool, "filename_from_window_dialog", fake_dialog)
-    assert collect_files_from_dialog() == image_paths
+def test_ask_for_files_stops_on_an_empty_line(monkeypatch, image_paths):
+    """Paths are typed one per line; an empty line ends the loop."""
+    _answers(monkeypatch, *[str(path) for path in image_paths], "")
+    assert ask_for_files() == image_paths
 
 
-def test_collect_files_from_dialog_stops_after_a_video(monkeypatch, gif_path):
-    """Selecting a video ends the loop right away; no second dialog is opened."""
-    calls = []
-
-    def fake_dialog(*_args, **_kwargs):
-        calls.append(1)
-        return gif_path
-
-    monkeypatch.setattr(selection_tool, "filename_from_window_dialog", fake_dialog)
-    assert collect_files_from_dialog() == [gif_path]
-    assert len(calls) == 1
+def test_ask_for_files_stops_after_a_sequence(monkeypatch, gif_path):
+    """A video ends the loop right away; no second path is asked for."""
+    _answers(monkeypatch, str(gif_path))
+    assert ask_for_files() == [gif_path]
 
 
-def test_collect_files_from_dialog_raises_without_selection(monkeypatch):
-    def fake_dialog(*_args, **_kwargs):
-        raise ValueError("No file selected.")
+def test_ask_for_files_rejects_missing_paths(monkeypatch, image_paths):
+    """A typo is reported and re-asked, not silently accepted."""
+    _answers(monkeypatch, "does/not/exist.png", str(image_paths[0]), "")
+    assert ask_for_files() == [image_paths[0]]
 
-    monkeypatch.setattr(selection_tool, "filename_from_window_dialog", fake_dialog)
+
+def test_ask_for_files_strips_quotes(monkeypatch, gif_path):
+    """Dragging a file into a terminal often quotes the path."""
+    _answers(monkeypatch, f'"{gif_path}"')
+    assert ask_for_files() == [gif_path]
+
+
+def test_ask_for_files_raises_without_selection(monkeypatch):
+    _answers(monkeypatch, "")
     with pytest.raises(ValueError, match="No files selected"):
-        collect_files_from_dialog()
+        ask_for_files()
 
 
 # ── interactive selector ──────────────────────────────────────────────────────
@@ -597,8 +591,10 @@ def test_save_masks_writes_a_readable_zea_file(tmp_path):
         assert list(file.data.segmentation.labels[:]) == ["lv"]
 
 
-def test_save_masks_keeps_coordinates(tmp_path):
+def test_save_masks_carries_source_metadata_over(tmp_path):
+    """Coordinates, frame timing and file-level metadata come along; bulk data does not."""
     from zea import File
+    from zea.tools.selection_tool import SourceMetadata
 
     images = np.zeros((2, 4, 6), dtype=np.uint8)
     masks = np.zeros((2, 4, 6), dtype=bool)
@@ -606,13 +602,26 @@ def test_save_masks_keeps_coordinates(tmp_path):
     coordinates = np.zeros((4, 6, 3), dtype=np.float32)
     coordinates[..., 0] = np.arange(6, dtype=np.float32)
 
-    path = save_masks(
-        masks, tmp_path / "annotations", images=images, coordinates=coordinates, label="roi"
+    source = SourceMetadata(
+        file_fields={"probe": {"name": "GE M5S", "type": "phased"}, "us_machine": "GE Vivid"},
+        map_fields={
+            "coordinates": coordinates,
+            "timestamps": np.array([0.0, 0.02], dtype=np.float32),
+            "start_time_offset": np.float32(0.0),
+        },
     )
 
+    path = save_masks(masks, tmp_path / "annotations", images=images, label="roi", source=source)
+
     with File(path) as file:
+        # the pixel grid and the frame timing describe both maps
         np.testing.assert_allclose(file.data.image.coordinates[:], coordinates)
         np.testing.assert_allclose(file.data.segmentation.coordinates[:], coordinates)
+        np.testing.assert_allclose(file.data.image.timestamps[:], [0.0, 0.02])
+        np.testing.assert_allclose(file.data.segmentation.timestamps[:], [0.0, 0.02])
+        # file-level metadata survives too
+        assert file.probe.name == "GE M5S"
+        assert file.us_machine == "GE Vivid"
 
 
 def test_save_masks_requires_matching_shapes(tmp_path):
@@ -743,11 +752,9 @@ def test_run_selection_tool_prompts_for_missing_options(monkeypatch, fake_select
     assert (gif_path.parent / f"{gif_path.stem}_apex_annotations.gif").exists()
 
 
-def test_run_selection_tool_uses_the_file_dialog_without_files(
-    monkeypatch, fake_selector, gif_path
-):
+def test_run_selection_tool_asks_for_files_when_given_none(monkeypatch, fake_selector, gif_path):
     fake_selector([((4, 4), (12, 12))])
-    monkeypatch.setattr(selection_tool, "filename_from_window_dialog", lambda *_a, **_k: gif_path)
+    _answers(monkeypatch, str(gif_path))
 
     masks = run_selection_tool(
         selector="rectangle",
@@ -797,6 +804,10 @@ def zea_path(tmp_path):
     File.create(
         path=path,
         data={"image": {"values": images, "coordinates": coordinates}},
+        probe={"name": "GE M5S", "type": "phased"},
+        us_machine="GE Vivid",
+        metadata={"subject": {"id": "patient0401", "type": "human"}},
+        description="A source recording.",
         ignore_warnings=True,
     )
     return path
@@ -808,8 +819,10 @@ def test_load_input_files_zea(zea_path):
     assert inputs.is_sequence is True
     assert len(inputs.images) == 6
     assert all(image.shape == (20, 24) for image in inputs.images)
-    assert inputs.coordinates is not None
-    assert inputs.coordinates.shape == (20, 24, 3)
+    assert inputs.source is not None
+    assert inputs.source.map_fields["coordinates"].shape == (20, 24, 3)
+    # metadata from the source file is picked up for the annotation file
+    assert inputs.source.file_fields["probe"]["name"] == "GE M5S"
 
 
 def test_load_input_files_zea_without_image_data(tmp_path):
@@ -989,30 +1002,6 @@ def test_interactive_selector_confirmation_redoes_the_selection(monkeypatch):
     assert len(masks) == 1
     # the second (larger) box is what comes back
     assert patches[0].shape[0] > 10
-
-
-def test_collect_files_from_dialog_falls_back_without_tkinter(monkeypatch, gif_path):
-    """No tkinter is not fatal: the tool asks for paths on the terminal instead."""
-
-    def no_tkinter(*_args, **_kwargs):
-        raise ImportError("no tkinter here")
-
-    monkeypatch.setattr(selection_tool, "filename_from_window_dialog", no_tkinter)
-    _answers(monkeypatch, str(gif_path))
-
-    assert collect_files_from_dialog() == [gif_path]
-
-
-def test_collect_files_from_terminal_rejects_missing_paths(monkeypatch, image_paths):
-    """A typo is reported and re-asked, not silently accepted."""
-
-    def no_tkinter(*_args, **_kwargs):
-        raise ImportError("no tkinter here")
-
-    monkeypatch.setattr(selection_tool, "filename_from_window_dialog", no_tkinter)
-    _answers(monkeypatch, "does/not/exist.png", str(image_paths[0]), "")
-
-    assert collect_files_from_dialog() == [image_paths[0]]
 
 
 def test_redo_keys_avoid_matplotlibs_own_keymap():

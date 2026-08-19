@@ -7,7 +7,7 @@ processing workflows where manual or semi-automatic selection of regions is requ
 Key features
 ------------
 - Interactive selection with a rectangle or lasso tool, via matplotlib widgets.
-- Selecting and confirming both happen in the plot window, with no tkinter dialogs.
+- Selecting and confirming both happen in the plot window; no tkinter required.
 - Cropping, masking and extracting the selected regions from images.
 - Polygon and rectangle extraction, interpolation and mask reconstruction.
 - Mask interpolation across the frames of a sequence, plus animation of the result.
@@ -33,17 +33,19 @@ Annotating a zea dataset
 Any zea file with image data (``data/image``) can be annotated directly, including
 files on the Hugging Face Hub. For example, on a CAMUS recording::
 
-    zea tools select hf://zeahub/camus/val/patient0409/patient0409_4CH.hdf5 \
+    zea tools select \\
+        hf://zeahub/camus/val/patient0409/patient0409_4CH_half_sequence.hdf5 \\
         --selector lasso --title lv_endo --num-selections 3 --fps 20
 
-Pick the left-ventricle border in each of the three key frames; the masks are
-interpolated across all frames and written to
-``patient0409_4CH_lv_endo_annotations.hdf5`` (plus a ``.gif`` preview) in the working
-directory. The result is a regular zea file, so it reads back like any other dataset::
+Draw the left-ventricle border in each of the three key frames and press ``enter`` to
+keep it. The masks are interpolated across all frames and written to
+``patient0409_4CH_half_sequence_lv_endo_annotations.hdf5`` (plus a ``.gif``
+preview) in the working directory. The result is a regular zea file, so it reads back
+like any other dataset::
 
     from zea import File
 
-    with File("patient0409_4CH_lv_endo_annotations.hdf5") as file:
+    with File("patient0409_4CH_half_sequence_lv_endo_annotations.hdf5") as file:
         images = file.data.image.values[:]              # (n_frames, H, W)
         masks = file.data.segmentation.values[..., 0]   # (n_frames, H, W), bool
         labels = file.data.segmentation.labels[:]       # ["lv_endo"]
@@ -75,6 +77,7 @@ from typing import NamedTuple
 
 import matplotlib
 import matplotlib.axes
+import matplotlib.figure
 import matplotlib.image
 import matplotlib.pyplot as plt
 import numpy as np
@@ -90,11 +93,7 @@ from sklearn.metrics import pairwise_distances
 from zea import log
 from zea.func.tensor import translate
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
-from zea.internal.viewer import (
-    filename_from_window_dialog,
-    get_matplotlib_figure_props,
-    move_matplotlib_figure,
-)
+from zea.internal.viewer import get_matplotlib_figure_props, move_matplotlib_figure
 from zea.io_lib import (
     _SUPPORTED_IMG_TYPES,
     _SUPPORTED_VID_TYPES,
@@ -216,7 +215,7 @@ def interactive_selector(
     }
     kwargs_dict = {LassoSelector: {}, RectangleSelector: {"interactive": True}}
 
-    # Selection state, shared with the callbacks above and reset on every round.
+    # Selection state, shared with the callbacks above.
     mask = np.tile(False, data.shape)
     masks = []
     select_idx = 0
@@ -240,7 +239,6 @@ def interactive_selector(
             plt.show(block=False)
             figure = ax.get_figure()
             while select_idx < num_selections:
-                # Closing the window used to spin here forever; stop with what we have.
                 if not plt.fignum_exists(figure.number):
                     log.warning(
                         f"Plot was closed after {select_idx} of {num_selections} selections."
@@ -262,12 +260,10 @@ def interactive_selector(
 
     patches = _execute_selector()
 
-    # Early return if no confirmation is required
     if not confirm_selection:
         return patches, masks
 
     while True:
-        # draw the masks on top of the data so the user can judge them
         for current_mask in masks:
             plot_mask(ax, current_mask, selector)
         plt.draw()
@@ -761,16 +757,52 @@ def update_imshow_with_mask(
 
 # ── In-figure prompts ─────────────────────────────────────────────────────────
 #
-# Confirming happens with the keyboard inside the plot window rather than through a
-# dialog. That keeps the user's hands where the selecting happens (no switching to a
-# terminal between key frames) and needs no tkinter: opening a second Tk interpreter
-# next to matplotlib's own crashes on macOS, and tkinter is not always installed.
+# Confirming happens in the plot window rather than through a dialog: it keeps the
+# user's hands where the selecting happens, and needs no tkinter.
 
 #: Keys that accept what is currently shown. Closing the window accepts too.
 ACCEPT_KEYS = ("enter", "y")
 #: Keys that discard the current selection and start over. Deliberately outside
 #: matplotlib's default keymap ('r' is "reset view", 'q' closes the window, ...).
 REDO_KEYS = ("n", "escape")
+
+#: Style of the banner drawn under a figure, chosen to stand out against both a light
+#: figure background and the grayscale images it sits under.
+_BANNER_STYLE = {
+    "ha": "center",
+    "va": "bottom",
+    "fontsize": "large",
+    "fontweight": "bold",
+    "color": "black",
+    "bbox": {
+        "boxstyle": "round,pad=0.5",
+        "facecolor": "gold",
+        "edgecolor": "black",
+        "linewidth": 1.5,
+    },
+}
+
+
+def show_status(fig, message: str, banner=None):
+    """Show ``message`` in a highlighted banner under a figure, and paint it right away.
+
+    Args:
+        fig (matplotlib.figure.Figure): Figure to draw the banner on.
+        message (str): Text to show.
+        banner (matplotlib.text.Text, optional): Banner returned by an earlier call,
+            which is replaced. Defaults to None, i.e. draw a new one.
+
+    Returns:
+        matplotlib.text.Text: The banner, to pass back in or to ``remove()``.
+    """
+    log.info(message)
+    if banner is not None:
+        banner.remove()
+    banner = fig.text(0.5, 0.015, message, **_BANNER_STYLE)
+    if plt.fignum_exists(fig.number):
+        fig.canvas.draw_idle()
+        plt.pause(0.001)  # let the backend paint before we go back to work
+    return banner
 
 
 def wait_for_key(
@@ -790,7 +822,6 @@ def wait_for_key(
         bool: True when an ``accept`` key was pressed (or the window was closed), False
         for a ``redo`` key.
     """
-    log.info(message)
     decision = {}
 
     def _on_key(event):
@@ -799,8 +830,10 @@ def wait_for_key(
         elif event.key in redo:
             decision["accept"] = False
 
-    text = fig.text(0.5, 0.01, message, ha="center", va="bottom", fontsize="small")
+    # Connect before the banner: showing it flushes pending events, which would
+    # otherwise swallow a keypress that arrived first.
     cid = fig.canvas.mpl_connect("key_press_event", _on_key)
+    banner = show_status(fig, message)
     try:
         while "accept" not in decision:
             # A closed window means the user is done; take what we have.
@@ -809,7 +842,7 @@ def wait_for_key(
             plt.pause(0.1)
     finally:
         fig.canvas.mpl_disconnect(cid)
-        text.remove()
+        banner.remove()
         if plt.fignum_exists(fig.number):
             fig.canvas.draw_idle()
     return decision["accept"]
@@ -926,48 +959,25 @@ def _suffix(file: str | Path) -> str:
     return PurePosixPath(str(file)).suffix.lower()
 
 
-def collect_files_from_dialog() -> list[Path]:
-    """Collect input files through repeated file dialogs.
+def ask_for_files() -> list[Path]:
+    """Ask for the input file paths on the terminal, one per line.
 
-    Keeps asking for image files until the user cancels the dialog. Selecting a video,
-    gif or zea file immediately stops the loop, since a sequence is annotated on its own.
+    Only reached when no paths were passed on the command line. Typing a video, gif or
+    zea file ends the loop right away, since a sequence is annotated on its own.
 
     Returns:
-        list[Path]: The selected files.
+        list[Path]: The chosen files.
 
     Raises:
-        ValueError: If the user did not select any file.
+        ValueError: If no file was given.
     """
     log.info(
-        "Select as many images as you like, OR select 1 video / gif / zea file. "
-        "Cancel the dialog to continue..."
+        "Enter the path to each input file, one per line: as many images as you like, "
+        "OR one video / gif / zea file. Leave empty to continue."
     )
     files: list[Path] = []
     while True:
-        try:
-            file = filename_from_window_dialog("Choose image / video / zea file")
-        except ValueError:
-            break
-        except ImportError:
-            # tkinter is the only thing the tool needs it for, and it is not always
-            # installed. Fall back to typing paths (or pass them on the command line).
-            log.warning("No file dialog available (tkinter is missing).")
-            return _collect_files_from_terminal()
-        files.append(file)
-        if _suffix(file) in _SEQUENCE_TYPES:
-            break
-
-    if not files:
-        raise ValueError("No files selected.")
-    return files
-
-
-def _collect_files_from_terminal() -> list[Path]:
-    """Ask for input file paths on the terminal, one per line."""
-    log.info("Enter the path to each input file, one per line. Leave empty to continue.")
-    files: list[Path] = []
-    while True:
-        answer = input("Path: ").strip()
+        answer = input("Path: ").strip().strip("'\"")
         if not answer:
             break
         file = Path(answer).expanduser()
@@ -983,20 +993,57 @@ def _collect_files_from_terminal() -> list[Path]:
     return files
 
 
-def _load_zea_file(path: str | Path) -> tuple[np.ndarray, np.ndarray | None]:
-    """Read the image map of a zea HDF5 file.
+class SourceMetadata(NamedTuple):
+    """Small, cheap-to-copy fields carried over from a zea input file.
+
+    The bulk arrays (raw data, beamformed data, ...) are deliberately left behind: the
+    annotation file holds only the images that were annotated and their masks, so it
+    stays small and can be written without streaming gigabytes back out.
+
+    Attributes:
+        file_fields (dict): Keyword arguments for :meth:`zea.File.create`, e.g.
+            ``metadata``, ``metrics``, ``probe``, ``us_machine``, ``acquisition_time``.
+        map_fields (dict): Extra fields for the copied image map, e.g. ``coordinates``,
+            ``unit``, ``min``, ``max``, ``timestamps``.
+    """
+
+    file_fields: dict
+    map_fields: dict
+
+
+#: Map fields the tool writes itself, so they are never copied from a source file.
+_OWN_MAP_FIELDS = frozenset({"values", "labels"})
+#: Map fields describing the pixel values, which say nothing about a boolean mask.
+_VALUE_MAP_FIELDS = frozenset({"unit", "min", "max", "description"})
+#: File fields the annotation file writes itself (``description``) or cannot honour
+#: without the acquisition it describes (``track_schedule``).
+_OWN_FILE_FIELDS = frozenset({"track_schedule", "description"})
+
+
+def _copyable_fields(schema, skip: frozenset) -> tuple[str, ...]:
+    """Names in a spec ``SCHEMA`` that are worth copying from a source file.
+
+    Derived from the spec rather than listed here, so fields added to
+    :mod:`zea.data.spec` later are carried over without touching this module.
+    """
+    return tuple(name for name in schema if name not in skip)
+
+
+def _load_zea_file(path: str | Path) -> tuple[np.ndarray, SourceMetadata]:
+    """Read the image map of a zea HDF5 file, plus the metadata worth carrying over.
 
     Args:
         path (str | Path): Path to a zea file. Also accepts an ``hf://`` URI.
 
     Returns:
-        tuple: ``(values, coordinates)``. ``coordinates`` is None when the file's image
-        map has none.
+        tuple: ``(values, source)`` with the image values and a :class:`SourceMetadata`
+        holding everything small enough to copy into the annotation file.
 
     Raises:
         ValueError: If the file has no image data, or if the images are not 2D.
     """
-    from zea.data.file import File
+    from zea.data.file import File, load_dict_from_hdf5_group
+    from zea.data.spec import FileSpec, Map
 
     path = str(path)
     if path.startswith(HF_PREFIX):
@@ -1011,14 +1058,25 @@ def _load_zea_file(path: str | Path) -> tuple[np.ndarray, np.ndarray | None]:
             )
         image = file.data.image
         values = image.values[:]
-        coordinates = image.coordinates[:] if "coordinates" in image.keys() else None
+
+        map_fields = {
+            name: getattr(image, name)[()]
+            for name in _copyable_fields(Map.SCHEMA, _OWN_MAP_FIELDS)
+            if name in image.keys()
+        }
+        file_fields = {}
+        for name in _copyable_fields(FileSpec.SCHEMA, _OWN_FILE_FIELDS):
+            if name in file:
+                file_fields[name] = load_dict_from_hdf5_group(file[name])
+            elif name in file.attrs:
+                file_fields[name] = file.attrs[name]
 
     if values.ndim != 3:
         raise ValueError(
             f"Expected 2D images of shape (n_frames, z, x) in {path}, got shape "
             f"{values.shape}. Volumetric data is not supported by the selection tool."
         )
-    return values, coordinates
+    return values, SourceMetadata(file_fields, map_fields)
 
 
 class SelectionInputs(NamedTuple):
@@ -1030,14 +1088,15 @@ class SelectionInputs(NamedTuple):
         is_sequence (bool): True when the images are consecutive frames of one recording,
             which are annotated by interpolating between key frames. False when they are
             separate images, which are compared with a metric.
-        coordinates (np.ndarray | None): Per-pixel Cartesian coordinates carried over
-            from a zea input file, so the saved annotations line up with the source grid.
+        source (SourceMetadata | None): Fields carried over from a zea input file, so the
+            saved annotations line up with (and describe) the source. None for images,
+            videos and gifs, which carry no such metadata.
     """
 
     images: list[np.ndarray]
     file_names: list[str]
     is_sequence: bool
-    coordinates: np.ndarray | None = None
+    source: SourceMetadata | None = None
 
 
 def load_input_files(files: Sequence[str | Path]) -> SelectionInputs:
@@ -1054,8 +1113,8 @@ def load_input_files(files: Sequence[str | Path]) -> SelectionInputs:
         ValueError: If no files were given, if a file type is unsupported, or if a video
             / zea file was combined with other files.
     """
-    # Paths are kept as strings: `Path('hf://zeahub/camus')` collapses the double slash
-    # to `hf:/zeahub/camus`, which breaks the Hugging Face prefix checks downstream.
+    # Kept as strings: `Path('hf://zeahub/camus')` collapses the double slash to
+    # `hf:/zeahub/camus`, breaking the Hugging Face prefix checks downstream.
     files = [str(file) for file in files]
     if not files:
         raise ValueError("No input files given.")
@@ -1067,16 +1126,16 @@ def load_input_files(files: Sequence[str | Path]) -> SelectionInputs:
                 f"Select either a single video / zea file or one or more images, got "
                 f"{len(files)} files including a sequence."
             )
-        source = sequences[0]
-        coordinates = None
-        if _suffix(source) in _SUPPORTED_ZEA_TYPES:
-            values, coordinates = _load_zea_file(source)
+        path = sequences[0]
+        source = None
+        if _suffix(path) in _SUPPORTED_ZEA_TYPES:
+            values, source = _load_zea_file(path)
             frames = list(values)
         else:
-            frames = list(load_video(source))
-        name = PurePosixPath(source).name
+            frames = list(load_video(path))
+        name = PurePosixPath(path).name
         # A single frame cannot be interpolated, so treat it as a plain image.
-        return SelectionInputs(frames, [name] * len(frames), len(frames) > 1, coordinates)
+        return SelectionInputs(frames, [name] * len(frames), len(frames) > 1, source)
 
     images, file_names = [], []
     for file in files:
@@ -1198,6 +1257,36 @@ def annotate_sequence(
     return interpolate_masks(masks, num_frames=len(images), rectangle=(selector == "rectangle"))
 
 
+def preview_figure(
+    images: Sequence[np.ndarray],
+    masks: Sequence[np.ndarray],
+    selector: str = "rectangle",
+    title: str = "",
+    frame: int = 0,
+) -> matplotlib.figure.Figure:
+    """Open a figure showing one annotated frame, to report progress on.
+
+    Args:
+        images (Sequence[np.ndarray]): Frames of the sequence.
+        masks (Sequence[np.ndarray]): One mask per frame.
+        selector (str, optional): Type of selection tool the masks came from. Defaults
+            to ``"rectangle"``.
+        title (str, optional): Name of what was selected, shown above the frame.
+        frame (int, optional): Which frame to show. Defaults to 0.
+
+    Returns:
+        matplotlib.figure.Figure: The (non-blocking) figure.
+    """
+    fig, ax = plt.subplots()
+    ax.imshow(images[frame], cmap="gray")
+    ax.axis("off")
+    ax.set_title(f"{title} - frame {frame + 1} of {len(images)}".strip(" -"))
+    plot_mask(ax, masks[frame], selector)
+    fig.tight_layout()
+    plt.show(block=False)
+    return fig
+
+
 def save_mask_animation(
     images: Sequence[np.ndarray],
     masks: Sequence[np.ndarray],
@@ -1245,7 +1334,7 @@ def save_masks(
     filename: str | Path,
     images: Sequence[np.ndarray] | np.ndarray,
     label: str = "roi",
-    coordinates: np.ndarray | None = None,
+    source: SourceMetadata | None = None,
     description: str | None = None,
     overwrite: bool = False,
 ) -> Path:
@@ -1256,17 +1345,22 @@ def save_masks(
     :class:`~zea.data.spec.Segmentation` under ``data/segmentation``, so it can be read
     back with :class:`zea.File` like any other zea dataset.
 
+    When the images came from a zea file, ``source`` carries its metadata over: the pixel
+    coordinates, frame timing, probe, subject and credit information. The bulk arrays are
+    not copied -- the annotation file describes the images that were annotated, not the
+    acquisition they were reconstructed from.
+
     Since the selection tool only produces images and segmentations, the warnings about
-    the acquisition fields it cannot fill in (scan parameters, probe geometry, …) are
-    suppressed.
+    the acquisition fields it cannot fill in (scan parameters, ...) are suppressed.
 
     Args:
-        masks (Sequence[np.ndarray]): One boolean mask per image.
+        masks (Sequence[np.ndarray] | np.ndarray): One boolean mask per image.
         filename (str | Path): Output path; the ``.hdf5`` suffix is enforced.
-        images (Sequence[np.ndarray]): The annotated images, of equal shape as the masks.
+        images (Sequence[np.ndarray] | np.ndarray): The annotated images, of equal shape
+            as the masks.
         label (str, optional): Name of the segmentation label. Defaults to ``"roi"``.
-        coordinates (np.ndarray, optional): Per-pixel Cartesian coordinates of the image
-            grid, carried over from a zea input file. Defaults to None.
+        source (SourceMetadata, optional): Fields carried over from a zea input file, as
+            returned in :attr:`SelectionInputs.source`. Defaults to None.
         description (str, optional): Free-text description stored in the file.
         overwrite (bool, optional): Whether to overwrite an existing file. Defaults to
             False.
@@ -1290,16 +1384,16 @@ def save_masks(
     filename = Path(filename).with_suffix(".hdf5")
     filename.parent.mkdir(parents=True, exist_ok=True)
 
-    image_map = {"values": image_values}
+    file_fields = dict(source.file_fields) if source is not None else {}
+    map_fields = dict(source.map_fields) if source is not None else {}
+
+    image_map = {"values": image_values, **map_fields}
     segmentation_map = {
         # (n_frames, z, x) -> (n_frames, z, x, n_labels) with a single label
         "values": mask_values[..., None],
         "labels": np.array([label], dtype=np.str_),
+        **{name: value for name, value in map_fields.items() if name not in _VALUE_MAP_FIELDS},
     }
-    if coordinates is not None:
-        coordinates = np.asarray(coordinates, dtype=np.float32)
-        image_map["coordinates"] = coordinates
-        segmentation_map["coordinates"] = coordinates
 
     File.create(
         path=filename,
@@ -1307,6 +1401,7 @@ def save_masks(
         description=description or f"Regions of interest ('{label}') from zea tools select.",
         overwrite=overwrite,
         ignore_warnings=True,
+        **file_fields,
     )
     log.info(f"Successfully saved annotations to {log.yellow(filename)}")
     return filename
@@ -1392,7 +1487,7 @@ def run_selection_tool(
     Raises:
         FileExistsError: If an output file exists and ``overwrite`` is False.
     """
-    files = list(files) if files else collect_files_from_dialog()
+    files = list(files) if files else ask_for_files()
     inputs = load_input_files(files)
     images = inputs.images
 
@@ -1427,8 +1522,6 @@ def run_selection_tool(
         animation_fps = fps if fps is not None else ask_save_animation_with_fps()
         outputs.append(animation_path)
 
-    # Check the outputs before annotating, so a name clash never throws away the
-    # selections the user just made.
     _check_outputs_free(outputs, overwrite)
 
     masks = annotate_sequence(
@@ -1438,18 +1531,37 @@ def run_selection_tool(
         confirm_selection=confirm_selection,
     )
 
-    save_masks(
-        masks,
-        stem,
-        images=images,
-        label=title,
-        coordinates=inputs.coordinates,
-        description=f"Regions of interest ('{title}') selected in {PurePosixPath(source).name}.",
-        overwrite=overwrite,
-    )
+    # Report progress in a window, so the result and where it went stay visible.
+    fig = preview_figure(images, masks, selector, title=title)
+    status = show_status(fig, "Saving annotations...")
+
+    written = [
+        save_masks(
+            masks,
+            stem,
+            images=images,
+            label=title,
+            source=inputs.source,
+            description=(
+                f"Regions of interest ('{title}') selected in {PurePosixPath(source).name}."
+            ),
+            overwrite=overwrite,
+        )
+    ]
 
     if animation_path is not None:
-        save_mask_animation(images, masks, animation_path, selector=selector, fps=animation_fps)
+        status = show_status(fig, "Saving preview animation...", status)
+        written.append(
+            save_mask_animation(images, masks, animation_path, selector=selector, fps=animation_fps)
+        )
+
+    status.remove()
+    saved = f"Saved {' and '.join(path.name for path in written)} to {stem.parent}/"
+    if confirm_selection:
+        wait_for_key(fig, f"{saved} Press {_keys(ACCEPT_KEYS)} to close.")
+    else:
+        log.info(saved)
+    plt.close(fig)
 
     return masks
 

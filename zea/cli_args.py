@@ -441,9 +441,8 @@ class DataArgs:
 
 # ── Interactive tooling subcommands (``zea tools …``) ─────────────────────────
 #
-# Only the tools in :mod:`zea.tools` that are meant to be driven from a terminal are
-# exposed here. The heavy implementation is imported lazily inside ``run`` so that
-# ``zea --help`` / ``zea tools --help`` stay free of keras and matplotlib imports.
+# Only the tools in :mod:`zea.tools` meant to be driven from a terminal are exposed
+# here; the rest of the package stays a library.
 
 
 @dataclass
@@ -508,10 +507,9 @@ class _Select:
 
 ToolsCommand = Union[
     Annotated[_Select, tyro.conf.subcommand("select")],
-    # A one-element ``Union`` collapses to the element itself, which would inline the
-    # tool's arguments into ``zea tools`` rather than put them behind ``select``. The
-    # suppressed ``None`` keeps this a real subcommand union; drop it once a second
-    # tool is added here.
+    # A one-element Union collapses to the element itself, inlining the tool's arguments
+    # into `zea tools`. The suppressed None keeps it a subcommand union; drop it once a
+    # second tool is added.
     Annotated[None, tyro.conf.Suppress],
 ]
 

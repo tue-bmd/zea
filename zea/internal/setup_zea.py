@@ -63,7 +63,6 @@ from zea.config import Config, check_config
 from zea.datapaths import create_new_user, set_data_paths
 from zea.internal.device import init_device
 from zea.internal.git_info import get_git_summary
-from zea.internal.viewer import filename_from_window_dialog
 
 
 def reload_module(name):
@@ -168,9 +167,8 @@ def setup_config(
     """Setup function for config. Retrieves config file and checks for validity.
 
     Args:
-        config_path (str, optional): file path to config yaml. Defaults to None.
-            if None, argparser is checked. If that is None as well, the window
-            ui will pop up for choosing the config file manually. Besides a local
+        config_path (str, optional): file path to config yaml. Required; a ``ValueError``
+            is raised when it is None. Besides a local
             path it can also be a Hugging Face repository path, in the form
             hf://<repo_id>/<path_to_config>. For example:
             `hf://username/zeahub/configs/config_camus.yaml`.
@@ -187,22 +185,10 @@ def setup_config(
 
     """
     if config_path is None:
-        # if no argument is provided resort to UI window
-        filetype = "yaml"
-        try:
-            config_path = str(
-                filename_from_window_dialog(
-                    f"Choose .{filetype} file",
-                    filetypes=((filetype, "*." + filetype),),
-                    initialdir="./configs",
-                )
-            )
-        except Exception as e:
-            raise ValueError(
-                "Please specify the path to a config file through --config flag "
-                "i.e. `zea --config <path-to-config.yaml>` if GUI is not working "
-                "(usually on headless servers)."
-            ) from e
+        raise ValueError(
+            "No config file given. Please specify the path to a config file through the "
+            "--config flag, i.e. `zea --config <path-to-config.yaml>`."
+        )
 
     config = Config.from_path(config_path, loader=loader, **kwargs)
 

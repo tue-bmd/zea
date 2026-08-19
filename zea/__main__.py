@@ -23,9 +23,7 @@ if "ZEA_LOG_LEVEL" not in os.environ:
 
 from zea.cli_args import AppArgs, ConvertArgs, DataArgs, ProcessArgs, ToolsArgs
 
-# subcommands that don't require a device. `zea tools` is interactive matplotlib work;
-# only the optional image-mode metric touches keras, and that runs fine on the default
-# device.
+# subcommands that don't require a device
 _NO_DEVICE_FNS = [DataArgs, ToolsArgs]
 
 
@@ -71,8 +69,7 @@ def main() -> None:
         # standalone ``python -m zea.data.convert`` entry point.
         init_device(cli_args.device, allow_preallocate=not isinstance(args, ConvertArgs))
 
-    # Every subcommand dataclass in zea.cli_args knows how to run itself, and imports
-    # its (heavy) implementation lazily when it does.
+    # Each subcommand dataclass imports its implementation lazily and runs it.
     args.run()
 
 
