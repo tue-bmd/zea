@@ -7,6 +7,7 @@ processing workflows where manual or semi-automatic selection of regions is requ
 Key features
 ------------
 - Interactive selection with a rectangle or lasso tool, via matplotlib widgets.
+- Selecting and confirming both happen in the plot window, with no tkinter dialogs.
 - Cropping, masking and extracting the selected regions from images.
 - Polygon and rectangle extraction, interpolation and mask reconstruction.
 - Mask interpolation across the frames of a sequence, plus animation of the result.
@@ -149,9 +150,9 @@ def interactive_selector(
             transform coordinates back to pixel values. Defaults to None.
         verbose (bool, optional): Whether to log progress messages. Defaults to True.
         num_selections (int, optional): Number of selections to make. When omitted the
-            user presses Enter in the terminal to signal they are done.
-        confirm_selection (bool, optional): Whether to ask for confirmation (through a
-            tkinter dialog) before returning. Defaults to True.
+            user presses Enter in the plot window to signal they are done.
+        confirm_selection (bool, optional): Whether to ask (in the plot window) to
+            confirm the selection before returning. Defaults to True.
 
     Returns:
         tuple: ``(patches, masks)``, where ``patches`` is a list of the selected parts
@@ -248,7 +249,10 @@ def interactive_selector(
                 plt.pause(0.1)
         else:
             plt.show(block=False)
-            input("Press Enter to continue (don't close plot)...\n")
+            wait_for_key(
+                ax.get_figure(),
+                f"Press {_keys(ACCEPT_KEYS)} in this window when you are done selecting.",
+            )
 
         widget.disconnect_events()
         widget.set_visible(False)
@@ -262,34 +266,17 @@ def interactive_selector(
     if not confirm_selection:
         return patches, masks
 
-    try:
-        from tkinter import Tk, messagebox
-    except ImportError as e:
-        raise ImportError(
-            log.error("Failed to import tkinter. Please install it with 'apt install python3-tk'.")
-        ) from e
-
-    # Create root window once for messagebox dialogs
-    root = Tk()
-    root.withdraw()
-
-    like_selection = False
-    while not like_selection:
-        log.info(f"You have made {len(patches)} selection(s).")
-        # draw masks on top of data
+    while True:
+        # draw the masks on top of the data so the user can judge them
         for current_mask in masks:
             plot_mask(ax, current_mask, selector)
         plt.draw()
 
-        like_selection = messagebox.askyesno("Like Selection", "Do you like your selection?")
+        if confirm_in_figure(ax.get_figure(), len(patches)):
+            return patches, masks
 
-        if not like_selection:
-            remove_masks_from_axs(ax)
-            patches = _execute_selector()
-
-    root.destroy()
-
-    return patches, masks
+        remove_masks_from_axs(ax)
+        patches = _execute_selector()
 
 
 def interactive_selector_with_plot_and_metric(
@@ -772,7 +759,87 @@ def update_imshow_with_mask(
     return imshow_obj, mask_obj
 
 
-# ── User prompts ──────────────────────────────────────────────────────────────
+# ── In-figure prompts ─────────────────────────────────────────────────────────
+#
+# Confirming happens with the keyboard inside the plot window rather than through a
+# dialog. That keeps the user's hands where the selecting happens (no switching to a
+# terminal between key frames) and needs no tkinter: opening a second Tk interpreter
+# next to matplotlib's own crashes on macOS, and tkinter is not always installed.
+
+#: Keys that accept what is currently shown. Closing the window accepts too.
+ACCEPT_KEYS = ("enter", "y")
+#: Keys that discard the current selection and start over. Deliberately outside
+#: matplotlib's default keymap ('r' is "reset view", 'q' closes the window, ...).
+REDO_KEYS = ("n", "escape")
+
+
+def wait_for_key(
+    fig, message: str, accept: Sequence[str] = ACCEPT_KEYS, redo: Sequence[str] = ()
+) -> bool:
+    """Show ``message`` under a figure and block until the user presses a listed key.
+
+    Args:
+        fig (matplotlib.figure.Figure): Figure to listen on and write the message under.
+        message (str): Instruction shown to the user, e.g. which keys to press.
+        accept (Sequence[str], optional): Keys that return True. Defaults to
+            :data:`ACCEPT_KEYS`.
+        redo (Sequence[str], optional): Keys that return False. Defaults to none, i.e.
+            the prompt can only be accepted.
+
+    Returns:
+        bool: True when an ``accept`` key was pressed (or the window was closed), False
+        for a ``redo`` key.
+    """
+    log.info(message)
+    decision = {}
+
+    def _on_key(event):
+        if event.key in accept:
+            decision["accept"] = True
+        elif event.key in redo:
+            decision["accept"] = False
+
+    text = fig.text(0.5, 0.01, message, ha="center", va="bottom", fontsize="small")
+    cid = fig.canvas.mpl_connect("key_press_event", _on_key)
+    try:
+        while "accept" not in decision:
+            # A closed window means the user is done; take what we have.
+            if not plt.fignum_exists(fig.number):
+                return True
+            plt.pause(0.1)
+    finally:
+        fig.canvas.mpl_disconnect(cid)
+        text.remove()
+        if plt.fignum_exists(fig.number):
+            fig.canvas.draw_idle()
+    return decision["accept"]
+
+
+def confirm_in_figure(fig, num_selections: int) -> bool:
+    """Ask, in the plot window, whether to keep the selection that is drawn on it.
+
+    Args:
+        fig (matplotlib.figure.Figure): Figure showing the selection.
+        num_selections (int): Number of selections that were made.
+
+    Returns:
+        bool: True to keep the selection, False to redo it.
+    """
+    return wait_for_key(
+        fig,
+        f"{num_selections} selection(s) made. Press {_keys(ACCEPT_KEYS)} to keep, "
+        f"{_keys(REDO_KEYS)} to redo.",
+        accept=ACCEPT_KEYS,
+        redo=REDO_KEYS,
+    )
+
+
+def _keys(keys: Sequence[str]) -> str:
+    """Render key names for a prompt, e.g. ``"'enter' / 'y'"``."""
+    return " / ".join(f"'{key}'" for key in keys)
+
+
+# ── Terminal prompts ──────────────────────────────────────────────────────────
 #
 # These are only used for options that were not passed on the command line, so that
 # ``zea tools select`` works both fully interactively and fully non-interactively.
@@ -881,6 +948,32 @@ def collect_files_from_dialog() -> list[Path]:
             file = filename_from_window_dialog("Choose image / video / zea file")
         except ValueError:
             break
+        except ImportError:
+            # tkinter is the only thing the tool needs it for, and it is not always
+            # installed. Fall back to typing paths (or pass them on the command line).
+            log.warning("No file dialog available (tkinter is missing).")
+            return _collect_files_from_terminal()
+        files.append(file)
+        if _suffix(file) in _SEQUENCE_TYPES:
+            break
+
+    if not files:
+        raise ValueError("No files selected.")
+    return files
+
+
+def _collect_files_from_terminal() -> list[Path]:
+    """Ask for input file paths on the terminal, one per line."""
+    log.info("Enter the path to each input file, one per line. Leave empty to continue.")
+    files: list[Path] = []
+    while True:
+        answer = input("Path: ").strip()
+        if not answer:
+            break
+        file = Path(answer).expanduser()
+        if not file.exists():
+            log.error(f"{file} does not exist.")
+            continue
         files.append(file)
         if _suffix(file) in _SEQUENCE_TYPES:
             break
@@ -1017,8 +1110,8 @@ def compare_images(
         selector (str, optional): Type of selection tool. Defaults to ``"rectangle"``.
         metric (str, optional): Metric to compute between the two patches. Defaults to
             ``"gcnr"``.
-        confirm_selection (bool, optional): Whether to ask for confirmation (through a
-            tkinter dialog) after selecting. Defaults to True.
+        confirm_selection (bool, optional): Whether to ask (in the plot window) to
+            confirm the selection. Defaults to True.
 
     Returns:
         list: The computed metric scores, one per image.
@@ -1056,8 +1149,8 @@ def annotate_sequence(
         images (Sequence[np.ndarray]): Frames of the sequence.
         selector (str, optional): Type of selection tool. Defaults to ``"rectangle"``.
         num_selections (int, optional): Number of key frames to annotate. Defaults to 2.
-        confirm_selection (bool, optional): Whether to ask for confirmation (through a
-            tkinter dialog) after each key frame. Defaults to True.
+        confirm_selection (bool, optional): Whether to ask (in the plot window) to
+            confirm each key frame's selection. Defaults to True.
 
     Returns:
         list[np.ndarray]: One interpolated mask per frame in ``images``.
@@ -1287,8 +1380,8 @@ def run_selection_tool(
             directory for ``hf://`` inputs.
         save_animation (bool, optional): Whether to save a preview gif in sequence mode.
             Defaults to True.
-        confirm_selection (bool, optional): Whether to ask for confirmation (through a
-            tkinter dialog) after each selection. Defaults to True.
+        confirm_selection (bool, optional): Whether to ask (in the plot window) to
+            confirm each selection. Defaults to True.
         overwrite (bool, optional): Whether to overwrite existing output files. Checked
             before the annotating starts, so no work is lost. Defaults to False.
 

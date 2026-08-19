@@ -258,18 +258,20 @@ def test_tools_help_lists_select():
     assert "select" in buf.getvalue()
 
 
-def test_tools_main_dispatches_to_the_selection_tool(monkeypatch):
-    """zea.__main__.main() routes 'tools select' to run_selection_tool."""
+def test_tools_main_dispatches_without_a_device(monkeypatch):
+    """'tools select' reaches run_selection_tool, and claims no compute device:
+    it is interactive matplotlib work, so it must not grab (or wait for) a GPU."""
     monkeypatch.setattr("sys.argv", ["zea", "tools", "select", "clip.mp4", "--no-confirm"])
 
     with (
-        patch("zea.internal.device.init_device"),
+        patch("zea.internal.device.init_device") as mock_init_device,
         patch("zea.tools.selection_tool.run_selection_tool") as mock_run,
     ):
         from zea.__main__ import main
 
         main()
 
+    assert mock_init_device.call_count == 0
     assert mock_run.call_count == 1
     _, kwargs = mock_run.call_args
     assert kwargs["files"] == ["clip.mp4"]

@@ -484,8 +484,8 @@ class _Select:
     animation: bool = True
     """Save a preview gif of the interpolated masks (sequence mode only)."""
     confirm: bool = True
-    """Ask for confirmation after each selection. Needs tkinter; pass ``--no-confirm``
-    on systems without it."""
+    """Ask to confirm each selection before moving on, with a keypress in the plot
+    window."""
     overwrite: bool = False
     """Overwrite existing output files."""
 

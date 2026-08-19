@@ -23,8 +23,10 @@ if "ZEA_LOG_LEVEL" not in os.environ:
 
 from zea.cli_args import AppArgs, ConvertArgs, DataArgs, ProcessArgs, ToolsArgs
 
-# subcommands that don't require a device
-_NO_DEVICE_FNS = [DataArgs]
+# subcommands that don't require a device. `zea tools` is interactive matplotlib work;
+# only the optional image-mode metric touches keras, and that runs fine on the default
+# device.
+_NO_DEVICE_FNS = [DataArgs, ToolsArgs]
 
 
 @dataclass

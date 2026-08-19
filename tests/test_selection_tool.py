@@ -42,6 +42,7 @@ from zea.tools.selection_tool import (  # noqa: E402
     save_mask_animation,
     save_masks,
     update_imshow_with_mask,
+    wait_for_key,
 )
 
 
@@ -912,3 +913,110 @@ def test_interactive_selector_stops_when_the_plot_is_closed(monkeypatch):
         np.ones((10, 10)), ax, num_selections=2, confirm_selection=False, verbose=False
     )
     assert patches == [] and masks == []
+
+
+# ── in-figure confirmation (no tkinter) ───────────────────────────────────────
+
+
+def _press_keys(monkeypatch, fig, *keys):
+    """Deliver `keys` to `fig` one per `plt.pause` call, as a user typing would."""
+    from matplotlib.backend_bases import KeyEvent
+
+    pending = list(keys)
+
+    def fake_pause(_interval):
+        if pending:
+            KeyEvent("key_press_event", fig.canvas, pending.pop(0))._process()
+
+    monkeypatch.setattr(plt, "pause", fake_pause)
+
+
+def test_wait_for_key_accepts(monkeypatch):
+    fig, _ = plt.subplots()
+    _press_keys(monkeypatch, fig, "y")
+
+    assert wait_for_key(fig, "press y", accept=("y",), redo=("n",)) is True
+    # the instruction is cleaned up again
+    assert all("press y" not in text.get_text() for text in fig.texts)
+
+
+def test_wait_for_key_ignores_unrelated_keys(monkeypatch):
+    fig, _ = plt.subplots()
+    _press_keys(monkeypatch, fig, "a", "0", "n")
+
+    assert wait_for_key(fig, "press n", accept=("y",), redo=("n",)) is False
+
+
+def test_wait_for_key_returns_on_a_closed_window(monkeypatch):
+    """A user who closes the plot is done, not stuck."""
+    fig, _ = plt.subplots()
+    monkeypatch.setattr(plt, "fignum_exists", lambda _number: False)
+
+    assert wait_for_key(fig, "press enter") is True
+
+
+def test_interactive_selector_confirmation_redoes_the_selection(monkeypatch):
+    """A redo key runs the selector again; an accept key returns the second round."""
+    rounds = []
+
+    class _CountingSelector:
+        def __init__(self, ax, onselect, **kwargs):
+            rounds.append(len(rounds))
+            size = 4 + 8 * len(rounds)
+            onselect(_Event(1, 1), _Event(size, size))
+
+        def disconnect_events(self):
+            pass
+
+        def set_visible(self, visible):
+            pass
+
+        def update(self):
+            pass
+
+    monkeypatch.setattr(selection_tool, "RectangleSelector", _CountingSelector)
+
+    data = np.ones((30, 30))
+    fig, ax = plt.subplots()
+    ax.imshow(data, cmap="gray")
+    _press_keys(monkeypatch, fig, "n", "enter")
+
+    patches, masks = interactive_selector(
+        data, ax, num_selections=1, confirm_selection=True, verbose=False
+    )
+
+    assert len(rounds) == 2  # first round rejected, second accepted
+    assert len(masks) == 1
+    # the second (larger) box is what comes back
+    assert patches[0].shape[0] > 10
+
+
+def test_collect_files_from_dialog_falls_back_without_tkinter(monkeypatch, gif_path):
+    """No tkinter is not fatal: the tool asks for paths on the terminal instead."""
+
+    def no_tkinter(*_args, **_kwargs):
+        raise ImportError("no tkinter here")
+
+    monkeypatch.setattr(selection_tool, "filename_from_window_dialog", no_tkinter)
+    _answers(monkeypatch, str(gif_path))
+
+    assert collect_files_from_dialog() == [gif_path]
+
+
+def test_collect_files_from_terminal_rejects_missing_paths(monkeypatch, image_paths):
+    """A typo is reported and re-asked, not silently accepted."""
+
+    def no_tkinter(*_args, **_kwargs):
+        raise ImportError("no tkinter here")
+
+    monkeypatch.setattr(selection_tool, "filename_from_window_dialog", no_tkinter)
+    _answers(monkeypatch, "does/not/exist.png", str(image_paths[0]), "")
+
+    assert collect_files_from_dialog() == [image_paths[0]]
+
+
+def test_redo_keys_avoid_matplotlibs_own_keymap():
+    """'r' resets the view and 'q' closes the window, so they cannot mean "redo"."""
+    reserved = {key for keys in matplotlib.rcParams.find_all("keymap").values() for key in keys}
+    assert not reserved & set(selection_tool.REDO_KEYS)
+    assert not reserved & set(selection_tool.ACCEPT_KEYS)
