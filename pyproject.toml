@@ -86,7 +86,7 @@ zea = "zea.__main__:main"
 # uv installs `dev` by default; lean envs opt out with --no-default-groups /
 # --only-group (readthedocs: UV_NO_DEFAULT_GROUPS, set in its dashboard).
 [dependency-groups]
-lint = ["ruff==0.16.2", "ty==0.0.69"]
+lint = ["ruff==0.16.3", "ty==0.0.72"]
 tests = [
     "pytest>=9.0.3",
     "papermill>=2.4",
