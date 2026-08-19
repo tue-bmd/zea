@@ -1,6 +1,7 @@
 """This file contains fixtures that are used by all tests in the tests directory."""
 
 import importlib.util
+import logging
 import os
 import subprocess
 import sys
@@ -333,3 +334,57 @@ def dummy_dataset_path(tmp_path):
         )
 
     yield str(temp_file.parent)
+
+
+@pytest.fixture
+def reset_warning_once():
+    """Isolates ``zea.log.warning_once`` dedupe state for one test.
+
+    The dedupe set is module-global, so a ``warning_once`` already fired by an
+    earlier test would be suppressed here. It is cleared for the duration of the
+    test and restored afterwards, so neither direction leaks.
+
+    Yields:
+        The dedupe set itself, for tests that need to clear it again mid-test.
+    """
+    from zea import log
+
+    saved = set(log._warned_locations)
+    log._warned_locations.clear()
+    try:
+        yield log._warned_locations
+    finally:
+        log._warned_locations.clear()
+        log._warned_locations.update(saved)
+
+
+@pytest.fixture
+def attach_caplog(caplog, reset_warning_once):
+    """Captures ``zea.log`` records with pytest's ``caplog``.
+
+    zea's logger has ``propagate = False``, so its records never reach the root
+    logger that ``caplog`` listens on; the handler is attached directly instead.
+    Captures from DEBUG up regardless of ``ZEA_LOG_LEVEL``, and isolates
+    ``warning_once`` state via :func:`reset_warning_once`.
+    """
+    from zea import log
+
+    caplog.set_level(logging.DEBUG, logger=log.logger.name)
+    log.logger.addHandler(caplog.handler)
+    try:
+        yield caplog
+    finally:
+        log.logger.removeHandler(caplog.handler)
+
+
+@pytest.fixture
+def attach_caplog_warnings(attach_caplog):
+    """Like :func:`attach_caplog`, but captures WARNING and above only.
+
+    Use this when a test asserts on exact record counts, which unrelated info
+    and debug output would otherwise break.
+    """
+    from zea import log
+
+    attach_caplog.set_level(logging.WARNING, logger=log.logger.name)
+    return attach_caplog

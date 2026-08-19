@@ -1075,6 +1075,47 @@ def test_split_seed_rejects_unknown_seed_type():
         split_seed("not-a-seed", 2)
 
 
+@run_in_backend("jax")
+def test_fold_seed_jax_gives_independent_seed_per_step():
+    """On JAX each loop index folds into its own reproducible, independent key."""
+    import jax
+    from keras import random as keras_random
+
+    from zea.func.tensor import fold_seed, materialize_seed
+
+    seed = materialize_seed(keras_random.SeedGenerator(11))
+    draws = [np.asarray(jax.random.uniform(fold_seed(seed, step), (6,))) for step in range(3)]
+    repeat = [np.asarray(jax.random.uniform(fold_seed(seed, step), (6,))) for step in range(3)]
+
+    # Folding the same seed with the same index is deterministic, different indices are not.
+    for a, b in zip(draws, repeat):
+        np.testing.assert_allclose(a, b)
+    assert not np.allclose(draws[0], draws[1])
+    assert not np.allclose(draws[1], draws[2])
+
+
+@run_in_backend("tensorflow")
+def test_fold_seed_non_jax_reuses_stateful_generator():
+    """On non-JAX backends the stateful generator is returned as-is and keeps advancing."""
+    from keras import random as keras_random
+
+    from zea.func.tensor import fold_seed
+
+    sg = keras_random.SeedGenerator(11)
+    seeds = [fold_seed(sg, step) for step in range(3)]
+    assert all(s is sg for s in seeds)
+
+    draws = _draw_per_seed(seeds)
+    assert not np.allclose(draws[0], draws[1])
+
+
+def test_fold_seed_none_stays_none():
+    """None folds to None so unseeded loop bodies keep working on any backend."""
+    from zea.func.tensor import fold_seed
+
+    assert fold_seed(None, 0) is None
+
+
 @pytest.mark.parametrize("axis", [0, -1])
 @backend_equality_check(decimal=5)
 def test_unwrap(axis):
@@ -1142,3 +1183,25 @@ def test_complex_resize():
     assert magnitude.max() <= np.abs(data).max() + 1e-4
 
     return ops.abs(upsampled)
+
+
+@backend_equality_check(decimal=4)
+def test_resample_complex():
+    """``resample`` interpolates complex input without discarding the imaginary part."""
+    from zea.func.tensor import resample
+
+    rng = default_rng(DEFAULT_TEST_SEED)
+    data = (rng.standard_normal((2, 16, 3)) + 1j * rng.standard_normal((2, 16, 3))).astype(
+        "complex64"
+    )
+    tensor = ops.convert_to_tensor(data)
+
+    same = ops.convert_to_numpy(resample(tensor, 16, axis=1))
+    np.testing.assert_allclose(same, data, rtol=1e-4, atol=1e-4)
+
+    upsampled = resample(tensor, 32, axis=1)
+    assert upsampled.shape == (2, 32, 3)
+    assert "complex" in str(upsampled.dtype)
+    assert np.any(np.imag(ops.convert_to_numpy(upsampled)) != 0)
+
+    return ops.stack([ops.real(upsampled), ops.imag(upsampled)])

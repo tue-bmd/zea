@@ -71,10 +71,13 @@ def print_gpu_memory_table(memory_free_values):
 
 
 def _iter_cuda_device_ids():
-    """Yield integer device IDs from CUDA_VISIBLE_DEVICES.
+    """Yield integer device IDs from CUDA_VISIBLE_DEVICES, in their original order.
 
-    Skips empty tokens and non-integer tokens (e.g. GPU UUIDs) silently,
-    so callers never receive a ``ValueError`` from malformed entries.
+    Empty tokens are skipped. Only integer indices are supported: GPU UUIDs and
+    MIG ids are skipped with a warning (once per value), because resolving them
+    would mean mapping them back onto nvidia-smi's physical indices. Callers see
+    only the integer entries, so a value holding nothing else selects no GPU and
+    falls back to CPU.
     """
     cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     for token in cuda_visible.split(","):
@@ -84,7 +87,29 @@ def _iter_cuda_device_ids():
         try:
             yield int(token)
         except ValueError:
-            pass  # Non-integer tokens (e.g. GPU UUIDs) are skipped
+            log.warning_once(
+                f"Ignoring CUDA_VISIBLE_DEVICES entry {token!r}: zea only supports integer GPU "
+                "indices, not GPU UUIDs or MIG ids. That GPU will not be used; set "
+                "CUDA_VISIBLE_DEVICES to indices (e.g. '0,2') to use it.",
+                key=cuda_visible,
+            )
+
+
+def _visible_to_physical_ids(visible_ids):
+    """Translate visible (positional) GPU ids to physical ids.
+
+    ``CUDA_VISIBLE_DEVICES`` renumbers the GPUs it exposes 0..N-1, so a
+    positional id only means a physical id when the variable is unset. Without
+    this translation, hiding GPUs twice in one process would map e.g. visible
+    id 0 back onto physical GPU 0 instead of the GPU actually selected.
+
+    Falls back to returning ``visible_ids`` unchanged when the variable is
+    unset or holds no integer entries (e.g. only GPU UUIDs).
+    """
+    physical_ids = list(_iter_cuda_device_ids())
+    if not physical_ids:
+        return visible_ids
+    return [physical_ids[i] for i in visible_ids if i < len(physical_ids)]
 
 
 def _visible_to_physical_ids(visible_ids):
@@ -119,7 +144,7 @@ def _cuda_visible_devices_disables_gpus():
         return True  # Empty means no GPUs
     device_ids = list(_iter_cuda_device_ids())
     if not device_ids:
-        return False  # Only non-integer tokens (e.g. GPU UUIDs) – let nvidia-smi decide
+        return False  # Only non-integer entries (e.g. GPU UUIDs) – let nvidia-smi decide
     return all(d < 0 for d in device_ids)
 
 
@@ -181,8 +206,8 @@ def get_gpu_memory(verbose=True):
 
     # only show enabled devices
     if os.environ.get("CUDA_VISIBLE_DEVICES", "") != "":
-        # Use _iter_cuda_device_ids to safely skip empty/non-integer tokens,
-        # then filter out negative and out-of-range IDs.
+        # Use _iter_cuda_device_ids to skip empty entries and warn about
+        # non-integer ones, then filter out negative and out-of-range IDs.
         gpus = [g for g in _iter_cuda_device_ids() if 0 <= g < len(memory_free_values)]
         if verbose:
             # Report the number of disabled GPUs out of the total
@@ -568,6 +593,9 @@ def init_device(
     # Check if the selected backend is installed with CUDA support
     # -> Run this last because it will mess up the hiding of GPUs!
     if not backend_cuda_available(backend):
+        log.warning(
+            f"Selected backend ({backend}) is not installed with CUDA support. Falling back to CPU."
+        )
         device = "cpu"
 
     return _cache_and_return(device)

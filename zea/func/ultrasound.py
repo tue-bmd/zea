@@ -153,7 +153,7 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
     Returns:
         rf_data (ndarray): output real valued rf data.
     """
-    assert iq_data.dtype in [
+    assert ops.dtype(iq_data) in [
         "complex64",
         "complex128",
     ], "IQ must contain all complex signals."
@@ -187,7 +187,7 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
     carrier = ops.reshape(carrier, (*[1] * (n_dim - 2), n_ax_up, 1))
 
     rf_data = iq_data_upsampled * carrier
-    rf_data = ops.real(rf_data) * ops.sqrt(2)
+    rf_data = ops.real(rf_data)
 
     return ops.cast(rf_data, "float32")
 
@@ -672,6 +672,9 @@ def apply_aligned_apodization(data, apodization, with_batch_dim):
     append_n_dims = ops.ndim(data) - ops.ndim(apodization)
     apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
 
+    # Match the signal dtype so a low-precision (bfloat16) signal is not up-cast.
+    apodization = ops.cast(apodization, data.dtype)
+
     return data * apodization
 
 
@@ -703,6 +706,9 @@ def apply_receive_apodization(data, apodization, with_batch_dim):
     # Append the trailing channel axis/axes so it broadcasts over n_ch
     append_n_dims = ops.ndim(data) - ops.ndim(apodization)
     apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
+
+    # Match the signal dtype so a low-precision (bfloat16) signal is not up-cast.
+    apodization = ops.cast(apodization, data.dtype)
 
     return data * apodization
 

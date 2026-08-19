@@ -238,15 +238,12 @@ def compute_pfield(
     # Exponential arrays of size [numel(x) n_el num_sub_elements]
     wavenumber = 2 * np.pi * freq[0] / sound_speed
     attenuation_wavenumber = attenuation_coef * freq[0]
-    attenuation_wavenumber = ops.cast(attenuation_wavenumber, dtype="complex64")
 
     # Exponential array for the increment wavenumber dk
     wavenumber_step = 2 * np.pi * freq_step / sound_speed
     attenuation_wavenumber_step = attenuation_coef * freq_step
-    wavenumber_step = ops.cast(wavenumber_step, dtype="complex64")
-    attenuation_wavenumber_step = ops.cast(attenuation_wavenumber_step, dtype="complex64")
 
-    @jit
+    @jit(torch=False)
     def _pfield_freq_loop(distance, sub_element_directivity):
         """Calculates the pressure field using frequency loop method.
 
@@ -257,10 +254,13 @@ def compute_pfield(
         distance_complex = ops.cast(distance, dtype="complex64")
 
         mod_out = ops.cast(ops.mod(wavenumber * distance, 2 * np.pi), dtype="complex64")
-        exp_arr = ops.exp(-attenuation_wavenumber * distance_complex + 1j * mod_out)
+        exp_arr = ops.exp(
+            ops.cast(-attenuation_wavenumber * distance, dtype="complex64") + 1j * mod_out
+        )
 
         exp_freq_step = ops.exp(
-            (-attenuation_wavenumber_step + 1j * wavenumber_step) * distance_complex
+            ops.cast(-attenuation_wavenumber_step * distance, dtype="complex64")
+            + 1j * ops.cast(wavenumber_step * distance, dtype="complex64")
         )
 
         exp_arr = exp_arr / ops.sqrt(distance_complex)

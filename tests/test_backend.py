@@ -140,6 +140,39 @@ class TestImportTorch:
             assert _import_torch(force=True) is None
 
 
+class TestJit:
+    """Tests for ``zea.backend.jit``, which dispatches on the active Keras backend."""
+
+    @staticmethod
+    @run_in_backend("torch")
+    def test_compiles_on_torch():
+        """``jit`` wraps the function with ``torch.compile`` on the torch backend."""
+        import keras
+        import numpy as np
+
+        from zea.backend import jit
+
+        def func(x):
+            return keras.ops.sum(x**2)
+
+        compiled = jit(func)
+        x = keras.ops.convert_to_tensor(np.array([1.0, 2.0, 3.0], dtype="float32"))
+
+        assert compiled is not func
+        np.testing.assert_allclose(keras.ops.convert_to_numpy(compiled(x)), 14.0, rtol=1e-6)
+
+    @staticmethod
+    @run_in_backend("torch")
+    def test_torch_false_returns_original_function():
+        """``torch=False`` opts a function out of compilation on the torch backend."""
+        from zea.backend import jit
+
+        def func(x):
+            return x
+
+        assert jit(func, torch=False) is func
+
+
 class TestAdam:
     """Tests for the backend-agnostic Adam optimizer in ``zea.backend.optimizer``."""
 
