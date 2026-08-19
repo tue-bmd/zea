@@ -47,6 +47,7 @@ more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_e
 import numpy as np
 from keras import ops
 
+from zea import log
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.ultrasound import directivity
 
@@ -86,20 +87,18 @@ def simulate_rf(
         n_ax (int): The number of samples in the RF data.
         center_frequency (float): The center frequency of the transmit pulse [Hz].
         sampling_frequency (float): The sampling frequency of the RF data [Hz].
-        t0_delays (array-like): The delays of the transmitting elements [s] of shape (n_tx, n_el).
-        initial_times (array-like): The initial times of the transmitting elements [s] of
-            shape (n_tx,).
+        t0_delays (array-like): The transmit delays [s] of shape (n_tx, n_el).
+        initial_times (array-like): The initial times [s] of shape (n_tx,).
         element_width (float): The width of the elements [m].
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
-        tx_apodizations (array-like): The apodizations of the transmitting elements of
-            shape (n_tx, n_el).
+        tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el).
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
-        elevation_lens (bool): Whether the probe has an elevation lens. See :func:`spread`.
-            When True, ignore scatterers outside the elevation slab defined by element_height.
-            Calling `simulate_rf` directly with an elevation lens only masks when using jit;
-            efficient pruning needs :class:`zea.ops.Simulate`.
-        element_height (float): The elevation height of the elements [m].
-            If None, defaults to element_width.
+        elevation_lens (bool): Whether the probe has an elevation lens: drop scatterers outside
+            the elevation slab, and focus transmit energy directly downwards (i.e. cylindrical
+            instead of spherical spread). For efficient pruning scatterers outside the slab,
+            use :class:`zea.ops.Simulate` rather than calling `simulate_rf` directly.
+        element_height (float): The elevation height of the elements [m], used for the
+            elevation directivity and the elevation slab. If None, defaults to element_width.
         max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
             :func:`zea.simulator_time_domain.simulate_rf_td` share a call signature.
 
@@ -117,6 +116,7 @@ def simulate_rf(
 
     magnitudes = scatterer_magnitudes
     if elevation_lens:
+        _warn_if_elevation_extent(probe_geometry)
         scatterer_positions, magnitudes = _apply_elevation_slab(
             scatterer_positions, magnitudes, probe_geometry, element_height
         )
@@ -130,7 +130,9 @@ def simulate_rf(
     scatterer_positions = ops.cast(scatterer_positions, "float32")
     magnitudes = ops.cast(magnitudes, "float32")
 
-    pulse_spectrum_fn = get_pulse_spectrum_fn(center_frequency, n_period=4)
+    pulse_spectrum_fn = get_pulse_spectrum_fn(
+        center_frequency, n_period=4, sampling_frequency=sampling_frequency
+    )
 
     if not apply_lens_correction:
         dist = ops.linalg.norm(probe_geometry[None] - scatterer_positions[:, None], axis=-1)
@@ -151,12 +153,7 @@ def simulate_rf(
 
     freqs = ops.arange(n_ax_rounded // 2 + 1, dtype="float32") / n_ax_rounded * sampling_frequency
 
-    # `pulse_spectrum_fn` gets rescaled by n_fft / sampling_frequency. Normalize to remove the link
-    # between sampling frequency and amplitude.
-    nonnorm_spectrum = pulse_spectrum_fn(freqs)
-    pulse = ops.irfft((ops.real(nonnorm_spectrum), ops.imag(nonnorm_spectrum)))
-    peak = ops.max(ops.abs(pulse))
-    waveform_spectrum = nonnorm_spectrum / ops.cast(peak, "complex64")
+    waveform_spectrum = pulse_spectrum_fn(freqs)
 
     scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
     theta = ops.arctan2(scat_pos_relative_to_probe[..., 0], scat_pos_relative_to_probe[..., 2])
@@ -164,7 +161,7 @@ def simulate_rf(
 
     # [n_scat, n_el, n_freq]
     directivity_x = directivity(freqs[None, None], theta[..., None], element_width, sound_speed)
-    directivity_y = directivity(freqs[None, None], phi[..., None], element_width, sound_speed)
+    directivity_y = directivity(freqs[None, None], phi[..., None], element_height, sound_speed)
     element_directivity = directivity_x * directivity_y
     attenuation = attenuate(freqs[None, None], attenuation_coef, dist[..., None])
     one_way_phase = delay2(
@@ -281,7 +278,9 @@ def spread(dist, exponent=1.0, mindist=1e-3):
 
     Args:
         dist (array-like): The distance the wave has traveled.
-        exponent (float): 1 for spherical, 0.5 for cylindrical.
+        exponent (float): 1 for spherical, 0.5 for cylindrical. An elevation lens focuses the
+            transmitted energy to a slab, resulting in a cylindrical transmit and a spherical
+            receive path.
         mindist (float): Distance that corresponds with unit gain.
 
     Returns:
@@ -379,6 +378,20 @@ def elevation_slab_bucket(
     return {"scatterer_positions": positions, "scatterer_magnitudes": magnitudes}
 
 
+def _warn_if_elevation_extent(probe_geometry, tol=1e-6):
+    """Warn if an elevation lens is used with a seemingly non-1D array probe."""
+    try:
+        elevation = ops.convert_to_numpy(probe_geometry)[:, 1]
+    except (RuntimeError, ValueError, TypeError):
+        return  # traced, cannot inspect
+    if elevation.max() - elevation.min() > tol:
+        log.warning(
+            "elevation_lens=True models a 1D probe with a cylindrical lens, but the probe is not"
+            f"1D (element elevation min, max: {elevation.min()}, {elevation.max()}) "
+            "This is probably a mistake."
+        )
+
+
 def _apply_elevation_slab(
     scatterer_positions, scatterer_magnitudes, probe_geometry, element_height
 ):
@@ -424,21 +437,25 @@ def hann_unnormalized(x, width):
     return ops.where(ops.abs(x) < width / 2, ops.cos(np.pi * x / width) ** 2, 0)
 
 
-def get_pulse_spectrum_fn(center_frequency, n_period=3.0):
+def get_pulse_spectrum_fn(center_frequency, n_period=3.0, sampling_frequency=None):
     """Computes the spectrum of a sine that is windowed with a Hann window.
 
     Args:
         center_frequency (float): The center frequency of the transmit pulse.
         n_period (float): The number of periods to include in the pulse.
+        sampling_frequency (float): Frequency used for scaling the spectrum such that a waveform
+            recovered with ``ops.irfft`` has a unit peak (as ``ops.irfft`` divides the waveform
+            by the sampling frequency).
 
     Returns:
         spectrum_fn (callable): A function that computes the spectrum of the pulse
         for the input frequencies in Hz.
     """
     period = n_period / center_frequency
+    scale = 0.5 if sampling_frequency is None else 0.5 * sampling_frequency * period
 
     def spectrum_fn(f):
-        return ops.array(1 / 2, "complex64") * ops.cast(
+        return ops.array(scale, "complex64") * ops.cast(
             (hann_fd(f - center_frequency, period) + hann_fd(f + center_frequency, period)),
             "complex64",
         )

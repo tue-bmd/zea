@@ -44,6 +44,7 @@ from zea.func.ultrasound import directivity
 from zea.simulator import (
     _apply_elevation_slab,
     _resolve_element_width,
+    _warn_if_elevation_extent,
     attenuate,
     hann_unnormalized,
     spread,
@@ -84,10 +85,9 @@ def simulate_rf_td(
     reusing the same helpers as :func:`zea.simulator.simulate_rf`.
 
     Args:
-        scatterer_positions (array-like): The scatterer positions [m] of shape
-            (n_scat, 3).
-        scatterer_magnitudes (array-like): The scatterer magnitudes of shape (n_scat,).
-        probe_geometry (array-like): The probe geometry [m] of shape (n_el, 3).
+        scatterer_positions (array-like): The positions of the scatterers [m] of shape (n_scat, 3).
+        scatterer_magnitudes (array-like): The magnitudes of the scatterers of shape (n_scat,).
+        probe_geometry (array-like): The geometry of the probe [m] of shape (n_el, 3).
         apply_lens_correction (bool): Whether to apply lens correction.
         lens_thickness (float): The thickness of the lens [m].
         lens_sound_speed (float): The speed of sound in the lens [m/s].
@@ -101,13 +101,12 @@ def simulate_rf_td(
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
         tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el).
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
-        elevation_lens (bool): Whether the probe has an elevation lens.
-            See :func:`zea.simulator.spread`. When True, ignore scatterers outside the
-            elevation slab defined by element_height.
-            Calling `simulate_rf_td` directly with an elevation lens only masks when using jit;
-            efficient pruning needs :class:`zea.ops.Simulate`.
-        element_height (float): The elevation height of the elements [m]. Only used when
-            ``elevation_lens`` is True.
+        elevation_lens (bool): Whether the probe has an elevation lens: drop scatterers outside
+            the elevation slab, and focus transmit energy directly downwards (i.e. cylindrical
+            instead of spherical spread). For efficient pruning scatterers outside the slab,
+            use :class:`zea.ops.Simulate` rather than calling `simulate_rf_td` directly.
+        element_height (float): The elevation height of the elements [m], used for the
+            elevation directivity and the elevation slab. If None, defaults to element_width.
         max_chunk_gb (float): Approximate memory budget [GB] for the (chunk, n_el, n_el)
             tensors held at once while iterating over scatterers. Scatterers are processed
             in chunks sized to this budget, so peak memory no longer scales with the total
@@ -117,6 +116,8 @@ def simulate_rf_td(
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
     """
     element_width = _resolve_element_width(probe_geometry, element_width)
+    if element_height is None:
+        element_height = element_width
     n_ax = int(n_ax)
     n_tx = t0_delays.shape[0]
     n_el = probe_geometry.shape[0]
@@ -142,9 +143,9 @@ def simulate_rf_td(
             sound_speed,
             center_frequency,
             element_width,
+            element_height,
             attenuation_coef,
             elevation_lens,
-            element_height,
         )
         for tx in range(n_tx):
             spike_maps[tx] = spike_maps[tx] + _simulate_transmit(
@@ -193,9 +194,9 @@ def _precompute_scatterer_response(
     sound_speed,
     center_frequency,
     element_width,
+    element_height,
     attenuation_coef,
     elevation_lens=False,
-    element_height=None,
 ):
     """Compute the transmit-independent gain and two-way travel time tensors.
 
@@ -207,11 +208,9 @@ def _precompute_scatterer_response(
     """
     magnitudes = scatterer_magnitudes
     if elevation_lens:
+        _warn_if_elevation_extent(probe_geometry)
         scatterer_positions, magnitudes = _apply_elevation_slab(
-            scatterer_positions,
-            magnitudes,
-            probe_geometry,
-            element_width if element_height is None else element_height,
+            scatterer_positions, magnitudes, probe_geometry, element_height
         )
 
     # See the matching cast in `simulate_rf`.
@@ -230,7 +229,12 @@ def _precompute_scatterer_response(
     two_way_distance = one_way_distance[:, :, None] + one_way_distance[:, None, :]
 
     element_directivity = _element_directivity(
-        scatterer_positions, probe_geometry, element_width, sound_speed, center_frequency
+        scatterer_positions,
+        probe_geometry,
+        element_width,
+        element_height,
+        sound_speed,
+        center_frequency,
     )
     directivity_pair = element_directivity[:, :, None] * element_directivity[:, None, :]
     spread_attenuation = (
@@ -267,14 +271,14 @@ def _one_way_distances(
 
 
 def _element_directivity(
-    scatterer_positions, probe_geometry, element_width, sound_speed, frequency
+    scatterer_positions, probe_geometry, element_width, element_height, sound_speed, frequency
 ):
     """3D directivity from each element to each scatterer."""
     relative = scatterer_positions[:, None] - probe_geometry[None]
     theta = ops.arctan2(relative[..., 0], relative[..., 2])
     phi = ops.arctan2(relative[..., 1], relative[..., 2])
     return directivity(frequency, theta, element_width, sound_speed) * directivity(
-        frequency, phi, element_width, sound_speed
+        frequency, phi, element_height, sound_speed
     )
 
 
