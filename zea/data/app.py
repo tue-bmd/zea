@@ -896,6 +896,7 @@ def run_checks(
             num_threads=4,
             insert_frame_axis=False,
             sort_files=False,
+            dtype="float32",
             axis_selections=_axis_sel,
             validate=False,
             revision=_dl_revision,

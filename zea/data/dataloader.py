@@ -549,7 +549,7 @@ class Dataloader:
       - resize
       - repeat
       - batch
-      - cast to float32
+      - cast to ``dtype`` (if specified)
       - normalize
       - augmentation
       - convert_to_tensor
@@ -626,6 +626,11 @@ class Dataloader:
             Default is ``False``.
         assert_image_range: Assert values stay within ``image_range``.
             Default is ``True``.
+        dtype: Cast samples to this dtype (e.g. ``"float32"``, ``np.float16``) after
+            batching and before normalization. Default is ``None``, which leaves the
+            dtype the files provide untouched. Note that normalization of integer data
+            needs a floating point ``dtype``, otherwise ``normalization_range`` is
+            applied with integer arithmetic.
         dataset_repetitions: Repeat dataset this many times. Repetition happens
             after sharding. Default is ``None`` (no repetition).
         cache: Cache loaded samples in RAM. Default is ``False``.
@@ -815,6 +820,7 @@ class Dataloader:
         normalization_range: tuple | None = None,
         clip_image_range: bool = False,
         assert_image_range: bool = True,
+        dtype: "str | np.dtype | None" = None,
         dataset_repetitions: int | None = None,
         cache: bool = False,
         additional_axes_iter: tuple | None = None,
@@ -899,6 +905,7 @@ class Dataloader:
             shard_index=shard_index,
             clip_image_range=clip_image_range,
             assert_image_range=assert_image_range,
+            dtype=None if dtype is None else np.dtype(dtype),
             image_range=image_range,
             normalization_range=normalization_range,
             dataset_repetitions=dataset_repetitions,
@@ -986,7 +993,8 @@ class Dataloader:
         if self.batch_size is not None:
             ds = ds.batch(batch_size=self.batch_size, drop_remainder=cfg["drop_remainder"])
 
-        ds = _ds_map(ds, lambda x: x.astype(np.float32))
+        if cfg["dtype"] is not None:
+            ds = _ds_map(ds, lambda x, _d=cfg["dtype"]: x.astype(_d))
 
         if cfg["normalization_range"] is not None:
             _ir, _nr = cfg["image_range"], cfg["normalization_range"]

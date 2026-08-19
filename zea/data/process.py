@@ -185,6 +185,7 @@ def run_processing(
         num_threads=num_threads,
         insert_frame_axis=False,
         sort_files=True,
+        dtype="float32",
         axis_selections=axis_selections,
         **dataset_hf_kwargs,
     )

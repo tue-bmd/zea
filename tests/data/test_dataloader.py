@@ -607,6 +607,66 @@ def test_cache_hit_and_store(dummy_hdf5):
     np.testing.assert_array_equal(result1, result2)
 
 
+@pytest.fixture
+def uint8_hdf5(tmp_path):
+    """Fixture to create a dummy hdf5 file holding uint8 data."""
+    file_path = tmp_path / "uint8_data.hdf5"
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    with h5py.File(file_path, "w") as f:
+        data = rng.integers(0, 256, (DUMMY_N_FRAMES, *DUMMY_IMAGE_SHAPE), dtype=np.uint8)
+        f.create_dataset("data", data=data)
+    return file_path
+
+
+def test_dtype_defaults_to_no_casting(uint8_hdf5):
+    """Test that without `dtype` the file's own dtype is preserved."""
+    dataloader = Dataloader(
+        uint8_hdf5,
+        key="data",
+        batch_size=2,
+        shuffle=False,
+        assert_image_range=False,
+        convert_to_tensor=False,
+        validate=False,
+    )
+    assert next(iter(dataloader)).dtype == np.uint8
+
+
+@pytest.mark.parametrize("dtype", ["float32", np.float16])
+def test_dtype_casts(uint8_hdf5, dtype):
+    """Test that `dtype` casts the samples to the requested dtype."""
+    dataloader = Dataloader(
+        uint8_hdf5,
+        key="data",
+        batch_size=2,
+        shuffle=False,
+        assert_image_range=False,
+        dtype=dtype,
+        convert_to_tensor=False,
+        validate=False,
+    )
+    assert next(iter(dataloader)).dtype == np.dtype(dtype)
+
+
+def test_dtype_casts_before_normalization(uint8_hdf5):
+    """Test that casting happens before normalization, so uint8 data normalizes."""
+    dataloader = Dataloader(
+        uint8_hdf5,
+        key="data",
+        batch_size=2,
+        shuffle=False,
+        image_range=(0, 255),
+        normalization_range=(0, 1),
+        dtype="float32",
+        convert_to_tensor=False,
+        validate=False,
+    )
+    batch = next(iter(dataloader))
+    assert batch.dtype == np.float32
+    assert 0.0 <= batch.min() and batch.max() <= 1.0
+    assert not np.all(np.equal(batch, np.round(batch)))
+
+
 def test_normalization_without_image_range_raises(dummy_hdf5):
     """Test that setting normalization_range without image_range raises."""
     with pytest.raises(AssertionError, match="image_range must be set"):
