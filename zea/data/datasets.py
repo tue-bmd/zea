@@ -567,7 +567,7 @@ class Dataset(H5FileHandleCache):
         Args:
             file_paths (str or list): (list of) path(s) to the folder(s) containing the HDF5 file(s)
                 or list of HDF5 file paths. Can be a mixed list of folders and files.
-            validate (bool, optional): Whether to validate the dataset. Defaults to True.
+            validate (bool, optional): Whether to validate the dataset. Defaults to False.
             directory_splits (list, optional): List of directory split by. Is a list of floats
                 between 0 and 1, with the same length as the number of file_paths given.
                 If none, all files in file_paths are used.

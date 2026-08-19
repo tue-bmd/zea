@@ -316,7 +316,7 @@ class H5DataSource:
         return_metadata: bool | str | Sequence[str] | None = None,
         return_filename: bool | None = None,
         cache: bool = False,
-        validate: bool = True,
+        validate: bool = False,
         revision: str | None = None,
         pad_incomplete_blocks: bool = False,
         axis_selections: dict | None = None,
@@ -643,7 +643,7 @@ class Dataloader:
         frame_axis: Axis along which frames are stacked/placed in output.
             Default is ``-1``.
         validate: Validate discovered files against the zea format.
-            Default is ``True``.
+            Default is ``False``.
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
             Defaults to ``None`` (uses the default branch, typically ``"main"``).
         prefetch: Enable Grain prefetching for iteration. Default is ``True``.
@@ -808,7 +808,7 @@ class Dataloader:
         insert_frame_axis: bool = True,
         frame_index_stride: int = 1,
         frame_axis: int = -1,
-        validate: bool = True,
+        validate: bool = False,
         revision: str | None = None,
         prefetch: bool = True,
         shard_index: int | None = None,
