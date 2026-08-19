@@ -577,13 +577,13 @@ def test_skipped_files_warning(tmp_path):
     assert len(source) == 0
 
 
-def test_limit_n_samples(dummy_hdf5):
-    """Test H5DataSource with limit_n_samples caps samples."""
+def test_limit_n_examples(dummy_hdf5):
+    """Test H5DataSource with limit_n_examples caps the dataset length."""
     source = H5DataSource(
         file_paths=dummy_hdf5,
         key="data",
         n_frames=1,
-        limit_n_samples=5,
+        limit_n_examples=5,
         validate=False,
     )
     assert len(source) == 5

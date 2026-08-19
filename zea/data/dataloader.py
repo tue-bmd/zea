@@ -281,13 +281,15 @@ class H5DataSource:
         key: HDF5 dataset key, e.g. ``"data/image"``.
         n_frames: Number of consecutive frames per sample.
         frame_index_stride: Stride between frames.
-        frame_axis: Axis along which frames are stacked in the output.
+        frame_axis: Axis along which frames are stacked in the output. Defaults to
+            ``-1`` so frames land in the channel position for image data; see
+            :class:`Dataloader`.
         insert_frame_axis: Whether to insert a new axis for frames.
         initial_frame_axis: Source axis that stores frames in the file.
         additional_axes_iter: Extra axes to iterate over.
         sort_files: Sort files numerically.
         overlapping_blocks: Allow overlapping frame blocks.
-        limit_n_samples: Cap the number of samples.
+        limit_n_examples: Cap the number of examples (dataset length).
         limit_n_frames: Cap frames loaded per file.
         return_metadata: Return a ``(sample, metadata)`` tuple. See :class:`Dataloader`.
         return_filename: Deprecated alias for ``return_metadata``.
@@ -310,7 +312,7 @@ class H5DataSource:
         additional_axes_iter: tuple | None = None,
         sort_files: bool = True,
         overlapping_blocks: bool = False,
-        limit_n_samples: int | None = None,
+        limit_n_examples: int | None = None,
         limit_n_frames: int | None = None,
         offset_n_frames: int = 0,
         return_metadata: bool | str | Sequence[str] | None = None,
@@ -402,9 +404,11 @@ class H5DataSource:
             offset_n_frames=offset_n_frames,
         )
 
-        if limit_n_samples is not None:
-            log.info(f"H5DataSource: Limiting to {limit_n_samples} / {len(self.indices)} samples.")
-            self.indices = self.indices[:limit_n_samples]
+        if limit_n_examples is not None:
+            log.info(
+                f"H5DataSource: Limiting to {limit_n_examples} / {len(self.indices)} examples."
+            )
+            self.indices = self.indices[:limit_n_examples]
 
         # Thread-local file handle caches (one per thread)
         self._local = threading.local()
@@ -536,7 +540,7 @@ class Dataloader:
 
       - offset_n_frames / axis_selections (applied at HDF5 read time)
       - limit_n_frames
-      - limit_n_samples
+      - limit_n_examples
       - shuffle
       - shard
       - add channel dim
@@ -591,9 +595,12 @@ class Dataloader:
             under the ``"file"`` key.
         seed: Random seed used for dataloader (e.g. shuffling). Default is ``None``.
             If ``None`` a random seed is generated.
-        limit_n_samples: Limit total number of samples (useful for debugging).
-            Default is ``None`` (no limit). Note that this is not the same as files.
-            A file can have multiple samples, i.e. multiple frames. Note that this happens
+        limit_n_examples: Cap the total number of examples the loader yields, across
+            all files (useful for debugging). Default is ``None`` (no limit). An
+            "example" is one item before batching -- a single frame, or a block of
+            ``n_frames`` consecutive frames -- so this is neither a count of files nor,
+            despite the ultrasound sense of the word, of axial samples. Contrast
+            ``limit_n_frames``, which caps frames *per file*. Note that this happens
             before shuffle!
         limit_n_frames: Maximum number of frames to load per file, counted from
             ``offset_n_frames``. Default is ``None`` (no limit).
@@ -641,7 +648,18 @@ class Dataloader:
         frame_index_stride: Step between selected frames in a block.
             Default is ``1``.
         frame_axis: Axis along which frames are stacked/placed in output.
-            Default is ``-1``.
+            Default is ``-1``, which puts frames in the trailing, channel-like
+            position: an image batch comes out as ``(batch, height, width, n_frames)``,
+            the channels-last layout ``Resizer`` and Keras expect. That is why
+            resizing without explicit ``resize_axes`` requires ``frame_axis=-1`` --
+            with the frame axis elsewhere, the default resize axes ``(1, 2)`` would
+            no longer be height and width.
+
+            For raw channel data there is no channel axis to double as, and the
+            trailing frame axis scrambles the ``(n_tx, n_ax, n_el, n_ch)`` layout the
+            processing pipeline wants. Set ``frame_axis=0`` there, so blocks keep the
+            file's own ``(n_frames, n_tx, n_ax, n_el, n_ch)`` order (or drop the dummy
+            axis with ``sample[..., 0]`` when ``n_frames=1``).
         validate: Validate discovered files against the zea format.
             Default is ``False``.
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
@@ -785,7 +803,7 @@ class Dataloader:
         return_metadata: bool | str | Sequence[str] | None = None,
         return_filename: bool | None = None,
         seed: int | None = None,
-        limit_n_samples: int | None = None,
+        limit_n_examples: int | None = None,
         limit_n_frames: int | None = None,
         offset_n_frames: int = 0,
         drop_remainder: bool = False,
@@ -862,7 +880,7 @@ class Dataloader:
             additional_axes_iter=additional_axes_iter,
             sort_files=sort_files,
             overlapping_blocks=overlapping_blocks,
-            limit_n_samples=limit_n_samples,
+            limit_n_examples=limit_n_examples,
             limit_n_frames=limit_n_frames,
             offset_n_frames=offset_n_frames,
             return_metadata=self.return_metadata,
@@ -895,8 +913,10 @@ class Dataloader:
             resize_type = resize_type or "resize"
             if frame_axis != -1:
                 assert resize_axes is not None, (
-                    "Resizing only works with frame_axis = -1. Alternatively, "
-                    "you can specify resize_axes."
+                    "Resizing without `resize_axes` assumes axes (1, 2) are height and "
+                    "width, which holds only when frames sit in the trailing channel "
+                    f"position (frame_axis=-1), but frame_axis={frame_axis}. Either "
+                    "use frame_axis=-1 or name the spatial axes via resize_axes."
                 )
             assert image_size is not None, (
                 "image_size must be provided when resizing (resize_type is set)."
