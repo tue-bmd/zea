@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from keras import ops
 
+from zea.data import dataloader as dataloader_module
 from zea.data.augmentations import RandomCircleInclusion
 from zea.data.dataloader import Dataloader, H5DataSource
 from zea.data.datasets import EXISTS, Dataset, compile_file_filter
@@ -271,7 +272,7 @@ def test_dataloader(
         ("dummy_hdf5", "data", 5, False, (20, 20), 1),
     ],
 )
-def test_h5_dataset_return_filename(
+def test_h5_dataset_return_metadata(
     directory,
     key,
     n_frames,
@@ -280,7 +281,7 @@ def test_h5_dataset_return_filename(
     batch_size,
     request,
 ):
-    """Test the dataloader with return_filename=True."""
+    """Test the dataloader with return_metadata=True."""
 
     is_camus = directory == "camus_dataset"
     validate = directory != "dummy_hdf5"
@@ -295,7 +296,7 @@ def test_h5_dataset_return_filename(
         insert_frame_axis=insert_frame_axis,
         shuffle=True,
         seed=DEFAULT_TEST_SEED,
-        return_filename=True,
+        return_metadata=True,
         resize_type="resize",
         batch_size=batch_size,
         validate=validate,
@@ -304,9 +305,14 @@ def test_h5_dataset_return_filename(
 
     batch = next(iter(dataset))
 
-    assert len(batch) == 2, "The batch should contain two elements: images and file names"
+    assert len(batch) == 2, "The batch should contain two elements: images and metadata"
 
-    _, file_dict = batch
+    _, metadata = batch
+
+    assert list(metadata) == ["file"], (
+        "With return_metadata=True only the file identity should be returned"
+    )
+    file_dict = metadata["file"]
 
     # Check keys
     keys = ["filename", "fullpath", "indices"]
@@ -369,7 +375,6 @@ def test_h5_dataset_resize_types(directory, key, image_size, resize_type, batch_
         shuffle=True,
         batch_size=batch_size,
         seed=DEFAULT_TEST_SEED,
-        return_filename=False,
         resize_type=resize_type,
         assert_image_range=False,
         validate=validate,
@@ -471,7 +476,6 @@ def test_ndim_hdf5_dataset(
         additional_axes_iter=additional_axes_iter,
         shuffle=True,
         seed=DEFAULT_TEST_SEED,
-        return_filename=False,
         resize_type=resize_type,
         resize_axes=(-3, -1),
         validate=False,  # ndim_hdf5_dataset_path is not a zea dataset
@@ -759,7 +763,7 @@ def test_shape_attribute(dummy_hdf5):
         shuffle=False,
         validate=False,
         batch_size=1,
-        return_filename=True,
+        return_metadata=True,
     )
     batch = next(iter(loader))
     assert batch[0].shape == (1, *DUMMY_IMAGE_SHAPE, 1)
@@ -791,7 +795,7 @@ def test_empty_dataloader_raises(monkeypatch):
     monkeypatch.setattr(Dataloader, "_build_pipeline", lambda self, seed: empty)
 
     dl = object.__new__(Dataloader)
-    dl.return_filename = False
+    dl.returns_metadata = False
 
     with pytest.raises(ValueError, match="no samples"):
         dl._map_dataset = dl._build_pipeline(seed=0)
@@ -1136,3 +1140,164 @@ class TestCompileFileFilter:
     def test_invalid_type_raises(self):
         with pytest.raises(TypeError):
             compile_file_filter(42)
+
+
+METADATA_N_FRAMES = 6
+METADATA_IMAGE_SHAPE = (16, 16)
+
+
+@pytest.fixture
+def metadata_dataset(tmp_path):
+    """Two spec-valid files carrying scan, probe, subject and per-frame annotations."""
+    for i, (sex, center_frequency) in enumerate([("f", 5e6), ("m", 9e6)]):
+        scan = generate_dummy_scan(n_tx=2, n_el=8, center_frequency=center_frequency)
+        File.create(
+            tmp_path / f"metadata_{i}_0.hdf5",
+            data={
+                "image": {
+                    "values": np.full((METADATA_N_FRAMES, *METADATA_IMAGE_SHAPE), i, dtype=np.uint8)
+                }
+            },
+            scan=scan,
+            probe={"name": "generic", "probe_geometry": np.zeros((8, 3), dtype=np.float32)},
+            metadata={
+                "subject": {"sex": sex, "age": np.uint8(61)},
+                "annotations": {
+                    "label": np.array(
+                        [f"f{i}{frame}" for frame in range(METADATA_N_FRAMES)], dtype=np.str_
+                    ),
+                    "view": "longitudinal",
+                },
+            },
+            description="metadata test dataset",
+            overwrite=True,
+            warn_missing_optional_fields=False,
+        )
+    return tmp_path
+
+
+def test_return_metadata_paths(metadata_dataset):
+    """Requested dotted paths are returned in a FileSpec-shaped dict."""
+    loader = Dataloader(
+        metadata_dataset,
+        key=CAMUS_KEY,
+        batch_size=None,
+        shuffle=False,
+        return_metadata=[
+            "scan.sampling_frequency",
+            "probe.probe_geometry",
+            "metadata.subject",
+            "description",
+        ],
+    )
+    _, metadata = next(iter(loader))
+    loader.close()
+
+    assert set(metadata) == {"scan", "probe", "metadata", "description", "file"}
+    assert metadata["scan"]["sampling_frequency"] == np.float32(40e6)
+    assert metadata["probe"]["probe_geometry"].shape == (8, 3)
+    # A path pointing at a group loads everything below it
+    assert metadata["metadata"]["subject"]["sex"] == "f"
+    assert metadata["metadata"]["subject"]["age"] == 61
+    # Root attributes resolve too, not just datasets
+    assert metadata["description"] == "metadata test dataset"
+    assert metadata["file"]["filename"] == "metadata_0_0"
+
+
+def test_return_metadata_single_path_and_batching(metadata_dataset):
+    """A single dotted path may be passed as a string, and batches stack metadata."""
+    batch_size = 2
+    loader = Dataloader(
+        metadata_dataset,
+        key=CAMUS_KEY,
+        batch_size=batch_size,
+        shuffle=False,
+        return_metadata="metadata.subject.sex",
+    )
+    _, metadata = next(iter(loader))
+    loader.close()
+
+    sexes = metadata["metadata"]["subject"]["sex"]
+    assert len(sexes) == batch_size
+    assert all(sex == "f" for sex in sexes)
+
+
+def test_return_metadata_slices_per_frame_fields(metadata_dataset):
+    """Per-frame fields follow the frames of the sample; other fields are returned whole."""
+    n_frames = 2
+    loader = Dataloader(
+        metadata_dataset,
+        key=CAMUS_KEY,
+        batch_size=None,
+        shuffle=False,
+        sort_files=False,
+        n_frames=n_frames,
+        return_metadata=["metadata.annotations.label", "metadata.annotations.view"],
+    )
+    labels = []
+    for _, metadata in loader:
+        annotations = metadata["metadata"]["annotations"]
+        assert annotations["label"].shape == (n_frames,)
+        # A scalar (broadcast) annotation has no frame axis and is left alone
+        assert annotations["view"] == "longitudinal"
+        labels.append(list(annotations["label"]))
+    loader.close()
+
+    per_file = METADATA_N_FRAMES // n_frames
+    assert labels[:per_file] == [["f00", "f01"], ["f02", "f03"], ["f04", "f05"]]
+    assert labels[per_file:] == [["f10", "f11"], ["f12", "f13"], ["f14", "f15"]]
+
+
+def test_return_metadata_missing_path_raises(metadata_dataset):
+    """A path that is absent from a file raises a KeyError naming the path and file."""
+    with pytest.raises(KeyError, match="metadata.subject.bmi"):
+        Dataloader(
+            metadata_dataset,
+            key=CAMUS_KEY,
+            batch_size=None,
+            shuffle=False,
+            return_metadata=["metadata.subject.bmi"],
+        )
+
+
+def test_return_metadata_read_once_per_file(metadata_dataset):
+    """Metadata is read once per file, not once per sample."""
+    source = H5DataSource(
+        metadata_dataset,
+        key=CAMUS_KEY,
+        return_metadata=["metadata.subject"],
+    )
+    n_calls = 0
+    original = dataloader_module.read_metadata
+
+    def counting_read_metadata(file, paths):
+        nonlocal n_calls
+        n_calls += 1
+        return original(file, paths)
+
+    dataloader_module.read_metadata = counting_read_metadata
+    try:
+        for index in range(len(source)):
+            source[index]
+    finally:
+        dataloader_module.read_metadata = original
+        source.close()
+
+    assert len(source) == 2 * METADATA_N_FRAMES
+    assert n_calls == 2, "metadata should be read once per file"
+
+
+def test_return_filename_is_deprecated(dummy_hdf5):
+    """``return_filename`` still works but warns and nests identity under 'file'."""
+    with pytest.deprecated_call(match="return_filename"):
+        loader = Dataloader(
+            dummy_hdf5,
+            key="data",
+            batch_size=1,
+            shuffle=False,
+            validate=False,
+            return_filename=True,
+        )
+    _, metadata = next(iter(loader))
+    loader.close()
+    assert set(metadata["file"]) == {"filename", "fullpath", "indices"}

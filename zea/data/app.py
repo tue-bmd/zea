@@ -890,7 +890,6 @@ def run_checks(
             key=_data_key,
             batch_size=None,
             shuffle=False,
-            return_filename=False,
             offset_n_frames=start_frame,
             limit_n_frames=actual_n,
             n_frames=1,

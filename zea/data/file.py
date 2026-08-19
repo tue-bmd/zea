@@ -1653,6 +1653,34 @@ class File(h5py.File):
             return cast("_DataProxy", _GroupProxy(self["data"], self._chunk_fetcher))
         raise KeyError("No 'data' group found in this file.")
 
+    def dataset(self, key: str) -> "ChunkedDataset | _StringDataset | _GroupProxy | h5py.Dataset":
+        """Return the dataset at *key* on the concurrent read fast path.
+
+        ``file[key]`` deliberately hands back the bare :class:`h5py.Dataset`, so reads
+        through it are serial. This returns the same dataset wrapped so slicing goes
+        through :mod:`zea.data.chunk_reader` — the same path
+        ``file.data.raw_data[...]`` takes, but addressed by key::
+
+            file.dataset("data/raw_data")[0, [0, 10, 20]]
+
+        Prefer it whenever the key is not known statically (a dataloader, a CLI). Groups
+        are returned as a :class:`_GroupProxy`, and anything the fast path cannot serve
+        falls back to h5py, so the result is always what h5py would have returned.
+
+        Args:
+            key: Path to the dataset, e.g. ``"data/raw_data"``. Resolved with the same
+                ``data``/``scan`` to ``tracks/track_0/`` remapping as ``file[key]``.
+
+        Returns:
+            The dataset, wrapped for concurrent reads where possible.
+        """
+        child = self[key]
+        if isinstance(child, h5py.Group):
+            return _GroupProxy(child, self._chunk_fetcher)
+        if h5py.check_string_dtype(child.dtype):
+            return _StringDataset(child)
+        return ChunkedDataset(child, self._chunk_fetcher)
+
     @property
     def _is_legacy_file(self) -> bool:
         return _is_legacy_file(self)
@@ -1782,8 +1810,9 @@ class File(h5py.File):
     def to_iterator(self, key):
         """Convert the data to an iterator over all frames."""
         key = self.format_key(key)
+        dataset = self.dataset(key)
         for frame_idx in range(self.n_frames):
-            yield self[key][frame_idx]
+            yield dataset[frame_idx]
 
     @staticmethod
     def key_to_data_type(key):
@@ -1804,7 +1833,7 @@ class File(h5py.File):
         )
         # First axis: all frames, second axis: selected transmits
         indices = (slice(None), np.array(selected_transmits))
-        return self[key][indices]
+        return self.dataset(key)[indices]
 
     @deprecated(replacement="File.data.<key> with h5py slice indexing")
     def load_data(
@@ -1834,7 +1863,7 @@ class File(h5py.File):
         if indices is None or (isinstance(indices, str) and indices == "all"):
             indices = slice(None)
 
-        data = self[key]
+        data = self.dataset(key)
         try:
             data = data[indices]
         except (OSError, IndexError) as exc:
@@ -2362,9 +2391,9 @@ def load_file(
         # Load the desired frames from the file
         _key = file.format_key(data_type)
         _indices = indices if indices is not None else slice(None)
-        item = file[_key]
-        if isinstance(item, h5py.Group):
-            data = item["values"][_indices]
+        item = file.dataset(_key)
+        if isinstance(item, _GroupProxy):
+            data = item.values[_indices]
         else:
             data = item[_indices]
 

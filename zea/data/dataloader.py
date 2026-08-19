@@ -22,7 +22,9 @@ Example:
 
 import re
 import threading
-from collections.abc import Callable
+import warnings
+from collections import OrderedDict
+from collections.abc import Callable, Sequence
 from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List
@@ -33,8 +35,19 @@ import numpy as np
 from keras import ops
 
 from zea import log
-from zea.data.datasets import Dataset, H5FileHandleCache, count_samples_per_directory
+from zea.data.datasets import (
+    FILE_HANDLE_CACHE_CAPACITY,
+    Dataset,
+    H5FileHandleCache,
+    count_samples_per_directory,
+)
 from zea.data.layers import Resizer
+from zea.data.metadata import (
+    has_per_frame_paths,
+    normalize_metadata_paths,
+    read_metadata,
+    slice_metadata,
+)
 from zea.func.tensor import translate
 from zea.utils import canonicalize_axis, map_negative_indices
 
@@ -231,6 +244,27 @@ def generate_h5_indices(
     return indices
 
 
+def _resolve_return_metadata(return_metadata, return_filename) -> tuple[str, ...] | None:
+    """Reconcile ``return_metadata`` with the deprecated ``return_filename`` flag.
+
+    Returns ``None`` when samples are plain arrays, otherwise a (possibly empty)
+    tuple of dotted metadata paths to load alongside the file identity.
+    """
+    if return_filename is not None:
+        warnings.warn(
+            "`return_filename` is deprecated and will be removed in a future release; "
+            "use `return_metadata` instead. `return_metadata=True` returns the same "
+            "file identity under a 'file' key, and a list of dotted paths (e.g. "
+            "`return_metadata=['scan.sampling_frequency']`) additionally loads metadata "
+            "from the file.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        if return_metadata is None:
+            return_metadata = return_filename
+    return normalize_metadata_paths(return_metadata)
+
+
 class H5DataSource:
     """Thread-safe random-access data source for HDF5 files.
 
@@ -255,7 +289,8 @@ class H5DataSource:
         overlapping_blocks: Allow overlapping frame blocks.
         limit_n_samples: Cap the number of samples.
         limit_n_frames: Cap frames loaded per file.
-        return_filename: Return filename metadata with each sample.
+        return_metadata: Return a ``(sample, metadata)`` tuple. See :class:`Dataloader`.
+        return_filename: Deprecated alias for ``return_metadata``.
         cache: Cache loaded samples to RAM.
         validate: Validate dataset against the zea format.
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
@@ -278,7 +313,8 @@ class H5DataSource:
         limit_n_samples: int | None = None,
         limit_n_frames: int | None = None,
         offset_n_frames: int = 0,
-        return_filename: bool = False,
+        return_metadata: bool | str | Sequence[str] | None = None,
+        return_filename: bool | None = None,
         cache: bool = False,
         validate: bool = True,
         revision: str | None = None,
@@ -287,9 +323,15 @@ class H5DataSource:
         file_filter: "Callable[[File], bool] | dict | None" = None,
         **kwargs,
     ):
-        self.return_filename = return_filename
+        self.return_metadata = _resolve_return_metadata(return_metadata, return_filename)
+        self.returns_metadata = self.return_metadata is not None
+        # Deprecated alias, kept so existing code reading the attribute keeps working.
+        self.return_filename = self.returns_metadata
         self.cache = cache
         self._data_cache = {}
+        # Metadata is constant per file, so cache it per path rather than per sample.
+        self._metadata_cache: OrderedDict[str, dict] = OrderedDict()
+        self._metadata_lock = threading.Lock()
         self.pad_incomplete_blocks = pad_incomplete_blocks
 
         self.key = key
@@ -326,6 +368,14 @@ class H5DataSource:
         num_dims = len(self.file_shapes[0]) if self.file_shapes else 0
         self.initial_frame_axis = canonicalize_axis(int(initial_frame_axis), num_dims)
         self.additional_axes_iter = map_negative_indices(list(additional_axes_iter or []), num_dims)
+
+        self._file_n_frames = {
+            path: shape[self.initial_frame_axis]
+            for path, shape in zip(self.file_paths, self.file_shapes)
+        }
+        self._slice_metadata_per_frame = bool(
+            self.return_metadata and has_per_frame_paths(self.return_metadata)
+        )
 
         # Validate and normalize axis_selections
         reserved_axes = {self.initial_frame_axis} | set(self.additional_axes_iter)
@@ -374,12 +424,14 @@ class H5DataSource:
         file = file_handle_cache.get_file(file_name)
 
         try:
-            images = file[key][indices]
+            # ``file.dataset`` rather than ``file[key]``: reads then go through
+            # zea's concurrent chunk reader instead of h5py's serial path.
+            images = file.dataset(key)[indices]
         except (OSError, IOError):
             # Invalidate cache entry and retry once
             file_handle_cache.pop(file_name)
             file = file_handle_cache.get_file(file_name)
-            images = file[key][indices]
+            images = file.dataset(key)[indices]
 
         if self.insert_frame_axis:
             initial = self.initial_frame_axis
@@ -396,15 +448,8 @@ class H5DataSource:
                 pad_width[self.frame_axis] = (0, self.n_frames - n_loaded)
                 images = np.pad(images, pad_width)
 
-        if self.return_filename:
-            file_data = {
-                # For streamed hf:// files ``filename`` is a placeholder for the
-                # underlying file object, so prefer the original source path.
-                "fullpath": getattr(file, "_source_name", None) or file.filename,
-                "filename": file.stem,
-                "indices": indices,
-            }
-            result = (images, file_data)
+        if self.returns_metadata:
+            result = (images, self._build_metadata(file, file_name, indices))
         else:
             result = images
 
@@ -417,6 +462,45 @@ class H5DataSource:
         return (
             f"H5DataSource(n_samples={len(self)}, n_files={len(self.file_paths)}, key='{self.key}')"
         )
+
+    def _build_metadata(self, file: "File", file_name: str, indices: tuple) -> dict:
+        """Build the metadata dict returned alongside a sample."""
+        metadata = {}
+        if self.return_metadata:
+            metadata = self._get_file_metadata(file, file_name)
+            if self._slice_metadata_per_frame:
+                metadata = slice_metadata(
+                    metadata,
+                    indices[self.initial_frame_axis],
+                    self._file_n_frames.get(file_name),
+                )
+            else:
+                metadata = dict(metadata)
+        metadata["file"] = {
+            # For streamed hf:// files ``filename`` is a placeholder for the
+            # underlying file object, so prefer the original source path.
+            "fullpath": getattr(file, "_source_name", None) or file.filename,
+            "filename": file.stem,
+            "indices": indices,
+        }
+        return metadata
+
+    def _get_file_metadata(self, file: "File", file_name: str) -> dict:
+        """Return the requested metadata for *file*, reading it at most once per file."""
+        with self._metadata_lock:
+            cached = self._metadata_cache.get(file_name)
+            if cached is not None:
+                self._metadata_cache.move_to_end(file_name)
+                return cached
+
+        metadata = read_metadata(file, self.return_metadata or ())
+
+        with self._metadata_lock:
+            self._metadata_cache[file_name] = metadata
+            self._metadata_cache.move_to_end(file_name)
+            while len(self._metadata_cache) > FILE_HANDLE_CACHE_CAPACITY:
+                self._metadata_cache.popitem(last=False)
+        return metadata
 
     def _get_file_handle_cache(self) -> H5FileHandleCache:
         """Return the file-handle cache for the current thread."""
@@ -475,8 +559,36 @@ class Dataloader:
         n_frames: Number of consecutive frames per sample. Default is ``1``.
             When ``n_frames > 1``, frames are grouped into blocks.
         shuffle: Shuffle dataset each epoch. Default is ``True``.
-        return_filename: Return filename metadata together with each sample.
-            Default is ``False``.
+        return_metadata: Return a ``(sample, metadata)`` tuple instead of a bare
+            sample. ``False`` (default) returns arrays only. ``True`` returns just
+            the file identity. An iterable of dotted paths additionally loads those
+            fields from the file, e.g.
+            ``["scan.sampling_frequency", "metadata.subject"]``; a path pointing at a
+            group loads everything below it. Paths use the same syntax as
+            ``file_filter`` and are read straight off the HDF5 groups, so only what
+            you ask for is loaded. The returned dict mirrors
+            :class:`~zea.data.spec.FileSpec`, with the loader's own provenance under
+            a ``"file"`` key::
+
+                {
+                    "scan": {"sampling_frequency": 40e6},
+                    "metadata": {"subject": {"age": 61}},
+                    "file": {"fullpath": ..., "filename": ..., "indices": ...},
+                }
+
+            Metadata is read once per file, not once per sample. Fields whose
+            leading dimension is ``n_frames`` in the spec (per-frame annotations,
+            per-frame metrics) are sliced to the sample's frames so they stay
+            aligned with the returned images. A requested path that is missing from
+            a file raises :exc:`KeyError` — drop those files with ``file_filter``.
+            Note that batching stacks metadata leaf by leaf, so every file must
+            supply the same structure and shapes; use ``batch_size=None`` for
+            metadata that varies in shape between files. Per-frame metadata is not
+            zero-padded along with the images when ``pad_incomplete_blocks=True``.
+        return_filename: Deprecated. Use ``return_metadata`` instead.
+            ``return_filename=True`` behaves like ``return_metadata=True``, except
+            that the file identity used to be returned at the top level and is now
+            under the ``"file"`` key.
         seed: Random seed used for dataloader (e.g. shuffling). Default is ``None``.
             If ``None`` a random seed is generated.
         limit_n_samples: Limit total number of samples (useful for debugging).
@@ -551,7 +663,11 @@ class Dataloader:
         convert_to_tensor: Whether to convert the data to a tensor (on cpu). Default is ``True``.
         axis_selections: Map of ``{axis: indices}`` applied at HDF5 read time to pre-filter
             non-frame axes. For example ``{1: [0, 2, 5]}`` loads only those indices along axis 1,
-            avoiding reading unused data from disk. Default is ``None``.
+            avoiding reading unused data from disk. Reads go through
+            :mod:`zea.data.chunk_reader`, so the saving tracks the *chunks* the selection
+            touches rather than the number of indices: a selection confined to a few chunks
+            saves both memory and time, while one spread across every chunk still saves
+            memory but reads about as much as the full axis. Default is ``None``.
         file_filter: Keep only files whose content matches a predicate, discarding the rest
             before any frames are indexed. Either a callable ``File -> bool`` (a file is kept
             when it returns ``True``), or a declarative dotted-path dict mapping a path on the
@@ -629,6 +745,18 @@ class Dataloader:
                 and f.metadata.subject.fat_percentage is not None,
             )
 
+            # metadata: load selected fields alongside each sample
+            loader = Dataloader(
+                file_paths="filter-demo-dataset",
+                key="data/image/values",
+                batch_size=None,
+                return_metadata=["scan.center_frequency", "metadata.subject"],
+            )
+            sample, meta = next(iter(loader))
+            assert meta["scan"]["center_frequency"] in (5e6, 9e6)
+            assert meta["metadata"]["subject"]["sex"] in ("f", "m")
+            assert meta["file"]["filename"] in ("a", "b")
+
             # dict: presence + equality + a value-level predicate (all ANDed)
             loader = Dataloader(
                 file_paths="filter-demo-dataset",
@@ -654,7 +782,8 @@ class Dataloader:
         batch_size: int | None = 16,
         n_frames: int = 1,
         shuffle: bool = True,
-        return_filename: bool = False,
+        return_metadata: bool | str | Sequence[str] | None = None,
+        return_filename: bool | None = None,
         seed: int | None = None,
         limit_n_samples: int | None = None,
         limit_n_frames: int | None = None,
@@ -705,7 +834,10 @@ class Dataloader:
 
         # ── Store config ──────────────────────────────────────────────
         self.batch_size = batch_size
-        self.return_filename = return_filename
+        self.return_metadata = _resolve_return_metadata(return_metadata, return_filename)
+        self.returns_metadata = self.return_metadata is not None
+        # Deprecated alias, kept so existing code reading the attribute keeps working.
+        self.return_filename = self.returns_metadata
         self.num_threads = num_threads
         self.prefetch_buffer_size = prefetch_buffer_size
         self.prefetch = prefetch
@@ -733,7 +865,7 @@ class Dataloader:
             limit_n_samples=limit_n_samples,
             limit_n_frames=limit_n_frames,
             offset_n_frames=offset_n_frames,
-            return_filename=return_filename,
+            return_metadata=self.return_metadata,
             cache=cache,
             validate=validate,
             revision=revision,
@@ -785,7 +917,7 @@ class Dataloader:
                 "and that the filters/transforms do not discard all items."
             )
 
-        if return_filename:
+        if self.returns_metadata:
             self._shape = self._map_dataset[0][0].shape
         else:
             self._shape = self._map_dataset[0].shape
@@ -799,7 +931,7 @@ class Dataloader:
                 with keras.device("cpu"):
                     return _fn(x)
 
-            if self.return_filename:
+            if self.returns_metadata:
                 return ds.map(lambda item: (on_cpu(item[0]), item[1]))
             return ds.map(on_cpu)
 

@@ -81,7 +81,8 @@ def _run_passthrough(
         for i in range(len(ds)):
             f = ds[i]  # lazy download for hf:// paths; returns cached File handle
             data_key = f.format_key(key)
-            arr = np.asarray(f[data_key][:n_frames] if n_frames is not None else f[data_key][:])
+            _dset = f.dataset(data_key)
+            arr = np.asarray(_dset[:n_frames] if n_frames is not None else _dset[:])
             filestem = f.stem
 
             # Ensure (N, H, W) — squeeze any leading single-element dims
@@ -178,7 +179,7 @@ def run_processing(
         key=key,
         batch_size=None,
         shuffle=False,
-        return_filename=True,
+        return_metadata=True,
         limit_n_frames=n_frames,
         n_frames=1,
         num_threads=num_threads,
@@ -251,7 +252,7 @@ def run_processing(
         for i in range(total_batches + 1):
             if i < total_batches:
                 frame, metadata = get_data()
-                file_path = metadata["fullpath"]
+                file_path = metadata["file"]["fullpath"]
             else:
                 file_path = None  # sentinel to flush the last file
 
