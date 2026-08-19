@@ -558,6 +558,10 @@ def read(
     naming the cause and the fix, regardless of ``progress``, since the serial
     fallback is slower on disk too (see :func:`_resave_note`, :func:`_selection_note`).
 
+    Safe to call while h5py's global lock is held — from inside a ``group.items()`` loop,
+    say. Nothing the workers touch reaches h5py (see the note on ``dtype`` below), so they
+    cannot block on a lock the caller is waiting to release.
+
     Args:
         dset (h5py.Dataset): The dataset to read from.
         selection: Any NumPy-style index. Ints, unit-step slices and increasing index
@@ -581,7 +585,13 @@ def read(
         _selection_note(dset, fetcher)
         return dset[selection]
 
-    itemsize = dset.dtype.itemsize
+    # Read every h5py attribute the decode needs *here*, on the calling thread, and keep
+    # the workers off ``dset`` entirely. Any h5py attribute access takes h5py's global
+    # lock, and the caller may already hold it — ``Group.items()`` and friends are
+    # generators that hold it across their yields. A worker would then block on a lock the
+    # caller cannot release until that worker finishes: a deadlock, not merely a slow read.
+    dtype = dset.dtype
+    itemsize = dtype.itemsize
     n_selected = int(np.prod([len(indices) for indices, _ in axes]))
     if n_selected * itemsize < MIN_BYTES:
         return dset[selection]
@@ -589,7 +599,7 @@ def read(
     chunks = dset.chunks
     out = np.empty(
         tuple(len(indices) for indices, keep in axes if keep),
-        dtype=dset.dtype,
+        dtype=dtype,
     )
 
     # Every chunk that the selection touches, with the output region it fills.
@@ -629,7 +639,8 @@ def read(
             blosc.decompress(raw, dest=view)
             return
         buf = _decode(raw, filters, mask, itemsize)
-        block = np.frombuffer(buf, dtype=dset.dtype, count=n_elem).reshape(chunks)
+        # ``dtype`` is the hoisted local, never ``dset.dtype``: see the note above.
+        block = np.frombuffer(buf, dtype=dtype, count=n_elem).reshape(chunks)
         # ``source`` has one entry per *dataset* axis, so it keeps a length-1 axis wherever the
         # selection used an int, while ``view`` has dropped it. Same elements in the same order
         # (_normalize allows at most one advanced index, which does not move axes), so reshape.

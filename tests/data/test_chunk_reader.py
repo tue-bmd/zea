@@ -15,9 +15,11 @@ import http.server
 import os
 import socketserver
 import threading
+from importlib import import_module
 import time
 from unittest.mock import MagicMock
 
+import h5py
 import hdf5plugin
 import numpy as np
 import pytest
@@ -92,6 +94,21 @@ def _write(path, raw, compression=BLOSC, chunk_axes=("n_frames",)):
         overwrite=True,
         ignore_warnings=True,
     )
+    return path
+
+
+def _write_partial_chunks(path):
+    """A dataset whose chunks do not divide its shape along a chunked axis.
+
+    Reads then hit the generic decode branch (each frame ends in a chunk that only
+    partly overlaps the output) rather than decompressing straight into the output.
+    """
+    shape, chunks = (4, 21, 60_000), (1, 13, 60_000)
+    with h5py.File(path, "w") as handle:
+        dataset = handle.create_group("data").create_dataset(
+            "raw", shape=shape, dtype="int16", chunks=chunks, **BLOSC
+        )
+        dataset[:] = np.random.default_rng(0).integers(-500, 500, shape, dtype=np.int16)
     return path
 
 
@@ -321,6 +338,66 @@ class TestFallbackNotes:
             for _ in range(3):
                 read(file[RAW], slice(None), file._chunk_fetcher, progress=False)
         assert len(notes.records) == 1
+
+    def test_reads_concurrently_under_h5py_lock(self, tmp_path, notes):
+        """A read from inside an h5py generator must stay on the fast path, not deadlock.
+
+        ``group.items()`` is a generator that holds h5py's global lock across its yields,
+        so the read runs with it held. That is safe only because the workers never touch
+        the dataset — reinstating any ``dset.<attr>`` inside ``place`` deadlocks here, as
+        the workers would block on a lock this thread cannot release until they finish.
+
+        Partial chunks on purpose: they take the generic decode branch, the one that
+        reads the dtype. Chunks dividing the shape evenly decompress straight into the
+        output and would not exercise it. A regression **hangs rather than fails** — a
+        deadlocked worker keeps the lock for good — so the read runs in a worker thread
+        to bound the wait, and the assertion below reports it as a failure when it can.
+        """
+        path = _write_partial_chunks(tmp_path / "partial.hdf5")
+        fetcher = LocalFetcher(path)
+        phil = import_module("h5py._objects").phil
+        try:
+            with h5py.File(path, "r") as handle:
+                group = handle["data"]
+                done, out = threading.Event(), {}
+
+                def read_inside_the_generator():
+                    for _, item in group.items():
+                        out["locked"] = phil._is_owned()  # the lock really is held here
+                        out["values"] = read(item, slice(None), fetcher, progress=False)
+                    done.set()
+
+                worker = threading.Thread(target=read_inside_the_generator, daemon=True)
+                worker.start()
+                assert done.wait(timeout=60), "read under h5py's global lock deadlocked"
+                assert out["locked"], "test is vacuous: h5py's lock was not held"
+                assert np.array_equal(out["values"], group["raw"][:])
+        finally:
+            fetcher.close()
+
+        assert notes.records == []  # concurrent, so nothing to report
+
+    def test_read_outside_the_generator_stays_on_the_fast_path(self, tmp_path, notes):
+        """The same read with the items materialised first: also concurrent, also quiet."""
+        path = _write_partial_chunks(tmp_path / "partial.hdf5")
+        fetcher = LocalFetcher(path)
+        try:
+            with h5py.File(path, "r") as handle:
+                group = handle["data"]
+                for _, item in list(group.items()):
+                    values = read(item, slice(None), fetcher, progress=False)
+                assert np.array_equal(values, group["raw"][:])
+        finally:
+            fetcher.close()
+        assert notes.records == []
+
+    def test_load_group_reads_on_the_fast_path(self, tmp_path, notes):
+        """``File.load_group`` reads a whole group without falling back."""
+        path = _write(tmp_path / "blosc.hdf5", _structured())
+        with File(path) as file:
+            data = file.load_group("data")
+            assert np.array_equal(data["raw_data"], file[RAW][:])
+        assert notes.records == []
 
     def test_lzf_over_http_still_nudges_when_progress_is_requested(self, tmp_path, notes):
         """lzf has no fast path even when streamed, so asking for progress gets none of it —

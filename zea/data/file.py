@@ -697,9 +697,9 @@ def _load_group_dict(group: "h5py.Group", fetcher) -> dict:
     scalars that make up a scan or metadata group.
 
     The item list is materialised **before** any read. ``h5py.Group.items()`` is a
-    generator holding h5py's global lock across its yields, and the concurrent reader's
-    decode threads cannot make progress while it is held — reading inside the loop
-    deadlocks, silently and forever, on any dataset big enough to reach the thread pool.
+    generator that holds h5py's global lock across its yields, and reading a whole data
+    group can take a while — no reason to keep every other thread's h5py call waiting on
+    it. The read itself is safe either way (see :func:`~zea.data.chunk_reader.read`).
     """
     ans = {}
     for key, item in list(group.items()):
