@@ -95,10 +95,17 @@ class UnknownHostnameWarning(UserWarning):
 
 class UnknownLocalRemoteWarning(UserWarning):
     """
-    Custom Warning indicating that the data_root corresponding to
+    Custom Warning indicating that the path corresponding to
     the local or remote key was not found
     in the user.yaml file
+
+    Carries the ``field`` it was raised for (``data_root`` or ``output``), so that
+    :func:`create_new_user` fills in the key that is actually missing.
     """
+
+    def __init__(self, message, field=None):
+        super().__init__(message)
+        self.field = field
 
 
 def _create_empty_yaml(path):
@@ -180,25 +187,25 @@ def _verify_user_config_and_get_paths(config, system, local):
             paths[key] = path
             continue
 
-        if local is True:
-            if "local" in path:
-                paths[key] = path["local"]
-            else:
-                warnings.warn(
-                    f"Unknown local path for {key} in user config. Falling back to default.",
-                    UnknownLocalRemoteWarning,
+        if local is True or local is False:
+            side = "local" if local else "remote"
+            if side in path:
+                paths[key] = path[side]
+                continue
+            # `data_root` is required, so fall back to a default for it. Any other path
+            # is optional and is better left unset than pointed at a made-up directory.
+            fallback = _fallback_to_default_data_root(system) if key == "data_root" else None
+            tail = (
+                f"Falling back to default: {fallback}."
+                if fallback is not None
+                else f"Leaving {key} unset."
+            )
+            warnings.warn(
+                UnknownLocalRemoteWarning(
+                    f"Unknown {side} path for {key} in user config. {tail}", field=key
                 )
-                paths[key] = _fallback_to_default_data_root(system)
-
-        elif local is False:
-            if "remote" in path:
-                paths[key] = path["remote"]
-            else:
-                warnings.warn(
-                    f"Unknown remote path for {key} in user config. Falling back to default.",
-                    UnknownLocalRemoteWarning,
-                )
-                paths[key] = _fallback_to_default_data_root(system)
+            )
+            paths[key] = fallback
         else:
             raise ValueError(
                 f"Please set local to True or False or have the {key} "
@@ -327,8 +334,8 @@ def set_data_paths(
         is created and -- when running interactively -- you are offered to set up a
         profile, see :func:`create_new_user`. When no ``data_root`` can be resolved for
         the current user and machine, a warning is raised and a default path for the
-        current operating system is used. When no ``output`` is given, it defaults to
-        ``data_root/output``.
+        current operating system is used. ``output`` is optional and stays ``None`` when
+        the file does not set one.
 
     """
     username = getpass.getuser()
@@ -467,6 +474,7 @@ def _path_completion():
         return
 
     previous = readline.get_completer()
+    previous_delims = readline.get_completer_delims()
     readline.set_completer(None)
     readline.set_completer_delims(" \t\n")
     # macOS often links libedit, which spells the binding differently to GNU readline.
@@ -476,6 +484,7 @@ def _path_completion():
         yield
     finally:
         readline.set_completer(previous)
+        readline.set_completer_delims(previous_delims)
 
 
 def _prompt(question, default=None, hint=None):
@@ -543,6 +552,14 @@ def _warning_type_was_thrown(warning_type, list_of_warnings):
     if not list_of_warnings:
         return False
     return any(isinstance(w.message, warning_type) for w in list_of_warnings)
+
+
+def _warning_field(warning_type, list_of_warnings):
+    """The ``field`` of the first warning of ``warning_type``, if it names one."""
+    for w in list_of_warnings or ():
+        if isinstance(w.message, warning_type):
+            return getattr(w.message, "field", None)
+    return None
 
 
 def _to_read_yaml_file(path_str):
@@ -622,7 +639,9 @@ def _resolve_config_section(config, username, hostname, owns=None):
     levels = _config_levels(config, username, hostname)
     if owns is not None:
         for level in reversed(levels):
-            if owns in level:
+            # An explicit `null` means "inherit" when resolving (see UserProfileSpec),
+            # so a section that spells it out does not own the key either.
+            if level.get(owns) is not None:
                 return level
     return levels[-1]
 
@@ -726,25 +745,36 @@ def create_new_user(user_config_path: "str | Path | None" = None, local: bool | 
                 log.success("Profile updated.")
         elif local_remote_warning_was_thrown:
             local_remote_str = "local" if local else "remote"
+            # Both `data_root` and `output` may be a local / remote mapping, so fill in
+            # the field the warning is actually about rather than assuming data_root.
+            field = _warning_field(UnknownLocalRemoteWarning, list_of_warnings) or "data_root"
             log.info(
-                f"No {log.yellow(local_remote_str)} data_root for "
+                f"No {log.yellow(local_remote_str)} {field} for "
                 f"{log.yellow(data_paths['username'])} yet, adding one."
             )
             users_yaml_dict = _read_users_yaml_for_update(user_config_path)
             if users_yaml_dict is None:
                 return data_paths
-            data_root = _acquire_and_validate_data_root()
-            data_paths["data_root"] = data_root
-            ## now update the data_root for the user and hostname in the yaml file
-            ## use local or remote subkey depending on the local parameter. The data_root
+            path = (
+                _acquire_and_validate_data_root()
+                if field == "data_root"
+                else _acquire_output_path()
+            )
+            if path is None:
+                # `output` is optional, so declining to name one is a valid answer.
+                log.info(f"Leaving {field} unset.")
+                return data_paths
+            data_paths[field] = path
+            ## now update the path for the user and hostname in the yaml file
+            ## use local or remote subkey depending on the local parameter. The path
             ## can live at the top level as well, so look up where it actually is.
             section = _resolve_config_section(
-                users_yaml_dict, data_paths["username"], data_paths["hostname"], owns="data_root"
+                users_yaml_dict, data_paths["username"], data_paths["hostname"], owns=field
             )
-            existing = section.get("data_root")
-            section["data_root"] = {
+            existing = section.get(field)
+            section[field] = {
                 **(existing if isinstance(existing, dict) else {}),
-                local_remote_str: data_root,
+                local_remote_str: path,
             }
             if _confirm(f"Update {log.yellow(user_config_path)}?", yaml.dump(users_yaml_dict)):
                 _try(

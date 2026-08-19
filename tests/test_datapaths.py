@@ -30,6 +30,7 @@ from zea.datapaths import (
     _to_read_yaml_file,
     _to_write_yaml_file,
     _try,
+    _warning_field,
     _warning_type_was_thrown,
     create_new_user,
     format_data_path,
@@ -217,6 +218,15 @@ def test_set_data_paths_missing_local_remote_key_warns(config, local):
     with pytest.warns(UnknownLocalRemoteWarning):
         data_paths = set_data_paths(config, local=local)
     assert data_paths.data_root == Path(_fallback_to_default_data_root(data_paths.system))
+
+
+def test_set_data_paths_missing_local_remote_output_stays_unset():
+    """Only ``data_root`` gets a default; a missing local/remote ``output`` stays unset."""
+    config = {"data_root": "/data", "output": {"local": "/local/output"}}
+    with pytest.warns(UnknownLocalRemoteWarning, match="Leaving output unset"):
+        data_paths = set_data_paths(config, local=False, verify=False)
+    assert data_paths.output is None
+    assert data_paths.data_root == Path("/data")
 
 
 def test_set_data_paths_local_none_with_local_remote_keys_raises():
@@ -642,6 +652,24 @@ def test_resolve_config_section_owns(config, expected):
     assert _resolve_config_section(config, USERNAME, HOSTNAME, owns="data_root") == expected
 
 
+def test_warning_field():
+    """``_warning_field`` reports the field of the first matching warning, if any."""
+    with pytest.warns((UnknownUsernameWarning, UnknownLocalRemoteWarning)) as recorded:
+        warnings.warn("no user", UnknownUsernameWarning)
+        warnings.warn(UnknownLocalRemoteWarning("no remote output", field="output"))
+
+    assert _warning_field(UnknownLocalRemoteWarning, recorded.list) == "output"
+    assert _warning_field(UnknownUsernameWarning, recorded.list) is None
+    assert _warning_field(UnknownHostnameWarning, recorded.list) is None
+    assert _warning_field(UnknownLocalRemoteWarning, []) is None
+
+
+def test_resolve_config_section_owns_skips_an_explicit_null():
+    """A section spelling out ``data_root: null`` inherits it, so it does not own it."""
+    config = {"data_root": {"local": "/local/data"}, USERNAME: {"data_root": None}}
+    assert _resolve_config_section(config, USERNAME, HOSTNAME, owns="data_root") is config
+
+
 def test_yaml_read_write_roundtrip(tmp_path):
     """``_to_read_yaml_file``/``_to_write_yaml_file`` round-trip a config."""
     config_path = tmp_path / "users.yaml"
@@ -750,6 +778,16 @@ def test_path_completion_restores_the_previous_completer():
         assert readline.get_completer() is _sentinel
     finally:
         readline.set_completer(None)
+
+
+def test_path_completion_restores_the_completer_delims():
+    """The word delimiters are borrowed for the prompt as well, and handed back."""
+    readline = pytest.importorskip("readline")
+
+    before = readline.get_completer_delims()
+    with _path_completion():
+        assert readline.get_completer_delims() == " \t\n", "paths may contain any other char"
+    assert readline.get_completer_delims() == before
 
 
 def test_path_completion_without_readline(monkeypatch):
@@ -943,6 +981,61 @@ def test_create_new_user_adds_missing_local_data_root_at_top_level(tmp_path, ans
         "remote": "/remote/data",
         "local": str(data_root),
     }
+
+
+def test_create_new_user_adds_missing_remote_output(tmp_path, answers, monkeypatch):
+    """``output`` can be a local/remote mapping too, and is then the field to fill in."""
+    monkeypatch.chdir(tmp_path)
+    output = tmp_path / "output"
+    output.mkdir()
+    _write_yaml(
+        tmp_path / "users.yaml",
+        {"data_root": "/data", "output": {"local": "/local/output"}},
+    )
+
+    answers.set(str(output), "")
+    create_new_user("users.yaml", local=False)
+
+    config = _to_read_yaml_file("users.yaml")
+    assert config["output"] == {"local": "/local/output", "remote": str(output)}
+    assert config["data_root"] == "/data", "the data_root was not the missing field"
+
+
+def test_create_new_user_skipping_the_missing_output_writes_nothing(tmp_path, answers, monkeypatch):
+    """``output`` is optional, so an empty answer leaves the users.yaml alone."""
+    monkeypatch.chdir(tmp_path)
+    _write_yaml(
+        tmp_path / "users.yaml",
+        {"data_root": "/data", "output": {"local": "/local/output"}},
+    )
+    before = (tmp_path / "users.yaml").read_text(encoding="utf-8")
+
+    answers.set("")
+    create_new_user("users.yaml", local=False)
+
+    assert (tmp_path / "users.yaml").read_text(encoding="utf-8") == before
+
+
+def test_create_new_user_treats_an_explicit_null_data_root_as_inherited(
+    tmp_path, answers, monkeypatch
+):
+    """A user-level ``data_root: null`` means "inherit", so the shared mapping is extended."""
+    monkeypatch.chdir(tmp_path)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    _write_yaml(
+        tmp_path / "users.yaml",
+        {"data_root": {"local": "/local/data"}, USERNAME: {"data_root": None}},
+    )
+
+    answers.set(str(data_root), "")
+    create_new_user("users.yaml", local=False)
+
+    config = _to_read_yaml_file("users.yaml")
+    assert config["data_root"] == {"local": "/local/data", "remote": str(data_root)}
+    assert config[USERNAME]["data_root"] is None, "the null was not turned into a mapping"
+    # the shared local path is still reachable, i.e. nothing shadows it
+    assert set_data_paths("users.yaml", local=True).data_root == Path("/local/data")
 
 
 def test_create_new_user_declined_local_remote_update(tmp_path, answers, monkeypatch):

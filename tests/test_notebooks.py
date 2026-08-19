@@ -171,9 +171,9 @@ def clean_notebook_artifacts():
         if path in pre_existing or not path.exists():
             continue
         if path.is_dir():
-            shutil.rmtree(path, ignore_errors=True)
+            shutil.rmtree(path)
         else:
-            path.unlink(missing_ok=True)
+            path.unlink()
 
 
 @pytest.mark.notebook
