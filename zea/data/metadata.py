@@ -1,32 +1,7 @@
 """Selective metadata loading for :class:`~zea.data.dataloader.Dataloader`.
 
-A zea file carries far more than its image data: scan parameters, probe
-geometry, subject information, per-frame annotations, metrics.  Reading *all*
-of it for every sample would dominate the time spent in the data pipeline, so
-the dataloader asks for metadata by **dotted path** — the same path syntax used
-by ``file_filter`` (see :func:`~zea.data.datasets.compile_file_filter`):
-
-.. code-block:: python
-
-    Dataloader(
-        ...,
-        return_metadata=[
-            "scan.sampling_frequency",
-            "probe.probe_geometry",
-            "metadata.subject",  # a group: everything below it
-        ],
-    )
-
-Each requested path is read straight off the HDF5 group, bypassing the eager
-:attr:`~zea.data.file.File.scan` / :attr:`~zea.data.file.File.metadata`
-properties (which read a whole group and re-run spec validation on every
-access).  The result is a nested dict mirroring
-:class:`~zea.data.spec.FileSpec`.
-
-Fields whose leading dimension is ``n_frames`` in the spec (per-frame
-annotations, per-frame metrics, map timestamps) are sliced with the same frame
-selection used for the sample's images, so metadata stays aligned with the
-frames it describes.
+See the ``return_metadata`` argument of :class:`~zea.data.dataloader.Dataloader`
+for the path syntax and the shape of the result.
 """
 
 from collections.abc import Iterable, Sequence
@@ -40,6 +15,8 @@ from zea.data.spec import ROOT_SPECS, FileSpec, Spec
 
 __all__ = [
     "has_per_frame_paths",
+    "batch_leaf_shape",
+    "metadata_signature",
     "missing_metadata_paths",
     "normalize_metadata_paths",
     "read_metadata",
@@ -229,6 +206,57 @@ def missing_metadata_paths(file: File, paths: Sequence[str]) -> tuple[str, ...]:
     return tuple(path for path in paths if not _path_exists(file, path))
 
 
+def _collect_signature(file: File, path: str, out: dict) -> None:
+    """Record the shape of every leaf at or below ``path`` into ``out``."""
+    key = path.replace(".", "/")
+    try:
+        obj = file.dataset(key)
+    except (KeyError, AttributeError):
+        obj = None
+
+    if isinstance(obj, _GroupProxy):
+        # A requested group contributes one entry per leaf below it, since that is
+        # what read_metadata returns and what batching stacks.
+        for name in obj.keys():
+            _collect_signature(file, f"{path}.{name}", out)
+        return
+
+    if obj is not None:
+        # h5py reports shape off the handle, so no data is read here.
+        out[path] = tuple(obj.shape)
+        return
+
+    if "." not in path and path in file.attrs:
+        out[path] = tuple(np.shape(file.attrs[path]))
+        return
+
+    out[path] = tuple(np.shape(_resolve_dotted_path(file, path)))
+
+
+def metadata_signature(file: File, paths: Sequence[str]) -> dict[str, tuple]:
+    """Map every leaf reachable from ``paths`` to its shape in ``file``.
+
+    The shapes are the raw stored ones: normalizing the frame axis needs the file's
+    own frame count, which the caller holds. Dtypes are deliberately left out --
+    stacking promotes them (``float32`` with ``float64``, ``<U4`` with ``<U9``), so a
+    difference there is not a batching failure.
+
+    Args:
+        file: An open :class:`~zea.data.file.File`.
+        paths: Dotted paths to describe. A path pointing at a group expands to one
+            entry per leaf below it.
+
+    Returns:
+        dict: Leaf dotted path -> shape tuple. A path absent from the file maps to
+        the shape of ``None``, i.e. ``()``; use :func:`missing_metadata_paths` to
+        tell absence apart from a genuine scalar.
+    """
+    out: dict[str, tuple] = {}
+    for path in paths:
+        _collect_signature(file, path, out)
+    return out
+
+
 def _assign(tree: dict, parts: Sequence[str], value) -> None:
     """Insert ``value`` into the nested ``tree`` at the given path segments."""
     node = tree
@@ -257,16 +285,40 @@ def read_metadata(file: File, paths: Sequence[str]) -> dict:
     return tree
 
 
-def _slice_value(path: str, value, frame_selection, n_frames: int | None):
-    """Slice ``value`` along its leading axis when the spec marks it per-frame."""
+def _is_per_frame_shape(path: str, shape: tuple, n_frames: int | None) -> bool:
+    """Whether a value of ``shape`` at ``path`` carries the file's frame axis.
+
+    Decides on shape alone so that :func:`_slice_value` and :func:`batch_leaf_shape`
+    cannot drift apart: what gets sliced is exactly what gets reported as per-frame.
+    """
     alternatives = PER_FRAME_PATHS.get(path)
-    if not alternatives or n_frames is None or not isinstance(value, np.ndarray):
-        return value
-    if value.ndim == 0 or value.shape[0] != n_frames:
+    if not alternatives or n_frames is None:
+        return False
+    if len(shape) == 0 or shape[0] != n_frames:
         # Broadcast scalar form (e.g. one annotation for the whole file), or a
         # shape that does not line up with the frame axis: leave it alone.
+        return False
+    return any(len(alt) == len(shape) for alt in alternatives)
+
+
+def batch_leaf_shape(path: str, shape: tuple, n_frames: int | None) -> tuple:
+    """Return ``shape`` with the per-frame axis replaced by a placeholder.
+
+    Batching stacks metadata leaf by leaf, so the leaves of every file must line up.
+    Files legitimately differ in how many frames they hold, and that axis is sliced
+    away to the sample's frame count before stacking -- so normalizing it is what
+    makes two files' leaves comparable.  Everything else must match exactly.
+    """
+    if _is_per_frame_shape(path, shape, n_frames):
+        return ("n_frames",) + tuple(shape[1:])
+    return tuple(shape)
+
+
+def _slice_value(path: str, value, frame_selection, n_frames: int | None):
+    """Slice ``value`` along its leading axis when the spec marks it per-frame."""
+    if not isinstance(value, np.ndarray):
         return value
-    if not any(len(alt) == value.ndim for alt in alternatives):
+    if not _is_per_frame_shape(path, value.shape, n_frames):
         return value
     return value[frame_selection]
 

@@ -1014,12 +1014,13 @@ FILTER_KEY = "data/image/values"
 FILTER_N_FRAMES = 4
 
 
-def _write_zea_file(path, *, metadata=None, center_frequency=7e6):
+def _write_zea_file(
+    path, *, metadata=None, center_frequency=7e6, n_frames=FILTER_N_FRAMES, grid=16
+):
     """Write a small but valid zea-format file with an ``image`` product."""
     n_tx, n_ax, n_el, n_ch = 2, 64, 8, 1
-    grid = 16
     data = generate_dummy_data_dict(
-        n_frames=FILTER_N_FRAMES,
+        n_frames=n_frames,
         n_ax=n_ax,
         n_el=n_el,
         n_tx=n_tx,
@@ -1491,3 +1492,190 @@ def test_return_metadata_present_path_does_not_raise(metadata_folder):
     """The up-front check stays out of the way when every file can answer."""
     values = _metadata_values(metadata_folder, "metadata.subject.sex")
     assert len(values) == 3 * FILTER_N_FRAMES
+
+
+def test_return_metadata_batch_shape_conflict_raises(metadata_folder):
+    """Leaves that differ between files are caught before a batch is ever stacked.
+
+    Requesting the ``metadata.subject`` *group* passes the presence check -- every file
+    has the group -- but file b has no ``fat_percentage`` leaf under it, so the dicts
+    cannot be stacked. Grain reports that as an unstructured "Expected all input
+    elements to have the same structure", and only once a batch happens to straddle
+    the two files.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        Dataloader(
+            metadata_folder,
+            key=FILTER_KEY,
+            batch_size=2,
+            shuffle=False,
+            validate=False,
+            return_metadata="metadata.subject",
+        )
+
+    message = str(excinfo.value)
+    assert "metadata.subject.fat_percentage" in message
+    assert "absent" in message
+    # Names both ways out: stop batching, or restrict the dataset.
+    assert "batch_size=None" in message
+    assert "file_filter" in message
+
+
+def test_return_metadata_shape_conflict_allowed_without_batching(metadata_folder):
+    """``batch_size=None`` is the documented escape hatch, so it must stay open."""
+    loader = Dataloader(
+        metadata_folder,
+        key=FILTER_KEY,
+        batch_size=None,
+        shuffle=False,
+        validate=False,
+        return_metadata="metadata.subject",
+    )
+    try:
+        subjects = [metadata["metadata"]["subject"] for _, metadata in loader]
+    finally:
+        loader.close()
+
+    assert len(subjects) == 3 * FILTER_N_FRAMES
+    # The very unevenness that blocks batching is preserved sample by sample.
+    assert sum("fat_percentage" in subject for subject in subjects) == 2 * FILTER_N_FRAMES
+
+
+def test_return_metadata_batching_allows_differing_frame_counts(tmp_path):
+    """Files may hold different numbers of frames: that axis is sliced away, not stacked.
+
+    Guards against the conflict check flagging the one difference between files that
+    per-frame slicing is there to absorb.
+    """
+    _write_zea_file(tmp_path / "a.hdf5", n_frames=4)
+    _write_zea_file(tmp_path / "b.hdf5", n_frames=6)
+
+    loader = Dataloader(
+        tmp_path,
+        key=FILTER_KEY,
+        batch_size=2,
+        shuffle=True,
+        seed=0,
+        validate=False,
+        n_frames=2,
+        # A per-frame field, so its leading axis differs between the two files on disk.
+        return_metadata="data.envelope_data",
+    )
+    try:
+        batches = list(loader)
+    finally:
+        loader.close()
+
+    # 4 frames -> 2 blocks, 6 frames -> 3 blocks, batched by 2 with a remainder of 1.
+    assert [len(sample) for sample, _ in batches] == [2, 2, 1]
+    for sample, metadata in batches:
+        values = metadata["data"]["envelope_data"]["values"]
+        # (batch, n_frames, ...) -- the file's own frame count is sliced away, so the
+        # two files stack despite holding 4 and 6 frames on disk.
+        assert values.shape[:2] == (len(sample), 2)
+
+
+@pytest.fixture
+def ragged_folder(tmp_path):
+    """Two zea files whose images differ in size (16x16 and 32x32)."""
+    _write_zea_file(tmp_path / "a.hdf5", grid=16)
+    _write_zea_file(tmp_path / "b.hdf5", grid=32)
+    return tmp_path
+
+
+def test_ragged_dataset_refuses_to_batch(ragged_folder):
+    """Files that disagree on sample shape cannot be stacked, so batching is refused."""
+    with pytest.raises(ValueError) as excinfo:
+        Dataloader(ragged_folder, key=FILTER_KEY, batch_size=2, shuffle=False, validate=False)
+
+    message = str(excinfo.value)
+    assert "(16, 16, 1)" in message and "(32, 32, 1)" in message
+    # Names all three ways out.
+    assert "image_size" in message
+    assert "batch_size=None" in message
+    assert "file_filter" in message
+
+
+def test_ragged_dataset_shape_raises(ragged_folder):
+    """``shape`` has no answer for a ragged loader, so it says so instead of guessing.
+
+    Reading it off sample 0 -- as it used to -- reports one file's shape as if it were
+    the whole dataset's.
+    """
+    loader = Dataloader(
+        ragged_folder, key=FILTER_KEY, batch_size=None, shuffle=False, validate=False
+    )
+    try:
+        assert set(loader.sample_shapes) == {(16, 16, 1), (32, 32, 1)}
+        with pytest.raises(ValueError, match="no single sample shape"):
+            loader.shape
+        # Iterating is still fine: nothing is stacked.
+        assert sorted(tuple(np.shape(sample)) for sample in loader) == (
+            [(16, 16, 1)] * FILTER_N_FRAMES + [(32, 32, 1)] * FILTER_N_FRAMES
+        )
+    finally:
+        loader.close()
+
+
+def test_ragged_dataset_batches_after_resize(ragged_folder):
+    """Resizing brings the files to a common shape, so batching them is allowed again."""
+    loader = Dataloader(
+        ragged_folder,
+        key=FILTER_KEY,
+        batch_size=3,
+        shuffle=True,
+        seed=0,
+        validate=False,
+        image_size=(20, 20),
+        resize_type="resize",
+    )
+    try:
+        assert loader.shape == (3, 20, 20, 1)
+        assert [tuple(np.shape(batch))[1:] for batch in loader] == [(20, 20, 1)] * 3
+    finally:
+        loader.close()
+
+
+def test_ragged_dataset_allows_batch_size_one(ragged_folder):
+    """A batch of one stacks a single sample, so raggedness cannot hurt it."""
+    loader = Dataloader(ragged_folder, key=FILTER_KEY, batch_size=1, shuffle=False, validate=False)
+    try:
+        assert sorted(tuple(np.shape(batch)) for batch in loader) == (
+            [(1, 16, 16, 1)] * FILTER_N_FRAMES + [(1, 32, 32, 1)] * FILTER_N_FRAMES
+        )
+    finally:
+        loader.close()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"n_frames": 2},
+        {"n_frames": 3, "pad_incomplete_blocks": True},
+        {"image_size": (8, 8), "resize_type": "center_crop"},
+        {"image_size": (24, 24), "resize_type": "crop_or_pad"},
+        {"image_size": (12, 12), "resize_type": "resize"},
+        # random_crop cannot be traced symbolically when it crops down, so this also
+        # covers the measured fallback in _resized_shape.
+        {"image_size": (12, 12), "resize_type": "random_crop"},
+    ],
+)
+def test_predicted_sample_shape_matches_pipeline(tmp_path, kwargs):
+    """The shape predicted without reading must equal the one the pipeline produces.
+
+    ``sample_shapes`` is derived from the index table alone, so it can drift from what
+    the pipeline actually does; this pins the two together.
+    """
+    _write_zea_file(tmp_path / "a.hdf5")
+
+    loader = Dataloader(
+        tmp_path, key=FILTER_KEY, batch_size=2, shuffle=False, validate=False, **kwargs
+    )
+    try:
+        (predicted,) = loader.sample_shapes
+        # loader.shape carries the batch dim; sample_shapes is per sample.
+        assert predicted == tuple(loader.shape)[1:]
+        assert predicted == tuple(np.shape(next(iter(loader))))[1:]
+    finally:
+        loader.close()

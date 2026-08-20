@@ -42,6 +42,7 @@ from zea.data.datasets import (
 )
 from zea.data.layers import Resizer
 from zea.data.metadata import (
+    batch_leaf_shape,
     has_per_frame_paths,
     normalize_metadata_paths,
     read_metadata,
@@ -54,7 +55,8 @@ from zea.utils import canonicalize_axis, map_negative_indices
 if TYPE_CHECKING:
     from zea.data.file import File
 
-DEFAULT_NORMALIZATION_RANGE = (0, 1)
+#: How many offending file names to name in a shape or metadata error before eliding.
+_MAX_LISTED_FILES = 5
 
 
 def _normalize_axis_selections(
@@ -281,10 +283,6 @@ def _resolve_source_frame_axis(key: str, num_dims: int) -> int | None:
     return None
 
 
-#: How many offending file names to name in a missing-metadata error before eliding.
-_MAX_LISTED_FILES = 5
-
-
 def _missing_metadata_error(metadata_gaps: dict, n_files: int) -> KeyError:
     """Build the error raised when files cannot supply a requested metadata path.
 
@@ -312,6 +310,97 @@ def _missing_metadata_error(metadata_gaps: dict, n_files: int) -> KeyError:
         " | ".join(parts) + ". Metadata is read for every sample, so the loader would "
         "otherwise fail partway through an epoch. Import EXISTS from zea.data.datasets, "
         "or drop the path from return_metadata."
+    )
+
+
+def _resized_shape(resizer: "Resizer", shape: tuple) -> tuple:
+    """The shape ``resizer`` produces for ``shape``, asked of the resizer itself.
+
+    Tries a symbolic call first, which traces the real layer without allocating or
+    computing anything. Some keras layers cannot be traced that way (``RandomCrop``
+    cropping down builds a slice from a tracer), so fall back to running the layer on
+    one zero-filled sample -- still the real layer, just no longer free.
+    """
+    try:
+        return tuple(resizer(keras.KerasTensor(shape, dtype="float32")).shape)
+    except Exception:  # noqa: BLE001 -- any tracing failure just means "measure it instead"
+        with keras.device("cpu"):
+            return tuple(np.shape(resizer(np.zeros(shape, np.float32))))
+
+
+def _sample_shape_error(sample_shapes: dict, batch_size: int) -> ValueError:
+    """Build the error raised when samples cannot be stacked into a batch."""
+    lines = [
+        f"  - {shape} from {len(files)} file(s) (e.g. {', '.join(Path(f).name for f in files)})"
+        for shape, files in sample_shapes.items()
+    ]
+    return ValueError(
+        f"Samples differ in shape between files, so they cannot be stacked into a batch "
+        f"of {batch_size}:\n"
+        + "\n".join(lines)
+        + "\nSet image_size (with resize_type) to bring them to a common shape, use "
+        "batch_size=None to keep samples separate, or restrict the dataset to files that "
+        "agree with file_filter."
+    )
+
+
+def _metadata_batch_conflicts(
+    metadata_signatures: dict, file_n_frames: dict
+) -> dict[str, dict[tuple, list[str]]]:
+    """Find metadata leaves whose shape differs between files.
+
+    Batching stacks metadata leaf by leaf, so a leaf that is a scalar in one file and
+    an array in another (or absent altogether) cannot be stacked. Comparing the
+    normalized shapes up front turns that into one clear error instead of a failure
+    inside the batch op.
+
+    Args:
+        metadata_signatures: File path -> ``{leaf path: stored shape}``.
+        file_n_frames: File path -> that file's frame count, for the files whose
+            per-frame metadata is sliced. Pass ``{}`` when no slicing happens; a
+            file missing from it keeps its stored shapes.
+
+    Returns:
+        dict: Leaf path -> ``{normalized shape: file paths}``, holding only leaves
+        that resolved to more than one shape. Empty when the files agree.
+    """
+    per_leaf: dict[str, dict[tuple, list[str]]] = defaultdict(lambda: defaultdict(list))
+    all_files = list(metadata_signatures)
+    for file_path, signature in metadata_signatures.items():
+        n_frames = file_n_frames.get(file_path)
+        for leaf, shape in signature.items():
+            per_leaf[leaf][batch_leaf_shape(leaf, shape, n_frames)].append(file_path)
+
+    conflicts = {}
+    for leaf, by_shape in per_leaf.items():
+        # A leaf that some files do not have at all is a structural mismatch too: the
+        # dicts being stacked would not share the same keys.
+        seen = {f for files in by_shape.values() for f in files}
+        if len(seen) != len(all_files):
+            # Not a shape, but it reads correctly in the error: "absent in 2 file(s)".
+            by_shape = {**by_shape, "absent": [f for f in all_files if f not in seen]}
+        if len(by_shape) > 1:
+            conflicts[leaf] = dict(by_shape)
+    return conflicts
+
+
+def _metadata_batch_error(conflicts: dict, batch_size: int) -> ValueError:
+    """Build the error raised when metadata shapes cannot be stacked into a batch."""
+    lines = []
+    for leaf, by_shape in conflicts.items():
+        variants = "; ".join(
+            f"{shape} in {len(files)} file(s) (e.g. {Path(files[0]).name})"
+            for shape, files in by_shape.items()
+        )
+        lines.append(f"  - '{leaf}': {variants}")
+    return ValueError(
+        "return_metadata fields differ in shape between files, so they cannot be stacked "
+        f"into a batch of {batch_size}:\n"
+        + "\n".join(lines)
+        + "\nBatching stacks metadata leaf by leaf, so every file must supply the same "
+        "leaves with the same shapes. Either use batch_size=None and batch the metadata "
+        "yourself, narrow return_metadata to the fields that do line up, or restrict the "
+        "dataset to files that agree with file_filter."
     )
 
 
@@ -414,7 +503,9 @@ class H5DataSource:
         self.file_paths = _dataset.file_paths
         # Requested metadata paths are checked in the same sweep that reads the shapes,
         # so a file that cannot answer surfaces here rather than mid-epoch.
-        self.file_shapes, metadata_gaps = _dataset.load_file_shapes(key, self.return_metadata or ())
+        self.file_shapes, metadata_gaps, self._metadata_signatures = _dataset.load_file_shapes(
+            key, self.return_metadata or ()
+        )
         _dataset.close()
 
         if metadata_gaps:
@@ -444,6 +535,13 @@ class H5DataSource:
             self.return_metadata
             and has_per_frame_paths(self.return_metadata)
             and self.source_frame_axis is not None
+        )
+
+        # Left for the caller to act on: only a batched loader stacks metadata across
+        # files, and this source does not know whether it feeds one.
+        self.metadata_batch_conflicts = _metadata_batch_conflicts(
+            self._metadata_signatures,
+            self._file_n_frames if self._slice_metadata_per_frame else {},
         )
 
         # Validate and normalize axis_selections
@@ -479,10 +577,66 @@ class H5DataSource:
             )
             self.indices = self.indices[:limit_n_examples]
 
+        self.sample_shapes = self._collect_sample_shapes()
+
         # Thread-local file handle caches (one per thread)
         self._local = threading.local()
         self._all_caches: set[H5FileHandleCache] = set()
         self._all_caches_lock = threading.Lock()
+
+    def _collect_sample_shapes(self) -> dict[tuple, list[str]]:
+        """Map each distinct sample shape this source yields to the files producing it.
+
+        Derived from the index table rather than by reading, so it costs no I/O. More
+        than one entry means the dataset is ragged: the files disagree on everything
+        but the frame axis, or a file's last block is shorter than ``n_frames``.
+        """
+        shape_by_path = dict(zip(self.file_paths, self.file_shapes))
+        shapes: dict[tuple, list[str]] = defaultdict(list)
+        for file_name, _key, selection in self.indices:
+            shape = self._sample_shape(shape_by_path[file_name], selection)
+            files = shapes[shape]
+            if len(files) < _MAX_LISTED_FILES and file_name not in files:
+                files.append(file_name)
+        return dict(shapes)
+
+    def _place_frames(self, images):
+        """Move the loaded frame axis into place and pad a block short of ``n_frames``.
+
+        Pure axis bookkeeping -- it reads only shapes, never values -- so
+        :meth:`_sample_shape` can run it on a dummy to learn the output shape.
+        """
+        # With n_frames=None the read used an int index, so there is no frame axis to
+        # place and nothing to pad -- the sample already has the file's own layout.
+        if self.n_frames is None:
+            return images
+
+        # __init__ rejects n_frames without a frame axis, so this is never None here.
+        assert self.source_frame_axis is not None
+        source = self.source_frame_axis
+        if self.additional_axes_iter:
+            # Axes iterated with an int index are gone from the loaded array.
+            source -= sum(ax < self.source_frame_axis for ax in self.additional_axes_iter)
+        images = np.moveaxis(images, source, self.frame_axis)
+
+        if self.pad_incomplete_blocks:
+            n_loaded = images.shape[self.frame_axis]
+            if n_loaded < self.n_frames:
+                pad_width = [(0, 0)] * images.ndim
+                pad_width[self.frame_axis] = (0, self.n_frames - n_loaded)
+                images = np.pad(images, pad_width)
+        return images
+
+    def _sample_shape(self, file_shape: tuple, selection: tuple) -> tuple:
+        """The shape :meth:`__getitem__` returns for a sample read with ``selection``.
+
+        Runs the real transform on a zero-strided dummy: ``broadcast_to`` of a 0-d
+        array is one byte however large the sample, and slicing and ``moveaxis`` keep
+        it a view. Going through :meth:`_place_frames` rather than re-deriving its
+        arithmetic here is what keeps the two from drifting apart.
+        """
+        dummy = np.broadcast_to(np.zeros((), np.uint8), file_shape)[selection]
+        return tuple(np.shape(self._place_frames(dummy)))
 
     def __len__(self) -> int:
         return len(self.indices)
@@ -506,23 +660,7 @@ class H5DataSource:
             file = file_handle_cache.get_file(file_name)
             images = file.dataset(key)[indices]
 
-        # With n_frames=None the read used an int index, so there is no frame axis to
-        # place and nothing to pad -- the sample already has the file's own layout.
-        if self.n_frames is not None:
-            # __init__ rejects n_frames without a frame axis, so this is never None here.
-            assert self.source_frame_axis is not None
-            source = self.source_frame_axis
-            if self.additional_axes_iter:
-                # Axes iterated with an int index are gone from the loaded array.
-                source -= sum(ax < self.source_frame_axis for ax in self.additional_axes_iter)
-            images = np.moveaxis(images, source, self.frame_axis)
-
-            if self.pad_incomplete_blocks:
-                n_loaded = images.shape[self.frame_axis]
-                if n_loaded < self.n_frames:
-                    pad_width = [(0, 0)] * images.ndim
-                    pad_width[self.frame_axis] = (0, self.n_frames - n_loaded)
-                    images = np.pad(images, pad_width)
+        images = self._place_frames(images)
 
         if self.returns_metadata:
             result = (images, self._build_metadata(file, file_name, indices))
@@ -633,11 +771,13 @@ class Dataloader:
         file_paths: Path(s) to directory(ies) and/or HDF5 file(s).
         key: HDF5 dataset key. Default is ``"data/image"``.
         batch_size: Batch size. Set to ``None`` to disable batching.
-            Default is ``16``. When batching is on, metadata requested via
-            ``return_metadata`` is stacked leaf by leaf just like the data, so every
-            file must supply the same fields with the same shapes. If your metadata
-            varies in shape between files, use ``batch_size=None`` and batch it
-            yourself.
+            Default is ``16``. Stacking two or more samples requires them to have the
+            same shape, and metadata requested via ``return_metadata`` is stacked leaf
+            by leaf just like the data, so every file must supply the same fields with
+            the same shapes. Both are checked when the loader is built, which refuses
+            to construct rather than failing on whichever batch first straddles two
+            files. ``image_size`` resolves differing sample shapes; for the rest, use
+            ``batch_size=None`` (or ``1``, which stacks nothing) and batch it yourself.
         n_frames: Number of consecutive frames per sample, placed on ``frame_axis``.
             Default is ``None``, which loads single frames *without* a frame axis, so a
             sample keeps the file's own layout for one frame. Set an int to group
@@ -677,10 +817,13 @@ class Dataloader:
             a broadcast form the spec allows -- one value for the whole file, such as a
             single ``annotations.view`` string or a map grid with its leading frame axis
             omitted -- is returned in full with every sample rather than sliced.
-            Note that batching stacks metadata leaf by leaf, so every file must
-            supply the same structure and shapes; use ``batch_size=None`` for
-            metadata that varies in shape between files. Per-frame metadata is not
-            zero-padded along with the images when ``pad_incomplete_blocks=True``.
+            Batching stacks metadata leaf by leaf, so every file must supply the same
+            leaves with the same shapes -- this too is checked when the loader is
+            built, and raises :exc:`ValueError` naming the leaves that disagree. Files
+            may still hold different numbers of frames: that axis is sliced away before
+            stacking. Use ``batch_size=None`` for metadata that genuinely varies in
+            shape between files. Per-frame metadata is not zero-padded along with the
+            images when ``pad_incomplete_blocks=True``.
         seed: Random seed used for dataloader (e.g. shuffling). Default is ``None``.
             If ``None`` a random seed is generated.
         limit_n_examples: Cap the total number of examples the loader yields, across
@@ -697,6 +840,8 @@ class Dataloader:
             ``[offset_n_frames, offset_n_frames + limit_n_frames)``. Default is ``0``.
         drop_remainder: Drop the final incomplete batch. Default is ``False``.
         image_size: Target ``(height, width)``. Default is ``None`` (no resizing).
+            Setting it is what lets files of differing image size be batched together,
+            since they arrive at the batch op already sharing a shape.
         resize_type: Resize strategy. One of ``"resize"``, ``"center_crop"``,
             ``"random_crop"`` or ``"crop_or_pad"``. Default is ``None``,
             which resolves to ``"resize"`` when `image_size` is set.
@@ -976,6 +1121,15 @@ class Dataloader:
             **kwargs,
         )
 
+        # Only a loader stacking two or more samples has to reconcile metadata across
+        # files, so this is exactly the case batch_size=None exists to escape.
+        if (
+            self.batch_size is not None
+            and self.batch_size > 1
+            and self.source.metadata_batch_conflicts
+        ):
+            raise _metadata_batch_error(self.source.metadata_batch_conflicts, self.batch_size)
+
         # ── Store pipeline config for rebuilding per epoch ────────────
         self._pipeline_cfg: dict[str, Any] = dict(
             num_shards=num_shards,
@@ -1013,6 +1167,23 @@ class Dataloader:
                 **resize_kwargs,
             )
 
+        # The resizer can bring differing files to a common shape, so this is only
+        # decidable once it is built. Both steps run the real pipeline code on the
+        # source shapes rather than re-deriving what it does; everything else in the
+        # pipeline (clip, cast, normalize, augment) leaves a sample's shape alone.
+        resizer = self._pipeline_cfg["resizer"]
+        self._sample_shapes: dict[tuple, list[str]] = {}
+        for source_shape, files in self.source.sample_shapes.items():
+            dummy = np.broadcast_to(np.zeros((), np.uint8), source_shape)
+            shape = tuple(np.shape(self._ensure_channel_dim(dummy)))
+            if resizer is not None:
+                shape = _resized_shape(resizer, shape)
+            self._sample_shapes.setdefault(shape, []).extend(files)
+
+        # A batch of one stacks a single sample, so raggedness is harmless there.
+        if len(self._sample_shapes) > 1 and self.batch_size is not None and self.batch_size > 1:
+            raise _sample_shape_error(self._sample_shapes, self.batch_size)
+
         self._map_dataset = self._build_pipeline(seed)
 
         if len(self._map_dataset) == 0:
@@ -1021,7 +1192,10 @@ class Dataloader:
                 "and that the filters/transforms do not discard all items."
             )
 
-        if self.returns_metadata:
+        if len(self._sample_shapes) > 1:
+            # Ragged and unbatched: there is no one shape to report.
+            self._shape = None
+        elif self.returns_metadata:
             self._shape = self._map_dataset[0][0].shape
         else:
             self._shape = self._map_dataset[0].shape
@@ -1092,8 +1266,31 @@ class Dataloader:
 
     @property
     def shape(self):
-        """Output shape of one batch (or sample if unbatched)."""
+        """Output shape of one batch (or sample if unbatched).
+
+        Raises:
+            ValueError: If the loader yields more than one shape, which only an
+                unbatched loader can do -- there is no single shape to report.
+                Inspect :attr:`sample_shapes` for the shapes it does yield.
+        """
+        if self._shape is None:
+            raise ValueError(
+                "This Dataloader has no single sample shape: its files yield "
+                f"{len(self._sample_shapes)} different shapes "
+                f"({', '.join(str(shape) for shape in self._sample_shapes)}). "
+                "Set image_size (with resize_type) to bring them to a common shape, or "
+                "read Dataloader.sample_shapes for the per-shape breakdown."
+            )
         return self._shape
+
+    @property
+    def sample_shapes(self) -> dict[tuple, list[str]]:
+        """Each shape this loader yields, mapped to a few files that produce it.
+
+        One entry for a well-formed dataset; more than one means the files disagree
+        and only ``batch_size=None`` can iterate them.
+        """
+        return self._sample_shapes
 
     def to_iter_dataset(self) -> grain.IterDataset:
         """Convert to a ``grain.IterDataset`` with prefetching.

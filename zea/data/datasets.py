@@ -225,20 +225,22 @@ class H5FileHandleCache:
 
 
 def _shape_and_metadata_gaps(file_path, key, metadata_paths):
-    """Read one file's shape for ``key`` and the ``metadata_paths`` it cannot supply.
+    """Describe one file: its shape for ``key``, plus what its metadata looks like.
 
-    The presence check rides along with the shape read so that a dataset is swept
-    once, not twice: the file is open either way, and each path costs a name
-    lookup. Must stay importable at module level -- it runs in a
-    :mod:`multiprocessing` worker.
+    Both metadata passes ride along with the shape read so that a dataset is swept
+    once, not three times: the file is open either way, and shapes and presence both
+    come off the handles without reading data. Must stay importable at module level
+    -- it runs in a :mod:`multiprocessing` worker.
     """
     # Imported here rather than at module scope: zea.data.metadata imports from us.
-    from zea.data.metadata import missing_metadata_paths
+    from zea.data.metadata import metadata_signature, missing_metadata_paths
 
     with File(file_path, mode="r") as file:
         shape = file.shape(key)
         missing = missing_metadata_paths(file, metadata_paths)
-    return shape, missing
+        # Only meaningful once every file can answer, so skip the walk when one cannot.
+        signature = {} if missing else metadata_signature(file, metadata_paths)
+    return shape, missing, signature
 
 
 @cache_output("filepaths", "key", "metadata_paths", "_filepath_hash", verbose=True)
@@ -275,11 +277,14 @@ def _find_h5_file_shapes(filepaths, key, _filepath_hash, metadata_paths=(), verb
         ):
             results.append(get_shape(file_path))
 
-    file_shapes = [shape for shape, _ in results]
+    file_shapes = [shape for shape, _, _ in results]
     metadata_gaps = {
-        file_path: missing for file_path, (_, missing) in zip(filepaths, results) if missing
+        file_path: missing for file_path, (_, missing, _) in zip(filepaths, results) if missing
     }
-    return file_shapes, metadata_gaps
+    metadata_signatures = {
+        file_path: signature for file_path, (_, _, signature) in zip(filepaths, results)
+    }
+    return file_shapes, metadata_gaps, metadata_signatures
 
 
 def _file_hash(filepaths):
@@ -415,9 +420,12 @@ class Folder:
                 open. Default is ``()`` (no check).
 
         Returns:
-            tuple: ``(file_shapes, metadata_gaps)``, where ``metadata_gaps`` maps a
-            file path to the requested paths that file lacks. Only files missing
-            something appear, so an empty dict means every file can answer.
+            tuple: ``(file_shapes, metadata_gaps, metadata_signatures)``.
+            ``metadata_gaps`` maps a file path to the requested paths that file
+            lacks -- only files missing something appear, so an empty dict means
+            every file can answer. ``metadata_signatures`` maps every file path to
+            its ``{leaf path: shape}`` mapping, for checking that the files agree
+            well enough to be batched together.
         """
         return _find_h5_file_shapes(
             self.file_paths, key, _file_hash(self.file_paths), tuple(metadata_paths)
@@ -697,9 +705,12 @@ class Dataset(H5FileHandleCache):
                 open. Default is ``()`` (no check).
 
         Returns:
-            tuple: ``(file_shapes, metadata_gaps)``, where ``metadata_gaps`` maps a
-            file path to the requested paths that file lacks. Only files missing
-            something appear, so an empty dict means every file can answer.
+            tuple: ``(file_shapes, metadata_gaps, metadata_signatures)``.
+            ``metadata_gaps`` maps a file path to the requested paths that file
+            lacks -- only files missing something appear, so an empty dict means
+            every file can answer. ``metadata_signatures`` maps every file path to
+            its ``{leaf path: shape}`` mapping, for checking that the files agree
+            well enough to be batched together.
         """
         return _find_h5_file_shapes(
             self.file_paths, key, _file_hash(self.file_paths), tuple(metadata_paths)
