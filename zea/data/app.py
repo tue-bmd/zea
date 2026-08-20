@@ -904,50 +904,55 @@ def run_checks(
         yield _emit(_html_fail("Open file", exc))
         return
 
-    for i, frame in enumerate(_dataloader):
-        try:
-            frame = np.asarray(frame)
-            if pipeline is not None:
-                output = _run_quiet(pipeline, data=frame, **params)
-                processed = ops.convert_to_numpy(output["data"])
-                for k in keep_keys:
-                    if k in output:
-                        params[k] = output[k]
-            else:
-                # Raw fallback: reduce to 2D
-                while frame.ndim > 2:
-                    if frame.shape[0] == 1:
-                        frame = frame[0]
-                    elif frame.shape[-1] == 1:
-                        frame = frame[..., 0]
-                    elif frame.ndim == 3:
-                        # Multi-channel last dim (e.g. segmentation one-hot)
-                        frame = np.argmax(frame, axis=-1)
-                    else:
-                        frame = frame[0]
-                if frame.ndim < 2:
-                    yield _emit(
-                        _html_fail(
-                            "Cannot display",
-                            f"Data shape {frame.shape} after indexing — need at least 2D.",
+    # try/finally so the loop's early returns and generator abandonment both close
+    # the dataloader's file handles.
+    try:
+        for i, frame in enumerate(_dataloader):
+            try:
+                frame = np.asarray(frame)
+                if pipeline is not None:
+                    output = _run_quiet(pipeline, data=frame, **params)
+                    processed = ops.convert_to_numpy(output["data"])
+                    for k in keep_keys:
+                        if k in output:
+                            params[k] = output[k]
+                else:
+                    # Raw fallback: reduce to 2D
+                    while frame.ndim > 2:
+                        if frame.shape[0] == 1:
+                            frame = frame[0]
+                        elif frame.shape[-1] == 1:
+                            frame = frame[..., 0]
+                        elif frame.ndim == 3:
+                            # Multi-channel last dim (e.g. segmentation one-hot)
+                            frame = np.argmax(frame, axis=-1)
+                        else:
+                            frame = frame[0]
+                    if frame.ndim < 2:
+                        yield _emit(
+                            _html_fail(
+                                "Cannot display",
+                                f"Data shape {frame.shape} after indexing — need at least 2D.",
+                            )
                         )
-                    )
-                    return
-                processed = frame
-        except Exception as exc:
-            yield _emit(_html_fail(f"Process frame {start_frame + i}", exc))
-            return
+                        return
+                    processed = frame
+            except Exception as exc:
+                yield _emit(_html_fail(f"Process frame {start_frame + i}", exc))
+                return
 
-        processed_frames.append(processed)
+            processed_frames.append(processed)
 
-        pbar = _html_progress(i + 1, actual_n)
-        if i == 0:
-            yield _emit(pbar)
-        else:
-            yield _replace_last(pbar)
+            pbar = _html_progress(i + 1, actual_n)
+            if i == 0:
+                yield _emit(pbar)
+            else:
+                yield _replace_last(pbar)
 
-        if _stopped():
-            return
+            if _stopped():
+                return
+    finally:
+        _dataloader.close()
 
     # 7. Convert to image / GIF
     try:

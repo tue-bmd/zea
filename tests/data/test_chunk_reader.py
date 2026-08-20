@@ -362,14 +362,21 @@ class TestFallbackNotes:
                 done, out = threading.Event(), {}
 
                 def read_inside_the_generator():
-                    for _, item in group.items():
-                        out["locked"] = phil._is_owned()  # the lock really is held here
-                        out["values"] = read(item, slice(None), fetcher, progress=False)
-                    done.set()
+                    try:
+                        for _, item in group.items():
+                            out["locked"] = phil._is_owned()  # the lock really is held here
+                            out["values"] = read(item, slice(None), fetcher, progress=False)
+                    except BaseException as exc:  # surfaced on the main thread below
+                        out["error"] = exc
+                    finally:
+                        done.set()
 
                 worker = threading.Thread(target=read_inside_the_generator, daemon=True)
                 worker.start()
                 assert done.wait(timeout=60), "read under h5py's global lock deadlocked"
+                if "error" in out:
+                    # Re-raise so the worker's own failure is reported, not a stray KeyError
+                    raise out["error"]
                 assert out["locked"], "test is vacuous: h5py's lock was not held"
                 assert np.array_equal(out["values"], group["raw"][:])
         finally:

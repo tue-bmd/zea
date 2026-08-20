@@ -35,7 +35,7 @@ import h5py
 import numpy as np
 
 from zea.data.datasets import _resolve_dotted_path
-from zea.data.file import File
+from zea.data.file import ChunkedDataset, File, _GroupProxy, _StringDataset
 from zea.data.spec import ROOT_SPECS, FileSpec, Spec
 
 __all__ = ["has_per_frame_paths", "normalize_metadata_paths", "read_metadata", "slice_metadata"]
@@ -136,7 +136,7 @@ def has_per_frame_paths(paths: Sequence[str]) -> bool:
     )
 
 
-def _read_dataset(dataset: "h5py.Dataset"):
+def _read_dataset(dataset: "h5py.Dataset | ChunkedDataset"):
     """Read an HDF5 dataset, decoding strings the same way as a group load."""
     if h5py.check_string_dtype(dataset.dtype) is not None:
         value = dataset.asstr()[()]
@@ -154,15 +154,21 @@ def _read_path(file: File, path: str):
     attribute access on the ``File`` object (which covers derived properties
     such as ``probe_name`` and ``zea_version``).
     """
+    key = path.replace(".", "/")
+    # Resolve with File.dataset rather than file[key]: the latter hands back the bare h5py
+    # object, whose reads are serial, while File.dataset and load_group both go through the
+    # concurrent chunk-read path. It raises the same exceptions file[key] does.
     try:
-        obj = file[path.replace(".", "/")]
+        obj = file.dataset(key)
     except (KeyError, AttributeError):
         obj = None
 
-    if isinstance(obj, h5py.Group):
-        return file.load_group(obj)
+    if isinstance(obj, _GroupProxy):
+        return file.load_group(key)
     if obj is not None:
-        return _read_dataset(obj)
+        # _StringDataset already decodes bytes on read; _read_dataset covers the rest (and
+        # still accepts a plain h5py.Dataset for other callers).
+        return obj[()] if isinstance(obj, _StringDataset) else _read_dataset(obj)
 
     if "." not in path and path in file.attrs:
         return file.attrs[path]

@@ -192,11 +192,13 @@ def generate_h5_indices(
         except Exception:
             log.warning("Could not sort file_paths by number.")
 
-    # block size with stride included
-    block_size = (n_frames or 1) * frame_index_stride
+    # Frames one sample consumes. With n_frames=None the selection is a single int, so a
+    # sample spans exactly one frame however large the stride: there the stride only
+    # spaces consecutive samples out, it does not widen them.
+    block_size = 1 if n_frames is None else n_frames * frame_index_stride
 
     if not overlapping_blocks:
-        block_step_size = block_size
+        block_step_size = frame_index_stride if n_frames is None else block_size
     else:
         # now blocks overlap by n_frames - 1
         block_step_size = 1
@@ -251,7 +253,7 @@ def generate_h5_indices(
             f"which is about {skipped_files / len(file_paths) * 100:.2f}% of the "
             f"dataset. This can be fine if you expect set `n_frames` and "
             "`frame_index_stride` to be high. Minimum frames in a file needs to be at "
-            f"least n_frames * frame_index_stride = {block_size}. "
+            f"least {block_size}. "
         )
 
     return indices
@@ -592,7 +594,11 @@ class Dataloader:
         file_paths: Path(s) to directory(ies) and/or HDF5 file(s).
         key: HDF5 dataset key. Default is ``"data/image"``.
         batch_size: Batch size. Set to ``None`` to disable batching.
-            Default is ``16``.
+            Default is ``16``. When batching is on, metadata requested via
+            ``return_metadata`` is stacked leaf by leaf just like the data, so every
+            file must supply the same fields with the same shapes. If your metadata
+            varies in shape between files, use ``batch_size=None`` and batch it
+            yourself.
         n_frames: Number of consecutive frames per sample, placed on ``frame_axis``.
             Default is ``None``, which loads single frames *without* a frame axis, so a
             sample keeps the file's own layout for one frame. Set an int to group

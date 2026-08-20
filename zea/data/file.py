@@ -373,9 +373,12 @@ class _BareDataset(h5py.Dataset):
         if name is not None and name not in _SLOW_READ_WARNED:
             _SLOW_READ_WARNED.add(name)
             key = re.sub(r"^/?tracks/track_\d+/", "", name).lstrip("/")
+            # Every path segment becomes an attribute hop, so a nested group like
+            # data/image/values is suggested as file.data.image.values, not file.data.values.
+            attr_path = key.replace("/", ".")
             log.warning(
                 f"Reading '{key}' through file[...] uses h5py's serial read path. "
-                f"Use file.dataset({key!r})[...] or file.data.{key.split('/')[-1]}[...] "
+                f"Use file.dataset({key!r})[...] or file.{attr_path}[...] "
                 "for concurrent chunk reads."
             )
         return super().__getitem__(args)

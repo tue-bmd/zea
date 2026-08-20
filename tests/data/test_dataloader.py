@@ -1318,9 +1318,16 @@ def test_return_metadata_slices_per_frame_fields(metadata_dataset):
         labels.append(list(annotations["label"]))
     loader.close()
 
-    per_file = METADATA_N_FRAMES // n_frames
-    assert labels[:per_file] == [["f00", "f01"], ["f02", "f03"], ["f04", "f05"]]
-    assert labels[per_file:] == [["f10", "f11"], ["f12", "f13"], ["f14", "f15"]]
+    # sort_files=False leaves file discovery order up to the filesystem, so compare the
+    # collected blocks as a set; each block stays intact, so frame order is still checked.
+    assert sorted(labels) == [
+        ["f00", "f01"],
+        ["f02", "f03"],
+        ["f04", "f05"],
+        ["f10", "f11"],
+        ["f12", "f13"],
+        ["f14", "f15"],
+    ]
 
 
 def test_return_metadata_missing_path_raises(metadata_dataset):

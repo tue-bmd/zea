@@ -19,7 +19,7 @@ from zea.cli_args import SUPPORTED_FORMATS, ProcessArgs
 from zea.config import Config
 from zea.data.dataloader import Dataloader
 from zea.data.datasets import Dataset
-from zea.data.file import File
+from zea.data.file import File, _GroupProxy
 from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
 from zea.ops.pipeline import Pipeline
@@ -82,6 +82,10 @@ def _run_passthrough(
             f = ds[i]  # lazy download for hf:// paths; returns cached File handle
             data_key = f.format_key(key)
             _dset = f.dataset(data_key)
+            # A map-style key such as "image" resolves to a group, not a dataset: read its
+            # values child, the same way load_file does.
+            if isinstance(_dset, _GroupProxy):
+                _dset = _dset.values
             arr = np.asarray(_dset[:n_frames] if n_frames is not None else _dset[:])
             filestem = f.stem
 
