@@ -677,6 +677,41 @@ def test_annotate_sequence_caps_selections_at_frame_count(fake_selector):
     assert len(masks) == 3
 
 
+def test_annotate_sequence_stops_when_the_plot_is_closed(monkeypatch, fake_selector):
+    """Closing the window keeps the key frames already done instead of raising."""
+    fake_selector([((2, 2), (10, 10))])
+
+    calls = []
+    real = selection_tool.interactive_selector
+
+    def _close_on_third(*args, **kwargs):
+        calls.append(1)
+        # the user closes the window on the third key frame without selecting
+        if len(calls) >= 3:
+            return [], []
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(selection_tool, "interactive_selector", _close_on_third)
+
+    images = [np.ones((20, 20)) for _ in range(6)]
+    masks = annotate_sequence(
+        images, selector="rectangle", num_selections=4, confirm_selection=False
+    )
+
+    assert len(masks) == len(images)
+    assert all(mask.sum() > 0 for mask in masks)
+
+
+def test_annotate_sequence_raises_when_nothing_was_selected(monkeypatch):
+    """Closing the very first window leaves nothing to interpolate."""
+    monkeypatch.setattr(selection_tool, "interactive_selector", lambda *a, **k: ([], []))
+
+    with pytest.raises(ValueError, match="nothing to interpolate"):
+        annotate_sequence(
+            [np.ones((20, 20)) for _ in range(4)], num_selections=2, confirm_selection=False
+        )
+
+
 def test_annotate_sequence_requires_multiple_frames(fake_selector):
     fake_selector([((2, 2), (10, 10))])
     with pytest.raises(AssertionError):

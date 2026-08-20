@@ -20,7 +20,7 @@ Command line interface
 
 The module is exposed through the ``zea`` CLI as ``zea tools select``::
 
-    zea tools select                              # pick files through a file dialog
+    zea tools select                              # ask for the file paths on the terminal
     zea tools select frame.png other.png          # compare two images with gCNR
     zea tools select clip.mp4 --num-selections 3  # annotate a video and interpolate
 
@@ -1188,6 +1188,28 @@ def compare_images(
     )
 
 
+def _select_key_frame_mask(image, axs, selector: str, confirm_selection: bool):
+    """Select one non-empty mask on ``image``, retrying while the selection is empty.
+
+    Returns:
+        np.ndarray | None: The mask, or None when the user closed the window without
+        selecting anything.
+    """
+    while True:
+        _, mask = interactive_selector(
+            image,
+            axs,
+            selector=selector,
+            num_selections=1,
+            confirm_selection=confirm_selection,
+        )
+        if not mask:
+            return None
+        if mask[0].sum() > 0:
+            return mask[0]
+        log.warning("Empty mask. Try again, make sure to make a decent selection...")
+
+
 def annotate_sequence(
     images: Sequence[np.ndarray],
     selector: str = "rectangle",
@@ -1195,6 +1217,9 @@ def annotate_sequence(
     confirm_selection: bool = True,
 ) -> list[np.ndarray]:
     """Annotate evenly spaced key frames of a sequence and interpolate in between.
+
+    Closing the window instead of selecting stops the annotating and keeps the key
+    frames done so far, matching what closing the window means elsewhere in the tool.
 
     Args:
         images (Sequence[np.ndarray]): Frames of the sequence.
@@ -1205,6 +1230,9 @@ def annotate_sequence(
 
     Returns:
         list[np.ndarray]: One interpolated mask per frame in ``images``.
+
+    Raises:
+        ValueError: If no key frame was annotated at all.
     """
     assert len(images) > 1, "At least two frames are required to annotate a sequence."
     num_selections = min(num_selections, len(images))
@@ -1222,25 +1250,20 @@ def annotate_sequence(
 
         axs.imshow(image, cmap="gray")
 
-        while True:
-            _, mask = interactive_selector(
-                image,
-                axs,
-                selector=selector,
-                num_selections=1,
-                confirm_selection=confirm_selection,
-            )
-            # check if mask is empty else retry
-            if mask[0].sum() == 0:
-                log.warning("Empty mask. Try again, make sure to make a decent selection...")
-            else:
-                break
+        mask = _select_key_frame_mask(image, axs, selector, confirm_selection)
+        if mask is None:
+            log.warning(f"Stopping after {len(masks)} of {num_selections} key frames.")
+            plt.close(fig)
+            break
 
         pos, size = get_matplotlib_figure_props(fig)
 
-        plot_mask(axs, mask[0], selector)
+        plot_mask(axs, mask, selector)
         plt.close(fig)
-        masks.append(mask[0])
+        masks.append(mask)
+
+    if not masks:
+        raise ValueError("No region was selected, so there is nothing to interpolate.")
 
     # interpolation needs at least two masks, so duplicate a single selection
     if len(masks) == 1:
@@ -1451,8 +1474,8 @@ def run_selection_tool(
 
     Args:
         files (Sequence[str | Path], optional): Input images, or a single video / gif or
-            zea HDF5 file (an ``hf://`` URI works too). Defaults to None, i.e. ask
-            through a file dialog.
+            zea HDF5 file (an ``hf://`` URI works too). Defaults to None, i.e. ask for
+            the paths on the terminal.
         selector (str, optional): Type of selection tool, one of :data:`SELECTORS`.
         title (str, optional): Name of what is being selected. Used as the segmentation
             label and in the output filenames. Only used in sequence mode.

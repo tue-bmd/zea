@@ -461,8 +461,8 @@ class _Select:
 
     files: tyro.conf.Positional[list[str]] = field(default_factory=list)
     """Input images (png/jpg), or a single video / gif or zea HDF5 file. zea files also
-    accept an 'hf://' path (parsed as a str so the '//' is not collapsed). Omit to pick
-    files through a file dialog."""
+    accept an 'hf://' path (parsed as a str so the '//' is not collapsed). Omit to be
+    asked for the paths on the terminal."""
     selector: Literal["rectangle", "lasso"] | None = None
     """Shape of the selection tool. Asked for interactively when omitted."""
     title: str | None = None
@@ -519,9 +519,9 @@ class ToolsArgs:
     """Interactive tools from :mod:`zea.tools`.
 
     These are GUI-driven helpers rather than batch operations; they open matplotlib
-    windows and file dialogs, so they need a display::
+    windows, so they need a display::
 
-        zea tools select                  # pick files through a dialog
+        zea tools select                  # ask for the file paths on the terminal
         zea tools select a.png b.png      # compare two images with gCNR
         zea tools select clip.mp4         # annotate a video
         zea tools select scan.hdf5        # annotate a zea file

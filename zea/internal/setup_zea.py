@@ -114,8 +114,8 @@ def setup(
     initializes gpu if available. Will return config object.
 
     Args:
-        config_path (str, optional): file path to config yaml.
-            Defaults to None, in which case a window dialog will pop up.
+        config_path (str, optional): file path to config yaml. Required; a ``ValueError``
+            is raised when it is None.
         user_config (str or dict, optional): path that points to yaml file with user info.
             Alternively dictionary with user info. Defaults to None.
         verbose (bool, optional): print config file path and git summary. Defaults to True.
@@ -186,8 +186,8 @@ def setup_config(
     """
     if config_path is None:
         raise ValueError(
-            "No config file given. Please specify the path to a config file through the "
-            "--config flag, i.e. `zea --config <path-to-config.yaml>`."
+            "No config file given. Please pass one through the config_path argument, "
+            "e.g. `zea process --config <path-to-config.yaml>`."
         )
 
     config = Config.from_path(config_path, loader=loader, **kwargs)

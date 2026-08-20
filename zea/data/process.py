@@ -22,6 +22,7 @@ from zea.data.datasets import Dataset
 from zea.data.file import File
 from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
+from zea.internal.device import init_device
 from zea.ops.pipeline import Pipeline
 from zea.utils import FunctionTimer, ProgressBar
 
@@ -311,7 +312,9 @@ def run_processing(
 
 def main() -> None:
     """Entry point for ``python -m zea.data.process``, equivalent to ``zea process``."""
-    tyro.cli(ProcessArgs).run()
+    args = tyro.cli(ProcessArgs)
+    init_device()
+    args.run()
 
 
 if __name__ == "__main__":
