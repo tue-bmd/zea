@@ -1,14 +1,24 @@
 """Test generating and validating zea data format."""
 
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Generator
 
+import h5py
 import numpy as np
 import pytest
 
 from zea.data.file import File, validate_file
-from zea.data.file_operations import save_file
-from zea.data.spec import ScanSpec
+from zea.data.spec import (
+    BLOSC_NTHREADS,
+    MAX_CHUNK_BYTES,
+    PAGED_LAYOUT,
+    SINGLE_CHUNK_BYTES,
+    ScanSpec,
+)
 
 from . import generate_example_dataset
 
@@ -23,6 +33,13 @@ _REQUIRED_SCAN_KEYS = ScanSpec.required_fields()
 # Data dict for File.create
 DATA = {
     "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+}
+
+# The same acquisition with enough samples to exceed SINGLE_CHUNK_BYTES, so tests about
+# the chunk *shape* are not answered by the small-array rule (which stores anything under
+# that size as one chunk). Only n_ax grows — SCAN and PROBE are sized by n_tx/n_el.
+SPLITTABLE_DATA = {
+    "raw_data": np.zeros((n_frames, n_tx, 4096, n_el, n_ch), dtype=np.float32),
 }
 
 # Scan dict for File.create
@@ -151,14 +168,28 @@ def test_omit_required_scan_key(key, tmp_hdf5_path):
         )
 
 
-@pytest.mark.parametrize("chunk_frames", [True, False])
-def test_chunk_frames(chunk_frames, tmp_hdf5_path):
-    """Tests that chunk_frames stores data datasets with one frame per chunk."""
+@pytest.mark.parametrize(
+    "chunk_axes, expected",
+    [
+        # One chunk per (frame, transmit) plane, full n_ax/n_el/n_ch.
+        (("n_frames", "n_tx"), lambda s: (1, 1) + s[2:]),
+        # One full frame per chunk (the current default).
+        (("n_frames",), lambda s: (1,) + s[1:]),
+        # Disabled: contiguous storage (no chunking) — needs compression off.
+        (None, lambda s: None),
+        ((), lambda s: None),
+    ],
+)
+def test_chunk_axes(chunk_axes, expected, tmp_hdf5_path):
+    """chunk_axes controls which dimensions get HDF5 chunk size 1."""
+    # Contiguous storage is only possible without compression.
+    compression = None if not chunk_axes else "lzf"
 
     File.create(
         path=tmp_hdf5_path,
-        chunk_frames=chunk_frames,
-        data=DATA,
+        chunk_axes=chunk_axes,
+        compression=compression,
+        data=SPLITTABLE_DATA,
         scan=SCAN,
         probe=PROBE,
     )
@@ -167,11 +198,318 @@ def test_chunk_frames(chunk_frames, tmp_hdf5_path):
 
     with File(tmp_hdf5_path) as file:
         raw_data = file["data/raw_data"]
-        if chunk_frames:
-            # One frame (a single slice along the first axis) per chunk.
-            assert raw_data.chunks == (1,) + raw_data.shape[1:]
+        assert raw_data.chunks == expected(raw_data.shape)
         # Data must still be readable regardless of chunking.
-        assert np.array_equal(file["data/raw_data"][:], DATA["raw_data"])
+        assert np.array_equal(raw_data[:], SPLITTABLE_DATA["raw_data"])
+
+
+def test_blosc_nthreads_is_set_for_writes():
+    """Blosc threads within a chunk, which is ~4x of the write throughput.
+
+    A regression here would be silent: the files stay correct, just slow to produce.
+    """
+    assert os.environ.get("BLOSC_NTHREADS") == str(BLOSC_NTHREADS)
+    # Lower bound is 1 (a single-core host is a valid config); above 8 measured *slower*
+    # (memory-bound).
+    assert 1 <= BLOSC_NTHREADS <= 8, "more threads than this measured *slower* (memory-bound)"
+
+
+def test_blosc_nthreads_does_not_override_the_user():
+    """An explicit BLOSC_NTHREADS wins — zea only supplies a default.
+
+    Run in a subprocess because the behaviour happens at import: reloading the module in-process
+    rebuilds zea's dataclasses and breaks isinstance checks across the rest of the suite.
+    """
+    env = {**os.environ, "BLOSC_NTHREADS": "3"}
+    proc = subprocess.run(
+        [sys.executable, "-c", "import os, zea.data.spec; print(os.environ['BLOSC_NTHREADS'])"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert proc.stdout.strip().splitlines()[-1] == "3"  # last line: zea logs a backend banner
+
+
+def test_default_write_is_blosc_and_per_frame(tmp_hdf5_path):
+    """Default File.create uses Blosc(zstd) compression and one-frame-per-chunk."""
+    import hdf5plugin
+
+    File.create(path=tmp_hdf5_path, data=SPLITTABLE_DATA, scan=SCAN, probe=PROBE)  # all defaults
+
+    with File(tmp_hdf5_path) as file:
+        raw_data = file["data/raw_data"]
+        # per-frame default: chunk size 1 on n_frames, full on the rest
+        assert raw_data.chunks == (1,) + raw_data.shape[1:]
+        # Blosc filter is applied (h5py doesn't name external filters, so check id)
+        dcpl = raw_data.id.get_create_plist()
+        filter_ids = {dcpl.get_filter(i)[0] for i in range(dcpl.get_nfilters())}
+        assert hdf5plugin.Blosc.filter_id in filter_ids
+        assert np.array_equal(raw_data[:], SPLITTABLE_DATA["raw_data"])
+
+
+def test_large_frames_are_split_into_capped_chunks(tmp_hdf5_path):
+    """A frame bigger than MAX_CHUNK_BYTES is split along n_tx, not stored as one chunk.
+
+    A chunk decodes in a single thread, so a whole-frame chunk of a high-transmit scan has
+    nothing to parallelise (~7x slower to read). The split must fall on ``n_tx``, leaving
+    ``n_ax``/``n_el`` whole so each chunk stays a contiguous run of the array.
+    """
+    big_frames, big_tx, big_ax, big_el = 2, 64, 2048, 64
+    raw = np.zeros((big_frames, big_tx, big_ax, big_el, 1), dtype=np.float32)
+    assert raw[0].nbytes > MAX_CHUNK_BYTES, "the frame must exceed the cap to test the cap"
+
+    scan = {
+        **SCAN,
+        "initial_times": np.zeros(big_tx, dtype=np.float32),
+        "t0_delays": np.zeros((big_tx, big_el), dtype=np.float32),
+        "focus_distances": np.zeros(big_tx, dtype=np.float32),
+        "polar_angles": np.linspace(-np.pi / 2, np.pi / 2, big_tx, dtype=np.float32),
+        "azimuth_angles": np.zeros(big_tx, dtype=np.float32),
+        "tx_apodizations": np.ones((big_tx, big_el), dtype=np.float32),
+        "time_to_next_transmit": np.ones((big_frames, big_tx), dtype=np.float32),
+        "transmit_origins": np.zeros((big_tx, 3), dtype=np.float32),
+    }
+    probe = {**PROBE, "probe_geometry": np.zeros((big_el, 3), dtype=np.float32)}
+    File.create(
+        path=tmp_hdf5_path,
+        data={"raw_data": raw},
+        scan=scan,
+        probe=probe,
+        overwrite=True,
+    )
+
+    with File(tmp_hdf5_path) as file:
+        raw_data = file["data/raw_data"]
+        chunks = raw_data.chunks
+        chunk_bytes = np.prod(chunks) * raw.dtype.itemsize
+
+        assert chunk_bytes <= MAX_CHUNK_BYTES
+        assert chunks[0] == 1  # still one frame per chunk
+        assert 1 <= chunks[1] < big_tx  # split along n_tx ...
+        assert chunks[2:] == (big_ax, big_el, 1)  # ... and only along n_tx
+        assert np.array_equal(raw_data[:], raw)
+
+
+def test_images_and_maps_are_chunked_per_frame(tmp_hdf5_path):
+    """Image/map values chunk on n_frames like raw_data, instead of h5py's auto-guess.
+
+    Their schema lists several alternative shapes (2-D and 3-D, with and without a
+    channel axis) rather than one flat tuple of dimension names. When that goes
+    unresolved the fields fall back to h5py's guess of ~40 KB — dozens of tiny chunks
+    per frame, so a single-frame read fetches many small pieces.
+    """
+    frames, z, x = 3, 768, 512
+    values = -np.abs(np.random.randn(frames, z, x).astype(np.float32))
+    labels = np.array(["background", "lumen"], dtype=np.str_)
+    segmentation = np.zeros((frames, z, x, len(labels)), dtype=bool)
+    assert values[0].nbytes > SINGLE_CHUNK_BYTES, "must exceed the single-chunk floor"
+
+    File.create(
+        path=tmp_hdf5_path,
+        data={
+            "image": {"values": values},
+            "segmentation": {"values": segmentation, "labels": labels},
+        },
+        overwrite=True,
+    )
+
+    validate_file(tmp_hdf5_path)
+
+    with File(tmp_hdf5_path) as file:
+        assert file["data/image/values"].chunks == (1, z, x)
+        assert file["data/segmentation/values"].chunks == (1, z, x, len(labels))
+        assert np.array_equal(file["data/image/values"][:], values)
+
+
+@pytest.mark.parametrize("per_frame", [True, False])
+def test_coordinates_are_never_split_across_the_xyz_axis(per_frame, tmp_hdf5_path):
+    """Coordinates stay contiguous slabs, whether or not they carry a frame axis.
+
+    ``coordinates`` is typed only as ``("...", 3)``, so no axis can be named and none is
+    a chunk axis — the array is one chunk, capped. What must never happen is h5py's
+    guess, which splits the trailing ``[x, y, z]`` axis and scatters each position
+    across chunks.
+    """
+    frames, z, x = 3, 768, 512
+    values = -np.abs(np.random.randn(frames, z, x).astype(np.float32))
+    shape = (frames, z, x, 3) if per_frame else (z, x, 3)
+    coordinates = np.zeros(shape, dtype=np.float32)
+
+    File.create(
+        path=tmp_hdf5_path,
+        data={"image": {"values": values, "coordinates": coordinates}},
+        overwrite=True,
+    )
+
+    with File(tmp_hdf5_path) as file:
+        stored = file["data/image/coordinates"]
+        chunks = stored.chunks
+        assert chunks[-1] == 3, "an [x, y, z] position must never straddle two chunks"
+        assert chunks[1:] == shape[1:], "only the outermost axis may be split"
+        assert np.prod(chunks) * coordinates.dtype.itemsize <= MAX_CHUNK_BYTES
+        assert np.array_equal(stored[:], coordinates)
+
+
+def test_small_arrays_are_stored_as_a_single_chunk(tmp_hdf5_path):
+    """Scan/probe/pose arrays are read whole, so they are one chunk each.
+
+    h5py's guess splits them into 8-16 pieces of a few KB — it cuts a (T, 3) probe pose
+    across x/y/z, and per-frame chunking would cut (n_frames, n_tx) timing into 384-byte
+    chunks. Neither buys anything: one range request fetches any of these whole.
+    """
+    samples = 5000
+    metadata = {
+        "probe_pose": {
+            "translation": np.zeros((samples, 3), dtype=np.float32),
+            "rotation": np.zeros((samples, 4), dtype=np.float32),
+            "rotation_representation": "quaternion_wxyz",
+            "start_time_offset": np.float32(0.0),
+            "sampling_frequency": np.float32(100.0),
+        }
+    }
+    File.create(
+        path=tmp_hdf5_path,
+        data=DATA,
+        scan=SCAN,
+        probe=PROBE,
+        metadata=metadata,
+        overwrite=True,
+    )
+
+    with h5py.File(tmp_hdf5_path, "r") as file:
+        for key in [
+            "tracks/track_0/scan/t0_delays",
+            "tracks/track_0/scan/tx_apodizations",
+            "tracks/track_0/scan/time_to_next_transmit",
+            "tracks/track_0/scan/transmit_origins",
+            "probe/probe_geometry",
+            "metadata/probe_pose/translation",
+            "metadata/probe_pose/rotation",
+            "tracks/track_0/data/raw_data",  # small enough here to be one chunk too
+        ]:
+            dataset = file[key]
+            assert dataset.nbytes <= SINGLE_CHUNK_BYTES, key
+            assert dataset.chunks == dataset.shape, key
+
+
+def test_large_image_frames_are_split_into_capped_chunks(tmp_hdf5_path):
+    """A volume frame bigger than MAX_CHUNK_BYTES is split along z, leaving x/y whole.
+
+    Same reasoning as for raw_data: a chunk decodes in one thread, so a whole-frame
+    chunk of a large volume has nothing to parallelise. The split falls on the outermost
+    full axis so each chunk stays a contiguous run of the array.
+    """
+    frames, z, x, y = 2, 160, 128, 128
+    values = -np.abs(np.random.randn(frames, z, x, y).astype(np.float32))
+    assert values[0].nbytes > MAX_CHUNK_BYTES, "the frame must exceed the cap to test the cap"
+
+    File.create(
+        path=tmp_hdf5_path,
+        data={"image": {"values": values}},
+        overwrite=True,
+    )
+
+    with File(tmp_hdf5_path) as file:
+        image = file["data/image/values"]
+        chunks = image.chunks
+        assert np.prod(chunks) * values.dtype.itemsize <= MAX_CHUNK_BYTES
+        assert chunks[0] == 1  # still one frame per chunk
+        assert 1 <= chunks[1] < z  # split along z ...
+        assert chunks[2:] == (x, y)  # ... and only along z
+        assert np.array_equal(image[:], values)
+
+
+def test_default_write_is_paged(tmp_hdf5_path):
+    """Files are written with a paged file space, which speeds up streamed opens.
+
+    Paging collects the metadata a reader walks on open into few adjacent pages, so a
+    cold open over HTTP costs fewer round trips. It must not change what is stored: the
+    file stays a plain HDF5 file, readable by h5py without any special handling.
+    """
+    File.create(path=tmp_hdf5_path, data=DATA, scan=SCAN, probe=PROBE)  # all defaults
+
+    with h5py.File(tmp_hdf5_path, "r") as file:
+        plist = file.id.get_create_plist()
+        strategy = plist.get_file_space_strategy()[0]
+        assert strategy == h5py.h5f.FSPACE_STRATEGY_PAGE
+        assert plist.get_file_space_page_size() == PAGED_LAYOUT["fs_page_size"]
+        # plain h5py (no zea key remapping): the file is an ordinary HDF5 file
+        assert np.array_equal(file["tracks/track_0/data/raw_data"][:], DATA["raw_data"])
+
+
+@pytest.mark.heavy
+def test_paged_file_readable_by_oldest_supported_h5py(tmp_hdf5_path, tmp_path_factory):
+    """A file written with the currently installed h5py opens under the oldest one we support.
+
+    PAGED_LAYOUT caps ``libver`` at "v114" instead of "latest" precisely so that files
+    stay portable across h5py/HDF5 releases: "latest" resolves to whatever HDF5 the
+    *writer's* h5py bundles, and h5py 3.16 jumped to bundling HDF5 2.0, which writes
+    object-header message versions that HDF5 1.14.x (h5py's own floor, ``h5py >=3.11``
+    in pyproject.toml) can't parse -- surfacing as "bad version number for datatype/layout
+    message" on read. Regression-tested here by installing h5py 3.11.0 into a throwaway
+    venv (never touches the environment running the test suite) and reading the file back
+    with it in a subprocess.
+    """
+    File.create(path=tmp_hdf5_path, data=DATA, scan=SCAN, probe=PROBE)
+
+    # uv brings its own interpreter and installer, so it works where `python -m venv`
+    # does not: that path goes through ensurepip, which is missing from some base Pythons
+    # (the CI runners among them) and fails the venv creation outright. uv is part of
+    # zea's dev setup and of every CI job, so requiring it costs nothing here.
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv is required to provision the oldest-supported-h5py venv")
+
+    venv_dir = tmp_path_factory.mktemp("old_h5py_venv")
+    venv_python = venv_dir / "bin" / "python"
+    # 3.12 is the newest Python h5py 3.11.0 ships wheels for -- ask for it explicitly so
+    # the test does not try to build h5py from source on a newer interpreter.
+    create_cmd = [uv, "venv", "--python", "3.12", str(venv_dir)]
+    install_cmd = [
+        uv,
+        "pip",
+        "install",
+        "--python",
+        str(venv_python),
+        "-q",
+        "h5py==3.11.0",
+        "hdf5plugin",
+    ]
+
+    create_venv = subprocess.run(create_cmd, capture_output=True, text=True, timeout=300)
+    assert create_venv.returncode == 0, (
+        f"could not create oldest-supported-h5py venv with {create_cmd}: {create_venv.stderr}"
+    )
+    pip_install = subprocess.run(install_cmd, capture_output=True, text=True, timeout=300)
+    assert pip_install.returncode == 0, (
+        f"could not provision oldest-supported-h5py venv (no network access?): {pip_install.stderr}"
+    )
+
+    read_script = (
+        "import hdf5plugin, h5py, sys\n"
+        "def walk(g):\n"
+        "    for key in g.keys():\n"
+        "        item = g[key]\n"
+        "        if isinstance(item, h5py.Group):\n"
+        "            walk(item)\n"
+        "        else:\n"
+        "            item[()] if item.shape == () else item[...]\n"
+        f"with h5py.File({str(tmp_hdf5_path)!r}, 'r') as f:\n"
+        "    walk(f)\n"
+        "print('h5py', h5py.__version__)\n"
+    )
+    read_result = subprocess.run(
+        [str(venv_python), "-c", read_script],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert read_result.returncode == 0, (
+        f"h5py 3.11 (HDF5 1.14.x) could not read a file written by the current "
+        f"h5py: {read_result.stderr}"
+    )
+    assert "h5py 3.11.0" in read_result.stdout
 
 
 def test_existing_path(tmp_hdf5_path):
@@ -264,7 +602,7 @@ def _parameters(tmp_path):
 
 
 def test_save_file_custom_maps(tmp_hdf5_path, _parameters):
-    """Tests that save_file correctly stores custom spatial maps in the data group."""
+    """Tests that saving correctly stores custom spatial maps in the data group."""
     import warnings
 
     custom_values = np.zeros((n_frames, 32, 32, 1), dtype=np.uint8)
@@ -272,16 +610,18 @@ def test_save_file_custom_maps(tmp_hdf5_path, _parameters):
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        save_file(
+        File.create(
             path=tmp_hdf5_path,
-            parameters=_parameters,
-            raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
-            custom_maps={
+            data={
+                "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                 "my_overlay": {
                     "values": custom_values,
                     "coordinates": custom_coordinates,
-                }
+                },
             },
+            scan=_parameters.to_scan_dict(),
+            probe=_parameters.to_probe_dict(),
+            overwrite=True,
         )
 
     with File(tmp_hdf5_path) as f:
@@ -291,11 +631,13 @@ def test_save_file_custom_maps(tmp_hdf5_path, _parameters):
 
 
 def test_save_file_custom_metadata(tmp_hdf5_path, _parameters):
-    """Tests that save_file correctly stores metadata in the metadata group."""
-    save_file(
+    """Tests that saving correctly stores metadata in the metadata group."""
+    File.create(
         path=tmp_hdf5_path,
-        parameters=_parameters,
-        raw_data=np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+        data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+        scan=_parameters.to_scan_dict(),
+        probe=_parameters.to_probe_dict(),
+        overwrite=True,
         metadata={
             "credit": "Test Lab, 2024",
             "text_report": "Normal acquisition.",

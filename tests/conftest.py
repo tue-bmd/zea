@@ -1,16 +1,20 @@
 """This file contains fixtures that are used by all tests in the tests directory."""
 
 import importlib.util
+import logging
 import os
 import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import pytest
+# Must be set before pyplot is imported, and inherited by the papermill kernels in
+# test_notebooks.py, which would otherwise pick up an interactive backend from the shell.
+os.environ["MPLBACKEND"] = "Agg"
 
-from .data import generate_example_dataset
+import pytest  # noqa: E402
+
+from .data import generate_example_dataset  # noqa: E402
 
 
 def _gpu_available() -> bool:
@@ -73,8 +77,6 @@ from .backend_utils import (  # noqa: E402
     unavailable_test_backends,
 )
 
-plt.rcParams["backend"] = "agg"
-
 
 def _skip_unavailable_backends_enabled(config):
     return bool(config.getoption("--skip-unavailable-backends")) or bool(
@@ -131,8 +133,30 @@ def pytest_addoption(parser):
     )
 
 
+def _enable_subprocess_coverage():
+    """Let coverage follow into subprocesses spawned by tests.
+
+    Several tests exercise CLIs through ``subprocess`` (e.g.
+    ``python -m zea.data.convert ...``); without this the code executed there is
+    invisible to coverage. When the suite runs under ``pytest --cov`` we point
+    ``COVERAGE_PROCESS_START`` at our config so the repo-root ``sitecustomize.py``
+    starts coverage in each subprocess (parallel mode writes ``.coverage.*`` files
+    that pytest-cov combines). Outside a coverage run this is a no-op.
+    """
+    try:
+        import coverage
+    except ImportError:  # pragma: no cover - coverage is always installed during a coverage run
+        return
+    if coverage.Coverage.current() is None:  # pragma: no cover - only when coverage is inactive
+        return
+    config_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    os.environ["COVERAGE_PROCESS_START"] = str(config_path)
+
+
 def pytest_configure(config):
     """Validate backend availability before importing backend-dependent test modules."""
+    _enable_subprocess_coverage()
+
     for backend in ML_BACKENDS:
         config.addinivalue_line("markers", f"{backend}: test requires the {backend} backend")
 
@@ -310,3 +334,57 @@ def dummy_dataset_path(tmp_path):
         )
 
     yield str(temp_file.parent)
+
+
+@pytest.fixture
+def reset_warning_once():
+    """Isolates ``zea.log.warning_once`` dedupe state for one test.
+
+    The dedupe set is module-global, so a ``warning_once`` already fired by an
+    earlier test would be suppressed here. It is cleared for the duration of the
+    test and restored afterwards, so neither direction leaks.
+
+    Yields:
+        The dedupe set itself, for tests that need to clear it again mid-test.
+    """
+    from zea import log
+
+    saved = set(log._warned_locations)
+    log._warned_locations.clear()
+    try:
+        yield log._warned_locations
+    finally:
+        log._warned_locations.clear()
+        log._warned_locations.update(saved)
+
+
+@pytest.fixture
+def attach_caplog(caplog, reset_warning_once):
+    """Captures ``zea.log`` records with pytest's ``caplog``.
+
+    zea's logger has ``propagate = False``, so its records never reach the root
+    logger that ``caplog`` listens on; the handler is attached directly instead.
+    Captures from DEBUG up regardless of ``ZEA_LOG_LEVEL``, and isolates
+    ``warning_once`` state via :func:`reset_warning_once`.
+    """
+    from zea import log
+
+    caplog.set_level(logging.DEBUG, logger=log.logger.name)
+    log.logger.addHandler(caplog.handler)
+    try:
+        yield caplog
+    finally:
+        log.logger.removeHandler(caplog.handler)
+
+
+@pytest.fixture
+def attach_caplog_warnings(attach_caplog):
+    """Like :func:`attach_caplog`, but captures WARNING and above only.
+
+    Use this when a test asserts on exact record counts, which unrelated info
+    and debug output would otherwise break.
+    """
+    from zea import log
+
+    attach_caplog.set_level(logging.WARNING, logger=log.logger.name)
+    return attach_caplog

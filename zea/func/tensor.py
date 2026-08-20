@@ -18,7 +18,7 @@ def split_seed(seed, n):
     """Split a seed into n seeds for reproducible random ops.
 
     Supports `keras.random.SeedGenerator <https://keras.io/api/random/#seedgenerator-class>`_
-    and `JAX random keys <https://jax.readthedocs.io/en/latest/jax.random.html#jax.random.PRNGKey>`_.
+    and `JAX random keys <https://docs.jax.dev/en/latest/_autosummary/jax.random.PRNGKey.html>`_.
 
     Args:
         seed: None, jax.Array, or keras.random.SeedGenerator.
@@ -45,6 +45,32 @@ def split_seed(seed, n):
         return [seed for _ in range(n)]
 
     raise TypeError("seed must be None, an int, keras.random.SeedGenerator, or a JAX key.")
+
+
+def fold_seed(seed, data):
+    """Derive a seed for a single loop iteration from the iteration index.
+
+    A stateful `keras.random.SeedGenerator <https://keras.io/api/random/seed_generator/>`_
+    cannot be part of a jitted loop state, so loop bodies derive their seed from the
+    iteration index rather than threading a seed through the loop. JAX keys are folded
+    with the index, all other seeds are either stateful or ``None`` and can be reused
+    as-is.
+
+    Args:
+        seed: None, jax.Array, int, or keras.random.SeedGenerator.
+        data: Integer (or scalar tensor) to fold into the seed, typically a loop index.
+
+    Returns:
+        A seed for this iteration (a JAX key, SeedGenerator, or None).
+    """
+    seed = materialize_seed(seed)
+
+    if is_jax_key(seed):
+        import jax
+
+        return jax.random.fold_in(seed, data)
+
+    return seed
 
 
 def materialize_seed(seed):
@@ -1478,6 +1504,12 @@ def resample(x, n_samples, axis=-2, order=1):
     Returns:
         Resampled tensor.
     """
+    # map_coordinates is real-only on tensorflow, so interpolate the two parts separately.
+    if "complex" in ops.dtype(x):
+        real = resample(ops.real(x), n_samples, axis=axis, order=order)
+        imag = resample(ops.imag(x), n_samples, axis=axis, order=order)
+        return ops.cast(real, ops.dtype(x)) + 1j * ops.cast(imag, ops.dtype(x))
+
     shape = ops.shape(x)
     rank = len(shape)
 
@@ -1512,6 +1544,88 @@ def resample(x, n_samples, axis=-2, order=1):
     resampled = ops.transpose(resampled, inv_perm)
 
     return resampled
+
+
+def unwrap(phase, axis=-1, discont=None, period=2 * np.pi):
+    """Unwrap a phase tensor by changing jumps larger than ``discont`` to their complement.
+
+    Backend-agnostic equivalent of :func:`numpy.unwrap`. The first sample along
+    ``axis`` is left untouched, all following samples are shifted by whole
+    periods so that consecutive differences stay below ``discont``.
+
+    Args:
+        phase (Tensor): Input tensor of phase values.
+        axis (int, optional): Axis along which to unwrap. Defaults to -1.
+        discont (float, optional): Maximum discontinuity between values. Defaults to
+            ``period / 2``, which is the smallest value that keeps the result
+            congruent to the input modulo ``period``.
+        period (float, optional): Size of the range over which the input wraps.
+            Defaults to ``2 * pi``.
+
+    Returns:
+        Tensor: Unwrapped tensor, with the same shape and dtype as `phase`.
+
+    Example:
+        .. doctest::
+
+            >>> import numpy as np
+            >>> from zea.func.tensor import unwrap
+            >>> phase = np.array([0.0, 3.0, 6.0, 9.0]) % (2 * np.pi)
+            >>> [round(float(value), 3) for value in unwrap(phase)]
+            [0.0, 3.0, 6.0, 9.0]
+    """
+    if discont is None:
+        discont = period / 2
+
+    half_period = period / 2
+    diff = ops.diff(phase, axis=axis)
+
+    # Wrap every difference into [-period/2, period/2), keeping +period/2 where the
+    # jump is positive so that exactly-half-period jumps do not flip sign.
+    wrapped_diff = ops.mod(diff + half_period, period) - half_period
+    wrapped_diff = ops.where(
+        ops.logical_and(wrapped_diff == -half_period, diff > 0), half_period, wrapped_diff
+    )
+
+    correction = wrapped_diff - diff
+    correction = ops.where(ops.abs(diff) < discont, ops.zeros_like(correction), correction)
+
+    # The first sample is never corrected, so prepend a zero before accumulating.
+    pad_shape = list(ops.shape(correction))
+    pad_shape[axis] = 1
+    correction = ops.concatenate(
+        [ops.zeros(pad_shape, dtype=correction.dtype), correction], axis=axis
+    )
+    return phase + ops.cumsum(correction, axis=axis)
+
+
+def complex_resize(tensor, size, interpolation="bilinear"):
+    """Resize a complex tensor by interpolating magnitude and unwrapped phase separately.
+
+    Interpolating the real and imaginary parts directly would create artifacts
+    wherever the phase wraps, so the tensor is resized in polar form instead.
+
+    Args:
+        tensor (Tensor): Complex tensor of shape ``((batch,) height, width, channels)``.
+        size (tuple): Target ``(height, width)``.
+        interpolation (str, optional): Interpolation method passed to
+            :func:`keras.ops.image.resize`. Defaults to ``"bilinear"``.
+
+    Returns:
+        Tensor: Resized complex tensor.
+    """
+    magnitude = ops.abs(tensor)
+    # Unwrap along the height axis before interpolating, so phase wraps do not
+    # get smeared out by the interpolation.
+    phase = unwrap(ops.angle(tensor), axis=-3)
+
+    magnitude = ops.image.resize(magnitude, size, interpolation=interpolation)
+    phase = ops.image.resize(phase, size, interpolation=interpolation)
+
+    # complex = magnitude * exp(1j * phase)
+    magnitude = ops.cast(magnitude, "complex64")
+    phase = ops.cast(phase, "complex64")
+    return magnitude * ops.exp(1j * phase)
 
 
 def fori_loop(lower, upper, body_fun, init_val, disable_jit=False):
@@ -1572,11 +1686,6 @@ def linear_sum_assignment(cost):
         col_ind.append(idx)
         assigned_true = keras.ops.scatter_update(assigned_true, [[idx]], [True])
     return np.array(row_ind), np.array(col_ind)
-
-
-def sinc(x, eps=keras.config.epsilon()):
-    """Sinc function."""
-    return ops.sin(x + eps) / (x + eps)
 
 
 def apply_along_axis(func1d, axis, arr, *args, **kwargs):

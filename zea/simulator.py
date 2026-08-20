@@ -37,6 +37,7 @@ more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_e
     ...     element_width=0.2e-3,
     ...     attenuation_coef=0.5,
     ...     tx_apodizations=np.ones((1, 64)),
+    ...     t_peak=np.full(1, 1 / 5e6),
     ... )
 
 """
@@ -45,6 +46,7 @@ import numpy as np
 from keras import ops
 
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
+from zea.func.ultrasound import directivity
 
 
 def simulate_rf(
@@ -63,6 +65,7 @@ def simulate_rf(
     element_width,
     attenuation_coef,
     tx_apodizations,
+    t_peak,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -85,6 +88,7 @@ def simulate_rf(
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
         tx_apodizations (array-like): The apodizations of the transmitting elements of
             shape (n_tx, n_el).
+        t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -130,7 +134,7 @@ def simulate_rf(
             * sound_speed
         )
 
-    n_ax_rounded = _round_up_to_power_of_two(int(n_ax)).astype("float32")
+    n_ax_rounded = float(_round_up_to_power_of_two(int(n_ax)))
 
     freqs = ops.arange(n_ax_rounded // 2 + 1, dtype="float32") / n_ax_rounded * sampling_frequency
 
@@ -144,7 +148,10 @@ def simulate_rf(
 
         # [n_scat, n_txel, n_rxel]
         tau_total = (
-            (dist_total / sound_speed) + t0_delays[tx_idx][None, :, None] - initial_times[tx_idx]
+            (dist_total / sound_speed)
+            + t0_delays[tx_idx][None, :, None]
+            - initial_times[tx_idx]
+            + t_peak[tx_idx]
         )
 
         scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
@@ -219,33 +226,6 @@ def simulate_rf(
     return rf_data
 
 
-def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
-    """Computes the directivity of a single element.
-
-    Args:
-        f (array-like): The input frequencies [Hz].
-        theta (array-like): The angles [rad].
-        element_width (float): The width of the element [m].
-        sound_speed (float): The speed of sound [m/s].
-        rigid_baffle (bool): Whether the element is mounted on a rigid baffle,
-            impacting the directivity.
-
-    Returns:
-        array-like: The directivity of the element.
-    """
-
-    if element_width is None:
-        response = ops.ones_like(theta)
-        return response
-
-    wavelength = sound_speed / f
-
-    response = sinc(element_width / wavelength * ops.sin(theta))
-    if not rigid_baffle:
-        response *= ops.cos(theta)
-    return response
-
-
 def delay2(f, tau, n_fft, sampling_frequency):
     """
     Applies a delay in the frequency domain without phase wrapping.
@@ -299,8 +279,12 @@ def spread(dist, mindist=1e-4):
 def hann_fd(f, width):
     """The fourier transform of a hann window in the time domain with given width."""
     denom = 1.0 - (f * width) ** 2
-    num = 0.5 * sinc(f * width)
-    result = num / denom
+    num = 0.5 * ops.sinc(f * width)
+    # denom == 0 at f * width == +/-1 is a removable singularity where the Hann
+    # window transform equals 0.25. Divide only away from it (using a dummy 1.0
+    # at the singular points) and fill the limit in explicitly, so no 0/0 occurs.
+    singular = denom == 0
+    result = ops.where(singular, 0.25, num / ops.where(singular, 1.0, denom))
     result = ops.where(ops.abs(result) > 1.1, 0.25, result)
     return ops.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.25)
 
@@ -358,12 +342,6 @@ def get_transducer_bandwidth_fn(probe_center_frequency, bandwidth):
         return hann_unnormalized(ops.abs(f) - probe_center_frequency, bandwidth)
 
     return bandwidth_fn
-
-
-def sinc(x):
-    """The normalized sinc function with a small offset to prevent division by zero."""
-    x = ops.abs(np.pi * x) + 1e-9
-    return ops.sin(x) / x
 
 
 def _round_up_to_power_of_two(x):

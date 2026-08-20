@@ -6,22 +6,30 @@ correct backend.
 """
 
 import math
+from unittest import mock
 
 import keras
 import numpy as np
 import pytest
+from scipy.linalg import hadamard
 from scipy.ndimage import gaussian_filter
 from scipy.signal import hilbert as hilbert_scipy
 
 from zea import ops
+from zea.beamform.delays import compute_t0_delays_focused
 from zea.func.ultrasound import (
     channels_to_complex,
     complex_to_channels,
     compute_time_to_peak_stack,
+    construct_acquisition_from_synthetic_aperture,
+    decode_hadamard,
+    get_low_pass_iq_filter,
     make_tgc_curve,
+    square_wave_apodization,
 )
 from zea.ops import Pipeline, Simulate, beamformer_registry
 from zea.parameters import Parameters
+from zea.simulator import simulate_rf
 
 from . import DEFAULT_TEST_SEED, backend_equality_check
 
@@ -197,6 +205,143 @@ def test_channels_to_complex(size, axis):
 
 
 @pytest.mark.parametrize(
+    "size, axis",
+    [
+        ((2, 1, 128, 32), -1),
+        ((2, 20, 8), 1),
+        ((512, 512), -1),
+    ],
+)
+@backend_equality_check(decimal=5)
+def test_complex_channels_operations(size, axis):
+    """Round-trip the ComplexToChannels and ChannelsToComplex operations.
+
+    ``ComplexToChannels`` splits complex data into two real channels placed at
+    ``axis``, while ``ChannelsToComplex`` reads the two channels from the last
+    axis, so we move them back before converting to complex again.
+    """
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    complex_data = (rng.random(size) + 1j * rng.random(size)).astype("complex64")
+
+    channels = ops.ComplexToChannels(axis=axis)(data=keras.ops.convert_to_tensor(complex_data))[
+        "data"
+    ]
+    channels = keras.ops.convert_to_numpy(channels)
+    assert channels.shape[axis] == 2, "Real/imaginary channels should live on `axis`."
+
+    restored = ops.ChannelsToComplex()(
+        data=keras.ops.convert_to_tensor(np.moveaxis(channels, axis, -1))
+    )["data"]
+    restored = keras.ops.convert_to_numpy(restored)
+
+    np.testing.assert_almost_equal(restored, complex_data, decimal=5)
+    return restored
+
+
+# NOTE: torch is excluded because keras' correlate drops the complex dtype on the
+# torch backend, which the complex_channels path relies on.
+@backend_equality_check(decimal=4, backends=["tensorflow", "jax"])
+def test_fir_filter_complex_channels():
+    """FirFilter with complex_channels=True filters IQ data given as two real channels.
+
+    Because the filter taps are real, filtering the complex signal is equivalent to
+    filtering the real and imaginary channels independently, so the complex-channel
+    path must match a plain real-valued FirFilter applied along the same axis.
+    """
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    # (batch, n_ax, complex_channels) — filter along the n_ax axis.
+    signal = rng.standard_normal((2, 64, 2)).astype("float32")
+    taps = rng.standard_normal((7,)).astype("float32")
+    signal_tensor = keras.ops.convert_to_tensor(signal)
+    taps_tensor = keras.ops.convert_to_tensor(taps)
+
+    result = ops.FirFilter(axis=1, complex_channels=True, with_batch_dim=True)(
+        data=signal_tensor, fir_filter_taps=taps_tensor
+    )["data"]
+    result = keras.ops.convert_to_numpy(result)
+
+    assert result.shape == signal.shape, "Real/imaginary channels should be restored."
+    assert not np.allclose(result, signal), "Filtering should change the signal."
+
+    reference = ops.FirFilter(axis=1, complex_channels=False, with_batch_dim=True)(
+        data=signal_tensor, fir_filter_taps=taps_tensor
+    )["data"]
+    reference = keras.ops.convert_to_numpy(reference)
+
+    np.testing.assert_almost_equal(result, reference, decimal=4)
+
+    # Last axis holds the complex channels, so it may not be the filter axis.
+    with pytest.raises(AssertionError):
+        ops.FirFilter(axis=-1, complex_channels=True, with_batch_dim=True)(
+            data=signal_tensor, fir_filter_taps=taps_tensor
+        )
+
+    return result
+
+
+def test_get_low_pass_iq_filter():
+    """Filter taps are complex, of the requested length, and reject out-of-band tones."""
+    num_taps, sampling_frequency = 63, 12.5e6
+    taps = get_low_pass_iq_filter(num_taps, sampling_frequency, 0.0, 2e6)
+
+    assert taps.shape == (num_taps,)
+    assert np.iscomplexobj(taps)
+
+    # At center_frequency 0 the modulation is a no-op, so the taps stay real-valued
+    # and sum to unit DC gain.
+    np.testing.assert_allclose(taps.imag, 0, atol=1e-12)
+    np.testing.assert_allclose(np.sum(taps.real), 1.0, atol=1e-6)
+
+    for bandwidth in (0.0, -1e6, 2 * sampling_frequency):
+        with pytest.raises(ValueError, match="Cutoff frequency"):
+            get_low_pass_iq_filter(num_taps, sampling_frequency, 0.0, bandwidth)
+
+
+@backend_equality_check(decimal=4, backends=["tensorflow", "jax"])
+def test_low_pass_filter_iq():
+    """LowPassFilterIQ keeps a baseband IQ tone and rejects one outside the passband."""
+    import keras
+
+    from zea import ops
+
+    n_ax, n_el = 256, 4
+    sampling_frequency, bandwidth = 12.5e6, 2e6
+
+    t = np.arange(n_ax) / sampling_frequency
+    in_band = np.exp(1j * 2 * np.pi * 0.3e6 * t)
+    out_band = np.exp(1j * 2 * np.pi * 5e6 * t)
+    iq = np.stack([in_band + out_band] * n_el, axis=-1)
+    data = np.stack([iq.real, iq.imag], axis=-1).reshape(1, n_ax, n_el, 2).astype("float32")
+
+    output = ops.LowPassFilterIQ(num_taps=63)(
+        data=keras.ops.convert_to_tensor(data),
+        bandwidth=bandwidth,
+        sampling_frequency=sampling_frequency,
+        center_frequency=0.0,
+    )["data"]
+    output = keras.ops.convert_to_numpy(output)
+    assert output.shape == data.shape
+
+    filtered = output[..., 0] + 1j * output[..., 1]
+    # Skip the edges, where the FIR transient dominates.
+    middle = slice(64, 192)
+    kept = np.abs(np.mean(filtered[0, middle, 0] * np.conj(in_band[middle])))
+    rejected = np.abs(np.mean(filtered[0, middle, 0] * np.conj(out_band[middle])))
+    assert kept > 0.9, f"passband tone attenuated to {kept:.3f}."
+    assert rejected < 0.05, f"stopband tone only attenuated to {rejected:.3f}."
+
+    return output
+
+
+@pytest.mark.parametrize(
     "factor, batch_size",
     [
         (1, 2),
@@ -205,7 +350,13 @@ def test_channels_to_complex(size, axis):
     ],
 )
 def test_up_and_down_conversion(factor, batch_size):
-    """Test rf2iq and iq2rf in sequence"""
+    """Test rf2iq and iq2rf in sequence.
+
+    Tolerance dependent on downsampling factor (no anti-alias filter in downsample, so quite lossy
+    at high factors). Tolerance is defined relative to the RF peak.
+    """
+    tolerance = {1: 1e-3, 2: 0.08, 4: 0.25}[factor]
+
     n_el = 128
     n_scat = 3
     n_tx = 2
@@ -298,12 +449,58 @@ def test_up_and_down_conversion(factor, batch_size):
     data = np.concatenate(data)
     _data = np.concatenate(_data)
 
-    np.testing.assert_almost_equal(
-        data,
-        _data,
-        decimal=2,
-        err_msg="Data is not equal after up and down conversion.",
+    error = np.max(np.abs(data - _data)) / np.max(np.abs(_data))
+    assert error < tolerance, (
+        f"downmix-> upmix not cycle-consistent: {error:.2%} of peak "
+        f"exceeds {tolerance:.2%} tolerance at {factor}x."
     )
+
+
+@pytest.mark.parametrize("factor", [1, 2, 4])
+@backend_equality_check(decimal=4, backends=["tensorflow", "jax"])
+def test_demodulate_upmix_roundtrip(factor):
+    """
+    Same as test_up_and_down_conversion, but without the simulator in the loop. Force eager
+    execution so codecov doesn't falsely flag it as not covered (codecov doesn't detect tensorflow
+    jit code properly)
+    """
+    import keras
+
+    from zea import ops
+
+    tolerance = {1: 1e-3, 2: 0.08, 4: 0.25}[factor]
+
+    n_ax, n_el = 256, 8
+    sampling_frequency, center_frequency = 12.5e6, 3.125e6
+
+    t = np.arange(n_ax) / sampling_frequency
+    envelope = np.exp(-(((t - t[n_ax // 2]) * center_frequency / 2) ** 2))
+    burst = envelope * np.sin(2 * np.pi * center_frequency * t)
+    # Stagger the elements so the axes are not interchangeable.
+    rf = np.stack([np.roll(burst, 3 * el) for el in range(n_el)], axis=-1)
+    rf = rf.reshape(1, n_ax, n_el, 1).astype("float32")
+
+    pipeline = ops.Pipeline(
+        [
+            ops.Demodulate(),
+            ops.Downsample(factor=factor),
+            ops.UpMix(upsampling_rate=factor),
+        ]
+    )
+    output = pipeline(
+        data=keras.ops.convert_to_tensor(rf),
+        sampling_frequency=sampling_frequency,
+        demodulation_frequency=center_frequency,
+    )["data"]
+    output = keras.ops.convert_to_numpy(output)
+
+    error = np.max(np.abs(output - rf)) / np.max(np.abs(rf))
+    assert error < tolerance, (
+        f"downmix-> upmix not cycle-consistent: {error:.2%} of peak "
+        f"exceeds {tolerance:.2%} tolerance at {factor}x."
+    )
+
+    return output
 
 
 @pytest.mark.parametrize(
@@ -680,6 +877,254 @@ def test_generalized_coherence_factor_m_zero_passthrough():
     ), "Expected different results for different m_zero values"
 
     return out_init
+
+
+def _reference_capon(x, subarray_size, diagonal_loading, axial_k=0, axial_stride=1):
+    """Textbook Capon/MVDR with forward spatial smoothing, in plain numpy.
+
+    Args:
+        x: complex array of shape ``(n_tx, n_pix, n_el)``.
+        axial_k: half-width of the axial covariance averaging window.
+        axial_stride: flat-index distance between axially adjacent pixels.
+
+    Returns:
+        Complex array of shape ``(n_pix,)``: sub-aperture-averaged, transmit-compounded.
+    """
+    n_tx, n_pix, n_el = x.shape
+    num_subarrays = n_el - subarray_size + 1
+    steering = np.ones(subarray_size, dtype=np.complex128)
+    out = np.zeros(n_pix, dtype=np.complex128)
+
+    # each transmit is beamformed with its own weights, then compounded
+    for tx in range(n_tx):
+        subs = [
+            np.array([x[tx, pix, start : start + subarray_size] for start in range(num_subarrays)])
+            for pix in range(n_pix)
+        ]
+        covariances = [np.einsum("li,lj->ij", s, s.conj()) / num_subarrays for s in subs]
+        for pix in range(n_pix):
+            neighbours = [
+                pix + k * axial_stride
+                for k in range(-axial_k, axial_k + 1)
+                if 0 <= pix + k * axial_stride < n_pix
+            ]
+            cov = sum(covariances[n] for n in neighbours) / len(neighbours)
+            # loading relative to the mean eigenvalue, i.e. trace / subarray_size
+            loading = diagonal_loading * np.trace(cov).real / subarray_size
+            cov_inv_a = np.linalg.solve(cov + loading * np.eye(subarray_size), steering)
+            weights = cov_inv_a / (steering.conj() @ cov_inv_a)
+            out[pix] += (weights.conj() @ subs[pix].sum(axis=0)) / num_subarrays
+    return out
+
+
+@pytest.mark.parametrize("subarray_size", [None, 3, 8])
+@backend_equality_check()
+def test_minimum_variance_matches_reference(subarray_size):
+    """MV output matches a plain-numpy Capon implementation, and has the right shape."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el = 3, 9, 8
+    complex_data = rng.standard_normal((n_tx, n_pix, n_el)) + 1j * rng.standard_normal(
+        (n_tx, n_pix, n_el)
+    )
+    data = np.stack([complex_data.real, complex_data.imag], axis=-1).astype(np.float32)
+
+    op = ops.MinimumVariance(subarray_size=subarray_size, axial_averaging=0, with_batch_dim=True)
+    out = op(data=keras.ops.convert_to_tensor(data[None]))["data"]
+    assert out.shape == (1, n_pix, 2)
+
+    expected = _reference_capon(
+        complex_data,
+        subarray_size if subarray_size is not None else n_el // 2,
+        op.diagonal_loading,
+    )
+    out_np = keras.ops.convert_to_numpy(out)[0]
+    assert np.allclose(out_np[:, 0], expected.real, atol=1e-4), "MV real part differs from Capon"
+    assert np.allclose(out_np[:, 1], expected.imag, atol=1e-4), "MV imag part differs from Capon"
+    return out
+
+
+@pytest.mark.parametrize("axial_averaging", [1, 2])
+@backend_equality_check()
+def test_minimum_variance_axial_averaging_matches_reference(axial_averaging):
+    """Axial covariance averaging matches the reference, including at the grid edges."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_el = 2, 8
+    grid_size_z, grid_size_x = 7, 3
+    n_pix = grid_size_z * grid_size_x
+    complex_data = rng.standard_normal((n_tx, n_pix, n_el)) + 1j * rng.standard_normal(
+        (n_tx, n_pix, n_el)
+    )
+    data = np.stack([complex_data.real, complex_data.imag], axis=-1).astype(np.float32)
+    # (n_z, n_x, 3); only its shape is used, to locate axially adjacent pixels
+    grid = np.zeros((grid_size_z, grid_size_x, 3), dtype=np.float32)
+
+    op = ops.MinimumVariance(subarray_size=4, axial_averaging=axial_averaging, with_batch_dim=True)
+    out = op(data=keras.ops.convert_to_tensor(data[None]), grid=grid)["data"]
+
+    expected = _reference_capon(
+        complex_data,
+        4,
+        op.diagonal_loading,
+        axial_k=axial_averaging,
+        axial_stride=grid_size_x,
+    )
+    out_np = keras.ops.convert_to_numpy(out)[0]
+    assert np.allclose(out_np[:, 0], expected.real, atol=1e-4), "MV real part differs from Capon"
+    assert np.allclose(out_np[:, 1], expected.imag, atol=1e-4), "MV imag part differs from Capon"
+    return out
+
+
+@backend_equality_check()
+def test_minimum_variance_axial_averaging_changes_output():
+    """Axial averaging is actually applied when a grid is available."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(0)
+    n_tx, n_el = 2, 8
+    grid_size_z, grid_size_x = 6, 4
+    data = rng.standard_normal((1, n_tx, grid_size_z * grid_size_x, n_el, 2)).astype(np.float32)
+    tensor = keras.ops.convert_to_tensor(data)
+    grid = np.zeros((grid_size_z, grid_size_x, 3), dtype=np.float32)
+
+    smoothed = ops.MinimumVariance(axial_averaging=2, with_batch_dim=True)(data=tensor, grid=grid)[
+        "data"
+    ]
+    plain = ops.MinimumVariance(axial_averaging=0, with_batch_dim=True)(data=tensor, grid=grid)[
+        "data"
+    ]
+    assert not np.allclose(
+        keras.ops.convert_to_numpy(smoothed), keras.ops.convert_to_numpy(plain)
+    ), "axial_averaging had no effect"
+    return smoothed
+
+
+@backend_equality_check()
+def test_minimum_variance_large_loading_tends_to_das():
+    """With heavy diagonal loading the Capon weights collapse to uniform, i.e. DAS."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el = 3, 7, 8
+    data = rng.standard_normal((1, n_tx, n_pix, n_el, 2)).astype(np.float32)
+    tensor = keras.ops.convert_to_tensor(data)
+
+    # A single sub-aperture spanning the full aperture makes the DAS limit exact:
+    # w -> 1/n_el, so the output is the DAS sum divided by n_el.
+    out = ops.MinimumVariance(subarray_size=n_el, diagonal_loading=1e8, with_batch_dim=True)(
+        data=tensor
+    )["data"]
+    das = ops.DelayAndSum(with_batch_dim=True)(data=tensor)["data"]
+
+    assert np.allclose(
+        keras.ops.convert_to_numpy(out),
+        keras.ops.convert_to_numpy(das) / n_el,
+        atol=1e-5,
+    ), "Heavily loaded MV should reduce to DAS"
+    return out
+
+
+@backend_equality_check()
+def test_minimum_variance_is_scale_equivariant():
+    """Scaling the input scales the output by the same factor.
+
+    The Capon weights are scale invariant (both the covariance and the trace-relative
+    diagonal loading scale with the signal power), so the beamformer must be linear in
+    the input amplitude. Any absolute epsilon in the weight normalisation breaks this.
+    """
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    data = rng.standard_normal((1, 3, 7, 8, 2)).astype(np.float32)
+    op = ops.MinimumVariance(with_batch_dim=True)
+
+    factor = 1e3
+    out = op(data=keras.ops.convert_to_tensor(data))["data"]
+    out_scaled = op(data=keras.ops.convert_to_tensor(data * factor))["data"]
+
+    assert np.allclose(
+        keras.ops.convert_to_numpy(out) * factor,
+        keras.ops.convert_to_numpy(out_scaled),
+        rtol=1e-3,
+    ), "MV output should scale linearly with the input amplitude"
+    return out
+
+
+@backend_equality_check()
+def test_minimum_variance_masked_aperture_is_finite():
+    """A partially masked receive aperture (f-number mask) must not produce NaN/Inf."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(42)
+    n_tx, n_pix, n_el = 4, 6, 16
+    data = rng.standard_normal((1, n_tx, n_pix, n_el, 2)).astype(np.float32)
+    data[..., n_el // 2 :, :] = 0.0  # half the aperture masked out
+    out = ops.MinimumVariance(subarray_size=8, with_batch_dim=True)(
+        data=keras.ops.convert_to_tensor(data)
+    )["data"]
+    assert np.all(np.isfinite(keras.ops.convert_to_numpy(out))), (
+        "MV produced non-finite values for a partially masked aperture"
+    )
+    return out
+
+
+def test_minimum_variance_requires_iq_data():
+    """MV should raise ValueError when given single-channel (RF) data."""
+    import keras
+
+    from zea import ops
+
+    data = keras.ops.zeros((1, 2, 5, 8, 1))
+    with pytest.raises(ValueError, match="requires IQ data"):
+        ops.MinimumVariance(with_batch_dim=True)(data=data)
+
+
+@pytest.mark.parametrize("kwargs", [{"subarray_size": 0}, {"subarray_size": 2.5}])
+def test_minimum_variance_invalid_subarray_size(kwargs):
+    """Invalid subarray_size is rejected at construction time."""
+    from zea import ops
+
+    with pytest.raises(ValueError, match="subarray_size"):
+        ops.MinimumVariance(**kwargs)
+
+
+@backend_equality_check()
+def test_minimum_variance_zero_data_is_finite():
+    """All-zero input (boundary pixels) must produce finite output, not NaN.
+
+    TOFCorrection returns zeros outside the image boundary.  The covariance for
+    those pixels is the zero matrix, whose trace is zero, so diagonal loading
+    collapses unless the trace is clamped away from zero.  This test exercises
+    that guard directly.
+    """
+    import keras
+
+    from zea import ops
+
+    n_tx, n_pix, n_el = 2, 5, 8
+    data = keras.ops.zeros((1, n_tx, n_pix, n_el, 2))
+    out = ops.MinimumVariance(with_batch_dim=True)(data=data)["data"]
+    out_np = keras.ops.convert_to_numpy(out)
+    assert np.all(np.isfinite(out_np)), (
+        f"MV produced non-finite values for all-zero input: "
+        f"nan={np.isnan(out_np).sum()}, inf={np.isinf(out_np).sum()}"
+    )
+    return out
 
 
 @pytest.mark.parametrize(
@@ -1157,7 +1602,9 @@ def test_receive_apodization_op(with_batch_dim):
     ones = keras.ops.ones((n_pix, n_el))
     out_ones = op(data=data, flat_receive_apodization=ones)["data"]
     np.testing.assert_allclose(
-        keras.ops.convert_to_numpy(out_ones), keras.ops.convert_to_numpy(data), rtol=1e-5
+        keras.ops.convert_to_numpy(out_ones),
+        keras.ops.convert_to_numpy(data),
+        rtol=1e-5,
     )
 
     # Per-element taper -> scales the expected elements
@@ -1218,6 +1665,9 @@ def test_prepare_parameters_pfield_all_backends():
     )
     parameters.grid_size_x = 8
     parameters.grid_size_z = 8
+    # default downsample=10 collapses this 8x8 grid to 1 point, making the field
+    # constant up to backend rounding noise, which flakes the quantile threshold.
+    parameters.pfield_kwargs = {"downsample": 2}
 
     # Disable the on-disk result cache so ops are actually executed in each backend
     # subprocess (the cache would serve a stale pickle and hide crashes).
@@ -1268,3 +1718,488 @@ def test_tissue_suppression():
     )
 
     return output
+
+
+def hadamard_encode(data, hadamard_matrix):
+    """Encodes transmits as Hadamard combinations: encoded[j] = sum_t H[j, t] * data[t]."""
+    return np.einsum("itklm,jt->ijklm", data, hadamard_matrix)
+
+
+def test_decode_hadamard():
+    """Hadamard encoding followed by decoding recovers the original data up to a factor n_tx."""
+    n_el = 32
+    hadamard_size = 32
+    n_tx = hadamard_size
+    participating_channels = np.random.choice(n_el, size=hadamard_size, replace=False)
+    hadamard_matrix = hadamard(hadamard_size).astype(np.float32)
+    tx_apodizations_hadamard = np.zeros((hadamard_size, n_el), dtype=np.float32)
+    tx_apodizations_hadamard[:, participating_channels] = hadamard_matrix
+    tx_apodizations_synthetic_aperture = np.zeros((hadamard_size, n_el), dtype=np.float32)
+    tx_apodizations_synthetic_aperture[:, participating_channels] = np.eye(hadamard_size)
+    center_frequency = 5e6
+    sampling_frequency = 4 * center_frequency
+    sound_speed = 1540.0
+    wavelength = sound_speed / center_frequency
+    element_width = wavelength / 2 * 0.9
+    shared_kwargs = dict(
+        scatterer_positions=np.array([[0.0, 0.0, 3e-3]], dtype=np.float32),
+        scatterer_magnitudes=np.array([1.0], dtype=np.float32),
+        probe_geometry=linear_probe_geometry(n_elements=n_el, pitch=wavelength / 2).astype(
+            np.float32
+        ),
+        apply_lens_correction=False,
+        lens_thickness=0.0,
+        lens_sound_speed=1000.0,
+        sound_speed=sound_speed,
+        n_ax=256,
+        center_frequency=center_frequency,
+        sampling_frequency=sampling_frequency,
+        t0_delays=np.zeros((n_tx, n_el), dtype=np.float32),
+        initial_times=np.zeros((n_tx,), dtype=np.float32),
+        element_width=element_width,
+        attenuation_coef=0.0,
+        t_peak=np.full((n_tx,), 1.0 / center_frequency, dtype=np.float32),
+    )
+    raw_data_encoded = simulate_rf(tx_apodizations=tx_apodizations_hadamard, **shared_kwargs)[None]
+    raw_data_synthetic_aperture = simulate_rf(
+        tx_apodizations=tx_apodizations_synthetic_aperture, **shared_kwargs
+    )[None]
+    raw_data_decoded, tx_apodizations_decoded = decode_hadamard(raw_data_encoded, hadamard_matrix)
+    np.testing.assert_allclose(
+        raw_data_decoded, raw_data_synthetic_aperture * hadamard_size, rtol=1e-5, atol=1e-5
+    )
+    np.testing.assert_array_equal(tx_apodizations_decoded, np.eye(hadamard_size))
+
+
+def test_decode_hadamard_warns_on_non_orthogonal_matrix():
+    """A non-orthogonal tx_apodizations matrix triggers a warning."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = rng.standard_normal((1, 2, 4, 2, 1))
+    non_orthogonal = np.array([[1.0, 1.0], [1.0, 1.0]])
+    with mock.patch("zea.log.warning") as warning:
+        decode_hadamard(data, non_orthogonal)
+    warning.assert_called_once()
+
+
+def test_sa_to_virtual_focus(tmp_path):
+    """sa_to_virtual_focus converts a synthetic aperture file into a single-transmit
+    virtual-focus file, wiring the scan metadata and raw data through
+    construct_acquisition_from_synthetic_aperture."""
+    from zea.data.file import File, validate_file
+    from zea.data.file_operations import sa_to_virtual_focus
+
+    from .data import generate_example_dataset
+
+    # Synthetic aperture data has one transmit per element (n_tx == n_el).
+    n_el = 8
+    input_path = tmp_path / "sa.hdf5"
+    output_path = tmp_path / "virtual_focus.hdf5"
+    generate_example_dataset(input_path, n_el=n_el, n_tx=n_el, n_ax=128, n_frames=1)
+
+    focus_distance = 20e-3
+    sa_to_virtual_focus(
+        input_path,
+        output_path,
+        polar_angle=0.0,
+        azimuth_angle=0.0,
+        focus_distance=focus_distance,
+        tx_apodization="hanning",
+    )
+
+    validate_file(output_path)
+
+    with File(input_path) as f:
+        raw_data = f.data.raw_data[:]
+        parameters = f.load_parameters()
+
+    tx_apodization = keras.ops.expand_dims(keras.ops.cast(keras.ops.hanning(n_el), "float32"), 0)
+    expected_raw_data, expected_t0_delays = construct_acquisition_from_synthetic_aperture(
+        raw_data=raw_data,
+        probe_geometry=parameters["probe_geometry"],
+        sampling_frequency=parameters["sampling_frequency"],
+        polar_angle=0.0,
+        azimuth_angle=0.0,
+        focus_distance=focus_distance,
+        transmit_origin=(0.0, 0.0, 0.0),
+        sound_speed=parameters["sound_speed"],
+        tx_apodization=tx_apodization,
+    )
+    expected_raw_data = keras.ops.convert_to_numpy(expected_raw_data)
+
+    with File(output_path) as f:
+        out_raw_data = f.data.raw_data[:]
+        out_parameters = f.load_parameters()
+
+    # A single transmit remains, and its data matches the directly-constructed acquisition.
+    assert out_raw_data.shape == (1, 1, 128, n_el, 1)
+    np.testing.assert_allclose(out_raw_data, expected_raw_data, atol=1e-4)
+
+    # The transmit scheme metadata reflects the requested virtual focus.
+    np.testing.assert_allclose(out_parameters["t0_delays"], np.asarray(expected_t0_delays))
+    np.testing.assert_allclose(out_parameters["polar_angles"], [0.0])
+    np.testing.assert_allclose(out_parameters["focus_distances"], [focus_distance])
+    np.testing.assert_allclose(out_parameters["transmit_origins"], [[0.0, 0.0, 0.0]])
+    assert out_parameters["tx_apodizations"].shape == (1, n_el)
+
+
+def test_sa_to_virtual_focus_requires_probe_geometry(tmp_path):
+    """sa_to_virtual_focus raises when the input file has no probe_geometry."""
+    from zea.data.file import File
+    from zea.data.file_operations import sa_to_virtual_focus
+
+    # A file with only an image has no probe, so probe_geometry is undefined.
+    input_path = tmp_path / "no_probe.hdf5"
+    output_path = tmp_path / "out.hdf5"
+    File.create(
+        input_path,
+        data={"image": {"values": np.zeros((1, 16, 16), dtype=np.float32)}},
+        overwrite=True,
+    )
+
+    with pytest.raises(ValueError, match="requires a probe with a defined probe_geometry"):
+        sa_to_virtual_focus(
+            input_path,
+            output_path,
+            polar_angle=0.0,
+            azimuth_angle=0.0,
+            focus_distance=np.inf,
+        )
+
+
+def test_sa_to_virtual_focus_refuses_existing_output(tmp_path):
+    """An existing output path is only overwritten when overwrite=True."""
+    from zea.data.file import File
+    from zea.data.file_operations import sa_to_virtual_focus
+
+    from .data import generate_example_dataset
+
+    n_el = 8
+    input_path = tmp_path / "sa.hdf5"
+    output_path = tmp_path / "existing.hdf5"
+    generate_example_dataset(input_path, n_el=n_el, n_tx=n_el, n_ax=64, n_frames=1)
+    output_path.touch()  # pre-existing output file
+
+    convert = lambda **kwargs: sa_to_virtual_focus(
+        input_path,
+        output_path,
+        polar_angle=0.0,
+        azimuth_angle=0.0,
+        focus_distance=np.inf,
+        **kwargs,
+    )
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        convert()
+
+    # With overwrite=True the existing file is replaced by a valid virtual-focus file.
+    convert(overwrite=True)
+    with File(output_path) as f:
+        assert f.data.raw_data[:].shape[1] == 1
+
+
+def linear_probe_geometry(n_elements, pitch):
+    """Returns a linear array geometry of shape (n_elements, 3) along the x-axis."""
+    x = np.arange(n_elements) * pitch
+    return np.stack([x, np.zeros(n_elements), np.zeros(n_elements)], axis=1)
+
+
+def synthetic_aperture_acquisition(raw_data, probe_geometry, polar_angle=0.0, **kwargs):
+    """Runs construct_acquisition_from_synthetic_aperture and returns numpy outputs."""
+    raw_data = keras.ops.convert_to_tensor(raw_data)
+    constructed, t0_delays = construct_acquisition_from_synthetic_aperture(
+        raw_data,
+        probe_geometry,
+        polar_angle=polar_angle,
+        azimuth_angle=0.0,
+        focus_distance=kwargs.pop("focus_distance", np.inf),
+        sampling_frequency=kwargs.pop("sampling_frequency", 1.0),
+        sound_speed=kwargs.pop("sound_speed", 1.0),
+        **kwargs,
+    )
+    return keras.ops.convert_to_numpy(constructed), np.asarray(t0_delays)
+
+
+def test_construct_acquisition_zero_angle_sums_transmits():
+    """A zero-angle plane wave has zero delays, so the output is the sum over transmits."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    n_frames, n_el, n_ax, n_ch = 2, 4, 32, 1
+    raw_data = rng.standard_normal((n_frames, n_el, n_ax, n_el, n_ch)).astype(np.float32)
+    probe_geometry = linear_probe_geometry(n_el, pitch=1.0)
+
+    constructed, t0_delays = synthetic_aperture_acquisition(raw_data, probe_geometry)
+
+    assert constructed.shape == (n_frames, 1, n_ax, n_el, n_ch)
+    assert t0_delays.shape == (1, n_el)
+    np.testing.assert_allclose(t0_delays, 0.0, atol=1e-12)
+    np.testing.assert_allclose(constructed[:, 0], raw_data.sum(axis=1), atol=1e-4)
+
+
+def test_construct_acquisition_applies_integer_sample_delays():
+    """An angled plane wave shifts an impulse by exactly t0_delay * sampling_frequency samples."""
+    n_el, n_ax, impulse_sample, active_transmit = 4, 64, 10, 2
+    raw_data = np.zeros((1, n_el, n_ax, n_el, 1), dtype=np.float32)
+    raw_data[0, active_transmit, impulse_sample] = 1.0
+    # pitch=2, sound_speed=1, sin(30 degrees)=0.5 gives delays of exactly [0, 1, 2, 3] samples
+    probe_geometry = linear_probe_geometry(n_el, pitch=2.0)
+
+    constructed, t0_delays = synthetic_aperture_acquisition(
+        raw_data, probe_geometry, polar_angle=np.pi / 6
+    )
+
+    np.testing.assert_allclose(t0_delays[0], np.arange(n_el), atol=1e-9)
+    expected_sample = impulse_sample + active_transmit
+    for element in range(n_el):
+        signal = constructed[0, 0, :, element, 0]
+        assert np.argmax(signal) == expected_sample
+        np.testing.assert_allclose(signal[expected_sample], 1.0, atol=1e-4)
+
+
+def test_construct_acquisition_applies_tx_apodization():
+    """The tx_apodization scales the output per receive element."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    n_el, n_ax = 4, 32
+    raw_data = rng.standard_normal((1, n_el, n_ax, n_el, 1)).astype(np.float32)
+    probe_geometry = linear_probe_geometry(n_el, pitch=1.0)
+    apodization = np.array([[0.0, 1.0, 0.5, 2.0]], dtype=np.float32)
+
+    unapodized, _ = synthetic_aperture_acquisition(raw_data, probe_geometry)
+    apodized, _ = synthetic_aperture_acquisition(
+        raw_data, probe_geometry, tx_apodization=keras.ops.convert_to_tensor(apodization)
+    )
+
+    expected = unapodized * apodization[0][None, None, None, :, None]
+    np.testing.assert_allclose(apodized, expected, atol=1e-4)
+
+
+def test_construct_acquisition_is_independent_of_chunk_size():
+    """Processing transmits in chunks of 1 gives the same result as a single chunk."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    n_el, n_ax = 4, 32
+    raw_data = rng.standard_normal((2, n_el, n_ax, n_el, 1)).astype(np.float32)
+    probe_geometry = linear_probe_geometry(n_el, pitch=2.0)
+
+    single_chunk, _ = synthetic_aperture_acquisition(
+        raw_data, probe_geometry, polar_angle=np.pi / 6, transmit_chunk_size=n_el
+    )
+    chunked, _ = synthetic_aperture_acquisition(
+        raw_data, probe_geometry, polar_angle=np.pi / 6, transmit_chunk_size=1
+    )
+
+    np.testing.assert_allclose(chunked, single_chunk, atol=1e-4)
+
+
+def test_construct_acquisition_focused_transmit_delays():
+    """A finite focus distance uses focused transmit delays."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    n_el, n_ax, focus_distance = 4, 32, 20.0
+    raw_data = rng.standard_normal((1, n_el, n_ax, n_el, 1)).astype(np.float32)
+    probe_geometry = linear_probe_geometry(n_el, pitch=1.0)
+
+    constructed, t0_delays = synthetic_aperture_acquisition(
+        raw_data, probe_geometry, focus_distance=focus_distance
+    )
+
+    expected_delays = compute_t0_delays_focused(
+        transmit_origins=np.zeros((1, 3)),
+        focus_distances=np.array([focus_distance]),
+        probe_geometry=probe_geometry,
+        polar_angles=np.array([0.0]),
+        sound_speed=1.0,
+    )
+    assert constructed.shape == (1, 1, n_ax, n_el, 1)
+    np.testing.assert_allclose(t0_delays, expected_delays, atol=1e-12)
+
+
+def _complex_clutter_video(n_frames=40, n_z=16, n_x=16, seed=DEFAULT_TEST_SEED):
+    """Complex IQ video: strong phase-rotating tissue clutter + weak blood.
+
+    The tissue rotates in phase over time, which is what distinguishes the
+    Hermitian Gram matrix from the plain-transpose one.
+
+    Returns the video as a complex array (n_frames, n_z, n_x) and as real IQ
+    channels (n_frames, n_z, n_x, 2).
+    """
+    rng = np.random.default_rng(seed)
+
+    def _complex_normal(shape):
+        return (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)).astype(np.complex64)
+
+    spatial = _complex_normal((n_z, n_x)) * 10
+    phase = np.exp(1j * 2 * np.pi * 0.02 * np.arange(n_frames)).astype(np.complex64)
+    tissue = (phase[:, None, None] * spatial[None]).astype(np.complex64)
+    blood = (_complex_normal((n_frames, n_z, n_x)) * 0.1).astype(np.complex64)
+    data = (tissue + blood).astype(np.complex64)
+    data_channels = np.stack([data.real, data.imag], axis=-1).astype(np.float32)
+    return data, data_channels
+
+
+@backend_equality_check(allow_none=True)
+def test_tissue_suppression_complex():
+    """TissueSuppression with filter_type='svd_complex' suppresses complex IQ clutter.
+
+    The op takes IQ data as two real channels (n_frames, ..., 2), the zea
+    convention, and converts to/from complex internally.
+    """
+    import keras
+
+    from zea import ops
+
+    _, data_channels = _complex_clutter_video()
+
+    op = ops.TissueSuppression(cutoff=2, filter_type="svd_complex")
+    output = keras.ops.convert_to_numpy(op(data=keras.ops.convert_to_tensor(data_channels))["data"])
+
+    assert output.shape == data_channels.shape
+    assert output.dtype == data_channels.dtype, (
+        f"Expected dtype {data_channels.dtype}, got {output.dtype}"
+    )
+
+    # The clutter dominates the energy, so removing it must remove nearly all of it.
+    energy_ratio = np.mean(output**2) / np.mean(data_channels**2)
+    assert energy_ratio < 0.01, f"Expected clutter to be suppressed, energy ratio {energy_ratio}"
+
+
+def test_tissue_suppression_complex_needs_conjugate():
+    """The plain-transpose 'svd' filter fails on complex IQ; 'svd_complex' is required.
+
+    On complex data the plain transpose builds X^T X rather than the temporal
+    covariance X^H X, so the components it finds are not the tissue subspace.
+    Checked against the reference implementation: this is maths, not backend behaviour.
+    """
+    import keras
+
+    from zea.func.ultrasound import suppress_tissue
+
+    data, _ = _complex_clutter_video()  # complex array, not the real-channel one
+
+    def _energy_ratio(conjugate):
+        output = keras.ops.convert_to_numpy(suppress_tissue(data, 2, conjugate=conjugate))
+        return np.mean(np.abs(output) ** 2) / np.mean(np.abs(data) ** 2)
+
+    assert _energy_ratio(conjugate=True) < 0.01
+    # The plain transpose leaves the phase-rotating clutter essentially intact.
+    assert _energy_ratio(conjugate=False) > 0.5
+
+
+@backend_equality_check(allow_none=True)
+def test_tissue_suppression_conjugate_matches_plain_on_zero_imag_data():
+    """With a zero imaginary part, the conjugate transpose is a no-op."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    real_data = rng.standard_normal((10, 8, 8)).astype(np.float32)
+    channel_data = np.stack([real_data, np.zeros_like(real_data)], axis=-1)
+
+    real_output = keras.ops.convert_to_numpy(
+        ops.TissueSuppression(cutoff=3, filter_type="svd")(
+            data=keras.ops.convert_to_tensor(real_data)
+        )["data"]
+    )
+    complex_output = keras.ops.convert_to_numpy(
+        ops.TissueSuppression(cutoff=3, filter_type="svd_complex")(
+            data=keras.ops.convert_to_tensor(channel_data)
+        )["data"]
+    )
+
+    np.testing.assert_allclose(real_output, complex_output[..., 0], atol=1e-2)
+    np.testing.assert_allclose(complex_output[..., 1], 0, atol=1e-2)
+
+
+def test_tissue_suppression_fractional_cutoff():
+    """A float cutoff is resolved as a fraction of the number of frames."""
+    from zea import ops
+
+    assert ops.TissueSuppression(cutoff=0.05).resolve_cutoff(400) == 20
+    assert ops.TissueSuppression(cutoff=0.1).resolve_cutoff(95) == 10
+    # An int cutoff is used as-is, independent of the frame count.
+    assert ops.TissueSuppression(cutoff=5).resolve_cutoff(400) == 5
+
+
+def test_tissue_suppression_filter_type_autodetect():
+    """filter_type=None picks svd_complex for IQ (n_ch=2) and svd otherwise."""
+    import keras
+
+    from zea import ops
+
+    def _resolve(shape, filter_type=None):
+        data = keras.ops.convert_to_tensor(np.zeros(shape, dtype=np.float32))
+        return ops.TissueSuppression(cutoff=2, filter_type=filter_type).resolve_filter_type(data)
+
+    assert _resolve((10, 8, 8, 2)) == "svd_complex"  # IQ
+    assert _resolve((10, 8, 8, 1)) == "svd"  # RF
+    assert _resolve((10, 8, 8)) == "svd"  # real, no channel axis
+    assert _resolve((10,)) == "svd"  # 1-D, no channel axis to read
+
+    # An explicit filter_type always wins over auto-detection.
+    assert _resolve((10, 8, 8, 2), filter_type="svd") == "svd"
+    assert _resolve((10, 8, 8), filter_type="svd_complex") == "svd_complex"
+
+
+@backend_equality_check(allow_none=True)
+def test_tissue_suppression_autodetect_matches_explicit():
+    """Auto-detected IQ input gives the same result as filter_type='svd_complex'."""
+    import keras
+
+    from zea import ops
+
+    _, data_channels = _complex_clutter_video()
+    data_tensor = keras.ops.convert_to_tensor(data_channels)
+
+    outputs = [
+        keras.ops.convert_to_numpy(
+            ops.TissueSuppression(cutoff=2, filter_type=filter_type)(data=data_tensor)["data"]
+        )
+        for filter_type in (None, "svd_complex")
+    ]
+    np.testing.assert_allclose(outputs[0], outputs[1], atol=1e-5)
+
+
+def test_tissue_suppression_invalid_arguments():
+    """Invalid filter_type / cutoff are rejected at construction time."""
+    import pytest
+
+    from zea import ops
+
+    with pytest.raises(ValueError, match="Unknown filter_type"):
+        ops.TissueSuppression(filter_type="not_a_filter")
+
+    with pytest.raises(ValueError, match="fraction of the frames"):
+        ops.TissueSuppression(cutoff=1.5)
+
+
+@backend_equality_check(decimal=6)
+def test_square_wave_apodization():
+    """Test the square wave apodization used for incoherent beamforming."""
+    n_el, block_size = 12, 4
+    apod = square_wave_apodization(n_el, block_size)
+
+    assert apod.shape == (n_el,)
+
+    # Alternating blocks of `block_size` elements, starting high (see docstring example)
+    expected = np.array([1, 1, 1, 1, -1, -1, -1, -1, 1, 1, 1, 1], dtype="float32")
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(apod), expected)
+
+    # Values are strictly +1 / -1
+    unique = np.unique(keras.ops.convert_to_numpy(apod))
+    np.testing.assert_allclose(unique, [-1.0, 1.0])
+
+    # A block size of half the aperture gives a single flip
+    half = keras.ops.convert_to_numpy(square_wave_apodization(8, 4))
+    np.testing.assert_allclose(half, [1, 1, 1, 1, -1, -1, -1, -1])
+
+    # Blocks stay exactly `block_size` wide when the aperture does not divide
+    # evenly: the trailing block is simply truncated.
+    partial = keras.ops.convert_to_numpy(square_wave_apodization(10, 4))
+    np.testing.assert_allclose(partial, [1, 1, 1, 1, -1, -1, -1, -1, 1, 1])
+    odd = keras.ops.convert_to_numpy(square_wave_apodization(7, 2))
+    np.testing.assert_allclose(odd, [1, 1, -1, -1, 1, 1, -1])
+
+    # A non-positive block size has no meaningful pattern and is rejected rather
+    # than silently dividing by zero
+    for invalid in (0, -4, float("nan")):
+        with pytest.raises(ValueError, match="block_size must be a positive number"):
+            square_wave_apodization(n_el, invalid)
+
+    return apod

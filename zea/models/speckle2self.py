@@ -77,7 +77,8 @@ def _build_torch_classes():  # pragma: no cover
     Returns:
         dict: ``{"SpeckleReductionNet": cls, "_SRNSingleInputWrapper": cls}``
     """
-    import torch.nn as nn  # noqa: F401 (torch required for ONNX export)
+    # torch required for ONNX export
+    import torch.nn as nn  # noqa: F401
 
     class ConvBlock(nn.Module):  # pragma: no cover
         """Conv2d(stride) + InstanceNorm2d(affine=False) + optional ReLU."""
@@ -241,7 +242,7 @@ def convert_to_onnx(pth_path, onnx_path, input_size=(1, 1, 512, 512)):  # pragma
     dummy = torch.zeros(*input_size)
     torch.onnx.export(
         wrapper,
-        dummy,  # ty: ignore[invalid-argument-type]
+        (dummy,),
         onnx_path,
         opset_version=11,
         input_names=["input"],

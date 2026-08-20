@@ -215,3 +215,73 @@ def test_animate_images_parameters_without_extent(tmp_path):
         animate_images(images, path=str(path), parameters=MinimalParameters(), interval=100)
     except AttributeError as e:
         pytest.fail(f"animate_images raised AttributeError: {e}")
+
+
+def test_animate_images_invalid_interval_raises(tmp_path):
+    """animate_images must reject a non-positive interval."""
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(2)]
+    path = tmp_path / "anim.gif"
+
+    with pytest.raises(ValueError, match="interval must be a positive integer"):
+        animate_images(images, path=str(path), interval=0)
+
+    with pytest.raises(ValueError, match="interval must be a positive integer"):
+        animate_images(images, path=str(path), interval=-10)
+
+
+def test_animate_images_empty_images_raises(tmp_path):
+    """animate_images must reject an empty sequence of images."""
+    from zea.internal.notebooks import animate_images
+
+    path = tmp_path / "anim.gif"
+
+    with pytest.raises(ValueError, match="images must be a non-empty sequence"):
+        animate_images([], path=str(path))
+
+
+def test_animate_images_unsupported_suffix_raises(tmp_path):
+    """animate_images must reject output paths with an unsupported suffix."""
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(2)]
+    path = tmp_path / "anim.mp4"
+
+    with pytest.raises(ValueError, match="Unsupported output format"):
+        animate_images(images, path=str(path))
+
+
+def test_animate_images_without_parameters(tmp_path):
+    """animate_images must work when no parameters object is given at all
+    (the ``parameters is None`` branch, as opposed to a parameters object that is
+    merely missing ``extent_imshow``)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(3)]
+    path = tmp_path / "anim.gif"
+
+    animate_images(images, path=str(path), parameters=None, interval=100)
+
+    assert path.exists()
+
+
+def test_animate_images_parameters_with_extent(tmp_path):
+    """animate_images must use the extent when parameters.extent_imshow is set."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(3)]
+    path = tmp_path / "anim.gif"
+
+    class ParametersWithExtent:
+        extent_imshow = np.array([0.0, 1.0, 0.0, 1.0])
+
+    animate_images(images, path=str(path), parameters=ParametersWithExtent(), interval=100)
+
+    assert path.exists()

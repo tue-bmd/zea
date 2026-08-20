@@ -25,8 +25,7 @@ from keras import ops
 
 from zea.backend import _import_tf, jit
 from zea.backend.autograd import AutoGrad
-from zea.func.tensor import L2, fori_loop, split_seed
-from zea.internal.core import Object
+from zea.func.tensor import L2, fold_seed, fori_loop, materialize_seed, split_seed
 from zea.internal.operators import Operator
 from zea.internal.registry import diffusion_guidance_registry, model_registry, operator_registry
 from zea.internal.utils import fn_requires_argument
@@ -37,6 +36,7 @@ from zea.models.preset_utils import register_presets
 from zea.models.presets import diffusion_model_presets
 from zea.models.unet import get_time_conditional_unetwork
 from zea.models.utils import LossTrackerWrapper
+from zea.utils import ProgressBar
 
 tf = _import_tf()
 
@@ -129,6 +129,9 @@ class DiffusionModel(DeepGenerativeModel):
         self.track_progress_interval = 1
         self.track_progress = []
 
+        # Build eagerly: torch.compile cannot trace Keras' lazy first-call build.
+        self.build((None, *self.input_shape))
+
         # for guidance / conditional sampling
         self.guidance_fn = None
         self.operator = None
@@ -198,6 +201,9 @@ class DiffusionModel(DeepGenerativeModel):
     def call(self, inputs, training: bool = False, network=None, **kwargs):
         """Call the score network.
 
+        If network is not provided, will use the exponential moving
+        average network if training is False, otherwise the regular network.
+
         Args:
             inputs: A list ``[noisy_images, noise_rates_squared]`` as
                 expected by the underlying time-conditional network.
@@ -253,11 +259,14 @@ class DiffusionModel(DeepGenerativeModel):
         """Sample from the posterior distribution given measurements.
 
         Args:
-            measurements: Input measurements. Typically of shape
-                ``(batch_size, *input_shape)``.
-            n_samples: Number of posterior samples to generate.
-                Will generate ``n_samples`` samples for each measurement
-                in the ``measurements`` batch.
+            measurements: Input measurements, typically of shape `(*self.input_shape)`, but can also
+                be of shape `(n_samples, *self.input_shape)` if you want to provide different
+                measurements for each sample.
+            n_samples: Number of posterior samples to generate, and the leading
+                dimension of the output. ``measurements`` is either a single
+                measurement shared by every sample, or exactly one measurement
+                per requested sample. Use :func:`zea.func.vmap` to sample from a
+                batch of measurements.
             n_steps: Number of diffusion steps.
             initial_step: Step at which to begin the reverse diffusion loop.
                 ``0`` runs all ``diffusion_steps`` steps from maximum noise.
@@ -274,39 +283,28 @@ class DiffusionModel(DeepGenerativeModel):
                 These ``initial_samples`` can be initial guesses such as solutions
                 of previous frames (for sequences), see for instance
                 `SeqDiff <https://arxiv.org/abs/2409.05399>`_.
-                Must be of shape ``(batch_size, n_samples, *input_shape)``.
+                Must be of shape ``(n_samples, *input_shape)``.
             seed: Random seed generator.
-            **kwargs: Additional arguments passed to
-                :meth:`reverse_conditional_diffusion`.
+            **kwargs: Additional arguments to pass to the guidance function and the operator.
+                Examples are omega, mask, etc.
 
         Returns:
-            Posterior samples ``p(x|y)`` of shape
-            ``(batch_size, n_samples, *input_shape)``.
+            Posterior samples p(x|y) of shape `(n_samples, *input_shape)`.
 
         """
-        batch_size = ops.shape(measurements)[0]
-        shape = (batch_size, n_samples, *self.input_shape)
-
-        def _tile_with_sample_dim(tensor):
-            """Tile the tensor with an additional sample dimension."""
-            shape = ops.shape(tensor)
-            tensor = ops.repeat(tensor[:, None], n_samples, axis=1)  # (batch, n_samples, ...)
-            return ops.reshape(tensor, (-1, *shape[1:]))
-
-        measurements = _tile_with_sample_dim(measurements)
-        if initial_samples is not None:
-            initial_samples = ops.reshape(initial_samples, (-1, *self.input_shape))
-        if "mask" in kwargs:
-            kwargs["mask"] = _tile_with_sample_dim(kwargs["mask"])
-
         seed1, seed2 = split_seed(seed, 2)
 
         initial_noise = keras.random.normal(
-            shape=(batch_size * n_samples, *self.input_shape),
+            shape=(n_samples, *self.input_shape),
             seed=seed1,
         )
 
-        out = self.reverse_conditional_diffusion(
+        measurements, _ = self._as_measurement_batch(
+            measurements, n_samples, event_ndim=len(self.input_shape)
+        )
+        measurements = ops.broadcast_to(measurements, (n_samples, *self.input_shape))
+
+        return self.reverse_conditional_diffusion(
             measurements=measurements,
             initial_noise=initial_noise,
             diffusion_steps=n_steps,
@@ -314,9 +312,7 @@ class DiffusionModel(DeepGenerativeModel):
             initial_step=initial_step,
             seed=seed2,
             **kwargs,
-        )  # ( batch_size * n_samples, *self.input_shape)
-
-        return ops.reshape(out, shape)  # (batch_size, n_samples, *input_shape)
+        )
 
     def log_likelihood(self, data, **kwargs):
         """Approximate log-likelihood of the data under the model.
@@ -444,16 +440,34 @@ class DiffusionModel(DeepGenerativeModel):
         return noise_rates, signal_rates
 
     def linear_diffusion_schedule(self, diffusion_times):
-        """Create a linear diffusion schedule"""
+        """Linear diffusion schedule.
 
-        def _compute_alpha_t(t):
-            """Compute alpha_t for linear diffusion schedule"""
-            return ops.prod(1 - diffusion_times[:t], axis=diffusion_times.shape[1:])
+        The counterpart of :meth:`diffusion_schedule`: where the cosine schedule
+        interpolates the *angle* linearly from ``arccos(max_signal_rate)`` to
+        ``arccos(min_signal_rate)``, this interpolates the signal rate itself.
+        Both share those endpoints and stay variance preserving
+        (``noise_rates ** 2 + signal_rates ** 2 == 1``), so the two are
+        interchangeable.
 
-        alphas = ops.vectorized_map(_compute_alpha_t, ops.arange(len(diffusion_times)))
-        signal_rates = ops.sqrt(alphas)
-        noise_rates = ops.sqrt(1 - alphas)
-        return signal_rates, noise_rates
+        .. note::
+
+            This is not the linear *beta* schedule of `Ho et al. (2020)
+            <https://arxiv.org/abs/2006.11239>`_, which is a cumulative product
+            over a discrete grid of timesteps. ``zea``'s schedules are continuous
+            in ``t`` and parameterized by the signal rate at either end.
+
+        Args:
+            diffusion_times: Tensor of diffusion times in ``[min_t, max_t]``.
+
+        Returns:
+            A ``(noise_rates, signal_rates)`` tuple of tensors with the
+            same shape as ``diffusion_times``.
+        """
+        signal_rates = self.max_signal_rate + diffusion_times * (
+            self.min_signal_rate - self.max_signal_rate
+        )
+        noise_rates = ops.sqrt(1.0 - signal_rates**2)
+        return noise_rates, signal_rates
 
     def denoise(
         self,
@@ -650,11 +664,19 @@ class DiffusionModel(DeepGenerativeModel):
             step_size,
         )
 
+        # Materialize outside the loop: a stateful seed generator cannot be advanced
+        # from within a jitted loop body.
+        seed = materialize_seed(seed)
+
         def step_fn(step, loop_state):
-            noisy_images, pred_images, seed = loop_state
+            noisy_images, pred_images = loop_state
+
+            # `step` is an integer tensor once the loop is traced, and TF will not
+            # implicitly promote it to the float dtype of the schedule.
+            elapsed_time = ops.cast(step, base_diffusion_times.dtype) * step_size
 
             # separate the current noisy image to its components
-            diffusion_times = base_diffusion_times - step * step_size
+            diffusion_times = base_diffusion_times - elapsed_time
             noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
 
             # remix the predicted components using the next signal and noise rates
@@ -669,7 +691,7 @@ class DiffusionModel(DeepGenerativeModel):
             else:
                 network = None
 
-            seed, seed1 = split_seed(seed, 2)
+            step_seed = fold_seed(seed, step)
 
             next_noisy_images, pred_images = self.solver_step(
                 noisy_images=noisy_images,
@@ -680,7 +702,7 @@ class DiffusionModel(DeepGenerativeModel):
                 shape=(num_images, *input_shape),
                 network=network,
                 training=training,
-                seed=seed1,
+                seed=step_seed,
                 stochastic_sampling=stochastic_sampling,
             )
 
@@ -690,18 +712,17 @@ class DiffusionModel(DeepGenerativeModel):
 
             self.store_progress(step, track_progress_type, next_noisy_images, pred_images)
 
-            loop_state = (next_noisy_images, pred_images, seed)
+            loop_state = (next_noisy_images, pred_images)
 
             return loop_state
 
-        _, pred_images, _ = fori_loop(
+        _, pred_images = fori_loop(
             initial_step,
             diffusion_steps,
             step_fn,
             (
                 next_noisy_images,
                 ops.zeros_like(initial_noise),
-                seed,
             ),
             # can't jit this with progbar or tracking intermediate values
             disable_jit=verbose or track_progress_type or disable_jit,
@@ -719,7 +740,7 @@ class DiffusionModel(DeepGenerativeModel):
         stochastic_sampling: bool = False,
         seed=None,
         verbose: bool = False,
-        track_progress_type: Literal[None, "x_0", "x_t"] = "x_0",
+        track_progress_type: Literal[None, "x_0", "x_t"] = None,
         disable_jit=False,
         **kwargs,
     ):
@@ -782,10 +803,18 @@ class DiffusionModel(DeepGenerativeModel):
             step_size,
         )
 
-        def step_fn(step, loop_state):
-            noisy_images, pred_images, seed = loop_state
+        # Materialize outside the loop: a stateful seed generator cannot be advanced
+        # from within a jitted loop body.
+        seed = materialize_seed(seed)
 
-            diffusion_times = base_diffusion_times - step * step_size
+        def step_fn(step, loop_state):
+            noisy_images, pred_images = loop_state
+
+            # `step` is an integer tensor once the loop is traced, and TF will not
+            # implicitly promote it to the float dtype of the schedule.
+            elapsed_time = ops.cast(step, base_diffusion_times.dtype) * step_size
+
+            diffusion_times = base_diffusion_times - elapsed_time
             noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
 
             # remix the predicted components using the next signal and noise rates
@@ -800,7 +829,7 @@ class DiffusionModel(DeepGenerativeModel):
                 **kwargs,
             )
 
-            seed, seed1 = split_seed(seed, 2)
+            step_seed = fold_seed(seed, step)
             next_noisy_images = self.reverse_diffusion_step(
                 shape=(num_images, *input_shape),
                 pred_images=pred_images,
@@ -808,7 +837,7 @@ class DiffusionModel(DeepGenerativeModel):
                 signal_rates=signal_rates,
                 next_signal_rates=next_signal_rates,
                 next_noise_rates=next_noise_rates,
-                seed=seed1,
+                seed=step_seed,
                 stochastic_sampling=stochastic_sampling,
             )
 
@@ -821,18 +850,17 @@ class DiffusionModel(DeepGenerativeModel):
 
             self.store_progress(step, track_progress_type, next_noisy_images, pred_images)
 
-            loop_state = (next_noisy_images, pred_images, seed)
+            loop_state = (next_noisy_images, pred_images)
 
             return loop_state
 
-        _, pred_images, _ = fori_loop(
+        _, pred_images = fori_loop(
             initial_step,
             diffusion_steps,
             step_fn,
             (
                 next_noisy_images,
                 ops.zeros_like(initial_noise),
-                seed,
             ),
             # can't jit this with progbar or tracking intermediate values
             disable_jit=verbose or track_progress_type or disable_jit,
@@ -875,7 +903,7 @@ class DiffusionModel(DeepGenerativeModel):
         step_size = self.max_t / diffusion_steps
 
         if verbose:
-            progbar = keras.utils.Progbar(diffusion_steps, verbose=verbose)
+            progbar = ProgressBar(diffusion_steps, verbose=verbose)
         else:
             progbar = None
 
@@ -995,7 +1023,7 @@ class DiffusionModel(DeepGenerativeModel):
 register_presets(diffusion_model_presets, DiffusionModel)
 
 
-class DiffusionGuidance(abc.ABC, Object):
+class DiffusionGuidance(abc.ABC):
     """Base class for diffusion guidance methods."""
 
     def __init__(
@@ -1120,8 +1148,7 @@ class DDS(DiffusionGuidance):
 
     def setup(self):
         """Setup DDS guidance function."""
-        if not self.disable_jit:
-            self.call = jit(self.call)
+        self._call = self.call if self.disable_jit else jit(self.call)
 
     def Acg(self, x, **op_kwargs):
         # we transform the operator from A(x) to A.T(A(x)) to get the normal equations,
@@ -1264,7 +1291,7 @@ class DDS(DiffusionGuidance):
             A ``(gradients, (measurement_error, (pred_noises, pred_images)))``
             tuple (see :meth:`call`).
         """
-        return self.call(
+        return self._call(
             noisy_images,
             measurements,
             noise_rates,

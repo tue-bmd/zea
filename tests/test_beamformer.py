@@ -8,7 +8,7 @@ from zea.beamform.beamformer import (
     apply_delays,
     calculate_delays,
     complex_rotate,
-    distance_Rx,
+    compute_receive_distances,
     tof_correction,
     transmit_delays,
 )
@@ -186,13 +186,62 @@ def test_complex_rotate_half_pi():
     return rotated
 
 
-# distance_Rx
+@backend_equality_check()
+def test_complex_rotate_precomputed_cos_sin_matches_theta_receive_only():
+    """verify that complex_rotate produces the same output for the precomputed and for the
+    on-the-fly path."""
+    rng = np.random.default_rng(seed=42)
+    n_pix, n_el = 6, 4
+    iq = keras.ops.convert_to_tensor(rng.standard_normal((n_pix, n_el, 2)).astype(np.float32))
+    theta_rx = keras.ops.convert_to_tensor(
+        np.linspace(-2.3, 2.3, n_pix * n_el).reshape(n_pix, n_el).astype(np.float32)
+    )
+
+    direct = keras.ops.convert_to_numpy(complex_rotate(iq, theta_rx))
+    precomputed = keras.ops.convert_to_numpy(
+        complex_rotate(
+            iq, None, cos_theta=keras.ops.cos(theta_rx), sin_theta=keras.ops.sin(theta_rx)
+        )
+    )
+    np.testing.assert_allclose(precomputed, direct, atol=1e-5)
+    return precomputed
+
+
+@backend_equality_check()
+def test_complex_rotate_precomputed_cos_sin_matches_theta_receive_plus_transmit():
+    """Verify that the optimized beamforming path preserves the correct rotation when using the
+    shared precomputed transmit angles."""
+    rng = np.random.default_rng(seed=42)
+    n_pix, n_el = 5, 3
+    iq = keras.ops.convert_to_tensor(rng.standard_normal((n_pix, n_el, 2)).astype(np.float32))
+
+    theta_rx = keras.ops.convert_to_tensor(
+        np.linspace(-1.7, 1.7, n_pix * n_el).reshape(n_pix, n_el).astype(np.float32)
+    )
+    theta_tx = keras.ops.convert_to_tensor(
+        np.linspace(0.3, -0.9, n_pix).reshape(n_pix, 1).astype(np.float32)
+    )
+
+    cos_rx, sin_rx = keras.ops.cos(theta_rx), keras.ops.sin(theta_rx)
+    cos_tx, sin_tx = keras.ops.cos(theta_tx), keras.ops.sin(theta_tx)
+    cos_theta = cos_rx * cos_tx - sin_rx * sin_tx
+    sin_theta = sin_rx * cos_tx + cos_rx * sin_tx
+
+    combined = keras.ops.convert_to_numpy(
+        complex_rotate(iq, None, cos_theta=cos_theta, sin_theta=sin_theta)
+    )
+    direct = keras.ops.convert_to_numpy(complex_rotate(iq, theta_rx + theta_tx))
+    np.testing.assert_allclose(combined, direct, atol=1e-5)
+    return combined
+
+
+# compute_receive_distances
 
 
 @backend_equality_check()
 def test_distance_rx_output_shape(flatgrid, probe_geometry):
     """Output should be (n_pix, n_el)."""
-    dist = distance_Rx(
+    dist = compute_receive_distances(
         keras.ops.convert_to_tensor(flatgrid),
         keras.ops.convert_to_tensor(probe_geometry),
     )
@@ -204,7 +253,7 @@ def test_distance_rx_output_shape(flatgrid, probe_geometry):
 def test_distance_rx_positive(flatgrid, probe_geometry):
     """All distances must be non-negative."""
     dist = keras.ops.convert_to_numpy(
-        distance_Rx(
+        compute_receive_distances(
             keras.ops.convert_to_tensor(flatgrid),
             keras.ops.convert_to_tensor(probe_geometry),
         )
@@ -217,7 +266,7 @@ def test_distance_rx_positive(flatgrid, probe_geometry):
 def test_distance_rx_known_distance():
     """Element at origin, pixel at (0, 0, 1) → distance = 1 m."""
     dist = keras.ops.convert_to_numpy(
-        distance_Rx(
+        compute_receive_distances(
             keras.ops.convert_to_tensor([[0.0, 0.0, 1.0]]),
             keras.ops.convert_to_tensor([[0.0, 0.0, 0.0]]),
         )
@@ -259,6 +308,34 @@ def test_apply_delays_interpolation_midpoint():
 
 
 @backend_equality_check()
+def test_apply_delays_fractional_distinct_per_element_and_channel():
+    """Fractional, non-midpoint delays that differ per element must interpolate
+    each element/channel independently, verifying the flattened gather keeps
+    element and channel alignment intact."""
+    n_ax, n_el, n_ch = 10, 3, 2
+    # Distinct values per (axial, element, channel) so any misalignment in the
+    # flattened gather changes the result.
+    data_np = np.arange(n_ax * n_el * n_ch, dtype=np.float32).reshape(n_ax, n_el, n_ch)
+    data_np *= np.array([1.0, 10.0, 100.0]).reshape(1, n_el, 1)  # scale per element
+    data = keras.ops.convert_to_tensor(data_np)
+
+    # One pixel, distinct fractional non-midpoint delay per element.
+    delays_per_el = np.array([2.3, 5.7, 1.25], dtype=np.float32)
+    delays = keras.ops.convert_to_tensor(delays_per_el[None, :])
+
+    result = keras.ops.convert_to_numpy(apply_delays(data, delays, clip_min=0, clip_max=n_ax - 1))
+    assert result.shape == (1, n_el, n_ch)
+
+    for e in range(n_el):
+        d = delays_per_el[e]
+        d0, d1 = int(np.floor(d)), int(np.floor(d)) + 1
+        expected = (d1 - d) * data_np[d0, e, :] + (d - d0) * data_np[d1, e, :]
+        np.testing.assert_allclose(result[0, e, :], expected, atol=1e-5)
+
+    return result
+
+
+@backend_equality_check()
 def test_apply_delays_iq_data_shape():
     """Two-channel (IQ) data should be handled correctly."""
     rng = np.random.default_rng(seed=42)
@@ -281,7 +358,7 @@ def test_transmit_delays_planewave_zero_angle(flatgrid, probe_geometry):
     n_el = probe_geometry.shape[0]
     t0 = keras.ops.zeros((n_el,))
     tx_apod = keras.ops.ones((n_el,))
-    rx_delays = distance_Rx(flatgrid_t, probe_geometry_t) / SOUND_SPEED
+    rx_delays = compute_receive_distances(flatgrid_t, probe_geometry_t) / SOUND_SPEED
 
     txd = transmit_delays(
         flatgrid_t,
@@ -307,7 +384,7 @@ def test_transmit_delays_focused(flatgrid, probe_geometry):
     n_el = probe_geometry.shape[0]
     t0 = keras.ops.zeros((n_el,))
     tx_apod = keras.ops.ones((n_el,))
-    rx_delays = distance_Rx(flatgrid_t, probe_geometry_t) / SOUND_SPEED
+    rx_delays = compute_receive_distances(flatgrid_t, probe_geometry_t) / SOUND_SPEED
 
     txd = transmit_delays(
         flatgrid_t,
@@ -578,7 +655,7 @@ def test_focal_region_length_noop_for_planewave(flatgrid, probe_geometry):
     n_el = probe_geometry.shape[0]
     t0 = keras.ops.zeros((n_el,))
     tx_apod = keras.ops.ones((n_el,))
-    rx = distance_Rx(flatgrid_t, probe_t) / SOUND_SPEED
+    rx = compute_receive_distances(flatgrid_t, probe_t) / SOUND_SPEED
     common = dict(transmit_origin=keras.ops.zeros((3,)))
     base = transmit_delays(
         flatgrid_t, t0, tx_apod, rx, np.float32(np.inf), np.float32(0.0), np.float32(0.0), **common
@@ -680,6 +757,30 @@ def test_tof_correction_with_fnumber(probe_geometry, flatgrid):
 
 
 @backend_equality_check()
+def test_tof_correction_convex_probe_fnumber(flatgrid):
+    """A curved (convex) probe runs end-to-end with per-element-normal masking.
+
+    The auto-derived element normals must not produce NaNs/Infs and must still
+    mask some channels (f_number > 0) for a non-flat geometry.
+    """
+    n_el = 48
+    phi = np.linspace(-0.5, 0.5, n_el).astype(np.float32)
+    radius = 40e-3
+    convex_geometry = np.stack(
+        [radius * np.sin(phi), np.zeros_like(phi), radius * (np.cos(phi) - 1.0)], axis=-1
+    ).astype(np.float32)
+
+    inputs = _make_tof_inputs(convex_geometry, flatgrid, n_tx=2, n_ax=64)
+    inputs["f_number"] = 1.0
+    result = keras.ops.convert_to_numpy(tof_correction(**inputs))
+
+    assert result.shape == (2, flatgrid.shape[0], n_el, 1)
+    assert np.all(np.isfinite(result))
+    assert np.any(result == 0.0), "Expected some masked-out values with f_number > 0"
+    return result
+
+
+@backend_equality_check()
 def test_tof_correction_zero_data(probe_geometry, flatgrid):
     """Zero input data should produce zero output regardless of delays."""
     n_tx, n_ax = 2, 64
@@ -753,4 +854,24 @@ def test_lens_correction_known_vertical_path():
     )
     expected = lens_thickness / c_lens + (z_pixel - lens_thickness) / c_medium
     np.testing.assert_allclose(tt[0, 0], expected, rtol=1e-4)
+    return tt
+
+
+@backend_equality_check()
+def test_lens_correction_z_zero_no_nan(probe_geometry):
+    """A pixel row at z=0 (level with the elements, e.g. the top row of a grid that
+    starts at the transducer face) must not produce NaN/Inf, including for the
+    on-axis pixel-element pair (pixel x exactly equal to an element x), which is
+    the exact 0/0 case the Newton-Raphson initial guess divides by."""
+    pixel_pos = keras.ops.convert_to_tensor(probe_geometry)  # same x's, z=0 -> worst case
+    tt = keras.ops.convert_to_numpy(
+        compute_lens_corrected_travel_times(
+            keras.ops.convert_to_tensor(probe_geometry),
+            pixel_pos,
+            lens_thickness=1e-3,
+            c_lens=1000.0,
+            c_medium=SOUND_SPEED,
+        )
+    )
+    assert np.isfinite(tt).all()
     return tt

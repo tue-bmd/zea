@@ -38,6 +38,36 @@ def print_clear_line():
     print(line_up, end=line_clear)
 
 
+class ProgressBar(keras.utils.Progbar):
+    """A :class:`keras.utils.Progbar` that cooperates with :mod:`zea.log`.
+
+    Drop-in replacement for ``keras.utils.Progbar`` that registers itself with
+    the logger while active, so that ``log.info``/``log.warning``/etc. calls
+    made in between updates are printed above the bar instead of corrupting
+    its line.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.verbose and self._dynamic_display:
+            log.register_progress(self)
+
+    def redraw(self):
+        """Forces a fresh render of the current state, bypassing the update-rate throttle."""
+        self._last_update = 0
+        self.update(self._seen_so_far, finalize=False)
+
+    def update(self, current, values=None, finalize=None):
+        super().update(current, values, finalize)
+        is_done = (
+            finalize
+            if finalize is not None
+            else (self.target is not None and current >= self.target)
+        )
+        if is_done:
+            log.unregister_progress(self)
+
+
 def strtobool(val: str):
     """Convert a string representation of truth to True or False.
 

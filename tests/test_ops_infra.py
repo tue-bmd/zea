@@ -10,7 +10,6 @@ import pytest
 from zea import func, ops
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.config import Config
-from zea.data.file import File
 from zea.internal.core import DEFAULT_DYNAMIC_RANGE, DataTypes
 from zea.internal.registry import ops_registry
 from zea.ops.keras_ops import Squeeze
@@ -360,7 +359,7 @@ def test_pipeline_dotted_registry_name():
     from zea.ops.keras_ops import Cast
     from zea.ops.pipeline import Pipeline
 
-    pipeline = Pipeline.from_default(jit_options=None)
+    pipeline = Pipeline([Cast(dtype="float32")])
     # Cast is registered as "keras.ops.cast" but must be addressable as "cast"
     assert isinstance(pipeline["cast"], Cast)
     assert "cast" in pipeline.keys()
@@ -1217,46 +1216,6 @@ def test_pipeline_parameter_tracing(ultrasound_parameters: Parameters):
     assert "demodulation_frequency" in output
 
 
-def test_demodulate_int16_requires_cast():
-    """Demodulate should raise a clear error for int16 raw input."""
-    data = np.zeros((1, 4, 8, 2, 1), dtype=np.int16)
-    op = ops.Demodulate(jit_compile=False)
-
-    with pytest.raises(ValueError, match=r"Cast\(dtype='float32'\)"):
-        op(data=data, demodulation_frequency=1e6, sampling_frequency=20e6)
-
-
-def test_demodulate_int16_from_hdf5_requires_cast(tmp_path):
-    """Demodulate should raise a clear cast error for int16 raw_data loaded from HDF5."""
-    n_frames, n_tx, n_ax = 1, 2, 8
-    probe = Probe.from_name("verasonics_l11_4v")
-    n_el = probe.n_el
-    path = tmp_path / "int16_raw_data.hdf5"
-
-    scan = {
-        "sampling_frequency": np.float32(20e6),
-        "center_frequency": np.float32(5e6),
-        "demodulation_frequency": np.float32(5e6),
-        "initial_times": np.zeros(n_tx, dtype=np.float32),
-        "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
-        "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
-        "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
-        "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
-        "polar_angles": np.zeros(n_tx, dtype=np.float32),
-        "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
-    }
-    raw_data = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.int16)
-
-    File.create(path, data={"raw_data": raw_data}, scan=scan, probe=probe)
-
-    with File(path, "r") as f_read:
-        loaded = f_read.data.raw_data[:]
-
-    op = ops.Demodulate(jit_compile=False)
-    with pytest.raises(ValueError, match=r"Cast\(dtype='float32'\)"):
-        op(data=loaded, demodulation_frequency=5e6, sampling_frequency=20e6)
-
-
 def test_ops_pass_positional_arg():
     """Test that passing positional arguments to Operation raises a custom error."""
     op = AddOperation()
@@ -1525,6 +1484,71 @@ def test_pipeline_call_runtime_error():
     pipeline = ops.Pipeline([AlwaysCrashes()], jit_options=None, validate=False)
     with pytest.raises(RuntimeError, match="boom"):
         pipeline(data=None)
+
+
+def test_pipeline_operation_error_summarizes_inputs():
+    """A generic operation failure reports the op name and input shapes/dtypes."""
+    import numpy as np
+
+    @ops_registry("crashes_with_data")
+    class CrashesWithData(ops.Operation):
+        def call(self, **kwargs):
+            raise ValueError("boom")
+
+    pipeline = ops.Pipeline([CrashesWithData()], jit_options=None, validate=False)
+    with pytest.raises(RuntimeError) as excinfo:
+        pipeline(data=np.zeros((4, 8), dtype="float32"))
+    msg = str(excinfo.value)
+    assert "CrashesWithData" in msg
+    assert "(4, 8)" in msg  # shape summary of the offending input
+    assert "float32" in msg
+
+
+def test_pipeline_missing_key_suggests_typo():
+    """A missing required key suggests a close match among the provided keys."""
+
+    @ops_registry("needs_gain")
+    class NeedsGain(ops.Operation):
+        def call(self, **kwargs):
+            return {"result": kwargs["gain"]}
+
+    pipeline = ops.Pipeline([NeedsGain()], jit_options=None, validate=False)
+    # 'gian' is a typo for the required 'gain' key.
+    with pytest.raises(KeyError, match="did you mean 'gain'"):
+        pipeline(data=None, gian=1.0)
+
+
+def test_pipeline_unused_key_typo_warns(monkeypatch):
+    """A provided key close to a valid key is flagged as a likely typo (warning)."""
+    import numpy as np
+
+    from zea.ops import pipeline as pipeline_module
+
+    messages = []
+    monkeypatch.setattr(pipeline_module.log, "warning", lambda msg, *a, **k: messages.append(msg))
+
+    pipeline = ops.Pipeline(
+        [ops.LogCompress()], with_batch_dim=False, jit_options=None, validate=False
+    )
+    pipeline(data=np.zeros((4, 4), dtype="float32"), dynamic_rang=(-50, 0))
+    assert any("dynamic_range" in m and "typo" in m for m in messages)
+
+
+def test_pipeline_nested_error_not_double_wrapped():
+    """An error from a nested pipeline is annotated once, not wrapped twice."""
+    import numpy as np
+
+    @ops_registry("nested_crash")
+    class NestedCrash(ops.Operation):
+        def call(self, **kwargs):
+            raise ValueError("kaboom")
+
+    inner = ops.Pipeline([NestedCrash()], jit_options=None, validate=False)
+    outer = ops.Pipeline([inner], jit_options=None, validate=False)
+    with pytest.raises(RuntimeError) as excinfo:
+        outer(data=np.zeros((2, 2), dtype="float32"))
+    # "failed with" appears exactly once -> the inner annotation is reused.
+    assert str(excinfo.value).count("failed with") == 1
 
 
 def test_map_get_dict():

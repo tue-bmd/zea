@@ -60,12 +60,21 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
     .. tab-item:: Docker
 
          See the :ref:`Docker <docker-information>` section of the installation guide
-         for build and run instructions. Once inside the container, install the dev
-         dependencies:
+         for build and run instructions. Images built with ``DEV=true`` (the default)
+         already include the ``dev`` dependency-group (tests, docs and lint tools).
+
+         Every shell prints a message of the day ending in the ``uv sync`` command for
+         that image. Use that one rather than copying from here: it names the backend
+         groups the image was built with, and ``uv sync`` removes any group you leave
+         out. Run it whenever ``uv.lock`` changes, after a rebase or a backend bump, to
+         update a running container without rebuilding it.
+
+         On a ``DEV=false`` image the command also has ``--no-default-groups``. Drop that
+         flag to add the ``dev`` group. For ``zeahub/all`` it becomes:
 
          .. code-block:: shell
 
-               pip install -e .[dev]
+               uv sync --group jax-gpu --group torch-gpu --group tf-gpu
                pre-commit install
 
     .. tab-item:: uv
@@ -74,27 +83,37 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
          .. code-block:: shell
 
-               uv sync --extra dev
+               uv sync
                uv run pre-commit install
 
          This creates a ``.venv`` with the exact locked dependencies and installs
          ``zea`` itself in **editable** mode, so your changes to the source take
-         effect immediately without reinstalling. Prefix commands with ``uv run``
-         (e.g. ``uv run pytest``) or activate the environment with
+         effect immediately without reinstalling. This will also install the ``dev``
+         dependency-group, i.e. the ``tests``, ``docs`` and ``lint`` groups. Prefix commands
+         with ``uv run`` (e.g. ``uv run pytest``) or activate the environment with
          ``source .venv/bin/activate``.
+
+         Backends are groups too, so add the ones you want — ``cpu`` or ``gpu``, and a
+         single backend is enough to run the test suite:
+
+         .. code-block:: shell
+
+               uv sync --group jax-cpu     # or jax-gpu, torch-cpu, tf-gpu, ...
 
     .. tab-item:: pip
 
          Install into any existing environment (``venv``, ``conda``, ...) with plain
-         ``pip``. The ``-e`` flag makes the install editable:
+         ``pip`` (requires pip >= 25.1 for ``--group`` support). The ``-e`` flag makes
+         the install editable:
 
          .. code-block:: shell
 
-               pip install -e .[dev]
+               pip install -e . --group dev
                pre-commit install
 
-For local environments (uv or pip), you also need to install a machine learning
-backend: JAX, PyTorch, or TensorFlow. See the
+The Docker images already come with a machine learning backend. For the uv and ``pip``
+routes you need one of JAX, PyTorch or TensorFlow: with uv use the backend groups shown
+above, with ``pip`` install it yourself — see the
 :ref:`backend installation <backend-installation>` guide.
 
 .. _running-tests:
@@ -244,7 +263,7 @@ The overall structure of the documentation is manually designed, but the API doc
 .. code-block:: shell
 
    # if you didn't install the dependencies earlier
-   pip install -e .[docs]
+   pip install -e . --group docs
    cd docs
    make docs-clean && make docs-build
    # you can also serve the docs locally
@@ -303,7 +322,9 @@ New tutorial or example notebooks are always welcome! Please add them to the
 `docs/source/notebooks <https://github.com/tue-bmd/zea/tree/main/docs/source/notebooks>`_
 directory. Make sure to follow the naming conventions and structure of existing
 notebooks. If you are adding a new tutorial, please also update :doc:`examples`
-to check if your notebook is included.
+to check if your notebook is included. See the `docs README
+<https://github.com/tue-bmd/zea/tree/main/docs#readme>`_ for notebook link
+conventions and how to check the docs for broken links.
 
 Adding to ``zea.models``
 ~~~~~~~~~~~~~~~~~~~~~~~~
