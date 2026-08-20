@@ -833,7 +833,7 @@ class Dataloader:
     def __init__(
         self,
         file_paths: List[str] | str,
-        key: str = "data/image",
+        key: str,
         batch_size: int | None = 16,
         n_frames: int | None = None,
         shuffle: bool = True,
