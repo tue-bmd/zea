@@ -7,7 +7,9 @@ Usage:
 import re
 import types
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Annotated
 
 import numpy as np
 import tyro
@@ -310,10 +312,20 @@ def run_processing(
         timer.print()
 
 
+@dataclass
+class _StandaloneProcessArgs(ProcessArgs):
+    """``ProcessArgs`` plus the ``--device`` flag that ``zea`` exposes globally."""
+
+    device: Annotated[
+        str,
+        tyro.conf.arg(help="Compute device passed to init_device (e.g. 'cpu', 'auto:1')."),
+    ] = "auto:1"
+
+
 def main() -> None:
     """Entry point for ``python -m zea.data.process``, equivalent to ``zea process``."""
-    args = tyro.cli(ProcessArgs)
-    init_device()
+    args = tyro.cli(_StandaloneProcessArgs)
+    init_device(args.device)
     args.run()
 
 
