@@ -4,7 +4,6 @@ Usage:
     python -m zea.data.process --dataset <path> --config <config.yaml>
 """
 
-import re
 import types
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -20,6 +19,7 @@ from zea.config import Config
 from zea.data.dataloader import Dataloader
 from zea.data.datasets import Dataset
 from zea.data.file import File, _GroupProxy
+from zea.data.spec import strip_track_prefix
 from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
 from zea.ops.pipeline import Pipeline
@@ -57,7 +57,7 @@ def _key_requires_pipeline(key: str) -> bool:
     Normalizes the key so aliases like ``raw_data`` match ``_NON_IMAGE_DATA_TYPES``.
     """
     normalized = (key or "").strip()
-    normalized = re.sub(r"^tracks/track_\d+/", "", normalized)
+    normalized = strip_track_prefix(normalized)
     normalized = normalized.removeprefix("data/").removesuffix("/values")
     return normalized in _NON_IMAGE_DATA_TYPES
 

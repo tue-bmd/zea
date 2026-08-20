@@ -2888,7 +2888,20 @@ class FileSpec(Spec):
 #: :meth:`zea.File.__getitem__` remaps onto ``tracks/track_0/``.
 ROOT_SPECS = {"data": DataSpec, "scan": ScanSpec}
 
+# A single track group name (``track_0``), and that name as a path prefix (``tracks/track_0/``).
 _TRACK_RE = re.compile(r"track_\d+")
+_TRACK_PREFIX_RE = re.compile(r"^/?tracks/track_\d+/")
+
+
+def strip_track_prefix(key: str) -> str:
+    """Strip a leading ``tracks/track_N/`` off a path into a zea file.
+
+    Turns a fully qualified path into the single-track shorthand
+    :meth:`zea.File.__getitem__` also accepts, so ``tracks/track_0/data/raw_data``
+    and ``data/raw_data`` can be treated alike. Paths without the prefix are
+    returned unchanged.
+    """
+    return _TRACK_PREFIX_RE.sub("", key)
 
 
 def _walk_to_schema_entry(parts: Sequence[str]) -> dict | None:

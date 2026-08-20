@@ -915,11 +915,9 @@ class Dataloader:
         convert_to_tensor: Whether to convert the data to a tensor (on cpu). Default is ``True``.
         axis_selections: Map of ``{axis: indices}`` applied at HDF5 read time to pre-filter
             non-frame axes. For example ``{1: [0, 2, 5]}`` loads only those indices along axis 1,
-            avoiding reading unused data from disk. Reads go through
-            :mod:`zea.data.chunk_reader`, so the saving tracks the *chunks* the selection
-            touches rather than the number of indices: a selection confined to a few chunks
-            saves both memory and time, while one spread across every chunk still saves
-            memory but reads about as much as the full axis. Default is ``None``.
+            avoiding reading unused data chunks from disk. A selection confined to a few chunks
+            saves both memory and time, while one spread across every chunk still saves memory but
+            reads about as much as the full axis. Default is ``None``.
         file_filter: Keep only files whose content matches a predicate, discarding the rest
             before any frames are indexed. Either a callable ``File -> bool`` (a file is kept
             when it returns ``True``), or a declarative dotted-path dict mapping a path on the

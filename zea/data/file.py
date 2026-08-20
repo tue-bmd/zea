@@ -26,6 +26,7 @@ from zea.data.spec import (
     MetricsSpec,
     ProbeSpec,
     ScanSpec,
+    strip_track_prefix,
 )
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path, _hf_stream_open
@@ -372,7 +373,7 @@ class _BareDataset(h5py.Dataset):
         name = self.name
         if name is not None and name not in _SLOW_READ_WARNED:
             _SLOW_READ_WARNED.add(name)
-            key = re.sub(r"^/?tracks/track_\d+/", "", name).lstrip("/")
+            key = strip_track_prefix(name).lstrip("/")
             # Every path segment becomes an attribute hop, so a nested group like
             # data/image/values is suggested as file.data.image.values, not file.data.values.
             attr_path = key.replace("/", ".")
