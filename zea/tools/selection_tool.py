@@ -619,7 +619,12 @@ def equalize_polygons(polygons, mode: str = "max"):
     return interpolated_polygons
 
 
-def interpolate_masks(masks: list | np.ndarray, num_frames: int, rectangle: bool = False) -> list:
+def interpolate_masks(
+    masks: list | np.ndarray,
+    num_frames: int,
+    rectangle: bool = False,
+    positions: Sequence[int] | None = None,
+) -> list:
     """Interpolate between an arbitrary number of masks.
 
     Args:
@@ -628,6 +633,9 @@ def interpolate_masks(masks: list | np.ndarray, num_frames: int, rectangle: bool
         rectangle (bool, optional): Whether the masks are rectangular, in which case the
             faster rectangle interpolation is used instead of polygon interpolation.
             Defaults to False.
+        positions (Sequence[int], optional): Frame index each mask belongs to, strictly
+            increasing. Defaults to None, i.e. spread the masks evenly over the frames.
+            Frames outside the range hold on to the nearest mask.
 
     Returns:
         list: ``num_frames`` interpolated masks.
@@ -639,12 +647,14 @@ def interpolate_masks(masks: list | np.ndarray, num_frames: int, rectangle: bool
     mask_shape = masks[0].shape
     assert all(mask.shape == mask_shape for mask in masks), "All masks must have the same shape."
 
-    # distribute number of frames over number of masks
-    base_frames = num_frames // (number_of_masks - 1)
-    remainder = num_frames % (number_of_masks - 1)
-    num_frames_per_segment = [base_frames] * (number_of_masks - 1)
-    for i in range(remainder):
-        num_frames_per_segment[i] += 1
+    if positions is None:
+        frame_positions = np.linspace(0, num_frames - 1, number_of_masks)
+    else:
+        frame_positions = np.asarray(positions, dtype=float)
+        assert len(frame_positions) == number_of_masks, "One position per mask is required."
+        assert np.all(np.diff(frame_positions) > 0), "Positions must be strictly increasing."
+
+    frames = np.arange(num_frames)
 
     if rectangle:
         # get the rectangles
@@ -652,11 +662,8 @@ def interpolate_masks(masks: list | np.ndarray, num_frames: int, rectangle: bool
         for mask in masks:
             rectangles.append(extract_rectangle_from_mask(mask))
 
-        rectangles = interpolate_rectangles(
-            rectangles,
-            np.linspace(0, num_frames - 1, len(rectangles)),
-            np.arange(num_frames),
-        )
+        # np.interp holds the outer rectangles for frames outside the position range
+        rectangles = interpolate_rectangles(rectangles, frame_positions, frames)
 
         # reconstruct the masks
         interpolated_masks = []
@@ -675,11 +682,21 @@ def interpolate_masks(masks: list | np.ndarray, num_frames: int, rectangle: bool
     for i in range(number_of_masks - 1):
         polygons[i], polygons[i + 1] = match_polygons(polygons[i], polygons[i + 1])
 
-    # interpolate the polygons
+    # interpolate the polygons, holding the outer ones outside the position range
     interpolated_polygons = []
-    for i in range(number_of_masks - 1):
-        for t in np.linspace(0, 1, num_frames_per_segment[i]):
-            interpolated_polygons.append(interpolate_polygons(polygons[i], polygons[i + 1], t))
+    for frame in frames:
+        segment = int(
+            np.clip(
+                np.searchsorted(frame_positions, frame, side="right") - 1,
+                0,
+                len(frame_positions) - 2,
+            )
+        )
+        start, end = frame_positions[segment], frame_positions[segment + 1]
+        t = float(np.clip((frame - start) / (end - start), 0.0, 1.0))
+        interpolated_polygons.append(
+            interpolate_polygons(polygons[segment], polygons[segment + 1], t)
+        )
 
     # reconstruct the masks
     interpolated_masks = []
@@ -1220,6 +1237,8 @@ def annotate_sequence(
 
     Closing the window instead of selecting stops the annotating and keeps the key
     frames done so far, matching what closing the window means elsewhere in the tool.
+    The masks stay tied to the key frames they were drawn on, and the frames past the
+    last annotated key frame keep its mask.
 
     Args:
         images (Sequence[np.ndarray]): Frames of the sequence.
@@ -1239,6 +1258,7 @@ def annotate_sequence(
 
     key_frames = np.linspace(0, len(images) - 1, num_selections).astype(int)
     masks = []
+    annotated_frames = []
     pos, size = None, None
     for idx in key_frames:
         image = images[idx]
@@ -1261,15 +1281,23 @@ def annotate_sequence(
         plot_mask(axs, mask, selector)
         plt.close(fig)
         masks.append(mask)
+        annotated_frames.append(int(idx))
 
     if not masks:
         raise ValueError("No region was selected, so there is nothing to interpolate.")
 
-    # interpolation needs at least two masks, so duplicate a single selection
+    # interpolation needs at least two masks, so duplicate a single selection. Both
+    # copies are the same, so spanning the sequence just holds it over every frame.
     if len(masks) == 1:
         masks.append(masks[0])
+        annotated_frames = [0, len(images) - 1]
 
-    return interpolate_masks(masks, num_frames=len(images), rectangle=(selector == "rectangle"))
+    return interpolate_masks(
+        masks,
+        num_frames=len(images),
+        rectangle=(selector == "rectangle"),
+        positions=annotated_frames,
+    )
 
 
 def preview_figure(

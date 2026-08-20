@@ -307,6 +307,32 @@ def test_interpolate_masks_polygon():
     assert centres == sorted(centres)
 
 
+@pytest.mark.parametrize("rectangle", [True, False])
+def test_interpolate_masks_honours_positions(rectangle):
+    """Masks land on the frames they belong to, and the last one is held afterwards."""
+    mask1 = reconstruct_mask_from_rectangle(((2, 2), (8, 8)), (40, 40))
+    mask2 = reconstruct_mask_from_rectangle(((2, 22), (8, 28)), (40, 40))
+
+    # both masks are annotated early on, so frames 2-5 have no key frame to move towards
+    masks = interpolate_masks([mask1, mask2], num_frames=6, rectangle=rectangle, positions=[0, 1])
+
+    # the polygon round trip is not pixel exact, so allow a pixel of slack
+    tops = [extract_rectangle_from_mask(mask)[0][1] for mask in masks]
+    assert abs(tops[0] - 2) <= 1
+    # frame 1 carries the second mask, and every later frame holds on to it
+    assert all(abs(top - 22) <= 1 for top in tops[1:])
+    assert len(set(tops[1:])) == 1
+
+
+def test_interpolate_masks_rejects_bad_positions():
+    mask = reconstruct_mask_from_rectangle(((2, 2), (8, 8)), (40, 40))
+
+    with pytest.raises(AssertionError, match="One position per mask"):
+        interpolate_masks([mask, mask], num_frames=4, rectangle=True, positions=[0])
+    with pytest.raises(AssertionError, match="strictly increasing"):
+        interpolate_masks([mask, mask], num_frames=4, rectangle=True, positions=[2, 2])
+
+
 @pytest.mark.parametrize(
     "masks,num_frames",
     [
@@ -700,6 +726,40 @@ def test_annotate_sequence_stops_when_the_plot_is_closed(monkeypatch, fake_selec
 
     assert len(masks) == len(images)
     assert all(mask.sum() > 0 for mask in masks)
+
+
+def test_annotate_sequence_keeps_masks_at_their_key_frames(monkeypatch):
+    """Distinct selections stay on the key frames they were drawn on, early stop or not."""
+
+    def _box(top):
+        mask = np.zeros((40, 40))
+        mask[top : top + 6, 2:8] = 1
+        return mask
+
+    tops_drawn = [0, 20]
+    calls = []
+
+    def _draw_then_close(*args, **kwargs):
+        calls.append(1)
+        if len(calls) > len(tops_drawn):
+            return [], []  # the user closes the window on the third key frame
+        return [None], [_box(tops_drawn[len(calls) - 1])]
+
+    monkeypatch.setattr(selection_tool, "interactive_selector", _draw_then_close)
+
+    # 6 frames and 4 key frames puts the key frames at 0, 1, 3 and 5
+    images = [np.ones((40, 40)) for _ in range(6)]
+    masks = annotate_sequence(
+        images, selector="rectangle", num_selections=4, confirm_selection=False
+    )
+
+    tops = [extract_rectangle_from_mask(mask)[0][1] for mask in masks]
+    assert len(masks) == len(images)
+    # the two selections sit on key frames 0 and 1, not spread over the whole sequence
+    assert tops[0] == tops_drawn[0]
+    assert tops[1] == tops_drawn[1]
+    # nothing was annotated past key frame 1, so those frames keep the last mask
+    assert tops[2:] == [tops_drawn[1]] * 4
 
 
 def test_annotate_sequence_raises_when_nothing_was_selected(monkeypatch):
