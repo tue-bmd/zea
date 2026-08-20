@@ -557,8 +557,7 @@ def read(
     fallback is slower on disk too (see :func:`_resave_note`, :func:`_selection_note`).
 
     Safe to call while h5py's global lock is held — from inside a ``group.items()`` loop,
-    say. Nothing the workers touch reaches h5py (see the note on ``dtype`` below), so they
-    cannot block on a lock the caller is waiting to release.
+    say: nothing the workers touch reaches h5py.
 
     Args:
         dset (h5py.Dataset): The dataset to read from.
@@ -584,10 +583,8 @@ def read(
         return dset[selection]
 
     # Read every h5py attribute the decode needs *here*, on the calling thread, and keep
-    # the workers off ``dset`` entirely. Any h5py attribute access takes h5py's global
-    # lock, and the caller may already hold it — ``Group.items()`` and friends are
-    # generators that hold it across their yields. A worker would then block on a lock the
-    # caller cannot release until that worker finishes: a deadlock, not merely a slow read.
+    # the workers off ``dset`` entirely to avoid h5py's global lock. A caller can already
+    # hold it (``Group.items()`` holds it across its yields), causing a deadlock.
     dtype = dset.dtype
     itemsize = dtype.itemsize
     n_selected = int(np.prod([len(indices) for indices, _ in axes]))
