@@ -683,6 +683,15 @@ def test_annotate_sequence_requires_multiple_frames(fake_selector):
         annotate_sequence([np.ones((20, 20))], confirm_selection=False)
 
 
+def test_annotate_sequence_stops_when_the_plot_is_closed(monkeypatch):
+    """A closed window yields no masks at all, which must not be indexed into."""
+    monkeypatch.setattr(selection_tool, "interactive_selector", lambda *args, **kwargs: ([], []))
+
+    images = [np.ones((20, 20)) for _ in range(4)]
+    with pytest.raises(ValueError, match="closed"):
+        annotate_sequence(images, num_selections=2, confirm_selection=False)
+
+
 def test_run_selection_tool_on_video(fake_selector, gif_path, tmp_path):
     """End-to-end video mode: a zea file and a preview animation land in ``output_dir``."""
     from zea import File

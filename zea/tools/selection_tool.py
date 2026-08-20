@@ -20,7 +20,7 @@ Command line interface
 
 The module is exposed through the ``zea`` CLI as ``zea tools select``::
 
-    zea tools select                              # pick files through a file dialog
+    zea tools select                              # ask for the files on the terminal
     zea tools select frame.png other.png          # compare two images with gCNR
     zea tools select clip.mp4 --num-selections 3  # annotate a video and interpolate
 
@@ -1230,6 +1230,10 @@ def annotate_sequence(
                 num_selections=1,
                 confirm_selection=confirm_selection,
             )
+            # no selection at all means the window was closed, so stop here
+            if not mask:
+                plt.close(fig)
+                raise ValueError("Plot window closed before a selection was made.")
             # check if mask is empty else retry
             if mask[0].sum() == 0:
                 log.warning("Empty mask. Try again, make sure to make a decent selection...")
@@ -1452,7 +1456,7 @@ def run_selection_tool(
     Args:
         files (Sequence[str | Path], optional): Input images, or a single video / gif or
             zea HDF5 file (an ``hf://`` URI works too). Defaults to None, i.e. ask
-            through a file dialog.
+            for the paths on the terminal.
         selector (str, optional): Type of selection tool, one of :data:`SELECTORS`.
         title (str, optional): Name of what is being selected. Used as the segmentation
             label and in the output filenames. Only used in sequence mode.
