@@ -224,14 +224,33 @@ class H5FileHandleCache:
         self.close()
 
 
-@cache_output("filepaths", "key", "_filepath_hash", verbose=True)
-def _find_h5_file_shapes(filepaths, key, _filepath_hash, verbose=True):
+def _shape_and_metadata_gaps(file_path, key, metadata_paths):
+    """Read one file's shape for ``key`` and the ``metadata_paths`` it cannot supply.
+
+    The presence check rides along with the shape read so that a dataset is swept
+    once, not twice: the file is open either way, and each path costs a name
+    lookup. Must stay importable at module level -- it runs in a
+    :mod:`multiprocessing` worker.
+    """
+    # Imported here rather than at module scope: zea.data.metadata imports from us.
+    from zea.data.metadata import missing_metadata_paths
+
+    with File(file_path, mode="r") as file:
+        shape = file.shape(key)
+        missing = missing_metadata_paths(file, metadata_paths)
+    return shape, missing
+
+
+@cache_output("filepaths", "key", "metadata_paths", "_filepath_hash", verbose=True)
+def _find_h5_file_shapes(filepaths, key, _filepath_hash, metadata_paths=(), verbose=True):
     # NOTE: we cache the output of this function such that file loading over the network is
     # faster for repeated calls with the same filepaths, key and _filepath_hash
 
     assert _filepath_hash is not None
 
-    get_shape = functools.partial(File.get_shape, key=key)
+    get_shape = functools.partial(
+        _shape_and_metadata_gaps, key=key, metadata_paths=tuple(metadata_paths)
+    )
 
     if os.environ.get("ZEA_FIND_H5_SHAPES_PARALLEL", "1") in ("1", "true", "yes"):
         # using multiprocessing to speed up reading hdf5 files
@@ -239,7 +258,7 @@ def _find_h5_file_shapes(filepaths, key, _filepath_hash, verbose=True):
         # or use if __name__ == "__main__" to avoid freezing the main process
 
         with multiprocessing.Pool() as pool:
-            file_shapes = list(
+            results = list(
                 tqdm.tqdm(
                     pool.imap(get_shape, filepaths),
                     total=len(filepaths),
@@ -248,15 +267,19 @@ def _find_h5_file_shapes(filepaths, key, _filepath_hash, verbose=True):
                 )
             )
     else:
-        file_shapes = []
+        results = []
         for file_path in tqdm.tqdm(
             filepaths,
             desc="Getting file shapes in each h5 file",
             disable=not verbose,
         ):
-            file_shapes.append(get_shape(file_path))
+            results.append(get_shape(file_path))
 
-    return file_shapes
+    file_shapes = [shape for shape, _ in results]
+    metadata_gaps = {
+        file_path: missing for file_path, (_, missing) in zip(filepaths, results) if missing
+    }
+    return file_shapes, metadata_gaps
 
 
 def _file_hash(filepaths):
@@ -383,9 +406,22 @@ class Folder:
         file_paths = list(search_file_tree(self.folder_path, filetypes=FILE_TYPES))
         return [str(fp) for fp in file_paths]  # to string
 
-    def load_file_shapes(self, key: str):
-        """Load the shapes of the datasets in each file."""
-        return _find_h5_file_shapes(self.file_paths, key, _file_hash(self.file_paths))
+    def load_file_shapes(self, key: str, metadata_paths: Sequence[str] = ()):
+        """Load the shapes of the datasets in each file.
+
+        Args:
+            key: HDF5 dataset key whose shape to read.
+            metadata_paths: Dotted metadata paths to check for while each file is
+                open. Default is ``()`` (no check).
+
+        Returns:
+            tuple: ``(file_shapes, metadata_gaps)``, where ``metadata_gaps`` maps a
+            file path to the requested paths that file lacks. Only files missing
+            something appear, so an empty dict means every file can answer.
+        """
+        return _find_h5_file_shapes(
+            self.file_paths, key, _file_hash(self.file_paths), tuple(metadata_paths)
+        )
 
     def __len__(self):
         """Returns the number of files in the dataset."""
@@ -652,9 +688,22 @@ class Dataset(H5FileHandleCache):
             log.info(f"file_filter kept {len(kept)}/{len(file_paths)} files ({n_removed} removed).")
         return kept
 
-    def load_file_shapes(self, key: str):
-        """Load the shapes of the datasets in each file."""
-        return _find_h5_file_shapes(self.file_paths, key, _file_hash(self.file_paths))
+    def load_file_shapes(self, key: str, metadata_paths: Sequence[str] = ()):
+        """Load the shapes of the datasets in each file.
+
+        Args:
+            key: HDF5 dataset key whose shape to read.
+            metadata_paths: Dotted metadata paths to check for while each file is
+                open. Default is ``()`` (no check).
+
+        Returns:
+            tuple: ``(file_shapes, metadata_gaps)``, where ``metadata_gaps`` maps a
+            file path to the requested paths that file lacks. Only files missing
+            something appear, so an empty dict means every file can answer.
+        """
+        return _find_h5_file_shapes(
+            self.file_paths, key, _file_hash(self.file_paths), tuple(metadata_paths)
+        )
 
     def _find_hf_files(self, hf_path: str) -> List[str]:
         """Resolve an HF path to a list of local paths (or HF strings if lazy)."""

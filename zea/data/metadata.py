@@ -38,7 +38,13 @@ from zea.data.datasets import _resolve_dotted_path
 from zea.data.file import ChunkedDataset, File, _GroupProxy, _StringDataset
 from zea.data.spec import ROOT_SPECS, FileSpec, Spec
 
-__all__ = ["has_per_frame_paths", "normalize_metadata_paths", "read_metadata", "slice_metadata"]
+__all__ = [
+    "has_per_frame_paths",
+    "missing_metadata_paths",
+    "normalize_metadata_paths",
+    "read_metadata",
+    "slice_metadata",
+]
 
 
 def _iter_shape_alternatives(shape) -> tuple[tuple, ...]:
@@ -181,6 +187,46 @@ def _read_path(file: File, path: str):
             f"file_filter={{'{path}': EXISTS}}."
         )
     return value
+
+
+def _path_exists(file: File, path: str) -> bool:
+    """Whether ``path`` resolves in ``file``, without reading the value.
+
+    Mirrors the resolution order of :func:`_read_path` -- HDF5 object, root
+    attribute, then derived ``File`` property -- but stops at the handle wherever
+    it can, so a presence check costs a name lookup rather than a read.  Keep the
+    two in step: a path that resolves here must be readable there.
+    """
+    key = path.replace(".", "/")
+    try:
+        if file.dataset(key) is not None:
+            return True
+    except (KeyError, AttributeError):
+        pass
+
+    if "." not in path and path in file.attrs:
+        return True
+
+    # Derived properties (``probe_name``, ``zea_version``) are not HDF5 objects, so
+    # they can only be confirmed by resolving them -- as _read_path does too.
+    return _resolve_dotted_path(file, path) is not None
+
+
+def missing_metadata_paths(file: File, paths: Sequence[str]) -> tuple[str, ...]:
+    """Return the subset of ``paths`` that ``file`` cannot supply.
+
+    Lets a caller check a whole dataset up front instead of discovering a missing
+    path when :func:`read_metadata` reaches the file mid-epoch.
+
+    Args:
+        file: An open :class:`~zea.data.file.File`.
+        paths: Dotted paths to check.
+
+    Returns:
+        tuple: The paths absent from ``file``, in the order given. Empty when the
+        file can answer all of them.
+    """
+    return tuple(path for path in paths if not _path_exists(file, path))
 
 
 def _assign(tree: dict, parts: Sequence[str], value) -> None:

@@ -1367,3 +1367,127 @@ def test_return_metadata_read_once_per_file(metadata_dataset):
 
     assert len(source) == 2 * METADATA_N_FRAMES
     assert n_calls == 2, "metadata should be read once per file"
+
+
+def _dig(metadata, path):
+    """Walk a dotted path through the nested dict ``return_metadata`` hands back."""
+    value = metadata
+    for part in path.split("."):
+        value = value[part]
+    return value
+
+
+def _metadata_values(folder, path, **kwargs):
+    """Every sample's value at ``path``, checking nothing beyond ``path`` comes back."""
+    loader = Dataloader(
+        folder,
+        key=FILTER_KEY,
+        batch_size=None,
+        shuffle=False,
+        validate=False,
+        return_metadata=path,
+        **kwargs,
+    )
+    try:
+        samples = list(loader)
+        # Only the requested path's root is returned; "file" is always included.
+        assert all(set(metadata) == {path.split(".")[0], "file"} for _, metadata in samples)
+        assert len(samples) == len(loader.source)
+        return [_dig(metadata, path) for _, metadata in samples]
+    finally:
+        loader.close()
+
+
+@pytest.mark.parametrize(
+    "value_filter, path, holds",
+    [
+        ("f", "metadata.subject.sex", lambda v: v == "f"),
+        ("m", "metadata.subject.sex", lambda v: v == "m"),
+        (lambda v: v >= 7e6, "scan.center_frequency", lambda v: v >= 7e6),
+    ],
+)
+def test_file_filter_round_trips_through_return_metadata(
+    metadata_folder, value_filter, path, holds
+):
+    """Reading a filtered path back yields only values that satisfy the filter.
+
+    ``file_filter`` and ``return_metadata`` take the same dotted-path syntax but resolve it
+    through separate code paths, so this pins the two to one interpretation: what the
+    filter matched on is what the loader hands back.
+    """
+    filtered = _metadata_values(metadata_folder, path, file_filter={path: value_filter})
+    assert filtered, "filter kept no files"
+    assert all(holds(value) for value in filtered)
+
+    # Without the filter the same read does surface values the filter excludes, so the
+    # assertion above is not vacuously true.
+    assert not all(holds(value) for value in _metadata_values(metadata_folder, path))
+
+
+def test_file_filter_exists_makes_optional_path_readable(metadata_folder):
+    """``EXISTS`` on a path is what lets ``return_metadata`` request that same path.
+
+    ``metadata_folder`` has one file (b) without ``fat_percentage``; requesting the path
+    outright raises, and filtering on it leaves exactly the files that can answer.
+    """
+    path = "metadata.subject.fat_percentage"
+
+    with pytest.raises(KeyError, match=path):
+        _metadata_values(metadata_folder, path)
+
+    values = _metadata_values(metadata_folder, path, file_filter={path: EXISTS})
+    # Files a and c, each contributing FILTER_N_FRAMES samples.
+    assert len(values) == 2 * FILTER_N_FRAMES
+    assert sorted(set(values)) == [np.float32(17.5), np.float32(30.0)]
+
+
+def test_return_metadata_missing_path_raises_before_any_sample(metadata_folder):
+    """A path missing from a *later* file fails at construction, not mid-epoch.
+
+    Only file b lacks ``fat_percentage``, so reading sample 0 (from file a) succeeds --
+    the loader has to sweep every file up front to catch this before an epoch starts.
+    """
+    path = "metadata.subject.fat_percentage"
+
+    with pytest.raises(KeyError) as excinfo:
+        Dataloader(
+            metadata_folder,
+            key=FILTER_KEY,
+            batch_size=None,
+            shuffle=False,
+            validate=False,
+            return_metadata=path,
+        )
+
+    message = str(excinfo.value)
+    assert path in message
+    # Names the offending file, its share of the dataset, and the way out.
+    assert "b.hdf5" in message
+    assert "1/3" in message
+    assert "EXISTS" in message
+
+
+def test_return_metadata_missing_path_error_lists_every_offending_file(metadata_folder):
+    """The up-front sweep reports all offending files, not just the first one reached."""
+    # No file carries this path, so all three are offenders.
+    path = "metadata.subject.bmi"
+
+    with pytest.raises(KeyError) as excinfo:
+        Dataloader(
+            metadata_folder,
+            key=FILTER_KEY,
+            batch_size=None,
+            shuffle=False,
+            validate=False,
+            return_metadata=path,
+        )
+
+    message = str(excinfo.value)
+    assert "3/3" in message
+    assert all(name in message for name in ("a.hdf5", "b.hdf5", "c.hdf5"))
+
+
+def test_return_metadata_present_path_does_not_raise(metadata_folder):
+    """The up-front check stays out of the way when every file can answer."""
+    values = _metadata_values(metadata_folder, "metadata.subject.sex")
+    assert len(values) == 3 * FILTER_N_FRAMES

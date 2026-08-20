@@ -22,7 +22,7 @@ Example:
 
 import re
 import threading
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Sequence
 from itertools import product
 from pathlib import Path
@@ -281,6 +281,40 @@ def _resolve_source_frame_axis(key: str, num_dims: int) -> int | None:
     return None
 
 
+#: How many offending file names to name in a missing-metadata error before eliding.
+_MAX_LISTED_FILES = 5
+
+
+def _missing_metadata_error(metadata_gaps: dict, n_files: int) -> KeyError:
+    """Build the error raised when files cannot supply a requested metadata path.
+
+    ``metadata_gaps`` maps a file path to the paths that file lacks; this inverts it
+    so the message is per path -- the unit the user acts on -- and names a few
+    offending files rather than all of them.  Returns a :exc:`KeyError` to match the
+    error :func:`~zea.data.metadata.read_metadata` raises for the same cause.
+    """
+    per_path: dict[str, list[str]] = defaultdict(list)
+    for file_path, paths in metadata_gaps.items():
+        for path in paths:
+            per_path[path].append(file_path)
+
+    parts = []
+    for path, files in per_path.items():
+        shown = ", ".join(f"'{Path(f).name}'" for f in files[:_MAX_LISTED_FILES])
+        if len(files) > _MAX_LISTED_FILES:
+            shown += f", +{len(files) - _MAX_LISTED_FILES} more"
+        parts.append(
+            f"return_metadata path '{path}' is missing from {len(files)}/{n_files} files "
+            f"({shown}); drop them with file_filter={{'{path}': EXISTS}}"
+        )
+    # KeyError renders its argument with repr(), so keep the message to one line.
+    return KeyError(
+        " | ".join(parts) + ". Metadata is read for every sample, so the loader would "
+        "otherwise fail partway through an epoch. Import EXISTS from zea.data.datasets, "
+        "or drop the path from return_metadata."
+    )
+
+
 class H5DataSource:
     """Thread-safe random-access data source for HDF5 files.
 
@@ -378,8 +412,13 @@ class H5DataSource:
             **kwargs,
         )
         self.file_paths = _dataset.file_paths
-        self.file_shapes = _dataset.load_file_shapes(key)
+        # Requested metadata paths are checked in the same sweep that reads the shapes,
+        # so a file that cannot answer surfaces here rather than mid-epoch.
+        self.file_shapes, metadata_gaps = _dataset.load_file_shapes(key, self.return_metadata or ())
         _dataset.close()
+
+        if metadata_gaps:
+            raise _missing_metadata_error(metadata_gaps, len(self.file_paths))
 
         num_dims = len(self.file_shapes[0]) if self.file_shapes else 0
         self.source_frame_axis = _resolve_source_frame_axis(self.key, num_dims)
@@ -629,8 +668,15 @@ class Dataloader:
             Metadata is read once per file, not once per sample. Fields whose
             leading dimension is ``n_frames`` in the spec (per-frame annotations,
             per-frame metrics) are sliced to the sample's frames so they stay
-            aligned with the returned images. A requested path that is missing from
-            a file raises :exc:`KeyError` — drop those files with ``file_filter``.
+            aligned with the returned images. Because metadata is per file, a requested
+            path is either present for every sample of a file or for none of them, so
+            every file is checked for the requested paths when the loader is built:
+            any that cannot answer raise :exc:`KeyError` there and then, naming them,
+            rather than failing partway through an epoch. Drop them with e.g.
+            ``file_filter={"metadata.subject.age": EXISTS}``. A per-frame field stored in
+            a broadcast form the spec allows -- one value for the whole file, such as a
+            single ``annotations.view`` string or a map grid with its leading frame axis
+            omitted -- is returned in full with every sample rather than sliced.
             Note that batching stacks metadata leaf by leaf, so every file must
             supply the same structure and shapes; use ``batch_size=None`` for
             metadata that varies in shape between files. Per-frame metadata is not
