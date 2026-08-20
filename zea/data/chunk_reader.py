@@ -389,20 +389,18 @@ def _fallback_note(
 ) -> None:
     """Nudge, once per dataset, when a read misses the concurrent path and goes to h5py.
 
-    Serial reads happen locally too, not only when streaming, so this fires whether or not
-    progress was requested. ``cause`` completes "Reading '{name}' {cause}" and ``fix`` says how
-    to avoid it; ``kind`` scopes the once-only dedupe so the resave and selection notes do not
-    silence each other. The name is the file — that is what a user would actually act on —
-    with the dataset's path in brackets (as the user indexes it, see :func:`_display_path`),
-    so notes for different datasets of the same file read as distinct rather than as repeats.
-    Datasets below :data:`MIN_BYTES` are silent: every read of one is served by h5py anyway
-    (see :func:`read`), so neither resaving nor reshaping the selection would change how it
-    is read — the note would be noise. A scan or metadata group is entirely such scalars.
-
-    Anything that could break here is swallowed; a message is never worth failing a read over.
+    Args:
+        dset (h5py.Dataset): The dataset the note is about.
+        fetcher (Fetcher, optional): Source of the chunk bytes; names the file when set.
+        kind (str): Scopes the once-only dedupe, so the resave and selection notes do not
+            silence each other.
+        cause (str): Completes "Reading '{name}' {cause}".
+        fix (str): How to avoid the fallback.
     """
+    # Silent below, h5py serves every such read anyway (see :func:`read`)
     if dset.nbytes < MIN_BYTES:
         return
+
     try:
         from zea import log
 
