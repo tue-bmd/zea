@@ -14,6 +14,7 @@ from zea.beamform.geometry import compute_element_normals
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.tensor import vmap
 from zea.internal.checks import _check_raw_data
+from zea.internal.precision import signal_compute_dtype
 from zea.log import warning_once as _warning_once
 
 
@@ -222,6 +223,14 @@ def tof_correction(
 
     _warn_if_focal_region_length_unused(focus_distances, focal_region_length)
 
+    # Resolve the signal compute dtype and cast the RF/IQ signal down to it. This is the
+    # single entry point where precision is lowered: everything below that touches the *signal*
+    # runs in this dtype, while the *delays* and geometry are kept in float32 for accuracy.
+    # Casting here also promotes integer RF (e.g. int16) to a floating dtype so the interpolation
+    # is well-defined.
+    compute_dtype = signal_compute_dtype()
+    data = ops.cast(data, compute_dtype)
+
     # ---- Compute delays ------------------------------------------------
     # txdel: transmit delay from t=0 to wavefront reaching each pixel
     # rxdel: receive delay from each pixel back to each element
@@ -288,6 +297,10 @@ def tof_correction(
         cos_rx = ops.cos(theta_rx)
         sin_rx = ops.sin(theta_rx)
 
+    # Keep the receive-aperture mask multiply in the signal compute dtype so it
+    # does not up-cast the (low-precision) signal via type promotion.
+    mask = ops.cast(mask, compute_dtype)
+
     # ---- Correct a single transmit (closure) ---------------------------
     def _correct_single_tx(data_tx, txdel_tx, mask_tx=None):
         """Apply delay-and-interpolate for one transmit event.
@@ -319,8 +332,8 @@ def tof_correction(
             theta_tx = phase_scale * txdel_tx  # (n_pix, 1)
             cos_tx = ops.cos(theta_tx)
             sin_tx = ops.sin(theta_tx)
-            cos_theta = cos_rx * cos_tx - sin_rx * sin_tx
-            sin_theta = sin_rx * cos_tx + cos_rx * sin_tx
+            cos_theta = ops.cast(cos_rx * cos_tx - sin_rx * sin_tx, tof_tx.dtype)
+            sin_theta = ops.cast(sin_rx * cos_tx + cos_rx * sin_tx, tof_tx.dtype)
             tof_tx = complex_rotate(tof_tx, None, cos_theta=cos_theta, sin_theta=sin_theta)
 
         return tof_tx
@@ -543,11 +556,26 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
     # Add a dummy channel dimension so the delays broadcast
     delays = delays[..., None]
 
-    d0 = ops.cast(d0, delays.dtype)[..., None]  # Cast to float
-    d1 = ops.cast(d1, delays.dtype)[..., None]  # Cast to float
-    data0 = ops.cast(data0, delays.dtype)  # Cast to float
-    data1 = ops.cast(data1, delays.dtype)  # Cast to float
-    reflection_samples = (d1 - delays) * data0 + (delays - d0) * data1
+    # Compute interpolated pixel value.
+    #
+    # The interpolation weights are derived from ``delays`` (sample indices that
+    # can run into the thousands), so they are computed in the delay dtype
+    # (``float32``) to preserve accuracy and only then cast down to the signal
+    # compute dtype. The gathered samples themselves stay in the (possibly
+    # low-precision) signal dtype so the multiply-add runs in that dtype for
+    # speed -- this is what makes mixed-precision beamforming worthwhile.
+    out_dtype = ops.dtype(data0)
+    if out_dtype not in ("float16", "bfloat16", "float32", "float64"):
+        # Integer RF (e.g. int16) gathered directly: promote to the compute dtype.
+        out_dtype = signal_compute_dtype()
+        data0 = ops.cast(data0, out_dtype)
+        data1 = ops.cast(data1, out_dtype)
+
+    d0 = ops.cast(d0, delays.dtype)[..., None]  # Cast indices to float for the weights
+    d1 = ops.cast(d1, delays.dtype)[..., None]
+    w0 = ops.cast(d1 - delays, out_dtype)  # weight in [0, 1], computed in float32
+    w1 = ops.cast(delays - d0, out_dtype)
+    reflection_samples = w0 * data0 + w1 * data1
 
     return reflection_samples
 
@@ -614,10 +642,13 @@ def complex_rotate(iq, theta, cos_theta=None, sin_theta=None):
     )
     # Allow passing precomputed cos/sin of theta to avoid recomputing the
     # transcendentals (e.g. when the caller factors theta into cheaper terms).
+    # ``theta`` (and any precomputed cos/sin passed in) is derived from the
+    # (float32) delays and can be large, so the trigonometrics are evaluated
+    # in that dtype and only then cast down to the signal compute dtype.
     if cos_theta is None:
-        cos_theta = ops.cos(theta)
+        cos_theta = ops.cast(ops.cos(theta), iq.dtype)
     if sin_theta is None:
-        sin_theta = ops.sin(theta)
+        sin_theta = ops.cast(ops.sin(theta), iq.dtype)
 
     # Select i and q channels
     i = iq[..., 0]
