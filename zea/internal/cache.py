@@ -34,6 +34,7 @@ import keras
 
 from zea import log
 from zea.internal.core import hash_elements
+from zea.internal.utils import atomic_write
 
 _DEFAULT_ZEA_CACHE_DIR = Path.home() / ".cache" / "zea"
 
@@ -170,17 +171,10 @@ def _dump_to_cache(result, cache_file: Path, func):
     Writes to a temporary file first and moves it into place, so a crash or a full
     disk cannot leave a truncated pickle behind that later runs would try to load.
     """
-    tmp_file = None
     try:
-        with tempfile.NamedTemporaryFile(
-            dir=cache_file.parent, prefix=cache_file.name, suffix=".tmp", delete=False
-        ) as f:
-            tmp_file = Path(f.name)
-            joblib.dump(result, f)
-        os.replace(tmp_file, cache_file)
+        with atomic_write(cache_file) as tmp_file:
+            joblib.dump(result, tmp_file)
     except Exception as e:
-        if tmp_file is not None:
-            tmp_file.unlink(missing_ok=True)
         log.warning(
             f"Could not cache result for {func.__qualname__} to {cache_file}: {e}. "
             "Continuing without caching this result."

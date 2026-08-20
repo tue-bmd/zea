@@ -1,7 +1,6 @@
 import math
 import os
 import re
-import tempfile
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields
@@ -17,6 +16,7 @@ import numpy as np
 
 from zea import log
 from zea.internal.typing import Scalar
+from zea.internal.utils import atomic_write
 
 # Named dimensions whose sizes must agree wherever they appear.
 CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch", "n_spatial_ch"}
@@ -2809,22 +2809,10 @@ class FileSpec(Spec):
                     "regulations. Ensure you have appropriate authorization and "
                     "de-identification measures in place before sharing this file."
                 )
-        # Write to a temporary file in the destination directory, then atomically
-        # rename it into place.
-        fd, tmp_name = tempfile.mkstemp(
-            dir=str(_path.parent), prefix=f".{_path.stem}.tmp-", suffix=".hdf5"
-        )
-        os.close(fd)
-        tmp_path = Path(tmp_name)
-        try:
+        with atomic_write(_path, suffix=".hdf5") as tmp_path:
             self._write_hdf5(
                 tmp_path, _zea_version, compression, chunk_axes, warn_missing_optional_fields
             )
-            os.replace(tmp_path, _path)
-        except BaseException:
-            # Includes KeyboardInterrupt/SystemExit: clean up the partial temp file.
-            tmp_path.unlink(missing_ok=True)
-            raise
 
         log.info(f"File saved to {log.yellow(path)}")
 
