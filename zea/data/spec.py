@@ -2898,7 +2898,7 @@ class FileSpec(Spec):
 #: Roots of a path into a zea file that are not fields of :class:`FileSpec` itself:
 #: ``data`` and ``scan`` are the single-track shorthands that
 #: :meth:`zea.File.__getitem__` remaps onto ``tracks/track_0/``.
-ROOT_SPECS: dict[str, type[Spec]] = {"data": DataSpec, "scan": ScanSpec}
+ROOT_SPECS = {"data": DataSpec, "scan": ScanSpec}
 
 _TRACK_RE = re.compile(r"track_\d+")
 
