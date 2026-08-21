@@ -176,35 +176,59 @@ def test_frame_axis_unknown_key_falls_back_to_axis_zero(dummy_hdf5):
     assert len(source) == DUMMY_N_FRAMES
 
 
-def test_pad_incomplete_blocks(dummy_hdf5):
-    """Files shorter than a block are skipped by default and padded when enabled."""
+def test_incomplete_blocks_raises_by_default(dummy_hdf5):
+    """A file too short to fill a block fails the build rather than vanishing quietly."""
     n_frames = DUMMY_N_FRAMES + 50
 
-    skipped = H5DataSource(
+    with pytest.raises(ValueError) as excinfo:
+        H5DataSource(file_paths=[dummy_hdf5], key="data", n_frames=n_frames, validate=False)
+
+    message = str(excinfo.value)
+    # Names the shortfall, the offending file with the frames it has, and the way out.
+    assert f"1/1 files hold fewer than the {n_frames} frames" in message
+    assert f"({DUMMY_N_FRAMES})" in message
+    assert "on_incomplete_blocks='skip'" in message
+
+
+def test_incomplete_blocks_skip_drops_the_file(dummy_hdf5):
+    """``skip`` restores the old silent-drop behaviour, now explicitly asked for."""
+    source = H5DataSource(
         file_paths=[dummy_hdf5],
         key="data",
-        n_frames=n_frames,
+        n_frames=DUMMY_N_FRAMES + 50,
         validate=False,
-        pad_incomplete_blocks=False,
+        on_incomplete_blocks="skip",
     )
-    assert len(skipped) == 0
+    assert len(source) == 0
 
-    padded = H5DataSource(
-        file_paths=[dummy_hdf5],
-        key="data",
-        n_frames=n_frames,
-        validate=False,
-        pad_incomplete_blocks=True,
-    )
-    assert len(padded) == 1
 
-    sample = padded[0]
-    assert sample.shape[-1] == n_frames
+def test_incomplete_blocks_error_counts_the_usable_window(dummy_hdf5):
+    """``offset_n_frames`` narrows what counts as available, and the error says so."""
+    offset = DUMMY_N_FRAMES - 1
 
-    per_frame_sum = np.abs(sample).sum(axis=tuple(range(sample.ndim - 1)))
-    valid_frames = int(np.count_nonzero(per_frame_sum))
-    assert valid_frames == DUMMY_N_FRAMES
-    assert np.all(per_frame_sum[DUMMY_N_FRAMES:] == 0)
+    with pytest.raises(ValueError) as excinfo:
+        H5DataSource(
+            file_paths=[dummy_hdf5],
+            key="data",
+            n_frames=2,
+            offset_n_frames=offset,
+            validate=False,
+        )
+
+    message = str(excinfo.value)
+    # One frame is left past the offset, which is one short of the two a block needs.
+    assert "(1)" in message
+    assert "offset_n_frames and limit_n_frames" in message
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"on_incomplete_blocks": "pad"}, {"on_missing_metadata": "drop"}],
+)
+def test_unknown_file_policy_rejected(dummy_hdf5, kwargs):
+    """An unrecognized policy is caught up front, listing what is accepted."""
+    with pytest.raises(ValueError, match=r"must be one of \('error', 'skip'\)"):
+        H5DataSource(file_paths=[dummy_hdf5], key="data", validate=False, **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -582,10 +606,10 @@ def test_resize_with_different_shapes(multi_shape_dataset):
     ), f"Output shape {images_np.shape} does not match expected (16, 16)"
 
 
-def test_skipped_files_warning(tmp_path):
-    """Test warning when files have too few frames for n_frames * frame_index_stride."""
+def test_skipped_files_leave_an_empty_source(tmp_path):
+    """A directory whose every file is too short yields nothing under ``skip``."""
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
-    # Create file with only 1 frame — requesting n_frames=5 should skip it
+    # Only 1 frame, so n_frames=5 cannot fill a block from it.
     with h5py.File(tmp_path / "small_0.hdf5", "w") as f:
         f.create_dataset("data", data=rng.standard_normal((1, 28, 28)))
 
@@ -595,6 +619,7 @@ def test_skipped_files_warning(tmp_path):
         n_frames=5,
         frame_index_stride=1,
         validate=False,
+        on_incomplete_blocks="skip",
     )
     assert len(source) == 0
 
@@ -1468,6 +1493,52 @@ def test_return_metadata_missing_path_raises_before_any_sample(metadata_folder):
     assert "EXISTS" in message
 
 
+def test_return_metadata_missing_path_skip_drops_those_files(metadata_folder):
+    """``on_missing_metadata="skip"`` keeps the run going with the files that can answer."""
+    path = "metadata.subject.fat_percentage"
+
+    values = _metadata_values(metadata_folder, path, on_missing_metadata="skip")
+
+    # Only b lacks the path, so a and c survive with all their samples.
+    assert len(values) == 2 * FILTER_N_FRAMES
+    assert sorted(set(values)) == [np.float32(17.5), np.float32(30.0)]
+
+
+def test_missing_metadata_not_judged_on_files_no_block_reaches(tmp_path):
+    """A file dropped for being too short must not fail the build over its metadata.
+
+    The two policies compose in one direction only: whatever ``on_incomplete_blocks``
+    discards is out of the dataset before ``on_missing_metadata`` gets an opinion.
+    """
+    path = "metadata.subject.fat_percentage"
+    _write_zea_file(
+        tmp_path / "long.hdf5",
+        n_frames=6,
+        metadata={"subject": {"fat_percentage": np.float32(17.5)}},
+    )
+    # Too short for a block of 4, and it could not answer the metadata path either.
+    _write_zea_file(tmp_path / "short.hdf5", n_frames=2)
+
+    loader = Dataloader(
+        tmp_path,
+        key=FILTER_KEY,
+        batch_size=None,
+        shuffle=False,
+        validate=False,
+        n_frames=4,
+        return_metadata=path,
+        on_incomplete_blocks="skip",
+        on_missing_metadata="error",
+    )
+    try:
+        assert len(loader.source) == 1
+        assert _kept_names(loader.source) == ["long.hdf5", "short.hdf5"]
+        # Judged on the one file that contributes, so the short file's gap is moot.
+        assert sorted(Path(p).name for p in loader.source._metadata_signatures) == ["long.hdf5"]
+    finally:
+        loader.close()
+
+
 def test_return_metadata_missing_path_error_lists_every_offending_file(metadata_folder):
     """The up-front sweep reports all offending files, not just the first one reached."""
     # No file carries this path, so all three are offenders.
@@ -1652,7 +1723,6 @@ def test_ragged_dataset_allows_batch_size_one(ragged_folder):
     [
         {},
         {"n_frames": 2},
-        {"n_frames": FILTER_N_FRAMES + 1, "pad_incomplete_blocks": True},
         {"image_size": (8, 8), "resize_type": "center_crop"},
         {"image_size": (24, 24), "resize_type": "crop_or_pad"},
         {"image_size": (12, 12), "resize_type": "resize"},

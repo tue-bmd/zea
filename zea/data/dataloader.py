@@ -58,6 +58,9 @@ if TYPE_CHECKING:
 #: How many offending file names to name in a shape or metadata error before eliding.
 _MAX_LISTED_FILES = 5
 
+#: What a loader does with files it cannot serve: refuse to build, or drop them.
+_FILE_POLICIES = ("error", "skip")
+
 
 def _normalize_axis_selections(
     axis_selections: dict,
@@ -106,7 +109,7 @@ def generate_h5_indices(
     sort_files: bool = True,
     overlapping_blocks: bool = False,
     limit_n_frames: int | None = None,
-    pad_incomplete_blocks: bool = False,
+    on_incomplete_blocks: str = "error",
     axis_selections: dict | None = None,
     offset_n_frames: int = 0,
 ):
@@ -132,9 +135,9 @@ def generate_h5_indices(
             Defaults to False.
         limit_n_frames (int, optional): Maximum number of frames to load per file, counted from
             ``offset_n_frames``. Defaults to None (no limit).
-        pad_incomplete_blocks (bool, optional): Keep files that are too short to fill a full block
-            by emitting a single partial block with the available frames. The loader zeropads these
-            samples to n_frames. Defaults to False.
+        on_incomplete_blocks (str, optional): What to do with files holding too few frames to
+            fill one block of ``n_frames * frame_index_stride``: ``"error"`` (default) raises
+            and names them, ``"skip"`` drops them from the index table.
         axis_selections (dict, optional): Map of ``{axis: indices}`` applied at HDF5 read time to
             pre-filter non-frame axes. For example ``{1: [0, 2, 5]}`` loads only those indices
             along axis 1, avoiding reading unused data from disk. Defaults to None.
@@ -205,19 +208,20 @@ def generate_h5_indices(
         # now blocks overlap by n_frames - 1
         block_step_size = 1
 
+    def usable_frames(shape) -> int:
+        """Frames of one file left for sampling, after ``offset``/``limit`` narrow it."""
+        effective_end = int(min(shape[source_frame_axis], offset_n_frames + frame_limit))
+        return max(0, effective_end - offset_n_frames)
+
     def frame_selections(shape):
         """Frame selections for one file, empty when it cannot fill a single block."""
-        total_frames_in_file = shape[source_frame_axis]
-        effective_end = int(min(total_frames_in_file, offset_n_frames + frame_limit))
+        effective_end = offset_n_frames + usable_frames(shape)
         # An int rather than a slice when n_frames is None: h5py then drops the axis
         # on read, so single-frame samples never grow a length-1 frame dimension.
-        selections = [
+        return [
             i if n_frames is None else slice(i, i + block_size, frame_index_stride)
             for i in range(offset_n_frames, effective_end - block_size + 1, block_step_size)
         ]
-        if not selections and pad_incomplete_blocks and effective_end > offset_n_frames:
-            selections = [slice(offset_n_frames, effective_end, frame_index_stride)]
-        return selections
 
     # The frame axis leads the product when there is one; without it (a field the spec
     # gives no n_frames axis) every file contributes exactly one sample.
@@ -226,14 +230,15 @@ def generate_h5_indices(
     )
 
     indices = []
-    skipped_files = 0
+    short_files: dict[str, int] = {}
     for file, shape in zip(file_paths, file_shapes):
         axis_indices = []
         if source_frame_axis is not None:
             selections = frame_selections(shape)
-            # drop files that are too small to fit a single block
+            # Files too small to fit a single block cannot be served: on_incomplete_blocks
+            # below decides whether that is an error or a silent drop.
             if not selections:
-                skipped_files += 1
+                short_files[file] = usable_frames(shape)
                 continue
             axis_indices.append(selections)
 
@@ -249,13 +254,18 @@ def generate_h5_indices(
                     full_indices[axis] = sel
             indices.append((file, key, tuple(full_indices)))
 
-    if skipped_files > 0:
-        log.warning(
-            f"Skipping {skipped_files} files with not enough frames "
-            f"which is about {skipped_files / len(file_paths) * 100:.2f}% of the "
-            f"dataset. This can be fine if you expect set `n_frames` and "
-            "`frame_index_stride` to be high. Minimum frames in a file needs to be at "
-            f"least {block_size}. "
+    if short_files:
+        if on_incomplete_blocks == "error":
+            raise _incomplete_blocks_error(
+                short_files,
+                len(file_paths),
+                block_size,
+                windowed=offset_n_frames > 0 or limit_n_frames is not None,
+            )
+        log.info(
+            f"Skipping {len(short_files)} / {len(file_paths)} files "
+            f"({len(short_files) / len(file_paths) * 100:.2f}% of the dataset) that hold "
+            f"fewer than the {block_size} frames one sample needs."
         )
 
     return indices
@@ -283,6 +293,53 @@ def _resolve_source_frame_axis(key: str, num_dims: int) -> int | None:
     return None
 
 
+def _check_file_policy(name: str, value: str) -> str:
+    """Validate one of the ``"error"`` / ``"skip"`` keywords, returning it unchanged."""
+    if value not in _FILE_POLICIES:
+        raise ValueError(
+            f"{name} must be one of {_FILE_POLICIES}, got {value!r}. Use 'error' to refuse "
+            "to build the loader and be told which files are at fault, or 'skip' to drop "
+            "them from the dataset."
+        )
+    return value
+
+
+def _name_files(files: Sequence[str]) -> str:
+    """Name the first few of ``files`` by basename, counting the rest."""
+    shown = ", ".join(f"'{Path(f).name}'" for f in files[:_MAX_LISTED_FILES])
+    if len(files) > _MAX_LISTED_FILES:
+        shown += f", +{len(files) - _MAX_LISTED_FILES} more"
+    return shown
+
+
+def _incomplete_blocks_error(
+    short_files: dict, n_files: int, block_size: int, windowed: bool
+) -> ValueError:
+    """Build the error raised when files hold too few frames to fill one block.
+
+    The counterpart of :func:`_missing_metadata_error`: both name files the loader
+    cannot serve and point at the ``"skip"`` policy that drops them.  ``short_files``
+    maps a file path to the frames it has available, which ``offset_n_frames`` and
+    ``limit_n_frames`` can narrow -- ``windowed`` says whether they did.
+    """
+    listed = list(short_files.items())[:_MAX_LISTED_FILES]
+    shown = ", ".join(f"'{Path(f).name}' ({n})" for f, n in listed)
+    if len(short_files) > _MAX_LISTED_FILES:
+        shown += f", +{len(short_files) - _MAX_LISTED_FILES} more"
+    window = (
+        " Those counts are what offset_n_frames and limit_n_frames leave of each file."
+        if windowed
+        else ""
+    )
+    return ValueError(
+        f"{len(short_files)}/{n_files} files hold fewer than the {block_size} frames one "
+        f"sample needs: {shown}.{window} Drop them with on_incomplete_blocks='skip', or "
+        "lower n_frames / frame_index_stride until a block fits. Samples are stacked into "
+        "batches, so a block short of n_frames cannot be served as it is; read those files "
+        "directly if you need their frames."
+    )
+
+
 def _missing_metadata_error(metadata_gaps: dict, n_files: int) -> KeyError:
     """Build the error raised when files cannot supply a requested metadata path.
 
@@ -298,12 +355,10 @@ def _missing_metadata_error(metadata_gaps: dict, n_files: int) -> KeyError:
 
     parts = []
     for path, files in per_path.items():
-        shown = ", ".join(f"'{Path(f).name}'" for f in files[:_MAX_LISTED_FILES])
-        if len(files) > _MAX_LISTED_FILES:
-            shown += f", +{len(files) - _MAX_LISTED_FILES} more"
         parts.append(
             f"return_metadata path '{path}' is missing from {len(files)}/{n_files} files "
-            f"({shown}); drop them with file_filter={{'{path}': EXISTS}}"
+            f"({_name_files(files)}); drop them with on_missing_metadata='skip', or up "
+            f"front with file_filter={{'{path}': EXISTS}}"
         )
     # KeyError renders its argument with repr(), so keep the message to one line.
     return KeyError(
@@ -433,6 +488,10 @@ class H5DataSource:
         cache: Cache loaded samples to RAM.
         validate: Validate dataset against the zea format.
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
+        on_incomplete_blocks: ``"error"`` or ``"skip"`` for files too short to fill a
+            block. See :class:`Dataloader`.
+        on_missing_metadata: ``"error"`` or ``"skip"`` for files that cannot supply a
+            requested ``return_metadata`` path. See :class:`Dataloader`.
         file_filter: Keep only files whose content matches a predicate. See
             :class:`Dataloader` for details. Defaults to ``None`` (no filtering).
     """
@@ -454,7 +513,8 @@ class H5DataSource:
         cache: bool = False,
         validate: bool = False,
         revision: str | None = None,
-        pad_incomplete_blocks: bool = False,
+        on_incomplete_blocks: str = "error",
+        on_missing_metadata: str = "error",
         axis_selections: dict | None = None,
         file_filter: "Callable[[File], bool] | dict | None" = None,
         **kwargs,
@@ -466,7 +526,8 @@ class H5DataSource:
         # Metadata is constant per file, so cache it per path rather than per sample.
         self._metadata_cache: OrderedDict[str, dict] = OrderedDict()
         self._metadata_lock = threading.Lock()
-        self.pad_incomplete_blocks = pad_incomplete_blocks
+        self.on_incomplete_blocks = _check_file_policy("on_incomplete_blocks", on_incomplete_blocks)
+        self.on_missing_metadata = _check_file_policy("on_missing_metadata", on_missing_metadata)
 
         self.key = key
         self.n_frames = None if n_frames is None else int(n_frames)
@@ -478,10 +539,6 @@ class H5DataSource:
         )
         assert self.n_frames is None or self.n_frames > 0, (
             f"`n_frames` must be > 0 or None, got {self.n_frames}"
-        )
-        assert not (pad_incomplete_blocks and self.n_frames is None), (
-            "`pad_incomplete_blocks` pads samples up to `n_frames`, so it needs an "
-            "`n_frames` to pad to. Set n_frames, or drop pad_incomplete_blocks."
         )
 
         # Discover files and shapes (reuses Dataset machinery)
@@ -556,20 +613,14 @@ class H5DataSource:
             sort_files=sort_files,
             overlapping_blocks=overlapping_blocks,
             limit_n_frames=limit_n_frames,
-            pad_incomplete_blocks=pad_incomplete_blocks,
+            on_incomplete_blocks=self.on_incomplete_blocks,
             axis_selections=self.normalized_axis_selections or None,
             offset_n_frames=offset_n_frames,
         )
 
-        if limit_n_examples is not None:
-            log.info(
-                f"H5DataSource: Limiting to {limit_n_examples} / {len(self.indices)} examples."
-            )
-            self.indices = self.indices[:limit_n_examples]
-
         # Only files that made it into the index table are ever read, so judge metadata
-        # on those: a file dropped for being too short to fill a block must not fail the
-        # loader over a path nothing will ever ask it for.
+        # on those: a file already dropped for being too short must not fail the loader
+        # over a path nothing will ever ask it for.
         contributing_files = {file_name for file_name, _key, _selection in self.indices}
         metadata_gaps = {
             file_path: paths
@@ -577,7 +628,14 @@ class H5DataSource:
             if file_path in contributing_files
         }
         if metadata_gaps:
-            raise _missing_metadata_error(metadata_gaps, len(contributing_files))
+            if self.on_missing_metadata == "error":
+                raise _missing_metadata_error(metadata_gaps, len(contributing_files))
+            log.info(
+                f"Skipping {len(metadata_gaps)} / {len(contributing_files)} files that cannot "
+                "supply the requested return_metadata paths."
+            )
+            self.indices = [entry for entry in self.indices if entry[0] not in metadata_gaps]
+            contributing_files -= set(metadata_gaps)
         self._metadata_signatures = {
             file_path: signature
             for file_path, signature in self._metadata_signatures.items()
@@ -591,6 +649,14 @@ class H5DataSource:
             self._file_n_frames if self._slice_metadata_per_frame else {},
         )
 
+        # Last, so the cap counts samples the loader actually yields rather than ones a
+        # policy above was about to drop.
+        if limit_n_examples is not None:
+            log.info(
+                f"H5DataSource: Limiting to {limit_n_examples} / {len(self.indices)} examples."
+            )
+            self.indices = self.indices[:limit_n_examples]
+
         self.sample_shapes = self._collect_sample_shapes()
 
         # Thread-local file handle caches (one per thread)
@@ -601,44 +667,30 @@ class H5DataSource:
     def _collect_sample_shapes(self) -> dict[tuple, list[str]]:
         """Map each distinct sample shape this source yields to the files producing it.
 
-        Derived from the index table rather than by reading, so it costs no I/O. More
-        than one entry means the dataset is ragged: the files disagree on everything
-        but the frame axis, or a file's last block is shorter than ``n_frames``.
+        Derived from the index table rather than by reading, so it costs no I/O. Every
+        block holds exactly ``n_frames`` frames, so all samples of a file share one
+        shape; more than one entry means the dataset is ragged -- the files disagree on
+        an axis other than the frame axis.
         """
         shape_by_path = dict(zip(self.file_paths, self.file_shapes))
         shapes: dict[tuple, list[str]] = defaultdict(list)
-        # A file's samples differ only in how many frames the block spans -- the other
-        # iterated axes are indexed away with an int -- so one file has at most a full
-        # block and a shorter tail. Deriving a shape per (file shape, block length)
-        # rather than per sample also spares :meth:`_place_frames` from materializing a
-        # padded dummy for every sample of a padded file.
-        shape_by_block: dict[tuple, tuple] = {}
+        # Samples of one file differ only in where their block starts, and the axes
+        # iterated alongside it are indexed away with an int -- so the sample shape
+        # follows from the file shape alone. Deriving one shape per distinct file shape
+        # keeps this off the per-sample path.
+        shape_by_file_shape: dict[tuple, tuple] = {}
         for file_name, _key, selection in self.indices:
             file_shape = shape_by_path[file_name]
-            block = (file_shape, self._block_length(file_shape, selection))
-            shape = shape_by_block.get(block)
+            shape = shape_by_file_shape.get(file_shape)
             if shape is None:
-                shape = shape_by_block[block] = self._sample_shape(file_shape, selection)
+                shape = shape_by_file_shape[file_shape] = self._sample_shape(file_shape, selection)
             files = shapes[shape]
             if len(files) < _MAX_LISTED_FILES and file_name not in files:
                 files.append(file_name)
         return dict(shapes)
 
-    def _block_length(self, file_shape: tuple, selection: tuple) -> int | None:
-        """Frames the sample read with ``selection`` spans, before any padding.
-
-        ``None`` when the frame axis never reaches the sample: the data has no frame
-        axis, or ``n_frames=None`` selected a single frame with an int index.
-        """
-        if self.source_frame_axis is None:
-            return None
-        frame_selection = selection[self.source_frame_axis]
-        if not isinstance(frame_selection, slice):
-            return None
-        return len(range(*frame_selection.indices(file_shape[self.source_frame_axis])))
-
     def _place_frames(self, images):
-        """Move the loaded frame axis into place and pad a block short of ``n_frames``.
+        """Move the loaded frame axis into the output position.
 
         Pure axis bookkeeping -- it reads only shapes, never values -- so
         :meth:`_sample_shape` can run it on a dummy to learn the output shape.
@@ -654,15 +706,7 @@ class H5DataSource:
         if self.additional_axes_iter:
             # Axes iterated with an int index are gone from the loaded array.
             source -= sum(ax < self.source_frame_axis for ax in self.additional_axes_iter)
-        images = np.moveaxis(images, source, self.frame_axis)
-
-        if self.pad_incomplete_blocks:
-            n_loaded = images.shape[self.frame_axis]
-            if n_loaded < self.n_frames:
-                pad_width = [(0, 0)] * images.ndim
-                pad_width[self.frame_axis] = (0, self.n_frames - n_loaded)
-                images = np.pad(images, pad_width)
-        return images
+        return np.moveaxis(images, source, self.frame_axis)
 
     def _sample_shape(self, file_shape: tuple, selection: tuple) -> tuple:
         """The shape :meth:`__getitem__` returns for a sample read with ``selection``.
@@ -859,8 +903,7 @@ class Dataloader:
             built, and raises :exc:`ValueError` naming the leaves that disagree. Files
             may still hold different numbers of frames: that axis is sliced away before
             stacking. Use ``batch_size=None`` for metadata that genuinely varies in
-            shape between files. Per-frame metadata is not zero-padded along with the
-            images when ``pad_incomplete_blocks=True``.
+            shape between files.
         seed: Random seed used for dataloader (e.g. shuffling). Default is ``None``.
             If ``None`` a random seed is generated.
         limit_n_examples: Cap the total number of examples the loader yields, across
@@ -912,8 +955,17 @@ class Dataloader:
         sort_files: Sort files numerically before indexing. Default is ``True``.
         overlapping_blocks: If ``True``, frame blocks overlap by ``n_frames - 1``.
             Has no effect unless ``n_frames > 1``. Default is ``False``.
-        pad_incomplete_blocks: If ``True``, keep files shorter than a full block and zeropad
-            their samples up to ``n_frames``. Requires ``n_frames``. Default is ``False``.
+        on_incomplete_blocks: What to do with files holding too few frames to fill one
+            block of ``n_frames`` (spaced by ``frame_index_stride``). ``"error"``
+            (default) refuses to build the loader and names the offending files;
+            ``"skip"`` drops them from the dataset. Samples are stacked into batches, so
+            a block short of ``n_frames`` is never served as it is -- read such files
+            directly if you need their frames.
+        on_missing_metadata: What to do with files that cannot supply a path requested
+            through ``return_metadata``. ``"error"`` (default) refuses to build the
+            loader and names the offending files; ``"skip"`` drops them from the
+            dataset. Default is ``"error"``, because metadata is read for every sample,
+            so a gap would otherwise fail the run partway through an epoch.
         augmentation: Callable applied to each batch after normalization.
             Default is ``None``.
         frame_index_stride: Step between selected frames in a block.
@@ -1090,7 +1142,8 @@ class Dataloader:
         sort_files: bool = True,
         overlapping_blocks: bool = False,
         augmentation: Callable | None = None,
-        pad_incomplete_blocks: bool = False,
+        on_incomplete_blocks: str = "error",
+        on_missing_metadata: str = "error",
         frame_index_stride: int = 1,
         frame_axis: int = -1,
         validate: bool = False,
@@ -1150,7 +1203,8 @@ class Dataloader:
             cache=cache,
             validate=validate,
             revision=revision,
-            pad_incomplete_blocks=pad_incomplete_blocks,
+            on_incomplete_blocks=on_incomplete_blocks,
+            on_missing_metadata=on_missing_metadata,
             axis_selections=axis_selections,
             file_filter=file_filter,
             **kwargs,
