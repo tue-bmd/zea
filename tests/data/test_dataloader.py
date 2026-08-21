@@ -1652,7 +1652,7 @@ def test_ragged_dataset_allows_batch_size_one(ragged_folder):
     [
         {},
         {"n_frames": 2},
-        {"n_frames": 3, "pad_incomplete_blocks": True},
+        {"n_frames": FILTER_N_FRAMES + 1, "pad_incomplete_blocks": True},
         {"image_size": (8, 8), "resize_type": "center_crop"},
         {"image_size": (24, 24), "resize_type": "crop_or_pad"},
         {"image_size": (12, 12), "resize_type": "resize"},

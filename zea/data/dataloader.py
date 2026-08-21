@@ -508,9 +508,6 @@ class H5DataSource:
         )
         _dataset.close()
 
-        if metadata_gaps:
-            raise _missing_metadata_error(metadata_gaps, len(self.file_paths))
-
         num_dims = len(self.file_shapes[0]) if self.file_shapes else 0
         self.source_frame_axis = _resolve_source_frame_axis(self.key, num_dims)
         self.additional_axes_iter = map_negative_indices(list(additional_axes_iter or []), num_dims)
@@ -535,13 +532,6 @@ class H5DataSource:
             self.return_metadata
             and has_per_frame_paths(self.return_metadata)
             and self.source_frame_axis is not None
-        )
-
-        # Left for the caller to act on: only a batched loader stacks metadata across
-        # files, and this source does not know whether it feeds one.
-        self.metadata_batch_conflicts = _metadata_batch_conflicts(
-            self._metadata_signatures,
-            self._file_n_frames if self._slice_metadata_per_frame else {},
         )
 
         # Validate and normalize axis_selections
@@ -577,6 +567,30 @@ class H5DataSource:
             )
             self.indices = self.indices[:limit_n_examples]
 
+        # Only files that made it into the index table are ever read, so judge metadata
+        # on those: a file dropped for being too short to fill a block must not fail the
+        # loader over a path nothing will ever ask it for.
+        contributing_files = {file_name for file_name, _key, _selection in self.indices}
+        metadata_gaps = {
+            file_path: paths
+            for file_path, paths in metadata_gaps.items()
+            if file_path in contributing_files
+        }
+        if metadata_gaps:
+            raise _missing_metadata_error(metadata_gaps, len(contributing_files))
+        self._metadata_signatures = {
+            file_path: signature
+            for file_path, signature in self._metadata_signatures.items()
+            if file_path in contributing_files
+        }
+
+        # Left for the caller to act on: only a batched loader stacks metadata across
+        # files, and this source does not know whether it feeds one.
+        self.metadata_batch_conflicts = _metadata_batch_conflicts(
+            self._metadata_signatures,
+            self._file_n_frames if self._slice_metadata_per_frame else {},
+        )
+
         self.sample_shapes = self._collect_sample_shapes()
 
         # Thread-local file handle caches (one per thread)
@@ -593,12 +607,35 @@ class H5DataSource:
         """
         shape_by_path = dict(zip(self.file_paths, self.file_shapes))
         shapes: dict[tuple, list[str]] = defaultdict(list)
+        # A file's samples differ only in how many frames the block spans -- the other
+        # iterated axes are indexed away with an int -- so one file has at most a full
+        # block and a shorter tail. Deriving a shape per (file shape, block length)
+        # rather than per sample also spares :meth:`_place_frames` from materializing a
+        # padded dummy for every sample of a padded file.
+        shape_by_block: dict[tuple, tuple] = {}
         for file_name, _key, selection in self.indices:
-            shape = self._sample_shape(shape_by_path[file_name], selection)
+            file_shape = shape_by_path[file_name]
+            block = (file_shape, self._block_length(file_shape, selection))
+            shape = shape_by_block.get(block)
+            if shape is None:
+                shape = shape_by_block[block] = self._sample_shape(file_shape, selection)
             files = shapes[shape]
             if len(files) < _MAX_LISTED_FILES and file_name not in files:
                 files.append(file_name)
         return dict(shapes)
+
+    def _block_length(self, file_shape: tuple, selection: tuple) -> int | None:
+        """Frames the sample read with ``selection`` spans, before any padding.
+
+        ``None`` when the frame axis never reaches the sample: the data has no frame
+        axis, or ``n_frames=None`` selected a single frame with an int index.
+        """
+        if self.source_frame_axis is None:
+            return None
+        frame_selection = selection[self.source_frame_axis]
+        if not isinstance(frame_selection, slice):
+            return None
+        return len(range(*frame_selection.indices(file_shape[self.source_frame_axis])))
 
     def _place_frames(self, images):
         """Move the loaded frame axis into place and pad a block short of ``n_frames``.
