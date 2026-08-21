@@ -850,24 +850,18 @@ class Dataloader:
 
     Args:
         file_paths: Path(s) to directory(ies) and/or HDF5 file(s).
-        key: HDF5 dataset key. Default is ``"data/image"``.
+        key: HDF5 dataset key.
         batch_size: Batch size. Set to ``None`` to disable batching.
-            Default is ``16``. Stacking two or more samples requires them to have the
-            same shape, and metadata requested via ``return_metadata`` is stacked leaf
-            by leaf just like the data, so every file must supply the same fields with
-            the same shapes. Both are checked when the loader is built, which refuses
-            to construct rather than failing on whichever batch first straddles two
-            files. ``image_size`` resolves differing sample shapes; for the rest, use
+            Default is ``16``. Stacking two or more samples (incl. metadata) requires them to have
+            the same shape. This is checked when the loader is built. Note that ``image_size`` can
+            resolve differing sample shapes; for the rest, use
             ``batch_size=None`` (or ``1``, which stacks nothing) and batch it yourself.
         n_frames: Number of consecutive frames per sample, placed on ``frame_axis``.
             Default is ``None``, which loads single frames *without* a frame axis, so a
             sample keeps the file's own layout for one frame. Set an int to group
             consecutive frames into blocks -- including ``n_frames=1``, which gives a
             length-1 frame axis. Frames are read from whichever axis the zea file spec
-            names ``n_frames`` for ``key``; a field the spec gives no such axis is only
-            loadable with ``n_frames=None``, one sample per file. Note that a 2-D sample
-            still picks up a trailing channel axis on its way through the pipeline, so
-            for plain images ``n_frames=None`` and ``n_frames=1`` batch identically.
+            names ``n_frames`` for ``key``.
         shuffle: Shuffle dataset each epoch. Default is ``True``.
         return_metadata: Return a ``(sample, metadata)`` tuple instead of a bare
             sample. ``False`` (default) returns arrays only. ``True`` returns just
@@ -875,10 +869,8 @@ class Dataloader:
             fields from the file, e.g.
             ``["scan.sampling_frequency", "metadata.subject"]``; a path pointing at a
             group loads everything below it. Paths use the same syntax as
-            ``file_filter`` and are read straight off the HDF5 groups, so only what
-            you ask for is loaded. The returned dict mirrors
-            :class:`~zea.data.spec.FileSpec`, with the loader's own provenance under
-            a ``"file"`` key::
+            ``file_filter``. The returned dict mirrors :class:`~zea.data.spec.FileSpec`, with
+            the loader's own provenance under a ``"file"`` key::
 
                 {
                     "scan": {"sampling_frequency": 40e6},
@@ -886,33 +878,18 @@ class Dataloader:
                     "file": {"fullpath": ..., "filename": ..., "indices": ...},
                 }
 
-            Metadata is read once per file, not once per sample. Fields whose
-            leading dimension is ``n_frames`` in the spec (per-frame annotations,
-            per-frame metrics) are sliced to the sample's frames so they stay
-            aligned with the returned images. Because metadata is per file, a requested
-            path is either present for every sample of a file or for none of them, so
-            every file is checked for the requested paths when the loader is built:
-            any that cannot answer raise :exc:`KeyError` there and then, naming them,
-            rather than failing partway through an epoch. Drop them with e.g.
-            ``file_filter={"metadata.subject.age": EXISTS}``. A per-frame field stored in
-            a broadcast form the spec allows -- one value for the whole file, such as a
-            single ``annotations.view`` string or a map grid with its leading frame axis
-            omitted -- is returned in full with every sample rather than sliced.
-            Batching stacks metadata leaf by leaf, so every file must supply the same
-            leaves with the same shapes -- this too is checked when the loader is
-            built, and raises :exc:`ValueError` naming the leaves that disagree. Files
-            may still hold different numbers of frames: that axis is sliced away before
-            stacking. Use ``batch_size=None`` for metadata that genuinely varies in
-            shape between files.
+            Fields whose leading dimension is ``n_frames`` in the spec are sliced to the
+            sample's frames so they stay aligned with the returned images. During construction,
+            the loader checks that all files can supply the requested paths and that
+            they have the same shapes, raising :exc:`KeyError` or :exc:`ValueError` naming the
+            offending files. They can be dropped with ``on_missing_metadata="skip"`` or
+            ``file_filter``. Use ``batch_size=None`` for metadata that genuinely varies in shape
+            between files.
         seed: Random seed used for dataloader (e.g. shuffling). Default is ``None``.
             If ``None`` a random seed is generated.
-        limit_n_examples: Cap the total number of examples the loader yields, across
-            all files (useful for debugging). Default is ``None`` (no limit). An
-            "example" is one item before batching -- a single frame, or a block of
-            ``n_frames`` consecutive frames -- so this is neither a count of files nor,
-            despite the ultrasound sense of the word, of axial samples. Contrast
-            ``limit_n_frames``, which caps frames *per file*. Note that this happens
-            before shuffle!
+        limit_n_examples: Cap the total number of examples (== item before batching) the loader
+            yields, across all files (useful for debugging). Default is ``None`` (no limit).
+            Note that this happens before shuffle.
         limit_n_frames: Maximum number of frames to load per file, counted from
             ``offset_n_frames``. Default is ``None`` (no limit).
         offset_n_frames: Frame index to start iteration from within each file.
@@ -958,14 +935,11 @@ class Dataloader:
         on_incomplete_blocks: What to do with files holding too few frames to fill one
             block of ``n_frames`` (spaced by ``frame_index_stride``). ``"error"``
             (default) refuses to build the loader and names the offending files;
-            ``"skip"`` drops them from the dataset. Samples are stacked into batches, so
-            a block short of ``n_frames`` is never served as it is -- read such files
-            directly if you need their frames.
+            ``"skip"`` drops them from the dataset.
         on_missing_metadata: What to do with files that cannot supply a path requested
             through ``return_metadata``. ``"error"`` (default) refuses to build the
             loader and names the offending files; ``"skip"`` drops them from the
-            dataset. Default is ``"error"``, because metadata is read for every sample,
-            so a gap would otherwise fail the run partway through an epoch.
+            dataset. Default is ``"error"``.
         augmentation: Callable applied to each batch after normalization.
             Default is ``None``.
         frame_index_stride: Step between selected frames in a block.
