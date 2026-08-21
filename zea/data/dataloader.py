@@ -937,10 +937,11 @@ class Dataloader:
         assert_image_range: Assert values stay within ``image_range``.
             Default is ``True``.
         dtype: Cast samples to this dtype (e.g. ``"float32"``, ``np.float16``) after
-            batching and before normalization. Default is ``None``, which leaves the
-            dtype the files provide untouched. Note that normalization of integer data
-            needs a floating point ``dtype``, otherwise ``normalization_range`` is
-            applied with integer arithmetic.
+            batching and before normalization, so it is also what picks the precision
+            ``normalization_range`` normalizes in. Must be floating point whenever
+            ``normalization_range`` is set. Default is ``None``, which keeps the dtype
+            the files hold -- except that files holding integers are promoted to
+            ``float32``, since normalizing has no integer-valued result.
         dataset_repetitions: Repeat dataset this many times. Repetition happens
             after sharding. Default is ``None`` (no repetition).
         cache: Cache loaded samples in RAM. Default is ``False``.
@@ -1158,6 +1159,11 @@ class Dataloader:
             assert image_range is not None, (
                 "If normalization_range is set, image_range must be set too."
             )
+            assert dtype is None or np.issubdtype(np.dtype(dtype), np.floating), (
+                "If normalization_range is set, dtype must be a floating point dtype, "
+                f"got {np.dtype(dtype)}. Normalized values cannot be held in an integer, "
+                "so the cast would be undone."
+            )
         if num_shards > 1:
             assert shard_index is not None, "shard_index must be specified"
             assert 0 <= shard_index < num_shards
@@ -1332,7 +1338,7 @@ class Dataloader:
 
         if cfg["normalization_range"] is not None:
             _ir, _nr = cfg["image_range"], cfg["normalization_range"]
-            ds = _ds_map(ds, lambda x, _a=_ir, _b=_nr: translate(x, _a, _b))
+            ds = _ds_map(ds, lambda x, _a=_ir, _b=_nr: Dataloader._normalize(x, _a, _b))
 
         if cfg["augmentation"] is not None:
             ds = _ds_map(ds, cfg["augmentation"])
@@ -1419,6 +1425,14 @@ class Dataloader:
         if len(np.shape(image)) < 3:
             return np.expand_dims(image, axis=-1)
         return image
+
+    @staticmethod
+    def _normalize(image, image_range, normalization_range):
+        """Map ``image`` from ``image_range`` to ``normalization_range``."""
+        # Promote integer samples to float32 so normalization doesn't wrap around
+        if not np.issubdtype(image.dtype, np.floating):
+            image = image.astype(np.float32)
+        return translate(image, image_range, normalization_range)
 
     @staticmethod
     def _assert_image_range(image, image_range):

@@ -744,6 +744,68 @@ def test_dtype_casts_before_normalization(uint8_hdf5):
     assert not np.all(np.equal(batch, np.round(batch)))
 
 
+@pytest.fixture
+def int16_hdf5(tmp_path):
+    """A file whose int16 data spans the full int16 range."""
+    file_path = tmp_path / "int16_data.hdf5"
+    values = np.array([-32768, 0, 32767], dtype=np.int16)
+    row = np.resize(values, DUMMY_IMAGE_SHAPE[-1])
+    data = np.broadcast_to(row, (DUMMY_N_FRAMES, *DUMMY_IMAGE_SHAPE)).astype(np.int16)
+    with h5py.File(file_path, "w") as f:
+        f.create_dataset("data", data=data)
+    return file_path
+
+
+def test_normalization_promotes_integer_samples(uint8_hdf5):
+    """Test that normalization promotes integer data to float32 without a `dtype`."""
+    dataloader = Dataloader(
+        uint8_hdf5,
+        key="data",
+        batch_size=2,
+        shuffle=False,
+        image_range=(0, 255),
+        normalization_range=(0, 1),
+        convert_to_tensor=False,
+        validate=False,
+    )
+    batch = next(iter(dataloader))
+    assert batch.dtype == np.float32
+    assert 0.0 <= batch.min() and batch.max() <= 1.0
+
+
+def test_normalization_of_full_range_int16_does_not_overflow(int16_hdf5):
+    """Test that shifting by `image_range[0]` does not wrap around in the input dtype."""
+    dataloader = Dataloader(
+        int16_hdf5,
+        key="data",
+        batch_size=2,
+        shuffle=False,
+        image_range=(-32768, 32767),
+        normalization_range=(0, 1),
+        convert_to_tensor=False,
+        validate=False,
+    )
+    batch = next(iter(dataloader))
+    assert batch.dtype == np.float32
+    np.testing.assert_allclose(np.unique(batch), [0.0, 0.5, 1.0], atol=1e-4)
+
+
+def test_normalization_preserves_floating_dtype(uint8_hdf5):
+    """Test that an explicit floating `dtype` survives normalization."""
+    dataloader = Dataloader(
+        uint8_hdf5,
+        key="data",
+        batch_size=2,
+        shuffle=False,
+        image_range=(0, 255),
+        normalization_range=(0, 1),
+        dtype="float64",
+        convert_to_tensor=False,
+        validate=False,
+    )
+    assert next(iter(dataloader)).dtype == np.float64
+
+
 def test_normalization_without_image_range_raises(dummy_hdf5):
     """Test that setting normalization_range without image_range raises."""
     with pytest.raises(AssertionError, match="image_range must be set"):
@@ -752,6 +814,19 @@ def test_normalization_without_image_range_raises(dummy_hdf5):
             key="data",
             normalization_range=(0, 1),
             image_range=None,
+            validate=False,
+        )
+
+
+def test_normalization_with_integer_dtype_raises(dummy_hdf5):
+    """Test that an integer `dtype` is rejected when `normalization_range` is set."""
+    with pytest.raises(AssertionError, match="dtype must be a floating point dtype"):
+        Dataloader(
+            dummy_hdf5,
+            key="data",
+            image_range=(0, 255),
+            normalization_range=(0, 1),
+            dtype="uint8",
             validate=False,
         )
 
