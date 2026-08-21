@@ -981,17 +981,37 @@ class VerasonicsFile(h5py.File):
         return 10 ** (gain_curve / 20)
 
     @property
+    def tgc_selection(self):
+        """The 1-based index into the TGC structs of the gain curve to use.
+
+        A sequence may define several TGC structs, each with its own gain curve, and every
+        acquisition picks one through ``Receive.TGC``. This converter writes a single track,
+        which holds one gain curve, so acquisitions with differing curves fall back to the
+        first curve used.
+        """
+        receive_tgc = self["Receive"].get("TGC")
+        if receive_tgc is None:
+            # Sequences that leave Receive.TGC unset only have a single gain curve to use
+            return 1
+
+        selections = set(self.dereference_all(receive_tgc, func=self.cast_to_integer))
+        if len(selections) > 1:
+            log.warning(
+                f"Acquisitions in file use different TGC gain curves {sorted(selections)}, but "
+                f"this converter writes a single track, which holds one gain curve. Using "
+                f"TGC({min(selections)}). To keep every gain curve, write a manual conversion "
+                "script that stores each acquisition type as its own track with "
+                "`zea.File.create(tracks=...)`."
+            )
+        return min(selections)
+
+    @property
     def tgc_gain_curve(self):
         """The TGC gain curve from the file interpolated to the number of axial samples (n_ax,)."""
-        n_tgc = self.get_reference_size(self["TGC"]["Waveform"])
-        if n_tgc > 1:
-            log.warning(
-                f"Found {n_tgc} TGC structs in file, but only a single TGC gain curve is "
-                "supported. Using the first one."
-            )
+        tgc_index = self.tgc_selection - 1  # MATLAB indices are 1-based
 
         # MATLAB stores the waveform as a row vector, which h5py reads as a column
-        waveform = self.dereference_index(self["TGC"]["Waveform"], 0)[:].squeeze(-1)
+        waveform = self.dereference_index(self["TGC"]["Waveform"], tgc_index)[:].squeeze(-1)
 
         # For baseband mode two consecutive samples are combined into a single complex sample
         n_ax = self.n_ax if not self.is_baseband_mode else self.n_ax // 2
