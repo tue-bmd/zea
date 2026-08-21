@@ -1532,12 +1532,10 @@ class ScanSpec(Spec):
         tgc_gain_curve: The time-gain-compensation that was applied to every
             sample in the raw_data of shape (n_ax,). Divide by this curve to
             undo the TGC.
-        waveforms_one_way: One-way waveforms of shape (n_tx, .) as simulated
-            by the Verasonics system. This is the waveform after being filtered
-            by the transducer bandwidth once.
-        waveforms_two_way: Two-way waveforms of shape (n_tx, .) as simulated
-            by the Verasonics system. This is the waveform after being filtered
-            by the transducer bandwidth twice.
+        waveforms_one_way: One-way (simulated) waveforms of shape (n_tx, .). This is the waveform
+            after being filtered by the transducer bandwidth once. Should be sampled at 250 MHz.
+        waveforms_two_way: Two-way (simulated) waveforms of shape (n_tx, .). This is the waveform
+            after being filtered by the transducer bandwidth twice. Should be sampled at 250 MHz.
     """
 
     sampling_frequency: np.ndarray | float

@@ -538,7 +538,15 @@ class VerasonicsFile(h5py.File):
         return tx_waveform_indices
 
     def read_waveforms(self):
-        """Read the waveforms from the file."""
+        """Read the waveforms from the file.
+
+        Verasonics simulates two waveforms for each transmit: a one-way waveform
+        and a two-way waveform. Both are sampled at 250 MHz.
+
+        Returns:
+            tuple: ``(waveforms_one_way, waveforms_two_way)`` — one-way and two-way waveforms of
+                shape ``(n_waveforms, n_samples)``.
+        """
         waveforms_one_way_list = []
         waveforms_two_way_list = []
 
