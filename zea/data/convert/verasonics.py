@@ -77,6 +77,11 @@ _VERASONICS_TO_ZEA_PROBE_NAMES = {
     "P4-2v": "verasonics_p4_2v",
     "P4-2V": "verasonics_p4_2v",
 }
+_FRAMES_RANGE_RE = re.compile(r"^\d+(-\d+)?$")
+
+# The Verasonics TGC waveform is sampled at 800ns (See Verasonics documentation for
+# details. Specifically the tutorial sequence programming)
+_TGC_SAMPLING_PERIOD = 800e-9
 
 
 def classify_ordered_geometry(geometry, rtol=1e-3):
@@ -127,9 +132,6 @@ def classify_ordered_geometry(geometry, rtol=1e-3):
             return True, "arc"
 
     return False, "unknown"
-
-
-_FRAMES_RANGE_RE = re.compile(r"^\d+(-\d+)?$")
 
 
 def estimate_lens_probe_params(
@@ -951,35 +953,50 @@ class VerasonicsFile(h5py.File):
         """
         return self.sample_mode in (50, 100)
 
-    @property
-    def tgc_gain_curve(self):
-        """The TGC gain curve from the file interpolated to the number of axial samples (n_ax,)."""
+    @staticmethod
+    def compute_tgc_gain_curve(waveform, n_ax, sampling_frequency):
+        """Interpolate a Verasonics TGC waveform to the axial sampling grid.
 
-        gain_curve = self["TGC"]["Waveform"][:][:, 0]
+        Args:
+            waveform (np.ndarray): Raw TGC waveform of the file, with values in [0, 1023].
+            n_ax (int): Number of axial samples to interpolate the waveform to.
+            sampling_frequency (float): Sampling frequency of the axial samples in Hz.
 
+        Returns:
+            np.ndarray: The gain curve in linear scale of shape (n_ax,).
+        """
         # Normalize the gain_curve to [0, 40]dB
-        gain_curve = gain_curve / 1023 * 40
-
-        # The gain curve is sampled at 800ns (See Verasonics documentation for details.
-        # Specifically the tutorial sequence programming)
-        gain_curve_sampling_period = 800e-9
+        gain_curve = waveform / 1023 * 40
 
         # Define the time axis for the gain curve
-        t_gain_curve = np.arange(gain_curve.size) * gain_curve_sampling_period
-
-        # For baseband mode two consecutive samples are combined into a single complex sample
-        n_ax = self.n_ax if not self.is_baseband_mode else self.n_ax // 2
+        t_gain_curve = np.arange(gain_curve.size) * _TGC_SAMPLING_PERIOD
 
         # Define the time axis for the axial samples
-        t_samples = np.arange(n_ax) / self.sampling_frequency
+        t_samples = np.arange(n_ax) / sampling_frequency
 
         # Interpolate the gain_curve to the number of axial samples
         gain_curve = np.interp(t_samples, t_gain_curve, gain_curve)
 
         # The gain_curve gains are in dB, so we need to convert them to linear scale
-        gain_curve = 10 ** (gain_curve / 20)
+        return 10 ** (gain_curve / 20)
 
-        return gain_curve
+    @property
+    def tgc_gain_curve(self):
+        """The TGC gain curve from the file interpolated to the number of axial samples (n_ax,)."""
+        n_tgc = self.get_reference_size(self["TGC"]["Waveform"])
+        if n_tgc > 1:
+            log.warning(
+                f"Found {n_tgc} TGC structs in file, but only a single TGC gain curve is "
+                "supported. Using the first one."
+            )
+
+        # MATLAB stores the waveform as a row vector, which h5py reads as a column
+        waveform = self.dereference_index(self["TGC"]["Waveform"], 0)[:].squeeze(-1)
+
+        # For baseband mode two consecutive samples are combined into a single complex sample
+        n_ax = self.n_ax if not self.is_baseband_mode else self.n_ax // 2
+
+        return self.compute_tgc_gain_curve(waveform, n_ax, self.sampling_frequency)
 
     def get_image_data_p_frame_order(self, buffer_index=0):
         """The order of frames in the ImgDataP buffer.
