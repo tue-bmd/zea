@@ -169,6 +169,36 @@ def test_frame_axis_comes_from_spec(spec_shaped_hdf5):
         )
 
 
+def test_frame_window_on_frameless_key_warns(spec_shaped_hdf5, attach_caplog_warnings):
+    """A frame window cannot narrow a key without frames, so it is ignored out loud."""
+    source = H5DataSource(
+        file_paths=[spec_shaped_hdf5],
+        key="probe/probe_geometry",
+        limit_n_frames=2,
+        offset_n_frames=3,
+        validate=False,
+    )
+    # The window changed nothing: still the one whole (n_el, 3) sample.
+    assert len(source) == 1
+    assert source[0].shape == (5, 3)
+
+    (record,) = [r for r in attach_caplog_warnings.records if "Ignoring" in r.message]
+    assert "limit_n_frames=2" in record.message
+    assert "offset_n_frames=3" in record.message
+
+
+def test_frame_window_on_framed_key_does_not_warn(spec_shaped_hdf5, attach_caplog_warnings):
+    """The warning is about frameless keys only -- a real frame axis is windowed as asked."""
+    source = H5DataSource(
+        file_paths=[spec_shaped_hdf5],
+        key="data/image/values",
+        limit_n_frames=2,
+        validate=False,
+    )
+    assert len(source) == 2
+    assert not [r for r in attach_caplog_warnings.records if "Ignoring" in r.message]
+
+
 def test_frame_axis_unknown_key_falls_back_to_axis_zero(dummy_hdf5):
     """A key outside the spec warns and assumes the usual leading frame axis."""
     source = H5DataSource(file_paths=[dummy_hdf5], key="data", validate=False)

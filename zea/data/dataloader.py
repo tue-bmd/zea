@@ -569,13 +569,33 @@ class H5DataSource:
         self.source_frame_axis = _resolve_source_frame_axis(self.key, num_dims)
         self.additional_axes_iter = map_negative_indices(list(additional_axes_iter or []), num_dims)
 
-        if self.source_frame_axis is None and self.n_frames is not None:
-            raise ValueError(
-                f"'{key}' has no frame axis in the zea file spec (its dimensions are "
-                f"{dim_names_for_key(key, num_dims)}), so frames cannot be grouped into "
-                f"blocks of n_frames={self.n_frames}. Use n_frames=None to load one "
-                "sample per file."
-            )
+        if self.source_frame_axis is None:
+            if self.n_frames is not None:
+                raise ValueError(
+                    f"'{key}' has no frame axis in the zea file spec (its dimensions are "
+                    f"{dim_names_for_key(key, num_dims)}), so frames cannot be grouped into "
+                    f"blocks of n_frames={self.n_frames}. Use n_frames=None to load one "
+                    "sample per file."
+                )
+            # Unlike n_frames, a frame window is not fatal: every file still yields its one
+            # sample. But it silently does nothing, so say so rather than let the caller
+            # believe their data was narrowed.
+            inert = [
+                f"{name}={value}"
+                for name, value in (
+                    ("limit_n_frames", limit_n_frames),
+                    ("offset_n_frames", offset_n_frames or None),
+                )
+                if value is not None
+            ]
+            if inert:
+                log.warning(
+                    f"Ignoring {' and '.join(inert)}: '{key}' has no frame axis in the zea "
+                    f"file spec (its dimensions are {dim_names_for_key(key, num_dims)}), so "
+                    "there are no frames to window and each file yields one whole sample. "
+                    "To load only part of such an array, pick indices along one of the axes "
+                    " using axis_selections, e.g. axis_selections={0: [0, 1]}."
+                )
 
         self._file_n_frames = (
             {
