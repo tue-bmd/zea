@@ -440,6 +440,32 @@ def test_t_peak_default_and_waveform_derived():
     assert np.allclose(parameters.t_peak, 1 / center_frequency)
 
 
+def test_tgc_gain_curve_per_transmit_follows_selected_transmits():
+    """A curve per transmit is filtered by set_transmits, a single curve is not."""
+    n_tx, n_ax = scan_args["n_tx"], scan_args["n_ax"]
+    gain_curves = np.linspace(1, 2, n_tx)[:, None] * np.ones(n_ax)
+
+    parameters = Parameters(**{**scan_args, "tgc_gain_curve": gain_curves})
+    assert parameters.tgc_gain_curve.shape == (n_tx, n_ax)
+
+    parameters.set_transmits([0, n_tx - 1])
+    assert parameters.tgc_gain_curve.shape == (2, n_ax)
+    assert np.allclose(parameters.tgc_gain_curve, gain_curves[[0, n_tx - 1]])
+
+    parameters = Parameters(**scan_args)
+    parameters.set_transmits([0, n_tx - 1])
+    assert parameters.tgc_gain_curve.shape == (n_ax,)
+
+
+@pytest.mark.parametrize("n_ax", [scan_args["n_ax"] - 1, scan_args["n_ax"] + 1])
+def test_tgc_gain_curve_length_must_match_n_ax(n_ax):
+    """A curve that was not sampled on the axial grid of the data is rejected."""
+    parameters = Parameters(**{**scan_args, "tgc_gain_curve": np.ones(n_ax)})
+
+    with pytest.raises(ValueError, match="must match n_ax"):
+        _ = parameters.tgc_gain_curve
+
+
 def test_missing_transmit_defaults_warn_once_on_access(monkeypatch, reset_warning_once):
     local_scan_args = scan_args.copy()
     local_scan_args.pop("azimuth_angles", None)

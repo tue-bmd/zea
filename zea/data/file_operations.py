@@ -786,6 +786,8 @@ def sa_to_virtual_focus(
             track.scan.waveforms_one_way = track.scan.waveforms_one_way[:1]
         if track.scan.waveforms_two_way is not None:
             track.scan.waveforms_two_way = track.scan.waveforms_two_way[:1]
+        if track.scan.tgc_gain_curve is not None and track.scan.tgc_gain_curve.ndim == 2:
+            track.scan.tgc_gain_curve = track.scan.tgc_gain_curve[:1]
         if track.scan.time_to_next_transmit is not None:
             track.scan.time_to_next_transmit = track.scan.time_to_next_transmit[:, :1]
 

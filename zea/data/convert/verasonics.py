@@ -288,6 +288,11 @@ class VerasonicsFile(h5py.File):
                 "Re-save the workspace in MATLAB with this flag and try again."
             ) from e
 
+    @staticmethod
+    def is_reference_dataset(dataset):
+        """Whether the dataset holds references to the actual data instead of the data itself."""
+        return h5py.check_dtype(ref=dataset.dtype) is not None
+
     def dereference_index(self, dataset, index):
         """Get the element at the given index from the dataset, dereferencing it if
         necessary.
@@ -303,7 +308,7 @@ class VerasonicsFile(h5py.File):
             dataset (h5py.Dataset): The dataset to read the element from.
             index (int): The index of the element to read.
         """
-        if isinstance(dataset.fillvalue, h5py.h5r.Reference):
+        if self.is_reference_dataset(dataset):
             reference = dataset[index].item()
             return self[reference][:]
         else:
@@ -330,7 +335,7 @@ class VerasonicsFile(h5py.File):
     @staticmethod
     def get_reference_size(dataset):
         """Get the size of a reference dataset."""
-        if isinstance(dataset.fillvalue, h5py.h5r.Reference):
+        if VerasonicsFile.is_reference_dataset(dataset):
             return len(dataset)
         else:
             return 1
@@ -988,43 +993,62 @@ class VerasonicsFile(h5py.File):
         # The gain_curve gains are in dB, so we need to convert them to linear scale
         return 10 ** (gain_curve / 20)
 
-    @property
-    def tgc_selection(self):
-        """The 1-based index into the TGC structs of the gain curve to use.
+    def read_tgc_waveform(self, tgc_index):
+        """Read the raw gain curve of the TGC struct at the given 0-based index."""
+        return self.dereference_index(self["TGC"]["Waveform"], tgc_index)[:].squeeze(-1)
+
+    def read_tgc_selection(self, rcv_order):
+        """The 1-based index into the TGC structs selected by each receive of shape (n_tx,).
 
         A sequence may define several TGC structs, each with its own gain curve, and every
-        acquisition picks one through ``Receive.TGC``. This converter writes a single track,
-        which holds one gain curve, so acquisitions with differing curves fall back to the
-        first curve used.
+        acquisition picks one through ``Receive.TGC``.
+
+        Args:
+            rcv_order (list): The order in which the receives appear in the events.
         """
         receive_tgc = self["Receive"].get("TGC")
         if receive_tgc is None:
             # Sequences that leave Receive.TGC unset only have a single gain curve to use
-            return 1
+            return np.ones(len(rcv_order), dtype=int)
 
-        selections = set(self.dereference_all(receive_tgc, func=self.cast_to_integer))
-        if len(selections) > 1:
-            log.warning(
-                f"Acquisitions in file use different TGC gain curves {sorted(selections)}, but "
-                f"this converter writes a single track, which holds one gain curve. Using "
-                f"TGC({min(selections)}). To keep every gain curve, write a manual conversion "
-                "script that stores each acquisition type as its own track with "
-                "`zea.File.create(tracks=...)`."
-            )
-        return min(selections)
+        return np.array(
+            [self.cast_to_integer(self.dereference_index(receive_tgc, n)) for n in rcv_order]
+        )
 
-    @property
-    def tgc_gain_curve(self):
-        """The TGC gain curve from the file interpolated to the number of axial samples (n_ax,)."""
-        tgc_index = self.tgc_selection - 1  # MATLAB indices are 1-based
+    def read_tgc_gain_curves(self, rcv_order):
+        """The TGC gain curves from the file interpolated to the number of axial samples.
 
-        # MATLAB stores the waveform as a row vector, which h5py reads as a column
-        waveform = self.dereference_index(self["TGC"]["Waveform"], tgc_index)[:].squeeze(-1)
+        Args:
+            rcv_order (list): The order in which the receives appear in the events.
+
+        Returns:
+            np.ndarray: The gain curves of shape ``(n_tx, n_ax)``, or of shape ``(n_ax,)`` when
+                every transmit uses the same gain curve.
+        """
+        selections = self.read_tgc_selection(rcv_order)
 
         # For baseband mode two consecutive samples are combined into a single complex sample
         n_ax = self.n_ax if not self.is_baseband_mode else self.n_ax // 2
 
-        return self.compute_tgc_gain_curve(waveform, n_ax, self.sampling_frequency)
+        # Several transmits usually share a TGC struct, so interpolate each curve only once
+        unique_selections, selection_index = np.unique(selections, return_inverse=True)
+        curves = np.stack(
+            [
+                self.compute_tgc_gain_curve(
+                    self.read_tgc_waveform(selection - 1),  # MATLAB indices are 1-based
+                    n_ax,
+                    self.sampling_frequency,
+                )
+                for selection in unique_selections
+            ]
+        )
+
+        # Different structs may still hold the same gain curve, so compare the curves
+        # themselves rather than the indices before storing one curve per transmit
+        if np.all(curves == curves[0]):
+            return curves[0]
+
+        return curves[selection_index]
 
     def get_image_data_p_frame_order(self, buffer_index=0):
         """The order of frames in the ImgDataP buffer.
@@ -1151,7 +1175,7 @@ class VerasonicsFile(h5py.File):
             "transmit_origins": transmit_origins,
             "waveforms_one_way": waveforms_one_way,
             "waveforms_two_way": waveforms_two_way,
-            "tgc_gain_curve": self.tgc_gain_curve,
+            "tgc_gain_curve": self.read_tgc_gain_curves(rcv_order),
         }
 
     def read_verasonics_file(

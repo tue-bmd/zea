@@ -984,9 +984,13 @@ class Parameters(BaseParameters):
 
         return value[:, self.selected_transmits]
 
-    @cache_with_dependencies("n_ax")
+    @cache_with_dependencies("n_ax", "selected_transmits")
     def tgc_gain_curve(self):
-        """Time gain compensation (TGC) curve of shape (n_ax,)."""
+        """Time gain compensation (TGC) curve of shape (n_ax,) or (n_tx, n_ax).
+
+        Files that compensated every transmit with the same curve store a single
+        curve, files that compensated them differently store one curve per transmit.
+        """
         value = self._params.get("tgc_gain_curve")
         if value is None:
             log.warning_once(
@@ -994,7 +998,14 @@ class Parameters(BaseParameters):
                 key=(id(self), "tgc_gain_curve"),
             )
             return np.ones(self.n_ax)
-        return value[: self.n_ax]
+        if value.shape[-1] != self.n_ax:
+            raise ValueError(
+                f"Last dimension of tgc_gain_curve must match n_ax ({self.n_ax}), "
+                f"got {value.shape[-1]}"
+            )
+        if np.ndim(value) == 2:
+            return value[self.selected_transmits]
+        return value
 
     @cache_with_dependencies(
         "sound_speed",

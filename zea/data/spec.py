@@ -1530,7 +1530,9 @@ class ScanSpec(Spec):
             shape (n_tx,).
         sound_speed: The speed of sound in meters per second.
         tgc_gain_curve: The time-gain-compensation that was applied to every
-            sample in the raw_data of shape (n_ax,). Divide by this curve to
+            sample in the raw_data, either of shape (n_ax,) when the same curve
+            was applied to every transmit, or of shape (n_tx, n_ax) when the
+            transmits were compensated differently. Divide by this curve to
             undo the TGC.
         waveforms_one_way: One-way (simulated) waveforms of shape (n_tx, .). This is the waveform
             after being filtered by the transducer bandwidth once. Should be sampled at 250 MHz.
@@ -1570,7 +1572,7 @@ class ScanSpec(Spec):
         },
         "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
         "sound_speed": {"dtype": np.float32, "shape": ()},
-        "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
+        "tgc_gain_curve": {"dtype": np.float32, "shape": (("n_ax",), ("n_tx", "n_ax"))},
         "waveforms_one_way": {
             "dtype": np.float32,
             "shape": ("n_tx", "n_samples_one_way"),

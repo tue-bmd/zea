@@ -920,7 +920,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - |badge-opt|
          * - ``tgc_gain_curve``
            - ``float32``
-           - (n_ax)
+           - (n_ax) or (n_tx, n_ax)
            - –
            - Time-gain-compensation curve.
            - |badge-opt|
