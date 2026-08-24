@@ -2068,10 +2068,14 @@ class Refocus(Operation):
         H = a_c * ops.exp(ops.cast(-1j * 2 * np.pi, "complex64") * f_c * d_c)
 
         if self.method == "adjoint":
-            # param=None  → ramp filter (multiply by f)
+            # param=None  → ramp filter (multiply by |f|)
             # param=0     → no ramp (multiply by 1, plain adjoint)
+            # |f| (not signed f) since the ramp compensates a real, symmetric
+            # passband gain; for IQ, f_vec can be negative (baseband bins
+            # below the demodulation frequency), and a signed ramp would flip
+            # the sign of those bins instead of just scaling their amplitude.
             Hinv = ops.conj(ops.transpose(H, (0, 2, 1)))
-            ramp_vals = f_vec if self.param is None else ops.ones_like(f_vec)
+            ramp_vals = ops.abs(f_vec) if self.param is None else ops.ones_like(f_vec)
             ramp = ops.cast(ramp_vals, "complex64")[:, None, None]
             return ramp * Hinv
 
