@@ -243,7 +243,7 @@ def _shape_and_metadata_gaps(file_path, key, metadata_paths):
     return shape, missing, signature
 
 
-@cache_output("filepaths", "key", "metadata_paths", "_filepath_hash", verbose=True)
+@cache_output("filepaths", "key", "metadata_paths", "_filepath_hash")
 def _find_h5_file_shapes(filepaths, key, _filepath_hash, metadata_paths=(), verbose=True):
     # NOTE: we cache the output of this function such that file loading over the network is
     # faster for repeated calls with the same filepaths, key and _filepath_hash
