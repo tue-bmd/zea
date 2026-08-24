@@ -9,6 +9,7 @@ import pytest
 from zea import Parameters
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.internal.dummy_scan import get_parameters
+from zea.probes import create_curved_probe_geometry
 
 scan_args = {
     "n_tx": 10,
@@ -278,6 +279,64 @@ def test_xlims_scales_with_fnumber():
 
     assert narrow.xlims[0] > wide.xlims[0]
     assert narrow.xlims[1] < wide.xlims[1]
+
+
+def test_xlims_zero_fnumber_uses_45_degree_cone():
+    """``f_number=0`` disables the receive mask, so a 45 degree cone is used instead."""
+    args = _xlims_scan_args([-0.02], [0.0])
+    parameters = Parameters(**args, f_number=0.0)
+
+    aperture_min = float(np.min(parameters.probe_geometry[:, 0]))
+    aperture_max = float(np.max(parameters.probe_geometry[:, 0]))
+    reach = max(parameters.zlims)
+    assert np.allclose(parameters.xlims, (aperture_min - reach, aperture_max + reach))
+
+
+def _curved_xlims_args(n_el, pitch, radius, angles=(-0.3, 0.0)):
+    args = _xlims_scan_args([np.inf] * len(angles), np.asarray(angles, dtype=np.float32))
+    args.update(
+        n_el=n_el,
+        zlims=(0, 0.15),
+        probe_geometry=create_curved_probe_geometry(n_el=n_el, pitch=pitch, radius=radius),
+    )
+    return args
+
+
+def test_xlims_curved_probe_widens_with_element_tilt():
+    """A curved array's edge elements tilt outward, so xlims should also widen."""
+    n_el, pitch, radius = 64, 1.6e-4, 0.03  # arc of +-10 degrees
+    parameters = Parameters(**_curved_xlims_args(n_el, pitch, radius))
+
+    tilt = (n_el - 1) * pitch / 2 / radius
+    edge_x, edge_z = radius * np.sin(tilt), radius * np.cos(tilt) - radius
+    half_angle = np.arctan(1 / (2 * parameters.f_number))
+    expected = edge_x + (max(parameters.zlims) - edge_z) * np.tan(tilt + half_angle)
+
+    assert np.allclose(parameters.xlims, (-expected, expected), rtol=1e-2)
+    assert expected > edge_x + max(parameters.zlims) / (2 * parameters.f_number)
+
+
+def test_xlims_clipped_at_60_degrees():
+    n_el, pitch, radius = 128, 5.1e-4, 0.05  # Approximately a C5-2v
+    parameters = Parameters(**_curved_xlims_args(n_el, pitch, radius))
+
+    edge_x = float(np.max(parameters.probe_geometry[:, 0]))
+    edge_z = float(parameters.probe_geometry[np.argmax(parameters.probe_geometry[:, 0]), 2])
+    expected = edge_x + (max(parameters.zlims) - edge_z) * np.tan(np.deg2rad(60.0))
+
+    assert np.allclose(parameters.xlims, (-expected, expected), rtol=1e-3)
+
+
+def test_xlims_unsteered_ignores_angle_noise():
+    """Converted data stores a nominally unsteered scan as float noise, not exact zeros."""
+    noise = np.full(4, 1e-9, dtype=np.float32)
+    parameters = Parameters(**_xlims_scan_args([np.inf] * 4, noise))
+
+    aperture = (
+        float(np.min(parameters.probe_geometry[:, 0])),
+        float(np.max(parameters.probe_geometry[:, 0])),
+    )
+    assert np.allclose(parameters.xlims, aperture)
 
 
 def test_initialization():

@@ -104,6 +104,7 @@ import numpy as np
 from keras import ops
 
 from zea import log
+from zea.beamform.geometry import compute_element_normals
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
@@ -556,35 +557,45 @@ class Parameters(BaseParameters):
     def xlims(self):
         """The lateral (x) limits of the beamforming grid in meters.
 
-        If not explicitly provided, the limits are derived from the probe geometry, the
-        transmits and the receive :attr:`f_number`:
+        If not explicitly provided, the limits are derived from the probe geometry, the transmits
+        and the receive :attr:`f_number`:. If f_number is 0, a 45 degree cone is used instead.
+        Default limits are clipped to -60, 60 degrees.
 
-        If all transmits are unsteered focused or plane waves (e.g. walking aperture scans), the
-        limits hug the probe width. Otherwise, the limits add ``max(zlims) / (2 * f_number)`` on
-        both sides, so the xlims match the f-number aperture angle. If f_number is 0, a 45 degree
-        cone is used instead.
+        If all transmits are unsteered focused or plane waves with a flat array (e.g. walking
+        aperture scans), the limits hug the probe width. Otherwise, the limits add
+        ``max(zlims) / (2 * f_number)`` on both sides, so the xlims match the f-number aperture
+        angle.
         """
         xlims = self._params.get("xlims")
         if xlims is not None:
             return xlims
 
         aperture_x = self.probe_geometry[:, 0]
-        xmin, xmax = float(np.min(aperture_x)), float(np.max(aperture_x))
+        left, right = int(np.argmin(aperture_x)), int(np.argmax(aperture_x))
+        xmin, xmax = float(aperture_x[left]), float(aperture_x[right])
 
         focus_distances = self.focus_distances
         polar_angles = self.polar_angles
         if polar_angles is None:
             polar_angles = np.zeros_like(focus_distances)
 
-        unsteered = np.all(polar_angles == 0) and np.all(
+        # Tolerance: converted data stores a nominally unsteered scan as float noise.
+        unsteered = np.allclose(polar_angles, 0.0, atol=1e-6) and np.all(
             (focus_distances >= 0) | np.isinf(focus_distances)
         )
         if unsteered and self.distance_to_apex == 0:
             return (xmin, xmax)
 
         f_number = float(self.f_number)
-        reach = max(self.zlims) / (2 * f_number) if f_number > 0 else max(self.zlims)
-        return (xmin - reach, xmax + reach)
+        half_angle = np.arctan(1 / (2 * f_number)) if f_number > 0 else np.pi / 4
+        normals = np.asarray(compute_element_normals(ops.convert_to_tensor(self.probe_geometry)))
+        tilt = np.arctan2(normals[:, 0], normals[:, 2])
+
+        # Outermost accepted ray of each edge element, hit at the deepest pixel.
+        cap = np.deg2rad(60.0)
+        depth = max(self.zlims) - self.probe_geometry[[left, right], 2]
+        reach = depth * np.tan(np.clip(tilt[[left, right]] + [-half_angle, half_angle], -cap, cap))
+        return (min(xmin, xmin + float(reach[0])), max(xmax, xmax + float(reach[1])))
 
     @cache_with_dependencies(
         "zlims", "grid_type", "azimuth_limits", "probe_geometry", "distance_to_apex"
