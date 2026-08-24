@@ -386,7 +386,7 @@ def _warn_if_elevation_extent(probe_geometry, tol=1e-6):
         return  # traced, cannot inspect
     if elevation.max() - elevation.min() > tol:
         log.warning(
-            "elevation_lens=True models a 1D probe with a cylindrical lens, but the probe is not"
+            "elevation_lens=True models a 1D probe with a cylindrical lens, but the probe is not "
             f"1D (element elevation min, max: {elevation.min()}, {elevation.max()}) "
             "This is probably a mistake."
         )
