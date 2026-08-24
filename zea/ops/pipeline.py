@@ -2157,6 +2157,12 @@ class Refocus(Operation):
             return ops.cast(rf_decoded, "float32")
         # Refocus for IQ
         elif n_ch == 2:
+            if demodulation_frequency is None:
+                raise ValueError(
+                    "Refocus requires `demodulation_frequency` for IQ (n_ch=2) input, "
+                    "got None. Pass it explicitly to `call` or ensure it is available "
+                    "in the pipeline parameters."
+                )
             # --- FFT over all channels at once ---
             # data: (n_tx, n_ax, n_el, n_ch) -> (n_ch, n_el, n_tx, n_ax)
             iq = ops.cast(ops.transpose(data, (3, 2, 0, 1)), "float32")
@@ -2169,10 +2175,12 @@ class Refocus(Operation):
             # (n_el_recv, n_tx, n_freq) -> (n_freq, n_tx, n_el_recv)
             IQ_enc = ops.transpose(IQ_enc, (2, 1, 0))
             # --- Batched inverse encoding matrices ---
-            # FFT frequencies contain positive and negative frequencies for IQ
+            # FFT frequencies contain positive and negative frequencies for IQ.
+            # For even n_ax the Nyquist bin (k == n_ax // 2) is the negative
+            # frequency -0.5, not +0.5 (matches numpy.fft.fftfreq convention).
             k = ops.arange(n_ax)
             frequency = ops.where(
-                k <= n_ax // 2,
+                k < (n_ax + 1) // 2,
                 ops.cast(k, "float32") / n_ax,
                 ops.cast(k - n_ax, "float32") / n_ax,
             )
@@ -2238,6 +2246,12 @@ class Refocus(Operation):
             t0_delays: ``(n_tx, n_el)`` transmit delays in **seconds**.
             sampling_frequency: Sampling frequency in Hz.
             probe_geometry: ``(n_el, 3)`` element positions in metres.
+            initial_times: ``(n_tx,)`` time (in seconds) of the first sample
+                of each transmit, relative to the transmit event.
+            demodulation_frequency (float, optional): Demodulation (carrier)
+                frequency in Hz. Required when the input data is IQ
+                (``n_ch=2``); unused for RF (``n_ch=1``) input. Defaults to
+                ``None``.
             tx_apodizations: ``(n_tx, n_el)`` transmit apodization weights.
                 Defaults to all-ones (uniform apodization).
             **kwargs: Must contain the input data tensor under ``self.key``.

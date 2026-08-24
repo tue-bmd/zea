@@ -9,7 +9,7 @@ N_EL = 8  # number of transducer elements
 N_TX = 5  # number of transmit events
 N_AX = 64  # number of axial samples
 SAMPLING_FREQ = np.float32(40e6)  # Hz
-DEMODULATION_FREQ = np.float32(20e6) #Hz
+DEMODULATION_FREQ = np.float32(20e6)  # Hz
 SOUND_SPEED = 1540.0  # m/s
 T_PEAK = np.float32(5e-7)  # transmit-waveform peak time (s)
 
