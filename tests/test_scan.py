@@ -234,7 +234,7 @@ def _xlims_scan_args(focus_distances, polar_angles):
         "center_frequency": 7e6,
         "sampling_frequency": 28e6,
         "sound_speed": 1540.0,
-        "n_ax": 3328,
+        "n_ax": 1024 * 16,
         "pixels_per_wavelength": 4,
         "polar_angles": np.asarray(polar_angles, dtype=np.float32),
         "focus_distances": np.asarray(focus_distances, dtype=np.float32),
@@ -292,20 +292,31 @@ def test_xlims_zero_fnumber_uses_45_degree_cone():
     assert np.allclose(parameters.xlims, (aperture_min - reach, aperture_max + reach))
 
 
-def _curved_xlims_args(n_el, pitch, radius, angles=(-0.3, 0.0)):
-    args = _xlims_scan_args([np.inf] * len(angles), np.asarray(angles, dtype=np.float32))
-    args.update(
-        n_el=n_el,
-        zlims=(0, 0.15),
-        probe_geometry=create_curved_probe_geometry(n_el=n_el, pitch=pitch, radius=radius),
-    )
-    return args
+def test_xlims_limited_by_record_length():
+    args = _xlims_scan_args([-0.02], [0.0])
+    args["n_ax"] = 1024
+    parameters = Parameters(**args, f_number=0.0)  # 45 degree cone
+
+    max_range = args["sound_speed"] * args["n_ax"] / args["sampling_frequency"] / 2
+    reach = max_range * np.sin(np.pi / 4)
+    aperture_min = float(np.min(parameters.probe_geometry[:, 0]))
+    aperture_max = float(np.max(parameters.probe_geometry[:, 0]))
+
+    assert reach < max(parameters.zlims)  # the depth-limited cone would reach further
+    assert np.allclose(parameters.xlims, (aperture_min - reach, aperture_max + reach))
 
 
 def test_xlims_curved_probe_widens_with_element_tilt():
     """A curved array's edge elements tilt outward, so xlims should also widen."""
     n_el, pitch, radius = 64, 1.6e-4, 0.03  # arc of +-10 degrees
-    parameters = Parameters(**_curved_xlims_args(n_el, pitch, radius))
+    args = _xlims_scan_args([np.inf, np.inf], np.asarray([-0.3, 0.0], dtype=np.float32))
+    args.update(
+        n_el=n_el,
+        n_ax=16384,
+        zlims=(0, 0.15),
+        probe_geometry=create_curved_probe_geometry(n_el=n_el, pitch=pitch, radius=radius),
+    )
+    parameters = Parameters(**args)
 
     tilt = (n_el - 1) * pitch / 2 / radius
     edge_x, edge_z = radius * np.sin(tilt), radius * np.cos(tilt) - radius
@@ -314,17 +325,6 @@ def test_xlims_curved_probe_widens_with_element_tilt():
 
     assert np.allclose(parameters.xlims, (-expected, expected), rtol=1e-2)
     assert expected > edge_x + max(parameters.zlims) / (2 * parameters.f_number)
-
-
-def test_xlims_clipped_at_60_degrees():
-    n_el, pitch, radius = 128, 5.1e-4, 0.05  # Approximately a C5-2v
-    parameters = Parameters(**_curved_xlims_args(n_el, pitch, radius))
-
-    edge_x = float(np.max(parameters.probe_geometry[:, 0]))
-    edge_z = float(parameters.probe_geometry[np.argmax(parameters.probe_geometry[:, 0]), 2])
-    expected = edge_x + (max(parameters.zlims) - edge_z) * np.tan(np.deg2rad(60.0))
-
-    assert np.allclose(parameters.xlims, (-expected, expected), rtol=1e-3)
 
 
 def test_xlims_unsteered_ignores_angle_noise():

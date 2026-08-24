@@ -559,7 +559,6 @@ class Parameters(BaseParameters):
 
         If not explicitly provided, the limits are derived from the probe geometry, the transmits
         and the receive :attr:`f_number`:. If f_number is 0, a 45 degree cone is used instead.
-        Default limits are clipped to -60, 60 degrees.
 
         If all transmits are unsteered focused or plane waves with a flat array (e.g. walking
         aperture scans), the limits hug the probe width. Otherwise, the limits add
@@ -591,10 +590,17 @@ class Parameters(BaseParameters):
         normals = np.asarray(compute_element_normals(ops.convert_to_tensor(self.probe_geometry)))
         tilt = np.arctan2(normals[:, 0], normals[:, 2])
 
-        # Outermost accepted ray of each edge element, hit at the deepest pixel.
-        cap = np.deg2rad(60.0)
+        # Outermost accepted ray of each edge element.
+        angle = tilt[[left, right]] + [-half_angle, half_angle]
         depth = max(self.zlims) - self.probe_geometry[[left, right], 2]
-        reach = depth * np.tan(np.clip(tilt[[left, right]] + [-half_angle, half_angle], -cap, cap))
+
+        # Stop at the deepest pixel or at the end of the record, whichever is first.
+        reach = depth * np.tan(np.abs(angle))
+        n_ax = self._params.get("n_ax")
+        if n_ax is not None:
+            max_range = self.sound_speed * float(n_ax) / self.sampling_frequency / 2
+            reach = np.minimum(reach, max_range * np.sin(np.abs(angle)))
+        reach = np.sign(angle) * reach
         return (min(xmin, xmin + float(reach[0])), max(xmax, xmax + float(reach[1])))
 
     @cache_with_dependencies(
