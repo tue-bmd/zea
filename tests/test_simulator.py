@@ -359,20 +359,21 @@ def test_record_length_gate_uses_worst_case_element_pair():
     assert np.abs(rf).max() == 0, "Out-of-record element pair was included; implies aliased energy."
 
 
-def _receive_chain_image(fish_scan, **receive_chain_kwargs):
+def _receive_chain_image(fish_scan, simulator, **receive_chain_kwargs):
     _, simulation_args, beamform = fish_scan
-    return beamform(simulate_rf(**simulation_args, noise_seed=0, **receive_chain_kwargs))
+    return beamform(simulator(**simulation_args, noise_seed=0, **receive_chain_kwargs))
 
 
-def test_tgc_brightens_the_deepest_scatterers(fish_scan):
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+def test_tgc_brightens_the_deepest_scatterers(fish_scan, simulator):
     """TGC compensates spreading loss, so the deep scatterers gain on the shallow ones."""
     positions, _, _ = fish_scan
     by_depth = np.argsort(positions[:, 2])
     quartile = len(positions) // 4
     deepest, shallowest = positions[by_depth[-quartile:]], positions[by_depth[:quartile]]
 
-    without = _receive_chain_image(fish_scan, noise_level_db=None, tgc_max_db=0.0)
-    with_tgc = _receive_chain_image(fish_scan, noise_level_db=None, tgc_max_db=50.0)
+    without = _receive_chain_image(fish_scan, simulator, noise_level_db=None, tgc_max_db=0.0)
+    with_tgc = _receive_chain_image(fish_scan, simulator, noise_level_db=None, tgc_max_db=50.0)
 
     dim = _dot_brightness(without, deepest).mean()
     bright = _dot_brightness(with_tgc, deepest).mean()
@@ -389,12 +390,13 @@ def test_tgc_brightens_the_deepest_scatterers(fish_scan):
     )
 
 
-def test_noise_lowers_relative_scatterer_amplitude(fish_scan):
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+def test_noise_lowers_relative_scatterer_amplitude(fish_scan, simulator):
     """Electronic noise lifts the background, so scatterers stand out less above the mean."""
     positions, _, _ = fish_scan
 
-    noiseless = _receive_chain_image(fish_scan, noise_level_db=-float("inf"), tgc_max_db=50.0)
-    noisy = _receive_chain_image(fish_scan, noise_level_db=-30.0, tgc_max_db=50.0)
+    noiseless = _receive_chain_image(fish_scan, simulator, noise_level_db=None, tgc_max_db=50.0)
+    noisy = _receive_chain_image(fish_scan, simulator, noise_level_db=-30.0, tgc_max_db=50.0)
 
     clean = _dot_brightness(noiseless / noiseless.mean(), positions).mean()
     degraded = _dot_brightness(noisy / noisy.mean(), positions).mean()
