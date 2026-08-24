@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from functools import partial
 
 import keras
 import numpy as np
@@ -32,15 +33,30 @@ from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
 from zea.simulator import simulate_rf
+from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
+
+simulator_settings = {
+    "exact": partial(simulate_rf, factored=False),
+    "factored": partial(simulate_rf, factored=True),
+    "fast": simulate_rf_td,
+}
 
 
 @ops_registry("simulate_rf")
 class Simulate(Operation):
-    """Simulate RF data."""
+    """Simulate RF data.
+
+    Set the static parameter ``method`` to ``"exact"`` for most accurate results. ``"factored"``
+    approximates spread with geometric instead of arithmetic mean so that attenuation factors;
+    this yields 30~500x speedup, but is slightly less accurate close to large probes. ``"fast"``
+    solves in the time domain; faster than ``"factored"`` in some cases, but less accurate.
+    After beamforming, images from ``"factored"`` yield 70~90dB PSNR compared to ``"exact"``;
+    ``"fast"`` yields 10~20dB.
+    """
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["n_ax", "apply_lens_correction"]
+    STATIC_PARAMS = ["n_ax", "apply_lens_correction", "method"]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
     def __init__(self, **kwargs):
@@ -67,8 +83,12 @@ class Simulate(Operation):
         attenuation_coef,
         tx_apodizations,
         t_peak,
+        method="factored",
         **kwargs,
     ):
+        if method not in simulator_settings:
+            raise ValueError(f"method must be one of {tuple(simulator_settings)}, got {method!r}")
+        simulate = simulator_settings[method]
         simulate_kwargs = {
             "probe_geometry": probe_geometry,
             "apply_lens_correction": apply_lens_correction,
@@ -86,14 +106,14 @@ class Simulate(Operation):
             "t_peak": t_peak,
         }
         if not self.with_batch_dim:
-            simulated_rf = simulate_rf(
+            simulated_rf = simulate(
                 scatterer_positions=scatterer_positions,
                 scatterer_magnitudes=scatterer_magnitudes,
                 **simulate_kwargs,
             )
         else:
             simulated_rf = ops.map(
-                lambda inputs: simulate_rf(
+                lambda inputs: simulate(
                     scatterer_positions=inputs["positions"],
                     scatterer_magnitudes=inputs["magnitudes"],
                     **simulate_kwargs,
