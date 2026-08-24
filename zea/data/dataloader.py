@@ -820,15 +820,23 @@ class H5DataSource:
         return metadata
 
     def _get_file_handle_cache(self) -> H5FileHandleCache:
-        """Return the file-handle cache for the current thread."""
+        """Return the file-handle cache for the current thread.
+
+        Re-registered on every call: ``close()`` empties the registry but cannot reach
+        another thread's thread-local, so each thread re-registers its own cache or the
+        handles it reopens go missing from the next ``close()``.
+        """
         if not hasattr(self._local, "cache"):
             self._local.cache = H5FileHandleCache()
-            with self._all_caches_lock:
-                self._all_caches.add(self._local.cache)
+        with self._all_caches_lock:
+            self._all_caches.add(self._local.cache)
         return self._local.cache
 
     def close(self):
-        """Close all file handles across all threads."""
+        """Close all file handles across all threads.
+
+        Handles reopen lazily on the next read, so the source stays usable afterwards.
+        """
         with self._all_caches_lock:
             for c in self._all_caches:
                 c.close()
@@ -1466,3 +1474,18 @@ class Dataloader:
     def close(self):
         """Release file handles."""
         self.source.close()
+
+    def __enter__(self) -> "Dataloader":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def __del__(self):
+        # Worker threads pin their file-handle caches for the loader's whole lifetime,
+        # so dropping it must release them even without a close(). Swallow errors:
+        # at interpreter shutdown h5py may already be torn down.
+        try:
+            self.close()
+        except Exception:
+            pass

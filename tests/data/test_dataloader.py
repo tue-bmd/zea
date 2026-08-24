@@ -1,5 +1,6 @@
 """Test H5 dataloader functions"""
 
+import gc
 import hashlib
 import importlib
 import pickle
@@ -923,6 +924,86 @@ def test_dataloader_repr(dummy_hdf5):
     assert "batch_size=4" in repr_str
     assert "key='data'" in repr_str
     assert "threads=" in repr_str
+
+
+def _open_handles(source):
+    """Every still-open h5py handle held by the source's per-thread caches."""
+    with source._all_caches_lock:
+        caches = list(source._all_caches)
+    return [file for cache in caches for file in cache._file_handle_cache.values() if file.id.valid]
+
+
+def test_close_releases_file_handles(dummy_hdf5):
+    """close() closes every handle the worker threads opened."""
+    loader = Dataloader(dummy_hdf5, key="data", shuffle=False, validate=False, batch_size=4)
+    list(loader)
+
+    handles = _open_handles(loader.source)
+    assert handles, "iterating should have opened at least one handle"
+
+    loader.close()
+    assert not any(file.id.valid for file in handles)
+
+
+def test_context_manager_closes_file_handles(dummy_hdf5):
+    """Using the loader as a context manager releases handles on exit."""
+    with Dataloader(dummy_hdf5, key="data", shuffle=False, validate=False, batch_size=4) as loader:
+        list(loader)
+        handles = _open_handles(loader.source)
+        assert handles, "iterating should have opened at least one handle"
+
+    assert not any(file.id.valid for file in handles)
+
+
+def test_del_releases_file_handles(dummy_hdf5):
+    """Dropping the loader releases handles even when close() was never called."""
+    loader = Dataloader(dummy_hdf5, key="data", shuffle=False, validate=False, batch_size=4)
+    list(loader)
+
+    # Held here so the caches outlive the loader: this asserts Dataloader.__del__
+    # closed the handles, not that the caches were collected along with it.
+    with loader.source._all_caches_lock:
+        caches = list(loader.source._all_caches)
+    handles = [file for cache in caches for file in cache._file_handle_cache.values()]
+    assert any(file.id.valid for file in handles)
+
+    del loader
+    gc.collect()
+
+    assert not any(file.id.valid for file in handles)
+
+
+def test_loader_is_usable_after_close(dummy_hdf5):
+    """close() drops handles without breaking the loader; reads reopen them."""
+    loader = Dataloader(dummy_hdf5, key="data", shuffle=False, validate=False, batch_size=4)
+    before = [np.asarray(batch) for batch in loader]
+
+    loader.close()
+
+    after = [np.asarray(batch) for batch in loader]
+    loader.close()
+
+    assert len(before) == len(after)
+    for first, second in zip(before, after):
+        np.testing.assert_array_equal(first, second)
+
+
+def test_close_after_reuse_releases_reopened_handles(dummy_hdf5):
+    """Handles reopened after a close are still reachable from the next close."""
+    source = H5DataSource(file_paths=dummy_hdf5, key="data", n_frames=1, validate=False)
+    source[0]
+    source.close()
+
+    # close() empties the registry while this thread keeps its cache, so the handle
+    # reopened here is only closable if the cache re-registers itself. Read from the
+    # calling thread on purpose: a fresh grain worker would get a fresh cache and
+    # register it either way.
+    source[0]
+    handles = _open_handles(source)
+    assert handles, "re-reading should have reopened a handle"
+
+    source.close()
+    assert not any(file.id.valid for file in handles)
 
 
 def test_assert_image_range_below():
