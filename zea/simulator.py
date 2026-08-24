@@ -236,7 +236,8 @@ def apply_receive_chain(
     """Add electronic noise and time gain compensation to noiseless RF.
 
     Args:
-        rf_data (array-like): Noiseless RF of shape (n_tx, n_ax, n_el, 1).
+        rf_data (array-like): Noiseless RF of shape (n_tx, n_ax, n_el, 1), optionally with a
+            leading batch axis.
         noise_level_db (float): Noise floor in dB below the peak of ``rf_data``. None disables
             the noise. Must be static when using jit compilation.
         tgc_max_db (float): Gain in dB at the last axial sample. 0 disables it. Must be static when
@@ -255,15 +256,16 @@ def apply_receive_chain(
 
     if noise_level_db is not None and noise_level_db > -float("inf"):
         if noise_reference is None:
-            noise_reference = ops.max(ops.abs(rf_data))
+            # When passing a batch, normalize noise level per item instead of per batch
+            noise_reference = ops.max(ops.abs(rf_data), axis=(-4, -3, -2, -1), keepdims=True)
         sigma = noise_reference * 10.0 ** (noise_level_db / 20.0)
         noise = keras.random.normal(ops.shape(rf_data), dtype=dtype, seed=noise_seed)
         rf_data = rf_data + ops.cast(sigma, dtype) * noise
 
     if tgc_max_db:
-        n_ax = int(ops.shape(rf_data)[1])
+        n_ax = int(ops.shape(rf_data)[-3])
         ramp = ops.arange(n_ax, dtype=dtype) / max(n_ax - 1, 1)
-        rf_data = rf_data * 10.0 ** (tgc_max_db * ramp / 20.0)[None, :, None, None]
+        rf_data = rf_data * ops.reshape(10.0 ** (tgc_max_db * ramp / 20.0), (n_ax, 1, 1))
 
     return rf_data
 

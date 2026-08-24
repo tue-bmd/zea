@@ -17,6 +17,7 @@ from zea.simulator import (
     select_elevation_slab,
     simulate_rf,
 )
+from zea.ops import Simulate
 from zea.simulator_time_domain import simulate_rf_td
 
 N_EL = 80
@@ -403,4 +404,91 @@ def test_noise_lowers_relative_scatterer_amplitude(fish_scan, simulator):
     assert degraded < clean, (
         f"Noise did not lower the relative scatterer amplitude: {clean:.1f}x noiseless, "
         f"{degraded:.1f}x at -30 dB"
+    )
+
+
+def _batched_rf(simulation_args, batch, **receive_chain_kwargs):
+    """RF for `batch` identical copies of a few scatterers, through the batched op path."""
+    args = dict(simulation_args)
+    positions = np.asarray(args["scatterer_positions"], dtype=np.float32)[:16]
+    args["scatterer_positions"] = np.repeat(positions[None], batch, axis=0)
+    args["scatterer_magnitudes"] = np.ones((batch, len(positions)), dtype=np.float32)
+    op = Simulate(with_batch_dim=True)
+    outputs = op(**args, **receive_chain_kwargs)
+    return np.asarray(keras.ops.convert_to_numpy(outputs[op.output_key]))
+
+
+def test_batched_noise_is_independent_across_items(fish_scan):
+    """A stateless seed must not repeat the same noise realisation for every batch item."""
+    _, simulation_args, _ = fish_scan
+
+    noiseless = _batched_rf(simulation_args, 3, noise_level_db=None, noise_seed=0)
+    noisy = _batched_rf(simulation_args, 3, noise_level_db=-20.0, noise_seed=0)
+    noise = noisy - noiseless
+
+    assert np.allclose(noiseless[0], noiseless[1]), "Identical scatterers gave different RF"
+    for other in (1, 2):
+        assert not np.allclose(noise[0], noise[other]), (
+            f"Batch item {other} got the same noise realisation as item 0"
+        )
+
+
+def test_batched_noise_is_reproducible(fish_scan):
+    """Same seed, same batch: identical noise. Different seed: different noise."""
+    _, simulation_args, _ = fish_scan
+    kwargs = {"noise_level_db": -20.0}
+
+    first = _batched_rf(simulation_args, 2, noise_seed=3, **kwargs)
+    again = _batched_rf(simulation_args, 2, noise_seed=3, **kwargs)
+    other = _batched_rf(simulation_args, 2, noise_seed=4, **kwargs)
+
+    assert np.array_equal(first, again), "Same seed did not reproduce the batched noise"
+    assert not np.allclose(first, other), "Different seeds gave the same batched noise"
+
+
+def test_batched_receive_chain_matches_unbatched(fish_scan):
+    """TGC and the default noise reference are per item, so batching must not change them."""
+    _, simulation_args, _ = fish_scan
+    positions = np.asarray(simulation_args["scatterer_positions"], dtype=np.float32)[:16]
+
+    batched = _batched_rf(simulation_args, 2, noise_level_db=None, tgc_max_db=50.0)
+    single = keras.ops.convert_to_numpy(
+        simulate_rf(
+            **{
+                **simulation_args,
+                "scatterer_positions": positions,
+                "scatterer_magnitudes": np.ones(len(positions), dtype=np.float32),
+            },
+            noise_level_db=None,
+            tgc_max_db=50.0,
+        )
+    )
+
+    # ops.map reduces in a different order, so compare against the RF peak.
+    scale = np.abs(single).max()
+    np.testing.assert_allclose(batched[0] / scale, single / scale, atol=1e-4)
+
+
+def test_batched_noise_reference_is_per_item(fish_scan):
+    """The default reference is each item's own peak, not one maximum shared by the batch."""
+    _, simulation_args, _ = fish_scan
+    args = dict(simulation_args)
+    positions = np.asarray(args["scatterer_positions"], dtype=np.float32)[:16]
+    magnitudes = np.ones(len(positions), dtype=np.float32)
+
+    args["scatterer_positions"] = np.repeat(positions[None], 2, axis=0)
+    args["scatterer_magnitudes"] = np.stack([magnitudes, magnitudes * 100.0])
+
+    op = Simulate(with_batch_dim=True)
+    noiseless = np.asarray(
+        keras.ops.convert_to_numpy(op(**args, noise_level_db=None)[op.output_key])
+    )
+    noisy = np.asarray(
+        keras.ops.convert_to_numpy(op(**args, noise_level_db=-20.0, noise_seed=0)[op.output_key])
+    )
+    noise = noisy - noiseless
+
+    ratio = noise[1].std() / noise[0].std()
+    assert 90.0 < ratio < 110.0, (
+        f"Noise did not track the per-item peak: 100x brighter item got {ratio:.1f}x the noise"
     )

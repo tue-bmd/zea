@@ -31,7 +31,7 @@ from zea.internal.core import (
 from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
-from zea.simulator import elevation_slab_bucket, simulate_rf
+from zea.simulator import apply_receive_chain, elevation_slab_bucket, simulate_rf
 from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
 
@@ -142,21 +142,24 @@ class Simulate(Operation):
                 **simulate_kwargs,
             )
         else:
+            # A stateless seed inside `map` repeats the same noise for every item, so instead, first
+            # simulate everything and then apply TGC and nosie.
+            mapped_kwargs = {**simulate_kwargs, "noise_level_db": None, "tgc_max_db": 0.0}
             simulated_rf = ops.map(
                 lambda inputs: simulate(
                     scatterer_positions=inputs["positions"],
                     scatterer_magnitudes=inputs["magnitudes"],
-                    **simulate_kwargs,
+                    **mapped_kwargs,
                 ),
-                {
-                    "positions": scatterer_positions,
-                    "magnitudes": scatterer_magnitudes,
-                },
+                {"positions": scatterer_positions, "magnitudes": scatterer_magnitudes},
+            )
+            simulated_rf = apply_receive_chain(
+                simulated_rf, noise_level_db, tgc_max_db, noise_seed, noise_reference
             )
 
         return {
             self.output_key: simulated_rf,
-            "n_ch": 1,  # Simulate always returns RF data (so single channel)
+            "n_ch": 1,
         }
 
 
