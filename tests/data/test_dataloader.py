@@ -243,6 +243,38 @@ def test_minimally_sized_strided_block(spec_shaped_hdf5):
     assert len(limited) == 1
 
 
+def test_strided_blocks_are_contiguous(tmp_path):
+    """Consecutive blocks pick up where the last one read, leaving no gap between them.
+
+    Stepping ``n_frames * stride`` instead would skip frame 3 here: it falls after the
+    first block's last frame (2) and before the second block would start (4).
+    """
+    file_path = tmp_path / "tagged_0_0.hdf5"
+    n_frames_in_file = 7
+    with h5py.File(file_path, "w") as f:
+        # Frame i is filled with the value i, so a sample reports which frames it holds.
+        frames = np.arange(n_frames_in_file, dtype=np.float32)[:, None, None]
+        f.create_dataset("data/image/values", data=np.broadcast_to(frames, (7, 2, 2)).copy())
+
+    source = H5DataSource(
+        file_paths=[file_path],
+        key="data/image/values",
+        n_frames=2,
+        frame_index_stride=2,
+        validate=False,
+    )
+
+    blocks = [np.asarray(source[i])[0, 0].astype(int).tolist() for i in range(len(source))]
+    assert blocks == [[0, 2], [3, 5]]
+
+    # Stride 1 is the ordinary contiguous case, unchanged by the span/step distinction.
+    unstrided = H5DataSource(
+        file_paths=[file_path], key="data/image/values", n_frames=2, validate=False
+    )
+    blocks = [np.asarray(unstrided[i])[0, 0].astype(int).tolist() for i in range(len(unstrided))]
+    assert blocks == [[0, 1], [2, 3], [4, 5]]
+
+
 def test_frame_axis_unknown_key_falls_back_to_axis_zero(dummy_hdf5):
     """A key outside the spec warns and assumes the usual leading frame axis."""
     source = H5DataSource(file_paths=[dummy_hdf5], key="data", validate=False)

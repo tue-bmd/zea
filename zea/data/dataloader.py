@@ -136,8 +136,9 @@ def generate_h5_indices(
         limit_n_frames (int, optional): Maximum number of frames to load per file, counted from
             ``offset_n_frames``. Defaults to None (no limit).
         on_incomplete_blocks (str, optional): What to do with files holding too few frames to
-            fill one block of ``n_frames * frame_index_stride``: ``"error"`` (default) raises
-            and names them, ``"skip"`` drops them from the index table.
+            fill one block of ``n_frames`` frames spaced by ``frame_index_stride``:
+            ``"error"`` (default) raises and names them, ``"skip"`` drops them from the
+            index table.
         axis_selections (dict, optional): Map of ``{axis: indices}`` applied at HDF5 read time to
             pre-filter non-frame axes. For example ``{1: [0, 2, 5]}`` loads only those indices
             along axis 1, avoiding reading unused data from disk. Defaults to None.
@@ -205,9 +206,10 @@ def generate_h5_indices(
     block_span = 1 if n_frames is None else (n_frames - 1) * frame_index_stride + 1
 
     if not overlapping_blocks:
-        # Consecutive blocks step over the frames a strided block skipped as well, so
-        # that no frame is served twice.
-        block_step_size = frame_index_stride if n_frames is None else n_frames * frame_index_stride
+        # Non-overlapping blocks are contiguous windows: the next one starts on the frame
+        # after the last frame the previous one read. Stepping a full n_frames * stride
+        # instead would leave the trailing stride-1 frames in a gap no block ever covers.
+        block_step_size = frame_index_stride if n_frames is None else block_span
     else:
         # now blocks overlap by n_frames - 1
         block_step_size = 1
@@ -977,8 +979,10 @@ class Dataloader:
             dataset. Default is ``"error"``.
         augmentation: Callable applied to each batch after normalization.
             Default is ``None``.
-        frame_index_stride: Step between selected frames in a block.
-            Default is ``1``.
+        frame_index_stride: Step between selected frames, to cover more of the
+            video: ``2`` takes every other frame, ``3`` every third. Samples still follow
+            one another without gaps -- with ``n_frames=2, frame_index_stride=2`` a file
+            yields frames ``(0, 2)``, then ``(3, 5)``, and so on. Default is ``1``.
         frame_axis: Axis the frame block is placed on in the output. Only applies when
             ``n_frames`` is set; with ``n_frames=None`` there is no frame axis to place.
             Default is ``-1``, which puts frames in the trailing, channel-like
