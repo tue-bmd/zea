@@ -18,6 +18,7 @@ import zea
 from zea import log
 from zea.data.legacy_file import legacy_data, legacy_probe, legacy_scan
 from zea.data.spec import (
+    _TRACK_RE,
     DEFAULT_CHUNK_AXES,
     DEFAULT_COMPRESSION,
     DataSpec,
@@ -2669,7 +2670,7 @@ def _validate_file_impl(file: File) -> None:
             track_grp = tracks_group[track_key]
             # Only track_N groups are tracks; anything else under 'tracks' is not one, so
             # it must not stand in for the data group the assertion below looks for.
-            if not (isinstance(track_grp, h5py.Group) and re.fullmatch(r"track_\d+", track_key)):
+            if not (isinstance(track_grp, h5py.Group) and _TRACK_RE.fullmatch(track_key)):
                 continue
             n_tracks += 1
             has_data = "data" in track_grp
