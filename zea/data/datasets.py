@@ -63,9 +63,8 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
 FILE_HANDLE_CACHE_CAPACITY = 128
-# Below this many files a worker pool costs more to start (~0.5 s) than the sweep it
-# parallelises, so the per-file sweeps below stay on the main process for small datasets.
-_PARALLEL_MIN_FILES = 500
+# Below this many files the sweeps stay serial; sized for network opens
+_PARALLEL_MIN_FILES = 32
 # How many invalid files a validation error spells out before summarising the rest.
 _MAX_LISTED_INVALID_FILES = 10
 # Seconds a per-file sweep may take before it draws a progress bar.
