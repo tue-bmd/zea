@@ -69,6 +69,8 @@ FILE_HANDLE_CACHE_CAPACITY = 128
 _PARALLEL_MIN_FILES = 500
 # How many invalid files a validation error spells out before summarising the rest.
 _MAX_LISTED_INVALID_FILES = 10
+# Seconds a per-file sweep may take before it draws a progress bar.
+_PROGRESS_DELAY_S = 1.0
 FILE_TYPES = [".hdf5", ".h5"]
 
 
@@ -272,10 +274,16 @@ def _map_over_files(func, file_paths, desc, verbose=True):
                     total=len(file_paths),
                     desc=desc,
                     disable=not verbose,
+                    delay=_PROGRESS_DELAY_S,
                 )
             )
 
-    return [func(file_path) for file_path in tqdm.tqdm(file_paths, desc=desc, disable=not verbose)]
+    return [
+        func(file_path)
+        for file_path in tqdm.tqdm(
+            file_paths, desc=desc, disable=not verbose, delay=_PROGRESS_DELAY_S
+        )
+    ]
 
 
 @cache_output("filepaths", "key", "metadata_paths", "_filepath_hash")
