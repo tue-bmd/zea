@@ -2670,6 +2670,10 @@ def _validate_file_impl(file: File) -> None:
         tracks_group = file["tracks"]
         for track_key in tracks_group.keys():
             track_grp = tracks_group[track_key]
+            # Only track_N groups are tracks; anything else under 'tracks' is not one, so
+            # it must not stand in for the data group the assertion below looks for.
+            if not (isinstance(track_grp, h5py.Group) and re.fullmatch(r"track_\d+", track_key)):
+                continue
             n_tracks += 1
             if "data" not in track_grp:
                 assert "transmit_only" in track_grp and bool(track_grp["transmit_only"][()]), (
