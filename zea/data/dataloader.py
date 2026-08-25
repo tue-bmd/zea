@@ -198,20 +198,15 @@ def generate_h5_indices(
         except Exception:
             log.warning("Could not sort file_paths by number.")
 
-    # Frames one sample reaches across: the first and last frame of the block, plus the
-    # gaps between them. A strided block does not consume the trailing stride, so
-    # n_frames=2 with stride=2 spans 3 frames (0 and 2), not 4. With n_frames=None the
-    # selection is a single int, so a sample spans exactly one frame however large the
-    # stride: there the stride only spaces consecutive samples out, it does not widen them.
+    # How many frames of a file one sample occupies: the minimum a file needs to yield a
+    # sample, and how far from the end the last sample can start.
     block_span = 1 if n_frames is None else (n_frames - 1) * frame_index_stride + 1
 
     if not overlapping_blocks:
-        # Non-overlapping blocks are contiguous windows: the next one starts on the frame
-        # after the last frame the previous one read. Stepping a full n_frames * stride
-        # instead would leave the trailing stride-1 frames in a gap no block ever covers.
+        # Non-overlapping blocks are contiguous.
         block_step_size = frame_index_stride if n_frames is None else block_span
     else:
-        # now blocks overlap by n_frames - 1
+        # Blocks overlap by n_frames - 1
         block_step_size = 1
 
     def usable_frames(shape) -> int:
@@ -760,8 +755,6 @@ class H5DataSource:
         file = file_handle_cache.get_file(file_name)
 
         try:
-            # ``file.dataset`` rather than ``file[key]``: reads then go through
-            # zea's concurrent chunk reader instead of h5py's serial path.
             images = file.dataset(key)[indices]
         except (OSError, IOError):
             # Invalidate cache entry and retry once
@@ -953,8 +946,7 @@ class Dataloader:
         assert_image_range: Assert values stay within ``image_range``.
             Default is ``True``.
         dtype: Cast samples to this dtype (e.g. ``"float32"``, ``np.float16``) after
-            batching and before normalization, so it is also what picks the precision
-            ``normalization_range`` normalizes in. Must be floating point whenever
+            batching and before normalization. Must be floating point whenever
             ``normalization_range`` is set. Default is ``None``, which keeps the dtype
             the files hold -- except that files holding integers are promoted to
             ``float32``, since normalizing has no integer-valued result.
@@ -979,23 +971,15 @@ class Dataloader:
             dataset. Default is ``"error"``.
         augmentation: Callable applied to each batch after normalization.
             Default is ``None``.
-        frame_index_stride: Step between selected frames, to cover more of the
-            video: ``2`` takes every other frame, ``3`` every third. Samples still follow
-            one another without gaps -- with ``n_frames=2, frame_index_stride=2`` a file
-            yields frames ``(0, 2)``, then ``(3, 5)``, and so on. Default is ``1``.
-        frame_axis: Axis the frame block is placed on in the output. Only applies when
-            ``n_frames`` is set; with ``n_frames=None`` there is no frame axis to place.
-            Default is ``-1``, which puts frames in the trailing, channel-like
-            position: an image batch comes out as ``(batch, height, width, n_frames)``,
-            the channels-last layout ``Resizer`` and Keras expect. That is why
-            resizing without explicit ``resize_axes`` requires ``frame_axis=-1`` --
-            with the frame axis elsewhere, the default resize axes ``(1, 2)`` would
-            no longer be height and width.
-
-            For raw channel data there is no channel axis to double as, and the
-            trailing frame axis scrambles the ``(n_tx, n_ax, n_el, n_ch)`` layout the
-            processing pipeline wants. Set ``frame_axis=0`` there, so blocks keep the
-            file's own ``(n_frames, n_tx, n_ax, n_el, n_ch)`` order.
+        frame_index_stride: Step between selected frames, for example, ``2`` takes every other
+            frame, ``3`` every third. Samples still follow one another without gaps -- with
+            ``n_frames=2, frame_index_stride=2`` a file yields frames ``(0, 2)``, then ``(3, 5)``.
+            Default is ``1``.
+        frame_axis: The frames are put in this axis. Only applies when ``n_frames`` is set.
+            Default is ``-1``: an image batch comes out as ``(batch, height, width, n_frames)``,
+            the channels-last layout ``Resizer`` and keras expect. That is why
+            resizing without explicit ``resize_axes`` requires ``frame_axis=-1``.
+            For ``raw_data`` it makes sense to set ``frame_axis=0`` to keep frames in front.
         validate: Validate discovered files against the zea format, raising if any file
             is not a valid zea file. Default is ``True``. The verdict is cached under, so only the
             first run over a given dataset opens every file.
@@ -1018,9 +1002,8 @@ class Dataloader:
         convert_to_tensor: Whether to convert the data to a tensor (on cpu). Default is ``True``.
         axis_selections: Map of ``{axis: indices}`` applied at HDF5 read time to pre-filter
             non-frame axes. For example ``{1: [0, 2, 5]}`` loads only those indices along axis 1,
-            avoiding reading unused data chunks from disk. A selection confined to a few chunks
-            saves both memory and time, while one spread across every chunk still saves memory but
-            reads about as much as the full axis. Default is ``None``.
+            avoiding reading unused data chunks from disk. This can save time and memory.
+            Default is ``None``.
         file_filter: Keep only files whose content matches a predicate, discarding the rest
             before any frames are indexed. Either a callable ``File -> bool`` (a file is kept
             when it returns ``True``), or a declarative dotted-path dict mapping a path on the
@@ -1279,9 +1262,7 @@ class Dataloader:
             )
 
         # The resizer can bring differing files to a common shape, so this is only
-        # decidable once it is built. Both steps run the real pipeline code on the
-        # source shapes rather than re-deriving what it does; everything else in the
-        # pipeline (clip, cast, normalize, augment) leaves a sample's shape alone.
+        # decidable once it is built. This run the real pipeline code that changes the shape.
         resizer = self._pipeline_cfg["resizer"]
         self._sample_shapes: dict[tuple, list[str]] = {}
         for source_shape, files in self.source.sample_shapes.items():
