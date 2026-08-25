@@ -1165,6 +1165,36 @@ def test_shape_attribute(dummy_hdf5):
     assert loader.shape == (1, *DUMMY_IMAGE_SHAPE, 1)
 
 
+def test_shape_batch_axis_with_drop_remainder(dummy_hdf5):
+    """A short final batch leaves axis 0 varying, so ``shape`` reports it as None."""
+    common = dict(key="data", shuffle=False, validate=False, batch_size=32)
+    assert DUMMY_N_FRAMES % 32 != 0, "fixture must not divide evenly for this to test anything"
+
+    loader = Dataloader(dummy_hdf5, drop_remainder=False, **common)
+    try:
+        assert loader.shape == (None, *DUMMY_IMAGE_SHAPE, 1)
+        last = list(loader)[-1]
+        assert tuple(np.shape(last)) == (DUMMY_N_FRAMES % 32, *DUMMY_IMAGE_SHAPE, 1)
+    finally:
+        loader.close()
+
+    # Dropping it, or a batch size that divides evenly, pins axis 0 to the batch size.
+    loader = Dataloader(dummy_hdf5, drop_remainder=True, **common)
+    try:
+        assert loader.shape == (32, *DUMMY_IMAGE_SHAPE, 1)
+        assert all(tuple(np.shape(batch)) == loader.shape for batch in loader)
+    finally:
+        loader.close()
+
+    loader = Dataloader(
+        dummy_hdf5, key="data", shuffle=False, validate=False, batch_size=25, drop_remainder=False
+    )
+    try:
+        assert loader.shape == (25, *DUMMY_IMAGE_SHAPE, 1)
+    finally:
+        loader.close()
+
+
 def test_len_attribute(dummy_hdf5):
     """Test that the len attribute is set correctly."""
 
@@ -1989,8 +2019,13 @@ def test_ragged_dataset_batches_after_resize(ragged_folder):
         resize_type="resize",
     )
     try:
-        assert loader.shape == (3, 20, 20, 1)
-        assert [tuple(np.shape(batch))[1:] for batch in loader] == [(20, 20, 1)] * 3
+        # 8 samples in batches of 3, so the last batch is short and axis 0 is not fixed.
+        assert loader.shape == (None, 20, 20, 1)
+        assert [tuple(np.shape(batch)) for batch in loader] == [
+            (3, 20, 20, 1),
+            (3, 20, 20, 1),
+            (2, 20, 20, 1),
+        ]
     finally:
         loader.close()
 

@@ -1287,10 +1287,15 @@ class Dataloader:
         if len(self._sample_shapes) > 1:
             # Ragged and unbatched: there is no one shape to report.
             self._shape = None
-        elif self.returns_metadata:
-            self._shape = self._map_dataset[0][0].shape
         else:
-            self._shape = self._map_dataset[0].shape
+            (sample_shape,) = self._sample_shapes
+            if self.batch_size is None:
+                self._shape = sample_shape
+            elif drop_remainder or self._n_samples % self.batch_size == 0:
+                self._shape = (self.batch_size, *sample_shape)
+            else:
+                # The final batch is short, so no single size describes axis 0.
+                self._shape = (None, *sample_shape)
 
     def _build_pipeline(self, seed: int):
         """Build the Grain MapDataset pipeline with the given seed."""
@@ -1333,6 +1338,9 @@ class Dataloader:
         if cfg["dataset_repetitions"] is not None:
             ds = ds.repeat(num_epochs=cfg["dataset_repetitions"])
 
+        # Recorded pre-batch so `shape` can tell whether the final batch is short.
+        self._n_samples = len(ds)
+
         if self.batch_size is not None:
             ds = ds.batch(batch_size=self.batch_size, drop_remainder=cfg["drop_remainder"])
 
@@ -1359,6 +1367,10 @@ class Dataloader:
     @property
     def shape(self):
         """Output shape of one batch (or sample if unbatched).
+
+        With ``drop_remainder=False`` the final batch is shorter than the rest whenever
+        the sample count is not a multiple of ``batch_size``; the batch axis is reported
+        as ``None`` in that case, since no single size describes every batch.
 
         Raises:
             ValueError: If the loader yields more than one shape, which only an
