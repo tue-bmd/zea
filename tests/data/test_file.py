@@ -12,6 +12,7 @@ from zea.data.file import (
     ChunkedDataset,
     CustomElement,
     File,
+    InvalidZeaFileError,
     Track,
     _format_selection,
     _GroupProxy,
@@ -1189,13 +1190,87 @@ class TestZeaVersion:
         with File(path) as f:
             assert f.validate() == {"status": "success"}
 
+    def test_legacy_file_validate_rejects_unknown_key(self, tmp_path):
+        """Legacy files are still checked key by key, against the schema plus their own keys."""
+        path = tmp_path / "legacy_junk.hdf5"
+        with h5py.File(path, "w") as f:
+            g = f.create_group("data")
+            g.create_dataset("not_a_zea_type", data=np.zeros((2, 8, 6), dtype=np.float32))
+
+        with pytest.raises(InvalidZeaFileError, match="not a recognised zea data type"):
+            File(path)
+
+    def test_legacy_file_with_raw_data_requires_scan(self, tmp_path):
+        """A legacy file holding raw_data must carry a scan group."""
+        path = tmp_path / "legacy_raw.hdf5"
+        with h5py.File(path, "w") as f:
+            g = f.create_group("data")
+            g.create_dataset("raw_data", data=np.zeros((2, 4, 4, 2, 1), dtype=np.float32))
+
+        with pytest.raises(InvalidZeaFileError, match="'scan' is required when 'raw_data'"):
+            File(path)
+
+    def test_legacy_file_with_aligned_data_does_not_require_scan(self, tmp_path):
+        """Only raw_data forces a scan, in either format.
+
+        TrackSpec requires a scan for raw_data alone, so demanding one for aligned_data
+        on read would reject tracks that ``File.create`` writes without complaint.
+        """
+        path = tmp_path / "legacy_aligned.hdf5"
+        with h5py.File(path, "w") as f:
+            g = f.create_group("data")
+            g.create_dataset("aligned_data", data=np.zeros((2, 4, 4, 2, 1), dtype=np.float32))
+
+        with File(path) as f:
+            assert f.validate() == {"status": "success"}
+
+    def test_new_format_raw_data_requires_scan(self, tmp_path):
+        """A track holding raw_data must carry a scan, matching TrackSpec's writer rule."""
+        path = tmp_path / "raw_no_scan.hdf5"
+        with h5py.File(path, "w") as f:
+            f.attrs["zea_version"] = "0.1.5"
+            g = f.create_group("tracks/track_0/data")
+            g.create_dataset("raw_data", data=np.zeros((2, 3, 16, 8, 1), dtype=np.float32))
+
+        with pytest.raises(InvalidZeaFileError, match="'scan' is required when 'raw_data'"):
+            File(path)
+
+        # Same file with a scan group validates.
+        with h5py.File(path, "a") as f:
+            f.create_group("tracks/track_0/scan")
+        with File(path) as f:
+            assert f.validate() == {"status": "success"}
+
+    def test_new_format_transmit_only_track_must_not_carry_data(self, tmp_path):
+        """A track flagged transmit_only must not hold data, on read as well as on write."""
+        path = tmp_path / "tx_with_data.hdf5"
+        with h5py.File(path, "w") as f:
+            f.attrs["zea_version"] = "0.1.5"
+            t = f.create_group("tracks/track_0")
+            t.create_group("data").create_dataset("image", data=np.zeros((2, 8, 6), np.float32))
+            t.create_group("scan")
+            t.create_dataset("transmit_only", data=True)
+
+        with pytest.raises(InvalidZeaFileError, match="must not carry data"):
+            File(path)
+
+    def test_new_format_track_needs_data_or_scan(self, tmp_path):
+        """A track with neither data nor scan is rejected on read, as TrackSpec rejects it."""
+        path = tmp_path / "empty_track.hdf5"
+        with h5py.File(path, "w") as f:
+            f.attrs["zea_version"] = "0.1.5"
+            f.create_group("tracks/track_0").create_dataset("transmit_only", data=False)
+
+        with pytest.raises(InvalidZeaFileError, match="at least one of 'data' or 'scan'"):
+            File(path)
+
     def test_open_validates_by_default(self, tmp_path):
         """Opening a non-zea file for reading fails at the open, not at first read."""
         path = tmp_path / "not_zea.hdf5"
         with h5py.File(path, "w") as f:
             f.create_dataset("data", data=np.zeros((2, 8, 6), dtype=np.float32))
 
-        with pytest.raises(AssertionError, match="may not be a zea file"):
+        with pytest.raises(InvalidZeaFileError, match="may not be a zea file"):
             File(path)
 
     def test_open_with_validate_false_skips_check(self, tmp_path):

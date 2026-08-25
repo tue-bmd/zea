@@ -182,6 +182,10 @@ def find_matched_shape(value: Any, expected_shapes: Sequence[tuple]) -> tuple | 
     return None
 
 
+class InvalidZeaFileError(ValueError):
+    """Raised when data does not have the structure the zea format requires."""
+
+
 class Spec:
     """Base class for data specifications with schema validation.
 
@@ -2281,6 +2285,33 @@ class MetricsSpec(Spec):
     }
 
 
+def check_track_rules(
+    *, has_data: bool, has_scan: bool, transmit_only: bool, has_raw: bool
+) -> None:
+    """Raise :class:`InvalidZeaFileError` if a track breaks one of the format's rules."""
+    if not has_data and not has_scan:
+        raise InvalidZeaFileError(
+            "A track must have at least one of 'data' or 'scan'. "
+            "'data' may be None (a transmit-only track) only when 'scan' is provided "
+            "and 'transmit_only=True' is explicitly set."
+        )
+    if not has_data and has_scan and not transmit_only:
+        raise InvalidZeaFileError(
+            "'data' is None but 'transmit_only' was not set to True. "
+            "Pass 'transmit_only=True' to explicitly create a transmit-only track "
+            "(one that records only the transmit sequence via 'scan', with no "
+            "corresponding receive data, e.g. a shear wave push pulse or "
+            "therapeutic ultrasound exposure)."
+        )
+    if transmit_only and has_data:
+        raise InvalidZeaFileError(
+            "'transmit_only=True' was set but 'data' is not None. "
+            "A transmit-only track must not carry data."
+        )
+    if has_raw and not has_scan:
+        raise InvalidZeaFileError("'scan' is required when 'raw_data' is provided in track data.")
+
+
 @dataclass
 class TrackSpec(Spec):
     """A single acquisition track with its own data and scan parameters.
@@ -2360,34 +2391,16 @@ class TrackSpec(Spec):
     def __post_init__(self):
         super().__post_init__()
 
-        if self.data is None and self.scan is None:
-            raise ValueError(
-                "A track must have at least one of 'data' or 'scan'. "
-                "'data' may be None (a transmit-only track) only when 'scan' is provided "
-                "and 'transmit_only=True' is explicitly set."
-            )
-
-        if self.data is None and self.scan is not None and not self.transmit_only:
-            raise ValueError(
-                "'data' is None but 'transmit_only' was not set to True. "
-                "Pass 'transmit_only=True' to explicitly create a transmit-only track "
-                "(one that records only the transmit sequence via 'scan', with no "
-                "corresponding receive data, e.g. a shear wave push pulse or "
-                "therapeutic ultrasound exposure)."
-            )
-
-        if self.transmit_only and self.data is not None:
-            raise ValueError(
-                "'transmit_only=True' was set but 'data' is not None. "
-                "A transmit-only track must not carry data."
-            )
-
         data = self.data
         has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
             isinstance(data, dict) and data.get("raw_data") is not None
         )
-        if has_raw and self.scan is None:
-            raise ValueError("'scan' is required when 'raw_data' is provided in track data.")
+        check_track_rules(
+            has_data=data is not None,
+            has_scan=self.scan is not None,
+            transmit_only=bool(self.transmit_only),
+            has_raw=has_raw,
+        )
 
         if self.label is not None and not isinstance(self.label, str):
             raise TypeError(f"'label' must be a str, got {type(self.label)}")

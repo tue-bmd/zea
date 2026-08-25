@@ -22,13 +22,15 @@ from zea.data.spec import (
     DEFAULT_COMPRESSION,
     DataSpec,
     FileSpec,
+    InvalidZeaFileError,
     MetadataSpec,
     MetricsSpec,
     ProbeSpec,
     ScanSpec,
+    check_track_rules,
     strip_track_prefix,
 )
-from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
+from zea.internal.checks import _DATA_TYPES
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path, _hf_stream_open
 from zea.internal.utils import deprecated
 
@@ -2262,7 +2264,7 @@ class File(h5py.File):
             dict: ``{"status": "success"}`` on success.
 
         Raises:
-            AssertionError: If the file is missing required groups or contains
+            InvalidZeaFileError: If the file is missing required groups or contains
                 unrecognised data keys.
         """
         try:
@@ -2621,18 +2623,19 @@ def validate_file(path: str | None = None, file: "File | None" = None):
         dict: ``{"status": "success"}`` on success.
 
     Raises:
-        AssertionError: If the file is missing the ``data`` group.
+        InvalidZeaFileError: If the file does not have the structure the zea format
+            requires (missing ``data`` group, unrecognised keys, a malformed track).
+        ValueError: If neither or both of *path* and *file* are given.
         TypeError, ValueError: If spec validation fails on files created with zea v0.1.0 and later.
     """
-    assert (path is not None) ^ (file is not None), (
-        "Provide either the path or the file, but not both."
-    )
+    if (path is not None) == (file is not None):
+        raise ValueError("Provide either the path or the file, but not both.")
 
     if path is not None:
         with File(path, "r") as _file:
             _validate_file_impl(_file)
     else:
-        assert file is not None  # guaranteed by the xor assertion above
+        assert file is not None  # narrowing for type checkers; guaranteed by the check above
         _validate_file_impl(file)
 
     return {"status": "success"}
@@ -2652,21 +2655,15 @@ def _validate_file_impl(file: File) -> None:
     """Lightweight structural validation — no array data is loaded.
 
     Checks that:
-    - a ``data`` group is present — either at ``tracks/track_N/data``
-      or at the root ``data`` group (legacy); a transmit-only track
-      (scan, no data) is accepted without one
-    - for legacy files, every key in ``data`` is a recognised zea data type
-    - for files created with zea v0.1.0 and later, every key in ``data``
-    is in :class:`~zea.data.spec.DataSpec`\'s schema
+    - a ``data`` group is present
+    - every track satisfies :func:`~zea.data.spec.check_track_rules`
+    - every key in ``data`` is in :class:`~zea.data.spec.DataSpec`\'s schema
     """
-    # Collect all data groups to validate
     data_groups: list[tuple[str, h5py.Group]] = []
-    # A transmit-only track carries a scan and no data at all, so it contributes no
-    # data group while still being a valid track (see TrackSpec.transmit_only).
     n_tracks = 0
 
+    # Track format: tracks/track_N/data
     if super(File, file).__contains__("tracks"):
-        # New multi-track format: tracks/track_N/data
         tracks_group = file["tracks"]
         for track_key in tracks_group.keys():
             track_grp = tracks_group[track_key]
@@ -2675,48 +2672,59 @@ def _validate_file_impl(file: File) -> None:
             if not (isinstance(track_grp, h5py.Group) and re.fullmatch(r"track_\d+", track_key)):
                 continue
             n_tracks += 1
-            if "data" not in track_grp:
-                assert "transmit_only" in track_grp and bool(track_grp["transmit_only"][()]), (
-                    f"Track group '{track_key}' is missing a 'data' subgroup."
+            has_data = "data" in track_grp
+            if has_data and not isinstance(track_grp["data"], h5py.Group):
+                raise InvalidZeaFileError(
+                    f"'{track_key}/data' is not a group - this may not be a zea file."
                 )
-                continue
-            assert isinstance(track_grp["data"], h5py.Group), (
-                f"'{track_key}/data' is not a group - this may not be a zea file."
-            )
-            data_groups.append((f"tracks/{track_key}/data", track_grp["data"]))
+            # The same rules TrackSpec enforces when writing, answered structurally.
+            transmit_only = "transmit_only" in track_grp and bool(track_grp["transmit_only"][()])
+            try:
+                check_track_rules(
+                    has_data=has_data,
+                    has_scan="scan" in track_grp,
+                    transmit_only=transmit_only,
+                    has_raw=has_data and "raw_data" in track_grp["data"],
+                )
+            except InvalidZeaFileError as e:
+                raise InvalidZeaFileError(f"Track '{track_key}': {e}") from e
+            if has_data:
+                data_groups.append((f"tracks/{track_key}/data", track_grp["data"]))
+
+    # Root-level data group
     elif super(File, file).__contains__("data"):
-        # Legacy root-level data group
-        assert isinstance(file["data"], h5py.Group), (
-            "'data' is not a group - this may not be a zea file."
+        if not isinstance(file["data"], h5py.Group):
+            raise InvalidZeaFileError("'data' is not a group - this may not be a zea file.")
+        check_track_rules(
+            has_data=True,
+            has_scan=super(File, file).__contains__("scan"),
+            transmit_only=False,
+            has_raw="raw_data" in file["data"],
         )
         data_groups.append(("data", file["data"]))
 
-    assert data_groups or n_tracks, (
-        "'data' group not found in file. "
-        "Expected either tracks/track_N/data or a root 'data' group."
-    )
+    if not data_groups and not n_tracks:
+        raise InvalidZeaFileError(
+            "'data' group not found in file. "
+            "Expected either tracks/track_N/data or a root 'data' group."
+        )
 
+    # Which names may appear as a flat dataset
+    if _is_legacy_file(file):
+        known_flat = set(DataSpec.SCHEMA) | {"image_sc"}
+    else:
+        known_flat = {k for k, v in DataSpec.SCHEMA.items() if "spec" not in v}
+
+    # Validate that every dataset in every data group is either a recognised flat dataset
+    # or a group (Map spec).
     for group_path, data_group in data_groups:
-        if _is_legacy_file(file):
-            # For legacy files: accepted keys are the flat _DATA_TYPES list.
-            has_raw = any(k in data_group for k in _NON_IMAGE_DATA_TYPES)
-            if has_raw:
-                assert "scan" in file, "Legacy file is missing the 'scan' group."
-            for key in data_group.keys():
-                assert key in _DATA_TYPES, (
-                    f"'{group_path}/{key}' is not a recognised zea data type."
-                )
-        else:
-            # For new-format files: flat datasets must be known DataSpec keys.
-            # HDF5 Groups are Map specs (either a named type or a custom map)
-            # and are always accepted; validate() is a structural check only.
-            known = set(DataSpec.SCHEMA.keys())
-            known_flat = {k for k, v in DataSpec.SCHEMA.items() if "spec" not in v}
-            for key in data_group.keys():
-                if isinstance(data_group[key], h5py.Group):
-                    # Named map or custom map — accepted without further checks here.
-                    continue
-                assert key in known_flat, (
-                    f"'{group_path}/{key}' is not in the DataSpec schema. "
-                    f"Known keys: {sorted(known)}"
+        for key in data_group.keys():
+            # Groups are Map specs, either a named type or a custom map, and are always
+            # accepted; validate() is a structural check only.
+            if isinstance(data_group[key], h5py.Group):
+                continue
+            if key not in known_flat:
+                raise InvalidZeaFileError(
+                    f"'{group_path}/{key}' is not a recognised zea data type. "
+                    f"Expected a group, or one of these datasets: {sorted(known_flat)}."
                 )

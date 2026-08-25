@@ -2001,6 +2001,44 @@ class TestTransmitOnlyTrack:
         assert isinstance(track.scan, ScanSpec)
         assert bool(track.transmit_only) is True
 
+    def test_check_track_rules_is_the_single_source_of_the_rules(self):
+        """The rules TrackSpec enforces are the ones zea.data.file checks on read.
+
+        Both callers go through this function, so the same violation is reported the
+        same way whether it is hit while building a file in memory or while reading one
+        back off disk.
+        """
+        from zea.data.spec import InvalidZeaFileError, check_track_rules
+
+        # A well-formed track raises nothing, whether it carries data or is transmit-only.
+        ok = dict(has_data=True, has_scan=True, transmit_only=False, has_raw=True)
+        check_track_rules(**ok)
+        check_track_rules(**{**ok, "has_data": False, "transmit_only": True})
+
+        for kwargs, message in [
+            (
+                dict(has_data=False, has_scan=False, transmit_only=True, has_raw=False),
+                "at least one of 'data' or 'scan'",
+            ),
+            (
+                dict(has_data=False, has_scan=True, transmit_only=False, has_raw=False),
+                "'transmit_only' was not set to True",
+            ),
+            (
+                dict(has_data=True, has_scan=True, transmit_only=True, has_raw=False),
+                "must not carry data",
+            ),
+            (
+                dict(has_data=True, has_scan=False, transmit_only=False, has_raw=True),
+                "'scan' is required when 'raw_data'",
+            ),
+        ]:
+            with pytest.raises(InvalidZeaFileError, match=message):
+                check_track_rules(**kwargs)
+
+        # A ValueError subclass, so callers that predate the type still catch it.
+        assert issubclass(InvalidZeaFileError, ValueError)
+
     def test_data_none_with_scan_without_transmit_only_raises(self):
         """Omitting 'data' without setting 'transmit_only=True' is rejected."""
         with pytest.raises(ValueError, match="'transmit_only' was not set to True"):

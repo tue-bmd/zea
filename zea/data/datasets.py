@@ -31,7 +31,6 @@ Features
 """
 
 import functools
-import inspect
 import multiprocessing
 import os
 from collections import OrderedDict
@@ -172,29 +171,31 @@ class H5FileHandleCache:
         """Check if a file is open."""
         return bool(file.id.valid)
 
+    def _open_file(self, file_path) -> File:
+        """Open one file for the cache.
+
+        A plain handle cache has no idea where its paths came from, so it opens
+        read-only and never validates. Subclasses that do know override this to apply
+        their own open policy -- see :meth:`Dataset._open_file`.
+        """
+        return File(file_path, "r", progress=False, validate=False)
+
     def get_file(self, file_path) -> File:
         """Open an HDF5 file and cache it."""
-        # Subclasses (e.g. Dataset) carry the requested HF revision and validate flag
-        revision = getattr(self, "revision", None)
-        # Validation is the owner's policy: Dataset already validates at discovery, so a
-        # plain handle cache does not re-validate on every (re)open.
-        validate = bool(getattr(self, "validate", False))
         # If file is already in cache, return it and move it to the end
         if file_path in self._file_handle_cache:
             self._file_handle_cache.move_to_end(file_path)
             file = self._file_handle_cache[file_path]
             # if file was closed, reopen:
             if not self._check_if_open(file):
-                file = File(file_path, "r", progress=False, revision=revision, validate=validate)
-                self._file_handle_cache[file_path] = file
+                self._file_handle_cache[file_path] = self._open_file(file_path)
         # If file is not in cache, open it and add it to the cache
         else:
             # If cache is full, close the least recently used file
             if len(self._file_handle_cache) >= self.file_handle_cache_capacity:
                 _, close_file = self._file_handle_cache.popitem(last=False)
                 close_file.close()
-            file = File(file_path, "r", progress=False, revision=revision, validate=validate)
-            self._file_handle_cache[file_path] = file
+            self._file_handle_cache[file_path] = self._open_file(file_path)
 
         return self._file_handle_cache[file_path]
 
@@ -339,21 +340,12 @@ def _validate_h5_file(file_path):
 
 @functools.lru_cache(maxsize=1)
 def _validator_hash():
-    """Hash of the validation rules themselves.
-
-    Part of the cache key below: ``_file_hash`` notices when the *files* change, this
-    notices when what counts as valid changes. ``cache_output`` only hashes the source
-    of the function it decorates, so a stricter check in :mod:`zea.data.file` would
-    otherwise keep serving "valid" from the cache.
-    """
-    from zea.data import file as file_module
-
+    """Hash of the source of :mod:`zea.data`, where the validation rules live."""
+    sources = []
     try:
-        sources = [
-            inspect.getsource(file_module.validate_file),
-            inspect.getsource(file_module._validate_file_impl),
-        ]
-    except OSError:  # source unavailable (e.g. frozen install): fall back to the version
+        for path in sorted(Path(__file__).parent.glob("*.py")):
+            sources.append(path.read_bytes().decode("utf-8", "replace"))
+    except OSError:  # no source on disk (e.g. frozen install): the version has to do
         import zea
 
         sources = [zea.__version__]
@@ -372,8 +364,6 @@ def _validate_h5_files(file_paths, _filepath_hash, _validator_hash, verbose=True
         dict: ``{file path: error message}`` for the files that failed validation.
         An empty dict means every file is a valid zea file.
     """
-    assert _filepath_hash is not None
-
     errors = _map_over_files(
         _validate_h5_file,
         file_paths,
@@ -638,6 +628,9 @@ class Dataset(H5FileHandleCache):
         self.lazy = lazy
         self.file_filter = compile_file_filter(file_filter)
         self._suggest_lazy = _suggest_lazy
+        # Lazy hf:// paths that _open_file has already validated, so a handle that is
+        # evicted and reopened does not stream the file again to re-check its structure.
+        self._validated: set[str] = set()
 
         self.file_paths = self.find_files(file_paths)
 
@@ -779,12 +772,27 @@ class Dataset(H5FileHandleCache):
 
         return file_paths
 
+    def _open_file(self, file_path) -> File:
+        """Open one file at the dataset's revision."""
+        # Only validate lazy hf:// paths that have not already been validated.
+        # Local paths and non-lazy hf:// paths are validated at discovery.
+        validate = (
+            self.validate
+            and str(file_path).startswith(HF_PREFIX)
+            and str(file_path) not in self._validated
+        )
+        file = File(file_path, "r", progress=False, revision=self.revision, validate=validate)
+        if validate:
+            # Only on success: a raising open leaves the path unvalidated, to be retried.
+            self._validated.add(str(file_path))
+        return file
+
     def _validate_files(self):
         """Validate the discovered files in one cached pass.
 
         Lazy ``hf://`` pointers are skipped: they are validated when each file is first
-        opened (see :meth:`H5FileHandleCache.get_file`), because streaming every remote
-        file here is exactly what ``lazy=True`` exists to avoid.
+        opened (see :meth:`_open_file`), because streaming every remote file here is
+        exactly what ``lazy=True`` exists to avoid.
         """
         local_paths = [p for p in self.file_paths if not str(p).startswith(HF_PREFIX)]
         if local_paths:
