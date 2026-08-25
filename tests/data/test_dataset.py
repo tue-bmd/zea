@@ -3,11 +3,13 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import h5py
 import numpy as np
 import pytest
 
 from zea.config import Config, check_config
 from zea.data.datasets import Dataset, Folder, split_files_by_directory
+from zea.internal.cache import is_cache_disabled
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 
 from .. import DUMMY_DATASET_GRID_SIZE_X, DUMMY_DATASET_GRID_SIZE_Z, DUMMY_DATASET_N_FRAMES
@@ -248,7 +250,7 @@ def test_dataset_lazy_hf_streams_on_access():
         _ = ds[0]
         mock_resolve.assert_not_called()
         mock_file.assert_called_once_with(
-            "hf://org/myrepo/file1.hdf5", "r", progress=False, revision=None
+            "hf://org/myrepo/file1.hdf5", "r", progress=False, revision=None, validate=True
         )
         # Pointer preserved as the hf:// URI so it keeps streaming, not swapped for a local path
         assert ds.file_paths[0] == "hf://org/myrepo/file1.hdf5"
@@ -275,7 +277,7 @@ def test_dataset_lazy_hf_streams_at_requested_revision():
         ds = Dataset("hf://org/myrepo", lazy=True, revision="v0.1.0")
         _ = ds[0]
         mock_file.assert_called_once_with(
-            "hf://org/myrepo/file1.hdf5", "r", progress=False, revision="v0.1.0"
+            "hf://org/myrepo/file1.hdf5", "r", progress=False, revision="v0.1.0", validate=True
         )
         ds.close()
 
@@ -297,7 +299,7 @@ def test_copy_downloads_hf_source_instead_of_streaming(tmp_path):
         # The source File (first open) forces a download at the requested revision.
         src_call = mock_file.call_args_list[0]
         assert src_call.args[0] == "hf://org/myrepo/file1.hdf5"
-        assert src_call.kwargs == {"stream": False, "revision": "v0.1.0"}
+        assert src_call.kwargs == {"stream": False, "revision": "v0.1.0", "validate": False}
 
 
 def test_dataloader_rejects_lazy():
@@ -349,3 +351,89 @@ def test_dataset_hf_large_no_lazy_suggestion(tmp_path):
     assert any("GB" in m for m in msgs)
     assert not any("lazy=True" in m for m in msgs)
     ds.close()
+
+
+class TestValidation:
+    """``Dataset``/``Folder`` validate their files in one cached pass (no flag file)."""
+
+    @staticmethod
+    def _broken_file(path):
+        """Write an hdf5 file that is not a zea file."""
+        with h5py.File(path, "w") as f:
+            f.create_dataset("data", data=np.zeros((2, 4), dtype=np.float32))
+
+    def test_invalid_file_raises_and_names_it(self, dummy_dataset_path, tmp_path):
+        """A bad file in the folder fails construction, naming the file and the escape hatch."""
+        folder = Path(dummy_dataset_path)
+        self._broken_file(folder / "broken.hdf5")
+
+        with pytest.raises(ValueError) as excinfo:
+            Dataset(folder)
+
+        message = str(excinfo.value)
+        assert "broken.hdf5" in message
+        assert "validate=False" in message
+
+    def test_invalid_file_accepted_with_validate_false(self, dummy_dataset_path):
+        """``validate=False`` still opens a folder containing a non-zea file."""
+        folder = Path(dummy_dataset_path)
+        self._broken_file(folder / "broken.hdf5")
+
+        with Dataset(folder, validate=False) as dataset:
+            assert dataset.n_files == 3
+
+    def test_validation_writes_nothing_to_the_data_folder(self, dummy_dataset_path):
+        """Validation must not leave flag or log files next to the data."""
+        folder = Path(dummy_dataset_path)
+        before = sorted(p.name for p in folder.iterdir())
+
+        with Dataset(folder):
+            pass
+
+        assert sorted(p.name for p in folder.iterdir()) == before
+
+    def test_second_pass_is_served_from_cache(self, dummy_dataset_path):
+        """Validating an unchanged dataset again does not reopen its files."""
+        if is_cache_disabled():
+            pytest.skip("ZEA_DISABLE_CACHE is set, so every pass revalidates by design")
+
+        with Dataset(dummy_dataset_path):
+            pass  # first pass populates the cache
+
+        with patch("zea.data.datasets._validate_h5_file") as mock_validate:
+            with Dataset(dummy_dataset_path):
+                pass
+        mock_validate.assert_not_called()
+
+    def test_cache_invalidated_when_a_file_changes(self, dummy_dataset_path):
+        """A file edited in place after a clean pass is caught, not served from cache."""
+        folder = Path(dummy_dataset_path)
+        with Dataset(folder):
+            pass
+
+        victim = sorted(folder.glob("*.hdf5"))[0]
+        self._broken_file(victim)
+
+        with pytest.raises(ValueError, match=victim.name):
+            Dataset(folder)
+
+    def test_lazy_hf_files_are_not_validated_at_discovery(self, tmp_path):
+        """Streaming every remote file at init would defeat lazy=True."""
+        hf_files = [(f"file{i:02d}.hdf5", 1024) for i in range(3)]
+
+        with (
+            patch("zea.data.datasets._hf_list_h5_files", return_value=hf_files),
+            patch("zea.data.datasets._validate_h5_file") as mock_validate,
+        ):
+            ds = Dataset("hf://org/myrepo", lazy=True, validate=True)
+
+        mock_validate.assert_not_called()
+        ds.close()
+
+    def test_folder_validate_raises(self, dummy_dataset_path):
+        """``Folder(validate=True)`` reports invalid files the same way."""
+        folder = Path(dummy_dataset_path)
+        self._broken_file(folder / "broken.hdf5")
+
+        with pytest.raises(ValueError, match="broken.hdf5"):
+            Folder(folder, validate=True)

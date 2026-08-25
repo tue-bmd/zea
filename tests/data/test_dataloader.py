@@ -286,6 +286,8 @@ def test_dataloader(
     Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     revision = None
+    # The fake directory holds plain hdf5 files, not zea files, so skip validation.
+    validate = directory != "fake_directory"
     if directory == "fake_directory":
         # create a fake directory with some dummy data
         for i in range(num_files):
@@ -301,7 +303,7 @@ def test_dataloader(
     else:
         raise ValueError("Invalid directory for testing")
 
-    with Dataset(directory, revision=revision) as dataset_test:
+    with Dataset(directory, revision=revision, validate=validate) as dataset_test:
         file_lengths = [len(file[key]) for file in dataset_test]
 
     expected_len_dataset = sum(length // (n_frames or 1) for length in file_lengths)
@@ -315,6 +317,7 @@ def test_dataloader(
         seed=DEFAULT_TEST_SEED,
         image_range=image_range,
         revision=revision,
+        validate=validate,
     )
     batch_shape = next(iter(dataset)).shape
 

@@ -76,7 +76,7 @@ def _run_passthrough(
         raise ValueError(f"Passthrough mode only supports gif/mp4/hdf5, got {save_as!r}")
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    with Dataset(dataset_path, validate=False, lazy=True, _suggest_lazy=False, **hf_kwargs) as ds:
+    with Dataset(dataset_path, lazy=True, _suggest_lazy=False, **hf_kwargs) as ds:
         pbar = ProgressBar(len(ds))
         for i in range(len(ds)):
             f = ds[i]  # lazy download for hf:// paths; returns cached File handle
@@ -168,10 +168,12 @@ def run_processing(
     axis_selections: dict | None = None
     if _key_requires_pipeline(key):
         try:
+            # validate=False here and on the peek open below: the Dataloader built from
+            # the same path validates these files, so checking them twice is wasted work.
             with Dataset(dataset_path, validate=False, **dataset_hf_kwargs) as _peek_ds:
                 _first_path = _peek_ds.file_paths[0] if _peek_ds.file_paths else None
             if _first_path:
-                with File(_first_path) as _peek_f:
+                with File(_first_path, validate=False) as _peek_f:
                     _peek_params = _peek_f.load_parameters()
                 _peek_params.update(config_params)
                 axis_selections = _axis_selections_from_params(_peek_params)
@@ -274,7 +276,8 @@ def run_processing(
                         break
 
                 prev_file_path = file_path
-                with File(file_path) as f:
+                # Already validated by the Dataloader that handed us this path.
+                with File(file_path, validate=False) as f:
                     filestem = f.stem
                     parameters = f.load_parameters()
                 parameters.update(config_params)

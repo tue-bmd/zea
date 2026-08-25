@@ -36,7 +36,10 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - ``60``
      - Any positive integer, or ``<= 0`` to disable timeout.
    * - ``ZEA_FIND_H5_SHAPES_PARALLEL``
-     - If set to ``1``, will use parallel processing when searching for HDF5 file shapes.
+     - If set to ``1``, will use parallel processing for the per-file sweeps over a dataset
+       (reading HDF5 file shapes, and validating files against the zea format). Sweeps over
+       fewer than 500 files stay on the main process either way, since starting a worker pool
+       costs more than it saves there.
      - ``1``
      - ``0``, ``1``
    * - ``ZEA_TEST_DEVICE``

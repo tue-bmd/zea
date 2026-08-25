@@ -31,6 +31,7 @@ Features
 """
 
 import functools
+import inspect
 import multiprocessing
 import os
 from collections import OrderedDict
@@ -41,7 +42,7 @@ import numpy as np
 import tqdm
 
 from zea import log
-from zea.data.file import File
+from zea.data.file import File, validate_file
 from zea.datapaths import format_data_path
 from zea.internal.cache import cache_output
 from zea.internal.core import hash_elements
@@ -53,19 +54,21 @@ from zea.internal.preset_utils import (
     _hf_parse_path,
     _hf_resolve_path,
 )
-from zea.internal.utils import calculate_file_hash, reduce_to_signature
+from zea.internal.utils import reduce_to_signature
 from zea.io_lib import search_file_tree
 from zea.tools.hf import HFPath
-from zea.utils import date_string_to_readable, get_date_string
 
 if TYPE_CHECKING:
     # ``Self`` is in ``typing`` only from 3.11; import lazily to keep the
     # 3.10 floor runtime-clean.
     from typing_extensions import Self
 
-_CHECK_MAX_DATASET_SIZE = 10000
-_VALIDATED_FLAG_FILE = "validated.flag"
 FILE_HANDLE_CACHE_CAPACITY = 128
+# Below this many files a worker pool costs more to start (~0.5 s) than the sweep it
+# parallelises, so the per-file sweeps below stay on the main process for small datasets.
+_PARALLEL_MIN_FILES = 500
+# How many invalid files a validation error spells out before summarising the rest.
+_MAX_LISTED_INVALID_FILES = 10
 FILE_TYPES = [".hdf5", ".h5"]
 
 
@@ -169,15 +172,18 @@ class H5FileHandleCache:
 
     def get_file(self, file_path) -> File:
         """Open an HDF5 file and cache it."""
-        # Subclasses (e.g. Dataset) carry the requested HF revision
+        # Subclasses (e.g. Dataset) carry the requested HF revision and validate flag
         revision = getattr(self, "revision", None)
+        # Validation is the owner's policy: Dataset already validates at discovery, so a
+        # plain handle cache does not re-validate on every (re)open.
+        validate = bool(getattr(self, "validate", False))
         # If file is already in cache, return it and move it to the end
         if file_path in self._file_handle_cache:
             self._file_handle_cache.move_to_end(file_path)
             file = self._file_handle_cache[file_path]
             # if file was closed, reopen:
             if not self._check_if_open(file):
-                file = File(file_path, "r", progress=False, revision=revision)
+                file = File(file_path, "r", progress=False, revision=revision, validate=validate)
                 self._file_handle_cache[file_path] = file
         # If file is not in cache, open it and add it to the cache
         else:
@@ -185,7 +191,7 @@ class H5FileHandleCache:
             if len(self._file_handle_cache) >= self.file_handle_cache_capacity:
                 _, close_file = self._file_handle_cache.popitem(last=False)
                 close_file.close()
-            file = File(file_path, "r", progress=False, revision=revision)
+            file = File(file_path, "r", progress=False, revision=revision, validate=validate)
             self._file_handle_cache[file_path] = file
 
         return self._file_handle_cache[file_path]
@@ -235,12 +241,41 @@ def _shape_and_metadata_gaps(file_path, key, metadata_paths):
     # Imported here rather than at module scope: zea.data.metadata imports from us.
     from zea.data.metadata import metadata_signature, missing_metadata_paths
 
-    with File(file_path, mode="r") as file:
+    # validate=False: the Dataset that owns these paths already validated them at
+    # discovery (or was told not to), so re-checking every file here is wasted work.
+    with File(file_path, mode="r", validate=False) as file:
         shape = file.shape(key)
         missing = missing_metadata_paths(file, metadata_paths)
         # Only meaningful once every file can answer, so skip the walk when one cannot.
         signature = {} if missing else metadata_signature(file, metadata_paths)
     return shape, missing, signature
+
+
+def _map_over_files(func, file_paths, desc, verbose=True):
+    """Apply *func* to every file path, in parallel when that is worth its startup cost.
+
+    ``func`` must be importable at module level -- it runs in a
+    :mod:`multiprocessing` worker. Set ``ZEA_FIND_H5_SHAPES_PARALLEL=0`` to force the
+    main process (e.g. when calling from a worker yourself).
+    """
+    parallel = len(file_paths) >= _PARALLEL_MIN_FILES and os.environ.get(
+        "ZEA_FIND_H5_SHAPES_PARALLEL", "1"
+    ) in ("1", "true", "yes")
+
+    if parallel:
+        # make sure to call this from within a function or use if __name__ == "__main__"
+        # to avoid freezing the main process
+        with multiprocessing.Pool() as pool:
+            return list(
+                tqdm.tqdm(
+                    pool.imap(func, file_paths),
+                    total=len(file_paths),
+                    desc=desc,
+                    disable=not verbose,
+                )
+            )
+
+    return [func(file_path) for file_path in tqdm.tqdm(file_paths, desc=desc, disable=not verbose)]
 
 
 @cache_output("filepaths", "key", "metadata_paths", "_filepath_hash")
@@ -253,29 +288,9 @@ def _find_h5_file_shapes(filepaths, key, _filepath_hash, metadata_paths=(), verb
     get_shape = functools.partial(
         _shape_and_metadata_gaps, key=key, metadata_paths=tuple(metadata_paths)
     )
-
-    if os.environ.get("ZEA_FIND_H5_SHAPES_PARALLEL", "1") in ("1", "true", "yes"):
-        # using multiprocessing to speed up reading hdf5 files
-        # make sure to call find_h5_file_shapes from within a function
-        # or use if __name__ == "__main__" to avoid freezing the main process
-
-        with multiprocessing.Pool() as pool:
-            results = list(
-                tqdm.tqdm(
-                    pool.imap(get_shape, filepaths),
-                    total=len(filepaths),
-                    desc="Getting file shapes in each h5 file",
-                    disable=not verbose,
-                )
-            )
-    else:
-        results = []
-        for file_path in tqdm.tqdm(
-            filepaths,
-            desc="Getting file shapes in each h5 file",
-            disable=not verbose,
-        ):
-            results.append(get_shape(file_path))
+    results = _map_over_files(
+        get_shape, filepaths, "Getting file shapes in each h5 file", verbose=verbose
+    )
 
     file_shapes = [shape for shape, _, _ in results]
     metadata_gaps = {
@@ -297,6 +312,86 @@ def _file_hash(filepaths):
             total_size += os.path.getsize(fp)
             modified_times.append(os.path.getmtime(fp))
     return hash_elements([total_size, modified_times])
+
+
+def _validate_h5_file(file_path):
+    """Validate one file. Returns ``None`` when valid, else the error message.
+
+    Must stay importable at module level -- it runs in a :mod:`multiprocessing` worker.
+    """
+    try:
+        # validate=False on the open, then validate explicitly: the error belongs in the
+        # returned report, not raised out of a worker process.
+        with File(file_path, validate=False) as file:
+            validate_file(file=file)
+    except Exception as e:  # noqa: BLE001 -- reported per file, never raised from a worker
+        return f"{type(e).__name__}: {e}"
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def _validator_hash():
+    """Hash of the validation rules themselves.
+
+    Part of the cache key below: ``_file_hash`` notices when the *files* change, this
+    notices when what counts as valid changes. ``cache_output`` only hashes the source
+    of the function it decorates, so a stricter check in :mod:`zea.data.file` would
+    otherwise keep serving "valid" from the cache.
+    """
+    from zea.data import file as file_module
+
+    try:
+        sources = [
+            inspect.getsource(file_module.validate_file),
+            inspect.getsource(file_module._validate_file_impl),
+        ]
+    except OSError:  # source unavailable (e.g. frozen install): fall back to the version
+        import zea
+
+        sources = [zea.__version__]
+    return hash_elements(sources)
+
+
+@cache_output("file_paths", "_filepath_hash", "_validator_hash")
+def _validate_h5_files(file_paths, _filepath_hash, _validator_hash, verbose=True) -> dict:
+    """Validate every file against the zea format, caching the verdict.
+
+    Cached on the file list, :func:`_file_hash` (size and modification time) and
+    :func:`_validator_hash`, so a repeated call over unchanged files is a cache read
+    rather than a sweep over every file on disk.
+
+    Returns:
+        dict: ``{file path: error message}`` for the files that failed validation.
+        An empty dict means every file is a valid zea file.
+    """
+    assert _filepath_hash is not None
+
+    errors = _map_over_files(
+        _validate_h5_file,
+        file_paths,
+        "Checking dataset files on validity (zea format)",
+        verbose=verbose,
+    )
+    return {path: error for path, error in zip(file_paths, errors) if error is not None}
+
+
+def _raise_on_invalid_files(file_paths, verbose=True):
+    """Validate *file_paths*, raising a single error that names the invalid files."""
+    file_paths = [str(fp) for fp in file_paths]
+    errors = _validate_h5_files(
+        file_paths, _file_hash(file_paths), _validator_hash(), verbose=verbose
+    )
+    if not errors:
+        return
+
+    listed = list(errors.items())[:_MAX_LISTED_INVALID_FILES]
+    details = "\n".join(f"  {path}: {error}" for path, error in listed)
+    if len(errors) > len(listed):
+        details += f"\n  ... and {len(errors) - len(listed)} more"
+    raise ValueError(
+        f"{len(errors)} of {len(file_paths)} file(s) are not valid zea files:\n{details}\n"
+        "Pass validate=False to open them anyway."
+    )
 
 
 def _copy_h5_files(file_paths, base_path, to_path, key, mode=None, revision=None):
@@ -348,7 +443,12 @@ def _copy_h5_files(file_paths, base_path, to_path, key, mode=None, revision=None
     ):
         dst_path = to_path / Path(file_path).relative_to(base_path)
         dst_path.parent.mkdir(parents=True, exist_ok=True)
-        with File(file_path, stream=False, revision=revision) as src, File(dst_path, mode) as dst:
+        # validate=False on the source: these paths come from a Folder/Dataset that has
+        # already applied its own validate policy to them.
+        with (
+            File(file_path, stream=False, revision=revision, validate=False) as src,
+            File(dst_path, mode) as dst,
+        ):
             if all_keys:
                 for obj in src.keys():
                     src.copy(obj, dst)
@@ -364,7 +464,7 @@ class Folder:
     def __init__(
         self,
         folder_path: str | Path | HFPath,
-        validate: bool = False,
+        validate: bool = True,
         hf_cache_dir: str = HF_DATASETS_DIR,
         revision: str | None = None,
     ):
@@ -441,131 +541,16 @@ class Folder:
         return len(self.file_paths)
 
     def validate_folder(self):
-        """Validate dataset contents.
+        """Validate that every file in the folder is a valid zea file.
 
-        If a validation file exists, it checks if the dataset was validated on the same date.
-        If the validation file was corrupted, it raises an error.
-        If the validation file was not corrupted and validated, it prints a message and returns.
+        The verdict is cached (see :func:`_validate_h5_files`), so repeating this over
+        an unchanged folder costs a ``stat`` per file rather than an open per file.
+
+        Raises:
+            ValueError: If any file in the folder is not a valid zea file. The message
+                names the offending files.
         """
-
-        validation_file_path = self.folder_path / _VALIDATED_FLAG_FILE
-        # for error logging
-        validation_error_file_path = Path(
-            self.folder_path, get_date_string() + "_validation_errors.log"
-        )
-        validation_error_log = []
-
-        if validation_file_path.is_file():
-            self._assert_validation_file(validation_file_path)
-            return
-
-        if self.n_files > _CHECK_MAX_DATASET_SIZE:
-            log.warning(
-                "Checking dataset in more than "
-                f"{_CHECK_MAX_DATASET_SIZE} files takes too long. "
-                f"Found {self.n_files} files in dataset. "
-            )
-            return
-
-        num_frames_per_file = []
-        validated_successfully = True
-        for file_path in tqdm.tqdm(
-            self.file_paths,
-            total=self.n_files,
-            desc="Checking dataset files on validity (zea format)",
-        ):
-            try:
-                with File(file_path) as file:
-                    file.validate()
-                    num_frames_per_file.append(file.n_frames)
-            except Exception as e:
-                validation_error_log.append(f"File {file_path} is not a valid zea dataset.\n{e}\n")
-                # convert into warning
-                log.warning(f"Error in file {file_path}.\n{e}")
-                validated_successfully = False
-
-        if not validated_successfully:
-            log.warning(
-                "Check warnings above for details. No validation file was created. "
-                f"See {validation_error_file_path} for details."
-            )
-            try:
-                with open(validation_error_file_path, "w", encoding="utf-8") as f:
-                    for error in validation_error_log:
-                        f.write(error)
-            except Exception as e:
-                log.error(
-                    f"Could not write validation errors to {validation_error_file_path}.\n{e}"
-                )
-            return
-
-        # Create the validated flag file
-        self._write_validation_file(self.folder_path, num_frames_per_file)
-        log.info(f"{log.green('Dataset validated.')} Check {validation_file_path} for details.")
-
-    @staticmethod
-    def _assert_validation_file(validation_file_path):
-        """Check if validation file exists and is valid."""
-        with open(validation_file_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-            try:
-                validation_date = lines[1].split(": ")[1].strip()
-                read_validation_file_hash = lines[-1].split(": ")[1].strip()
-            except Exception as exc:
-                raise ValueError(
-                    log.error(
-                        f"Validation file {log.yellow(validation_file_path)} is corrupted. "
-                        "Remove it if you want to redo validation."
-                    )
-                ) from exc
-
-            log.info(
-                f"Dataset was validated on {log.green(date_string_to_readable(validation_date))}"
-            )
-            log.info(f"Remove {log.yellow(validation_file_path)} if you want to redo validation.")
-        # check if validation file was corrupted
-        validation_file_hash = calculate_file_hash(validation_file_path, omit_line_str="hash")
-        assert validation_file_hash == read_validation_file_hash, log.error(
-            f"Validation file {log.yellow(validation_file_path)} was corrupted.\n"
-            f"Remove it if you want to redo validation.\n"
-        )
-
-    @staticmethod
-    def get_data_types(file_path):
-        """Get data types from file."""
-        with File(file_path) as file:
-            data_types = list(file["data"].keys())
-        return data_types
-
-    def _write_validation_file(self, path, num_frames_per_file):
-        """Write validation file."""
-        validation_file_path = Path(path, _VALIDATED_FLAG_FILE)
-
-        # Read data types from the first file
-        data_types = self.get_data_types(self.file_paths[0])
-
-        number_of_frames = sum(num_frames_per_file)
-        try:
-            with open(validation_file_path, "w", encoding="utf-8") as f:
-                f.write(f"Dataset: {path}\n")
-                f.write(f"Validated on: {get_date_string()}\n")
-                f.write(f"Number of files: {self.n_files}\n")
-                f.write(f"Number of frames: {number_of_frames}\n")
-                f.write(f"Data types: {', '.join(data_types)}\n")
-                f.write(f"{'-' * 80}\n")
-                # write all file names (not entire path) with number of frames on a new line
-                for file_path, num_frames in zip(self.file_paths, num_frames_per_file):
-                    f.write(f"{Path(file_path).name}: {num_frames}\n")
-                f.write(f"{'-' * 80}\n")
-
-            # Write the hash of the validation file
-            validation_file_hash = calculate_file_hash(validation_file_path)
-            with open(validation_file_path, "a", encoding="utf-8") as f:
-                # *** validation file hash *** (80 total line length)
-                f.write("*** validation file hash ***\n")
-                f.write(f"hash: {validation_file_hash}")
-        except Exception as e:
-            log.warning(f"Unable to write validation flag: {e}")
+        _raise_on_invalid_files(self.file_paths)
 
     def __repr__(self):
         return f"Folder(n_files={self.n_files}, folder='{self.folder_path}')"
@@ -598,7 +583,7 @@ class Dataset(H5FileHandleCache):
     def __init__(
         self,
         file_paths: Sequence[str | Path] | str | Path,
-        validate: bool = False,
+        validate: bool = True,
         directory_splits: list | None = None,
         revision: str | None = None,
         lazy: bool = True,
@@ -611,7 +596,11 @@ class Dataset(H5FileHandleCache):
         Args:
             file_paths (str or list): (list of) path(s) to the folder(s) containing the HDF5 file(s)
                 or list of HDF5 file paths. Can be a mixed list of folders and files.
-            validate (bool, optional): Whether to validate the dataset. Defaults to False.
+            validate (bool, optional): Whether to validate the discovered files against
+                the zea format, raising if any of them is not a valid zea file. Defaults
+                to True. The verdict is cached, so only the first call over a given
+                dataset opens every file. Lazy ``hf://`` files are validated when first
+                opened instead.
             directory_splits (list, optional): List of directory split by. Is a list of floats
                 between 0 and 1, with the same length as the number of file_paths given.
                 If none, all files in file_paths are used.
@@ -654,6 +643,9 @@ class Dataset(H5FileHandleCache):
 
         assert self.n_files > 0, f"No files in file_paths: {file_paths}"
 
+        if self.validate:
+            self._validate_files()
+
         if self.file_filter is not None:
             self.file_paths = self._apply_file_filter(self.file_paths)
 
@@ -670,7 +662,8 @@ class Dataset(H5FileHandleCache):
         for path in file_paths:
             # Opening the file is file access, not filtering: let open/download/
             # permission failures propagate instead of silently dropping the file.
-            with File(path, revision=self.revision) as file:
+            # validate=False: these paths were validated just above, in __init__.
+            with File(path, revision=self.revision, validate=False) as file:
                 try:
                     keep = file_filter(file)
                 except OSError:
@@ -746,20 +739,11 @@ class Dataset(H5FileHandleCache):
 
         resolved = _hf_resolve_path(hf_path, **hf_kwargs)
         if resolved.is_dir():
-            paths = sorted(str(fp) for fp in search_file_tree(resolved, filetypes=FILE_TYPES))
-            if self.validate:
-                for p in paths:
-                    with File(p) as f:
-                        f.validate()
-            return paths
-        else:
-            if self.validate:
-                with File(resolved) as f:
-                    f.validate()
-            return [str(resolved)]
+            return sorted(str(fp) for fp in search_file_tree(resolved, filetypes=FILE_TYPES))
+        return [str(resolved)]
 
     def find_files(self, paths) -> List[str]:
-        """Find files and optionally validate folders and files."""
+        """Expand folders, ``hf://`` paths and single files into a flat list of files."""
         file_paths = []
 
         if not isinstance(paths, (list, tuple)):
@@ -778,16 +762,25 @@ class Dataset(H5FileHandleCache):
 
             file_path = Path(file_path)
             if file_path.is_dir():
-                folder = Folder(file_path, self.validate, revision=self.revision)
+                # validate=False: the whole discovered set is validated in one pass below.
+                folder = Folder(file_path, validate=False, revision=self.revision)
                 file_paths += folder.file_paths
                 del folder
             elif file_path.is_file():
                 file_paths.append(str(file_path))
-                with File(file_path, revision=self.revision) as file:
-                    if self.validate:
-                        file.validate()
 
         return file_paths
+
+    def _validate_files(self):
+        """Validate the discovered files in one cached pass.
+
+        Lazy ``hf://`` pointers are skipped: they are validated when each file is first
+        opened (see :meth:`H5FileHandleCache.get_file`), because streaming every remote
+        file here is exactly what ``lazy=True`` exists to avoid.
+        """
+        local_paths = [p for p in self.file_paths if not str(p).startswith(HF_PREFIX)]
+        if local_paths:
+            _raise_on_invalid_files(local_paths)
 
     @classmethod
     def from_config(cls, path, user=None, **kwargs) -> "Self":

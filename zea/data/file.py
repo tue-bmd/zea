@@ -972,6 +972,10 @@ class File(h5py.File):
             cache (bool, optional): Cache fetched/streamed chunks on disk so a repeated read is
                 served locally instead of re-downloaded (default ``True``, streamed files only; see
                 :mod:`zea.data.chunk_cache`).
+            validate (bool, optional): Run :meth:`validate` right after opening, so an
+                invalid file raises here rather than at first read. Defaults to ``True``.
+                This is a lightweight structural check (no array data is loaded).
+                Only applies when opening for reading.
             *args: Additional arguments to pass to h5py.File.
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
@@ -1005,6 +1009,10 @@ class File(h5py.File):
         # Cache streamed chunks on disk (see zea.data.chunk_cache). On by default, like the
         # HF hub cache; ``cache=False`` (or ZEA_CHUNK_CACHE=0) re-fetches every time.
         cache_chunks = kwargs.pop("cache", True)
+
+        # Structural validation on open (see validate()). On by default so a non-zea or
+        # broken file fails here, at the open, instead of at some later read.
+        validate = kwargs.pop("validate", True)
 
         # File object opened for streaming; kept so we can close it in close().
         stream_fileobj = None
@@ -1077,6 +1085,12 @@ class File(h5py.File):
         # Warn when opening an existing file that pre-dates zea v0.1.0
         if mode in ("r", "r+"):
             _warn_if_legacy_file(self)
+            if validate:
+                try:
+                    self.validate()
+                except Exception:
+                    self.close()
+                    raise
 
     @property
     def progress(self):
@@ -2639,20 +2653,29 @@ def _validate_file_impl(file: File) -> None:
 
     Checks that:
     - a ``data`` group is present — either at ``tracks/track_N/data``
-      or at the root ``data`` group (legacy)
+      or at the root ``data`` group (legacy); a transmit-only track
+      (scan, no data) is accepted without one
     - for legacy files, every key in ``data`` is a recognised zea data type
     - for files created with zea v0.1.0 and later, every key in ``data``
     is in :class:`~zea.data.spec.DataSpec`\'s schema
     """
     # Collect all data groups to validate
     data_groups: list[tuple[str, h5py.Group]] = []
+    # A transmit-only track carries a scan and no data at all, so it contributes no
+    # data group while still being a valid track (see TrackSpec.transmit_only).
+    n_tracks = 0
 
     if super(File, file).__contains__("tracks"):
         # New multi-track format: tracks/track_N/data
         tracks_group = file["tracks"]
         for track_key in tracks_group.keys():
             track_grp = tracks_group[track_key]
-            assert "data" in track_grp, f"Track group '{track_key}' is missing a 'data' subgroup."
+            n_tracks += 1
+            if "data" not in track_grp:
+                assert "transmit_only" in track_grp and bool(track_grp["transmit_only"][()]), (
+                    f"Track group '{track_key}' is missing a 'data' subgroup."
+                )
+                continue
             assert isinstance(track_grp["data"], h5py.Group), (
                 f"'{track_key}/data' is not a group - this may not be a zea file."
             )
@@ -2664,7 +2687,7 @@ def _validate_file_impl(file: File) -> None:
         )
         data_groups.append(("data", file["data"]))
 
-    assert data_groups, (
+    assert data_groups or n_tracks, (
         "'data' group not found in file. "
         "Expected either tracks/track_N/data or a root 'data' group."
     )

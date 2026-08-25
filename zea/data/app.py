@@ -897,6 +897,7 @@ def run_checks(
             sort_files=False,
             dtype="float32",
             axis_selections=_axis_sel,
+            # Already validated by the File open in step 4 above.
             validate=False,
             revision=_dl_revision,
         )

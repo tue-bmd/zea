@@ -1715,7 +1715,7 @@ class TestLoadingWarnings:
             g.create_dataset("raw_data", data=np.zeros((2, 2, 8, 4, 1), dtype=np.float32))
 
         with patch("zea.log.warning") as mock_warn:
-            with File(path) as f:
+            with File(path, validate=False) as f:
                 f.get_scan_parameters()
         messages = [str(c.args[0]) for c in mock_warn.call_args_list]
         assert any("Could not find scan parameters in file" in m for m in messages)
@@ -1730,7 +1730,7 @@ class TestLoadingWarnings:
             wv.create_dataset("1", data=np.zeros(10, dtype=np.float32))
 
         with patch("zea.log.warning") as mock_warn:
-            with File(path) as f:
+            with File(path, validate=False) as f:
                 # f.scan emits the legacy-waveforms warning, then fails because the
                 # file has no other (required) ScanSpec fields.
                 with pytest.raises((ValueError, TypeError)):

@@ -486,7 +486,7 @@ class H5DataSource:
         limit_n_frames: Cap frames loaded per file.
         return_metadata: Return a ``(sample, metadata)`` tuple. See :class:`Dataloader`.
         cache: Cache loaded samples to RAM.
-        validate: Validate dataset against the zea format.
+        validate: Validate dataset against the zea format. Default is ``True``.
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
         on_incomplete_blocks: ``"error"`` or ``"skip"`` for files too short to fill a
             block. See :class:`Dataloader`.
@@ -511,7 +511,7 @@ class H5DataSource:
         offset_n_frames: int = 0,
         return_metadata: bool | str | Sequence[str] | None = None,
         cache: bool = False,
-        validate: bool = False,
+        validate: bool = True,
         revision: str | None = None,
         on_incomplete_blocks: str = "error",
         on_missing_metadata: str = "error",
@@ -986,8 +986,9 @@ class Dataloader:
             trailing frame axis scrambles the ``(n_tx, n_ax, n_el, n_ch)`` layout the
             processing pipeline wants. Set ``frame_axis=0`` there, so blocks keep the
             file's own ``(n_frames, n_tx, n_ax, n_el, n_ch)`` order.
-        validate: Validate discovered files against the zea format.
-            Default is ``False``.
+        validate: Validate discovered files against the zea format, raising if any file
+            is not a valid zea file. Default is ``True``. The verdict is cached under, so only the
+            first run over a given dataset opens every file.
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
             Defaults to ``None`` (uses the default branch, typically ``"main"``).
         prefetch: Enable Grain prefetching for iteration. Default is ``True``.
@@ -1149,7 +1150,7 @@ class Dataloader:
         on_missing_metadata: str = "error",
         frame_index_stride: int = 1,
         frame_axis: int = -1,
-        validate: bool = False,
+        validate: bool = True,
         revision: str | None = None,
         prefetch: bool = True,
         shard_index: int | None = None,
