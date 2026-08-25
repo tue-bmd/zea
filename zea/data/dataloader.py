@@ -197,13 +197,17 @@ def generate_h5_indices(
         except Exception:
             log.warning("Could not sort file_paths by number.")
 
-    # Frames one sample consumes. With n_frames=None the selection is a single int, so a
-    # sample spans exactly one frame however large the stride: there the stride only
-    # spaces consecutive samples out, it does not widen them.
-    block_size = 1 if n_frames is None else n_frames * frame_index_stride
+    # Frames one sample reaches across: the first and last frame of the block, plus the
+    # gaps between them. A strided block does not consume the trailing stride, so
+    # n_frames=2 with stride=2 spans 3 frames (0 and 2), not 4. With n_frames=None the
+    # selection is a single int, so a sample spans exactly one frame however large the
+    # stride: there the stride only spaces consecutive samples out, it does not widen them.
+    block_span = 1 if n_frames is None else (n_frames - 1) * frame_index_stride + 1
 
     if not overlapping_blocks:
-        block_step_size = frame_index_stride if n_frames is None else block_size
+        # Consecutive blocks step over the frames a strided block skipped as well, so
+        # that no frame is served twice.
+        block_step_size = frame_index_stride if n_frames is None else n_frames * frame_index_stride
     else:
         # now blocks overlap by n_frames - 1
         block_step_size = 1
@@ -219,8 +223,8 @@ def generate_h5_indices(
         # An int rather than a slice when n_frames is None: h5py then drops the axis
         # on read, so single-frame samples never grow a length-1 frame dimension.
         return [
-            i if n_frames is None else slice(i, i + block_size, frame_index_stride)
-            for i in range(offset_n_frames, effective_end - block_size + 1, block_step_size)
+            i if n_frames is None else slice(i, i + block_span, frame_index_stride)
+            for i in range(offset_n_frames, effective_end - block_span + 1, block_step_size)
         ]
 
     # The frame axis leads the product when there is one; without it (a field the spec
@@ -259,13 +263,13 @@ def generate_h5_indices(
             raise _incomplete_blocks_error(
                 short_files,
                 len(file_paths),
-                block_size,
+                block_span,
                 windowed=offset_n_frames > 0 or limit_n_frames is not None,
             )
         log.info(
             f"Skipping {len(short_files)} / {len(file_paths)} files "
             f"({len(short_files) / len(file_paths) * 100:.2f}% of the dataset) that hold "
-            f"fewer than the {block_size} frames one sample needs."
+            f"fewer than the {block_span} frames one sample needs."
         )
 
     return indices
@@ -274,13 +278,15 @@ def generate_h5_indices(
 def _resolve_source_frame_axis(key: str, num_dims: int) -> int | None:
     """Locate the axis that stores frames for ``key``, per the zea file spec.
 
-    Returns the axis index, or ``None`` when the spec names every axis of the field
-    and none of them is ``n_frames`` -- an array that simply has no frames, such as
-    ``probe/probe_geometry``.  Data the spec cannot speak for (custom keys, a
+    Returns the axis index, or ``None`` when the field has no frames at all: either
+    the spec names every axis and none of them is ``n_frames`` (such as
+    ``probe/probe_geometry``), or the dataset is a scalar with no axes to index
+    (such as ``scan/sound_speed``).  Data the spec cannot speak for (custom keys, a
     wildcard shape) falls back to axis 0, the convention everywhere in the spec.
     """
     if num_dims == 0:
-        return 0
+        # A scalar has no axis to take frames from; axis 0 would index an empty shape.
+        return None
     dim_names = dim_names_for_key(key, num_dims)
     if dim_names is None:
         log.warning(
@@ -1247,7 +1253,10 @@ class Dataloader:
         # Pre-build the resizer (stateless, reusable across epochs)
         if image_size or resize_type:
             resize_type = resize_type or "resize"
-            if frame_axis != -1:
+            # Only a framed read places a frame axis in the sample; with n_frames=None
+            # there is no frame axis to displace, so frame_axis is inert (see its docs)
+            # and axes (1, 2) are height and width whatever it was set to.
+            if frame_axis != -1 and self.source.n_frames is not None:
                 assert resize_axes is not None, (
                     "Resizing without `resize_axes` assumes axes (1, 2) are height and "
                     "width, which holds only when frames sit in the trailing channel "

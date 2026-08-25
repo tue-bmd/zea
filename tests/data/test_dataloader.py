@@ -200,6 +200,49 @@ def test_frame_window_on_framed_key_does_not_warn(spec_shaped_hdf5, attach_caplo
     assert not [r for r in attach_caplog_warnings.records if "Ignoring" in r.message]
 
 
+def test_scalar_key_has_no_frame_axis(spec_shaped_hdf5, tmp_path):
+    """A 0-d dataset has no axis to take frames from, so it loads as one whole sample."""
+    file_path = tmp_path / "scalar_0_0.hdf5"
+    with h5py.File(file_path, "w") as f:
+        f.create_dataset("scan/sound_speed", data=np.float32(1540.0))
+
+    source = H5DataSource(file_paths=[file_path], key="scan/sound_speed", validate=False)
+
+    assert source.source_frame_axis is None
+    assert len(source) == 1
+    assert np.asarray(source[0]) == np.float32(1540.0)
+
+
+def test_minimally_sized_strided_block(spec_shaped_hdf5):
+    """A strided block spans its gaps, not a trailing stride: 2 frames at stride 2 fit 3.
+
+    Measuring the span as ``n_frames * stride`` (4) instead of
+    ``(n_frames - 1) * stride + 1`` (3) drops files that can serve the block fine.
+    """
+    source = H5DataSource(
+        file_paths=[spec_shaped_hdf5],
+        key="data/image/values",
+        n_frames=2,
+        frame_index_stride=2,
+        validate=False,
+    )
+
+    # Non-overlapping blocks still step a full n_frames * stride, so 4 frames give one.
+    assert len(source) == 1
+    assert source[0].shape == (8, 6, 2), "two frames, on the trailing frame axis"
+
+    # And the same block fits a file with exactly the 3 frames it spans.
+    limited = H5DataSource(
+        file_paths=[spec_shaped_hdf5],
+        key="data/image/values",
+        n_frames=2,
+        frame_index_stride=2,
+        limit_n_frames=3,
+        validate=False,
+    )
+    assert len(limited) == 1
+
+
 def test_frame_axis_unknown_key_falls_back_to_axis_zero(dummy_hdf5):
     """A key outside the spec warns and assumes the usual leading frame axis."""
     source = H5DataSource(file_paths=[dummy_hdf5], key="data", validate=False)
@@ -611,6 +654,30 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
     assert np.any(np.isclose(images_np, 1.0)), (
         "Augmentation did not set any pixels to fill_value=1.0 as expected"
     )
+
+
+def test_frameless_resize_allows_nondefault_frame_axis(dummy_hdf5):
+    """With n_frames=None there is no frame axis, so frame_axis must not block resizing.
+
+    ``frame_axis`` is documented as unused when ``n_frames is None``; the samples are
+    2-D either way, so axes (1, 2) really are height and width and the default
+    ``resize_axes`` holds.
+    """
+    dataset = Dataloader(
+        dummy_hdf5,
+        batch_size=2,
+        key="data",
+        n_frames=None,
+        frame_axis=0,
+        image_size=(16, 16),
+        resize_type="resize",
+        shuffle=False,
+        seed=DEFAULT_TEST_SEED,
+        validate=False,
+    )
+
+    images = ops.convert_to_numpy(next(iter(dataset)))
+    assert images.shape == (2, 16, 16, 1)
 
 
 def test_resize_with_different_shapes(multi_shape_dataset):
