@@ -52,6 +52,17 @@ def compute_pfield(
 ):
     """Compute the pressure field for ultrasound imaging.
 
+    This implements PFIELD from MUST in its two-dimensional form: element height and elevation
+    focus are taken to infinity, so the elevation term of the 3-D theory drops out
+    and the Green's function is 1 / sqrt(r) instead of 1 / r (Eqs. 36-37). Equation
+    numbers in this module refer to the reference below.
+
+    .. admonition:: Reference
+
+        Garcia, D. (2022). SIMUS: An open-source simulator for medical ultrasound
+        imaging. Part I: Theory & examples. *Computer Methods and Programs in
+        Biomedicine, 218*, 106726. https://www.biomecardio.com/publis/cmpb22.pdf
+
     Args:
         sound_speed (float): Speed of sound in the medium.
         center_frequency (float): Center frequency of the transmit pulse in Hz.
@@ -92,9 +103,9 @@ def compute_pfield(
     """
     # medium params
     # NOTE: currently we ignore attenuation in the compounding
-    attenuation_coef = 0  # dB/cm/MHz, attenuation coefficient of the medium
-    attenuation_coef = attenuation_coef / 8.686  # convert to Np/cm/MHz
-    attenuation_coef = attenuation_coef / 1e6 / 1e2  # convert to Np/m/Hz
+    attenuation_coef = 0  # dB/(cm·MHz), attenuation coefficient of the medium
+    attenuation_coef = attenuation_coef / 8.686  # convert to Np/(cm·MHz)
+    attenuation_coef = attenuation_coef * 1e2 / 1e6  # Np/(m·Hz)
 
     n_el = int(n_el)
 
@@ -131,7 +142,7 @@ def compute_pfield(
     # % POINT LOCATIONS, DISTANCES & GRIDS %
     # %------------------------------------%
 
-    # subdivide elements into sub elements or not? (to satisfy Fraunhofer approximation)
+    # subdivide elements into sub elements or not? (to satisfy Fraunhofer approximation, Eq. 21)
     lambda_min = sound_speed / (center_frequency * (1 + probe_bandwidth_percent / 200))
     num_sub_elements = ops.ceil(element_width / lambda_min)
 
@@ -171,8 +182,9 @@ def compute_pfield(
     epsilon = keras.config.epsilon()
     theta = ops.arcsin(ops.clip(delta_x / distance, -1.0, 1.0)) - element_theta
 
-    # Directivity of a sub-element. Frequency-independent, so it is computed once here
-    # rather than inside the (batched, per-frequency) loop below.
+    # Directivity of a sub-element (Eq. 17). It varies over the band, but we approximate it at the
+    # center frequency such that it doesn't need to be recomputed for each frequency sample.
+    # We use a rigid baffle by default, PFIELD uses a soft baffle (extra cos(theta) factor, Eq. 39).
     sub_element_directivity = ops.cast(
         directivity(center_frequency, theta, seg_length, sound_speed), "complex64"
     )
@@ -187,7 +199,7 @@ def compute_pfield(
     # Both spectra are written in ordinary frequency (Hz) rather than angular frequency:
     # the sinc arguments then carry no factors of pi, since keras.ops.sinc is the
     # normalized sin(pi x) / (pi x).
-    def pulse_spectrum(f):
+    def pulse_spectrum(f):  # Eq. (25)
         imag = ops.sinc(pulse_width * (f - center_frequency)) - ops.sinc(
             pulse_width * (f + center_frequency)
         )
@@ -197,7 +209,7 @@ def compute_pfield(
     bandwidth = probe_bandwidth_percent * center_frequency / 100  # bandwidth in Hz
     p_shape = ops.log(126) / ops.log(epsilon + 2 * center_frequency / bandwidth)
 
-    def probe_spectrum(f):
+    def probe_spectrum(f):  # sqrt of Eq. (27), the one-way half of Eq. (28)
         # Calculate the normalized frequency difference
         freq_diff = ops.abs(f - center_frequency)
         # Calculate the denominator for normalization
@@ -212,7 +224,7 @@ def compute_pfield(
     # The spectrum of the pulse (pulse_spectrum) will be then multiplied
     # by the frequency-domain tapering window of the transducer (probe_spectrum)
     # The frequency step df is chosen to avoid interferences due to
-    # inadequate discretization.
+    # inadequate discretization (the criterion below Eq. 42).
     # df = frequency step (must be sufficiently small):
     # One has exp[-i(k r + w delay)] = exp[-2i pi(f r/c + f delay)] in the Eq.
     # One wants: the phase increment 2pi(df r/c + df delay) be < 2pi.
@@ -396,7 +408,8 @@ def _pfield_freq_step(
     delay_apodization = (
         ops.exp(1j * ops.cast(angular_frequency * delays_tx, "complex64")) * tx_apodization
     )
-    # (num_points, n_el) @ (n_el, n_tx) -> (num_points, n_tx): all transmits batched
+    # The sum over elements of Eq. (37), as a matmul:
+    # (num_points, n_el) @ (n_el, n_tx) -> (num_points, n_tx), all transmits batched
     pressure_k = (
         ops.matmul(monochromatic_pressure, ops.transpose(delay_apodization, (1, 0)))
         * pulse_spect
