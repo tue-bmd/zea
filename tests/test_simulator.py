@@ -329,11 +329,8 @@ def test_simulate_op_prunes_elevation_slab_without_leaking_pruned_cloud():
     assert outputs["scatterer_magnitudes"].shape == magnitudes.shape
 
 
-def test_record_length_gate_uses_worst_case_element_pair():
-    """
-    A scatterer with one in-record and one out-of-record element must be gated out to prevent
-    aliasing.
-    """
+def test_record_length_gate_keeps_in_record_pairs_without_aliasing():
+    """Scatterers that fit in the record must not be zeroed, but no aliasing may happen."""
     probe_geometry = np.array([[-8e-3, 0.0, 0.0], [8e-3, 0.0, 0.0]], dtype=np.float32)
     scatterer_positions = np.array([[9.375e-3, 0.0, 9.905e-3]], dtype=np.float32)
 
@@ -356,8 +353,23 @@ def test_record_length_gate_uses_worst_case_element_pair():
         "t_peak": np.zeros(1, dtype=np.float32),
     }
 
-    rf = keras.ops.convert_to_numpy(simulate_rf(**args))
-    assert np.abs(rf).max() == 0, "Out-of-record element pair was included; implies aliased energy."
+    rf = keras.ops.convert_to_numpy(simulate_rf(**args))[0, :, :, 0]
+    # Four times the record gates nothing, so it is the un-truncated ground truth.
+    reference = keras.ops.convert_to_numpy(simulate_rf(**{**args, "n_ax": 1024}))[0, :256, :, 0]
+
+    near = 1  # element 8 mm from the scatterer, so its own round trip is the 13.0 us pair
+    peak = np.abs(rf[:, near]).max()
+    assert np.abs(rf[:, near]).argmax() == np.abs(reference[:, near]).argmax(), (
+        "In-record pair was gated out or moved."
+    )
+    assert np.abs(rf[:, near] - reference[:, near]).max() < 1e-3 * peak
+
+    # The 26.0 us pair would land near sample 56; the earliest real arrival is the pulse
+    # around sample 156.
+    quiet = np.abs(rf[:140]).max()
+    assert quiet < 1e-3 * peak, (
+        f"Aliased energy detected: {quiet:.3g} should be much less than peak ({peak:.3g})"
+    )
 
 
 def _receive_chain_image(fish_scan, simulator, **receive_chain_kwargs):
