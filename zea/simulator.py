@@ -199,7 +199,9 @@ def simulate_rf(
         tx_response = shared_response * ops.cast(spread(dist[..., None], 1.0), "complex64")
         rx_response = tx_response
 
-    record_length = n_ax_rounded / sampling_frequency
+    # Leave room for the pulse tail
+    record_length = n_ax_rounded / sampling_frequency - 2 / center_frequency
+    travel_time = dist / sound_speed
     parts = []
     for tx in range(n_tx):
         shifts_not_travel_related = t0_delays[tx][:, None] - initial_times[tx] + t_peak[tx]
@@ -207,19 +209,22 @@ def simulate_rf(
         tx_delay = delay2(freqs[None], shifts_not_travel_related, n_ax_rounded, sampling_frequency)
         tx_element_weights = ops.cast(tx_apodizations[tx][:, None], "complex64") * tx_delay
 
-        # delay2 only gates one-way delays. Worst case over elements: drops some in-record
-        # pairs, but never aliases in ops.irfft.
-        round_trip_time = 2 * ops.max(dist, axis=1) / sound_speed + ops.max(
-            shifts_not_travel_related
+        # delay2 only gates one-way delays. Worst case over the active transmit elements,
+        # to never alias in ops.irfft.
+        tx_arrival = ops.max(
+            ops.where(
+                tx_apodizations[tx][None] != 0,
+                travel_time + shifts_not_travel_related[None, :, 0],
+                -float("inf"),
+            ),
+            axis=1,
         )
-        within_record = ops.cast(round_trip_time < record_length, "float32")
+        within_record = ops.cast(tx_arrival[:, None] + travel_time < record_length, "complex64")
 
         # Explicitly sum over tx dimension before the receive axis exists.
         incident_field = ops.sum(tx_response * tx_element_weights[None], axis=1)
-        scattered_field = incident_field * ops.cast(
-            (magnitudes * within_record)[:, None], "complex64"
-        )
-        received_field = scattered_field[:, None] * rx_response
+        scattered_field = incident_field * ops.cast(magnitudes[:, None], "complex64")
+        received_field = scattered_field[:, None] * rx_response * within_record[..., None]
         rf_spectrum = waveform_spectrum * ops.sum(received_field, axis=0)
         parts.append(ops.irfft((ops.real(rf_spectrum), ops.imag(rf_spectrum))))
 
