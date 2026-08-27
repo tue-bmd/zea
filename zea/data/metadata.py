@@ -5,13 +5,21 @@ for the path syntax and the shape of the result.
 """
 
 from collections.abc import Iterable, Sequence
+from typing import Any
 
 import h5py
 import numpy as np
 
 from zea.data.datasets import _resolve_dotted_path
 from zea.data.file import ChunkedDataset, File, _GroupProxy, _StringDataset
-from zea.data.spec import ROOT_SPECS, FileSpec, Spec
+from zea.data.spec import (
+    CONSISTENCY_DIMENSIONS,
+    LOCAL_CONSISTENCY_DIMENSIONS,
+    ROOT_SPECS,
+    FileSpec,
+    Spec,
+    dim_names_for_key,
+)
 
 __all__ = [
     "has_per_frame_paths",
@@ -20,8 +28,17 @@ __all__ = [
     "missing_metadata_paths",
     "normalize_metadata_paths",
     "read_metadata",
+    "select_metadata_axes",
+    "selected_dimensions",
+    "selected_leaf_shape",
     "slice_metadata",
 ]
+
+#: Dimensions an ``axis_selections`` take also applies to metadata: the ones the spec
+#: validates as file-wide consistent, minus those only consistent within one data product
+#: (:data:`~zea.data.spec.LOCAL_CONSISTENCY_DIMENSIONS`, so an ``n_ch`` take on ``raw_data``
+#: cannot cut a sibling product) and ``n_frames``, which :func:`slice_metadata` handles.
+PROPAGATED_DIMENSIONS = CONSISTENCY_DIMENSIONS - LOCAL_CONSISTENCY_DIMENSIONS - {"n_frames"}
 
 
 def _iter_shape_alternatives(shape) -> tuple[tuple, ...]:
@@ -301,14 +318,82 @@ def _is_per_frame_shape(path: str, shape: tuple, n_frames: int | None) -> bool:
     return any(len(alt) == len(shape) for alt in alternatives)
 
 
-def batch_leaf_shape(path: str, shape: tuple, n_frames: int | None) -> tuple:
-    """Return ``shape`` with the per-frame axis replaced by a placeholder.
+def selected_dimensions(key: str, num_dims: int, axis_selections: dict) -> dict[str, Any]:
+    """Resolve ``{axis: selection}`` on ``key`` into ``{dimension name: selection}``.
+
+    Naming the dimension is what lets the same take reach metadata laid out differently:
+    axis 1 of ``data/raw_data`` is ``n_tx``, which is axis 0 of ``scan.t0_delays``.
+    Empty for a key the spec cannot name, and for dimensions the take may not travel
+    along (:data:`PROPAGATED_DIMENSIONS`).
+    """
+    if not axis_selections:
+        return {}
+    dim_names = dim_names_for_key(key, num_dims)
+    if dim_names is None:
+        return {}
+    return {
+        dim_names[axis]: selection
+        for axis, selection in axis_selections.items()
+        if dim_names[axis] in PROPAGATED_DIMENSIONS
+    }
+
+
+def _leaf_axis_selections(
+    path: str, shape: tuple, dim_selections: dict, dim_sizes: dict
+) -> dict[int, Any]:
+    """Map axis -> selection for the axes of ``path`` carrying a selected dimension.
+
+    The non-frame counterpart of :func:`_is_per_frame_shape`, shared by
+    :func:`_select_value` and :func:`selected_leaf_shape` so the take and the shape it
+    yields cannot drift apart.  An axis is only taken from when its length is the file's
+    full extent for that dimension (``dim_sizes``), which is what the selection indexes.
+    """
+    if not dim_selections or not shape:
+        return {}
+    dim_names = dim_names_for_key(path, len(shape))
+    if dim_names is None:
+        return {}
+    return {
+        axis: dim_selections[dim]
+        for axis, dim in enumerate(dim_names)
+        if dim in dim_selections and dim_sizes.get(dim) == shape[axis]
+    }
+
+
+def _selection_length(selection, size: int) -> int:
+    """How many indices ``selection`` takes from an axis of length ``size``."""
+    if isinstance(selection, slice):
+        return len(range(*selection.indices(size)))
+    return len(selection)
+
+
+def selected_leaf_shape(path: str, shape: tuple, dim_selections: dict, dim_sizes: dict) -> tuple:
+    """Return ``shape`` as it is after :func:`select_metadata_axes` narrows it."""
+    selections = _leaf_axis_selections(path, shape, dim_selections, dim_sizes)
+    if not selections:
+        return tuple(shape)
+    out = list(shape)
+    for axis, selection in selections.items():
+        out[axis] = _selection_length(selection, shape[axis])
+    return tuple(out)
+
+
+def batch_leaf_shape(
+    path: str,
+    shape: tuple,
+    n_frames: int | None,
+    dim_selections: dict | None = None,
+    dim_sizes: dict | None = None,
+) -> tuple:
+    """Return ``shape`` as batching sees it: selected, with the frame axis a placeholder.
 
     Batching stacks metadata leaf by leaf, so the leaves of every file must line up.
-    Files legitimately differ in how many frames they hold, and that axis is sliced
-    away to the sample's frame count before stacking -- so normalizing it is what
-    makes two files' leaves comparable.  Everything else must match exactly.
+    Both cuts a sample's metadata undergoes are applied here, since a leaf only has to
+    match after them: the selection (:func:`selected_leaf_shape`), and the frame axis,
+    sliced to the sample's frame count and so normalized rather than compared.
+    Everything else must match exactly.
     """
+    shape = selected_leaf_shape(path, shape, dim_selections or {}, dim_sizes or {})
     if _is_per_frame_shape(path, shape, n_frames):
         return ("n_frames",) + tuple(shape[1:])
     return tuple(shape)
@@ -344,4 +429,45 @@ def slice_metadata(tree: dict, frame_selection, n_frames: int | None, prefix: st
             out[name] = slice_metadata(value, frame_selection, n_frames, prefix=f"{path}.")
         else:
             out[name] = _slice_value(path, value, frame_selection, n_frames)
+    return out
+
+
+def _select_value(path: str, value, dim_selections: dict, dim_sizes: dict):
+    """Take the selected indices from every axis of ``value`` the spec names as shared."""
+    if not isinstance(value, np.ndarray):
+        return value
+    for axis, selection in _leaf_axis_selections(
+        path, value.shape, dim_selections, dim_sizes
+    ).items():
+        # One axis at a time: keeps it in place, and takes slices as well as index lists.
+        value = value[(slice(None),) * axis + (selection,)]
+    return value
+
+
+def select_metadata_axes(
+    tree: dict, dim_selections: dict, dim_sizes: dict, prefix: str = ""
+) -> dict:
+    """Return a copy of ``tree`` narrowed by the sample's ``axis_selections``.
+
+    A selection means something about the acquisition -- "these 21 transmits" -- so a
+    field carrying that dimension stops describing the sample it comes with unless it is
+    cut the same way.  Unlike the frame axis of :func:`slice_metadata`, the cut is the
+    same for every sample of a file, so this runs once per file rather than per sample.
+
+    Args:
+        tree: Nested metadata dict as returned by :func:`read_metadata`.
+        dim_selections: Dimension name -> selection, from :func:`selected_dimensions`.
+        dim_sizes: Dimension name -> that dimension's full extent in this file.
+        prefix: Dotted prefix of ``tree`` within the file spec (internal).
+
+    Returns:
+        dict: A new nested dict; values with no selected axis are shared, not copied.
+    """
+    out = {}
+    for name, value in tree.items():
+        path = f"{prefix}{name}"
+        if isinstance(value, dict):
+            out[name] = select_metadata_axes(value, dim_selections, dim_sizes, prefix=f"{path}.")
+        else:
+            out[name] = _select_value(path, value, dim_selections, dim_sizes)
     return out

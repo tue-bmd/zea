@@ -17,6 +17,7 @@ from zea.data.dataloader import Dataloader, H5DataSource
 from zea.data.datasets import EXISTS, Dataset, compile_file_filter
 from zea.data.file import File
 from zea.data.layers import Resizer
+from zea.data.metadata import selected_dimensions, selected_leaf_shape
 from zea.tools.hf import HFPath
 
 from .. import DEFAULT_TEST_SEED
@@ -1303,6 +1304,252 @@ def test_axis_selections_via_dataloader(axis_selections_hdf5):
     )
     sample = np.asarray(next(iter(loader)))
     np.testing.assert_array_equal(sample, data[0, selection])
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# axis_selections applied to return_metadata
+# ──────────────────────────────────────────────────────────────────────────
+
+AXSEL_N_FRAMES = 4
+AXSEL_N_AX = 16
+AXSEL_N_EL = 8
+
+
+def _write_axsel_file(path, n_tx=6, n_frames=AXSEL_N_FRAMES, n_el=AXSEL_N_EL):
+    """Write a spec-valid raw_data file whose scan fields vary per transmit/element."""
+    scan = generate_dummy_scan(n_tx=n_tx, n_el=n_el)
+    # Distinct per transmit and element, so the wrong indices cannot pass by coincidence.
+    scan["t0_delays"] = np.arange(n_tx * n_el, dtype=np.float32).reshape(n_tx, n_el)
+    scan["polar_angles"] = np.arange(n_tx, dtype=np.float32) / 100
+    scan["initial_times"] = np.arange(n_tx, dtype=np.float32) * 1e-6
+    scan["time_to_next_transmit"] = (
+        np.arange(n_frames * n_tx, dtype=np.float32).reshape(n_frames, n_tx) * 1e-4
+    )
+    probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
+    probe_geometry[:, 0] = np.arange(n_el, dtype=np.float32) * 1e-3
+    File.create(
+        path,
+        data={
+            "raw_data": np.arange(n_frames * n_tx * AXSEL_N_AX * n_el, dtype=np.float32).reshape(
+                n_frames, n_tx, AXSEL_N_AX, n_el, 1
+            )
+        },
+        scan=scan,
+        probe={"name": "generic", "probe_geometry": probe_geometry},
+        description="axis_selections metadata test",
+        overwrite=True,
+        warn_missing_optional_fields=False,
+    )
+    return scan, probe_geometry
+
+
+@pytest.fixture
+def axis_selections_metadata_file(tmp_path):
+    """One spec-valid file plus the scan/probe arrays it was written with."""
+    path = tmp_path / "axsel_meta_0_0.hdf5"
+    scan, probe_geometry = _write_axsel_file(path)
+    return path, scan, probe_geometry
+
+
+def _load_one(path, **kwargs):
+    """Read the first (sample, metadata) pair of an unbatched loader."""
+    loader = Dataloader(
+        str(path),
+        key="data/raw_data",
+        batch_size=None,
+        shuffle=False,
+        n_frames=None,
+        validate=False,
+        **kwargs,
+    )
+    sample, metadata = next(iter(loader))
+    return np.asarray(sample), metadata
+
+
+def test_axis_selections_narrow_per_transmit_metadata(axis_selections_metadata_file):
+    """A take on the transmit axis also takes those transmits from the scan fields."""
+    path, scan, _ = axis_selections_metadata_file
+    selection = [0, 2, 5]
+
+    sample, metadata = _load_one(
+        path,
+        axis_selections={1: selection},
+        return_metadata=["scan.t0_delays", "scan.polar_angles", "scan.initial_times"],
+    )
+
+    assert sample.shape == (len(selection), AXSEL_N_AX, AXSEL_N_EL, 1)
+    np.testing.assert_array_equal(metadata["scan"]["t0_delays"], scan["t0_delays"][selection])
+    np.testing.assert_array_equal(metadata["scan"]["polar_angles"], scan["polar_angles"][selection])
+    np.testing.assert_array_equal(
+        metadata["scan"]["initial_times"], scan["initial_times"][selection]
+    )
+
+
+def test_axis_selections_narrow_metadata_on_a_later_axis(axis_selections_metadata_file):
+    """The selected dimension is taken wherever it sits, not from axis 0."""
+    path, scan, probe_geometry = axis_selections_metadata_file
+    selection = [1, 4, 6]
+
+    # Axis 3 of raw_data is n_el, which is axis 1 of t0_delays and axis 0 of probe_geometry.
+    sample, metadata = _load_one(
+        path,
+        axis_selections={3: selection},
+        return_metadata=["scan.t0_delays", "probe.probe_geometry"],
+    )
+
+    assert sample.shape == (6, AXSEL_N_AX, len(selection), 1)
+    np.testing.assert_array_equal(metadata["scan"]["t0_delays"], scan["t0_delays"][:, selection])
+    np.testing.assert_array_equal(metadata["probe"]["probe_geometry"], probe_geometry[selection])
+
+
+def test_axis_selections_slice_narrows_metadata(axis_selections_metadata_file):
+    """Slice selections narrow metadata the same way index lists do."""
+    path, scan, _ = axis_selections_metadata_file
+    selection = slice(1, 6, 2)
+
+    _, metadata = _load_one(
+        path,
+        axis_selections={1: selection},
+        return_metadata="scan.polar_angles",
+    )
+    np.testing.assert_array_equal(metadata["scan"]["polar_angles"], scan["polar_angles"][selection])
+
+
+def test_axis_selections_and_frame_slicing_compose(axis_selections_metadata_file):
+    """A field carrying both n_frames and n_tx is cut on both axes."""
+    path, scan, _ = axis_selections_metadata_file
+    selection = [1, 3]
+
+    loader = Dataloader(
+        str(path),
+        key="data/raw_data",
+        batch_size=None,
+        shuffle=False,
+        n_frames=2,
+        validate=False,
+        axis_selections={1: selection},
+        return_metadata="scan.time_to_next_transmit",
+    )
+    _, metadata = next(iter(loader))
+
+    # First sample holds frames 0-1; the selection takes transmits 1 and 3 of those.
+    expected = scan["time_to_next_transmit"][0:2][:, selection]
+    np.testing.assert_array_equal(metadata["scan"]["time_to_next_transmit"], expected)
+
+
+def test_axis_selections_leave_unrelated_metadata_whole(axis_selections_metadata_file):
+    """Fields that do not carry the selected dimension are returned as stored."""
+    path, scan, _ = axis_selections_metadata_file
+
+    _, metadata = _load_one(
+        path,
+        axis_selections={1: [0, 2, 5]},
+        return_metadata=["scan.sound_speed", "probe.probe_geometry"],
+    )
+    assert metadata["scan"]["sound_speed"] == scan["sound_speed"]
+    assert metadata["probe"]["probe_geometry"].shape == (AXSEL_N_EL, 3)
+
+
+def test_axis_selections_batch_files_that_differ_on_the_selected_axis(tmp_path):
+    """Files disagreeing on n_tx batch fine once the selection cuts both to one size."""
+    _write_axsel_file(tmp_path / "axsel_a_0_0.hdf5", n_tx=6)
+    _write_axsel_file(tmp_path / "axsel_b_0_0.hdf5", n_tx=9)
+    selection = [0, 2, 4]
+
+    loader = Dataloader(
+        tmp_path,
+        key="data/raw_data",
+        batch_size=2,
+        shuffle=False,
+        n_frames=None,
+        validate=False,
+        axis_selections={1: selection},
+        return_metadata="scan.t0_delays",
+    )
+    # Stored t0_delays are (6, 8) and (9, 8): a conflict before the selection, not after.
+    assert loader.source.metadata_batch_conflicts == {}
+
+    _, metadata = next(iter(loader))
+    assert np.asarray(metadata["scan"]["t0_delays"]).shape == (2, len(selection), AXSEL_N_EL)
+
+
+def test_axis_selections_off_spec_key_warns_about_metadata(tmp_path, attach_caplog_warnings):
+    """A key the spec cannot name leaves metadata unnarrowed, and says so."""
+    path = tmp_path / "axsel_custom_0_0.hdf5"
+    _write_axsel_file(path)
+    with h5py.File(path, "a") as f:
+        f.create_dataset("data/custom_array", data=np.zeros((AXSEL_N_FRAMES, 6, 4), np.float32))
+
+    caplog = attach_caplog_warnings
+    H5DataSource(
+        file_paths=[str(path)],
+        key="data/custom_array",
+        n_frames=None,
+        validate=False,
+        axis_selections={1: [0, 2]},
+        return_metadata="scan.polar_angles",
+    )
+    assert any("not part of the zea file spec" in record.message for record in caplog.records)
+
+
+def test_axis_selections_on_a_private_dimension_warns(metadata_dataset, attach_caplog_warnings):
+    """Selecting an image axis warns too: no other field is indexed by ``z``."""
+    caplog = attach_caplog_warnings
+    H5DataSource(
+        file_paths=[str(metadata_dataset)],
+        key=CAMUS_KEY,
+        n_frames=None,
+        validate=False,
+        axis_selections={1: [0, 1]},
+        return_metadata="scan.polar_angles",
+    )
+    assert any("name no dimension shared" in record.message for record in caplog.records)
+
+
+class TestSelectedDimensions:
+    """Unit tests for the axis -> named dimension resolution behind the propagation."""
+
+    def test_resolves_axes_to_spec_dimension_names(self):
+        assert selected_dimensions("data/raw_data", 5, {1: [0, 2], 3: [1]}) == {
+            "n_tx": [0, 2],
+            "n_el": [1],
+        }
+
+    def test_channel_dimensions_are_not_propagated(self):
+        # n_ch is only consistent within one data product, so a take on raw_data's
+        # channels says nothing about a sibling product's channels.
+        assert selected_dimensions("data/raw_data", 5, {4: [0]}) == {}
+
+    def test_off_spec_key_yields_nothing(self):
+        assert selected_dimensions("data/custom_array", 3, {1: [0, 2]}) == {}
+
+    def test_no_selection_yields_nothing(self):
+        assert selected_dimensions("data/raw_data", 5, {}) == {}
+
+
+class TestSelectedLeafShape:
+    """The shape side of the take, which batching compares files on."""
+
+    def test_narrows_the_axis_carrying_the_dimension(self):
+        assert selected_leaf_shape("scan.t0_delays", (9, 8), {"n_tx": [0, 2, 4]}, {"n_tx": 9}) == (
+            3,
+            8,
+        )
+
+    def test_slice_selection_counts_its_indices(self):
+        assert selected_leaf_shape(
+            "scan.polar_angles", (9,), {"n_tx": slice(1, 6, 2)}, {"n_tx": 9}
+        ) == (3,)
+
+    def test_axis_of_a_different_extent_is_left_alone(self):
+        # The selection was formed against n_tx=9; an axis of another length is not it.
+        assert selected_leaf_shape("scan.t0_delays", (4, 8), {"n_tx": [0, 2, 4]}, {"n_tx": 9}) == (
+            4,
+            8,
+        )
+
+    def test_unrelated_leaf_is_unchanged(self):
+        assert selected_leaf_shape("scan.sound_speed", (), {"n_tx": [0]}, {"n_tx": 9}) == ()
 
 
 # ──────────────────────────────────────────────────────────────────────────

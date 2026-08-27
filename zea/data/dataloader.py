@@ -47,6 +47,8 @@ from zea.data.metadata import (
     has_per_frame_paths,
     normalize_metadata_paths,
     read_metadata,
+    select_metadata_axes,
+    selected_dimensions,
     slice_metadata,
 )
 from zea.data.spec import dim_names_for_key
@@ -430,7 +432,10 @@ def _sample_shape_error(sample_shapes: dict, batch_size: int) -> ValueError:
 
 
 def _metadata_batch_conflicts(
-    metadata_signatures: dict, file_n_frames: dict
+    metadata_signatures: dict,
+    file_n_frames: dict,
+    dim_selections: dict | None = None,
+    file_dim_sizes: dict | None = None,
 ) -> dict[str, dict[tuple, list[str]]]:
     """Find metadata leaves whose shape differs between files.
 
@@ -444,6 +449,8 @@ def _metadata_batch_conflicts(
         file_n_frames: File path -> that file's frame count, for the files whose
             per-frame metadata is sliced. Pass ``{}`` when no slicing happens; a
             file missing from it keeps its stored shapes.
+        dim_selections: Selections applied to the metadata, keyed by dimension name.
+        file_dim_sizes: File path -> ``{dimension name: extent in that file}``.
 
     Returns:
         dict: Leaf path -> ``{normalized shape: file paths}``, holding only leaves
@@ -451,10 +458,13 @@ def _metadata_batch_conflicts(
     """
     per_leaf: dict[str, dict[tuple, list[str]]] = defaultdict(lambda: defaultdict(list))
     all_files = list(metadata_signatures)
+    file_dim_sizes = file_dim_sizes or {}
     for file_path, signature in metadata_signatures.items():
         n_frames = file_n_frames.get(file_path)
+        dim_sizes = file_dim_sizes.get(file_path, {})
         for leaf, shape in signature.items():
-            per_leaf[leaf][batch_leaf_shape(leaf, shape, n_frames)].append(file_path)
+            shape = batch_leaf_shape(leaf, shape, n_frames, dim_selections, dim_sizes)
+            per_leaf[leaf][shape].append(file_path)
 
     conflicts = {}
     for leaf, by_shape in per_leaf.items():
@@ -523,6 +533,8 @@ class H5DataSource:
             block. See :class:`Dataloader`.
         on_missing_metadata: ``"error"`` or ``"skip"`` for files that cannot supply a
             requested ``return_metadata`` path. See :class:`Dataloader`.
+        axis_selections: Map of ``{axis: indices}`` pre-filtering non-frame axes, applied
+            to the requested metadata too. See :class:`Dataloader`.
         file_filter: Keep only files whose content matches a predicate. See
             :class:`Dataloader` for details. Defaults to ``None`` (no filtering).
     """
@@ -648,6 +660,25 @@ class H5DataSource:
             else {}
         )
 
+        # The metadata is narrowed with the sample, by dimension name rather than axis.
+        self._dim_selections = selected_dimensions(
+            self.key, num_dims, self.normalized_axis_selections
+        )
+        self._file_dim_sizes = self._collect_file_dim_sizes(num_dims)
+        if self.return_metadata and self.normalized_axis_selections and not self._dim_selections:
+            key_dims = dim_names_for_key(key, num_dims)
+            why = (
+                f"'{key}' is not part of the zea file spec, so what its axes mean is unknown"
+                if key_dims is None
+                else f"the axes selected of {key_dims} name no dimension shared with other fields"
+            )
+            log.warning(
+                f"axis_selections narrows the samples read from '{key}' but not the "
+                f"return_metadata that comes with them: {why}. Metadata is returned at its "
+                "full stored extent, so any field indexed by those axes no longer lines up "
+                "with the sample."
+            )
+
         # Compute per-sample index table
         self.indices = generate_h5_indices(
             file_paths=self.file_paths,
@@ -694,6 +725,8 @@ class H5DataSource:
         self.metadata_batch_conflicts = _metadata_batch_conflicts(
             self._metadata_signatures,
             self._file_n_frames if self._slice_metadata_per_frame else {},
+            self._dim_selections,
+            self._file_dim_sizes,
         )
 
         # Last, so the cap counts samples the loader actually yields rather than ones a
@@ -710,6 +743,27 @@ class H5DataSource:
         self._local = threading.local()
         self._all_caches: set[H5FileHandleCache] = set()
         self._all_caches_lock = threading.Lock()
+
+    def _collect_file_dim_sizes(self, num_dims: int) -> dict[str, dict[str, int]]:
+        """Map each file to the full extent it stores for every selected dimension.
+
+        Read per file because files may disagree on ``n_tx`` even under one selection.
+        See :func:`~zea.data.metadata.select_metadata_axes` for what it is used for.
+        """
+        if not self._dim_selections:
+            return {}
+        # Not None: _dim_selections is only non-empty when the spec named these axes.
+        dim_names = dim_names_for_key(self.key, num_dims)
+        assert dim_names is not None
+        selected_axes = {
+            axis: dim
+            for axis in self.normalized_axis_selections
+            if (dim := dim_names[axis]) is not None and dim in self._dim_selections
+        }
+        return {
+            path: {dim: shape[axis] for axis, dim in selected_axes.items()}
+            for path, shape in zip(self.file_paths, self.file_shapes)
+        }
 
     def _collect_sample_shapes(self) -> dict[tuple, list[str]]:
         """Map each distinct sample shape this source yields to the files producing it.
@@ -836,6 +890,11 @@ class H5DataSource:
                 return cached
 
         metadata = read_metadata(file, self.return_metadata or ())
+        if self._dim_selections:
+            # Constant per file, so it is applied here and cached in that form.
+            metadata = select_metadata_axes(
+                metadata, self._dim_selections, self._file_dim_sizes.get(file_name, {})
+            )
 
         with self._metadata_lock:
             self._metadata_cache[file_name] = metadata
@@ -932,12 +991,13 @@ class Dataloader:
                 }
 
             Fields whose leading dimension is ``n_frames`` in the spec are sliced to the
-            sample's frames so they stay aligned with the returned images. During construction,
-            the loader checks that all files can supply the requested paths and that
-            they have the same shapes, raising :exc:`KeyError` or :exc:`ValueError` naming the
-            offending files. They can be dropped with ``on_missing_metadata="skip"`` or
-            ``file_filter``. Use ``batch_size=None`` for metadata that genuinely varies in shape
-            between files.
+            sample's frames so they stay aligned with the returned images, and fields sharing
+            a dimension with an ``axis_selections`` entry are narrowed the same way.
+            During construction, the loader checks that all files can supply the requested
+            paths and that they have the same shapes, raising :exc:`KeyError` or
+            :exc:`ValueError` naming the offending files. They can be dropped with
+            ``on_missing_metadata="skip"`` or ``file_filter``. Use ``batch_size=None`` for
+            metadata that genuinely varies in shape between files.
         seed: Random seed used for dataloader (e.g. shuffling). Default is ``None``.
             If ``None`` a random seed is generated.
         limit_n_examples: Cap the total number of examples (== item before batching) the loader
@@ -1037,7 +1097,9 @@ class Dataloader:
         axis_selections: Map of ``{axis: indices}`` applied at HDF5 read time to pre-filter
             non-frame axes. For example ``{1: [0, 2, 5]}`` loads only those indices along axis 1,
             avoiding reading unused data chunks from disk. This can save time and memory.
-            Default is ``None``.
+            ``return_metadata`` fields carrying the selected dimension are cut to match,
+            wherever that dimension sits in their own layout: selecting transmits on
+            ``data/raw_data`` also selects them in ``scan.t0_delays``. Default is ``None``.
         file_filter: Keep only files whose content matches a predicate, discarding the rest
             before any frames are indexed. Either a callable ``File -> bool`` (a file is kept
             when it returns ``True``), or a declarative dotted-path dict mapping a path on the
