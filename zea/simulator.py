@@ -72,6 +72,7 @@ def simulate_rf(
     t_peak,
     elevation_lens=False,
     element_height=None,
+    scatter_exponent=2.0,
     max_chunk_gb=10.0,
     noise_level_db=None,
     tgc_max_db=0.0,
@@ -104,6 +105,9 @@ def simulate_rf(
             use :class:`zea.ops.Simulate` rather than calling `simulate_rf` directly.
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity and the elevation slab. If None, defaults to element_width.
+        scatter_exponent (float): Weight the scattered field by
+            ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering, approximately
+            1.5 is typical for soft tissue. Must be static under jit.
         max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
             :func:`zea.simulator_time_domain.simulate_rf_td` share a call signature.
         noise_level_db (float): Electronic noise level in dB relative to the noiseless RF
@@ -175,6 +179,11 @@ def simulate_rf(
 
     waveform_spectrum = pulse_spectrum_fn(freqs)
 
+    if scatter_exponent:
+        scatter_gain = (freqs / center_frequency) ** scatter_exponent
+    else:
+        scatter_gain = ops.ones_like(freqs)
+
     scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
     theta = ops.arctan2(scat_pos_relative_to_probe[..., 0], scat_pos_relative_to_probe[..., 2])
     phi = ops.arctan2(scat_pos_relative_to_probe[..., 1], scat_pos_relative_to_probe[..., 2])
@@ -223,7 +232,7 @@ def simulate_rf(
 
         # Explicitly sum over tx dimension before the receive axis exists.
         incident_field = ops.sum(tx_response * tx_element_weights[None], axis=1)
-        scattered_field = incident_field * ops.cast(magnitudes[:, None], "complex64")
+        scattered_field = incident_field * ops.cast(magnitudes[:, None] * scatter_gain, "complex64")
         received_field = scattered_field[:, None] * rx_response * within_record[..., None]
         rf_spectrum = waveform_spectrum * ops.sum(received_field, axis=0)
         parts.append(ops.irfft((ops.real(rf_spectrum), ops.imag(rf_spectrum))))
