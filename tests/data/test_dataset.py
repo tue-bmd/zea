@@ -315,6 +315,27 @@ def test_validator_hash_tracks_zea_data_sources():
     assert fresh() == baseline
 
 
+def test_file_hash_follows_remote_content(tmp_path):
+    """A lazy ``hf://`` path has no size or mtime locally, so the hash must key on the
+    content id -- otherwise a re-upload keeps serving shapes from the superseded file."""
+    from zea.data.datasets import _file_hash
+
+    remote = ["hf://org/myrepo/file1.hdf5"]
+    with patch("zea.data.datasets._hf_content_id", return_value="sha-a") as content_id:
+        baseline = _file_hash(remote)
+        assert _file_hash(remote) == baseline
+        # The revision reaches the hub lookup, so two revisions of one path differ.
+        _file_hash(remote, revision="v0.1.0")
+    assert content_id.call_args.kwargs == {"revision": "v0.1.0"}
+
+    with patch("zea.data.datasets._hf_content_id", return_value="sha-b"):
+        assert _file_hash(remote) != baseline
+
+    # A path the listing cannot identify still hashes stably, just not per version.
+    with patch("zea.data.datasets._hf_content_id", return_value=None):
+        assert _file_hash(remote) == _file_hash(remote)
+
+
 def test_dataset_lazy_hf_validates_each_file_once():
     """Validation on open is per path, not per open: a reopened handle skips it.
 
@@ -387,12 +408,65 @@ def test_copy_downloads_hf_source_instead_of_streaming(tmp_path):
         assert src_call.kwargs == {"stream": False, "revision": "v0.1.0", "validate": False}
 
 
-def test_dataloader_rejects_lazy():
-    """H5DataSource raises ValueError when lazy=True is passed."""
+#: Stands in for the shape sweep, which would otherwise open every (streamed) file.
+_FAKE_SHAPES = ([(4, 32, 32)], {}, {})
+
+
+@pytest.mark.parametrize("lazy", [True, False])
+def test_dataloader_forwards_lazy(tmp_path, lazy):
+    """``lazy`` reaches the Dataset, so a lazy source streams and an eager one downloads."""
     from zea.data.dataloader import H5DataSource
 
-    with pytest.raises(ValueError, match="lazy=True is not supported"):
-        H5DataSource("nonexistent_path", lazy=True)
+    f = tmp_path / "file1.hdf5"
+    generate_example_dataset(f)
+
+    with (
+        patch("zea.data.datasets._hf_list_h5_files", return_value=[("file1.hdf5", 1024)]),
+        patch("zea.data.datasets._hf_resolve_path", return_value=tmp_path),
+        patch("zea.data.datasets.search_file_tree", return_value=[f]),
+        patch("zea.data.datasets.Dataset.load_file_shapes", return_value=_FAKE_SHAPES),
+    ):
+        source = H5DataSource("hf://org/myrepo", key="data/image", lazy=lazy)
+
+    streamed = [str(p).startswith("hf://") for p in source.file_paths]
+    assert all(streamed) if lazy else not any(streamed)
+
+
+def test_dataloader_warns_when_stream_exceeds_chunk_cache():
+    """Streaming more than the chunk cache holds re-fetches every epoch, so it warns."""
+    from zea.data import dataloader as dataloader_module
+    from zea.data.dataloader import H5DataSource
+
+    oversized = dataloader_module.chunk_cache.MAX_BYTES + 1
+
+    with (
+        patch("zea.data.datasets._hf_list_h5_files", return_value=[("file1.hdf5", oversized)]),
+        patch("zea.data.datasets.Dataset.load_file_shapes", return_value=_FAKE_SHAPES),
+        patch.object(dataloader_module, "_warned_about_streaming", False),
+        patch("zea.data.dataloader.log") as mock_log,
+    ):
+        H5DataSource("hf://org/myrepo", key="data/image", lazy=True)
+        # Only the first loader warns: the message is about the data, not the loader.
+        H5DataSource("hf://org/myrepo", key="data/image", lazy=True)
+
+    assert mock_log.warning.call_count == 1
+    assert "chunk cache" in mock_log.warning.call_args[0][0]
+
+
+def test_dataloader_does_not_warn_when_stream_fits_chunk_cache():
+    """A dataset the cache can hold streams without complaint."""
+    from zea.data import dataloader as dataloader_module
+    from zea.data.dataloader import H5DataSource
+
+    with (
+        patch("zea.data.datasets._hf_list_h5_files", return_value=[("file1.hdf5", 1024)]),
+        patch("zea.data.datasets.Dataset.load_file_shapes", return_value=_FAKE_SHAPES),
+        patch.object(dataloader_module, "_warned_about_streaming", False),
+        patch("zea.data.dataloader.log") as mock_log,
+    ):
+        H5DataSource("hf://org/myrepo", key="data/image", lazy=True)
+
+    mock_log.warning.assert_not_called()
 
 
 def test_dataset_hf_large_warns_about_gb_size(tmp_path):

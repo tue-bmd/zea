@@ -48,6 +48,7 @@ from zea.internal.core import hash_elements
 from zea.internal.preset_utils import (
     HF_DATASETS_DIR,
     HF_PREFIX,
+    _hf_content_id,
     _hf_list_files,
     _hf_list_h5_files,
     _hf_parse_path,
@@ -310,16 +311,29 @@ def _find_h5_file_shapes(filepaths, key, _filepath_hash, metadata_paths=(), verb
     return file_shapes, metadata_gaps, metadata_signatures
 
 
-def _file_hash(filepaths):
-    """Calculate a hash for a list of file paths based on their sizes and modified times."""
-    # NOTE: this is really fast, even over network filesystemss
+def _file_hash(filepaths, revision: str | None = None):
+    """Hash the identity of a list of files, to key caches that must follow their content.
+
+    Local files are identified by size and modification time. ``hf://`` files are identified by
+    content id (see :func:`~zea.internal.preset_utils._hf_content_id`), which moves when a file is
+    re-uploaded or when ``revision`` points somewhere else.
+    """
+    # NOTE: this is really fast, even over network filesystems: the local branch stats
+    # each file, and the remote one reads an already-memoized repo listing.
     total_size = 0
     modified_times = []
+    content_ids = []
+    hf_kwargs = {"revision": revision} if revision is not None else {}
     for fp in filepaths:
-        if os.path.isfile(fp):
+        fp = str(fp)
+        if fp.startswith(HF_PREFIX):
+            # Falling back to the path keeps the hash stable (not wrong) for a file the
+            # listing cannot identify; it just stops distinguishing that file's versions.
+            content_ids.append(_hf_content_id(fp, **hf_kwargs) or fp)
+        elif os.path.isfile(fp):
             total_size += os.path.getsize(fp)
             modified_times.append(os.path.getmtime(fp))
-    return hash_elements([total_size, modified_times])
+    return hash_elements([total_size, modified_times, content_ids])
 
 
 def _validate_h5_file(file_path):
@@ -630,6 +644,9 @@ class Dataset(H5FileHandleCache):
         # Lazy hf:// paths that _open_file has already validated, so a handle that is
         # evicted and reopened does not stream the file again to re-check its structure.
         self._validated: set[str] = set()
+        #: Bytes held by the files this dataset streams rather than downloads. Filled by
+        #: `find_files` from the repo listing, so it costs nothing extra to know.
+        self.remote_bytes = 0
 
         self.file_paths = self.find_files(file_paths)
 
@@ -706,7 +723,10 @@ class Dataset(H5FileHandleCache):
             well enough to be batched together.
         """
         return _find_h5_file_shapes(
-            self.file_paths, key, _file_hash(self.file_paths), tuple(metadata_paths)
+            self.file_paths,
+            key,
+            _file_hash(self.file_paths, revision=self.revision),
+            tuple(metadata_paths),
         )
 
     def _find_hf_files(self, hf_path: str) -> List[str]:
@@ -735,6 +755,7 @@ class Dataset(H5FileHandleCache):
             log.warning(msg)
 
         if self.lazy:
+            self.remote_bytes += sum(size for _, size in hf_files)
             return [f"{HF_PREFIX}{repo_id}/{f}" for f, _ in hf_files]
 
         resolved = _hf_resolve_path(hf_path, **hf_kwargs)

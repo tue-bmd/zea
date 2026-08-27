@@ -34,6 +34,7 @@ import numpy as np
 from keras import ops
 
 from zea import log
+from zea.data import chunk_cache
 from zea.data.datasets import (
     FILE_HANDLE_CACHE_CAPACITY,
     Dataset,
@@ -60,6 +61,32 @@ _MAX_LISTED_FILES = 5
 
 #: What a loader does with files it cannot serve: refuse to build, or drop them.
 _FILE_POLICIES = ("error", "skip")
+
+#: Whether this process already warned about streaming more than the chunk cache holds.
+#: That is a property of the data, so repeating it for every loader only adds noise.
+_warned_about_streaming = False
+
+
+def _warn_if_stream_exceeds_chunk_cache(remote_bytes: int) -> None:
+    """Warn when streamed files cannot all fit in the on-disk chunk cache.
+
+    Only the chunks a read touches are ever fetched, so a loader that reads a slice of
+    each file (``axis_selections``, ``limit_n_frames``) stays well under this bound -- but
+    when the part being read does exceed the cache, an LRU that never gets to serve a hit
+    turns every epoch into a fresh download. Downloading the files once is cheaper then.
+    """
+    global _warned_about_streaming
+    if _warned_about_streaming or not remote_bytes or remote_bytes <= chunk_cache.MAX_BYTES:
+        return
+    _warned_about_streaming = True
+    log.warning(
+        f"Streaming {remote_bytes / 1e9:.1f} GB of hf:// files, more than the "
+        f"{chunk_cache.MAX_BYTES / 1e9:.1f} GB chunk cache "
+        "(zea.data.chunk_cache, ZEA_CHUNK_CACHE_SIZE). Reading all of it repeatedly will "
+        "evict chunks before they are re-read, so every epoch re-fetches them. Pass "
+        "lazy=False to download the files once instead. Reading only part of each file "
+        "(axis_selections, limit_n_frames) may still fit."
+    )
 
 
 def _normalize_axis_selections(
@@ -491,6 +518,7 @@ class H5DataSource:
         cache: Cache loaded samples to RAM.
         validate: Validate dataset against the zea format. Default is ``True``.
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
+        lazy: Stream ``hf://`` files instead of downloading them. See :class:`Dataloader`.
         on_incomplete_blocks: ``"error"`` or ``"skip"`` for files too short to fill a
             block. See :class:`Dataloader`.
         on_missing_metadata: ``"error"`` or ``"skip"`` for files that cannot supply a
@@ -516,6 +544,7 @@ class H5DataSource:
         cache: bool = False,
         validate: bool = True,
         revision: str | None = None,
+        lazy: bool = True,
         on_incomplete_blocks: str = "error",
         on_missing_metadata: str = "error",
         axis_selections: dict | None = None,
@@ -545,21 +574,16 @@ class H5DataSource:
         )
 
         # Discover files and shapes (reuses Dataset machinery)
-        lazy = kwargs.pop("lazy", False)
-        if lazy:
-            raise ValueError(
-                "lazy=True is not supported in Dataloader / H5DataSource. "
-                "All files must be downloaded before building the data pipeline. "
-                "Use Dataset(..., lazy=True) directly for interactive use."
-            )
         _dataset = Dataset(
             file_paths,
             validate=validate,
             revision=revision,
+            lazy=lazy,
             file_filter=file_filter,
             _suggest_lazy=False,
             **kwargs,
         )
+        _warn_if_stream_exceeds_chunk_cache(_dataset.remote_bytes)
         self.file_paths = _dataset.file_paths
         # Requested metadata paths are checked in the same sweep that reads the shapes,
         # so a file that cannot answer surfaces here rather than mid-epoch.
@@ -985,16 +1009,26 @@ class Dataloader:
             first run over a given dataset opens every file.
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
             Defaults to ``None`` (uses the default branch, typically ``"main"``).
-        prefetch: Enable Grain prefetching for iteration. Default is ``True``.
+        lazy: Stream ``hf://`` files over HTTP instead of downloading them up front.
+            Default is ``True``: a read fetches only the chunks it touches, so reading a
+            slice of a few large files costs a fraction of them, and the bytes land in the
+            on-disk chunk cache (:mod:`zea.data.chunk_cache`) for the next read. Pass
+            ``False`` to download every file in full before the pipeline is built, which
+            is the better trade for training: shuffled access over a dataset larger than
+            that cache re-fetches it every epoch, and a bulk download is both faster per
+            byte and resumable. Ignored for local paths.
         shard_index: Shard index to select when ``num_shards > 1``.
             Must satisfy ``0 <= shard_index < num_shards``.
         num_shards: Total number of shards for distributed loading.
             Sharding happens before downstream transforms. Default is ``1``.
         num_threads: Number of Grain read threads (``0`` means main thread only).
             Default is ``16``.
-        prefetch_buffer_size: Size of the Grain buffer for reading elements per Python
-            process (not per thread). Useful when reading from a distributed file
-            system. Default is ``500``.
+        prefetch_buffer_size: How many elements the Grain buffer holds, per Python process
+            (not per thread). An element here is whatever this loader yields, so with a
+            ``batch_size`` it counts *batches*: ``prefetch_buffer_size=500,
+            batch_size=16`` keeps up to 8000 examples in RAM.
+            Useful when reading from a distributed file system. Default is ``500``.
+            Set to ``0`` to disable prefetching and read sequentially instead.
         reshuffle_each_epoch: Whether to reshuffle the dataset after each epoch.
             Default is ``True``. For evaluation it might be useful to set this to
             ``False``. Or when you want to use a persistent iterator between epochs, using
@@ -1115,6 +1149,7 @@ class Dataloader:
         self,
         file_paths: List[str] | str,
         key: str,
+        *,
         batch_size: int | None = 16,
         n_frames: int | None = None,
         shuffle: bool = True,
@@ -1145,7 +1180,7 @@ class Dataloader:
         frame_axis: int = -1,
         validate: bool = True,
         revision: str | None = None,
-        prefetch: bool = True,
+        lazy: bool = True,
         shard_index: int | None = None,
         num_shards: int = 1,
         num_threads: int = 16,
@@ -1178,7 +1213,6 @@ class Dataloader:
         self.returns_metadata = self.return_metadata is not None
         self.num_threads = num_threads
         self.prefetch_buffer_size = prefetch_buffer_size
-        self.prefetch = prefetch
         self._shuffle = shuffle
         self.reshuffle_each_epoch = reshuffle_each_epoch
 
@@ -1205,6 +1239,7 @@ class Dataloader:
             cache=cache,
             validate=validate,
             revision=revision,
+            lazy=lazy,
             on_incomplete_blocks=on_incomplete_blocks,
             on_missing_metadata=on_missing_metadata,
             axis_selections=axis_selections,
@@ -1406,7 +1441,7 @@ class Dataloader:
         return self._map_dataset.to_iter_dataset(
             grain.ReadOptions(
                 num_threads=self.num_threads,
-                prefetch_buffer_size=self.prefetch_buffer_size if self.prefetch else 0,
+                prefetch_buffer_size=self.prefetch_buffer_size,
             )
         )
 
