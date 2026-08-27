@@ -276,7 +276,6 @@ def compute_pfield(
         )
 
         exp_arr = exp_arr / ops.sqrt(distance_complex)
-        exp_arr = exp_arr * ops.cast(ops.sqrt(min_distance), "complex64")
 
         exp_arr = exp_arr * sub_element_directivity
 
@@ -319,13 +318,13 @@ def compute_pfield(
     # Zero out pressure behind the transducer (z < 0)
     pressure_squared = ops.where(grid_z[:, None] < 0, 0, pressure_squared)
 
-    # Mean over the retained frequency samples, not their sum: the scan accumulates
-    # |P(f_k)|^2 with no df factor, so a sum scales with the sample count, i.e. with
-    # 1/freq_step -- which is set above from max(t0_delays) and so depends on which
-    # transmits are in the stack. The mean keeps the field a true RMS over the
-    # retained band, and comparable across transmit subsets (~2e-3 apart, from the
-    # differing grids). No effect when norm=True: a global factor cancels below.
-    pressure_squared = pressure_squared / ops.cast(ops.shape(freq)[0], "float32")
+    # The Riemann sum of Eq. (42), completed by PFIELD's correcting factor: the
+    # frequency step, which cancels the sample count -- that count follows freq_step,
+    # itself set above from max(t0_delays), so a bare sum would depend on which
+    # transmits are in the stack -- times the element width, whose square root is the
+    # amplitude factor of Eq. (36). Like PFIELD we integrate over ordinary frequency,
+    # so there is no 2 pi against Eq. (42)'s dw. No effect when norm=True.
+    pressure_squared = pressure_squared * freq_step * element_width
 
     # RMS acoustic pressure, reshaped to (n_tx, grid_size_z, grid_size_x)
     pressure = ops.transpose(ops.sqrt(pressure_squared), (1, 0))
