@@ -71,6 +71,7 @@ def simulate_rf_td(
     t_peak,
     elevation_lens=False,
     element_height=None,
+    n_period=4.0,
     max_chunk_gb=10.0,
     noise_level_db=None,
     tgc_max_db=0.0,
@@ -112,6 +113,8 @@ def simulate_rf_td(
             use :class:`zea.ops.Simulate` rather than calling `simulate_rf_td` directly.
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity and the elevation slab. If None, defaults to element_width.
+        n_period (float): Number of cycles in the transmit pulse. Sets the axial resolution
+            cell and the bandwidth.
         max_chunk_gb (float): Approximate memory budget [GB] for the (chunk, n_el, n_el)
             tensors held at once while iterating over scatterers. Scatterers are processed
             in chunks sized to this budget, so peak memory no longer scales with the total
@@ -137,7 +140,7 @@ def simulate_rf_td(
     n_el = probe_geometry.shape[0]
     n_scat = scatterer_positions.shape[0]
 
-    pulse = get_pulse_waveform(center_frequency, sampling_frequency)
+    pulse = get_pulse_waveform(center_frequency, sampling_frequency, n_period=n_period)
 
     # Chunk so the (n_scat, n_el, n_el) tensors never materialize at once. The factor is
     # approximate memory use after jit fusion, not a count of intermediate tensors.
@@ -390,4 +393,8 @@ def get_pulse_waveform(center_frequency, sampling_frequency, n_period=4, n_sampl
         )
     times = (ops.arange(n_samples, dtype="float32") - n_samples // 2) / sampling_frequency
     window = hann_unnormalized(times, width)
-    return window * ops.cos(2 * np.pi * center_frequency * times)
+    pulse = window * ops.cos(2 * np.pi * center_frequency * times)
+    # Force zero mean, matching the DC bin that get_pulse_spectrum_fn zeroes. A non-integer
+    # n_period otherwise leaves DC that sums coherently over every scatterer. Re-windowing the
+    # correction keeps the pulse inside the Hann support.
+    return pulse - window * (ops.sum(pulse) / ops.sum(window))

@@ -72,6 +72,7 @@ def simulate_rf(
     t_peak,
     elevation_lens=False,
     element_height=None,
+    n_period=4.0,
     max_chunk_gb=10.0,
     noise_level_db=None,
     tgc_max_db=0.0,
@@ -104,6 +105,8 @@ def simulate_rf(
             use :class:`zea.ops.Simulate` rather than calling `simulate_rf` directly.
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity and the elevation slab. If None, defaults to element_width.
+        n_period (float): Number of cycles in the transmit pulse. Sets the axial resolution
+            cell and the bandwidth.
         max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
             :func:`zea.simulator_time_domain.simulate_rf_td` share a call signature.
         noise_level_db (float): Electronic noise level in dB relative to the noiseless RF
@@ -151,7 +154,7 @@ def simulate_rf(
     magnitudes = ops.cast(magnitudes, "float32")
 
     pulse_spectrum_fn = get_pulse_spectrum_fn(
-        center_frequency, n_period=4, sampling_frequency=sampling_frequency
+        center_frequency, n_period=n_period, sampling_frequency=sampling_frequency
     )
 
     if not apply_lens_correction:
@@ -519,9 +522,18 @@ def get_pulse_spectrum_fn(center_frequency, n_period=3.0, sampling_frequency=Non
     period = n_period / center_frequency
     scale = 0.5 if sampling_frequency is None else 0.5 * sampling_frequency * period
 
+    # No transducer passes DC, and near-DC is where this pulse is dangerous: the low bins sum
+    # coherently over scatterers (their delay term is close to exp(0) = 1), the amplitudes are
+    # positive so they accumulate as N, and attenuation is proportional to |f| so it spares them
+    # entirely. At a non-integer n_period the skirt there is flat and high (48 dB below the peak
+    # at 5.5 cycles, across every one of the lowest bins) and it swamps the speckle. At integer
+    # skirt is already below -128 dB by the first bin, so this ramp is a no-op.
+    highpass_edge = 0.25 * center_frequency
+
     def spectrum_fn(f):
+        ramp = 0.5 * (1.0 - ops.cos(np.pi * ops.minimum(ops.abs(f), highpass_edge) / highpass_edge))
         return ops.array(scale, "complex64") * ops.cast(
-            (hann_fd(f - center_frequency, period) + hann_fd(f + center_frequency, period)),
+            (hann_fd(f - center_frequency, period) + hann_fd(f + center_frequency, period)) * ramp,
             "complex64",
         )
 
