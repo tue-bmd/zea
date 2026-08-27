@@ -191,7 +191,7 @@ To use ``zea``, you need to install one of the supported machine learning backen
 
 If you are unsure which backend to use, we recommend JAX as it is currently the fastest backend.
 
-After installing a backend, set the ``KERAS_BACKEND`` environment variable to one of the following:
+If ``KERAS_BACKEND`` is not set, ``zea`` selects one of the installed backends on import (preferring TensorFlow, then JAX, then PyTorch). To choose the backend explicitly, for instance when several are installed, set the ``KERAS_BACKEND`` environment variable to one of the following:
 
 .. tab-set::
 
