@@ -574,6 +574,7 @@ class H5DataSource:
         self.on_missing_metadata = _check_file_policy("on_missing_metadata", on_missing_metadata)
 
         self.key = key
+        self.revision = revision
         self.n_frames = None if n_frames is None else int(n_frames)
         self.frame_index_stride = int(frame_index_stride)
         self.frame_axis = int(frame_axis)
@@ -830,14 +831,14 @@ class H5DataSource:
 
         file_name, key, indices = self.indices[index]
         file_handle_cache = self._get_file_handle_cache()
-        file = file_handle_cache.get_file(file_name)
+        file = file_handle_cache.get_file(file_name, revision=self.revision)
 
         try:
             images = file.dataset(key)[indices]
         except (OSError, IOError):
             # Invalidate cache entry and retry once
-            file_handle_cache.pop(file_name)
-            file = file_handle_cache.get_file(file_name)
+            file_handle_cache.pop(file_name, revision=self.revision)
+            file = file_handle_cache.get_file(file_name, revision=self.revision)
             images = file.dataset(key)[indices]
 
         images = self._place_frames(images)

@@ -384,7 +384,7 @@ def test_file_handle_cache_never_validates():
         H5FileHandleCache().get_file("hf://org/myrepo/file1.hdf5")
 
     mock_file.assert_called_once_with(
-        "hf://org/myrepo/file1.hdf5", "r", progress=False, validate=False
+        "hf://org/myrepo/file1.hdf5", "r", progress=False, revision=None, validate=False
     )
 
 
@@ -430,6 +430,53 @@ def test_dataloader_forwards_lazy(tmp_path, lazy):
 
     streamed = [str(p).startswith("hf://") for p in source.file_paths]
     assert all(streamed) if lazy else not any(streamed)
+
+
+def test_dataloader_lazy_hf_reads_the_requested_revision(tmp_path):
+    """A pinned revision must survive every open a lazy source makes.
+
+    Two revisions of one ``hf://`` path hold different data here, so reading the wrong
+    one is visible rather than silently equivalent: the shape sweep at init opens the
+    files itself, and the per-thread handle cache reopens them long after the ``Dataset``
+    that discovered them is closed.
+    """
+    from zea.data import datasets as datasets_module
+    from zea.data.dataloader import H5DataSource
+
+    revisions = {"v0.1.0": tmp_path / "old.hdf5", "v0.2.0": tmp_path / "new.hdf5"}
+    for n_frames, path in zip((2, 3), revisions.values()):
+        generate_example_dataset(path, n_frames=n_frames, n_ax=16, n_el=4, n_tx=2)
+
+    real_file = datasets_module.File
+
+    def open_at_revision(file_path, *args, revision=None, **kwargs):
+        """Stand in for the hub: resolve the one remote path to the asked-for revision."""
+        assert str(file_path).startswith("hf://"), f"expected a lazy pointer, got {file_path}"
+        return real_file(revisions[revision], *args, **kwargs)
+
+    with (
+        patch("zea.data.datasets._hf_list_h5_files", return_value=[("file1.hdf5", 1024)]),
+        # Unique per run, so the cached shape sweep of an earlier run cannot answer this one.
+        patch(
+            "zea.data.datasets._hf_content_id",
+            side_effect=lambda fp, **kw: f"{fp}@{kw.get('revision')}@{tmp_path}",
+        ),
+        patch("zea.data.datasets.File", side_effect=open_at_revision),
+    ):
+        source = H5DataSource(
+            "hf://org/myrepo", key="data/raw_data", lazy=True, revision="v0.2.0", validate=False
+        )
+        try:
+            # The shape sweep read the pinned revision, not the repo default.
+            assert source.file_shapes[0][0] == 3
+            # ... and so did the handle cache that serves the sample itself.
+            sample = np.asarray(source[0])
+        finally:
+            source.close()
+
+    with real_file(revisions["v0.2.0"], "r") as file:
+        expected = file["data/raw_data"][0]
+    np.testing.assert_array_equal(sample, expected)
 
 
 def test_dataloader_warns_when_stream_exceeds_chunk_cache():

@@ -171,37 +171,42 @@ class H5FileHandleCache:
         """Check if a file is open."""
         return bool(file.id.valid)
 
-    def _open_file(self, file_path) -> File:
-        """Open one file for the cache.
+    def _open_file(self, file_path, revision: str | None = None) -> File:
+        """Open one file for the cache, at the caller's ``revision``.
 
         A plain handle cache has no idea where its paths came from, so it opens
         read-only and never validates. Subclasses that do know override this to apply
         their own open policy -- see :meth:`Dataset._open_file`.
         """
-        return File(file_path, "r", progress=False, validate=False)
+        return File(file_path, "r", progress=False, revision=revision, validate=False)
 
-    def get_file(self, file_path) -> File:
-        """Open an HDF5 file and cache it."""
+    def get_file(self, file_path, revision: str | None = None) -> File:
+        """Open an HDF5 file and cache it.
+
+        ``revision`` is part of the cache key, not just the open: two revisions of one
+        ``hf://`` path are different files, so one must never be served for the other.
+        """
+        cache_key = (file_path, revision)
         # If file is already in cache, return it and move it to the end
-        if file_path in self._file_handle_cache:
-            self._file_handle_cache.move_to_end(file_path)
-            file = self._file_handle_cache[file_path]
+        if cache_key in self._file_handle_cache:
+            self._file_handle_cache.move_to_end(cache_key)
+            file = self._file_handle_cache[cache_key]
             # if file was closed, reopen:
             if not self._check_if_open(file):
-                self._file_handle_cache[file_path] = self._open_file(file_path)
+                self._file_handle_cache[cache_key] = self._open_file(file_path, revision)
         # If file is not in cache, open it and add it to the cache
         else:
             # If cache is full, close the least recently used file
             if len(self._file_handle_cache) >= self.file_handle_cache_capacity:
                 _, close_file = self._file_handle_cache.popitem(last=False)
                 close_file.close()
-            self._file_handle_cache[file_path] = self._open_file(file_path)
+            self._file_handle_cache[cache_key] = self._open_file(file_path, revision)
 
-        return self._file_handle_cache[file_path]
+        return self._file_handle_cache[cache_key]
 
-    def pop(self, file_path):
+    def pop(self, file_path, revision: str | None = None):
         """Pop a file from the cache and close it."""
-        file = self._file_handle_cache.pop(file_path, None)
+        file = self._file_handle_cache.pop((file_path, revision), None)
         if file is not None:
             try:
                 file.close()
@@ -233,7 +238,7 @@ class H5FileHandleCache:
         self.close()
 
 
-def _shape_and_metadata_gaps(file_path, key, metadata_paths):
+def _shape_and_metadata_gaps(file_path, key, metadata_paths, revision=None):
     """Describe one file: its shape for ``key``, plus what its metadata looks like.
 
     Both metadata passes ride along with the shape read so that a dataset is swept
@@ -246,7 +251,7 @@ def _shape_and_metadata_gaps(file_path, key, metadata_paths):
 
     # validate=False: the Dataset that owns these paths already validated them at
     # discovery (or was told not to), so re-checking every file here is wasted work.
-    with File(file_path, mode="r", validate=False) as file:
+    with File(file_path, mode="r", revision=revision, validate=False) as file:
         shape = file.shape(key)
         missing = missing_metadata_paths(file, metadata_paths)
         # Only meaningful once every file can answer, so skip the walk when one cannot.
@@ -287,15 +292,17 @@ def _map_over_files(func, file_paths, desc, verbose=True):
     ]
 
 
-@cache_output("filepaths", "key", "metadata_paths", "_filepath_hash")
-def _find_h5_file_shapes(filepaths, key, _filepath_hash, metadata_paths=(), verbose=True):
+@cache_output("filepaths", "key", "metadata_paths", "_filepath_hash", "revision")
+def _find_h5_file_shapes(
+    filepaths, key, _filepath_hash, metadata_paths=(), verbose=True, revision=None
+):
     # NOTE: we cache the output of this function such that file loading over the network is
     # faster for repeated calls with the same filepaths, key and _filepath_hash
 
     assert _filepath_hash is not None
 
     get_shape = functools.partial(
-        _shape_and_metadata_gaps, key=key, metadata_paths=tuple(metadata_paths)
+        _shape_and_metadata_gaps, key=key, metadata_paths=tuple(metadata_paths), revision=revision
     )
     results = _map_over_files(
         get_shape, filepaths, "Getting file shapes in each h5 file", verbose=verbose
@@ -727,6 +734,7 @@ class Dataset(H5FileHandleCache):
             key,
             _file_hash(self.file_paths, revision=self.revision),
             tuple(metadata_paths),
+            revision=self.revision,
         )
 
     def _find_hf_files(self, hf_path: str) -> List[str]:
@@ -792,7 +800,7 @@ class Dataset(H5FileHandleCache):
 
         return file_paths
 
-    def _open_file(self, file_path) -> File:
+    def _open_file(self, file_path, revision: str | None = None) -> File:
         """Open one file at the dataset's revision."""
         # Only validate lazy hf:// paths that have not already been validated.
         # Local paths and non-lazy hf:// paths are validated at discovery.
@@ -801,7 +809,7 @@ class Dataset(H5FileHandleCache):
             and str(file_path).startswith(HF_PREFIX)
             and str(file_path) not in self._validated
         )
-        file = File(file_path, "r", progress=False, revision=self.revision, validate=validate)
+        file = File(file_path, "r", progress=False, revision=revision, validate=validate)
         if validate:
             # Only on success: a raising open leaves the path unvalidated, to be retried.
             self._validated.add(str(file_path))
@@ -872,7 +880,7 @@ class Dataset(H5FileHandleCache):
         # ``get_file`` so ``File`` streams them (stream=True is the default for hf://
         # paths) instead of resolving to a local path, which downloads the whole file.
         # Non-lazy HF paths were already resolved at init, and non-HF paths are local.
-        return self.get_file(self.file_paths[index])
+        return self.get_file(self.file_paths[index], revision=self.revision)
 
     def __iter__(self):
         """
@@ -887,7 +895,10 @@ class Dataset(H5FileHandleCache):
     @property
     def total_frames(self):
         """Return total number of frames in dataset."""
-        return sum(self.get_file(file_path).n_frames for file_path in self.file_paths)
+        return sum(
+            self.get_file(file_path, revision=self.revision).n_frames
+            for file_path in self.file_paths
+        )
 
     def __repr__(self):
         return f"Dataset(n_files={self.n_files})"
