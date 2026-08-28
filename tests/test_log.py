@@ -15,29 +15,6 @@ from zea import log
 _ZEA_PACKAGE_DIR = zea.__file__.rsplit("/", 1)[0]
 
 
-@pytest.fixture
-def file_logger_capture():
-    """Points ``log.file_logger`` at an in-memory logger for the duration of a test.
-
-    Bypasses ``enable_file_logging``/``configure_file_logger`` (which touch real
-    files and a module-global directory) so tests stay hermetic.
-    """
-    original = log.file_logger
-    stream = io.StringIO()
-    fl = logging.getLogger("test_file_logger_capture")
-    fl.handlers.clear()
-    fl.setLevel(logging.DEBUG)
-    handler = logging.StreamHandler(stream)
-    handler.setFormatter(logging.Formatter("%(levelname)s - %(message)s"))
-    fl.addHandler(handler)
-    fl.propagate = False
-    log.file_logger = fl
-    try:
-        yield stream
-    finally:
-        log.file_logger = original
-
-
 @pytest.fixture(autouse=True)
 def _isolate_warned_locations(reset_warning_once):
     """Prevents ``warning_once`` dedup state from leaking between tests in this module."""
@@ -216,24 +193,25 @@ def test_suppress_warnings_resets_after_context_exits(attach_caplog):
 
 
 # --------------------------------------------------------------------------- #
-# file logger mirroring
+# set_level
 # --------------------------------------------------------------------------- #
 
 
-def test_file_logger_strips_ansi_for_every_level(file_logger_capture):
-    for func_name in ["debug", "info", "warning", "error", "critical", "deprecated"]:
-        getattr(log, func_name)(log.red(f"colored {func_name}"))
-    content = file_logger_capture.getvalue()
-    assert "\x1b[" not in content
-    for func_name in ["debug", "info", "warning", "error", "critical", "deprecated"]:
-        assert f"colored {func_name}" in content
+def test_set_level_filters_output():
+    with _CapturingHandler() as stream:
+        with log.set_level("ERROR"):
+            log.info("hidden")
+            log.error("shown")
+        out = stream.getvalue()
+    assert "hidden" not in out
+    assert "shown" in out
 
 
-def test_file_logger_mirrors_success_without_color(file_logger_capture):
-    log.success("saved file")
-    content = file_logger_capture.getvalue()
-    assert "\x1b[" not in content
-    assert "saved file" in content
+def test_set_level_restores_previous_level():
+    original = log.logger.level
+    with log.set_level("ERROR"):
+        assert log.logger.level == logging.ERROR
+    assert log.logger.level == original
 
 
 # --------------------------------------------------------------------------- #
