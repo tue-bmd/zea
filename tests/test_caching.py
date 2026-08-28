@@ -1,5 +1,6 @@
 """Tests for the caching utility."""
 
+import atexit
 import os
 import shutil
 import time
@@ -268,8 +269,8 @@ def test_disabled_cache_dir_survives_a_forked_child(monkeypatch):
     ``_disable_cache`` once used ``TemporaryDirectory``, whose ``weakref.finalize`` is
     inherited by forked children (``multiprocessing.Pool`` workers, in practice). The
     first worker to exit deleted the cache directory out from under the parent, which
-    then failed to read its own files. ``mkdtemp`` + an ``atexit`` hook has no finalizer
-    to inherit, so only the process that made the directory removes it.
+    then failed to read its own files. ``mkdtemp`` + an ``atexit`` hook that only fires
+    in the process that made the directory keeps a child's exit harmless.
     """
     # _disable_cache sets ZEA_DISABLE_CACHE itself; hand monkeypatch the current value
     # first so its teardown puts the session back, rather than leaving caching off for
@@ -279,8 +280,13 @@ def test_disabled_cache_dir_survives_a_forked_child(monkeypatch):
     cache_dir = cache_mod._disable_cache()
     try:
         pid = os.fork()
-        if pid == 0:  # child: exit immediately, running any inherited finalizers
-            os._exit(0)
+        if pid == 0:
+            # os._exit skips the exit handlers this test is about, so run the inherited
+            # ones explicitly first -- then leave without unwinding into pytest.
+            try:
+                atexit._run_exitfuncs()
+            finally:
+                os._exit(0)
         os.waitpid(pid, 0)
         assert cache_dir.is_dir()
     finally:
