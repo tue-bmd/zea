@@ -1264,6 +1264,15 @@ class TestZeaVersion:
         with pytest.raises(InvalidZeaFileError, match="at least one of 'data' or 'scan'"):
             File(path)
 
+    def test_tracks_dataset_is_rejected_as_a_zea_file(self, tmp_path):
+        """A 'tracks' dataset is not a track listing: say so, rather than fail on .keys()."""
+        path = tmp_path / "tracks_dataset.hdf5"
+        with h5py.File(path, "w") as f:
+            f.create_dataset("tracks", data=np.zeros((2,), dtype=np.float32))
+
+        with pytest.raises(InvalidZeaFileError, match="'tracks' is not a group"):
+            File(path)
+
     def test_open_validates_by_default(self, tmp_path):
         """Opening a non-zea file for reading fails at the open, not at first read."""
         path = tmp_path / "not_zea.hdf5"

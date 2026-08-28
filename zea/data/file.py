@@ -2666,6 +2666,8 @@ def _validate_file_impl(file: File) -> None:
     # Track format: tracks/track_N/data
     if super(File, file).__contains__("tracks"):
         tracks_group = file["tracks"]
+        if not isinstance(tracks_group, h5py.Group):
+            raise InvalidZeaFileError("'tracks' is not a group - this may not be a zea file.")
         for track_key in tracks_group.keys():
             track_grp = tracks_group[track_key]
             # Only track_N groups are tracks; anything else under 'tracks' is not one, so
