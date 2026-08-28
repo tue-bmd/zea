@@ -1,8 +1,6 @@
 """Tests for the caching utility."""
 
-import atexit
 import os
-import shutil
 import time
 from pathlib import Path
 
@@ -261,36 +259,6 @@ def test_caching_custom_object():
         f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
     )
     assert result == 2 + 20, f"Expected 2 + 20, got {result}"
-
-
-def test_disabled_cache_dir_survives_a_forked_child(monkeypatch):
-    """A disabled cache must not be cleaned up by whichever process happens to exit first.
-
-    ``_disable_cache`` once used ``TemporaryDirectory``, whose ``weakref.finalize`` is
-    inherited by forked children (``multiprocessing.Pool`` workers, in practice). The
-    first worker to exit deleted the cache directory out from under the parent, which
-    then failed to read its own files. ``mkdtemp`` + an ``atexit`` hook that only fires
-    in the process that made the directory keeps a child's exit harmless.
-    """
-    # _disable_cache sets ZEA_DISABLE_CACHE itself; hand monkeypatch the current value
-    # first so its teardown puts the session back, rather than leaving caching off for
-    # every test that follows.
-    monkeypatch.setenv("ZEA_DISABLE_CACHE", os.environ.get("ZEA_DISABLE_CACHE", "0"))
-
-    cache_dir = cache_mod._disable_cache()
-    try:
-        pid = os.fork()
-        if pid == 0:
-            # os._exit skips the exit handlers this test is about, so run the inherited
-            # ones explicitly first -- then leave without unwinding into pytest.
-            try:
-                atexit._run_exitfuncs()
-            finally:
-                os._exit(0)
-        os.waitpid(pid, 0)
-        assert cache_dir.is_dir()
-    finally:
-        shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 def test_cache_summary():

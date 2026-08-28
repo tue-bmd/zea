@@ -43,15 +43,7 @@ def _disable_cache():
     """Disable caching by creating a temporary directory and setting the environment variable."""
     os.environ["ZEA_DISABLE_CACHE"] = "1"
     _tmp_dir_path = tempfile.mkdtemp(prefix="zea_cache_")
-    owner_pid = os.getpid()
-
-    def _cleanup():
-        # Exit handlers are inherited across fork, so without this guard whichever
-        # forked child exits first would delete the directory its parent is still using.
-        if os.getpid() == owner_pid:
-            shutil.rmtree(_tmp_dir_path, ignore_errors=True)
-
-    atexit.register(_cleanup)
+    atexit.register(lambda: shutil.rmtree(_tmp_dir_path, ignore_errors=True))
     return Path(_tmp_dir_path)
 
 

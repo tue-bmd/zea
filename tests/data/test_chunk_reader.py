@@ -12,6 +12,7 @@ layouts and selections where it could plausibly diverge. The cases that earn the
 """
 
 import http.server
+import inspect
 import os
 import socketserver
 import threading
@@ -19,11 +20,13 @@ from importlib import import_module
 import time
 from unittest.mock import MagicMock
 
+import aiohttp
 import h5py
 import hdf5plugin
 import numpy as np
 import pytest
 
+from zea.data import chunk_reader
 from zea.data.chunk_reader import (
     MIN_BYTES,
     HTTPFetcher,
@@ -637,13 +640,22 @@ class TestFetchers:
 # Remote: the win is round trips, so count them rather than timing them.
 # --------------------------------------------------------------------------- #
 class _CountingServer:
-    """Range-capable HTTP server that counts requests and delays each one."""
+    """Range-capable HTTP server that counts requests and delays each one.
 
-    def __init__(self, directory, latency=0.02):
+    Two ways to make a request fail, for the two halves of the retry path: ``reject_first``
+    requests are answered with ``reject_status`` instead of bytes (Hugging Face answers 429 to
+    a reader going too fast), and ``drop_first`` requests get no answer at all — the connection
+    closes before a status is sent, as a CDN does when it hiccups.
+    """
+
+    def __init__(self, directory, latency=0.02, reject_first=0, reject_status=429, drop_first=0):
         self.count = 0
         #: Highest number of requests in flight at once — the real evidence of concurrency.
         self.peak = 0
         self._active = 0
+        self._reject_left = reject_first
+        self._drop_left = drop_first
+        self.reject_status = reject_status
         lock = threading.Lock()
         outer = self
 
@@ -666,6 +678,22 @@ class _CountingServer:
                 finally:
                     with lock:
                         outer._active -= 1
+                        rejected = outer._reject_left > 0
+                        if rejected:
+                            outer._reject_left -= 1
+                        dropped = not rejected and outer._drop_left > 0
+                        if dropped:
+                            outer._drop_left -= 1
+                if dropped:
+                    # No response line at all: returning None from send_head leaves do_GET
+                    # nothing to write, and the socket closes under the waiting client.
+                    self.close_connection = True
+                    return None
+                if rejected:
+                    self.send_response(outer.reject_status)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return None
                 path = self.translate_path(self.path)
                 with open(path, "rb") as handle:
                     body = handle.read()
@@ -789,3 +817,176 @@ class TestRemote:
             tqdm_mock.assert_not_called()
         finally:
             server.close()
+
+
+# --------------------------------------------------------------------------- #
+# Rate limits: a host that says "slow down" must be waited out, not failed on.
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def fast_backoff(monkeypatch):
+    """Keep the retry tests to milliseconds instead of the real seconds-long backoff."""
+    monkeypatch.setattr(chunk_reader, "BASE_BACKOFF", 0.01)
+    monkeypatch.setattr(chunk_reader, "MAX_BACKOFF", 0.05)
+
+
+def _status_error(status):
+    """The exception fsspec's HTTP filesystem raises for a response with this status."""
+    return aiohttp.ClientResponseError(MagicMock(), (), status=status)
+
+
+class TestRetry:
+    def test_rate_limited_range_requests_are_retried(self, structured_file, fast_backoff):
+        """A 429 is transient: the read must come back with the right bytes, not an error."""
+        rejects = 3
+        server = _CountingServer(structured_file.parent, latency=0, reject_first=rejects)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                info = file[RAW].id.get_chunk_info(0)
+                ranges = [(int(info.byte_offset), int(info.size))]
+                (raw,) = fetcher.fetch(ranges)
+
+                local = LocalFetcher(structured_file)
+                try:
+                    assert [raw] == local.fetch(ranges)
+                finally:
+                    local.close()
+            assert server.count == rejects + 1, "expected one attempt per rejection, then the read"
+        finally:
+            server.close()
+
+    def test_dropped_connections_are_retried(self, structured_file, fast_backoff):
+        """A connection that dies before any status arrives is as transient as a 503 — and
+        likelier: the more chunks a pass streams, the closer to certain one of them drops."""
+        drops = 2
+        server = _CountingServer(structured_file.parent, latency=0, drop_first=drops)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                info = file[RAW].id.get_chunk_info(0)
+                ranges = [(int(info.byte_offset), int(info.size))]
+                (raw,) = fetcher.fetch(ranges)
+
+                local = LocalFetcher(structured_file)
+                try:
+                    assert [raw] == local.fetch(ranges)
+                finally:
+                    local.close()
+            assert server.count == drops + 1, "expected one attempt per drop, then the read"
+        finally:
+            server.close()
+
+    def test_retries_run_out(self, structured_file, fast_backoff, monkeypatch):
+        """A host that never lets up surfaces its error rather than retrying forever."""
+        monkeypatch.setattr(chunk_reader, "MAX_RETRIES", 2)
+        server = _CountingServer(structured_file.parent, latency=0, reject_first=1000)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                info = file[RAW].id.get_chunk_info(0)
+                with pytest.raises(Exception) as excinfo:
+                    fetcher.fetch([(int(info.byte_offset), int(info.size))])
+            assert getattr(excinfo.value, "status", None) == 429
+            assert server.count == 3, "expected the first attempt plus MAX_RETRIES retries"
+        finally:
+            server.close()
+
+    def test_a_missing_file_is_not_retried(self, structured_file, fast_backoff):
+        """Only transient statuses are worth another attempt; 404 is an answer, not a stall."""
+        server = _CountingServer(
+            structured_file.parent, latency=0, reject_first=1, reject_status=404
+        )
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                info = file[RAW].id.get_chunk_info(0)
+                with pytest.raises(FileNotFoundError):
+                    fetcher.fetch([(int(info.byte_offset), int(info.size))])
+            assert server.count == 1, "a 404 must not be retried"
+        finally:
+            server.close()
+
+    def test_requests_in_flight_are_capped(self, structured_file, monkeypatch):
+        """The cap is what keeps a read from tripping the rate limit in the first place."""
+        cap = 2
+        monkeypatch.setattr(chunk_reader, "MAX_CONCURRENT_REQUESTS", cap)
+        # The semaphore is made once per event loop and cached, so drop whatever earlier
+        # reads left behind -- otherwise this would run against the real cap.
+        monkeypatch.setattr(chunk_reader, "_limiters", {})
+
+        server = _CountingServer(structured_file.parent, latency=0.02)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                got = read(file[RAW], slice(0, 4), fetcher)
+                np.testing.assert_array_equal(got, file[RAW][0:4])
+            assert server.count > cap, "too few requests for the cap to constrain anything"
+            assert server.peak <= cap, f"{server.peak} requests in flight, cap is {cap}"
+        finally:
+            server.close()
+
+
+class TestIsTransient:
+    @pytest.mark.parametrize("status", sorted(chunk_reader.RETRY_STATUS))
+    def test_transient_statuses(self, status):
+        assert chunk_reader._is_transient(_status_error(status))
+
+    @pytest.mark.parametrize("status", [400, 401, 403, 404, 416])
+    def test_an_answer_is_not_a_stall(self, status):
+        assert not chunk_reader._is_transient(_status_error(status))
+
+    @pytest.mark.parametrize(
+        "exc", [ConnectionResetError(), TimeoutError(), aiohttp.ServerDisconnectedError()]
+    )
+    def test_connection_failures(self, exc):
+        assert chunk_reader._is_transient(exc)
+
+    @pytest.mark.parametrize("exc", [FileNotFoundError(), PermissionError(), ValueError()])
+    def test_not_retryable(self, exc):
+        """fsspec turns 404 and 403 into these; a read that retried them would hang on for a
+        file that is simply not there."""
+        assert not chunk_reader._is_transient(exc)
+
+    def test_matches_huggingface_hub(self):
+        """The retry policy is documented as huggingface_hub's, so catch it drifting from it.
+
+        Asserted here rather than imported at runtime: the set is private to
+        ``huggingface_hub.utils._http``, and a module-level import of a private name would
+        turn a hub upgrade into an ImportError on a read path. A skip is the right answer if
+        it moves -- a stale status costs one unretried request, not a failure.
+        """
+        http = pytest.importorskip("huggingface_hub.utils._http")
+        statuses = getattr(http, "_DEFAULT_RETRY_ON_STATUS_CODES", None)
+        if statuses is None:
+            pytest.skip("huggingface_hub no longer exposes _DEFAULT_RETRY_ON_STATUS_CODES")
+        assert set(statuses) == chunk_reader.RETRY_STATUS
+
+        defaults = inspect.signature(http.http_backoff).parameters
+        assert defaults["max_retries"].default == chunk_reader.MAX_RETRIES
+        assert defaults["base_wait_time"].default == chunk_reader.BASE_BACKOFF
+        assert defaults["max_wait_time"].default == chunk_reader.MAX_BACKOFF
+
+
+class TestRetryDelay:
+    def test_honours_retry_after(self):
+        assert chunk_reader._retry_delay(0, {"Retry-After": "3"}) == 3.0
+
+    def test_caps_retry_after(self):
+        """However long the server asks for, a read should not disappear for minutes."""
+        assert chunk_reader._retry_delay(0, {"Retry-After": "600"}) == chunk_reader.MAX_BACKOFF
+
+    @pytest.mark.parametrize(
+        "headers", [None, {}, {"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}]
+    )
+    def test_falls_back_to_jittered_backoff(self, headers):
+        """No usable Retry-After (the HTTP-date form included) means back off exponentially."""
+        delays = [chunk_reader._retry_delay(3, headers) for _ in range(20)]
+        ceiling = min(chunk_reader.BASE_BACKOFF * 2**3, chunk_reader.MAX_BACKOFF)
+        assert all(0 <= delay <= ceiling for delay in delays)
+        assert len(set(delays)) > 1, "the backoff must be jittered, or throttled requests resync"
+
+    def test_grows_with_the_attempt(self):
+        """Later attempts wait longer, up to the cap."""
+        early = max(chunk_reader._retry_delay(0) for _ in range(50))
+        late = max(chunk_reader._retry_delay(3) for _ in range(50))
+        assert late > early
