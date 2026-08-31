@@ -331,6 +331,11 @@ def test_interpolate_masks_rejects_bad_positions():
         interpolate_masks([mask, mask], num_frames=4, rectangle=True, positions=[0])
     with pytest.raises(AssertionError, match="strictly increasing"):
         interpolate_masks([mask, mask], num_frames=4, rectangle=True, positions=[2, 2])
+    # only frames 0..num_frames-1 are rendered, so num_frames itself is out of range
+    with pytest.raises(AssertionError, match="frame indices"):
+        interpolate_masks([mask, mask], num_frames=4, rectangle=True, positions=[0, 4])
+    with pytest.raises(AssertionError, match="frame indices"):
+        interpolate_masks([mask, mask], num_frames=4, rectangle=True, positions=[-1, 2])
 
 
 @pytest.mark.parametrize(
