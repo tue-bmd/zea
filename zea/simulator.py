@@ -105,7 +105,7 @@ def simulate_rf(
             use :class:`zea.ops.Simulate` rather than calling `simulate_rf` directly.
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity and the elevation slab. If None, defaults to element_width.
-        scatter_exponent (float): Weight the scattered field by
+        scatter_exponent (float): Weigh the scattered field by
             ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering, approximately
             1.5 is typical for soft tissue. Must be static under jit.
         max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
