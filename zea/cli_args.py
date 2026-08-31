@@ -61,6 +61,36 @@ class AppArgs:
 
 
 @dataclass
+class DataPathsArgs:
+    """Set up the local data paths in a ``users.yaml`` file.
+
+    Walks you through pointing zea at your data directory, and writes the answers to a
+    ``users.yaml`` so paths in configs can stay relative and portable. Running it again
+    on a machine that already has a profile just prints the paths it resolved.
+    """
+
+    user_config: Annotated[
+        Path | None,
+        tyro.conf.arg(
+            aliases=["-u"],
+            help="users.yaml to create or update. Defaults to ./users.yaml.",
+        ),
+    ] = None
+    local: Annotated[
+        bool | None,
+        tyro.conf.arg(
+            help="Record the data root under a 'local' or 'remote' sub key. "
+            "Leave unset for a single path shared by both.",
+        ),
+    ] = None
+
+    def run(self) -> None:
+        from zea.datapaths import create_new_user
+
+        create_new_user(self.user_config, local=self.local)
+
+
+@dataclass
 class ProcessArgs:
     """Arguments for beamforming a zea dataset."""
 

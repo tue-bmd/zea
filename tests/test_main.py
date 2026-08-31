@@ -8,7 +8,7 @@ import pytest
 import tyro
 
 from zea.__main__ import CLI
-from zea.cli_args import AppArgs, ProcessArgs
+from zea.cli_args import AppArgs, DataPathsArgs, ProcessArgs
 
 
 def parse_args(argv):
@@ -189,6 +189,36 @@ def test_convert_main_dispatches_without_preallocating(monkeypatch):
 
     assert isinstance(called_args, _Camus)
     assert called_args.download is True
+
+
+# ── datapaths subcommand ──────────────────────────────────────────────────────
+
+
+def test_datapaths_subcommand_exists():
+    """`zea datapaths` is registered and takes the users.yaml to write."""
+    args = parse_args(["datapaths", "--user-config", "users.yaml"]).subcommand
+    assert isinstance(args, DataPathsArgs)
+    assert str(args.user_config) == "users.yaml"
+    assert args.local is None
+
+
+def test_datapaths_main_dispatches_without_a_device(monkeypatch):
+    """Setting up data paths has no use for a compute device, so none is initialised."""
+    monkeypatch.setattr("sys.argv", ["zea", "datapaths", "--user-config", "users.yaml"])
+
+    with (
+        patch("zea.internal.device.init_device") as mock_init_device,
+        patch("zea.datapaths.create_new_user") as mock_create,
+    ):
+        from zea.__main__ import main
+
+        main()
+
+    mock_init_device.assert_not_called()
+    assert mock_create.call_count == 1
+    (called_path,), kwargs = mock_create.call_args
+    assert str(called_path) == "users.yaml"
+    assert kwargs == {"local": None}
 
 
 # ── tools subcommand ──────────────────────────────────────────────────────────

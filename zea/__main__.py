@@ -2,10 +2,11 @@
 
 Usage::
 
-    zea process --dataset <path> --config <config.yaml> [options]  # batch beamform a dataset
     zea app [--share] [--server-port PORT]                         # launch the Gradio visualizer
-    zea data <operation> [options]                                 # manipulate zea data files
     zea convert <dataset> <src> <dst> [options]                    # convert raw datasets to zea
+    zea data <operation> [options]                                 # manipulate zea data files
+    zea datapaths [--user-config users.yaml]                       # set up your local data paths
+    zea process --dataset <path> --config <config.yaml> [options]  # batch beamform a dataset
     zea tools select [files] [options]                             # annotate regions of interest
 
 """
@@ -21,10 +22,17 @@ if "ZEA_LOG_LEVEL" not in os.environ:
 
     log.set_level("WARNING")
 
-from zea.cli_args import AppArgs, ConvertArgs, DataArgs, ProcessArgs, ToolsArgs
+from zea.cli_args import (
+    AppArgs,
+    ConvertArgs,
+    DataArgs,
+    DataPathsArgs,
+    ProcessArgs,
+    ToolsArgs,
+)
 
 # subcommands that don't require a device
-_NO_DEVICE_FNS = [DataArgs, ToolsArgs]
+_NO_DEVICE_FNS = [DataArgs, DataPathsArgs, ToolsArgs]
 
 
 @dataclass
@@ -33,10 +41,11 @@ class CLI:
 
     subcommand: tyro.conf.OmitSubcommandPrefixes[
         Union[
-            Annotated[ProcessArgs, tyro.conf.subcommand("process")],
             Annotated[AppArgs, tyro.conf.subcommand("app")],
-            Annotated[DataArgs, tyro.conf.subcommand("data")],
             Annotated[ConvertArgs, tyro.conf.subcommand("convert")],
+            Annotated[DataArgs, tyro.conf.subcommand("data")],
+            Annotated[DataPathsArgs, tyro.conf.subcommand("datapaths")],
+            Annotated[ProcessArgs, tyro.conf.subcommand("process")],
             Annotated[ToolsArgs, tyro.conf.subcommand("tools")],
         ]
     ]
