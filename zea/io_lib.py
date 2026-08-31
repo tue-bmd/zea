@@ -138,7 +138,7 @@ def save_video(images, filename, fps=20, **kwargs):
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def save_to_gif(images, filename, fps=20, shared_color_palette=True):
+def save_to_gif(images, filename, fps=20, shared_color_palette=True, loop=0):
     """Saves a sequence of images to a GIF file.
 
     .. note::
@@ -157,6 +157,9 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=True):
             throughout the GIF. Defaults to True, which is default behavior
             of PIL.Image.save. Note: True increases speed and shrinks file
             size for longer sequences.
+        loop (int, optional): Number of times to repeat after the first play.
+            Defaults to 0, which loops forever. Pass None to write no loop
+            extension at all, so the GIF plays once and stops on the last frame.
 
     """
     images = preprocess_for_saving(images)
@@ -186,15 +189,18 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=True):
 
     pillow_img, *pillow_imgs = pillow_imgs
 
+    # Pillow only omits the Netscape loop extension when `loop` is absent entirely
+    loop_kwarg = {} if loop is None else {"loop": loop}
+
     pillow_img.save(
         fp=filename,
         format="GIF",
         append_images=pillow_imgs,
         save_all=True,
-        loop=0,
         duration=duration,
         interlace=False,
         optimize=False,
+        **loop_kwarg,
     )
     log.success(f"Successfully saved GIF to -> {log.yellow(filename)}")
 
