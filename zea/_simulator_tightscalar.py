@@ -72,8 +72,6 @@ def simulate_rf(
     t_peak,
     elevation_lens=False,
     element_height=None,
-    n_period=4.0,
-    scatter_exponent=0.0,
     max_chunk_gb=10.0,
     noise_level_db=None,
     tgc_max_db=0.0,
@@ -106,12 +104,6 @@ def simulate_rf(
             use :class:`zea.ops.Simulate` rather than calling `simulate_rf` directly.
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity and the elevation slab. If None, defaults to element_width.
-        n_period (float): Number of cycles in the transmit pulse. Sets the axial resolution
-            cell and the bandwidth.
-        scatter_exponent (float): Weight the scattered field by
-            ``(f / center_frequency)**scatter_exponent``. 2 is the Rayleigh regime for scatterers
-            well below a wavelength, ~1.5 is typical of soft tissue, 0 keeps the frequency-flat
-            scattering zea has always used. Must be static under jit.
         max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
             :func:`zea.simulator_time_domain.simulate_rf_td` share a call signature.
         noise_level_db (float): Electronic noise level in dB relative to the noiseless RF
@@ -159,7 +151,7 @@ def simulate_rf(
     magnitudes = ops.cast(magnitudes, "float32")
 
     pulse_spectrum_fn = get_pulse_spectrum_fn(
-        center_frequency, n_period=n_period, sampling_frequency=sampling_frequency
+        center_frequency, n_period=4, sampling_frequency=sampling_frequency
     )
 
     if not apply_lens_correction:
@@ -182,12 +174,6 @@ def simulate_rf(
     freqs = ops.arange(n_ax_rounded // 2 + 1, dtype="float32") / n_ax_rounded * sampling_frequency
 
     waveform_spectrum = pulse_spectrum_fn(freqs)
-
-    # Normalised at f0, so this changes the spectral shape and not the level.
-    if scatter_exponent:
-        scatter_gain = (freqs / center_frequency) ** scatter_exponent
-    else:
-        scatter_gain = ops.ones_like(freqs)
 
     scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
     theta = ops.arctan2(scat_pos_relative_to_probe[..., 0], scat_pos_relative_to_probe[..., 2])
@@ -213,7 +199,7 @@ def simulate_rf(
         tx_response = shared_response * ops.cast(spread(dist[..., None], 1.0), "complex64")
         rx_response = tx_response
 
-    # Leave room for the pulse tail
+    # Leave room for the pulse tail, so a round trip that is kept cannot wrap around.
     record_length = n_ax_rounded / sampling_frequency - 2 / center_frequency
     travel_time = dist / sound_speed
     parts = []
@@ -223,8 +209,8 @@ def simulate_rf(
         tx_delay = delay2(freqs[None], shifts_not_travel_related, n_ax_rounded, sampling_frequency)
         tx_element_weights = ops.cast(tx_apodizations[tx][:, None], "complex64") * tx_delay
 
-        # delay2 only gates one-way delays. Worst case over the active transmit elements,
-        # to never alias in ops.irfft.
+        # delay2 only gates one-way delays, so gate the round trip here. Exact on the receive
+        # leg; worst case over the active transmit elements, which needs no tx-by-rx tensor.
         tx_arrival = ops.max(
             ops.where(
                 tx_apodizations[tx][None] != 0,
@@ -233,12 +219,16 @@ def simulate_rf(
             ),
             axis=1,
         )
-        within_record = ops.cast(tx_arrival[:, None] + travel_time < record_length, "complex64")
+        within_record = ops.cast(
+            tx_arrival + ops.max(travel_time, axis=1) < record_length, "float32"
+        )
 
         # Explicitly sum over tx dimension before the receive axis exists.
         incident_field = ops.sum(tx_response * tx_element_weights[None], axis=1)
-        scattered_field = incident_field * ops.cast(magnitudes[:, None] * scatter_gain, "complex64")
-        received_field = scattered_field[:, None] * rx_response * within_record[..., None]
+        scattered_field = incident_field * ops.cast(
+            (magnitudes * within_record)[:, None], "complex64"
+        )
+        received_field = scattered_field[:, None] * rx_response
         rf_spectrum = waveform_spectrum * ops.sum(received_field, axis=0)
         parts.append(ops.irfft((ops.real(rf_spectrum), ops.imag(rf_spectrum))))
 
@@ -533,18 +523,9 @@ def get_pulse_spectrum_fn(center_frequency, n_period=3.0, sampling_frequency=Non
     period = n_period / center_frequency
     scale = 0.5 if sampling_frequency is None else 0.5 * sampling_frequency * period
 
-    # No transducer passes DC, and near-DC is where this pulse is dangerous: the low bins sum
-    # coherently over scatterers (their delay term is close to exp(0) = 1), the amplitudes are
-    # positive so they accumulate as N, and attenuation is proportional to |f| so it spares them
-    # entirely. At a non-integer n_period the skirt there is flat and high (48 dB below the peak
-    # at 5.5 cycles, across every one of the lowest bins) and it swamps the speckle. At integer
-    # skirt is already below -128 dB by the first bin, so this ramp is a no-op.
-    highpass_edge = 0.25 * center_frequency
-
     def spectrum_fn(f):
-        ramp = 0.5 * (1.0 - ops.cos(np.pi * ops.minimum(ops.abs(f), highpass_edge) / highpass_edge))
         return ops.array(scale, "complex64") * ops.cast(
-            (hann_fd(f - center_frequency, period) + hann_fd(f + center_frequency, period)) * ramp,
+            (hann_fd(f - center_frequency, period) + hann_fd(f + center_frequency, period)),
             "complex64",
         )
 
