@@ -336,6 +336,9 @@ def test_interpolate_masks_rejects_bad_positions():
         interpolate_masks([mask, mask], num_frames=4, rectangle=True, positions=[0, 4])
     with pytest.raises(AssertionError, match="frame indices"):
         interpolate_masks([mask, mask], num_frames=4, rectangle=True, positions=[-1, 2])
+    # only whole frames are rendered, so a mask cannot sit between two of them
+    with pytest.raises(AssertionError, match="frame indices"):
+        interpolate_masks([mask, mask], num_frames=4, rectangle=True, positions=[0.5, 2.5])
 
 
 @pytest.mark.parametrize(

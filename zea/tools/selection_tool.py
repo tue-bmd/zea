@@ -653,9 +653,11 @@ def interpolate_masks(
         frame_positions = np.asarray(positions, dtype=float)
         assert len(frame_positions) == number_of_masks, "One position per mask is required."
         assert np.all(np.diff(frame_positions) > 0), "Positions must be strictly increasing."
-        assert frame_positions[0] >= 0 and frame_positions[-1] < num_frames, (
-            f"Positions must be frame indices in [0, {num_frames})."
-        )
+        assert (
+            np.all(frame_positions == np.floor(frame_positions))
+            and frame_positions[0] >= 0
+            and frame_positions[-1] < num_frames
+        ), f"Positions must be integer frame indices in [0, {num_frames})."
 
     frames = np.arange(num_frames)
 
