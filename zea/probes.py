@@ -298,7 +298,7 @@ class Probe(ProbeSpec):
         if self.probe_bandwidth_percent is not None:
             parts.append(f"bw={float(self.probe_bandwidth_percent):.1f}%")
         if self.element_width is not None:
-            parts.append(f"pitch={float(self.element_width) * 1e3:.3f} mm")
+            parts.append(f"element_width={float(self.element_width) * 1e3:.3f} mm")
         return f"Probe({', '.join(parts)})"
 
     @classmethod
