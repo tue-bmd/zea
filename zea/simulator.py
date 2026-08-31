@@ -106,8 +106,8 @@ def simulate_rf(
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity and the elevation slab. If None, defaults to element_width.
         scatter_exponent (float): Weigh the scattered field by
-            ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering, approximately
-            1.5 is typical for soft tissue. Must be static under jit.
+            ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
+            myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
         max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
             :func:`zea.simulator_time_domain.simulate_rf_td` share a call signature.
         noise_level_db (float): Electronic noise level in dB relative to the noiseless RF

@@ -114,8 +114,8 @@ def simulate_rf_td(
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity and the elevation slab. If None, defaults to element_width.
         scatter_exponent (float): Weigh the scattered waveform spectrum by
-            ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering, approximately
-            1.5 is typical for soft tissue. Must be static under jit.
+            ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
+            myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
         max_chunk_gb (float): Approximate memory budget [GB] for the (chunk, n_el, n_el)
             tensors held at once while iterating over scatterers. Scatterers are processed
             in chunks sized to this budget, so peak memory no longer scales with the total
