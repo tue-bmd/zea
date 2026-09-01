@@ -1219,6 +1219,8 @@ def compare_images(
     """Select two regions in one image and compare them across all images.
 
     Every image is plotted in its own figure; the selection is made in the first one.
+    Nothing is written to disk, so the comparison is held on screen until dismissed,
+    the way sequence mode holds its preview open after saving.
 
     Args:
         images (Sequence[np.ndarray]): The images to compare.
@@ -1226,16 +1228,16 @@ def compare_images(
         selector (str, optional): Type of selection tool. Defaults to ``"rectangle"``.
         metric (str, optional): Metric to compute between the two patches. Defaults to
             ``"gcnr"``.
-        confirm_selection (bool, optional): Whether to ask (in the plot window) to
-            confirm the selection. Defaults to True.
+        confirm_selection (bool, optional): Whether to confirm the selection and hold
+            the comparison open, both in the plot window. Defaults to True.
 
     Returns:
         list: The computed metric scores, one per image.
     """
-    axs = []
+    axs, figures = [], []
     # Plot in reverse so that the figure the selection is made in ends up on top.
     for i, (image, file_name) in enumerate(zip(images[::-1], file_names[::-1])):
-        _, ax = plt.subplots()
+        fig, ax = plt.subplots()
         ax.imshow(image, cmap="gray")
         if i == len(images) - 1:
             ax.set_title(f"Make selection in this plot\n {file_name}")
@@ -1243,14 +1245,21 @@ def compare_images(
             ax.set_title(file_name)
         ax.axis("off")
         axs.append(ax)
+        figures.append(fig)
 
-    return interactive_selector_with_plot_and_metric(
+    scores = interactive_selector_with_plot_and_metric(
         list(images),
         axs[::-1],
         selector=selector,
         metric=metric,
         confirm_selection=confirm_selection,
     )
+
+    if confirm_selection:
+        wait_for_key(figures[-1], f"Press {_keys(ACCEPT_KEYS)} to close.")
+    for fig in figures:
+        plt.close(fig)
+    return scores
 
 
 def _select_key_frame_mask(image, axs, selector: str, confirm_selection: bool):

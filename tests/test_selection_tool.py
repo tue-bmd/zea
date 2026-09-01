@@ -1000,6 +1000,39 @@ def test_run_selection_tool_rejects_unknown_selector(gif_path):
         run_selection_tool(files=[gif_path], selector="circle")
 
 
+def test_compare_images_holds_the_comparison_open(monkeypatch, fake_selector):
+    """Image mode writes nothing, so the figures must survive until dismissed."""
+    fake_selector([((2, 2), (8, 8)), ((12, 12), (18, 18))])
+    waited = []
+
+    def fake_wait(fig, message, **kwargs):
+        if "close" in message:
+            waited.append(fig)
+        return True  # accept the confirmation prompt
+
+    monkeypatch.setattr(selection_tool, "wait_for_key", fake_wait)
+
+    selection_tool.compare_images(
+        [np.ones((20, 20)), np.ones((20, 20))], ["a.png", "b.png"], metric=None
+    )
+
+    assert len(waited) == 1
+    # and everything is cleaned up afterwards
+    assert plt.get_fignums() == []
+
+
+def test_compare_images_does_not_block_without_confirmation(monkeypatch, fake_selector):
+    fake_selector([((2, 2), (8, 8)), ((12, 12), (18, 18))])
+    monkeypatch.setattr(
+        selection_tool, "wait_for_key", lambda *a, **kw: pytest.fail("blocked with --no-confirm")
+    )
+
+    selection_tool.compare_images(
+        [np.ones((20, 20))], ["a.png"], metric=None, confirm_selection=False
+    )
+    assert plt.get_fignums() == []
+
+
 def test_run_selection_tool_on_images(fake_selector, image_paths):
     """Image mode returns one metric score per image."""
     fake_selector([((2, 2), (8, 8)), ((12, 12), (20, 20))])
