@@ -33,6 +33,7 @@ from zea.tools.selection_tool import (  # noqa: E402
     interpolate_polygons,
     interpolate_rectangles,
     load_input_files,
+    match_polygon_chain,
     match_polygons,
     normalize_title,
     reconstruct_mask_from_polygon,
@@ -248,7 +249,7 @@ def test_match_polygons():
     assert np.all(poly1 == poly2)
 
 
-def test_interpolate_masks_keeps_every_segment_aligned():
+def test_match_polygon_chain_keeps_every_segment_aligned():
     """Matching pairwise in both directions un-aligns the segment before it.
 
     Three lasso key frames is the docstring's own example, so a twisted first
@@ -257,19 +258,15 @@ def test_interpolate_masks_keeps_every_segment_aligned():
     angles = np.linspace(0, 2 * np.pi, 9)[:-1]
     # asymmetric, so the vertex correspondence actually matters
     base = np.stack([np.cos(angles) * 10, np.sin(angles) * 4], axis=1)
-    polygons = [base, np.roll(base + 20, 3, axis=0), np.roll(base + 40, 6, axis=0)]
 
     def distance(first, second):
         return np.linalg.norm(first - second, axis=1).sum()
 
-    for i in range(len(polygons) - 1):
-        polygons[i + 1], _ = match_polygons(polygons[i + 1], polygons[i])
+    aligned = match_polygon_chain([base, np.roll(base + 20, 3, 0), np.roll(base + 40, 6, 0)])
 
-    for i in range(len(polygons) - 1):
-        best = min(
-            distance(np.roll(polygons[i + 1], k, axis=0), polygons[i]) for k in range(len(base))
-        )
-        assert distance(polygons[i], polygons[i + 1]) == pytest.approx(best)
+    for first, second in zip(aligned, aligned[1:]):
+        best = min(distance(np.roll(second, k, 0), first) for k in range(len(base)))
+        assert distance(first, second) == pytest.approx(best)
 
 
 def test_interpolate_polygons_endpoints_and_midpoint():

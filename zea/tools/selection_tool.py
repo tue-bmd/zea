@@ -572,6 +572,26 @@ def match_polygons(polygon1, polygon2):
     return polygon1, polygon2
 
 
+def match_polygon_chain(polygons: Sequence[np.ndarray]) -> list[np.ndarray]:
+    """Align a run of polygons so that consecutive ones share a vertex correspondence.
+
+    Each polygon is rolled onto its predecessor, which is never touched again. Matching
+    every pair in both directions instead would re-roll the polygon in the middle and
+    undo the alignment of the segment before it.
+
+    Args:
+        polygons (Sequence[np.ndarray]): Polygons of shape (N, 2), all with the same
+            number of vertices.
+
+    Returns:
+        list[np.ndarray]: The polygons, aligned to their predecessor.
+    """
+    aligned = list(polygons)
+    for i in range(len(aligned) - 1):
+        aligned[i + 1], _ = match_polygons(aligned[i + 1], aligned[i])
+    return aligned
+
+
 def equalize_polygons(polygons, mode: str = "max"):
     """Make sure all polygons have the same number of vertices.
 
@@ -684,10 +704,7 @@ def interpolate_masks(
     # trim the polygons for equal number of vertices
     polygons = equalize_polygons(polygons)
 
-    # roll each polygon onto the previous, already-fixed one; matching pairwise in
-    # both directions would undo the alignment of the segment before it
-    for i in range(number_of_masks - 1):
-        polygons[i + 1], _ = match_polygons(polygons[i + 1], polygons[i])
+    polygons = match_polygon_chain(polygons)
 
     # interpolate the polygons, holding the outer ones outside the position range
     interpolated_polygons = []
