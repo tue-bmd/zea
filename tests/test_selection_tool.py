@@ -907,6 +907,32 @@ def test_run_selection_tool_asks_for_files_when_given_none(monkeypatch, fake_sel
     assert len(masks) == 8
 
 
+def test_module_entry_point_parses_argv(monkeypatch, fake_selector, gif_path, tmp_path):
+    """`python -m zea.tools.selection_tool` must honour its arguments, not ignore them."""
+    fake_selector([((4, 4), (12, 12))])
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "selection_tool",
+            str(gif_path),
+            "--selector",
+            "rectangle",
+            "--title",
+            "roi",
+            "--num-selections",
+            "2",
+            "--output-dir",
+            str(tmp_path),
+            "--no-animation",
+            "--no-confirm",
+        ],
+    )
+
+    selection_tool.main()
+
+    assert (tmp_path / f"{gif_path.stem}_roi_annotations.hdf5").exists()
+
+
 def test_run_selection_tool_rejects_unknown_selector(gif_path):
     with pytest.raises(AssertionError):
         run_selection_tool(files=[gif_path], selector="circle")

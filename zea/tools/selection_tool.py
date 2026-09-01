@@ -1661,9 +1661,13 @@ def run_selection_tool(
     return masks
 
 
-def main():
-    """Entry point for ``python -m zea.tools.selection_tool``."""
-    run_selection_tool()
+def main() -> None:
+    """Entry point for ``python -m …``, equivalent to ``zea tools select``."""
+    import tyro
+
+    from zea.cli_args import _Select
+
+    tyro.cli(_Select).run()
 
 
 if __name__ == "__main__":
