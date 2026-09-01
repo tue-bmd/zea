@@ -981,14 +981,14 @@ def _suffix(file: str | Path) -> str:
     return PurePosixPath(str(file)).suffix.lower()
 
 
-def ask_for_files() -> list[Path]:
+def ask_for_files() -> list[str]:
     """Ask for the input file paths on the terminal, one per line.
 
     Only reached when no paths were passed on the command line. Typing a video, gif or
     zea file ends the loop right away, since a sequence is annotated on its own.
 
     Returns:
-        list[Path]: The chosen files.
+        list[str]: The chosen paths, local or ``hf://``.
 
     Raises:
         ValueError: If no file was given.
@@ -997,17 +997,19 @@ def ask_for_files() -> list[Path]:
         "Enter the path to each input file, one per line: as many images as you like, "
         "OR one video / gif / zea file. Leave empty to continue."
     )
-    files: list[Path] = []
+    files: list[str] = []
     while True:
         answer = input("Path: ").strip().strip("'\"")
         if not answer:
             break
-        file = Path(answer).expanduser()
-        if not file.exists():
-            log.error(f"{file} does not exist.")
-            continue
-        files.append(file)
-        if _suffix(file) in _SEQUENCE_TYPES:
+        if not answer.startswith(HF_PREFIX):
+            local = Path(answer).expanduser()
+            if not local.exists():
+                log.error(f"{local} does not exist.")
+                continue
+            answer = str(local)
+        files.append(answer)
+        if _suffix(answer) in _SEQUENCE_TYPES:
             break
 
     if not files:

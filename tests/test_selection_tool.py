@@ -473,25 +473,32 @@ def test_load_input_files_rejects_empty():
 def test_ask_for_files_stops_on_an_empty_line(monkeypatch, image_paths):
     """Paths are typed one per line; an empty line ends the loop."""
     _answers(monkeypatch, *[str(path) for path in image_paths], "")
-    assert ask_for_files() == image_paths
+    assert ask_for_files() == [str(path) for path in image_paths]
 
 
 def test_ask_for_files_stops_after_a_sequence(monkeypatch, gif_path):
     """A video ends the loop right away; no second path is asked for."""
     _answers(monkeypatch, str(gif_path))
-    assert ask_for_files() == [gif_path]
+    assert ask_for_files() == [str(gif_path)]
 
 
 def test_ask_for_files_rejects_missing_paths(monkeypatch, image_paths):
     """A typo is reported and re-asked, not silently accepted."""
     _answers(monkeypatch, "does/not/exist.png", str(image_paths[0]), "")
-    assert ask_for_files() == [image_paths[0]]
+    assert ask_for_files() == [str(image_paths[0])]
 
 
 def test_ask_for_files_strips_quotes(monkeypatch, gif_path):
     """Dragging a file into a terminal often quotes the path."""
     _answers(monkeypatch, f'"{gif_path}"')
-    assert ask_for_files() == [gif_path]
+    assert ask_for_files() == [str(gif_path)]
+
+
+def test_ask_for_files_accepts_hf_uris(monkeypatch):
+    """The prompt must take the same 'hf://' paths the CLI flag advertises."""
+    uri = "hf://zeahub/camus/val/patient0409/patient0409_4CH_half_sequence.hdf5"
+    _answers(monkeypatch, uri)
+    assert ask_for_files() == [uri]
 
 
 def test_ask_for_files_raises_without_selection(monkeypatch):
