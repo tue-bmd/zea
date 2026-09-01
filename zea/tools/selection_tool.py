@@ -356,12 +356,12 @@ def interactive_selector_with_plot_and_metric(
 
     # plot on top of existing plot
     if plot:
-        for _ax, score in zip(ax, scores):
-            title = _ax.get_title()
-            _ax.set_title(title + "\n" + f"{metric}: {score:.3f}")
+        for i, _ax in enumerate(ax):
             for mask in masks:
                 plot_mask(_ax, mask, selector)
-            plt.tight_layout()
+            if i < len(scores):
+                _ax.set_title(f"{_ax.get_title()}\n{metric}: {scores[i]:.3f}")
+        plt.tight_layout()
 
     # plot patches and masks
     if mask_plot:

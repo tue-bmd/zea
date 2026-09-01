@@ -598,13 +598,21 @@ def test_interactive_selector_with_plot_and_metric_without_metric(fake_selector)
 
     fake_selector([((1, 1), (5, 5)), ((10, 10), (15, 15))])
 
+    _, axes = plt.subplots(1, 2)
+    for axis in axes:
+        axis.imshow(np.ones((20, 20)), cmap="gray")
+
     scores = interactive_selector_with_plot_and_metric(
         [np.ones((20, 20)), np.ones((20, 20))],
+        list(axes),
         metric=None,
         confirm_selection=False,
         verbose=False,
     )
+
     assert scores == []
+    # without a metric there is nothing to title, but the selections are still drawn
+    assert all(len(axis.patches) == 2 for axis in axes)
 
 
 # ── saving ────────────────────────────────────────────────────────────────────
