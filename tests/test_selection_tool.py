@@ -574,6 +574,37 @@ def test_interactive_selector_multiple_selections(fake_selector):
     assert not np.any(masks[0] & masks[1])
 
 
+def test_interactive_selector_skips_confirmation_when_nothing_was_drawn(monkeypatch):
+    """A closed window has nothing to confirm, so it must not prompt for a decision."""
+
+    class _NeverSelects:
+        def __init__(self, ax, onselect, **kwargs):
+            pass
+
+        def disconnect_events(self):
+            pass
+
+        def set_visible(self, visible):
+            pass
+
+        def update(self):
+            pass
+
+    monkeypatch.setattr(selection_tool, "RectangleSelector", _NeverSelects)
+    monkeypatch.setattr(plt, "fignum_exists", lambda _number: False)
+    monkeypatch.setattr(
+        selection_tool,
+        "confirm_in_figure",
+        lambda *a, **k: pytest.fail("prompted with nothing selected"),
+    )
+
+    _, ax = plt.subplots()
+    patches, masks = interactive_selector(
+        np.ones((10, 10)), ax, num_selections=1, confirm_selection=True, verbose=False
+    )
+    assert patches == [] and masks == []
+
+
 def test_interactive_selector_rejects_non_2d_data():
     _, ax = plt.subplots()
     with pytest.raises(AssertionError):

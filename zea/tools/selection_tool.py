@@ -263,7 +263,7 @@ def interactive_selector(
     if not confirm_selection:
         return patches, masks
 
-    while True:
+    while masks:
         for current_mask in masks:
             plot_mask(ax, current_mask, selector)
         plt.draw()
@@ -273,6 +273,8 @@ def interactive_selector(
 
         remove_masks_from_axs(ax)
         patches = _execute_selector()
+
+    return patches, masks
 
 
 def interactive_selector_with_plot_and_metric(
@@ -421,18 +423,18 @@ def reconstruct_mask_from_rectangle(corner_points, image_shape):
     return image
 
 
-def interpolate_rectangles(rectangles, x_indices, y_indices):
+def interpolate_rectangles(rectangles, positions, frames):
     """Interpolate between an arbitrary number of rectangles.
 
     Args:
         rectangles (list): List with any number of rectangles as tuples of the form
-            ``((x1, y1), (x2, y2))``. Its length must equal the number of x indices.
-        x_indices (np.ndarray): Array with x indices for interpolation.
-        y_indices (np.ndarray): Array with y indices for interpolation.
+            ``((x1, y1), (x2, y2))``. Its length must equal the number of positions.
+        positions (np.ndarray): Frame index each rectangle sits on.
+        frames (np.ndarray): Frame indices to interpolate onto.
 
     Returns:
-        list: Interpolated rectangles as tuples of the form ``((x1, y1), (x2, y2))``.
-        Its length equals the number of y indices.
+        list: Interpolated rectangles as tuples of the form ``((x1, y1), (x2, y2))``,
+        one per entry in ``frames``.
     """
     new_rectangles = []
     x1 = [rect[0][0] for rect in rectangles]
@@ -442,7 +444,7 @@ def interpolate_rectangles(rectangles, x_indices, y_indices):
 
     values_interp = []
     for values in [x1, x2, y1, y2]:
-        values_interp.append(np.interp(y_indices, x_indices, values).astype(np.int32))
+        values_interp.append(np.interp(frames, positions, values).astype(np.int32))
 
     x1, x2, y1, y2 = values_interp
     new_rectangles = [((x1[i], y1[i]), (x2[i], y2[i])) for i in range(len(x1))]
@@ -584,11 +586,10 @@ def equalize_polygons(polygons, mode: str = "max"):
         list: The polygons, all with the same number of vertices.
     """
     assert mode in ("max", "min"), f"Mode must be either 'max' or 'min', not {mode}."
-    reduce = max if mode == "max" else min
-    num_vertices = reduce(polygon.shape[0] for polygon in polygons)
+    sizes = [polygon.shape[0] for polygon in polygons]
+    num_vertices = max(sizes) if mode == "max" else min(sizes)
 
-    # give warning if difference in min / max vertices is large
-    if num_vertices < 0.8 * max(polygon.shape[0] for polygon in polygons):
+    if num_vertices < 0.8 * max(sizes):
         log.warning(
             "Difference in number of vertices is large. "
             "Possibly due to large difference in polygon size."
