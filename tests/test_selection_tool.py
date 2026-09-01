@@ -954,6 +954,49 @@ def zea_path(tmp_path):
     return path
 
 
+@pytest.fixture
+def multi_track_path(tmp_path):
+    """Write a two-track zea file, both tracks carrying images."""
+    from zea.data.file import File
+
+    from .data import generate_dummy_scan
+
+    def track(label, fill):
+        return {
+            "label": label,
+            "data": {"image": {"values": np.full((4, 12, 10), fill, dtype=np.uint8)}},
+            "scan": generate_dummy_scan(n_tx=1, n_el=8),
+        }
+
+    path = tmp_path / "two_tracks.hdf5"
+    File.create(
+        path=path,
+        tracks=[track("bmode", 30), track("doppler", 200)],
+        ignore_warnings=True,
+    )
+    return path
+
+
+def test_load_input_files_multi_track_needs_a_track(multi_track_path):
+    """Without --track there is no way to know which images to annotate."""
+    with pytest.raises(ValueError, match="--track"):
+        load_input_files([multi_track_path])
+
+
+@pytest.mark.parametrize("track,fill", [("bmode", 30), ("doppler", 200), (1, 200), ("0", 30)])
+def test_load_input_files_selects_a_track(multi_track_path, track, fill):
+    """Tracks resolve by label or by index, from the CLI (str) or the API (int)."""
+    inputs = load_input_files([multi_track_path], track)
+
+    assert len(inputs.images) == 4
+    assert all(image[0, 0] == fill for image in inputs.images)
+
+
+def test_load_input_files_rejects_an_unknown_track(multi_track_path):
+    with pytest.raises(ValueError, match="No track labelled"):
+        load_input_files([multi_track_path], "elastography")
+
+
 def test_load_input_files_zea(zea_path):
     inputs = load_input_files([zea_path])
 

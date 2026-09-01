@@ -517,6 +517,8 @@ class _Select:
     window."""
     overwrite: bool = False
     """Overwrite existing output files."""
+    track: str | None = None
+    """Label or index of the track to annotate, for zea files holding more than one."""
 
     def run(self):
         from zea.tools.selection_tool import run_selection_tool
@@ -532,6 +534,7 @@ class _Select:
             save_animation=self.animation,
             confirm_selection=self.confirm,
             overwrite=self.overwrite,
+            track=self.track,
         )
 
 

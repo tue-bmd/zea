@@ -1047,18 +1047,52 @@ def _copyable_fields(schema, skip: frozenset) -> tuple[str, ...]:
     return tuple(name for name in schema if name not in skip)
 
 
-def _load_zea_file(path: str | Path) -> tuple[np.ndarray, SourceMetadata]:
+def _select_track(file, track: str | int | None):
+    """Return the data group to annotate, from a single- or multi-track file.
+
+    Args:
+        file (zea.File): The open file.
+        track (str | int, optional): Label or index of the track to annotate. Only
+            needed for files with more than one track.
+
+    Returns:
+        The track's data group.
+
+    Raises:
+        ValueError: If the file has several tracks and ``track`` does not name one.
+    """
+    labels = file.track_labels
+    if len(labels) <= 1 and track is None:
+        return file.data
+    if track is None:
+        raise ValueError(
+            f"This file has {len(labels)} tracks, so --track is needed to say which one "
+            f"to annotate. Available: {labels}."
+        )
+    if isinstance(track, int) or (isinstance(track, str) and track.isdigit()):
+        return file.tracks[int(track)].data
+    if track not in labels:
+        raise ValueError(f"No track labelled {track!r} in this file. Available: {labels}.")
+    return file.get_track(track).data
+
+
+def _load_zea_file(
+    path: str | Path, track: str | int | None = None
+) -> tuple[np.ndarray, SourceMetadata]:
     """Read the image map of a zea HDF5 file, plus the metadata worth carrying over.
 
     Args:
         path (str | Path): Path to a zea file. Also accepts an ``hf://`` URI.
+        track (str | int, optional): Label or index of the track to annotate, for files
+            holding more than one.
 
     Returns:
         tuple: ``(values, source)`` with the image values and a :class:`SourceMetadata`
         holding everything small enough to copy into the annotation file.
 
     Raises:
-        ValueError: If the file has no image data, or if the images are not 2D.
+        ValueError: If the track cannot be resolved, if the file has no image data, or
+            if the images are not 2D.
     """
     from zea.data.file import File, load_dict_from_hdf5_group
     from zea.data.spec import FileSpec, Map
@@ -1068,13 +1102,14 @@ def _load_zea_file(path: str | Path) -> tuple[np.ndarray, SourceMetadata]:
         path = _hf_resolve_path(path)
 
     with File(path) as file:
-        if "image" not in file.data.keys():
+        data = _select_track(file, track)
+        if "image" not in data.keys():
             raise ValueError(
                 f"{path} has no 'data/image' group. The selection tool annotates images, "
                 "so the file must contain (beamformed and log-compressed) image data. "
                 "Use `zea process` to reconstruct images from raw data first."
             )
-        image = file.data.image
+        image = data.image
         values = image.values[:]
 
         map_fields = {
@@ -1113,12 +1148,16 @@ class SelectionInputs(NamedTuple):
     source: SourceMetadata | None = None
 
 
-def load_input_files(files: Sequence[str | Path]) -> SelectionInputs:
+def load_input_files(
+    files: Sequence[str | Path], track: str | int | None = None
+) -> SelectionInputs:
     """Load a set of images, the frames of a single video / gif, or a zea file.
 
     Args:
         files (Sequence[str | Path]): Image files, or a single video / gif or zea HDF5
             file. zea files also accept an ``hf://`` URI.
+        track (str | int, optional): Label or index of the track to annotate, for zea
+            files holding more than one.
 
     Returns:
         SelectionInputs: The loaded images and where they came from.
@@ -1143,7 +1182,7 @@ def load_input_files(files: Sequence[str | Path]) -> SelectionInputs:
         path = sequences[0]
         source = None
         if _suffix(path) in _SUPPORTED_ZEA_TYPES:
-            values, source = _load_zea_file(path)
+            values, source = _load_zea_file(path, track)
             frames = list(values)
         else:
             frames = list(load_video(path))
@@ -1502,6 +1541,7 @@ def run_selection_tool(
     save_animation: bool = True,
     confirm_selection: bool = True,
     overwrite: bool = False,
+    track: str | int | None = None,
 ):
     """Run the interactive selection tool.
 
@@ -1539,6 +1579,8 @@ def run_selection_tool(
             confirm each selection. Defaults to True.
         overwrite (bool, optional): Whether to overwrite existing output files. Checked
             before the annotating starts, so no work is lost. Defaults to False.
+        track (str | int, optional): Label or index of the track to annotate, for zea
+            files holding more than one.
 
     Returns:
         list: The metric scores in image mode, or the interpolated masks in sequence
@@ -1548,7 +1590,7 @@ def run_selection_tool(
         FileExistsError: If an output file exists and ``overwrite`` is False.
     """
     files = list(files) if files else ask_for_files()
-    inputs = load_input_files(files)
+    inputs = load_input_files(files, track)
     images = inputs.images
 
     if selector is None:
