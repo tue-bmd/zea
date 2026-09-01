@@ -634,7 +634,7 @@ class H5DataSource:
                     f"file spec (its dimensions are {dim_names_for_key(key, num_dims)}), so "
                     "there are no frames to window and each file yields one whole sample. "
                     "To load only part of such an array, pick indices along one of the axes "
-                    " using axis_selections, e.g. axis_selections={0: [0, 1]}."
+                    "using axis_selections, e.g. axis_selections={0: [0, 1]}."
                 )
 
         self._file_n_frames = (
@@ -1066,7 +1066,7 @@ class Dataloader:
             resizing without explicit ``resize_axes`` requires ``frame_axis=-1``.
             For ``raw_data`` it makes sense to set ``frame_axis=0`` to keep frames in front.
         validate: Validate discovered files against the zea format, raising if any file
-            is not a valid zea file. Default is ``True``. The verdict is cached under, so only the
+            is not a valid zea file. Default is ``True``. The verdict is cached, so only the
             first run over a given dataset opens every file.
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
             Defaults to ``None`` (uses the default branch, typically ``"main"``).
@@ -1360,7 +1360,7 @@ class Dataloader:
             )
 
         # The resizer can bring differing files to a common shape, so this is only
-        # decidable once it is built. This run the real pipeline code that changes the shape.
+        # decidable once it is built. This runs the real pipeline code that changes the shape.
         resizer = self._pipeline_cfg["resizer"]
         self._sample_shapes: dict[tuple, list[str]] = {}
         for source_shape, files in self.source.sample_shapes.items():
