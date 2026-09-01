@@ -683,9 +683,10 @@ def interpolate_masks(
     # trim the polygons for equal number of vertices
     polygons = equalize_polygons(polygons)
 
-    # match the polygons
+    # roll each polygon onto the previous, already-fixed one; matching pairwise in
+    # both directions would undo the alignment of the segment before it
     for i in range(number_of_masks - 1):
-        polygons[i], polygons[i + 1] = match_polygons(polygons[i], polygons[i + 1])
+        polygons[i + 1], _ = match_polygons(polygons[i + 1], polygons[i])
 
     # interpolate the polygons, holding the outer ones outside the position range
     interpolated_polygons = []

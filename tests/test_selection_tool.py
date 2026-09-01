@@ -248,6 +248,30 @@ def test_match_polygons():
     assert np.all(poly1 == poly2)
 
 
+def test_interpolate_masks_keeps_every_segment_aligned():
+    """Matching pairwise in both directions un-aligns the segment before it.
+
+    Three lasso key frames is the docstring's own example, so a twisted first
+    segment would show up on the advertised path.
+    """
+    angles = np.linspace(0, 2 * np.pi, 9)[:-1]
+    # asymmetric, so the vertex correspondence actually matters
+    base = np.stack([np.cos(angles) * 10, np.sin(angles) * 4], axis=1)
+    polygons = [base, np.roll(base + 20, 3, axis=0), np.roll(base + 40, 6, axis=0)]
+
+    def distance(first, second):
+        return np.linalg.norm(first - second, axis=1).sum()
+
+    for i in range(len(polygons) - 1):
+        polygons[i + 1], _ = match_polygons(polygons[i + 1], polygons[i])
+
+    for i in range(len(polygons) - 1):
+        best = min(
+            distance(np.roll(polygons[i + 1], k, axis=0), polygons[i]) for k in range(len(base))
+        )
+        assert distance(polygons[i], polygons[i + 1]) == pytest.approx(best)
+
+
 def test_interpolate_polygons_endpoints_and_midpoint():
     poly1 = np.array([[0.0, 0.0], [0.0, 10.0], [10.0, 10.0]])
     poly2 = poly1 + 10.0
