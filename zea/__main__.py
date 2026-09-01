@@ -11,16 +11,10 @@ Usage::
 
 """
 
-import os
 from dataclasses import dataclass
 from typing import Annotated, Union
 
 import tyro
-
-if "ZEA_LOG_LEVEL" not in os.environ:
-    from zea import log
-
-    log.set_level("WARNING")
 
 from zea.cli_args import (
     AppArgs,
