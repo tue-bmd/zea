@@ -811,6 +811,25 @@ def test_run_selection_tool_on_video(fake_selector, gif_path, tmp_path):
         assert file.data.image.values.shape == (8, 24, 32)
 
 
+def test_run_selection_tool_keeps_dots_in_the_source_name(fake_selector, gif_path, tmp_path):
+    """A dotted stem must not swallow the title: `clip.720p.gif` -> `clip.720p_roi_...`."""
+    dotted = gif_path.parent / "clip.720p.gif"
+    gif_path.rename(dotted)
+    fake_selector([((4, 4), (12, 12))])
+
+    run_selection_tool(
+        files=[dotted],
+        selector="rectangle",
+        title="roi",
+        num_selections=2,
+        save_animation=False,
+        output_dir=tmp_path,
+        confirm_selection=False,
+    )
+
+    assert (tmp_path / "clip.720p_roi_annotations.hdf5").exists()
+
+
 def test_run_selection_tool_can_skip_the_animation(fake_selector, gif_path, tmp_path):
     fake_selector([((4, 4), (12, 12))])
 

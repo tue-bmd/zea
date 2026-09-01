@@ -1377,6 +1377,15 @@ def save_mask_animation(
     return filename
 
 
+def _with_extension(path: Path, extension: str) -> Path:
+    """Give ``path`` this extension, appending rather than replacing it.
+
+    ``Path.with_suffix`` would eat everything after the first dot, so a source named
+    ``clip.720p.mp4`` would lose the title from its annotation filename.
+    """
+    return path if path.suffix == extension else path.with_name(path.name + extension)
+
+
 def save_masks(
     masks: Sequence[np.ndarray] | np.ndarray,
     filename: str | Path,
@@ -1429,7 +1438,7 @@ def save_masks(
     if image_values.dtype not in (np.uint8, np.float32):
         image_values = image_values.astype(np.uint8)
 
-    filename = Path(filename).with_suffix(".hdf5")
+    filename = _with_extension(Path(filename), ".hdf5")
     filename.parent.mkdir(parents=True, exist_ok=True)
 
     file_fields = dict(source.file_fields) if source is not None else {}
@@ -1562,11 +1571,11 @@ def run_selection_tool(
 
     source = str(files[0])
     stem = _output_stem(source, title, output_dir)
-    outputs = [stem.with_suffix(".hdf5")]
+    outputs = [_with_extension(stem, ".hdf5")]
 
     animation_path, animation_fps = None, 0
     if save_animation:
-        animation_path = stem.with_suffix(".gif")
+        animation_path = _with_extension(stem, ".gif")
         animation_fps = fps if fps is not None else ask_save_animation_with_fps()
         outputs.append(animation_path)
 
