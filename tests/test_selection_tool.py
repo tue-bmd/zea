@@ -788,6 +788,17 @@ def test_annotate_sequence_raises_when_nothing_was_selected(monkeypatch):
         )
 
 
+@pytest.mark.parametrize("num_selections", [0, -3])
+def test_annotate_sequence_rejects_non_positive_selections(num_selections):
+    """The CLI flag is unvalidated, so a bad count must not reach np.linspace."""
+    with pytest.raises(ValueError, match="At least one key frame"):
+        annotate_sequence(
+            [np.ones((20, 20)) for _ in range(4)],
+            num_selections=num_selections,
+            confirm_selection=False,
+        )
+
+
 def test_annotate_sequence_requires_multiple_frames(fake_selector):
     fake_selector([((2, 2), (10, 10))])
     with pytest.raises(AssertionError):

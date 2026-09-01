@@ -1256,9 +1256,12 @@ def annotate_sequence(
         list[np.ndarray]: One interpolated mask per frame in ``images``.
 
     Raises:
-        ValueError: If no key frame was annotated at all.
+        ValueError: If ``num_selections`` is not positive, or if no key frame was
+            annotated at all.
     """
     assert len(images) > 1, "At least two frames are required to annotate a sequence."
+    if num_selections < 1:
+        raise ValueError(f"At least one key frame must be annotated, got {num_selections}.")
     num_selections = min(num_selections, len(images))
 
     key_frames = np.linspace(0, len(images) - 1, num_selections).astype(int)
