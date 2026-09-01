@@ -275,14 +275,12 @@ def test_match_polygon_chain_keeps_every_segment_aligned():
     # asymmetric, so the vertex correspondence actually matters
     base = np.stack([np.cos(angles) * 10, np.sin(angles) * 4], axis=1)
 
-    def distance(first, second):
-        return np.linalg.norm(first - second, axis=1).sum()
-
     aligned = match_polygon_chain([base, np.roll(base + 20, 3, 0), np.roll(base + 40, 6, 0)])
 
-    for first, second in zip(aligned, aligned[1:]):
-        best = min(distance(np.roll(second, k, 0), first) for k in range(len(base)))
-        assert distance(first, second) == pytest.approx(best)
+    # every polygon is rolled back onto the first one's vertex order
+    np.testing.assert_allclose(aligned[0], base)
+    np.testing.assert_allclose(aligned[1], base + 20)
+    np.testing.assert_allclose(aligned[2], base + 40)
 
 
 def test_interpolate_polygons_endpoints_and_midpoint():
