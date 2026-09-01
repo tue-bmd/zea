@@ -226,6 +226,22 @@ def test_equalize_polygons(mode):
         assert len(polygons[0]) == 5
 
 
+@pytest.mark.parametrize("mode", ["min", "max"])
+def test_equalize_polygons_warns_on_a_large_spread(caplog, mode):
+    """The diagnostic is about the spread between polygons, so it holds in both modes."""
+    small = np.zeros((4, 2))
+    large = np.zeros((40, 2))
+
+    with caplog.at_level("WARNING"):
+        equalize_polygons([small, large], mode=mode)
+    assert "Difference in number of vertices" in caplog.text
+
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        equalize_polygons([large, large], mode=mode)
+    assert "Difference in number of vertices" not in caplog.text
+
+
 def test_equalize_polygons_rejects_unknown_mode():
     poly = np.array([[1, 1], [2, 2], [3, 3]])
     with pytest.raises(AssertionError):

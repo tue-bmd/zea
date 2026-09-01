@@ -609,7 +609,7 @@ def equalize_polygons(polygons, mode: str = "max"):
     sizes = [polygon.shape[0] for polygon in polygons]
     num_vertices = max(sizes) if mode == "max" else min(sizes)
 
-    if num_vertices < 0.8 * max(sizes):
+    if min(sizes) < 0.8 * max(sizes):
         log.warning(
             "Difference in number of vertices is large. "
             "Possibly due to large difference in polygon size."
