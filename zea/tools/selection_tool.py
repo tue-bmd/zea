@@ -92,7 +92,7 @@ from sklearn.metrics import pairwise_distances
 
 from zea import log
 from zea.func.tensor import translate
-from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
+from zea.internal.preset_utils import HF_PREFIX
 from zea.internal.viewer import get_matplotlib_figure_props, move_matplotlib_figure
 from zea.io_lib import (
     _SUPPORTED_IMG_TYPES,
@@ -1090,10 +1090,11 @@ def _select_track(file, track: str | int | None):
             f"This file has {len(labels)} tracks, so --track is needed to say which one "
             f"to annotate. Available: {labels}."
         )
-    if isinstance(track, int) or (isinstance(track, str) and track.isdigit()):
-        return file.tracks[int(track)].data
-    if track not in labels:
-        raise ValueError(f"No track labelled {track!r} in this file. Available: {labels}.")
+    if isinstance(track, int) or track.isdigit():
+        index = int(track)
+        if not 0 <= index < len(labels):
+            raise IndexError(f"No track {index} in this file; it has {len(labels)}.")
+        return file.tracks[index].data
     return file.get_track(track).data
 
 
@@ -1119,9 +1120,6 @@ def _load_zea_file(
     from zea.data.spec import FileSpec, Map
 
     path = str(path)
-    if path.startswith(HF_PREFIX):
-        path = _hf_resolve_path(path)
-
     with File(path) as file:
         data = _select_track(file, track)
         if "image" not in data.keys():

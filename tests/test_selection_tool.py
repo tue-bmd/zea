@@ -1125,8 +1125,11 @@ def test_load_input_files_selects_a_track(multi_track_path, track, fill):
 
 
 def test_load_input_files_rejects_an_unknown_track(multi_track_path):
-    with pytest.raises(ValueError, match="No track labelled"):
+    # File.get_track raises, listing the labels the file does have
+    with pytest.raises(KeyError, match="No track with label"):
         load_input_files([multi_track_path], "elastography")
+    with pytest.raises(IndexError, match="No track 5"):
+        load_input_files([multi_track_path], 5)
 
 
 def test_load_input_files_zea(zea_path):
