@@ -27,7 +27,10 @@ Two details carry most of the win and are easy to lose in a refactor:
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import os
+import random
 import threading
 import zlib
 from concurrent.futures import ThreadPoolExecutor
@@ -65,6 +68,88 @@ MAX_BYTES_IN_FLIGHT = 512 << 20  # 512 MiB
 # Decode threads. Blosc and zlib release the GIL, so these scale with cores; but the work
 # is memory-bandwidth-bound long before it is core-bound, hence the cap.
 MAX_WORKERS = min(16, (os.cpu_count() or 4))
+
+#: Statuses worth another attempt at a range request.
+RETRY_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+
+#: Attempts after the first, per range request.
+MAX_RETRIES = 5
+
+#: Backoff bounds in seconds. Doubles per attempt up to the cap, unless Hugging Face says how
+#: long to wait. Matches huggingface_hub's defaults.
+BASE_BACKOFF = 1.0
+MAX_BACKOFF = 8.0
+
+#: Range requests in flight at once, across every fetcher sharing fsspec's event loop. Kept low
+#: enough to stay under Hugging Face's per-IP rate limit from a shared machine.
+MAX_CONCURRENT_REQUESTS = 16
+
+_limiters: "dict[Any, asyncio.Semaphore]" = {}
+_limiters_lock = threading.Lock()
+
+
+@functools.cache
+def _transient_errors() -> tuple[type, ...]:
+    """Failures worth another attempt that never carried a status: the connection itself.
+
+    A socket reset, dropped or timed out mid-body fails a read as surely as a 503, and grows
+    likelier with every chunk streamed. ``ClientConnectionError`` is aiohttp's umbrella over
+    reset, disconnect, connector and server-timeout; ``ClientPayloadError`` is a body that
+    stopped arriving mid-transfer.
+    """
+    types: list[type] = [ConnectionError, TimeoutError]  # stdlib, for a non-aiohttp backend
+    try:
+        import aiohttp
+    except ImportError:
+        return tuple(types)
+    return (*types, aiohttp.ClientConnectionError, aiohttp.ClientPayloadError)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """Whether this failure is worth another attempt.
+
+    Matched off the exception rather than caught at the call site: which one fsspec's HTTP
+    filesystem raises is fsspec's business, and aiohttp is fsspec's dependency, not one zea
+    declares. Retrying is safe whatever the cause — a range request is an idempotent GET.
+
+    A status outside :data:`RETRY_STATUS` is an answer, not a stall, and never retried: fsspec
+    turns 404 and 403 into ``FileNotFoundError``/``PermissionError``, and retrying those would
+    hang on for a file that is simply not there.
+    """
+    status = getattr(exc, "status", None)
+    if status is not None:
+        return status in RETRY_STATUS
+    return isinstance(exc, _transient_errors())
+
+
+def _limiter(loop) -> asyncio.Semaphore:
+    """The semaphore bounding the requests in flight on ``loop``.
+
+    Global rather than per read: one read already fans out to a request per chunk, and every
+    dataloader thread issues one at the same moment, so it is the threads together that overrun
+    Hugging Face. fsspec keeps a single event loop for all its async filesystems, so in practice
+    every fetcher shares this one semaphore.
+    """
+    with _limiters_lock:
+        semaphore = _limiters.get(loop)
+        if semaphore is None:
+            semaphore = _limiters[loop] = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+        return semaphore
+
+
+def _retry_delay(attempt: int, headers=None) -> float:
+    """Seconds to wait before retrying ``attempt`` (0-based), per ``Retry-After`` if sent.
+
+    Jittered rather than a flat doubling: the throttled requests went out together, so a fixed
+    backoff would send them back together, into the same limit.
+    """
+    after = (headers or {}).get("Retry-After")
+    if after is not None:
+        try:
+            return min(float(after), MAX_BACKOFF)
+        except (TypeError, ValueError):
+            pass  # the HTTP-date form; fall through to the exponential backoff
+    return random.uniform(0, min(BASE_BACKOFF * 2**attempt, MAX_BACKOFF))
 
 
 class _Unsupported(Exception):
@@ -172,6 +257,11 @@ class HTTPFetcher(Fetcher):
     does its own batching and periodically stalls (measured at 20 ms/request: 32 ranges in
     1.06 s against 0.06 s here) — and it is what makes per-chunk progress possible at all,
     since ``cat_ranges`` only returns once every range is done.
+
+    Neither fsspec nor aiohttp retries anything, so the retry Hugging Face needs — it rate-limits
+    per IP, and a dataloader reading a streamed dataset reaches that limit quickly — lives here,
+    along with the concurrency cap that keeps a read from tripping the limit to begin with; see
+    :func:`_is_transient` and :data:`MAX_CONCURRENT_REQUESTS`.
     """
 
     def __init__(self, url: str, token: str | None = None, cache=None):
@@ -184,9 +274,34 @@ class HTTPFetcher(Fetcher):
             "http", client_kwargs={"headers": headers} if headers else None
         )
 
-    def fetch(self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None) -> list[bytes]:
-        import asyncio
+    async def _cat_range(self, offset: int, size: int) -> bytes:
+        """One range request: bounded by the shared limiter, retried through rate limits.
 
+        What counts as worth retrying is :func:`_is_transient`. The limiter is released
+        before sleeping — holding a slot through the backoff would starve the requests that
+        are not being throttled.
+        """
+        attempt = 0
+        while True:
+            try:
+                async with _limiter(asyncio.get_running_loop()):
+                    return await self._fs._cat_file(self.url, start=offset, end=offset + size)
+            except Exception as exc:
+                if not _is_transient(exc) or attempt >= MAX_RETRIES:
+                    raise
+                from zea import log  # local, like the fallback warning below: zea imports us
+
+                status = getattr(exc, "status", None)
+                reason = f"HTTP {status}" if status is not None else type(exc).__name__
+                delay = _retry_delay(attempt, getattr(exc, "headers", None))
+                log.debug(
+                    f"{reason} for {size} bytes at {offset} of {self.url}; "
+                    f"retrying in {delay:.1f}s ({attempt + 1}/{MAX_RETRIES})"
+                )
+                await asyncio.sleep(delay)
+                attempt += 1
+
+    def fetch(self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None) -> list[bytes]:
         from fsspec.asyn import sync
 
         out: list[bytes | None] = [None] * len(ranges)
@@ -206,7 +321,7 @@ class HTTPFetcher(Fetcher):
             return cast(list[bytes], out)
 
         async def one(index: int, offset: int, size: int) -> None:
-            data = await self._fs._cat_file(self.url, start=offset, end=offset + size)
+            data = await self._cat_range(offset, size)
             out[index] = data
             if self.cache is not None:
                 self.cache.put(offset, size, data)
@@ -389,14 +504,18 @@ def _fallback_note(
 ) -> None:
     """Nudge, once per dataset, when a read misses the concurrent path and goes to h5py.
 
-    Serial reads happen locally too, not only when streaming, so this fires whether or not
-    progress was requested. ``cause`` completes "Reading '{name}' {cause}" and ``fix`` says how
-    to avoid it; ``kind`` scopes the once-only dedupe so the resave and selection notes do not
-    silence each other. The name is the file — that is what a user would actually act on —
-    with the dataset's path in brackets (as the user indexes it, see :func:`_display_path`),
-    so notes for different datasets of the same file read as distinct rather than as repeats.
-    Anything that could break here is swallowed; a message is never worth failing a read over.
+    Args:
+        dset (h5py.Dataset): The dataset the note is about.
+        fetcher (Fetcher, optional): Source of the chunk bytes; names the file when set.
+        kind (str): Scopes the once-only dedupe, so the resave and selection notes do not
+            silence each other.
+        cause (str): Completes "Reading '{name}' {cause}".
+        fix (str): How to avoid the fallback.
     """
+    # Silent below, h5py serves every such read anyway (see :func:`read`)
+    if dset.nbytes < MIN_BYTES:
+        return
+
     try:
         from zea import log
 
@@ -552,6 +671,9 @@ def read(
     naming the cause and the fix, regardless of ``progress``, since the serial
     fallback is slower on disk too (see :func:`_resave_note`, :func:`_selection_note`).
 
+    Safe to call while h5py's global lock is held — from inside a ``group.items()`` loop,
+    say: nothing the workers touch reaches h5py.
+
     Args:
         dset (h5py.Dataset): The dataset to read from.
         selection: Any NumPy-style index. Ints, unit-step slices and increasing index
@@ -575,7 +697,11 @@ def read(
         _selection_note(dset, fetcher)
         return dset[selection]
 
-    itemsize = dset.dtype.itemsize
+    # Read every h5py attribute the decode needs *here*, on the calling thread, and keep
+    # the workers off ``dset`` entirely to avoid h5py's global lock. A caller can already
+    # hold it (``Group.items()`` holds it across its yields), causing a deadlock.
+    dtype = dset.dtype
+    itemsize = dtype.itemsize
     n_selected = int(np.prod([len(indices) for indices, _ in axes]))
     if n_selected * itemsize < MIN_BYTES:
         return dset[selection]
@@ -583,7 +709,7 @@ def read(
     chunks = dset.chunks
     out = np.empty(
         tuple(len(indices) for indices, keep in axes if keep),
-        dtype=dset.dtype,
+        dtype=dtype,
     )
 
     # Every chunk that the selection touches, with the output region it fills.
@@ -623,7 +749,8 @@ def read(
             blosc.decompress(raw, dest=view)
             return
         buf = _decode(raw, filters, mask, itemsize)
-        block = np.frombuffer(buf, dtype=dset.dtype, count=n_elem).reshape(chunks)
+        # ``dtype`` is the hoisted local, never ``dset.dtype``: see the note above.
+        block = np.frombuffer(buf, dtype=dtype, count=n_elem).reshape(chunks)
         # ``source`` has one entry per *dataset* axis, so it keeps a length-1 axis wherever the
         # selection used an int, while ``view`` has dropped it. Same elements in the same order
         # (_normalize allows at most one advanced index, which does not move axes), so reshape.
