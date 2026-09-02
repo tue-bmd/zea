@@ -586,7 +586,7 @@ def test_histogram_match_roi_is_fit_on_roi_and_extends_linearly(kwargs):
 @pytest.mark.parametrize("kwargs", MATCHES.values(), ids=MATCHES)
 def test_histogram_match_ignores_dead_pixels(kwargs):
     """The log(0) sentinel neither anchors the mapping nor turns into a bright pixel."""
-    from zea.display import DEAD_PIXEL_DB, histogram_match
+    from zea.display import EXCLUDE_BELOW, histogram_match
 
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     image, reference = _speckle(rng, scale=0.1), _speckle(rng, scale=1.0)
@@ -605,7 +605,7 @@ def test_histogram_match_ignores_dead_pixels(kwargs):
     # Passed through rather than mapped: a fitted slope below one would otherwise lift the
     # sentinel out of the bottom of the range and into the displayed one.
     np.testing.assert_array_equal(matched_dead[:2], dead[:2])
-    assert np.all(matched_dead[:2] < DEAD_PIXEL_DB), "Sentinel pixels should stay below the floor"
+    assert np.all(matched_dead[:2] < EXCLUDE_BELOW), "Sentinel pixels should stay below the floor"
 
 
 @pytest.mark.parametrize("kwargs", MATCHES.values(), ids=MATCHES)
@@ -647,6 +647,44 @@ def test_histogram_match_ignores_dead_reference_pixels(kwargs):
     matched_dead = histogram_match(image, dead, **kwargs)
 
     np.testing.assert_allclose(matched_dead, matched)
+
+
+@pytest.mark.parametrize("kwargs", MATCHES.values(), ids=MATCHES)
+def test_histogram_match_exclude_below_follows_the_scale(kwargs):
+    """Data on another scale marks its dead pixels elsewhere, and says so."""
+    from zea.display import histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    # Envelope data rather than dB: the sentinel of an unmeasured pixel is an exact zero,
+    # which the dB default (-300) lets straight into the fit.
+    image, reference = rng.rayleigh(0.1, (128, 128)), rng.rayleigh(1.0, (128, 128))
+    image[:2] = 0.0
+
+    matched = histogram_match(image, reference, exclude_below=0.0, **kwargs)
+    expected = histogram_match(image[2:], reference, allow_unequal_shapes=True, **kwargs)
+
+    np.testing.assert_allclose(matched[2:], expected)
+    np.testing.assert_array_equal(matched[:2], 0.0)
+    # Left to the default, the zeros anchor the bottom of the mapping and are carried up
+    # with it, into the range the measured pixels are displayed in.
+    included = histogram_match(image, reference, **kwargs)
+    assert np.all(included[:2] >= matched[2:].min())
+
+
+@pytest.mark.parametrize("kwargs", MATCHES.values(), ids=MATCHES)
+def test_histogram_match_exclude_below_none_excludes_nothing(kwargs):
+    """None keeps every finite pixel, however far below the dB sentinel it sits."""
+    from zea.display import histogram_match
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image, reference = _speckle(rng, scale=0.1), _speckle(rng, scale=1.0)
+    image[:2] = -400.0
+
+    matched = histogram_match(image, reference, exclude_below=None, **kwargs)
+
+    assert np.all(matched[:2] != image[:2]), "Every finite pixel should be transformed"
+    # Transformed as the darkest pixels of the image, hence still the darkest of the match.
+    assert matched[:2].max() < matched[2:].min()
 
 
 def test_histogram_match_extension_is_bounded_for_clipped_images():
