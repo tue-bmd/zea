@@ -66,6 +66,41 @@ def _key_requires_pipeline(key: str) -> bool:
     return normalized in _NON_IMAGE_DATA_TYPES
 
 
+def _resolve_track(file: File, key: str, track: str | None) -> tuple[int | None, str]:
+    """Pick the track to process and return ``(track_index, data_key)``.
+
+    ``track`` is matched against the file's labels first and read as an index
+    only when no label matches, so a numeric label still wins. Files with a
+    single track have nothing to address and return ``(None, key)`` unchanged.
+
+    Raises:
+        ValueError: If the file has several tracks and none was selected, or the
+            requested track does not exist in this file.
+    """
+    labels = file.track_labels
+    if file._n_tracks <= 1:
+        return None, key
+    if track is None:
+        raise ValueError(
+            f"{file.path} has {len(labels)} tracks {labels} but no track was selected. "
+            "Pass --track <label|index> to pick one."
+        )
+    try:
+        index = labels.index(track) if track in labels else int(track)
+    except ValueError:
+        index = -1  # neither a label nor a number: report it like a bad index
+    if not 0 <= index < len(labels):
+        raise ValueError(f"No track {track!r} in {file.path}. Available tracks: {labels}.")
+    return index, f"tracks/track_{index}/data/{strip_track_prefix(key).removeprefix('data/')}"
+
+
+def _load_track_parameters(file: File, track_index: int | None):
+    """Load the acquisition parameters of ``track_index`` (or of the whole file)."""
+    if track_index is None:
+        return file.load_parameters()
+    return file.tracks[track_index].load_parameters()
+
+
 def _run_passthrough(
     dataset_path: str,
     key: str,
@@ -134,6 +169,7 @@ def run_processing(
     keep_dynamic_range=False,
     revision: str | None = None,
     config_revision: str | None = None,
+    track: str | None = None,
 ) -> None:
     if keep_dynamic_range and save_as != "hdf5":
         raise ValueError("--keep_dynamic_range is only supported with --save_as hdf5.")
@@ -150,43 +186,49 @@ def run_processing(
     )
     config = Config.from_path(config_path, **config_hf_kwargs)
     config_params = _get_config_parameters(config)
+
+    # Peek at the first file for the track to read (the Dataloader takes one key for
+    # the whole dataset, so ``data_key`` has to name it) and for selected_transmits,
+    # letting the dataloader pre-filter the transmit axis at HDF5 read time. lazy=True
+    # streams hf:// paths, fetching only the chunks the peek touches; validate=False
+    # because the Dataloader validates these same files anyway.
+    track_index: int | None = None
+    data_key = key
+    axis_selections: dict | None = None
+    with Dataset(
+        dataset_path, validate=False, lazy=True, _suggest_lazy=False, **dataset_hf_kwargs
+    ) as _peek_ds:
+        if len(_peek_ds) > 0:
+            _peek_f = _peek_ds[0]
+            track_index, data_key = _resolve_track(_peek_f, key, track)
+            if _key_requires_pipeline(data_key):
+                try:
+                    _peek_params = _load_track_parameters(_peek_f, track_index)
+                    _peek_params.update(config_params)
+                    axis_selections = _axis_selections_from_params(_peek_params)
+                except Exception:
+                    pass  # fall back to runtime slicing if the peek fails
+
     try:
         pipeline = Pipeline.from_path(config_path, with_batch_dim=False, **config_hf_kwargs)
     except (ValueError, KeyError) as exc:
-        if _key_requires_pipeline(key):
+        if _key_requires_pipeline(data_key):
             raise
         log.warning(
             f"No pipeline found in config ({exc}). "
-            f"Key '{key}' does not require beamforming — saving data as-is."
+            f"Key '{data_key}' does not require beamforming — saving data as-is."
         )
         save_dir.mkdir(parents=True, exist_ok=True)
         _run_passthrough(
-            dataset_path, key, n_frames, save_dir, save_as, overwrite, **dataset_hf_kwargs
+            dataset_path, data_key, n_frames, save_dir, save_as, overwrite, **dataset_hf_kwargs
         )
         return
 
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # Peek at the first file to get selected_transmits so the dataloader can
-    # pre-filter the transmit axis at HDF5 read time (avoids reading unused data).
-    axis_selections: dict | None = None
-    if _key_requires_pipeline(key):
-        try:
-            # validate=False here and on the peek open below: the Dataloader built from
-            # the same path validates these files, so checking them twice is wasted work.
-            with Dataset(dataset_path, validate=False, **dataset_hf_kwargs) as _peek_ds:
-                _first_path = _peek_ds.file_paths[0] if _peek_ds.file_paths else None
-            if _first_path:
-                with File(_first_path, validate=False) as _peek_f:
-                    _peek_params = _peek_f.load_parameters()
-                _peek_params.update(config_params)
-                axis_selections = _axis_selections_from_params(_peek_params)
-        except Exception:
-            pass  # fall back to runtime slicing if peek fails
-
     dataloader = Dataloader(
         dataset_path,
-        key=key,
+        key=data_key,
         batch_size=None,
         shuffle=False,
         return_metadata=True,
@@ -283,7 +325,14 @@ def run_processing(
                 # Already validated by the Dataloader that handed us this path.
                 with File(file_path, validate=False) as f:
                     filestem = f.stem
-                    parameters = f.load_parameters()
+                    # Re-resolve rather than trust the peek: a file whose tracks are
+                    # ordered differently would otherwise be read at the wrong index.
+                    if _resolve_track(f, key, track)[0] != track_index:
+                        raise ValueError(
+                            f"Track {track!r} is not at index {track_index} in {file_path} as "
+                            "it is in the first file; tracks must be ordered consistently."
+                        )
+                    parameters = _load_track_parameters(f, track_index)
                 parameters.update(config_params)
 
                 try:
@@ -316,6 +365,13 @@ def run_processing(
             if timings:
                 for tname in timer.timings.keys():
                     timer.append_to_yaml(save_dir / f"timings_{tname}.yaml", tname)
+
+        # Re-raise anything the last save hit. Every other save is awaited before
+        # the next one is submitted, but the final one is not: leaving its result
+        # unread swallows the exception, and a run that wrote nothing at all still
+        # exits 0.
+        if save_future is not None:
+            save_future.result()
 
     if timings:
         timer.print()

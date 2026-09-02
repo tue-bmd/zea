@@ -126,6 +126,13 @@ class ProcessArgs:
             help="Data key to load from each file (e.g. data/raw_data, data/image/values).",
         ),
     ] = "data/raw_data"
+    track: Annotated[
+        str | None,
+        tyro.conf.arg(
+            help="Which track to process in a multi-track file: a label (e.g. 'doppler') or "
+            "an index (e.g. '1'). Required for multi-track files, ignored for single-track ones.",
+        ),
+    ] = None
     n_frames: Annotated[
         int | None,
         tyro.conf.arg(
@@ -202,6 +209,7 @@ class ProcessArgs:
             keep_dynamic_range=self.keep_dynamic_range,
             revision=self.revision,
             config_revision=self.config_revision,
+            track=self.track,
         )
 
 
