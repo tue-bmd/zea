@@ -1115,7 +1115,7 @@ def _load_zea_file(
         ValueError: If the track cannot be resolved, if the file has no image data, or
             if the images are not 2D.
     """
-    from zea.data.file import File, load_dict_from_hdf5_group
+    from zea.data.file import File
     from zea.data.spec import FileSpec, Map
 
     path = str(path)
@@ -1141,7 +1141,7 @@ def _load_zea_file(
         file_fields = {}
         for name in _copyable_fields(FileSpec.SCHEMA, _OWN_FILE_FIELDS):
             if name in file:
-                file_fields[name] = load_dict_from_hdf5_group(file[name])
+                file_fields[name] = file.load_group(name)
             elif name in file.attrs:
                 file_fields[name] = file.attrs[name]
 
