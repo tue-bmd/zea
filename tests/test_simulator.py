@@ -23,6 +23,7 @@ def _base_args(n_el=16, n_tx=2, n_ax=256, n_scat=4):
         ],
         axis=-1,
     ).astype(np.float32)
+    center_frequency = 5e6
     return {
         "scatterer_positions": positions,
         "scatterer_magnitudes": np.ones(n_scat, dtype=np.float32),
@@ -32,13 +33,17 @@ def _base_args(n_el=16, n_tx=2, n_ax=256, n_scat=4):
         "lens_sound_speed": 1000.0,
         "sound_speed": 1540.0,
         "n_ax": n_ax,
-        "center_frequency": 5e6,
+        "center_frequency": center_frequency,
         "sampling_frequency": 20e6,
         "t0_delays": np.tile(np.linspace(0, 1e-6, n_el), (n_tx, 1)).astype(np.float32),
         "initial_times": np.zeros(n_tx, dtype=np.float32),
         "element_width": 0.2e-3,
         "attenuation_coef": 0.0,
         "tx_apodizations": rng.uniform(0, 1, (n_tx, n_el)).astype(np.float32),
+        # Transmit pulse peak time, added to every echo arrival time. Mirrors
+        # ``Parameters.t_peak``'s fallback of ``1 / center_frequency`` for a probe
+        # with no stored waveforms, which is what the beamformer compensates for.
+        "t_peak": np.full(n_tx, 1 / center_frequency, dtype=np.float32),
     }
 
 
@@ -113,6 +118,7 @@ def _focused_args(n_el=64, n_ax=1024, focus_depth=15e-3):
     lateral = np.array([0.0, 0.0, 5e-3, 7e-3], dtype=np.float32)
     positions = np.stack([lateral, np.zeros_like(depths), depths], axis=-1).astype(np.float32)
 
+    center_frequency = 5e6
     args = {
         "scatterer_positions": positions,
         "scatterer_magnitudes": np.ones(len(depths), dtype=np.float32),
@@ -122,13 +128,15 @@ def _focused_args(n_el=64, n_ax=1024, focus_depth=15e-3):
         "lens_sound_speed": 1000.0,
         "sound_speed": 1540.0,
         "n_ax": n_ax,
-        "center_frequency": 5e6,
+        "center_frequency": center_frequency,
         "sampling_frequency": 20e6,
         "t0_delays": t0_delays,
         "initial_times": np.zeros(1, dtype=np.float32),
         "element_width": 0.2e-3,
         "attenuation_coef": 0.0,
         "tx_apodizations": apod,
+        # See _base_args: matches Parameters.t_peak's 1 / center_frequency fallback.
+        "t_peak": np.full(1, 1 / center_frequency, dtype=np.float32),
     }
     geometry = {
         "focus_distances": focus_distances,
