@@ -3,10 +3,14 @@
 These are not exposed to the public API.
 """
 
+import contextlib
 import functools
 import hashlib
 import inspect
+import os
 import platform
+import tempfile
+from pathlib import Path
 
 import numpy as np
 
@@ -179,6 +183,48 @@ def deprecated(replacement=None):
             raise TypeError("Decorator can only be applied to functions, methods, or properties.")
 
     return decorator
+
+
+@contextlib.contextmanager
+def atomic_write(path, suffix=None):
+    """Write to a temporary file and move it into place only once it is complete.
+
+    Readers of `path` never observe a half-written file, and a failed write leaves any
+    existing `path` untouched instead of replacing it with a truncated one. The
+    temporary file is created next to the destination so that it lives on the same
+    filesystem, which is what makes the final move atomic.
+
+    Args:
+        path (str, Path): Destination path. Its parent directory must already exist.
+        suffix (str, optional): Suffix of the temporary file. Writers that pick their
+            format from the extension (h5py, PIL, ...) need this to match the
+            destination. Defaults to the suffix of `path`.
+
+    Yields:
+        Path: Temporary path to write to. It exists (empty) when the block starts.
+
+    Example:
+        .. code-block:: python
+
+            with atomic_write(path) as tmp:
+                tmp.write_bytes(data)
+
+    """
+    path = Path(path)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.tmp-",
+        suffix=path.suffix if suffix is None else suffix,
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        yield tmp_path
+        os.replace(tmp_path, path)
+    except BaseException:
+        # Includes KeyboardInterrupt/SystemExit: clean up the partial temp file.
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def calculate_file_hash(file_path, omit_line_str=None):

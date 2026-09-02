@@ -8,6 +8,7 @@ import numpy as np
 from tqdm import tqdm
 
 from zea import log
+from zea.internal.utils import atomic_write
 
 # Girder API base URL shared by CAMUS and CETUS collections
 GIRDER_API = "https://humanheart-project.creatis.insa-lyon.fr/database/api/v1"
@@ -182,13 +183,11 @@ def download_file(url: str, destination: str | Path) -> Path:  # pragma: no cove
     destination.parent.mkdir(parents=True, exist_ok=True)
     timeout = int(os.getenv("ZEA_DOWNLOAD_TIMEOUT", "600"))
     filename = destination.name
-    temp_path = destination.with_name(f"{destination.name}.part")
-
-    if temp_path.exists():
-        temp_path.unlink()
 
     log.info(f"Downloading {filename} ...")
-    try:
+    # An interrupted download must not leave a truncated file behind that the
+    # `destination.exists()` check above would then treat as a completed one.
+    with atomic_write(destination) as temp_path:
         with urllib.request.urlopen(url, timeout=timeout) as response:
             total_header = response.headers.get("content-length")
             total = int(total_header) if total_header is not None else None
@@ -209,11 +208,6 @@ def download_file(url: str, destination: str | Path) -> Path:  # pragma: no cove
                 f"Downloaded size mismatch for {filename}: "
                 f"expected {total} bytes, got {bytes_written}."
             )
-
-        temp_path.replace(destination)
-    finally:
-        if temp_path.exists() and not destination.exists():
-            temp_path.unlink(missing_ok=True)
 
     log.info(f"Downloaded {filename} to {destination.parent}")
     return destination

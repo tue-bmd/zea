@@ -1297,7 +1297,7 @@ class DDS(DiffusionGuidance):
             noise_rates,
             signal_rates,
             n_inner,
-            eps,  # ty: ignore[invalid-argument-type]
+            eps,
             verbose,
             **op_kwargs,
         )
