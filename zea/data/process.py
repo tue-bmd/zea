@@ -4,7 +4,6 @@ Usage:
     python -m zea.data.process --dataset <path> --config <config.yaml>
 """
 
-import re
 import types
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -21,7 +20,8 @@ from zea.cli_args import SUPPORTED_FORMATS, ProcessArgs
 from zea.config import Config
 from zea.data.dataloader import Dataloader
 from zea.data.datasets import Dataset
-from zea.data.file import File
+from zea.data.file import File, _GroupProxy
+from zea.data.spec import strip_track_prefix
 from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
 from zea.internal.device import init_device
@@ -60,7 +60,7 @@ def _key_requires_pipeline(key: str) -> bool:
     Normalizes the key so aliases like ``raw_data`` match ``_NON_IMAGE_DATA_TYPES``.
     """
     normalized = (key or "").strip()
-    normalized = re.sub(r"^tracks/track_\d+/", "", normalized)
+    normalized = strip_track_prefix(normalized)
     normalized = normalized.removeprefix("data/").removesuffix("/values")
     return normalized in _NON_IMAGE_DATA_TYPES
 
@@ -79,12 +79,17 @@ def _run_passthrough(
         raise ValueError(f"Passthrough mode only supports gif/mp4/hdf5, got {save_as!r}")
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    with Dataset(dataset_path, validate=False, lazy=True, _suggest_lazy=False, **hf_kwargs) as ds:
+    with Dataset(dataset_path, lazy=True, _suggest_lazy=False, **hf_kwargs) as ds:
         pbar = ProgressBar(len(ds))
         for i in range(len(ds)):
             f = ds[i]  # lazy download for hf:// paths; returns cached File handle
             data_key = f.format_key(key)
-            arr = np.asarray(f[data_key][:n_frames] if n_frames is not None else f[data_key][:])
+            _dset = f.dataset(data_key)
+            # A map-style key such as "image" resolves to a group, not a dataset: read its
+            # values child, the same way load_file does.
+            if isinstance(_dset, _GroupProxy):
+                _dset = _dset.values
+            arr = np.asarray(_dset[:n_frames] if n_frames is not None else _dset[:])
             filestem = f.stem
 
             # Ensure (N, H, W) — squeeze any leading single-element dims
@@ -166,10 +171,12 @@ def run_processing(
     axis_selections: dict | None = None
     if _key_requires_pipeline(key):
         try:
+            # validate=False here and on the peek open below: the Dataloader built from
+            # the same path validates these files, so checking them twice is wasted work.
             with Dataset(dataset_path, validate=False, **dataset_hf_kwargs) as _peek_ds:
                 _first_path = _peek_ds.file_paths[0] if _peek_ds.file_paths else None
             if _first_path:
-                with File(_first_path) as _peek_f:
+                with File(_first_path, validate=False) as _peek_f:
                     _peek_params = _peek_f.load_parameters()
                 _peek_params.update(config_params)
                 axis_selections = _axis_selections_from_params(_peek_params)
@@ -181,12 +188,12 @@ def run_processing(
         key=key,
         batch_size=None,
         shuffle=False,
-        return_filename=True,
+        return_metadata=True,
         limit_n_frames=n_frames,
-        n_frames=1,
+        n_frames=None,
         num_threads=num_threads,
-        insert_frame_axis=False,
         sort_files=True,
+        dtype="float32",
         axis_selections=axis_selections,
         **dataset_hf_kwargs,
     )
@@ -254,7 +261,7 @@ def run_processing(
         for i in range(total_batches + 1):
             if i < total_batches:
                 frame, metadata = get_data()
-                file_path = metadata["fullpath"]
+                file_path = metadata["file"]["fullpath"]
             else:
                 file_path = None  # sentinel to flush the last file
 
@@ -272,7 +279,8 @@ def run_processing(
                         break
 
                 prev_file_path = file_path
-                with File(file_path) as f:
+                # Already validated by the Dataloader that handed us this path.
+                with File(file_path, validate=False) as f:
                     filestem = f.stem
                     parameters = f.load_parameters()
                 parameters.update(config_params)
