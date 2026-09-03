@@ -599,10 +599,8 @@ class Parameters(BaseParameters):
 
         # Stop at the deepest pixel or at the end of the record, whichever is first.
         reach = depth * np.tan(np.abs(angle))
-        n_ax = self._params.get("n_ax")
-        if n_ax is not None:
-            max_range = self.sound_speed * float(n_ax) / self.sampling_frequency / 2
-            reach = np.minimum(reach, max_range * np.sin(np.abs(angle)))
+        max_range = self.sound_speed * float(self.n_ax) / self.sampling_frequency / 2
+        reach = np.minimum(reach, max_range * np.sin(np.abs(angle)))
         reach = np.sign(angle) * reach
         return (min(xmin, xmin + float(reach[0])), max(xmax, xmax + float(reach[1])))
 

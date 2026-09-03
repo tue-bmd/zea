@@ -843,6 +843,8 @@ def test_polar_grid_uses_the_fitted_apex():
         grid_size_z=256,
         grid_size_x=128,
         center_frequency=3.5e6,
+        sampling_frequency=20e6,
+        n_ax=4096,
     )
     assert parameters.distance_to_apex == pytest.approx(radius, rel=1e-5)
     assert parameters.rho_range[0] == pytest.approx(0.005 + radius, rel=1e-5)
