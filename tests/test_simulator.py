@@ -17,6 +17,7 @@ from zea.simulator import (
     select_elevation_slab,
     simulate_rf,
 )
+from zea.ops import Simulate
 from zea.simulator_time_domain import simulate_rf_td
 
 N_EL = 80
@@ -30,7 +31,7 @@ DYNAMIC_RANGE = (-50.0, 0.0)
 
 
 def _parameters(probe_geometry):
-    angles = np.linspace(-5, 5, N_TX) * np.pi / 180
+    angles = np.linspace(-15, 15, N_TX) * np.pi / 180
     wavelength = SOUND_SPEED / CENTER_FREQUENCY
     return Parameters(
         n_tx=N_TX,
@@ -328,11 +329,8 @@ def test_simulate_op_prunes_elevation_slab_without_leaking_pruned_cloud():
     assert outputs["scatterer_magnitudes"].shape == magnitudes.shape
 
 
-def test_record_length_gate_uses_worst_case_element_pair():
-    """
-    A scatterer with one in-record and one out-of-record element must be gated out to prevent
-    aliasing.
-    """
+def test_record_length_gate_keeps_in_record_pairs_without_aliasing():
+    """Scatterers that fit in the record must not be zeroed, but no aliasing may happen."""
     probe_geometry = np.array([[-8e-3, 0.0, 0.0], [8e-3, 0.0, 0.0]], dtype=np.float32)
     scatterer_positions = np.array([[9.375e-3, 0.0, 9.905e-3]], dtype=np.float32)
 
@@ -355,5 +353,154 @@ def test_record_length_gate_uses_worst_case_element_pair():
         "t_peak": np.zeros(1, dtype=np.float32),
     }
 
-    rf = keras.ops.convert_to_numpy(simulate_rf(**args))
-    assert np.abs(rf).max() == 0, "Out-of-record element pair was included; implies aliased energy."
+    rf = keras.ops.convert_to_numpy(simulate_rf(**args))[0, :, :, 0]
+    # Four times the record gates nothing, so it is the un-truncated ground truth.
+    reference = keras.ops.convert_to_numpy(simulate_rf(**{**args, "n_ax": 1024}))[0, :256, :, 0]
+
+    near = 1  # element 8 mm from the scatterer, so its own round trip is the 13.0 us pair
+    peak = np.abs(rf[:, near]).max()
+    assert np.abs(rf[:, near]).argmax() == np.abs(reference[:, near]).argmax(), (
+        "In-record pair was gated out or moved."
+    )
+    assert np.abs(rf[:, near] - reference[:, near]).max() < 1e-3 * peak
+
+    # The 26.0 us pair would land near sample 56; the earliest real arrival is the pulse
+    # around sample 156.
+    quiet = np.abs(rf[:140]).max()
+    assert quiet < 1e-3 * peak, (
+        f"Aliased energy detected: {quiet:.3g} should be much less than peak ({peak:.3g})"
+    )
+
+
+def _receive_chain_image(fish_scan, simulator, **receive_chain_kwargs):
+    _, simulation_args, beamform = fish_scan
+    return beamform(simulator(**simulation_args, noise_seed=0, **receive_chain_kwargs))
+
+
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+def test_tgc_brightens_the_deepest_scatterers(fish_scan, simulator):
+    """TGC compensates spreading loss, so the deep scatterers gain on the shallow ones."""
+    positions, _, _ = fish_scan
+    by_depth = np.argsort(positions[:, 2])
+    quartile = len(positions) // 4
+    deepest, shallowest = positions[by_depth[-quartile:]], positions[by_depth[:quartile]]
+
+    without = _receive_chain_image(fish_scan, simulator, noise_level_db=None, tgc_max_db=0.0)
+    with_tgc = _receive_chain_image(fish_scan, simulator, noise_level_db=None, tgc_max_db=50.0)
+
+    dim = _dot_brightness(without, deepest).mean()
+    bright = _dot_brightness(with_tgc, deepest).mean()
+    assert dim < bright, (
+        f"Deepest scatterers are not brighter with TGC: {dim:.1f} without, {bright:.1f} with"
+    )
+
+    # Depth ratio isolates the gain ramp from any global brightness shift.
+    without_ratio = dim / _dot_brightness(without, shallowest).mean()
+    with_ratio = bright / _dot_brightness(with_tgc, shallowest).mean()
+    assert without_ratio < 1.0 < with_ratio, (
+        f"TGC did not invert the deep/shallow brightness ratio: {without_ratio:.2f} without, "
+        f"{with_ratio:.2f} with"
+    )
+
+
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+def test_noise_lowers_relative_scatterer_amplitude(fish_scan, simulator):
+    """Electronic noise lifts the background, so scatterers stand out less above the mean."""
+    positions, _, _ = fish_scan
+
+    noiseless = _receive_chain_image(fish_scan, simulator, noise_level_db=None, tgc_max_db=50.0)
+    noisy = _receive_chain_image(fish_scan, simulator, noise_level_db=-30.0, tgc_max_db=50.0)
+
+    clean = _dot_brightness(noiseless / noiseless.mean(), positions).mean()
+    degraded = _dot_brightness(noisy / noisy.mean(), positions).mean()
+    assert degraded < clean, (
+        f"Noise did not lower the relative scatterer amplitude: {clean:.1f}x noiseless, "
+        f"{degraded:.1f}x at -30 dB"
+    )
+
+
+def _batched_rf(simulation_args, batch, **receive_chain_kwargs):
+    """RF for `batch` identical copies of a few scatterers, through the batched op path."""
+    args = dict(simulation_args)
+    positions = np.asarray(args["scatterer_positions"], dtype=np.float32)[:16]
+    args["scatterer_positions"] = np.repeat(positions[None], batch, axis=0)
+    args["scatterer_magnitudes"] = np.ones((batch, len(positions)), dtype=np.float32)
+    op = Simulate(with_batch_dim=True)
+    outputs = op(**args, **receive_chain_kwargs)
+    return np.asarray(keras.ops.convert_to_numpy(outputs[op.output_key]))
+
+
+def test_batched_noise_is_independent_across_items(fish_scan):
+    """A stateless seed must not repeat the same noise realisation for every batch item."""
+    _, simulation_args, _ = fish_scan
+
+    noiseless = _batched_rf(simulation_args, 3, noise_level_db=None, noise_seed=0)
+    noisy = _batched_rf(simulation_args, 3, noise_level_db=-20.0, noise_seed=0)
+    noise = noisy - noiseless
+
+    assert np.allclose(noiseless[0], noiseless[1]), "Identical scatterers gave different RF"
+    for other in (1, 2):
+        assert not np.allclose(noise[0], noise[other]), (
+            f"Batch item {other} got the same noise realisation as item 0"
+        )
+
+
+def test_batched_noise_is_reproducible(fish_scan):
+    """Same seed, same batch: identical noise. Different seed: different noise."""
+    _, simulation_args, _ = fish_scan
+    kwargs = {"noise_level_db": -20.0}
+
+    first = _batched_rf(simulation_args, 2, noise_seed=3, **kwargs)
+    again = _batched_rf(simulation_args, 2, noise_seed=3, **kwargs)
+    other = _batched_rf(simulation_args, 2, noise_seed=4, **kwargs)
+
+    assert np.array_equal(first, again), "Same seed did not reproduce the batched noise"
+    assert not np.allclose(first, other), "Different seeds gave the same batched noise"
+
+
+def test_batched_receive_chain_matches_unbatched(fish_scan):
+    """TGC and the default noise reference are per item, so batching must not change them."""
+    _, simulation_args, _ = fish_scan
+    positions = np.asarray(simulation_args["scatterer_positions"], dtype=np.float32)[:16]
+
+    batched = _batched_rf(simulation_args, 2, noise_level_db=None, tgc_max_db=50.0)
+    single = keras.ops.convert_to_numpy(
+        simulate_rf(
+            **{
+                **simulation_args,
+                "scatterer_positions": positions,
+                "scatterer_magnitudes": np.ones(len(positions), dtype=np.float32),
+            },
+            noise_level_db=None,
+            tgc_max_db=50.0,
+        )
+    )
+
+    # ops.map reduces in a different order, so compare against the RF peak.
+    scale = np.abs(single).max()
+    np.testing.assert_allclose(batched[0] / scale, single / scale, atol=1e-4)
+
+
+def test_batched_noise_reference_is_per_item(fish_scan):
+    """The default reference is each item's own peak, not one maximum shared by the batch."""
+    _, simulation_args, _ = fish_scan
+    args = dict(simulation_args)
+    positions = np.asarray(args["scatterer_positions"], dtype=np.float32)[:16]
+    magnitudes = np.ones(len(positions), dtype=np.float32)
+
+    args["scatterer_positions"] = np.repeat(positions[None], 2, axis=0)
+    args["scatterer_magnitudes"] = np.stack([magnitudes, magnitudes * 100.0])
+
+    op = Simulate(with_batch_dim=True)
+    noiseless = np.asarray(
+        keras.ops.convert_to_numpy(op(**args, noise_level_db=None)[op.output_key])
+    )
+    noisy = np.asarray(
+        keras.ops.convert_to_numpy(op(**args, noise_level_db=-20.0, noise_seed=0)[op.output_key])
+    )
+    noise = noisy - noiseless
+
+    ratio = noise[1].std() / noise[0].std()
+    assert 90.0 < ratio < 110.0, (
+        f"Noise did not track the per-item peak: 100x brighter item got {ratio:.1f}x the noise"
+    )
