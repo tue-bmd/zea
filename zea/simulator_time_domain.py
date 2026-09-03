@@ -44,6 +44,7 @@ from zea.func.ultrasound import directivity
 from zea.simulator import (
     _apply_elevation_slab,
     _resolve_element_width,
+    _validate_scatter_exponent,
     _warn_if_elevation_extent,
     attenuate,
     hann_unnormalized,
@@ -76,6 +77,7 @@ def simulate_rf_td(
     tgc_max_db=0.0,
     noise_seed=0,
     noise_reference=None,
+    scatter_exponent=2.0,
 ):
     """Time-domain (splat-and-convolve) RF simulator.
 
@@ -125,6 +127,9 @@ def simulate_rf_td(
         noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
             noiseless RF maximum. Pass a fixed reference to avoid the noise level changing per
             transmit batch. See :func:`zea.simulator.apply_receive_chain`.
+        scatter_exponent (float): Weigh the scattered waveform spectrum by
+            ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
+            myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -137,7 +142,9 @@ def simulate_rf_td(
     n_el = probe_geometry.shape[0]
     n_scat = scatterer_positions.shape[0]
 
-    pulse = get_pulse_waveform(center_frequency, sampling_frequency)
+    pulse = get_pulse_waveform(
+        center_frequency, sampling_frequency, scatter_exponent=scatter_exponent
+    )
 
     # Chunk so the (n_scat, n_el, n_el) tensors never materialize at once. The factor is
     # approximate memory use after jit fusion, not a count of intermediate tensors.
@@ -360,7 +367,9 @@ def _multiply_spectra(signals, kernel, n_full):
     return ops.irfft((product_real, product_imag), fft_length=n_full)
 
 
-def get_pulse_waveform(center_frequency, sampling_frequency, n_period=4, n_samples=129):
+def get_pulse_waveform(
+    center_frequency, sampling_frequency, n_period=4, n_samples=129, scatter_exponent=0.0
+):
     """Generate a real, Hann-windowed sinusoidal transmit pulse in the time domain.
 
     This is the time-domain counterpart of :func:`zea.simulator.get_pulse_spectrum_fn`: an even,
@@ -376,10 +385,13 @@ def get_pulse_waveform(center_frequency, sampling_frequency, n_period=4, n_sampl
         sampling_frequency (float): The sampling frequency [Hz].
         n_period (float): The number of periods spanned by the Hann window.
         n_samples (int): The (odd) number of samples in the pulse.
+        scatter_exponent (float): Exponent applied to the pulse spectrum relative to
+            ``center_frequency``.
 
     Returns:
         array-like: The pulse waveform of shape (n_samples,).
     """
+    _validate_scatter_exponent(scatter_exponent)
     width = n_period / center_frequency
     support_samples = width * sampling_frequency
     if support_samples > n_samples:
@@ -390,4 +402,12 @@ def get_pulse_waveform(center_frequency, sampling_frequency, n_period=4, n_sampl
         )
     times = (ops.arange(n_samples, dtype="float32") - n_samples // 2) / sampling_frequency
     window = hann_unnormalized(times, width)
-    return window * ops.cos(2 * np.pi * center_frequency * times)
+    pulse = window * ops.cos(2 * np.pi * center_frequency * times)
+    if not scatter_exponent:
+        return pulse
+
+    n_freq = n_samples // 2 + 1
+    freqs = ops.arange(n_freq, dtype="float32") / n_samples * sampling_frequency
+    scatter_gain = (freqs / center_frequency) ** scatter_exponent
+    pulse_real, pulse_imag = ops.rfft(pulse)
+    return ops.irfft((pulse_real * scatter_gain, pulse_imag * scatter_gain), fft_length=n_samples)

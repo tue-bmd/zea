@@ -77,6 +77,7 @@ def simulate_rf(
     tgc_max_db=0.0,
     noise_seed=0,
     noise_reference=None,
+    scatter_exponent=2.0,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -115,11 +116,16 @@ def simulate_rf(
         noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
             noiseless RF maximum. Pass a fixed reference to avoid the noise level changing per
             transmit batch. See :func:`apply_receive_chain`.
+        scatter_exponent (float): Weigh the scattered field by
+            ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
+            myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
 
     """
+
+    _validate_scatter_exponent(scatter_exponent)
 
     n_tx = t0_delays.shape[0]
 
@@ -175,6 +181,11 @@ def simulate_rf(
 
     waveform_spectrum = pulse_spectrum_fn(freqs)
 
+    if scatter_exponent:
+        scatter_gain = (freqs / center_frequency) ** scatter_exponent
+    else:
+        scatter_gain = ops.ones_like(freqs)
+
     scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
     theta = ops.arctan2(scat_pos_relative_to_probe[..., 0], scat_pos_relative_to_probe[..., 2])
     phi = ops.arctan2(scat_pos_relative_to_probe[..., 1], scat_pos_relative_to_probe[..., 2])
@@ -223,7 +234,7 @@ def simulate_rf(
 
         # Explicitly sum over tx dimension before the receive axis exists.
         incident_field = ops.sum(tx_response * tx_element_weights[None], axis=1)
-        scattered_field = incident_field * ops.cast(magnitudes[:, None], "complex64")
+        scattered_field = incident_field * ops.cast(magnitudes[:, None] * scatter_gain, "complex64")
         received_field = scattered_field[:, None] * rx_response * within_record[..., None]
         rf_spectrum = waveform_spectrum * ops.sum(received_field, axis=0)
         parts.append(ops.irfft((ops.real(rf_spectrum), ops.imag(rf_spectrum))))
@@ -273,6 +284,17 @@ def apply_receive_chain(
         rf_data = rf_data * ops.reshape(10.0 ** (tgc_max_db * ramp / 20.0), (n_ax, 1, 1))
 
     return rf_data
+
+
+def _validate_scatter_exponent(scatter_exponent):
+    """Reject exponents that make the weighting non-finite: the DC bin is zero, so a
+    negative exponent gives infinite gain there, and the NaN spreads over the whole frame."""
+    if not np.isfinite(scatter_exponent) or scatter_exponent < 0:
+        raise ValueError(
+            f"scatter_exponent ({scatter_exponent}) must be finite and non-negative. "
+            "2 is Rayleigh scattering (e.g. blood), myocardium is approximately 1.5, "
+            "soft tissue 0.6-0.8."
+        )
 
 
 def _resolve_element_width(probe_geometry, element_width):

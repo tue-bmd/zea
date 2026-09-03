@@ -18,7 +18,7 @@ from zea.simulator import (
     simulate_rf,
 )
 from zea.ops import Simulate
-from zea.simulator_time_domain import simulate_rf_td
+from zea.simulator_time_domain import get_pulse_waveform, simulate_rf_td
 
 N_EL = 80
 APERTURE = 32e-3
@@ -28,6 +28,29 @@ SOUND_SPEED = 1540.0  # m/s
 XLIMS = (-24e-3, 24e-3)
 ZLIMS = (10e-3, 35e-3)
 DYNAMIC_RANGE = (-50.0, 0.0)
+
+
+def test_time_domain_scatter_exponent_weights_pulse_spectrum():
+    """The time-domain approximation applies scatter frequency dependence to its pulse."""
+    n_samples = 129
+    unweighted = np.asarray(
+        keras.ops.convert_to_numpy(
+            get_pulse_waveform(CENTER_FREQUENCY, CENTER_FREQUENCY * 4, n_samples=n_samples)
+        )
+    )
+    weighted = np.asarray(
+        keras.ops.convert_to_numpy(
+            get_pulse_waveform(
+                CENTER_FREQUENCY,
+                CENTER_FREQUENCY * 4,
+                n_samples=n_samples,
+                scatter_exponent=2.0,
+            )
+        )
+    )
+    frequencies = np.fft.rfftfreq(n_samples, 1 / (CENTER_FREQUENCY * 4))
+    expected = np.fft.rfft(unweighted) * (frequencies / CENTER_FREQUENCY) ** 2
+    np.testing.assert_allclose(np.fft.rfft(weighted), expected, rtol=2e-5, atol=2e-5)
 
 
 def _parameters(probe_geometry):
@@ -504,3 +527,92 @@ def test_batched_noise_reference_is_per_item(fish_scan):
     assert 90.0 < ratio < 110.0, (
         f"Noise did not track the per-item peak: 100x brighter item got {ratio:.1f}x the noise"
     )
+
+
+def _td_args(n_el=16, **overrides):
+    """Minimal single-transmit argument set for the time-domain simulator."""
+    probe_geometry = np.stack(
+        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+    args = {
+        "probe_geometry": probe_geometry,
+        "apply_lens_correction": False,
+        "lens_thickness": 1e-3,
+        "lens_sound_speed": 1000.0,
+        "sound_speed": SOUND_SPEED,
+        "n_ax": 1024,
+        "center_frequency": CENTER_FREQUENCY,
+        "sampling_frequency": CENTER_FREQUENCY * 4,
+        "t0_delays": np.zeros((1, n_el), dtype=np.float32),
+        "initial_times": np.zeros(1, dtype=np.float32),
+        "element_width": 1e-3,
+        "attenuation_coef": 0.0,
+        "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
+        "t_peak": np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
+    }
+    return {**args, **overrides}
+
+
+def test_time_domain_elevation_lens_prunes_out_of_plane_scatterers():
+    """The time-domain simulator drops scatterers outside the elevation slab."""
+    element_height = 5e-3
+    args = _td_args(elevation_lens=True, element_height=element_height)
+    args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
+
+    inside = np.array([[0.0, 0.5 * element_height, 30e-3]], dtype=np.float32)
+    outside = np.array([[0.0, 1.5 * element_height, 30e-3]], dtype=np.float32)
+
+    rf_inside = keras.ops.convert_to_numpy(simulate_rf_td(scatterer_positions=inside, **args))
+    rf_outside = keras.ops.convert_to_numpy(simulate_rf_td(scatterer_positions=outside, **args))
+    assert np.abs(rf_inside).max() > 0
+    assert np.abs(rf_outside).max() == 0
+
+
+def test_time_domain_lens_correction_delays_arrivals():
+    """A slow lens lengthens the round trip."""
+    args = _td_args()
+    args["scatterer_positions"] = np.array([[0.0, 0.0, 30e-3]], dtype=np.float32)
+    args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
+
+    uncorrected = keras.ops.convert_to_numpy(simulate_rf_td(**args))[0, :, :, 0]
+    corrected = keras.ops.convert_to_numpy(
+        simulate_rf_td(**{**args, "apply_lens_correction": True})
+    )[0, :, :, 0]
+
+    center = args["probe_geometry"].shape[0] // 2
+    delay = np.abs(corrected[:, center]).argmax() - np.abs(uncorrected[:, center]).argmax()
+    # Two lens crossings at 1000 m/s instead of 1540 m/s: ~0.7 us, ~8 samples at 4x fc.
+    expected = (
+        2
+        * args["lens_thickness"]
+        * (1 / args["lens_sound_speed"] - 1 / args["sound_speed"])
+        * args["sampling_frequency"]
+    )
+    assert delay == pytest.approx(expected, abs=2), (
+        f"Lens correction shifted the echo by {delay} samples, expected ~{expected:.1f}"
+    )
+
+
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+@pytest.mark.parametrize("scatter_exponent", [-1.0, np.nan, np.inf])
+def test_invalid_scatter_exponent_raises(simulator, scatter_exponent):
+    """A bad exponent must fail loudly, not silently return an all-NaN RF frame."""
+    args = _td_args()
+    args["scatterer_positions"] = np.array([[0.0, 0.0, 30e-3]], dtype=np.float32)
+    args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
+
+    with pytest.raises(ValueError, match="scatter_exponent"):
+        simulator(**args, scatter_exponent=scatter_exponent)
+
+
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+@pytest.mark.parametrize("scatter_exponent", [0.0, 0.6, 2.0])
+def test_valid_scatter_exponent_gives_finite_rf(simulator, scatter_exponent):
+    """Physical exponents, including the unweighted 0, stay accepted and finite."""
+    args = _td_args()
+    args["scatterer_positions"] = np.array([[0.0, 0.0, 30e-3]], dtype=np.float32)
+    args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
+
+    rf = keras.ops.convert_to_numpy(simulator(**args, scatter_exponent=scatter_exponent))
+    assert np.isfinite(rf).all()
+    assert np.abs(rf).max() > 0
