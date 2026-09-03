@@ -34,6 +34,7 @@ import keras
 
 from zea import log
 from zea.internal.core import hash_elements
+from zea.internal.utils import atomic_write
 
 _DEFAULT_ZEA_CACHE_DIR = Path.home() / ".cache" / "zea"
 
@@ -67,14 +68,19 @@ def cache_disabled():
 
 
 def _make_cache_dir(path: Path):
-    """Try to create the cache directory.
+    """Try to create the cache directory and verify it is writable.
     If it fails, disable the cache and return a temporary directory instead."""
     try:
         path.mkdir(parents=True, exist_ok=True)
+
+        # Raise if the current user cannot actually write into `path`
+        with tempfile.NamedTemporaryFile(dir=path, prefix=".zea_write_test_"):
+            pass
+
         return path
     except Exception as e:
         log.warning(
-            f"Could not create cache directory {ZEA_CACHE_DIR}: {e} \n"
+            f"Could not use cache directory {path}: {e} \n"
             + "Disabling cache globally. Set ZEA_CACHE_DIR to a different directory "
             + "to enable caching again."
         )
@@ -91,8 +97,7 @@ else:
     ZEA_CACHE_DIR = _make_cache_dir(ZEA_CACHE_DIR)
 
 
-_CACHE_DIR = ZEA_CACHE_DIR / "cached_funcs"
-_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_CACHE_DIR = _make_cache_dir(ZEA_CACHE_DIR / "cached_funcs")
 
 
 def get_function_source(func):
@@ -160,6 +165,22 @@ def generate_cache_key(func, args, kwargs, arg_names):
     return f"{func.__qualname__}_" + hash_elements(key_elements)
 
 
+def _dump_to_cache(result, cache_file: Path, func):
+    """Write `result` to `cache_file`, never failing the call that produced it.
+
+    Writes to a temporary file first and moves it into place, so a crash or a full
+    disk cannot leave a truncated pickle behind that later runs would try to load.
+    """
+    try:
+        with atomic_write(cache_file) as tmp_file:
+            joblib.dump(result, tmp_file)
+    except Exception as e:
+        log.warning(
+            f"Could not cache result for {func.__qualname__} to {cache_file}: {e}. "
+            "Continuing without caching this result."
+        )
+
+
 def cache_output(*arg_names, verbose=False):
     """Decorator to cache function outputs using joblib."""
     assert all(isinstance(arg_name, str) for arg_name in arg_names), (
@@ -193,7 +214,7 @@ def cache_output(*arg_names, verbose=False):
             elif verbose:
                 log.info(f"Running {func.__qualname__} and caching the result to {cache_file}.")
             result = func(*args, **kwargs)
-            joblib.dump(result, cache_file)
+            _dump_to_cache(result, cache_file, func)
             return result
 
         return wrapper

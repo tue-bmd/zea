@@ -18,16 +18,20 @@ import zea
 from zea import log
 from zea.data.legacy_file import legacy_data, legacy_probe, legacy_scan
 from zea.data.spec import (
+    _TRACK_RE,
     DEFAULT_CHUNK_AXES,
     DEFAULT_COMPRESSION,
     DataSpec,
     FileSpec,
+    InvalidZeaFileError,
     MetadataSpec,
     MetricsSpec,
     ProbeSpec,
     ScanSpec,
+    check_track_rules,
+    strip_track_prefix,
 )
-from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
+from zea.internal.checks import _DATA_TYPES
 from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path, _hf_stream_open
 from zea.internal.utils import deprecated
 
@@ -346,6 +350,55 @@ def _format_selection(selection) -> str:
     return _format_one(selection)
 
 
+#: Datasets already pointed at the fast path, by HDF5 path. Keyed by path rather than by
+#: file so that iterating a whole dataset warns once, not once per file.
+_SLOW_READ_WARNED: set[str] = set()
+
+#: Only datasets at least this large are worth a pointer: below it h5py's serial read is
+#: not the bottleneck, and :mod:`zea.data.chunk_reader` would hand back to it anyway.
+_SLOW_READ_WARN_BYTES = 8 << 20  # 8 MiB
+
+
+class _BareDataset(h5py.Dataset):
+    """An ``h5py.Dataset`` that points at the fast path the first time it is read.
+
+    ``file["data/raw_data"]`` hands back h5py's own dataset, whose reads are serial: one
+    chunk decoded at a time, and over HTTP one round trip each. :meth:`File.dataset` and
+    ``file.data.<key>`` return the same data through :mod:`zea.data.chunk_reader` instead,
+    which fetches the chunk byte ranges itself and decodes them concurrently.
+
+    Subclassing keeps ``isinstance(file[key], h5py.Dataset)`` true and leaves the read
+    itself untouched — only large chunked datasets are wrapped, and only reads are
+    intercepted, so shape/dtype/attribute access stays silent.
+    """
+
+    def __getitem__(self, args):
+        name = self.name
+        if name is not None and name not in _SLOW_READ_WARNED:
+            _SLOW_READ_WARNED.add(name)
+            key = strip_track_prefix(name).lstrip("/")
+            # Every path segment becomes an attribute hop, so a nested group like
+            # data/image/values is suggested as file.data.image.values, not file.data.values.
+            attr_path = key.replace("/", ".")
+            log.warning(
+                f"Reading '{key}' through file[...] uses h5py's serial read path. "
+                f"Use file.dataset({key!r})[...] or file.{attr_path}[...] "
+                "for concurrent chunk reads."
+            )
+        return super().__getitem__(args)
+
+
+def _wrap_bare_dataset(child):
+    """Wrap *child* in :class:`_BareDataset` when the fast path would be worth using."""
+    if (
+        type(child) is h5py.Dataset
+        and child.chunks is not None
+        and child.nbytes >= _SLOW_READ_WARN_BYTES
+    ):
+        return _BareDataset(child.id)
+    return child
+
+
 class _GroupProxy:
     """Lazy proxy for an h5py.Group that exposes children as attributes.
 
@@ -541,7 +594,7 @@ class Track:
                 f"Track {self._index} has no 'scan' group. "
                 f"Available keys: {list(self._group.keys())}"
             )
-        scan_dict = load_dict_from_hdf5_group(self._group["scan"])
+        scan_dict = _load_group_dict(self._group["scan"], self._fetcher)
 
         return ScanSpec(**scan_dict)
 
@@ -643,17 +696,12 @@ class Track:
         return f"<Track[{self._index}]{label_part} data={keys}>"
 
 
-def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
-    """Recursively load the contents of an HDF5 group into a plain dict.
+def _load_group_dict(group: "h5py.Group", fetcher) -> dict:
+    """Recursively load *group* into a dict, reading arrays through *fetcher*.
 
-    Datasets are returned as numpy arrays or scalars; nested groups are
-    converted recursively.  String datasets are decoded to ``np.str_``.
-
-    Args:
-        group: An open :class:`h5py.Group` (or :class:`h5py.File`).
-
-    Returns:
-        dict: Nested dictionary mirroring the group structure.
+    ``fetcher`` may be ``None``, in which case every read falls back to h5py. Reads too
+    small to be worth the concurrent path fall back too, so wrapping is free for the
+    scalars that make up a scan or metadata group.
     """
     ans = {}
     for key, item in group.items():
@@ -664,9 +712,9 @@ def load_dict_from_hdf5_group(group: "h5py.Group") -> dict:
                     val = val.astype(np.str_)
                 ans[key] = val
             else:
-                ans[key] = item[()]
+                ans[key] = ChunkedDataset(item, fetcher)[()]
         elif isinstance(item, h5py.Group):
-            ans[key] = load_dict_from_hdf5_group(item)
+            ans[key] = _load_group_dict(item, fetcher)
     return ans
 
 
@@ -927,6 +975,10 @@ class File(h5py.File):
             cache (bool, optional): Cache fetched/streamed chunks on disk so a repeated read is
                 served locally instead of re-downloaded (default ``True``, streamed files only; see
                 :mod:`zea.data.chunk_cache`).
+            validate (bool, optional): Run :meth:`validate` right after opening, so an
+                invalid file raises here rather than at first read. Defaults to ``True``.
+                This is a lightweight structural check (no array data is loaded).
+                Only applies when opening for reading.
             *args: Additional arguments to pass to h5py.File.
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
@@ -960,6 +1012,10 @@ class File(h5py.File):
         # Cache streamed chunks on disk (see zea.data.chunk_cache). On by default, like the
         # HF hub cache; ``cache=False`` (or ZEA_CHUNK_CACHE=0) re-fetches every time.
         cache_chunks = kwargs.pop("cache", True)
+
+        # Structural validation on open (see validate()). On by default so a non-zea or
+        # broken file fails here, at the open, instead of at some later read.
+        validate = kwargs.pop("validate", True)
 
         # File object opened for streaming; kept so we can close it in close().
         stream_fileobj = None
@@ -1032,6 +1088,12 @@ class File(h5py.File):
         # Warn when opening an existing file that pre-dates zea v0.1.0
         if mode in ("r", "r+"):
             _warn_if_legacy_file(self)
+            if validate:
+                try:
+                    self.validate()
+                except Exception:
+                    self.close()
+                    raise
 
     @property
     def progress(self):
@@ -1128,13 +1190,8 @@ class File(h5py.File):
             return False
         return False
 
-    def __getitem__(self, name):
-        """Open an object in the file.
-
-        Extends the h5py default to redirect ``"data"`` and ``"scan"`` (and
-        sub-paths like ``"data/segmentation"``) to the tracks layout for
-        single-track new-format files.  Multi-track files raise :exc:`AttributeError`.
-        """
+    def _resolve(self, name):
+        """Open an object in the file, applying the tracks remapping. No wrapping."""
         parts = name.split("/", 1)
         if parts[0] in ("data", "scan") and not super().__contains__(name):
             n = self._n_tracks
@@ -1145,6 +1202,17 @@ class File(h5py.File):
             if n == 1:
                 return super().__getitem__(f"tracks/track_0/{name}")
         return super().__getitem__(name)
+
+    def __getitem__(self, name):
+        """Open an object in the file.
+
+        Extends the h5py default to redirect ``"data"`` and ``"scan"`` (and
+        sub-paths like ``"data/segmentation"``) to the tracks layout for
+        single-track new-format files.  Multi-track files raise :exc:`AttributeError`.
+
+        Reads go through h5py's serial path; see :meth:`dataset` for the concurrent one.
+        """
+        return _wrap_bare_dataset(self._resolve(name))
 
     @property
     def path(self):
@@ -1224,7 +1292,7 @@ class File(h5py.File):
         # scan parameters with probe_geometry, element_width, etc.
         probe_dict: "dict | None" = None
         if super().__contains__("probe"):
-            probe_dict = load_dict_from_hdf5_group(self["probe"])
+            probe_dict = self.load_group("probe")
         tracks: list[Track] = []
         i = 0
         while f"track_{i}" in tracks_group:
@@ -1653,6 +1721,53 @@ class File(h5py.File):
             return cast("_DataProxy", _GroupProxy(self["data"], self._chunk_fetcher))
         raise KeyError("No 'data' group found in this file.")
 
+    def dataset(self, key: str) -> "ChunkedDataset | _StringDataset | _GroupProxy | h5py.Dataset":
+        """Return the dataset at *key* on the concurrent read fast path.
+
+        ``file[key]`` deliberately hands back the bare :class:`h5py.Dataset`, so reads
+        through it are serial. This returns the same dataset wrapped so slicing goes
+        through :mod:`zea.data.chunk_reader` — the same path
+        ``file.data.raw_data[...]`` takes, but addressed by key::
+
+            file.dataset("data/raw_data")[0, [0, 10, 20]]
+
+        Prefer it whenever the key is not known statically (a dataloader, a CLI). Groups
+        are returned as a :class:`_GroupProxy`, and anything the fast path cannot serve
+        falls back to h5py, so the result is always what h5py would have returned.
+
+        Args:
+            key: Path to the dataset, e.g. ``"data/raw_data"``. Resolved with the same
+                ``data``/``scan`` to ``tracks/track_0/`` remapping as ``file[key]``.
+
+        Returns:
+            The dataset, wrapped for concurrent reads where possible.
+        """
+        child = self._resolve(key)
+        if isinstance(child, h5py.Group):
+            return _GroupProxy(child, self._chunk_fetcher)
+        if h5py.check_string_dtype(child.dtype):
+            return _StringDataset(child)
+        return ChunkedDataset(child, self._chunk_fetcher)
+
+    def load_group(self, group: "str | h5py.Group") -> dict:
+        """Recursively load an HDF5 group into a plain dict, on the fast read path.
+
+        The dict mirrors the group structure: datasets become numpy arrays or scalars
+        (strings decoded to ``np.str_``), nested groups become nested dicts. Reads go
+        through :mod:`zea.data.chunk_reader` rather than h5py's serial path, which is what
+        makes loading a whole ``data`` group affordable.
+
+        Args:
+            group: Either a key resolved like ``file[key]`` (e.g. ``"metadata"``), or an
+                already-opened :class:`h5py.Group` belonging to this file.
+
+        Returns:
+            dict: Nested dictionary mirroring the group structure.
+        """
+        if isinstance(group, str):
+            group = self._resolve(group)
+        return _load_group_dict(group, self._chunk_fetcher)
+
     @property
     def _is_legacy_file(self) -> bool:
         return _is_legacy_file(self)
@@ -1782,8 +1897,9 @@ class File(h5py.File):
     def to_iterator(self, key):
         """Convert the data to an iterator over all frames."""
         key = self.format_key(key)
+        dataset = self.dataset(key)
         for frame_idx in range(self.n_frames):
-            yield self[key][frame_idx]
+            yield dataset[frame_idx]
 
     @staticmethod
     def key_to_data_type(key):
@@ -1804,7 +1920,7 @@ class File(h5py.File):
         )
         # First axis: all frames, second axis: selected transmits
         indices = (slice(None), np.array(selected_transmits))
-        return self[key][indices]
+        return self.dataset(key)[indices]
 
     @deprecated(replacement="File.data.<key> with h5py slice indexing")
     def load_data(
@@ -1834,7 +1950,7 @@ class File(h5py.File):
         if indices is None or (isinstance(indices, str) and indices == "all"):
             indices = slice(None)
 
-        data = self[key]
+        data = self.dataset(key)
         try:
             data = data[indices]
         except (OSError, IndexError) as exc:
@@ -1915,7 +2031,7 @@ class File(h5py.File):
             log.warning("Could not find scan parameters in file.")
             return {}
 
-        scan_parameters = load_dict_from_hdf5_group(scan_group)
+        scan_parameters = self.load_group(scan_group)
 
         return scan_parameters
 
@@ -2043,7 +2159,7 @@ class File(h5py.File):
         from zea.probes import Probe
 
         if "probe" in self.keys():
-            probe_dict = self.recursively_load_dict_contents_from_group("probe")
+            probe_dict = self.load_group("probe")
         elif _is_legacy_file(self):
             scan_dict = self.get_scan_parameters()
             probe_dict = legacy_probe(scan_dict)
@@ -2080,7 +2196,7 @@ class File(h5py.File):
         """
         if "metadata" not in self:
             raise KeyError("No 'metadata' group in this file.")
-        raw = load_dict_from_hdf5_group(self["metadata"])
+        raw = self.load_group("metadata")
         return MetadataSpec(**raw)
 
     @property
@@ -2101,22 +2217,8 @@ class File(h5py.File):
         """
         if "metrics" not in self:
             raise KeyError("No 'metrics' group in this file.")
-        raw = load_dict_from_hdf5_group(self["metrics"])
+        raw = self.load_group("metrics")
         return MetricsSpec(**raw)
-
-    def recursively_load_dict_contents_from_group(self, path: str) -> dict:
-        """Load dict from contents of group.
-
-        .. deprecated::
-            Use the module-level :func:`load_dict_from_hdf5_group` function instead,
-            passing an :class:`h5py.Group` directly.
-
-        Args:
-            path (str): path to group
-        Returns:
-            dict: dictionary with contents of group
-        """
-        return load_dict_from_hdf5_group(self[path])
 
     def has_key(self, key: str) -> bool:
         """Check if the file has a specific key.
@@ -2163,7 +2265,7 @@ class File(h5py.File):
             dict: ``{"status": "success"}`` on success.
 
         Raises:
-            AssertionError: If the file is missing required groups or contains
+            InvalidZeaFileError: If the file is missing required groups or contains
                 unrecognised data keys.
         """
         try:
@@ -2211,7 +2313,7 @@ class File(h5py.File):
         if "tracks" not in self:
             track: dict = {}
             if super().__contains__("data"):
-                data = load_dict_from_hdf5_group(self["data"])
+                data = self.load_group("data")
                 track["data"] = legacy_data(data) if _is_legacy_file(self) else data
             if self.scan is not None:
                 track["scan"] = self.scan
@@ -2222,7 +2324,7 @@ class File(h5py.File):
         for track in self.tracks:
             track_dict: dict = {"label": track.label}
             if "data" in track._group:
-                track_dict["data"] = load_dict_from_hdf5_group(track._group["data"])
+                track_dict["data"] = self.load_group(track._group["data"])
             if "scan" in track._group:
                 track_dict["scan"] = track.scan
             # Preserve transmit-only tracks (data=None); without this the rebuilt TrackSpec
@@ -2362,9 +2464,9 @@ def load_file(
         # Load the desired frames from the file
         _key = file.format_key(data_type)
         _indices = indices if indices is not None else slice(None)
-        item = file[_key]
-        if isinstance(item, h5py.Group):
-            data = item["values"][_indices]
+        item = file.dataset(_key)
+        if isinstance(item, _GroupProxy):
+            data = item.values[_indices]
         else:
             data = item[_indices]
 
@@ -2522,18 +2624,19 @@ def validate_file(path: str | None = None, file: "File | None" = None):
         dict: ``{"status": "success"}`` on success.
 
     Raises:
-        AssertionError: If the file is missing the ``data`` group.
+        InvalidZeaFileError: If the file does not have the structure the zea format
+            requires (missing ``data`` group, unrecognised keys, a malformed track).
+        ValueError: If neither or both of *path* and *file* are given.
         TypeError, ValueError: If spec validation fails on files created with zea v0.1.0 and later.
     """
-    assert (path is not None) ^ (file is not None), (
-        "Provide either the path or the file, but not both."
-    )
+    if (path is not None) == (file is not None):
+        raise ValueError("Provide either the path or the file, but not both.")
 
     if path is not None:
         with File(path, "r") as _file:
             _validate_file_impl(_file)
     else:
-        assert file is not None  # guaranteed by the xor assertion above
+        assert file is not None  # narrowing for type checkers; guaranteed by the check above
         _validate_file_impl(file)
 
     return {"status": "success"}
@@ -2553,58 +2656,78 @@ def _validate_file_impl(file: File) -> None:
     """Lightweight structural validation — no array data is loaded.
 
     Checks that:
-    - a ``data`` group is present — either at ``tracks/track_N/data``
-      or at the root ``data`` group (legacy)
-    - for legacy files, every key in ``data`` is a recognised zea data type
-    - for files created with zea v0.1.0 and later, every key in ``data``
-    is in :class:`~zea.data.spec.DataSpec`\'s schema
+    - a ``data`` group is present
+    - every track satisfies :func:`~zea.data.spec.check_track_rules`
+    - every key in ``data`` is in :class:`~zea.data.spec.DataSpec`\'s schema
     """
-    # Collect all data groups to validate
     data_groups: list[tuple[str, h5py.Group]] = []
+    n_tracks = 0
 
+    # Track format: tracks/track_N/data
     if super(File, file).__contains__("tracks"):
-        # New multi-track format: tracks/track_N/data
         tracks_group = file["tracks"]
+        if not isinstance(tracks_group, h5py.Group):
+            raise InvalidZeaFileError("'tracks' is not a group - this may not be a zea file.")
         for track_key in tracks_group.keys():
             track_grp = tracks_group[track_key]
-            assert "data" in track_grp, f"Track group '{track_key}' is missing a 'data' subgroup."
-            assert isinstance(track_grp["data"], h5py.Group), (
-                f"'{track_key}/data' is not a group - this may not be a zea file."
-            )
-            data_groups.append((f"tracks/{track_key}/data", track_grp["data"]))
+            # Only track_N groups are tracks; anything else under 'tracks' is not one, so
+            # it must not stand in for the data group the assertion below looks for.
+            if not (isinstance(track_grp, h5py.Group) and _TRACK_RE.fullmatch(track_key)):
+                continue
+            n_tracks += 1
+            has_data = "data" in track_grp
+            if has_data and not isinstance(track_grp["data"], h5py.Group):
+                raise InvalidZeaFileError(
+                    f"'{track_key}/data' is not a group - this may not be a zea file."
+                )
+            # The same rules TrackSpec enforces when writing, answered structurally.
+            transmit_only = "transmit_only" in track_grp and bool(track_grp["transmit_only"][()])
+            try:
+                check_track_rules(
+                    has_data=has_data,
+                    has_scan="scan" in track_grp,
+                    transmit_only=transmit_only,
+                    has_raw=has_data and "raw_data" in track_grp["data"],
+                )
+            except InvalidZeaFileError as e:
+                raise InvalidZeaFileError(f"Track '{track_key}': {e}") from e
+            if has_data:
+                data_groups.append((f"tracks/{track_key}/data", track_grp["data"]))
+
+    # Root-level data group
     elif super(File, file).__contains__("data"):
-        # Legacy root-level data group
-        assert isinstance(file["data"], h5py.Group), (
-            "'data' is not a group - this may not be a zea file."
+        if not isinstance(file["data"], h5py.Group):
+            raise InvalidZeaFileError("'data' is not a group - this may not be a zea file.")
+        check_track_rules(
+            has_data=True,
+            has_scan=super(File, file).__contains__("scan"),
+            transmit_only=False,
+            has_raw="raw_data" in file["data"],
         )
         data_groups.append(("data", file["data"]))
 
-    assert data_groups, (
-        "'data' group not found in file. "
-        "Expected either tracks/track_N/data or a root 'data' group."
-    )
+    if not data_groups and not n_tracks:
+        raise InvalidZeaFileError(
+            "'data' group not found in file. "
+            "Expected either tracks/track_N/data or a root 'data' group."
+        )
 
+    # Which names may appear as a flat dataset
+    if _is_legacy_file(file):
+        known_flat = set(DataSpec.SCHEMA) | {"image_sc"}
+    else:
+        known_flat = {k for k, v in DataSpec.SCHEMA.items() if "spec" not in v}
+
+    # Validate that every dataset in every data group is either a recognised flat dataset
+    # or a group (Map spec).
     for group_path, data_group in data_groups:
-        if _is_legacy_file(file):
-            # For legacy files: accepted keys are the flat _DATA_TYPES list.
-            has_raw = any(k in data_group for k in _NON_IMAGE_DATA_TYPES)
-            if has_raw:
-                assert "scan" in file, "Legacy file is missing the 'scan' group."
-            for key in data_group.keys():
-                assert key in _DATA_TYPES, (
-                    f"'{group_path}/{key}' is not a recognised zea data type."
-                )
-        else:
-            # For new-format files: flat datasets must be known DataSpec keys.
-            # HDF5 Groups are Map specs (either a named type or a custom map)
-            # and are always accepted; validate() is a structural check only.
-            known = set(DataSpec.SCHEMA.keys())
-            known_flat = {k for k, v in DataSpec.SCHEMA.items() if "spec" not in v}
-            for key in data_group.keys():
-                if isinstance(data_group[key], h5py.Group):
-                    # Named map or custom map — accepted without further checks here.
-                    continue
-                assert key in known_flat, (
-                    f"'{group_path}/{key}' is not in the DataSpec schema. "
-                    f"Known keys: {sorted(known)}"
+        for key in data_group.keys():
+            # Groups are Map specs, either a named type or a custom map, and are always
+            # accepted; validate() is a structural check only.
+            if isinstance(data_group[key], h5py.Group):
+                continue
+            if key not in known_flat:
+                raise InvalidZeaFileError(
+                    f"'{group_path}/{key}' is not a recognised zea data type. "
+                    f"Expected a group, or one of these datasets: {sorted(known_flat)}."
                 )

@@ -1,6 +1,6 @@
 import math
 import os
-import tempfile
+import re
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields
@@ -16,6 +16,7 @@ import numpy as np
 
 from zea import log
 from zea.internal.typing import Scalar
+from zea.internal.utils import atomic_write
 
 # Named dimensions whose sizes must agree wherever they appear.
 CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch", "n_spatial_ch"}
@@ -179,6 +180,10 @@ def find_matched_shape(value: Any, expected_shapes: Sequence[tuple]) -> tuple | 
         if match_shape(value, expected_shape):
             return expected_shape
     return None
+
+
+class InvalidZeaFileError(ValueError):
+    """Raised when data does not have the structure the zea format requires."""
 
 
 class Spec:
@@ -2280,6 +2285,33 @@ class MetricsSpec(Spec):
     }
 
 
+def check_track_rules(
+    *, has_data: bool, has_scan: bool, transmit_only: bool, has_raw: bool
+) -> None:
+    """Raise :class:`InvalidZeaFileError` if a track breaks one of the format's rules."""
+    if not has_data and not has_scan:
+        raise InvalidZeaFileError(
+            "A track must have at least one of 'data' or 'scan'. "
+            "'data' may be None (a transmit-only track) only when 'scan' is provided "
+            "and 'transmit_only=True' is explicitly set."
+        )
+    if not has_data and has_scan and not transmit_only:
+        raise InvalidZeaFileError(
+            "'data' is None but 'transmit_only' was not set to True. "
+            "Pass 'transmit_only=True' to explicitly create a transmit-only track "
+            "(one that records only the transmit sequence via 'scan', with no "
+            "corresponding receive data, e.g. a shear wave push pulse or "
+            "therapeutic ultrasound exposure)."
+        )
+    if transmit_only and has_data:
+        raise InvalidZeaFileError(
+            "'transmit_only=True' was set but 'data' is not None. "
+            "A transmit-only track must not carry data."
+        )
+    if has_raw and not has_scan:
+        raise InvalidZeaFileError("'scan' is required when 'raw_data' is provided in track data.")
+
+
 @dataclass
 class TrackSpec(Spec):
     """A single acquisition track with its own data and scan parameters.
@@ -2359,34 +2391,16 @@ class TrackSpec(Spec):
     def __post_init__(self):
         super().__post_init__()
 
-        if self.data is None and self.scan is None:
-            raise ValueError(
-                "A track must have at least one of 'data' or 'scan'. "
-                "'data' may be None (a transmit-only track) only when 'scan' is provided "
-                "and 'transmit_only=True' is explicitly set."
-            )
-
-        if self.data is None and self.scan is not None and not self.transmit_only:
-            raise ValueError(
-                "'data' is None but 'transmit_only' was not set to True. "
-                "Pass 'transmit_only=True' to explicitly create a transmit-only track "
-                "(one that records only the transmit sequence via 'scan', with no "
-                "corresponding receive data, e.g. a shear wave push pulse or "
-                "therapeutic ultrasound exposure)."
-            )
-
-        if self.transmit_only and self.data is not None:
-            raise ValueError(
-                "'transmit_only=True' was set but 'data' is not None. "
-                "A transmit-only track must not carry data."
-            )
-
         data = self.data
         has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
             isinstance(data, dict) and data.get("raw_data") is not None
         )
-        if has_raw and self.scan is None:
-            raise ValueError("'scan' is required when 'raw_data' is provided in track data.")
+        check_track_rules(
+            has_data=data is not None,
+            has_scan=self.scan is not None,
+            transmit_only=bool(self.transmit_only),
+            has_raw=has_raw,
+        )
 
         if self.label is not None and not isinstance(self.label, str):
             raise TypeError(f"'label' must be a str, got {type(self.label)}")
@@ -2808,22 +2822,10 @@ class FileSpec(Spec):
                     "regulations. Ensure you have appropriate authorization and "
                     "de-identification measures in place before sharing this file."
                 )
-        # Write to a temporary file in the destination directory, then atomically
-        # rename it into place.
-        fd, tmp_name = tempfile.mkstemp(
-            dir=str(_path.parent), prefix=f".{_path.stem}.tmp-", suffix=".hdf5"
-        )
-        os.close(fd)
-        tmp_path = Path(tmp_name)
-        try:
+        with atomic_write(_path, suffix=".hdf5") as tmp_path:
             self._write_hdf5(
                 tmp_path, _zea_version, compression, chunk_axes, warn_missing_optional_fields
             )
-            os.replace(tmp_path, _path)
-        except BaseException:
-            # Includes KeyboardInterrupt/SystemExit: clean up the partial temp file.
-            tmp_path.unlink(missing_ok=True)
-            raise
 
         log.info(f"File saved to {log.yellow(path)}")
 
@@ -2892,3 +2894,93 @@ class FileSpec(Spec):
                     )
                     group[element.name].attrs["description"] = element.description
                     group[element.name].attrs["unit"] = element.unit
+
+
+#: Roots of a path into a zea file that are not fields of :class:`FileSpec` itself:
+#: ``data`` and ``scan`` are the single-track shorthands that
+#: :meth:`zea.File.__getitem__` remaps onto ``tracks/track_0/``.
+ROOT_SPECS = {"data": DataSpec, "scan": ScanSpec}
+
+# A single track group name (``track_0``), and that name as a path prefix (``tracks/track_0/``).
+_TRACK_RE = re.compile(r"track_\d+")
+_TRACK_PREFIX_RE = re.compile(r"^/?tracks/track_\d+/")
+
+
+def strip_track_prefix(key: str) -> str:
+    """Strip a leading ``tracks/track_N/`` off a path into a zea file.
+
+    Turns a fully qualified path into the single-track shorthand
+    :meth:`zea.File.__getitem__` also accepts, so ``tracks/track_0/data/raw_data``
+    and ``data/raw_data`` can be treated alike. Paths without the prefix are
+    returned unchanged.
+    """
+    return _TRACK_PREFIX_RE.sub("", key)
+
+
+def _walk_to_schema_entry(parts: Sequence[str]) -> dict | None:
+    """Follow ``parts`` down the spec tree, returning the SCHEMA entry it lands on."""
+    spec_cls: type[Spec] | None = FileSpec
+    entry: dict | None = None
+    if parts and parts[0] in ROOT_SPECS:
+        spec_cls, parts = ROOT_SPECS[parts[0]], parts[1:]
+    for part in parts:
+        if spec_cls is None:
+            return None  # a leaf was reached with path segments left over
+        entry = getattr(spec_cls, "SCHEMA", {}).get(part)
+        if entry is None:
+            return None
+        spec_cls = entry.get("spec")
+    if spec_cls is not None:
+        # Landed on a group (``data/image``); the array itself lives in ``values``.
+        entry = getattr(spec_cls, "SCHEMA", {}).get("values")
+    return entry
+
+
+def dim_names_for_key(key: str, ndim: int) -> tuple[str | None, ...] | None:
+    """Resolve a path into a zea file to one dimension name per axis of its array.
+
+    Lets a reader ask *what does this axis mean* — most usefully, which axis (if
+    any) holds frames — without opening a file.  The path is the same one
+    :meth:`zea.File.__getitem__` takes: ``"data/raw_data"``,
+    ``"data/image/values"``, or the group ``"data/image"``, which resolves to the
+    group's ``values`` field.  Dots and slashes are interchangeable and a
+    ``tracks/track_N/`` prefix is stripped.
+
+    Args:
+        key: Path to a data array within the file.
+        ndim: Rank of the array actually stored there, used to pick between the
+            alternative shapes a field may declare (``Image.values`` is 2-D or 3-D
+            plus frames, say).
+
+    Returns:
+        One name per axis, ``None`` for axes the spec gives no name (a literal
+        size, such as the trailing ``3`` of ``coordinates``).  ``None`` instead of
+        a tuple when the spec cannot say: the path is not part of the spec, no
+        declared shape has this rank, or the matching shape uses a ``"..."``
+        wildcard, which leaves the meaning of the absorbed axes unknown.
+
+    Example:
+        .. doctest::
+
+            >>> from zea.data.spec import dim_names_for_key
+            >>> dim_names_for_key("data/raw_data", 5)
+            ('n_frames', 'n_tx', 'n_ax', 'n_el', 'n_ch')
+            >>> dim_names_for_key("data/image", 3)
+            ('n_frames', 'z', 'x')
+            >>> dim_names_for_key("probe/probe_geometry", 2)
+            ('n_el', None)
+            >>> dim_names_for_key("custom/my_array", 3) is None
+            True
+    """
+    parts = [part for part in key.replace(".", "/").split("/") if part]
+    if len(parts) >= 2 and parts[0] == "tracks" and _TRACK_RE.fullmatch(parts[1]):
+        parts = parts[2:]
+    entry = _walk_to_schema_entry(parts)
+    if entry is None:
+        return None
+    for alternative in Spec._expected_shapes(entry.get("shape")):
+        if "..." in alternative:
+            continue  # the wildcard absorbs an unknown number of unnamed axes
+        if len(alternative) == ndim:
+            return tuple(dim if isinstance(dim, str) else None for dim in alternative)
+    return None
