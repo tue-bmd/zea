@@ -49,8 +49,9 @@ class Simulate(Operation):
     ``method`` switches between different approximation models. ``"exact"`` is the highest fidelity
     version. ``"frequency_approximation"`` is an alias for ``exact``; future versions that sacrifice
     speed for accuracy or accuracy for speed will use these two paths respectively.
-    ``"time_approximation"`` solves in the time domain, evaluating only at the center frequency;
-    less accurate than the others, but much faster in some settings.
+    ``"time_approximation"`` solves in the time domain. Its geometry-dependent factors are
+    evaluated at the center frequency, making it less accurate than the others but much faster in
+    some settings.
     """
 
     # Define operation-specific static parameters
@@ -62,6 +63,7 @@ class Simulate(Operation):
         "max_chunk_gb",
         "center_frequency",
         "sampling_frequency",
+        "scatter_exponent",
         "noise_level_db",
         "tgc_max_db",
         "noise_seed",
@@ -107,6 +109,7 @@ class Simulate(Operation):
         tgc_max_db=0.0,
         noise_seed=0,
         noise_reference=None,
+        scatter_exponent=2.0,
         **kwargs,
     ):
         if method not in simulator_settings:
@@ -129,6 +132,7 @@ class Simulate(Operation):
             "t_peak": t_peak,
             "elevation_lens": elevation_lens,
             "element_height": element_height,
+            "scatter_exponent": scatter_exponent,
             "max_chunk_gb": max_chunk_gb,
             "noise_level_db": noise_level_db,
             "tgc_max_db": tgc_max_db,
