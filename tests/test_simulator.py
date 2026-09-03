@@ -591,3 +591,28 @@ def test_time_domain_lens_correction_delays_arrivals():
     assert delay == pytest.approx(expected, abs=2), (
         f"Lens correction shifted the echo by {delay} samples, expected ~{expected:.1f}"
     )
+
+
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+@pytest.mark.parametrize("scatter_exponent", [-1.0, np.nan, np.inf])
+def test_invalid_scatter_exponent_raises(simulator, scatter_exponent):
+    """A bad exponent must fail loudly, not silently return an all-NaN RF frame."""
+    args = _td_args()
+    args["scatterer_positions"] = np.array([[0.0, 0.0, 30e-3]], dtype=np.float32)
+    args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
+
+    with pytest.raises(ValueError, match="scatter_exponent"):
+        simulator(**args, scatter_exponent=scatter_exponent)
+
+
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+@pytest.mark.parametrize("scatter_exponent", [0.0, 0.6, 2.0])
+def test_valid_scatter_exponent_gives_finite_rf(simulator, scatter_exponent):
+    """Physical exponents, including the unweighted 0, stay accepted and finite."""
+    args = _td_args()
+    args["scatterer_positions"] = np.array([[0.0, 0.0, 30e-3]], dtype=np.float32)
+    args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
+
+    rf = keras.ops.convert_to_numpy(simulator(**args, scatter_exponent=scatter_exponent))
+    assert np.isfinite(rf).all()
+    assert np.abs(rf).max() > 0

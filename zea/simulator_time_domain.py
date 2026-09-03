@@ -44,6 +44,7 @@ from zea.func.ultrasound import directivity
 from zea.simulator import (
     _apply_elevation_slab,
     _resolve_element_width,
+    _validate_scatter_exponent,
     _warn_if_elevation_extent,
     attenuate,
     hann_unnormalized,
@@ -390,6 +391,7 @@ def get_pulse_waveform(
     Returns:
         array-like: The pulse waveform of shape (n_samples,).
     """
+    _validate_scatter_exponent(scatter_exponent)
     width = n_period / center_frequency
     support_samples = width * sampling_frequency
     if support_samples > n_samples:

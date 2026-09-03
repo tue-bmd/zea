@@ -125,6 +125,8 @@ def simulate_rf(
 
     """
 
+    _validate_scatter_exponent(scatter_exponent)
+
     n_tx = t0_delays.shape[0]
 
     element_width = _resolve_element_width(probe_geometry, element_width)
@@ -282,6 +284,17 @@ def apply_receive_chain(
         rf_data = rf_data * ops.reshape(10.0 ** (tgc_max_db * ramp / 20.0), (n_ax, 1, 1))
 
     return rf_data
+
+
+def _validate_scatter_exponent(scatter_exponent):
+    """Reject exponents that make the weighting non-finite: the DC bin is zero, so a
+    negative exponent gives infinite gain there, and the NaN spreads over the whole frame."""
+    if not np.isfinite(scatter_exponent) or scatter_exponent < 0:
+        raise ValueError(
+            f"scatter_exponent ({scatter_exponent}) must be finite and non-negative. "
+            "2 is Rayleigh scattering (e.g. blood), myocardium is approximately 1.5, "
+            "soft tissue 0.6-0.8."
+        )
 
 
 def _resolve_element_width(probe_geometry, element_width):
