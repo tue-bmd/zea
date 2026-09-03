@@ -553,17 +553,20 @@ class Parameters(BaseParameters):
         "focus_distances",
         "polar_angles",
         "f_number",
+        "sound_speed",
+        "sampling_frequency",
+        "n_ax",
     )
     def xlims(self):
         """The lateral (x) limits of the beamforming grid in meters.
 
         If not explicitly provided, the limits are derived from the probe geometry, the transmits
         and the receive :attr:`f_number`:. If f_number is 0, a 45 degree cone is used instead.
+        The limits never come out narrower than the probe width.
 
-        If all transmits are unsteered focused or plane waves with a flat array (e.g. walking
-        aperture scans), the limits hug the probe width. Otherwise, the limits add
-        ``max(zlims) / (2 * f_number)`` on both sides, so the xlims match the f-number aperture
-        angle.
+        Unsteered focused or plane wave transmits on a flat array (e.g. walking aperture scans)
+        image the strip in front of the array, so the limits hug the probe width. Otherwise the
+        field of view follows the receive cone for the edge elements.
         """
         xlims = self._params.get("xlims")
         if xlims is not None:
