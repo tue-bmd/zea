@@ -17,6 +17,7 @@ from zea.internal.core import DEFAULT_DYNAMIC_RANGE, DataTypes
 from zea.internal.registry import ops_registry
 from zea.ops.keras_ops import Squeeze
 from zea.ops.pipeline import (
+    DEFAULT_PATCH_SIZE,
     Beamform,
     Map,
     PatchedGrid,
@@ -929,7 +930,9 @@ def test_compact_output_omits_defaults():
     beamform_dict = full["pipeline"]["operations"][0]
     assert "params" in beamform_dict
     assert beamform_dict["params"]["beamformer"] == "delay_and_sum"
-    assert beamform_dict["params"]["num_patches"] == 100
+    # Patches are sized, not counted, by default.
+    assert beamform_dict["params"]["patch_size"] == DEFAULT_PATCH_SIZE
+    assert "num_patches" not in beamform_dict["params"]
     assert beamform_dict["params"]["enable_pfield"] is False
 
 
