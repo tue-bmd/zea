@@ -17,7 +17,8 @@ from zea.simulator import (
     select_elevation_slab,
     simulate_rf,
 )
-from zea.simulator_time_domain import simulate_rf_td
+from zea.ops import Simulate
+from zea.simulator_time_domain import get_pulse_waveform, simulate_rf_td
 
 N_EL = 80
 APERTURE = 32e-3
@@ -29,8 +30,31 @@ ZLIMS = (10e-3, 35e-3)
 DYNAMIC_RANGE = (-50.0, 0.0)
 
 
+def test_time_domain_scatter_exponent_weights_pulse_spectrum():
+    """The time-domain approximation applies scatter frequency dependence to its pulse."""
+    n_samples = 129
+    unweighted = np.asarray(
+        keras.ops.convert_to_numpy(
+            get_pulse_waveform(CENTER_FREQUENCY, CENTER_FREQUENCY * 4, n_samples=n_samples)
+        )
+    )
+    weighted = np.asarray(
+        keras.ops.convert_to_numpy(
+            get_pulse_waveform(
+                CENTER_FREQUENCY,
+                CENTER_FREQUENCY * 4,
+                n_samples=n_samples,
+                scatter_exponent=2.0,
+            )
+        )
+    )
+    frequencies = np.fft.rfftfreq(n_samples, 1 / (CENTER_FREQUENCY * 4))
+    expected = np.fft.rfft(unweighted) * (frequencies / CENTER_FREQUENCY) ** 2
+    np.testing.assert_allclose(np.fft.rfft(weighted), expected, rtol=2e-5, atol=2e-5)
+
+
 def _parameters(probe_geometry):
-    angles = np.linspace(-5, 5, N_TX) * np.pi / 180
+    angles = np.linspace(-15, 15, N_TX) * np.pi / 180
     wavelength = SOUND_SPEED / CENTER_FREQUENCY
     return Parameters(
         n_tx=N_TX,
@@ -328,11 +352,8 @@ def test_simulate_op_prunes_elevation_slab_without_leaking_pruned_cloud():
     assert outputs["scatterer_magnitudes"].shape == magnitudes.shape
 
 
-def test_record_length_gate_uses_worst_case_element_pair():
-    """
-    A scatterer with one in-record and one out-of-record element must be gated out to prevent
-    aliasing.
-    """
+def test_record_length_gate_keeps_in_record_pairs_without_aliasing():
+    """Scatterers that fit in the record must not be zeroed, but no aliasing may happen."""
     probe_geometry = np.array([[-8e-3, 0.0, 0.0], [8e-3, 0.0, 0.0]], dtype=np.float32)
     scatterer_positions = np.array([[9.375e-3, 0.0, 9.905e-3]], dtype=np.float32)
 
@@ -355,5 +376,243 @@ def test_record_length_gate_uses_worst_case_element_pair():
         "t_peak": np.zeros(1, dtype=np.float32),
     }
 
-    rf = keras.ops.convert_to_numpy(simulate_rf(**args))
-    assert np.abs(rf).max() == 0, "Out-of-record element pair was included; implies aliased energy."
+    rf = keras.ops.convert_to_numpy(simulate_rf(**args))[0, :, :, 0]
+    # Four times the record gates nothing, so it is the un-truncated ground truth.
+    reference = keras.ops.convert_to_numpy(simulate_rf(**{**args, "n_ax": 1024}))[0, :256, :, 0]
+
+    near = 1  # element 8 mm from the scatterer, so its own round trip is the 13.0 us pair
+    peak = np.abs(rf[:, near]).max()
+    assert np.abs(rf[:, near]).argmax() == np.abs(reference[:, near]).argmax(), (
+        "In-record pair was gated out or moved."
+    )
+    assert np.abs(rf[:, near] - reference[:, near]).max() < 1e-3 * peak
+
+    # The 26.0 us pair would land near sample 56; the earliest real arrival is the pulse
+    # around sample 156.
+    quiet = np.abs(rf[:140]).max()
+    assert quiet < 1e-3 * peak, (
+        f"Aliased energy detected: {quiet:.3g} should be much less than peak ({peak:.3g})"
+    )
+
+
+def _receive_chain_image(fish_scan, simulator, **receive_chain_kwargs):
+    _, simulation_args, beamform = fish_scan
+    return beamform(simulator(**simulation_args, noise_seed=0, **receive_chain_kwargs))
+
+
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+def test_tgc_brightens_the_deepest_scatterers(fish_scan, simulator):
+    """TGC compensates spreading loss, so the deep scatterers gain on the shallow ones."""
+    positions, _, _ = fish_scan
+    by_depth = np.argsort(positions[:, 2])
+    quartile = len(positions) // 4
+    deepest, shallowest = positions[by_depth[-quartile:]], positions[by_depth[:quartile]]
+
+    without = _receive_chain_image(fish_scan, simulator, noise_level_db=None, tgc_max_db=0.0)
+    with_tgc = _receive_chain_image(fish_scan, simulator, noise_level_db=None, tgc_max_db=50.0)
+
+    dim = _dot_brightness(without, deepest).mean()
+    bright = _dot_brightness(with_tgc, deepest).mean()
+    assert dim < bright, (
+        f"Deepest scatterers are not brighter with TGC: {dim:.1f} without, {bright:.1f} with"
+    )
+
+    # Depth ratio isolates the gain ramp from any global brightness shift.
+    without_ratio = dim / _dot_brightness(without, shallowest).mean()
+    with_ratio = bright / _dot_brightness(with_tgc, shallowest).mean()
+    assert without_ratio < 1.0 < with_ratio, (
+        f"TGC did not invert the deep/shallow brightness ratio: {without_ratio:.2f} without, "
+        f"{with_ratio:.2f} with"
+    )
+
+
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+def test_noise_lowers_relative_scatterer_amplitude(fish_scan, simulator):
+    """Electronic noise lifts the background, so scatterers stand out less above the mean."""
+    positions, _, _ = fish_scan
+
+    noiseless = _receive_chain_image(fish_scan, simulator, noise_level_db=None, tgc_max_db=50.0)
+    noisy = _receive_chain_image(fish_scan, simulator, noise_level_db=-30.0, tgc_max_db=50.0)
+
+    clean = _dot_brightness(noiseless / noiseless.mean(), positions).mean()
+    degraded = _dot_brightness(noisy / noisy.mean(), positions).mean()
+    assert degraded < clean, (
+        f"Noise did not lower the relative scatterer amplitude: {clean:.1f}x noiseless, "
+        f"{degraded:.1f}x at -30 dB"
+    )
+
+
+def _batched_rf(simulation_args, batch, **receive_chain_kwargs):
+    """RF for `batch` identical copies of a few scatterers, through the batched op path."""
+    args = dict(simulation_args)
+    positions = np.asarray(args["scatterer_positions"], dtype=np.float32)[:16]
+    args["scatterer_positions"] = np.repeat(positions[None], batch, axis=0)
+    args["scatterer_magnitudes"] = np.ones((batch, len(positions)), dtype=np.float32)
+    op = Simulate(with_batch_dim=True)
+    outputs = op(**args, **receive_chain_kwargs)
+    return np.asarray(keras.ops.convert_to_numpy(outputs[op.output_key]))
+
+
+def test_batched_noise_is_independent_across_items(fish_scan):
+    """A stateless seed must not repeat the same noise realisation for every batch item."""
+    _, simulation_args, _ = fish_scan
+
+    noiseless = _batched_rf(simulation_args, 3, noise_level_db=None, noise_seed=0)
+    noisy = _batched_rf(simulation_args, 3, noise_level_db=-20.0, noise_seed=0)
+    noise = noisy - noiseless
+
+    assert np.allclose(noiseless[0], noiseless[1]), "Identical scatterers gave different RF"
+    for other in (1, 2):
+        assert not np.allclose(noise[0], noise[other]), (
+            f"Batch item {other} got the same noise realisation as item 0"
+        )
+
+
+def test_batched_noise_is_reproducible(fish_scan):
+    """Same seed, same batch: identical noise. Different seed: different noise."""
+    _, simulation_args, _ = fish_scan
+    kwargs = {"noise_level_db": -20.0}
+
+    first = _batched_rf(simulation_args, 2, noise_seed=3, **kwargs)
+    again = _batched_rf(simulation_args, 2, noise_seed=3, **kwargs)
+    other = _batched_rf(simulation_args, 2, noise_seed=4, **kwargs)
+
+    assert np.array_equal(first, again), "Same seed did not reproduce the batched noise"
+    assert not np.allclose(first, other), "Different seeds gave the same batched noise"
+
+
+def test_batched_receive_chain_matches_unbatched(fish_scan):
+    """TGC and the default noise reference are per item, so batching must not change them."""
+    _, simulation_args, _ = fish_scan
+    positions = np.asarray(simulation_args["scatterer_positions"], dtype=np.float32)[:16]
+
+    batched = _batched_rf(simulation_args, 2, noise_level_db=None, tgc_max_db=50.0)
+    single = keras.ops.convert_to_numpy(
+        simulate_rf(
+            **{
+                **simulation_args,
+                "scatterer_positions": positions,
+                "scatterer_magnitudes": np.ones(len(positions), dtype=np.float32),
+            },
+            noise_level_db=None,
+            tgc_max_db=50.0,
+        )
+    )
+
+    # ops.map reduces in a different order, so compare against the RF peak.
+    scale = np.abs(single).max()
+    np.testing.assert_allclose(batched[0] / scale, single / scale, atol=1e-4)
+
+
+def test_batched_noise_reference_is_per_item(fish_scan):
+    """The default reference is each item's own peak, not one maximum shared by the batch."""
+    _, simulation_args, _ = fish_scan
+    args = dict(simulation_args)
+    positions = np.asarray(args["scatterer_positions"], dtype=np.float32)[:16]
+    magnitudes = np.ones(len(positions), dtype=np.float32)
+
+    args["scatterer_positions"] = np.repeat(positions[None], 2, axis=0)
+    args["scatterer_magnitudes"] = np.stack([magnitudes, magnitudes * 100.0])
+
+    op = Simulate(with_batch_dim=True)
+    noiseless = np.asarray(
+        keras.ops.convert_to_numpy(op(**args, noise_level_db=None)[op.output_key])
+    )
+    noisy = np.asarray(
+        keras.ops.convert_to_numpy(op(**args, noise_level_db=-20.0, noise_seed=0)[op.output_key])
+    )
+    noise = noisy - noiseless
+
+    ratio = noise[1].std() / noise[0].std()
+    assert 90.0 < ratio < 110.0, (
+        f"Noise did not track the per-item peak: 100x brighter item got {ratio:.1f}x the noise"
+    )
+
+
+def _td_args(n_el=16, **overrides):
+    """Minimal single-transmit argument set for the time-domain simulator."""
+    probe_geometry = np.stack(
+        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+    args = {
+        "probe_geometry": probe_geometry,
+        "apply_lens_correction": False,
+        "lens_thickness": 1e-3,
+        "lens_sound_speed": 1000.0,
+        "sound_speed": SOUND_SPEED,
+        "n_ax": 1024,
+        "center_frequency": CENTER_FREQUENCY,
+        "sampling_frequency": CENTER_FREQUENCY * 4,
+        "t0_delays": np.zeros((1, n_el), dtype=np.float32),
+        "initial_times": np.zeros(1, dtype=np.float32),
+        "element_width": 1e-3,
+        "attenuation_coef": 0.0,
+        "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
+        "t_peak": np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
+    }
+    return {**args, **overrides}
+
+
+def test_time_domain_elevation_lens_prunes_out_of_plane_scatterers():
+    """The time-domain simulator drops scatterers outside the elevation slab."""
+    element_height = 5e-3
+    args = _td_args(elevation_lens=True, element_height=element_height)
+    args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
+
+    inside = np.array([[0.0, 0.5 * element_height, 30e-3]], dtype=np.float32)
+    outside = np.array([[0.0, 1.5 * element_height, 30e-3]], dtype=np.float32)
+
+    rf_inside = keras.ops.convert_to_numpy(simulate_rf_td(scatterer_positions=inside, **args))
+    rf_outside = keras.ops.convert_to_numpy(simulate_rf_td(scatterer_positions=outside, **args))
+    assert np.abs(rf_inside).max() > 0
+    assert np.abs(rf_outside).max() == 0
+
+
+def test_time_domain_lens_correction_delays_arrivals():
+    """A slow lens lengthens the round trip."""
+    args = _td_args()
+    args["scatterer_positions"] = np.array([[0.0, 0.0, 30e-3]], dtype=np.float32)
+    args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
+
+    uncorrected = keras.ops.convert_to_numpy(simulate_rf_td(**args))[0, :, :, 0]
+    corrected = keras.ops.convert_to_numpy(
+        simulate_rf_td(**{**args, "apply_lens_correction": True})
+    )[0, :, :, 0]
+
+    center = args["probe_geometry"].shape[0] // 2
+    delay = np.abs(corrected[:, center]).argmax() - np.abs(uncorrected[:, center]).argmax()
+    # Two lens crossings at 1000 m/s instead of 1540 m/s: ~0.7 us, ~8 samples at 4x fc.
+    expected = (
+        2
+        * args["lens_thickness"]
+        * (1 / args["lens_sound_speed"] - 1 / args["sound_speed"])
+        * args["sampling_frequency"]
+    )
+    assert delay == pytest.approx(expected, abs=2), (
+        f"Lens correction shifted the echo by {delay} samples, expected ~{expected:.1f}"
+    )
+
+
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+@pytest.mark.parametrize("scatter_exponent", [-1.0, np.nan, np.inf])
+def test_invalid_scatter_exponent_raises(simulator, scatter_exponent):
+    """A bad exponent must fail loudly, not silently return an all-NaN RF frame."""
+    args = _td_args()
+    args["scatterer_positions"] = np.array([[0.0, 0.0, 30e-3]], dtype=np.float32)
+    args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
+
+    with pytest.raises(ValueError, match="scatter_exponent"):
+        simulator(**args, scatter_exponent=scatter_exponent)
+
+
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+@pytest.mark.parametrize("scatter_exponent", [0.0, 0.6, 2.0])
+def test_valid_scatter_exponent_gives_finite_rf(simulator, scatter_exponent):
+    """Physical exponents, including the unweighted 0, stay accepted and finite."""
+    args = _td_args()
+    args["scatterer_positions"] = np.array([[0.0, 0.0, 30e-3]], dtype=np.float32)
+    args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
+
+    rf = keras.ops.convert_to_numpy(simulator(**args, scatter_exponent=scatter_exponent))
+    assert np.isfinite(rf).all()
+    assert np.abs(rf).max() > 0
