@@ -1070,7 +1070,7 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("zlims", "distance_to_apex")
     def rho_range(self):
-        """A tuple specifying the range of rho values (min_rho, max_rho). Defined in mm.
+        """A tuple specifying the range of rho values (min_rho, max_rho). Defined in meters.
         Used for scan conversion. Rho is measured from the apex of the polar grid, so
         :attr:`zlims` (depths below the transducer) are shifted by
         :attr:`distance_to_apex`, matching the ``rlims`` of
