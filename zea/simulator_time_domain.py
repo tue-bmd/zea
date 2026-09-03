@@ -71,12 +71,12 @@ def simulate_rf_td(
     t_peak,
     elevation_lens=False,
     element_height=None,
-    scatter_exponent=2.0,
     max_chunk_gb=10.0,
     noise_level_db=None,
     tgc_max_db=0.0,
     noise_seed=0,
     noise_reference=None,
+    scatter_exponent=2.0,
 ):
     """Time-domain (splat-and-convolve) RF simulator.
 
@@ -113,9 +113,6 @@ def simulate_rf_td(
             use :class:`zea.ops.Simulate` rather than calling `simulate_rf_td` directly.
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity and the elevation slab. If None, defaults to element_width.
-        scatter_exponent (float): Weigh the scattered waveform spectrum by
-            ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
-            myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
         max_chunk_gb (float): Approximate memory budget [GB] for the (chunk, n_el, n_el)
             tensors held at once while iterating over scatterers. Scatterers are processed
             in chunks sized to this budget, so peak memory no longer scales with the total
@@ -129,6 +126,9 @@ def simulate_rf_td(
         noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
             noiseless RF maximum. Pass a fixed reference to avoid the noise level changing per
             transmit batch. See :func:`zea.simulator.apply_receive_chain`.
+        scatter_exponent (float): Weigh the scattered waveform spectrum by
+            ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
+            myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).

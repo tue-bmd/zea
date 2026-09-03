@@ -104,12 +104,12 @@ class Simulate(Operation):
         method="exact",
         elevation_lens=False,
         element_height=None,
-        scatter_exponent=2.0,
         max_chunk_gb=10.0,
         noise_level_db=None,
         tgc_max_db=0.0,
         noise_seed=0,
         noise_reference=None,
+        scatter_exponent=2.0,
         **kwargs,
     ):
         if method not in simulator_settings:
