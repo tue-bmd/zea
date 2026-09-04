@@ -57,7 +57,7 @@ overrides.
     >>> config.pipeline.operations # doctest: +NORMALIZE_WHITESPACE
     ['demodulate',
      {'name': 'downsample', 'params': {'factor': 4}},
-     {'name': 'beamform', 'params': {'beamformer': 'delay_and_sum', 'enable_pfield': False, 'num_patches': 200}},
+     {'name': 'beamform', 'params': {'beamformer': 'delay_and_sum', 'enable_pfield': False},
      'envelope_detect',
      'normalize',
      'log_compress']
