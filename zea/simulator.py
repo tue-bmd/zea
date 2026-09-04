@@ -44,6 +44,7 @@ more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_e
 
 """
 
+import keras
 import numpy as np
 from keras import ops
 
@@ -72,6 +73,11 @@ def simulate_rf(
     elevation_lens=False,
     element_height=None,
     max_chunk_gb=10.0,
+    noise_level_db=None,
+    tgc_max_db=0.0,
+    noise_seed=0,
+    noise_reference=None,
+    scatter_exponent=2.0,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -101,11 +107,25 @@ def simulate_rf(
             elevation directivity and the elevation slab. If None, defaults to element_width.
         max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
             :func:`zea.simulator_time_domain.simulate_rf_td` share a call signature.
+        noise_level_db (float): Electronic noise level in dB relative to the noiseless RF
+            maximum. None disables the noise. Must be static under jit.
+        tgc_max_db (float): Time gain compensation in dB at the last axial sample, ramped
+            linearly in dB from 0 at the first. 0 disables it. Must be static under jit.
+        noise_seed (int | SeedGenerator | jax.random.key, optional): Seed for the noise. Vary it
+            across transmit batches to keep the realisations independent.
+        noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
+            noiseless RF maximum. Pass a fixed reference to avoid the noise level changing per
+            transmit batch. See :func:`apply_receive_chain`.
+        scatter_exponent (float): Weigh the scattered field by
+            ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
+            myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
 
     """
+
+    _validate_scatter_exponent(scatter_exponent)
 
     n_tx = t0_delays.shape[0]
 
@@ -124,7 +144,13 @@ def simulate_rf(
     # tensorflow can't reduce over an empty axis.
     if scatterer_positions.shape[0] == 0:
         shape = (t0_delays.shape[0], int(n_ax), probe_geometry.shape[0], 1)
-        return ops.zeros(shape, dtype="float32")
+        return apply_receive_chain(
+            ops.zeros(shape, dtype="float32"),
+            noise_level_db,
+            tgc_max_db,
+            noise_seed,
+            noise_reference,
+        )
 
     # Phantoms are float64. Cast manually so tensorflow doesn't complain.
     scatterer_positions = ops.cast(scatterer_positions, "float32")
@@ -155,6 +181,11 @@ def simulate_rf(
 
     waveform_spectrum = pulse_spectrum_fn(freqs)
 
+    if scatter_exponent:
+        scatter_gain = (freqs / center_frequency) ** scatter_exponent
+    else:
+        scatter_gain = ops.ones_like(freqs)
+
     scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
     theta = ops.arctan2(scat_pos_relative_to_probe[..., 0], scat_pos_relative_to_probe[..., 2])
     phi = ops.arctan2(scat_pos_relative_to_probe[..., 1], scat_pos_relative_to_probe[..., 2])
@@ -179,7 +210,9 @@ def simulate_rf(
         tx_response = shared_response * ops.cast(spread(dist[..., None], 1.0), "complex64")
         rx_response = tx_response
 
-    record_length = n_ax_rounded / sampling_frequency
+    # Leave room for the pulse tail
+    record_length = n_ax_rounded / sampling_frequency - 2 / center_frequency
+    travel_time = dist / sound_speed
     parts = []
     for tx in range(n_tx):
         shifts_not_travel_related = t0_delays[tx][:, None] - initial_times[tx] + t_peak[tx]
@@ -187,19 +220,22 @@ def simulate_rf(
         tx_delay = delay2(freqs[None], shifts_not_travel_related, n_ax_rounded, sampling_frequency)
         tx_element_weights = ops.cast(tx_apodizations[tx][:, None], "complex64") * tx_delay
 
-        # delay2 only gates one-way delays. Worst case over elements: drops some in-record
-        # pairs, but never aliases in ops.irfft.
-        round_trip_time = 2 * ops.max(dist, axis=1) / sound_speed + ops.max(
-            shifts_not_travel_related
+        # delay2 only gates one-way delays. Worst case over the active transmit elements,
+        # to never alias in ops.irfft.
+        tx_arrival = ops.max(
+            ops.where(
+                tx_apodizations[tx][None] != 0,
+                travel_time + shifts_not_travel_related[None, :, 0],
+                -float("inf"),
+            ),
+            axis=1,
         )
-        within_record = ops.cast(round_trip_time < record_length, "float32")
+        within_record = ops.cast(tx_arrival[:, None] + travel_time < record_length, "complex64")
 
         # Explicitly sum over tx dimension before the receive axis exists.
         incident_field = ops.sum(tx_response * tx_element_weights[None], axis=1)
-        scattered_field = incident_field * ops.cast(
-            (magnitudes * within_record)[:, None], "complex64"
-        )
-        received_field = scattered_field[:, None] * rx_response
+        scattered_field = incident_field * ops.cast(magnitudes[:, None] * scatter_gain, "complex64")
+        received_field = scattered_field[:, None] * rx_response * within_record[..., None]
         rf_spectrum = waveform_spectrum * ops.sum(received_field, axis=0)
         parts.append(ops.irfft((ops.real(rf_spectrum), ops.imag(rf_spectrum))))
 
@@ -207,7 +243,58 @@ def simulate_rf(
     rf_data = ops.transpose(rf_data, (0, 2, 1))
     rf_data = rf_data[..., None]
     rf_data = rf_data[:, :n_ax, :, :]
+    return apply_receive_chain(rf_data, noise_level_db, tgc_max_db, noise_seed, noise_reference)
+
+
+def apply_receive_chain(
+    rf_data, noise_level_db=None, tgc_max_db=0.0, noise_seed=0, noise_reference=None
+):
+    """Add electronic noise and time gain compensation to noiseless RF.
+
+    Args:
+        rf_data (array-like): Noiseless RF of shape (n_tx, n_ax, n_el, 1), optionally with a
+            leading batch axis.
+        noise_level_db (float): Noise floor in dB below the peak of ``rf_data``. None disables
+            the noise. Must be static when using jit compilation.
+        tgc_max_db (float): Gain in dB at the last axial sample. 0 disables it. Must be static when
+            using jit compilation.
+        noise_seed (int | SeedGenerator | jax.random.key, optional): Seed for the noise. An int
+            is stateless, so the same value gives the same realisation; vary it across transmit
+            batches. None draws from the global generator and cannot be traced under jit.
+        noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
+            ``rf_data`` maximum. Pass a fixed reference to avoid the noise level changing per
+            transmit batch.
+
+    Returns:
+        array-like: RF with same shape as ``rf_data``.
+    """
+    dtype = keras.backend.standardize_dtype(rf_data.dtype)
+
+    if noise_level_db is not None and noise_level_db > -float("inf"):
+        if noise_reference is None:
+            # When passing a batch, normalize noise level per item instead of per batch
+            noise_reference = ops.max(ops.abs(rf_data), axis=(-4, -3, -2, -1), keepdims=True)
+        sigma = noise_reference * 10.0 ** (noise_level_db / 20.0)
+        noise = keras.random.normal(ops.shape(rf_data), dtype=dtype, seed=noise_seed)
+        rf_data = rf_data + ops.cast(sigma, dtype) * noise
+
+    if tgc_max_db:
+        n_ax = int(ops.shape(rf_data)[-3])
+        ramp = ops.arange(n_ax, dtype=dtype) / max(n_ax - 1, 1)
+        rf_data = rf_data * ops.reshape(10.0 ** (tgc_max_db * ramp / 20.0), (n_ax, 1, 1))
+
     return rf_data
+
+
+def _validate_scatter_exponent(scatter_exponent):
+    """Reject exponents that make the weighting non-finite: the DC bin is zero, so a
+    negative exponent gives infinite gain there, and the NaN spreads over the whole frame."""
+    if not np.isfinite(scatter_exponent) or scatter_exponent < 0:
+        raise ValueError(
+            f"scatter_exponent ({scatter_exponent}) must be finite and non-negative. "
+            "2 is Rayleigh scattering (e.g. blood), myocardium is approximately 1.5, "
+            "soft tissue 0.6-0.8."
+        )
 
 
 def _resolve_element_width(probe_geometry, element_width):
