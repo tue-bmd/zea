@@ -1075,6 +1075,10 @@ def _copyable_fields(schema, skip: frozenset) -> tuple[str, ...]:
 def _select_track(file, track: str | int | None):
     """Return the data group to annotate, from a single- or multi-track file.
 
+    ``track`` is matched against the file's labels first and read as an index only when
+    no label matches, so a numerically labelled track still wins. Files with a single
+    track (or no ``tracks/`` group at all) have nothing to address and ignore ``track``.
+
     Args:
         file (zea.File): The open file.
         track (str | int, optional): Label or index of the track to annotate. Only
@@ -1087,19 +1091,20 @@ def _select_track(file, track: str | int | None):
         ValueError: If the file has several tracks and ``track`` does not name one.
     """
     labels = file.track_labels
-    if len(labels) <= 1 and track is None:
+    if len(labels) <= 1:  # flat layout reports no labels, single-track reports one
         return file.data
     if track is None:
         raise ValueError(
-            f"This file has {len(labels)} tracks, so --track is needed to say which one "
-            f"to annotate. Available: {labels}."
+            f"This file has {len(labels)} tracks {labels} but no track was selected. "
+            "Pass --track <label|index> to pick one."
         )
-    if isinstance(track, int) or track.isdigit():
-        index = int(track)
-        if not 0 <= index < len(labels):
-            raise IndexError(f"No track {index} in this file; it has {len(labels)}.")
-        return file.tracks[index].data
-    return file.get_track(track).data
+    try:
+        index = labels.index(track) if track in labels else int(track)
+    except ValueError:
+        index = -1  # neither a label nor a number: report it like a bad index
+    if not 0 <= index < len(labels):
+        raise ValueError(f"No track {track!r} in this file. Available tracks: {labels}.")
+    return file.tracks[index].data
 
 
 def _map_name(key: str) -> str:

@@ -1125,12 +1125,40 @@ def test_load_input_files_selects_a_track(multi_track_path, track, fill):
     assert all(image[0, 0] == fill for image in inputs.images)
 
 
-def test_load_input_files_rejects_an_unknown_track(multi_track_path):
-    # File.get_track raises, listing the labels the file does have
-    with pytest.raises(KeyError, match="No track with label"):
-        load_input_files([multi_track_path], "elastography")
-    with pytest.raises(IndexError, match="No track 5"):
-        load_input_files([multi_track_path], 5)
+@pytest.mark.parametrize("track", ["elastography", 5, "5", "not-a-number"])
+def test_load_input_files_rejects_an_unknown_track(multi_track_path, track):
+    """One error type for every way of naming a track that isn't there."""
+    with pytest.raises(ValueError, match="Available tracks"):
+        load_input_files([multi_track_path], track)
+
+
+def test_load_input_files_prefers_a_label_over_an_index(tmp_path):
+    """A track labelled '1' is selected by that label, not read as index 1."""
+    from zea.data.file import File
+
+    from .data import generate_dummy_scan
+
+    path = tmp_path / "numeric_labels.hdf5"
+    File.create(
+        path=path,
+        tracks=[
+            {
+                "label": label,
+                "data": {"image": {"values": np.full((2, 8, 6), fill, dtype=np.uint8)}},
+                "scan": generate_dummy_scan(n_tx=1, n_el=4),
+            }
+            for label, fill in (("1", 10), ("0", 20))
+        ],
+        ignore_warnings=True,
+    )
+
+    assert load_input_files([path], "1").images[0][0, 0] == 10  # the label, at index 0
+    assert load_input_files([path], "0").images[0][0, 0] == 20  # the label, at index 1
+
+
+def test_load_input_files_ignores_a_track_on_a_single_track_file(zea_path):
+    """Single-track files have nothing to address, so --track is a no-op, not an error."""
+    assert len(load_input_files([zea_path], "anything").images) == 6
 
 
 def test_load_input_files_zea(zea_path):

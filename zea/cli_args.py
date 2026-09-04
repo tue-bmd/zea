@@ -521,7 +521,8 @@ class _Select:
     overwrite: bool = False
     """Overwrite existing output files."""
     track: str | None = None
-    """Label or index of the track to annotate, for zea files holding more than one."""
+    """Which track to annotate in a multi-track zea file: a label (e.g. 'doppler') or an
+    index (e.g. '1'). Required for multi-track files, ignored for single-track ones."""
 
     def run(self):
         from zea.tools.selection_tool import run_selection_tool
