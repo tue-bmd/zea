@@ -490,9 +490,12 @@ class _Select:
     """
 
     files: tyro.conf.Positional[list[str]] = field(default_factory=list)
-    """Input images (png/jpg), or a single video / gif or zea HDF5 file. zea files also
-    accept an 'hf://' path (parsed as a str so the '//' is not collapsed). Omit to be
-    asked for the paths on the terminal."""
+    """Input images (png/jpg), or a single video / gif or zea HDF5 file. A zea file is
+    annotated on the map named by --key, and also accepts an 'hf://' path (parsed as a
+    str so the '//' is not collapsed). Omit to be asked for the paths on the terminal."""
+    key: str = "data/image"
+    """Data key of the map to annotate in a zea file (e.g. data/image, data/image_sc).
+    Its 'values' are the frames; its grid and timing are carried into the annotations."""
     selector: Literal["rectangle", "lasso"] | None = None
     """Shape of the selection tool. Asked for interactively when omitted."""
     title: str | None = None
@@ -535,6 +538,7 @@ class _Select:
             confirm_selection=self.confirm,
             overwrite=self.overwrite,
             track=self.track,
+            key=self.key,
         )
 
 

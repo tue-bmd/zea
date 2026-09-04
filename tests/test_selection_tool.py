@@ -32,6 +32,7 @@ from zea.tools.selection_tool import (  # noqa: E402
     interpolate_masks,
     interpolate_polygons,
     interpolate_rectangles,
+    _map_name,
     load_input_files,
     match_polygon_chain,
     match_polygons,
@@ -1142,6 +1143,43 @@ def test_load_input_files_zea(zea_path):
     assert inputs.source.map_fields["coordinates"].shape == (20, 24, 3)
     # metadata from the source file is picked up for the annotation file
     assert inputs.source.file_fields["probe"]["name"] == "GE M5S"
+
+
+@pytest.mark.parametrize(
+    "key,expected",
+    [
+        ("data/image", "image"),
+        ("image", "image"),
+        ("data/image/values", "image"),
+        ("tracks/track_1/data/image_sc", "image_sc"),
+    ],
+)
+def test_map_name_accepts_the_usual_key_spellings(key, expected):
+    """A key names a map group, however the caller spells it."""
+    assert _map_name(key) == expected
+
+
+def test_load_input_files_honours_the_key(tmp_path):
+    """--key picks which map is annotated, not just which file."""
+    from zea.data.file import File
+
+    path = tmp_path / "two_maps.hdf5"
+    File.create(
+        path=path,
+        data={
+            "image": {"values": np.full((3, 8, 6), 10, dtype=np.uint8)},
+            "image_sc": {"values": np.full((3, 8, 6), 200, dtype=np.uint8)},
+        },
+        ignore_warnings=True,
+    )
+
+    assert load_input_files([path]).images[0][0, 0] == 10  # data/image by default
+    assert load_input_files([path], key="data/image_sc").images[0][0, 0] == 200
+
+
+def test_load_input_files_reports_a_missing_key(zea_path):
+    with pytest.raises(ValueError, match="no 'data/elastography' group"):
+        load_input_files([zea_path], key="data/elastography")
 
 
 def test_load_input_files_zea_without_image_data(tmp_path):

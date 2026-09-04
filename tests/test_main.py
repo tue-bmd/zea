@@ -236,6 +236,7 @@ def test_tools_select_subcommand_exists():
     # defaults
     assert args.selector is None
     assert args.metric == "gcnr"
+    assert args.key == "data/image"
     assert args.animation is True
     assert args.confirm is True
     assert args.overwrite is False

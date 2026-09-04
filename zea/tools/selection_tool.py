@@ -106,6 +106,10 @@ from zea.visualize import plot_rectangle_from_mask, plot_shape_from_mask
 #: Selection tools that can be used to draw a region of interest.
 SELECTORS = ("rectangle", "lasso")
 
+#: Data key annotated in a zea file when none is given. Names the map group, whose
+#: ``values`` are the frames and whose other fields describe the grid they sit on.
+DEFAULT_KEY = "data/image"
+
 
 def crop_array(array, value=None):
     """Crop an array to remove all rows and columns containing only a given value.
@@ -1098,37 +1102,52 @@ def _select_track(file, track: str | int | None):
     return file.get_track(track).data
 
 
+def _map_name(key: str) -> str:
+    """Reduce a data key to the map group it names, e.g. ``data/image`` -> ``image``.
+
+    Accepts the fully qualified forms zea files use elsewhere, so
+    ``tracks/track_1/data/image`` and ``data/image/values`` name the same map.
+    """
+    from zea.data.spec import strip_track_prefix
+
+    name = strip_track_prefix(key).removeprefix("data/")
+    return name.removesuffix("/values")
+
+
 def _load_zea_file(
-    path: str | Path, track: str | int | None = None
+    path: str | Path, track: str | int | None = None, key: str = DEFAULT_KEY
 ) -> tuple[np.ndarray, SourceMetadata]:
-    """Read the image map of a zea HDF5 file, plus the metadata worth carrying over.
+    """Read a map of a zea HDF5 file, plus the metadata worth carrying over.
 
     Args:
         path (str | Path): Path to a zea file. Also accepts an ``hf://`` URI.
         track (str | int, optional): Label or index of the track to annotate, for files
             holding more than one.
+        key (str, optional): Data key of the map to annotate. Defaults to
+            :data:`DEFAULT_KEY`.
 
     Returns:
-        tuple: ``(values, source)`` with the image values and a :class:`SourceMetadata`
+        tuple: ``(values, source)`` with the map values and a :class:`SourceMetadata`
         holding everything small enough to copy into the annotation file.
 
     Raises:
-        ValueError: If the track cannot be resolved, if the file has no image data, or
+        ValueError: If the track cannot be resolved, if the file has no such map, or
             if the images are not 2D.
     """
     from zea.data.file import File
     from zea.data.spec import FileSpec, Map
 
     path = str(path)
+    name = _map_name(key)
     with File(path) as file:
         data = _select_track(file, track)
-        if "image" not in data.keys():
+        if name not in data.keys():
             raise ValueError(
-                f"{path} has no 'data/image' group. The selection tool annotates images, "
-                "so the file must contain (beamformed and log-compressed) image data. "
+                f"{path} has no '{key}' group. The selection tool annotates images, so "
+                f"the file must hold a map there; it has {sorted(data.keys())}. "
                 "Use `zea process` to reconstruct images from raw data first."
             )
-        image = data.image
+        image = getattr(data, name)
         values = image.values[:]
 
         map_fields = {
@@ -1168,7 +1187,7 @@ class SelectionInputs(NamedTuple):
 
 
 def load_input_files(
-    files: Sequence[str | Path], track: str | int | None = None
+    files: Sequence[str | Path], track: str | int | None = None, key: str = DEFAULT_KEY
 ) -> SelectionInputs:
     """Load a set of images, the frames of a single video / gif, or a zea file.
 
@@ -1177,6 +1196,8 @@ def load_input_files(
             file. zea files also accept an ``hf://`` URI.
         track (str | int, optional): Label or index of the track to annotate, for zea
             files holding more than one.
+        key (str, optional): Data key of the map to annotate in a zea file. Defaults to
+            :data:`DEFAULT_KEY`.
 
     Returns:
         SelectionInputs: The loaded images and where they came from.
@@ -1201,7 +1222,7 @@ def load_input_files(
         path = sequences[0]
         source = None
         if _suffix(path) in _SUPPORTED_ZEA_TYPES:
-            values, source = _load_zea_file(path, track)
+            values, source = _load_zea_file(path, track, key)
             frames = list(values)
         else:
             frames = list(load_video(path))
@@ -1570,6 +1591,7 @@ def run_selection_tool(
     confirm_selection: bool = True,
     overwrite: bool = False,
     track: str | int | None = None,
+    key: str = DEFAULT_KEY,
 ):
     """Run the interactive selection tool.
 
@@ -1609,6 +1631,8 @@ def run_selection_tool(
             before the annotating starts, so no work is lost. Defaults to False.
         track (str | int, optional): Label or index of the track to annotate, for zea
             files holding more than one.
+        key (str, optional): Data key of the map to annotate in a zea file. Defaults to
+            :data:`DEFAULT_KEY`.
 
     Returns:
         list: The metric scores in image mode, or the interpolated masks in sequence
@@ -1618,7 +1642,7 @@ def run_selection_tool(
         FileExistsError: If an output file exists and ``overwrite`` is False.
     """
     files = list(files) if files else ask_for_files()
-    inputs = load_input_files(files, track)
+    inputs = load_input_files(files, track, key)
     images = inputs.images
 
     if selector is None:
