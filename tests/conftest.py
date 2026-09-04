@@ -125,6 +125,14 @@ def pytest_addoption(parser):
         "Torch support is currently in alpha, and tests are expected to fail.",
     )
     parser.addoption(
+        "--notebook-cell-timeout",
+        action="store",
+        type=int,
+        default=None,
+        help="Seconds a single notebook cell may run before the test fails. "
+        "Defaults to tests.test_notebooks.DEFAULT_CELL_TIMEOUT.",
+    )
+    parser.addoption(
         "--notebook-dir",
         action="append",
         default=None,
