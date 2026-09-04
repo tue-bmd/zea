@@ -246,7 +246,8 @@ class Pipeline:
     def from_default(
         cls,
         beamformer="delay_and_sum",
-        num_patches=100,
+        num_patches=None,
+        patch_size=None,
         baseband=False,
         enable_pfield=False,
         enable_aligned_apodization=False,
@@ -265,8 +266,10 @@ class Pipeline:
                 - "generalized_coherence_factor"
                 - "minimum_variance"
                 Defaults to "delay_and_sum".
-            num_patches (int): Number of patches for the PatchedGrid operation.
-                Defaults to 100. If you get an out of memory error, try to increase this number.
+            num_patches (int, optional): Number of patches for the PatchedGrid operation.
+                Mutually exclusive with ``patch_size``, which is preferred.
+            patch_size (int, optional): Grid pixels per patch for the PatchedGrid operation.
+                Defaults to :data:`DEFAULT_PATCH_SIZE`. Decrease it if you run out of memory.
             baseband (bool): If True, assume the input data is baseband (I/Q) data,
                 which has 2 channels (last dim). Defaults to False, which assumes RF data,
                 so input signal has a single channel dim and is still on carrier frequency.
@@ -297,6 +300,7 @@ class Pipeline:
             Beamform(
                 beamformer=beamformer,
                 num_patches=num_patches,
+                patch_size=patch_size,
                 enable_pfield=enable_pfield,
                 enable_aligned_apodization=enable_aligned_apodization,
                 enable_receive_apodization=enable_receive_apodization,
@@ -977,6 +981,9 @@ class Map(Pipeline):
     - Changing anything other than ``self.output_key`` in the dict will not be propagated.
     - Will be jitted as a single operation, not the individual operations.
     - This class handles the batching.
+    - Prefer ``batch_size`` over ``chunks``: it fixes the size of each step, whereas
+      ``chunks`` fixes their number and so lets each step grow with the input. Large steps
+      compile disproportionately slowly (see :data:`MAX_SAFE_PATCH_SIZE`).
 
     For more information on how to use ``in_axes``, ``out_axes``, `see the documentation for
     jax.vmap <https://docs.jax.dev/en/latest/_autosummary/jax.vmap.html>`_.
@@ -1173,6 +1180,15 @@ class Map(Pipeline):
         return config
 
 
+#: Default number of grid pixels beamformed per patch.
+DEFAULT_PATCH_SIZE = 1024
+
+#: Pixels per patch above which compilation slows down by orders of magnitude, while
+#: execution time stays flat. On L40s: ~1 s per patch up to 2044 pixels, 22 s at 2552,
+#: 93 s at 3130. Not reproduced on other GPUs, but still good to keep patches small.
+MAX_SAFE_PATCH_SIZE = 2048
+
+
 @ops_registry("patched_grid")
 class PatchedGrid(Map):
     """
@@ -1181,10 +1197,21 @@ class PatchedGrid(Map):
 
     This can be used to reduce memory usage by processing data in chunks.
 
+    Patches are sized in pixels (``patch_size``) rather than counted, so peak memory and
+    compile time stay constant as the grid grows. Passing ``num_patches`` instead lets each
+    patch grow with the grid, which gets expensive (see :data:`MAX_SAFE_PATCH_SIZE`).
+
     For more information and flexibility, see :class:`zea.ops.Map`.
     """
 
-    def __init__(self, *args, num_patches=10, **kwargs):
+    def __init__(self, *args, num_patches=None, patch_size=None, **kwargs):
+        if num_patches is not None and patch_size is not None:
+            raise ValueError(
+                "num_patches and patch_size are mutually exclusive. Please specify only one."
+            )
+        if num_patches is None and patch_size is None:
+            patch_size = DEFAULT_PATCH_SIZE
+
         super().__init__(
             *args,
             argnames=[
@@ -1194,9 +1221,53 @@ class PatchedGrid(Map):
                 "flat_receive_apodization",
             ],
             chunks=num_patches,
+            batch_size=patch_size,
             **kwargs,
         )
         self.num_patches = num_patches
+        self.patch_size = patch_size
+        self._warned_patch_size = False
+
+    def call_item(self, **inputs):
+        """Process data in patches."""
+        self._warn_if_patch_too_large(inputs.get("flatgrid"))
+        return super().call_item(**inputs)
+
+    def _warn_if_patch_too_large(self, flatgrid):
+        """Warn once when the configured patching makes each patch too large."""
+        if self._warned_patch_size:
+            return
+
+        # A pinned patch_size needs no grid to check; a pinned num_patches does.
+        if self.patch_size is not None:
+            if self.patch_size <= MAX_SAFE_PATCH_SIZE:
+                return
+            self._warned_patch_size = True
+            log.warning(
+                f"[zea.ops.PatchedGrid] patch_size={self.patch_size} is above the "
+                f"{MAX_SAFE_PATCH_SIZE} pixels where compilation could get very slow. Lower "
+                "`patch_size` to compile faster."
+            )
+            return
+
+        if self.num_patches is None or flatgrid is None:
+            return
+
+        n_pix = ops.shape(flatgrid)[0]
+        if not isinstance(n_pix, int):
+            return  # dynamic shape, nothing to check against
+
+        patch_size = -(-n_pix // self.num_patches)  # ceil, matching zea.func.tensor.vmap
+        if patch_size <= MAX_SAFE_PATCH_SIZE:
+            return
+
+        self._warned_patch_size = True
+        log.warning(
+            f"[zea.ops.PatchedGrid] num_patches={self.num_patches} splits this "
+            f"{n_pix}-pixel grid into patches of {patch_size} pixels, above the "
+            f"{MAX_SAFE_PATCH_SIZE} where compilation could get very slow. Pass `patch_size` "
+            "instead to keep patches a fixed size as the grid grows."
+        )
 
     def get_dict(self, compact=True):
         """Get the configuration of the pipeline."""
@@ -1206,7 +1277,11 @@ class PatchedGrid(Map):
         params = config.get("params", {})
         params.pop("argnames", None)
         params.pop("chunks", None)
-        params["num_patches"] = self.num_patches
+        params.pop("batch_size", None)
+        if self.num_patches is not None:
+            params["num_patches"] = self.num_patches
+        if not compact or self.patch_size not in (None, DEFAULT_PATCH_SIZE):
+            params["patch_size"] = self.patch_size
         config["params"] = params
         return config
 
@@ -1247,7 +1322,8 @@ class Beamform(Pipeline):
     def __init__(
         self,
         beamformer="delay_and_sum",
-        num_patches=100,
+        num_patches=None,
+        patch_size=None,
         enable_pfield=False,
         enable_aligned_apodization=False,
         enable_receive_apodization=False,
@@ -1264,8 +1340,11 @@ class Beamform(Pipeline):
                 - "generalized_coherence_factor"
                 - "minimum_variance"
                 Defaults to "delay_and_sum".
-            num_patches (int): Number of patches to split the grid into for patch-wise
-                beamforming. If 1, no patching is performed.
+            num_patches (int, optional): Number of patches to split the grid into for
+                patch-wise beamforming. If 1, no patching is performed. Prefer
+                ``patch_size``, with which it is mutually exclusive.
+            patch_size (int, optional): Number of grid pixels to beamform per patch.
+                Defaults to :data:`DEFAULT_PATCH_SIZE`.
             enable_pfield (bool): Whether to include pressure field weighting in the beamforming.
                 Mutually exclusive with ``enable_aligned_apodization``.
             enable_aligned_apodization (bool): Whether to include an explicit per-pixel,
@@ -1289,8 +1368,17 @@ class Beamform(Pipeline):
                 "Please specify only one."
             )
 
+        if num_patches is not None and patch_size is not None:
+            raise ValueError(
+                "num_patches and patch_size are mutually exclusive. Please specify only one."
+            )
+
         self.beamformer_type = beamformer
         self.num_patches = num_patches
+        # Resolved here so a non-compact config records the size actually used.
+        self.patch_size = patch_size if num_patches is None else None
+        if self.num_patches is None and self.patch_size is None:
+            self.patch_size = DEFAULT_PATCH_SIZE
         self.enable_pfield = enable_pfield
         self.enable_aligned_apodization = enable_aligned_apodization
         self.enable_receive_apodization = enable_receive_apodization
@@ -1345,11 +1433,18 @@ class Beamform(Pipeline):
         if self.enable_pfield:
             beamforming.insert(1, PfieldWeighting())
 
-        # Optionally add patching
-        if self.num_patches > 1:
+        # Optionally add patching; `num_patches=1` is the explicit opt-out.
+        if self.num_patches != 1:
             beamforming = cast(  # type: ignore[assignment]
                 List[Operation],
-                [PatchedGrid(operations=beamforming, num_patches=self.num_patches, **kwargs)],
+                [
+                    PatchedGrid(
+                        operations=beamforming,
+                        num_patches=self.num_patches,
+                        patch_size=self.patch_size,
+                        **kwargs,
+                    )
+                ],
             )
 
         # Reshape the grid to image shape
@@ -1385,8 +1480,10 @@ class Beamform(Pipeline):
         params = {}
         if not compact or self.beamformer_type != "delay_and_sum":
             params["beamformer"] = self.beamformer_type
-        if not compact or self.num_patches != 100:
+        if self.num_patches is not None:
             params["num_patches"] = self.num_patches
+        elif not compact or self.patch_size != DEFAULT_PATCH_SIZE:
+            params["patch_size"] = self.patch_size
         if not compact or self.enable_pfield:
             params["enable_pfield"] = self.enable_pfield
         if not compact or self.enable_aligned_apodization:
@@ -1943,8 +2040,8 @@ class MinimumVariance(Operation):
                 log.warning(
                     f"MinimumVariance axial_averaging={self.axial_averaging} needs "
                     f"{2 * self.axial_averaging + 1} axial pixels per patch, but a patch "
-                    f"holds only {n_pix // stride}. Lower `num_patches` to use the full "
-                    "averaging window."
+                    f"holds only {n_pix // stride}. Raise `patch_size` (or lower "
+                    "`num_patches`) to use the full averaging window."
                 )
         self._warned = True
         return stride

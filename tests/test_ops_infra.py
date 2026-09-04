@@ -17,6 +17,8 @@ from zea.internal.core import DEFAULT_DYNAMIC_RANGE, DataTypes
 from zea.internal.registry import ops_registry
 from zea.ops.keras_ops import Squeeze
 from zea.ops.pipeline import (
+    DEFAULT_PATCH_SIZE,
+    MAX_SAFE_PATCH_SIZE,
     Beamform,
     Map,
     PatchedGrid,
@@ -68,6 +70,14 @@ class AddTransmitsOperation(ops.Operation):
 
     def call(self, x, n_tx):
         return {"z": keras.ops.add(x, n_tx)}
+
+
+@ops_registry("sum_flatgrid")
+class SumFlatgridOperation(ops.Operation):
+    """Reduces `flatgrid` per pixel, so PatchedGrid has something to map over."""
+
+    def call(self, flatgrid):
+        return {"data": keras.ops.sum(flatgrid, axis=-1)}
 
 
 @ops_registry("large_matrix_multiplication")
@@ -929,7 +939,9 @@ def test_compact_output_omits_defaults():
     beamform_dict = full["pipeline"]["operations"][0]
     assert "params" in beamform_dict
     assert beamform_dict["params"]["beamformer"] == "delay_and_sum"
-    assert beamform_dict["params"]["num_patches"] == 100
+    # Patches are sized, not counted, by default.
+    assert beamform_dict["params"]["patch_size"] == DEFAULT_PATCH_SIZE
+    assert "num_patches" not in beamform_dict["params"]
     assert beamform_dict["params"]["enable_pfield"] is False
 
 
@@ -1758,6 +1770,150 @@ def test_patched_grid_get_dict():
     assert d["params"]["num_patches"] == 20
     assert "argnames" not in d["params"]
     assert "chunks" not in d["params"]
+    assert "batch_size" not in d["params"]
+    # A grid split by count has no fixed patch size to report.
+    assert "patch_size" not in d["params"]
+
+
+def test_patched_grid_defaults_to_patch_size():
+    """Without arguments PatchedGrid sizes its patches instead of counting them."""
+
+    pg = PatchedGrid(operations=[AddOperation()], jit_options=None)
+    assert pg.num_patches is None
+    assert pg.patch_size == DEFAULT_PATCH_SIZE
+    assert pg.chunks is None
+    assert pg.batch_size == DEFAULT_PATCH_SIZE
+
+
+def test_patched_grid_get_dict_patch_size():
+    """The default patch size is implied in a compact dict and spelled out in a full one."""
+
+    default = PatchedGrid(operations=[AddOperation()], jit_options=None)
+    assert "patch_size" not in default.get_dict(compact=True)["params"]
+    assert default.get_dict(compact=False)["params"]["patch_size"] == DEFAULT_PATCH_SIZE
+
+    custom = PatchedGrid(operations=[AddOperation()], patch_size=64, jit_options=None)
+    assert custom.get_dict(compact=True)["params"]["patch_size"] == 64
+    assert "num_patches" not in custom.get_dict(compact=True)["params"]
+
+
+def test_beamform_get_dict_patch_size():
+    """Beamform reports whichever of the two patching knobs is actually in play."""
+
+    default = Beamform(jit_options=None)
+    assert "patch_size" not in default.get_dict(compact=True)["params"]
+    assert default.get_dict(compact=False)["params"]["patch_size"] == DEFAULT_PATCH_SIZE
+
+    sized = Beamform(patch_size=256, jit_options=None)
+    assert sized.get_dict(compact=True)["params"]["patch_size"] == 256
+    assert "num_patches" not in sized.get_dict(compact=True)["params"]
+
+    counted = Beamform(num_patches=50, jit_options=None)
+    assert counted.get_dict(compact=False)["params"]["num_patches"] == 50
+    assert "patch_size" not in counted.get_dict(compact=False)["params"]
+
+
+def test_pipeline_from_default_forwards_patch_size():
+    """`Pipeline.from_default` hands its patching arguments to the Beamform op."""
+
+    def get_beamform(**kwargs):
+        pipeline = Pipeline.from_default(jit_options=None, **kwargs)
+        return next(op for op in pipeline.operations if isinstance(op, Beamform))
+
+    beamform = get_beamform(patch_size=256)
+    assert beamform.patch_size == 256
+    assert beamform.num_patches is None
+
+    beamform = get_beamform(num_patches=50)
+    assert beamform.num_patches == 50
+    assert beamform.patch_size is None
+
+
+@pytest.mark.parametrize("cls", [PatchedGrid, Beamform])
+def test_num_patches_and_patch_size_are_mutually_exclusive(cls):
+    """Sizing and counting patches at once is ambiguous, so it is rejected."""
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        cls(num_patches=10, patch_size=256, jit_options=None)
+
+
+def _run_patched_grid(n_pix=8192, **kwargs):
+    """Run a minimal PatchedGrid over a grid of ``n_pix`` pixels."""
+    pg = PatchedGrid(
+        operations=[SumFlatgridOperation()],
+        jit_options=None,
+        with_batch_dim=False,
+        **kwargs,
+    )
+    return pg, pg(flatgrid=np.ones((n_pix, 3), dtype="float32"))
+
+
+def test_patched_grid_warns_when_num_patches_makes_patches_too_large(attach_caplog_warnings):
+    """A pinned num_patches lets patches grow with the grid, which compiles slowly."""
+
+    n_pix = 8 * MAX_SAFE_PATCH_SIZE
+    pg, out = _run_patched_grid(n_pix=n_pix, num_patches=2)
+
+    assert out["data"].shape == (n_pix,)
+    messages = [record.message for record in attach_caplog_warnings.records]
+    assert sum("PatchedGrid" in message for message in messages) == 1
+    (warning,) = [message for message in messages if "PatchedGrid" in message]
+    assert f"{n_pix // 2} pixels" in warning
+    assert str(MAX_SAFE_PATCH_SIZE) in warning
+
+    # Warning is emitted once per operation, not once per patch or per call.
+    attach_caplog_warnings.clear()
+    pg(flatgrid=np.ones((n_pix, 3), dtype="float32"))
+    assert not [r for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"num_patches": 8}, id="small_patches"),
+        pytest.param({"patch_size": 512}, id="sized_patches"),
+        pytest.param({}, id="default"),
+    ],
+)
+def test_patched_grid_does_not_warn_for_safe_patches(kwargs, attach_caplog_warnings):
+    """Patches at or below the safe size compile fine, so they warn about nothing."""
+
+    _run_patched_grid(n_pix=4096, **kwargs)
+    assert not [r for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
+
+
+def test_patched_grid_does_not_warn_on_dynamic_shape(attach_caplog_warnings):
+    """With an unknown pixel count there is no patch size to compare against."""
+
+    pg = PatchedGrid(operations=[SumFlatgridOperation()], num_patches=2, jit_options=None)
+    pg._warn_if_patch_too_large(keras.KerasTensor((None, 3)))
+
+    assert not [r for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
+
+
+def test_patched_grid_warns_on_unsafe_patch_size(attach_caplog_warnings):
+    """An explicit patch_size above the safe size compiles slowly too."""
+
+    patch_size = 2 * MAX_SAFE_PATCH_SIZE
+    _run_patched_grid(n_pix=4 * patch_size, patch_size=patch_size)
+
+    messages = [r.message for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
+    assert len(messages) == 1
+    assert f"patch_size={patch_size}" in messages[0]
+    assert str(MAX_SAFE_PATCH_SIZE) in messages[0]
+
+
+def test_patched_grid_warns_after_dynamic_shape_call(attach_caplog_warnings):
+    """A skipped check must not consume the one-time warning."""
+
+    n_pix = 8 * MAX_SAFE_PATCH_SIZE
+    pg = PatchedGrid(operations=[SumFlatgridOperation()], num_patches=2, jit_options=None)
+    pg._warn_if_patch_too_large(keras.KerasTensor((None, 3)))
+    pg._warn_if_patch_too_large(np.ones((n_pix, 3), dtype="float32"))
+
+    messages = [r.message for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
+    assert len(messages) == 1
+    assert f"{n_pix // 2} pixels" in messages[0]
 
 
 def test_beamform_repr():
