@@ -1184,8 +1184,8 @@ class Map(Pipeline):
 DEFAULT_PATCH_SIZE = 1024
 
 #: Pixels per patch above which compilation slows down by orders of magnitude, while
-#: execution time stays flat. Measured on one GPU: ~1 s per patch up to 2044 pixels,
-#: 22 s at 2552, 93 s at 3130.
+#: execution time stays flat. On L40s: ~1 s per patch up to 2044 pixels, 22 s at 2552,
+#: 93 s at 3130. Not reproduced on other GPUs, but still good to keep patches small.
 MAX_SAFE_PATCH_SIZE = 2048
 
 
@@ -1234,10 +1234,24 @@ class PatchedGrid(Map):
         return super().call_item(**inputs)
 
     def _warn_if_patch_too_large(self, flatgrid):
-        """Warn once when a pinned ``num_patches`` makes each patch too large."""
-        if self._warned_patch_size or self.num_patches is None or flatgrid is None:
+        """Warn once when the configured patching makes each patch too large."""
+        if self._warned_patch_size:
             return
-        self._warned_patch_size = True
+
+        # A pinned patch_size needs no grid to check; a pinned num_patches does.
+        if self.patch_size is not None:
+            if self.patch_size <= MAX_SAFE_PATCH_SIZE:
+                return
+            self._warned_patch_size = True
+            log.warning(
+                f"[zea.ops.PatchedGrid] patch_size={self.patch_size} is above the "
+                f"{MAX_SAFE_PATCH_SIZE} pixels where compilation could get very slow. Lower "
+                "`patch_size` to compile faster."
+            )
+            return
+
+        if self.num_patches is None or flatgrid is None:
+            return
 
         n_pix = ops.shape(flatgrid)[0]
         if not isinstance(n_pix, int):
@@ -1247,10 +1261,11 @@ class PatchedGrid(Map):
         if patch_size <= MAX_SAFE_PATCH_SIZE:
             return
 
+        self._warned_patch_size = True
         log.warning(
             f"[zea.ops.PatchedGrid] num_patches={self.num_patches} splits this "
             f"{n_pix}-pixel grid into patches of {patch_size} pixels, above the "
-            f"{MAX_SAFE_PATCH_SIZE} where compilation gets very slow. Pass `patch_size` "
+            f"{MAX_SAFE_PATCH_SIZE} where compilation could get very slow. Pass `patch_size` "
             "instead to keep patches a fixed size as the grid grows."
         )
 

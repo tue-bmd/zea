@@ -1891,6 +1891,31 @@ def test_patched_grid_does_not_warn_on_dynamic_shape(attach_caplog_warnings):
     assert not [r for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
 
 
+def test_patched_grid_warns_on_unsafe_patch_size(attach_caplog_warnings):
+    """An explicit patch_size above the safe size compiles slowly too."""
+
+    patch_size = 2 * MAX_SAFE_PATCH_SIZE
+    _run_patched_grid(n_pix=4 * patch_size, patch_size=patch_size)
+
+    messages = [r.message for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
+    assert len(messages) == 1
+    assert f"patch_size={patch_size}" in messages[0]
+    assert str(MAX_SAFE_PATCH_SIZE) in messages[0]
+
+
+def test_patched_grid_warns_after_dynamic_shape_call(attach_caplog_warnings):
+    """A skipped check must not consume the one-time warning."""
+
+    n_pix = 8 * MAX_SAFE_PATCH_SIZE
+    pg = PatchedGrid(operations=[SumFlatgridOperation()], num_patches=2, jit_options=None)
+    pg._warn_if_patch_too_large(keras.KerasTensor((None, 3)))
+    pg._warn_if_patch_too_large(np.ones((n_pix, 3), dtype="float32"))
+
+    messages = [r.message for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
+    assert len(messages) == 1
+    assert f"{n_pix // 2} pixels" in messages[0]
+
+
 def test_beamform_repr():
     """Test Beamform.__repr__ returns constructor-style format."""
 
