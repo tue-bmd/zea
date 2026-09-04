@@ -332,6 +332,8 @@ def compute_global_palette_by_histogram(pillow_imgs, bits_per_channel=5, palette
     total_bins = bins_per**3
     # counts per bin in the final histogram
     counts = np.zeros(total_bins, dtype=np.int64)
+    # per-bin sum of the colors that landed in it, to average into its entry
+    sums = np.zeros((total_bins, 3), dtype=np.int64)
 
     shift = 8 - bits_per_channel
     # Iterate images, accumulate bin counts
@@ -345,6 +347,10 @@ def compute_global_palette_by_histogram(pillow_imgs, bits_per_channel=5, palette
         # accumulate counts
         bincount = np.bincount(idx, minlength=total_bins)
         counts += bincount
+        for channel in range(3):
+            sums[:, channel] += np.bincount(
+                idx, weights=arr[:, channel], minlength=total_bins
+            ).astype(np.int64)
 
     # pick top bins
     top_idx = np.argpartition(-counts, palette_size - 1)[:palette_size]
@@ -352,16 +358,16 @@ def compute_global_palette_by_histogram(pillow_imgs, bits_per_channel=5, palette
     # sort top bins by frequency
     top_idx = top_idx[np.argsort(-counts[top_idx])]
 
-    # convert bin index back to representative RGB (center of bin)
-    bins = np.array(
-        [((i // (bins_per * bins_per)), (i // bins_per) % bins_per, i % bins_per) for i in top_idx]
-    )
-
-    # expand bin centers back to 8-bit values
-    center = (
-        (bins * (1 << (8 - bits_per_channel)) + (1 << (7 - bits_per_channel))).clip(0, 255)
+    # Represent each bin by the mean of the colors in it, not by the bin's center: a
+    # bin holding one exact color is then reproduced exactly, which matters most for
+    # the flat backgrounds that dominate plots -- a pure black one quantized to the
+    # center of its bin comes out a visibly non-black (4, 4, 4).
+    occupied = counts[top_idx] > 0
+    mean = np.zeros((len(top_idx), 3), dtype=np.uint8)
+    mean[occupied] = np.round(
+        sums[top_idx][occupied] / counts[top_idx][occupied, None]
     ).astype(np.uint8)
-    palette_colors = center.reshape(-1, 3)  # shape (k,3)
+    palette_colors = mean.reshape(-1, 3)  # shape (k,3)
 
     # build a PIL 'P' palette image from these colors
     pal = np.zeros(768, dtype=np.uint8)  # 256*3 entries

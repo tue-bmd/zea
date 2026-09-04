@@ -4,7 +4,13 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from zea.io_lib import load_image, load_video, save_video
+from zea.io_lib import (
+    compute_global_palette_by_histogram,
+    load_image,
+    load_video,
+    save_to_gif,
+    save_video,
+)
 
 from . import DEFAULT_TEST_SEED
 
@@ -195,6 +201,39 @@ def test_color_palette(tmp_path):
     save_video(frames, gif_path_with_palette, fps=10, shared_color_palette=True)
     loaded_with_palette_gif = load_video(gif_path_with_palette, mode="L")
     assert loaded_with_palette_gif.shape == (n_frames, height, width)
+
+
+def test_global_palette_keeps_exact_colors():
+    """A histogram bin holding a single color is represented by exactly that color.
+
+    The palette entry is the mean of the colors in the bin, not the bin's center: a
+    center would round pure black to (4, 4, 4) at the default 5 bits per channel,
+    which is visibly not black wherever a plot's background is meant to be.
+    """
+    colors = np.array([[0, 0, 0], [255, 255, 255], [130, 40, 200]], dtype=np.uint8)
+    image = Image.fromarray(np.repeat(colors[None], 4, axis=0))
+
+    palette = compute_global_palette_by_histogram([image], bits_per_channel=5)
+    entries = np.array(palette.getpalette(), dtype=np.uint8).reshape(-1, 3)
+
+    for color in colors:
+        assert (entries == color).all(axis=1).any(), f"{color} is not in the palette"
+
+
+def test_save_to_gif_keeps_black_black(tmp_path):
+    """A black background survives the shared-palette quantization as exactly 0."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    frames = np.zeros((4, 16, 16, 3), dtype=np.uint8)
+    # Something for the palette to spend its other entries on, so black is not the
+    # only color and has to survive alongside the rest.
+    frames[:, 4:12, 4:12] = rng.integers(0, 255, (4, 8, 8, 3), dtype=np.uint8)
+
+    path = tmp_path / "black_background.gif"
+    save_to_gif(frames, path, fps=10, shared_color_palette=True)
+
+    loaded = load_video(path, mode="RGB")
+    background = np.concatenate([loaded[:, :4].ravel(), loaded[:, 12:].ravel()])
+    assert background.max() == 0
 
 
 def test_animate_images_parameters_without_extent(tmp_path):
