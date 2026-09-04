@@ -9,6 +9,7 @@ N_EL = 8  # number of transducer elements
 N_TX = 5  # number of transmit events
 N_AX = 64  # number of axial samples
 SAMPLING_FREQ = np.float32(40e6)  # Hz
+DEMODULATION_FREQ = np.float32(20e6)  # Hz
 SOUND_SPEED = 1540.0  # m/s
 T_PEAK = np.float32(5e-7)  # transmit-waveform peak time (s)
 
@@ -56,6 +57,7 @@ def _call_refocus(op, data_np, probe_geometry_np, plane_wave_delays_np):
         probe_geometry=keras.ops.convert_to_tensor(probe_geometry_np),
         initial_times=np.zeros(N_TX, dtype=np.float32),
         t_peak=keras.ops.convert_to_tensor(np.full(N_TX, T_PEAK, dtype=np.float32)),
+        demodulation_frequency=DEMODULATION_FREQ,
     )
 
 
@@ -310,5 +312,6 @@ def test_refocus_cross_backend(method):
         sampling_frequency=np.float32(SAMPLING_FREQ),
         probe_geometry=keras.ops.convert_to_tensor(probe_geometry),
         initial_times=np.zeros(N_TX, dtype=np.float32),
+        demodulation_frequency=np.float32(DEMODULATION_FREQ),
     )
     return keras.ops.convert_to_numpy(result[op.output_key])

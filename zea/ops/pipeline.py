@@ -1981,7 +1981,7 @@ class Refocus(Operation):
     where :math:`\tau_{t,e}` is the transmit delay in samples and
     :math:`a_{t,e}` is the apodization.
 
-    At each temporal frequency the received RF spectrum is decoded by
+    At each temporal frequency the received RF/IQ spectrum is decoded by
     multiplying with the pseudo-inverse :math:`H^{-1}`:
 
     .. math::
@@ -2068,10 +2068,14 @@ class Refocus(Operation):
         H = a_c * ops.exp(ops.cast(-1j * 2 * np.pi, "complex64") * f_c * d_c)
 
         if self.method == "adjoint":
-            # param=None  → ramp filter (multiply by f)
+            # param=None  → ramp filter (multiply by |f|)
             # param=0     → no ramp (multiply by 1, plain adjoint)
+            # |f| (not signed f) since the ramp compensates a real, symmetric
+            # passband gain; for IQ, f_vec can be negative (baseband bins
+            # below the demodulation frequency), and a signed ramp would flip
+            # the sign of those bins instead of just scaling their amplitude.
             Hinv = ops.conj(ops.transpose(H, (0, 2, 1)))
-            ramp_vals = f_vec if self.param is None else ops.ones_like(f_vec)
+            ramp_vals = ops.abs(f_vec) if self.param is None else ops.ones_like(f_vec)
             ramp = ops.cast(ramp_vals, "complex64")[:, None, None]
             return ramp * Hinv
 
@@ -2091,16 +2095,18 @@ class Refocus(Operation):
         sinv_c = ops.cast(sinv, "complex64")
         return ops.matmul(VHT * sinv_c[:, None, :], UT)
 
-    def _decode(self, data, delays_samples, apod):
+    def _decode(self, data, delays_samples, apod, demodulation_frequency, sampling_frequency):
         """REFoCUS decoding for a single (unbatched) volume.
 
         All channels and all frequency bins are processed in parallel via
         batched tensor operations.
 
         Args:
-            data: ``(n_tx, n_ax, n_el, n_ch)`` float32 RF array.
+            data: ``(n_tx, n_ax, n_el, n_ch)`` float32 array.
             delays_samples: ``(n_tx, n_el)`` transmit delays in samples.
             apod: ``(n_tx, n_el)`` transmit apodization.
+            demodulation_frequency (float): Demodulation frequency
+            sampling_frequency (float): Sampling frequency
 
         Returns:
             decoded: ``(n_el, n_ax, n_el, n_ch)`` float32 array.
@@ -2108,47 +2114,115 @@ class Refocus(Operation):
         n_tx, n_ax, n_el, n_ch = data.shape
         n_elements = delays_samples.shape[1]
 
-        # --- FFT over all channels at once ---
-        # data: (n_tx, n_ax, n_el, n_ch) -> (n_ch, n_el, n_tx, n_ax)
-        rf = ops.cast(ops.transpose(data, (3, 2, 0, 1)), "float32")
-        # (n_ch, n_el_recv, n_tx, n_freq)
-        RF_enc_r, RF_enc_i = ops.rfft(rf)
-        RF_enc = ops.cast(RF_enc_r, "complex64") + 1j * ops.cast(RF_enc_i, "complex64")
-        n_freq = RF_enc.shape[-1]
+        if n_ch not in (1, 2):
+            raise ValueError(f"Refocus supports RF (n_ch=1) or IQ (n_ch=2) data, got n_ch={n_ch}.")
+        # Refocus for RF
+        if n_ch == 1:
+            # --- FFT over all channels at once ---
+            # data: (n_tx, n_ax, n_el, n_ch) -> (n_ch, n_el, n_tx, n_ax)
+            rf = ops.cast(ops.transpose(data, (3, 2, 0, 1)), "float32")
+            # (n_ch, n_el_recv, n_tx, n_freq)
+            RF_enc_r, RF_enc_i = ops.rfft(rf)
+            RF_enc = ops.cast(RF_enc_r, "complex64") + 1j * ops.cast(RF_enc_i, "complex64")
+            n_freq = RF_enc.shape[-1]
 
-        # Rearrange to (n_freq, n_tx, n_el_recv * n_ch) for batched matmul.
-        # (n_ch, n_el_recv, n_tx, n_freq) -> (n_freq, n_tx, n_el_recv, n_ch)
-        RF_enc = ops.transpose(RF_enc, (3, 2, 1, 0))
-        # -> (n_freq, n_tx, n_el_recv * n_ch)
-        RF_enc = ops.reshape(RF_enc, (n_freq, n_tx, n_el * n_ch))
+            # Rearrange to (n_freq, n_tx, n_el_recv * n_ch) for batched matmul.
+            # (n_ch, n_el_recv, n_tx, n_freq) -> (n_freq, n_tx, n_el_recv, n_ch)
+            RF_enc = ops.transpose(RF_enc, (3, 2, 1, 0))
+            # -> (n_freq, n_tx, n_el_recv * n_ch)
+            RF_enc = ops.reshape(RF_enc, (n_freq, n_tx, n_el * n_ch))
 
-        # --- Batched inverse encoding matrices (skip DC at index 0) ---
-        frequency = ops.cast(ops.arange(n_freq), "float32") / n_ax
-        freq_noDC = frequency[1:]  # (n_freq - 1,)
-        # Hinv: (n_freq - 1, n_elements, n_tx)
-        Hinv = self._get_hinv(delays_samples, freq_noDC, apod)
+            # --- Batched inverse encoding matrices (skip DC at index 0) ---
+            frequency = ops.cast(ops.arange(n_freq), "float32") / n_ax
+            freq_noDC = frequency[1:]  # (n_freq - 1,)
+            # Hinv: (n_freq - 1, n_elements, n_tx)
+            Hinv = self._get_hinv(delays_samples, freq_noDC, apod)
 
-        # --- Single batched matmul over all frequencies and channels ---
-        # (n_freq-1, n_elements, n_tx) @ (n_freq-1, n_tx, n_el_recv * n_ch)
-        # -> (n_freq-1, n_elements, n_el_recv * n_ch)
-        RF_dec = ops.matmul(Hinv, RF_enc[1:])
+            # --- Single batched matmul over all frequencies and channels ---
+            # (n_freq-1, n_elements, n_tx) @ (n_freq-1, n_tx, n_el_recv * n_ch)
+            # -> (n_freq-1, n_elements, n_el_recv * n_ch)
+            RF_dec = ops.matmul(Hinv, RF_enc[1:])
 
-        # Prepend zeros for the DC bin: (n_freq, n_elements, n_el_recv * n_ch)
-        dc = ops.zeros((1, n_elements, n_el * n_ch), dtype="complex64")
-        RF_decoded = ops.concatenate([dc, RF_dec], axis=0)
+            # Prepend zeros for the DC bin: (n_freq, n_elements, n_el_recv * n_ch)
+            dc = ops.zeros((1, n_elements, n_el * n_ch), dtype="complex64")
+            RF_decoded = ops.concatenate([dc, RF_dec], axis=0)
 
-        # --- IFFT back to time domain ---
-        # Reshape to (n_freq, n_elements, n_el_recv, n_ch)
-        RF_decoded = ops.reshape(RF_decoded, (n_freq, n_elements, n_el, n_ch))
-        # irfft acts on the last axis: move n_freq last
-        # -> (n_elements, n_el_recv, n_ch, n_freq)
-        RF_decoded = ops.transpose(RF_decoded, (1, 2, 3, 0))
-        # -> (n_elements, n_el_recv, n_ch, n_ax)
-        rf_decoded = ops.irfft((ops.real(RF_decoded), ops.imag(RF_decoded)), fft_length=n_ax)
-        # -> (n_elements, n_ax, n_el_recv, n_ch)
-        rf_decoded = ops.transpose(rf_decoded, (0, 3, 1, 2))
+            # --- IFFT back to time domain ---
+            # Reshape to (n_freq, n_elements, n_el_recv, n_ch)
+            RF_decoded = ops.reshape(RF_decoded, (n_freq, n_elements, n_el, n_ch))
+            # irfft acts on the last axis: move n_freq last
+            # -> (n_elements, n_el_recv, n_ch, n_freq)
+            RF_decoded = ops.transpose(RF_decoded, (1, 2, 3, 0))
+            # -> (n_elements, n_el_recv, n_ch, n_ax)
+            rf_decoded = ops.irfft((ops.real(RF_decoded), ops.imag(RF_decoded)), fft_length=n_ax)
+            # -> (n_elements, n_ax, n_el_recv, n_ch)
+            rf_decoded = ops.transpose(rf_decoded, (0, 3, 1, 2))
 
-        return ops.cast(rf_decoded, "float32")
+            return ops.cast(rf_decoded, "float32")
+        # Refocus for IQ
+        elif n_ch == 2:
+            if demodulation_frequency is None:
+                raise ValueError(
+                    "Refocus requires `demodulation_frequency` for IQ (n_ch=2) input, "
+                    "got None. Pass it explicitly to `call` or ensure it is available "
+                    "in the pipeline parameters."
+                )
+            # --- FFT over all channels at once ---
+            # data: (n_tx, n_ax, n_el, n_ch) -> (n_ch, n_el, n_tx, n_ax)
+            iq = ops.cast(ops.transpose(data, (3, 2, 0, 1)), "float32")
+            # (n_ch, n_el_recv, n_tx, n_freq)
+            IQ_enc_r, IQ_enc_i = ops.fft((iq[0, :, :, :], iq[1, :, :, :]))
+            IQ_enc = ops.cast(IQ_enc_r, "complex64") + 1j * ops.cast(IQ_enc_i, "complex64")
+            n_freq = IQ_enc.shape[-1]
+
+            # Rearrange to (n_freq, n_tx, n_el_recv) for batched matmul.
+            # (n_el_recv, n_tx, n_freq) -> (n_freq, n_tx, n_el_recv)
+            IQ_enc = ops.transpose(IQ_enc, (2, 1, 0))
+            # --- Batched inverse encoding matrices ---
+            # FFT frequencies contain positive and negative frequencies for IQ.
+            # For even n_ax the Nyquist bin (k == n_ax // 2) is the negative
+            # frequency -0.5, not +0.5 (matches numpy.fft.fftfreq convention).
+            k = ops.arange(n_ax)
+            frequency = ops.where(
+                k < (n_ax + 1) // 2,
+                ops.cast(k, "float32") / n_ax,
+                ops.cast(k - n_ax, "float32") / n_ax,
+            )
+            frequency = (
+                frequency + demodulation_frequency / sampling_frequency
+            )  # relative to baseband
+
+            # Hinv: (n_freq, n_elements, n_tx)
+            Hinv = self._get_hinv(delays_samples, frequency, apod)
+
+            # --- Single batched matmul over all frequencies and channels ---
+            # (n_freq, n_elements, n_tx) @ (n_freq, n_tx, n_el_recv * n_ch)
+            # -> (n_freq, n_elements, n_el_recv * n_ch)
+            IQ_decoded = ops.matmul(Hinv, IQ_enc)
+            # --- IFFT back to time domain ---
+            # (n_freq, n_elements, n_el_recv)
+
+            # -> (n_elements, n_el_recv, n_freq)
+            IQ_decoded = ops.transpose(IQ_decoded, (1, 2, 0))
+            # Use `ifft2` with a dummy axis so the inverse transform still
+            # applies along the frequency axis while preserving the 1D layout.
+            # We do this because keras does not supoort ifft
+            # -> (n_elements, n_el_recv, 1, n_freq)
+            iq_decoded_real = ops.expand_dims(ops.real(IQ_decoded), axis=-2)
+            iq_decoded_imag = ops.expand_dims(ops.imag(IQ_decoded), axis=-2)
+            # -> (n_elements, n_el_recv, 1, n_ax)
+            iq_decoded_r, iq_decoded_i = ops.ifft2((iq_decoded_real, iq_decoded_imag))
+            # -> (n_elements, n_el_recv, n_ax)
+            iq_decoded_r = ops.squeeze(iq_decoded_r, axis=-2)
+            iq_decoded_i = ops.squeeze(iq_decoded_i, axis=-2)
+
+            # Recreate the channel dimension.
+            # -> (n_elements, n_el_recv, n_ax, n_ch)
+            iq_decoded = ops.stack((iq_decoded_r, iq_decoded_i), axis=-1)
+
+            # -> (n_elements, n_ax, n_el_recv, n_ch)
+            iq_decoded = ops.transpose(iq_decoded, (0, 2, 1, 3))
+            return ops.cast(iq_decoded, "float32")
 
     # ------------------------------------------------------------------
     # Operation interface
@@ -2160,6 +2234,7 @@ class Refocus(Operation):
         sampling_frequency,
         probe_geometry,
         initial_times,
+        demodulation_frequency=None,
         tx_apodizations=None,
         **kwargs,
     ):
@@ -2175,6 +2250,12 @@ class Refocus(Operation):
             t0_delays: ``(n_tx, n_el)`` transmit delays in **seconds**.
             sampling_frequency: Sampling frequency in Hz.
             probe_geometry: ``(n_el, 3)`` element positions in metres.
+            initial_times: ``(n_tx,)`` time (in seconds) of the first sample
+                of each transmit, relative to the transmit event.
+            demodulation_frequency (float, optional): Demodulation (carrier)
+                frequency in Hz. Required when the input data is IQ
+                (``n_ch=2``); unused for RF (``n_ch=1``) input. Defaults to
+                ``None``.
             tx_apodizations: ``(n_tx, n_el)`` transmit apodization weights.
                 Defaults to all-ones (uniform apodization).
             **kwargs: Must contain the input data tensor under ``self.key``.
@@ -2213,9 +2294,13 @@ class Refocus(Operation):
             apod = tx_apodizations
 
         if self.with_batch_dim:
-            decoded = vmap(self._decode, in_axes=[0, None, None])(data, delays_samples, apod)
+            decoded = vmap(self._decode, in_axes=[0, None, None, None, None])(
+                data, delays_samples, apod, demodulation_frequency, sampling_frequency
+            )
         else:
-            decoded = self._decode(data, delays_samples, apod)
+            decoded = self._decode(
+                data, delays_samples, apod, demodulation_frequency, sampling_frequency
+            )
 
         # Number of virtual SA transmits = number of elements
         n_el = ops.shape(probe_geometry)[0]
