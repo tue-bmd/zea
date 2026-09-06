@@ -8,7 +8,6 @@ import pytest
 
 from tests.data import generate_example_dataset
 
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -61,6 +60,7 @@ def test_cli_defaults():
 
     args = tyro.cli(ProcessArgs, args=["--dataset", "data/", "--config", "cfg.yaml"])
     assert args.key == "data/raw_data"
+    assert args.track is None
     assert args.n_frames is None
     assert args.save_as == "gif"
     assert args.overwrite is False
@@ -269,3 +269,215 @@ def test_main_dispatches_to_run_processing(tmp_path, monkeypatch):
     assert called["key"] == "data/image/values"
     assert called["dataset"] == str(ds_dir)
     assert called["config"] == str(cfg)
+
+
+# ── track selection ───────────────────────────────────────────────────────────
+
+
+def _make_multitrack_file(path: Path, labels=("bmode", "doppler"), n_frames: int = 2) -> Path:
+    """Create a multi-track file whose tracks differ in both image data and scan."""
+    from tests.data import generate_dummy_scan
+    from zea.data.file import File
+    from zea.data.spec import ProbeSpec
+
+    n_el, n_tx, n_ax, n_ch = 4, 2, 8, 1
+    probe_geometry = np.zeros((n_el, 3), dtype=ProbeSpec.get_dtype("probe_geometry"))
+    probe_geometry[:, 0] = np.linspace(-0.02, 0.02, n_el)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    File.create(
+        path,
+        tracks=[
+            {
+                "data": {
+                    "raw_data": np.full((n_frames, n_tx, n_ax, n_el, n_ch), i, dtype=np.float32),
+                    "image": {"values": np.full((n_frames, 8, 8), i, dtype=np.uint8)},
+                },
+                "scan": generate_dummy_scan(n_tx=n_tx, n_el=n_el, sampling_frequency=(i + 1) * 1e7),
+                "label": label,
+            }
+            for i, label in enumerate(labels)
+        ],
+        probe={"name": "generic", "probe_geometry": probe_geometry},
+        overwrite=True,
+        ignore_warnings=True,
+    )
+    return path
+
+
+@pytest.mark.parametrize("track", ["doppler", "1"])
+def test_resolve_track_by_label_or_index(tmp_path, track):
+    """A track selects by label or by index, and rewrites the key to address it."""
+    from zea.data.file import File
+    from zea.data.process import _resolve_track
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        index, data_key = _resolve_track(f, "data/image/values", track)
+
+    assert index == 1
+    assert data_key == "tracks/track_1/data/image/values"
+
+
+def test_resolve_track_multitrack_requires_selection(tmp_path):
+    """A multi-track file with no track selected raises, listing the tracks it has."""
+    from zea.data.file import File
+    from zea.data.process import _resolve_track
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        with pytest.raises(ValueError, match="2 tracks") as exc:
+            _resolve_track(f, "data/image/values", None)
+
+    assert "'bmode'" in str(exc.value) and "'doppler'" in str(exc.value)
+
+
+def test_resolve_track_unknown_label_raises(tmp_path):
+    """An unknown track label reports the labels the file actually has."""
+    from zea.data.file import File
+    from zea.data.process import _resolve_track
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        with pytest.raises(ValueError, match="No track 'flow'"):
+            _resolve_track(f, "data/image/values", "flow")
+
+
+def test_resolve_track_single_track_is_noop(tmp_path):
+    """Single-track files keep the key untouched and need no track addressing."""
+    from zea.data.file import File
+    from zea.data.process import _resolve_track
+
+    path = _make_image_file(tmp_path / "single.hdf5")
+    with File(path) as f:
+        assert _resolve_track(f, "data/image/values", None) == (None, "data/image/values")
+
+
+def test_load_track_parameters_uses_selected_track(tmp_path):
+    """Parameters come from the selected track's scan, not from the file as a whole."""
+    from zea.data.file import File
+    from zea.data.process import _load_track_parameters
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        assert _load_track_parameters(f, 0).sampling_frequency == pytest.approx(1e7)
+        assert _load_track_parameters(f, 1).sampling_frequency == pytest.approx(2e7)
+
+
+def test_check_track_consistency_accepts_matching_label(tmp_path):
+    """The track the key addresses by index carries the expected label."""
+    from zea.data.file import File
+    from zea.data.process import _check_track_consistency
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        _check_track_consistency(f, 1, "doppler")  # does not raise
+
+
+def test_check_track_consistency_rejects_reordered_label(tmp_path):
+    """A file with the same tracks in a different order is refused."""
+    from zea.data.file import File
+    from zea.data.process import _check_track_consistency
+
+    path = _make_multitrack_file(tmp_path / "reversed.hdf5", labels=("doppler", "bmode"))
+    with File(path) as f:
+        with pytest.raises(ValueError, match="ordered consistently"):
+            _check_track_consistency(f, 1, "doppler")
+
+
+def test_check_track_consistency_rejects_missing_index(tmp_path):
+    """An index past the end of a file's tracks is reported, not an IndexError."""
+    from zea.data.file import File
+    from zea.data.process import _check_track_consistency
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        with pytest.raises(ValueError, match="ordered consistently"):
+            _check_track_consistency(f, 5, "doppler")
+
+
+def test_check_track_consistency_single_track_is_noop(tmp_path):
+    """Without a resolved track there is no index to keep consistent."""
+    from zea.data.file import File
+    from zea.data.process import _check_track_consistency
+
+    path = _make_image_file(tmp_path / "single.hdf5")
+    with File(path) as f:
+        _check_track_consistency(f, None, None)  # does not raise
+
+
+def test_run_processing_track_selects_data(tmp_path):
+    """run_processing reads the requested track end to end."""
+    from zea.data.file import File
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    _make_multitrack_file(ds_dir / "duplex.hdf5")
+    cfg = _minimal_config(tmp_path / "cfg.yaml", with_pipeline=False)
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/image/values",
+        n_frames=None,
+        save_dir=out_dir,
+        save_as="hdf5",
+        track="doppler",
+    )
+
+    with File(out_dir / "duplex.hdf5") as f:
+        values = f[f.format_key("data/image/values")][:]
+    assert np.all(values == 1), "expected track 1 ('doppler'), which is filled with 1s"
+
+
+@pytest.mark.parametrize("track", ["doppler", "1"])
+def test_run_processing_rejects_reordered_tracks(tmp_path, track):
+    """A file whose tracks are ordered differently is refused, not silently misread.
+
+    ``--track 1`` resolves to index 1 in every file, so only the label at that index
+    reveals the reordering; both ways of naming the track must be caught.
+    """
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    _make_multitrack_file(ds_dir / "a_first.hdf5", labels=("bmode", "doppler"))
+    _make_multitrack_file(ds_dir / "b_second.hdf5", labels=("doppler", "bmode"))
+    cfg = _minimal_config(tmp_path / "cfg.yaml", with_pipeline=False)
+
+    with pytest.raises(ValueError, match="ordered consistently"):
+        run_processing(
+            str(ds_dir),
+            str(cfg),
+            key="data/image/values",
+            n_frames=None,
+            save_dir=tmp_path / "out",
+            save_as="hdf5",
+            track=track,
+        )
+
+
+def test_run_processing_accepts_consistently_ordered_tracks(tmp_path):
+    """The consistency check passes for a dataset whose files agree on track order."""
+    from zea.data.file import File
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    _make_multitrack_file(ds_dir / "a_first.hdf5")
+    _make_multitrack_file(ds_dir / "b_second.hdf5")
+    cfg = _minimal_config(tmp_path / "cfg.yaml", with_pipeline=False)
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/image/values",
+        n_frames=None,
+        save_dir=out_dir,
+        save_as="hdf5",
+        track="doppler",
+    )
+
+    for name in ("a_first.hdf5", "b_second.hdf5"):
+        with File(out_dir / name) as f:
+            assert np.all(f[f.format_key("data/image/values")][:] == 1)
