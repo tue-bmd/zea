@@ -364,6 +364,48 @@ def test_load_track_parameters_uses_selected_track(tmp_path):
         assert _load_track_parameters(f, 1).sampling_frequency == pytest.approx(2e7)
 
 
+def test_check_track_consistency_accepts_matching_label(tmp_path):
+    """The track the key addresses by index carries the expected label."""
+    from zea.data.file import File
+    from zea.data.process import _check_track_consistency
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        _check_track_consistency(f, 1, "doppler")  # does not raise
+
+
+def test_check_track_consistency_rejects_reordered_label(tmp_path):
+    """A file with the same tracks in a different order is refused."""
+    from zea.data.file import File
+    from zea.data.process import _check_track_consistency
+
+    path = _make_multitrack_file(tmp_path / "reversed.hdf5", labels=("doppler", "bmode"))
+    with File(path) as f:
+        with pytest.raises(ValueError, match="ordered consistently"):
+            _check_track_consistency(f, 1, "doppler")
+
+
+def test_check_track_consistency_rejects_missing_index(tmp_path):
+    """An index past the end of a file's tracks is reported, not an IndexError."""
+    from zea.data.file import File
+    from zea.data.process import _check_track_consistency
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        with pytest.raises(ValueError, match="ordered consistently"):
+            _check_track_consistency(f, 5, "doppler")
+
+
+def test_check_track_consistency_single_track_is_noop(tmp_path):
+    """Without a resolved track there is no index to keep consistent."""
+    from zea.data.file import File
+    from zea.data.process import _check_track_consistency
+
+    path = _make_image_file(tmp_path / "single.hdf5")
+    with File(path) as f:
+        _check_track_consistency(f, None, None)  # does not raise
+
+
 def test_run_processing_track_selects_data(tmp_path):
     """run_processing reads the requested track end to end."""
     from zea.data.file import File
@@ -387,3 +429,55 @@ def test_run_processing_track_selects_data(tmp_path):
     with File(out_dir / "duplex.hdf5") as f:
         values = f[f.format_key("data/image/values")][:]
     assert np.all(values == 1), "expected track 1 ('doppler'), which is filled with 1s"
+
+
+@pytest.mark.parametrize("track", ["doppler", "1"])
+def test_run_processing_rejects_reordered_tracks(tmp_path, track):
+    """A file whose tracks are ordered differently is refused, not silently misread.
+
+    ``--track 1`` resolves to index 1 in every file, so only the label at that index
+    reveals the reordering; both ways of naming the track must be caught.
+    """
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    _make_multitrack_file(ds_dir / "a_first.hdf5", labels=("bmode", "doppler"))
+    _make_multitrack_file(ds_dir / "b_second.hdf5", labels=("doppler", "bmode"))
+    cfg = _minimal_config(tmp_path / "cfg.yaml", with_pipeline=False)
+
+    with pytest.raises(ValueError, match="ordered consistently"):
+        run_processing(
+            str(ds_dir),
+            str(cfg),
+            key="data/image/values",
+            n_frames=None,
+            save_dir=tmp_path / "out",
+            save_as="hdf5",
+            track=track,
+        )
+
+
+def test_run_processing_accepts_consistently_ordered_tracks(tmp_path):
+    """The consistency check passes for a dataset whose files agree on track order."""
+    from zea.data.file import File
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    _make_multitrack_file(ds_dir / "a_first.hdf5")
+    _make_multitrack_file(ds_dir / "b_second.hdf5")
+    cfg = _minimal_config(tmp_path / "cfg.yaml", with_pipeline=False)
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/image/values",
+        n_frames=None,
+        save_dir=out_dir,
+        save_as="hdf5",
+        track="doppler",
+    )
+
+    for name in ("a_first.hdf5", "b_second.hdf5"):
+        with File(out_dir / name) as f:
+            assert np.all(f[f.format_key("data/image/values")][:] == 1)
