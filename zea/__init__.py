@@ -55,19 +55,22 @@ def _bootstrap_backend():
         return
 
     def _check_backend_installed():
-        """Verify that the required ML backend is installed.
+        """Verify that a usable ML backend is installed.
+
+        When KERAS_BACKEND is not set, one of the installed backends is selected automatically.
 
         Raises ImportError if:
         1. No ML backend (torch, tensorflow, jax) is installed
         2. KERAS_BACKEND points to a backend that is not installed
         """
-        ML_BACKENDS = ["torch", "tensorflow", "jax"]
+        # Ordered by preference: the first backend in the list that is installed will be used if KERAS_BACKEND is not set.
+        KERAS_DEFAULT_BACKEND = "tensorflow"
+        ML_BACKENDS = [KERAS_DEFAULT_BACKEND, "jax", "torch"]
         INSTALL_URLS = {
             "torch": "https://pytorch.org/get-started/locally/",
             "tensorflow": "https://www.tensorflow.org/install",
             "jax": "https://docs.jax.dev/en/latest/installation.html",
         }
-        KERAS_DEFAULT_BACKEND = "tensorflow"
         DOCS_URL = "https://zea.readthedocs.io/en/latest/installation.html"
 
         # Determine which backend Keras will try to use
@@ -78,6 +81,11 @@ def _bootstrap_backend():
         installed_backends = [
             backend for backend in ML_BACKENDS if importlib.util.find_spec(backend) is not None
         ]
+
+        # If the user did not pick a backend, use one that is actually installed
+        if backend_env is None and installed_backends:
+            effective_backend = installed_backends[0]
+            os.environ["KERAS_BACKEND"] = effective_backend
 
         # Keras' numpy backend is not standalone: it imports jax internally (see
         # keras/src/backend/numpy/nn.py), so jax is required no matter which other
@@ -131,11 +139,17 @@ def _bootstrap_backend():
                 f"For more information, see: {DOCS_URL}"
             )
 
+    backend_was_set = os.environ.get("KERAS_BACKEND") is not None
+
     _check_backend_installed()
 
     # Read from the env var rather than calling ``keras.backend.backend()``
     # so that importing ``zea`` does not import ``keras``.
-    log.info(f"Using backend {os.environ.get('KERAS_BACKEND', 'tensorflow')!r}")
+    backend = os.environ.get("KERAS_BACKEND", "tensorflow")
+    if backend_was_set:
+        log.info(f"Using backend {backend!r}")
+    else:
+        log.info(f"Using backend {backend!r} (KERAS_BACKEND not set, set it to override)")
 
 
 # Skip backend bootstrap when building on ReadTheDocs

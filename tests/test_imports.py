@@ -112,12 +112,16 @@ def test_package_does_not_import_ml_libs():
         importlib.import_module("zea")
 
 
-def _subprocess_import_zea_with_only_backend(backend, keras_backend=None):  # pragma: no cover
+def _subprocess_import_zea_with_only_backend(
+    backend, keras_backend=None, unset_keras_backend=False
+):  # pragma: no cover
     """
     This function is run in a subprocess to test zea import with only one backend available.
 
     ``keras_backend`` sets KERAS_BACKEND independently of the available backend (used to
-    test e.g. KERAS_BACKEND=numpy); it defaults to ``backend``.
+    test e.g. KERAS_BACKEND=numpy); it defaults to ``backend``. With
+    ``unset_keras_backend``, KERAS_BACKEND is removed from the environment instead, to
+    test zea's automatic backend selection.
     """
     import builtins
     import importlib.util
@@ -128,10 +132,13 @@ def _subprocess_import_zea_with_only_backend(backend, keras_backend=None):  # pr
     all_backends = ["tensorflow", "torch", "jax"]
 
     # Set KERAS_BACKEND before any imports
-    if keras_backend is None:
-        keras_backend = backend
-    if keras_backend is not None:
-        os.environ["KERAS_BACKEND"] = keras_backend
+    if unset_keras_backend:
+        os.environ.pop("KERAS_BACKEND", None)
+    else:
+        if keras_backend is None:
+            keras_backend = backend
+        if keras_backend is not None:
+            os.environ["KERAS_BACKEND"] = keras_backend
 
     import_orig = builtins.__import__
 
@@ -181,17 +188,21 @@ def _subprocess_import_zea_with_only_backend(backend, keras_backend=None):  # pr
     except Exception as e:
         print(str(e))
         sys.exit(1)
+    print(f"RESOLVED_KERAS_BACKEND={os.environ.get('KERAS_BACKEND')}")
     sys.exit(0)
 
 
-def run_import_zea_with_only_backend(backend, keras_backend=None):
+def run_import_zea_with_only_backend(backend, keras_backend=None, unset_keras_backend=False):
     """
     Run a subprocess that tries to import zea with only one backend available.
     All other backends will raise ImportError.
     """
     # Get the source code of the subprocess function, dedent, and add call at the end
     code = textwrap.dedent(inspect.getsource(_subprocess_import_zea_with_only_backend))
-    code += f"\n_subprocess_import_zea_with_only_backend({repr(backend)}, {repr(keras_backend)})\n"
+    code += (
+        f"\n_subprocess_import_zea_with_only_backend("
+        f"{repr(backend)}, {repr(keras_backend)}, {repr(unset_keras_backend)})\n"
+    )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     return result
 
@@ -229,6 +240,23 @@ def test_import_zea_with_backend_subprocess(backend, should_succeed):
     else:
         if result.returncode == 0:
             assert False, "zea should not import if all backends are missing"
+
+
+@pytest.mark.parametrize("backend", ["tensorflow", "torch", "jax"])
+def test_import_zea_without_keras_backend_env(backend):
+    """Without KERAS_BACKEND set, zea should use the backend that is actually installed.
+
+    Keras defaults to tensorflow, so a torch- or jax-only environment would otherwise
+    fail to import.
+    """
+    result = run_import_zea_with_only_backend(backend, unset_keras_backend=True)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, (
+        f"zea should import with KERAS_BACKEND unset and only {backend} installed.\n{output}"
+    )
+    assert f"RESOLVED_KERAS_BACKEND={backend}" in output, (
+        f"zea should have selected '{backend}', the only installed backend.\n{output}"
+    )
 
 
 @pytest.mark.parametrize("backend,should_succeed", [("jax", True), ("torch", False)])
