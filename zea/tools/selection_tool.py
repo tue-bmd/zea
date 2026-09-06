@@ -211,14 +211,6 @@ def interactive_selector(
         masks.append(np.copy(mask))
         mask.flat[ind] = False
 
-    name_to_selector = {"lasso": LassoSelector, "rectangle": RectangleSelector}
-    selector_cls = name_to_selector[selector]
-    onselect_dict = {
-        LassoSelector: _onselect_lasso,
-        RectangleSelector: _onselect_rectangle,
-    }
-    kwargs_dict = {LassoSelector: {}, RectangleSelector: {"interactive": True}}
-
     # Selection state, shared with the callbacks above.
     mask = np.tile(False, data.shape)
     masks = []
@@ -231,34 +223,37 @@ def interactive_selector(
         masks = []
         select_idx = 0
 
-        widget = selector_cls(
-            ax,
-            onselect_dict[selector_cls],  # ty: ignore[invalid-argument-type]
-            **kwargs_dict[selector_cls],  # ty: ignore[invalid-argument-type]
-        )
+        if selector == "lasso":
+            widget = LassoSelector(ax, _onselect_lasso)
+        else:
+            widget = RectangleSelector(ax, _onselect_rectangle, interactive=True)
 
+        figure = ax.get_figure()
+        closed_early = False
         if num_selections:
             if verbose:
                 log.info(f"...Plot will close after {num_selections} selections...")
             plt.show(block=False)
-            figure = ax.get_figure()
             while select_idx < num_selections:
                 if not plt.fignum_exists(figure.number):
                     log.warning(
                         f"Plot was closed after {select_idx} of {num_selections} selections."
                     )
+                    closed_early = True
                     break
                 plt.pause(0.1)
         else:
             plt.show(block=False)
             wait_for_key(
-                ax.get_figure(),
+                figure,
                 f"Press {_keys(ACCEPT_KEYS)} in this window when you are done selecting.",
             )
+            closed_early = not plt.fignum_exists(figure.number)
 
-        widget.disconnect_events()
-        widget.set_visible(False)
-        widget.update()
+        if not closed_early:
+            widget.disconnect_events()
+            widget.set_visible(False)
+            widget.update()
 
         return [crop_array(data * selected, value=0) for selected in masks]
 
@@ -351,7 +346,7 @@ def interactive_selector_with_plot_and_metric(
 
     # compute metrics
     scores = []
-    if metric:
+    if metric is not None:
         from zea.metrics import get_metric
 
         for i in range(len(data)):
@@ -1052,6 +1047,9 @@ class SourceMetadata(NamedTuple):
     file_fields: dict
     #: Extra fields for the copied image map, e.g. ``coordinates``, ``timestamps``.
     map_fields: dict
+    #: Label of the track the images were read from, for a multi-track source file.
+    #: None when the source had a single track, so there was nothing to record.
+    track_label: str | None = None
 
 
 #: Map fields the tool writes itself, so they are never copied from a source file.
@@ -1072,12 +1070,11 @@ def _copyable_fields(schema, skip: frozenset) -> tuple[str, ...]:
     return tuple(name for name in schema if name not in skip)
 
 
-def _select_track(file, track: str | int | None):
+def _select_track(file, track: str | int | None) -> tuple:
     """Return the data group to annotate, from a single- or multi-track file.
 
-    ``track`` is matched against the file's labels first and read as an index only when
-    no label matches, so a numerically labelled track still wins. Files with a single
-    track (or no ``tracks/`` group at all) have nothing to address and ignore ``track``.
+    Files with a single track (or no ``tracks/`` group at all) have nothing to address
+    and ignore ``track``. Otherwise resolution is delegated to :meth:`File.get_track`.
 
     Args:
         file (zea.File): The open file.
@@ -1085,26 +1082,26 @@ def _select_track(file, track: str | int | None):
             needed for files with more than one track.
 
     Returns:
-        The track's data group.
+        tuple: ``(data, track_label)``, the track's data group and the label it was
+        selected by. ``track_label`` is None for a single-track file, where nothing
+        needed choosing and there is no track identity worth recording downstream.
 
     Raises:
         ValueError: If the file has several tracks and ``track`` does not name one.
     """
     labels = file.track_labels
     if len(labels) <= 1:  # flat layout reports no labels, single-track reports one
-        return file.data
+        return file.data, None
     if track is None:
         raise ValueError(
             f"This file has {len(labels)} tracks {labels} but no track was selected. "
             "Pass --track <label|index> to pick one."
         )
     try:
-        index = labels.index(track) if track in labels else int(track)
-    except ValueError:
-        index = -1  # neither a label nor a number: report it like a bad index
-    if not 0 <= index < len(labels):
-        raise ValueError(f"No track {track!r} in this file. Available tracks: {labels}.")
-    return file.tracks[index].data
+        resolved = file.get_track(track)
+    except KeyError as e:
+        raise ValueError(str(e)) from e
+    return resolved.data, resolved.label
 
 
 def _map_name(key: str) -> str:
@@ -1145,7 +1142,7 @@ def _load_zea_file(
     path = str(path)
     name = _map_name(key)
     with File(path) as file:
-        data = _select_track(file, track)
+        data, track_label = _select_track(file, track)
         if name not in data.keys():
             raise ValueError(
                 f"{path} has no '{key}' group. The selection tool annotates images, so "
@@ -1153,12 +1150,16 @@ def _load_zea_file(
                 "Use `zea process` to reconstruct images from raw data first."
             )
         image = getattr(data, name)
-        values = image.values[:]
+        # One recursive read of the whole group instead of one getattr()[()] per schema
+        # field, so an `hf://` source is read as a single batch rather than one range
+        # request per present field (`values` included, saving a second read of it).
+        loaded_image = image.load_group()
+        values = loaded_image["values"]
 
         map_fields = {
-            name: getattr(image, name)[()]
+            name: loaded_image[name]
             for name in _copyable_fields(Map.SCHEMA, _OWN_MAP_FIELDS)
-            if name in image.keys()
+            if name in loaded_image
         }
         file_fields = {}
         for name in _copyable_fields(FileSpec.SCHEMA, _OWN_FILE_FIELDS):
@@ -1172,7 +1173,7 @@ def _load_zea_file(
             f"Expected 2D images of shape (n_frames, z, x) in {path}, got shape "
             f"{values.shape}. Volumetric data is not supported by the selection tool."
         )
-    return values, SourceMetadata(file_fields, map_fields)
+    return values, SourceMetadata(file_fields, map_fields, track_label)
 
 
 class SelectionInputs(NamedTuple):
@@ -1574,9 +1575,9 @@ def _output_stem(source: str, title: str, output_dir: str | Path | None) -> Path
 
 def _check_outputs_free(paths: Sequence[Path], overwrite: bool) -> None:
     """Raise unless every output path is free, mirroring the ``zea data`` guards."""
-    if overwrite:
-        return
-    existing = [path for path in paths if path.exists()]
+    from zea.data.file_operations import output_blocked
+
+    existing = [path for path in paths if output_blocked(path, overwrite)]
     if existing:
         raise FileExistsError(
             f"Output file(s) already exist: {', '.join(str(path) for path in existing)}. "
@@ -1694,13 +1695,19 @@ def run_selection_tool(
     fig = preview_figure(images, masks, selector, title=title)
     status = show_status(fig, "Saving annotations...")
 
+    track_note = ""
+    if inputs.source is not None and inputs.source.track_label is not None:
+        track_note = f" (track {inputs.source.track_label!r})"
+
     save_masks(
         masks,
         stem,
         images=images,
         label=title,
         source=inputs.source,
-        description=f"Regions of interest ('{title}') selected in {PurePosixPath(source).name}.",
+        description=(
+            f"Regions of interest ('{title}') selected in {PurePosixPath(source).name}{track_note}."
+        ),
         overwrite=overwrite,
     )
 

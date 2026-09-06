@@ -24,6 +24,11 @@ sitk = importlib.util.find_spec("SimpleITK")
 if sitk is not None:
     SUPPORTED_FORMATS += ["nii.gz"]
 
+#: Shared between the top-level ``--device`` flag (``zea/__main__.py``) and the standalone
+#: ``python -m zea.data.process`` entry point, so the two can't drift apart.
+DEFAULT_DEVICE = "auto:1"
+DEVICE_HELP = "Compute device passed to init_device (e.g. 'cpu', 'auto:1')."
+
 
 @dataclass
 class AppArgs:
@@ -434,6 +439,7 @@ def _run_data_command(command) -> None:
     still guarded inside the operation itself, so only an existing output *file* is
     blocked here.
     """
+    from zea.data.file_operations import output_blocked
     from zea.log import logger
 
     output_path = getattr(command, "output_path", None)
@@ -446,7 +452,7 @@ def _run_data_command(command) -> None:
     if (
         output_path is not None
         and Path(output_path).is_file()
-        and not getattr(command, "overwrite", False)
+        and output_blocked(output_path, getattr(command, "overwrite", False))
     ):
         logger.error(f"Output file {output_path} already exists. Use --overwrite to overwrite it.")
         raise SystemExit(1)

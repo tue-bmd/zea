@@ -21,6 +21,8 @@ from zea.cli_args import (
     ConvertArgs,
     DataArgs,
     DataPathsArgs,
+    DEFAULT_DEVICE,
+    DEVICE_HELP,
     ProcessArgs,
     ToolsArgs,
 )
@@ -45,8 +47,8 @@ class CLI:
     ]
     device: Annotated[
         tyro.conf.CascadeSubcommandArgs[str],
-        tyro.conf.arg(help="Compute device passed to init_device (e.g. 'cpu', 'auto:1')."),
-    ] = "auto:1"
+        tyro.conf.arg(help=DEVICE_HELP),
+    ] = DEFAULT_DEVICE
 
 
 def _check_if_device_needed(subcommand) -> bool:

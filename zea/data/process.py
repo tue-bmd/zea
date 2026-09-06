@@ -16,11 +16,12 @@ from keras import ops
 
 from zea import io_lib, log
 from zea.backend import jit
-from zea.cli_args import SUPPORTED_FORMATS, ProcessArgs
+from zea.cli_args import DEFAULT_DEVICE, DEVICE_HELP, SUPPORTED_FORMATS, ProcessArgs
 from zea.config import Config
 from zea.data.dataloader import Dataloader
 from zea.data.datasets import Dataset
 from zea.data.file import File, _GroupProxy
+from zea.data.file_operations import output_blocked
 from zea.data.spec import strip_track_prefix
 from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
@@ -107,7 +108,7 @@ def _run_passthrough(
                 )
 
             save_path = save_dir / f"{filestem}.{save_as}"
-            if save_path.exists() and not overwrite:
+            if output_blocked(save_path, overwrite):
                 log.warning(f"File {save_path} already exists. Use --overwrite to replace it.")
             else:
                 if save_as in ("gif", "mp4"):
@@ -226,7 +227,7 @@ def run_processing(
         parameters,
         fps: int,
     ):
-        if save_path.exists() and not overwrite:
+        if output_blocked(save_path, overwrite):
             log.warning(f"File {save_path} already exists. Use --overwrite to replace it.")
             return
         if save_as in ["mp4", "gif"]:
@@ -326,8 +327,8 @@ class _StandaloneProcessArgs(ProcessArgs):
 
     device: Annotated[
         str,
-        tyro.conf.arg(help="Compute device passed to init_device (e.g. 'cpu', 'auto:1')."),
-    ] = "auto:1"
+        tyro.conf.arg(help=DEVICE_HELP),
+    ] = DEFAULT_DEVICE
 
 
 def main() -> None:

@@ -1116,19 +1116,28 @@ def test_load_input_files_multi_track_needs_a_track(multi_track_path):
         load_input_files([multi_track_path])
 
 
-@pytest.mark.parametrize("track,fill", [("bmode", 30), ("doppler", 200), (1, 200), ("0", 30)])
-def test_load_input_files_selects_a_track(multi_track_path, track, fill):
+@pytest.mark.parametrize(
+    "track,fill,label",
+    [
+        ("bmode", 30, "bmode"),
+        ("doppler", 200, "doppler"),
+        (1, 200, "doppler"),
+        ("0", 30, "bmode"),
+    ],
+)
+def test_load_input_files_selects_a_track(multi_track_path, track, fill, label):
     """Tracks resolve by label or by index, from the CLI (str) or the API (int)."""
     inputs = load_input_files([multi_track_path], track)
 
     assert len(inputs.images) == 4
     assert all(image[0, 0] == fill for image in inputs.images)
+    assert inputs.source.track_label == label
 
 
 @pytest.mark.parametrize("track", ["elastography", 5, "5", "not-a-number"])
 def test_load_input_files_rejects_an_unknown_track(multi_track_path, track):
     """One error type for every way of naming a track that isn't there."""
-    with pytest.raises(ValueError, match="Available tracks"):
+    with pytest.raises(ValueError, match="Available labels"):
         load_input_files([multi_track_path], track)
 
 
@@ -1246,6 +1255,28 @@ def test_run_selection_tool_on_zea_file(fake_selector, zea_path, tmp_path):
     with File(out) as annotated:
         assert list(annotated.data.segmentation.labels[:]) == ["lv_endo"]
         assert annotated.data.segmentation.values.shape == (6, 20, 24, 1)
+
+
+def test_run_selection_tool_records_the_source_track(fake_selector, multi_track_path, tmp_path):
+    """Annotating one track of a multi-track file records which one in the description."""
+    from zea import File
+
+    fake_selector([((1, 1), (8, 8))])
+
+    run_selection_tool(
+        files=[multi_track_path],
+        selector="rectangle",
+        title="roi",
+        num_selections=2,
+        save_animation=False,
+        output_dir=tmp_path,
+        confirm_selection=False,
+        track="doppler",
+    )
+
+    out = tmp_path / f"{multi_track_path.stem}_roi_annotations.hdf5"
+    with File(out) as annotated:
+        assert "'doppler'" in annotated.description
 
 
 def test_run_selection_tool_refuses_to_clobber(fake_selector, gif_path, tmp_path):
