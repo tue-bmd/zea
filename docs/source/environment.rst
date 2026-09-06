@@ -12,7 +12,7 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - **Default**
      - **Options**
    * - ``KERAS_BACKEND``
-     - Select the Keras backend to use. This defines the ML framework that will be used for all tensor operations. If not set, ``zea`` picks an installed backend on import (preferring ``tensorflow``, then ``jax``, then ``torch``).
+     - Select the Keras backend to use. This defines the ML framework that will be used for all tensor operations. Takes precedence over the backend in ``keras.json``. If neither is set, ``zea`` picks an installed backend on import (preferring ``tensorflow``, then ``jax``, then ``torch``).
      - installed backend
      - ``tensorflow``, ``jax``, ``torch``, ``numpy``
    * - ``ZEA_CACHE_DIR``
