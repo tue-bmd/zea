@@ -443,6 +443,75 @@ def test_stale_keras_json_falls_back_to_installed_backend(tmp_path):
     )
 
 
+@pytest.mark.parametrize("origin", ["env", "keras.json"])
+def test_unsupported_keras_backend_is_rejected(origin, tmp_path):
+    """Keras supports backends that zea does not, such as openvino.
+
+    Those must fail loudly: substituting a backend zea does support would silently run
+    the user's code on something other than what they asked for.
+    """
+    keras_home = tmp_path / "keras_home"
+    keras_home.mkdir()
+
+    if origin == "env":
+        kwargs = {"keras_backend": "openvino"}
+    else:
+        (keras_home / "keras.json").write_text(json.dumps({"backend": "openvino"}))
+        kwargs = {"unset_keras_backend": True}
+
+    result = run_import_zea_with_only_backend("jax", keras_home=str(keras_home), **kwargs)
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, (
+        f"zea should refuse to import with an unsupported backend set in {origin}.\n{output}"
+    )
+    assert "does not support" in output, f"Expected an unsupported-backend error, got:\n{output}"
+    assert resolved_backend(result) is None, (
+        f"zea should not fall back to a backend of its own choosing.\n{output}"
+    )
+
+
+def test_keras_imported_before_zea_keeps_its_backend(tmp_path):
+    """When keras is already imported its backend is fixed, so zea must follow it.
+
+    zea cannot change it any more, and leaving KERAS_BACKEND naming a different backend
+    would make ``zea.init_device`` (and any subprocess) configure one that is not running.
+    """
+    # A backend zea accepts but keras is not running, so the two genuinely disagree.
+    # keras' numpy backend needs jax; without it, fall back to another installed backend.
+    if "jax" in available_test_backends():
+        divergent = "numpy"
+    else:
+        others = [b for b in available_test_backends() if b != TEST_BACKEND]
+        if not others:
+            pytest.skip("Needs a second backend to disagree about.")
+        divergent = others[0]
+
+    keras_home = tmp_path / "keras_home"
+    keras_home.mkdir()
+    (keras_home / "keras.json").write_text(json.dumps({"backend": TEST_BACKEND}))
+
+    env = dict(os.environ, KERAS_HOME=str(keras_home), KERAS_BACKEND="")
+    code = (
+        "import os, keras\n"
+        f"os.environ['KERAS_BACKEND'] = {divergent!r}\n"
+        "import zea\n"
+        "print('ENV=' + os.environ['KERAS_BACKEND'])\n"
+        "print('KERAS=' + keras.backend.backend())\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, f"zea should still import after keras.\n{output}"
+    assert f"KERAS={TEST_BACKEND}" in output, (
+        f"keras should be unaffected by the later KERAS_BACKEND change.\n{output}"
+    )
+    assert f"ENV={TEST_BACKEND}" in output, (
+        f"zea should adopt the backend keras is running, not {divergent!r}.\n{output}"
+    )
+    assert "imported before zea" in output, (
+        f"zea should warn that the import order decided the backend.\n{output}"
+    )
+
+
 @pytest.mark.parametrize("backend,should_succeed", [("jax", True), ("torch", False)])
 def test_import_zea_numpy_backend_requires_jax(backend, should_succeed):
     """KERAS_BACKEND=numpy requires jax, even when another backend is installed.

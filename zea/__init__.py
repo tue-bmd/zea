@@ -53,22 +53,29 @@ def _bootstrap_backend():
 
     Runs before keras is imported, so ``KERAS_BACKEND`` is in place by the time it is.
     The backend is read from the environment and from ``keras.json`` directly rather
-    than through keras itself, which would defeat the lazy imports below.
+    than through keras itself, which would defeat the lazy imports below. When keras
+    was already imported, its backend is fixed and zea defers to it instead.
     """
 
-    # What Keras falls back to when no backend is configured anywhere. Only used to
-    # explain in error messages what would have happened without zea.
+    # Keras prefers tensorflow
     KERAS_DEFAULT_BACKEND = "tensorflow"
-    # Ordered by preference: when the user did not pick a backend, the first of these
-    # that is installed is used. zea is built on top of Keras, so we mirror the Keras
-    # default of preferring tensorflow rather than imposing an order of our own.
+    # Ordered by preference for automatic selection
     ML_BACKENDS = ["tensorflow", "jax", "torch"]
+    # Keras supports backends that zea does not, such as openvino.
+    SUPPORTED_BACKENDS = ML_BACKENDS + ["numpy"]
+
     INSTALL_URLS = {
         "torch": "https://pytorch.org/get-started/locally/",
         "tensorflow": "https://www.tensorflow.org/install",
         "jax": "https://docs.jax.dev/en/latest/installation.html",
     }
     DOCS_URL = "https://zea.readthedocs.io/en/latest/installation.html"
+
+    # Probed with find_spec so that no backend is imported here
+    installed_backends = [
+        backend for backend in ML_BACKENDS if importlib.util.find_spec(backend) is not None
+    ]
+    usable_backends = [*installed_backends, "numpy"]
 
     def _backend_from_keras_config():
         """Read the backend from ``keras.json``, without importing keras.
@@ -86,61 +93,59 @@ def _bootstrap_backend():
         except (OSError, ValueError):
             return None
 
-    def _resolve_backend():
-        """Pick the backend to use and verify that it is usable.
+    def _select_backend():
+        """Pick the backend to use, without checking whether it can be used.
 
-        Returns a ``(backend, installed_backends, origin)`` tuple, where ``origin`` is
-        ``"env"``, ``"keras.json"`` or ``"auto"``, depending on where the backend came
-        from.
+        Returns:
+            A ``(backend, origin, source)`` tuple:
 
-        Raises ImportError if:
-        1. No ML backend (torch, tensorflow, jax) is installed
-        2. The chosen backend is not installed
+            - ``backend``: the backend to use.
+            - ``origin``: where the backend came from, one of ``"env"``,
+              ``"keras.json"`` or ``"auto"``.
+            - ``source``: a string describing the source of the backend, for error
+              messages.
         """
+        # Use the environment variable first
         backend_env = os.environ.get("KERAS_BACKEND") or None
-
-        # Find all installed ML backends
-        installed_backends = [
-            backend for backend in ML_BACKENDS if importlib.util.find_spec(backend) is not None
-        ]
+        if backend_env:
+            return backend_env, "env", f"KERAS_BACKEND is set to '{backend_env}'"
 
         # Keras writes keras.json itself on first import, so the file exists even for
-        # users who never touched it. Only trust it when it names a backend that is
-        # actually usable here; a stale entry falls through to automatic selection
-        # instead of erroring, whereas KERAS_BACKEND, being a deliberate act, does not.
-        config_backend = None
-        if backend_env is None:
-            config_backend = _backend_from_keras_config()
-            if config_backend not in installed_backends and config_backend != "numpy":
-                config_backend = None
+        # users who never touched it and can name a backend this environment does not
+        # have. Such a stale entry falls through to automatic selection instead of
+        # erroring, whereas KERAS_BACKEND, being a deliberate act, does not.
+        config_backend = _backend_from_keras_config()
+        stale = config_backend in SUPPORTED_BACKENDS and config_backend not in usable_backends
+        if config_backend and not stale:
+            return (
+                config_backend,
+                "keras.json",
+                f"keras.json selects backend '{config_backend}'",
+            )
 
-        if backend_env:
-            origin = "env"
-            source = f"KERAS_BACKEND is set to '{backend_env}'"
-        elif config_backend:
-            origin = "keras.json"
-            source = f"keras.json selects backend '{config_backend}'"
-        else:
-            origin = "auto"
-            source = f"KERAS_BACKEND is not set (Keras defaults to '{KERAS_DEFAULT_BACKEND}')"
+        # Nobody picked a backend, so use one that is actually installed.
+        backend = installed_backends[0] if installed_backends else KERAS_DEFAULT_BACKEND
+        source = f"KERAS_BACKEND is not set (Keras defaults to '{KERAS_DEFAULT_BACKEND}')"
+        return backend, "auto", source
 
-        # If the user did not pick a backend, use one that is actually installed
-        backend = (
-            backend_env
-            or config_backend
-            or (installed_backends[0] if installed_backends else KERAS_DEFAULT_BACKEND)
-        )
+    def _check_backend(backend, source):
+        """Raise ImportError if ``backend`` cannot be used in this environment."""
 
-        # Keras' numpy backend is not standalone: it imports jax internally (see
-        # keras/src/backend/numpy/nn.py), so jax is required no matter which other
-        # backends happen to be installed.
+        # The backend is one keras supports but zea does not.
+        if backend not in SUPPORTED_BACKENDS:
+            raise ImportError(
+                f"{source}, which {__package__} does not support. "
+                f"Supported backends: {', '.join(SUPPORTED_BACKENDS)}. Please set "
+                f"KERAS_BACKEND to one of them. For more information, see: {DOCS_URL}"
+            )
+
+        # The backend is numpy without jax, which keras' numpy backend needs
         if backend == "numpy" and "jax" not in installed_backends:
-            if installed_backends:
-                backend_status = f"Installed backends: {', '.join(installed_backends)}."
-            else:
-                backend_status = (
-                    "No ML backend (torch, tensorflow, jax) installed in current environment."
-                )
+            backend_status = (
+                f"Installed backends: {', '.join(installed_backends)}."
+                if installed_backends
+                else "No ML backend (torch, tensorflow, jax) installed in current environment."
+            )
             raise ImportError(
                 f"{backend_status} {source}, but Keras' numpy "
                 f"backend is not standalone: jax must be installed as well. Install it with "
@@ -148,9 +153,10 @@ def _bootstrap_backend():
                 f"(CPU-only). For more information, see: {DOCS_URL}"
             )
 
-        # Error if no backends are installed
+        install_url = INSTALL_URLS.get(backend, "https://keras.io/getting_started/")
+
+        # No ML backend (torch, tensorflow, jax) is installed
         if not installed_backends:
-            install_url = INSTALL_URLS.get(backend, "https://keras.io/getting_started/")
             raise ImportError(
                 f"No ML backend (torch, tensorflow, jax) installed in current "
                 f"environment. Please install at least one ML backend before importing "
@@ -160,11 +166,8 @@ def _bootstrap_backend():
                 f"see: {DOCS_URL}"
             )
 
-        # Error if the chosen backend is not installed. Only reachable for an explicit
-        # choice: automatic selection always lands on an installed backend.
-        # (skip numpy which doesn't need installation)
-        if backend != "numpy" and backend not in installed_backends:
-            install_url = INSTALL_URLS.get(backend, "https://keras.io/getting_started/")
+        # The backend is not installed
+        if backend not in usable_backends:
             raise ImportError(
                 f"{source}, but this backend is not installed. "
                 f"Installed backends: {', '.join(installed_backends)}. "
@@ -174,27 +177,48 @@ def _bootstrap_backend():
                 f"For more information, see: {DOCS_URL}"
             )
 
-        return backend, installed_backends, origin
+    def _active_keras_backend():
+        """The backend keras already resolved, or None when nothing fixed it yet.
 
-    backend, installed_backends, origin = _resolve_backend()
-
-    # Export the resolution so that keras, and anything reading KERAS_BACKEND
-    # (e.g. ``zea.init_device``), agrees with what was decided here.
-    os.environ["KERAS_BACKEND"] = backend
-
-    # Keras resolves its backend once, at import time, so if something imported it
-    # before zea the line above came too late. Reading it back is free here: the
-    # module is already loaded, so this does not import keras.
-    if "keras" in sys.modules:
+        Keras resolves its backend once, at import time, so if something imported it
+        before zea, nothing decided here can still change it. Reading it back is free:
+        the module is already loaded, so this does not import keras.
+        """
+        keras = sys.modules.get("keras")
+        if keras is None:
+            return None
         try:
-            active_backend = sys.modules["keras"].backend.backend()
+            return keras.backend.backend()
         except AttributeError:  # keras is still initialising
-            active_backend = backend
-        if active_backend != backend:
-            log.warning(
-                f"keras was imported before zea and is using the {active_backend!r} backend, "
-                f"not {backend!r}. Import zea, or set KERAS_BACKEND, before importing keras."
+            return None
+
+    def _export_backend(backend):
+        """Export the backend to the environment so that keras and zea agree. Any subprocess, or functions that read KERAS_BACKEND, will see the same backend."""
+        os.environ["KERAS_BACKEND"] = backend
+
+    backend, origin, source = _select_backend()
+    _check_backend(backend, source)
+
+    # Keras was first: it already resolved its backend, so zea must defer to it.
+    active_backend = _active_keras_backend()
+    if active_backend is not None and active_backend != backend:
+        if active_backend not in SUPPORTED_BACKENDS:
+            raise ImportError(
+                f"keras was imported before {__package__} and is using the "
+                f"{active_backend!r} backend, which {__package__} does not support. "
+                f"Supported backends: {', '.join(SUPPORTED_BACKENDS)}. For more "
+                f"information, see: {DOCS_URL}"
             )
+
+        _export_backend(active_backend)
+        log.warning(
+            f"keras was imported before zea and is using the {active_backend!r} backend, "
+            f"not {backend!r}. Continuing with {active_backend!r}; import zea, or set "
+            f"KERAS_BACKEND, before importing keras."
+        )
+        return
+
+    _export_backend(backend)
 
     # No printing when using --help flag
     if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
