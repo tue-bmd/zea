@@ -17,6 +17,8 @@ import pytest
 
 import zea
 
+from . import TEST_BACKEND
+from .backend_utils import available_test_backends
 from .helpers import run_in_subprocess
 
 
@@ -368,6 +370,55 @@ def test_keras_json_backend_is_not_overridden(tmp_path):
     assert "from keras.json" in output and "Set KERAS_BACKEND to pin it" in output, (
         f"zea should still warn that the backend is not pinned by KERAS_BACKEND.\n{output}"
     )
+
+
+def test_empty_keras_backend_is_treated_as_unset(tmp_path):
+    """An empty KERAS_BACKEND picks nothing, so keras.json must still be honoured.
+
+    Keras ignores an empty value and falls back to keras.json, and .env files routinely
+    leave the variable blank (this repo's own .env.example does), so treating it as a
+    deliberate choice would silently override the configured backend.
+    """
+    keras_home = tmp_path / "keras_home"
+    keras_home.mkdir()
+    (keras_home / "keras.json").write_text(json.dumps({"backend": "jax"}))
+
+    result = run_import_zea_with_only_backend(
+        ["tensorflow", "jax"], keras_backend="", keras_home=str(keras_home)
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, f"zea should import with an empty KERAS_BACKEND.\n{output}"
+    assert resolved_backend(result) == "jax", (
+        f"An empty KERAS_BACKEND should not suppress the backend from keras.json.\n{output}"
+    )
+
+
+def test_resolved_backend_is_the_one_keras_uses(tmp_path):
+    """What zea reports must be what keras actually runs on.
+
+    KERAS_BACKEND and ``keras.backend.backend()`` can disagree, because keras also reads
+    keras.json and ignores an empty KERAS_BACKEND, so asserting on the env var alone
+    would miss it. Runs against real keras, using the backend that is actually installed.
+    """
+    # Name a backend automatic selection would not land on, so a regression actually
+    # shows up here. keras' numpy backend is only usable when jax is installed.
+    expected = "numpy" if "jax" in available_test_backends() else TEST_BACKEND
+
+    keras_home = tmp_path / "keras_home"
+    keras_home.mkdir()
+    (keras_home / "keras.json").write_text(json.dumps({"backend": expected}))
+
+    env = dict(os.environ, KERAS_HOME=str(keras_home), KERAS_BACKEND="")
+    code = (
+        "import zea, os, keras\n"
+        "print('ENV=' + os.environ['KERAS_BACKEND'])\n"
+        "print('KERAS=' + keras.backend.backend())\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, f"zea and keras should both import.\n{output}"
+    assert f"ENV={expected}" in output, f"zea should resolve {expected!r}.\n{output}"
+    assert f"KERAS={expected}" in output, f"keras should actually be using {expected!r}.\n{output}"
 
 
 def test_stale_keras_json_falls_back_to_installed_backend(tmp_path):

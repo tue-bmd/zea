@@ -97,7 +97,7 @@ def _bootstrap_backend():
         1. No ML backend (torch, tensorflow, jax) is installed
         2. The chosen backend is not installed
         """
-        backend_env = os.environ.get("KERAS_BACKEND")
+        backend_env = os.environ.get("KERAS_BACKEND") or None
 
         # Find all installed ML backends
         installed_backends = [
