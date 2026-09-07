@@ -255,9 +255,9 @@ def test_main_dispatches_to_run_processing(tmp_path, monkeypatch):
 
     called = {}
 
-    def _fake_run(dataset, config, key, *args, **kwargs):
-        called["dataset"] = dataset
-        called["config"] = config
+    def _fake_run(dataset_path, config_path, key, *args, **kwargs):
+        called["dataset"] = dataset_path
+        called["config"] = config_path
         called["key"] = key
 
     with patch("zea.data.process.run_processing", _fake_run):
