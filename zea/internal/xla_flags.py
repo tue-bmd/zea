@@ -1,12 +1,13 @@
 """XLA flag defaults, applied from :mod:`zea`'s bootstrap before any backend loads.
 
-XLA's GPU fusion autotuner is on by default, and it causes jax jit compilation times to
-explode on large grids. The flag to disable it is part of an experimental feature that
-may disappear in future versions (and invalid XLA flags crash the compiler), so this
-first checks whether jaxlib supports it.
+XLA's GPU fusion autotuner is on by default, and it causes jit compilation times to
+explode on large grids. The flag to disable it is part of an experimental feature
+that may disappear in future versions (and invalid XLA flags crash the compiler),
+so this first checks whether the currently used version supports it.
 """
 
 import importlib.util
+import json
 import mmap
 import os
 from pathlib import Path
@@ -16,10 +17,10 @@ from zea import log
 FUSION_AUTOTUNER_FLAG = "xla_gpu_experimental_enable_fusion_autotuner"
 
 
-def flag_supported(flag):
-    """Check if ``flag`` shows up in jaxlib's compiled libraries."""
+def flag_supported(flag, package):
+    """Check if ``flag`` shows up in the compiled libraries of ``package``."""
     try:
-        spec = importlib.util.find_spec("jaxlib")
+        spec = importlib.util.find_spec(package)
     except ImportError:
         return False
     if spec is None or not spec.submodule_search_locations:
@@ -48,8 +49,16 @@ def disable_fusion_autotuner(backend=None):
         bool: whether the flag was added.
     """
     if backend is None:
-        backend = os.environ.get("KERAS_BACKEND", "jax")
-    if backend.lower() not in ("jax", "numpy"):  # numpy falls back to jax for some operations
+        # Resolve the backend the way keras does: env var, then keras.json, then tensorflow.
+        config = Path(os.environ.get("KERAS_HOME", Path.home() / ".keras")) / "keras.json"
+        try:
+            default = json.loads(config.read_text()).get("backend", "tensorflow")
+        except (OSError, ValueError, AttributeError):
+            default = "tensorflow"
+        backend = os.environ.get("KERAS_BACKEND", default)
+    # Which XLA build gets to see the flag; numpy falls back to jax for some operations.
+    package = {"jax": "jaxlib", "numpy": "jaxlib", "tensorflow": "tensorflow"}.get(backend.lower())
+    if package is None:  # torch does not go through XLA
         return False
 
     xla_flags = os.environ.get("XLA_FLAGS", "")
@@ -61,7 +70,7 @@ def disable_fusion_autotuner(backend=None):
             )
         return False
 
-    if not flag_supported(FUSION_AUTOTUNER_FLAG):
+    if not flag_supported(FUSION_AUTOTUNER_FLAG, package):
         return False
 
     os.environ["XLA_FLAGS"] = f"{xla_flags} --{FUSION_AUTOTUNER_FLAG}=false".strip()
