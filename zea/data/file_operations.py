@@ -804,6 +804,16 @@ def _delete_file_if_exists(path: Path):
         path.unlink()
 
 
+def output_blocked(output_path: str | Path, overwrite: bool) -> bool:
+    """Whether ``output_path`` exists and would be silently clobbered.
+
+    The single predicate behind every "refuse to overwrite an output" guard in
+    :mod:`zea`, so the definition of "blocked" (currently: the path exists and
+    ``overwrite`` was not requested) only needs to change in one place.
+    """
+    return Path(output_path).exists() and not overwrite
+
+
 def _prepare_output_path(output_path: str, overwrite: bool):
     """Guard the save target, matching :func:`resave`: refuse to clobber unless asked.
 
@@ -818,7 +828,7 @@ def _prepare_output_path(output_path: str, overwrite: bool):
             f"Cannot save to an 'hf://' path: {output_path}. 'hf://' paths are read-only; "
             "save to a local path instead."
         )
-    if Path(output_path).exists() and not overwrite:
+    if output_blocked(output_path, overwrite):
         raise FileExistsError(
             f"Output path {output_path} already exists. Use overwrite=True to overwrite."
         )
