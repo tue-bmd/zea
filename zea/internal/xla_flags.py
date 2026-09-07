@@ -18,7 +18,10 @@ FUSION_AUTOTUNER_FLAG = "xla_gpu_experimental_enable_fusion_autotuner"
 
 def flag_supported(flag):
     """Check if ``flag`` shows up in jaxlib's compiled libraries."""
-    spec = importlib.util.find_spec("jaxlib")
+    try:
+        spec = importlib.util.find_spec("jaxlib")
+    except ImportError:
+        return False
     if spec is None or not spec.submodule_search_locations:
         return False
     for root in spec.submodule_search_locations:
@@ -45,7 +48,7 @@ def disable_fusion_autotuner(backend=None):
         bool: whether the flag was added.
     """
     if backend is None:
-        backend = os.environ.get("KERAS_BACKEND", "tensorflow")
+        backend = os.environ.get("KERAS_BACKEND", "jax")
     if backend.lower() not in ("jax", "numpy"):  # numpy falls back to jax for some operations
         return False
 
