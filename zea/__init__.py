@@ -133,6 +133,11 @@ def _bootstrap_backend():
 
     _check_backend_installed()
 
+    # Must happen before any backend initialises XLA, which parses XLA_FLAGS once.
+    from .internal.xla_flags import disable_fusion_autotuner
+
+    disable_fusion_autotuner()
+
     # Read from the env var rather than calling ``keras.backend.backend()``
     # so that importing ``zea`` does not import ``keras``.
     log.info(f"Using backend {os.environ.get('KERAS_BACKEND', 'tensorflow')!r}")

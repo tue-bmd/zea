@@ -27,6 +27,13 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - If set to ``1`` will write to a temporary cache directory that is deleted after the program exits.
      - ``0``
      - ``0``, ``1``
+   * - ``XLA_FLAGS``
+     - Flags passed to XLA. On jax-based backends ``zea`` appends
+       ``--xla_gpu_experimental_enable_fusion_autotuner=false`` if supported, because XLA's fusion
+       autotuner makes jit compilation very slow for pipelines with large grids. Setting
+       that flag yourself takes precedence; ``zea`` then warns if you enable the autotuner.
+     - ``--xla_gpu_experimental_enable_fusion_autotuner=false`` (jax backends)
+     - Any XLA flags, see the `XLA documentation <https://openxla.org/xla/flags>`_.
    * - ``ZEA_NVIDIA_SMI_TIMEOUT``
      - Timeout in seconds for calling ``nvidia-smi`` to get GPU information during :func:`zea.init_device`.
      - ``30``
