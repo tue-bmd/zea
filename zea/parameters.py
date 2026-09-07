@@ -104,6 +104,7 @@ import numpy as np
 from keras import ops
 
 from zea import log
+from zea.beamform.geometry import compute_element_normals
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
@@ -545,29 +546,63 @@ class Parameters(BaseParameters):
         """Calculate the wavelength based on sound speed and transmit center frequency."""
         return self.sound_speed / self.center_frequency
 
-    @cache_with_dependencies("zlims", "polar_limits", "probe_geometry", "distance_to_apex")
+    @cache_with_dependencies(
+        "zlims",
+        "probe_geometry",
+        "distance_to_apex",
+        "focus_distances",
+        "polar_angles",
+        "f_number",
+        "sound_speed",
+        "sampling_frequency",
+        "n_ax",
+    )
     def xlims(self):
-        """The x-limits of the beamforming grid [m]. If not explicitly set, it is computed based
-        on the polar limits and probe geometry.
+        """The lateral (x) limits of the beamforming grid in meters.
+
+        If not explicitly provided, the limits are derived from the probe geometry, the transmits
+        and the receive :attr:`f_number`:. If f_number is 0, a 45 degree cone is used instead.
+        The limits never come out narrower than the probe width.
+
+        Unsteered focused or plane wave transmits on a flat array (e.g. walking aperture scans)
+        image the strip in front of the array, so the limits hug the probe width. Otherwise the
+        field of view follows the receive cone for the edge elements.
         """
         xlims = self._params.get("xlims")
-        if xlims is None:
-            # The sector fans out from the apex, so its half-width at the deepest pixel is
-            # set by the radius to that pixel, not by its depth below the transducer.
-            radius = max(self.zlims) + self.distance_to_apex
-            xlims_polar = (
-                radius * np.cos(-np.pi / 2 + self.polar_limits[0]),
-                radius * np.cos(-np.pi / 2 + self.polar_limits[1]),
-            )
-            xlims_plane = (
-                min(self.probe_geometry[:, 0]),
-                max(self.probe_geometry[:, 0]),
-            )
-            xlims = (
-                min(xlims_polar[0], xlims_plane[0]),
-                max(xlims_polar[1], xlims_plane[1]),
-            )
-        return xlims
+        if xlims is not None:
+            return xlims
+
+        aperture_x = self.probe_geometry[:, 0]
+        left, right = int(np.argmin(aperture_x)), int(np.argmax(aperture_x))
+        xmin, xmax = float(aperture_x[left]), float(aperture_x[right])
+
+        focus_distances = self.focus_distances
+        polar_angles = self.polar_angles
+        if polar_angles is None:
+            polar_angles = np.zeros_like(focus_distances)
+
+        # Tolerance: converted data stores a nominally unsteered scan as float noise.
+        unsteered = np.allclose(polar_angles, 0.0, atol=1e-6) and np.all(
+            (focus_distances >= 0) | np.isinf(focus_distances)
+        )
+        if unsteered and self.distance_to_apex == 0:
+            return (xmin, xmax)
+
+        f_number = float(self.f_number)
+        half_angle = np.arctan(1 / (2 * f_number)) if f_number > 0 else np.pi / 4
+        normals = np.asarray(compute_element_normals(ops.convert_to_tensor(self.probe_geometry)))
+        tilt = np.arctan2(normals[:, 0], normals[:, 2])
+
+        # Outermost accepted ray of each edge element.
+        angle = tilt[[left, right]] + [-half_angle, half_angle]
+        depth = max(self.zlims) - self.probe_geometry[[left, right], 2]
+
+        # Stop at the deepest pixel or at the end of the record, whichever is first.
+        reach = depth * np.tan(np.abs(angle))
+        max_range = self.sound_speed * float(self.n_ax) / self.sampling_frequency / 2
+        reach = np.minimum(reach, max_range * np.sin(np.abs(angle)))
+        reach = np.sign(angle) * reach
+        return (min(xmin, xmin + float(reach[0])), max(xmax, xmax + float(reach[1])))
 
     @cache_with_dependencies(
         "zlims", "grid_type", "azimuth_limits", "probe_geometry", "distance_to_apex"
@@ -1033,7 +1068,7 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("zlims", "distance_to_apex")
     def rho_range(self):
-        """A tuple specifying the range of rho values (min_rho, max_rho). Defined in mm.
+        """A tuple specifying the range of rho values (min_rho, max_rho). Defined in meters.
         Used for scan conversion. Rho is measured from the apex of the polar grid, so
         :attr:`zlims` (depths below the transducer) are shifted by
         :attr:`distance_to_apex`, matching the ``rlims`` of

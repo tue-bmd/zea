@@ -12,6 +12,7 @@ from zea.data.file import (
     ChunkedDataset,
     CustomElement,
     File,
+    InvalidZeaFileError,
     Track,
     _format_selection,
     _GroupProxy,
@@ -73,7 +74,7 @@ def test_hf_streams_by_default(complex_h5_file, monkeypatch):
     monkeypatch.setattr("zea.data.file._hf_stream_open", fake_stream)
     monkeypatch.setattr("zea.data.file._hf_resolve_path", fake_resolve)
 
-    with File("hf://org/repo/x.hdf5") as file:
+    with File("hf://org/repo/x.hdf5", validate=False) as file:
         assert file["dummy_dataset2"][:].tolist() == [0, 1, 2, 3, 4]
         assert file._stream_fileobj is not None  # streamed, not downloaded
 
@@ -97,7 +98,7 @@ def test_hf_stream_false_downloads(complex_h5_file, monkeypatch):
     monkeypatch.setattr("zea.data.file._hf_stream_open", fake_stream)
     monkeypatch.setattr("zea.data.file._hf_resolve_path", fake_resolve)
 
-    with File("hf://org/repo/x.hdf5", stream=False) as file:
+    with File("hf://org/repo/x.hdf5", stream=False, validate=False) as file:
         assert file["dummy_dataset2"][:].tolist() == [0, 1, 2, 3, 4]
         assert file._stream_fileobj is None
 
@@ -132,7 +133,7 @@ def test_stream_unknown_kwarg_raises(monkeypatch):
 def test_basic_properties(simple_h5_file):
     """Test basic properties of File class."""
 
-    with File(simple_h5_file) as file:
+    with File(simple_h5_file, validate=False) as file:
         assert file.attrs["dummy_attr"] == "dummy_value"
 
         # Get length of file (should be 0 as there are no datasets)
@@ -141,7 +142,7 @@ def test_basic_properties(simple_h5_file):
 
 def test_with_datasets(complex_h5_file):
     """Test File features with datasets."""
-    with File(complex_h5_file) as file:
+    with File(complex_h5_file, validate=False) as file:
         # Get length of file
         assert len(file) == 2
 
@@ -155,8 +156,8 @@ def test_with_datasets(complex_h5_file):
 def test_recursively_load_dict(complex_h5_file):
     """Test recursively loading dict contents from group."""
 
-    with File(complex_h5_file) as file:
-        dict_contents = file.recursively_load_dict_contents_from_group("/")
+    with File(complex_h5_file, validate=False) as file:
+        dict_contents = file.load_group("/")
         assert list(dict_contents.keys()) == ["dummy_dataset", "dummy_dataset2"]
         assert dict_contents["dummy_dataset"].shape == (10, 20)
         assert dict_contents["dummy_dataset2"].shape == (5,)
@@ -166,7 +167,7 @@ def test_recursively_load_dict(complex_h5_file):
 def test_print_hdf5_attrs(complex_h5_file, capsys):
     """Test printing HDF5 attributes."""
 
-    with File(complex_h5_file) as file:
+    with File(complex_h5_file, validate=False) as file:
         file.summary()
 
     captured = capsys.readouterr().out
@@ -585,7 +586,7 @@ class TestFileDataProperty:
             assert isinstance(f.data, _GroupProxy)
 
     def test_data_property_raises_when_no_data_group(self, simple_h5_file):
-        with File(simple_h5_file) as f:
+        with File(simple_h5_file, validate=False) as f:
             with pytest.raises(KeyError, match="No 'data' group"):
                 f.data
 
@@ -1070,7 +1071,7 @@ class TestMetadataMetricsAccessors:
         with h5py.File(path, "w") as f:
             f.create_dataset("dummy", data=[1])
 
-        with File(path) as f:
+        with File(path, validate=False) as f:
             with pytest.raises(KeyError, match="metadata"):
                 _ = f.metadata
 
@@ -1080,7 +1081,7 @@ class TestMetadataMetricsAccessors:
         with h5py.File(path, "w") as f:
             f.create_dataset("dummy", data=[1])
 
-        with File(path) as f:
+        with File(path, validate=False) as f:
             with pytest.raises(KeyError, match="metrics"):
                 _ = f.metrics
 
@@ -1128,7 +1129,7 @@ class TestZeaVersion:
             f.attrs["zea_version"] = "0.0.13"
 
         with patch("zea.data.file.log.warning") as mock_warn:
-            with File(path):
+            with File(path, validate=False):
                 pass
         mock_warn.assert_called_once()
         assert "legacy" in mock_warn.call_args.args[0].lower()
@@ -1140,7 +1141,7 @@ class TestZeaVersion:
             f.attrs["zea_version"] = "0.1.0"
 
         with patch("zea.data.file.log.warning") as mock_warn:
-            with File(path):
+            with File(path, validate=False):
                 pass
         mock_warn.assert_not_called()
 
@@ -1188,6 +1189,114 @@ class TestZeaVersion:
 
         with File(path) as f:
             assert f.validate() == {"status": "success"}
+
+    def test_legacy_file_validate_rejects_unknown_key(self, tmp_path):
+        """Legacy files are still checked key by key, against the schema plus their own keys."""
+        path = tmp_path / "legacy_junk.hdf5"
+        with h5py.File(path, "w") as f:
+            g = f.create_group("data")
+            g.create_dataset("not_a_zea_type", data=np.zeros((2, 8, 6), dtype=np.float32))
+
+        with pytest.raises(InvalidZeaFileError, match="not a recognised zea data type"):
+            File(path)
+
+    def test_legacy_file_with_raw_data_requires_scan(self, tmp_path):
+        """A legacy file holding raw_data must carry a scan group."""
+        path = tmp_path / "legacy_raw.hdf5"
+        with h5py.File(path, "w") as f:
+            g = f.create_group("data")
+            g.create_dataset("raw_data", data=np.zeros((2, 4, 4, 2, 1), dtype=np.float32))
+
+        with pytest.raises(InvalidZeaFileError, match="'scan' is required when 'raw_data'"):
+            File(path)
+
+    def test_legacy_file_with_aligned_data_does_not_require_scan(self, tmp_path):
+        """Only raw_data forces a scan, in either format.
+
+        TrackSpec requires a scan for raw_data alone, so demanding one for aligned_data
+        on read would reject tracks that ``File.create`` writes without complaint.
+        """
+        path = tmp_path / "legacy_aligned.hdf5"
+        with h5py.File(path, "w") as f:
+            g = f.create_group("data")
+            g.create_dataset("aligned_data", data=np.zeros((2, 4, 4, 2, 1), dtype=np.float32))
+
+        with File(path) as f:
+            assert f.validate() == {"status": "success"}
+
+    def test_new_format_raw_data_requires_scan(self, tmp_path):
+        """A track holding raw_data must carry a scan, matching TrackSpec's writer rule."""
+        path = tmp_path / "raw_no_scan.hdf5"
+        with h5py.File(path, "w") as f:
+            f.attrs["zea_version"] = "0.1.5"
+            g = f.create_group("tracks/track_0/data")
+            g.create_dataset("raw_data", data=np.zeros((2, 3, 16, 8, 1), dtype=np.float32))
+
+        with pytest.raises(InvalidZeaFileError, match="'scan' is required when 'raw_data'"):
+            File(path)
+
+        # Same file with a scan group validates.
+        with h5py.File(path, "a") as f:
+            f.create_group("tracks/track_0/scan")
+        with File(path) as f:
+            assert f.validate() == {"status": "success"}
+
+    def test_new_format_transmit_only_track_must_not_carry_data(self, tmp_path):
+        """A track flagged transmit_only must not hold data, on read as well as on write."""
+        path = tmp_path / "tx_with_data.hdf5"
+        with h5py.File(path, "w") as f:
+            f.attrs["zea_version"] = "0.1.5"
+            t = f.create_group("tracks/track_0")
+            t.create_group("data").create_dataset("image", data=np.zeros((2, 8, 6), np.float32))
+            t.create_group("scan")
+            t.create_dataset("transmit_only", data=True)
+
+        with pytest.raises(InvalidZeaFileError, match="must not carry data"):
+            File(path)
+
+    def test_new_format_track_needs_data_or_scan(self, tmp_path):
+        """A track with neither data nor scan is rejected on read, as TrackSpec rejects it."""
+        path = tmp_path / "empty_track.hdf5"
+        with h5py.File(path, "w") as f:
+            f.attrs["zea_version"] = "0.1.5"
+            f.create_group("tracks/track_0").create_dataset("transmit_only", data=False)
+
+        with pytest.raises(InvalidZeaFileError, match="at least one of 'data' or 'scan'"):
+            File(path)
+
+    def test_tracks_dataset_is_rejected_as_a_zea_file(self, tmp_path):
+        """A 'tracks' dataset is not a track listing: say so, rather than fail on .keys()."""
+        path = tmp_path / "tracks_dataset.hdf5"
+        with h5py.File(path, "w") as f:
+            f.create_dataset("tracks", data=np.zeros((2,), dtype=np.float32))
+
+        with pytest.raises(InvalidZeaFileError, match="'tracks' is not a group"):
+            File(path)
+
+    def test_open_validates_by_default(self, tmp_path):
+        """Opening a non-zea file for reading fails at the open, not at first read."""
+        path = tmp_path / "not_zea.hdf5"
+        with h5py.File(path, "w") as f:
+            f.create_dataset("data", data=np.zeros((2, 8, 6), dtype=np.float32))
+
+        with pytest.raises(InvalidZeaFileError, match="may not be a zea file"):
+            File(path)
+
+    def test_open_with_validate_false_skips_check(self, tmp_path):
+        """validate=False opens a plain hdf5 file, for callers that only want raw keys."""
+        path = tmp_path / "not_zea.hdf5"
+        with h5py.File(path, "w") as f:
+            f.create_dataset("data", data=np.zeros((2, 8, 6), dtype=np.float32))
+
+        with File(path, validate=False) as f:
+            assert f["data"].shape == (2, 8, 6)
+
+    def test_write_mode_does_not_validate(self, tmp_path):
+        """A file opened for writing has nothing to validate yet."""
+        path = tmp_path / "fresh.hdf5"
+        with File(path, "w") as f:
+            f.create_dataset("data", data=np.zeros((1,), dtype=np.float32))
+        assert path.is_file()
 
 
 def test_load_file_image_type(tmp_path):
@@ -1352,7 +1461,7 @@ class TestMultiTrackFile:
             g = f.create_group("data")
             g.create_dataset("raw_data", data=np.zeros((1, 2, 8, 4, 1), dtype=np.float32))
 
-        with File(path) as f:
+        with File(path, validate=False) as f:
             with pytest.raises(AttributeError, match="flat layout"):
                 _ = f.tracks
 
@@ -2282,7 +2391,7 @@ class TestCustomElements:
             ds.attrs["description"] = "legacy"
             ds.attrs["unit"] = "-"
 
-        with File(path) as f:
+        with File(path, validate=False) as f:
             c = f.custom
             assert float(c["Bad Name"].data) == 2.0
             with pytest.raises(AttributeError):
@@ -2320,7 +2429,7 @@ class TestCustomElements:
             ds.attrs["description"] = "legacy scalar"
             ds.attrs["unit"] = "wavelengths"
 
-        with File(path) as f:
+        with File(path, validate=False) as f:
             assert f._is_legacy_file
             elements = f.custom
 
@@ -2335,7 +2444,7 @@ class TestCustomElements:
         with h5py.File(path, "w"):
             pass  # no zea_version attr (legacy) and no non_standard_elements group
 
-        with File(path) as f:
+        with File(path, validate=False) as f:
             assert f._is_legacy_file
             assert f.custom == []
 

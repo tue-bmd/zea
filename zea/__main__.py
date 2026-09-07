@@ -6,6 +6,7 @@ Usage::
     zea app [--share] [--server-port PORT]                         # launch the Gradio visualizer
     zea data <operation> [options]                                 # manipulate zea data files
     zea convert <dataset> <src> <dst> [options]                    # convert raw datasets to zea
+    zea datapaths [--user-config users.yaml]                       # set up your local data paths
 
 """
 
@@ -20,10 +21,10 @@ if "ZEA_LOG_LEVEL" not in os.environ:
 
     log.set_level("WARNING")
 
-from zea.cli_args import AppArgs, ConvertArgs, DataArgs, ProcessArgs
+from zea.cli_args import AppArgs, ConvertArgs, DataArgs, DataPathsArgs, ProcessArgs
 
 # subcommands that don't require a device
-_NO_DEVICE_FNS = [DataArgs]
+_NO_DEVICE_FNS = [DataArgs, DataPathsArgs]
 
 
 @dataclass
@@ -36,6 +37,7 @@ class CLI:
             Annotated[AppArgs, tyro.conf.subcommand("app")],
             Annotated[DataArgs, tyro.conf.subcommand("data")],
             Annotated[ConvertArgs, tyro.conf.subcommand("convert")],
+            Annotated[DataPathsArgs, tyro.conf.subcommand("datapaths")],
         ]
     ]
     device: Annotated[
@@ -103,7 +105,7 @@ def main() -> None:
             theme=gr.themes.Soft(primary_hue="violet", secondary_hue="yellow"),
             css=CSS,
         )
-    elif isinstance(args, (DataArgs, ConvertArgs)):
+    elif isinstance(args, (DataArgs, ConvertArgs, DataPathsArgs)):
         args.run()
     else:
         raise ValueError(f"Unknown command: {args}")

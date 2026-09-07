@@ -190,18 +190,19 @@ def _cache_key(*parts, **kwargs):
 
 
 def _hf_repo_files(repo_id, repo_type="dataset", **kwargs) -> dict:
-    """Map every file in a repo to its size in bytes (memoized).
+    """Map every file in a repo to its :class:`~huggingface_hub.RepoFile` (memoized).
 
-    ``list_repo_tree`` already carries the sizes that ``list_repo_files`` throws away,
-    so one listing serves both the callers that only want names
-    (:func:`_hf_list_files`) and the ones that need sizes (:func:`_hf_list_h5_files`).
+    ``list_repo_tree`` already carries the sizes and content ids that ``list_repo_files``
+    throws away, so one listing serves the callers that only want names
+    (:func:`_hf_list_files`), the ones that need sizes (:func:`_hf_list_h5_files`) and
+    the ones that need a content id (:func:`_hf_content_id`).
 
     The returned mapping is shared between callers and must not be mutated.
     """
 
     def _list():
         entries = _hf_call(list_repo_tree, repo_id, recursive=True, repo_type=repo_type, **kwargs)
-        return {entry.path: entry.size for entry in entries if isinstance(entry, RepoFile)}
+        return {entry.path: entry for entry in entries if isinstance(entry, RepoFile)}
 
     return _LISTING_CACHE.get_or_call(_cache_key(repo_id, repo_type, **kwargs), _list)
 
@@ -313,7 +314,23 @@ def _hf_list_h5_files(hf_path: str, **kwargs) -> list[tuple[str, int]]:
     else:
         matched = [f for f in entries if f.endswith(_HF_H5_EXTENSIONS)]
 
-    return [(f, entries[f]) for f in matched]
+    return [(f, entries[f].size) for f in matched]
+
+
+def _hf_content_id(hf_path: str, **kwargs) -> str | None:
+    """Content id of a single ``hf://`` file, or ``None`` if the repo has no such file.
+
+    The LFS sha256 when the file is stored in LFS (as data files are), else its git blob
+    id. Both name the *content*, so they change on re-upload and differ between revisions
+    -- which is what makes them usable as a cache key, unlike the mutable path. Served
+    from the memoized repo listing, so it costs no extra request.
+    """
+    repo_id, subpath = _hf_parse_path(hf_path)
+    entry = _hf_repo_files(repo_id, repo_type="dataset", **kwargs).get(subpath)
+    if entry is None:
+        return None
+    lfs = getattr(entry, "lfs", None)
+    return getattr(lfs, "sha256", None) or entry.blob_id
 
 
 def _hf_resolve_path(hf_path: str, cache_dir=None, repo_type="dataset", **kwargs) -> Path:

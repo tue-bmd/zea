@@ -341,6 +341,7 @@ def test_scanline_grid_polar_style():
         center_frequency=5e6,
         sound_speed=1540.0,
         sampling_frequency=20e6,
+        n_ax=2048,
         grid_type="polar",
         enable_scanline=True,
         selected_transmits="all",

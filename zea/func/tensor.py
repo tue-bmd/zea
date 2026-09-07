@@ -1858,6 +1858,10 @@ def translate(array, range_from=None, range_to=(0, 255)):
 
     Returns:
         (ndarray): translated array
+
+    Warning:
+        Cast integer input to floating point first: ``array - range_from[0]`` is
+        evaluated in the input dtype and can wrap around silently on overflow.
     """
     if range_from is None:
         left_min, left_max = ops.min(array), ops.max(array)
