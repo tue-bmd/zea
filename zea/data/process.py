@@ -6,7 +6,9 @@ Usage:
 
 import types
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Annotated
 
 import numpy as np
 import tyro
@@ -14,14 +16,16 @@ from keras import ops
 
 from zea import io_lib, log
 from zea.backend import jit
-from zea.cli_args import SUPPORTED_FORMATS, ProcessArgs
+from zea.cli_args import DEFAULT_DEVICE, DEVICE_HELP, SUPPORTED_FORMATS, ProcessArgs
 from zea.config import Config
 from zea.data.dataloader import Dataloader
 from zea.data.datasets import Dataset
 from zea.data.file import File, _GroupProxy
+from zea.data.file_operations import output_blocked
 from zea.data.spec import strip_track_prefix
 from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
+from zea.internal.device import init_device
 from zea.ops.pipeline import Pipeline
 from zea.utils import FunctionTimer, ProgressBar
 
@@ -104,7 +108,7 @@ def _run_passthrough(
                 )
 
             save_path = save_dir / f"{filestem}.{save_as}"
-            if save_path.exists() and not overwrite:
+            if output_blocked(save_path, overwrite):
                 log.warning(f"File {save_path} already exists. Use --overwrite to replace it.")
             else:
                 if save_as in ("gif", "mp4"):
@@ -223,7 +227,7 @@ def run_processing(
         parameters,
         fps: int,
     ):
-        if save_path.exists() and not overwrite:
+        if output_blocked(save_path, overwrite):
             log.warning(f"File {save_path} already exists. Use --overwrite to replace it.")
             return
         if save_as in ["mp4", "gif"]:
@@ -317,23 +321,21 @@ def run_processing(
         timer.print()
 
 
+@dataclass
+class _StandaloneProcessArgs(ProcessArgs):
+    """``ProcessArgs`` plus the ``--device`` flag that ``zea`` exposes globally."""
+
+    device: Annotated[
+        str,
+        tyro.conf.arg(help=DEVICE_HELP),
+    ] = DEFAULT_DEVICE
+
+
 def main() -> None:
-    args = tyro.cli(ProcessArgs)
-    run_processing(
-        args.dataset,
-        args.config,
-        args.key,
-        args.n_frames,
-        args.save_dir,
-        args.save_as,
-        args.keep_keys,
-        args.timings,
-        args.num_threads,
-        args.overwrite,
-        args.keep_dynamic_range,
-        args.revision,
-        args.config_revision,
-    )
+    """Entry point for ``python -m zea.data.process``, equivalent to ``zea process``."""
+    args = tyro.cli(_StandaloneProcessArgs)
+    init_device(args.device)
+    args.run()
 
 
 if __name__ == "__main__":
