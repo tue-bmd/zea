@@ -1197,9 +1197,8 @@ class PatchedGrid(Map):
 
     This can be used to reduce memory usage by processing data in chunks.
 
-    Patches are sized in pixels (``patch_size``) rather than counted, so peak memory and
-    compile time stay constant as the grid grows. Passing ``num_patches`` instead lets each
-    patch grow with the grid, which gets expensive (see :data:`MAX_SAFE_PATCH_SIZE`).
+    Patches are sized in pixels (``patch_size``), which limits peak memory and
+    compile time stays constant as the grid grows.
 
     For more information and flexibility, see :class:`zea.ops.Map`.
     """
