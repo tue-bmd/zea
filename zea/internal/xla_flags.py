@@ -46,7 +46,7 @@ def disable_fusion_autotuner(backend=None):
     """
     if backend is None:
         backend = os.environ.get("KERAS_BACKEND", "tensorflow")
-    if backend.lower() not in ("jax", "numpy"):  # keras' numpy backend runs on jax
+    if backend.lower() not in ("jax", "numpy"):  # numpy falls back to jax for some operations
         return False
 
     xla_flags = os.environ.get("XLA_FLAGS", "")
