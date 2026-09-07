@@ -75,7 +75,8 @@ def _bootstrap_backend():
     installed_backends = [
         backend for backend in ML_BACKENDS if importlib.util.find_spec(backend) is not None
     ]
-    usable_backends = [*installed_backends, "numpy"]
+    # Keras' numpy backend is not standalone: without jax it cannot be used either.
+    usable_backends = [*installed_backends, *(["numpy"] if "jax" in installed_backends else [])]
 
     def _backend_from_keras_config():
         """Read the backend from ``keras.json``, without importing keras.
@@ -89,9 +90,11 @@ def _bootstrap_backend():
         config_path = os.path.expanduser(os.path.join(keras_home, "keras.json"))
         try:
             with open(config_path, encoding="utf-8") as file:
-                return json.load(file).get("backend")
+                config = json.load(file)
         except (OSError, ValueError):
             return None
+        # A valid keras.json is an object; anything else names no backend.
+        return config.get("backend") if isinstance(config, dict) else None
 
     def _select_backend():
         """Pick the backend to use, without checking whether it can be used.
@@ -197,19 +200,21 @@ def _bootstrap_backend():
         os.environ["KERAS_BACKEND"] = backend
 
     backend, origin, source = _select_backend()
-    _check_backend(backend, source)
 
-    # Keras was first: it already resolved its backend, so zea must defer to it.
+    # Keras was first: it already resolved its backend, so zea must defer to it. What zea
+    # selected can no longer take effect, so validate the backend that is actually running
+    # rather than the one that was asked for.
     active_backend = _active_keras_backend()
-    if active_backend is not None and active_backend != backend:
-        if active_backend not in SUPPORTED_BACKENDS:
-            raise ImportError(
-                f"keras was imported before {__package__} and is using the "
-                f"{active_backend!r} backend, which {__package__} does not support. "
-                f"Supported backends: {', '.join(SUPPORTED_BACKENDS)}. For more "
-                f"information, see: {DOCS_URL}"
-            )
-
+    if active_backend is None:
+        _check_backend(backend, source)
+    elif active_backend not in SUPPORTED_BACKENDS:
+        raise ImportError(
+            f"keras was imported before {__package__} and is using the "
+            f"{active_backend!r} backend, which {__package__} does not support. "
+            f"Supported backends: {', '.join(SUPPORTED_BACKENDS)}. For more "
+            f"information, see: {DOCS_URL}"
+        )
+    elif active_backend != backend:
         _export_backend(active_backend)
         log.warning(
             f"keras was imported before zea and is using the {active_backend!r} backend, "
