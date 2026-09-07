@@ -29,7 +29,7 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - ``0``, ``1``
    * - ``XLA_FLAGS``
      - Flags passed to XLA. On jax-based backends ``zea`` appends
-       ``--xla_gpu_experimental_enable_fusion_autotuner=false``, because XLA's fusion
+       ``--xla_gpu_experimental_enable_fusion_autotuner=false`` if supported, because XLA's fusion
        autotuner makes jit compilation very slow for pipelines with large grids. Setting
        that flag yourself takes precedence; ``zea`` then warns if you enable the autotuner.
      - ``--xla_gpu_experimental_enable_fusion_autotuner=false`` (jax backends)
