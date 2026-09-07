@@ -13,6 +13,7 @@ from keras import ops
 from zea import log
 from zea.backend import jit
 from zea.internal.utils import (
+    atomic_write,
     calculate_file_hash,
     find_first_nonzero_index,
     find_key,
@@ -523,3 +524,42 @@ def test_function_timer_print(timer, capsys):
     timer.print(drop_first=True, total_time=True)
     out = log.remove_color_escape_codes(capsys.readouterr().out)
     assert "Mean Total Time" in out
+
+
+def test_atomic_write_moves_result_into_place(tmp_path):
+    """The destination appears only once the block completes, leaving no temp files."""
+    destination = tmp_path / "result.txt"
+
+    with atomic_write(destination) as tmp:
+        tmp.write_text("done")
+        assert tmp != destination
+        assert tmp.parent == destination.parent, "temp file must share the filesystem"
+        assert not destination.exists(), "destination must not appear before the block ends"
+
+    assert destination.read_text() == "done"
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+def test_atomic_write_keeps_previous_file_on_failure(tmp_path):
+    """A failed write leaves the old contents in place instead of a truncated file."""
+    destination = tmp_path / "result.txt"
+    destination.write_text("original")
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        with atomic_write(destination) as tmp:
+            tmp.write_text("partial")
+            raise RuntimeError("write failed")
+
+    assert destination.read_text() == "original"
+    assert list(tmp_path.iterdir()) == [destination], "temp file must be cleaned up"
+
+
+def test_atomic_write_suffix(tmp_path):
+    """Writers that key off the extension can ask for a matching temp suffix."""
+    destination = tmp_path / "result.hdf5"
+
+    with atomic_write(destination) as default_suffix:
+        assert default_suffix.suffix == ".hdf5"
+
+    with atomic_write(destination, suffix=".part") as custom_suffix:
+        assert custom_suffix.suffix == ".part"

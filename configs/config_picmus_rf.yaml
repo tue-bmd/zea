@@ -5,7 +5,8 @@ data:
   # user data root (set in users.yaml), and Hugging Face Hub paths
   # (hf://org/repo/path/to/file.hdf5).
   path: hf://zeahub/picmus/database/simulation/contrast_speckle/contrast_speckle_simu_dataset_rf/contrast_speckle_simu_dataset_rf.hdf5
-  # true: use local data on this device, false: use data from NAS
+  # true: use local data on this device, false: use data from a remote location.
+  # null when the users.yaml paths are single paths, shared by both.
   local: false
 
 # Open mapping of scan/probe/custom parameters that overwrite values loaded from

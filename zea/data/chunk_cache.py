@@ -20,11 +20,11 @@ fast and parallel (see :mod:`zea.data.chunk_reader`).
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 
 from zea import log
 from zea.internal.cache import ZEA_CACHE_DIR
+from zea.internal.utils import atomic_write
 
 #: Cache is enabled unless ZEA_CHUNK_CACHE=0.
 ENABLED = os.environ.get("ZEA_CHUNK_CACHE", "1") != "0"
@@ -72,16 +72,12 @@ class ChunkCache:
         """Store this chunk. Failure to cache is never an error — it just costs a re-fetch."""
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
-            # Write to a temporary and rename: a reader (possibly another dataloader worker)
-            # must never observe a half-written chunk. os.replace is atomic within a filesystem.
-            fd, tmp = tempfile.mkstemp(dir=self.dir, suffix=".part")
-            try:
-                with os.fdopen(fd, "wb") as handle:
-                    handle.write(data)
-                os.replace(tmp, self._path(offset, size))
-            except BaseException:
-                Path(tmp).unlink(missing_ok=True)
-                raise
+            # A reader (possibly another dataloader worker) must never observe a
+            # half-written chunk, hence the atomic write. The `.part` suffix is not
+            # cosmetic: `prune` skips it, so a chunk still being written cannot be
+            # evicted out from under us before it is renamed into place.
+            with atomic_write(self._path(offset, size), suffix=".part") as tmp:
+                tmp.write_bytes(data)
 
             self._writes += 1
             if self._writes % PRUNE_EVERY == 0:

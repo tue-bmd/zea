@@ -13,7 +13,7 @@ from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
 # `zea.func.ultrasound.log_compress` maps zeros to 20 * log10(1e-16) = -320 dB. Such pixels
 # hold no measurement, so they are excluded when fitting a histogram transform.
-DEAD_PIXEL_DB: float = -300.0
+EXCLUDE_BELOW: float = -300.0
 
 
 def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True):
@@ -73,9 +73,9 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     return image
 
 
-def _masked_pixels(image, roi=None, minimum=2):
+def _masked_pixels(image, roi=None, minimum=2, floor=EXCLUDE_BELOW):
     """Mask out the pixels a transform may not use: unmeasured, or outside ``roi`` if given."""
-    mask = np.isfinite(image) & (image > DEAD_PIXEL_DB)
+    mask = np.isfinite(image) & (image > floor)
     if roi is not None:
         # Without this, a mask of a broadcastable shape (a row, a column) selects pixels
         # nobody asked for rather than failing.
@@ -184,12 +184,23 @@ def histogram_match(
     n_bins: Union[int, str] = 256,
     roi=None,
     allow_unequal_shapes: bool = False,
+    exclude_below: Union[float, None] = EXCLUDE_BELOW,
 ) -> np.ndarray:
     """Match the histogram of an image to a reference image, for fair visual comparison.
 
     Image formation methods apply different dynamic range transformations, which biases
     visual as well as quantitative comparison. Matching the histogram of an image to a
     reference (typically a conventional B-mode image) puts the two on a common scale.
+
+    .. admonition:: Reference
+
+        N. Bottenus, B. Byram, and D. Hyun, "Histogram Matching for Visual Ultrasound
+        Image Comparison," *IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency
+        Control*, vol. 68, no. 5, pp. 1487-1495, 2021.
+        https://doi.org/10.1109/TUFFC.2020.3035965
+
+        Their MATLAB implementation, referred to above as the reference implementation:
+        https://github.com/nbottenus/histogram_matching/blob/main/histmatch.m
 
     Args:
         image (ndarray): Image to transform, typically log-compressed (dB).
@@ -227,16 +238,14 @@ def histogram_match(
             False. Pass True to match against a reference deliberately not of the shape of
             the image, e.g. a region cut out of a larger acquisition. An ``roi`` has to index
             both images regardless, so it cannot be combined with unequal shapes.
+        exclude_below (float, optional): Value at or below which a pixel of either image
+            is kept out of the fit and the transform. Defaults to -300.0, which catches
+            zea's ``log(0)`` sentinel and nothing a log-compressed B-mode measures. Pass `None`
+            to exclude nothing but the non-finite pixels.
 
     Returns:
         ndarray: Transformed image (float64), unclipped: clipping to a display range is
         left to the caller (`to_8bit`, or ``vmin``/``vmax``).
-
-    .. note::
-        Every mode fits on, and applies to, finite pixels above `DEAD_PIXEL_DB` only, so
-        that zea's ``log(0)`` sentinel neither anchors the bottom of the mapping nor is
-        lifted into the displayed range by it. Pixels holding no measurement are returned
-        as they came in, sentinel or non-finite alike.
 
     .. note::
         Which image is matched to which is a choice (Sec. V): matching to B-mode is natural
@@ -261,16 +270,6 @@ def histogram_match(
             >>> round(matched.mean() - reference.mean())
             0
 
-    .. admonition:: Reference
-
-        N. Bottenus, B. Byram, and D. Hyun, "Histogram Matching for Visual Ultrasound
-        Image Comparison," *IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency
-        Control*, vol. 68, no. 5, pp. 1487-1495, 2021.
-        https://doi.org/10.1109/TUFFC.2020.3035965
-
-        Their MATLAB implementation, referred to above as the reference implementation:
-        https://github.com/nbottenus/histogram_matching/blob/main/histmatch.m
-
     """
     if mode not in ("full", "partial"):
         raise ValueError(f"Unknown mode {mode!r}, expected 'full' or 'partial'.")
@@ -287,17 +286,19 @@ def histogram_match(
         )
     if roi is not None:
         roi = ops.convert_to_numpy(roi).astype(bool)
+    # A threshold nothing falls at or below excludes nothing, which is what None asks for.
+    floor = -np.inf if exclude_below is None else exclude_below
 
     # A bin has to be worth estimating: ask for as many pixels as there are bins.
     minimum = 2 if mode == "partial" or every_pixel else n_bins
-    x = _masked_pixels(image, roi, minimum)
-    y = _masked_pixels(reference, roi, minimum)
+    x = _masked_pixels(image, roi, minimum, floor)
+    y = _masked_pixels(reference, roi, minimum, floor)
 
     image = image.astype(np.float64)
     # Pixels that hold no measurement are kept out of the transform as well as out of the fit:
     # a mapping they never informed would place them anywhere, and a slope below one is enough
     # to lift the sentinel out of the bottom of the range and into the displayed one.
-    unmeasured = image <= DEAD_PIXEL_DB
+    unmeasured = image <= floor
 
     if mode == "partial":
         # eq. (8)-(9): the scale and offset that match mean and variance.
