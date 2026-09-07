@@ -66,6 +66,59 @@ def _key_requires_pipeline(key: str) -> bool:
     return normalized in _NON_IMAGE_DATA_TYPES
 
 
+def _resolve_track(file: File, key: str, track: str | None) -> tuple[int | None, str]:
+    """Pick the track to process and return ``(track_index, data_key)``.
+
+    Resolution is delegated to :meth:`File.get_track`, which matches ``track`` against
+    the file's labels first and reads it as an index only when no label matches, so a
+    numeric label still wins. Files with a single track have nothing to address and
+    return ``(None, key)`` unchanged.
+
+    Raises:
+        ValueError: If the file has several tracks and none was selected, or the
+            requested track does not exist in this file.
+    """
+    if file._n_tracks <= 1:
+        return None, key
+    labels = file.track_labels
+    if track is None:
+        raise ValueError(
+            f"{file.path} has {len(labels)} tracks {labels} but no track was selected. "
+            "Pass --track <label|index> to pick one."
+        )
+    try:
+        index = file.get_track(track).index
+    except KeyError as exc:
+        raise ValueError(f"No track {track!r} in {file.path}. Available tracks: {labels}.") from exc
+    return index, f"tracks/track_{index}/data/{strip_track_prefix(key).removeprefix('data/')}"
+
+
+def _load_track_parameters(file: File, track_index: int | None):
+    """Load the acquisition parameters of ``track_index`` (or of the whole file)."""
+    if track_index is None:
+        return file.load_parameters()
+    return file.tracks[track_index].load_parameters()
+
+
+def _check_track_consistency(file: File, track_index: int | None, track_label: str | None) -> None:
+    """Raise unless ``file`` carries the same track at ``track_index`` as the first file.
+
+    The data key resolved from the first file addresses its track by index, so a file
+    whose tracks are ordered differently is silently read at the wrong one. The label is
+    what reveals it: ``--track 1`` resolves to index 1 in every file however they are
+    ordered, so the index alone can never catch a reordering.
+    """
+    if track_index is None:
+        return
+    labels = file.track_labels
+    label = labels[track_index] if track_index < len(labels) else None
+    if label != track_label:
+        raise ValueError(
+            f"Track at index {track_index} is {label!r} in {file.path} but {track_label!r} "
+            "in the first file; tracks must be ordered consistently across the dataset."
+        )
+
+
 def _run_passthrough(
     dataset_path: str,
     key: str,
@@ -73,6 +126,8 @@ def _run_passthrough(
     save_dir: Path,
     save_as: str,
     overwrite: bool,
+    track_index: int | None = None,
+    track_label: str | None = None,
     **hf_kwargs,
 ) -> None:
     """Save data frames directly without a beamforming pipeline."""
@@ -84,6 +139,9 @@ def _run_passthrough(
         pbar = ProgressBar(len(ds))
         for i in range(len(ds)):
             f = ds[i]  # lazy download for hf:// paths; returns cached File handle
+            # ``key`` addresses the track by index, so every file must agree on which
+            # track sits there — the pipeline path checks the same thing.
+            _check_track_consistency(f, track_index, track_label)
             data_key = f.format_key(key)
             _dset = f.dataset(data_key)
             # A map-style key such as "image" resolves to a group, not a dataset: read its
@@ -134,6 +192,7 @@ def run_processing(
     keep_dynamic_range=False,
     revision: str | None = None,
     config_revision: str | None = None,
+    track: str | None = None,
 ) -> None:
     if keep_dynamic_range and save_as != "hdf5":
         raise ValueError("--keep_dynamic_range is only supported with --save_as hdf5.")
@@ -150,43 +209,62 @@ def run_processing(
     )
     config = Config.from_path(config_path, **config_hf_kwargs)
     config_params = _get_config_parameters(config)
+
+    # Peek at the first file for the track to read (the Dataloader takes one key for
+    # the whole dataset, so ``data_key`` has to name it) and for selected_transmits,
+    # letting the dataloader pre-filter the transmit axis at HDF5 read time. lazy=True
+    # streams hf:// paths, fetching only the chunks the peek touches; validate=False
+    # because the Dataloader validates these same files anyway.
+    track_index: int | None = None
+    track_label: str | None = None
+    data_key = key
+    axis_selections: dict | None = None
+    with Dataset(
+        dataset_path, validate=False, lazy=True, _suggest_lazy=False, **dataset_hf_kwargs
+    ) as _peek_ds:
+        if len(_peek_ds) > 0:
+            _peek_f = _peek_ds[0]
+            track_index, data_key = _resolve_track(_peek_f, key, track)
+            if track_index is not None:
+                # Baseline for the per-file check below: every other file must carry the
+                # same track at this index, since ``data_key`` addresses it by index.
+                track_label = _peek_f.track_labels[track_index]
+            if _key_requires_pipeline(data_key):
+                try:
+                    _peek_params = _load_track_parameters(_peek_f, track_index)
+                    _peek_params.update(config_params)
+                    axis_selections = _axis_selections_from_params(_peek_params)
+                except Exception:
+                    pass  # fall back to runtime slicing if the peek fails
+
     try:
         pipeline = Pipeline.from_path(config_path, with_batch_dim=False, **config_hf_kwargs)
     except (ValueError, KeyError) as exc:
-        if _key_requires_pipeline(key):
+        if _key_requires_pipeline(data_key):
             raise
         log.warning(
             f"No pipeline found in config ({exc}). "
-            f"Key '{key}' does not require beamforming — saving data as-is."
+            f"Key '{data_key}' does not require beamforming — saving data as-is."
         )
         save_dir.mkdir(parents=True, exist_ok=True)
         _run_passthrough(
-            dataset_path, key, n_frames, save_dir, save_as, overwrite, **dataset_hf_kwargs
+            dataset_path,
+            data_key,
+            n_frames,
+            save_dir,
+            save_as,
+            overwrite,
+            track_index=track_index,
+            track_label=track_label,
+            **dataset_hf_kwargs,
         )
         return
 
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # Peek at the first file to get selected_transmits so the dataloader can
-    # pre-filter the transmit axis at HDF5 read time (avoids reading unused data).
-    axis_selections: dict | None = None
-    if _key_requires_pipeline(key):
-        try:
-            # validate=False here and on the peek open below: the Dataloader built from
-            # the same path validates these files, so checking them twice is wasted work.
-            with Dataset(dataset_path, validate=False, **dataset_hf_kwargs) as _peek_ds:
-                _first_path = _peek_ds.file_paths[0] if _peek_ds.file_paths else None
-            if _first_path:
-                with File(_first_path, validate=False) as _peek_f:
-                    _peek_params = _peek_f.load_parameters()
-                _peek_params.update(config_params)
-                axis_selections = _axis_selections_from_params(_peek_params)
-        except Exception:
-            pass  # fall back to runtime slicing if peek fails
-
     dataloader = Dataloader(
         dataset_path,
-        key=key,
+        key=data_key,
         batch_size=None,
         shuffle=False,
         return_metadata=True,
@@ -283,7 +361,10 @@ def run_processing(
                 # Already validated by the Dataloader that handed us this path.
                 with File(file_path, validate=False) as f:
                     filestem = f.stem
-                    parameters = f.load_parameters()
+                    # Re-check rather than trust the peek: a file whose tracks are
+                    # ordered differently would otherwise be read at the wrong index.
+                    _check_track_consistency(f, track_index, track_label)
+                    parameters = _load_track_parameters(f, track_index)
                 parameters.update(config_params)
 
                 try:
@@ -316,6 +397,13 @@ def run_processing(
             if timings:
                 for tname in timer.timings.keys():
                     timer.append_to_yaml(save_dir / f"timings_{tname}.yaml", tname)
+
+        # Re-raise anything the last save hit. Every other save is awaited before
+        # the next one is submitted, but the final one is not: leaving its result
+        # unread swallows the exception, and a run that wrote nothing at all still
+        # exits 0.
+        if save_future is not None:
+            save_future.result()
 
     if timings:
         timer.print()
