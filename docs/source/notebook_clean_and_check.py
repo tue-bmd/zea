@@ -100,6 +100,11 @@ def check_execution_counts(nb, nb_path):
 # in the cell source.
 READTHEDOCS_LINK = re.compile(r"https?://zea\.readthedocs\.io/[^\s)\]>\"'`]+")
 
+# [text with `code`](url): pandoc has to nest an RST inline literal inside a
+# hyperlink, which RST cannot express, so the whole link leaks into the page as
+# literal ``` ``x`` text <url>`__ ```. Image links (![...]) are unaffected.
+CODE_IN_LINK_TEXT = re.compile(r"(?<!!)\[[^\]\n]*`[^\]\n]*\]\(")
+
 
 def check_doc_links(nb, nb_path):
     # Relative links (unlike hardcoded readthedocs.io URLs) are validated by the
@@ -114,6 +119,14 @@ def check_doc_links(nb, nb_path):
                 f"Found hardcoded readthedocs.io link to zea docs: {match.group(0)}. "
                 "Use a relative link to the target .rst page instead "
                 "(e.g. '../../_autosummary/zea.X.rst' or '../../pipeline.rst').",
+                nb_path,
+            )
+        match = CODE_IN_LINK_TEXT.search(src)
+        if match:
+            error(
+                f"Markdown link with inline code in its text: {match.group(0)}. "
+                "RST has no inline literal inside a hyperlink, so nbsphinx renders "
+                "this as raw RST. Drop the backticks from the link text.",
                 nb_path,
             )
 

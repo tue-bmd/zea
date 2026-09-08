@@ -922,15 +922,13 @@ class DiffusionModel(DeepGenerativeModel):
         """Prepare the starting noisy images for the reverse diffusion loop.
 
         Constructs the initial ``x_t`` tensor that is fed into the first
-        diffusion step.  Three cases are handled:
+        diffusion step.  Two cases are handled:
 
-        - ``initial_samples`` provided and ``initial_step > 0``:
-          samples are mixed with noise at the noise level that corresponds
-          to ``initial_step``, skipping the highest-noise diffusion steps.
-        - ``initial_samples`` provided and ``initial_step == 0``:
-          samples are mixed with noise at the maximum noise level
-          (``max_t``), running the full diffusion process from a noised
-          version of the samples.x
+        - ``initial_samples`` provided: samples are mixed with noise at the
+          level of ``initial_step``, skipping the highest-noise diffusion
+          steps. With ``initial_step == 0`` that level is the maximum noise
+          level (``max_t``) and the full diffusion process runs, from a
+          noised version of the samples, weighted by ``min_signal_rate``.
         - ``initial_samples is None`` and ``initial_step == 0``:
           the starting point is pure noise (``initial_noise``).
 
@@ -950,14 +948,11 @@ class DiffusionModel(DeepGenerativeModel):
             use as the starting point ``x_t`` for the diffusion loop.
         """
         # We can optionally start with a set of samples that are partially noised
-        if initial_samples is not None and initial_step > 0:
-            starting_diffusion_times = base_diffusion_times - ((initial_step - 1) * step_size)
+        if initial_samples is not None:
+            starting_diffusion_times = base_diffusion_times - (initial_step * step_size)
             noise_rates, signal_rates = self.diffusion_schedule(starting_diffusion_times)
             next_noisy_images = signal_rates * initial_samples + noise_rates * initial_noise
-        elif initial_samples is not None:
-            noise_rates, signal_rates = self.diffusion_schedule(base_diffusion_times)
-            next_noisy_images = signal_rates * initial_samples + noise_rates * initial_noise
-        elif initial_samples is None and initial_step == 0:
+        elif initial_step == 0:
             # important line:
             # at the first sampling step, the "noisy image" is pure noise
             # but its signal rate is assumed to be nonzero (min_signal_rate)
@@ -1297,7 +1292,7 @@ class DDS(DiffusionGuidance):
             noise_rates,
             signal_rates,
             n_inner,
-            eps,  # ty: ignore[invalid-argument-type]
+            eps,
             verbose,
             **op_kwargs,
         )

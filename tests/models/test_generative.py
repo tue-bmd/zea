@@ -363,6 +363,107 @@ def test_diffusion_posterior_sample_is_traceable():
     assert tuple(traced(model, measurements, mask, seed_gen).shape) == (2, n_features)
 
 
+class _OracleDiffusionModel(DiffusionModel):
+    """A diffusion model whose score network is a *perfect* noise predictor.
+
+    It returns the exact noise that was mixed into ``initial_samples``, so DDIM becomes an
+    identity on the trajectory and any deviation of the output from ``x0`` comes purely from
+    a diffusion-schedule inconsistency, not from an untrained network.
+    """
+
+    def set_oracle_noise(self, noise):
+        """Store the noise that the denoiser should predict."""
+        self._oracle_noise = keras.ops.convert_to_tensor(noise)
+
+    def call(self, inputs, training=False, network=None, **kwargs):
+        return self._oracle_noise
+
+
+@pytest.mark.parametrize("initial_step", [0, 1, 5, 9])
+def test_warm_start_noises_samples_at_the_time_the_loop_assumes(initial_step):
+    """``prepare_schedule`` must noise ``initial_samples`` at the loop's own diffusion time.
+
+    The reverse loop starts at ``step = initial_step`` and evaluates the schedule at
+    ``t = max_t - initial_step * step_size``. If ``prepare_schedule`` mixes the samples at a
+    different ``t``, the (here perfect) denoiser is handed a mismatched noise level and cannot
+    recover ``x0`` exactly. Regression test for an ``initial_step - 1`` off-by-one.
+    """
+    n_features, n_samples, diffusion_steps = 16, 2, 10
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    x0 = rng.normal(size=(n_samples, n_features)).astype("float32")
+    noise = rng.normal(size=(n_samples, n_features)).astype("float32")
+
+    model = _OracleDiffusionModel(
+        input_shape=(n_features,),
+        network_name="dense_time_conditional",
+        network_kwargs={"widths": [8], "output_dim": n_features},
+    )
+    model.set_oracle_noise(noise)
+
+    pred_images = model.reverse_diffusion(
+        initial_noise=keras.ops.convert_to_tensor(noise),
+        initial_samples=keras.ops.convert_to_tensor(x0),
+        initial_step=initial_step,
+        diffusion_steps=diffusion_steps,
+        verbose=False,
+        track_progress_type=None,
+    )
+
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(pred_images), x0, atol=1e-4)
+
+
+@pytest.mark.parametrize("initial_step", [0, 1, 5, 9])
+def test_warm_start_is_consistent_in_conditional_diffusion(initial_step):
+    """The guided loop shares ``prepare_schedule``, so it must warm-start at the same time.
+
+    ``omega=0.0`` zeroes the DPS measurement error and hence its gradient, reducing the guided
+    trajectory to the unconditional one, which a perfect denoiser must trace back to ``x0``.
+    """
+    n_features, n_samples, diffusion_steps = 16, 2, 10
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    x0 = rng.normal(size=(n_samples, n_features)).astype("float32")
+    noise = rng.normal(size=(n_samples, n_features)).astype("float32")
+
+    model = _OracleDiffusionModel(
+        input_shape=(n_features,),
+        network_name="dense_time_conditional",
+        network_kwargs={"widths": [8], "output_dim": n_features},
+        guidance="dps",
+        operator="inpainting",
+    )
+    model.set_oracle_noise(noise)
+
+    pred_images = model.reverse_conditional_diffusion(
+        measurements=keras.ops.zeros((n_samples, n_features)),
+        initial_noise=keras.ops.convert_to_tensor(noise),
+        initial_samples=keras.ops.convert_to_tensor(x0),
+        initial_step=initial_step,
+        diffusion_steps=diffusion_steps,
+        mask=keras.ops.ones((n_samples, n_features)),
+        omega=0.0,
+        verbose=False,
+    )
+
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(pred_images), x0, atol=1e-4)
+
+
+def test_warm_start_without_initial_samples_is_rejected():
+    """``initial_samples=None`` is only meaningful at ``initial_step == 0``."""
+    model = _make_minimal_diffusion_model((4,))
+    base_diffusion_times = keras.ops.ones((2, 1)) * model.max_t
+
+    with pytest.raises(ValueError, match="Initial samples should be provided"):
+        model.prepare_schedule(
+            base_diffusion_times,
+            initial_noise=keras.ops.zeros((2, 4)),
+            initial_samples=None,
+            initial_step=3,
+            step_size=model.max_t / 10,
+        )
+
+
 def test_dehaze_nuclear_diffusion_shape_logic():
     """Test dehaze_nuclear_diffusion shape logic."""
 

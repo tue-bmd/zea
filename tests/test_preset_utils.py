@@ -241,7 +241,13 @@ def test_cache_key_is_none_for_unhashable_arguments():
 def fake_tree(monkeypatch):
     """Patch ``list_repo_tree`` with a fixed repo layout and count the calls."""
     entries = [
-        RepoFile(path="val/a.hdf5", size=10, oid="1"),
+        # Data files are LFS-backed, hence the lfs info; the rest are plain git blobs.
+        RepoFile(
+            path="val/a.hdf5",
+            size=10,
+            oid="1",
+            lfs={"oid": "lfs-sha-a", "size": 10, "pointerSize": 100},
+        ),
         RepoFile(path="val/b.h5", size=20, oid="2"),
         RepoFile(path="val/notes.txt", size=1, oid="3"),
         RepoFile(path="train/c.hdf5", size=30, oid="4"),
@@ -302,6 +308,19 @@ def test_list_h5_files_single_file(fake_tree):
 
 def test_list_h5_files_unknown_subdirectory_is_empty(fake_tree):
     assert ipu._hf_list_h5_files(f"hf://{REPO_ID}/nope") == []
+
+
+def test_content_id_prefers_lfs_sha_over_blob_id(fake_tree):
+    """Data files live in LFS, whose sha256 names the content; the blob id is the fallback."""
+    assert ipu._hf_content_id(f"hf://{REPO_ID}/val/b.h5") == "2"  # no lfs info: git blob id
+    assert ipu._hf_content_id(f"hf://{REPO_ID}/val/a.hdf5") == "lfs-sha-a"
+    # Shares the one memoized listing with the other views.
+    assert len(fake_tree) == 1
+
+
+def test_content_id_is_none_for_unknown_path(fake_tree):
+    assert ipu._hf_content_id(f"hf://{REPO_ID}/val/nope.hdf5") is None
+    assert ipu._hf_content_id(f"hf://{REPO_ID}") is None
 
 
 # Downloads
