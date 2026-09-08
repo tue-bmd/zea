@@ -67,6 +67,8 @@ class Simulate(Operation):
         "sampling_frequency",
         "scatter_exponent",
         "rigid_baffle",
+        "bandwidth_percent",
+        "probe_center_frequency",
         "noise_level_db",
         "tgc_max_db",
         "noise_seed",
@@ -114,13 +116,20 @@ class Simulate(Operation):
         noise_reference=None,
         scatter_exponent=2.0,
         rigid_baffle=True,
+        bandwidth_percent=None,
+        probe_center_frequency=None,
         **kwargs,
     ):
         if method not in simulator_settings:
             raise ValueError(f"method ({method}) must be one of {tuple(simulator_settings)}")
         simulate = simulator_settings[method]
         if method in ("exact", "frequency_approximation"):
-            simulate = functools.partial(simulate, rigid_baffle=rigid_baffle)
+            simulate = functools.partial(
+                simulate,
+                rigid_baffle=rigid_baffle,
+                bandwidth_percent=bandwidth_percent,
+                probe_center_frequency=probe_center_frequency,
+            )
         simulate_kwargs = {
             "probe_geometry": probe_geometry,
             "apply_lens_correction": apply_lens_correction,
