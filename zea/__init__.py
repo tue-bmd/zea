@@ -201,6 +201,9 @@ def _bootstrap_backend():
 
     backend, origin, source = _select_backend()
 
+    # No printing when using --help flag
+    silence_help = "-h" in sys.argv[1:] or "--help" in sys.argv[1:]
+
     # Keras was first: it already resolved its backend, so zea must defer to it. What zea
     # selected can no longer take effect, so validate the backend that is actually running
     # rather than the one that was asked for.
@@ -216,17 +219,18 @@ def _bootstrap_backend():
         )
     elif active_backend != backend:
         _export_backend(active_backend)
-        log.warning(
-            f"keras was imported before zea and is using the {active_backend!r} backend, "
-            f"not {backend!r}. Continuing with {active_backend!r}; import zea, or set "
-            f"KERAS_BACKEND, before importing keras."
-        )
+        if not silence_help:
+            log.warning(
+                f"keras was imported before zea and is using the {active_backend!r} backend, "
+                f"not {backend!r}. Continuing with {active_backend!r}; import zea, or set "
+                f"KERAS_BACKEND, before importing keras."
+            )
         return
 
     _export_backend(backend)
 
-    # No printing when using --help flag
-    if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
+    # Only logging statements below
+    if silence_help:
         return
 
     # Speak up only when the backend was not pinned and more than one was available:
