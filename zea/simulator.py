@@ -82,6 +82,8 @@ def simulate_rf(
     bandwidth_percent=None,
     probe_center_frequency=None,
     element_normals=None,
+    chirp_sweep=None,
+    n_period=4.0,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -138,6 +140,13 @@ def simulate_rf(
             +y onto the element plane, so a normal must not be parallel to +y. None is every
             element facing +z. See :func:`zea.probes.curved_probe_normals`. The lens correction
             keeps assuming a flat lens.
+        chirp_sweep (float, optional): Linear frequency sweep of the transmit pulse [Hz]. The
+            instantaneous frequency runs from ``center_frequency - chirp_sweep / 2`` to
+            ``center_frequency + chirp_sweep / 2`` over the Hann-windowed pulse (see
+            :func:`chirp_spectrum`). None or 0 is the plain windowed tone. Must be static
+            under jit.
+        n_period (float): Periods of ``center_frequency`` under the Hann window of the transmit
+            pulse. Must be static under jit.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -176,7 +185,7 @@ def simulate_rf(
     magnitudes = ops.cast(magnitudes, "float32")
 
     pulse_spectrum_fn = get_pulse_spectrum_fn(
-        center_frequency, n_period=4, sampling_frequency=sampling_frequency
+        center_frequency, n_period=n_period, sampling_frequency=sampling_frequency
     )
 
     if not apply_lens_correction:
@@ -197,12 +206,17 @@ def simulate_rf(
     # Room for a whole pulse, so record_length below never gates the end of the record away.
     # Traced frequencies give no static pulse length; the record then keeps its old short tail.
     fc_np, fs_np = _concrete(center_frequency), _concrete(sampling_frequency)
-    n_pulse = 0 if fc_np is None or fs_np is None else int(np.ceil(4 / fc_np * fs_np))
+    n_pulse = 0 if fc_np is None or fs_np is None else int(np.ceil(n_period / fc_np * fs_np))
     n_ax_rounded = float(_round_up_to_power_of_two(int(n_ax) + n_pulse))
 
     freqs = ops.arange(n_ax_rounded // 2 + 1, dtype="float32") / n_ax_rounded * sampling_frequency
 
-    waveform_spectrum = pulse_spectrum_fn(freqs)
+    if chirp_sweep:
+        waveform_spectrum = chirp_spectrum(
+            n_ax_rounded, center_frequency, sampling_frequency, n_period, chirp_sweep
+        )
+    else:
+        waveform_spectrum = pulse_spectrum_fn(freqs)
     if bandwidth_percent is not None:
         transfer = transducer_transfer(
             freqs, probe_center_frequency, bandwidth_percent, center_frequency
@@ -241,7 +255,7 @@ def simulate_rf(
         rx_response = tx_response
 
     # Leave room for the pulse tail
-    record_length = n_ax_rounded / sampling_frequency - 2 / center_frequency
+    record_length = n_ax_rounded / sampling_frequency - 0.5 * n_period / center_frequency
     travel_time = dist / sound_speed
     parts = []
     for tx in range(n_tx):
@@ -638,6 +652,39 @@ def get_transducer_bandwidth_fn(probe_center_frequency, bandwidth):
         return hann_unnormalized(ops.abs(f) - probe_center_frequency, bandwidth)
 
     return bandwidth_fn
+
+
+def chirp_spectrum(n_fft, center_frequency, sampling_frequency, n_period, chirp_sweep, xp=ops):
+    """Spectrum of a Hann-windowed linear chirp centred at t=0, on the rfft grid of ``n_fft``.
+
+    The window spans ``n_period`` periods of ``center_frequency``, over which the instantaneous
+    frequency sweeps linearly from ``center_frequency - chirp_sweep / 2`` to
+    ``center_frequency + chirp_sweep / 2``. Scaled like :func:`get_pulse_spectrum_fn`: the
+    waveform recovered with ``irfft`` has a unit peak. The waveform is even, so the spectrum is
+    real, and with ``chirp_sweep=0`` it is the sampled counterpart of the windowed tone.
+
+    Args:
+        n_fft (int): FFT length; the waveform is sampled on its wrapped time grid.
+        center_frequency (float): Centre frequency [Hz].
+        sampling_frequency (float): Sampling frequency [Hz].
+        n_period (float): Periods of ``center_frequency`` under the Hann window.
+        chirp_sweep (float): Total frequency sweep [Hz].
+        xp: Array module, ``keras.ops`` or ``numpy``.
+
+    Returns:
+        array-like: Complex spectrum of shape (n_fft // 2 + 1,).
+    """
+    n_fft = int(n_fft)
+    k = xp.arange(n_fft, dtype="float32")
+    t = xp.where(k < n_fft // 2, k, k - n_fft) / sampling_frequency
+    width = n_period / center_frequency
+    window = xp.where(xp.abs(t) < width / 2, xp.cos(np.pi * t / width) ** 2, 0.0)
+    phase = 2 * np.pi * (center_frequency * t + chirp_sweep / (2 * width) * t**2)
+    waveform = window * xp.cos(phase)
+    if xp is np:
+        return np.fft.rfft(waveform).astype(np.complex64)
+    real, imag = ops.rfft(waveform)
+    return ops.cast(real, "complex64") + ops.array(1j, "complex64") * ops.cast(imag, "complex64")
 
 
 def transducer_transfer(

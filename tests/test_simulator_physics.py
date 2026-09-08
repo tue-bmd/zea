@@ -5,7 +5,7 @@ import pytest
 from keras import ops
 
 from zea.probes import create_curved_probe_geometry, curved_probe_normals
-from zea.simulator import simulate_rf, transducer_transfer
+from zea.simulator import chirp_spectrum, simulate_rf, transducer_transfer
 
 SOUND_SPEED = 1540.0
 CENTER_FREQUENCY = 3e6
@@ -109,6 +109,54 @@ def test_curved_probe_normals_point_along_the_arc():
     expected = np.stack([np.sin(angles), np.zeros(16), np.cos(angles)], -1)
     np.testing.assert_allclose(normals, expected, atol=1e-6)
     np.testing.assert_allclose(curved_probe_normals(geometry, radius=40e-3), expected, atol=1e-6)
+
+
+def _correlation(a, b):
+    a, b = np.ravel(a), np.ravel(b)
+    return a @ b / np.sqrt((a @ a) * (b @ b))
+
+
+def _half_max_width(rf):
+    spectrum = np.abs(np.fft.rfft(rf))
+    return np.count_nonzero(spectrum > 0.5 * spectrum.max())
+
+
+def test_chirp_excitation():
+    depth, sweep, n_period = 0.02, 2e6, 16
+    scene = _scene(np.zeros((1, 3)), [0.0, 0.0, depth], n_period=n_period)
+    tone = _np(simulate_rf(**scene))[0, :, 0, 0]
+    chirp = _np(simulate_rf(**scene, chirp_sweep=sweep))[0, :, 0, 0]
+
+    # The echo is the chirp waveform delayed by the round trip.
+    n_fft = 2048
+    freqs = np.fft.rfftfreq(n_fft, 1 / SAMPLING_FREQUENCY)
+    delay = np.exp(-2j * np.pi * freqs * 2 * depth / SOUND_SPEED)
+    spectrum = chirp_spectrum(n_fft, CENTER_FREQUENCY, SAMPLING_FREQUENCY, n_period, sweep, xp=np)
+    expected = np.fft.irfft(spectrum * delay, n_fft)[:N_AX]
+    assert _correlation(chirp, expected) > 0.999
+    assert _correlation(tone, expected) < 0.8
+    assert _half_max_width(chirp) > 2 * _half_max_width(tone)
+
+
+def test_n_period_sets_the_pulse_length():
+    scene = _scene(np.zeros((1, 3)), [0.0, 0.0, 0.02])
+    short = _np(simulate_rf(**scene, n_period=4))[0, :, 0, 0]
+    long = _np(simulate_rf(**scene, n_period=12))[0, :, 0, 0]
+    support = lambda rf: np.count_nonzero(np.abs(rf) > 1e-2 * np.abs(rf).max())  # noqa: E731
+    assert 2.5 * support(short) < support(long) < 3.5 * support(short)
+
+
+def test_chirp_spectrum_without_sweep_is_the_windowed_tone():
+    n_fft = 1024
+    spectrum = chirp_spectrum(n_fft, CENTER_FREQUENCY, SAMPLING_FREQUENCY, 4, 0.0)
+    waveform = np.fft.irfft(_np(spectrum), n_fft)
+    t = np.fft.fftfreq(n_fft, SAMPLING_FREQUENCY / n_fft)
+    width = 4 / CENTER_FREQUENCY
+    tone = np.where(np.abs(t) < width / 2, np.cos(np.pi * t / width) ** 2, 0) * np.cos(
+        2 * np.pi * CENTER_FREQUENCY * t
+    )
+    np.testing.assert_allclose(waveform, tone, atol=1e-5)
+    assert np.isclose(waveform.max(), 1.0)
 
 
 def _rayleigh_pattern(directions, width, height, wavelength, distance, n=(21, 201)):
