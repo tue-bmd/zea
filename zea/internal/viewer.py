@@ -1,72 +1,8 @@
-"""Helpers for file-open dialogs and matplotlib figure window management."""
-
-import sys
-from pathlib import Path
+"""Helpers for matplotlib figure window management."""
 
 import matplotlib
 
 from zea import log
-
-
-def running_in_notebook():
-    """Check whether code is running in a Jupyter Notebook or not."""
-    return "ipykernel_launcher" in sys.argv[0]
-
-
-def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None) -> Path:
-    """Get filename through dialog window
-    Args:
-        window_name: string with name of window
-        filetypes: tuple of tuples containing (name, filetypes)
-            example:
-                (('mat or hdf5 or whatever you want', '*.mat *.hdf5 *'), (ckpt, *.ckpt))
-        initialdir: path to directory where window will start
-    Returns:
-        filename: string containing path to selected file
-    """
-    if filetypes is None:
-        filetypes = (("all files", "*.*"),)
-
-    try:
-        from tkinter import Tk
-        from tkinter.filedialog import askopenfilename
-    except ImportError as error:
-        raise ImportError(
-            "The file dialog window features in zea require Python's native Tkinter GUI toolkit. "
-            "Tkinter was not found in your current Python environment. Please ensure that "
-            "your Python distribution includes Tkinter or install your system's corresponding "
-            "python-tk package."
-        ) from error
-
-    try:
-        root = Tk()
-    except Exception as error:
-        raise ValueError(
-            "Cannot run zea GUI on a server, unless a X11 server is properly setup"
-        ) from error
-
-    # open in foreground
-    root.wm_attributes("-topmost", True)
-    root.wm_attributes("-topmost", False)
-
-    # we don't want a full GUI, so keep the root window from appearing
-    if not running_in_notebook():
-        root.withdraw()
-
-    # show an "Open" dialog box and return the path to the selected file
-    filename = askopenfilename(
-        parent=root,
-        title=window_name,
-        filetypes=filetypes,
-        initialdir=initialdir,
-    )
-    root.destroy()
-
-    # check whether a file was selected
-    if filename:
-        return Path(filename)
-    else:
-        raise ValueError("No file selected.")
 
 
 def move_matplotlib_figure(figure, position, size=None):

@@ -449,6 +449,10 @@ class _GroupProxy:
         """Return the keys of the underlying group."""
         return self._group.keys()
 
+    def load_group(self) -> dict:
+        """Recursively load this group into a plain dict. See :meth:`File.load_group`."""
+        return _load_group_dict(self._group, self._fetcher)
+
     def __contains__(self, key):
         return key in self._group
 
@@ -679,6 +683,15 @@ class Track:
         :meth:`File.get_track` to retrieve a track by name.
         """
         return self._label
+
+    @property
+    def index(self) -> int:
+        """Position of this track in acquisition order, i.e. its ``tracks/track_N`` group.
+
+        Matches the order of :attr:`File.tracks` and :attr:`File.track_labels`, so it is
+        also what ``tracks/track_{index}/...`` keys in this file address.
+        """
+        return self._index
 
     @property
     def timestamps(self) -> "np.ndarray | None":
@@ -1357,17 +1370,22 @@ class File(h5py.File):
             i += 1
         return labels
 
-    def get_track(self, label: str) -> "Track":
-        """Return the track with the given label.
+    def get_track(self, label: "str | int") -> "Track":
+        """Return the track with the given label, or at the given index.
+
+        ``label`` is matched against the file's labels first and read as an index only
+        when no label matches, so a numerically labelled track still wins over a
+        positional lookup with the same value.
 
         Args:
-            label: The exact label string assigned to the desired track.
+            label: The exact label string assigned to the desired track, or its index
+                (e.g. ``1`` or ``"1"``) in acquisition order.
 
         Returns:
             Track: The matching :class:`Track` object.
 
         Raises:
-            KeyError: If no track with that label exists, with a message
+            KeyError: If no track with that label or index exists, with a message
                 listing the available labels so the error is self-diagnosing.
 
         Example::
@@ -1376,12 +1394,20 @@ class File(h5py.File):
                 focused = f.get_track("focused")
                 raw = focused.data.raw_data[:]
         """
-        for track in self.tracks:
+        tracks = self.tracks
+        for track in tracks:
             if track.label == label:
                 return track
-        available = [t.label for t in self.tracks]
+        try:
+            index = int(label)
+        except (TypeError, ValueError):
+            index = None
+        if index is not None and 0 <= index < len(tracks):
+            return tracks[index]
+        available = [t.label for t in tracks]
         raise KeyError(
-            f"No track with label {label!r}. Available labels (in acquisition order): {available}"
+            f"No track with label or index {label!r}. "
+            f"Available labels (in acquisition order): {available}"
         )
 
     @property
