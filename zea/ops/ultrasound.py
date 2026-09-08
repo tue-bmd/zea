@@ -37,6 +37,7 @@ from zea.simulator import (
     apply_receive_chain,
     elevation_slab_bucket,
     simulate_rf,
+    simulate_rf_zea_wave,
 )
 from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
@@ -45,6 +46,7 @@ from zea.utils import canonicalize_axis
 simulator_settings: dict[str, Callable] = {
     "exact": simulate_rf,
     "frequency_approximation": simulate_rf,
+    "zea_wave": simulate_rf_zea_wave,
     "time_approximation": simulate_rf_td,
 }
 
@@ -68,10 +70,14 @@ class Simulate(Operation):
     speed for accuracy or accuracy for speed will use these two paths respectively.
     ``"time_approximation"`` solves in the time domain. Its geometry-dependent factors are
     evaluated at the center frequency, making it less accurate than the others but much faster in
-    some settings. The transducer and element options (``rigid_baffle``, ``bandwidth_percent``,
+    some settings. ``"zea_wave"`` is the ``exact`` physics with the scatterer response shared
+    across transmits (:func:`zea.simulator.simulate_rf_zea_wave`): up to an order of magnitude
+    faster for many transmits and scatterers, matching ``exact`` up to the ``band_db`` cut-off.
+    The transducer and element options (``rigid_baffle``, ``bandwidth_percent``,
     ``probe_center_frequency``, ``element_normals``, ``chirp_sweep``, ``n_period``,
     ``n_sub_elements``, ``elevation_focus``, ``lens_attenuation_coef``) reach the
-    frequency-domain methods only; ``"time_approximation"`` does not model them.
+    frequency-domain methods only, and ``band_db`` and ``n_fft`` reach ``"zea_wave"`` only;
+    ``"time_approximation"`` does not model any of them.
     """
 
     # Define operation-specific static parameters
@@ -94,6 +100,8 @@ class Simulate(Operation):
         "n_period",
         "n_sub_elements",
         "elevation_focus",
+        "band_db",
+        "n_fft",
     ]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
@@ -151,13 +159,17 @@ class Simulate(Operation):
         n_period=4.0,
         n_sub_elements=None,
         elevation_focus=None,
+        band_db=-80.0,
+        n_fft=None,
         lens_attenuation_coef=0.0,
         **kwargs,
     ):
         if method not in simulator_settings:
             raise ValueError(f"method ({method}) must be one of {tuple(simulator_settings)}")
         simulate = simulator_settings[method]
-        if method in ("exact", "frequency_approximation"):
+        if method == "zea_wave":
+            simulate = functools.partial(simulate, band_db=band_db, n_fft=n_fft)
+        if method in ("exact", "frequency_approximation", "zea_wave"):
             simulate = functools.partial(
                 simulate,
                 rigid_baffle=rigid_baffle,

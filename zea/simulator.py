@@ -44,11 +44,14 @@ more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_e
 
 """
 
+import functools
+
 import keras
 import numpy as np
 from keras import ops
 
 from zea import log
+from zea.backend import checkpoint, highest_matmul_precision
 from zea.beamform.lens_correction import (
     compute_lens_corrected_travel_times,
     compute_lens_path_lengths,
@@ -576,10 +579,12 @@ def _element_responses(
     n_sub_elements=(1, 1),
     elevation_focus=None,
     lens_attenuation_coef=0.0,
+    frequency_first=False,
 ):
-    """Transmit and receive one-way responses [s, e, f] and the one-way path length [s, e].
+    """Transmit and receive one-way responses and the one-way path length [s, e].
 
-    Each element is the mean of ``n_sub_elements`` (lateral, elevation) sub-elements with their
+    The responses are [s, e, f], or [f, s, e] when ``frequency_first`` is True. Each element is
+    the mean of ``n_sub_elements`` (lateral, elevation) sub-elements with their
     own distance, phase and sinc directivity, so the response holds in the near field too. An
     elevation focus is the ideal focusing advance of each elevation sub-element, or with the lens
     the refracted (Fermat) path through the local lens thickness, which the focus thins towards
@@ -620,14 +625,18 @@ def _element_responses(
         thickness = ops.full_like(v, lens_thickness)
     sub_width = element_width / n_lateral
     sub_height = element_height / n_elevation
-    f3 = freqs[None, None, :]
+    f3 = freqs[:, None, None] if frequency_first else freqs[None, None, :]
+
+    def fx(x):
+        """Puts the frequency axis of a [s, e] array where ``frequency_first`` wants it."""
+        return x[None] if frequency_first else x[..., None]
 
     def response(j):
         offset = u[j] * lateral_axis + v[j] * elevation_axis
         relative = relative_center - offset[None]
         theta, phi, obliquity = _element_angles(relative, frame)
-        amplitude = directivity(f3, theta[..., None], sub_width, sound_speed) * directivity(
-            f3, phi[..., None], sub_height, sound_speed
+        amplitude = directivity(f3, fx(theta), sub_width, sound_speed) * directivity(
+            f3, fx(phi), sub_height, sound_speed
         )
         if apply_lens_correction:
             lens_len, medium_len = compute_lens_path_lengths(
@@ -642,20 +651,20 @@ def _element_responses(
             spread_dist = _lens_spread_distance(
                 lens_len, medium_len, thickness[j], sound_speed, lens_sound_speed
             )
-            amplitude = amplitude * attenuate(f3, lens_attenuation_coef, lens_len[..., None])
+            amplitude = amplitude * attenuate(f3, lens_attenuation_coef, fx(lens_len))
         else:
             medium_len = sub_dist = spread_dist = ops.linalg.norm(relative, axis=-1)
-        amplitude = amplitude * attenuate(f3, attenuation_coef, medium_len[..., None])
+        amplitude = amplitude * attenuate(f3, attenuation_coef, fx(medium_len))
         if not rigid_baffle:
-            amplitude = amplitude * obliquity[..., None]
+            amplitude = amplitude * fx(obliquity)
         phase = ops.exp(
             ops.array(-2j * np.pi, "complex64")
-            * ops.cast((sub_dist[..., None] / sound_speed - advance[j]) * f3, "complex64")
+            * ops.cast((fx(sub_dist) / sound_speed - advance[j]) * f3, "complex64")
         )
-        rx = ops.cast(amplitude * spread(spread_dist[..., None], 1.0), "complex64") * phase
+        rx = ops.cast(amplitude * spread(fx(spread_dist), 1.0), "complex64") * phase
         if elevation_slab_2d:
             # An elevation lens focuses the transmit to a slab: cylindrical spread on the way out.
-            tx = ops.cast(amplitude * spread(spread_dist[..., None], 0.5), "complex64") * phase
+            tx = ops.cast(amplitude * spread(fx(spread_dist), 0.5), "complex64") * phase
         else:
             tx = rx
         return tx, rx
@@ -990,3 +999,501 @@ def _concrete(x):
         return ops.convert_to_numpy(x)
     except (RuntimeError, ValueError, TypeError, NotImplementedError):
         return None
+
+
+# ---------------------------------------------------------------------------------------------
+# zeaWave: the same physics as ``simulate_rf`` with the transmit-invariant response shared
+# across transmits through two matrix products per frequency block.
+# ---------------------------------------------------------------------------------------------
+
+
+def smooth_size(n):
+    """Smallest 2^a 3^b 5^c >= n."""
+    best = int(_round_up_to_power_of_two(max(n, 1)))
+    a = 0
+    while 2**a < 2 * n:
+        b = 0
+        while 2**a * 3**b < 2 * n:
+            c = 0
+            while 2**a * 3**b * 5**c < n:
+                c += 1
+            best = min(best, 2**a * 3**b * 5**c)
+            b += 1
+        a += 1
+    return best
+
+
+def _hann_fd_np(f, width):
+    """:func:`hann_fd` in numpy, for static band selection under an outer jit."""
+    denom = 1.0 - (f * width) ** 2
+    num = 0.5 * np.sinc(f * width)
+    singular = denom == 0
+    result = np.where(singular, 0.25, num / np.where(singular, 1.0, denom))
+    result = np.where(np.abs(result) > 1.1, 0.25, result)
+    return np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.25)
+
+
+def pulse_spectrum_np(freqs, center_frequency, sampling_frequency, n_period):
+    """Pulse spectrum of :func:`get_pulse_spectrum_fn` as a numpy array."""
+    period = n_period / center_frequency
+    f = np.asarray(freqs, np.float32)
+    scale = 0.5 * sampling_frequency * period
+    return (
+        scale
+        * (_hann_fd_np(f - center_frequency, period) + _hann_fd_np(f + center_frequency, period))
+    ).astype(np.complex64)
+
+
+def _zea_wave_spectrum_np(
+    freqs,
+    center_frequency,
+    sampling_frequency,
+    n_period,
+    bandwidth_percent,
+    probe_center_frequency,
+    chirp_sweep=None,
+    one_way=False,
+):
+    """Transmit pulse times transducer transfer function on the full rfft grid, in numpy.
+
+    ``one_way`` takes the square root of the pulse-echo transfer function, for a transmit field.
+    """
+    if chirp_sweep:
+        n_fft = 2 * (len(freqs) - 1)
+        wave = chirp_spectrum(
+            n_fft, center_frequency, sampling_frequency, n_period, chirp_sweep, xp=np
+        )
+    else:
+        wave = pulse_spectrum_np(freqs, center_frequency, sampling_frequency, n_period)
+    if bandwidth_percent is not None:
+        transfer = transducer_transfer(
+            freqs, probe_center_frequency, bandwidth_percent, center_frequency, xp=np
+        )
+        if one_way:
+            transfer = np.sqrt(transfer)
+        wave = (wave * transfer).astype(np.complex64)
+    return wave
+
+
+def band_bins(
+    n_fft,
+    center_frequency,
+    sampling_frequency,
+    n_period,
+    scatter_exponent,
+    band_db,
+    bandwidth_percent=None,
+    probe_center_frequency=None,
+    chirp_sweep=None,
+    one_way=False,
+):
+    """Contiguous bin range where the pulse spectrum, the transducer transfer function and
+    the scattering gain together exceed ``band_db``."""
+    freqs = np.arange(n_fft // 2 + 1) / n_fft * sampling_frequency
+    if band_db is None:
+        return 0, len(freqs)
+    w = np.abs(
+        _zea_wave_spectrum_np(
+            freqs,
+            center_frequency,
+            sampling_frequency,
+            n_period,
+            bandwidth_percent,
+            probe_center_frequency,
+            chirp_sweep,
+            one_way,
+        )
+    )
+    w = w * (freqs / center_frequency) ** scatter_exponent
+    keep = np.flatnonzero(w > w.max() * 10 ** (band_db / 20))
+    return int(keep[0]), int(keep[-1]) + 1
+
+
+def fft_length(
+    n_ax,
+    sampling_frequency,
+    center_frequency,
+    sound_speed,
+    probe_geometry,
+    shift_min,
+    shift_max,
+    n_period=4.0,
+    scatterer_positions=None,
+):
+    """Smooth FFT length whose echoes never wrap into the first ``n_ax`` samples.
+
+    A kept scatterer has its earliest echo inside the record, so its last one is at most the
+    aperture round trip, the spread of the transmit shifts and one pulse later. When the
+    positions are given the bound from the farthest scatterer is used if smaller.
+
+    Args:
+        n_ax (int): Number of axial samples in the record.
+        sampling_frequency (float): Sampling frequency in Hz.
+        center_frequency (float): Pulse center frequency in Hz.
+        sound_speed (float): Speed of sound in m/s.
+        probe_geometry (array-like): Element positions of shape (n_el, 3).
+        shift_min (float): Smallest transmit shift (``t0_delays - initial_times + t_peak``).
+        shift_max (float): Largest transmit shift.
+        n_period (float): Number of periods in the pulse.
+        scatterer_positions (array-like, optional): Concrete positions of shape (n_scat, 3).
+
+    Returns:
+        int: FFT length, a product of powers of 2, 3 and 5.
+    """
+    fs, c = float(sampling_frequency), float(sound_speed)
+    geometry = np.asarray(probe_geometry, np.float64)
+    pulse = 2 * n_period / float(center_frequency)
+    aperture = 2 * np.linalg.norm(geometry - geometry.mean(0), axis=1).max()
+    n = n_ax + int(np.ceil((2 * aperture / c + float(shift_max - shift_min) + pulse) * fs))
+    if scatterer_positions is not None and len(scatterer_positions):
+        reach = np.linalg.norm(np.asarray(scatterer_positions, np.float64), axis=1).max()
+        reach = reach + np.linalg.norm(geometry, axis=1).max()
+        bound = int(np.ceil((2 * reach / c + max(float(shift_max), 0.0) + pulse) * fs))
+        n = min(n, max(n_ax, bound))
+    return smooth_size(n)
+
+
+def _to_complex(x):
+    return ops.cast(x, "complex64")
+
+
+def _zea_wave_block(
+    freqs,
+    positions,
+    magnitudes,
+    geometry,
+    shift,
+    tx_apodizations,
+    center_frequency,
+    sound_speed,
+    element_width,
+    element_height,
+    attenuation_coef,
+    lens_thickness,
+    lens_sound_speed,
+    gate_time,
+    scatter_exponent,
+    apply_lens_correction,
+    elevation_slab_2d,
+    rigid_baffle,
+    element_normals,
+    n_sub_elements,
+    elevation_focus,
+    lens_attenuation_coef,
+):
+    """Band spectrum [f, t, e] of one frequency block over all scatterers.
+
+    Frequency leads every array so the einsums are plain batched matrix products. Scatterers
+    whose earliest echo has no support before ``gate_time`` cannot reach the output and are
+    dropped, so a long path never wraps into the record.
+    """
+    tx_response, rx_response, dist = _element_responses(
+        positions,
+        geometry,
+        freqs,
+        sound_speed,
+        element_width,
+        element_height,
+        attenuation_coef,
+        lens_thickness,
+        lens_sound_speed,
+        apply_lens_correction,
+        elevation_slab_2d,
+        rigid_baffle,
+        element_normals,
+        n_sub_elements,
+        elevation_focus,
+        lens_attenuation_coef,
+        frequency_first=True,
+    )
+    if scatter_exponent:
+        gain = (freqs / center_frequency) ** scatter_exponent
+    else:
+        gain = ops.ones_like(freqs)
+    keep = 2 * ops.min(dist, axis=1) / sound_speed + ops.min(shift) < gate_time
+    weight = ops.where(keep, magnitudes, 0.0)
+    f3 = freqs[:, None, None]
+    tx_weights = _to_complex(tx_apodizations[None]) * ops.exp(
+        ops.array(-2j * np.pi, "complex64") * _to_complex(shift[None] * f3)
+    )
+    with highest_matmul_precision():
+        incident = ops.einsum("fte,fse->fts", tx_weights, tx_response)
+        scattered = incident * _to_complex(weight[None, None, :] * gain[:, None, None])
+        return ops.einsum("fts,fse->fte", scattered, rx_response)
+
+
+def simulate_rf_zea_wave(
+    scatterer_positions,
+    scatterer_magnitudes,
+    probe_geometry,
+    apply_lens_correction,
+    lens_thickness,
+    lens_sound_speed,
+    sound_speed,
+    n_ax,
+    center_frequency,
+    sampling_frequency,
+    t0_delays,
+    initial_times,
+    element_width,
+    attenuation_coef,
+    tx_apodizations,
+    t_peak,
+    elevation_slab_2d=False,
+    element_height=None,
+    max_chunk_gb=1.0,
+    noise_level_db=None,
+    tgc_max_db=0.0,
+    noise_seed=0,
+    noise_reference=None,
+    scatter_exponent=2.0,
+    rigid_baffle=True,
+    bandwidth_percent=None,
+    probe_center_frequency=None,
+    element_normals=None,
+    chirp_sweep=None,
+    n_period=4.0,
+    n_sub_elements=None,
+    elevation_focus=None,
+    band_db=-100.0,
+    n_fft=None,
+    lens_attenuation_coef=0.0,
+):
+    """:func:`simulate_rf` with the scatterer response shared across transmits.
+
+    The transmit-independent one-way response is generated once per frequency block and reused
+    over all transmits.
+
+    .. code-block:: text
+
+        incident[f, t, s] = sum_e W[f, t, e] R_tx[f, s, e]    W = apod_te exp(-2 pi i f shift_te)
+        rf[f, t, e]       = sum_s S[f, t, s] R_rx[f, s, e]    S = incident * mag_s * gain(f)
+
+    :func:`simulate_rf` evaluates the same sums transmit by transmit, re-reading the (large)
+    response every time. This version is up to 20x faster for large batches of transmits, and
+    only slower for very few transmits (it falls back to simulate_rf with a single transmit,
+    to use the more efficient path when there nothing to share).
+
+    Only the bins where the pulse spectrum, the transducer transfer function and the scattering
+    gain together exceed ``band_db`` are computed (``band_db=None`` keeps every bin, -100 matches
+    SIMUS defaults), and the record gate is applied per scatterer rather than per (transmit,
+    scatterer, element), with the FFT length sized so that no kept echo wraps into the record
+    (``n_fft`` pins it). A scatterer is kept when its
+    earliest echo still has pulse support inside the record, so the gate is exact up to the pulse
+    envelope; echoes that fall past the record are not masked but simply truncated. With
+    ``band_db=None`` and the same ``n_fft`` the result matches :func:`simulate_rf` to float32
+    precision, except for the last pulse length of the record, where :func:`simulate_rf` retains
+    a sub-1e-3 leakage tail from scatterers whose support lies wholly outside it.
+
+    Takes the arguments of :func:`simulate_rf` with the same meaning and defaults, plus:
+
+    Args:
+        n_period (float): Periods in the Hann-windowed transmit pulse.
+        band_db (float, optional): Bins where the pulse spectrum times the scattering gain is
+            below this many dB of its peak are not synthesised. None keeps every bin.
+        n_fft (int, optional): FFT length. Derived when None from ``n_ax``, the aperture and
+            the transmit shifts (and the scatterer positions when concrete) so that no echo
+            wraps into the record. Must be given when the geometry, delays or sound speed are
+            traced.
+        max_chunk_gb (float): Memory budget for one frequency block. Barely affects GPU speed,
+            up to 2x on CPU.
+
+    Returns:
+        rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
+    """
+    if int(ops.shape(t0_delays)[0]) == 1:
+        return simulate_rf(
+            scatterer_positions,
+            scatterer_magnitudes,
+            probe_geometry,
+            apply_lens_correction,
+            lens_thickness,
+            lens_sound_speed,
+            sound_speed,
+            n_ax,
+            center_frequency,
+            sampling_frequency,
+            t0_delays,
+            initial_times,
+            element_width,
+            attenuation_coef,
+            tx_apodizations,
+            t_peak,
+            elevation_slab_2d=elevation_slab_2d,
+            element_height=element_height,
+            max_chunk_gb=max_chunk_gb,
+            noise_level_db=noise_level_db,
+            tgc_max_db=tgc_max_db,
+            noise_seed=noise_seed,
+            noise_reference=noise_reference,
+            scatter_exponent=scatter_exponent,
+            rigid_baffle=rigid_baffle,
+            bandwidth_percent=bandwidth_percent,
+            probe_center_frequency=probe_center_frequency,
+            element_normals=element_normals,
+            chirp_sweep=chirp_sweep,
+            n_period=n_period,
+            n_sub_elements=n_sub_elements,
+            elevation_focus=elevation_focus,
+            lens_attenuation_coef=lens_attenuation_coef,
+        )
+
+    _validate_scatter_exponent(scatter_exponent)
+    _validate_elevation(elevation_slab_2d, elevation_focus)
+    fc, fs = float(center_frequency), float(sampling_frequency)
+    n_ax = int(n_ax)
+    element_width = _resolve_element_width(probe_geometry, element_width)
+    if element_height is None:
+        element_height = element_width
+    _validate_lens(
+        apply_lens_correction,
+        lens_thickness,
+        lens_sound_speed,
+        sound_speed,
+        elevation_focus,
+        element_height,
+    )
+    n_sub_elements = _resolve_sub_elements(
+        n_sub_elements,
+        elevation_focus,
+        element_width,
+        element_height,
+        sound_speed,
+        fc,
+        bandwidth_percent,
+    )
+
+    # Concrete views of the raw inputs, before any op puts them into an outer jit.
+    raw = [_concrete(x) for x in (t0_delays, initial_times, t_peak, probe_geometry, sound_speed)]
+    if n_fft is None:
+        if any(x is None for x in raw):
+            raise ValueError(
+                "n_fft cannot be derived from traced geometry, delays or sound speed; "
+                "pass n_fft explicitly."
+            )
+        t0_np, t_init_np, t_peak_np, geom_np, c_np = raw
+        shift_np = t0_np - t_init_np[:, None] + t_peak_np[:, None]
+        n_fft = fft_length(
+            n_ax,
+            fs,
+            fc,
+            float(c_np),
+            geom_np,
+            shift_np.min(),
+            shift_np.max(),
+            n_period,
+            _concrete(scatterer_positions),
+        )
+    n_fft = int(n_fft)
+
+    positions = ops.cast(scatterer_positions, "float32")
+    magnitudes = ops.cast(scatterer_magnitudes, "float32")
+    geometry = ops.cast(probe_geometry, "float32")
+    t0_delays = ops.cast(t0_delays, "float32")
+    n_tx, n_el = (int(d) for d in ops.shape(t0_delays))
+
+    if elevation_slab_2d:
+        _warn_if_elevation_extent(geometry)
+        positions, magnitudes = _apply_elevation_slab(
+            positions, magnitudes, geometry, element_height
+        )
+
+    def finish(rf):
+        return apply_receive_chain(
+            rf[..., None], noise_level_db, tgc_max_db, noise_seed, noise_reference
+        )
+
+    if int(ops.shape(positions)[0]) == 0:
+        return finish(ops.zeros((n_tx, n_ax, n_el), "float32"))
+
+    # Transmit shift per element beyond the travel time, as in simulate_rf.
+    shift = (
+        t0_delays
+        - ops.cast(initial_times, "float32")[:, None]
+        + ops.cast(t_peak, "float32")[:, None]
+    )
+    if bandwidth_percent is not None:
+        bandwidth_percent = float(bandwidth_percent)
+    if probe_center_frequency is not None:
+        probe_center_frequency = float(probe_center_frequency)
+    chirp_sweep = float(chirp_sweep) if chirp_sweep else None
+    k0, k1 = band_bins(
+        n_fft,
+        fc,
+        fs,
+        n_period,
+        scatter_exponent,
+        band_db,
+        bandwidth_percent,
+        probe_center_frequency,
+        chirp_sweep,
+    )
+
+    # Forward of one block per bin: the complex responses and the two matrix product outputs.
+    n_scat = int(ops.shape(positions)[0])
+    per_bin = 8 * ((2 if elevation_slab_2d else 1) * n_scat * n_el + n_tx * n_scat + n_tx * n_el)
+    f_block = int(max(1, min(k1 - k0, max_chunk_gb * 2**30 // per_bin)))
+    n_blocks = -(-(k1 - k0) // f_block)
+    # Spread the band evenly, so the last block is padded by less than a whole block.
+    f_block = -(-(k1 - k0) // n_blocks)
+    n_band = n_blocks * f_block
+
+    # Band padded to whole blocks; the padded bins get zero pulse weight below.
+    freqs_all = np.arange(n_fft // 2 + 1) / n_fft * fs
+    freqs = np.full(n_band, freqs_all[k1 - 1], np.float32)
+    freqs[: k1 - k0] = freqs_all[k0:k1]
+    wave = np.zeros(n_band, np.complex64)
+    wave[: k1 - k0] = _zea_wave_spectrum_np(
+        freqs_all, fc, fs, n_period, bandwidth_percent, probe_center_frequency, chirp_sweep
+    )[k0:k1]
+    freqs = ops.convert_to_tensor(freqs)
+
+    def as_f32(x):
+        return ops.cast(0.0 if x is None else x, "float32")
+
+    block = checkpoint(
+        functools.partial(
+            _zea_wave_block,
+            positions=positions,
+            magnitudes=magnitudes,
+            geometry=geometry,
+            shift=shift,
+            tx_apodizations=ops.cast(tx_apodizations, "float32"),
+            center_frequency=fc,
+            sound_speed=as_f32(sound_speed),
+            element_width=as_f32(element_width),
+            element_height=as_f32(element_height),
+            attenuation_coef=as_f32(attenuation_coef),
+            lens_thickness=as_f32(lens_thickness),
+            lens_sound_speed=as_f32(lens_sound_speed),
+            gate_time=n_ax / fs + 0.5 * n_period / fc,
+            scatter_exponent=float(scatter_exponent),
+            apply_lens_correction=bool(apply_lens_correction),
+            elevation_slab_2d=bool(elevation_slab_2d),
+            rigid_baffle=bool(rigid_baffle),
+            element_normals=None if element_normals is None else as_f32(element_normals),
+            n_sub_elements=n_sub_elements,
+            elevation_focus=None if elevation_focus is None else float(elevation_focus),
+            lens_attenuation_coef=as_f32(lens_attenuation_coef),
+        )
+    )
+
+    def body(i, spectrum):
+        start = i * f_block
+        block_freqs = ops.slice(freqs, [start], [f_block])
+        return ops.slice_update(spectrum, [start, 0, 0], block(block_freqs))
+
+    spectrum = ops.zeros((n_band, n_tx, n_el), "complex64")
+    spectrum = ops.fori_loop(0, n_blocks, body, spectrum)
+    spectrum = spectrum[: k1 - k0] * ops.convert_to_tensor(wave[: k1 - k0])[:, None, None]
+
+    # limited to prevent large focused line grids from OOM'ing.
+    group = min(32, n_tx)
+    parts = []
+    for start in range(0, n_tx, group):
+        band = ops.transpose(spectrum[:, start : start + group], (1, 2, 0))
+        pad = ((0, 0), (0, 0), (k0, n_fft // 2 + 1 - k1))
+        full = (ops.pad(ops.real(band), pad), ops.pad(ops.imag(band), pad))
+        parts.append(ops.irfft(full, fft_length=n_fft)[..., :n_ax])
+    rf = ops.transpose(ops.concatenate(parts, axis=0), (0, 2, 1))
+    return finish(rf)

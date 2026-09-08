@@ -12,6 +12,13 @@ Public API
     Unified JIT compilation for JAX (``jax.jit``), TensorFlow
     (``tf.function``) and PyTorch (``torch.compile``).
 
+:func:`checkpoint`
+    Gradient checkpointing (rematerialization) for JAX, TensorFlow and PyTorch.
+
+:func:`highest_matmul_precision`
+    Context manager that keeps float32 matrix products at full precision where the
+    backend would otherwise use TF32 (JAX on GPU).
+
 :class:`device`
     Context manager that pins all Keras ops to a specific device.
     Re-exported as :func:`zea.device`.
@@ -167,6 +174,41 @@ def _jit_compile(func, jax=True, tensorflow=True, torch=True, **kwargs):
             return func(*args, **kw)
 
         return _warn_on_first_call
+
+
+def checkpoint(func):
+    """Rematerialize ``func`` in the backward pass instead of storing its intermediates.
+
+    Wraps ``jax.checkpoint``, ``tf.recompute_grad`` or ``torch.utils.checkpoint``. Returns
+    ``func`` unchanged on other backends.
+    """
+    backend = keras.backend.backend()
+    if backend == "jax" and jax_mod is not None:
+        return jax_mod.checkpoint(func)
+    if backend == "tensorflow" and tf_mod is not None:
+        return tf_mod.recompute_grad(func)
+    if backend == "torch" and torch_mod is not None:
+        import torch.utils.checkpoint
+
+        @functools.wraps(func)
+        def wrapper(*args):
+            return torch.utils.checkpoint.checkpoint(func, *args, use_reentrant=False)
+
+        return wrapper
+    return func
+
+
+def highest_matmul_precision():
+    """Context in which float32 matrix products use full precision.
+
+    XLA on GPU rounds float32 matmul inputs to TF32 by default; this raises the precision of
+    every matmul traced inside the context on the JAX backend. Torch does not use TF32 for
+    matmuls by default, and TensorFlow's switch is a process-wide runtime setting, so the
+    context is a no-op on the other backends.
+    """
+    if keras.backend.backend() == "jax" and jax_mod is not None:
+        return jax_mod.default_matmul_precision("highest")
+    return nullcontext()
 
 
 class device:
