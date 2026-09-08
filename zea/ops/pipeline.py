@@ -1,6 +1,7 @@
 import difflib
 import inspect
 import json
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Dict, List, Sequence, Union, cast
 
 import keras
@@ -36,6 +37,20 @@ if TYPE_CHECKING:
     # Imported lazily at runtime (inside prepare_parameters) to avoid a circular
     # import: zea.parameters imports the data specs, which can pull in this module.
     from zea.parameters import Parameters
+
+
+@lru_cache(maxsize=1)
+def _valid_parameter_names() -> frozenset:
+    """Names recognized by :class:`~zea.Parameters`.
+
+    Such keys are never typos when handed to a pipeline: many of them configure
+    *derived* inputs (``polar_limits`` shapes ``grid``, ``pfield_kwargs`` shapes
+    ``flat_pfield``) and are therefore legitimately unused by the pipeline itself.
+    """
+    # Local import for the circular-import reason described above.
+    from zea.parameters import Parameters
+
+    return frozenset(Parameters.VALID_PARAMS)
 
 
 class PipelineError(RuntimeError):
@@ -430,7 +445,11 @@ class Pipeline:
     def _raise_missing_key(self, operation, exc: KeyError, inputs: Dict[str, Any]):
         """Re-raise a bare ``KeyError`` from an operation with actionable context."""
         missing = exc.args[0] if exc.args else "?"
-        unused = [k for k in (set(inputs.keys()) - self.valid_keys) if k != "kwargs"]
+        unused = [
+            k
+            for k in (set(inputs.keys()) - self.valid_keys - _valid_parameter_names())
+            if k != "kwargs"
+        ]
         # If the caller passed something close to the missing key, it is likely a typo.
         typo = difflib.get_close_matches(str(missing), unused, n=1, cutoff=0.6)
         hint = (
@@ -506,7 +525,7 @@ class Pipeline:
                 candidates = self.valid_keys - {"kwargs"}
                 matches = {
                     key: difflib.get_close_matches(key, candidates, n=1, cutoff=0.6)
-                    for key in difference_keys
+                    for key in difference_keys - _valid_parameter_names()
                 }
                 typos = {key: match[0] for key, match in matches.items() if match}
                 benign = difference_keys - set(typos)

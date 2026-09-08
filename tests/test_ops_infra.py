@@ -1707,6 +1707,35 @@ def test_pipeline_unused_key_typo_warns(monkeypatch):
     assert any("dynamic_range" in m and "typo" in m for m in messages)
 
 
+def test_pipeline_valid_parameter_not_flagged_as_typo(monkeypatch):
+    """A real ``zea.Parameters`` field is never reported as a typo.
+
+    ``polar_limits`` fuzzy-matches the pipeline's ``polar_angles``, but it is a
+    legitimate parameter that shapes *derived* inputs (the beamforming grid), so
+    it belongs in the benign debug list rather than the typo warning.
+    """
+    import numpy as np
+
+    from zea.ops import pipeline as pipeline_module
+
+    warnings_, debugs = [], []
+    monkeypatch.setattr(pipeline_module.log, "warning", lambda msg, *a, **k: warnings_.append(msg))
+    monkeypatch.setattr(pipeline_module.log, "debug", lambda msg, *a, **k: debugs.append(msg))
+
+    @ops_registry("needs_polar_angles")
+    class NeedsPolarAngles(ops.Operation):
+        def call(self, polar_angles=None, **kwargs):
+            return {"data": kwargs["data"]}
+
+    pipeline = ops.Pipeline(
+        [NeedsPolarAngles()], with_batch_dim=False, jit_options=None, validate=False
+    )
+    pipeline(data=np.zeros((4, 4), dtype="float32"), polar_limits=(-0.5, 0.5))
+
+    assert not any("typo" in m for m in warnings_)
+    assert any("polar_limits" in m for m in debugs)
+
+
 def test_pipeline_nested_error_not_double_wrapped():
     """An error from a nested pipeline is annotated once, not wrapped twice."""
     import numpy as np
