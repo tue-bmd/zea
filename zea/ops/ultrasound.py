@@ -32,7 +32,12 @@ from zea.internal.core import (
 from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
-from zea.simulator import apply_receive_chain, elevation_slab_bucket, simulate_rf
+from zea.simulator import (
+    _concrete,
+    apply_receive_chain,
+    elevation_slab_bucket,
+    simulate_rf,
+)
 from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
 
@@ -42,6 +47,16 @@ simulator_settings: dict[str, Callable] = {
     "frequency_approximation": simulate_rf,
     "time_approximation": simulate_rf_td,
 }
+
+
+def _python_scalar(x):
+    """0-d numeric arrays as Python scalars; anything else unchanged."""
+    if isinstance(x, (bool, int, float, str, type(None))):
+        return x
+    value = _concrete(x)
+    if value is None or np.ndim(value) != 0:
+        return x
+    return value.item()
 
 
 @ops_registry("simulate_rf")
@@ -86,8 +101,14 @@ class Simulate(Operation):
         )
 
     def __call__(self, **kwargs):
-        # Drop out-of-slab scatterers here, because `call` is traced.
         merged = {**self._input_cache, **kwargs}
+        if not self._inside_outer_jit:
+            # Static scalars as Python numbers: tf.function would otherwise trace them as
+            # tensors, and the simulators size the FFT from the concrete pulse length.
+            merged.update(
+                {key: _python_scalar(merged[key]) for key in self.static_params if key in merged}
+            )
+        # Drop out-of-slab scatterers here, because `call` is traced.
         pruned = {} if self._inside_outer_jit else elevation_slab_bucket(**merged)
         outputs = super().__call__(**{**merged, **pruned})
         return {**outputs, **{key: merged[key] for key in pruned}}
