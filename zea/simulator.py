@@ -187,8 +187,12 @@ def simulate_rf(
         scatter_gain = ops.ones_like(freqs)
 
     scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
-    theta = ops.arctan2(scat_pos_relative_to_probe[..., 0], scat_pos_relative_to_probe[..., 2])
-    phi = ops.arctan2(scat_pos_relative_to_probe[..., 1], scat_pos_relative_to_probe[..., 2])
+    # The Fraunhofer pattern of a rectangular element takes the direction cosines lateral / r and
+    # elevation / r. Projected angles arctan2(elevation, axial) narrow the elevation pattern for
+    # laterally offset scatterers.
+    element_dist = ops.maximum(ops.linalg.norm(scat_pos_relative_to_probe, axis=-1), 1e-12)
+    theta = ops.arcsin(ops.clip(scat_pos_relative_to_probe[..., 0] / element_dist, -1.0, 1.0))
+    phi = ops.arcsin(ops.clip(scat_pos_relative_to_probe[..., 1] / element_dist, -1.0, 1.0))
 
     # [n_scat, n_el, n_freq]
     directivity_x = directivity(freqs[None, None], theta[..., None], element_width, sound_speed)
