@@ -6030,6 +6030,20 @@ wheels = [
 ]
 
 [[package]]
+name = "pymust"
+version = "0.1.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7a/e0/ee8fc8fb519e2bf42a6bc4fe822d735db025d166d45252aab4eed1e6deeb/pymust-0.1.9.tar.gz", hash = "sha256:ae13377d59eb4c89fa384723c289a8edac81b1c00d0965ba1bc070e28e949ce3", size = 13028799, upload-time = "2026-01-19T20:59:42.017Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b0/d2/3de5405f3633e852a21c13bf17ffc879b06e93611e0345a552537e3b24a8/pymust-0.1.9-py3-none-any.whl", hash = "sha256:9151727ae9a61d14fc3f2577192b09f2da1c7fd2e0e14f5300cd8d1597cf3392", size = 125508, upload-time = "2026-01-19T20:59:40.704Z" },
+]
+
+[[package]]
 name = "pyparsing"
 version = "3.3.2"
 source = { registry = "https://pypi.org/simple" }
@@ -9118,6 +9132,7 @@ dev = [
     { name = "pip" },
     { name = "pre-commit" },
     { name = "pybtex" },
+    { name = "pymust" },
     { name = "pystemmer" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -9170,6 +9185,7 @@ tests = [
     { name = "ipywidgets" },
     { name = "papermill" },
     { name = "pre-commit" },
+    { name = "pymust" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "simpleitk" },
@@ -9245,6 +9261,7 @@ dev = [
     { name = "pip" },
     { name = "pre-commit" },
     { name = "pybtex", specifier = ">=0.26.1" },
+    { name = "pymust", specifier = ">=0.1.9" },
     { name = "pystemmer" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov" },
@@ -9288,6 +9305,7 @@ tests = [
     { name = "ipywidgets" },
     { name = "papermill", specifier = ">=2.4" },
     { name = "pre-commit" },
+    { name = "pymust", specifier = ">=0.1.9" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov" },
     { name = "simpleitk", specifier = ">=2.2.1" },
