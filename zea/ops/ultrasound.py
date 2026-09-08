@@ -69,7 +69,8 @@ class Simulate(Operation):
     ``"time_approximation"`` solves in the time domain. Its geometry-dependent factors are
     evaluated at the center frequency, making it less accurate than the others but much faster in
     some settings. The transducer and element options (``rigid_baffle``, ``bandwidth_percent``,
-    ``probe_center_frequency``, ``element_normals``, ``chirp_sweep``, ``n_period``) reach the
+    ``probe_center_frequency``, ``element_normals``, ``chirp_sweep``, ``n_period``,
+    ``n_sub_elements``) reach the
     frequency-domain methods only; ``"time_approximation"`` does not model them.
     """
 
@@ -91,6 +92,7 @@ class Simulate(Operation):
         "tgc_max_db",
         "noise_seed",
         "n_period",
+        "n_sub_elements",
     ]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
@@ -146,6 +148,7 @@ class Simulate(Operation):
         element_normals=None,
         chirp_sweep=None,
         n_period=4.0,
+        n_sub_elements=None,
         **kwargs,
     ):
         if method not in simulator_settings:
@@ -160,6 +163,7 @@ class Simulate(Operation):
                 element_normals=element_normals,
                 chirp_sweep=chirp_sweep,
                 n_period=n_period,
+                n_sub_elements=n_sub_elements,
             )
         simulate_kwargs = {
             "probe_geometry": probe_geometry,
