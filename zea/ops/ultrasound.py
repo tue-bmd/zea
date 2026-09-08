@@ -1,4 +1,5 @@
-from collections.abc import Iterable
+import functools
+from collections.abc import Callable, Iterable
 
 import keras
 import numpy as np
@@ -35,7 +36,8 @@ from zea.simulator import apply_receive_chain, elevation_slab_bucket, simulate_r
 from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
 
-simulator_settings = {
+# The simulators take different options, so the type checker cannot resolve the union.
+simulator_settings: dict[str, Callable] = {
     "exact": simulate_rf,
     "frequency_approximation": simulate_rf,
     "time_approximation": simulate_rf_td,
@@ -64,6 +66,7 @@ class Simulate(Operation):
         "center_frequency",
         "sampling_frequency",
         "scatter_exponent",
+        "rigid_baffle",
         "noise_level_db",
         "tgc_max_db",
         "noise_seed",
@@ -110,11 +113,14 @@ class Simulate(Operation):
         noise_seed=0,
         noise_reference=None,
         scatter_exponent=2.0,
+        rigid_baffle=True,
         **kwargs,
     ):
         if method not in simulator_settings:
             raise ValueError(f"method ({method}) must be one of {tuple(simulator_settings)}")
         simulate = simulator_settings[method]
+        if method in ("exact", "frequency_approximation"):
+            simulate = functools.partial(simulate, rigid_baffle=rigid_baffle)
         simulate_kwargs = {
             "probe_geometry": probe_geometry,
             "apply_lens_correction": apply_lens_correction,

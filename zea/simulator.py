@@ -78,6 +78,7 @@ def simulate_rf(
     noise_seed=0,
     noise_reference=None,
     scatter_exponent=2.0,
+    rigid_baffle=True,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -119,6 +120,9 @@ def simulate_rf(
         scatter_exponent (float): Weigh the scattered field by
             ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
             myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
+        rigid_baffle (bool): Element mounted in a rigid baffle (sinc directivity only). False
+            models a soft baffle, which adds the obliquity factor cos(angle to the element
+            normal), on transmit and on receive. Must be static under jit.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -190,18 +194,14 @@ def simulate_rf(
     else:
         scatter_gain = ops.ones_like(freqs)
 
-    scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
-    # The Fraunhofer pattern of a rectangular element takes the direction cosines lateral / r and
-    # elevation / r. Projected angles arctan2(elevation, axial) narrow the elevation pattern for
-    # laterally offset scatterers.
-    element_dist = ops.maximum(ops.linalg.norm(scat_pos_relative_to_probe, axis=-1), 1e-12)
-    theta = ops.arcsin(ops.clip(scat_pos_relative_to_probe[..., 0] / element_dist, -1.0, 1.0))
-    phi = ops.arcsin(ops.clip(scat_pos_relative_to_probe[..., 1] / element_dist, -1.0, 1.0))
+    theta, phi, obliquity = _element_angles(scatterer_positions[:, None] - probe_geometry[None])
 
     # [n_scat, n_el, n_freq]
     directivity_x = directivity(freqs[None, None], theta[..., None], element_width, sound_speed)
     directivity_y = directivity(freqs[None, None], phi[..., None], element_height, sound_speed)
     element_directivity = directivity_x * directivity_y
+    if not rigid_baffle:
+        element_directivity = element_directivity * obliquity[..., None]
     attenuation = attenuate(freqs[None, None], attenuation_coef, dist[..., None])
     one_way_phase = delay2(
         freqs[None, None],
@@ -330,6 +330,26 @@ def _resolve_element_width(probe_geometry, element_width):
             f"Details: {exc}"
         ) from exc
     return pitch * 0.9  # 90% of the pitch
+
+
+def _element_angles(relative):
+    """Lateral and elevation angles and cos of the angle to the element normal (+z).
+
+    The sines of theta and phi are the direction cosines lateral / r and elevation / r, as in
+    the Fraunhofer pattern of a rectangular aperture (and SIMUS). Projected angles
+    arctan2(lateral, axial) would narrow the elevation pattern for laterally offset scatterers.
+
+    Args:
+        relative (array-like): Scatterer positions relative to the elements, (n_scat, n_el, 3).
+
+    Returns:
+        theta, phi, obliquity: arrays of shape (n_scat, n_el).
+    """
+    dist = ops.maximum(ops.linalg.norm(relative, axis=-1), 1e-12)
+    theta = ops.arcsin(ops.clip(relative[..., 0] / dist, -1.0, 1.0))
+    phi = ops.arcsin(ops.clip(relative[..., 1] / dist, -1.0, 1.0))
+    obliquity = relative[..., 2] / dist
+    return theta, phi, obliquity
 
 
 def delay2(f, tau, n_fft, sampling_frequency):
