@@ -1,3 +1,4 @@
+import functools
 from collections.abc import Iterable
 
 import keras
@@ -31,13 +32,19 @@ from zea.internal.core import (
 from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
-from zea.simulator import apply_receive_chain, elevation_slab_bucket, simulate_rf
+from zea.simulator import (
+    apply_receive_chain,
+    elevation_slab_bucket,
+    simulate_rf,
+    simulate_rf_gem_wave,
+)
 from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
 
 simulator_settings = {
     "exact": simulate_rf,
     "frequency_approximation": simulate_rf,
+    "gem_wave": simulate_rf_gem_wave,
     "time_approximation": simulate_rf_td,
 }
 
@@ -51,7 +58,11 @@ class Simulate(Operation):
     speed for accuracy or accuracy for speed will use these two paths respectively.
     ``"time_approximation"`` solves in the time domain. Its geometry-dependent factors are
     evaluated at the center frequency, making it less accurate than the others but much faster in
-    some settings.
+    some settings. ``"gem_wave"`` is the ``exact`` physics with the scatterer response shared
+    across transmits (:func:`zea.simulator.simulate_rf_gem_wave`): up to an order of magnitude
+    faster for many transmits and scatterers, matching ``exact`` up to the ``band_db`` cut-off.
+    Its extra static parameters ``n_period``, ``band_db`` and ``n_fft`` are ignored by the other
+    methods.
     """
 
     # Define operation-specific static parameters
@@ -67,6 +78,9 @@ class Simulate(Operation):
         "noise_level_db",
         "tgc_max_db",
         "noise_seed",
+        "n_period",
+        "band_db",
+        "n_fft",
     ]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
@@ -110,11 +124,16 @@ class Simulate(Operation):
         noise_seed=0,
         noise_reference=None,
         scatter_exponent=2.0,
+        n_period=4.0,
+        band_db=-80.0,
+        n_fft=None,
         **kwargs,
     ):
         if method not in simulator_settings:
             raise ValueError(f"method ({method}) must be one of {tuple(simulator_settings)}")
         simulate = simulator_settings[method]
+        if method == "gem_wave":
+            simulate = functools.partial(simulate, n_period=n_period, band_db=band_db, n_fft=n_fft)
         simulate_kwargs = {
             "probe_geometry": probe_geometry,
             "apply_lens_correction": apply_lens_correction,
