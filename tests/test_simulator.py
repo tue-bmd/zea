@@ -352,6 +352,36 @@ def test_simulate_op_prunes_elevation_slab_without_leaking_pruned_cloud():
     assert outputs["scatterer_magnitudes"].shape == magnitudes.shape
 
 
+@pytest.mark.parametrize("method", ["exact", "frequency_approximation", "time_approximation"])
+def test_simulate_op_runs_every_method(method):
+    """The op hands options that only the frequency-domain simulators take to those alone."""
+    n_el = 8
+    probe_geometry = np.stack(
+        [np.linspace(-4e-3, 4e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+    op = Simulate(jit_compile=False, with_batch_dim=False)
+    outputs = op(
+        scatterer_positions=np.array([[0.0, 0.0, 15e-3]], dtype=np.float32),
+        scatterer_magnitudes=np.ones(1, dtype=np.float32),
+        probe_geometry=probe_geometry,
+        apply_lens_correction=False,
+        lens_thickness=1e-3,
+        lens_sound_speed=1000.0,
+        sound_speed=SOUND_SPEED,
+        n_ax=512,
+        center_frequency=CENTER_FREQUENCY,
+        sampling_frequency=CENTER_FREQUENCY * 4,
+        t0_delays=np.zeros((1, n_el), dtype=np.float32),
+        initial_times=np.zeros(1, dtype=np.float32),
+        element_width=1e-3,
+        attenuation_coef=0.0,
+        tx_apodizations=np.ones((1, n_el), dtype=np.float32),
+        t_peak=np.zeros(1, dtype=np.float32),
+        method=method,
+    )
+    assert np.abs(keras.ops.convert_to_numpy(outputs[op.output_key])).max() > 0
+
+
 def test_record_length_gate_keeps_in_record_pairs_without_aliasing():
     """Scatterers that fit in the record must not be zeroed, but no aliasing may happen."""
     probe_geometry = np.array([[-8e-3, 0.0, 0.0], [8e-3, 0.0, 0.0]], dtype=np.float32)

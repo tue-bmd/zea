@@ -52,6 +52,17 @@ def _rel_err(reference, result):
     return np.linalg.norm(reference - result) / np.linalg.norm(reference)
 
 
+def test_soft_baffle_scales_by_cos_of_angle():
+    angle = np.deg2rad(35.0)
+    scatterer = 0.02 * np.array([np.sin(angle), 0.0, np.cos(angle)])
+    scene = _scene(np.zeros((1, 3)), scatterer)
+    rigid = simulate_rf(**scene, rigid_baffle=True)
+    soft = simulate_rf(**scene, rigid_baffle=False)
+    assert _rel_err(rigid, soft) > 0.1
+    # Obliquity on transmit and on receive.
+    assert _rel_err(np.cos(angle) ** 2 * _np(rigid), soft) < 1e-3
+
+
 def _rayleigh_pattern(directions, width, height, wavelength, distance, n=(21, 201)):
     """One-way pattern of a rectangular face by numerical integration, what the sinc approximates.
 
