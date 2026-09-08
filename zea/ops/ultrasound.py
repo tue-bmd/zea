@@ -70,7 +70,7 @@ class Simulate(Operation):
     evaluated at the center frequency, making it less accurate than the others but much faster in
     some settings. The transducer and element options (``rigid_baffle``, ``bandwidth_percent``,
     ``probe_center_frequency``, ``element_normals``, ``chirp_sweep``, ``n_period``,
-    ``n_sub_elements``, ``elevation_focus``) reach the
+    ``n_sub_elements``, ``elevation_focus``, ``lens_attenuation_coef``) reach the
     frequency-domain methods only; ``"time_approximation"`` does not model them.
     """
 
@@ -151,6 +151,7 @@ class Simulate(Operation):
         n_period=4.0,
         n_sub_elements=None,
         elevation_focus=None,
+        lens_attenuation_coef=0.0,
         **kwargs,
     ):
         if method not in simulator_settings:
@@ -167,6 +168,7 @@ class Simulate(Operation):
                 n_period=n_period,
                 n_sub_elements=n_sub_elements,
                 elevation_focus=elevation_focus,
+                lens_attenuation_coef=lens_attenuation_coef,
             )
         simulate_kwargs = {
             "probe_geometry": probe_geometry,
