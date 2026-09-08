@@ -85,6 +85,7 @@ def simulate_rf(
     chirp_sweep=None,
     n_period=4.0,
     n_sub_elements=None,
+    elevation_focus=None,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -152,7 +153,12 @@ def simulate_rf(
             distance and sinc directivity so the response holds in the near field. A pair
             (n_lateral, n_elevation), an int for the lateral count, or ``"auto"`` for the SIMUS
             rule ceil(size / lambda_min) in both directions, with lambda_min at the top of the
-            transducer band. None is a single sub-element. Must be static under jit.
+            transducer band. None is a single sub-element, except in elevation when
+            ``elevation_focus`` is set, which then follows the auto rule. Must be static under
+            jit.
+        elevation_focus (float, optional): Focal distance [m] of a fixed elevation lens, modelled
+            as the focusing advance of each elevation sub-element on transmit and on receive.
+            Exclusive with ``elevation_lens``. Must be static under jit.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -160,6 +166,7 @@ def simulate_rf(
     """
 
     _validate_scatter_exponent(scatter_exponent)
+    _validate_elevation(elevation_lens, elevation_focus)
 
     n_tx = t0_delays.shape[0]
 
@@ -169,6 +176,7 @@ def simulate_rf(
         element_height = element_width
     n_sub_elements = _resolve_sub_elements(
         n_sub_elements,
+        elevation_focus,
         element_width,
         element_height,
         sound_speed,
@@ -243,6 +251,7 @@ def simulate_rf(
         rigid_baffle,
         element_normals,
         n_sub_elements,
+        elevation_focus,
     )
     # One-way delays past the FFT length are gated, as delay2 does for the transmit shifts.
     in_fft = ops.cast(dist / sound_speed < n_ax_rounded / sampling_frequency, "complex64")
@@ -336,6 +345,14 @@ def _validate_scatter_exponent(scatter_exponent):
         )
 
 
+def _validate_elevation(elevation_lens, elevation_focus):
+    if elevation_lens and elevation_focus is not None:
+        raise ValueError(
+            "elevation_focus models the lens with elevation sub-elements; it excludes the "
+            "elevation_lens slab and cylindrical-spread approximation."
+        )
+
+
 def _resolve_element_width(probe_geometry, element_width):
     """Return the element width, inferring it from the probe pitch when not given."""
     if element_width is not None:
@@ -407,6 +424,7 @@ def _element_angles(relative, frame):
 
 def _resolve_sub_elements(
     n_sub_elements,
+    elevation_focus,
     element_width,
     element_height,
     sound_speed,
@@ -416,12 +434,14 @@ def _resolve_sub_elements(
     """Sub-elements per element as (n_lateral, n_elevation).
 
     "auto" is the SIMUS rule ceil(size / lambda_min), lambda_min at the top of the transducer
-    band. None and an int keep one elevation sub-element.
+    band. None and an int keep one elevation sub-element unless there is an elevation focus,
+    which needs the elevation subdivision to act at all.
     """
     if isinstance(n_sub_elements, (tuple, list)):
         n_lateral, n_elevation = (int(n) for n in n_sub_elements)
         return max(n_lateral, 1), max(n_elevation, 1)
-    if n_sub_elements != "auto":
+    focused = elevation_focus is not None
+    if n_sub_elements != "auto" and not focused:
         return (1 if n_sub_elements is None else max(int(n_sub_elements), 1)), 1
     values = [_concrete(x) for x in (sound_speed, center_frequency, element_width, element_height)]
     if any(v is None for v in values):
@@ -432,7 +452,9 @@ def _resolve_sub_elements(
     c, fc, width, height = (float(v) for v in values)
     lambda_min = c / (fc * (1 + (bandwidth_percent or 0.0) / 200))
     n_elevation = max(int(np.ceil(height / lambda_min)), 1)
-    return max(int(np.ceil(width / lambda_min)), 1), n_elevation
+    if n_sub_elements == "auto":
+        return max(int(np.ceil(width / lambda_min)), 1), n_elevation
+    return (1 if n_sub_elements is None else max(int(n_sub_elements), 1)), n_elevation
 
 
 def _sub_element_offsets(n_lateral, n_elevation, element_width, element_height):
@@ -461,13 +483,15 @@ def _element_responses(
     rigid_baffle,
     element_normals,
     n_sub_elements=(1, 1),
+    elevation_focus=None,
 ):
     """Transmit and receive one-way responses [s, e, f] and the one-way path length [s, e].
 
     Each element is the mean of ``n_sub_elements`` (lateral, elevation) sub-elements with their
-    own distance, phase and sinc directivity, so the response holds in the near field too. The
-    lens correction of the travel time is taken at the element centre and applied to all its
-    sub-elements. The returned path length is the element centre's.
+    own distance, phase and sinc directivity, so the response holds in the near field too; an
+    elevation focus is the fixed-lens advance of each elevation sub-element. The lens correction
+    of the travel time is taken at the element centre and applied to all its sub-elements. The
+    returned path length is the element centre's.
     """
     n_lateral, n_elevation = n_sub_elements
     n_sub = n_lateral * n_elevation
@@ -493,6 +517,11 @@ def _element_responses(
         lens_delta = None
     u, v = _sub_element_offsets(n_lateral, n_elevation, element_width, element_height)
     u, v = ops.cast(u, dtype), ops.cast(v, dtype)
+    if elevation_focus is None:
+        advance = ops.zeros_like(v)
+    else:
+        focus = ops.cast(elevation_focus, dtype)
+        advance = (ops.sqrt(focus**2 + v**2) - focus) / sound_speed
     sub_width = element_width / n_lateral
     sub_height = element_height / n_elevation
     f3 = freqs[None, None, :]
@@ -513,7 +542,7 @@ def _element_responses(
             amplitude = amplitude * obliquity[..., None]
         phase = ops.exp(
             ops.array(-2j * np.pi, "complex64")
-            * ops.cast(sub_dist[..., None] / sound_speed * f3, "complex64")
+            * ops.cast((sub_dist[..., None] / sound_speed - advance[j]) * f3, "complex64")
         )
         rx = ops.cast(amplitude * spread(sub_dist[..., None], 1.0), "complex64") * phase
         if elevation_lens:
