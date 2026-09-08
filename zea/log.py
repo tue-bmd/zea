@@ -34,7 +34,10 @@ file_logger: logging.Logger | None = None
 
 LOG_DIR = Path("log")
 
-ZEA_LOG_LEVEL = os.getenv("ZEA_LOG_LEVEL", "DEBUG").upper()
+# Default to INFO: ``log.info`` is zea's user-facing output channel (progress,
+# saved paths, cache summaries), while ``log.debug`` is diagnostic detail that
+# should be opted into via ZEA_LOG_LEVEL=DEBUG.
+ZEA_LOG_LEVEL = os.getenv("ZEA_LOG_LEVEL", "INFO").upper()
 
 DEPRECATED_LEVEL_NUM = logging.WARNING + 5
 logging.addLevelName(DEPRECATED_LEVEL_NUM, "DEPRECATED")
