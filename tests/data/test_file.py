@@ -1324,7 +1324,9 @@ def test_load_file_image_type(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
+def _make_two_track_spec(
+    tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1, labels=("track_a", "track_b")
+):
     """Build and save a two-track file via File.create; return (path, raw_a, raw_b)."""
     raw_a = np.arange(n_frames * n_tx * n_ax * n_el * n_ch, dtype=np.float32).reshape(
         n_frames, n_tx, n_ax, n_el, n_ch
@@ -1336,8 +1338,8 @@ def _make_two_track_spec(tmp_path, n_frames=2, n_tx=3, n_el=4, n_ax=8, n_ch=1):
     File.create(
         path,
         tracks=[
-            {"data": {"raw_data": raw_a}, "scan": scan, "label": "track_a"},
-            {"data": {"raw_data": raw_b}, "scan": scan, "label": "track_b"},
+            {"data": {"raw_data": raw_a}, "scan": scan, "label": labels[0]},
+            {"data": {"raw_data": raw_b}, "scan": scan, "label": labels[1]},
         ],
         probe=_probe_minimal("two_track_probe", n_el=n_el),
     )
@@ -1540,6 +1542,37 @@ class TestMultiTrackFile:
         with File(path) as f:
             with pytest.raises(KeyError, match="track_a"):
                 f.get_track("nonexistent")
+
+    def test_track_index_property(self, tmp_path):
+        """Track.index matches its position in File.tracks / File.track_labels."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            assert f.tracks[0].index == 0
+            assert f.tracks[1].index == 1
+
+    def test_get_track_by_index(self, tmp_path):
+        """File.get_track also accepts a positional index, as an int or a string."""
+        path, raw_a, raw_b = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            t = f.get_track(1)
+            assert t.label == "track_b"
+            np.testing.assert_array_equal(t.data.raw_data[:], raw_b)
+            assert f.get_track("1").label == "track_b"
+
+    def test_get_track_label_wins_over_numeric_index(self, tmp_path):
+        """A track labelled '1' is matched by that label, not read as index 1."""
+        path, raw_a, raw_b = _make_two_track_spec(tmp_path, labels=("1", "track_b"))
+        with File(path) as f:
+            t = f.get_track("1")
+            assert t.label == "1"
+            np.testing.assert_array_equal(t.data.raw_data[:], raw_a)
+
+    def test_get_track_missing_index_raises(self, tmp_path):
+        """File.get_track raises KeyError for an out-of-range index too."""
+        path, *_ = _make_two_track_spec(tmp_path)
+        with File(path) as f:
+            with pytest.raises(KeyError, match="track_a"):
+                f.get_track(5)
 
     def test_filespec_multi_track_missing_label_raises(self):
         """FileSpec raises ValueError when any track in a multi-track file has no label."""
