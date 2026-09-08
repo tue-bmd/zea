@@ -178,7 +178,11 @@ def simulate_rf(
             * sound_speed
         )
 
-    n_ax_rounded = float(_round_up_to_power_of_two(int(n_ax)))
+    # Room for a whole pulse, so record_length below never gates the end of the record away.
+    # Traced frequencies give no static pulse length; the record then keeps its old short tail.
+    fc_np, fs_np = _concrete(center_frequency), _concrete(sampling_frequency)
+    n_pulse = 0 if fc_np is None or fs_np is None else int(np.ceil(4 / fc_np * fs_np))
+    n_ax_rounded = float(_round_up_to_power_of_two(int(n_ax) + n_pulse))
 
     freqs = ops.arange(n_ax_rounded // 2 + 1, dtype="float32") / n_ax_rounded * sampling_frequency
 
@@ -750,7 +754,7 @@ def _gem_wave_block(
     attenuation_coef,
     lens_thickness,
     lens_sound_speed,
-    record_length,
+    gate_time,
     scatter_exponent,
     apply_lens_correction,
     elevation_lens,
@@ -758,8 +762,8 @@ def _gem_wave_block(
     """Band spectrum [f, t, e] of one frequency block over all scatterers.
 
     Frequency leads every array so the einsums are plain batched matrix products. Scatterers
-    whose earliest echo arrives after ``record_length`` cannot reach the output and are dropped,
-    so a long path never wraps into the record.
+    whose earliest echo has no support before ``gate_time`` cannot reach the output and are
+    dropped, so a long path never wraps into the record.
     """
     tx_response, rx_response, dist = _gem_wave_responses(
         positions,
@@ -778,7 +782,7 @@ def _gem_wave_block(
         gain = (freqs / center_frequency) ** scatter_exponent
     else:
         gain = ops.ones_like(freqs)
-    keep = 2 * ops.min(dist, axis=1) / sound_speed + ops.min(shift) < record_length
+    keep = 2 * ops.min(dist, axis=1) / sound_speed + ops.min(shift) < gate_time
     weight = ops.where(keep, magnitudes, 0.0)
     f3 = freqs[:, None, None]
     tx_weights = _to_complex(tx_apodizations[None]) * ops.exp(
@@ -809,37 +813,40 @@ def simulate_rf_gem_wave(
     t_peak,
     elevation_lens=False,
     element_height=None,
-    max_chunk_gb=10.0,
+    max_chunk_gb=1.0,
     noise_level_db=None,
     tgc_max_db=0.0,
     noise_seed=0,
     noise_reference=None,
     scatter_exponent=2.0,
     n_period=4.0,
-    band_db=-80.0,
+    band_db=-100.0,
     n_fft=None,
 ):
     """:func:`simulate_rf` with the scatterer response shared across transmits.
 
     The transmit-independent one-way response is generated once per frequency block and reused
-    over all transmits through two matrix products batched over frequency:
+    over all transmits.
 
     .. code-block:: text
 
         incident[f, t, s] = sum_e W[f, t, e] R_tx[f, s, e]    W = apod_te exp(-2 pi i f shift_te)
         rf[f, t, e]       = sum_s S[f, t, s] R_rx[f, s, e]    S = incident * mag_s * gain(f)
 
-    :func:`simulate_rf` evaluates the same sums transmit by transmit and is bound by re-reading
-    the response; this form is up to an order of magnitude faster for clouds of thousands of
-    scatterers and many transmits, and slower only for very few of either. With a single
-    transmit there is nothing to share, so a one-transmit call is handed to :func:`simulate_rf`.
+    :func:`simulate_rf` evaluates the same sums transmit by transmit, re-reading the (large)
+    response every time. This version is up to 20x faster for large batches of transmits, and
+    only slower for very few transmits (it falls back to simulate_rf with a single transmit,
+    to use the more efficient path when there nothing to share).
 
-    Two approximations that :func:`simulate_rf` does not make, both exact in the limit: only the
-    bins where the pulse spectrum times the scattering gain exceeds ``band_db`` are synthesised
-    (``band_db=None`` keeps every bin), and the record-length gate is applied per scatterer
-    rather than per (transmit, scatterer, element), with the FFT length sized so that no kept
-    echo wraps into the record (``n_fft`` pins it). With ``band_db=None`` and the same ``n_fft``
-    the result matches :func:`simulate_rf` to float32 precision.
+    Only the bins where the pulse spectrum times the scattering gain exceeds ``band_db`` are
+    computed (``band_db=None`` keeps every bin, -100 matches SIMUS defaults), and the record gate is
+    applied per scatterer rather than per (transmit, scatterer, element), with the FFT length sized
+    so that no kept echo wraps into the record (``n_fft`` pins it). A scatterer is kept when its
+    earliest echo still has pulse support inside the record, so the gate is exact up to the pulse
+    envelope; echoes that fall past the record are not masked but simply truncated. With
+    ``band_db=None`` and the same ``n_fft`` the result matches :func:`simulate_rf` to float32
+    precision, except for the last pulse length of the record, where :func:`simulate_rf` retains
+    a sub-1e-3 leakage tail from scatterers whose support lies wholly outside it.
 
     Takes the arguments of :func:`simulate_rf` with the same meaning and defaults, plus:
 
@@ -852,13 +859,8 @@ def simulate_rf_gem_wave(
             the transmit shifts (and the scatterer positions when concrete) so that no echo
             wraps into the record. Must be given when the geometry, delays or sound speed are
             traced.
-        max_chunk_gb (float): Bounds the forward working set of one frequency block: complex64
-            responses (n_scat, n_el) per bin, twice that with an elevation lens, plus the two
-            matrix product outputs. On top of it the forward holds the band spectrum
-            (n_bins, n_tx, n_el) complex64, the RF output and one 32-transmit inverse FFT
-            buffer. The block is rematerialized in reverse mode, which adds 2 to 4x the block
-            for the recomputed responses and their adjoints. The block size does not affect
-            speed.
+        max_chunk_gb (float): Memory budget for one frequency block. Barely affects GPU speed,
+            up to 2x on CPU.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -898,7 +900,7 @@ def simulate_rf_gem_wave(
     if element_height is None:
         element_height = element_width
 
-    # Concrete views of the raw inputs, before any op stages them into an outer jit.
+    # Concrete views of the raw inputs, before any op puts them into an outer jit.
     raw = [_concrete(x) for x in (t0_delays, initial_times, t_peak, probe_geometry, sound_speed)]
     if n_fft is None:
         if any(x is None for x in raw):
@@ -949,12 +951,13 @@ def simulate_rf_gem_wave(
     )
     k0, k1 = band_bins(n_fft, fc, fs, n_period, scatter_exponent, band_db)
 
-    # Forward working set of one block per bin: the complex responses and the two matrix
-    # product outputs.
+    # Forward of one block per bin: the complex responses and the two matrix product outputs.
     n_scat = int(ops.shape(positions)[0])
     per_bin = 8 * ((2 if elevation_lens else 1) * n_scat * n_el + n_tx * n_scat + n_tx * n_el)
     f_block = int(max(1, min(k1 - k0, max_chunk_gb * 2**30 // per_bin)))
     n_blocks = -(-(k1 - k0) // f_block)
+    # Spread the band evenly, so the last block is padded by less than a whole block.
+    f_block = -(-(k1 - k0) // n_blocks)
     n_band = n_blocks * f_block
 
     # Band padded to whole blocks; the padded bins get zero pulse weight below.
@@ -983,7 +986,7 @@ def simulate_rf_gem_wave(
             attenuation_coef=as_f32(attenuation_coef),
             lens_thickness=as_f32(lens_thickness),
             lens_sound_speed=as_f32(lens_sound_speed),
-            record_length=n_ax / fs,
+            gate_time=n_ax / fs + 0.5 * n_period / fc,
             scatter_exponent=float(scatter_exponent),
             apply_lens_correction=bool(apply_lens_correction),
             elevation_lens=bool(elevation_lens),
@@ -999,7 +1002,7 @@ def simulate_rf_gem_wave(
     spectrum = ops.fori_loop(0, n_blocks, body, spectrum)
     spectrum = spectrum[: k1 - k0] * ops.convert_to_tensor(wave[: k1 - k0])[:, None, None]
 
-    # Inverse FFT 32 transmits at a time, keeping the full-band spectrum off the peak.
+    # limited to prevent large focused line grids from OOM'ing.
     group = min(32, n_tx)
     parts = []
     for start in range(0, n_tx, group):
