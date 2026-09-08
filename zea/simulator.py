@@ -105,7 +105,8 @@ def simulate_rf(
             lens: ``lens_thickness`` at the element centre, thinned (``lens_sound_speed`` below
             ``sound_speed``) or thickened towards the elevation edges so that the normal-incidence
             delay focuses at ``elevation_focus``. The lens face is taken locally flat under each
-            sub-element, and the sinc directivity uses the geometric angle to the scatterer.
+            sub-element, for the delay and for the spreading of the refracted wave, and the sinc
+            directivity uses the geometric angle to the scatterer.
         lens_thickness (float): The thickness of the lens [m] at the element centre.
         lens_sound_speed (float): The speed of sound in the lens [m/s].
         sound_speed (float): The speed of sound in the medium [m/s].
@@ -388,6 +389,25 @@ def _lens_sag(v, elevation_focus, sound_speed, lens_sound_speed):
     return path * lens_sound_speed / (sound_speed - lens_sound_speed)
 
 
+def _lens_spread_distance(lens_len, medium_len, thickness, sound_speed, lens_sound_speed):
+    """Distance whose 1/r spreading is the ray-tube divergence of the path refracted at the face.
+
+    The phase path scales the lens leg by c / c_lens, but the wave leaves the face as if from a
+    source lens_len * c_lens / c below it (apparent depth). The refracted wavefront is
+    astigmatic: that radius holds across the plane of incidence, and within it the radius is
+    scaled by cos^2 of the medium angle over cos^2 of the lens angle.
+    """
+    ratio = lens_sound_speed / sound_speed
+    lens_len = ops.maximum(lens_len, 1e-9)
+    cos_lens_sq = ops.clip((thickness / lens_len) ** 2, 1e-6, 1.0)
+    cos_medium_sq = ops.maximum(1.0 - (1.0 - cos_lens_sq) / ratio**2, 1e-6)
+    r_across = lens_len * ratio
+    r_within = r_across * cos_medium_sq / cos_lens_sq
+    return lens_len * ops.sqrt(
+        (r_across + medium_len) * (r_within + medium_len) / (r_across * r_within)
+    )
+
+
 def _validate_lens(
     apply_lens_correction,
     lens_thickness,
@@ -554,9 +574,9 @@ def _element_responses(
     own distance, phase and sinc directivity, so the response holds in the near field too. An
     elevation focus is the ideal focusing advance of each elevation sub-element, or with the lens
     the refracted (Fermat) path through the local lens thickness, which the focus thins towards
-    the edges. The lens path is expressed as the medium distance with the same travel time; the
-    lens leg is attenuated with ``lens_attenuation_coef``. The returned path length is the element
-    centre's.
+    the edges. The lens path is expressed as the medium distance with the same travel time for the
+    phase, and spreads as the refracted ray tube (:func:`_lens_spread_distance`); the lens leg is
+    attenuated with ``lens_attenuation_coef``. The returned path length is the element centre's.
     """
     n_lateral, n_elevation = n_sub_elements
     n_sub = n_lateral * n_elevation
@@ -610,9 +630,12 @@ def _element_responses(
                 n_iter=3,
             )
             sub_dist = lens_len * (sound_speed / lens_sound_speed) + medium_len
+            spread_dist = _lens_spread_distance(
+                lens_len, medium_len, thickness[j], sound_speed, lens_sound_speed
+            )
             amplitude = amplitude * attenuate(f3, lens_attenuation_coef, lens_len[..., None])
         else:
-            medium_len = sub_dist = ops.linalg.norm(relative, axis=-1)
+            medium_len = sub_dist = spread_dist = ops.linalg.norm(relative, axis=-1)
         amplitude = amplitude * attenuate(f3, attenuation_coef, medium_len[..., None])
         if not rigid_baffle:
             amplitude = amplitude * obliquity[..., None]
@@ -620,10 +643,10 @@ def _element_responses(
             ops.array(-2j * np.pi, "complex64")
             * ops.cast((sub_dist[..., None] / sound_speed - advance[j]) * f3, "complex64")
         )
-        rx = ops.cast(amplitude * spread(sub_dist[..., None], 1.0), "complex64") * phase
+        rx = ops.cast(amplitude * spread(spread_dist[..., None], 1.0), "complex64") * phase
         if elevation_lens:
             # An elevation lens focuses the transmit to a slab: cylindrical spread on the way out.
-            tx = ops.cast(amplitude * spread(sub_dist[..., None], 0.5), "complex64") * phase
+            tx = ops.cast(amplitude * spread(spread_dist[..., None], 0.5), "complex64") * phase
         else:
             tx = rx
         return tx, rx

@@ -4,9 +4,11 @@ import numpy as np
 import pytest
 from keras import ops
 from scipy.signal import hilbert
+from scipy.special import jv
 
 from zea.probes import create_curved_probe_geometry, curved_probe_normals
 from zea.simulator import (
+    _element_responses,
     _resolve_sub_elements,
     chirp_spectrum,
     simulate_rf,
@@ -55,7 +57,8 @@ def _scene(geometry, positions, magnitudes=None, n_tx=1, **overrides):
 
 
 def _envelope_peak(rf):
-    return np.abs(hilbert(rf, axis=1)).max()
+    """Peak of the envelope over all samples and elements of an (n_ax, n_el) record."""
+    return np.abs(hilbert(rf, axis=0)).max()
 
 
 def _rel_err(reference, result):
@@ -296,15 +299,74 @@ def test_lens_layer_delays_the_echo_by_its_travel_time():
     lag = np.argmax(xcorr) - (len(plain) - 1)
     expected = 2 * 1e-3 * (1 / 1000.0 - 1 / SOUND_SPEED) * SAMPLING_FREQUENCY
     assert abs(lag - expected) <= 1
-    # The lens leg counts as 1.54 mm of medium in the spread: about 5% less amplitude.
-    ratio = _envelope_peak(lensed[None]) / _envelope_peak(plain[None])
-    assert 0.9 < ratio < 1.0
+    # The wave leaves the slow lens as if from 0.65 mm below its face, and spreads through the
+    # medium 1.54 times faster: the on-axis spreading distance is d + (z - d) c / c_lens.
+    ratio = _envelope_peak(lensed) / _envelope_peak(plain)
+    expected = (20e-3 / (1e-3 + 19e-3 * SOUND_SPEED / 1000.0)) ** 2
+    assert np.isclose(ratio, expected, rtol=0.01)
+
+
+def _slab_field(rho, z, d, c_lens, c, frequency, n_u=4000, n_t=200, t_max=1.5):
+    """Field of a point source under a flat slab of ``d`` at ``c_lens``, by the Sommerfeld integral.
+
+    Plane-wave expansion of the source, each wave transmitted with its own coefficient (equal
+    densities), summed over the propagating and the evanescent branch. Exact for the flat slab.
+    """
+    k1, k2 = 2 * np.pi * frequency / c_lens, 2 * np.pi * frequency / c
+    u = (np.arange(n_u) + 0.5) * (np.pi / 2) / n_u
+    t = (np.arange(n_t) + 0.5) * t_max / n_t
+    kr = np.concatenate([k1 * np.sin(u), k1 * np.cosh(t)])
+    kz1 = np.concatenate([k1 * np.cos(u), 1j * k1 * np.sinh(t)])
+    weight = np.concatenate(
+        [k1 * np.sin(u) * (np.pi / 2) / n_u, k1 * np.cosh(t) / 1j * t_max / n_t]
+    )
+    kz2 = np.sqrt(k2**2 - kr**2 + 0j)
+    kz2 = np.where(kz2.imag < 0, -kz2, kz2)
+    transmission = 2 * kz1 / (kz1 + kz2)
+    integrand = weight * transmission * np.exp(1j * kz1 * d)
+    bessel = jv(0, np.outer(rho, kr))
+    return 1j * np.sum(bessel * integrand * np.exp(1j * kz2 * (z[:, None] - d)), axis=-1)
+
+
+def test_lens_spreading_matches_the_sommerfeld_slab():
+    # One element under a flat 1 mm lens at 1000 m/s, one frequency: the magnitude of the
+    # sub-element sum against the exact slab solution, across elevation and along the axis. The
+    # phase-path distance 1/(lens_len c / c_lens + medium_len) as the spread is off by 0.10 here.
+    height, thickness, c_lens, n_sub = 5e-3, 1e-3, 1000.0, 100
+    y = np.concatenate([np.linspace(-6e-3, 6e-3, 13), np.zeros(4)])
+    z = np.concatenate([np.full(13, 20e-3), [5e-3, 10e-3, 30e-3, 40e-3]])
+    positions = np.stack([np.zeros_like(y), y, z], -1).astype(np.float32)
+    _, rx, _ = _element_responses(
+        ops.convert_to_tensor(positions),
+        ops.convert_to_tensor(np.zeros((1, 3), np.float32)),
+        ops.convert_to_tensor(np.array([CENTER_FREQUENCY], np.float32)),
+        SOUND_SPEED,
+        0.1e-3,
+        height,
+        0.0,
+        thickness,
+        c_lens,
+        True,
+        False,
+        True,
+        None,
+        n_sub_elements=(1, n_sub),
+    )
+    simulated = np.abs(_np(rx)[:, 0, 0])
+    offsets = (np.arange(n_sub) - (n_sub - 1) / 2) * height / n_sub
+    reference = np.abs(
+        sum(
+            _slab_field(np.abs(y - v), z, thickness, c_lens, SOUND_SPEED, CENTER_FREQUENCY)
+            for v in offsets
+        )
+    )
+    assert _rel_err(reference / reference.max(), simulated / simulated.max()) < 0.02
 
 
 def test_lens_thickness_profile_focuses_like_the_ideal_advance():
-    # A slow lens thinned towards the elevation edges focuses at elevation_focus: the echo from
-    # the focus is as strong as with the ideal per-sub-element advance, and well above the
-    # unfocused uniform lens.
+    # A slow lens thinned towards the elevation edges focuses at elevation_focus: its gain over
+    # the uniform lens at the focus matches the gain of the ideal per-sub-element advance over
+    # the plain element. The lens lowers both levels alike, as the wave spreads faster past it.
     focus = 20e-3
     scene = _scene(
         np.zeros((1, 3)),
@@ -314,12 +376,12 @@ def test_lens_thickness_profile_focuses_like_the_ideal_advance():
         lens_sound_speed=1000.0,
         n_sub_elements=(1, 16),
     )
-    ideal = _envelope_peak(_np(simulate_rf(**scene, elevation_focus=focus))[0, :, :, 0])
+    peak = lambda **kwargs: _envelope_peak(_np(simulate_rf(**kwargs))[0, :, :, 0])  # noqa: E731
+    ideal_gain = peak(**scene, elevation_focus=focus) / peak(**scene)
     lens = {**scene, "apply_lens_correction": True}
-    physical = _envelope_peak(_np(simulate_rf(**lens, elevation_focus=focus))[0, :, :, 0])
-    uniform = _envelope_peak(_np(simulate_rf(**lens))[0, :, :, 0])
-    assert np.isclose(physical, ideal, rtol=0.1)
-    assert physical > 1.4 * uniform
+    physical, uniform = peak(**lens, elevation_focus=focus), peak(**lens)
+    assert np.isclose(physical / uniform, ideal_gain, rtol=0.05)
+    assert physical > 1.3 * uniform
 
 
 def test_lens_attenuation_apodizes_and_lowers_the_centre_frequency():
