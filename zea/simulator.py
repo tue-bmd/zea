@@ -81,6 +81,7 @@ def simulate_rf(
     rigid_baffle=True,
     bandwidth_percent=None,
     probe_center_frequency=None,
+    element_normals=None,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -131,6 +132,12 @@ def simulate_rf(
             transducer response. Must be static under jit.
         probe_center_frequency (float, optional): Centre of the transducer band [Hz]. Defaults
             to ``center_frequency``. Must be static under jit.
+        element_normals (array-like, optional): Outward normal of each element of shape
+            (n_el, 3), for curved or tilted arrays. The directivity and the obliquity are
+            evaluated in each element's own frame: the elevation axis is the projection of
+            +y onto the element plane, so a normal must not be parallel to +y. None is every
+            element facing +z. See :func:`zea.probes.curved_probe_normals`. The lens correction
+            keeps assuming a flat lens.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -207,7 +214,9 @@ def simulate_rf(
     else:
         scatter_gain = ops.ones_like(freqs)
 
-    theta, phi, obliquity = _element_angles(scatterer_positions[:, None] - probe_geometry[None])
+    theta, phi, obliquity = _element_angles(
+        scatterer_positions[:, None] - probe_geometry[None], _element_frame(element_normals)
+    )
 
     # [n_scat, n_el, n_freq]
     directivity_x = directivity(freqs[None, None], theta[..., None], element_width, sound_speed)
@@ -345,8 +354,25 @@ def _resolve_element_width(probe_geometry, element_width):
     return pitch * 0.9  # 90% of the pitch
 
 
-def _element_angles(relative):
-    """Lateral and elevation angles and cos of the angle to the element normal (+z).
+def _element_frame(element_normals, dtype="float32"):
+    """Lateral, elevation and normal unit vectors of the elements, each (n_el, 3) or (1, 3).
+
+    The elevation axis is +y projected onto the element plane, lateral completes the frame.
+    """
+    if element_normals is None:
+        eye = ops.cast(ops.convert_to_tensor(np.eye(3, dtype=np.float32)), dtype)
+        return eye[0:1], eye[1:2], eye[2:3]
+    normal = ops.cast(element_normals, dtype)
+    normal = normal / ops.linalg.norm(normal, axis=-1, keepdims=True)
+    y = ops.cast(ops.convert_to_tensor(np.array([0.0, 1.0, 0.0], np.float32)), dtype)
+    elevation_axis = y - normal[:, 1:2] * normal
+    elevation_axis = elevation_axis / ops.linalg.norm(elevation_axis, axis=-1, keepdims=True)
+    lateral_axis = ops.cross(elevation_axis, normal)
+    return lateral_axis, elevation_axis, normal
+
+
+def _element_angles(relative, frame):
+    """Lateral and elevation angles and cos of the angle to the element normal.
 
     The sines of theta and phi are the direction cosines lateral / r and elevation / r, as in
     the Fraunhofer pattern of a rectangular aperture (and SIMUS). Projected angles
@@ -354,14 +380,19 @@ def _element_angles(relative):
 
     Args:
         relative (array-like): Scatterer positions relative to the elements, (n_scat, n_el, 3).
+        frame (tuple): Element axes from :func:`_element_frame`.
 
     Returns:
         theta, phi, obliquity: arrays of shape (n_scat, n_el).
     """
+    lateral_axis, elevation_axis, normal = frame
+    lateral = ops.sum(relative * lateral_axis[None], axis=-1)
+    elevation = ops.sum(relative * elevation_axis[None], axis=-1)
+    axial = ops.sum(relative * normal[None], axis=-1)
     dist = ops.maximum(ops.linalg.norm(relative, axis=-1), 1e-12)
-    theta = ops.arcsin(ops.clip(relative[..., 0] / dist, -1.0, 1.0))
-    phi = ops.arcsin(ops.clip(relative[..., 1] / dist, -1.0, 1.0))
-    obliquity = relative[..., 2] / dist
+    theta = ops.arcsin(ops.clip(lateral / dist, -1.0, 1.0))
+    phi = ops.arcsin(ops.clip(elevation / dist, -1.0, 1.0))
+    obliquity = axial / dist
     return theta, phi, obliquity
 
 

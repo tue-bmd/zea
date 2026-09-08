@@ -118,6 +118,7 @@ class Simulate(Operation):
         rigid_baffle=True,
         bandwidth_percent=None,
         probe_center_frequency=None,
+        element_normals=None,
         **kwargs,
     ):
         if method not in simulator_settings:
@@ -129,6 +130,7 @@ class Simulate(Operation):
                 rigid_baffle=rigid_baffle,
                 bandwidth_percent=bandwidth_percent,
                 probe_center_frequency=probe_center_frequency,
+                element_normals=element_normals,
             )
         simulate_kwargs = {
             "probe_geometry": probe_geometry,
