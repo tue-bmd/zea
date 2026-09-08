@@ -84,6 +84,7 @@ def simulate_rf(
     element_normals=None,
     chirp_sweep=None,
     n_period=4.0,
+    n_sub_elements=None,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -147,6 +148,11 @@ def simulate_rf(
             under jit.
         n_period (float): Periods of ``center_frequency`` under the Hann window of the transmit
             pulse. Must be static under jit.
+        n_sub_elements (optional): Sub-elements per element, summed coherently with their own
+            distance and sinc directivity so the response holds in the near field. A pair
+            (n_lateral, n_elevation), an int for the lateral count, or ``"auto"`` for the SIMUS
+            rule ceil(size / lambda_min) in both directions, with lambda_min at the top of the
+            transducer band. None is a single sub-element. Must be static under jit.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -161,6 +167,14 @@ def simulate_rf(
 
     if element_height is None:
         element_height = element_width
+    n_sub_elements = _resolve_sub_elements(
+        n_sub_elements,
+        element_width,
+        element_height,
+        sound_speed,
+        center_frequency,
+        bandwidth_percent,
+    )
 
     magnitudes = scatterer_magnitudes
     if elevation_lens:
@@ -188,21 +202,6 @@ def simulate_rf(
         center_frequency, n_period=n_period, sampling_frequency=sampling_frequency
     )
 
-    if not apply_lens_correction:
-        dist = ops.linalg.norm(probe_geometry[None] - scatterer_positions[:, None], axis=-1)
-    else:
-        dist = (
-            compute_lens_corrected_travel_times(
-                probe_geometry,
-                scatterer_positions,
-                lens_thickness=lens_thickness,
-                c_lens=lens_sound_speed,
-                c_medium=sound_speed,
-                n_iter=3,
-            )
-            * sound_speed
-        )
-
     # Room for a whole pulse, so record_length below never gates the end of the record away.
     # Traced frequencies give no static pulse length; the record then keeps its old short tail.
     fc_np, fs_np = _concrete(center_frequency), _concrete(sampling_frequency)
@@ -228,31 +227,27 @@ def simulate_rf(
     else:
         scatter_gain = ops.ones_like(freqs)
 
-    theta, phi, obliquity = _element_angles(
-        scatterer_positions[:, None] - probe_geometry[None], _element_frame(element_normals)
-    )
-
     # [n_scat, n_el, n_freq]
-    directivity_x = directivity(freqs[None, None], theta[..., None], element_width, sound_speed)
-    directivity_y = directivity(freqs[None, None], phi[..., None], element_height, sound_speed)
-    element_directivity = directivity_x * directivity_y
-    if not rigid_baffle:
-        element_directivity = element_directivity * obliquity[..., None]
-    attenuation = attenuate(freqs[None, None], attenuation_coef, dist[..., None])
-    one_way_phase = delay2(
-        freqs[None, None],
-        dist[..., None] / sound_speed,
-        n_ax_rounded,
-        sampling_frequency,
+    tx_response, rx_response, dist = _element_responses(
+        scatterer_positions,
+        probe_geometry,
+        freqs,
+        sound_speed,
+        element_width,
+        element_height,
+        attenuation_coef,
+        lens_thickness,
+        lens_sound_speed,
+        apply_lens_correction,
+        elevation_lens,
+        rigid_baffle,
+        element_normals,
+        n_sub_elements,
     )
-    shared_response = ops.cast(element_directivity * attenuation, "complex64") * one_way_phase
-
-    if elevation_lens:
-        tx_response = shared_response * ops.cast(spread(dist[..., None], 0.5), "complex64")
-        rx_response = shared_response * ops.cast(spread(dist[..., None], 1.0), "complex64")
-    else:
-        tx_response = shared_response * ops.cast(spread(dist[..., None], 1.0), "complex64")
-        rx_response = tx_response
+    # One-way delays past the FFT length are gated, as delay2 does for the transmit shifts.
+    in_fft = ops.cast(dist / sound_speed < n_ax_rounded / sampling_frequency, "complex64")
+    tx_response = tx_response * in_fft[..., None]
+    rx_response = rx_response * in_fft[..., None]
 
     # Leave room for the pulse tail
     record_length = n_ax_rounded / sampling_frequency - 0.5 * n_period / center_frequency
@@ -408,6 +403,138 @@ def _element_angles(relative, frame):
     phi = ops.arcsin(ops.clip(elevation / dist, -1.0, 1.0))
     obliquity = axial / dist
     return theta, phi, obliquity
+
+
+def _resolve_sub_elements(
+    n_sub_elements,
+    element_width,
+    element_height,
+    sound_speed,
+    center_frequency,
+    bandwidth_percent,
+):
+    """Sub-elements per element as (n_lateral, n_elevation).
+
+    "auto" is the SIMUS rule ceil(size / lambda_min), lambda_min at the top of the transducer
+    band. None and an int keep one elevation sub-element.
+    """
+    if isinstance(n_sub_elements, (tuple, list)):
+        n_lateral, n_elevation = (int(n) for n in n_sub_elements)
+        return max(n_lateral, 1), max(n_elevation, 1)
+    if n_sub_elements != "auto":
+        return (1 if n_sub_elements is None else max(int(n_sub_elements), 1)), 1
+    values = [_concrete(x) for x in (sound_speed, center_frequency, element_width, element_height)]
+    if any(v is None for v in values):
+        raise ValueError(
+            "The sub-element count cannot be derived from a traced sound speed, frequency or "
+            "element size; pass n_sub_elements=(n_lateral, n_elevation) explicitly."
+        )
+    c, fc, width, height = (float(v) for v in values)
+    lambda_min = c / (fc * (1 + (bandwidth_percent or 0.0) / 200))
+    n_elevation = max(int(np.ceil(height / lambda_min)), 1)
+    return max(int(np.ceil(width / lambda_min)), 1), n_elevation
+
+
+def _sub_element_offsets(n_lateral, n_elevation, element_width, element_height):
+    """Centroid offsets (u, v) of the sub-elements in the element frame, each (n_sub,)."""
+    u = (ops.arange(n_lateral, dtype="float32") - (n_lateral - 1) / 2) * (
+        ops.cast(element_width, "float32") / n_lateral
+    )
+    v = (ops.arange(n_elevation, dtype="float32") - (n_elevation - 1) / 2) * (
+        ops.cast(element_height, "float32") / n_elevation
+    )
+    return ops.reshape(ops.tile(u[:, None], (1, n_elevation)), (-1,)), ops.tile(v, (n_lateral,))
+
+
+def _element_responses(
+    positions,
+    geometry,
+    freqs,
+    sound_speed,
+    element_width,
+    element_height,
+    attenuation_coef,
+    lens_thickness,
+    lens_sound_speed,
+    apply_lens_correction,
+    elevation_lens,
+    rigid_baffle,
+    element_normals,
+    n_sub_elements=(1, 1),
+):
+    """Transmit and receive one-way responses [s, e, f] and the one-way path length [s, e].
+
+    Each element is the mean of ``n_sub_elements`` (lateral, elevation) sub-elements with their
+    own distance, phase and sinc directivity, so the response holds in the near field too. The
+    lens correction of the travel time is taken at the element centre and applied to all its
+    sub-elements. The returned path length is the element centre's.
+    """
+    n_lateral, n_elevation = n_sub_elements
+    n_sub = n_lateral * n_elevation
+    relative_center = positions[:, None] - geometry[None]
+    dtype = relative_center.dtype
+    lateral_axis, elevation_axis, _ = frame = _element_frame(element_normals, dtype)
+    dist_center = ops.linalg.norm(relative_center, axis=-1)
+    if apply_lens_correction:
+        dist = (
+            compute_lens_corrected_travel_times(
+                geometry,
+                positions,
+                lens_thickness=lens_thickness,
+                c_lens=lens_sound_speed,
+                c_medium=sound_speed,
+                n_iter=3,
+            )
+            * sound_speed
+        )
+        lens_delta = dist - dist_center
+    else:
+        dist = dist_center
+        lens_delta = None
+    u, v = _sub_element_offsets(n_lateral, n_elevation, element_width, element_height)
+    u, v = ops.cast(u, dtype), ops.cast(v, dtype)
+    sub_width = element_width / n_lateral
+    sub_height = element_height / n_elevation
+    f3 = freqs[None, None, :]
+
+    def response(j):
+        offset = u[j] * lateral_axis + v[j] * elevation_axis
+        relative = relative_center - offset[None]
+        sub_dist = ops.linalg.norm(relative, axis=-1)
+        if lens_delta is not None:
+            sub_dist = sub_dist + lens_delta
+        theta, phi, obliquity = _element_angles(relative, frame)
+        amplitude = (
+            directivity(f3, theta[..., None], sub_width, sound_speed)
+            * directivity(f3, phi[..., None], sub_height, sound_speed)
+            * attenuate(f3, attenuation_coef, sub_dist[..., None])
+        )
+        if not rigid_baffle:
+            amplitude = amplitude * obliquity[..., None]
+        phase = ops.exp(
+            ops.array(-2j * np.pi, "complex64")
+            * ops.cast(sub_dist[..., None] / sound_speed * f3, "complex64")
+        )
+        rx = ops.cast(amplitude * spread(sub_dist[..., None], 1.0), "complex64") * phase
+        if elevation_lens:
+            # An elevation lens focuses the transmit to a slab: cylindrical spread on the way out.
+            tx = ops.cast(amplitude * spread(sub_dist[..., None], 0.5), "complex64") * phase
+        else:
+            tx = rx
+        return tx, rx
+
+    if n_sub == 1:
+        tx, rx = response(0)
+        return tx, rx, dist
+
+    def body(j, carry):
+        tx, rx = response(j)
+        return carry[0] + tx, carry[1] + rx
+
+    zeros = ops.zeros(ops.shape(response(0)[0]), "complex64")
+    tx, rx = ops.fori_loop(0, n_sub, body, (zeros, zeros))
+    scale = ops.array(1.0 / n_sub, "complex64")
+    return tx * scale, rx * scale, dist
 
 
 def delay2(f, tau, n_fft, sampling_frequency):

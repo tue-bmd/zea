@@ -5,7 +5,12 @@ import pytest
 from keras import ops
 
 from zea.probes import create_curved_probe_geometry, curved_probe_normals
-from zea.simulator import chirp_spectrum, simulate_rf, transducer_transfer
+from zea.simulator import (
+    _resolve_sub_elements,
+    chirp_spectrum,
+    simulate_rf,
+    transducer_transfer,
+)
 
 SOUND_SPEED = 1540.0
 CENTER_FREQUENCY = 3e6
@@ -157,6 +162,47 @@ def test_chirp_spectrum_without_sweep_is_the_windowed_tone():
     )
     np.testing.assert_allclose(waveform, tone, atol=1e-5)
     assert np.isclose(waveform.max(), 1.0)
+
+
+def test_sub_elements_reproduce_the_sinc_in_the_far_field():
+    # The coherent sum of sub-elements tends to the sinc directivity of the whole element: the
+    # amplitude spectra agree as 1 / r^2 into the far field of a 2 mm element (w^2 / lambda is
+    # 8 mm). The waveforms keep a small Fresnel delay, the mean path being longer than the
+    # centre path, so they are not compared directly.
+    angle = np.deg2rad(10.0)
+
+    def amplitude_error(r, n_sub):
+        scatterer = r * np.array([np.sin(angle), 0.0, np.cos(angle)])
+        scene = _scene(np.zeros((1, 3)), scatterer, element_width=2e-3, n_ax=2048)
+        whole = np.abs(np.fft.rfft(_np(simulate_rf(**scene))[0, :, 0, 0]))
+        divided = np.abs(np.fft.rfft(_np(simulate_rf(**scene, n_sub_elements=n_sub))[0, :, 0, 0]))
+        return _rel_err(whole, divided)
+
+    near, far = amplitude_error(0.02, 8), amplitude_error(0.08, 8)
+    assert near > 1e-2
+    assert far < 2e-3
+    assert abs(amplitude_error(0.08, 32) - far) < 2e-4
+
+
+def test_sub_elements_converge_in_the_near_field():
+    # Off the axis of a 5 mm tall element at 8 mm depth, the far-field sinc is wrong and the
+    # sub-element sum converges as the count doubles.
+    scene = _scene(np.zeros((1, 3)), [0.0, 2e-3, 8e-3], element_height=5e-3)
+    counts = (1, 4, 8, 16, 32)
+    results = [_np(simulate_rf(**scene, n_sub_elements=(1, n))) for n in counts]
+    steps = [_rel_err(results[i + 1], results[i]) for i in range(len(counts) - 1)]
+    assert steps[0] > 0.1
+    assert steps[1] > steps[2] > steps[3]
+    assert steps[3] < 1e-2
+
+
+def test_auto_sub_elements_follow_the_simus_rule():
+    lambda_min = SOUND_SPEED / (CENTER_FREQUENCY * 1.4)
+    auto = _resolve_sub_elements("auto", 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, 80.0)
+    assert auto == (int(np.ceil(1e-3 / lambda_min)), int(np.ceil(5e-3 / lambda_min)))
+    assert _resolve_sub_elements(None, 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, 80.0) == (1, 1)
+    assert _resolve_sub_elements(3, 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, None) == (3, 1)
+    assert _resolve_sub_elements((2, 3), 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, None) == (2, 3)
 
 
 def _rayleigh_pattern(directions, width, height, wavelength, distance, n=(21, 201)):
