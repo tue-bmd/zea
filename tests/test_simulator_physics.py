@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from keras import ops
 
-from zea.simulator import simulate_rf
+from zea.simulator import simulate_rf, transducer_transfer
 
 SOUND_SPEED = 1540.0
 CENTER_FREQUENCY = 3e6
@@ -61,6 +61,22 @@ def test_soft_baffle_scales_by_cos_of_angle():
     assert _rel_err(rigid, soft) > 0.1
     # Obliquity on transmit and on receive.
     assert _rel_err(np.cos(angle) ** 2 * _np(rigid), soft) < 1e-3
+
+
+def test_transducer_bandwidth_shapes_the_spectrum():
+    scene = _scene(np.zeros((1, 3)), [0.0, 0.0, 0.02])
+    flat = _np(simulate_rf(**scene))[0, :, 0, 0]
+    shaped = _np(simulate_rf(**scene, bandwidth_percent=50.0, probe_center_frequency=2.6e6))[
+        0, :, 0, 0
+    ]
+    freqs = np.fft.rfftfreq(N_AX, 1 / SAMPLING_FREQUENCY)
+    spectrum_flat, spectrum_shaped = np.fft.rfft(flat), np.fft.rfft(shaped)
+    expected = transducer_transfer(freqs, 2.6e6, 50.0, xp=np)
+    in_band = np.abs(spectrum_flat) > 0.05 * np.abs(spectrum_flat).max()
+    ratio = spectrum_shaped[in_band] / spectrum_flat[in_band]
+    np.testing.assert_allclose(ratio, expected[in_band], atol=2e-3)
+    # -6 dB at the band edges, per the definition of the fractional bandwidth.
+    assert np.isclose(transducer_transfer(2.6e6 * 1.25, 2.6e6, 50.0, xp=np), 0.5)
 
 
 def _rayleigh_pattern(directions, width, height, wavelength, distance, n=(21, 201)):

@@ -79,6 +79,8 @@ def simulate_rf(
     noise_reference=None,
     scatter_exponent=2.0,
     rigid_baffle=True,
+    bandwidth_percent=None,
+    probe_center_frequency=None,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -123,6 +125,12 @@ def simulate_rf(
         rigid_baffle (bool): Element mounted in a rigid baffle (sinc directivity only). False
             models a soft baffle, which adds the obliquity factor cos(angle to the element
             normal), on transmit and on receive. Must be static under jit.
+        bandwidth_percent (float, optional): Pulse-echo -6 dB fractional bandwidth of the
+            transducer in percent of ``probe_center_frequency``. Applies the Gaussian transfer
+            function of :func:`transducer_transfer` to the received spectrum. None is a flat
+            transducer response. Must be static under jit.
+        probe_center_frequency (float, optional): Centre of the transducer band [Hz]. Defaults
+            to ``center_frequency``. Must be static under jit.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -188,6 +196,11 @@ def simulate_rf(
     freqs = ops.arange(n_ax_rounded // 2 + 1, dtype="float32") / n_ax_rounded * sampling_frequency
 
     waveform_spectrum = pulse_spectrum_fn(freqs)
+    if bandwidth_percent is not None:
+        transfer = transducer_transfer(
+            freqs, probe_center_frequency, bandwidth_percent, center_frequency
+        )
+        waveform_spectrum = waveform_spectrum * ops.cast(transfer, "complex64")
 
     if scatter_exponent:
         scatter_gain = (freqs / center_frequency) ** scatter_exponent
@@ -594,6 +607,31 @@ def get_transducer_bandwidth_fn(probe_center_frequency, bandwidth):
         return hann_unnormalized(ops.abs(f) - probe_center_frequency, bandwidth)
 
     return bandwidth_fn
+
+
+def transducer_transfer(
+    f, probe_center_frequency, bandwidth_percent, center_frequency=None, xp=ops
+):
+    """Gaussian pulse-echo transfer function of the transducer.
+
+    Unit gain at ``probe_center_frequency`` and -6 dB at the edges of the fractional bandwidth,
+    ``probe_center_frequency * (1 +/- bandwidth_percent / 200)``.
+
+    Args:
+        f (array-like): Frequencies [Hz].
+        probe_center_frequency (float, optional): Centre of the band [Hz]. ``center_frequency``
+            when None.
+        bandwidth_percent (float): -6 dB fractional bandwidth in percent.
+        center_frequency (float, optional): Fallback band centre [Hz].
+        xp: Array module, ``keras.ops`` or ``numpy``.
+
+    Returns:
+        array-like: The transfer function at ``f``.
+    """
+    if probe_center_frequency is None:
+        probe_center_frequency = center_frequency
+    half_width = 0.5 * bandwidth_percent / 100 * probe_center_frequency
+    return xp.exp(-np.log(2) * ((xp.abs(f) - probe_center_frequency) / half_width) ** 2)
 
 
 def _round_up_to_power_of_two(x):
