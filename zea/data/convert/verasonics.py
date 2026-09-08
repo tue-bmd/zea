@@ -1029,8 +1029,8 @@ class VerasonicsFile(h5py.File):
         if "ImgDataP" not in self:
             return None
 
-        # Get the dataset reference
-        image_data_ref = self["ImgDataP"][:].squeeze()[buffer_index]
+        # Get the dataset reference.
+        image_data_ref = np.atleast_1d(self["ImgDataP"][:].squeeze())[buffer_index]
         # Dereference the dataset
         image_data = self[image_data_ref][:]
 
