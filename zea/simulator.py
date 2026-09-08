@@ -49,7 +49,10 @@ import numpy as np
 from keras import ops
 
 from zea import log
-from zea.beamform.lens_correction import compute_lens_corrected_travel_times
+from zea.beamform.lens_correction import (
+    compute_lens_corrected_travel_times,
+    compute_lens_path_lengths,
+)
 from zea.func.ultrasound import directivity
 
 
@@ -86,6 +89,7 @@ def simulate_rf(
     n_period=4.0,
     n_sub_elements=None,
     elevation_focus=None,
+    lens_attenuation_coef=0.0,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -94,8 +98,15 @@ def simulate_rf(
         scatterer_positions (array-like): The positions of the scatterers [m] of shape (n_scat, 3).
         scatterer_magnitudes (array-like): The magnitudes of the scatterers of shape (n_scat,).
         probe_geometry (array-like): The geometry of the probe [m] of shape (n_el, 3).
-        apply_lens_correction (bool): Whether to apply lens correction.
-        lens_thickness (float): The thickness of the lens [m].
+        apply_lens_correction (bool): Model the acoustic lens as a layer of ``lens_sound_speed``
+            in front of the elements. Every sub-element's path refracts through it (Fermat), so
+            the lens delay depends on the direction to the scatterer, and the lens attenuates
+            with ``lens_attenuation_coef``. With ``elevation_focus`` the layer is a cylindrical
+            lens: ``lens_thickness`` at the element centre, thinned (``lens_sound_speed`` below
+            ``sound_speed``) or thickened towards the elevation edges so that the normal-incidence
+            delay focuses at ``elevation_focus``. The lens face is taken locally flat under each
+            sub-element, and the sinc directivity uses the geometric angle to the scatterer.
+        lens_thickness (float): The thickness of the lens [m] at the element centre.
         lens_sound_speed (float): The speed of sound in the lens [m/s].
         sound_speed (float): The speed of sound in the medium [m/s].
         n_ax (int): The number of samples in the RF data.
@@ -157,8 +168,13 @@ def simulate_rf(
             ``elevation_focus`` is set, which then follows the auto rule. Must be static under
             jit.
         elevation_focus (float, optional): Focal distance [m] of a fixed elevation lens, modelled
-            as the focusing advance of each elevation sub-element on transmit and on receive.
-            Exclusive with ``elevation_lens``. Must be static under jit.
+            on transmit and on receive through the elevation sub-elements: an ideal focusing
+            advance per sub-element, or with ``apply_lens_correction`` the refracted path through
+            the lens thickness profile. Exclusive with ``elevation_lens``. Must be static under
+            jit.
+        lens_attenuation_coef (float): Attenuation in the lens [dB/cm/MHz], applied over each
+            sub-element's path inside the lens when ``apply_lens_correction`` is set. Apodizes
+            the aperture where the lens is thick and lowers the centre frequency.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -174,6 +190,14 @@ def simulate_rf(
 
     if element_height is None:
         element_height = element_width
+    _validate_lens(
+        apply_lens_correction,
+        lens_thickness,
+        lens_sound_speed,
+        sound_speed,
+        elevation_focus,
+        element_height,
+    )
     n_sub_elements = _resolve_sub_elements(
         n_sub_elements,
         elevation_focus,
@@ -252,6 +276,7 @@ def simulate_rf(
         element_normals,
         n_sub_elements,
         elevation_focus,
+        lens_attenuation_coef,
     )
     # One-way delays past the FFT length are gated, as delay2 does for the transmit shifts.
     in_fft = ops.cast(dist / sound_speed < n_ax_rounded / sampling_frequency, "complex64")
@@ -350,6 +375,43 @@ def _validate_elevation(elevation_lens, elevation_focus):
         raise ValueError(
             "elevation_focus models the lens with elevation sub-elements; it excludes the "
             "elevation_lens slab and cylindrical-spread approximation."
+        )
+
+
+def _lens_sag(v, elevation_focus, sound_speed, lens_sound_speed):
+    """Thickness removed from the lens at elevation offset ``v`` to focus at ``elevation_focus``.
+
+    A slower lens is thickest at the centre, a faster one thinnest (negative sag).
+    """
+    focus = ops.cast(elevation_focus, v.dtype)
+    path = ops.sqrt(focus**2 + v**2) - focus
+    return path * lens_sound_speed / (sound_speed - lens_sound_speed)
+
+
+def _validate_lens(
+    apply_lens_correction,
+    lens_thickness,
+    lens_sound_speed,
+    sound_speed,
+    elevation_focus,
+    element_height,
+):
+    """Static checks of a focusing lens: distinct speeds, and a face above the elements."""
+    if not apply_lens_correction or elevation_focus is None:
+        return
+    values = [_concrete(x) for x in (lens_thickness, lens_sound_speed, sound_speed, element_height)]
+    if any(v is None for v in values):
+        return
+    thickness, c_lens, c, height = (float(v) for v in values)
+    if c_lens == c:
+        raise ValueError("A lens at the medium's sound speed cannot focus; set lens_sound_speed.")
+    sag = (np.sqrt(float(elevation_focus) ** 2 + (height / 2) ** 2) - float(elevation_focus)) * (
+        c_lens / (c - c_lens)
+    )
+    if thickness - sag <= 0:
+        raise ValueError(
+            f"lens_thickness {thickness:.2e} m is too thin to focus at {elevation_focus} m: the "
+            f"lens needs at least {sag:.2e} m at the centre."
         )
 
 
@@ -484,14 +546,17 @@ def _element_responses(
     element_normals,
     n_sub_elements=(1, 1),
     elevation_focus=None,
+    lens_attenuation_coef=0.0,
 ):
     """Transmit and receive one-way responses [s, e, f] and the one-way path length [s, e].
 
     Each element is the mean of ``n_sub_elements`` (lateral, elevation) sub-elements with their
-    own distance, phase and sinc directivity, so the response holds in the near field too; an
-    elevation focus is the fixed-lens advance of each elevation sub-element. The lens correction
-    of the travel time is taken at the element centre and applied to all its sub-elements. The
-    returned path length is the element centre's.
+    own distance, phase and sinc directivity, so the response holds in the near field too. An
+    elevation focus is the ideal focusing advance of each elevation sub-element, or with the lens
+    the refracted (Fermat) path through the local lens thickness, which the focus thins towards
+    the edges. The lens path is expressed as the medium distance with the same travel time; the
+    lens leg is attenuated with ``lens_attenuation_coef``. The returned path length is the element
+    centre's.
     """
     n_lateral, n_elevation = n_sub_elements
     n_sub = n_lateral * n_elevation
@@ -511,17 +576,19 @@ def _element_responses(
             )
             * sound_speed
         )
-        lens_delta = dist - dist_center
     else:
         dist = dist_center
-        lens_delta = None
     u, v = _sub_element_offsets(n_lateral, n_elevation, element_width, element_height)
     u, v = ops.cast(u, dtype), ops.cast(v, dtype)
-    if elevation_focus is None:
+    if elevation_focus is None or apply_lens_correction:
         advance = ops.zeros_like(v)
     else:
         focus = ops.cast(elevation_focus, dtype)
         advance = (ops.sqrt(focus**2 + v**2) - focus) / sound_speed
+    if apply_lens_correction and elevation_focus is not None:
+        thickness = lens_thickness - _lens_sag(v, elevation_focus, sound_speed, lens_sound_speed)
+    else:
+        thickness = ops.full_like(v, lens_thickness)
     sub_width = element_width / n_lateral
     sub_height = element_height / n_elevation
     f3 = freqs[None, None, :]
@@ -529,15 +596,24 @@ def _element_responses(
     def response(j):
         offset = u[j] * lateral_axis + v[j] * elevation_axis
         relative = relative_center - offset[None]
-        sub_dist = ops.linalg.norm(relative, axis=-1)
-        if lens_delta is not None:
-            sub_dist = sub_dist + lens_delta
         theta, phi, obliquity = _element_angles(relative, frame)
-        amplitude = (
-            directivity(f3, theta[..., None], sub_width, sound_speed)
-            * directivity(f3, phi[..., None], sub_height, sound_speed)
-            * attenuate(f3, attenuation_coef, sub_dist[..., None])
+        amplitude = directivity(f3, theta[..., None], sub_width, sound_speed) * directivity(
+            f3, phi[..., None], sub_height, sound_speed
         )
+        if apply_lens_correction:
+            lens_len, medium_len = compute_lens_path_lengths(
+                geometry + offset,
+                positions,
+                lens_thickness=thickness[j],
+                c_lens=lens_sound_speed,
+                c_medium=sound_speed,
+                n_iter=3,
+            )
+            sub_dist = lens_len * (sound_speed / lens_sound_speed) + medium_len
+            amplitude = amplitude * attenuate(f3, lens_attenuation_coef, lens_len[..., None])
+        else:
+            medium_len = sub_dist = ops.linalg.norm(relative, axis=-1)
+        amplitude = amplitude * attenuate(f3, attenuation_coef, medium_len[..., None])
         if not rigid_baffle:
             amplitude = amplitude * obliquity[..., None]
         phase = ops.exp(

@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 from keras import ops
+from scipy.signal import hilbert
 
 from zea.probes import create_curved_probe_geometry, curved_probe_normals
 from zea.simulator import (
@@ -51,6 +52,10 @@ def _scene(geometry, positions, magnitudes=None, n_tx=1, **overrides):
     return {
         k: ops.convert_to_tensor(v) if isinstance(v, np.ndarray) else v for k, v in kwargs.items()
     }
+
+
+def _envelope_peak(rf):
+    return np.abs(hilbert(rf, axis=1)).max()
 
 
 def _rel_err(reference, result):
@@ -279,3 +284,77 @@ def test_elevation_focus_adds_the_elevation_sub_elements_in_phase():
     assert np.abs(focused).max() > 1.5 * np.abs(unfocused).max()
     with pytest.raises(ValueError):
         simulate_rf(**scene, elevation_lens=True, elevation_focus=15e-3)
+
+
+def test_lens_layer_delays_the_echo_by_its_travel_time():
+    # A uniform lens of 1 mm at 1000 m/s adds 2 d (1 / c_lens - 1 / c) to the round trip of an
+    # on-axis scatterer, 8.4 samples here.
+    scene = _scene(np.zeros((1, 3)), [0.0, 0.0, 20e-3], lens_sound_speed=1000.0)
+    plain = _np(simulate_rf(**scene))[0, :, 0, 0]
+    lensed = _np(simulate_rf(**{**scene, "apply_lens_correction": True}))[0, :, 0, 0]
+    xcorr = np.correlate(lensed, plain, "full")
+    lag = np.argmax(xcorr) - (len(plain) - 1)
+    expected = 2 * 1e-3 * (1 / 1000.0 - 1 / SOUND_SPEED) * SAMPLING_FREQUENCY
+    assert abs(lag - expected) <= 1
+    # The lens leg counts as 1.54 mm of medium in the spread: about 5% less amplitude.
+    ratio = _envelope_peak(lensed[None]) / _envelope_peak(plain[None])
+    assert 0.9 < ratio < 1.0
+
+
+def test_lens_thickness_profile_focuses_like_the_ideal_advance():
+    # A slow lens thinned towards the elevation edges focuses at elevation_focus: the echo from
+    # the focus is as strong as with the ideal per-sub-element advance, and well above the
+    # unfocused uniform lens.
+    focus = 20e-3
+    scene = _scene(
+        np.zeros((1, 3)),
+        [0.0, 0.0, focus],
+        element_height=5e-3,
+        lens_thickness=1e-3,
+        lens_sound_speed=1000.0,
+        n_sub_elements=(1, 16),
+    )
+    ideal = _envelope_peak(_np(simulate_rf(**scene, elevation_focus=focus))[0, :, :, 0])
+    lens = {**scene, "apply_lens_correction": True}
+    physical = _envelope_peak(_np(simulate_rf(**lens, elevation_focus=focus))[0, :, :, 0])
+    uniform = _envelope_peak(_np(simulate_rf(**lens))[0, :, :, 0])
+    assert np.isclose(physical, ideal, rtol=0.1)
+    assert physical > 1.4 * uniform
+
+
+def test_lens_attenuation_apodizes_and_lowers_the_centre_frequency():
+    # 5 dB/cm/MHz over a 1 mm lens twice costs about 3 dB at 3 MHz and tilts the spectrum down.
+    scene = _scene(
+        np.zeros((1, 3)),
+        [0.0, 0.0, 20e-3],
+        lens_thickness=1e-3,
+        lens_sound_speed=1000.0,
+        apply_lens_correction=True,
+    )
+    lossless = _np(simulate_rf(**scene))[0, :, 0, 0]
+    lossy = _np(simulate_rf(**scene, lens_attenuation_coef=5.0))[0, :, 0, 0]
+    energy_db = 10 * np.log10(np.sum(lossy**2) / np.sum(lossless**2))
+    assert -4.0 < energy_db < -2.0
+
+    freqs = np.fft.rfftfreq(len(lossless), 1 / SAMPLING_FREQUENCY)
+
+    def centroid(rf):
+        power = np.abs(np.fft.rfft(rf)) ** 2
+        return np.sum(freqs * power) / np.sum(power)
+
+    assert centroid(lossy) < centroid(lossless) - 2e4
+
+
+def test_focusing_lens_must_stay_thicker_than_its_sag():
+    scene = _scene(
+        np.zeros((1, 3)),
+        [0.0, 0.0, 20e-3],
+        element_height=5e-3,
+        lens_thickness=0.2e-3,
+        lens_sound_speed=1000.0,
+        apply_lens_correction=True,
+    )
+    with pytest.raises(ValueError, match="too thin"):
+        simulate_rf(**scene, elevation_focus=20e-3)
+    with pytest.raises(ValueError, match="cannot focus"):
+        simulate_rf(**{**scene, "lens_sound_speed": SOUND_SPEED}, elevation_focus=20e-3)

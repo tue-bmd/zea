@@ -4,7 +4,8 @@ The acoustic lens fitted over most ultrasound probes has a lower speed of
 sound than the surrounding medium (tissue / water), ~1000 m/s versus 1540 m/s,
 which shortens the travel time near the face of the transducer and alters
 the effective focus. We assume a flat lens with uniform thickness and
-speed of sound.
+speed of sound. The simulator applies these functions per sub-element with the
+local thickness of a focusing lens, see :func:`zea.simulator.simulate_rf`.
 
 The corrected one-way travel time from each transducer element to each image
 pixel is computed by finding the lateral crossing point :math:`x_l` on the
@@ -56,7 +57,21 @@ def compute_lens_corrected_travel_times(
     Returns:
         ndarray: The travel times of shape (n_pixels, n_el).
     """
+    lens_length, medium_length = compute_lens_path_lengths(
+        element_pos, pixel_pos, lens_thickness, c_lens, c_medium, n_iter
+    )
+    return lens_length / c_lens + medium_length / c_medium
 
+
+def compute_lens_path_lengths(element_pos, pixel_pos, lens_thickness, c_lens, c_medium, n_iter=1):
+    """Lengths of the two legs of the shortest path: inside the lens and in the medium.
+
+    Same assumptions as :func:`compute_lens_corrected_travel_times`. The lens face lies at
+    ``lens_thickness`` above the element along z.
+
+    Returns:
+        tuple: (lens_length, medium_length), each of shape (n_pixels, n_el) [m].
+    """
     pixel_pos = pixel_pos[:, None] - element_pos[None]
 
     # Project the 3D problem to a 2D problem by shifting all pixels to have the element
@@ -81,14 +96,9 @@ def compute_lens_corrected_travel_times(
     # lens to the point
     pos_lenscrossing = ops.stack([xl, lens_thickness * ops.ones_like(xl)], axis=-1)
 
-    indices = ops.array([0, -1])
-    element_pos = ops.take(element_pos, indices, axis=-1)
-
-    # Compute the travel time of the shortest path
-    travel_time = compute_travel_time(
-        element_pos_2d, pos_lenscrossing, c_lens
-    ) + compute_travel_time(pos_lenscrossing, pixel_pos_2d, c_medium)
-    return travel_time
+    lens_length = ops.linalg.norm(pos_lenscrossing - element_pos_2d, axis=-1)
+    medium_length = ops.linalg.norm(pixel_pos_2d - pos_lenscrossing, axis=-1)
+    return lens_length, medium_length
 
 
 def compute_xl(element_pos_2d, pixel_pos_2d, lens_thickness, c_lens, c_medium, n_iter):
