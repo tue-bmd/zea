@@ -1398,6 +1398,49 @@ def test_verasonics_read_without_img_data_p(tmp_path):
     assert "verasonics_image_buffer" not in element_names
 
 
+def copy_verasonics_mat_with_one_image_buffer(destination_dir):
+    """Copy the Verasonics test .mat and reduce it to a single image buffer.
+
+    The test workspace defines two ``imageDisplay`` processes and therefore two image
+    buffers, but a setup script with a single display window produces just one. MATLAB
+    then stores ``ImgDataP`` as a 1x1 cell and ``Resource.ImageBuffer`` as a plain
+    struct rather than a struct array. Rewriting both reproduces such a workspace.
+    """
+    mat_file = _hf_resolve_path("hf://zeahub/pytest/verasonics_conversion_test_zea.mat")
+    single_buffer_file = destination_dir / mat_file.name
+    shutil.copy(mat_file, single_buffer_file)
+
+    single_buffer_file.chmod(0o644)
+    with h5py.File(single_buffer_file, "r+") as file:
+        image_data_ref = file["ImgDataP"][0, 0]
+        num_frames = file[file["Resource"]["ImageBuffer"]["numFrames"][0, 0]][:]
+
+        del file["ImgDataP"]
+        file.create_dataset("ImgDataP", data=np.array([[image_data_ref]], dtype=h5py.ref_dtype))
+
+        del file["Resource"]["ImageBuffer"]["numFrames"]
+        file["Resource"]["ImageBuffer"]["numFrames"] = np.reshape(num_frames, (1, 1))
+
+    return single_buffer_file
+
+
+@pytest.mark.heavy
+def test_verasonics_read_with_one_image_buffer(tmp_path):
+    """Reading a Verasonics file with a single image buffer keeps the image buffer."""
+    single_buffer_file = copy_verasonics_mat_with_one_image_buffer(tmp_path)
+
+    with VerasonicsFile(single_buffer_file, "r") as verasonics_file:
+        image_data = verasonics_file.read_image_data_p()
+        assert image_data is not None
+        _, _, _, custom_elements = verasonics_file.read_verasonics_file()
+
+    element_names = [element.name for element in custom_elements]
+    assert "verasonics_image_buffer" in element_names
+
+    image_buffer = custom_elements[element_names.index("verasonics_image_buffer")]
+    assert image_buffer.data.shape == image_data.shape
+
+
 def test_check_output_dir_ownership_empty_dir(tmp_path):
     """test check_output_dir_ownership with empty directory (should pass)."""
 
