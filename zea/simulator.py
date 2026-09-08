@@ -175,7 +175,11 @@ def simulate_rf(
             * sound_speed
         )
 
-    n_ax_rounded = float(_round_up_to_power_of_two(int(n_ax)))
+    # Room for a whole pulse, so record_length below never gates the end of the record away.
+    # Traced frequencies give no static pulse length; the record then keeps its old short tail.
+    fc_np, fs_np = _concrete(center_frequency), _concrete(sampling_frequency)
+    n_pulse = 0 if fc_np is None or fs_np is None else int(np.ceil(4 / fc_np * fs_np))
+    n_ax_rounded = float(_round_up_to_power_of_two(int(n_ax) + n_pulse))
 
     freqs = ops.arange(n_ax_rounded // 2 + 1, dtype="float32") / n_ax_rounded * sampling_frequency
 
@@ -575,3 +579,13 @@ def get_transducer_bandwidth_fn(probe_center_frequency, bandwidth):
 def _round_up_to_power_of_two(x):
     """Rounds up to the next power of two."""
     return 2 ** np.ceil(np.log2(x))
+
+
+def _concrete(x):
+    """numpy view of ``x``, or None when it is traced."""
+    if x is None:
+        return None
+    try:
+        return ops.convert_to_numpy(x)
+    except (RuntimeError, ValueError, TypeError, NotImplementedError):
+        return None
