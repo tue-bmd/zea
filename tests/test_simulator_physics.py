@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from keras import ops
 
+from zea.probes import create_curved_probe_geometry, curved_probe_normals
 from zea.simulator import simulate_rf, transducer_transfer
 
 SOUND_SPEED = 1540.0
@@ -77,6 +78,37 @@ def test_transducer_bandwidth_shapes_the_spectrum():
     np.testing.assert_allclose(ratio, expected[in_band], atol=2e-3)
     # -6 dB at the band edges, per the definition of the fractional bandwidth.
     assert np.isclose(transducer_transfer(2.6e6 * 1.25, 2.6e6, 50.0, xp=np), 0.5)
+
+
+def _rotation_about_y(angle):
+    c, s = np.cos(angle), np.sin(angle)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
+
+
+@pytest.mark.parametrize("rigid_baffle", [True, False])
+def test_element_normals_make_the_scene_rotation_invariant(rigid_baffle):
+    n_el = 8
+    geometry = np.stack([(np.arange(n_el) - 3.5) * 0.3e-3, np.zeros(n_el), np.zeros(n_el)], -1)
+    rng = np.random.default_rng(0)
+    positions = np.stack(
+        [rng.uniform(-0.01, 0.01, 6), rng.uniform(-1e-3, 1e-3, 6), rng.uniform(0.01, 0.03, 6)], -1
+    )
+    rotation = _rotation_about_y(np.deg2rad(30.0))
+    normals = np.tile(rotation[:, 2], (n_el, 1))
+
+    reference = simulate_rf(**_scene(geometry, positions, rigid_baffle=rigid_baffle))
+    rotated = _scene(geometry @ rotation.T, positions @ rotation.T, rigid_baffle=rigid_baffle)
+    assert _rel_err(reference, simulate_rf(**rotated)) > 0.05
+    assert _rel_err(reference, simulate_rf(**rotated, element_normals=normals)) < 1e-3
+
+
+def test_curved_probe_normals_point_along_the_arc():
+    geometry = create_curved_probe_geometry(16, 0.5e-3, 40e-3)
+    normals = curved_probe_normals(geometry)
+    angles = (np.arange(16) - 7.5) * 0.5e-3 / 40e-3
+    expected = np.stack([np.sin(angles), np.zeros(16), np.cos(angles)], -1)
+    np.testing.assert_allclose(normals, expected, atol=1e-6)
+    np.testing.assert_allclose(curved_probe_normals(geometry, radius=40e-3), expected, atol=1e-6)
 
 
 def _rayleigh_pattern(directions, width, height, wavelength, distance, n=(21, 201)):

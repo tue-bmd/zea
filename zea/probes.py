@@ -204,6 +204,28 @@ def create_curved_probe_geometry(n_el, pitch, radius):
     return probe_geometry
 
 
+def curved_probe_normals(probe_geometry, radius=None):
+    """Outward element normals of a convex array in zea's curved-probe frame.
+
+    The normals point from the centre of curvature ``(0, 0, -radius)`` through the elements.
+    Pass them to the simulator as ``element_normals``.
+
+    Args:
+        probe_geometry (np.ndarray): Element positions in metres, shape (n_el, 3).
+        radius (float, optional): Radius of curvature in metres. Fitted with
+            :func:`fit_curved_probe_radius` when None.
+
+    Returns:
+        np.ndarray: Unit normals of shape (n_el, 3).
+    """
+    geometry = np.asarray(probe_geometry, np.float64)
+    if radius is None:
+        radius = fit_curved_probe_radius(geometry)
+    normals = geometry - np.array([0.0, 0.0, -radius])
+    normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+    return normals.astype(np.float32)
+
+
 def fit_curved_probe_radius(probe_geometry, tol: float = 0.5) -> float:
     """Recover a curved probe's radius of curvature from its element positions.
 
