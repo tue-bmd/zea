@@ -995,6 +995,12 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - m
            - Height (elevation aperture) of a single transducer element.
            - |badge-opt|
+         * - ``elevation_focus``
+           - ``float32``
+           - scalar
+           - m
+           - Focal distance of the fixed elevation lens.
+           - |badge-opt|
          * - ``lens_sound_speed``
            - ``float32``
            - scalar

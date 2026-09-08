@@ -198,11 +198,19 @@ def test_sub_elements_converge_in_the_near_field():
 
 def test_auto_sub_elements_follow_the_simus_rule():
     lambda_min = SOUND_SPEED / (CENTER_FREQUENCY * 1.4)
-    auto = _resolve_sub_elements("auto", 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, 80.0)
+    auto = _resolve_sub_elements("auto", None, 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, 80.0)
     assert auto == (int(np.ceil(1e-3 / lambda_min)), int(np.ceil(5e-3 / lambda_min)))
-    assert _resolve_sub_elements(None, 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, 80.0) == (1, 1)
-    assert _resolve_sub_elements(3, 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, None) == (3, 1)
-    assert _resolve_sub_elements((2, 3), 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, None) == (2, 3)
+    assert _resolve_sub_elements(None, None, 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, 80.0) == (
+        1,
+        1,
+    )
+    assert _resolve_sub_elements(3, None, 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, None) == (3, 1)
+    focused = _resolve_sub_elements(None, 0.02, 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, None)
+    assert focused == (1, int(np.ceil(5e-3 * CENTER_FREQUENCY / SOUND_SPEED)))
+    assert _resolve_sub_elements((2, 3), 0.02, 1e-3, 5e-3, SOUND_SPEED, CENTER_FREQUENCY, None) == (
+        2,
+        3,
+    )
 
 
 def _rayleigh_pattern(directions, width, height, wavelength, distance, n=(21, 201)):
@@ -260,3 +268,14 @@ def test_whole_element_directivity_uses_direction_cosines(lateral_deg):
         directions, width, height, SOUND_SPEED / CENTER_FREQUENCY, distance
     )
     assert _rel_err(reference / reference[on_axis], simulated / simulated[on_axis]) < 0.05
+
+
+def test_elevation_focus_adds_the_elevation_sub_elements_in_phase():
+    # At the focus every elevation sub-element arrives together, so the echo of a scatterer
+    # there is stronger than without the lens.
+    scene = _scene(np.zeros((1, 3)), [0.0, 0.0, 15e-3], element_height=5e-3)
+    unfocused = _np(simulate_rf(**scene, n_sub_elements=(1, 12)))
+    focused = _np(simulate_rf(**scene, n_sub_elements=(1, 12), elevation_focus=15e-3))
+    assert np.abs(focused).max() > 1.5 * np.abs(unfocused).max()
+    with pytest.raises(ValueError):
+        simulate_rf(**scene, elevation_lens=True, elevation_focus=15e-3)

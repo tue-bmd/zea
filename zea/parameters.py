@@ -176,6 +176,9 @@ class Parameters(BaseParameters):
     element_height: float
     """Height (elevation) of each transducer element [m]."""
 
+    elevation_focus: float
+    """Focal distance of the fixed elevation lens [m]."""
+
     selected_transmits: list[int] | None
     """Indices of the currently selected transmit events, or ``None`` when not yet
     resolved (e.g. image-only files where ``n_tx`` is unknown).

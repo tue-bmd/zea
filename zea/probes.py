@@ -29,6 +29,7 @@ A probe is described by the fields below (all optional — record what you have;
 - ``element_width`` -- width of a single element (m), along the array (azimuthal)
   direction.
 - ``element_height`` -- elevation aperture of a single element (m).
+- ``elevation_focus`` -- focal distance of the fixed elevation lens (m).
 - ``lens_sound_speed`` / ``lens_thickness`` -- acoustic-lens speed of sound (m/s)
   and thickness (m), used to correct receive travel times for the lens.
 

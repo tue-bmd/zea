@@ -1723,6 +1723,7 @@ class ProbeSpec(Spec):
             automatically as read-only properties from this array.
         element_width: Width of a single transducer element in metres.
         element_height: Height (elevation aperture) of a single element in metres.
+        elevation_focus: Focal distance of the fixed elevation lens in metres.
         lens_sound_speed: Speed of sound in the acoustic lens in m/s.
         lens_thickness: Thickness of the acoustic lens in metres.
     """
@@ -1734,6 +1735,7 @@ class ProbeSpec(Spec):
     probe_geometry: np.ndarray | None = None
     element_width: Scalar | None = None
     element_height: Scalar | None = None
+    elevation_focus: Scalar | None = None
     lens_sound_speed: Scalar | None = None
     lens_thickness: Scalar | None = None
 
@@ -1745,6 +1747,7 @@ class ProbeSpec(Spec):
         "probe_geometry": {"dtype": np.float32, "shape": ("n_el", 3)},
         "element_width": {"dtype": np.float32, "shape": ()},
         "element_height": {"dtype": np.float32, "shape": ()},
+        "elevation_focus": {"dtype": np.float32, "shape": ()},
         "lens_sound_speed": {"dtype": np.float32, "shape": ()},
         "lens_thickness": {"dtype": np.float32, "shape": ()},
     }
@@ -1771,6 +1774,11 @@ class ProbeSpec(Spec):
         "element_height": {
             "unit": "m",
             "description": "Height (elevation aperture) of a single transducer element.",
+            "rare": True,
+        },
+        "elevation_focus": {
+            "unit": "m",
+            "description": "Focal distance of the fixed elevation lens.",
             "rare": True,
         },
         "lens_sound_speed": {
@@ -1821,6 +1829,10 @@ class ProbeSpec(Spec):
         if self.element_height is not None and self.element_height <= 0:
             raise ValueError(
                 f"ProbeSpec: element_height must be positive, got {self.element_height}"
+            )
+        if self.elevation_focus is not None and self.elevation_focus <= 0:
+            raise ValueError(
+                f"ProbeSpec: elevation_focus must be positive, got {self.elevation_focus}"
             )
         if self.lens_sound_speed is not None and self.lens_sound_speed <= 0:
             raise ValueError(
