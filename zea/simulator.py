@@ -8,6 +8,9 @@ transmit scheme parameters and scatterers. To simulate a sequence of multiple fr
 you can call :func:`simulate_rf` repeatedly with different scatterer positions and magnitudes
 and then stack the results.
 
+:func:`simulate_rf_zea_wave` evaluates the same model with the scatterer response shared across
+transmits, which is faster for many transmits.
+
 There is a time-domain variant of the simulator in :mod:`zea.simulator_time_domain`.
 
 Example usage
@@ -1044,8 +1047,13 @@ def pulse_spectrum_np(freqs, center_frequency, sampling_frequency, n_period):
     ).astype(np.complex64)
 
 
+def _rfft_freqs(n_fft, sampling_frequency):
+    """The rfft frequency grid of ``n_fft`` samples, in numpy."""
+    return np.arange(n_fft // 2 + 1) / n_fft * sampling_frequency
+
+
 def _zea_wave_spectrum_np(
-    freqs,
+    n_fft,
     center_frequency,
     sampling_frequency,
     n_period,
@@ -1058,8 +1066,8 @@ def _zea_wave_spectrum_np(
 
     ``one_way`` takes the square root of the pulse-echo transfer function, for a transmit field.
     """
+    freqs = _rfft_freqs(n_fft, sampling_frequency)
     if chirp_sweep:
-        n_fft = 2 * (len(freqs) - 1)
         wave = chirp_spectrum(
             n_fft, center_frequency, sampling_frequency, n_period, chirp_sweep, xp=np
         )
@@ -1087,14 +1095,17 @@ def band_bins(
     chirp_sweep=None,
     one_way=False,
 ):
-    """Contiguous bin range where the pulse spectrum, the transducer transfer function and
-    the scattering gain together exceed ``band_db``."""
-    freqs = np.arange(n_fft // 2 + 1) / n_fft * sampling_frequency
+    """Contiguous bin range that carries the band.
+
+    The pulse spectrum, the transducer transfer function and the scattering gain together
+    exceed ``band_db`` there.
+    """
+    freqs = _rfft_freqs(n_fft, sampling_frequency)
     if band_db is None:
         return 0, len(freqs)
     w = np.abs(
         _zea_wave_spectrum_np(
-            freqs,
+            n_fft,
             center_frequency,
             sampling_frequency,
             n_period,
@@ -1271,24 +1282,23 @@ def simulate_rf_zea_wave(
 
     :func:`simulate_rf` evaluates the same sums transmit by transmit, re-reading the (large)
     response every time. This version is up to 20x faster for large batches of transmits, and
-    only slower for very few transmits (it falls back to simulate_rf with a single transmit,
-    to use the more efficient path when there nothing to share).
+    only slower for very few transmits (it falls back to :func:`simulate_rf` with a single
+    transmit, where there is nothing to share).
 
     Only the bins where the pulse spectrum, the transducer transfer function and the scattering
     gain together exceed ``band_db`` are computed (``band_db=None`` keeps every bin, -100 matches
     SIMUS defaults), and the record gate is applied per scatterer rather than per (transmit,
     scatterer, element), with the FFT length sized so that no kept echo wraps into the record
-    (``n_fft`` pins it). A scatterer is kept when its
-    earliest echo still has pulse support inside the record, so the gate is exact up to the pulse
-    envelope; echoes that fall past the record are not masked but simply truncated. With
-    ``band_db=None`` and the same ``n_fft`` the result matches :func:`simulate_rf` to float32
-    precision, except for the last pulse length of the record, where :func:`simulate_rf` retains
-    a sub-1e-3 leakage tail from scatterers whose support lies wholly outside it.
+    (``n_fft`` pins it). A scatterer is kept when its earliest echo still has pulse support
+    inside the record, so the gate is exact up to the pulse envelope; echoes that fall past the
+    record are not masked but simply truncated. With ``band_db=None`` and the same ``n_fft`` the
+    result matches :func:`simulate_rf` to float32 precision, except for the last pulse length of
+    the record, where :func:`simulate_rf` retains a sub-1e-3 leakage tail from scatterers whose
+    support lies wholly outside it.
 
-    Takes the arguments of :func:`simulate_rf` with the same meaning and defaults, plus:
+    Takes the arguments of :func:`simulate_rf` with the same meaning, plus:
 
     Args:
-        n_period (float): Periods in the Hann-windowed transmit pulse.
         band_db (float, optional): Bins where the pulse spectrum times the scattering gain is
             below this many dB of its peak are not synthesised. None keeps every bin.
         n_fft (int, optional): FFT length. Derived when None from ``n_ax``, the aperture and
@@ -1438,13 +1448,12 @@ def simulate_rf_zea_wave(
     f_block = -(-(k1 - k0) // n_blocks)
     n_band = n_blocks * f_block
 
-    # Band padded to whole blocks; the padded bins get zero pulse weight below.
-    freqs_all = np.arange(n_fft // 2 + 1) / n_fft * fs
+    # Band padded to whole blocks; the pad repeats the last bin and is dropped after the loop.
+    freqs_all = _rfft_freqs(n_fft, fs)
     freqs = np.full(n_band, freqs_all[k1 - 1], np.float32)
     freqs[: k1 - k0] = freqs_all[k0:k1]
-    wave = np.zeros(n_band, np.complex64)
-    wave[: k1 - k0] = _zea_wave_spectrum_np(
-        freqs_all, fc, fs, n_period, bandwidth_percent, probe_center_frequency, chirp_sweep
+    wave = _zea_wave_spectrum_np(
+        n_fft, fc, fs, n_period, bandwidth_percent, probe_center_frequency, chirp_sweep
     )[k0:k1]
     freqs = ops.convert_to_tensor(freqs)
 
@@ -1485,9 +1494,9 @@ def simulate_rf_zea_wave(
 
     spectrum = ops.zeros((n_band, n_tx, n_el), "complex64")
     spectrum = ops.fori_loop(0, n_blocks, body, spectrum)
-    spectrum = spectrum[: k1 - k0] * ops.convert_to_tensor(wave[: k1 - k0])[:, None, None]
+    spectrum = spectrum[: k1 - k0] * ops.convert_to_tensor(wave)[:, None, None]
 
-    # limited to prevent large focused line grids from OOM'ing.
+    # Transmits in groups, so a long record over many transmits does not allocate at once.
     group = min(32, n_tx)
     parts = []
     for start in range(0, n_tx, group):
