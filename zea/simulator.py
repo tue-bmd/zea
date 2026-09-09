@@ -73,7 +73,7 @@ def simulate_rf(
     attenuation_coef,
     tx_apodizations,
     t_peak,
-    elevation_lens=False,
+    elevation_slab_2d=False,
     element_height=None,
     max_chunk_gb=10.0,
     noise_level_db=None,
@@ -119,10 +119,13 @@ def simulate_rf(
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
         tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el).
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
-        elevation_lens (bool): Whether the probe has an elevation lens: drop scatterers outside
-            the elevation slab, and focus transmit energy directly downwards (i.e. cylindrical
-            instead of spherical spread). For efficient pruning scatterers outside the slab,
-            use :class:`zea.ops.Simulate` rather than calling `simulate_rf` directly.
+        elevation_slab_2d (bool): Reduce the elevation dimension to a 2D slab: drop the
+            scatterers outside it, and spread the transmit cylindrically rather than
+            spherically, as an ideal elevation lens focusing to that slab would. This is a
+            cheap approximation, not a modelled lens; for the physical lens in 3D use
+            ``elevation_focus``, which is exclusive with it. For efficient pruning of the
+            scatterers outside the slab, use :class:`zea.ops.Simulate` rather than calling
+            `simulate_rf` directly.
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity and the elevation slab. If None, defaults to element_width.
         max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
@@ -171,7 +174,8 @@ def simulate_rf(
         elevation_focus (float, optional): Focal distance [m] of a fixed elevation lens, modelled
             on transmit and on receive through the elevation sub-elements: an ideal focusing
             advance per sub-element, or with ``apply_lens_correction`` the refracted path through
-            the lens thickness profile. Exclusive with ``elevation_lens``. Must be static under
+            the lens thickness profile. Exclusive with ``elevation_slab_2d``, the cheap 2D
+            approximation of an elevation lens. Must be static under
             jit.
         lens_attenuation_coef (float): Attenuation in the lens [dB/cm/MHz], applied over each
             sub-element's path inside the lens when ``apply_lens_correction`` is set. Apodizes
@@ -183,7 +187,7 @@ def simulate_rf(
     """
 
     _validate_scatter_exponent(scatter_exponent)
-    _validate_elevation(elevation_lens, elevation_focus)
+    _validate_elevation(elevation_slab_2d, elevation_focus)
 
     n_tx = t0_delays.shape[0]
 
@@ -210,7 +214,7 @@ def simulate_rf(
     )
 
     magnitudes = scatterer_magnitudes
-    if elevation_lens:
+    if elevation_slab_2d:
         _warn_if_elevation_extent(probe_geometry)
         scatterer_positions, magnitudes = _apply_elevation_slab(
             scatterer_positions, magnitudes, probe_geometry, element_height
@@ -272,7 +276,7 @@ def simulate_rf(
         lens_thickness,
         lens_sound_speed,
         apply_lens_correction,
-        elevation_lens,
+        elevation_slab_2d,
         rigid_baffle,
         element_normals,
         n_sub_elements,
@@ -371,11 +375,12 @@ def _validate_scatter_exponent(scatter_exponent):
         )
 
 
-def _validate_elevation(elevation_lens, elevation_focus):
-    if elevation_lens and elevation_focus is not None:
+def _validate_elevation(elevation_slab_2d, elevation_focus):
+    if elevation_slab_2d and elevation_focus is not None:
         raise ValueError(
-            "elevation_focus models the lens with elevation sub-elements; it excludes the "
-            "elevation_lens slab and cylindrical-spread approximation."
+            "elevation_slab_2d is the cheap 2D approximation (slab pruning and cylindrical "
+            "spread); elevation_focus models the lens in 3D through the elevation "
+            "sub-elements. Pick one."
         )
 
 
@@ -565,7 +570,7 @@ def _element_responses(
     lens_thickness,
     lens_sound_speed,
     apply_lens_correction,
-    elevation_lens,
+    elevation_slab_2d,
     rigid_baffle,
     element_normals,
     n_sub_elements=(1, 1),
@@ -648,7 +653,7 @@ def _element_responses(
             * ops.cast((sub_dist[..., None] / sound_speed - advance[j]) * f3, "complex64")
         )
         rx = ops.cast(amplitude * spread(spread_dist[..., None], 1.0), "complex64") * phase
-        if elevation_lens:
+        if elevation_slab_2d:
             # An elevation lens focuses the transmit to a slab: cylindrical spread on the way out.
             tx = ops.cast(amplitude * spread(spread_dist[..., None], 0.5), "complex64") * phase
         else:
@@ -729,7 +734,7 @@ def elevation_slab_mask(scatterer_positions, probe_geometry, element_height):
         array-like: 1 inside the slab and 0 outside, of shape (n_scat,).
     """
     if element_height is None:
-        raise ValueError("elevation_lens=True requires element_height to be provided.")
+        raise ValueError("elevation_slab_2d=True requires element_height to be provided.")
     elevation_center = ops.mean(probe_geometry[:, 1])
     offset = ops.abs(scatterer_positions[:, 1] - elevation_center)
     return ops.cast(offset <= element_height / 2, "float32")
@@ -756,7 +761,7 @@ def elevation_slab_bucket(
     scatterer_magnitudes=None,
     probe_geometry=None,
     element_height=None,
-    elevation_lens=False,
+    elevation_slab_2d=False,
     bucket_growth=2.0,
     **kwargs,
 ):
@@ -768,7 +773,7 @@ def elevation_slab_bucket(
         dict: pruned scatterers, or ``{}`` if the input is traced or pruning is disabled.
     """
     del kwargs
-    if not elevation_lens or element_height is None:
+    if not elevation_slab_2d or element_height is None:
         return {}
     if scatterer_positions is None or scatterer_magnitudes is None or probe_geometry is None:
         return {}
@@ -818,8 +823,9 @@ def _warn_if_elevation_extent(probe_geometry, tol=1e-6):
         return  # traced, cannot inspect
     if elevation.max() - elevation.min() > tol:
         log.warning(
-            "elevation_lens=True models a 1D probe with a cylindrical lens, but the probe is not "
-            f"1D (element elevation min, max: {elevation.min()}, {elevation.max()}) "
+            "elevation_slab_2d=True models a 1D probe with a simplified cylindrical elevation lens,"
+            " but the probe is not 1D "
+            f"(element elevation min, max: {elevation.min()}, {elevation.max()}) "
             "This is probably a mistake."
         )
 

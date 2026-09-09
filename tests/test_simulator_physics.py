@@ -286,7 +286,7 @@ def test_elevation_focus_adds_the_elevation_sub_elements_in_phase():
     focused = _np(simulate_rf(**scene, n_sub_elements=(1, 12), elevation_focus=15e-3))
     assert np.abs(focused).max() > 1.5 * np.abs(unfocused).max()
     with pytest.raises(ValueError):
-        simulate_rf(**scene, elevation_lens=True, elevation_focus=15e-3)
+        simulate_rf(**scene, elevation_slab_2d=True, elevation_focus=15e-3)
 
 
 def test_lens_layer_delays_the_echo_by_its_travel_time():
