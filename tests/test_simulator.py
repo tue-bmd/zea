@@ -18,6 +18,7 @@ from zea.simulator import (
     simulate_rf,
 )
 from zea.ops import Simulate
+from zea.ops.ultrasound import simulator_settings
 from zea.simulator_time_domain import get_pulse_waveform, simulate_rf_td
 
 N_EL = 80
@@ -352,7 +353,7 @@ def test_simulate_op_prunes_elevation_slab_without_leaking_pruned_cloud():
     assert outputs["scatterer_magnitudes"].shape == magnitudes.shape
 
 
-@pytest.mark.parametrize("method", ["exact", "frequency_approximation", "time_approximation"])
+@pytest.mark.parametrize("method", list(simulator_settings))
 def test_simulate_op_runs_every_method(method):
     """The op hands options that only the frequency-domain simulators take to those alone."""
     n_el = 8

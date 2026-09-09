@@ -417,7 +417,11 @@ def _validate_lens(
     element_height,
 ):
     """Static checks of a focusing lens: distinct speeds, and a face above the elements."""
-    if not apply_lens_correction or elevation_focus is None:
+    if not apply_lens_correction:
+        return
+    if lens_sound_speed is None:
+        raise ValueError("apply_lens_correction=True requires lens_sound_speed.")
+    if elevation_focus is None:
         return
     values = [_concrete(x) for x in (lens_thickness, lens_sound_speed, sound_speed, element_height)]
     if any(v is None for v in values):
