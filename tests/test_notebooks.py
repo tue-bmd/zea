@@ -45,6 +45,7 @@ NOTEBOOK_PARAMETERS = {
         "num_patches": 4,
         "grid_size_z": 96,
         "grid_size_x": 64,
+        "train_num_patches": 2,
         "train_grid_size_z": 48,
         "train_grid_size_x": 32,
         "n_transmits": 2,
