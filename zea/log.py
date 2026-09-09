@@ -1,7 +1,7 @@
 """Custom ``zea`` python logging module.
 
-Wrapper around python logging module to provide a simple interface for logging both
-to the console and to a file with color support.
+Wrapper around python logging module to provide a simple interface for logging to
+the console with color support.
 
 Example usage
 ^^^^^^^^^^^^^^
@@ -24,17 +24,15 @@ import os
 import re
 import sys
 import weakref
-from pathlib import Path
 
 from tqdm import tqdm as _tqdm_cls
 
-# The logger to use
+# The logger to use: a single logger named "zea" with one console handler.
 logger: logging.Logger
-file_logger: logging.Logger | None = None
-
-LOG_DIR = Path("log")
 
 ZEA_LOG_LEVEL = os.getenv("ZEA_LOG_LEVEL", "DEBUG").upper()
+
+LEVELS = ["DEBUG", "INFO", "DEPRECATED", "WARNING", "ERROR", "CRITICAL"]
 
 DEPRECATED_LEVEL_NUM = logging.WARNING + 5
 logging.addLevelName(DEPRECATED_LEVEL_NUM, "DEPRECATED")
@@ -227,17 +225,9 @@ def configure_console_logger(
     Configures a simple console logger with the givel level.
     A usecase is to change the formatting of the default handler of the root logger
     """
-    assert level in [
-        "DEBUG",
-        "INFO",
-        "DEPRECATED",
-        "WARNING",
-        "ERROR",
-        "CRITICAL",
-    ], f"Invalid log level: {level}"
+    assert level in LEVELS, f"Invalid log level: {level}"
 
-    # Create a logger
-    new_logger = logging.getLogger("my_logger")
+    new_logger = logging.getLogger("zea")
     new_logger.setLevel(level)
 
     formatter = CustomFormatter(name, color, name_color)
@@ -248,44 +238,6 @@ def configure_console_logger(
         console.setFormatter(formatter)
         console.setLevel(level)
         new_logger.addHandler(console)
-
-    return new_logger
-
-
-def configure_file_logger(level="INFO") -> logging.Logger:
-    """
-    Configures a simple console logger with the givel level.
-    A usecase is to change the formatting of the default handler of the root logger
-    """
-    assert level in [
-        "DEBUG",
-        "INFO",
-        "DEPRECATED",
-        "WARNING",
-        "ERROR",
-        "CRITICAL",
-    ], f"Invalid log level: {level}"
-
-    # Create a logger
-    new_logger = logging.getLogger("file_logger")
-    new_logger.setLevel("DEBUG")
-
-    file_log_format = "%(asctime)s - %(levelname)s - %(message)s"
-
-    # Set the date format
-    date_format = "%Y-%m-%d %H:%M:%S"
-
-    formatter = logging.Formatter(file_log_format, date_format)
-
-    # File handler if this logger doesn't already have one of its own
-    if not new_logger.handlers:
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-        # Add file handler
-        file_handler = logging.FileHandler(Path(LOG_DIR, "log.log"), mode="a")
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel("DEBUG")
-        new_logger.addHandler(file_handler)
 
     return new_logger
 
@@ -390,8 +342,6 @@ def _log(level, message, *args, suppressible=False, location=False, raw_location
         frame = _caller_frame(skip_package=not raw_location)
         message = f"{frame.filename}:{frame.lineno}: {message}"
     logger.log(level, message, *args, **kwargs)
-    if file_logger:
-        file_logger.log(level, remove_color_escape_codes(message), *args, **kwargs)
     return message
 
 
@@ -467,33 +417,9 @@ def number_to_str(number, decimals=2):
         raise ValueError(f"Expected a number, got {type(number)}: {number}")
 
 
-def set_file_logger_directory(directory):
-    """Sets the log level of the logger."""
-    global LOG_DIR, file_logger
-    LOG_DIR = directory
-    # Remove all handlers from the file logger
-    if file_logger is None:
-        raise RuntimeError("File logging not enabled; call enable_file_logging() first.")
-    for handler in list(file_logger.handlers):
-        file_logger.removeHandler(handler)
-
-    # Add file handler
-    file_logger = configure_file_logger(level="DEBUG")
-
-
-def enable_file_logging():
-    """Enables file logging"""
-    global file_logger
-    if not file_logger:
-        file_logger = configure_file_logger(level="DEBUG")
-        file_logger.propagate = False
-
-
 @contextlib.contextmanager
 def set_level(level):
     """Context manager to temporarily set the log level for the logger.
-
-    Also sets the log level for the file logger if it exists.
 
     Args:
         level (str or int): The log level to set temporarily
@@ -511,16 +437,11 @@ def set_level(level):
             ...     _ = log.error("Error messages will be shown")
     """
     prev_level = logger.level
-    prev_file_level = file_logger.level if file_logger else None
     logger.setLevel(level)
-    if file_logger:
-        file_logger.setLevel(level)
     try:
         yield
     finally:
         logger.setLevel(prev_level)
-        if file_logger and prev_file_level is not None:
-            file_logger.setLevel(prev_file_level)
 
 
 logger = configure_console_logger(
@@ -529,9 +450,6 @@ logger = configure_console_logger(
     color=True,
     name_color="darkgreen",
 )
-
-# File logger is disabled by default
-file_logger = None
 
 # Do not propagate the log messages to the root logger
 # Prevents double logging when using the logger in multiple modules

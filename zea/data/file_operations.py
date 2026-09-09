@@ -69,6 +69,8 @@ def _iter_folder_io(input_path: str | Path, output_path: str | Path):
         tuple[Path, Path]: Pairs of (input file, output file) paths.
     """
     input_path, output_path = Path(input_path), Path(output_path)
+    # validate=False: this only enumerates paths — the operation validates each file
+    # when it opens it for the actual work.
     with Dataset(input_path, validate=False) as dataset:
         for file in dataset:
             yield file.path, output_path / file.path.relative_to(input_path)
@@ -219,6 +221,8 @@ def sum_data(input_paths: Sequence[str | Path], output_path: str | Path, overwri
 
     _prepare_output_path(str(output_path), overwrite)
 
+    # validate=False: this only expands the paths; every file is opened (and so
+    # validated) again below.
     with Dataset(input_paths, validate=False) as dataset:
         input_paths = [file.path for file in dataset]
 
@@ -682,7 +686,7 @@ def copy(src: str | Path, dst: str | Path, key: str, mode: str | None = None):
             None, which lets :meth:`zea.Dataset.copy` auto-select the mode (``"a"`` for a
             single key, ``"w"`` when ``key`` is ``"all"``/``"*"``).
     """
-    dataset = Dataset(src, validate=False)
+    dataset = Dataset(src)
     dataset.copy(dst, key, mode=mode)
 
 
@@ -800,6 +804,16 @@ def _delete_file_if_exists(path: Path):
         path.unlink()
 
 
+def output_blocked(output_path: str | Path, overwrite: bool) -> bool:
+    """Whether ``output_path`` exists and would be silently clobbered.
+
+    The single predicate behind every "refuse to overwrite an output" guard in
+    :mod:`zea`, so the definition of "blocked" (currently: the path exists and
+    ``overwrite`` was not requested) only needs to change in one place.
+    """
+    return Path(output_path).exists() and not overwrite
+
+
 def _prepare_output_path(output_path: str, overwrite: bool):
     """Guard the save target, matching :func:`resave`: refuse to clobber unless asked.
 
@@ -814,7 +828,7 @@ def _prepare_output_path(output_path: str, overwrite: bool):
             f"Cannot save to an 'hf://' path: {output_path}. 'hf://' paths are read-only; "
             "save to a local path instead."
         )
-    if Path(output_path).exists() and not overwrite:
+    if output_blocked(output_path, overwrite):
         raise FileExistsError(
             f"Output path {output_path} already exists. Use overwrite=True to overwrite."
         )

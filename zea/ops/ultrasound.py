@@ -31,16 +31,43 @@ from zea.internal.core import (
 from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
-from zea.simulator import simulate_rf
+from zea.simulator import apply_receive_chain, elevation_slab_bucket, simulate_rf
+from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
+
+simulator_settings = {
+    "exact": simulate_rf,
+    "frequency_approximation": simulate_rf,
+    "time_approximation": simulate_rf_td,
+}
 
 
 @ops_registry("simulate_rf")
 class Simulate(Operation):
-    """Simulate RF data."""
+    """Simulate RF data.
+
+    ``method`` switches between different approximation models. ``"exact"`` is the highest fidelity
+    version. ``"frequency_approximation"`` is an alias for ``exact``; future versions that sacrifice
+    speed for accuracy or accuracy for speed will use these two paths respectively.
+    ``"time_approximation"`` solves in the time domain. Its geometry-dependent factors are
+    evaluated at the center frequency, making it less accurate than the others but much faster in
+    some settings.
+    """
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["n_ax", "apply_lens_correction"]
+    STATIC_PARAMS = [
+        "n_ax",
+        "apply_lens_correction",
+        "method",
+        "elevation_lens",
+        "max_chunk_gb",
+        "center_frequency",
+        "sampling_frequency",
+        "scatter_exponent",
+        "noise_level_db",
+        "tgc_max_db",
+        "noise_seed",
+    ]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
     def __init__(self, **kwargs):
@@ -48,6 +75,13 @@ class Simulate(Operation):
             output_data_type=DataTypes.RAW_DATA,
             **kwargs,
         )
+
+    def __call__(self, **kwargs):
+        # Drop out-of-slab scatterers here, because `call` is traced.
+        merged = {**self._input_cache, **kwargs}
+        pruned = {} if self._inside_outer_jit else elevation_slab_bucket(**merged)
+        outputs = super().__call__(**{**merged, **pruned})
+        return {**outputs, **{key: merged[key] for key in pruned}}
 
     def call(
         self,
@@ -67,8 +101,20 @@ class Simulate(Operation):
         attenuation_coef,
         tx_apodizations,
         t_peak,
+        method="exact",
+        elevation_lens=False,
+        element_height=None,
+        max_chunk_gb=10.0,
+        noise_level_db=None,
+        tgc_max_db=0.0,
+        noise_seed=0,
+        noise_reference=None,
+        scatter_exponent=2.0,
         **kwargs,
     ):
+        if method not in simulator_settings:
+            raise ValueError(f"method ({method}) must be one of {tuple(simulator_settings)}")
+        simulate = simulator_settings[method]
         simulate_kwargs = {
             "probe_geometry": probe_geometry,
             "apply_lens_correction": apply_lens_correction,
@@ -84,29 +130,40 @@ class Simulate(Operation):
             "attenuation_coef": attenuation_coef,
             "tx_apodizations": tx_apodizations,
             "t_peak": t_peak,
+            "elevation_lens": elevation_lens,
+            "element_height": element_height,
+            "scatter_exponent": scatter_exponent,
+            "max_chunk_gb": max_chunk_gb,
+            "noise_level_db": noise_level_db,
+            "tgc_max_db": tgc_max_db,
+            "noise_seed": noise_seed,
+            "noise_reference": noise_reference,
         }
         if not self.with_batch_dim:
-            simulated_rf = simulate_rf(
+            simulated_rf = simulate(
                 scatterer_positions=scatterer_positions,
                 scatterer_magnitudes=scatterer_magnitudes,
                 **simulate_kwargs,
             )
         else:
+            # A stateless seed inside `map` repeats the same noise for every item, so instead, first
+            # simulate everything and then apply TGC and nosie.
+            mapped_kwargs = {**simulate_kwargs, "noise_level_db": None, "tgc_max_db": 0.0}
             simulated_rf = ops.map(
-                lambda inputs: simulate_rf(
+                lambda inputs: simulate(
                     scatterer_positions=inputs["positions"],
                     scatterer_magnitudes=inputs["magnitudes"],
-                    **simulate_kwargs,
+                    **mapped_kwargs,
                 ),
-                {
-                    "positions": scatterer_positions,
-                    "magnitudes": scatterer_magnitudes,
-                },
+                {"positions": scatterer_positions, "magnitudes": scatterer_magnitudes},
+            )
+            simulated_rf = apply_receive_chain(
+                simulated_rf, noise_level_db, tgc_max_db, noise_seed, noise_reference
             )
 
         return {
             self.output_key: simulated_rf,
-            "n_ch": 1,  # Simulate always returns RF data (so single channel)
+            "n_ch": 1,
         }
 
 

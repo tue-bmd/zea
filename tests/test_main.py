@@ -8,7 +8,7 @@ import pytest
 import tyro
 
 from zea.__main__ import CLI
-from zea.cli_args import AppArgs, ProcessArgs
+from zea.cli_args import AppArgs, DataPathsArgs, ProcessArgs
 
 
 def parse_args(argv):
@@ -189,6 +189,124 @@ def test_convert_main_dispatches_without_preallocating(monkeypatch):
 
     assert isinstance(called_args, _Camus)
     assert called_args.download is True
+
+
+# ── datapaths subcommand ──────────────────────────────────────────────────────
+
+
+def test_datapaths_subcommand_exists():
+    """`zea datapaths` is registered and takes the users.yaml to write."""
+    args = parse_args(["datapaths", "--user-config", "users.yaml"]).subcommand
+    assert isinstance(args, DataPathsArgs)
+    assert str(args.user_config) == "users.yaml"
+    assert args.local is None
+
+
+def test_datapaths_main_dispatches_without_a_device(monkeypatch):
+    """Setting up data paths has no use for a compute device, so none is initialised."""
+    monkeypatch.setattr("sys.argv", ["zea", "datapaths", "--user-config", "users.yaml"])
+
+    with (
+        patch("zea.internal.device.init_device") as mock_init_device,
+        patch("zea.datapaths.create_new_user") as mock_create,
+    ):
+        from zea.__main__ import main
+
+        main()
+
+    mock_init_device.assert_not_called()
+    assert mock_create.call_count == 1
+    (called_path,), kwargs = mock_create.call_args
+    assert str(called_path) == "users.yaml"
+    assert kwargs == {"local": None}
+
+
+# ── tools subcommand ──────────────────────────────────────────────────────────
+
+
+def test_tools_select_subcommand_exists():
+    """'select' sits behind 'tools' rather than being inlined into it."""
+    from zea.cli_args import ToolsArgs, _Select
+
+    cli_args = parse_args(["tools", "select", "a.png", "b.png"])
+    assert isinstance(cli_args.subcommand, ToolsArgs)
+    args = cli_args.subcommand.subcommand
+    assert isinstance(args, _Select)
+    assert args.files == ["a.png", "b.png"]
+    # defaults
+    assert args.selector is None
+    assert args.metric == "gcnr"
+    assert args.key == "data/image"
+    assert args.animation is True
+    assert args.confirm is True
+    assert args.overwrite is False
+
+
+def test_tools_select_flags():
+    cli_args = parse_args(
+        [
+            "tools",
+            "select",
+            "clip.mp4",
+            "--selector",
+            "lasso",
+            "--title",
+            "LV endo",
+            "--num-selections",
+            "3",
+            "--fps",
+            "20",
+            "--output-dir",
+            "/tmp/out",
+            "--no-animation",
+            "--no-confirm",
+            "--overwrite",
+        ]
+    )
+    args = cli_args.subcommand.subcommand
+    assert args.selector == "lasso"
+    assert args.title == "LV endo"
+    assert args.num_selections == 3
+    assert args.fps == 20
+    assert str(args.output_dir) == "/tmp/out"
+    assert args.animation is False
+    assert args.confirm is False
+    assert args.overwrite is True
+
+
+def test_tools_select_preserves_hf_paths():
+    """Like the data subcommands, 'hf://' inputs must survive tyro parsing as strings."""
+    uri = "hf://zeahub/camus/val/patient0409/patient0409_4CH.hdf5"
+    args = parse_args(["tools", "select", uri]).subcommand.subcommand
+    assert args.files == [uri]
+
+
+def test_tools_help_lists_select():
+    buf = io.StringIO()
+    with pytest.raises(SystemExit) as exc_info, contextlib.redirect_stdout(buf):
+        parse_args(["tools", "--help"])
+    assert exc_info.value.code == 0
+    assert "select" in buf.getvalue()
+
+
+def test_tools_main_dispatches_without_a_device(monkeypatch):
+    """'tools select' reaches run_selection_tool, and claims no compute device:
+    it is interactive matplotlib work, so it must not grab (or wait for) a GPU."""
+    monkeypatch.setattr("sys.argv", ["zea", "tools", "select", "clip.mp4", "--no-confirm"])
+
+    with (
+        patch("zea.internal.device.init_device") as mock_init_device,
+        patch("zea.tools.selection_tool.run_selection_tool") as mock_run,
+    ):
+        from zea.__main__ import main
+
+        main()
+
+    assert mock_init_device.call_count == 0
+    assert mock_run.call_count == 1
+    _, kwargs = mock_run.call_args
+    assert kwargs["files"] == ["clip.mp4"]
+    assert kwargs["confirm_selection"] is False
 
 
 @pytest.mark.parametrize(
