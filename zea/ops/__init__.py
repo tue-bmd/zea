@@ -166,7 +166,7 @@ pipeline looks like this:
         - name: beamform
           params:
             beamformer: delay_and_sum
-            num_patches: 100
+            patch_size: 1024
         - name: envelope_detect
         - name: normalize
         - name: log_compress
