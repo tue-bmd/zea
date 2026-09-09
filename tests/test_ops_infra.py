@@ -1736,6 +1736,30 @@ def test_pipeline_valid_parameter_not_flagged_as_typo(monkeypatch):
     assert any("polar_limits" in m for m in debugs)
 
 
+def test_pipeline_missing_key_does_not_blame_valid_parameter():
+    """A missing key is not blamed on a real ``zea.Parameters`` name.
+
+    ``polar_limits`` fuzzy-matches the missing ``polar_angles``, but suggesting it as
+    the typo would send the user to rename a parameter that is legitimately theirs.
+    """
+    import numpy as np
+
+    @ops_registry("needs_polar_angles_strict")
+    class NeedsPolarAnglesStrict(ops.Operation):
+        def call(self, **kwargs):
+            return {"data": kwargs["polar_angles"]}
+
+    pipeline = ops.Pipeline(
+        [NeedsPolarAnglesStrict()], with_batch_dim=False, jit_options=None, validate=False
+    )
+    with pytest.raises(KeyError) as excinfo:
+        pipeline(data=np.zeros((4, 4), dtype="float32"), polar_limits=(-0.5, 0.5))
+
+    msg = str(excinfo.value)
+    assert "polar_angles" in msg
+    assert "did you mean" not in msg, "polar_limits is a real parameter, not the typo"
+
+
 def test_pipeline_nested_error_not_double_wrapped():
     """An error from a nested pipeline is annotated once, not wrapped twice."""
     import numpy as np
