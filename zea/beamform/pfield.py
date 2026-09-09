@@ -49,6 +49,7 @@ def compute_pfield(
     norm=True,
     point_batch_size=2048,
     interpolation="bilinear",
+    attenuation_coef=0.0,
 ):
     """Compute the pressure field for ultrasound imaging.
 
@@ -96,16 +97,18 @@ def compute_pfield(
             weighting, which can cause visible steps at the edges of each
             transmit's insonified region; "bilinear" (default) removes those steps at a
             small extra cost and is recommended for display-quality images.
+        attenuation_coef (float, optional): Frequency-dependent attenuation of the
+            medium in dB/(cm·MHz), applied one-way along the transmit path (Eq. 42's
+            exponential). Default is 0 (lossless). Soft tissue is ~0.5; with it the
+            high end of the band, which focuses hardest, is lost with depth, so the
+            focus is wider and weaker than in the lossless field.
 
     Returns:
         ops.array: The (normalized) pressure field (across tx events)
             of shape (n_tx, grid_size_z, grid_size_x).
     """
-    # medium params
-    # NOTE: currently we ignore attenuation in the compounding
-    attenuation_coef = 0  # dB/(cm·MHz), attenuation coefficient of the medium
-    attenuation_coef = attenuation_coef / 8.686  # convert to Np/(cm·MHz)
-    attenuation_coef = attenuation_coef * 1e2 / 1e6  # Np/(m·Hz)
+    # medium params: attenuation dB/(cm·MHz) -> Np/(cm·MHz) -> Np/(m·Hz)
+    attenuation_coef = float(attenuation_coef) / 8.686 * 1e2 / 1e6
 
     n_el = int(n_el)
 
