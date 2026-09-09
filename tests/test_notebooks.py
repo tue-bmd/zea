@@ -41,10 +41,13 @@ NOTEBOOKS = list(NOTEBOOKS_DIR.rglob("*.ipynb"))
 # these overwrite the default parameters in the notebooks
 NOTEBOOK_PARAMETERS = {
     "adaptive_beamforming_by_deep_learning.ipynb": {
-        "n_steps": 20,
+        "n_steps": 5,
         "num_patches": 4,
         "grid_size_z": 96,
         "grid_size_x": 64,
+        "train_grid_size_z": 48,
+        "train_grid_size_x": 32,
+        "n_transmits": 2,
     },
     "diffusion_model_example.ipynb": {
         "n_unconditional_samples": 2,
