@@ -518,8 +518,9 @@ def test_batched_receive_chain_matches_unbatched(fish_scan):
     positions = np.asarray(simulation_args["scatterer_positions"], dtype=np.float32)[:16]
 
     batched = _batched_rf(simulation_args, 2, noise_level_db=None, tgc_max_db=50.0)
+    op = Simulate(with_batch_dim=False)
     single = keras.ops.convert_to_numpy(
-        simulate_rf(
+        op(
             **{
                 **simulation_args,
                 "scatterer_positions": positions,
@@ -527,7 +528,7 @@ def test_batched_receive_chain_matches_unbatched(fish_scan):
             },
             noise_level_db=None,
             tgc_max_db=50.0,
-        )
+        )[op.output_key]
     )
 
     # ops.map reduces in a different order, so compare against the RF peak.

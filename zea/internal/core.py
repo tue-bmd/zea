@@ -124,6 +124,9 @@ def _to_tensor(key: str, val, keep_as_is: list | None = None):
         keep_as_is = []
 
     if key in keep_as_is:
+        # Numpy scalars would be traced by tf.function; Python scalars stay static.
+        if isinstance(val, np.generic) or (isinstance(val, np.ndarray) and val.ndim == 0):
+            return val.item()
         return val
 
     # Anything outside the convertible types (including None and dicts) is passed through

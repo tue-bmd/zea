@@ -81,9 +81,8 @@ def simulate_rf_td(
 ):
     """Time-domain (splat-and-convolve) RF simulator.
 
-    A faster alternative to :func:`zea.simulator.simulate_rf` that produces equivalent RF data
-    without a per-scatterer, per-frequency Fourier synthesis. Each scatterer
-    contribution is splatted, with linear sub-sample interpolation, into an
+    An approximation of :func:`zea.simulator.simulate_rf` without the per-frequency synthesis.
+    Each scatterer contribution is splatted, with linear sub-sample interpolation, into an
     ``(n_ax, n_el)`` spike map at its two-way sample delay; the spike map is then
     convolved once per receive channel with a real transmit pulse.
 

@@ -36,19 +36,61 @@ from zea.simulator import (
     _concrete,
     apply_receive_chain,
     elevation_slab_bucket,
+    fft_length,
     simulate_rf,
-    simulate_rf_zea_wave,
 )
 from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
 
 # The simulators take different options, so the type checker cannot resolve the union.
 simulator_settings: dict[str, Callable] = {
-    "exact": simulate_rf,
-    "frequency_approximation": simulate_rf,
-    "zea_wave": simulate_rf_zea_wave,
-    "time_approximation": simulate_rf_td,
+    "frequency_domain": simulate_rf,
+    "time_domain": simulate_rf_td,
 }
+_DEPRECATED_METHODS = {
+    "exact": "frequency_domain",
+    "frequency_approximation": "frequency_domain",
+    "zea_wave": "frequency_domain",
+    "time_approximation": "time_domain",
+}
+
+
+def _resolve_method(method):
+    """The canonical simulator method name, warning once for a deprecated alias."""
+    if method in _DEPRECATED_METHODS:
+        replacement = _DEPRECATED_METHODS[method]
+        log.warning_once(
+            f"Simulate method {method!r} is deprecated, use {replacement!r}.", key=method
+        )
+        return replacement
+    if method not in simulator_settings:
+        raise ValueError(f"method ({method}) must be one of {tuple(simulator_settings)}")
+    return method
+
+
+def _derived_fft_length(kwargs):
+    """FFT length for the scan in ``kwargs``, or None when a needed input is traced or absent.
+
+    The bound from the aperture and the transmit shifts holds for any cloud, so it is one
+    static value per scan and the jit cache is not invalidated by the scatterers.
+    """
+    keys = ("t0_delays", "initial_times", "t_peak", "probe_geometry", "sound_speed")
+    raw = [_concrete(kwargs.get(key)) for key in keys]
+    scalars = ("n_ax", "sampling_frequency", "center_frequency")
+    if any(x is None for x in raw) or any(kwargs.get(key) is None for key in scalars):
+        return None
+    t0, t_init, t_peak, geometry, sound_speed = raw
+    shift = t0 - t_init[:, None] + t_peak[:, None]
+    return fft_length(
+        int(kwargs["n_ax"]),
+        float(kwargs["sampling_frequency"]),
+        float(kwargs["center_frequency"]),
+        float(sound_speed),
+        geometry,
+        shift.min(),
+        shift.max(),
+        float(kwargs.get("n_period", 4.0)),
+    )
 
 
 def _python_scalar(x):
@@ -65,19 +107,19 @@ def _python_scalar(x):
 class Simulate(Operation):
     """Simulate RF data.
 
-    ``method`` switches between different approximation models. ``"exact"`` is the highest fidelity
-    version. ``"frequency_approximation"`` is an alias for ``exact``; future versions that sacrifice
-    speed for accuracy or accuracy for speed will use these two paths respectively.
-    ``"time_approximation"`` solves in the time domain. Its geometry-dependent factors are
-    evaluated at the center frequency, making it less accurate than the others but much faster in
-    some settings. ``"zea_wave"`` is the ``exact`` physics with the scatterer response shared
-    across transmits (:func:`zea.simulator.simulate_rf_zea_wave`): up to an order of magnitude
-    faster for many transmits and scatterers, matching ``exact`` up to the ``band_db`` cut-off.
-    The transducer and element options (``rigid_baffle``, ``bandwidth_percent``,
-    ``probe_center_frequency``, ``element_normals``, ``chirp_sweep``, ``n_period``,
-    ``n_sub_elements``, ``elevation_focus``, ``lens_attenuation_coef``) reach the
-    frequency-domain methods only, and ``band_db`` and ``n_fft`` reach ``"zea_wave"`` only;
-    ``"time_approximation"`` does not model any of them.
+    ``method`` selects the simulator. ``"frequency_domain"`` (default) is
+    :func:`zea.simulator.simulate_rf`, the full model. ``"time_domain"`` is
+    :func:`zea.simulator_time_domain.simulate_rf_td`, which evaluates the geometry-dependent
+    factors at the center frequency: less accurate, faster in some settings. The transducer and
+    element options (``rigid_baffle``, ``bandwidth_percent``, ``probe_center_frequency``,
+    ``element_normals``, ``chirp_sweep``, ``n_period``, ``n_sub_elements``, ``elevation_focus``,
+    ``lens_attenuation_coef``, ``band_db``, ``n_fft``) reach the frequency-domain simulator only.
+    The old names ``"exact"``, ``"frequency_approximation"`` and ``"time_approximation"`` are
+    deprecated aliases.
+
+    ``n_fft`` is derived from the scan before the jitted call when it is not given, so the
+    frequency-domain simulator runs under jit without it. ``max_chunk_gb`` None leaves each
+    simulator its own default.
     """
 
     # Define operation-specific static parameters
@@ -119,6 +161,10 @@ class Simulate(Operation):
             merged.update(
                 {key: _python_scalar(merged[key]) for key in self.static_params if key in merged}
             )
+            # The FFT length is static and needs concrete geometry, so it is derived here.
+            method = _resolve_method(merged.get("method", "frequency_domain"))
+            if method == "frequency_domain" and merged.get("n_fft") is None:
+                merged["n_fft"] = _derived_fft_length(merged)
         # Drop out-of-slab scatterers here, because `call` is traced.
         pruned = {} if self._inside_outer_jit else elevation_slab_bucket(**merged)
         outputs = super().__call__(**{**merged, **pruned})
@@ -142,10 +188,10 @@ class Simulate(Operation):
         attenuation_coef,
         tx_apodizations,
         t_peak,
-        method="exact",
+        method="frequency_domain",
         elevation_slab_2d=False,
         element_height=None,
-        max_chunk_gb=10.0,
+        max_chunk_gb=None,
         noise_level_db=None,
         tgc_max_db=0.0,
         noise_seed=0,
@@ -164,14 +210,13 @@ class Simulate(Operation):
         lens_attenuation_coef=0.0,
         **kwargs,
     ):
-        if method not in simulator_settings:
-            raise ValueError(f"method ({method}) must be one of {tuple(simulator_settings)}")
+        method = _resolve_method(method)
         simulate = simulator_settings[method]
-        if method == "zea_wave":
-            simulate = functools.partial(simulate, band_db=band_db, n_fft=n_fft)
-        if method in ("exact", "frequency_approximation", "zea_wave"):
+        if method == "frequency_domain":
             simulate = functools.partial(
                 simulate,
+                band_db=band_db,
+                n_fft=n_fft,
                 rigid_baffle=rigid_baffle,
                 bandwidth_percent=bandwidth_percent,
                 probe_center_frequency=probe_center_frequency,
@@ -200,12 +245,13 @@ class Simulate(Operation):
             "elevation_slab_2d": elevation_slab_2d,
             "element_height": element_height,
             "scatter_exponent": scatter_exponent,
-            "max_chunk_gb": max_chunk_gb,
             "noise_level_db": noise_level_db,
             "tgc_max_db": tgc_max_db,
             "noise_seed": noise_seed,
             "noise_reference": noise_reference,
         }
+        if max_chunk_gb is not None:
+            simulate_kwargs["max_chunk_gb"] = max_chunk_gb
         if not self.with_batch_dim:
             simulated_rf = simulate(
                 scatterer_positions=scatterer_positions,
