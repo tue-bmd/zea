@@ -88,7 +88,9 @@ Supported keys
        (``hf://org/repo/path/to/file.hdf5``).
    * - ``local``
      - ``true``
-     - Whether to use local data (``true``) or a network/NAS location (``false``).
+     - Whether to use local data (``true``) or data at a remote location
+       (``false``). Use ``null`` when the ``users.yaml`` paths are single paths,
+       shared by both.
    * - ``indices``
      - ``null``
      - Which frames to load: ``null`` (default), ``'all'``, a single ``int``, or
@@ -147,6 +149,44 @@ custom keys straight through to the pipeline:
 
 The top-level config is **open**: arbitrary extra sections (``model:``, etc.)
 are accepted and passed through unchanged.
+
+----------------------------
+Defining a beamforming grid
+----------------------------
+
+The extent of the final produced image is defined by :attr:`~zea.Parameters.xlims` and :attr:`~zea.Parameters.zlims`. For a cartesian beamforming grid (``grid_type="cartesian"``) this is also the extent of the beamforming grid. For a polar grid (``grid_type="polar"``) the rays fan out from an apex a distance :attr:`~zea.Parameters.distance_to_apex` *behind* the transducer surface. The ``rlims`` (radii from the apex) are then derived from :attr:`~zea.Parameters.zlims` and the ``distance_to_apex`` offset. The final image after scan conversion is then defined by :attr:`~zea.Parameters.xlims` and :attr:`~zea.Parameters.zlims` again.
+
+.. raw:: html
+
+   <div style="display: flex; flex-direction: column; align-items: center; margin: 3em 0;">
+     <!-- Dark mode image -->
+     <img
+       src="_static/pixelgrid-Dark.svg"
+       alt="Polar pixel grid geometry: xlims, zlims, rlims and distance_to_apex"
+       style="display: none; width: 85%; padding-bottom: 1em;"
+       class="only-dark"
+     />
+     <!-- Light mode image -->
+     <img
+       src="_static/pixelgrid-Light.svg"
+       alt="Polar pixel grid geometry: xlims, zlims, rlims and distance_to_apex"
+       style="display: none; width: 85%; padding-bottom: 1em;"
+       class="only-light"
+     />
+     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
+        The pixel grid of a polar <code>zea.Parameters</code> object on a curved probe.
+     </div>
+   </div>
+   <style>
+     @media (prefers-color-scheme: dark) {
+       .only-dark { display: block !important; }
+     }
+     @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
+       .only-light { display: block !important; }
+     }
+   </style>
+
+
 
 ----------------------------
 API reference

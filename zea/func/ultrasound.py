@@ -10,6 +10,8 @@ from zea.func.tensor import (
     resample,
     split_into_windows,
 )
+from zea.internal.utils import deprecated
+from zea.utils import ProgressBar
 
 
 def demodulate_not_jitable(
@@ -151,7 +153,7 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
     Returns:
         rf_data (ndarray): output real valued rf data.
     """
-    assert iq_data.dtype in [
+    assert ops.dtype(iq_data) in [
         "complex64",
         "complex128",
     ], "IQ must contain all complex signals."
@@ -185,15 +187,9 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
     carrier = ops.reshape(carrier, (*[1] * (n_dim - 2), n_ax_up, 1))
 
     rf_data = iq_data_upsampled * carrier
-    rf_data = ops.real(rf_data) * ops.sqrt(2)
+    rf_data = ops.real(rf_data)
 
     return ops.cast(rf_data, "float32")
-
-
-def _sinc(x):
-    """Return the normalized sinc function. Equivalent to np.sinc(x)."""
-    y = np.pi * ops.where(x == 0, 1.0e-20, x)
-    return ops.sin(y) / y
 
 
 def get_band_pass_filter(num_taps, sampling_frequency, f1, f2, validate=True):
@@ -241,7 +237,7 @@ def get_band_pass_filter(num_taps, sampling_frequency, f1, f2, validate=True):
     # Build up the coefficients.
     alpha = 0.5 * (num_taps - 1)
     m = ops.arange(0, num_taps, dtype="float32") - alpha
-    h = f2 * _sinc(f2 * m) - f1 * _sinc(f1 * m)
+    h = f2 * ops.sinc(f2 * m) - f1 * ops.sinc(f1 * m)
 
     # Get and apply the window function.
     win = np.hamming(num_taps)
@@ -288,8 +284,13 @@ def get_low_pass_iq_filter(num_taps, sampling_frequency, center_frequency, bandw
     return lpf_complex
 
 
+@deprecated(replacement="keras.ops.view_as_real")
 def complex_to_channels(complex_data, axis=-1):
     """Unroll complex data to separate channels.
+
+    .. deprecated::
+        Use :func:`keras.ops.view_as_real` instead. Note that ``keras.ops.view_as_real``
+        always appends the real/imaginary components as the last axis.
 
     Args:
         complex_data (complex ndarray): complex input data.
@@ -310,9 +311,13 @@ def complex_to_channels(complex_data, axis=-1):
     return iq_data
 
 
+@deprecated(replacement="keras.ops.view_as_complex")
 def channels_to_complex(data):
     """Convert array with real and imaginary components at
     different channels to complex data array.
+
+    .. deprecated::
+        Use :func:`keras.ops.view_as_complex` instead.
 
     Args:
         data (ndarray): input data, with at 0 index of axis
@@ -481,7 +486,7 @@ def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3):
     iq_data_signal_complex = analytical_signal * ops.exp(phasor_exponent)
 
     # Split the complex signal into two channels
-    iq_data_two_channel = complex_to_channels(ops.squeeze(iq_data_signal_complex, axis=-1))
+    iq_data_two_channel = ops.view_as_real(ops.squeeze(iq_data_signal_complex, axis=-1))
 
     return iq_data_two_channel
 
@@ -523,31 +528,30 @@ def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency
     waveforms_iq_complex_channels = demodulate(
         waveform[..., None], center_frequency, waveform_sampling_frequency, axis=-1
     )
-    waveforms_iq_complex = channels_to_complex(waveforms_iq_complex_channels)
+    waveforms_iq_complex = ops.view_as_complex(waveforms_iq_complex_channels)
     envelope = ops.abs(waveforms_iq_complex)
     peak_idx = ops.argmax(envelope, axis=-1)
     t_peak = ops.cast(peak_idx, dtype="float32") / waveform_sampling_frequency
     return t_peak
 
 
-def envelope_detect(data, axis=-3):
-    """Envelope detection of RF signals.
-
-    If the input data is real, it first applies the Hilbert transform along the specified axis
-    and then computes the magnitude of the resulting complex signal.
-    If the input data is complex, it computes the magnitude directly.
+def channels_to_analytic(data, axis):
+    """Return the analytic signal (complex) from RF (``n_ch == 1``) or from
+    two-channel I/Q (``n_ch == 2``) data.
 
     Args:
-        - data (Tensor): The beamformed data of shape (..., grid_size_z, grid_size_x, n_ch).
-        - axis (int): Axis along which to apply the Hilbert transform. Defaults to -3.
+        data (Tensor): Tensor of shape ``(..., n_ch)`` with ``n_ch in {1, 2}``. For RF
+            the analytic signal is formed with a Hilbert transform along ``axis``; for
+            I/Q the two channels are read as real/imaginary parts.
+        axis (int): Fast-time (axial) axis along which to Hilbert-transform RF data.
 
     Returns:
-        - envelope_data (Tensor): The envelope detected data
-            of shape (..., grid_size_z, grid_size_x).
+        Tensor: Complex tensor with the channel axis removed.
     """
-    if data.shape[-1] == 2:
-        data = channels_to_complex(data)
-    else:
+    n_ch = data.shape[-1]
+    if n_ch == 2:
+        return ops.view_as_complex(data)
+    if n_ch == 1:
         n_ax = ops.shape(data)[axis]
 
         # Calculate next power of 2: M = 2^ceil(log2(n_ax))
@@ -559,10 +563,84 @@ def envelope_detect(data, axis=-3):
         indices = ops.arange(n_ax)
 
         data = ops.take(data, indices, axis=axis)
-        data = ops.squeeze(data, axis=-1)
+        return ops.squeeze(data, axis=-1)
+    raise ValueError(f"Expected data with n_ch in {{1, 2}} (last axis), got n_ch={n_ch}.")
 
-    data = ops.abs(data)
-    return data
+
+def envelope_detect(data, axis=-3):
+    """Envelope detection of RF signals.
+
+    If the input data is real, it first applies the Hilbert transform along the specified axis
+    and then computes the magnitude of the resulting complex signal.
+    If the input data is complex, it computes the magnitude directly.
+
+    Args:
+        data (Tensor): The beamformed data of shape (..., grid_size_z, grid_size_x, n_ch).
+        axis (int): Axis along which to apply the Hilbert transform. Defaults to -3.
+
+    Returns:
+        Tensor: The envelope detected data of shape (..., grid_size_z, grid_size_x).
+    """
+    return ops.abs(channels_to_analytic(data, axis))
+
+
+def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
+    """Computes the directivity of a single element.
+
+    Args:
+        f (array-like): The input frequencies [Hz].
+        theta (array-like): The angles [rad].
+        element_width (float): The width of the element [m].
+        sound_speed (float): The speed of sound [m/s].
+        rigid_baffle (bool): Whether the element is mounted on a rigid baffle,
+            impacting the directivity.
+
+    Returns:
+        array-like: The directivity of the element.
+    """
+
+    if element_width is None:
+        response = ops.ones_like(theta)
+        return response
+
+    # element_width / wavelength == element_width * f / sound_speed. Using the
+    # latter avoids dividing by f, so the DC bin (f == 0) stays finite: the
+    # argument is 0 and sinc(0) == 1 (isotropic directivity), the correct limit.
+    response = ops.sinc(element_width * f / sound_speed * ops.sin(theta))
+    if not rigid_baffle:
+        response *= ops.cos(theta)
+    return response
+
+
+def square_wave_apodization(n_el: int, block_size: float):
+    """Return a square wave apodization of alternating ``+1`` / ``-1`` blocks.
+
+    Used for incoherent beamforming.
+
+    Args:
+        n_el (int): Total number of elements in the array.
+        block_size (float): Number of elements that will be high/low. Can be a float.
+
+    Returns:
+        Tensor: Apodization of shape ``(n_el,)`` with values in ``{-1, +1}``.
+
+    Example:
+        .. code-block:: text
+
+            +1 +1 +1 +1             +1 +1 +1 +1
+                        -1 -1 -1 -1
+
+            <----------> block_size = 4, n_el = 12
+    """
+    if not block_size > 0:  # also rejects NaN
+        raise ValueError(f"block_size must be a positive number, got {block_size}.")
+
+    # Which block each element falls in; even blocks are high, odd blocks are low.
+    # Indexing the elements directly (rather than sampling a square wave over a
+    # normalized axis) keeps every block exactly `block_size` wide, including a
+    # partial trailing block when `n_el` is not a multiple of `block_size`.
+    block_index = ops.floor(ops.arange(n_el, dtype="float32") / block_size)
+    return ops.where(ops.mod(block_index, 2.0) == 0.0, 1.0, -1.0)
 
 
 def apply_aligned_apodization(data, apodization, with_batch_dim):
@@ -593,6 +671,9 @@ def apply_aligned_apodization(data, apodization, with_batch_dim):
 
     append_n_dims = ops.ndim(data) - ops.ndim(apodization)
     apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
+
+    # Match the signal dtype so a low-precision (bfloat16) signal is not up-cast.
+    apodization = ops.cast(apodization, data.dtype)
 
     return data * apodization
 
@@ -625,6 +706,9 @@ def apply_receive_apodization(data, apodization, with_batch_dim):
     # Append the trailing channel axis/axes so it broadcasts over n_ch
     append_n_dims = ops.ndim(data) - ops.ndim(apodization)
     apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
+
+    # Match the signal dtype so a low-precision (bfloat16) signal is not up-cast.
+    apodization = ops.cast(apodization, data.dtype)
 
     return data * apodization
 
@@ -933,7 +1017,7 @@ def dehaze_nuclear_diffusion(
     frame_tissue_preds = [[] for _ in range(int(seq_len))]
     frame_haze_preds = [[] for _ in range(int(seq_len))]
 
-    progbar = keras.utils.Progbar(len(windows), verbose=verbose, unit_name="window")
+    progbar = ProgressBar(len(windows), verbose=verbose, unit_name="window")
 
     # Process each window
     for window_idx, (window, frame_indices) in enumerate(zip(windows, window_indices)):
@@ -1000,24 +1084,37 @@ def dehaze_nuclear_diffusion(
     return tissue_frames, haze_frames
 
 
-def suppress_tissue(data, cutoff: int = 5):
+def suppress_tissue(data, cutoff: int = 5, conjugate: bool = False):
     """
     Suppresses tissue using Direct SVD.
+
+    Builds the Casorati matrix (frames x pixels), takes the SVD of its temporal
+    Gram matrix, and projects the data onto the subspace orthogonal to the
+    ``cutoff`` strongest (tissue) components.
 
     Args:
         data (ops.Tensor): Shape (n_frames, ...)
         cutoff (int): Number of principal components (tissue) to reject.
+        conjugate (bool): Whether to use the conjugate (Hermitian) transpose when
+            forming the Gram matrix and the projector. Leave ``False`` for
+            real-valued input. Set to ``True`` for complex (baseband IQ) input:
+            the plain transpose builds ``XᵀX`` rather than ``XᴴX``, which is not
+            the temporal covariance of a complex signal and does not suppress the
+            tissue. Ignored for real input, where the two are identical.
     """
     if cutoff <= 0:
         return data
     if cutoff >= data.shape[0]:
         raise ValueError(f"Cutoff must be between 0 and n_frames-1, got {cutoff}.")
 
+    def _transpose(x):
+        return ops.conj(ops.transpose(x)) if conjugate else ops.transpose(x)
+
     original_shape = data.shape
     n_frames = original_shape[0]
     data_2d = ops.reshape(data, (n_frames, -1))
 
-    casorati_matrix = ops.matmul(data_2d, ops.transpose(data_2d))
+    casorati_matrix = ops.matmul(data_2d, _transpose(data_2d))
 
     # We call the data X
     # X = U @ S @ Vh
@@ -1027,9 +1124,200 @@ def suppress_tissue(data, cutoff: int = 5):
     V, S, _ = ops.linalg.svd(casorati_matrix)
 
     # Remove the right singular vectors
-    reconstructed = ops.matmul(ops.transpose(data_2d), V)
+    reconstructed = ops.matmul(_transpose(data_2d), V)
 
     # Reconstruct with only part of the vectors
-    reconstructed = ops.matmul(reconstructed[:, cutoff:], ops.transpose(V[:, cutoff:]))
+    reconstructed = ops.matmul(reconstructed[:, cutoff:], _transpose(V[:, cutoff:]))
 
-    return ops.reshape(ops.transpose(reconstructed), original_shape)
+    return ops.reshape(_transpose(reconstructed), original_shape)
+
+
+def decode_hadamard(raw_data, tx_apodizations):
+    """
+    Decode Hadamard-encoded raw data using the provided transmit apodizations.
+
+    This function is compatible with partial Hadamard encoding, where some transmit channels may
+    not be used. It finds the participating transmit channels (those with non-zero apodization in
+    any transmit) and constructs the Hadamard matrix for those channels. The raw data is then
+    decoded by multiplying with the transpose of the Hadamard matrix.
+
+    Args:
+        raw_data (ops.Tensor): The Hadamard-encoded raw data of shape (n_frames, n_tx, n_ax, n_el,
+            n_ch).
+        tx_apodizations (ops.Tensor): The transmit apodizations of shape (n_tx, n_el).
+
+    Returns:
+        tuple: The decoded raw data with the same shape as the input, and the decoded transmit
+        apodizations of shape (n_tx, n_el). After decoding each transmit activates a single
+        participating channel, so the decoded apodizations form an identity over the participating
+        channels.
+    """
+    _validate_decode_hadamard_inputs(raw_data, tx_apodizations)
+    participating_channels = _find_participating_channels(tx_apodizations)
+    hadamard_matrix = _find_hadamard_matrix(tx_apodizations, participating_channels)
+    _warn_if_hadamard_not_orthogonal(hadamard_matrix)
+    raw_data_decoded = _apply_hadamard_decoding(raw_data, hadamard_matrix)
+    tx_apodizations_decoded = _decode_tx_apodizations(tx_apodizations, participating_channels)
+    return raw_data_decoded, tx_apodizations_decoded
+
+
+def _validate_decode_hadamard_inputs(raw_data, tx_apodizations):
+    if not raw_data.ndim == 5:
+        raise ValueError(
+            f"Expected raw_data with 5 dimensions (n_frames, n_tx, n_ax, n_el, n_ch), "
+            f"got {raw_data.ndim} dimensions."
+        )
+    if not tx_apodizations.ndim == 2:
+        raise ValueError(
+            f"Expected tx_apodizations with 2 dimensions (n_tx, n_el), "
+            f"got {tx_apodizations.ndim} dimensions."
+        )
+
+
+def _apply_hadamard_decoding(raw_data, hadamard_matrix):
+    hadamard_matrix_t = ops.transpose(hadamard_matrix)
+    raw_data = ops.moveaxis(raw_data, 1, -1)
+    raw_data = ops.matmul(raw_data, hadamard_matrix_t)
+    return ops.moveaxis(raw_data, -1, 1)
+
+
+def _decode_tx_apodizations(tx_apodizations, participating_channels):
+    n_el = tx_apodizations.shape[1]
+    return ops.one_hot(participating_channels, n_el)
+
+
+def _warn_if_hadamard_not_orthogonal(hadamard_matrix):
+    gram = ops.matmul(hadamard_matrix, ops.transpose(hadamard_matrix))
+    normalized = gram / ops.max(gram)
+    identity = ops.eye(ops.shape(gram)[0])
+    if not ops.all(ops.isclose(normalized, identity)):
+        log.warning(
+            "The Hadamard decoding may not be correct. The tx_apodizations matrix is not "
+            "orthogonal."
+        )
+
+
+def _find_participating_channels(apodizations):
+    apodizations = ops.sum(ops.abs(apodizations), axis=0)
+    participating_channels = ops.where(apodizations > 0)[0]
+    return participating_channels
+
+
+def _find_hadamard_matrix(apodizations, participating_channels):
+    n_tx = len(participating_channels)
+    hadamard_matrix = ops.take(apodizations[:n_tx], participating_channels, axis=1)
+    return hadamard_matrix
+
+
+def construct_acquisition_from_synthetic_aperture(
+    raw_data,
+    probe_geometry,
+    polar_angle: float,
+    azimuth_angle: float,
+    focus_distance: float,
+    sampling_frequency: float,
+    transmit_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    sound_speed: float = 1540.0,
+    tx_apodization=None,
+    transmit_chunk_size: int = 32,
+):
+    """
+    Construct a specific acquisition from synthetic aperture data by applying time delays to the
+    raw data.
+
+    Args:
+        raw_data (ops.Tensor): The synthetic aperture raw data.
+        probe_geometry (ops.Tensor): The probe geometry.
+        polar_angle: The polar angle of the transmit.
+        azimuth_angle: The azimuth angle of the transmit.
+        focus_distance: The focus distance of the transmit. Set to np.inf for plane wave transmit.
+        transmit_origin: The origin of the transmit in 3D space.
+        sampling_frequency: The sampling frequency of the raw data.
+        tx_apodization (ops.Tensor, optional): The transmit apodization to apply to the raw
+            data. If None, no apodization is applied.
+        transmit_chunk_size: Number of transmits to process per FFT chunk. Lower values reduce
+            peak memory usage.
+
+    Returns:
+        raw_data (ops.Tensor): The constructed raw data of shape (n_frames, 1, n_ax, n_el, n_ch).
+        t0_delays (ops.Tensor): t0 delays of shape (1, n_el).
+    """
+    # Imported here rather than at module level: zea.beamform imports from zea.func
+    # (see zea.beamform.pfield), so a top-level import would be circular.
+    from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
+
+    if not np.isinf(focus_distance):
+        t0_delays = compute_t0_delays_focused(
+            transmit_origins=np.array([transmit_origin]),
+            focus_distances=np.array([focus_distance]),
+            probe_geometry=probe_geometry,
+            polar_angles=np.array([polar_angle]),
+            azimuth_angles=np.array([azimuth_angle]),
+            sound_speed=sound_speed,
+        )
+    else:
+        t0_delays = compute_t0_delays_planewave(
+            probe_geometry=probe_geometry,
+            polar_angles=np.array([polar_angle]),
+            azimuth_angles=np.array([azimuth_angle]),
+            sound_speed=sound_speed,
+        )
+
+    if tx_apodization is None:
+        tx_apodization = ops.ones((1, raw_data.shape[1]), dtype=raw_data.dtype)
+
+    n_ax = raw_data.shape[2]
+    n_tx = raw_data.shape[1]
+    n_fft = n_ax + n_ax // 2
+
+    # Delay phasors exp(-2j * pi * f * t0) per transmit, applied in the frequency domain
+    frequencies = np.fft.fftfreq(n_fft, d=1 / sampling_frequency)
+    phase = ops.convert_to_tensor(
+        (-2 * np.pi * frequencies[None, :] * np.asarray(t0_delays)[0][:, None]).astype(np.float32)
+    )
+
+    # Process the transmits in chunks to bound peak memory during the FFT
+    spectrum_real, spectrum_imag = 0.0, 0.0
+    for start in range(0, n_tx, transmit_chunk_size):
+        end = min(start + transmit_chunk_size, n_tx)
+        chunk_real, chunk_imag = _delayed_transmit_spectrum(
+            raw_data[:, start:end], phase[start:end], n_fft - n_ax
+        )
+        spectrum_real += chunk_real
+        spectrum_imag += chunk_imag
+
+    apodization = tx_apodization[0][None, None, :, None, None]
+    spectrum_real = spectrum_real * apodization
+    spectrum_imag = spectrum_imag * apodization
+
+    # Inverse FFT via the conjugate trick: real(ifft(X)) = real(fft(conj(X))) / n_fft
+    raw_data = ops.fft((spectrum_real, -spectrum_imag))[0] / n_fft
+
+    # Restore the original axis order and remove the padding
+    raw_data = ops.transpose(raw_data, (0, 1, 4, 2, 3))[:, :, :n_ax]
+    return raw_data, t0_delays
+
+
+def _delayed_transmit_spectrum(raw_data, phase, n_pad):
+    """FFTs transmits along the axial axis, applies delay phasors, and sums over transmits.
+
+    Args:
+        raw_data (ops.Tensor): Raw data chunk of shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        phase (ops.Tensor): Delay phases of shape (n_tx, n_fft).
+        n_pad: Number of zeros to pad the axial axis with to reach n_fft samples.
+
+    Returns:
+        Real and imaginary spectra of shape (n_frames, 1, n_el, n_ch, n_fft), where the
+        axial axis has been moved to the end because ops.fft operates on the last axis.
+    """
+    raw_data = ops.pad(raw_data, ((0, 0), (0, 0), (0, n_pad), (0, 0), (0, 0)))
+    raw_data = ops.transpose(raw_data, (0, 1, 3, 4, 2))
+    fft_real, fft_imag = ops.fft((raw_data, ops.zeros_like(raw_data)))
+    delay_real = ops.cos(phase)[None, :, None, None, :]
+    delay_imag = ops.sin(phase)[None, :, None, None, :]
+    delayed_real = fft_real * delay_real - fft_imag * delay_imag
+    delayed_imag = fft_real * delay_imag + fft_imag * delay_real
+    return (
+        ops.sum(delayed_real, axis=1, keepdims=True),
+        ops.sum(delayed_imag, axis=1, keepdims=True),
+    )

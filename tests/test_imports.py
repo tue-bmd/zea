@@ -5,6 +5,7 @@ import builtins
 import contextlib
 import importlib
 import inspect
+import json
 import os
 import pkgutil
 import subprocess
@@ -16,6 +17,8 @@ import pytest
 
 import zea
 
+from . import TEST_BACKEND
+from .backend_utils import available_test_backends
 from .helpers import run_in_subprocess
 
 
@@ -70,19 +73,7 @@ def test_all_zea_modules_importable():
     # dependency is missing -- not a failure of zea's declared dependencies.
     EXCLUDED = {"zea.backend.tf2jax"}
 
-    # Exclude backend subpackages if their dependencies are not available
-    backend_modules = {
-        "torch": "zea.backend.torch",
-        "tensorflow": "zea.backend.tensorflow",
-        "jax": "zea.backend.jax",
-    }
     excluded_prefixes = []
-    for backend_name, backend_module in backend_modules.items():
-        try:
-            __import__(backend_name)
-        except ImportError:
-            EXCLUDED.add(backend_module)
-            excluded_prefixes.append(backend_module)
 
     failures = {}
 
@@ -124,30 +115,62 @@ def test_package_does_not_import_ml_libs():
         importlib.import_module("zea")
 
 
-def _subprocess_import_zea_with_only_backend(backend):  # pragma: no cover
+def _subprocess_import_zea_with_only_backend(
+    backend, keras_backend=None, unset_keras_backend=False, keras_home=None
+):  # pragma: no cover
     """
     This function is run in a subprocess to test zea import with only one backend available.
+
+    ``backend`` is the backend, or collection of backends, that stays importable; every
+    other backend raises ImportError. A backend named here does not have to be installed:
+    zea's bootstrap only probes with ``find_spec``, which is mocked below, so backend
+    combinations the current machine does not have can still be tested.
+
+    ``keras_backend`` sets KERAS_BACKEND independently of the available backends (used
+    to test e.g. KERAS_BACKEND=numpy); it defaults to ``backend``. With
+    ``unset_keras_backend``, KERAS_BACKEND is removed from the environment instead, to
+    test zea's automatic backend selection. ``keras_home`` sets KERAS_HOME, the directory
+    zea and keras read ``keras.json`` from; it defaults to an empty directory so that the
+    developer's own config cannot affect the result.
     """
     import builtins
+    import importlib.machinery
     import importlib.util
     import os
     import sys
+    import tempfile
     import traceback
 
     all_backends = ["tensorflow", "torch", "jax"]
 
+    if backend is None:
+        available = []
+    elif isinstance(backend, str):
+        available = [backend]
+    else:
+        available = list(backend)
+
+    # Point at a directory without a keras.json, so automatic selection is what is tested
+    os.environ["KERAS_HOME"] = keras_home or os.path.join(tempfile.mkdtemp(), "keras")
+
     # Set KERAS_BACKEND before any imports
-    if backend is not None:
-        os.environ["KERAS_BACKEND"] = backend
+    if unset_keras_backend:
+        os.environ.pop("KERAS_BACKEND", None)
+    else:
+        if keras_backend is None:
+            keras_backend = available[0] if available else None
+        if keras_backend is not None:
+            os.environ["KERAS_BACKEND"] = keras_backend
+
+    blocked = [b for b in all_backends if b not in available]
+
+    def is_blocked(name):
+        return name in blocked or any(name.startswith(b + ".") for b in blocked)
 
     import_orig = builtins.__import__
 
     def mocked_import(name, *args, **kwargs):
-        if name in all_backends and (backend is None or name != backend):
-            raise ImportError(f"No module named '{name}' (simulated by test)")
-        if any(name.startswith(b + ".") for b in all_backends) and (
-            backend is None or not name.startswith(backend + ".")
-        ):
+        if is_blocked(name):
             raise ImportError(f"No module named '{name}' (simulated by test)")
         return import_orig(name, *args, **kwargs)
 
@@ -159,23 +182,24 @@ def _subprocess_import_zea_with_only_backend(backend):  # pragma: no cover
     find_spec_orig = importlib.util.find_spec
 
     def mocked_find_spec(name, *args, **kwargs):
-        if name in all_backends and (backend is None or name != backend):
+        if is_blocked(name):
             return None
-        if any(name.startswith(b + ".") for b in all_backends) and (
-            backend is None or not name.startswith(backend + ".")
-        ):
-            return None
-        return find_spec_orig(name, *args, **kwargs)
+        spec = find_spec_orig(name, *args, **kwargs)
+        if spec is None and name in available:
+            # Pretend the backend is installed. zea's bootstrap only probes with
+            # find_spec and never imports the backend, so this is enough to test
+            # combinations that the current environment does not actually have.
+            return importlib.machinery.ModuleSpec(name, loader=None)
+        return spec
 
     importlib.util.find_spec = mocked_find_spec
 
-    # Remove all backends from sys.modules except the allowed one
-    for b in all_backends:
-        if backend is None or b != backend:
-            sys.modules.pop(b, None)
-            for mod in list(sys.modules):
-                if mod.startswith(b + "."):
-                    sys.modules.pop(mod, None)
+    # Remove all blocked backends from sys.modules
+    for b in blocked:
+        sys.modules.pop(b, None)
+        for mod in list(sys.modules):
+            if mod.startswith(b + "."):
+                sys.modules.pop(mod, None)
     for mod in list(sys.modules):
         if mod == "zea" or mod.startswith("zea."):
             sys.modules.pop(mod, None)
@@ -188,19 +212,36 @@ def _subprocess_import_zea_with_only_backend(backend):  # pragma: no cover
     except Exception as e:
         print(str(e))
         sys.exit(1)
+    print(f"RESOLVED_KERAS_BACKEND={os.environ.get('KERAS_BACKEND')}")
     sys.exit(0)
 
 
-def run_import_zea_with_only_backend(backend):
+def run_import_zea_with_only_backend(
+    backend, keras_backend=None, unset_keras_backend=False, keras_home=None, argv=()
+):
     """
-    Run a subprocess that tries to import zea with only one backend available.
-    All other backends will raise ImportError.
+    Run a subprocess that tries to import zea with only the given backend(s) available.
+    All other backends will raise ImportError. ``argv`` is passed to the subprocess, so
+    that zea sees it in ``sys.argv``.
     """
     # Get the source code of the subprocess function, dedent, and add call at the end
     code = textwrap.dedent(inspect.getsource(_subprocess_import_zea_with_only_backend))
-    code += f"\n_subprocess_import_zea_with_only_backend({repr(backend)})\n"
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    code += (
+        f"\n_subprocess_import_zea_with_only_backend("
+        f"{repr(backend)}, {repr(keras_backend)}, "
+        f"{repr(unset_keras_backend)}, {repr(keras_home)})\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code, *argv], capture_output=True, text=True)
     return result
+
+
+def resolved_backend(result):
+    """Return the backend zea settled on, as reported by the subprocess."""
+    prefix = "RESOLVED_KERAS_BACKEND="
+    for line in result.stdout.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix) :]
+    return None
 
 
 @pytest.mark.parametrize(
@@ -236,6 +277,262 @@ def test_import_zea_with_backend_subprocess(backend, should_succeed):
     else:
         if result.returncode == 0:
             assert False, "zea should not import if all backends are missing"
+
+
+@pytest.mark.parametrize("backend", ["tensorflow", "torch", "jax"])
+def test_import_zea_without_keras_backend_env(backend):
+    """Without KERAS_BACKEND set, zea should use the backend that is actually installed.
+
+    Keras defaults to tensorflow, so a torch- or jax-only environment would otherwise
+    fail to import.
+    """
+    result = run_import_zea_with_only_backend(backend, unset_keras_backend=True)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, (
+        f"zea should import with KERAS_BACKEND unset and only {backend} installed.\n{output}"
+    )
+    assert resolved_backend(result) == backend, (
+        f"zea should have selected '{backend}', the only installed backend.\n{output}"
+    )
+    assert "Set KERAS_BACKEND to pin it" not in output, (
+        f"zea should not suggest pinning when '{backend}' was the only option.\n{output}"
+    )
+
+
+def test_import_zea_prefers_first_installed_backend():
+    """With several backends installed and no explicit choice, the preference order decides.
+
+    This is the only case where automatic selection has anything to decide, so it is what
+    pins the order in ``ML_BACKENDS`` down: reordering that list should fail here.
+
+    Deliberately not marked as requiring tensorflow or jax: backend availability is
+    simulated, so this runs on a single-backend machine too. Marking it would skip it in
+    exactly the environments where the ordering is easiest to get wrong.
+    """
+    result = run_import_zea_with_only_backend(["tensorflow", "jax"], unset_keras_backend=True)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, (
+        f"zea should import with KERAS_BACKEND unset and tensorflow and jax installed.\n{output}"
+    )
+    assert resolved_backend(result) == "tensorflow", (
+        f"zea should prefer tensorflow over jax when both are installed.\n{output}"
+    )
+    assert "jax also installed" in output, (
+        f"zea should name the alternatives it did not pick.\n{output}"
+    )
+    assert "Set KERAS_BACKEND to pin it" in output, (
+        f"zea should warn that the backend is not pinned.\n{output}"
+    )
+
+
+@pytest.mark.parametrize("flag", ["-h", "--help"])
+def test_help_flag_does_not_disable_backend_selection(flag):
+    """``--help`` only silences zea's logging, it must not skip backend selection.
+
+    The bootstrap suppresses its log lines when the script is invoked with a help flag.
+    That check reads the *user's* argv, so it must not gate anything the rest of the
+    process depends on, or a script would resolve its backend differently under --help.
+    """
+    result = run_import_zea_with_only_backend("jax", unset_keras_backend=True, argv=[flag])
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, (
+        f"zea should import with KERAS_BACKEND unset and {flag} in sys.argv.\n{output}"
+    )
+    assert resolved_backend(result) == "jax", (
+        f"zea should still select the installed backend when {flag} is passed.\n{output}"
+    )
+    assert "Using backend" not in output, (
+        f"zea should not log the backend when {flag} is passed.\n{output}"
+    )
+
+
+def test_keras_json_backend_is_not_overridden(tmp_path):
+    """A backend set in ``keras.json`` is a user choice, so automatic selection must not win.
+
+    Keras documents ``keras.json`` as an alternative to KERAS_BACKEND, so overriding it
+    would silently change the backend of anyone who configured keras that way.
+
+    Backend availability is simulated, so this does not require tensorflow to be installed.
+    """
+    keras_home = tmp_path / "keras_home"
+    keras_home.mkdir()
+    (keras_home / "keras.json").write_text(json.dumps({"backend": "jax"}))
+
+    result = run_import_zea_with_only_backend(
+        ["tensorflow", "jax"], unset_keras_backend=True, keras_home=str(keras_home)
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, f"zea should import with a backend set in keras.json.\n{output}"
+    assert resolved_backend(result) == "jax", (
+        f"zea should honour the backend from keras.json instead of preferring tensorflow.\n{output}"
+    )
+    # keras.json is machine-local, so it is no more reproducible than automatic selection
+    assert "from keras.json" in output and "Set KERAS_BACKEND to pin it" in output, (
+        f"zea should still warn that the backend is not pinned by KERAS_BACKEND.\n{output}"
+    )
+
+
+def test_empty_keras_backend_is_treated_as_unset(tmp_path):
+    """An empty KERAS_BACKEND picks nothing, so keras.json must still be honoured.
+
+    Keras ignores an empty value and falls back to keras.json, and .env files routinely
+    leave the variable blank (this repo's own .env.example does), so treating it as a
+    deliberate choice would silently override the configured backend.
+    """
+    keras_home = tmp_path / "keras_home"
+    keras_home.mkdir()
+    (keras_home / "keras.json").write_text(json.dumps({"backend": "jax"}))
+
+    result = run_import_zea_with_only_backend(
+        ["tensorflow", "jax"], keras_backend="", keras_home=str(keras_home)
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, f"zea should import with an empty KERAS_BACKEND.\n{output}"
+    assert resolved_backend(result) == "jax", (
+        f"An empty KERAS_BACKEND should not suppress the backend from keras.json.\n{output}"
+    )
+
+
+def test_resolved_backend_is_the_one_keras_uses(tmp_path):
+    """What zea reports must be what keras actually runs on.
+
+    KERAS_BACKEND and ``keras.backend.backend()`` can disagree, because keras also reads
+    keras.json and ignores an empty KERAS_BACKEND, so asserting on the env var alone
+    would miss it. Runs against real keras, using the backend that is actually installed.
+    """
+    # Name a backend automatic selection would not land on, so a regression actually
+    # shows up here. keras' numpy backend is only usable when jax is installed.
+    expected = "numpy" if "jax" in available_test_backends() else TEST_BACKEND
+
+    keras_home = tmp_path / "keras_home"
+    keras_home.mkdir()
+    (keras_home / "keras.json").write_text(json.dumps({"backend": expected}))
+
+    env = dict(os.environ, KERAS_HOME=str(keras_home), KERAS_BACKEND="")
+    code = (
+        "import zea, os, keras\n"
+        "print('ENV=' + os.environ['KERAS_BACKEND'])\n"
+        "print('KERAS=' + keras.backend.backend())\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, f"zea and keras should both import.\n{output}"
+    assert f"ENV={expected}" in output, f"zea should resolve {expected!r}.\n{output}"
+    assert f"KERAS={expected}" in output, f"keras should actually be using {expected!r}.\n{output}"
+
+
+def test_stale_keras_json_falls_back_to_installed_backend(tmp_path):
+    """``keras.json`` is written by keras itself, so it can name an uninstalled backend.
+
+    That is not a deliberate choice worth erroring over, so zea should fall back to
+    automatic selection rather than refusing to import.
+    """
+    keras_home = tmp_path / "keras_home"
+    keras_home.mkdir()
+    (keras_home / "keras.json").write_text(json.dumps({"backend": "tensorflow"}))
+
+    result = run_import_zea_with_only_backend(
+        "jax", unset_keras_backend=True, keras_home=str(keras_home)
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, (
+        f"zea should import despite keras.json naming an uninstalled backend.\n{output}"
+    )
+    assert resolved_backend(result) == "jax", (
+        f"zea should fall back to the installed backend.\n{output}"
+    )
+
+
+@pytest.mark.parametrize("origin", ["env", "keras.json"])
+def test_unsupported_keras_backend_is_rejected(origin, tmp_path):
+    """Keras supports backends that zea does not, such as openvino.
+
+    Those must fail loudly: substituting a backend zea does support would silently run
+    the user's code on something other than what they asked for.
+    """
+    keras_home = tmp_path / "keras_home"
+    keras_home.mkdir()
+
+    if origin == "env":
+        kwargs = {"keras_backend": "openvino"}
+    else:
+        (keras_home / "keras.json").write_text(json.dumps({"backend": "openvino"}))
+        kwargs = {"unset_keras_backend": True}
+
+    result = run_import_zea_with_only_backend("jax", keras_home=str(keras_home), **kwargs)
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, (
+        f"zea should refuse to import with an unsupported backend set in {origin}.\n{output}"
+    )
+    assert "does not support" in output, f"Expected an unsupported-backend error, got:\n{output}"
+    assert resolved_backend(result) is None, (
+        f"zea should not fall back to a backend of its own choosing.\n{output}"
+    )
+
+
+def test_keras_imported_before_zea_keeps_its_backend(tmp_path):
+    """When keras is already imported its backend is fixed, so zea must follow it.
+
+    zea cannot change it any more, and leaving KERAS_BACKEND naming a different backend
+    would make ``zea.init_device`` (and any subprocess) configure one that is not running.
+    """
+    # A backend zea accepts but keras is not running, so the two genuinely disagree.
+    # keras' numpy backend needs jax; without it, fall back to another installed backend.
+    if "jax" in available_test_backends():
+        divergent = "numpy"
+    else:
+        others = [b for b in available_test_backends() if b != TEST_BACKEND]
+        if not others:
+            pytest.skip("Needs a second backend to disagree about.")
+        divergent = others[0]
+
+    keras_home = tmp_path / "keras_home"
+    keras_home.mkdir()
+    (keras_home / "keras.json").write_text(json.dumps({"backend": TEST_BACKEND}))
+
+    env = dict(os.environ, KERAS_HOME=str(keras_home), KERAS_BACKEND="")
+    code = (
+        "import os, keras\n"
+        f"os.environ['KERAS_BACKEND'] = {divergent!r}\n"
+        "import zea\n"
+        "print('ENV=' + os.environ['KERAS_BACKEND'])\n"
+        "print('KERAS=' + keras.backend.backend())\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, f"zea should still import after keras.\n{output}"
+    assert f"KERAS={TEST_BACKEND}" in output, (
+        f"keras should be unaffected by the later KERAS_BACKEND change.\n{output}"
+    )
+    assert f"ENV={TEST_BACKEND}" in output, (
+        f"zea should adopt the backend keras is running, not {divergent!r}.\n{output}"
+    )
+    assert "imported before zea" in output, (
+        f"zea should warn that the import order decided the backend.\n{output}"
+    )
+
+
+@pytest.mark.parametrize("backend,should_succeed", [("jax", True), ("torch", False)])
+def test_import_zea_numpy_backend_requires_jax(backend, should_succeed):
+    """KERAS_BACKEND=numpy requires jax, even when another backend is installed.
+
+    Keras' numpy backend is not standalone, so zea should refuse to import with a clear
+    dependency error when jax is missing, regardless of torch/tensorflow being available.
+    """
+    result = run_import_zea_with_only_backend(backend, keras_backend="numpy")
+    output = result.stdout + result.stderr
+    if should_succeed:
+        assert result.returncode == 0, (
+            f"zea should import with KERAS_BACKEND=numpy and jax available.\n{output}"
+        )
+    else:
+        assert result.returncode != 0, (
+            f"zea should not import with KERAS_BACKEND=numpy while jax is missing "
+            f"(only {backend} installed)."
+        )
+        assert "jax must be installed as well" in output, (
+            f"Expected the numpy/jax dependency error, got:\n{output}"
+        )
 
 
 def test_all_model_modules_imported():

@@ -46,6 +46,11 @@ docs-serve: docs-parameters docs-autosummary
 docs-test: docs-parameters docs-autosummary
 	$(SPHINXBUILD) -b doctest "$(SOURCEDIR)" "$(BUILDDIR)/doctest" $(SPHINXOPTS)
 
+# Check that all hyperlinks in the documentation (including example notebooks,
+# which nbsphinx renders into the doctree just like any other page) resolve.
+docs-linkcheck: docs-parameters docs-autosummary
+	$(SPHINXBUILD) -b linkcheck "$(SOURCEDIR)" "$(BUILDDIR)/linkcheck" $(SPHINXOPTS)
+
 docs-clean:
 	rm -rf "$(BUILDDIR)"
 	echo "Cleaned build directory: $(BUILDDIR)"

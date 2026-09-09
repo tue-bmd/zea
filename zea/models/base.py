@@ -129,14 +129,19 @@ class BaseModel(keras.models.Model):
                 )
         return loader.load_model(cls, load_weights, **kwargs)
 
-    def save_to_preset(self, preset_dir):
+    def save_to_preset(self, preset_dir, max_shard_size=10):
         """Save backbone to a preset directory.
 
         Args:
             preset_dir: The path to the local model preset directory.
+            max_shard_size: ``int`` or ``float``. Maximum size in GB of each
+                weights file. A model larger than this is written as shards
+                alongside a ``model.weights.json`` index, which
+                :meth:`from_preset` loads transparently. If ``None``, the
+                weights are always written as a single file. Defaults to ``10``.
         """
         saver = get_preset_saver(preset_dir)
-        saver.save_model(self)
+        saver.save_model(self, max_shard_size=max_shard_size)
 
 
 def deserialize_zea_object(config, cls=None):

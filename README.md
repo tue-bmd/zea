@@ -1,17 +1,23 @@
-# zea <img src="https://raw.githubusercontent.com/tue-bmd/zea/main/docs/_static/zea-logo.png" width="120" height="120" align="right" alt="zea Logo" />
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tue-bmd/zea/main/docs/_static/zea-logo.png" width="140" alt="zea logo">
+</p>
 
+<h1 align="center">zea</h1>
+<p align="center"><em>A Toolbox for Cognitive Ultrasound Imaging</em></p>
 
-[![PyPI version](https://img.shields.io/pypi/v/zea)](https://pypi.org/project/zea/)
-[![Continuous integration](https://github.com/tue-bmd/zea/actions/workflows/tests.yaml/badge.svg)](https://github.com/tue-bmd/zea/actions/workflows/tests.yaml)
-[![Documentation Status](https://readthedocs.org/projects/zea/badge/?version=latest)](https://zea.readthedocs.io/en/latest/?badge=latest)
-[![License](https://img.shields.io/github/license/tue-bmd/zea)](https://github.com/tue-bmd/zea/blob/main/LICENSE)
-[![codecov](https://codecov.io/gh/tue-bmd/zea/branch/main/graph/badge.svg)](https://codecov.io/gh/tue-bmd/zea)
-[![status](https://joss.theoj.org/papers/fa923917ca41761fe0623ca6c350017d/status.svg)](https://joss.theoj.org/papers/fa923917ca41761fe0623ca6c350017d)
-[![arXiv](https://img.shields.io/badge/arXiv-B31B1B?style=flat&logo=arXiv&logoColor=white)](https://arxiv.org/abs/2512.01433)
-[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co/zeahub)
-[![GitHub stars](https://img.shields.io/github/stars/tue-bmd/zea?style=social)](https://github.com/tue-bmd/zea/stargazers)
+<p align="center">
+  <a href="https://pypi.org/project/zea/"><img src="https://img.shields.io/pypi/v/zea" alt="PyPI version"></a>
+  <a href="https://github.com/tue-bmd/zea/actions/workflows/tests.yaml"><img src="https://github.com/tue-bmd/zea/actions/workflows/tests.yaml/badge.svg" alt="Continuous integration"></a>
+  <a href="https://zea.readthedocs.io/en/latest/?badge=latest"><img src="https://readthedocs.org/projects/zea/badge/?version=latest" alt="Documentation Status"></a>
+  <a href="https://github.com/tue-bmd/zea/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tue-bmd/zea" alt="License"></a>
+  <a href="https://codecov.io/gh/tue-bmd/zea"><img src="https://codecov.io/gh/tue-bmd/zea/branch/main/graph/badge.svg" alt="codecov"></a>
+  <a href="https://joss.theoj.org/papers/fa923917ca41761fe0623ca6c350017d"><img src="https://joss.theoj.org/papers/fa923917ca41761fe0623ca6c350017d/status.svg" alt="status"></a>
+  <a href="https://arxiv.org/abs/2512.01433"><img src="https://img.shields.io/badge/arXiv-B31B1B?style=flat&logo=arXiv&logoColor=white" alt="arXiv"></a>
+  <a href="https://huggingface.co/zeahub"><img src="https://img.shields.io/badge/Hugging%20Face-FFD21E?logo=huggingface&logoColor=black" alt="Hugging Face"></a>
+  <a href="https://github.com/tue-bmd/zea/stargazers"><img src="https://img.shields.io/github/stars/tue-bmd/zea?style=social" alt="GitHub stars"></a>
+</p>
 
-Welcome to the `zea` package: *A Toolbox for Cognitive Ultrasound Imaging.*
+Welcome to the `zea` package.
 
 - 📚 Full documentation: [zea.readthedocs.io](https://zea.readthedocs.io)
 - 🔬 Try hands-on examples (with Colab): [Examples & Tutorials](https://zea.readthedocs.io/en/latest/examples.html)
@@ -29,7 +35,7 @@ Check out the [About](https://zea.readthedocs.io/en/latest/about.html) page for 
 
 > [!WARNING]
 > **Beta!**
-> This package is under active development. It is mainly used to support [our research](https://zea.readthedocs.io/en/latest/about.html#papers). That being said, we are happy to share it with the ultrasound community and hope it will be useful for your research as well.
+> This package is under active development. See a list of ongoing [research](https://zea.readthedocs.io/en/latest/about.html#papers) supported by `zea`. We are happy to share it with the ultrasound community and hope it will be useful for your research as well.
 
 > [!NOTE]
 > 📖 Please cite `zea` in your publications if it helps your research. You can find citation info [here](https://zea.readthedocs.io/en/latest/getting-started.html#citation).

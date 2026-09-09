@@ -6,6 +6,7 @@ from keras import ops
 
 from zea.func.tensor import linear_sum_assignment
 from zea.models.generative import GenerativeModel
+from zea.utils import ProgressBar
 
 
 class GaussianMixtureModel(GenerativeModel):
@@ -117,7 +118,7 @@ class GaussianMixtureModel(GenerativeModel):
             self._initialize(X)
 
         prev_ll = None
-        progbar = keras.utils.Progbar(max_iter, verbose=verbose)
+        progbar = ProgressBar(max_iter, verbose=verbose)
         for i in range(max_iter):
             # E-step
             gamma = self._e_step(X)
@@ -157,24 +158,26 @@ class GaussianMixtureModel(GenerativeModel):
 
     def posterior_sample(self, measurements, n_samples=1, seed=None, **kwargs):
         """
-        Sample component indices from the posterior p(z|x) for each measurement.
+        Sample component indices from the posterior p(z|x).
 
         Args:
-            measurements: Input data, shape (batch, n_features).
-            n_samples: Number of posterior samples per measurement.
+            measurements: Input data of shape (n_features,), or
+                (n_samples, n_features) to condition each sample on a
+                different measurement. Use :func:`zea.func.vmap` to sample from
+                a batch of measurements.
+            n_samples: Number of posterior samples to generate.
             seed: Random seed.
 
         Returns:
-            Component indices, shape (batch, n_samples).
+            Component indices, shape (n_samples,).
         """
         X = ops.convert_to_tensor(measurements, dtype="float32")
-        gamma = self._e_step(X)  # (batch, n_components)
-        # Sample n_samples times for each measurement
-        comp_idx = keras.random.categorical(
-            ops.log(gamma), n_samples, seed=seed
-        )  # (batch, n_samples)
-        # Return as (batch, n_samples)
-        return comp_idx
+        X, _ = self._as_measurement_batch(X, n_samples, event_ndim=1)
+        X = ops.broadcast_to(X, (n_samples, ops.shape(X)[-1]))
+        gamma = self._e_step(X)  # (n_samples, n_components)
+        # One draw per sample, from that sample's own responsibilities
+        comp_idx = keras.random.categorical(ops.log(gamma), 1, seed=seed)  # (n_samples, 1)
+        return ops.squeeze(comp_idx, axis=-1)
 
     def log_density(self, data, **kwargs):
         X = ops.convert_to_tensor(data, dtype="float32")

@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 import keras
 import numpy as np
 from keras import ops
@@ -14,8 +16,6 @@ from zea.func.tensor import (
 from zea.func.ultrasound import (
     apply_aligned_apodization,
     apply_receive_apodization,
-    channels_to_complex,
-    complex_to_channels,
     demodulate,
     envelope_detect,
     get_band_pass_filter,
@@ -29,17 +29,45 @@ from zea.internal.core import (
     DataTypes,
 )
 from zea.internal.registry import ops_registry
+from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
-from zea.simulator import simulate_rf
+from zea.simulator import apply_receive_chain, elevation_slab_bucket, simulate_rf
+from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
+
+simulator_settings = {
+    "exact": simulate_rf,
+    "frequency_approximation": simulate_rf,
+    "time_approximation": simulate_rf_td,
+}
 
 
 @ops_registry("simulate_rf")
 class Simulate(Operation):
-    """Simulate RF data."""
+    """Simulate RF data.
+
+    ``method`` switches between different approximation models. ``"exact"`` is the highest fidelity
+    version. ``"frequency_approximation"`` is an alias for ``exact``; future versions that sacrifice
+    speed for accuracy or accuracy for speed will use these two paths respectively.
+    ``"time_approximation"`` solves in the time domain. Its geometry-dependent factors are
+    evaluated at the center frequency, making it less accurate than the others but much faster in
+    some settings.
+    """
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["n_ax", "apply_lens_correction"]
+    STATIC_PARAMS = [
+        "n_ax",
+        "apply_lens_correction",
+        "method",
+        "elevation_lens",
+        "max_chunk_gb",
+        "center_frequency",
+        "sampling_frequency",
+        "scatter_exponent",
+        "noise_level_db",
+        "tgc_max_db",
+        "noise_seed",
+    ]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
     def __init__(self, **kwargs):
@@ -47,6 +75,13 @@ class Simulate(Operation):
             output_data_type=DataTypes.RAW_DATA,
             **kwargs,
         )
+
+    def __call__(self, **kwargs):
+        # Drop out-of-slab scatterers here, because `call` is traced.
+        merged = {**self._input_cache, **kwargs}
+        pruned = {} if self._inside_outer_jit else elevation_slab_bucket(**merged)
+        outputs = super().__call__(**{**merged, **pruned})
+        return {**outputs, **{key: merged[key] for key in pruned}}
 
     def call(
         self,
@@ -65,8 +100,21 @@ class Simulate(Operation):
         element_width,
         attenuation_coef,
         tx_apodizations,
+        t_peak,
+        method="exact",
+        elevation_lens=False,
+        element_height=None,
+        max_chunk_gb=10.0,
+        noise_level_db=None,
+        tgc_max_db=0.0,
+        noise_seed=0,
+        noise_reference=None,
+        scatter_exponent=2.0,
         **kwargs,
     ):
+        if method not in simulator_settings:
+            raise ValueError(f"method ({method}) must be one of {tuple(simulator_settings)}")
+        simulate = simulator_settings[method]
         simulate_kwargs = {
             "probe_geometry": probe_geometry,
             "apply_lens_correction": apply_lens_correction,
@@ -81,29 +129,41 @@ class Simulate(Operation):
             "element_width": element_width,
             "attenuation_coef": attenuation_coef,
             "tx_apodizations": tx_apodizations,
+            "t_peak": t_peak,
+            "elevation_lens": elevation_lens,
+            "element_height": element_height,
+            "scatter_exponent": scatter_exponent,
+            "max_chunk_gb": max_chunk_gb,
+            "noise_level_db": noise_level_db,
+            "tgc_max_db": tgc_max_db,
+            "noise_seed": noise_seed,
+            "noise_reference": noise_reference,
         }
         if not self.with_batch_dim:
-            simulated_rf = simulate_rf(
+            simulated_rf = simulate(
                 scatterer_positions=scatterer_positions,
                 scatterer_magnitudes=scatterer_magnitudes,
                 **simulate_kwargs,
             )
         else:
+            # A stateless seed inside `map` repeats the same noise for every item, so instead, first
+            # simulate everything and then apply TGC and nosie.
+            mapped_kwargs = {**simulate_kwargs, "noise_level_db": None, "tgc_max_db": 0.0}
             simulated_rf = ops.map(
-                lambda inputs: simulate_rf(
+                lambda inputs: simulate(
                     scatterer_positions=inputs["positions"],
                     scatterer_magnitudes=inputs["magnitudes"],
-                    **simulate_kwargs,
+                    **mapped_kwargs,
                 ),
-                {
-                    "positions": scatterer_positions,
-                    "magnitudes": scatterer_magnitudes,
-                },
+                {"positions": scatterer_positions, "magnitudes": scatterer_magnitudes},
+            )
+            simulated_rf = apply_receive_chain(
+                simulated_rf, noise_level_db, tgc_max_db, noise_seed, noise_reference
             )
 
         return {
             self.output_key: simulated_rf,
-            "n_ch": 1,  # Simulate always returns RF data (so single channel)
+            "n_ch": 1,
         }
 
 
@@ -394,6 +454,7 @@ class ScanConvert(Operation):
         resolution=None,
         coordinates=None,
         fill_value=None,
+        distance_to_apex=0.0,
         **kwargs,
     ):
         """Scan convert images to cartesian coordinates.
@@ -411,6 +472,9 @@ class ScanConvert(Operation):
                 based on rho_range, theta_range, phi_range and resolution. If provided, this
                 operation can be jitted.
             fill_value (float): Value to fill the image with outside the defined region.
+            distance_to_apex (float): Distance from the apex of the polar grid to the
+                transducer surface. Only shifts the reported ``z_lim`` so it reads as a
+                depth below the transducer; the image itself is unchanged.
 
         """
         if fill_value is None:
@@ -437,6 +501,7 @@ class ScanConvert(Operation):
             fill_value,
             self.order,
             with_batch_dim=self.with_batch_dim,
+            distance_to_apex=distance_to_apex,
         )
 
         return {self.output_key: data_out, **parameters}
@@ -461,14 +526,6 @@ class Demodulate(Operation):
 
     def call(self, demodulation_frequency=None, sampling_frequency=None, **kwargs):
         data = kwargs[self.key]
-
-        dtype = str(ops.dtype(data))
-        if dtype == "int16":
-            raise ValueError(
-                "Demodulate received int16 raw_data. Add a Cast operation before Demodulate, "
-                "for example: Pipeline([Cast(dtype='float32'), Demodulate(), ...]). "
-                "Tip: Pipeline.from_default() already includes this cast."
-            )
 
         data = ops.cast(data, "float32")
 
@@ -542,7 +599,7 @@ class FirFilter(Operation):
                 "When using complex_channels=True, the complex channels are removed to convert"
                 " to complex numbers before filtering, so axis cannot be the last axis."
             )
-            signal = channels_to_complex(signal)
+            signal = ops.view_as_complex(signal)
 
         def _convolve(signal):
             """Apply the filter to the signal using correlation."""
@@ -551,7 +608,7 @@ class FirFilter(Operation):
         filtered_signal = apply_along_axis(_convolve, axis, signal)
 
         if self.complex_channels:
-            filtered_signal = complex_to_channels(filtered_signal)
+            filtered_signal = ops.view_as_real(filtered_signal)
 
         return {self.output_key: filtered_signal}
 
@@ -711,16 +768,14 @@ class BandPassFilter(FirFilter):
         """Validate passband and return (f1, f2)."""
         passband_error_message = "passband must be an iterable of two numeric values"
 
-        try:
-            passband_values = tuple(selected_passband)
-            f1 = passband_values[0]
-            f2 = passband_values[1]
-        except (TypeError, IndexError) as exc:
-            raise ValueError(passband_error_message) from exc
+        if not isinstance(selected_passband, Iterable):
+            raise ValueError(passband_error_message)
 
+        passband_values = tuple(selected_passband)
         if len(passband_values) != 2:
             raise ValueError(passband_error_message)
 
+        f1, f2 = passband_values
         if not all(
             isinstance(f, (int, float, np.number)) and not isinstance(f, bool) for f in (f1, f2)
         ):
@@ -731,21 +786,26 @@ class BandPassFilter(FirFilter):
 
 @ops_registry("channels_to_complex")
 class ChannelsToComplex(Operation):
+    @deprecated(replacement="zea.ops.keras_ops.ViewAsComplex")
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
     def call(self, **kwargs):
         data = kwargs[self.key]
-        output = channels_to_complex(data)
+        output = ops.view_as_complex(data)
         return {self.output_key: output}
 
 
 @ops_registry("complex_to_channels")
 class ComplexToChannels(Operation):
+    @deprecated(replacement="zea.ops.keras_ops.ViewAsReal")
     def __init__(self, axis=-1, **kwargs):
         super().__init__(**kwargs)
         self.axis = axis
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        output = complex_to_channels(data, axis=self.axis)
+        output = ops.moveaxis(ops.view_as_real(data), -1, self.axis)
         return {self.output_key: output}
 
 
@@ -956,7 +1016,7 @@ class AnisotropicDiffusion(Operation):
     """Speckle Reducing Anisotropic Diffusion (SRAD) filter.
 
     Reference:
-    - https://www.researchgate.net/publication/5602035_Speckle_reducing_anisotropic_diffusion
+    - https://doi.org/10.1109/TIP.2002.804276
     - https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox
     """
 
@@ -1085,7 +1145,7 @@ class UpMix(Operation):
             log.warning("Upmixing is not applicable to RF data.")
             return {self.output_key: data}
         elif data.shape[-1] == 2:
-            data = channels_to_complex(data)
+            data = ops.view_as_complex(data)
 
         data = upmix(data, sampling_frequency, demodulation_frequency, self.upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
@@ -1340,27 +1400,132 @@ class CommonMidpointPhaseError(Operation):
 
 @ops_registry("tissue_suppression")
 class TissueSuppression(Operation):
-    """Tissue suppression using SVD-based clutter filtering.
+    """Tissue suppression using SVD-based clutter filtering. Typically applied
+    after beamforming but before envelope detection, on beamformed RF or IQ data.
 
     Removes stationary tissue components from multi-frame ultrasound data
     by zeroing the dominant singular values of the Casorati matrix.
+
+    Two filter types are available:
+
+    * ``"svd"`` -- the real-valued Direct SVD filter, building the temporal Gram
+      matrix with a plain transpose (``XᵀX``). For real data.
+    * ``"svd_complex"`` -- the same filter using the conjugate (Hermitian)
+      transpose (``XᴴX``, the true temporal covariance), for IQ data.
+
+    By default ``filter_type=None`` picks between them from the channel axis --
+    ``n_ch=2`` means IQ and selects ``"svd_complex"``, otherwise
+    ``"svd"``.
+
+    .. note::
+        Unlike most operations, this one is temporal: axis 0 of the input is the
+        frame axis and is consumed jointly, so ``with_batch_dim`` does not apply
+        and is ignored. Input is always ``(n_frames, ...)``. To process several
+        acquisitions, loop the pipeline over them.
+
+    .. note::
+        On the TensorFlow backend the ``"svd_complex"`` path runs eagerly:
+        TensorFlow registers no XLA ``Svd`` kernel for complex dtypes. The other
+        backends JIT it.
     """
 
-    def __init__(self, cutoff: int = 5, **kwargs):
-        super().__init__(**kwargs)
-        self.cutoff = cutoff
+    FILTER_TYPES = ("svd", "svd_complex")
 
-    def suppress_tissue(self, data):
+    def __init__(self, cutoff: int | float = 5, filter_type: str | None = None, **kwargs):
+        """
+        Args:
+            cutoff (int or float): Number of principal (tissue) components to
+                reject. An ``int`` is a component count. A ``float`` in ``[0, 1)``
+                is a fraction of the number of frames, resolved at call time as
+                ``round(n_frames * cutoff)``.
+            filter_type (str or None): Which clutter filter to use, one of
+                :attr:`FILTER_TYPES`. Defaults to ``None``, which selects
+                ``"svd_complex"`` for IQ input (``n_ch=2``) and ``"svd"``
+                otherwise.
+        """
+        if filter_type is not None and filter_type not in self.FILTER_TYPES:
+            raise ValueError(
+                f"Unknown filter_type {filter_type!r}, expected one of "
+                f"{', '.join(map(repr, self.FILTER_TYPES))} or None (auto-detect)."
+            )
+        if isinstance(cutoff, float) and not 0 <= cutoff < 1:
+            raise ValueError(
+                f"A float cutoff is a fraction of the frames and must be in [0, 1), got {cutoff}."
+            )
+        # Set before super().__init__(), which calls set_jit() -> reads self.jittable.
+        self.cutoff = cutoff
+        self.filter_type = filter_type
+        super().__init__(**kwargs)
+
+    @property
+    def jittable(self):
+        """Whether this operation can be JIT compiled.
+
+        TensorFlow registers no XLA ``Svd`` kernel for complex dtypes, so the
+        ``"svd_complex"`` path has to run eagerly there. With ``filter_type=None``
+        the path is only known once the data's channel axis is seen, so on
+        TensorFlow we conservatively assume complex is possible and stay eager;
+        pass ``filter_type="svd"`` explicitly to keep the real filter jitted.
+        """
+        if self.filter_type != "svd" and keras.backend.backend() == "tensorflow":
+            return False
+        return super().jittable
+
+    def resolve_filter_type(self, data) -> str:
+        """Resolve which filter to use for ``data``.
+
+        Args:
+            data (ops.Tensor): Input of shape ``(n_frames, ..., n_ch)``.
+
+        Returns:
+            str: The configured ``filter_type``, or -- when it is ``None`` --
+            ``"svd_complex"`` if the channel axis marks the data as IQ
+            (``n_ch=2``, zea's convention) and ``"svd"`` otherwise.
+        """
+        if self.filter_type is not None:
+            return self.filter_type
+        return "svd_complex" if len(data.shape) > 1 and data.shape[-1] == 2 else "svd"
+
+    def resolve_cutoff(self, n_frames: int) -> int:
+        """Resolve a fractional ``cutoff`` into a component count.
+
+        Args:
+            n_frames (int): Number of frames in the data.
+
+        Returns:
+            int: Number of principal components to reject.
+        """
+        if isinstance(self.cutoff, float):
+            return min(int(round(n_frames * self.cutoff)), n_frames - 1)
+        return self.cutoff
+
+    def suppress_tissue(self, data, filter_type=None):
         """
         Suppresses tissue using Direct SVD.
 
         Args:
-            data (ops.Tensor): Shape (n_frames, ...)
+            data (ops.Tensor): Shape (n_frames, ...). Complex for the
+                ``"svd_complex"`` filter type, real otherwise.
+            filter_type (str or None): Filter to apply. Defaults to ``None``,
+                which resolves it from ``data`` via :meth:`resolve_filter_type`.
 
         """
-        return suppress_tissue(data, self.cutoff)
+        if filter_type is None:
+            filter_type = self.resolve_filter_type(data)
+        return suppress_tissue(
+            data,
+            self.resolve_cutoff(data.shape[0]),
+            conjugate=filter_type == "svd_complex",
+        )
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        filtered = self.suppress_tissue(ops.array(data))
+        filter_type = self.resolve_filter_type(data)
+        is_complex = filter_type == "svd_complex"
+
+        array = ops.view_as_complex(ops.array(data)) if is_complex else ops.array(data)
+        filtered = self.suppress_tissue(array, filter_type=filter_type)
+        if is_complex:
+            filtered = ops.view_as_real(filtered)
+
         return {self.output_key: ops.cast(ops.array(filtered), data.dtype)}

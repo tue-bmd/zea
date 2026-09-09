@@ -12,9 +12,9 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - **Default**
      - **Options**
    * - ``KERAS_BACKEND``
-     - Select the Keras backend to use. This defines the ML framework that will be used for all tensor operations.
-     - ``jax``
-     - ``tensorflow``, ``torch``, ``jax``, ``numpy``
+     - Select the Keras backend to use. This defines the ML framework that will be used for all tensor operations. Takes precedence over the backend in ``keras.json``. If neither is set, ``zea`` picks an installed backend on import (preferring ``tensorflow``, then ``jax``, then ``torch``).
+     - installed backend
+     - ``tensorflow``, ``jax``, ``torch``, ``numpy``
    * - ``ZEA_CACHE_DIR``
      - Directory to use for caching downloaded files, e.g. model weights or datasets from Hugging Face Hub.
      - ``~/.cache/zea``
@@ -36,7 +36,8 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - ``60``
      - Any positive integer, or ``<= 0`` to disable timeout.
    * - ``ZEA_FIND_H5_SHAPES_PARALLEL``
-     - If set to ``1``, will use parallel processing when searching for HDF5 file shapes.
+     - If set to ``1``, will use parallel processing for the per-file sweeps over a dataset
+       (reading HDF5 file shapes, and validating files against the zea format).
      - ``1``
      - ``0``, ``1``
    * - ``ZEA_TEST_DEVICE``
@@ -44,3 +45,28 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - ``auto:1``
      - Any valid device name as accepted by :func:`zea.init_device`. For example, ``cpu``,
        ``cuda:0``, ``auto:1``, etc.
+   * - ``ZEA_HF_CACHE_TTL``
+     - Seconds a Hugging Face repository listing or resolved download path may be reused before
+       ``zea`` asks the hub again. Keeps a dataset scan or preset load from repeating the same
+       request; set to ``0`` if you need every call to hit the hub (e.g. a repo being written to
+       from elsewhere while you read it).
+     - ``300``
+     - Any number of seconds, ``0`` to disable.
+   * - ``ZEA_CHUNK_CACHE``
+     - Cache chunks fetched while streaming (``hf://``) under ``ZEA_CACHE_DIR/chunks``, so a
+       repeated read is served from disk instead of re-downloaded. Keyed by content hash, so a
+       re-uploaded file misses rather than serving stale bytes. Per-file: ``File(cache=False)``.
+     - ``1``
+     - ``0``, ``1``
+   * - ``ZEA_CHUNK_CACHE_SIZE``
+     - Byte budget for that cache; least-recently-used chunks are evicted once it is exceeded.
+     - ``10737418240`` (10 GiB)
+     - Any positive integer (bytes).
+   * - ``BLOSC_NTHREADS``
+     - Threads Blosc uses within a single HDF5 chunk, which is most of the write throughput
+       (~4x). Turn it **down** when writes are already parallel (several dataloader workers each
+       saving a file will multiply with it); turning it far up backfires, as the blocks go
+       memory-bound. Only affects writes: the read path (:mod:`zea.data.chunk_reader`) uses
+       ``numcodecs``, which has its own thread setting.
+     - ``min(8, cpu_count)``
+     - Any positive integer.

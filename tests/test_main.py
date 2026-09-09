@@ -2,12 +2,13 @@
 
 import contextlib
 import io
+from unittest.mock import patch
 
 import pytest
 import tyro
 
 from zea.__main__ import CLI
-from zea.cli_args import AppArgs, ProcessArgs
+from zea.cli_args import AppArgs, DataPathsArgs, ProcessArgs
 
 
 def parse_args(argv):
@@ -139,3 +140,237 @@ def test_app_flags():
     args = cli_args.subcommand
     assert args.share is True
     assert args.server_port == 7861
+
+
+# ── convert subcommand ────────────────────────────────────────────────────────
+
+
+def test_convert_subcommand_exists():
+    """The 'convert' subcommand parses to ConvertArgs wrapping the dataset dataclass."""
+    from zea.cli_args import ConvertArgs, _Camus
+
+    cli_args = parse_args(["convert", "camus", "raw/", "out/"])
+    assert isinstance(cli_args.subcommand, ConvertArgs)
+    assert isinstance(cli_args.subcommand.subcommand, _Camus)
+    assert cli_args.subcommand.subcommand.download is False
+
+
+def test_convert_help_lists_datasets():
+    """zea convert --help should print the dataset subcommands and exit 0."""
+    buf = io.StringIO()
+    with pytest.raises(SystemExit) as exc_info, contextlib.redirect_stdout(buf):
+        parse_args(["convert", "--help"])
+    assert exc_info.value.code == 0
+    assert "echonet" in buf.getvalue()
+
+
+def test_convert_main_dispatches_without_preallocating(monkeypatch):
+    """zea.__main__.main() routes 'convert' to the converter with allow_preallocate=False."""
+    monkeypatch.setattr("sys.argv", ["zea", "convert", "camus", "raw/", "out/", "--download"])
+
+    captured = {}
+
+    def fake_init_device(device="auto:1", **kwargs):
+        captured["allow_preallocate"] = kwargs.get("allow_preallocate", True)
+
+    with (
+        patch("zea.internal.device.init_device", side_effect=fake_init_device),
+        patch("zea.data.convert.camus.convert_camus") as mock_convert,
+    ):
+        from zea.__main__ import main
+
+        main()
+
+    # Conversion must not preallocate the full GPU (mirrors the standalone entry point).
+    assert captured["allow_preallocate"] is False
+    assert mock_convert.call_count == 1
+    (called_args,), _ = mock_convert.call_args
+    from zea.cli_args import _Camus
+
+    assert isinstance(called_args, _Camus)
+    assert called_args.download is True
+
+
+# ── datapaths subcommand ──────────────────────────────────────────────────────
+
+
+def test_datapaths_subcommand_exists():
+    """`zea datapaths` is registered and takes the users.yaml to write."""
+    args = parse_args(["datapaths", "--user-config", "users.yaml"]).subcommand
+    assert isinstance(args, DataPathsArgs)
+    assert str(args.user_config) == "users.yaml"
+    assert args.local is None
+
+
+def test_datapaths_main_dispatches_without_a_device(monkeypatch):
+    """Setting up data paths has no use for a compute device, so none is initialised."""
+    monkeypatch.setattr("sys.argv", ["zea", "datapaths", "--user-config", "users.yaml"])
+
+    with (
+        patch("zea.internal.device.init_device") as mock_init_device,
+        patch("zea.datapaths.create_new_user") as mock_create,
+    ):
+        from zea.__main__ import main
+
+        main()
+
+    mock_init_device.assert_not_called()
+    assert mock_create.call_count == 1
+    (called_path,), kwargs = mock_create.call_args
+    assert str(called_path) == "users.yaml"
+    assert kwargs == {"local": None}
+
+
+# ── tools subcommand ──────────────────────────────────────────────────────────
+
+
+def test_tools_select_subcommand_exists():
+    """'select' sits behind 'tools' rather than being inlined into it."""
+    from zea.cli_args import ToolsArgs, _Select
+
+    cli_args = parse_args(["tools", "select", "a.png", "b.png"])
+    assert isinstance(cli_args.subcommand, ToolsArgs)
+    args = cli_args.subcommand.subcommand
+    assert isinstance(args, _Select)
+    assert args.files == ["a.png", "b.png"]
+    # defaults
+    assert args.selector is None
+    assert args.metric == "gcnr"
+    assert args.key == "data/image"
+    assert args.animation is True
+    assert args.confirm is True
+    assert args.overwrite is False
+
+
+def test_tools_select_flags():
+    cli_args = parse_args(
+        [
+            "tools",
+            "select",
+            "clip.mp4",
+            "--selector",
+            "lasso",
+            "--title",
+            "LV endo",
+            "--num-selections",
+            "3",
+            "--fps",
+            "20",
+            "--output-dir",
+            "/tmp/out",
+            "--no-animation",
+            "--no-confirm",
+            "--overwrite",
+        ]
+    )
+    args = cli_args.subcommand.subcommand
+    assert args.selector == "lasso"
+    assert args.title == "LV endo"
+    assert args.num_selections == 3
+    assert args.fps == 20
+    assert str(args.output_dir) == "/tmp/out"
+    assert args.animation is False
+    assert args.confirm is False
+    assert args.overwrite is True
+
+
+def test_tools_select_preserves_hf_paths():
+    """Like the data subcommands, 'hf://' inputs must survive tyro parsing as strings."""
+    uri = "hf://zeahub/camus/val/patient0409/patient0409_4CH.hdf5"
+    args = parse_args(["tools", "select", uri]).subcommand.subcommand
+    assert args.files == [uri]
+
+
+def test_tools_help_lists_select():
+    buf = io.StringIO()
+    with pytest.raises(SystemExit) as exc_info, contextlib.redirect_stdout(buf):
+        parse_args(["tools", "--help"])
+    assert exc_info.value.code == 0
+    assert "select" in buf.getvalue()
+
+
+def test_tools_main_dispatches_without_a_device(monkeypatch):
+    """'tools select' reaches run_selection_tool, and claims no compute device:
+    it is interactive matplotlib work, so it must not grab (or wait for) a GPU."""
+    monkeypatch.setattr("sys.argv", ["zea", "tools", "select", "clip.mp4", "--no-confirm"])
+
+    with (
+        patch("zea.internal.device.init_device") as mock_init_device,
+        patch("zea.tools.selection_tool.run_selection_tool") as mock_run,
+    ):
+        from zea.__main__ import main
+
+        main()
+
+    assert mock_init_device.call_count == 0
+    assert mock_run.call_count == 1
+    _, kwargs = mock_run.call_args
+    assert kwargs["files"] == ["clip.mp4"]
+    assert kwargs["confirm_selection"] is False
+
+
+@pytest.mark.parametrize(
+    "argv,attr",
+    [
+        (["data", "resave", "hf://zeahub/data/file.h5", "out.hdf5"], "input_path"),
+        (["data", "compound_frames", "hf://zeahub/data/", "out/"], "input_path"),
+        (["data", "compound_transmits", "hf://zeahub/data/file.h5", "out.hdf5"], "input_path"),
+        (["data", "extract", "hf://zeahub/data/file.h5", "out.hdf5"], "input_path"),
+        (["data", "summary", "hf://zeahub/data/file.h5"], "input_path"),
+        (["data", "copy", "hf://zeahub/data/", "out/", "--key", "all"], "src"),
+    ],
+)
+def test_data_subcommands_preserve_hf_paths(argv, attr):
+    """'hf://' URIs must survive tyro parsing unchanged: as a `Path`, the double slash
+    collapses to `PosixPath('hf:/org/repo')`, breaking the 'hf://' prefix checks used to
+    resolve Hugging Face paths. These fields are parsed as `str` to avoid that."""
+    args = parse_args(argv).subcommand.subcommand
+    assert getattr(args, attr) == argv[2]
+
+
+def test_data_sum_preserves_hf_paths():
+    """`sum`'s variadic input_paths must also survive as unmangled 'hf://' strings."""
+    cli_args = parse_args(
+        ["data", "sum", "hf://zeahub/a", "hf://zeahub/b", "--output-path", "out.hdf5"]
+    )
+    args = cli_args.subcommand.subcommand
+    assert args.input_paths == ["hf://zeahub/a", "hf://zeahub/b"]
+
+
+def test_data_output_path_rejects_hf():
+    """CLI-level guard: 'hf://' is read-only and cannot be used as an output_path."""
+    from zea.cli_args import _run_data_command
+
+    cli_args = parse_args(["data", "resave", "in.hdf5", "hf://zeahub/out.hdf5"])
+    with pytest.raises(SystemExit) as exc_info:
+        _run_data_command(cli_args.subcommand.subcommand)
+    assert exc_info.value.code != 0
+
+
+def test_data_copy_dst_rejects_hf():
+    """CLI-level guard also applies to `copy`'s dst, which uses a different field name."""
+    from zea.cli_args import _run_data_command
+
+    cli_args = parse_args(["data", "copy", "in.hdf5", "hf://zeahub/out/", "--key", "all"])
+    with pytest.raises(SystemExit) as exc_info:
+        _run_data_command(cli_args.subcommand.subcommand)
+    assert exc_info.value.code != 0
+
+
+def test_data_output_path_local_runs_and_overwrites(tmp_path):
+    """A local (non-'hf://') output_path is unaffected by the 'hf://' guard and,
+    with --overwrite, replaces an existing output file."""
+    from zea.cli_args import _run_data_command
+    from zea.data.file import validate_file
+
+    from .data import generate_example_dataset
+
+    input_path = tmp_path / "in.hdf5"
+    output_path = tmp_path / "out.hdf5"
+    generate_example_dataset(input_path)
+    output_path.write_bytes(b"stale")
+
+    cli_args = parse_args(["data", "resave", str(input_path), str(output_path), "--overwrite"])
+    _run_data_command(cli_args.subcommand.subcommand)
+
+    validate_file(output_path)

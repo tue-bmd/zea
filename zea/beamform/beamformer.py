@@ -10,9 +10,11 @@ import keras
 import numpy as np
 from keras import ops
 
+from zea.beamform.geometry import compute_element_normals
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.tensor import vmap
 from zea.internal.checks import _check_raw_data
+from zea.internal.precision import signal_compute_dtype
 from zea.log import warning_once as _warning_once
 
 
@@ -221,6 +223,14 @@ def tof_correction(
 
     _warn_if_focal_region_length_unused(focus_distances, focal_region_length)
 
+    # Resolve the signal compute dtype and cast the RF/IQ signal down to it. This is the
+    # single entry point where precision is lowered: everything below that touches the *signal*
+    # runs in this dtype, while the *delays* and geometry are kept in float32 for accuracy.
+    # Casting here also promotes integer RF (e.g. int16) to a floating dtype so the interpolation
+    # is well-defined.
+    compute_dtype = signal_compute_dtype()
+    data = ops.cast(data, compute_dtype)
+
     # ---- Compute delays ------------------------------------------------
     # txdel: transmit delay from t=0 to wavefront reaching each pixel
     # rxdel: receive delay from each pixel back to each element
@@ -279,6 +289,18 @@ def tof_correction(
         # through the heterogeneous beamformer (e.g. SOS estimation).
         mask = ops.stop_gradient(mask)
 
+    # Precompute the receive-side phase rotation (same for all transmits)
+    is_iq = data.shape[-1] == 2
+    if is_iq:
+        phase_scale = 2 * np.pi * demodulation_frequency / sampling_frequency
+        theta_rx = phase_scale * rxdel  # (n_pix, n_el)
+        cos_rx = ops.cos(theta_rx)
+        sin_rx = ops.sin(theta_rx)
+
+    # Keep the receive-aperture mask multiply in the signal compute dtype so it
+    # does not up-cast the (low-precision) signal via type promotion.
+    mask = ops.cast(mask, compute_dtype)
+
     # ---- Correct a single transmit (closure) ---------------------------
     def _correct_single_tx(data_tx, txdel_tx, mask_tx=None):
         """Apply delay-and-interpolate for one transmit event.
@@ -303,11 +325,16 @@ def tof_correction(
         else:
             tof_tx = tof_tx * mask
 
-        # Phase rotation for IQ data (see complex_rotate docstring)
-        if data_tx.shape[-1] == 2:
-            total_delay_seconds = delays / sampling_frequency
-            theta = 2 * np.pi * demodulation_frequency * total_delay_seconds
-            tof_tx = complex_rotate(tof_tx, theta)
+        # Phase rotation for IQ data (see complex_rotate docstring). Combine the
+        # precomputed receive rotation with this transmit's rotation via
+        # cos(a+b) = cos a cos b - sin a sin b, sin(a+b) = sin a cos b + cos a sin b.
+        if is_iq:
+            theta_tx = phase_scale * txdel_tx  # (n_pix, 1)
+            cos_tx = ops.cos(theta_tx)
+            sin_tx = ops.sin(theta_tx)
+            cos_theta = ops.cast(cos_rx * cos_tx - sin_rx * sin_tx, tof_tx.dtype)
+            sin_theta = ops.cast(sin_rx * cos_tx + cos_rx * sin_tx, tof_tx.dtype)
+            tof_tx = complex_rotate(tof_tx, None, cos_theta=cos_theta, sin_theta=sin_theta)
 
         return tof_tx
 
@@ -430,7 +457,7 @@ def calculate_delays(
 
     if not apply_lens_correction:
         # Compute receive distances in meters of shape (n_pix, n_el)
-        rx_distances = distance_Rx(grid, probe_geometry)
+        rx_distances = compute_receive_distances(grid, probe_geometry)
 
         # Convert distances to delays in seconds
         rx_delays = rx_distances / sound_speed
@@ -502,49 +529,58 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
     Returns:
         Tensor: Interpolated samples of shape ``(n_pix, n_el, n_ch)``.
     """
+    n_ax, n_el = data.shape[0], data.shape[1]
 
-    # Add a dummy channel dimension to the delays tensor to ensure it has the
-    # same number of dimensions as the data. The new shape is (n_pix, n_el, 1)
-    delays = delays[..., None]
-
-    # Get the integer values above and below the exact delay values
-    # Floor to get the integers below
-    # (num_elements, num_pixels, 1)
-    d0 = ops.floor(delays)
-
-    # Cast to integer to be able to use as indices
-    d0 = ops.cast(d0, "int32")
-    # Add 1 to find the integers above the exact delay values
+    # Get the integer sample indices below and above the exact delay values.
+    d0 = ops.cast(ops.floor(delays), "int32")
     d1 = d0 + 1
 
     # Apply clipping of delays clipping to ensure correct behavior on cpu
     if clip_min != -1 and clip_max != -1:
-        clip_min = ops.cast(clip_min, d0.dtype)
-        clip_max = ops.cast(clip_max, d0.dtype)
+        clip_min = ops.cast(clip_min, "int32")
+        clip_max = ops.cast(clip_max, "int32")
         d0 = ops.clip(d0, clip_min, clip_max)
         d1 = ops.clip(d1, clip_min, clip_max)
+        i0, i1 = d0, d1
+    else:
+        i0 = ops.clip(d0, 0, n_ax - 1)
+        i1 = ops.clip(d1, 0, n_ax - 1)
 
-    if data.shape[-1] == 2:
-        d0 = ops.concatenate([d0, d0], axis=-1)
-        d1 = ops.concatenate([d1, d1], axis=-1)
+    # Gather pixel values with a single linear index to keep the data in
+    # a contiguous slice.
+    flat = ops.reshape(data, (n_ax * n_el, data.shape[-1]))
+    el = ops.expand_dims(ops.arange(n_el, dtype="int32"), 0)  # (1, n_el)
+    data0 = ops.take(flat, i0 * n_el + el, axis=0)
+    data1 = ops.take(flat, i1 * n_el + el, axis=0)
 
-    # Gather pixel values
-    # Here we extract for each transducer element the sample containing the
-    # reflection from each pixel. These are of shape `(n_pix, n_el, n_ch)`.
-    data0 = ops.take_along_axis(data, d0, 0)
-    data1 = ops.take_along_axis(data, d1, 0)
+    # Add a dummy channel dimension so the delays broadcast
+    delays = delays[..., None]
 
-    # Compute interpolated pixel value
-    d0 = ops.cast(d0, delays.dtype)  # Cast to float
-    d1 = ops.cast(d1, delays.dtype)  # Cast to float
-    data0 = ops.cast(data0, delays.dtype)  # Cast to float
-    data1 = ops.cast(data1, delays.dtype)  # Cast to float
-    reflection_samples = (d1 - delays) * data0 + (delays - d0) * data1
+    # Compute interpolated pixel value.
+    #
+    # The interpolation weights are derived from ``delays`` (sample indices that
+    # can run into the thousands), so they are computed in the delay dtype
+    # (``float32``) to preserve accuracy and only then cast down to the signal
+    # compute dtype. The gathered samples themselves stay in the (possibly
+    # low-precision) signal dtype so the multiply-add runs in that dtype for
+    # speed -- this is what makes mixed-precision beamforming worthwhile.
+    out_dtype = ops.dtype(data0)
+    if out_dtype not in ("float16", "bfloat16", "float32", "float64"):
+        # Integer RF (e.g. int16) gathered directly: promote to the compute dtype.
+        out_dtype = signal_compute_dtype()
+        data0 = ops.cast(data0, out_dtype)
+        data1 = ops.cast(data1, out_dtype)
+
+    d0 = ops.cast(d0, delays.dtype)[..., None]  # Cast indices to float for the weights
+    d1 = ops.cast(d1, delays.dtype)[..., None]
+    w0 = ops.cast(d1 - delays, out_dtype)  # weight in [0, 1], computed in float32
+    w1 = ops.cast(delays - d0, out_dtype)
+    reflection_samples = w0 * data0 + w1 * data1
 
     return reflection_samples
 
 
-def complex_rotate(iq, theta):
+def complex_rotate(iq, theta, cos_theta=None, sin_theta=None):
     r"""Phase-rotate IQ data by angle *theta*.
 
     When delaying IQ-demodulated data it is not sufficient to interpolate the
@@ -559,7 +595,13 @@ def complex_rotate(iq, theta):
     Args:
         iq (Tensor): IQ data of shape ``(..., 2)``.
         theta (Tensor or float): Rotation angle in radians (broadcastable to
-            ``iq[..., 0]``).
+            ``iq[..., 0]``). Ignored when both ``cos_theta`` and ``sin_theta``
+            are supplied.
+        cos_theta (Tensor, optional): Precomputed ``cos(theta)``, broadcastable
+            to ``iq[..., 0]``. Avoids recomputing the transcendental when the
+            caller can obtain it more cheaply. Defaults to ``None``.
+        sin_theta (Tensor, optional): Precomputed ``sin(theta)``. Defaults to
+            ``None``.
 
     Returns:
         Tensor: Rotated IQ data of shape ``(..., 2)``.
@@ -598,13 +640,23 @@ def complex_rotate(iq, theta):
         "The last dimension of the input tensor should be 2, "
         f"got {iq.shape[-1]} dimensions and shape {iq.shape}."
     )
+    # Allow passing precomputed cos/sin of theta to avoid recomputing the
+    # transcendentals (e.g. when the caller factors theta into cheaper terms).
+    # ``theta`` (and any precomputed cos/sin passed in) is derived from the
+    # (float32) delays and can be large, so the trigonometrics are evaluated
+    # in that dtype and only then cast down to the signal compute dtype.
+    if cos_theta is None:
+        cos_theta = ops.cast(ops.cos(theta), iq.dtype)
+    if sin_theta is None:
+        sin_theta = ops.cast(ops.sin(theta), iq.dtype)
+
     # Select i and q channels
     i = iq[..., 0]
     q = iq[..., 1]
 
     # Compute rotated components
-    ir = i * ops.cos(theta) - q * ops.sin(theta)
-    qr = q * ops.cos(theta) + i * ops.sin(theta)
+    ir = i * cos_theta - q * sin_theta
+    qr = q * cos_theta + i * sin_theta
 
     # Reintroduce channel dimension
     ir = ir[..., None]
@@ -613,7 +665,7 @@ def complex_rotate(iq, theta):
     return ops.concatenate([ir, qr], -1)
 
 
-def distance_Rx(grid, probe_geometry):
+def compute_receive_distances(grid, probe_geometry):
     """Euclidean distance from every pixel to every transducer element.
 
     Args:
@@ -769,7 +821,7 @@ def transmit_delays(
     return tx_delay
 
 
-def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):
+def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn, element_normals=None):
     """Receive-aperture apodization mask based on the f-number.
 
     This is the **built-in** receive-aperture (per-element) apodization.
@@ -778,6 +830,16 @@ def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):
     defined by the f-number.  The transition within the cone is controlled
     by *fnum_window_fn* (e.g. :func:`fnum_window_fn_rect`,
     :func:`fnum_window_fn_hann`, :func:`fnum_window_fn_tukey`).
+
+    The acceptance cone is measured relative to **each element's own surface
+    normal**.  For a flat linear array every normal is ``+z`` and this is the
+    familiar depth-axis cone; for a **curved/convex** array the peripheral
+    elements are tilted outward, so measuring the cone from their true normal
+    (rather than the global ``+z`` axis) keeps their aperture from being
+    clipped at the edges of the sector.  When *element_normals* is not given it
+    is derived from ``probe_geometry`` via
+    :func:`zea.beamform.geometry.compute_element_normals`, which is an exact
+    no-op (``+z``) for flat arrays.
 
     For a *custom* receive-aperture apodization (arbitrary per-pixel,
     per-element weights) use :class:`zea.ops.ReceiveApodization`, which is
@@ -793,18 +855,27 @@ def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):
         fnum_window_fn (callable): Window function mapping normalized
             angles in ``[0, 1]`` to weights.  Must return ``0`` for inputs
             ``> 1``.
+        element_normals (Tensor, optional): Unit surface normals of shape
+            ``(n_el, 3)``.  Defaults to ``None``, in which case they are
+            derived from ``probe_geometry``.
 
     Returns:
         Tensor: Mask of shape ``(n_pix, n_el, 1)``.
     """
+    if element_normals is None:
+        element_normals = compute_element_normals(probe_geometry)
 
     grid_relative_to_probe = flatgrid[:, None] - probe_geometry[None]
 
     grid_relative_to_probe_norm = ops.linalg.norm(grid_relative_to_probe, axis=-1)
 
-    grid_relative_to_probe_z = grid_relative_to_probe[..., 2] / (grid_relative_to_probe_norm + 1e-6)
+    # Unit element -> pixel direction (same +1e-6 guard as before, so a +z
+    # normal reproduces the legacy depth-axis cone up to float32 rounding).
+    unit_direction = grid_relative_to_probe / (grid_relative_to_probe_norm[..., None] + 1e-6)
 
-    alpha = ops.arccos(grid_relative_to_probe_z)
+    # Angle between the element -> pixel direction and the element's normal.
+    cos_alpha = ops.sum(unit_direction * element_normals[None], axis=-1)
+    alpha = ops.arccos(ops.clip(cos_alpha, -1.0, 1.0))
 
     # The f-number is f_number = z/aperture = 1/(2 * tan(alpha))
     # Rearranging gives us alpha = arctan(1/(2 * f_number))

@@ -38,7 +38,7 @@ Vision
 
 The toolbox is intended for anyone exploring cutting-edge ultrasound research and development who wants to integrate the latest advances in probabilistic machine learning into a fast and flexible ultrasound image reconstruction pipeline. Many persistent challenges --- such as artifacts (*haze, reverberation, shadowing, aberration*), limited *resolution* or *penetration depth*, and the inherent trade-off between *image quality*, *field of view*, and *acquisition time* --- can be approached by closing the action-perception loop. Where and how you measure ultrasound data (**action**), greatly influences how well you can reconstruct an image, or estimate a certain diagnostic parameter (**perception**).
 
-This imaging paradigm is largely enabled by the availability of powerful statistical models that can learn from data to improve reconstruction in difficult scenarios :cite:p:`about-stevens2026ultrasound`, for example when we have limited measurements. Besides reconstruction, these models can also guide the acquisition process by optimizing the transmit sequence for a certain downstream task, e.g., a doppler measurement :cite:p:`about-federici2024active`, estimation of a diagnostic biomarker :cite:p:`about-nolan2026task`, or segmentation of a certain structure :cite:p:`about-van2025patient`.
+This imaging paradigm is largely enabled by the availability of powerful statistical models that can learn from data to improve reconstruction in difficult scenarios :cite:p:`about-stevens2026ultrasound`, for example when we have limited measurements. Besides reconstruction, these models can also guide the acquisition process by optimizing the transmit sequence for a certain downstream task, e.g., a doppler measurement :cite:p:`about-federici2024active`, estimation of a diagnostic biomarker :cite:p:`about-nolan2026task`, or image-quality :cite:p:`about-van2026patient`.
 
 To enable cognitive ultrasound imaging, it is important that the traditional ultrasound image reconstruction pipeline is tightly integrated with the models and algorithms that are used to learn from data and optimize the acquisition process. This toolbox provides a modular and flexible framework to do so, which will help researchers minimize the time from idea conceptualization to implementation by bypassing the time to develop the necessary infrastructure to integrate the different components that enable cognitive ultrasound (data & parameter handling and loading, differentiable ultrasound reconstruction pipeline, model infrastructure, etc.).
 
@@ -97,7 +97,7 @@ The following list contains some of the papers that have been published using ``
    stevens2025high
    stevens2025deep
    penninga2025deep
-   van2025patient
+   van2026patient
    stevens2025semantic
    stevens2026nuclear
    nolan2026task

@@ -19,7 +19,7 @@ arbitrary extra keys, which are stored and re-emitted unchanged.  This mirrors
 import re
 from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Callable, ClassVar, Optional, Type
+from typing import Any, Callable, ClassVar, Optional, Type, TypeVar
 
 # ---------------------------------------------------------------------------
 # Validator helpers
@@ -180,7 +180,11 @@ def operations_list(value: Any) -> list:
                 raise ValueError(f"operation {op!r} must have a string 'name'")
             unexpected = set(op) - {"name", "params"}
             if unexpected:
-                raise ValueError(f"operation {op!r} has unexpected keys {sorted(unexpected)}")
+                # keys of an arbitrary mapping are not necessarily comparable, so
+                # sort on their string form to keep the message deterministic.
+                raise ValueError(
+                    f"operation {op!r} has unexpected keys {sorted(map(str, unexpected))}"
+                )
             if "params" in op and not isinstance(op["params"], dict):
                 raise ValueError(f"operation {op!r} 'params' must be a dict")
             continue
@@ -191,6 +195,10 @@ def operations_list(value: Any) -> list:
 # ---------------------------------------------------------------------------
 # Config Spec base class
 # ---------------------------------------------------------------------------
+
+#: Bound to the concrete subclass, so ``from_dict`` on a subclass is typed as
+#: returning that subclass rather than the base.
+SpecT = TypeVar("SpecT", bound="ConfigSpec")
 
 
 @dataclass
@@ -247,7 +255,7 @@ class ConfigSpec:
     # -- construction / serialization --------------------------------------
 
     @classmethod
-    def from_dict(cls, dictionary: Optional[dict]) -> "ConfigSpec":
+    def from_dict(cls: Type[SpecT], dictionary: Optional[dict]) -> SpecT:
         """Validate ``dictionary`` and return a populated spec instance."""
         if dictionary is None:
             dictionary = {}
@@ -278,7 +286,8 @@ class ConfigSpec:
             if isinstance(value, ConfigSpec):
                 value = value.to_dict()
             result[name] = value
-        result.update(self._extra)
+        for name, value in self._extra.items():
+            result[name] = value.to_dict() if isinstance(value, ConfigSpec) else value
         return result
 
     # -- introspection (used by tooling / docs) ----------------------------
@@ -331,7 +340,9 @@ class DataConfig(ConfigSpec):
 
     VALIDATORS: ClassVar[dict] = {
         "path": optional(string_or_path),
-        "local": boolean,
+        # None is a valid choice for `set_data_paths(local=...)`: it means the
+        # users.yaml data_root is a plain path, shared between local and remote.
+        "local": optional(boolean),
         "indices": optional(any_of(enum("all"), integer, list_of_positive_integers)),
         "user": optional(mapping),
     }

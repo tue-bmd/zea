@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Union
 import keras
 from keras import ops
 
-from zea import log
 from zea.backend import jit
 from zea.internal.checks import _assert_keys_and_axes
 from zea.internal.core import (
@@ -223,10 +222,7 @@ class Operation(keras.Operation):
         self._inside_outer_jit = False
 
         # Set the jit compilation flag and compile the `call` method
-        # Set zea logger level to suppress warnings regarding
-        # torch not being able to compile the function
-        with log.set_level("ERROR"):
-            self.set_jit(jit_compile)
+        self.set_jit(jit_compile)
 
     @property
     def output_keys(self) -> List[str]:

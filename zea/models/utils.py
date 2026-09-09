@@ -3,6 +3,22 @@
 import keras
 
 
+def onnx2tf_saved_model_kwargs():  # pragma: no cover
+    """Arguments needed to still get a SavedModel out of :func:`onnx2tf.convert`.
+
+    onnx2tf 2.6 made ``flatbuffer_direct`` the default backend, which emits TFLite
+    only: the call succeeds but writes no SavedModel, which is what the presets ship.
+    Older versions do not have the option, so it is only passed when understood.
+    """
+    import inspect
+
+    from onnx2tf.onnx2tf import convert  # the public convert() is a kwargs passthrough
+
+    if "tflite_backend" in inspect.signature(convert).parameters:
+        return {"tflite_backend": "tf_converter"}
+    return {}
+
+
 class LossTrackerWrapper:
     """A wrapper for Keras Mean metrics to track multiple loss values."""
 

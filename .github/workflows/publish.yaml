@@ -1,3 +1,5 @@
+# On a published GitHub release: builds the wheel and sdist and uploads them to
+# PyPI via trusted publishing (no API token needed).
 name: Build and Publish
 
 on:

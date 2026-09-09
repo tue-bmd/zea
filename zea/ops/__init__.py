@@ -242,6 +242,7 @@ from .pipeline import (
     Refocus,
 )
 from .tensor import GaussianBlur, Normalize, Pad, Threshold
+from .usct import USCTReflectivityDAS
 from .ultrasound import (
     AlignedApodization,
     AnisotropicDiffusion,
@@ -317,6 +318,7 @@ __all__ = [
     "TOFCorrection",
     "TissueSuppression",
     "UpMix",
+    "USCTReflectivityDAS",
     "CommonMidpointPhaseError",
     # Keras operations
     "keras_ops",

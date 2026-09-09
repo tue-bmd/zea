@@ -15,6 +15,7 @@ import tempfile
 import threading
 import warnings
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import tyro
@@ -47,6 +48,10 @@ warnings.filterwarnings(
     "ignore",
     message=r"'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated",
 )
+
+
+def _bind_gradio_event(component: Any, method: str, *args, **kwargs):
+    return getattr(component, method)(*args, **kwargs)
 
 
 # ── Logo ───────────────────────────────────────────────────────────────────────
@@ -885,14 +890,14 @@ def run_checks(
             key=_data_key,
             batch_size=None,
             shuffle=False,
-            return_filename=False,
             offset_n_frames=start_frame,
             limit_n_frames=actual_n,
-            n_frames=1,
+            n_frames=None,
             num_threads=4,
-            insert_frame_axis=False,
             sort_files=False,
+            dtype="float32",
             axis_selections=_axis_sel,
+            # Already validated by the File open in step 4 above.
             validate=False,
             revision=_dl_revision,
         )
@@ -900,50 +905,55 @@ def run_checks(
         yield _emit(_html_fail("Open file", exc))
         return
 
-    for i, frame in enumerate(_dataloader):
-        try:
-            frame = np.asarray(frame)
-            if pipeline is not None:
-                output = _run_quiet(pipeline, data=frame, **params)
-                processed = ops.convert_to_numpy(output["data"])
-                for k in keep_keys:
-                    if k in output:
-                        params[k] = output[k]
-            else:
-                # Raw fallback: reduce to 2D
-                while frame.ndim > 2:
-                    if frame.shape[0] == 1:
-                        frame = frame[0]
-                    elif frame.shape[-1] == 1:
-                        frame = frame[..., 0]
-                    elif frame.ndim == 3:
-                        # Multi-channel last dim (e.g. segmentation one-hot)
-                        frame = np.argmax(frame, axis=-1)
-                    else:
-                        frame = frame[0]
-                if frame.ndim < 2:
-                    yield _emit(
-                        _html_fail(
-                            "Cannot display",
-                            f"Data shape {frame.shape} after indexing — need at least 2D.",
+    # try/finally so the loop's early returns and generator abandonment both close
+    # the dataloader's file handles.
+    try:
+        for i, frame in enumerate(_dataloader):
+            try:
+                frame = np.asarray(frame)
+                if pipeline is not None:
+                    output = _run_quiet(pipeline, data=frame, **params)
+                    processed = ops.convert_to_numpy(output["data"])
+                    for k in keep_keys:
+                        if k in output:
+                            params[k] = output[k]
+                else:
+                    # Raw fallback: reduce to 2D
+                    while frame.ndim > 2:
+                        if frame.shape[0] == 1:
+                            frame = frame[0]
+                        elif frame.shape[-1] == 1:
+                            frame = frame[..., 0]
+                        elif frame.ndim == 3:
+                            # Multi-channel last dim (e.g. segmentation one-hot)
+                            frame = np.argmax(frame, axis=-1)
+                        else:
+                            frame = frame[0]
+                    if frame.ndim < 2:
+                        yield _emit(
+                            _html_fail(
+                                "Cannot display",
+                                f"Data shape {frame.shape} after indexing — need at least 2D.",
+                            )
                         )
-                    )
-                    return
-                processed = frame
-        except Exception as exc:
-            yield _emit(_html_fail(f"Process frame {start_frame + i}", exc))
-            return
+                        return
+                    processed = frame
+            except Exception as exc:
+                yield _emit(_html_fail(f"Process frame {start_frame + i}", exc))
+                return
 
-        processed_frames.append(processed)
+            processed_frames.append(processed)
 
-        pbar = _html_progress(i + 1, actual_n)
-        if i == 0:
-            yield _emit(pbar)
-        else:
-            yield _replace_last(pbar)
+            pbar = _html_progress(i + 1, actual_n)
+            if i == 0:
+                yield _emit(pbar)
+            else:
+                yield _replace_last(pbar)
 
-        if _stopped():
-            return
+            if _stopped():
+                return
+    finally:
+        _dataloader.close()
 
     # 7. Convert to image / GIF
     try:
@@ -1175,8 +1185,10 @@ def build_interface() -> "gr.Blocks":
         def _rev_toggle(path):
             return gr.update(interactive=_is_hf(path))
 
-        dataset_input.change(_rev_toggle, [dataset_input], [dataset_rev_input])
-        config_input.change(_rev_toggle, [config_input], [config_rev_input])
+        _bind_gradio_event(
+            dataset_input, "change", _rev_toggle, [dataset_input], [dataset_rev_input]
+        )
+        _bind_gradio_event(config_input, "change", _rev_toggle, [config_input], [config_rev_input])
 
         _TRACK_RESET = gr.update(choices=[("Track 0", 0)], value=0, visible=True, interactive=False)
 
@@ -1258,7 +1270,9 @@ def build_interface() -> "gr.Blocks":
                 _reset_key,
             )
 
-        dataset_input.blur(
+        _bind_gradio_event(
+            dataset_input,
+            "blur",
             _on_dataset_blur,
             inputs=[dataset_input],
             outputs=[
@@ -1312,7 +1326,9 @@ def build_interface() -> "gr.Blocks":
                 gr.Warning(f"Cannot access config: {short}")
                 return gr.update(interactive=False, choices=["main"], value=None)
 
-        config_input.blur(_on_config_blur, [config_input], [config_rev_input])
+        _bind_gradio_event(
+            config_input, "blur", _on_config_blur, [config_input], [config_rev_input]
+        )
 
         # Dataset revision change → refresh file list; auto-reload selected file at new revision
         def _on_dataset_rev_change_gen(rev, path, decoupled, current_file, key):
@@ -1383,7 +1399,9 @@ def build_interface() -> "gr.Blocks":
             )
             yield cfg_upd, gr.update(), fpaths, meta, trk, tlbls, run_upd, key_upd, sf, nf
 
-        dataset_rev_input.input(
+        _bind_gradio_event(
+            dataset_rev_input,
+            "input",
             _on_dataset_rev_change_gen,
             [dataset_rev_input, dataset_input, config_rev_decoupled, file_selector, key_input],
             [
@@ -1404,7 +1422,13 @@ def build_interface() -> "gr.Blocks":
         def _on_config_rev_input():
             return True, gr.update(label="Revision")
 
-        config_rev_input.input(_on_config_rev_input, [], [config_rev_decoupled, config_rev_input])
+        _bind_gradio_event(
+            config_rev_input,
+            "input",
+            _on_config_rev_input,
+            [],
+            [config_rev_decoupled, config_rev_input],
+        )
 
         # Preset → fill all fields + reset sync state (no file auto-load)
         def _apply_preset(name):
@@ -1442,7 +1466,9 @@ def build_interface() -> "gr.Blocks":
                 gr.update(interactive=False),  # run_btn — re-enabled after file is picked
             )
 
-        preset_selector.change(
+        _bind_gradio_event(
+            preset_selector,
+            "change",
             _apply_preset,
             [preset_selector],
             [
@@ -1546,7 +1572,9 @@ def build_interface() -> "gr.Blocks":
                 gr.update(interactive=_is_hf(config_path or "")),  # config_rev_input
             )
 
-        file_select_event = file_selector.change(
+        file_select_event = _bind_gradio_event(
+            file_selector,
+            "change",
             _on_file_select_gen,
             inputs=[file_selector, file_paths_state, key_input, dataset_rev_input, config_input],
             outputs=[
@@ -1569,7 +1597,9 @@ def build_interface() -> "gr.Blocks":
         )
 
         # Key chosen → enable run button (file is already loaded at this point)
-        key_input.change(
+        _bind_gradio_event(
+            key_input,
+            "change",
             lambda key, fname: gr.update(interactive=bool(key and fname)),
             inputs=[key_input, file_selector],
             outputs=[run_btn],
@@ -1606,7 +1636,9 @@ def build_interface() -> "gr.Blocks":
             except Exception:
                 return gr.update(), gr.update()
 
-        track_selector.change(
+        _bind_gradio_event(
+            track_selector,
+            "change",
             _on_track_change,
             [
                 track_selector,
@@ -1619,7 +1651,9 @@ def build_interface() -> "gr.Blocks":
         )
 
         # Config editor: mark when user types → editor contents now override the path
-        config_editor.input(
+        _bind_gradio_event(
+            config_editor,
+            "input",
             lambda: (gr.update(visible=True, value=_EDITOR_ACTIVE_HTML), True),
             [],
             [editor_indicator, editor_override_active],
@@ -1629,7 +1663,9 @@ def build_interface() -> "gr.Blocks":
         def _load_and_clear(path, revision):
             return _load_config_text(path, revision), gr.update(visible=False, value=""), False
 
-        load_config_btn.click(
+        _bind_gradio_event(
+            load_config_btn,
+            "click",
             _load_and_clear,
             [config_input, config_rev_input],
             [config_editor, editor_indicator, editor_override_active],
@@ -1641,11 +1677,19 @@ def build_interface() -> "gr.Blocks":
             return gr.update(visible=False, value=""), False
 
         for _component in (dataset_input, config_input):
-            _component.change(
-                _clear_editor_override, [], [editor_indicator, editor_override_active]
+            _bind_gradio_event(
+                _component,
+                "change",
+                _clear_editor_override,
+                [],
+                [editor_indicator, editor_override_active],
             )
-        preset_selector.change(
-            _clear_editor_override, [], [editor_indicator, editor_override_active]
+        _bind_gradio_event(
+            preset_selector,
+            "change",
+            _clear_editor_override,
+            [],
+            [editor_indicator, editor_override_active],
         )
 
         # Run generator
@@ -1777,7 +1821,9 @@ def build_interface() -> "gr.Blocks":
                     except OSError:
                         pass
 
-        run_event = run_btn.click(
+        run_event = _bind_gradio_event(
+            run_btn,
+            "click",
             _on_run,
             inputs=[
                 dataset_input,
@@ -1833,7 +1879,9 @@ def build_interface() -> "gr.Blocks":
             )
 
         # Stop cancels both run and file-loading events, and restores UI directly.
-        stop_btn.click(
+        _bind_gradio_event(
+            stop_btn,
+            "click",
             _on_stop,
             inputs=[key_input],
             outputs=[
@@ -1854,7 +1902,7 @@ def build_interface() -> "gr.Blocks":
             cancels=[run_event, file_select_event],
         )
 
-        status_output.change(fn=None, js=_SCROLL_JS)
+        _bind_gradio_event(status_output, "change", fn=None, js=_SCROLL_JS)
         demo.load(_load_config_text, inputs=[config_input], outputs=[config_editor])
 
     return demo
@@ -1864,15 +1912,10 @@ def build_interface() -> "gr.Blocks":
 
 
 def main() -> None:
+    """Entry point for ``python -m zea.data.app``, equivalent to ``zea app``."""
     args = tyro.cli(AppArgs)
     init_device()
-    demo = build_interface()
-    demo.launch(
-        share=args.share,
-        server_port=args.server_port,
-        theme=gr.themes.Soft(primary_hue="violet", secondary_hue="yellow"),
-        css=CSS,
-    )
+    args.run()
 
 
 if __name__ == "__main__":

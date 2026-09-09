@@ -1,5 +1,6 @@
 """Tests for AutoGrad."""
 
+import functools
 import time
 
 import keras
@@ -8,7 +9,7 @@ import pytest
 
 from zea.backend.autograd import AutoGrad
 
-from . import backend_equality_check, DEFAULT_TEST_SEED
+from . import DEFAULT_TEST_SEED, backend_equality_check, run_in_backend
 
 GT_BACKEND = "jax"  # ground truth backend for equality check
 OTHER_BACKENDS = ["torch", "tensorflow"]  # reference backends for equality check
@@ -112,3 +113,100 @@ def test_gradient_and_value_jit_timing(wrapper, x_input):
     jit_time = time.time() - start
 
     print(f"Non-jitted: {non_jit_time:.4f}s, Jitted: {jit_time:.4f}s")
+
+
+def test_backend_property_matches_keras(wrapper):
+    """The backend property reflects the active keras backend and is read-only."""
+    assert wrapper.backend == keras.backend.backend()
+
+    with pytest.raises(ValueError, match="Cannot change backend"):
+        wrapper.backend = "jax"
+
+
+def test_verbose_reports_backend(capsys):
+    """``verbose=True`` prints the backend that will be used."""
+    AutoGrad(verbose=True)
+    assert keras.backend.backend() in capsys.readouterr().out
+
+
+@backend_equality_check(
+    backends=["tensorflow", "torch"],
+    gt_backend=GT_BACKEND,
+)  # no numpy, which has no autograd
+def test_get_gradient_jit_fn(wrapper, x_input):
+    """The jitted gradient function returns the same gradients as the eager one."""
+
+    def f(x):
+        return keras.ops.sum(x**3)
+
+    wrapper.set_function(f)
+    grad = keras.ops.convert_to_numpy(wrapper.get_gradient_jit_fn()(x_input))
+
+    np.testing.assert_allclose(grad, 3 * np.asarray(x_input) ** 2, rtol=1e-4)
+    return grad
+
+
+def test_get_gradient_and_value_jit_fn_disable_jit(wrapper, x_input):
+    """``disable_jit=True`` returns a plain (non-compiled) callable on every backend."""
+
+    def f(x):
+        return keras.ops.sum(x**2)
+
+    wrapper.set_function(f)
+    grad, out = wrapper.get_gradient_and_value_jit_fn(disable_jit=True)(x_input)
+
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(grad), 2 * np.asarray(x_input), rtol=1e-5)
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(out), np.sum(np.asarray(x_input) ** 2), rtol=1e-5
+    )
+
+
+@pytest.mark.torch
+@run_in_backend("torch")
+def test_get_gradient_and_value_jit_fn_torch():
+    """``torch.compile`` backs the jitted gradient_and_value on the torch backend."""
+    from zea.backend.autograd import AutoGrad
+
+    def cube_sum(x):
+        return keras.ops.sum(x**3)
+
+    wrapper = AutoGrad()
+    wrapper.set_function(cube_sum)
+    x = keras.ops.convert_to_tensor(np.array([1.0, 2.0, 3.0], dtype="float32"))
+
+    grad, out = wrapper.get_gradient_and_value_jit_fn()(x)
+
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(grad), [3.0, 12.0, 27.0], rtol=1e-5)
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(out), 36.0, rtol=1e-5)
+
+
+def _cube_sum_for_serialization(x):
+    """Module-level target so ``functools.partial`` of it stays picklable."""
+    return keras.ops.sum(x**3)
+
+
+@pytest.mark.torch
+@run_in_backend("torch")
+def test_compiled_partial_serializes_like_plain_partial():
+    """A compiled ``functools.partial`` (the torch gradient_and_value path)
+    serializes like an equivalent plain partial, bound args included."""
+    from zea.internal.core import _unwrap_compiled_callable, serialize_elements
+
+    wrapper = AutoGrad()
+    wrapper.set_function(_cube_sum_for_serialization)
+    compiled = wrapper.get_gradient_and_value_jit_fn(has_aux=True)
+
+    # The unwrap recovers a partial with the bound has_aux flag
+    target = _unwrap_compiled_callable(compiled)
+    assert isinstance(target, functools.partial)
+    assert target.keywords == {"has_aux": True}
+    assert target.func == wrapper.gradient_and_value
+
+    # The key contains the full pickled partial, bound arguments included
+    serialized = serialize_elements([compiled])
+    assert serialized == "compiled:" + serialize_elements([target])
+
+    equal = wrapper.get_gradient_and_value_jit_fn(has_aux=True)
+    different = wrapper.get_gradient_and_value_jit_fn(has_aux=False)
+    assert serialize_elements([equal]) == serialized
+    assert serialize_elements([different]) != serialized

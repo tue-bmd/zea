@@ -1073,3 +1073,135 @@ def test_split_seed_rejects_unknown_seed_type():
 
     with pytest.raises(TypeError):
         split_seed("not-a-seed", 2)
+
+
+@run_in_backend("jax")
+def test_fold_seed_jax_gives_independent_seed_per_step():
+    """On JAX each loop index folds into its own reproducible, independent key."""
+    import jax
+    from keras import random as keras_random
+
+    from zea.func.tensor import fold_seed, materialize_seed
+
+    seed = materialize_seed(keras_random.SeedGenerator(11))
+    draws = [np.asarray(jax.random.uniform(fold_seed(seed, step), (6,))) for step in range(3)]
+    repeat = [np.asarray(jax.random.uniform(fold_seed(seed, step), (6,))) for step in range(3)]
+
+    # Folding the same seed with the same index is deterministic, different indices are not.
+    for a, b in zip(draws, repeat):
+        np.testing.assert_allclose(a, b)
+    assert not np.allclose(draws[0], draws[1])
+    assert not np.allclose(draws[1], draws[2])
+
+
+@run_in_backend("tensorflow")
+def test_fold_seed_non_jax_reuses_stateful_generator():
+    """On non-JAX backends the stateful generator is returned as-is and keeps advancing."""
+    from keras import random as keras_random
+
+    from zea.func.tensor import fold_seed
+
+    sg = keras_random.SeedGenerator(11)
+    seeds = [fold_seed(sg, step) for step in range(3)]
+    assert all(s is sg for s in seeds)
+
+    draws = _draw_per_seed(seeds)
+    assert not np.allclose(draws[0], draws[1])
+
+
+def test_fold_seed_none_stays_none():
+    """None folds to None so unseeded loop bodies keep working on any backend."""
+    from zea.func.tensor import fold_seed
+
+    assert fold_seed(None, 0) is None
+
+
+@pytest.mark.parametrize("axis", [0, -1])
+@backend_equality_check(decimal=5)
+def test_unwrap(axis):
+    """``unwrap`` matches ``np.unwrap``, the reference implementation."""
+    from zea.func.tensor import unwrap
+
+    rng = default_rng(DEFAULT_TEST_SEED)
+    phase = np.mod(rng.uniform(-20, 20, (8, 16)), 2 * np.pi).astype("float32")
+
+    unwrapped = unwrap(ops.convert_to_tensor(phase), axis=axis)
+
+    np.testing.assert_allclose(
+        ops.convert_to_numpy(unwrapped), np.unwrap(phase, axis=axis), rtol=1e-5, atol=1e-5
+    )
+    # Unwrapping only adds whole periods, so the result stays congruent modulo 2 pi
+    np.testing.assert_allclose(
+        np.mod(ops.convert_to_numpy(unwrapped), 2 * np.pi), phase, rtol=1e-4, atol=1e-4
+    )
+    return unwrapped
+
+
+def test_unwrap_custom_period():
+    """A custom period unwraps e.g. degrees instead of radians."""
+    from zea.func.tensor import unwrap
+
+    degrees = np.array([0.0, 170.0, 340.0, 150.0, 320.0], dtype="float32")
+    np.testing.assert_allclose(
+        ops.convert_to_numpy(unwrap(degrees, period=360)),
+        np.unwrap(degrees, period=360),
+        rtol=1e-5,
+        atol=1e-4,
+    )
+
+
+def test_unwrap_leaves_continuous_phase_untouched():
+    """Phases without discontinuities are returned unchanged."""
+    from zea.func.tensor import unwrap
+
+    phase = np.linspace(0, 3, 20).astype("float32")
+    np.testing.assert_allclose(ops.convert_to_numpy(unwrap(phase)), phase, rtol=1e-6, atol=1e-6)
+
+
+@backend_equality_check(decimal=4)
+def test_complex_resize():
+    """``complex_resize`` resizes magnitude and phase, preserving both on a no-op resize."""
+    from zea.func.tensor import complex_resize
+
+    rng = default_rng(DEFAULT_TEST_SEED)
+    data = (rng.standard_normal((2, 8, 8, 1)) + 1j * rng.standard_normal((2, 8, 8, 1))).astype(
+        "complex64"
+    )
+    tensor = ops.convert_to_tensor(data)
+
+    # Resizing to the same size is a no-op (up to interpolation round-off)
+    same = ops.convert_to_numpy(complex_resize(tensor, (8, 8)))
+    np.testing.assert_allclose(np.abs(same), np.abs(data), rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(np.angle(same), np.angle(data), rtol=1e-4, atol=1e-4)
+
+    upsampled = complex_resize(tensor, (16, 16))
+    assert upsampled.shape == (2, 16, 16, 1)
+    assert "complex" in str(upsampled.dtype)
+
+    # Magnitudes are interpolated, so they stay within the original range
+    magnitude = np.abs(ops.convert_to_numpy(upsampled))
+    assert magnitude.max() <= np.abs(data).max() + 1e-4
+
+    return ops.abs(upsampled)
+
+
+@backend_equality_check(decimal=4)
+def test_resample_complex():
+    """``resample`` interpolates complex input without discarding the imaginary part."""
+    from zea.func.tensor import resample
+
+    rng = default_rng(DEFAULT_TEST_SEED)
+    data = (rng.standard_normal((2, 16, 3)) + 1j * rng.standard_normal((2, 16, 3))).astype(
+        "complex64"
+    )
+    tensor = ops.convert_to_tensor(data)
+
+    same = ops.convert_to_numpy(resample(tensor, 16, axis=1))
+    np.testing.assert_allclose(same, data, rtol=1e-4, atol=1e-4)
+
+    upsampled = resample(tensor, 32, axis=1)
+    assert upsampled.shape == (2, 32, 3)
+    assert "complex" in str(upsampled.dtype)
+    assert np.any(np.imag(ops.convert_to_numpy(upsampled)) != 0)
+
+    return ops.stack([ops.real(upsampled), ops.imag(upsampled)])

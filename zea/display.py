@@ -11,6 +11,10 @@ from PIL import Image
 from zea.func.tensor import translate
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
+# `zea.func.ultrasound.log_compress` maps zeros to 20 * log10(1e-16) = -320 dB. Such pixels
+# hold no measurement, so they are excluded when fitting a histogram transform.
+EXCLUDE_BELOW: float = -300.0
+
 
 def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True):
     """Convert image to 8 bit image [0, 255]. Clip between dynamic range.
@@ -67,6 +71,246 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     if pillow:
         image = Image.fromarray(image)
     return image
+
+
+def _masked_pixels(image, roi=None, minimum=2, floor=EXCLUDE_BELOW):
+    """Mask out the pixels a transform may not use: unmeasured, or outside ``roi`` if given."""
+    mask = np.isfinite(image) & (image > floor)
+    if roi is not None:
+        # Without this, a mask of a broadcastable shape (a row, a column) selects pixels
+        # nobody asked for rather than failing.
+        if roi.shape != image.shape:
+            raise ValueError(
+                f"roi shape {roi.shape} does not match the shape {image.shape} of the image "
+                "it selects in; an roi has to index both the image and the reference."
+            )
+        mask &= roi
+    pixels = image[mask].astype(np.float64)
+    if pixels.size < minimum:
+        raise ValueError(
+            f"Too few valid pixels to fit a transform: {pixels.size}, need at least {minimum}."
+        )
+    if pixels.min() == pixels.max():
+        raise ValueError("Cannot fit a transform: the valid pixels all have the same value.")
+    return pixels
+
+
+def _quantile_pairs(x, y, n_bins):
+    """One quantile of each distribution per bin, i.e. eq. (13): ``h[i] = j`` such that
+    ``F_X[i] = F_Y[j]``. The pairs are the knots the mapping is interpolated through.
+
+    The reference implementation (histmatch.m) bins equispaced in *amplitude*, which on
+    log-compressed data spends nearly all of its resolution on the tail towards the noise floor.
+    Binning equispaced in *probability* instead puts equal mass in every bin, so the resolution
+    follows the data (the paper's own remark in Sec. V that bins should be chosen after
+    dynamic range compression). Hence the bins are counted out in probability, as the
+    ``n_bins`` levels at which both CDFs are read.
+
+    At ``n_bins = x.size`` the quantiles of ``x`` are its order statistics, so the pairs
+    become the rank transport of Sec. III.C.1: one pixel per bin, with the quantile function
+    of ``y`` resampled onto the ranks of ``x`` when the two differ in size.
+    """
+    levels = np.linspace(0, 1, n_bins)
+
+    def quantiles(v):
+        # `np.quantile` selects rather than sorts, which is quadratic in the number of
+        # levels; this is its linear method, interpolating between the order statistics.
+        v = np.sort(v)
+        return np.interp(levels, np.linspace(0, 1, v.size), v)
+
+    return quantiles(x), quantiles(y)
+
+
+def _merge_ties(xs, ys):
+    """Collapse knots that share an ``x``, which PCHIP cannot accept, onto a single ``y``.
+
+    Knots collapse wherever the image distribution has an atom, i.e. a value carrying a
+    finite fraction of the mass: a pile-up at the edge of the range the image was clipped
+    to, or a repeated level in a quantized image. A monotone map has to send an atom to one
+    value, and this takes the lowest of the reference values it spans, which is the CDF read
+    just below the atom. A clipping floor then stays at the bottom of the matched range
+    rather than being lifted into the middle of it.
+    """
+    xs, first = np.unique(xs, return_index=True)
+    return xs, ys[first]
+
+
+def _end_slopes(xs, ys, frac=0.125, max_ratio=4.0):
+    """Slopes for linear extension of the mapping past the first and last knot."""
+    # Secants between adjacent knots are unusable: an atom collapses knots onto each other
+    # (see `_merge_ties`), which makes the secant explode. Measure across the outer `frac`
+    # of the knots instead, which because they are equispaced in probability is the outer
+    # `frac` of the mass, and cap the result relative to the overall slope.
+    slope = (ys[-1] - ys[0]) / (xs[-1] - xs[0])
+    k = max(2, round(frac * xs.size))
+
+    def secant(dx, dy):
+        if dx < 1e-3:  # degenerate span, nothing local to learn from
+            return slope
+        return float(np.clip(dy / dx, slope / max_ratio, slope * max_ratio))
+
+    return (
+        secant(xs[k - 1] - xs[0], ys[k - 1] - ys[0]),
+        secant(xs[-1] - xs[-k], ys[-1] - ys[-k]),
+    )
+
+
+def _monotone_map(image, xs, ys, spline=True):
+    """Monotone interpolation through the knots, one per bin, extended linearly at the ends.
+
+    A spline shapes the mapping *between* the knots, which is what a bin pooling many pixels
+    into one knot leaves undetermined. At one knot per pixel (``spline=False``) there is no
+    such gap to shape, so the knots are joined by straight lines instead.
+    """
+    # The end slopes are read off the knots before merging, which loses how much mass each
+    # of them carries and with it the meaning of "the outer `frac` of the distribution".
+    slope_low, slope_high = _end_slopes(xs, ys)
+    xs, ys = _merge_ties(xs, ys)
+    if spline:
+        out = scipy.interpolate.PchipInterpolator(xs, ys)(image)
+    else:
+        out = np.interp(image, xs, ys)
+    # Cubic extrapolation can fold back on itself and break monotonicity, so replace it by
+    # a linear extension (Sec. III.C.3): a point target brighter than anything in the ROI
+    # should stay the brightest instead of piling onto the top knot.
+    out = np.where(image < xs[0], ys[0] + slope_low * (image - xs[0]), out)
+    return np.where(image > xs[-1], ys[-1] + slope_high * (image - xs[-1]), out)
+
+
+def histogram_match(
+    image,
+    reference,
+    mode: str = "full",
+    n_bins: Union[int, str] = 256,
+    roi=None,
+    allow_unequal_shapes: bool = False,
+    exclude_below: Union[float, None] = EXCLUDE_BELOW,
+) -> np.ndarray:
+    """Match the histogram of an image to a reference image, for fair visual comparison.
+
+    Image formation methods apply different dynamic range transformations, which biases
+    visual as well as quantitative comparison. Matching the histogram of an image to a
+    reference (typically a conventional B-mode image) puts the two on a common scale.
+
+    .. admonition:: Reference
+
+        N. Bottenus, B. Byram, and D. Hyun, "Histogram Matching for Visual Ultrasound
+        Image Comparison," *IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency
+        Control*, vol. 68, no. 5, pp. 1487-1495, 2021.
+        https://doi.org/10.1109/TUFFC.2020.3035965
+
+        Their MATLAB implementation, referred to above as the reference implementation:
+        https://github.com/nbottenus/histogram_matching/blob/main/histmatch.m
+
+    Args:
+        image (ndarray): Image to transform, typically log-compressed (dB).
+        reference (ndarray): Image to match to. Has to be of the shape of ``image``, unless
+            ``allow_unequal_shapes`` says otherwise.
+        mode (str, optional): Class of transform to match with. Defaults to ``"full"``.
+
+            - ``"partial"``: affine match (Sec. III.A), the scale and offset that match
+              mean and variance. It leaves the *shape* of the image's own distribution
+              intact, so pick it when that shape is the thing under comparison, when the
+              fitted region contains structure rather than plain speckle, or when the CNR
+              must survive the matching.
+            - ``"full"``: any monotone mapping (Sec. III.B), the one that carries the
+              histogram of the image onto that of the reference, estimated on ``n_bins``
+              bins. It matches the shape of the distribution too, hence undoes non-linear
+              compression, so pick it to compare methods whose transformations differ in
+              more than scale and offset, or are unknown ("black box" images, Sec. III.C.2).
+              Together with a speckle ``roi``, the paper's expected common use (Sec. V).
+
+        n_bins (int or str, optional): Number of bins the mapping of a ``"full"`` match is
+            estimated on; ignored by ``"partial"``. Defaults to 256, the number of bins used
+            in the paper, which it found enough for consistent results.
+            Pass ``"all"`` for one bin per fitted pixel, the limit of the binning process
+            (Sec. III.C.1): it reproduces the reference distribution down to its outliers and tails,
+            which replicates them in the matched image. This is what
+            `skimage.exposure.match_histograms` does.
+        roi (ndarray, optional): Boolean mask, of the shape of both images, selecting a
+            homogeneous speckle region (Sec. III.C.3, the paper's expected common use).
+            The mapping is fit inside the mask and applied to the whole image, extended
+            linearly outside the fitted range. Defaults to None (fit on the whole image).
+        allow_unequal_shapes (bool, optional): Whether ``reference`` may be of a shape other
+            than that of ``image``. Only the two distributions are compared, so a match is
+            well defined either way, but images of different shapes are more often a mistake
+            (a stray transpose, the wrong frame of a sequence) than an intent. Defaults to
+            False. Pass True to match against a reference deliberately not of the shape of
+            the image, e.g. a region cut out of a larger acquisition. An ``roi`` has to index
+            both images regardless, so it cannot be combined with unequal shapes.
+        exclude_below (float, optional): Value at or below which a pixel of either image
+            is kept out of the fit and the transform. Defaults to -300.0, which catches
+            zea's ``log(0)`` sentinel and nothing a log-compressed B-mode measures. Pass `None`
+            to exclude nothing but the non-finite pixels.
+
+    Returns:
+        ndarray: Transformed image (float64), unclipped: clipping to a display range is
+        left to the caller (`to_8bit`, or ``vmin``/``vmax``).
+
+    .. note::
+        Which image is matched to which is a choice (Sec. V): matching to B-mode is natural
+        for a reader used to B-mode, but features outside its dynamic range are lost in the
+        process, and matching in the other direction then shows them off better.
+
+    Example:
+        .. doctest::
+
+            >>> import numpy as np
+
+            >>> from zea.display import histogram_match
+
+            >>> rng = np.random.default_rng(0)
+            >>> image = 20 * np.log10(rng.rayleigh(0.1, (64, 64)))
+            >>> reference = 20 * np.log10(rng.rayleigh(1.0, (64, 64)))
+
+            >>> round(image.mean() - reference.mean())  # the image is 20 dB darker
+            -20
+
+            >>> matched = histogram_match(image, reference)
+            >>> round(matched.mean() - reference.mean())
+            0
+
+    """
+    if mode not in ("full", "partial"):
+        raise ValueError(f"Unknown mode {mode!r}, expected 'full' or 'partial'.")
+    every_pixel = n_bins == "all"
+    if not every_pixel and not (isinstance(n_bins, (int, np.integer)) and n_bins >= 2):
+        raise ValueError(f"Invalid n_bins {n_bins!r}, expected an integer >= 2 or 'all'.")
+
+    image = ops.convert_to_numpy(image)
+    reference = ops.convert_to_numpy(reference)
+    if not allow_unequal_shapes and image.shape != reference.shape:
+        raise ValueError(
+            f"image shape {image.shape} does not match reference shape {reference.shape}; "
+            "pass allow_unequal_shapes=True to match against a reference of another shape."
+        )
+    if roi is not None:
+        roi = ops.convert_to_numpy(roi).astype(bool)
+    # A threshold nothing falls at or below excludes nothing, which is what None asks for.
+    floor = -np.inf if exclude_below is None else exclude_below
+
+    # A bin has to be worth estimating: ask for as many pixels as there are bins.
+    minimum = 2 if mode == "partial" or every_pixel else n_bins
+    x = _masked_pixels(image, roi, minimum, floor)
+    y = _masked_pixels(reference, roi, minimum, floor)
+
+    image = image.astype(np.float64)
+    # Pixels that hold no measurement are kept out of the transform as well as out of the fit:
+    # a mapping they never informed would place them anywhere, and a slope below one is enough
+    # to lift the sentinel out of the bottom of the range and into the displayed one.
+    unmeasured = image <= floor
+
+    if mode == "partial":
+        # eq. (8)-(9): the scale and offset that match mean and variance.
+        slope = y.std() / x.std()
+        matched = slope * image + (y.mean() - slope * x.mean())
+    else:
+        xs, ys = _quantile_pairs(x, y, x.size if every_pixel else n_bins)
+        matched = _monotone_map(image, xs, ys, spline=not every_pixel)
+
+    # Non-finite pixels are not `unmeasured` (a comparison against NaN is False), and pass
+    # through the transform itself: NaN in, NaN out.
+    return np.where(unmeasured, image, matched)
 
 
 def overlay_masks(
@@ -185,7 +429,14 @@ def compute_scan_convert_2d_coordinates(
     dtype: str = "float32",
     distance_to_apex: float = 0.0,
 ):
-    """Precompute coordinates for 2d scan conversion from polar coordinates"""
+    """Precompute coordinates for 2d scan conversion from polar coordinates.
+
+    ``rho`` is measured from the apex of the polar grid. ``distance_to_apex`` says how far
+    the transducer sits in front of that apex, and is used only to report ``z_lim`` as a
+    depth below the transducer (matching :attr:`~zea.Parameters.extent`). It must not
+    enter the sampling grid: the returned coordinates index the polar image, so they stay
+    in the apex frame.
+    """
     assert len(rho_range) == 2, "rho_range should be a tuple of length 2"
     assert len(theta_range) == 2, "theta_range should be a tuple of length 2"
     assert rho_range[0] < rho_range[1], "min_rho should be less than max_rho"
@@ -210,18 +461,17 @@ def compute_scan_convert_2d_coordinates(
         resolution = ops.mean([sRT, d_rho])  # mm per pixel
 
     x_vec = ops.arange(x_lim[0], x_lim[1], resolution)
-    z_vec = ops.arange(z_lim[0] + distance_to_apex, z_lim[1], resolution)
+    z_vec = ops.arange(z_lim[0], z_lim[1], resolution)
 
     coordinates = _polar_sampling_coordinates(x_vec, z_vec, rho, theta)
     parameters = {
         "resolution": resolution,
         "x_lim": x_lim,
-        "z_lim": z_lim,
+        "z_lim": [z_lim[0] - distance_to_apex, z_lim[1] - distance_to_apex],
         "rho_range": rho_range,
         "theta_range": theta_range,
         "d_rho": d_rho,
         "d_theta": d_theta,
-        "distance_to_apex": distance_to_apex,
     }
     return coordinates, parameters
 
@@ -257,8 +507,10 @@ def scan_convert_2d(
             outside the input image ranges. Defaults to 0.0. When set to NaN,
             no interpolation at the edges will happen.
         order (int, optional): The order of the spline interpolation. Defaults to 1.
-        distance_to_apex (float, optional): Distance from the apex to the
-            start of the z-axis in Cartesian grid. Defaults to 0.0.
+        distance_to_apex (float, optional): Distance from the apex ``rho`` is measured
+            from to the transducer surface. Only shifts the reported ``z_lim`` so it
+            reads as a depth below the transducer; the image itself is unchanged.
+            Defaults to 0.0.
 
     Returns:
         ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
@@ -455,6 +707,7 @@ def scan_convert(
     fill_value: float = 0.0,
     order: int = 1,
     with_batch_dim: bool = False,
+    distance_to_apex: float = 0.0,
 ):
     """Scan convert image based on number of dimensions."""
     if len(image.shape) == 2 + int(with_batch_dim):
@@ -466,6 +719,7 @@ def scan_convert(
             coordinates,
             fill_value,
             order,
+            distance_to_apex=distance_to_apex,
         )
     elif len(image.shape) == 3 + int(with_batch_dim):
         return scan_convert_3d(
@@ -665,6 +919,62 @@ def polar_to_cartesian_matrix(
     """
     assert "float" in ops.dtype(polar_matrix), "Input image must be float type"
 
+    dtype = ops.dtype(polar_matrix)
+    n_rho, n_theta = ops.shape(polar_matrix)[-2], ops.shape(polar_matrix)[-1]
+
+    coordinates = polar_to_cartesian_coordinates(
+        cartesian_shape,
+        n_rho,
+        n_theta,
+        tip=tip,
+        r_max=r_max,
+        theta_range=theta_range,
+        pitch=pitch,
+        dtype=dtype,
+    )
+    cartesian, _ = scan_convert_2d(
+        polar_matrix, coordinates=coordinates, fill_value=fill_value, order=order
+    )
+    return cartesian
+
+
+def polar_to_cartesian_coordinates(
+    cartesian_shape: Tuple[int, int],
+    n_rho: int,
+    n_theta: int,
+    tip: Union[Tuple[float, float], None] = None,
+    r_max: Union[float, None] = None,
+    theta_range: Union[Tuple[float, float], None] = None,
+    pitch: float = 1.0,
+    dtype: str = "float32",
+):
+    """(rho, theta) sampling grid that pins a polar cone's apex at pixel ``tip``.
+
+    Shared core of :func:`polar_to_cartesian_matrix`: builds the fractional index grid that
+    resamples an ``(n_rho, n_theta)`` polar image onto a ``cartesian_shape`` canvas, with the
+    apex at pixel ``tip`` and ``pitch`` units per pixel. Pass the result as ``coordinates`` to
+    :func:`scan_convert_2d` (or the :class:`~zea.ops.ScanConvert` operation) to run the same
+    resampling inside a pipeline. Unlike :func:`compute_scan_convert_2d_coordinates`, this uses
+    the ``arctan2`` mapping in :func:`_polar_sampling_coordinates`, so it covers a full circle
+    rather than only a narrow (``|theta| < pi/2``) sector.
+
+    Args:
+        cartesian_shape (tuple): Output ``(rows, cols)`` = ``(n_z, n_x)``.
+        n_rho (int): Radial samples of the polar image the indices address.
+        n_theta (int): Angular samples of the polar image the indices address.
+        tip (tuple, optional): ``(col, row)`` pixel location of the cone apex in the output.
+            Defaults to the centre-top ``(cols / 2, 0)``.
+        r_max (float, optional): Radius spanned by the polar image, in the same units as
+            ``pitch`` (pixels by default). Defaults to ``rows``.
+        theta_range (tuple, optional): angular extent in radians; the order must match the
+            column order of the polar image. Defaults to (45, -45) degrees.
+        pitch (float, optional): Output units per pixel (radial units of ``r_max``).
+            Defaults to 1.0, i.e. ``tip`` and ``r_max`` are in pixels.
+        dtype (str, optional): Compute dtype for the axes. Defaults to ``"float32"``.
+
+    Returns:
+        coords (Array): ``(2, cols, rows)`` stack of ``[rho_idx, theta_idx]`` sampling indices.
+    """
     cart_rows, cart_cols = cartesian_shape
     if tip is None:
         tip = (cart_cols / 2, 0.0)
@@ -674,20 +984,13 @@ def polar_to_cartesian_matrix(
         theta_range = (np.deg2rad(45), -np.deg2rad(45))
 
     tip_x, tip_y = tip
-    dtype = ops.dtype(polar_matrix)
-    n_rho, n_theta = ops.shape(polar_matrix)[-2], ops.shape(polar_matrix)[-1]
-
     rho = ops.linspace(0.0, r_max, n_rho, dtype=dtype)
     theta = ops.linspace(theta_range[0], theta_range[1], n_theta, dtype=dtype)
 
     x_vec = (tip_x - ops.cast(ops.arange(cart_cols), dtype)) * pitch
     z_vec = (ops.cast(ops.arange(cart_rows), dtype) - tip_y) * pitch
 
-    coordinates = _polar_sampling_coordinates(x_vec, z_vec, rho, theta)
-    cartesian, _ = scan_convert_2d(
-        polar_matrix, coordinates=coordinates, fill_value=fill_value, order=order
-    )
-    return cartesian
+    return _polar_sampling_coordinates(x_vec, z_vec, rho, theta)
 
 
 def inverse_scan_convert_2d(

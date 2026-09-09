@@ -1,0 +1,40 @@
+codecov:
+  notify:
+    # tests.yaml uploads coverage under two flags: `unit` (fast job) and `heavy`
+    # (self-hosted, up to 2h). Wait for both before notifying, otherwise Codecov
+    # reports as soon as `unit` lands while `heavy` is still running.
+    after_n_builds: 2
+  require_ci_to_pass: false
+  max_report_age: off
+
+coverage:
+  precision: 2
+  round: down
+  range: 60..85  # Visual color range in PR comments; matches current ~85% coverage
+
+  status:
+    project:
+      default:
+        target: auto         # Pass as long as we don't drop below the base commit...
+        threshold: 1.0       # ...allow up to 1pt of drop before failing.
+    patch:
+      default:
+        target: auto         # Same bar as the project check: don't drag the overall
+                              # average down, rather than requiring near-100% on every
+                              # diff.
+        threshold: 1.0       # Same 1pt buffer as the project check.
+
+flag_management:
+  individual_flags:
+    - name: unit
+    - name: heavy
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
+  after_n_builds: 2
+
+ignore:
+  - "tests/**"
+

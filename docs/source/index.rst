@@ -16,7 +16,7 @@ Check out the :doc:`about` page for more information and the motivation behind `
 .. admonition:: Beta!
    :class: warning
 
-   This package is under active development. It is mainly used to support :ref:`our research <papers>`. That being said, we are happy to share it with the ultrasound community and hope it will be useful for your research as well.
+   This package is under active development. See a list of ongoing :ref:`research <papers>` supported by ``zea``. We are happy to share it with the ultrasound community and hope it will be useful for your research as well.
 
 .. note::
 

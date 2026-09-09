@@ -22,11 +22,13 @@ from pathlib import Path
 import keras
 from keras import backend, ops
 
+from zea import log
 from zea.backend import _import_tf
 from zea.internal.registry import model_registry
 from zea.models.base import BaseModel
 from zea.models.preset_utils import get_preset_loader, register_presets
 from zea.models.presets import taesdxl_decoder_presets, taesdxl_encoder_presets, taesdxl_presets
+from zea.models.utils import onnx2tf_saved_model_kwargs
 
 
 @model_registry(name="taesdxl")
@@ -78,8 +80,10 @@ class TinyAutoencoder(BaseModel):
                 "Please load model using `TinyAutoencoder.from_preset()` before calling."
             )
 
-        if ops.shape(inputs)[-1] == 1:
-            self._grayscale = True
+        # Reset per call: a grayscale image followed by an RGB one must not make
+        # `decode` fold the RGB output back down to a single channel.
+        self._grayscale = ops.shape(inputs)[-1] == 1
+        if self._grayscale:
             inputs = ops.concatenate([inputs, inputs, inputs], axis=-1)  # grayscale to RGB
         return self.encoder(inputs)
 
@@ -263,3 +267,89 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
 register_presets(taesdxl_presets, TinyAutoencoder)
 register_presets(taesdxl_encoder_presets, TinyEncoder)
 register_presets(taesdxl_decoder_presets, TinyDecoder)
+
+
+def convert_original_weights(
+    model_name="madebyollin/taesdxl", output_dir=None, revision=None
+):  # pragma: no cover
+    """Convert the original PyTorch TAESD weights to TensorFlow / Keras v3 models.
+
+    This is how the ``taesdxl`` presets on the Hugging Face Hub were created; it is
+    kept here for reproducibility and is not needed to *use* the model.
+
+    The conversion goes PyTorch -> ONNX -> TensorFlow and therefore needs a few
+    extra packages that are not part of the ``zea`` dependencies::
+
+        pip install torch diffusers[torch] onnx==1.16.1 onnxruntime==1.18.1 onnx2tf \\
+            onnx-graphsurgeon onnxsim==0.4.33 sne4onnx sng4onnx tf-keras
+
+    .. note::
+        torch and TensorFlow have to coexist in one process here, which not every
+        combination of wheels survives. Prefer the ``zeahub/all`` container, and
+        import torch before this module if you hit a crash while building the
+        torch model.
+
+    Args:
+        model_name (str, optional): Hugging Face model id of the original PyTorch
+            autoencoder. Defaults to ``"madebyollin/taesdxl"``.
+        revision (str, optional): Git revision of `model_name` to convert. Defaults
+            to None, i.e. whatever upstream currently has on its default branch;
+            pass a commit or tag to reproduce one specific set of weights.
+        output_dir (str | Path, optional): Folder to write the converted models to.
+            Defaults to a timestamped folder under ``./temp/zea``.
+
+    Returns:
+        Path: Folder containing the converted ``encoder`` and ``decoder`` models.
+    """
+    import time
+
+    # Imported here (not at module level) so that merely importing this module never
+    # pulls in torch or the onnx toolchain: they are only needed for the conversion.
+    import torch
+    from diffusers import AutoencoderTiny
+    from onnx2tf import convert
+
+    # Unpinned by default, so this follows upstream: the published presets carry the
+    # pre-1.3 decoder, while main has been 1.3 since 2024-11-07. Pass `revision` to
+    # convert one specific commit instead.
+    vae = AutoencoderTiny.from_pretrained(model_name, revision=revision, torch_dtype=torch.float32)
+    vae.eval()
+
+    if output_dir is None:
+        output_dir = Path(
+            f"./temp/zea/{model_name.split('/')[-1]}-{time.strftime('%Y%m%d-%H%M%S')}"
+        )
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Both halves are exported separately: zea loads them as TinyEncoder / TinyDecoder.
+    # dynamic_axes keys must match input_names / output_names, or they are ignored.
+    dynamic_axes = {
+        "input": {0: "batch_size", 2: "height", 3: "width"},
+        "output": {0: "batch_size", 2: "height", 3: "width"},
+    }
+    for name, submodel, example_input in [
+        ("encoder", vae.encoder, torch.rand((1, 3, 256, 256), dtype=torch.float32)),
+        ("decoder", vae.decoder, torch.rand((1, 4, 32, 32), dtype=torch.float32)),
+    ]:
+        onnx_path = str(output_dir / f"{name}.onnx")
+        torch.onnx.export(
+            submodel,
+            (example_input,),
+            onnx_path,
+            input_names=["input"],
+            output_names=["output"],
+            dynamic_axes=dynamic_axes,
+            # Legacy TorchScript exporter: the dynamo exporter (torch >= 2.9
+            # default) emits graphs onnx2tf cannot convert.
+            dynamo=False,
+        )
+        convert(
+            onnx_path,
+            output_folder_path=str(output_dir / name),
+            output_keras_v3=True,
+            **onnx2tf_saved_model_kwargs(),
+        )
+
+    log.success(f"Models saved to {log.yellow(str(output_dir))}")
+    return output_dir

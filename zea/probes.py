@@ -5,6 +5,33 @@ bandwidth, and properties such as element dimensions and lens geometry.
 All probe objects are instances of :class:`Probe`, which inherits validation from
 :class:`~zea.data.spec.ProbeSpec`.
 
+Probe parameters
+^^^^^^^^^^^^^^^^
+
+A probe is described by the fields below (all optional — record what you have; see
+:class:`~zea.data.spec.ProbeSpec` for exact dtypes and shapes):
+
+- ``name`` -- probe model identifier, e.g. ``"verasonics_c5_2v"``.
+- ``type`` -- geometry class: ``"linear"``, ``"phased"``, ``"curved"``, ...
+- ``probe_geometry`` -- element positions ``(x, y, z)`` in metres, shape
+  ``(n_el, 3)``. The element count ``n_el`` and ``pitch`` are derived from it.
+- ``probe_center_frequency`` -- the probe's nominal centre frequency (Hz), a fixed
+  property of the transducer. For the built-in probes it is defined as the
+  **midpoint of the -6 dB band** named by the probe (e.g. "L11-4v" -> 4-11 MHz ->
+  7.5 MHz), so it derives consistently with ``probe_bandwidth_percent`` from the
+  band edges. This is the *defined band centre*, not a measured peak-response
+  frequency, and it is distinct from the centre frequency of the transmit pulse
+  used in an acquisition, which lives in ``ScanSpec.center_frequency`` /
+  :attr:`~zea.parameters.Parameters.center_frequency`.
+- ``probe_bandwidth_percent`` -- fractional bandwidth as a percentage,
+  ``(f_high - f_low) / f_centre * 100``, using the arithmetic band centre above
+  (the standard fractional-bandwidth reference).
+- ``element_width`` -- width of a single element (m), along the array (azimuthal)
+  direction.
+- ``element_height`` -- elevation aperture of a single element (m).
+- ``lens_sound_speed`` / ``lens_thickness`` -- acoustic-lens speed of sound (m/s)
+  and thickness (m), used to correct receive travel times for the lens.
+
 There are three ways to obtain a probe:
 
 Loading a built-in probe
@@ -17,7 +44,7 @@ A small set of probes is pre-defined and can be retrieved by name:
     >>> from zea import Probe
     >>> probe = Probe.from_name("verasonics_l11_4v")
     >>> float(probe.probe_center_frequency)
-    6250000.0
+    7500000.0
     >>> probe.n_el
     128
 
@@ -29,6 +56,8 @@ Built-in probes
 - :class:`Verasonics_l11_4v` -- Verasonics L11-4V linear array
 - :class:`Verasonics_l11_5v` -- Verasonics L11-5V linear array
 - :class:`Esaote_sll1543` -- Esaote SLL1543 linear array
+- :class:`Verasonics_c5_2v` -- Verasonics C5-2v convex (curved) array
+- :class:`Verasonics_p4_2v` -- Verasonics P4-2v phased array
 
 Loading a probe from a data file
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -143,6 +172,93 @@ def create_probe_geometry(n_el, pitch):
         axis=1,
     ).astype(np.float32)
     return probe_geometry
+
+
+def create_curved_probe_geometry(n_el, pitch, radius):
+    """Create the geometry of a convex (curved) array.
+
+    Elements lie on an arc of the given radius of curvature in the ``x-z`` plane
+    (``y = 0``), centred on ``(0, 0, -radius)``. The middle of the array sits at the
+    origin facing ``+z`` and the peripheral elements curve back toward ``-z`` (zea's
+    convention: the medium is at ``+z``). ``pitch`` is the arc spacing between adjacent
+    elements, so the per-element angular step is ``pitch / radius``.
+
+    Args:
+        n_el (int): Number of elements in the probe.
+        pitch (float): Arc distance between adjacent elements in metres.
+        radius (float): Radius of curvature of the array in metres.
+
+    Returns:
+        np.ndarray: Probe geometry with shape (n_el, 3).
+    """
+    angular_pitch = pitch / radius
+    angles = (np.arange(n_el) - (n_el - 1) / 2) * angular_pitch
+    probe_geometry = np.stack(
+        [
+            radius * np.sin(angles),
+            np.zeros((n_el,)),
+            radius * np.cos(angles) - radius,
+        ],
+        axis=1,
+    ).astype(np.float32)
+    return probe_geometry
+
+
+def fit_curved_probe_radius(probe_geometry, tol: float = 0.5) -> float:
+    """Recover a curved probe's radius of curvature from its element positions.
+
+    Inverse of :func:`create_curved_probe_geometry`, for curved probes whose radius is
+    only known through ``probe_geometry`` (e.g. read from a converted file) rather than
+    built from an explicit radius. For such a probe the radius is also the polar grid's
+    :attr:`~zea.Parameters.distance_to_apex`, because the centre of curvature is exactly
+    the apex the beams fan out from.
+
+    Elements are assumed to lie on an arc of radius ``R`` centred at ``(0, 0, -R)``, so
+    ``x^2 + (z + R)^2 = R^2``  =>  ``x^2 + z^2 + 2 R z = 0``. Solved as a least-squares
+    fit over all elements rather than per-element, which is ill-conditioned for the
+    elements nearest the middle of the array (``z -> 0``).
+
+    .. note::
+        The apex is the centre of curvature, at ``(0, 0, -R)``. It is not the middle of
+        the array, which sits at the origin, hence ``distance_to_apex`` for a curved
+        probe is its radius of curvature rather than zero.
+
+    Args:
+        probe_geometry (np.ndarray): Element positions in metres, shape (n_el, 3), in
+            zea's curved-probe frame (see :func:`create_curved_probe_geometry`).
+        tol (float, optional): How far an element may sit from the fitted arc before the
+            fit is rejected, as a fraction of the element pitch. Defaults to 0.5, which
+            comfortably admits the irregularity of measured and simulated geometries
+            while still rejecting an array that is off-frame by a single element.
+
+    Returns:
+        float: Fitted radius of curvature in metres.
+
+    Raises:
+        ValueError: If the elements do not lie on such an arc, either because the array
+            is not curved or because ``probe_geometry`` uses a different origin -- a
+            translated arc still fits *a* circle, just not one centred at ``(0, 0, -R)``.
+    """
+    x = probe_geometry[:, 0].astype(np.float64)
+    z = probe_geometry[:, 2].astype(np.float64)
+
+    denominator = 2.0 * np.sum(z**2)
+    radius = -np.sum(z * (x**2 + z**2)) / denominator if denominator > 0 else np.inf
+
+    # Check the fit instead of trusting it: this catches a flat array (nothing to fit) as
+    # well as a geometry in a different frame, which would otherwise fit the wrong circle.
+    if np.isfinite(radius):
+        deviation = np.max(np.abs(np.hypot(x, z + radius) - radius))
+        pitch = np.median(np.linalg.norm(np.diff(probe_geometry, axis=0), axis=1))
+        if deviation <= tol * pitch:
+            return float(radius)
+
+    raise ValueError(
+        "Cannot fit a radius of curvature: the elements do not lie on an arc centred at "
+        "(0, 0, -R). Either the array is not curved, or probe_geometry uses a different "
+        "origin and needs re-centring onto zea's curved-probe frame "
+        "(see create_curved_probe_geometry)."
+    )
 
 
 class Probe(ProbeSpec):
@@ -266,14 +382,19 @@ class Probe(ProbeSpec):
 
 @probe_registry(name="verasonics_l11_4v")
 class Verasonics_l11_4v(Probe):
-    """Verasonics L11-4V linear ultrasound transducer."""
+    """Verasonics L11-4V linear array.
+
+    Elevation focus ~20 mm, sensitivity -64.5 to -59.5 dB.
+    """
 
     def __init__(self):
         """Verasonics L11-4V linear ultrasound transducer."""
 
         probe_geometry = create_probe_geometry(n_el=128, pitch=0.3e-3)
-        center_frequency = 6.25e6
-        probe_bandwidth_percent = (11 - 4) * 100 / (center_frequency / 1e6)
+        # Centre frequency is the midpoint of the -6 dB band from the probe name.
+        low_freq, high_freq = 4e6, 11e6
+        center_frequency = (low_freq + high_freq) / 2
+        probe_bandwidth_percent = (high_freq - low_freq) / center_frequency * 100
 
         super().__init__(
             name="verasonics_l11_4v",
@@ -281,22 +402,23 @@ class Verasonics_l11_4v(Probe):
             probe_center_frequency=center_frequency,
             probe_bandwidth_percent=probe_bandwidth_percent,
             probe_geometry=probe_geometry,
+            element_width=0.27e-3,
+            element_height=5e-3,
         )
 
 
 @probe_registry(name="verasonics_l11_5v")
 class Verasonics_l11_5v(Probe):
-    """Verasonics L11-5V linear ultrasound transducer."""
+    """Verasonics L11-5V linear array."""
 
     def __init__(self):
         """Verasonics L11-5V linear ultrasound transducer."""
 
         probe_geometry = create_probe_geometry(n_el=128, pitch=0.3e-3)
-        center_frequency = 6.25e6
-        probe_bandwidth_percent = (11 - 5) * 100 / (center_frequency / 1e6)
-
-        # elevation_focus = 18e-3
-        # sensitivity = -52 +/- 3 dB
+        # Centre frequency is the midpoint of the -6 dB band from the probe name.
+        low_freq, high_freq = 5e6, 11e6
+        center_frequency = (low_freq + high_freq) / 2
+        probe_bandwidth_percent = (high_freq - low_freq) / center_frequency * 100
 
         super().__init__(
             name="verasonics_l11_5v",
@@ -304,6 +426,8 @@ class Verasonics_l11_5v(Probe):
             probe_center_frequency=center_frequency,
             probe_bandwidth_percent=probe_bandwidth_percent,
             probe_geometry=probe_geometry,
+            element_width=0.27e-3,
+            element_height=5e-3,
         )
 
 
@@ -318,8 +442,10 @@ class Esaote_sll1543(Probe):
         """Set probe parameters"""
 
         probe_geometry = create_probe_geometry(n_el=192, pitch=0.245 / 1e3)
-        center_frequency = 8e6
-        probe_bandwidth_percent = (13 - 3) * 100 / (center_frequency / 1e6)
+        # Centre frequency is the midpoint of the -6 dB band from the probe name.
+        low_freq, high_freq = 3e6, 13e6
+        center_frequency = (low_freq + high_freq) / 2
+        probe_bandwidth_percent = (high_freq - low_freq) / center_frequency * 100
 
         super().__init__(
             name="esaote_sll1543",
@@ -327,4 +453,56 @@ class Esaote_sll1543(Probe):
             probe_center_frequency=center_frequency,
             probe_bandwidth_percent=probe_bandwidth_percent,
             probe_geometry=probe_geometry,
+        )
+
+
+@probe_registry(name="verasonics_c5_2v")
+class Verasonics_c5_2v(Probe):
+    """Verasonics C5-2v convex (curved) array.
+
+    Elevation focus ~60 mm, sensitivity -55.5 to -50.5 dB.
+    """
+
+    def __init__(self):
+        """Verasonics C5-2v convex (curved) ultrasound transducer."""
+
+        probe_geometry = create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=49.57e-3)
+        # Centre frequency is the midpoint of the -6 dB band from the probe name.
+        low_freq, high_freq = 2e6, 5e6
+        center_frequency = (low_freq + high_freq) / 2
+        probe_bandwidth_percent = (high_freq - low_freq) / center_frequency * 100
+
+        super().__init__(
+            name="verasonics_c5_2v",
+            type="curved",
+            probe_center_frequency=center_frequency,
+            probe_bandwidth_percent=probe_bandwidth_percent,
+            probe_geometry=probe_geometry,
+            element_width=0.46e-3,
+        )
+
+
+@probe_registry(name="verasonics_p4_2v")
+class Verasonics_p4_2v(Probe):
+    """Verasonics P4-2v phased array.
+
+    Elevation focus ~60 mm, sensitivity -69 to -65 dB.
+    """
+
+    def __init__(self):
+        """Verasonics P4-2v phased-array ultrasound transducer."""
+
+        probe_geometry = create_probe_geometry(n_el=64, pitch=0.3e-3)
+        # Centre frequency is the midpoint of the -6 dB band from the probe name.
+        low_freq, high_freq = 2e6, 4e6
+        center_frequency = (low_freq + high_freq) / 2
+        probe_bandwidth_percent = (high_freq - low_freq) / center_frequency * 100
+
+        super().__init__(
+            name="verasonics_p4_2v",
+            type="phased",
+            probe_center_frequency=center_frequency,
+            probe_bandwidth_percent=probe_bandwidth_percent,
+            probe_geometry=probe_geometry,
+            element_width=0.25e-3,
         )

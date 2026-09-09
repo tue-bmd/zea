@@ -2,6 +2,9 @@
 
 import inspect
 import json
+import subprocess
+import sys
+import textwrap
 
 import keras
 import numpy as np
@@ -10,7 +13,6 @@ import pytest
 from zea import func, ops
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.config import Config
-from zea.data.file import File
 from zea.internal.core import DEFAULT_DYNAMIC_RANGE, DataTypes
 from zea.internal.registry import ops_registry
 from zea.ops.keras_ops import Squeeze
@@ -27,6 +29,7 @@ from zea.parameters import Parameters
 from zea.probes import Probe
 
 from . import DEFAULT_TEST_SEED, run_in_backend
+from .backend_utils import format_backend_skip_reason, missing_required_backends
 
 """Some operations for testing"""
 
@@ -360,7 +363,7 @@ def test_pipeline_dotted_registry_name():
     from zea.ops.keras_ops import Cast
     from zea.ops.pipeline import Pipeline
 
-    pipeline = Pipeline.from_default(jit_options=None)
+    pipeline = Pipeline([Cast(dtype="float32")])
     # Cast is registered as "keras.ops.cast" but must be addressable as "cast"
     assert isinstance(pipeline["cast"], Cast)
     assert "cast" in pipeline.keys()
@@ -1159,6 +1162,175 @@ def test_simulator(ultrasound_probe, ultrasound_parameters, ultrasound_scatterer
     assert output["data"].shape == expected_shape
 
 
+def _subprocess_simulate_elevation_lens_under_jit():  # pragma: no cover
+    """`elevation_lens` is branched on with a Python `if` in `simulate_rf`, so it must be in
+    `Simulate.STATIC_PARAMS` or it raises `TracerBoolConversionError` under jit."""
+    import os
+
+    os.environ["KERAS_BACKEND"] = "jax"
+
+    import numpy as np
+
+    from zea import ops
+    from zea.beamform.delays import compute_t0_delays_planewave
+    from zea.ops.pipeline import Pipeline
+    from zea.parameters import Parameters
+
+    n_el = 16
+    probe_geometry = np.stack(
+        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+    angles = np.zeros(1)
+    parameters = Parameters(
+        n_tx=1,
+        n_ax=128,
+        n_el=n_el,
+        center_frequency=3e6,
+        sampling_frequency=12e6,
+        probe_geometry=probe_geometry,
+        t0_delays=compute_t0_delays_planewave(
+            probe_geometry=probe_geometry, polar_angles=angles, sound_speed=1540.0
+        ),
+        tx_apodizations=np.ones((1, n_el), dtype=np.float32),
+        element_width=np.linalg.norm(probe_geometry[1] - probe_geometry[0]),
+        apply_lens_correction=False,
+        sound_speed=1540.0,
+        lens_sound_speed=1000.0,
+        lens_thickness=1e-3,
+        initial_times=np.ones((1,)) * 1e-6,
+        attenuation_coef=0.2,
+        n_ch=1,
+        selected_transmits="all",
+        focus_distances=np.ones(1) * np.inf,
+        polar_angles=angles,
+        xlims=(-15e-3, 15e-3),
+        zlims=(0, 35e-3),
+    )
+
+    pipeline = Pipeline([ops.Simulate(jit_compile=True)], with_batch_dim=False)
+    inputs = pipeline.prepare_parameters(parameters)
+    pipeline(
+        **inputs,
+        scatterer_positions=np.array([[0.0, 0.0, 20e-3]], dtype=np.float32),
+        scatterer_magnitudes=np.ones(1, dtype=np.float32),
+        elevation_lens=True,
+        element_height=5e-3,
+    )
+
+
+def test_simulate_elevation_lens_under_jax_jit():
+    """Needs a subprocess, as `run_in_backend` disables jit."""
+    missing = missing_required_backends(["jax"])
+    if missing:
+        pytest.skip(format_backend_skip_reason(missing))
+
+    code = textwrap.dedent(inspect.getsource(_subprocess_simulate_elevation_lens_under_jit))
+    code += "\n_subprocess_simulate_elevation_lens_under_jit()\n"
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, (
+        f"Simulation with elevation_lens crashed with jax jit.\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+
+
+def _subprocess_simulate_elevation_bucket_compile_counts():  # pragma: no cover
+    """XLA compiles per call to check `elevation_slab_bucket` caches correctly."""
+    import os
+
+    os.environ["KERAS_BACKEND"] = "jax"
+
+    import jax
+    import numpy as np
+
+    from zea import ops
+
+    n_el, element_height = 16, 5e-3
+    probe_geometry = np.stack(
+        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+
+    def cloud(n_inside, n_total, seed):
+        rng = np.random.default_rng(seed)
+        y = np.concatenate(
+            [
+                rng.uniform(-0.4, 0.4, n_inside) * element_height,
+                rng.uniform(1.5, 3.0, n_total - n_inside) * element_height,
+            ]
+        )
+        positions = np.stack(
+            [
+                rng.uniform(-5e-3, 5e-3, n_total),
+                y,
+                rng.uniform(15e-3, 30e-3, n_total),
+            ],
+            axis=1,
+        ).astype(np.float32)
+        return positions, rng.uniform(0.5, 1.5, n_total).astype(np.float32)
+
+    op = ops.Simulate(jit_compile=True, with_batch_dim=False)
+    args = {
+        "probe_geometry": probe_geometry,
+        "apply_lens_correction": False,
+        "lens_thickness": 1e-3,
+        "lens_sound_speed": 1000.0,
+        "sound_speed": 1540.0,
+        "n_ax": 256,
+        "center_frequency": 3e6,
+        "sampling_frequency": 12e6,
+        "t0_delays": np.zeros((1, n_el), dtype=np.float32),
+        "initial_times": np.zeros(1, dtype=np.float32),
+        "element_width": 1e-3,
+        "attenuation_coef": 0.0,
+        "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
+        "t_peak": np.full(1, 1 / 3e6, dtype=np.float32),
+        "elevation_lens": True,
+        "element_height": element_height,
+    }
+
+    compile_count = 0
+
+    def _on_compile(event, duration_secs, **kwargs):
+        nonlocal compile_count
+        if event == "/jax/core/compile/backend_compile_duration":
+            compile_count += 1
+
+    jax.monitoring.register_event_duration_secs_listener(_on_compile)
+
+    n_compiles = {}
+    for n_inside in (300, 400, 500, 900):
+        before = compile_count
+        positions, magnitudes = cloud(n_inside, 2000, seed=n_inside)
+        op(scatterer_positions=positions, scatterer_magnitudes=magnitudes, **args)
+        n_compiles[n_inside] = compile_count - before
+
+    print(f"compiles per call: {n_compiles}")
+    if n_compiles[300] == 0:
+        raise AssertionError("The first call should compile.")
+    if n_compiles[400] or n_compiles[500]:
+        raise AssertionError(f"clouds in the same bucket should reuse: {n_compiles}")
+    if n_compiles[900] == 0:
+        raise AssertionError(f"clouds in different buckets should recompile: {n_compiles}")
+
+
+def test_simulate_elevation_bucket_reuses_compiled_shapes():
+    """Neighbouring in-slab counts must hit one compiled shape, or bucketing buys nothing."""
+    missing = missing_required_backends(["jax"])
+    if missing:
+        pytest.skip(format_backend_skip_reason(missing))
+
+    code = textwrap.dedent(inspect.getsource(_subprocess_simulate_elevation_bucket_compile_counts))
+    code += "\n_subprocess_simulate_elevation_bucket_compile_counts()\n"
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=600
+    )
+    assert result.returncode == 0, (
+        f"elevation slab bucketing did not reuse compiled shapes.\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+
+
 @pytest.mark.heavy
 def test_default_ultrasound_pipeline(
     default_pipeline,
@@ -1215,46 +1387,6 @@ def test_pipeline_parameter_tracing(ultrasound_parameters: Parameters):
     )
     output = pipeline(data=data, **inputs)
     assert "demodulation_frequency" in output
-
-
-def test_demodulate_int16_requires_cast():
-    """Demodulate should raise a clear error for int16 raw input."""
-    data = np.zeros((1, 4, 8, 2, 1), dtype=np.int16)
-    op = ops.Demodulate(jit_compile=False)
-
-    with pytest.raises(ValueError, match=r"Cast\(dtype='float32'\)"):
-        op(data=data, demodulation_frequency=1e6, sampling_frequency=20e6)
-
-
-def test_demodulate_int16_from_hdf5_requires_cast(tmp_path):
-    """Demodulate should raise a clear cast error for int16 raw_data loaded from HDF5."""
-    n_frames, n_tx, n_ax = 1, 2, 8
-    probe = Probe.from_name("verasonics_l11_4v")
-    n_el = probe.n_el
-    path = tmp_path / "int16_raw_data.hdf5"
-
-    scan = {
-        "sampling_frequency": np.float32(20e6),
-        "center_frequency": np.float32(5e6),
-        "demodulation_frequency": np.float32(5e6),
-        "initial_times": np.zeros(n_tx, dtype=np.float32),
-        "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
-        "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
-        "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
-        "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
-        "polar_angles": np.zeros(n_tx, dtype=np.float32),
-        "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
-    }
-    raw_data = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.int16)
-
-    File.create(path, data={"raw_data": raw_data}, scan=scan, probe=probe)
-
-    with File(path, "r") as f_read:
-        loaded = f_read.data.raw_data[:]
-
-    op = ops.Demodulate(jit_compile=False)
-    with pytest.raises(ValueError, match=r"Cast\(dtype='float32'\)"):
-        op(data=loaded, demodulation_frequency=5e6, sampling_frequency=20e6)
 
 
 def test_ops_pass_positional_arg():
@@ -1525,6 +1657,71 @@ def test_pipeline_call_runtime_error():
     pipeline = ops.Pipeline([AlwaysCrashes()], jit_options=None, validate=False)
     with pytest.raises(RuntimeError, match="boom"):
         pipeline(data=None)
+
+
+def test_pipeline_operation_error_summarizes_inputs():
+    """A generic operation failure reports the op name and input shapes/dtypes."""
+    import numpy as np
+
+    @ops_registry("crashes_with_data")
+    class CrashesWithData(ops.Operation):
+        def call(self, **kwargs):
+            raise ValueError("boom")
+
+    pipeline = ops.Pipeline([CrashesWithData()], jit_options=None, validate=False)
+    with pytest.raises(RuntimeError) as excinfo:
+        pipeline(data=np.zeros((4, 8), dtype="float32"))
+    msg = str(excinfo.value)
+    assert "CrashesWithData" in msg
+    assert "(4, 8)" in msg  # shape summary of the offending input
+    assert "float32" in msg
+
+
+def test_pipeline_missing_key_suggests_typo():
+    """A missing required key suggests a close match among the provided keys."""
+
+    @ops_registry("needs_gain")
+    class NeedsGain(ops.Operation):
+        def call(self, **kwargs):
+            return {"result": kwargs["gain"]}
+
+    pipeline = ops.Pipeline([NeedsGain()], jit_options=None, validate=False)
+    # 'gian' is a typo for the required 'gain' key.
+    with pytest.raises(KeyError, match="did you mean 'gain'"):
+        pipeline(data=None, gian=1.0)
+
+
+def test_pipeline_unused_key_typo_warns(monkeypatch):
+    """A provided key close to a valid key is flagged as a likely typo (warning)."""
+    import numpy as np
+
+    from zea.ops import pipeline as pipeline_module
+
+    messages = []
+    monkeypatch.setattr(pipeline_module.log, "warning", lambda msg, *a, **k: messages.append(msg))
+
+    pipeline = ops.Pipeline(
+        [ops.LogCompress()], with_batch_dim=False, jit_options=None, validate=False
+    )
+    pipeline(data=np.zeros((4, 4), dtype="float32"), dynamic_rang=(-50, 0))
+    assert any("dynamic_range" in m and "typo" in m for m in messages)
+
+
+def test_pipeline_nested_error_not_double_wrapped():
+    """An error from a nested pipeline is annotated once, not wrapped twice."""
+    import numpy as np
+
+    @ops_registry("nested_crash")
+    class NestedCrash(ops.Operation):
+        def call(self, **kwargs):
+            raise ValueError("kaboom")
+
+    inner = ops.Pipeline([NestedCrash()], jit_options=None, validate=False)
+    outer = ops.Pipeline([inner], jit_options=None, validate=False)
+    with pytest.raises(RuntimeError) as excinfo:
+        outer(data=np.zeros((2, 2), dtype="float32"))
+    # "failed with" appears exactly once -> the inner annotation is reused.
+    assert str(excinfo.value).count("failed with") == 1
 
 
 def test_map_get_dict():
