@@ -10,8 +10,10 @@ import keras
 from keras import ops
 from keras.layers import Conv2D
 
-from zea.internal.registry import model_registry
+from zea.internal.core import DataTypes
+from zea.internal.registry import beamformer_registry, model_registry, ops_registry
 from zea.models.base import BaseModel
+from zea.ops.base import Operation
 
 
 @model_registry(name="able")
@@ -20,8 +22,9 @@ class ABLE(BaseModel):
 
     Implements a configurable pixel-wise convolutional encoder/decoder that
     computes per-element adaptive weights from time-of-flight-corrected
-    channel data.  The weighted data is then summed by a subsequent
-    :class:`~zea.ops.DelayAndSum` operation to form the final image.
+    channel data.  Summing the weighted data over elements and transmits
+    forms the image; :class:`ABLEBeamform` does both in one pipeline
+    operation.
 
     .. admonition:: Reference
 
@@ -29,8 +32,8 @@ class ABLE(BaseModel):
         Learning," *IEEE Trans. Med. Imaging* **39** (12), 2020.
         https://doi.org/10.1109/TMI.2020.3008537
 
-    Expected input shape when used inside a
-    :class:`~zea.ops.PatchedGrid` pipeline via :class:`~zea.ops.Lambda`:
+    Expected input shape (time-of-flight corrected channel data, as
+    produced by :class:`~zea.ops.TOFCorrection`):
 
     - ``(n_tx, n_pix, n_el)``       — RF data
     - ``(n_tx, n_pix, n_el, n_ch)`` — IQ data
@@ -403,58 +406,96 @@ class ABLE(BaseModel):
         return out
 
 
-if __name__ == "__main__":
-    import os
+@beamformer_registry("able")
+@ops_registry("able")
+class ABLEBeamform(Operation):
+    """Beamform by summing the ABLE-weighted channel data.
 
-    os.environ["KERAS_BACKEND"] = "jax"
+    Drop-in replacement for :class:`~zea.ops.DelayAndSum`: where delay-and-sum
+    sums the time-of-flight corrected channels with uniform weights, this
+    operation first weights them with the content-adaptive apodization
+    predicted by :class:`ABLE`.
 
-    import keras
-    import numpy as np
+    Being registered as a beamformer, it slots straight into
+    :class:`~zea.ops.Beamform`::
 
-    # Expected input shape: (n_tx, n_pix, n_el) or (n_tx, n_pix, n_el, n_ch)
-    # The model maps over n_tx internally.
-    n_tx = 5
-    n_pix = 64 * 64  # flattened spatial grid
-    n_el = 128
+        from zea.models.able import ABLE
+        from zea.ops import Beamform
 
-    # --- RF data (no channel dim) ---
-    model = ABLE(latent_dim=32, n_latent_layers=2, kernel_size=1)
-    x_rf = np.random.randn(n_tx, n_pix, n_el).astype(np.float32)
-    y_rf = model(x_rf)
-    print("RF  input shape: ", x_rf.shape)
-    print("RF  output shape:", y_rf.shape)
-    assert y_rf.shape == x_rf.shape, "RF output shape mismatch"
+        model = ABLE()
+        model.build((n_tx, n_pix, n_el, n_ch))  # eagerly, see note below
+        beamform = Beamform(beamformer="able", model=model, num_patches=10)
 
-    # --- IQ data (n_ch = 2) ---
-    n_ch = 2
-    model_iq = ABLE(latent_dim=32, n_latent_layers=2, kernel_size=1)
-    x_iq = np.random.randn(n_tx, n_pix, n_el, n_ch).astype(np.float32)
-    y_iq = model_iq(x_iq)
-    print("IQ  input shape: ", x_iq.shape)
-    print("IQ  output shape:", y_iq.shape)
-    assert y_iq.shape == x_iq.shape, "IQ output shape mismatch"
+    Since the weights are trainable, the ABLE model has to be built *before*
+    the pipeline is first called: building it inside a traced pipeline would
+    create the convolution weights as tracers that escape their scope.
 
-    print("Layer dims: ", model_iq.layer_dims)
-    print("Kernel sizes:", model_iq.kernel_sizes)
+    .. warning::
 
-    # --- Timing with JIT (IQ, larger grid) ---
-    from time import perf_counter
+        Train with ``jit_options=None`` on the enclosing pipeline. The default
+        (``"ops"``) compiles the surrounding operations separately, which cuts
+        the gradient path to the model weights: the loss then simply does not
+        move. Compiling is fine once the model is trained.
 
-    model_jit = ABLE(latent_dim=32, n_latent_layers=1, kernel_size=1)
-    model_jit.compile(jit_compile=True)
-    x_large = np.random.randn(n_tx, 256 * 256, 128, 2).astype(np.float32)
-    x_large = keras.ops.convert_to_tensor(x_large)
+    Args:
+        model (ABLE or None): The ABLE model predicting the apodization
+            weights.  A default :class:`ABLE` is created when omitted.
+        **kwargs: Forwarded to :class:`~zea.ops.base.Operation`.
+    """
 
-    print("Warmup run (compiling/tracing)...")
-    t0 = perf_counter()
-    _ = model_jit(x_large).block_until_ready()
-    t1 = perf_counter()
-    print(f"Warmup: {t1 - t0:.3f} s")
+    def __init__(self, model=None, **kwargs):
+        # The model weights must stay visible to the outer training trace, so this
+        # operation is not JIT-compiled on its own. Compile the enclosing pipeline
+        # instead (``jit_options="pipeline"``) once training is done.
+        kwargs.setdefault("jit_compile", False)
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
+            **kwargs,
+        )
+        self.model: ABLE = ABLE() if model is None else model
 
-    N = 5
-    start = perf_counter()
-    for _ in range(N):
-        out = model_jit(x_large)
-    out.block_until_ready()
-    end = perf_counter()
-    print(f"Avg over {N} runs: {(end - start) / N:.3f} s")
+    def get_dict(self, compact=True):
+        """Serialize the operation, leaving out the ABLE model.
+
+        The model carries trained weights, which do not belong in a pipeline
+        config; save and load it separately (see :class:`~zea.models.base.BaseModel`).
+        A pipeline restored from this config therefore gets a freshly initialized
+        :class:`ABLE`.
+        """
+        model = self.model
+        self.model = None  # ty: ignore[invalid-assignment]
+        try:
+            return super().get_dict(compact=compact)
+        finally:
+            self.model = model
+
+    def call(self, **kwargs):
+        """Apply the ABLE weights to TOF-corrected data and sum.
+
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape
+                `(n_tx, prod(grid.shape), n_el, n_ch)` with optional batch dimension.
+
+        Returns:
+            dict: Dictionary containing beamformed_data
+                of shape `(prod(grid.shape), n_ch)`
+                with optional batch dimension.
+        """
+        data = kwargs[self.key]
+        shape = data.shape[1:] if self.with_batch_dim else data.shape
+
+        # Build here rather than on first use below: inside a traced pipeline the
+        # convolution weights would be created as tracers that escape their scope.
+        # Only helps when this operation itself runs eagerly (see the class docstring).
+        if not self.model.built:
+            self.model.build(shape)
+
+        # ABLE maps over the transmit axis itself, so the batch axis is mapped here.
+        weighted = ops.map(self.model, data) if self.with_batch_dim else self.model(data)
+
+        # Sum over the channels (n_el), then over the transmits (n_tx), as in DAS.
+        beamformed_data = ops.sum(weighted, -2)
+        beamformed_data = ops.sum(beamformed_data, -3)
+
+        return {self.output_key: beamformed_data}

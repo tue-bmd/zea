@@ -776,6 +776,7 @@ def test_beamformers(beamformer_name):
 
     import keras
 
+    import zea.models.able  # noqa: F401  (registers the "able" beamformer)
     from zea.ops import beamformer_registry
 
     n_tx, n_pix, n_el, n_ch = 3, 7, 4, 2

@@ -120,3 +120,67 @@ def test_able_stack_unstack_iq(able_model):
     np.testing.assert_allclose(
         keras.ops.convert_to_numpy(x), keras.ops.convert_to_numpy(recovered), atol=1e-6
     )
+
+
+def test_able_beamform_output_shape():
+    """ABLEBeamform reduces TOF-corrected data to a beamformed image."""
+    import keras
+
+    from zea.models.able import ABLE, ABLEBeamform
+
+    n_tx, n_pix, n_el, n_ch = 3, 16, 8, 2
+    data = keras.ops.convert_to_tensor(
+        np.random.default_rng(DEFAULT_TEST_SEED)
+        .standard_normal((1, n_tx, n_pix, n_el, n_ch))
+        .astype(np.float32)
+    )
+    operation = ABLEBeamform(model=ABLE(latent_dim=8, n_latent_layers=2), with_batch_dim=True)
+    out = operation(data=data)["data"]
+    assert out.shape == (1, n_pix, n_ch)
+
+
+def test_able_beamform_builds_default_model():
+    """Omitting the model creates one, built from the shape of the first input."""
+    import keras
+
+    from zea.models.able import ABLEBeamform
+
+    operation = ABLEBeamform(with_batch_dim=False)
+    assert not operation.model.built
+
+    n_tx, n_pix, n_el, n_ch = 2, 8, 4, 1
+    data = keras.ops.convert_to_tensor(
+        np.random.default_rng(DEFAULT_TEST_SEED)
+        .standard_normal((n_tx, n_pix, n_el, n_ch))
+        .astype(np.float32)
+    )
+    out = operation(data=data)["data"]
+    assert operation.model.built
+    assert out.shape == (n_pix, n_ch)
+
+
+def test_able_beamform_is_registered_as_beamformer():
+    """The operation plugs into `zea.ops.Beamform` under the name "able"."""
+    from zea.models.able import ABLE, ABLEBeamform
+    from zea.ops import Beamform, beamformer_registry
+
+    assert beamformer_registry["able"] is ABLEBeamform
+
+    model = ABLE(latent_dim=8)
+    beamform = Beamform(beamformer="able", model=model, num_patches=2)
+    operations = beamform.operations[0].operations
+    assert isinstance(operations[-1], ABLEBeamform)
+    assert operations[-1].model is model
+
+
+def test_able_beamform_not_serialized_into_config():
+    """The trained model is left out of the pipeline config, but stays on the operation."""
+    from zea.models.able import ABLE
+    from zea.ops import Beamform
+
+    model = ABLE(latent_dim=8)
+    beamform = Beamform(beamformer="able", model=model, num_patches=2)
+    config = beamform.get_dict()
+    assert config["params"]["beamformer"] == "able"
+    assert "model" not in config["params"]
+    assert beamform.operations[0].operations[-1].model is model
