@@ -30,7 +30,10 @@ from tqdm import tqdm as _tqdm_cls
 # The logger to use: a single logger named "zea" with one console handler.
 logger: logging.Logger
 
-ZEA_LOG_LEVEL = os.getenv("ZEA_LOG_LEVEL", "DEBUG").upper()
+# Default to INFO: ``log.info`` is zea's user-facing output channel (progress,
+# saved paths, cache summaries), while ``log.debug`` is diagnostic detail that
+# should be opted into via ZEA_LOG_LEVEL=DEBUG.
+ZEA_LOG_LEVEL = os.getenv("ZEA_LOG_LEVEL", "INFO").upper()
 
 LEVELS = ["DEBUG", "INFO", "DEPRECATED", "WARNING", "ERROR", "CRITICAL"]
 

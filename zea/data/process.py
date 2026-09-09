@@ -372,7 +372,7 @@ def run_processing(
                 except (ValueError, AttributeError):
                     fps = _DEFAULT_FPS
 
-                params = prepare_parameters(parameters, **config_params)
+                params = prepare_parameters(parameters)
 
             # Sentinel iteration (no more data — also covers an empty dataset
             # where total_batches == 0); nothing to process, so stop here.

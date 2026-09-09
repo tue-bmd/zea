@@ -406,6 +406,52 @@ def test_check_track_consistency_single_track_is_noop(tmp_path):
         _check_track_consistency(f, None, None)  # does not raise
 
 
+def test_run_processing_does_not_forward_unused_config_params(tmp_path):
+    """Config parameters the pipeline does not need never reach the pipeline.
+
+    ``run_processing`` already merges the config into ``zea.Parameters``, so passing
+    it as overrides too would bypass ``prepare_parameters``' ``needs_keys`` filter and
+    push unused keys (here ``pixels_per_wavelength``) all the way into the pipeline,
+    where they surface as spurious "unused input key" reports.
+    """
+    from zea.data.process import run_processing
+    from zea.ops.pipeline import Pipeline
+
+    ds_dir = tmp_path / "ds"
+    generate_example_dataset(ds_dir / "scan.hdf5", n_frames=1, n_ax=8, n_el=4, n_tx=2)
+
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "parameters:\n"
+        "  pixels_per_wavelength: 2\n"  # a real parameter this pipeline has no use for
+        "pipeline:\n"
+        "  operations:\n"
+        "    - envelope_detect\n"
+    )
+
+    seen = {}
+    original = Pipeline.prepare_parameters
+
+    def spy(self, parameters=None, device=None, **overrides):
+        prepared = original(self, parameters, device=device, **overrides)
+        seen["overrides"] = set(overrides)
+        seen["prepared"] = set(prepared)
+        return prepared
+
+    with patch.object(Pipeline, "prepare_parameters", spy):
+        run_processing(
+            str(ds_dir),
+            str(cfg),
+            key="data/raw_data",
+            n_frames=1,
+            save_dir=tmp_path / "out",
+            save_as="gif",
+        )
+
+    assert seen["overrides"] == set(), "config must not be forwarded as overrides"
+    assert "pixels_per_wavelength" not in seen["prepared"]
+
+
 def test_run_processing_track_selects_data(tmp_path):
     """run_processing reads the requested track end to end."""
     from zea.data.file import File
