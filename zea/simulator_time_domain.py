@@ -70,7 +70,7 @@ def simulate_rf_td(
     attenuation_coef,
     tx_apodizations,
     t_peak,
-    elevation_lens=False,
+    elevation_slab_2d=False,
     element_height=None,
     max_chunk_gb=10.0,
     noise_level_db=None,
@@ -108,10 +108,13 @@ def simulate_rf_td(
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
         tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el).
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
-        elevation_lens (bool): Whether the probe has an elevation lens: drop scatterers outside
-            the elevation slab, and focus transmit energy directly downwards (i.e. cylindrical
-            instead of spherical spread). For efficient pruning scatterers outside the slab,
-            use :class:`zea.ops.Simulate` rather than calling `simulate_rf_td` directly.
+        elevation_slab_2d (bool): Reduce the elevation dimension to a 2D slab: drop the
+            scatterers outside it, and spread the transmit cylindrically rather than
+            spherically, as an ideal elevation lens focusing to that slab would. This is a
+            cheap approximation, not a modelled lens; for the physical lens in 3D use
+            ``elevation_focus``, which is exclusive with it. For efficient pruning of the
+            scatterers outside the slab, use :class:`zea.ops.Simulate` rather than calling
+            `simulate_rf_td` directly.
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity and the elevation slab. If None, defaults to element_width.
         max_chunk_gb (float): Approximate memory budget [GB] for the (chunk, n_el, n_el)
@@ -166,7 +169,7 @@ def simulate_rf_td(
             element_width,
             element_height,
             attenuation_coef,
-            elevation_lens,
+            elevation_slab_2d,
         )
         for tx in range(n_tx):
             spike_maps[tx] = spike_maps[tx] + _simulate_transmit(
@@ -218,7 +221,7 @@ def _precompute_scatterer_response(
     element_width,
     element_height,
     attenuation_coef,
-    elevation_lens=False,
+    elevation_slab_2d=False,
 ):
     """Compute the transmit-independent gain and two-way travel time tensors.
 
@@ -229,7 +232,7 @@ def _precompute_scatterer_response(
             time [s], excluding transmit delays and initial times.
     """
     magnitudes = scatterer_magnitudes
-    if elevation_lens:
+    if elevation_slab_2d:
         _warn_if_elevation_extent(probe_geometry)
         scatterer_positions, magnitudes = _apply_elevation_slab(
             scatterer_positions, magnitudes, probe_geometry, element_height
@@ -260,7 +263,7 @@ def _precompute_scatterer_response(
     )
     directivity_pair = element_directivity[:, :, None] * element_directivity[:, None, :]
     spread_attenuation = (
-        spread(one_way_distance[:, :, None], 0.5 if elevation_lens else 1.0)
+        spread(one_way_distance[:, :, None], 0.5 if elevation_slab_2d else 1.0)
         * spread(one_way_distance[:, None, :], 1.0)
         * attenuate(center_frequency, attenuation_coef, two_way_distance)
     )

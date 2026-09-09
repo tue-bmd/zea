@@ -1163,7 +1163,7 @@ def test_simulator(ultrasound_probe, ultrasound_parameters, ultrasound_scatterer
 
 
 def _subprocess_simulate_elevation_lens_under_jit():  # pragma: no cover
-    """`elevation_lens` is branched on with a Python `if` in `simulate_rf`, so it must be in
+    """`elevation_slab_2d` is branched on with a Python `if` in `simulate_rf`, so it must be in
     `Simulate.STATIC_PARAMS` or it raises `TracerBoolConversionError` under jit."""
     import os
 
@@ -1213,7 +1213,7 @@ def _subprocess_simulate_elevation_lens_under_jit():  # pragma: no cover
         **inputs,
         scatterer_positions=np.array([[0.0, 0.0, 20e-3]], dtype=np.float32),
         scatterer_magnitudes=np.ones(1, dtype=np.float32),
-        elevation_lens=True,
+        elevation_slab_2d=True,
         element_height=5e-3,
     )
 
@@ -1230,7 +1230,7 @@ def test_simulate_elevation_lens_under_jax_jit():
         [sys.executable, "-c", code], capture_output=True, text=True, timeout=30
     )
     assert result.returncode == 0, (
-        f"Simulation with elevation_lens crashed with jax jit.\n"
+        f"Simulation with elevation_slab_2d crashed with jax jit.\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
 
@@ -1285,7 +1285,7 @@ def _subprocess_simulate_elevation_bucket_compile_counts():  # pragma: no cover
         "attenuation_coef": 0.0,
         "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
         "t_peak": np.full(1, 1 / 3e6, dtype=np.float32),
-        "elevation_lens": True,
+        "elevation_slab_2d": True,
         "element_height": element_height,
     }
 

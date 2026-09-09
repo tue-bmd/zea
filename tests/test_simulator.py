@@ -190,7 +190,7 @@ def test_elevation_lens_prunes_out_of_plane_scatterers():
         "attenuation_coef": 0.0,
         "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
         "t_peak": np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
-        "elevation_lens": True,
+        "elevation_slab_2d": True,
         "element_height": element_height,
     }
 
@@ -245,7 +245,7 @@ def test_elevation_slab_bucket_rounds_up_and_is_a_noop_when_inapplicable():
     kwargs = {
         "probe_geometry": probe_geometry,
         "element_height": element_height,
-        "elevation_lens": True,
+        "elevation_slab_2d": True,
     }
 
     for n_inside in (5000, 7000):
@@ -257,7 +257,7 @@ def test_elevation_slab_bucket_rounds_up_and_is_a_noop_when_inapplicable():
         assert int((out["scatterer_magnitudes"] > 0).sum()) == n_inside
 
     positions, magnitudes = _slab_cloud(100, 900, element_height)
-    no_lens = {**kwargs, "elevation_lens": False}
+    no_lens = {**kwargs, "elevation_slab_2d": False}
     no_height = {**kwargs, "element_height": None}
     lensless_bucket = elevation_slab_bucket(
         scatterer_positions=positions, scatterer_magnitudes=magnitudes, **no_lens
@@ -301,7 +301,7 @@ def test_elevation_slab_bucket_matches_unpruned_simulation():
         "attenuation_coef": 0.0,
         "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
         "t_peak": np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
-        "elevation_lens": True,
+        "elevation_slab_2d": True,
         "element_height": element_height,
     }
 
@@ -344,7 +344,7 @@ def test_simulate_op_prunes_elevation_slab_without_leaking_pruned_cloud():
         attenuation_coef=0.0,
         tx_apodizations=np.ones((1, n_el), dtype=np.float32),
         t_peak=np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
-        elevation_lens=True,
+        elevation_slab_2d=True,
         element_height=element_height,
     )
 
@@ -587,7 +587,7 @@ def _td_args(n_el=16, **overrides):
 def test_time_domain_elevation_lens_prunes_out_of_plane_scatterers():
     """The time-domain simulator drops scatterers outside the elevation slab."""
     element_height = 5e-3
-    args = _td_args(elevation_lens=True, element_height=element_height)
+    args = _td_args(elevation_slab_2d=True, element_height=element_height)
     args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
 
     inside = np.array([[0.0, 0.5 * element_height, 30e-3]], dtype=np.float32)
