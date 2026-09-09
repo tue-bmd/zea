@@ -39,6 +39,9 @@ NOTEBOOKS = list(NOTEBOOKS_DIR.rglob("*.ipynb"))
 # Per-notebook parameters for CI testing (faster execution)
 # these overwrite the default parameters in the notebooks
 NOTEBOOK_PARAMETERS = {
+    "adaptive_beamforming_by_deep_learning.ipynb": {
+        "n_steps": 20,
+    },
     "diffusion_model_example.ipynb": {
         "n_unconditional_samples": 2,
         "n_unconditional_steps": 2,
