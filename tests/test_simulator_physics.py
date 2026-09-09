@@ -420,3 +420,11 @@ def test_focusing_lens_must_stay_thicker_than_its_sag():
         simulate_rf(**scene, elevation_focus=20e-3)
     with pytest.raises(ValueError, match="cannot focus"):
         simulate_rf(**{**scene, "lens_sound_speed": SOUND_SPEED}, elevation_focus=20e-3)
+
+
+def test_lens_correction_requires_a_lens_sound_speed():
+    scene = _scene(
+        np.zeros((1, 3)), [0.0, 0.0, 20e-3], apply_lens_correction=True, lens_sound_speed=None
+    )
+    with pytest.raises(ValueError, match="lens_sound_speed"):
+        simulate_rf(**scene)
