@@ -769,14 +769,24 @@ def test_compute_time_to_peak():
     assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
 
 
-@pytest.mark.parametrize("beamformer_name", beamformer_registry.registered_names())
+# Only the beamformers zea.ops defines itself. A model-backed beamformer (such as
+# "able", registered by zea.models.able) is not comparable across backends: its
+# weights are randomly initialized per backend, and under torch its output requires
+# grad, which this harness cannot convert to numpy. Those live with their model.
+_OPS_BEAMFORMERS = [
+    name
+    for name in beamformer_registry.registered_names()
+    if beamformer_registry[name].__module__.startswith("zea.ops.")
+]
+
+
+@pytest.mark.parametrize("beamformer_name", _OPS_BEAMFORMERS)
 @backend_equality_check()
 def test_beamformers(beamformer_name):
     """All beamformer operations produce the correct output shape and agree across backends."""
 
     import keras
 
-    import zea.models.able  # noqa: F401  (registers the "able" beamformer)
     from zea.ops import beamformer_registry
 
     n_tx, n_pix, n_el, n_ch = 3, 7, 4, 2
