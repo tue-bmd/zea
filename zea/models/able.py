@@ -495,7 +495,9 @@ class ABLEBeamform(Operation):
         weighted = ops.map(self.model, data) if self.with_batch_dim else self.model(data)
 
         # Sum over the channels (n_el), then over the transmits (n_tx), as in DAS.
-        beamformed_data = ops.sum(weighted, -2)
+        # Accumulate in float32: under a mixed-precision policy the weighted data is
+        # bfloat16, which would lose significant accuracy over ~n_el * n_tx terms.
+        beamformed_data = ops.sum(ops.cast(weighted, "float32"), -2)
         beamformed_data = ops.sum(beamformed_data, -3)
 
         return {self.output_key: beamformed_data}
