@@ -59,8 +59,9 @@ class ABLE(BaseModel):
         n_latent_layers (int): Number of hidden layers when ``latent_layers``
             is not supplied. Must be ≥ 1. Default is ``2``.
         latent_layers (list or None): Explicit list of channel sizes for the
-            hidden layers.  Overrides ``n_latent_layers`` and ``latent_dim``
-            when provided. Default is ``None``.
+            hidden layers.  Overrides ``latent_dim`` when provided, and must
+            hold exactly ``n_latent_layers`` entries — including when that
+            argument is left at its default. Default is ``None``.
         axis (int or None): Reserved for future use. Default is ``None``.
         name (str): Model name forwarded to :class:`~zea.models.base.BaseModel`.
             Default is ``"able"``.
@@ -165,7 +166,8 @@ class ABLE(BaseModel):
 
         Args:
             latent_layers (list or None): Explicit list of channel sizes for inner layers.
-                If provided, it overrides `n_latent_layers` and `latent_dim`.
+                If provided, it overrides `latent_dim`, and has to hold exactly
+                `n_latent_layers` entries.
             n_latent_layers (int): Number of inner layers to construct when `latent_layers`
                 is not provided.
             input_dim (int): Channel size for the input layer.
