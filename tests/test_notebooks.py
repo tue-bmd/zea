@@ -41,6 +41,9 @@ NOTEBOOKS = list(NOTEBOOKS_DIR.rglob("*.ipynb"))
 NOTEBOOK_PARAMETERS = {
     "adaptive_beamforming_by_deep_learning.ipynb": {
         "n_steps": 20,
+        "num_patches": 4,
+        "grid_size_z": 96,
+        "grid_size_x": 64,
     },
     "diffusion_model_example.ipynb": {
         "n_unconditional_samples": 2,
