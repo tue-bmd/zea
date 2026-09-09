@@ -153,7 +153,7 @@ class Simulate(Operation):
         waveform_sampling_frequency=250e6,
         n_sub_elements=None,
         elevation_focus=None,
-        band_db=-80.0,
+        band_db=-100.0,
         n_fft=None,
         lens_attenuation_coef=0.0,
         **kwargs,

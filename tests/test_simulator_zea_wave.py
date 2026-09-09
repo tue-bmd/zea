@@ -167,6 +167,41 @@ def test_scatterers_beyond_record_are_dropped_without_wrapping():
     _assert_close(reference, simulate_rf_zea_wave(**kwargs, band_db=None))
 
 
+def test_frequency_blocks_and_transmit_groups_match_one_block():
+    """More transmits than one irfft group, and a band that needs several frequency blocks."""
+    n_tx, n_el, picks = 35, 8, [0, 32, 34]
+    rng = np.random.default_rng(4)
+    positions, magnitudes = _phantom(8, seed=5)
+    kwargs = dict(CASES["linear"])
+    kwargs.update(
+        scatterer_positions=positions,
+        scatterer_magnitudes=magnitudes,
+        probe_geometry=_linear_probe(n_el),
+        t0_delays=rng.uniform(0, 2e-6, (n_tx, n_el)).astype(np.float32),
+        initial_times=np.zeros(n_tx, np.float32),
+        tx_apodizations=rng.uniform(0.5, 1.0, (n_tx, n_el)).astype(np.float32),
+        t_peak=np.zeros(n_tx, np.float32),
+    )
+    per_tx = ("t0_delays", "tx_apodizations", "initial_times", "t_peak")
+    subset = {**kwargs, **{key: kwargs[key][picks] for key in per_tx}}
+    kwargs = _tensors(kwargs)
+    whole = simulate_rf_zea_wave(**kwargs, band_db=None, n_fft=1024)
+    blocked = simulate_rf_zea_wave(**kwargs, band_db=None, n_fft=1024, max_chunk_gb=1e-4)
+    assert _np(whole).shape[0] == n_tx
+    # 32 and 34 fall in the second irfft group; simulating them alone must give the same rows.
+    _assert_close(simulate_rf(**_tensors(subset)), _np(whole)[picks])
+    _assert_close(whole, blocked, rel_tol=1e-6)
+
+
+def test_chirp_is_sampled_on_an_odd_fft_grid():
+    # smooth_size lands on an odd length for some records; the chirp follows the same grid.
+    assert smooth_size(1082) == 1125
+    kwargs = _tensors(CASES["chirp"])
+    even = simulate_rf_zea_wave(**kwargs, band_db=None, n_fft=1024)
+    odd = simulate_rf_zea_wave(**kwargs, band_db=None, n_fft=1125)
+    _assert_close(even, odd)
+
+
 def test_empty_phantom_gives_zeros():
     kwargs = dict(CASES["linear"])
     kwargs["scatterer_positions"] = np.zeros((0, 3), np.float32)
@@ -269,7 +304,7 @@ def test_simulate_op_with_batch_dim():
 
 
 def test_smooth_size_and_fft_length():
-    assert [smooth_size(n) for n in (1, 7, 100, 1025)] == [1, 8, 100, 1080]
+    assert [smooth_size(n) for n in (1, 7, 100, 601, 1025)] == [1, 8, 100, 625, 1080]
     geometry = _linear_probe()
     n_fft = fft_length(N_AX, SAMPLING_FREQUENCY, CENTER_FREQUENCY, SOUND_SPEED, geometry, 0, 0)
     assert n_fft >= N_AX
