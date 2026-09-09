@@ -5,12 +5,7 @@ import numpy as np
 import pytest
 from keras import ops
 
-from zea.simulator import (
-    pressure_field,
-    simulate_rf,
-    simulate_rf_zea_wave,
-    transducer_transfer,
-)
+from zea.simulator import pressure_field, simulate_rf, transducer_transfer
 
 SOUND_SPEED = 1540.0
 CENTER_FREQUENCY = 3e6
@@ -18,18 +13,13 @@ SAMPLING_FREQUENCY = 12e6
 N_AX = 512
 ELEMENT_WIDTH = 0.27e-3
 
-SIMULATORS = {"simulate_rf": simulate_rf, "zea_wave": simulate_rf_zea_wave}
-
 
 def _np(x):
     return np.asarray(ops.convert_to_numpy(x))
 
 
-def _transmit(geometry, n_tx=2, t0_delays=None, **overrides):
-    """Unfocused, unapodized transmits shared by the simulators and the pressure field.
-
-    Two identical transmits, because zeaWave hands a single transmit to ``simulate_rf``.
-    """
+def _transmit(geometry, n_tx=1, t0_delays=None, **overrides):
+    """Unfocused, unapodized transmits shared by the simulator and the pressure field."""
     n_el = len(geometry)
     if t0_delays is None:
         t0_delays = np.zeros((n_tx, n_el), np.float32)
@@ -78,14 +68,13 @@ def _spectrum_ratio(numerator, denominator, floor=0.05):
     return np.abs(num[keep] / den[keep]), keep
 
 
-@pytest.mark.parametrize("simulate", SIMULATORS.values(), ids=SIMULATORS)
-def test_single_element_echo_is_the_pressure_delayed_by_the_return_trip(simulate):
+def test_single_element_echo_is_the_pressure_delayed_by_the_return_trip():
     # On axis of one element the receive response is the spread and a delay, so the echo is
     # the transmit field shifted by the travel time, spread with unit gain at 1 mm.
     samples = 64
     r = samples * SOUND_SPEED / SAMPLING_FREQUENCY
     transmit = _transmit(np.zeros((1, 3)))
-    rf = _np(simulate(**_scene(transmit, [0.0, 0.0, r])))[0, :, 0, 0]
+    rf = _np(simulate_rf(**_scene(transmit, [0.0, 0.0, r])))[0, :, 0, 0]
     pressure = _np(pressure_field(np.array([[0.0, 0.0, r]]), **transmit, n_ax=N_AX, output="time"))
     pressure = pressure[0, :, 0]
     expected = np.zeros_like(rf)
@@ -102,8 +91,8 @@ def test_rms_matches_the_time_waveforms_and_follows_the_grid_shape():
     grid = np.stack([x, np.zeros_like(x), z], -1)
     waveforms = _np(pressure_field(grid, **transmit, output="time"))
     rms = _np(pressure_field(grid, **transmit, n_ax=waveforms.shape[1]))
-    assert rms.shape == (2, 4, 5)
-    assert waveforms.shape[0] == 2 and waveforms.shape[2:] == (4, 5)
+    assert rms.shape == (1, 4, 5)
+    assert waveforms.shape[0] == 1 and waveforms.shape[2:] == (4, 5)
     assert _rel_err(np.sqrt(np.mean(waveforms**2, axis=1)), rms) < 1e-5
 
 
