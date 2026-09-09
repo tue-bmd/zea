@@ -16,6 +16,7 @@ Or to run a specific notebook:
 
 """
 
+import contextlib
 import os
 import shutil
 
@@ -158,6 +159,38 @@ for notebook_name in TENSORFLOW_NOTEBOOKS:
 DEFAULT_CELL_TIMEOUT = 600
 
 
+# OpenBLAS is compiled for a fixed maximum thread count (64 in the wheels we install)
+# and keeps one metadata slot per thread that *calls* into it. On a many-core runner XLA
+# sizes its CPU worker pool from the process's CPU affinity, so the batched solve behind
+# minimum variance beamforming calls BLAS from far more threads than there are slots.
+# OpenBLAS then falls back to an auxiliary metadata array, which corrupts the heap
+# ("malloc(): corrupted top size") and takes the notebook kernel down with it.
+#
+# Capping the pool with OPENBLAS_NUM_THREADS does not help: the slot is per calling
+# thread, not per pool thread. Narrowing the affinity mask is what bounds the callers,
+# and the kernel inherits the mask from this process when papermill launches it.
+KERNEL_MAX_CPUS = 32
+
+
+@contextlib.contextmanager
+def _capped_cpu_affinity(max_cpus=KERNEL_MAX_CPUS):
+    """Narrow this process's CPU affinity, so a kernel launched inside inherits it."""
+    if not hasattr(os, "sched_getaffinity"):  # non-Linux
+        yield
+        return
+
+    original = os.sched_getaffinity(0)
+    if len(original) <= max_cpus:
+        yield
+        return
+
+    os.sched_setaffinity(0, set(sorted(original)[:max_cpus]))
+    try:
+        yield
+    finally:
+        os.sched_setaffinity(0, original)
+
+
 def _execute_notebook(notebook, output_path, parameters=None, cell_timeout=DEFAULT_CELL_TIMEOUT):
     """Run ``notebook`` through papermill with a per-cell time limit.
 
@@ -167,13 +200,14 @@ def _execute_notebook(notebook, output_path, parameters=None, cell_timeout=DEFAU
     the source of the cell that hung, which is what makes a stall diagnosable from a CI
     log alone.
     """
-    return pm.execute_notebook(
-        input_path=str(notebook),
-        output_path=str(output_path),
-        kernel_name="python3",
-        parameters=parameters or {},
-        execution_timeout=cell_timeout,
-    )
+    with _capped_cpu_affinity():
+        return pm.execute_notebook(
+            input_path=str(notebook),
+            output_path=str(output_path),
+            kernel_name="python3",
+            parameters=parameters or {},
+            execution_timeout=cell_timeout,
+        )
 
 
 def _notebook_case(notebook):

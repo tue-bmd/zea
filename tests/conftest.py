@@ -12,13 +12,6 @@ from pathlib import Path
 # test_notebooks.py, which would otherwise pick up an interactive backend from the shell.
 os.environ["MPLBACKEND"] = "Agg"
 
-# Inherited by those same kernels. OpenBLAS is compiled for a fixed maximum thread
-# count; on a runner with more cores than that it falls back to an auxiliary
-# thread-metadata array, which corrupts the heap ("malloc(): invalid size") under the
-# batched solve of minimum variance beamforming and takes the kernel with it. Capping
-# the pool stays below that ceiling; setdefault leaves an explicit choice alone.
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "32")
-
 import pytest  # noqa: E402
 
 from .data import generate_example_dataset  # noqa: E402
