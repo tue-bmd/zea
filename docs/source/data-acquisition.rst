@@ -605,4 +605,15 @@ See :mod:`zea.data.convert.verasonics` for details.
 
 **us4us**
 
-To be added in a future release. See ongoing issue `#448 <https://github.com/tue-bmd/zea/issues/448>`__.
+Record data with us4us software (ARRUS + gui4us), save the capture to ``.pkl``, then convert:
+
+.. code-block:: shell
+
+    zea convert us4us <src> <dst> --mapping 0:image 1:beamformed_data
+
+``<src>`` and ``<dst>`` are either single files (``.pkl`` and ``.hdf5``) or directories, in
+which case every recording in ``<src>`` is converted. ``--mapping`` selects which pipeline
+output of the recording becomes which zea data type.
+
+See :mod:`zea.data.convert.us4us` for all options, the ARRUS metadata that is used, and the
+limitations of the converter.
