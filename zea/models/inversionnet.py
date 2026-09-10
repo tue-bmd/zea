@@ -1,4 +1,4 @@
-"""InversionNet: full-waveform inversion of ultrasound computed tomography data.
+r"""InversionNet: full-waveform inversion of ultrasound computed tomography data.
 
 InversionNet is an encoder-decoder network that maps raw multi-source waveform
 data straight to a speed-of-sound (SOS) map, without an iterative solver. It was
@@ -14,6 +14,30 @@ Usage
 
     model = InversionNet.from_preset("inversionnet-openpros")
     sos = model(waveforms)  # (B, 1000, 161, 40) -> (B, 401, 161, 1) in [-1, 1]
+
+Input preprocessing
+-------------------
+The preset only works on input scaled the way it was trained, and mis-scaled input
+degrades the reconstruction silently rather than raising. Reproduce the OpenPros
+preprocessing exactly:
+
+1. Sign-preserving log compression, :math:`t(x) = \mathrm{sign}(x)\log(1 + |kx|)`,
+   with ``k = 1e5``.
+2. Min-max normalize ``[t(data_min), t(data_max)]`` to ``[-1, 1]``, with the OpenPros
+   dataset constants ``data_min = -0.25`` and ``data_max = 0.45``.
+
+The output is in ``[-1, 1]`` and maps linearly onto the OpenPros label range of
+``1300-3600 m/s`` — undo it with
+``Normalize(input_range=(-1, 1), output_range=(1300, 3600))``.
+
+.. note::
+
+    ``k`` is effectively part of the weights, not a free parameter. The OpenPros job
+    scripts pass ``--k 1e9``, but ``k = 1e5`` is what reproduces the released
+    checkpoint on the released data: on the OpenPros sample it gives a mean absolute
+    error of 14 m/s against the ground-truth map, where ``k = 1e9`` gives 244 m/s.
+    The optimum is sharp — an order of magnitude either way costs roughly 3x in
+    error — so do not tune it.
 
 Architecture notes
 ------------------
@@ -72,6 +96,11 @@ _BN_EPSILON = 1e-5
 _BN_MOMENTUM = 0.9
 
 
+def _conv_out_size(size, kernel, stride, padding):
+    """Spatial size after a convolution, following PyTorch's floor convention."""
+    return (size + 2 * padding - kernel) // stride + 1
+
+
 class ConvBlock(keras.layers.Layer):
     """Conv2D + BatchNorm + LeakyReLU (or ``tanh``), channels-last.
 
@@ -96,10 +125,10 @@ class ConvBlock(keras.layers.Layer):
             else keras.layers.LeakyReLU(negative_slope=0.2)
         )
 
-    def call(self, x):
+    def call(self, x, training=None):
         if self.pad is not None:
             x = self.pad(x)
-        return self.act(self.norm(self.conv(x)))
+        return self.act(self.norm(self.conv(x), training=training))
 
 
 class DeconvBlock(keras.layers.Layer):
@@ -119,11 +148,11 @@ class DeconvBlock(keras.layers.Layer):
         self.norm = keras.layers.BatchNormalization(epsilon=_BN_EPSILON, momentum=_BN_MOMENTUM)
         self.act = keras.layers.LeakyReLU(negative_slope=0.2)
 
-    def call(self, x):
+    def call(self, x, training=None):
         x = self.conv(x)
         if self.crop is not None:
             x = self.crop(x)
-        return self.act(self.norm(x))
+        return self.act(self.norm(x, training=training))
 
 
 @model_registry(name="inversionnet")
@@ -187,15 +216,32 @@ class InversionNet(BaseModel):
         self.crop = tuple(crop)
 
         widths = [2**c for c in self.enc_ch]
+        # Track the feature map alongside the blocks: the bottleneck convolution is
+        # "valid", so it only collapses to 1 x 1 if it matches what is left here.
+        height, receivers = self.waveform_shape[:2]
         encoder = [ConvBlock(widths[0], kernel_size=(7, 1), strides=(2, 1), padding=(3, 0))]
+        height = _conv_out_size(height, 7, 2, 3)
         for level, side in enumerate(self.enc_side, start=1):
-            width = widths[level]
+            channels = widths[level]
             if side:
-                encoder.append(ConvBlock(width, kernel_size=(3, 1), strides=(2, 1), padding=(1, 0)))
-                encoder.append(ConvBlock(width, kernel_size=(3, 1), padding=(1, 0)))
+                encoder.append(
+                    ConvBlock(channels, kernel_size=(3, 1), strides=(2, 1), padding=(1, 0))
+                )
+                encoder.append(ConvBlock(channels, kernel_size=(3, 1), padding=(1, 0)))
             else:
-                encoder.append(ConvBlock(width, strides=2))
-                encoder.append(ConvBlock(width))
+                encoder.append(ConvBlock(channels, strides=2))
+                encoder.append(ConvBlock(channels))
+                receivers = _conv_out_size(receivers, 3, 2, 1)
+            height = _conv_out_size(height, 3, 2, 1)
+        if (height, receivers) != self.bottle_conv:
+            raise ValueError(
+                f"The encoder must collapse to 1 x 1 before the decoder, but "
+                f"waveform_shape={self.waveform_shape} leaves a {height} x {receivers} "
+                f"feature map at the bottleneck, which bottle_conv={self.bottle_conv} does "
+                f"not match. Pass bottle_conv=({height}, {receivers}), or change "
+                f"waveform_shape / enc_side. Left alone, the decoder would upsample the "
+                f"leftover extent and silently return a wrongly sized map."
+            )
         encoder.append(ConvBlock(widths[-1], kernel_size=self.bottle_conv, padding=0))
         self.encoder = encoder
 
@@ -213,14 +259,16 @@ class InversionNet(BaseModel):
         self.output_crop = keras.layers.Cropping2D(((top, bottom), (left, right)))
         self.output_block = ConvBlock(1, activation="tanh")
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         """Reconstruct a speed-of-sound map from waveform data.
 
         Args:
             inputs (array-like): Waveforms of shape ``(B, time, receivers, channels)``,
-                preprocessed exactly as during training. For the OpenPros preset that
-                is a sign-preserving ``log1p`` compression followed by a min-max
-                normalization to ``[-1, 1]``.
+                scaled exactly as during training — see the preprocessing section in
+                the module documentation, which the preset depends on.
+
+            training (bool, optional): Forwarded to the batch normalization layers,
+                which use the running statistics unless this is ``True``.
 
         Returns:
             Tensor: Speed-of-sound maps of shape ``(B, height, width, 1)``, in
@@ -238,10 +286,10 @@ class InversionNet(BaseModel):
             )
         x = inputs
         for block in self.encoder:
-            x = block(x)
+            x = block(x, training=training)
         for block in self.decoder:
-            x = block(x)
-        return self.output_block(self.output_crop(x))
+            x = block(x, training=training)
+        return self.output_block(self.output_crop(x), training=training)
 
     def get_config(self):
         """Serialize the architecture arguments."""
