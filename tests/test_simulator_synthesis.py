@@ -14,7 +14,14 @@ from keras import ops
 import zea
 from zea.ops import Pipeline, Simulate
 from zea.probes import create_curved_probe_geometry, curved_probe_normals
-from zea.simulator import fft_length, simulate_rf, smooth_size
+from zea.simulator import (
+    fft_length,
+    in_record,
+    record_bounds,
+    record_reach,
+    simulate_rf,
+    smooth_size,
+)
 from zea.simulator_time_domain import simulate_rf_td
 
 SOUND_SPEED = 1540.0
@@ -159,7 +166,7 @@ CASES = {
         t_peak=np.array([1, 2, 0.5, 1.5], np.float32) / CENTER_FREQUENCY,
     ),
     "lens_correction": _case(_linear_probe(), apply_lens_correction=True),
-    "elevation_slab_2d": _case(_linear_probe(), elevation_slab_2d=True, element_height=1e-3),
+    "two_dimensional": _case(_linear_probe(), two_dimensional=True, element_height=1e-3),
     "noise_and_tgc": _case(
         _linear_probe(), noise_level_db=-40.0, tgc_max_db=20.0, noise_seed=3, noise_reference=1.0
     ),
@@ -246,9 +253,35 @@ def test_record_prefix_does_not_depend_on_the_record_length():
     _assert_close(long, simulate_rf(**{**kwargs, "n_ax": 256}))
 
 
+def _record_args(kwargs):
+    """The arguments of the record helpers, out of a simulator call."""
+    names = (
+        "probe_geometry",
+        "sound_speed",
+        "n_ax",
+        "sampling_frequency",
+        "center_frequency",
+        "t0_delays",
+        "initial_times",
+        "t_peak",
+        "apply_lens_correction",
+        "lens_thickness",
+        "lens_sound_speed",
+    )
+    return {k: kwargs[k] for k in names if k in kwargs}
+
+
 def test_gate_keeps_a_scatterer_inside_the_record_and_drops_one_past_it():
-    reach = (N_AX / SAMPLING_FREQUENCY + 0.5 * N_PERIOD / CENTER_FREQUENCY) * SOUND_SPEED / 2
     kwargs = _single_element()
+    reach = record_reach(**_record_args(kwargs))
+    assert (
+        abs(
+            reach
+            / ((N_AX / SAMPLING_FREQUENCY + 0.5 * N_PERIOD / CENTER_FREQUENCY) * SOUND_SPEED / 2)
+            - 1
+        )
+        < 1e-12
+    )
     kwargs["scatterer_positions"] = np.array([[0.0, 0.0, 0.98 * reach]], np.float32)
     inside = _np(simulate_rf(**_tensors(kwargs)))
     kwargs["scatterer_positions"] = np.array([[0.0, 0.0, 1.02 * reach]], np.float32)
@@ -258,6 +291,49 @@ def test_gate_keeps_a_scatterer_inside_the_record_and_drops_one_past_it():
     # The pulse straddles the end of the record: energy in the last samples only.
     assert np.abs(inside[0, : N_AX // 2]).max() < 1e-4 * peak
     assert not outside.any()
+
+
+def test_record_helpers_agree_with_the_gate():
+    """``in_record`` is the gate: the record of a cloud is that of its kept scatterers, the
+    dropped ones give zeros. ``record_bounds`` holds every kept scatterer, and the reach is a
+    scatterer's distance from its nearest element."""
+    rng = np.random.default_rng(2)
+    kwargs = _case(_linear_probe(), lens_sound_speed=1000.0, apply_lens_correction=True)
+    positions = rng.uniform([-0.05, -0.01, 0.0], [0.05, 0.01, 0.06], (300, 3)).astype(np.float32)
+    magnitudes = rng.uniform(0.5, 1.0, len(positions)).astype(np.float32)
+    kwargs.update(scatterer_positions=positions, scatterer_magnitudes=magnitudes)
+    args = _record_args(kwargs)
+    mask = _np(in_record(positions, **args))
+    assert 0 < mask.sum() < len(mask)
+
+    reference = simulate_rf(**_tensors(kwargs))
+    kept = {
+        **kwargs,
+        "scatterer_positions": positions[mask],
+        "scatterer_magnitudes": magnitudes[mask],
+    }
+    dropped = {
+        **kwargs,
+        "scatterer_positions": positions[~mask],
+        "scatterer_magnitudes": magnitudes[~mask],
+    }
+    _assert_close(reference, simulate_rf(**_tensors(kept)), rel_tol=1e-4)
+    assert not _np(simulate_rf(**_tensors(dropped))).any()
+
+    low, high = record_bounds(**args)
+    assert (positions[mask] >= low).all() and (positions[mask] <= high).all()
+    # A scatterer straight below an element is kept up to the reach and dropped past it.
+    reach = record_reach(**args)
+    probe = [kwargs["probe_geometry"][3]]
+    on_axis = np.array([probe[0] + [0.0, 0.0, 0.99 * reach], probe[0] + [0.0, 0.0, 1.01 * reach]])
+    assert _np(in_record(on_axis.astype(np.float32), **args)).tolist() == [True, False]
+
+    # 2D collapses the box onto the plane and gates the projected scatterers.
+    low_2d, high_2d = record_bounds(**args, two_dimensional=True)
+    assert low_2d[1] == high_2d[1] == 0.0
+    projected = positions * [1.0, 0.0, 1.0]
+    mask_2d = _np(in_record(positions, **args, two_dimensional=True))
+    assert (mask_2d == _np(in_record(projected, **args))).all()
 
 
 def test_single_element_echo_is_the_delayed_and_spread_pulse():
