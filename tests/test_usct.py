@@ -22,6 +22,8 @@ from keras import ops
 from zea.func.ultrasound import channels_to_analytic
 from zea.func.usct import usct_reflectivity_das
 
+from . import backend_equality_check
+
 
 def _small_scene(seed=0):
     """A tiny deterministic USCT scene: partial ring geometry + random analytic.
@@ -311,6 +313,35 @@ def test_usct_straight_ray_times_matches_constant_speed():
 
     dist = np.linalg.norm(positions[:, None, :] - pixels[None, :, :], axis=-1)
     np.testing.assert_allclose(times, dist / c, rtol=1e-5, atol=1e-8)
+
+
+@backend_equality_check(decimal=6)
+def test_straight_ray_slowness_is_the_same_on_every_backend():
+    """The straight-ray sampler behind ``straight_ray_times`` and the simulator's sound speed
+    map, on a 3D map with rays inside and outside its footprint."""
+    from zea.func.ultrasound import straight_ray_slowness
+
+    rng = np.random.default_rng(42)
+    x_axis = np.linspace(-0.01, 0.01, 11).astype(np.float32)
+    y_axis = np.linspace(-0.004, 0.004, 5).astype(np.float32)
+    z_axis = np.linspace(0.0, 0.03, 16).astype(np.float32)
+    sos_map = rng.uniform(1400.0, 1600.0, (16, 11, 5)).astype(np.float32)
+    elements = np.stack([np.linspace(-0.006, 0.006, 8), np.zeros(8), np.zeros(8)], -1)
+    positions = rng.uniform([-0.015, -0.005, 0.002], [0.015, 0.005, 0.035], (20, 3))
+    slowness = straight_ray_slowness(
+        positions.astype(np.float32),
+        elements.astype(np.float32),
+        sos_map,
+        x_axis,
+        z_axis,
+        1500.0,
+        sos_grid_y=y_axis,
+        n_samples=32,
+    )
+    slowness = np.asarray(ops.convert_to_numpy(slowness))
+    assert slowness.shape == (20, 8)
+    assert (slowness >= 1 / 1600.0).all() and (slowness <= 1 / 1400.0).all()
+    return slowness
 
 
 def test_usct_das_sos_map_matches_constant_speed_when_uniform():

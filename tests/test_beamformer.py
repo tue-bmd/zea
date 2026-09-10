@@ -7,6 +7,7 @@ import pytest
 from zea.beamform.beamformer import (
     apply_delays,
     calculate_delays,
+    calculate_delays_heterogeneous_medium,
     complex_rotate,
     compute_receive_distances,
     tof_correction,
@@ -813,6 +814,68 @@ def test_tof_correction_sos_grid_zero_data(probe_geometry, flatgrid):
     result = keras.ops.convert_to_numpy(tof_correction(**inputs))
     np.testing.assert_allclose(result, 0.0, atol=1e-7)
     return result
+
+
+@backend_equality_check(backends=["tensorflow", "jax"])
+def test_tof_correction_flat_sos_grid_matches_homogeneous(probe_geometry, flatgrid):
+    """A constant sos map must reproduce the analytical constant-sound-speed delays."""
+    # Long enough a record that every pixel delay lands inside it.
+    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_ax=1400)
+    homogeneous = keras.ops.convert_to_numpy(tof_correction(**inputs))
+
+    nx_sos, nz_sos = 16, 16
+    heterogeneous = keras.ops.convert_to_numpy(
+        tof_correction(
+            **inputs,
+            sos_map=np.full((nz_sos, nx_sos), SOUND_SPEED, dtype=np.float32),
+            sos_grid_x=np.linspace(-12e-3, 12e-3, nx_sos).astype(np.float32),
+            sos_grid_z=np.linspace(0.0, 25e-3, nz_sos).astype(np.float32),
+        )
+    )
+    # The ray integral samples the map at a finite number of points, so the two
+    # travel times differ by a fraction of a sample; compare on the mean level.
+    assert np.mean(np.abs(homogeneous - heterogeneous)) < 1e-2 * np.mean(np.abs(homogeneous))
+    return heterogeneous
+
+
+@backend_equality_check(backends=["tensorflow", "jax"])
+def test_heterogeneous_delays_multistatic_matches_general_path(probe_geometry, flatgrid):
+    """One-hot transmits must give the same delays through both code paths."""
+    n_el = probe_geometry.shape[0]
+    nx_sos, nz_sos = 24, 30
+    sos_grid_x = np.linspace(-12e-3, 12e-3, nx_sos).astype(np.float32)
+    sos_grid_z = np.linspace(0.0, 25e-3, nz_sos).astype(np.float32)
+    grid_x, grid_z = np.meshgrid(sos_grid_x, sos_grid_z)
+    sos_map = np.where(grid_x**2 + (grid_z - 12e-3) ** 2 < (6e-3) ** 2, 1400.0, SOUND_SPEED).astype(
+        np.float32
+    )
+
+    common = (
+        flatgrid,
+        sos_map,
+        sos_grid_x,
+        sos_grid_z,
+        np.zeros((n_el, n_el), dtype=np.float32),
+        probe_geometry,
+        np.ones(n_el, dtype=np.float32) * 1e-6,
+        SAMPLING_FREQ,
+        np.full(n_el, 2e-7, dtype=np.float32),
+    )
+    tx_legacy, rx_legacy = calculate_delays_heterogeneous_medium(*common)
+    tx_general, rx_general = calculate_delays_heterogeneous_medium(
+        *common,
+        tx_apodizations=np.eye(n_el, dtype=np.float32),
+        focus_distances=np.zeros(n_el, dtype=np.float32),
+        polar_angles=np.zeros(n_el, dtype=np.float32),
+        transmit_origins=np.zeros((n_el, 3), dtype=np.float32),
+    )
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(rx_legacy), keras.ops.convert_to_numpy(rx_general), atol=1e-4
+    )
+    np.testing.assert_allclose(
+        keras.ops.convert_to_numpy(tx_legacy), keras.ops.convert_to_numpy(tx_general), atol=1e-3
+    )
+    return tx_general
 
 
 @backend_equality_check()

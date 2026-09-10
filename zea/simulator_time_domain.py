@@ -36,11 +36,12 @@ Example usage
 
 """
 
+import numpy as np
 from keras import ops
 
+from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.ultrasound import directivity
 from zea.simulator import (
-    _one_way_distance,
     _resolve_element_height,
     _resolve_element_width,
     _snap_elevation,
@@ -294,6 +295,26 @@ def _precompute_scatterer_response(
     return base_gain, two_way_time
 
 
+def _one_way_distance(
+    positions, geometry, apply_lens_correction, lens_thickness, lens_sound_speed, sound_speed
+):
+    """One-way path length [m] from each position to each element center, of shape [s, e].
+
+    Through a lens it is the medium distance with the travel time of the refracted path.
+    """
+    if not apply_lens_correction:
+        return ops.linalg.norm(positions[:, None] - geometry[None], axis=-1)
+    travel_times = compute_lens_corrected_travel_times(
+        geometry,
+        positions,
+        lens_thickness=lens_thickness,
+        c_lens=lens_sound_speed,
+        c_medium=sound_speed,
+        n_iter=3,
+    )
+    return travel_times * sound_speed
+
+
 def _element_directivity(
     scatterer_positions,
     probe_geometry,
@@ -389,3 +410,18 @@ def _scattered_waveform(pulse, center_frequency, scatter_exponent):
     scatter_gain = (freqs / center_frequency) ** scatter_exponent
     pulse_real, pulse_imag = ops.rfft(waveform)
     return ops.irfft((pulse_real * scatter_gain, pulse_imag * scatter_gain), fft_length=n_samples)
+
+
+def hann_unnormalized(x, width):
+    """Hann window function that is 1 at the peak. This means that the integral of the
+    window function is not necessarily 1.
+
+    Args:
+        x (array-like): The input values.
+        width (float): The width of the window. This is the total width from -x to x. The
+            window will be nonzero in the range [-width/2, width/2].
+
+    Returns:
+        hann_vals (array-like): The values of the Hann window function.
+    """
+    return ops.where(ops.abs(x) < width / 2, ops.cos(np.pi * x / width) ** 2, 0)
