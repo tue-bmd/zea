@@ -1,6 +1,7 @@
 import difflib
 import inspect
 import json
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Dict, List, Sequence, Union, cast
 
 import keras
@@ -36,6 +37,24 @@ if TYPE_CHECKING:
     # Imported lazily at runtime (inside prepare_parameters) to avoid a circular
     # import: zea.parameters imports the data specs, which can pull in this module.
     from zea.parameters import Parameters
+
+
+@lru_cache(maxsize=1)
+def _valid_parameter_names() -> frozenset:
+    """Names recognized by :class:`~zea.Parameters`.
+
+    Used to tell two kinds of unused input apart. A name in this set is a real
+    parameter, so it is reported as unused but never guessed at as a typo. A name
+    outside it is unknown to zea entirely, so a close match is worth suggesting.
+
+    Reaching the pipeline at all still means a caller passed the key by hand:
+    :meth:`Pipeline.prepare_parameters` only draws the keys the pipeline needs
+    out of a :class:`~zea.Parameters` object.
+    """
+    # Local import for the circular-import reason described above.
+    from zea.parameters import Parameters
+
+    return frozenset(Parameters.VALID_PARAMS)
 
 
 class PipelineError(RuntimeError):
@@ -246,7 +265,8 @@ class Pipeline:
     def from_default(
         cls,
         beamformer="delay_and_sum",
-        num_patches=100,
+        num_patches=None,
+        patch_size=None,
         baseband=False,
         enable_pfield=False,
         enable_aligned_apodization=False,
@@ -265,8 +285,10 @@ class Pipeline:
                 - "generalized_coherence_factor"
                 - "minimum_variance"
                 Defaults to "delay_and_sum".
-            num_patches (int): Number of patches for the PatchedGrid operation.
-                Defaults to 100. If you get an out of memory error, try to increase this number.
+            num_patches (int, optional): Number of patches for the PatchedGrid operation.
+                Mutually exclusive with ``patch_size``, which is preferred.
+            patch_size (int, optional): Grid pixels per patch for the PatchedGrid operation.
+                Defaults to :data:`DEFAULT_PATCH_SIZE`. Decrease it if you run out of memory.
             baseband (bool): If True, assume the input data is baseband (I/Q) data,
                 which has 2 channels (last dim). Defaults to False, which assumes RF data,
                 so input signal has a single channel dim and is still on carrier frequency.
@@ -297,6 +319,7 @@ class Pipeline:
             Beamform(
                 beamformer=beamformer,
                 num_patches=num_patches,
+                patch_size=patch_size,
                 enable_pfield=enable_pfield,
                 enable_aligned_apodization=enable_aligned_apodization,
                 enable_receive_apodization=enable_receive_apodization,
@@ -430,7 +453,11 @@ class Pipeline:
     def _raise_missing_key(self, operation, exc: KeyError, inputs: Dict[str, Any]):
         """Re-raise a bare ``KeyError`` from an operation with actionable context."""
         missing = exc.args[0] if exc.args else "?"
-        unused = [k for k in (set(inputs.keys()) - self.valid_keys) if k != "kwargs"]
+        unused = [
+            k
+            for k in (set(inputs.keys()) - self.valid_keys - _valid_parameter_names())
+            if k != "kwargs"
+        ]
         # If the caller passed something close to the missing key, it is likely a typo.
         typo = difflib.get_close_matches(str(missing), unused, n=1, cutoff=0.6)
         hint = (
@@ -501,12 +528,13 @@ class Pipeline:
         if not self._logged_difference_keys:
             difference_keys = set(inputs.keys()) - self.valid_keys
             if difference_keys:
-                # Separate likely typos (close to a key the pipeline actually uses)
-                # from benign pass-through keys (e.g. extra `zea.Parameters` fields).
+                # Split unknown names, where a close match is a useful typo hint,
+                # from real `zea.Parameters` names, which this pipeline simply does
+                # not consume. Both are unused; only the first is likely a mistake.
                 candidates = self.valid_keys - {"kwargs"}
                 matches = {
                     key: difflib.get_close_matches(key, candidates, n=1, cutoff=0.6)
-                    for key in difference_keys
+                    for key in difference_keys - _valid_parameter_names()
                 }
                 typos = {key: match[0] for key, match in matches.items() if match}
                 benign = difference_keys - set(typos)
@@ -977,6 +1005,9 @@ class Map(Pipeline):
     - Changing anything other than ``self.output_key`` in the dict will not be propagated.
     - Will be jitted as a single operation, not the individual operations.
     - This class handles the batching.
+    - Prefer ``batch_size`` over ``chunks``: it fixes the size of each step, whereas
+      ``chunks`` fixes their number and so lets each step grow with the input. Large steps
+      compile disproportionately slowly (see :data:`MAX_SAFE_PATCH_SIZE`).
 
     For more information on how to use ``in_axes``, ``out_axes``, `see the documentation for
     jax.vmap <https://docs.jax.dev/en/latest/_autosummary/jax.vmap.html>`_.
@@ -1173,6 +1204,15 @@ class Map(Pipeline):
         return config
 
 
+#: Default number of grid pixels beamformed per patch.
+DEFAULT_PATCH_SIZE = 1024
+
+#: Pixels per patch above which compilation slows down by orders of magnitude, while
+#: execution time stays flat. On L40s: ~1 s per patch up to 2044 pixels, 22 s at 2552,
+#: 93 s at 3130. Not reproduced on other GPUs, but still good to keep patches small.
+MAX_SAFE_PATCH_SIZE = 2048
+
+
 @ops_registry("patched_grid")
 class PatchedGrid(Map):
     """
@@ -1181,10 +1221,20 @@ class PatchedGrid(Map):
 
     This can be used to reduce memory usage by processing data in chunks.
 
+    Patches are sized in pixels (``patch_size``), which limits peak memory and
+    compile time stays constant as the grid grows.
+
     For more information and flexibility, see :class:`zea.ops.Map`.
     """
 
-    def __init__(self, *args, num_patches=10, **kwargs):
+    def __init__(self, *args, num_patches=None, patch_size=None, **kwargs):
+        if num_patches is not None and patch_size is not None:
+            raise ValueError(
+                "num_patches and patch_size are mutually exclusive. Please specify only one."
+            )
+        if num_patches is None and patch_size is None:
+            patch_size = DEFAULT_PATCH_SIZE
+
         super().__init__(
             *args,
             argnames=[
@@ -1194,9 +1244,53 @@ class PatchedGrid(Map):
                 "flat_receive_apodization",
             ],
             chunks=num_patches,
+            batch_size=patch_size,
             **kwargs,
         )
         self.num_patches = num_patches
+        self.patch_size = patch_size
+        self._warned_patch_size = False
+
+    def call_item(self, **inputs):
+        """Process data in patches."""
+        self._warn_if_patch_too_large(inputs.get("flatgrid"))
+        return super().call_item(**inputs)
+
+    def _warn_if_patch_too_large(self, flatgrid):
+        """Warn once when the configured patching makes each patch too large."""
+        if self._warned_patch_size:
+            return
+
+        # A pinned patch_size needs no grid to check; a pinned num_patches does.
+        if self.patch_size is not None:
+            if self.patch_size <= MAX_SAFE_PATCH_SIZE:
+                return
+            self._warned_patch_size = True
+            log.warning(
+                f"[zea.ops.PatchedGrid] patch_size={self.patch_size} is above the "
+                f"{MAX_SAFE_PATCH_SIZE} pixels where compilation could get very slow. Lower "
+                "`patch_size` to compile faster."
+            )
+            return
+
+        if self.num_patches is None or flatgrid is None:
+            return
+
+        n_pix = ops.shape(flatgrid)[0]
+        if not isinstance(n_pix, int):
+            return  # dynamic shape, nothing to check against
+
+        patch_size = -(-n_pix // self.num_patches)  # ceil, matching zea.func.tensor.vmap
+        if patch_size <= MAX_SAFE_PATCH_SIZE:
+            return
+
+        self._warned_patch_size = True
+        log.warning(
+            f"[zea.ops.PatchedGrid] num_patches={self.num_patches} splits this "
+            f"{n_pix}-pixel grid into patches of {patch_size} pixels, above the "
+            f"{MAX_SAFE_PATCH_SIZE} where compilation could get very slow. Pass `patch_size` "
+            "instead to keep patches a fixed size as the grid grows."
+        )
 
     def get_dict(self, compact=True):
         """Get the configuration of the pipeline."""
@@ -1206,7 +1300,11 @@ class PatchedGrid(Map):
         params = config.get("params", {})
         params.pop("argnames", None)
         params.pop("chunks", None)
-        params["num_patches"] = self.num_patches
+        params.pop("batch_size", None)
+        if self.num_patches is not None:
+            params["num_patches"] = self.num_patches
+        if not compact or self.patch_size not in (None, DEFAULT_PATCH_SIZE):
+            params["patch_size"] = self.patch_size
         config["params"] = params
         return config
 
@@ -1247,7 +1345,8 @@ class Beamform(Pipeline):
     def __init__(
         self,
         beamformer="delay_and_sum",
-        num_patches=100,
+        num_patches=None,
+        patch_size=None,
         enable_pfield=False,
         enable_aligned_apodization=False,
         enable_receive_apodization=False,
@@ -1264,8 +1363,11 @@ class Beamform(Pipeline):
                 - "generalized_coherence_factor"
                 - "minimum_variance"
                 Defaults to "delay_and_sum".
-            num_patches (int): Number of patches to split the grid into for patch-wise
-                beamforming. If 1, no patching is performed.
+            num_patches (int, optional): Number of patches to split the grid into for
+                patch-wise beamforming. If 1, no patching is performed. Prefer
+                ``patch_size``, with which it is mutually exclusive.
+            patch_size (int, optional): Number of grid pixels to beamform per patch.
+                Defaults to :data:`DEFAULT_PATCH_SIZE`.
             enable_pfield (bool): Whether to include pressure field weighting in the beamforming.
                 Mutually exclusive with ``enable_aligned_apodization``.
             enable_aligned_apodization (bool): Whether to include an explicit per-pixel,
@@ -1289,8 +1391,17 @@ class Beamform(Pipeline):
                 "Please specify only one."
             )
 
+        if num_patches is not None and patch_size is not None:
+            raise ValueError(
+                "num_patches and patch_size are mutually exclusive. Please specify only one."
+            )
+
         self.beamformer_type = beamformer
         self.num_patches = num_patches
+        # Resolved here so a non-compact config records the size actually used.
+        self.patch_size = patch_size if num_patches is None else None
+        if self.num_patches is None and self.patch_size is None:
+            self.patch_size = DEFAULT_PATCH_SIZE
         self.enable_pfield = enable_pfield
         self.enable_aligned_apodization = enable_aligned_apodization
         self.enable_receive_apodization = enable_receive_apodization
@@ -1345,11 +1456,18 @@ class Beamform(Pipeline):
         if self.enable_pfield:
             beamforming.insert(1, PfieldWeighting())
 
-        # Optionally add patching
-        if self.num_patches > 1:
+        # Optionally add patching; `num_patches=1` is the explicit opt-out.
+        if self.num_patches != 1:
             beamforming = cast(  # type: ignore[assignment]
                 List[Operation],
-                [PatchedGrid(operations=beamforming, num_patches=self.num_patches, **kwargs)],
+                [
+                    PatchedGrid(
+                        operations=beamforming,
+                        num_patches=self.num_patches,
+                        patch_size=self.patch_size,
+                        **kwargs,
+                    )
+                ],
             )
 
         # Reshape the grid to image shape
@@ -1385,8 +1503,10 @@ class Beamform(Pipeline):
         params = {}
         if not compact or self.beamformer_type != "delay_and_sum":
             params["beamformer"] = self.beamformer_type
-        if not compact or self.num_patches != 100:
+        if self.num_patches is not None:
             params["num_patches"] = self.num_patches
+        elif not compact or self.patch_size != DEFAULT_PATCH_SIZE:
+            params["patch_size"] = self.patch_size
         if not compact or self.enable_pfield:
             params["enable_pfield"] = self.enable_pfield
         if not compact or self.enable_aligned_apodization:
@@ -1943,8 +2063,8 @@ class MinimumVariance(Operation):
                 log.warning(
                     f"MinimumVariance axial_averaging={self.axial_averaging} needs "
                     f"{2 * self.axial_averaging + 1} axial pixels per patch, but a patch "
-                    f"holds only {n_pix // stride}. Lower `num_patches` to use the full "
-                    "averaging window."
+                    f"holds only {n_pix // stride}. Raise `patch_size` (or lower "
+                    "`num_patches`) to use the full averaging window."
                 )
         self._warned = True
         return stride
@@ -1981,7 +2101,7 @@ class Refocus(Operation):
     where :math:`\tau_{t,e}` is the transmit delay in samples and
     :math:`a_{t,e}` is the apodization.
 
-    At each temporal frequency the received RF spectrum is decoded by
+    At each temporal frequency the received RF/IQ spectrum is decoded by
     multiplying with the pseudo-inverse :math:`H^{-1}`:
 
     .. math::
@@ -1994,6 +2114,9 @@ class Refocus(Operation):
     The **input** data has shape ``(n_tx, n_ax, n_el, n_ch)`` and the
     **output** has shape ``(n_el, n_ax, n_el, n_ch)``, where the new first
     axis indexes the decoded virtual transmit elements.
+
+    The last axis selects how the data is interpreted: ``n_ch=1`` is RF and
+    ``n_ch=2`` is IQ (baseband) data.
 
     .. admonition:: References
 
@@ -2021,7 +2144,7 @@ class Refocus(Operation):
         param (float or None): Regularization / filter parameter.
 
             - ``'adjoint'``: ``None`` applies a ramp filter (multiply by
-              :math:`f`). Set to ``0`` to disable the ramp filter. Defaults to ``None``.
+              :math:`|f|`). Set to ``0`` to disable the ramp filter. Defaults to ``None``.
             - ``'tikhonov'``, ``'rsvd'``, ``'tsvd'``: Relative regularization
               strength. Defaults to ``1e-2`` when ``None``.
 
@@ -2068,10 +2191,14 @@ class Refocus(Operation):
         H = a_c * ops.exp(ops.cast(-1j * 2 * np.pi, "complex64") * f_c * d_c)
 
         if self.method == "adjoint":
-            # param=None  → ramp filter (multiply by f)
+            # param=None  → ramp filter (multiply by |f|)
             # param=0     → no ramp (multiply by 1, plain adjoint)
+            # |f| (not signed f) since the ramp compensates a real, symmetric
+            # passband gain; for IQ, f_vec can be negative (baseband bins
+            # below the demodulation frequency), and a signed ramp would flip
+            # the sign of those bins instead of just scaling their amplitude.
             Hinv = ops.conj(ops.transpose(H, (0, 2, 1)))
-            ramp_vals = f_vec if self.param is None else ops.ones_like(f_vec)
+            ramp_vals = ops.abs(f_vec) if self.param is None else ops.ones_like(f_vec)
             ramp = ops.cast(ramp_vals, "complex64")[:, None, None]
             return ramp * Hinv
 
@@ -2091,16 +2218,21 @@ class Refocus(Operation):
         sinv_c = ops.cast(sinv, "complex64")
         return ops.matmul(VHT * sinv_c[:, None, :], UT)
 
-    def _decode(self, data, delays_samples, apod):
+    def _decode(self, data, delays_samples, apod, demodulation_frequency, sampling_frequency):
         """REFoCUS decoding for a single (unbatched) volume.
 
         All channels and all frequency bins are processed in parallel via
         batched tensor operations.
 
         Args:
-            data: ``(n_tx, n_ax, n_el, n_ch)`` float32 RF array.
+            data: ``(n_tx, n_ax, n_el, n_ch)`` float32 array.
             delays_samples: ``(n_tx, n_el)`` transmit delays in samples.
             apod: ``(n_tx, n_el)`` transmit apodization.
+            demodulation_frequency (float or None): Demodulation (carrier)
+                frequency in Hz. Required for IQ (``n_ch=2``) input; unused
+                for RF (``n_ch=1``) input.
+            sampling_frequency (float): Sampling frequency in Hz of ``data``
+                as it currently is, i.e. after any :class:`Downsample`.
 
         Returns:
             decoded: ``(n_el, n_ax, n_el, n_ch)`` float32 array.
@@ -2108,47 +2240,115 @@ class Refocus(Operation):
         n_tx, n_ax, n_el, n_ch = data.shape
         n_elements = delays_samples.shape[1]
 
-        # --- FFT over all channels at once ---
-        # data: (n_tx, n_ax, n_el, n_ch) -> (n_ch, n_el, n_tx, n_ax)
-        rf = ops.cast(ops.transpose(data, (3, 2, 0, 1)), "float32")
-        # (n_ch, n_el_recv, n_tx, n_freq)
-        RF_enc_r, RF_enc_i = ops.rfft(rf)
-        RF_enc = ops.cast(RF_enc_r, "complex64") + 1j * ops.cast(RF_enc_i, "complex64")
-        n_freq = RF_enc.shape[-1]
+        if n_ch not in (1, 2):
+            raise ValueError(f"Refocus supports RF (n_ch=1) or IQ (n_ch=2) data, got n_ch={n_ch}.")
+        # Refocus for RF
+        if n_ch == 1:
+            # --- FFT over all channels at once ---
+            # data: (n_tx, n_ax, n_el, n_ch) -> (n_ch, n_el, n_tx, n_ax)
+            rf = ops.cast(ops.transpose(data, (3, 2, 0, 1)), "float32")
+            # (n_ch, n_el_recv, n_tx, n_freq)
+            RF_enc_r, RF_enc_i = ops.rfft(rf)
+            RF_enc = ops.cast(RF_enc_r, "complex64") + 1j * ops.cast(RF_enc_i, "complex64")
+            n_freq = RF_enc.shape[-1]
 
-        # Rearrange to (n_freq, n_tx, n_el_recv * n_ch) for batched matmul.
-        # (n_ch, n_el_recv, n_tx, n_freq) -> (n_freq, n_tx, n_el_recv, n_ch)
-        RF_enc = ops.transpose(RF_enc, (3, 2, 1, 0))
-        # -> (n_freq, n_tx, n_el_recv * n_ch)
-        RF_enc = ops.reshape(RF_enc, (n_freq, n_tx, n_el * n_ch))
+            # Rearrange to (n_freq, n_tx, n_el_recv * n_ch) for batched matmul.
+            # (n_ch, n_el_recv, n_tx, n_freq) -> (n_freq, n_tx, n_el_recv, n_ch)
+            RF_enc = ops.transpose(RF_enc, (3, 2, 1, 0))
+            # -> (n_freq, n_tx, n_el_recv * n_ch)
+            RF_enc = ops.reshape(RF_enc, (n_freq, n_tx, n_el * n_ch))
 
-        # --- Batched inverse encoding matrices (skip DC at index 0) ---
-        frequency = ops.cast(ops.arange(n_freq), "float32") / n_ax
-        freq_noDC = frequency[1:]  # (n_freq - 1,)
-        # Hinv: (n_freq - 1, n_elements, n_tx)
-        Hinv = self._get_hinv(delays_samples, freq_noDC, apod)
+            # --- Batched inverse encoding matrices (skip DC at index 0) ---
+            frequency = ops.cast(ops.arange(n_freq), "float32") / n_ax
+            freq_noDC = frequency[1:]  # (n_freq - 1,)
+            # Hinv: (n_freq - 1, n_elements, n_tx)
+            Hinv = self._get_hinv(delays_samples, freq_noDC, apod)
 
-        # --- Single batched matmul over all frequencies and channels ---
-        # (n_freq-1, n_elements, n_tx) @ (n_freq-1, n_tx, n_el_recv * n_ch)
-        # -> (n_freq-1, n_elements, n_el_recv * n_ch)
-        RF_dec = ops.matmul(Hinv, RF_enc[1:])
+            # --- Single batched matmul over all frequencies and channels ---
+            # (n_freq-1, n_elements, n_tx) @ (n_freq-1, n_tx, n_el_recv * n_ch)
+            # -> (n_freq-1, n_elements, n_el_recv * n_ch)
+            RF_dec = ops.matmul(Hinv, RF_enc[1:])
 
-        # Prepend zeros for the DC bin: (n_freq, n_elements, n_el_recv * n_ch)
-        dc = ops.zeros((1, n_elements, n_el * n_ch), dtype="complex64")
-        RF_decoded = ops.concatenate([dc, RF_dec], axis=0)
+            # Prepend zeros for the DC bin: (n_freq, n_elements, n_el_recv * n_ch)
+            dc = ops.zeros((1, n_elements, n_el * n_ch), dtype="complex64")
+            RF_decoded = ops.concatenate([dc, RF_dec], axis=0)
 
-        # --- IFFT back to time domain ---
-        # Reshape to (n_freq, n_elements, n_el_recv, n_ch)
-        RF_decoded = ops.reshape(RF_decoded, (n_freq, n_elements, n_el, n_ch))
-        # irfft acts on the last axis: move n_freq last
-        # -> (n_elements, n_el_recv, n_ch, n_freq)
-        RF_decoded = ops.transpose(RF_decoded, (1, 2, 3, 0))
-        # -> (n_elements, n_el_recv, n_ch, n_ax)
-        rf_decoded = ops.irfft((ops.real(RF_decoded), ops.imag(RF_decoded)), fft_length=n_ax)
-        # -> (n_elements, n_ax, n_el_recv, n_ch)
-        rf_decoded = ops.transpose(rf_decoded, (0, 3, 1, 2))
+            # --- IFFT back to time domain ---
+            # Reshape to (n_freq, n_elements, n_el_recv, n_ch)
+            RF_decoded = ops.reshape(RF_decoded, (n_freq, n_elements, n_el, n_ch))
+            # irfft acts on the last axis: move n_freq last
+            # -> (n_elements, n_el_recv, n_ch, n_freq)
+            RF_decoded = ops.transpose(RF_decoded, (1, 2, 3, 0))
+            # -> (n_elements, n_el_recv, n_ch, n_ax)
+            rf_decoded = ops.irfft((ops.real(RF_decoded), ops.imag(RF_decoded)), fft_length=n_ax)
+            # -> (n_elements, n_ax, n_el_recv, n_ch)
+            rf_decoded = ops.transpose(rf_decoded, (0, 3, 1, 2))
 
-        return ops.cast(rf_decoded, "float32")
+            return ops.cast(rf_decoded, "float32")
+        # Refocus for IQ
+        else:
+            if demodulation_frequency is None:
+                raise ValueError(
+                    "Refocus requires `demodulation_frequency` for IQ (n_ch=2) input, "
+                    "got None. Pass it explicitly to `call` or ensure it is available "
+                    "in the pipeline parameters."
+                )
+            # --- FFT over all channels at once ---
+            # data: (n_tx, n_ax, n_el, n_ch) -> (n_ch, n_el, n_tx, n_ax)
+            iq = ops.cast(ops.transpose(data, (3, 2, 0, 1)), "float32")
+            # (n_ch, n_el_recv, n_tx, n_freq)
+            IQ_enc_r, IQ_enc_i = ops.fft((ops.take(iq, 0, axis=0), ops.take(iq, 1, axis=0)))
+            IQ_enc = ops.cast(IQ_enc_r, "complex64") + 1j * ops.cast(IQ_enc_i, "complex64")
+            n_freq = IQ_enc.shape[-1]
+
+            # Rearrange to (n_freq, n_tx, n_el_recv) for batched matmul.
+            # (n_el_recv, n_tx, n_freq) -> (n_freq, n_tx, n_el_recv)
+            IQ_enc = ops.transpose(IQ_enc, (2, 1, 0))
+            # --- Batched inverse encoding matrices ---
+            # FFT frequencies contain positive and negative frequencies for IQ.
+            # For even n_ax the Nyquist bin (k == n_ax // 2) is the negative
+            # frequency -0.5, not +0.5 (matches numpy.fft.fftfreq convention).
+            k = ops.arange(n_ax)
+            frequency = ops.where(
+                k < (n_ax + 1) // 2,
+                ops.cast(k, "float32") / n_ax,
+                ops.cast(k - n_ax, "float32") / n_ax,
+            )
+            frequency = (
+                frequency + demodulation_frequency / sampling_frequency
+            )  # relative to baseband
+
+            # Hinv: (n_freq, n_elements, n_tx)
+            Hinv = self._get_hinv(delays_samples, frequency, apod)
+
+            # --- Single batched matmul over all frequencies and channels ---
+            # (n_freq, n_elements, n_tx) @ (n_freq, n_tx, n_el_recv * n_ch)
+            # -> (n_freq, n_elements, n_el_recv * n_ch)
+            IQ_decoded = ops.matmul(Hinv, IQ_enc)
+            # --- IFFT back to time domain ---
+            # (n_freq, n_elements, n_el_recv)
+
+            # -> (n_elements, n_el_recv, n_freq)
+            IQ_decoded = ops.transpose(IQ_decoded, (1, 2, 0))
+            # Use `ifft2` with a dummy axis so the inverse transform still
+            # applies along the frequency axis while preserving the 1D layout.
+            # We do this because keras does not support ifft
+            # -> (n_elements, n_el_recv, 1, n_freq)
+            iq_decoded_real = ops.expand_dims(ops.real(IQ_decoded), axis=-2)
+            iq_decoded_imag = ops.expand_dims(ops.imag(IQ_decoded), axis=-2)
+            # -> (n_elements, n_el_recv, 1, n_ax)
+            iq_decoded_r, iq_decoded_i = ops.ifft2((iq_decoded_real, iq_decoded_imag))
+            # -> (n_elements, n_el_recv, n_ax)
+            iq_decoded_r = ops.squeeze(iq_decoded_r, axis=-2)
+            iq_decoded_i = ops.squeeze(iq_decoded_i, axis=-2)
+
+            # Recreate the channel dimension.
+            # -> (n_elements, n_el_recv, n_ax, n_ch)
+            iq_decoded = ops.stack((iq_decoded_r, iq_decoded_i), axis=-1)
+
+            # -> (n_elements, n_ax, n_el_recv, n_ch)
+            iq_decoded = ops.transpose(iq_decoded, (0, 2, 1, 3))
+            return ops.cast(iq_decoded, "float32")
 
     # ------------------------------------------------------------------
     # Operation interface
@@ -2160,6 +2360,7 @@ class Refocus(Operation):
         sampling_frequency,
         probe_geometry,
         initial_times,
+        demodulation_frequency=None,
         tx_apodizations=None,
         **kwargs,
     ):
@@ -2175,6 +2376,12 @@ class Refocus(Operation):
             t0_delays: ``(n_tx, n_el)`` transmit delays in **seconds**.
             sampling_frequency: Sampling frequency in Hz.
             probe_geometry: ``(n_el, 3)`` element positions in metres.
+            initial_times: ``(n_tx,)`` time (in seconds) of the first sample
+                of each transmit, relative to the transmit event.
+            demodulation_frequency (float, optional): Demodulation (carrier)
+                frequency in Hz. Required when the input data is IQ
+                (``n_ch=2``); unused for RF (``n_ch=1``) input. Defaults to
+                ``None``.
             tx_apodizations: ``(n_tx, n_el)`` transmit apodization weights.
                 Defaults to all-ones (uniform apodization).
             **kwargs: Must contain the input data tensor under ``self.key``.
@@ -2213,9 +2420,13 @@ class Refocus(Operation):
             apod = tx_apodizations
 
         if self.with_batch_dim:
-            decoded = vmap(self._decode, in_axes=[0, None, None])(data, delays_samples, apod)
+            decoded = vmap(self._decode, in_axes=[0, None, None, None, None])(
+                data, delays_samples, apod, demodulation_frequency, sampling_frequency
+            )
         else:
-            decoded = self._decode(data, delays_samples, apod)
+            decoded = self._decode(
+                data, delays_samples, apod, demodulation_frequency, sampling_frequency
+            )
 
         # Number of virtual SA transmits = number of elements
         n_el = ops.shape(probe_geometry)[0]
