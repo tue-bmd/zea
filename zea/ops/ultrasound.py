@@ -69,6 +69,11 @@ def _derived_fft_length(kwargs):
     scalars = ("n_ax", "sampling_frequency", "center_frequency")
     if any(x is None for x in raw) or any(kwargs.get(key) is None for key in scalars):
         return None
+    sos_map = kwargs.get("sos_map")
+    if sos_map is not None:
+        sos_map = _concrete(sos_map)
+        if sos_map is None:
+            return None
     t0, t_init, t_peak, geometry, sound_speed = raw
     shift = t0 - t_init[:, None] + t_peak[:, None]
     return fft_length(
@@ -80,6 +85,7 @@ def _derived_fft_length(kwargs):
         shift.min(),
         shift.max(),
         float(kwargs.get("n_period", 4.0)),
+        sos_map=sos_map,
     )
 
 
@@ -100,24 +106,21 @@ class Simulate(Operation):
     ``method`` selects the simulator. ``"frequency_domain"`` (default) is
     :func:`zea.simulator.simulate_rf`, the full model. ``"time_domain"`` is
     :func:`zea.simulator_time_domain.simulate_rf_td`, which evaluates the geometry-dependent
-    factors at the center frequency: less accurate, faster in some settings. The transducer and
-    element options (``rigid_baffle``, ``bandwidth_percent``, ``probe_center_frequency``,
-    ``element_normals``, ``chirp_sweep``, ``n_period``, ``n_sub_elements``, ``elevation_focus``,
-    ``lens_attenuation_coef``, ``band_db``, ``n_fft``, ``scatter_exponent_range``) reach the
-    frequency-domain simulator only.
+    factors at the center frequency: less accurate, faster in some settings.
 
-    ``n_fft`` is derived from the scan before the jitted call when it is not given, so the
-    frequency-domain simulator runs under jit without it. ``max_chunk_gb`` None leaves each
-    simulator its own default.
+    Frequency-domain only arguments:
 
-    ``scatter_exponent`` is one value shared by every scatterer, or a vector of shape
-    (n_scat,) giving each scatterer its own backscatter coefficient, which only the
-    frequency-domain simulator supports. A concrete scalar is a static argument, so the band it
-    implies is trimmed for it and a new value recompiles; anything else (a vector, which jax
-    cannot hash, or a traced value, which has nothing to hash) is traced instead, so one kernel
-    serves every exponent and the exponent is differentiable. ``scatter_exponent_range``, the
-    exponent range the static band is picked from, is derived here whenever the exponent is
-    concrete; pass it, or ``band_db=None``, when it is not.
+    - Transducer and element model: ``rigid_baffle``, ``bandwidth_percent``,
+      ``probe_center_frequency``, ``element_normals``, ``chirp_sweep``, ``n_period``,
+      ``n_sub_elements``, ``elevation_focus``, ``lens_attenuation_coef``, ``band_db``.
+    - Sound speed map: ``sos_map`` with ``sos_grid_x`` and ``sos_grid_z`` (2D, extruded along
+      y), plus ``sos_grid_y`` for a 3D map. Each element-scatterer path is timed along its
+      straight ray with ``n_sos_ray_samples`` samples, at ``sound_speed`` outside the map.
+    - Per-scatterer ``scatter_exponent``: a vector of shape (n_scat,) instead of one shared
+      value. Pass ``scatter_exponent_range`` (or ``band_db=None``) when the exponent is
+      traced, for example inside an outer jit.
+    - ``n_fft``: derived from the scan (and the map) when not given, so the simulator runs
+      under jit without it; inside an outer jit take it from :attr:`zea.Parameters.n_fft`.
     """
 
     # Define operation-specific static parameters
@@ -143,6 +146,7 @@ class Simulate(Operation):
         "band_db",
         "n_fft",
         "scatter_exponent_range",
+        "n_sos_ray_samples",
     ]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
@@ -188,6 +192,11 @@ class Simulate(Operation):
             # The FFT length and the exponent band are static and need concrete inputs, so
             # they are derived here, before the exponents are traced into the jitted call.
             method = _resolve_method(merged.get("method", "frequency_domain"))
+            if method == "time_domain" and merged.get("sos_map") is not None:
+                raise ValueError(
+                    "sos_map is only supported by the frequency-domain simulator "
+                    "(method='frequency_domain')."
+                )
             if method == "frequency_domain" and merged.get("n_fft") is None:
                 merged["n_fft"] = _derived_fft_length(merged)
             if method == "frequency_domain" and merged.get("scatter_exponent_range") is None:
@@ -235,6 +244,11 @@ class Simulate(Operation):
         n_fft=None,
         lens_attenuation_coef=0.0,
         scatter_exponent_range=None,
+        sos_map=None,
+        sos_grid_x=None,
+        sos_grid_z=None,
+        sos_grid_y=None,
+        n_sos_ray_samples=64,
         **kwargs,
     ):
         method = _resolve_method(method)
@@ -244,6 +258,11 @@ class Simulate(Operation):
                 simulate,
                 band_db=band_db,
                 n_fft=n_fft,
+                sos_map=sos_map,
+                sos_grid_x=sos_grid_x,
+                sos_grid_z=sos_grid_z,
+                sos_grid_y=sos_grid_y,
+                n_sos_ray_samples=n_sos_ray_samples,
                 rigid_baffle=rigid_baffle,
                 bandwidth_percent=bandwidth_percent,
                 probe_center_frequency=probe_center_frequency,
@@ -373,9 +392,11 @@ class TOFCorrection(Operation):
             apply_lens_correction (bool): Whether to apply lens correction
             lens_thickness (float): Lens thickness
             lens_sound_speed (float): Sound speed in the lens
-            sos_map (Tensor): Speed-of-sound map of shape ``(Nz, Nx)`` in m/s.
-            sos_grid_x (Tensor): x-coordinates of ``sos_map`` rows.
-            sos_grid_z (Tensor): z-coordinates of ``sos_map`` columns.
+            sos_map (Tensor): Speed-of-sound map of shape ``(Nz, Nx)`` in m/s. 2D only;
+                TODO: 3D maps (``sos_grid_y``) as in :func:`zea.simulator.simulate_rf`,
+                by delegating to :func:`zea.func.ultrasound.straight_ray_slowness`.
+            sos_grid_x (Tensor): x-coordinates of the ``sos_map`` columns.
+            sos_grid_z (Tensor): z-coordinates of the ``sos_map`` rows.
             focal_region_length (float): Full length in meters of the region
                 around the focal plane of focused transmits where first- and
                 last-arrival delays are linearly blended. This smooths the

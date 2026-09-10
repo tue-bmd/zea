@@ -332,6 +332,11 @@ class Parameters(BaseParameters):
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
         "distance_to_apex": {"dtype": (np.float32, type(None)), "default": None},
+        # Sound speed map of zea.simulator.simulate_rf: (Nz, Nx), or (Nz, Nx, Ny) with sos_grid_y.
+        "sos_map": {"dtype": (np.float32, type(None)), "default": None},
+        "sos_grid_x": {"dtype": (np.float32, type(None)), "default": None},
+        "sos_grid_y": {"dtype": (np.float32, type(None)), "default": None},
+        "sos_grid_z": {"dtype": (np.float32, type(None)), "default": None},
     }
 
     # Add some defaults that are not stored in a file
@@ -1024,13 +1029,14 @@ class Parameters(BaseParameters):
         "t0_delays",
         "initial_times",
         "t_peak",
+        "sos_map",
     )
     def n_fft(self):
         """FFT length of :func:`zea.simulator.simulate_rf` for this scan.
 
         Sized with :func:`zea.simulator.fft_length` so that no echo of a scatterer in the record
-        wraps into it, for any cloud and up to twice the default pulse length. Set it explicitly
-        to override.
+        wraps into it, for any cloud and up to twice the default pulse length, through the
+        sound speed map ``sos_map`` when there is one. Set it explicitly to override.
         """
         n_fft = self._params.get("n_fft")
         if n_fft is not None:
@@ -1044,6 +1050,7 @@ class Parameters(BaseParameters):
             self.probe_geometry,
             shift.min(),
             shift.max(),
+            sos_map=self.sos_map,
         )
 
     @cache_with_dependencies("selected_transmits")
