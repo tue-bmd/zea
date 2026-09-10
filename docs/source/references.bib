@@ -1,0 +1,264 @@
+% References cited from the zea documentation and docstrings via the
+% ``.. citation::`` directive (see docs/source/_ext/citation.py).
+%
+% This file is for *external* work that zea builds on: beamformers, models,
+% metrics and datasets whose papers are cited from the API docs. Papers written
+% with zea, and the toolbox's own citation, live in ``paper/paper.bib`` instead.
+% Both files are listed in ``bibtex_bibfiles``, so keys must be unique across
+% the two and either file can be cited from anywhere in the docs.
+%
+% Keys follow the convention already used in paper/paper.bib:
+% ``<first author surname><year><first significant title word>``.
+
+% -- Beamforming --------------------------------------------------------------
+
+@inproceedings{hollman1999coherence,
+  author       = {Hollman, K. W. and Rigby, K. W. and O'Donnell, M.},
+  booktitle    = {1999 IEEE Ultrasonics Symposium Proceedings},
+  doi          = {10.1109/ULTSYM.1999.849225},
+  pages        = {1257--1260},
+  title        = {{C}oherence {F}actor of {S}peckle from a {M}ulti-{R}ow {P}robe},
+  volume       = {2},
+  year         = {1999}
+}
+
+@article{li2003adaptive,
+  author       = {Li, Pai-Chi and Li, Meng-Lin},
+  doi          = {10.1109/TUFFC.2003.1182117},
+  journal      = {{IEEE} Transactions on Ultrasonics, Ferroelectrics, and Frequency Control},
+  number       = {2},
+  pages        = {128--141},
+  title        = {{A}daptive {I}maging {U}sing the {G}eneralized {C}oherence {F}actor},
+  volume       = {50},
+  year         = {2003}
+}
+
+@article{synnevag2007adaptive,
+  author       = {Synnev{\aa}g, Johan-Fredrik and Austeng, Andreas and Holm, Sverre},
+  doi          = {10.1109/TUFFC.2007.431},
+  journal      = {{IEEE} Transactions on Ultrasonics, Ferroelectrics, and Frequency Control},
+  number       = {8},
+  pages        = {1606--1613},
+  title        = {{A}daptive {B}eamforming {A}pplied to {M}edical {U}ltrasound {I}maging},
+  volume       = {54},
+  year         = {2007}
+}
+
+@article{vignon2008capon,
+  author       = {Vignon, Fran{\c{c}}ois and Burcher, Michael R.},
+  doi          = {10.1109/TUFFC.2008.686},
+  journal      = {{IEEE} Transactions on Ultrasonics, Ferroelectrics, and Frequency Control},
+  number       = {3},
+  pages        = {619--628},
+  title        = {{C}apon {B}eamforming in {M}edical {U}ltrasound {I}maging with {F}ocused {B}eams},
+  volume       = {55},
+  year         = {2008}
+}
+
+@article{bottenus2018recovery,
+  author       = {Bottenus, Nick},
+  doi          = {10.1109/TUFFC.2017.2773495},
+  journal      = {{IEEE} Transactions on Ultrasonics, Ferroelectrics, and Frequency Control},
+  number       = {1},
+  pages        = {30--38},
+  title        = {{R}ecovery of the {C}omplete {D}ata {S}et from {F}ocused {T}ransmit {B}eams},
+  volume       = {65},
+  year         = {2018}
+}
+
+@article{ali2020extending,
+  author       = {Ali, Rehman and Herickhoff, Carl D. and Hyun, Dongwoon and Dahl, Jeremy J. and
+                  Bottenus, Nick},
+  doi          = {10.1109/TUFFC.2019.2961875},
+  journal      = {{IEEE} Transactions on Ultrasonics, Ferroelectrics, and Frequency Control},
+  number       = {5},
+  pages        = {943--956},
+  title        = {{E}xtending {R}etrospective {E}ncoding for {R}obust {R}ecovery of the
+                  {M}ultistatic {D}ata {S}et},
+  volume       = {67},
+  year         = {2020}
+}
+
+@article{lafci2022expediting,
+  author       = {Lafci, Berkan and Robin, Justine and De{\'{a}}n-Ben, Xos{\'{e}} Lu{\'{i}}s and
+                  Razansky, Daniel},
+  doi          = {10.1109/TUFFC.2022.3172713},
+  journal      = {{IEEE} Transactions on Ultrasonics, Ferroelectrics, and Frequency Control},
+  number       = {10},
+  pages        = {2837--2848},
+  title        = {{E}xpediting {I}mage {A}cquisition in {R}eflection {U}ltrasound {C}omputed
+                  {T}omography},
+  volume       = {69},
+  year         = {2022}
+}
+
+% -- Image processing, display and metrics ------------------------------------
+
+@article{yu2002speckle,
+  author       = {Yu, Yongjian and Acton, Scott T.},
+  doi          = {10.1109/TIP.2002.804276},
+  journal      = {{IEEE} Transactions on Image Processing},
+  number       = {11},
+  pages        = {1260--1270},
+  title        = {{S}peckle {R}educing {A}nisotropic {D}iffusion},
+  volume       = {11},
+  year         = {2002}
+}
+
+@article{bottenus2021histogram,
+  author       = {Bottenus, Nick and Byram, Brett C. and Hyun, Dongwoon},
+  doi          = {10.1109/TUFFC.2020.3035965},
+  journal      = {{IEEE} Transactions on Ultrasonics, Ferroelectrics, and Frequency Control},
+  number       = {5},
+  pages        = {1487--1495},
+  title        = {{H}istogram {M}atching for {V}isual {U}ltrasound {I}mage {C}omparison},
+  volume       = {68},
+  year         = {2021}
+}
+
+@inproceedings{zhang2018unreasonable,
+  author       = {Zhang, Richard and Isola, Phillip and Efros, Alexei A. and Shechtman, Eli and
+                  Wang, Oliver},
+  booktitle    = {{IEEE/CVF} Conference on Computer Vision and Pattern Recognition (CVPR)},
+  doi          = {10.1109/CVPR.2018.00068},
+  pages        = {586--595},
+  title        = {{T}he {U}nreasonable {E}ffectiveness of {D}eep {F}eatures as a {P}erceptual
+                  {M}etric},
+  year         = {2018}
+}
+
+@article{li2025speckle2self,
+  author       = {Li, Xuesong and Navab, Nassir and Jiang, Zhongliang},
+  doi          = {10.48550/arXiv.2507.06828},
+  journal      = {Medical Image Analysis},
+  title        = {{S}peckle2{S}elf: {S}elf-{S}upervised {U}ltrasound {S}peckle {R}eduction
+                  {W}ithout {C}lean {D}ata},
+  year         = {2025}
+}
+
+% -- Segmentation and quantification models -----------------------------------
+
+@article{vanknippenberg2022unsupervised,
+  author       = {van Knippenberg, Luuk and van Sloun, Ruud J. G. and Mischi, Massimo and
+                  de Ruijter, Joerik and Lopata, Richard and Bouwman, R. Arthur},
+  doi          = {10.1016/j.cmpb.2022.107037},
+  journal      = {Computer Methods and Programs in Biomedicine},
+  pages        = {107037},
+  title        = {{U}nsupervised {D}omain {A}daptation {M}ethod for {S}egmenting {C}ross-{S}ectional
+                  {CCA} {I}mages},
+  volume       = {225},
+  year         = {2022}
+}
+
+@article{vandevyver2025regional,
+  author       = {Van De Vyver, Gilles and M{\aa}s{\o}y, Svein-Erik and Dalen, H{\aa}vard and
+                  Grenne, Bj{\o}rnar Leangen and Holte, Espen and Olaisen, Sindre Hellum and
+                  Nyberg, John and {\O}stvik, Andreas and L{\o}vstakken, Lasse and
+                  Smistad, Erik},
+  doi          = {10.1016/j.ultrasmedbio.2024.12.008},
+  journal      = {Ultrasound in Medicine \& Biology},
+  number       = {4},
+  pages        = {638--649},
+  title        = {{R}egional {I}mage {Q}uality {S}coring for 2-{D} {E}chocardiography {U}sing
+                  {D}eep {L}earning},
+  volume       = {51},
+  year         = {2025}
+}
+
+@article{vandevyver2025generative,
+  author       = {Van De Vyver, Gilles and Lenz, Aksel Try and Smistad, Erik and
+                  Olaisen, Sindre Hellum and Grenne, Bj{\o}rnar and Holte, Espen and
+                  Dalen, H{\aa}vard and L{\o}vstakken, Lasse},
+  doi          = {10.1038/s41598-025-21938-y},
+  journal      = {Scientific Reports},
+  title        = {{G}enerative {A}ugmentations for {I}mproved {C}ardiac {U}ltrasound
+                  {S}egmentation {U}sing {D}iffusion {M}odels},
+  year         = {2025}
+}
+
+@article{ouyang2020video,
+  author       = {Ouyang, David and He, Bryan and Ghorbani, Amirata and Yuan, Neal and
+                  Ebinger, Joseph and Langlotz, Curtis P. and Heidenreich, Paul A. and
+                  Harrington, Robert A. and Liang, David H. and Ashley, Euan A. and Zou, James Y.},
+  doi          = {10.1038/s41586-020-2145-8},
+  journal      = {Nature},
+  number       = {7802},
+  pages        = {252--256},
+  title        = {{V}ideo-{B}ased {AI} for {B}eat-to-{B}eat {A}ssessment of {C}ardiac {F}unction},
+  volume       = {580},
+  year         = {2020}
+}
+
+@article{duffy2022high,
+  author       = {Duffy, Grant and Cheng, Paul P. and Yuan, Neal and He, Bryan and
+                  Kwan, Alan C. and Shun-Shin, Matthew J. and Alexander, Kevin M. and
+                  Ebinger, Joseph and Lungren, Matthew P. and Rader, Florian and
+                  Liang, David H. and Schnittger, Ingela and Ashley, Euan A. and Zou, James Y. and
+                  Patel, Jignesh and Witteles, Ronald and Cheng, Susan and Ouyang, David},
+  doi          = {10.1001/jamacardio.2021.6059},
+  journal      = {{JAMA} Cardiology},
+  number       = {4},
+  pages        = {386--395},
+  title        = {{H}igh-{T}hroughput {P}recision {P}henotyping of {L}eft {V}entricular
+                  {H}ypertrophy with {C}ardiovascular {D}eep {L}earning},
+  volume       = {7},
+  year         = {2022}
+}
+
+@article{bernard2016standardized,
+  author       = {Bernard, Olivier and others},
+  doi          = {10.1109/TMI.2015.2503890},
+  journal      = {{IEEE} Transactions on Medical Imaging},
+  number       = {4},
+  pages        = {967--977},
+  title        = {{S}tandardized {E}valuation {S}ystem for {L}eft {V}entricular {S}egmentation
+                  {A}lgorithms in 3{D} {E}chocardiography},
+  volume       = {35},
+  year         = {2016}
+}
+
+% -- Network architectures and generative modelling ---------------------------
+
+@inproceedings{peebles2023scalable,
+  author       = {Peebles, William and Xie, Saining},
+  booktitle    = {{IEEE/CVF} International Conference on Computer Vision (ICCV)},
+  doi          = {10.48550/arXiv.2212.09748},
+  pages        = {4195--4205},
+  title        = {{S}calable {D}iffusion {M}odels with {T}ransformers},
+  year         = {2023}
+}
+
+@inproceedings{chen2018encoder,
+  author       = {Chen, Liang-Chieh and Zhu, Yukun and Papandreou, George and Schroff, Florian and
+                  Adam, Hartwig},
+  booktitle    = {European Conference on Computer Vision (ECCV)},
+  doi          = {10.48550/arXiv.1802.02611},
+  title        = {{E}ncoder-{D}ecoder with {A}trous {S}eparable {C}onvolution for {S}emantic
+                  {I}mage {S}egmentation},
+  year         = {2018}
+}
+
+@article{chen2017rethinking,
+  author       = {Chen, Liang-Chieh and Papandreou, George and Schroff, Florian and Adam, Hartwig},
+  doi          = {10.48550/arXiv.1706.05587},
+  journal      = {arXiv preprint},
+  title        = {{R}ethinking {A}trous {C}onvolution for {S}emantic {I}mage {S}egmentation},
+  year         = {2017}
+}
+
+@article{nibali2018numerical,
+  author       = {Nibali, Aiden and He, Zhen and Morgan, Stuart and Prendergast, Luke},
+  doi          = {10.48550/arXiv.1711.08229},
+  journal      = {arXiv preprint},
+  title        = {{N}umerical {C}oordinate {R}egression with {C}onvolutional {N}eural {N}etworks},
+  year         = {2018}
+}
+
+@inproceedings{chung2024decomposed,
+  author       = {Chung, Hyungjin and Lee, Suhyeon and Ye, Jong Chul},
+  booktitle    = {International Conference on Learning Representations (ICLR)},
+  doi          = {10.48550/arXiv.2303.05754},
+  title        = {{D}ecomposed {D}iffusion {S}ampler for {A}ccelerating {L}arge-{S}cale {I}nverse
+                  {P}roblems},
+  year         = {2024}
+}
