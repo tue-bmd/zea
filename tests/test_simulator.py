@@ -19,6 +19,7 @@ from zea.simulator import (
 )
 from zea.ops import Simulate
 from zea.ops.ultrasound import simulator_settings
+from zea.probes import create_curved_probe_geometry, create_probe_geometry, curved_probe_normals
 from zea.simulator_time_domain import get_pulse_waveform, simulate_rf_td
 
 N_EL = 80
@@ -381,6 +382,40 @@ def test_simulate_op_runs_every_method(method):
         method=method,
     )
     assert np.abs(keras.ops.convert_to_numpy(outputs[op.output_key])).max() > 0
+
+
+def test_parameters_derive_element_normals_from_probe_geometry():
+    curved = create_curved_probe_geometry(N_EL, 0.4e-3, 40e-3)
+    # One-sided differences tilt the end elements by half the angular pitch (5 mrad here).
+    np.testing.assert_allclose(
+        Parameters(probe_geometry=curved).element_normals, curved_probe_normals(curved), atol=1e-2
+    )
+    flat = create_probe_geometry(N_EL, 0.4e-3)
+    z_normals = np.tile(np.array([0.0, 0.0, 1.0], np.float32), (N_EL, 1))
+    np.testing.assert_array_equal(Parameters(probe_geometry=flat).element_normals, z_normals)
+    # A virtual apex behind a flat array does not tilt its elements.
+    with_apex = Parameters(probe_geometry=flat, distance_to_apex=20e-3)
+    np.testing.assert_array_equal(with_apex.element_normals, z_normals)
+    tilted = np.tile(np.array([0.5, 0.0, np.sqrt(0.75)], np.float32), (N_EL, 1))
+    np.testing.assert_array_equal(
+        Parameters(probe_geometry=flat, element_normals=tilted).element_normals, tilted
+    )
+
+
+def test_pipeline_simulates_curved_probe_in_its_element_frames():
+    """The Simulate op gets a curved probe's normals from Parameters, not the flat +z frame."""
+    probe_geometry = create_curved_probe_geometry(N_EL, APERTURE / N_EL, 40e-3)
+    pipeline = zea.Pipeline([Simulate()], with_batch_dim=False, jit_options=None)
+    inputs = pipeline.prepare_parameters(_parameters(probe_geometry))
+    normals = keras.ops.convert_to_numpy(inputs["element_normals"])
+    np.testing.assert_allclose(normals, curved_probe_normals(probe_geometry), atol=1e-2)
+
+    inputs["scatterer_positions"] = np.array([[-12e-3, 0, 20e-3], [10e-3, 0, 25e-3]], np.float32)
+    inputs["scatterer_magnitudes"] = np.ones(2, np.float32)
+    curved = pipeline(**inputs)[pipeline.output_key]
+    flat = pipeline(**{**inputs, "element_normals": None})[pipeline.output_key]
+    curved, flat = keras.ops.convert_to_numpy(curved), keras.ops.convert_to_numpy(flat)
+    assert np.linalg.norm(curved - flat) > 0.05 * np.linalg.norm(curved)
 
 
 def test_record_length_gate_keeps_in_record_pairs_without_aliasing():

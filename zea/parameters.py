@@ -330,6 +330,7 @@ class Parameters(BaseParameters):
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
         "distance_to_apex": {"dtype": (np.float32, type(None)), "default": None},
+        "element_normals": {"dtype": (type(None), np.ndarray), "default": None},
     }
 
     # Add some defaults that are not stored in a file
@@ -374,6 +375,24 @@ class Parameters(BaseParameters):
             return np.float32(fit_curved_probe_radius(probe_geometry))
         except ValueError:  # not a curved array
             return np.float32(0.0)
+
+    @cache_with_dependencies("probe_geometry")
+    def element_normals(self):
+        """Outward unit normal of each element of shape (n_el, 3), used by the simulator.
+
+        Derived from :attr:`probe_geometry` with
+        :func:`~zea.beamform.geometry.compute_element_normals`: +z for flat arrays and the
+        radial normal for curved ones. Set it explicitly for other geometries, such as a
+        tilted array.
+        """
+        value = self._params.get("element_normals")
+        if value is not None:
+            return value
+
+        probe_geometry = self._params.get("probe_geometry")
+        if probe_geometry is None:
+            return None
+        return ops.convert_to_numpy(compute_element_normals(ops.convert_to_tensor(probe_geometry)))
 
     @cache_with_dependencies(
         "xlims",
