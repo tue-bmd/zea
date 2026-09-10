@@ -93,6 +93,17 @@ def test_transducer_bandwidth_shapes_the_spectrum():
     assert np.isclose(transducer_transfer(2.6e6 * 1.25, 2.6e6, 50.0, xp=np), 0.5)
 
 
+def test_transducer_transfer_flat_for_none_bandwidth():
+    freqs = np.linspace(0.0, 6e6, 16)
+    np.testing.assert_array_equal(transducer_transfer(freqs, 2.6e6, None, xp=np), 1.0)
+
+
+@pytest.mark.parametrize("bandwidth_percent", [0.0, -50.0])
+def test_transducer_transfer_rejects_non_positive_bandwidth(bandwidth_percent):
+    with pytest.raises(ValueError, match="bandwidth_percent must be positive"):
+        transducer_transfer(np.linspace(0.0, 6e6, 16), 2.6e6, bandwidth_percent, xp=np)
+
+
 def _rotation_about_y(angle):
     c, s = np.cos(angle), np.sin(angle)
     return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
