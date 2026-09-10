@@ -50,8 +50,9 @@ For models originally trained in PyTorch, the typical workflow is:
 
 1. **Vendor the architecture** — keep the PyTorch network code at hand while you
    port it. If you want it in the module long-term (e.g. for ONNX export), put it
-   in a ``_build_torch_classes()`` helper that imports ``torch`` lazily, so that
-   PyTorch is only required for weight conversion and never for inference.
+   in a ``_build_torch_classes()`` helper that imports ``torch`` lazily. PyTorch is
+   then required for weight conversion and ONNX export, but never for inference —
+   which is what keeps it out of the runtime dependencies.
 
 2. **Implement the Keras architecture** — write ``keras.layers.Layer`` subclasses
    that replicate each block. Key API differences to handle:
@@ -89,9 +90,12 @@ For models originally trained in PyTorch, the typical workflow is:
    layer where the difference appears is the one that was ported wrong.
 
    .. warning::
-      Run that comparison on CPU. On an NVIDIA GPU both JAX and PyTorch use TF32
-      for convolutions by default, which costs ~3 decimal digits and makes a
-      correct port look broken (differences of ~1e-2 instead of ~1e-5).
+      Run that comparison on CPU. On a supported NVIDIA GPU all three backends —
+      JAX, TensorFlow and PyTorch — use TF32 for convolutions by default, which
+      costs ~3 decimal digits and makes a correct port look broken (differences of
+      ~1e-2 instead of ~1e-5). This applies to any pair of them, so a
+      TensorFlow-versus-PyTorch comparison is no safer than a JAX-versus-PyTorch
+      one.
 
 6. Optionally **add an ONNX fallback** — for environments that have
    ``onnxruntime`` but not ``torch``, you can keep a ``from_onnx(path)``

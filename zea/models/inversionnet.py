@@ -65,8 +65,11 @@ __all__ = ["InversionNet", "OPENPROS_INPUT_SHAPE"]
 #: Input shape ``(time, receivers, sources)`` the OpenPros preset was trained on.
 OPENPROS_INPUT_SHAPE = (1000, 161, 40)
 
-# PyTorch's BatchNorm2d default, which Keras does not share.
+# PyTorch BatchNorm2d defaults, which Keras does not share. Keras' ``momentum`` weights
+# the *existing* running statistic where PyTorch's weights the *incoming* batch, so
+# PyTorch's default of 0.1 is Keras' 0.9. Only matters when training or fine-tuning.
 _BN_EPSILON = 1e-5
+_BN_MOMENTUM = 0.9
 
 
 class ConvBlock(keras.layers.Layer):
@@ -86,7 +89,7 @@ class ConvBlock(keras.layers.Layer):
             else None
         )
         self.conv = keras.layers.Conv2D(out_ch, kernel_size, strides=strides, padding="valid")
-        self.norm = keras.layers.BatchNormalization(epsilon=_BN_EPSILON)
+        self.norm = keras.layers.BatchNormalization(epsilon=_BN_EPSILON, momentum=_BN_MOMENTUM)
         self.act = (
             keras.layers.Activation("tanh")
             if activation == "tanh"
@@ -113,7 +116,7 @@ class DeconvBlock(keras.layers.Layer):
             out_ch, kernel_size, strides=strides, padding="valid"
         )
         self.crop = keras.layers.Cropping2D(padding) if padding else None
-        self.norm = keras.layers.BatchNormalization(epsilon=_BN_EPSILON)
+        self.norm = keras.layers.BatchNormalization(epsilon=_BN_EPSILON, momentum=_BN_MOMENTUM)
         self.act = keras.layers.LeakyReLU(negative_slope=0.2)
 
     def call(self, x):

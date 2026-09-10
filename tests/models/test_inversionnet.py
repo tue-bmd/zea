@@ -86,3 +86,21 @@ def test_weights_round_trip_through_a_preset(tiny_model, tmp_path, rng):
     reloaded = InversionNet.from_preset(str(tmp_path))
 
     assert np.allclose(ops.convert_to_numpy(reloaded(x)), expected, atol=1e-6)
+
+
+def test_training_mode_updates_batch_norm_like_pytorch(tiny_model, rng):
+    """Fine-tuning weights the running statistics the way the original does.
+
+    Keras' ``momentum`` is the weight of the *existing* statistic where PyTorch's is
+    the weight of the *incoming* batch, so PyTorch's default of ``0.1`` is Keras'
+    ``0.9``. Getting this wrong is invisible at inference time and only shows up as
+    running statistics that adapt 10x too slowly during fine-tuning.
+    """
+    x = rng.random((4, *TINY_INPUT_SHAPE)).astype("float32")
+    block = tiny_model.encoder[0]
+
+    tiny_model(x, training=True)
+
+    batch_mean = ops.convert_to_numpy(block.conv(block.pad(x))).mean(axis=(0, 1, 2))
+    # The moving mean starts at zero, so one update leaves it at 0.1 * the batch mean.
+    assert np.allclose(ops.convert_to_numpy(block.norm.moving_mean), 0.1 * batch_mean, atol=1e-5)
