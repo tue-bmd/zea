@@ -964,13 +964,19 @@ def transducer_transfer(
         f (array-like): Frequencies [Hz].
         probe_center_frequency (float, optional): Centre of the band [Hz]. ``center_frequency``
             when None.
-        bandwidth_percent (float): -6 dB fractional bandwidth in percent.
+        bandwidth_percent (float, optional): -6 dB fractional bandwidth in percent. None is a
+            flat response.
         center_frequency (float, optional): Fallback band centre [Hz].
         xp: Array module, ``keras.ops`` or ``numpy``.
 
     Returns:
         array-like: The transfer function at ``f``.
     """
+    if bandwidth_percent is None:
+        return xp.ones_like(f)
+    bandwidth = _concrete(bandwidth_percent)
+    if bandwidth is not None and float(bandwidth) <= 0:
+        raise ValueError(f"bandwidth_percent must be positive, got {float(bandwidth)}.")
     if probe_center_frequency is None:
         probe_center_frequency = center_frequency
     half_width = 0.5 * bandwidth_percent / 100 * probe_center_frequency
