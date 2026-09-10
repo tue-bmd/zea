@@ -11,6 +11,7 @@ end-to-end test against a real us4us recording lives in
 import pickle
 import sys
 import types
+from collections import OrderedDict, deque
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -57,6 +58,7 @@ class _ArrusLike:
     """Stand-in for an ``arrus`` object: keeps whatever attributes it is given."""
 
     def __init__(self, **attributes):
+        """Store the given attributes, as the pickled ARRUS object would carry them."""
         self.__dict__.update(attributes)
 
 
@@ -255,6 +257,7 @@ def recording(tmp_path):
     ],
 )
 def test_parse_mapping_accepts_cli_and_json_forms(mapping, expected):
+    """Both the CLI entries and a JSON object normalize to the same mapping."""
     assert parse_mapping(mapping) == expected
 
 
@@ -272,6 +275,7 @@ def test_parse_mapping_accepts_cli_and_json_forms(mapping, expected):
     ],
 )
 def test_parse_mapping_rejects_invalid_specs(mapping, message):
+    """A malformed mapping is reported before any file is read."""
     with pytest.raises(Us4usConversionError, match=message):
         parse_mapping(mapping)
 
@@ -372,6 +376,7 @@ def test_image_without_a_grid_is_stored_as_depth_by_transmit(tmp_path):
 
 
 def test_separate_tracks_writes_one_track_per_output(recording, tmp_path):
+    """--separate-tracks keeps each mapped output in a track of its own."""
     src, _ = recording
     dst = convert_us4us_file(
         src, tmp_path / "out.hdf5", ["0:image", "2:raw_data"], separate_tracks=True
@@ -396,6 +401,7 @@ def test_convert_directory_of_recordings(tmp_path):
 
 
 def test_existing_output_is_only_replaced_with_overwrite(recording, tmp_path):
+    """A converted file is never silently replaced by a second run."""
     src, _ = recording
     dst = tmp_path / "out.hdf5"
     convert_us4us_file(src, dst, ["0:image"])
@@ -405,17 +411,20 @@ def test_existing_output_is_only_replaced_with_overwrite(recording, tmp_path):
 
 
 def test_mapping_beyond_the_available_outputs_is_rejected(recording, tmp_path):
+    """Mapping an output index the recording does not have names the valid range."""
     src, _ = recording
     with pytest.raises(Us4usConversionError, match=r"only has 3 output"):
         convert_us4us_file(src, tmp_path / "out.hdf5", ["7:image"])
 
 
 def test_missing_source_raises(tmp_path):
+    """A source path that does not exist fails before anything is written."""
     with pytest.raises(FileNotFoundError, match="Source path not found"):
         convert_us4us(SimpleNamespace(src=tmp_path / "nope.pkl", dst=tmp_path / "out.hdf5"))
 
 
 def test_directory_without_recordings_raises(tmp_path):
+    """An empty source directory is reported rather than silently doing nothing."""
     src = tmp_path / "src"
     src.mkdir()
     with pytest.raises(FileNotFoundError, match="No .pkl files"):
@@ -426,12 +435,14 @@ def test_directory_without_recordings_raises(tmp_path):
 # Recordings this converter cannot (yet) handle: the error must say why
 # ---------------------------------------------------------------------------
 def test_pickle_without_data_key_is_rejected(tmp_path):
+    """A capture dict without frames names the key that is missing."""
     src = write_pickle(tmp_path / "bad.pkl", {"metadata": ()})
     with pytest.raises(Us4usConversionError, match="no 'data' key"):
         convert_us4us_file(src, tmp_path / "out.hdf5")
 
 
 def test_pickle_that_is_not_a_recording_is_rejected(tmp_path):
+    """A pickle of something else entirely says what was expected instead."""
     src = write_pickle(tmp_path / "bad.pkl", "just a string")
     with pytest.raises(Us4usConversionError, match="expected a dict with 'data' and 'metadata'"):
         convert_us4us_file(src, tmp_path / "out.hdf5")
@@ -465,6 +476,7 @@ def test_metadata_from_a_separate_file(tmp_path, sidecar):
 
 
 def test_data_and_metadata_stored_as_a_pair(tmp_path):
+    """A [data, metadata] two-element pickle is understood as a recording."""
     payload, _ = make_recording()
     src = write_pickle(tmp_path / "pair.pkl", [payload["data"], payload["metadata"]])
     dst = convert_us4us_file(src, tmp_path / "out.hdf5", ["0:image"])
@@ -503,6 +515,7 @@ def test_transmit_that_addresses_another_element_grid_is_rejected(tmp_path):
 
 
 def test_frames_with_changing_shapes_are_rejected(tmp_path):
+    """zea files need one shape for all frames, so a ragged recording is refused."""
     payload, _ = make_recording()
     payload["data"][1] = (payload["data"][1][0][:, :-1],) + payload["data"][1][1:]
     src = write_pickle(tmp_path / "ragged.pkl", payload)
@@ -526,10 +539,82 @@ def test_unknown_grid_spacing_is_ignored(tmp_path):
 # Pickle trust boundary
 # ---------------------------------------------------------------------------
 def test_loader_refuses_classes_outside_the_allowlist(tmp_path):
-    """Only arrus/numpy/collections globals may be resolved while unpickling."""
+    """Only arrus classes and the listed data constructors may be resolved."""
     src = write_pickle(tmp_path / "hostile.pkl", {"data": [], "metadata": (datetime.now(),)})
-    with pytest.raises(pickle.UnpicklingError, match="not in the us4us converter allowlist"):
+    with pytest.raises(pickle.UnpicklingError, match="Refusing to load datetime.datetime"):
         load_us4us_pickle(src)
+
+
+def _pickle_that_calls(module: str, name: str, argument: str) -> bytes:
+    """Hand-build a pickle whose REDUCE opcode calls ``module.name(argument)``.
+
+    Written byte-wise rather than through ``pickle.dumps`` so the test never has
+    to import the module it is trying to smuggle in.
+    """
+    encoded = argument.encode()
+    return (
+        b"\x80\x02"  # protocol 2
+        + f"c{module}\n{name}\n".encode()  # GLOBAL module name
+        + b"("  # MARK
+        + b"X"
+        + len(encoded).to_bytes(4, "little")
+        + encoded  # BINUNICODE argument
+        + b"t"  # TUPLE
+        + b"R"  # REDUCE: call the global with it
+        + b"."  # STOP
+    )
+
+
+@pytest.mark.parametrize(
+    "module, name",
+    [
+        # Shell execution reachable from inside numpy itself, which is why the
+        # allowlist is by (module, name) and not by module.
+        ("numpy.distutils.exec_command", "exec_command"),
+        ("os", "system"),
+        ("subprocess", "check_output"),
+        ("builtins", "eval"),
+    ],
+)
+def test_loader_refuses_globals_that_execute(tmp_path, module, name):
+    """``find_class`` must refuse before a REDUCE opcode can call the global."""
+    src = tmp_path / "hostile.pkl"
+    src.write_bytes(_pickle_that_calls(module, name, "echo pwned"))
+
+    with pytest.raises(pickle.UnpicklingError, match=f"Refusing to load {module}.{name}"):
+        load_us4us_pickle(src)
+
+
+@pytest.mark.parametrize("protocol", [2, 4, 5])
+def test_loader_reads_the_numpy_payloads_a_recording_holds(tmp_path, protocol):
+    """The allowlist must still cover everything a real recording pickles."""
+    payload = {
+        "arrays": [
+            np.zeros((2, 3), dtype=np.int16),
+            np.zeros(4, dtype=np.complex64),
+            np.array(["I", "Q"], dtype=np.str_),
+            np.zeros((3, 4), dtype=np.float32, order="F"),
+            np.zeros(3, dtype=bool),
+            np.array([b"raw"]),
+        ],
+        "scalars": [np.float32(1.5), np.int64(3), np.float64(np.inf)],
+        "dtype": np.dtype("float32"),
+        "frames": deque([np.zeros(2, dtype=np.int16)]),
+        "ordered": OrderedDict(sampling_frequency=np.float32(65e6)),
+    }
+    src = tmp_path / "payloads.pkl"
+    with open(src, "wb") as file:
+        pickle.dump(payload, file, protocol=protocol)
+
+    loaded = load_us4us_pickle(src)
+
+    assert loaded["arrays"][0].shape == (2, 3)
+    assert loaded["arrays"][1].dtype == np.complex64
+    assert list(loaded["arrays"][2]) == ["I", "Q"]
+    assert loaded["scalars"][0] == np.float32(1.5)
+    assert loaded["dtype"] == np.dtype("float32")
+    assert len(loaded["frames"]) == 1
+    assert loaded["ordered"]["sampling_frequency"] == np.float32(65e6)
 
 
 def test_loader_keeps_arrus_attributes_without_arrus_installed(recording):

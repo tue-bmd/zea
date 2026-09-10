@@ -251,17 +251,43 @@ def parse_mapping(mapping) -> dict:
 # Allowlisted unpickler
 #
 # TRUST BOUNDARY: pickle is not a safe format for untrusted input -- every
-# GLOBAL / STACK_GLOBAL opcode resolves a class that can run code through
-# __reduce__ / __setstate__ / __new__. To keep this converter usable without the
-# third-party ``arrus`` package installed, and to stop a hostile .pkl from
-# reaching e.g. ``os.system``, ``find_class`` is restricted to an allowlist:
+# GLOBAL / STACK_GLOBAL opcode resolves a name that a following REDUCE opcode may
+# then call with arguments taken straight from the file. To keep this converter
+# usable without the third-party ``arrus`` package installed, and to keep a
+# hostile ``.pkl`` from reaching anything that executes, ``find_class`` resolves
+# only:
 #
-#   * ``arrus.*`` globals are replaced by a per-class stub;
-#   * ``numpy.*`` and ``collections.*`` globals resolve normally (arrays,
-#     dtypes, scalars, deques);
-#   * everything else raises ``pickle.UnpicklingError``.
+#   * ``arrus.*``, replaced by an inert per-class stub (see :class:`_ArrusStub`);
+#   * the exact globals listed below;
+#
+# and raises :class:`pickle.UnpicklingError` for everything else.
+#
+# The list is by (module, name), not by module: a whole namespace is too coarse a
+# boundary, since e.g. ``numpy.distutils.exec_command.exec_command`` runs shell
+# commands. Every entry below builds data and nothing else. The set was taken
+# from what pickling arrays, scalars and dtypes of every kind actually resolves,
+# under pickle protocols 2 through 5.
 # ---------------------------------------------------------------------------
-_ALLOWED_PICKLE_MODULE_PREFIXES = ("numpy", "collections")
+_ALLOWED_PICKLE_GLOBALS = frozenset(
+    {
+        ("numpy", "ndarray"),
+        ("numpy", "dtype"),
+        # numpy 2.0 moved its internals from ``numpy.core`` to ``numpy._core``.
+        # Recordings written by either generation must keep loading, and numpy
+        # still resolves the old paths for exactly this reason.
+        ("numpy.core.multiarray", "_reconstruct"),
+        ("numpy._core.multiarray", "_reconstruct"),
+        ("numpy.core.multiarray", "scalar"),
+        ("numpy._core.multiarray", "scalar"),
+        ("numpy.core.numeric", "_frombuffer"),
+        ("numpy._core.numeric", "_frombuffer"),
+        # gui4us keeps captured frames in a deque, and arrus metadata in mappings.
+        ("collections", "deque"),
+        ("collections", "OrderedDict"),
+        # How protocol-2 pickles carry byte strings (e.g. a bytes-dtype array).
+        ("_codecs", "encode"),
+    }
+)
 
 
 class _ArrusStub:
@@ -277,12 +303,14 @@ class _ArrusStub:
     arrus_class = "arrus"
 
     def __init__(self, *args, **kwargs):
+        """Accept any constructor arguments an ARRUS class would have taken."""
         # Enum-like classes are reconstructed by calling the class; keep the
         # arguments around so diagnostics can show them.
         self._stub_args = args
         self._stub_kwargs = kwargs
 
     def __setstate__(self, state):
+        """Restore the pickled attributes, from ``__dict__`` and any ``__slots__``."""
         if isinstance(state, tuple) and len(state) == 2:
             state, slots = state
             for key, value in (slots or {}).items():
@@ -291,6 +319,7 @@ class _ArrusStub:
             self.__dict__.update(state)
 
     def __repr__(self):
+        """Name the ARRUS class this stub stands in for."""
         return f"<{self.arrus_class} stub>"
 
 
@@ -312,23 +341,30 @@ def _arrus_stub_for(module: str, name: str) -> type:
 class _ArrusUnpickler(pickle.Unpickler):
     """Allowlisted unpickler for us4us pickle files.
 
-    Swaps ``arrus.*`` classes for stubs, resolves ``numpy.*``/``collections.*``
-    globals normally, and refuses everything else so payloads referencing e.g.
-    ``os.system`` or ``subprocess.Popen`` cannot execute.
+    Swaps ``arrus.*`` classes for stubs, resolves the exact data constructors in
+    :data:`_ALLOWED_PICKLE_GLOBALS`, and refuses every other name, so a payload
+    cannot reach a callable with side effects (``os.system``,
+    ``subprocess.Popen``, ``numpy.distutils.exec_command.exec_command``, ...).
     """
 
     def find_class(self, module, name):
+        """Resolve a pickled global, or refuse it.
+
+        Raises:
+            pickle.UnpicklingError: If ``module.name`` is neither an ARRUS class
+                nor one of :data:`_ALLOWED_PICKLE_GLOBALS`.
+        """
         if module == "arrus" or module.startswith("arrus."):
             return _arrus_stub_for(module, name)
-        if any(
-            module == prefix or module.startswith(prefix + ".")
-            for prefix in _ALLOWED_PICKLE_MODULE_PREFIXES
-        ):
+        if (module, name) in _ALLOWED_PICKLE_GLOBALS:
             return super().find_class(module, name)
         raise pickle.UnpicklingError(
-            f"Refusing to load class {module}.{name} from a us4us pickle: the module is "
-            "not in the us4us converter allowlist (arrus, numpy, collections). Only "
-            "trusted us4us .pkl files should be processed by this loader."
+            f"Refusing to load {module}.{name} from a us4us pickle: only arrus classes "
+            "and the numpy/collections constructors a recording needs are allowed, so "
+            "that a crafted pickle cannot reach anything that executes. If a genuine "
+            "us4us recording needs this name, add it to _ALLOWED_PICKLE_GLOBALS in "
+            "zea/data/convert/us4us.py after checking that calling it cannot have side "
+            "effects."
         )
 
 
@@ -982,6 +1018,7 @@ def _pick_scan_metadata(metadata, mapping: dict):
             return metadata[output_idx]
 
     def sampling_frequency(entry):
+        """Sampling frequency reported for one pipeline output, 0 when unknown."""
         return float(getattr(_get_data_description(entry), "sampling_frequency", 0) or 0)
 
     return max(metadata, key=sampling_frequency, default=metadata[0])

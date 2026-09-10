@@ -149,6 +149,7 @@ def test_download_falls_back_when_the_default_cache_is_not_writable(monkeypatch,
     calls = []
 
     def unwritable_default(**kwargs):
+        """Refuse to write into the default cache, accept any other directory."""
         calls.append(Path(kwargs["cache_dir"]))
         if Path(kwargs["cache_dir"]) == ipu.HF_DATASETS_DIR:
             raise PermissionError(13, "Permission denied", str(ipu.HF_DATASETS_DIR / "x.lock"))
@@ -172,6 +173,7 @@ def test_download_does_not_redirect_an_explicit_cache_dir(monkeypatch, tmp_path)
     monkeypatch.setattr(ipu, "_FALLBACK_CACHE_DIRS", {})
 
     def unwritable(**kwargs):
+        """Refuse to write, wherever the download is pointed."""
         raise PermissionError(13, "Permission denied", str(tmp_path / "x.lock"))
 
     monkeypatch.setattr(ipu, "hf_hub_download", unwritable)
@@ -186,6 +188,7 @@ def test_download_does_not_fall_back_on_other_os_errors(monkeypatch):
     calls = []
 
     def no_space(**kwargs):
+        """Fail the way a full disk does: an OSError another directory cannot fix."""
         calls.append(1)
         raise OSError(errno.ENOSPC, "No space left on device")
 

@@ -270,6 +270,7 @@ def _hf_download(repo_id, filename, cache_dir=None, repo_type="dataset", **kwarg
         cache_dir = _HF_CACHE_DIRS.get(repo_type, HF_DATASETS_DIR)
 
     def _download_to(target_dir):
+        """Download the file into ``target_dir`` and return its local path."""
         return _hf_call(
             hf_hub_download,
             retry_on=_HF_DOWNLOAD_RETRY_ERRORS,
@@ -281,6 +282,7 @@ def _hf_download(repo_id, filename, cache_dir=None, repo_type="dataset", **kwarg
         )
 
     def _download():
+        """Download into the requested cache, falling back if it is unwritable."""
         try:
             return _download_to(cache_dir)
         except OSError as exc:
