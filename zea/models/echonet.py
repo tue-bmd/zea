@@ -11,10 +11,9 @@ To try this model, simply load one of the available presets:
 
 .. important::
     This is a ``zea`` implementation of the model.
-    For the original paper and code, see `here <https://echonet.github.io/dynamic/>`_.
+    For the original code, see `here <https://echonet.github.io/dynamic/>`_.
 
-    Ouyang, David, et al. "Video-based AI for beat-to-beat assessment of cardiac function."
-    *Nature 580.7802 (2020): 252-256*
+.. citation:: ouyang2020video
 
 .. seealso::
     A tutorial notebook where this model is used:
