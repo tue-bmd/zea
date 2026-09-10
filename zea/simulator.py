@@ -664,26 +664,25 @@ def pressure_field(
         n_fft, fc, fs, n_period, bandwidth_percent, probe_center_frequency, chirp_sweep, True
     )
 
-    block = checkpoint(
-        functools.partial(
-            _pressure_block,
-            geometry=geometry,
-            shift=shift,
-            tx_apodizations=ops.cast(tx_apodizations, "float32"),
-            sound_speed=_as_f32(sound_speed),
-            element_width=_as_f32(element_width),
-            element_height=_as_f32(element_height),
-            attenuation_coef=_as_f32(attenuation_coef),
-            lens_thickness=_as_f32(lens_thickness),
-            lens_sound_speed=_as_f32(lens_sound_speed),
-            apply_lens_correction=bool(apply_lens_correction),
-            two_dimensional=bool(two_dimensional),
-            rigid_baffle=bool(rigid_baffle),
-            element_normals=None if element_normals is None else _as_f32(element_normals),
-            n_sub_elements=n_sub_elements,
-            elevation_focus=None if elevation_focus is None else float(elevation_focus),
-            lens_attenuation_coef=_as_f32(lens_attenuation_coef),
-        )
+    # workaround for tensorflow. tf.recompute_grad converts every argument to a tensor, crashing
+    # when no sound speed map is available (i.e. None).
+    block_kwargs = dict(
+        geometry=geometry,
+        shift=shift,
+        tx_apodizations=ops.cast(tx_apodizations, "float32"),
+        sound_speed=_as_f32(sound_speed),
+        element_width=_as_f32(element_width),
+        element_height=_as_f32(element_height),
+        attenuation_coef=_as_f32(attenuation_coef),
+        lens_thickness=_as_f32(lens_thickness),
+        lens_sound_speed=_as_f32(lens_sound_speed),
+        apply_lens_correction=bool(apply_lens_correction),
+        two_dimensional=bool(two_dimensional),
+        rigid_baffle=bool(rigid_baffle),
+        element_normals=None if element_normals is None else _as_f32(element_normals),
+        n_sub_elements=n_sub_elements,
+        elevation_focus=None if elevation_focus is None else float(elevation_focus),
+        lens_attenuation_coef=_as_f32(lens_attenuation_coef),
     )
 
     slowness = _ray_slowness(
@@ -702,6 +701,9 @@ def pressure_field(
 
     def blocked(points, slow, budget):
         """Band spectrum [f, t, p] or its Parseval energy [t, p] over ``points``."""
+        block = checkpoint(
+            functools.partial(_pressure_block, positions=points, slowness=slow, **block_kwargs)
+        )
         n_pts = int(ops.shape(points)[0])
         per_bin = 8 * ((2 if two_dimensional else 1) * n_pts * n_el + n_tx * n_pts)
         f_block = int(max(1, min(n_kept, budget // per_bin)))
@@ -719,7 +721,7 @@ def pressure_field(
 
             def body(i, spectrum):
                 start = i * f_block
-                part = block(ops.slice(freqs_t, [start], [f_block]), points, slow)
+                part = block(ops.slice(freqs_t, [start], [f_block]))
                 return ops.slice_update(spectrum, [start, 0, 0], part)
 
             spectrum = ops.fori_loop(
@@ -738,7 +740,7 @@ def pressure_field(
 
         def body(i, energy):
             start = i * f_block
-            part = block(ops.slice(freqs_t, [start], [f_block]), points, slow)
+            part = block(ops.slice(freqs_t, [start], [f_block]))
             w = ops.slice(weight, [start], [f_block])[:, None, None]
             return energy + ops.sum(w * (ops.real(part) ** 2 + ops.imag(part) ** 2), axis=0)
 
