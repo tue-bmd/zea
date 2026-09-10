@@ -182,6 +182,12 @@ class Simulate(Operation):
 
     def __call__(self, **kwargs):
         merged = {**self._input_cache, **kwargs}
+        if "elevation_lens" in merged:
+            # `call` takes **kwargs, so the removed keyword would otherwise be silently ignored.
+            raise TypeError(
+                "`elevation_lens` was removed. Use `elevation_slab_2d` for the old 2D slab "
+                "approximation, or `elevation_focus` for a physical cylindrical elevation lens."
+            )
         self._track_scatter_exponent(merged.get("scatter_exponent", 2.0))
         if not self._inside_outer_jit:
             # Static scalars as Python numbers: tf.function would otherwise trace them as
@@ -1177,9 +1183,11 @@ class Downsample(Operation):
 class AnisotropicDiffusion(Operation):
     """Speckle Reducing Anisotropic Diffusion (SRAD) filter.
 
-    Reference:
-    - https://doi.org/10.1109/TIP.2002.804276
-    - https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox
+    .. citation:: yu2002speckle
+
+        See also the `Image Despeckle Filtering Toolbox
+        <https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox>`_
+        on MATLAB Central.
     """
 
     def call(self, niter=100, lmbda=0.1, rect=None, eps=1e-6, **kwargs):

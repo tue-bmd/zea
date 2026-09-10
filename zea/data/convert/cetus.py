@@ -23,13 +23,7 @@ Dataset splits:
    The CETUS dataset is available free of charge strictly for non-commercial
    scientific research purposes only.
 
-.. admonition:: Reference
-
-   O. Bernard, et al.
-   *Standardized Evaluation System for Left Ventricular Segmentation Algorithms
-   in 3D Echocardiography.*
-   IEEE Transactions on Medical Imaging, vol. 35, no. 4, pp. 967-977, April 2016.
-   `DOI: 10.1109/tmi.2015.2503890 <https://doi.org/10.1109/tmi.2015.2503890>`_
+.. citation:: bernard2016standardized
 
 .. rubric:: Links
 

@@ -1661,10 +1661,7 @@ class CoherenceFactor(Operation):
     The beamformed output is the standard DAS sum weighted by CF per transmit,
     then compounded across transmits.
 
-    .. admonition:: Reference
-
-        Hollman, K. W., Rigby, K. W., & O'Donnell, M. (1999).
-        Coherence factor of speckle from a multi-row probe. IEEE Ultrasonics Symposium.
+    .. citation:: hollman1999coherence
 
     Args:
         **kwargs: Additional arguments passed to the Operation base class.
@@ -1750,12 +1747,7 @@ class GeneralizedCoherenceFactor(Operation):
     where :math:`\mathcal{M}_0 = \{k : k \leq m_0\} \cup \{k : k \geq N - m_0\}`
     is the low spatial-frequency region controlled by :math:`m_0`.
 
-    .. admonition:: Reference
-
-        Li, P. C., & Li, M. L. (2003).
-        "Adaptive imaging using the generalized coherence factor."
-        IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency Control,
-        50(2), 128-141.
+    .. citation:: li2003adaptive
 
     Args:
         m_zero (int): Cutoff frequency index for the low-frequency spatial region.
@@ -1886,15 +1878,7 @@ class MinimumVariance(Operation):
         into a triangular artefact. Set ``parameters.f_number = 0`` and let MV adapt
         the aperture itself.
 
-    .. admonition:: References
-
-        Synnevåg, J.-F., Austeng, A. and Holm, S., "Adaptive beamforming applied to
-        medical ultrasound imaging," *IEEE Trans. Ultrason. Ferroelectr. Freq.
-        Control* **54** (8), 2007. https://doi.org/10.1109/TUFFC.2007.431
-
-        Vignon, F. and Burcher, M. R., "Capon beamforming in medical ultrasound
-        imaging with focused beams," *IEEE Trans. Ultrason. Ferroelectr. Freq.
-        Control* **55** (3), 2008. https://doi.org/10.1109/TUFFC.2008.686
+    .. citation:: synnevag2007adaptive, vignon2008capon
 
     Args:
         subarray_size (int or None): Sub-aperture length :math:`M`. Smaller values are
@@ -2118,19 +2102,10 @@ class Refocus(Operation):
     The last axis selects how the data is interpreted: ``n_ch=1`` is RF and
     ``n_ch=2`` is IQ (baseband) data.
 
-    .. admonition:: References
+    .. citation:: bottenus2018recovery, ali2020extending
 
-        Bottenus, N. (2018).
-        "Recovery of the complete data set from focused transmit beams."
-        *IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency
-        Control*, 65(1), 30–38.
-
-        Ali, R., Dahl, J., & Bottenus, N. (2019).
-        "Extending Retrospective Encoding for Robust Recovery of the Multistatic Dataset."
-        *IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency
-        Control*, 67(5), 943–956.
-
-        https://github.com/nbottenus/REFoCUS
+        See the `REFoCUS <https://github.com/nbottenus/REFoCUS>`_ repository for a
+        reference implementation.
 
     Args:
         method (str): Inversion method. One of:

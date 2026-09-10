@@ -218,10 +218,18 @@ def curved_probe_normals(probe_geometry, radius=None):
 
     Returns:
         np.ndarray: Unit normals of shape (n_el, 3).
+
+    Raises:
+        ValueError: If ``radius`` is given but is not a finite, strictly positive number.
     """
     geometry = np.asarray(probe_geometry, np.float64)
     if radius is None:
         radius = fit_curved_probe_radius(geometry)
+    elif not (np.isfinite(radius) and radius > 0):
+        raise ValueError(
+            "Cannot compute curved probe normals: radius must be finite and strictly "
+            f"positive, got {radius}"
+        )
     normals = geometry - np.array([0.0, 0.0, -radius])
     normals /= np.linalg.norm(normals, axis=1, keepdims=True)
     return normals.astype(np.float32)

@@ -18,12 +18,7 @@ The dataset comprises three partitions:
    The only request is to refer properly to PICMUS - The Plane Wave Imaging Challenge
    in Medical UltraSound and quote the proceeding paper.
 
-.. admonition:: Reference
-
-   H. Liebgott, A. Rodriguez-Molares, F. Cervenansky, J. D'hooge and O. Bernard.
-   *Plane-Wave Imaging Challenge in Medical Ultrasound.*
-   2016 IEEE International Ultrasonics Symposium (IUS), Tours, France, 2016, pp. 1-4.
-   `DOI: 10.1109/ULTSYM.2016.7728908 <https://doi.org/10.1109/ULTSYM.2016.7728908>`_
+.. citation:: liebgott2016plane
 
 .. rubric:: Links
 

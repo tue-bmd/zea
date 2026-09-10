@@ -10,11 +10,9 @@ To try this model, simply load one of the available presets:
 
 .. important::
     This is a ``zea`` implementation of the model.
-    For the original paper and code, see `here <https://echonet.github.io/lvh/>`_.
+    For the original code, see `here <https://echonet.github.io/lvh/>`_.
 
-    Duffy, Grant, et al.
-    "High-throughput precision phenotyping of left ventricular hypertrophy with cardiovascular deep learning."
-    *JAMA cardiology 7.4 (2022): 386-395*
+.. citation:: duffy2022high
 
 .. seealso::
     A tutorial notebook where this model is used:
@@ -132,7 +130,7 @@ class EchoNetLVH(BaseModel):
         This implements a differentiable version of taking the max of a heatmap
         by computing the weighted average of coordinates.
 
-        Reference: https://arxiv.org/pdf/1711.08229
+        .. citation:: nibali2018numerical
 
         Args:
             mask (Tensor): Heatmap of shape [B, H, W]

@@ -186,6 +186,16 @@ def test_fit_curved_probe_radius_errors():
             fit_curved_probe_radius(geometry)
 
 
+@pytest.mark.parametrize("radius", [0.0, -40e-3, np.nan, np.inf, -np.inf])
+def test_curved_probe_normals_rejects_invalid_radius(radius):
+    """curved_probe_normals raises on a zero, negative, or non-finite explicit radius."""
+    from zea.probes import create_curved_probe_geometry, curved_probe_normals
+
+    geometry = create_curved_probe_geometry(n_el=64, pitch=0.3e-3, radius=40e-3)
+    with pytest.raises(ValueError, match="finite and strictly positive"):
+        curved_probe_normals(geometry, radius=radius)
+
+
 def test_verasonics_p4_2v_phased_probe():
     """The P4-2v built-in is a 64-element flat phased array."""
     probe = Probe.from_name("verasonics_p4_2v")

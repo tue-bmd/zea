@@ -10,11 +10,8 @@ To try this model, simply load one of the available presets:
 
 .. important::
     This is a ``zea`` implementation of the model.
-    For the original paper see:
 
-    van Knippenberg, Luuk, et al.
-    "Unsupervised domain adaptation method for segmenting cross-sectional CCA images."
-    *https://doi.org/10.1016/j.cmpb.2022.107037*
+.. citation:: vanknippenberg2022unsupervised
 
 .. seealso::
     A tutorial notebook where this model is used:
@@ -56,9 +53,7 @@ class CarotidSegmenter(BaseModel):
 
         Based on U-Net architecture.
 
-        Original implementation of paper:
-            - "Unsupervised domain adaptation method for segmenting cross-sectional CCA images"
-            - https://doi.org/10.1016/j.cmpb.2022.107037
+        .. citation:: vanknippenberg2022unsupervised
         """
 
         super().__init__(
