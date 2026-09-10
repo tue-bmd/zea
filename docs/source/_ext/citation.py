@@ -81,9 +81,20 @@ def _clean(text: str) -> str:
 
 
 def _initials(name: str) -> str:
-    """Initialise one given name, keeping compounds intact (``Jean-Luc`` -> ``J.-L.``)."""
-    parts = [part for part in re.split(r"[-\s]+", name) if part]
-    return "-".join(f"{part[0]}." for part in parts)
+    """Initialise one given name, keeping compounds intact (``Jean-Luc`` -> ``J.-L.``).
+
+    A name BibTeX already spells as compact initials keeps every letter
+    (``J.A.`` -> ``J. A.``): splitting on spaces and hyphens alone would treat
+    it as a single word and drop everything after the first initial.
+    """
+    parts = []
+    for chunk in re.split(r"[-\s]+", name):
+        if not chunk:
+            continue
+        letters = [piece[0] for piece in chunk.split(".") if piece]
+        if letters:
+            parts.append(" ".join(f"{letter}." for letter in letters))
+    return "-".join(parts)
 
 
 def _format_person(person: Person) -> str:
@@ -228,6 +239,18 @@ def _entry_nodes(key: str, entry: Entry) -> nodes.paragraph:
     return para
 
 
+def _clear_bibliography_cache(app) -> None:
+    """Drop the cached bibliography at the start of every build.
+
+    The cache exists to parse each ``.bib`` file once per build rather than
+    once per directive, so it must not outlive the build that filled it.
+    ``sphinx-autobuild`` (``make docs-serve``) rebuilds in the same process
+    with the same source directory, and without this a ``.bib`` edit would
+    keep rendering from the copy read at start-up.
+    """
+    _BIB_CACHE.pop(str(app.srcdir), None)
+
+
 def _load_bibliography(app) -> dict[str, Entry]:
     """Parse every file in :confval:`bibtex_bibfiles` into one key -> entry map.
 
@@ -309,6 +332,7 @@ def setup(app):
     # it, so make sure it exists even if that extension loads after this one.
     app.setup_extension("sphinxcontrib.bibtex")
     app.add_directive("citation", CitationDirective)
+    app.connect("builder-inited", _clear_bibliography_cache)
     return {
         "version": "1.0",
         "parallel_read_safe": True,
