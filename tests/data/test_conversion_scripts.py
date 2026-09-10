@@ -576,17 +576,7 @@ def create_us4us_test_data(src):
     The two-entry mapping converts both pipeline outputs of that recording, so
     the test covers writing several data types side by side in one track.
     """
-    hf_path = "hf://zeahub/pytest/zea_us4us_converter_test_data.pkl"
-    try:
-        pkl_file = _hf_resolve_path(hf_path)
-    except PermissionError as exc:
-        # The shared cache on the CI runners is a PersistentVolume that outlives the
-        # pods, and entries written by an earlier job can be owned by another user.
-        # A cache hit short-circuits before huggingface_hub takes its lock, so only a
-        # fixture that still has to be downloaded runs into this. Fall back to a
-        # per-run cache rather than failing on the state of the shared one.
-        print(f"Shared Hugging Face cache is not writable ({exc}); using a private cache.")
-        pkl_file = _hf_resolve_path(hf_path, cache_dir=src.parent / "hf_cache")
+    pkl_file = _hf_resolve_path("hf://zeahub/pytest/zea_us4us_converter_test_data.pkl")
     shutil.copy(pkl_file, src / pkl_file.name)
     return ["--mapping", "0:image", "1:beamformed_data"]
 

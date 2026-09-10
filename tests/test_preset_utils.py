@@ -5,6 +5,7 @@ model and the data stack) and the Keras preset loading/saving in
 ``zea.models.preset_utils``. Everything here runs offline: hub calls are faked.
 """
 
+import errno
 import json
 import threading
 import time
@@ -135,6 +136,64 @@ def test_download_of_an_unreachable_repo_is_retried(monkeypatch):
         ipu._hf_download(REPO_ID, "config.json")
     assert len(calls) == 2
     assert len(logins) == 1
+
+
+def test_download_falls_back_when_the_default_cache_is_not_writable(monkeypatch, tmp_path):
+    """A shared cache another user owns must not fail the download.
+
+    huggingface_hub writes blobs, snapshots and locks into per-repo subdirectories of
+    the cache, so a cache shared between users can be unwritable for the repo at hand
+    even though its root is fine.
+    """
+    monkeypatch.setattr(ipu, "_FALLBACK_CACHE_DIRS", {})
+    calls = []
+
+    def unwritable_default(**kwargs):
+        calls.append(Path(kwargs["cache_dir"]))
+        if Path(kwargs["cache_dir"]) == ipu.HF_DATASETS_DIR:
+            raise PermissionError(13, "Permission denied", str(ipu.HF_DATASETS_DIR / "x.lock"))
+        return str(Path(kwargs["cache_dir"]) / kwargs["filename"])
+
+    monkeypatch.setattr(ipu, "hf_hub_download", unwritable_default)
+
+    downloaded = Path(ipu._hf_download(REPO_ID, "config.json"))
+
+    assert calls[0] == ipu.HF_DATASETS_DIR, "the default cache is tried first"
+    assert len(calls) == 2, "the download is retried once, in the fallback cache"
+    assert downloaded.parent == calls[1] != ipu.HF_DATASETS_DIR
+    # The fallback is created once, so a second file reuses it rather than piling up
+    # temporary directories.
+    ipu._hf_clear_caches()
+    assert Path(ipu._hf_download(REPO_ID, "model.weights.h5")).parent == calls[1]
+
+
+def test_download_does_not_redirect_an_explicit_cache_dir(monkeypatch, tmp_path):
+    """Where the caller asked for is where it goes; a failure there is reported."""
+    monkeypatch.setattr(ipu, "_FALLBACK_CACHE_DIRS", {})
+
+    def unwritable(**kwargs):
+        raise PermissionError(13, "Permission denied", str(tmp_path / "x.lock"))
+
+    monkeypatch.setattr(ipu, "hf_hub_download", unwritable)
+
+    with pytest.raises(PermissionError):
+        ipu._hf_download(REPO_ID, "config.json", cache_dir=tmp_path)
+
+
+def test_download_does_not_fall_back_on_other_os_errors(monkeypatch):
+    """Only an unwritable cache is worth retrying elsewhere; a full disk is not."""
+    monkeypatch.setattr(ipu, "_FALLBACK_CACHE_DIRS", {})
+    calls = []
+
+    def no_space(**kwargs):
+        calls.append(1)
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(ipu, "hf_hub_download", no_space)
+
+    with pytest.raises(OSError, match="No space left on device"):
+        ipu._hf_download(REPO_ID, "config.json")
+    assert len(calls) == 1
 
 
 # _hf_login
