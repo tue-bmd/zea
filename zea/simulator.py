@@ -1506,6 +1506,8 @@ def transducer_transfer(
         raise ValueError(f"bandwidth_percent must be positive, got {float(bandwidth)}.")
     if probe_center_frequency is None:
         probe_center_frequency = center_frequency
+    if probe_center_frequency is None:
+        raise ValueError("bandwidth_percent needs probe_center_frequency or center_frequency.")
     half_width = 0.5 * bandwidth_percent / 100 * probe_center_frequency
     return xp.exp(-np.log(2) * ((xp.abs(f) - probe_center_frequency) / half_width) ** 2)
 
