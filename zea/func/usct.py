@@ -67,7 +67,7 @@ def straight_ray_times(positions, pixels, sos_map, x_axis, z_axis, background_c,
         in-plane coordinate components (columns 0 and 1 of ``positions``/``pixels``).
     """
     slowness = straight_ray_slowness(
-        ops.stack([pixels[:, 0],    ops.zeros_like(pixels[:, 0]),    pixels[:, 1]],    axis=-1),
+        ops.stack([pixels[:, 0], ops.zeros_like(pixels[:, 0]), pixels[:, 1]], axis=-1),
         ops.stack([positions[:, 0], ops.zeros_like(positions[:, 0]), positions[:, 1]], axis=-1),
         sos_map,
         x_axis,
