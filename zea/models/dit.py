@@ -27,10 +27,7 @@ The architecture follows the original DiT with **adaLN-Zero** conditioning:
 5. A final adaLN-modulated linear layer projects each token back to its pixel
    patch, and the patches are reassembled (unpatchified) into an image.
 
-.. seealso::
-
-    Peebles & Xie, *Scalable Diffusion Models with Transformers*, 2023.
-    https://arxiv.org/abs/2212.09748
+.. citation:: peebles2023scalable
 """
 
 from __future__ import annotations

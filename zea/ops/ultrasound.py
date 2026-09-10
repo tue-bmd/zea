@@ -1015,9 +1015,11 @@ class Downsample(Operation):
 class AnisotropicDiffusion(Operation):
     """Speckle Reducing Anisotropic Diffusion (SRAD) filter.
 
-    Reference:
-    - https://doi.org/10.1109/TIP.2002.804276
-    - https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox
+    .. citation:: yu2002speckle
+
+        See also the `Image Despeckle Filtering Toolbox
+        <https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox>`_
+        on MATLAB Central.
     """
 
     def call(self, niter=100, lmbda=0.1, rect=None, eps=1e-6, **kwargs):
