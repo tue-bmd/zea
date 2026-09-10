@@ -12,11 +12,7 @@ from zea import Parameters, Probe, display
 from zea.beamform import phantoms
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.metrics import psnr
-from zea.simulator import (
-    elevation_slab_bucket,
-    select_elevation_slab,
-    simulate_rf,
-)
+from zea.simulator import simulate_rf
 from zea.ops import Simulate
 from zea.ops.ultrasound import simulator_settings
 from zea.simulator_time_domain import get_pulse_waveform, simulate_rf_td
@@ -166,191 +162,6 @@ def test_simulator_mode_psnr_against_exact(images, mode):
     assert value > min_psnr, (
         f"{mode} mode: PSNR against `exact` is low! {value:.1f} dB, expected {min_psnr:.0f} dB"
     )
-
-
-def test_elevation_lens_prunes_out_of_plane_scatterers():
-    n_el = 16
-    probe_geometry = np.stack(
-        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
-    ).astype(np.float32)
-    element_height = 5e-3
-    args = {
-        "scatterer_magnitudes": np.ones(1, dtype=np.float32),
-        "probe_geometry": probe_geometry,
-        "apply_lens_correction": False,
-        "lens_thickness": 1e-3,
-        "lens_sound_speed": 1000.0,
-        "sound_speed": SOUND_SPEED,
-        "n_ax": 1024,
-        "center_frequency": CENTER_FREQUENCY,
-        "sampling_frequency": CENTER_FREQUENCY * 4,
-        "t0_delays": np.zeros((1, n_el), dtype=np.float32),
-        "initial_times": np.zeros(1, dtype=np.float32),
-        "element_width": 1e-3,
-        "attenuation_coef": 0.0,
-        "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
-        "t_peak": np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
-        "elevation_slab_2d": True,
-        "element_height": element_height,
-    }
-
-    inside = np.array([[0.0, 0.5 * element_height, 30e-3]], dtype=np.float32)
-    outside = np.array([[0.0, 1.5 * element_height, 30e-3]], dtype=np.float32)
-    assert (
-        np.abs(keras.ops.convert_to_numpy(simulate_rf(scatterer_positions=inside, **args))).max()
-        > 0
-    )
-    assert (
-        np.abs(keras.ops.convert_to_numpy(simulate_rf(scatterer_positions=outside, **args))).max()
-        == 0
-    )
-
-    both = np.concatenate([inside, outside], axis=0)
-    positions, magnitudes = select_elevation_slab(
-        both, np.ones(2, dtype=np.float32), probe_geometry, element_height
-    )
-    assert positions.shape == (1, 3)
-    assert magnitudes.shape == (1,)
-
-    # Check if pruning and masking results in the same rf.
-    args["scatterer_magnitudes"] = np.ones(2, dtype=np.float32)
-    pruned = keras.ops.convert_to_numpy(simulate_rf(scatterer_positions=both, **args))
-    args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
-    reference = keras.ops.convert_to_numpy(simulate_rf(scatterer_positions=inside, **args))
-    assert np.allclose(pruned, reference)
-
-
-def _slab_cloud(n_inside, n_outside, element_height, seed=0):
-    """A cloud split into scatterers inside and outside the elevation slab."""
-    rng = np.random.default_rng(seed)
-    n = n_inside + n_outside
-    y = np.concatenate(
-        [
-            rng.uniform(-0.4, 0.4, n_inside) * element_height,
-            rng.uniform(1.5, 3.0, n_outside) * element_height,
-        ]
-    )
-    positions = np.stack(
-        [rng.uniform(-5e-3, 5e-3, n), y, rng.uniform(15e-3, 30e-3, n)], axis=1
-    ).astype(np.float32)
-    return positions, rng.uniform(0.5, 1.5, n).astype(np.float32)
-
-
-def test_elevation_slab_bucket_rounds_up_and_is_a_noop_when_inapplicable():
-    n_el = 16
-    probe_geometry = np.stack(
-        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
-    ).astype(np.float32)
-    element_height = 5e-3
-    kwargs = {
-        "probe_geometry": probe_geometry,
-        "element_height": element_height,
-        "elevation_slab_2d": True,
-    }
-
-    for n_inside in (5000, 7000):
-        positions, magnitudes = _slab_cloud(n_inside, 20000 - n_inside, element_height)
-        out = elevation_slab_bucket(
-            scatterer_positions=positions, scatterer_magnitudes=magnitudes, **kwargs
-        )
-        assert out["scatterer_positions"].shape == (8192, 3)
-        assert int((out["scatterer_magnitudes"] > 0).sum()) == n_inside
-
-    positions, magnitudes = _slab_cloud(100, 900, element_height)
-    no_lens = {**kwargs, "elevation_slab_2d": False}
-    no_height = {**kwargs, "element_height": None}
-    lensless_bucket = elevation_slab_bucket(
-        scatterer_positions=positions, scatterer_magnitudes=magnitudes, **no_lens
-    )
-    heightless_bucket = elevation_slab_bucket(
-        scatterer_positions=positions, scatterer_magnitudes=magnitudes, **no_height
-    )
-    assert lensless_bucket == {}
-    assert heightless_bucket == {}
-    # Check that passing irrelevant simulator params do not raise errors.
-    assert elevation_slab_bucket(
-        scatterer_positions=positions,
-        scatterer_magnitudes=magnitudes,
-        sound_speed=SOUND_SPEED,
-        n_ax=1024,
-        **kwargs,
-    )
-
-
-def test_elevation_slab_bucket_matches_unpruned_simulation():
-    """Pruning to a padded bucket must not change the RF."""
-    n_el = 16
-    probe_geometry = np.stack(
-        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
-    ).astype(np.float32)
-    element_height = 5e-3
-    positions, magnitudes = _slab_cloud(20, 300, element_height)
-
-    args = {
-        "probe_geometry": probe_geometry,
-        "apply_lens_correction": False,
-        "lens_thickness": 1e-3,
-        "lens_sound_speed": 1000.0,
-        "sound_speed": SOUND_SPEED,
-        "n_ax": 1024,
-        "center_frequency": CENTER_FREQUENCY,
-        "sampling_frequency": CENTER_FREQUENCY * 4,
-        "t0_delays": np.zeros((1, n_el), dtype=np.float32),
-        "initial_times": np.zeros(1, dtype=np.float32),
-        "element_width": 1e-3,
-        "attenuation_coef": 0.0,
-        "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
-        "t_peak": np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
-        "elevation_slab_2d": True,
-        "element_height": element_height,
-    }
-
-    pruned = elevation_slab_bucket(
-        scatterer_positions=positions, scatterer_magnitudes=magnitudes, **args
-    )
-    assert pruned["scatterer_positions"].shape[0] == 32
-
-    reference = keras.ops.convert_to_numpy(
-        simulate_rf(scatterer_positions=positions, scatterer_magnitudes=magnitudes, **args)
-    )
-    bucketed = keras.ops.convert_to_numpy(simulate_rf(**pruned, **args))
-    assert np.allclose(reference, bucketed, atol=1e-3 * np.abs(reference).max())
-
-
-def test_simulate_op_prunes_elevation_slab_without_leaking_pruned_cloud():
-    """The `Simulate` op prunes before its jitted `call`, but must hand the full cloud on."""
-    n_el = 16
-    probe_geometry = np.stack(
-        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
-    ).astype(np.float32)
-    element_height = 5e-3
-    positions, magnitudes = _slab_cloud(20, 300, element_height)
-
-    op = zea.ops.Simulate(jit_compile=True, with_batch_dim=False)
-    outputs = op(
-        scatterer_positions=positions,
-        scatterer_magnitudes=magnitudes,
-        probe_geometry=probe_geometry,
-        apply_lens_correction=False,
-        lens_thickness=1e-3,
-        lens_sound_speed=1000.0,
-        sound_speed=SOUND_SPEED,
-        n_ax=1024,
-        center_frequency=CENTER_FREQUENCY,
-        sampling_frequency=CENTER_FREQUENCY * 4,
-        t0_delays=np.zeros((1, n_el), dtype=np.float32),
-        initial_times=np.zeros(1, dtype=np.float32),
-        element_width=1e-3,
-        attenuation_coef=0.0,
-        tx_apodizations=np.ones((1, n_el), dtype=np.float32),
-        t_peak=np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
-        elevation_slab_2d=True,
-        element_height=element_height,
-    )
-
-    assert np.abs(keras.ops.convert_to_numpy(outputs[op.output_key])).max() > 0
-    assert outputs["scatterer_positions"].shape == positions.shape
-    assert outputs["scatterer_magnitudes"].shape == magnitudes.shape
 
 
 @pytest.mark.parametrize("method", list(simulator_settings))
@@ -585,19 +396,20 @@ def _td_args(n_el=16, **overrides):
     return {**args, **overrides}
 
 
-def test_time_domain_elevation_lens_prunes_out_of_plane_scatterers():
-    """The time-domain simulator drops scatterers outside the elevation slab."""
-    element_height = 5e-3
-    args = _td_args(elevation_slab_2d=True, element_height=element_height)
+def test_time_domain_two_dimensional_moves_scatterers_into_the_plane():
+    """In 2D an off-plane scatterer echoes as its projection onto the imaging plane."""
+    args = _td_args(two_dimensional=True, element_height=5e-3)
     args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
+    in_plane = np.array([[2e-3, 0.0, 30e-3]], dtype=np.float32)
+    off_plane = np.array([[2e-3, 8e-3, 30e-3]], dtype=np.float32)
 
-    inside = np.array([[0.0, 0.5 * element_height, 30e-3]], dtype=np.float32)
-    outside = np.array([[0.0, 1.5 * element_height, 30e-3]], dtype=np.float32)
-
-    rf_inside = keras.ops.convert_to_numpy(simulate_rf_td(scatterer_positions=inside, **args))
-    rf_outside = keras.ops.convert_to_numpy(simulate_rf_td(scatterer_positions=outside, **args))
-    assert np.abs(rf_inside).max() > 0
-    assert np.abs(rf_outside).max() == 0
+    rf_in = keras.ops.convert_to_numpy(simulate_rf_td(scatterer_positions=in_plane, **args))
+    rf_off = keras.ops.convert_to_numpy(simulate_rf_td(scatterer_positions=off_plane, **args))
+    assert np.abs(rf_in).max() > 0
+    assert np.allclose(rf_in, rf_off)
+    args["two_dimensional"] = False
+    rf_3d = keras.ops.convert_to_numpy(simulate_rf_td(scatterer_positions=off_plane, **args))
+    assert not np.allclose(rf_in, rf_3d)
 
 
 def test_time_domain_lens_correction_delays_arrivals():

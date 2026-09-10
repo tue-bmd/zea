@@ -35,7 +35,6 @@ from zea.ops.base import Filter, Operation
 from zea.simulator import (
     _concrete,
     apply_receive_chain,
-    elevation_slab_bucket,
     fft_length,
     simulate_rf,
 )
@@ -127,7 +126,7 @@ class Simulate(Operation):
         "n_ax",
         "apply_lens_correction",
         "method",
-        "elevation_slab_2d",
+        "two_dimensional",
         "max_chunk_gb",
         "center_frequency",
         "sampling_frequency",
@@ -165,10 +164,7 @@ class Simulate(Operation):
             method = _resolve_method(merged.get("method", "frequency_domain"))
             if method == "frequency_domain" and merged.get("n_fft") is None:
                 merged["n_fft"] = _derived_fft_length(merged)
-        # Drop out-of-slab scatterers here, because `call` is traced.
-        pruned = {} if self._inside_outer_jit else elevation_slab_bucket(**merged)
-        outputs = super().__call__(**{**merged, **pruned})
-        return {**outputs, **{key: merged[key] for key in pruned}}
+        return super().__call__(**merged)
 
     def call(
         self,
@@ -189,7 +185,7 @@ class Simulate(Operation):
         tx_apodizations,
         t_peak,
         method="frequency_domain",
-        elevation_slab_2d=False,
+        two_dimensional=False,
         element_height=None,
         max_chunk_gb=None,
         noise_level_db=None,
@@ -242,7 +238,7 @@ class Simulate(Operation):
             "attenuation_coef": attenuation_coef,
             "tx_apodizations": tx_apodizations,
             "t_peak": t_peak,
-            "elevation_slab_2d": elevation_slab_2d,
+            "two_dimensional": two_dimensional,
             "element_height": element_height,
             "scatter_exponent": scatter_exponent,
             "noise_level_db": noise_level_db,

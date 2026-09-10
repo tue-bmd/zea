@@ -286,7 +286,40 @@ def test_elevation_focus_adds_the_elevation_sub_elements_in_phase():
     focused = _np(simulate_rf(**scene, n_sub_elements=(1, 12), elevation_focus=15e-3))
     assert np.abs(focused).max() > 1.5 * np.abs(unfocused).max()
     with pytest.raises(ValueError):
-        simulate_rf(**scene, elevation_slab_2d=True, elevation_focus=15e-3)
+        simulate_rf(**scene, two_dimensional=True, elevation_focus=15e-3)
+
+
+def test_two_dimensional_spreads_the_transmit_cylindrically():
+    # One element, scatterers at z and 2z: the two-way spread falls by 4 in 3D and by 2 sqrt 2
+    # behind the ideal elevation lens, whose transmit falls as 1 / sqrt(r).
+    z = 15e-3
+    scene = _scene(np.zeros((1, 3)), [[0.0, 0.0, z], [0.0, 0.0, 2 * z]], n_ax=1024)
+    for two_dimensional, expected in ((False, 4.0), (True, 2 * np.sqrt(2.0))):
+        peaks = []
+        for scatterer in range(2):
+            single = {
+                **scene,
+                "scatterer_magnitudes": ops.convert_to_tensor(
+                    np.eye(2, dtype=np.float32)[scatterer]
+                ),
+            }
+            rf = _np(simulate_rf(**single, two_dimensional=two_dimensional))[0, :, 0, 0]
+            peaks.append(_envelope_peak(rf[:, None]))
+        assert abs(peaks[0] / peaks[1] - expected) < 1e-2 * expected
+
+
+def test_two_dimensional_moves_scatterers_into_the_imaging_plane():
+    # Off the plane a scatterer echoes as its projection; in 3D it is delayed and less directive.
+    geometry = np.stack([np.linspace(-2e-3, 2e-3, 8), np.zeros(8), np.zeros(8)], -1)
+    in_plane = _scene(geometry, [1e-3, 0.0, 20e-3], element_height=3e-3)
+    off_plane = _scene(geometry, [1e-3, 6e-3, 20e-3], element_height=3e-3)
+    reference = _np(simulate_rf(**in_plane, two_dimensional=True))
+    assert np.abs(reference).max() > 0
+    assert _rel_err(reference, simulate_rf(**off_plane, two_dimensional=True)) < 1e-6
+    assert _rel_err(reference, simulate_rf(**off_plane)) > 0.1
+    matrix = np.stack([geometry, geometry + [0.0, 1e-3, 0.0]]).reshape(-1, 3)
+    with pytest.raises(ValueError, match="1D probe"):
+        simulate_rf(**_scene(matrix, [0.0, 0.0, 20e-3]), two_dimensional=True)
 
 
 def test_lens_layer_delays_the_echo_by_its_travel_time():

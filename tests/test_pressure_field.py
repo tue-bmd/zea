@@ -154,12 +154,13 @@ def test_transducer_bandwidth_enters_one_way():
     assert np.allclose(ratio, np.sqrt(transfer), atol=2e-3)
 
 
-def test_elevation_lens_spreads_cylindrically_inside_the_slab():
+def test_two_dimensional_spreads_cylindrically_in_the_imaging_plane():
     transmit = _transmit(np.zeros((1, 3)), element_height=4e-3)
     points = np.array([[0.0, 0.0, 0.01], [0.0, 0.0, 0.02], [0.0, 3e-3, 0.01]])
-    rms = _np(pressure_field(points, **transmit, elevation_slab_2d=True))[0]
+    rms = _np(pressure_field(points, **transmit, two_dimensional=True))[0]
     assert abs(rms[0] / rms[1] - np.sqrt(2.0)) < 1e-3
-    assert rms[2] == 0.0
+    # Off the plane a point sees the field of its projection onto it.
+    assert abs(rms[2] / rms[0] - 1.0) < 1e-6
     spherical = _np(pressure_field(points[:2], **transmit))[0]
     assert abs(spherical[0] / spherical[1] - 2.0) < 1e-3
 
