@@ -9,7 +9,7 @@ N_EL = 8  # number of transducer elements
 N_TX = 5  # number of transmit events
 N_AX = 64  # number of axial samples
 SAMPLING_FREQ = np.float32(40e6)  # Hz
-DEMODULATION_FREQ = np.float32(20e6)  # Hz
+DEMODULATION_FREQ = np.float32(5e6)  # Hz
 SOUND_SPEED = 1540.0  # m/s
 T_PEAK = np.float32(5e-7)  # transmit-waveform peak time (s)
 
@@ -44,6 +44,23 @@ def iq_data():
     """Random IQ data: (n_tx, n_ax, n_el, 2)."""
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     return rng.standard_normal((N_TX, N_AX, N_EL, 2)).astype(np.float32)
+
+
+@pytest.fixture
+def bandlimited_rf_data():
+    """RF data as Gaussian-modulated pulses centred at DEMODULATION_FREQ."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    t = np.arange(N_AX) / SAMPLING_FREQ
+    sigma = 3.0 / SAMPLING_FREQ  # ~1.5 cycles at DEMODULATION_FREQ
+    data = np.zeros((N_TX, N_AX, N_EL, 1), dtype=np.float32)
+    for tx in range(N_TX):
+        for el in range(N_EL):
+            for _ in range(3):  # a few echoes per trace
+                t_c = rng.uniform(0.25, 0.75) * N_AX / SAMPLING_FREQ
+                envelope = np.exp(-((t - t_c) ** 2) / (2 * sigma**2))
+                phase = 2 * np.pi * DEMODULATION_FREQ * (t - t_c) + rng.uniform(0, 2 * np.pi)
+                data[tx, :, el, 0] += envelope * np.cos(phase)
+    return data
 
 
 def _call_refocus(op, data_np, probe_geometry_np, plane_wave_delays_np):
@@ -129,6 +146,147 @@ def test_output_shape_iq(method, probe_geometry, plane_wave_delays, iq_data):
     assert decoded.shape == (N_EL, N_AX, N_EL, 2), (
         f"Expected ({N_EL}, {N_AX}, {N_EL}, 2), got {decoded.shape}"
     )
+
+
+_IQ_EQUIV_TOL = {
+    ("adjoint", None): 1e-3,
+    ("adjoint", 0): 5e-2,
+    ("tikhonov", None): 1e-2,
+    ("rsvd", None): 1e-2,
+    ("tsvd", None): 1e-2,
+}
+
+
+@pytest.mark.parametrize(
+    ("method", "param"),
+    [("adjoint", None), ("adjoint", 0), ("tikhonov", None), ("rsvd", None), ("tsvd", None)],
+)
+def test_iq_matches_demodulated_rf(
+    method, param, probe_geometry, plane_wave_delays, bandlimited_rf_data
+):
+    """Decoding commutes with demodulation.
+        demodulate(decode_RF(rf)) == decode_IQ(demodulate(rf))
+
+    Asserting this pins down the carrier offset, the fftfreq sign convention,
+    the even-length Nyquist bin and the inverse-FFT normalization of the IQ
+    path all at once.
+    """
+    import keras
+
+    from zea.func.ultrasound import demodulate
+    from zea.ops import Refocus
+
+    def _demodulate(array):
+        return keras.ops.convert_to_numpy(
+            demodulate(
+                keras.ops.convert_to_tensor(array),
+                DEMODULATION_FREQ,
+                SAMPLING_FREQ,
+                axis=-3,
+            )
+        )
+
+    op = Refocus(method=method, param=param, with_batch_dim=False)
+
+    iq_data = _demodulate(bandlimited_rf_data)
+    assert iq_data.shape == (N_TX, N_AX, N_EL, 2)
+
+    rf_decoded = keras.ops.convert_to_numpy(
+        _call_refocus(op, bandlimited_rf_data, probe_geometry, plane_wave_delays)[op.output_key]
+    )
+    iq_decoded = keras.ops.convert_to_numpy(
+        _call_refocus(op, iq_data, probe_geometry, plane_wave_delays)[op.output_key]
+    )
+
+    expected = _demodulate(rf_decoded)
+    assert iq_decoded.shape == expected.shape
+
+    error = np.abs(iq_decoded - expected).max() / np.abs(expected).max()
+    tol = _IQ_EQUIV_TOL[(method, param)]
+    assert error < tol, (
+        f"method={method} param={param}: IQ decoding does not match the "
+        f"demodulated RF decoding (relative max error {error:.3e} >= {tol:.3e})"
+    )
+
+
+def test_iq_requires_demodulation_frequency(probe_geometry, plane_wave_delays, iq_data):
+    """IQ input without a demodulation frequency must raise, not silently decode."""
+    import keras
+
+    from zea.ops import Refocus
+
+    op = Refocus(with_batch_dim=False)
+    with pytest.raises(ValueError, match="demodulation_frequency"):
+        op(
+            data=keras.ops.convert_to_tensor(iq_data),
+            t0_delays=keras.ops.convert_to_tensor(plane_wave_delays),
+            sampling_frequency=SAMPLING_FREQ,
+            probe_geometry=keras.ops.convert_to_tensor(probe_geometry),
+            initial_times=np.zeros(N_TX, dtype=np.float32),
+            demodulation_frequency=None,
+        )
+
+
+def test_unsupported_n_ch_raises(probe_geometry, plane_wave_delays):
+    """Only RF (n_ch=1) and IQ (n_ch=2) are supported."""
+    from zea.ops import Refocus
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = rng.standard_normal((N_TX, N_AX, N_EL, 3)).astype(np.float32)
+
+    op = Refocus(with_batch_dim=False)
+    with pytest.raises(ValueError, match="n_ch=3"):
+        _call_refocus(op, data, probe_geometry, plane_wave_delays)
+
+
+def test_output_shape_iq_with_batch_dim(probe_geometry, plane_wave_delays):
+    """IQ decoding must survive the vmap path used when with_batch_dim=True."""
+    import keras
+
+    from zea.ops import Refocus
+
+    op = Refocus(with_batch_dim=True)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    batch_size = 2
+    data_batch = rng.standard_normal((batch_size, N_TX, N_AX, N_EL, 2)).astype(np.float32)
+
+    result = op(
+        data=keras.ops.convert_to_tensor(data_batch),
+        t0_delays=keras.ops.convert_to_tensor(plane_wave_delays),
+        sampling_frequency=SAMPLING_FREQ,
+        probe_geometry=keras.ops.convert_to_tensor(probe_geometry),
+        initial_times=np.zeros(N_TX, dtype=np.float32),
+        demodulation_frequency=DEMODULATION_FREQ,
+    )
+    decoded = keras.ops.convert_to_numpy(result[op.output_key])
+    assert decoded.shape == (batch_size, N_EL, N_AX, N_EL, 2), (
+        f"Expected ({batch_size}, {N_EL}, {N_AX}, {N_EL}, 2), got {decoded.shape}"
+    )
+
+
+def test_adjoint_ramp_uses_absolute_frequency():
+    """The adjoint ramp filter must scale by |f|, not by signed f."""
+    import keras
+
+    from zea.ops import Refocus
+
+    op = Refocus(method="adjoint", param=None)
+    n_tx, n_el = 3, 4
+
+    # With zero delays and unit apodization H == 1, so Hinv reduces to the
+    # ramp itself and a sign flip is directly visible.
+    delays = keras.ops.zeros((n_tx, n_el))
+    apod = keras.ops.ones((n_tx, n_el))
+    f_vec = keras.ops.convert_to_tensor(np.array([-0.25, 0.25], dtype=np.float32))
+
+    hinv = keras.ops.convert_to_numpy(op._get_hinv(delays, f_vec, apod))
+
+    assert hinv.shape == (2, n_el, n_tx)
+    expected = 0.25 * np.ones((n_el, n_tx))
+    np.testing.assert_allclose(
+        hinv[0], expected, atol=1e-6, err_msg="negative f was not |f|-scaled"
+    )
+    np.testing.assert_allclose(hinv[1], expected, atol=1e-6)
 
 
 def test_sa_parameter_outputs(probe_geometry, plane_wave_delays, rf_data):
@@ -262,25 +420,29 @@ def test_output_shape_with_batch_dim(probe_geometry, plane_wave_delays):
     )
 
 
-def test_output_dtype_is_float32(probe_geometry, plane_wave_delays, rf_data):
-    """Decoded output must always be float32 regardless of method."""
+@pytest.mark.parametrize("data_kind", ["rf", "iq"])
+def test_output_dtype_is_float32(data_kind, probe_geometry, plane_wave_delays, rf_data, iq_data):
+    """Decoded output must always be float32 regardless of method or n_ch."""
     import keras
 
     from zea.ops import Refocus
 
+    data = rf_data if data_kind == "rf" else iq_data
+
     for method in ("adjoint", "tikhonov", "rsvd", "tsvd"):
         op = Refocus(method=method, with_batch_dim=False)
-        result = _call_refocus(op, rf_data, probe_geometry, plane_wave_delays)
+        result = _call_refocus(op, data, probe_geometry, plane_wave_delays)
         decoded = keras.ops.convert_to_numpy(result[op.output_key])
         assert decoded.dtype == np.float32, (
-            f"method={method}: expected float32, got {decoded.dtype}"
+            f"method={method} data={data_kind}: expected float32, got {decoded.dtype}"
         )
 
 
 @pytest.mark.parametrize("method", ["adjoint", "tikhonov"])
+@pytest.mark.parametrize("n_ch", [1, 2])
 @backend_equality_check(decimal=3)
-def test_refocus_cross_backend(method):
-    """Refocus output must be consistent across backends."""
+def test_refocus_cross_backend(method, n_ch):
+    """Refocus output must be consistent across backends, for RF and for IQ."""
     import keras
     import numpy as np
 
@@ -303,7 +465,7 @@ def test_refocus_cross_backend(method):
         probe_geometry, polar_angles, sound_speed=SOUND_SPEED
     ).astype(np.float32)
 
-    data = rng.standard_normal((N_TX, N_AX, N_EL, 1)).astype(np.float32)
+    data = rng.standard_normal((N_TX, N_AX, N_EL, n_ch)).astype(np.float32)
 
     op = Refocus(method=method, with_batch_dim=False)
     result = op(

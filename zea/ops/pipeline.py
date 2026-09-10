@@ -2115,6 +2115,9 @@ class Refocus(Operation):
     **output** has shape ``(n_el, n_ax, n_el, n_ch)``, where the new first
     axis indexes the decoded virtual transmit elements.
 
+    The last axis selects how the data is interpreted: ``n_ch=1`` is RF and
+    ``n_ch=2`` is IQ (baseband) data.
+
     .. admonition:: References
 
         Bottenus, N. (2018).
@@ -2141,7 +2144,7 @@ class Refocus(Operation):
         param (float or None): Regularization / filter parameter.
 
             - ``'adjoint'``: ``None`` applies a ramp filter (multiply by
-              :math:`f`). Set to ``0`` to disable the ramp filter. Defaults to ``None``.
+              :math:`|f|`). Set to ``0`` to disable the ramp filter. Defaults to ``None``.
             - ``'tikhonov'``, ``'rsvd'``, ``'tsvd'``: Relative regularization
               strength. Defaults to ``1e-2`` when ``None``.
 
@@ -2225,8 +2228,11 @@ class Refocus(Operation):
             data: ``(n_tx, n_ax, n_el, n_ch)`` float32 array.
             delays_samples: ``(n_tx, n_el)`` transmit delays in samples.
             apod: ``(n_tx, n_el)`` transmit apodization.
-            demodulation_frequency (float): Demodulation frequency
-            sampling_frequency (float): Sampling frequency
+            demodulation_frequency (float or None): Demodulation (carrier)
+                frequency in Hz. Required for IQ (``n_ch=2``) input; unused
+                for RF (``n_ch=1``) input.
+            sampling_frequency (float): Sampling frequency in Hz of ``data``
+                as it currently is, i.e. after any :class:`Downsample`.
 
         Returns:
             decoded: ``(n_el, n_ax, n_el, n_ch)`` float32 array.
@@ -2280,7 +2286,7 @@ class Refocus(Operation):
 
             return ops.cast(rf_decoded, "float32")
         # Refocus for IQ
-        elif n_ch == 2:
+        else:
             if demodulation_frequency is None:
                 raise ValueError(
                     "Refocus requires `demodulation_frequency` for IQ (n_ch=2) input, "
@@ -2291,7 +2297,7 @@ class Refocus(Operation):
             # data: (n_tx, n_ax, n_el, n_ch) -> (n_ch, n_el, n_tx, n_ax)
             iq = ops.cast(ops.transpose(data, (3, 2, 0, 1)), "float32")
             # (n_ch, n_el_recv, n_tx, n_freq)
-            IQ_enc_r, IQ_enc_i = ops.fft((iq[0, :, :, :], iq[1, :, :, :]))
+            IQ_enc_r, IQ_enc_i = ops.fft((ops.take(iq, 0, axis=0), ops.take(iq, 1, axis=0)))
             IQ_enc = ops.cast(IQ_enc_r, "complex64") + 1j * ops.cast(IQ_enc_i, "complex64")
             n_freq = IQ_enc.shape[-1]
 
@@ -2326,7 +2332,7 @@ class Refocus(Operation):
             IQ_decoded = ops.transpose(IQ_decoded, (1, 2, 0))
             # Use `ifft2` with a dummy axis so the inverse transform still
             # applies along the frequency axis while preserving the 1D layout.
-            # We do this because keras does not supoort ifft
+            # We do this because keras does not support ifft
             # -> (n_elements, n_el_recv, 1, n_freq)
             iq_decoded_real = ops.expand_dims(ops.real(IQ_decoded), axis=-2)
             iq_decoded_imag = ops.expand_dims(ops.imag(IQ_decoded), axis=-2)
