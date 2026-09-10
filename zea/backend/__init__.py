@@ -17,7 +17,7 @@ Public API
 
 :func:`highest_matmul_precision`
     Context manager that keeps float32 matrix products at full precision where the
-    backend would otherwise use TF32 (JAX on GPU).
+    backend would otherwise use TF32.
 
 :class:`device`
     Context manager that pins all Keras ops to a specific device.
