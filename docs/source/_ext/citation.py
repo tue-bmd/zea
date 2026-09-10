@@ -81,10 +81,10 @@ def _clean(text: str) -> str:
 
 
 def _initials(name: str) -> str:
-    """Initialise one given name, keeping compounds intact (``Jean-Luc`` -> ``J.-L.``).
+    """Initialise one given name, keeping compounds intact (``Foo-Bar`` -> ``F.-B.``).
 
     A name BibTeX already spells as compact initials keeps every letter
-    (``J.A.`` -> ``J. A.``): splitting on spaces and hyphens alone would treat
+    (``F.B.`` -> ``F. B.``): splitting on spaces and hyphens alone would treat
     it as a single word and drop everything after the first initial.
     """
     parts = []
