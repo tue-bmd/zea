@@ -819,7 +819,6 @@ def test_tof_correction_sos_grid_zero_data(probe_geometry, flatgrid):
 @backend_equality_check(backends=["tensorflow", "jax"])
 def test_tof_correction_flat_sos_grid_matches_homogeneous(probe_geometry, flatgrid):
     """A constant sos map must reproduce the analytical constant-sound-speed delays."""
-    # Long enough a record that every pixel delay lands inside it.
     inputs = _make_tof_inputs(probe_geometry, flatgrid, n_ax=1400)
     homogeneous = keras.ops.convert_to_numpy(tof_correction(**inputs))
 
@@ -832,8 +831,6 @@ def test_tof_correction_flat_sos_grid_matches_homogeneous(probe_geometry, flatgr
             sos_grid_z=np.linspace(0.0, 25e-3, nz_sos).astype(np.float32),
         )
     )
-    # The ray integral samples the map at a finite number of points, so the two
-    # travel times differ by a fraction of a sample; compare on the mean level.
     assert np.mean(np.abs(homogeneous - heterogeneous)) < 1e-2 * np.mean(np.abs(homogeneous))
     return heterogeneous
 
