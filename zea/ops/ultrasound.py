@@ -35,34 +35,25 @@ from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
 from zea.simulator import (
     _concrete,
+    _ndim,
     apply_receive_chain,
     fft_length,
+    scatter_exponent_bounds,
     simulate_rf,
 )
 from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
 
-# The simulators take different options, so the type checker cannot resolve the union.
+# Different function arguments, so annotate as Callable to avoid the type checker trying to check
+# the argument types.
 simulator_settings: dict[str, Callable] = {
     "frequency_domain": simulate_rf,
     "time_domain": simulate_rf_td,
 }
-_DEPRECATED_METHODS = {
-    "exact": "frequency_domain",
-    "frequency_approximation": "frequency_domain",
-    "zea_wave": "frequency_domain",
-    "time_approximation": "time_domain",
-}
 
 
 def _resolve_method(method):
-    """The canonical simulator method name, warning once for a deprecated alias."""
-    if method in _DEPRECATED_METHODS:
-        replacement = _DEPRECATED_METHODS[method]
-        log.warning_once(
-            f"Simulate method {method!r} is deprecated, use {replacement!r}.", key=method
-        )
-        return replacement
+    """The simulator method name, checked against the ones that exist."""
     if method not in simulator_settings:
         raise ValueError(f"method ({method}) must be one of {tuple(simulator_settings)}")
     return method
@@ -102,7 +93,7 @@ class Simulate(Operation):
     :func:`zea.simulator_time_domain.simulate_rf_td`, which evaluates the geometry-dependent
     factors at the center frequency: less accurate, faster in some settings. The element
     options (``baffle_impedance_ratio``, ``element_normals``, ``n_sub_elements``,
-    ``elevation_focus``, ``lens_attenuation_coef``, ``band_db``, ``n_fft``) reach the
+    ``elevation_focus``, ``lens_attenuation_coef``, ``band_db``, ``n_fft``, ``scatter_exponent_range``) reach the
     frequency-domain simulator only. The transmit pulse is ``waveforms_two_way`` (the one of a
     :class:`zea.Parameters` or zea file, or built with :func:`zea.simulator.transmit_pulse`),
     and the default pulse of that function without. The old names ``"exact"``,
@@ -110,8 +101,16 @@ class Simulate(Operation):
 
     ``n_fft`` is derived from the scan before the jitted call when it is not given, so the
     frequency-domain simulator runs under jit without it. ``max_chunk_gb`` None leaves each
-    simulator its own default. ``element_height`` (both simulators) defaults to an eighth of
-    the width of a 1D probe.
+    simulator its own default.
+
+    ``scatter_exponent`` is one value shared by every scatterer, or a vector of shape
+    (n_scat,) giving each scatterer its own backscatter coefficient, which only the
+    frequency-domain simulator supports. A concrete scalar is a static argument, so the band it
+    implies is trimmed for it and a new value recompiles; anything else (a vector, which jax
+    cannot hash, or a traced value, which has nothing to hash) is traced instead, so one kernel
+    serves every exponent and the exponent is differentiable. ``scatter_exponent_range``, the
+    exponent range the static band is picked from, is derived here whenever the exponent is
+    concrete; pass it, or ``band_db=None``, when it is not.
 
     ``element_height`` (both simulators) defaults to an eighth of the width of a 1D probe.
     """
@@ -136,14 +135,39 @@ class Simulate(Operation):
         "elevation_focus",
         "band_db",
         "n_fft",
+        "scatter_exponent_range",
     ]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
     def __init__(self, **kwargs):
+        self._scatter_exponent_static = True
         super().__init__(
             output_data_type=DataTypes.RAW_DATA,
             **kwargs,
         )
+
+    @property
+    def static_params(self):
+        """``scatter_exponent`` is static only while it is a concrete scalar: a per-scatterer
+        vector is an array, which jax cannot hash into a static argument, and a traced value has
+        nothing to hash at all. Both are traced instead."""
+        params = super().static_params
+        if self._scatter_exponent_static:
+            return params
+        return [param for param in params if param != "scatter_exponent"]
+
+    def _track_scatter_exponent(self, scatter_exponent):
+        """Rebuild the jit when the exponent switches between a concrete scalar and anything
+        else, since that moves it between the static and the traced arguments."""
+        static = _ndim(scatter_exponent) == 0 and _concrete(scatter_exponent) is not None
+        if static == self._scatter_exponent_static:
+            return
+        self._scatter_exponent_static = static
+        if keras.backend.backend() == "jax":
+            self.jit_kwargs = dict(self._user_jit_kwargs)
+            if self.static_params:
+                self.jit_kwargs["static_argnames"] = self.static_params
+            self.set_jit(self.jit_compile)
 
     def __call__(self, **kwargs):
         merged = {**self._input_cache, **kwargs}
@@ -153,16 +177,22 @@ class Simulate(Operation):
                 "`elevation_lens` was removed. Use `elevation_slab_2d` for the old 2D slab "
                 "approximation, or `elevation_focus` for a physical cylindrical elevation lens."
             )
+        self._track_scatter_exponent(merged.get("scatter_exponent", 2.0))
         if not self._inside_outer_jit:
             # Static scalars as Python numbers: tf.function would otherwise trace them as
             # tensors, and the simulators size the FFT from the concrete pulse length.
             merged.update(
                 {key: python_constant(merged[key]) for key in self.static_params if key in merged}
             )
-            # The FFT length is static and needs concrete geometry, so it is derived here.
+            # The FFT length and the exponent band are static and need concrete inputs, so
+            # they are derived here, before the exponents are traced into the jitted call.
             method = _resolve_method(merged.get("method", "frequency_domain"))
             if method == "frequency_domain" and merged.get("n_fft") is None:
                 merged["n_fft"] = _derived_fft_length(merged)
+            if method == "frequency_domain" and merged.get("scatter_exponent_range") is None:
+                merged["scatter_exponent_range"] = scatter_exponent_bounds(
+                    merged.get("scatter_exponent", 2.0)
+                )
         return super().__call__(**merged)
 
     def call(
@@ -201,6 +231,7 @@ class Simulate(Operation):
         band_db=-100.0,
         n_fft=None,
         lens_attenuation_coef=0.0,
+        scatter_exponent_range=None,
         **kwargs,
     ):
         method = _resolve_method(method)
@@ -215,6 +246,7 @@ class Simulate(Operation):
                 n_sub_elements=n_sub_elements,
                 elevation_focus=elevation_focus,
                 lens_attenuation_coef=lens_attenuation_coef,
+                scatter_exponent_range=scatter_exponent_range,
             )
         simulate_kwargs = {
             "waveforms_two_way": waveforms_two_way,
