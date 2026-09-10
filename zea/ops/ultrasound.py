@@ -105,6 +105,12 @@ class Simulate(Operation):
 
     def __call__(self, **kwargs):
         merged = {**self._input_cache, **kwargs}
+        if "elevation_lens" in merged:
+            # `call` takes **kwargs, so the removed keyword would otherwise be silently ignored.
+            raise TypeError(
+                "`elevation_lens` was removed. Use `elevation_slab_2d` for the old 2D slab "
+                "approximation, or `elevation_focus` for a physical cylindrical elevation lens."
+            )
         if not self._inside_outer_jit:
             # Static scalars as Python numbers: tf.function would otherwise trace them as
             # tensors, and the simulators size the FFT from the concrete pulse length.
