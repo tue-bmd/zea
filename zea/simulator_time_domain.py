@@ -44,6 +44,7 @@ from zea.simulator import (
     _one_way_distance,
     _resolve_element_width,
     _snap_elevation,
+    _ndim,
     _validate_scatter_exponent,
     _validate_two_dimensional,
     apply_receive_chain,
@@ -129,10 +130,18 @@ def simulate_rf_td(
         scatter_exponent (float): Weigh the scattered waveform spectrum by
             ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
             myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
+            One shared exponent only: the whole medium is splatted into a single spike map and
+            convolved with one pulse, so a per-scatterer vector is rejected. Use
+            :func:`zea.simulator.simulate_rf` for that.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
     """
+    if _ndim(scatter_exponent) > 0:
+        raise ValueError(
+            "per-scatterer backscatter coefficients are only supported in the frequency "
+            "domain simulator"
+        )
     _validate_two_dimensional(two_dimensional, None, probe_geometry)
     element_width = _resolve_element_width(probe_geometry, element_width)
     if element_height is None:

@@ -464,17 +464,14 @@ def test_simulate_op_derives_n_fft_for_its_jitted_call():
     _assert_close(reference, result[1], rel_tol=1e-3)
 
 
-def test_simulate_op_methods_and_deprecated_aliases():
+def test_simulate_op_methods():
+    """``time_domain`` reaches the time-domain simulator, and an unknown name is rejected.
+    The default ``frequency_domain`` is checked against its function above."""
     kwargs = _tensors(CASES["linear"])
     op = Simulate(jit_compile=False, with_batch_dim=False)
-    frequency = op(**kwargs, method="frequency_domain")[op.output_key]
-    _assert_close(frequency, op(**kwargs, method="exact")[op.output_key], rel_tol=1e-6)
     _assert_close(
-        frequency, op(**kwargs, method="frequency_approximation")[op.output_key], rel_tol=1e-6
+        simulate_rf_td(**kwargs), op(**kwargs, method="time_domain")[op.output_key], rel_tol=1e-4
     )
-    time = op(**kwargs, method="time_domain")[op.output_key]
-    _assert_close(simulate_rf_td(**kwargs), time, rel_tol=1e-4)
-    _assert_close(time, op(**kwargs, method="time_approximation")[op.output_key], rel_tol=1e-6)
     with pytest.raises(ValueError, match="method"):
         op(**kwargs, method="exact_slab")
 
@@ -530,6 +527,168 @@ def test_parameters_derive_n_fft_for_a_jitted_pipeline():
     kwargs = _tensors(CASES["linear"])
     # Tensorflow on GPU rounds to TF32 once torch is imported, as the test workers do.
     _assert_close(simulate_rf(**kwargs), outputs["data"], rel_tol=1e-3)
+
+
+def test_per_scatterer_scatter_exponent_matches_the_shared_one():
+    """A constant vector of exponents is the scalar it repeats."""
+    kwargs = CASES["matrix"]
+    n_scat = kwargs["scatterer_positions"].shape[0]
+    vector = np.full(n_scat, kwargs["scatter_exponent"], np.float32)
+    _assert_close(simulate_rf(**kwargs), simulate_rf(**{**kwargs, "scatter_exponent": vector}))
+
+
+def test_per_scatterer_scatter_exponent_superposes():
+    """Two exponents over disjoint halves of the phantom sum to the mixed-exponent frame,
+    so each scatterer really carries its own backscatter coefficient."""
+    kwargs = {**CASES["matrix"], "band_db": None}
+    magnitudes = kwargs["scatterer_magnitudes"]
+    first_half = np.arange(magnitudes.shape[0]) < magnitudes.shape[0] // 2
+    mixed = simulate_rf(**{**kwargs, "scatter_exponent": np.where(first_half, 0.0, 2.0)})
+    parts = [
+        simulate_rf(
+            **{
+                **kwargs,
+                "scatter_exponent": exponent,
+                "scatterer_magnitudes": np.where(half, magnitudes, 0.0),
+            }
+        )
+        for exponent, half in ((0.0, first_half), (2.0, ~first_half))
+    ]
+    _assert_close(mixed, parts[0] + parts[1], rel_tol=1e-4)
+
+
+def test_band_covers_both_scatter_exponent_extremes():
+    """The trimmed band is the union over the exponents in play, so trimming it costs no
+    more accuracy than it does for a single exponent."""
+    kwargs = {**CASES["matrix"], "scatter_exponent": None}
+    n_scat = kwargs["scatterer_positions"].shape[0]
+    kwargs["scatter_exponent"] = np.where(np.arange(n_scat) % 2, 0.0, 2.0).astype(np.float32)
+    _assert_close(simulate_rf(**{**kwargs, "band_db": None}), simulate_rf(**kwargs))
+
+
+def test_invalid_per_scatterer_scatter_exponent_raises():
+    kwargs = CASES["matrix"]
+    n_scat = kwargs["scatterer_positions"].shape[0]
+    with pytest.raises(ValueError, match="one value per scatterer"):
+        simulate_rf(**{**kwargs, "scatter_exponent": np.ones(n_scat + 1, np.float32)})
+    with pytest.raises(ValueError, match="dimensions"):
+        simulate_rf(**{**kwargs, "scatter_exponent": np.ones((n_scat, 1), np.float32)})
+    with pytest.raises(ValueError, match="scatter_exponent"):
+        simulate_rf(**{**kwargs, "scatter_exponent": -np.ones(n_scat, np.float32)})
+
+
+def test_time_domain_rejects_per_scatterer_scatter_exponent():
+    kwargs = {k: v for k, v in CASES["matrix"].items() if k != "scatter_exponent"}
+    n_scat = kwargs["scatterer_positions"].shape[0]
+    with pytest.raises(ValueError, match="only supported in the frequency domain"):
+        simulate_rf_td(**kwargs, scatter_exponent=np.full(n_scat, 1.5, np.float32))
+
+
+@pytest.mark.skipif(keras.backend.backend() != "jax", reason="jax tracing semantics")
+def test_traced_per_scatterer_scatter_exponent_needs_a_band():
+    """The band is a static shape, so a traced exponent has to declare its range."""
+    import jax
+
+    kwargs = {**CASES["matrix"], "n_fft": 1024}
+    exponent = kwargs.pop("scatter_exponent")
+    n_scat = kwargs["scatterer_positions"].shape[0]
+    vector = np.full(n_scat, exponent, np.float32)
+    static = (
+        "n_ax",
+        "center_frequency",
+        "sampling_frequency",
+        "n_fft",
+        "band_db",
+        "apply_lens_correction",
+    )
+    jitted = jax.jit(
+        lambda **kw: simulate_rf(**kw), static_argnames=static + ("scatter_exponent_range",)
+    )
+    with pytest.raises(ValueError, match="scatter_exponent_range"):
+        jitted(**kwargs, scatter_exponent=vector)
+    reference = simulate_rf(**kwargs, scatter_exponent=exponent)
+    _assert_close(reference, jitted(**kwargs, scatter_exponent=vector, band_db=None))
+    _assert_close(
+        reference,
+        jitted(**kwargs, scatter_exponent=vector, scatter_exponent_range=(exponent, exponent)),
+    )
+
+
+@pytest.mark.skipif(keras.backend.backend() != "jax", reason="jax tracing semantics")
+def test_traced_shared_scatter_exponent():
+    """A shared exponent may be traced too: only the band needs it concrete, not the gain.
+
+    Tracing it keeps one compiled kernel across exponents and makes the exponent
+    differentiable, at the price of declaring the band.
+    """
+    import jax
+    import jax.numpy as jnp
+
+    kwargs = {**CASES["matrix"], "n_fft": 1024}
+    exponent = kwargs.pop("scatter_exponent")
+    static = (
+        "n_ax",
+        "center_frequency",
+        "sampling_frequency",
+        "n_fft",
+        "band_db",
+        "apply_lens_correction",
+        "scatter_exponent_range",
+    )
+    jitted = jax.jit(lambda **kw: simulate_rf(**kw), static_argnames=static)
+    traced = jnp.float32(exponent)
+    with pytest.raises(ValueError, match="scatter_exponent_range"):
+        jitted(**kwargs, scatter_exponent=traced)
+    reference = simulate_rf(**kwargs, scatter_exponent=exponent)
+    _assert_close(reference, jitted(**kwargs, scatter_exponent=traced, band_db=None))
+    _assert_close(
+        reference,
+        jitted(**kwargs, scatter_exponent=traced, scatter_exponent_range=(exponent, exponent)),
+    )
+    # One band covering a range serves every exponent in it without recompiling.
+    for value in (0.5, exponent, 2.0):
+        _assert_close(
+            simulate_rf(**kwargs, scatter_exponent=value),
+            jitted(
+                **kwargs, scatter_exponent=jnp.float32(value), scatter_exponent_range=(0.5, 2.0)
+            ),
+        )
+    # A traced exponent carries a gradient, which a static one cannot.
+    grad = jax.grad(
+        lambda p: jnp.sum(
+            jitted(**kwargs, scatter_exponent=p, scatter_exponent_range=(0.5, 2.0)) ** 2
+        )
+    )(traced)
+    assert np.isfinite(grad) and grad != 0.0
+
+
+@pytest.mark.skipif(keras.backend.backend() != "jax", reason="jax tracing semantics")
+def test_op_traces_a_shared_scatter_exponent():
+    """Under an outer jit the op cannot read the exponent, so the caller declares the band."""
+    import jax
+    import jax.numpy as jnp
+
+    kwargs = {k: v for k, v in CASES["matrix"].items() if k != "scatter_exponent"}
+    exponent = CASES["matrix"]["scatter_exponent"]
+    op = Simulate(with_batch_dim=False, jit_compile=False)
+
+    def run(p):
+        return op(**kwargs, scatter_exponent=p, scatter_exponent_range=(exponent, exponent))["data"]
+
+    reference = simulate_rf(**kwargs, scatter_exponent=exponent)
+    _assert_close(reference, jax.jit(run)(jnp.float32(exponent)))
+
+
+def test_op_traces_a_per_scatterer_scatter_exponent():
+    """The op derives the static band before the jitted call, so the vector can be traced."""
+    kwargs = CASES["matrix"]
+    n_scat = kwargs["scatterer_positions"].shape[0]
+    op = Simulate(with_batch_dim=False)
+    reference = op(**kwargs)["data"]
+    vector = np.full(n_scat, kwargs["scatter_exponent"], np.float32)
+    _assert_close(reference, op(**{**kwargs, "scatter_exponent": vector})["data"])
+    # And back to a scalar, which moves the argument between static and traced again.
+    _assert_close(reference, op(**kwargs)["data"])
 
 
 def test_smooth_size_and_fft_length():

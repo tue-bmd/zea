@@ -13,7 +13,7 @@ Public API
     (``tf.function``) and PyTorch (``torch.compile``).
 
 :func:`checkpoint`
-    Gradient checkpointing (rematerialization) for JAX, TensorFlow and PyTorch.
+    Gradient checkpointing for JAX, TensorFlow and PyTorch.
 
 :func:`highest_matmul_precision`
     Context manager that keeps float32 matrix products at full precision where the
@@ -177,10 +177,10 @@ def _jit_compile(func, jax=True, tensorflow=True, torch=True, **kwargs):
 
 
 def checkpoint(func):
-    """Rematerialize ``func`` in the backward pass instead of storing its intermediates.
+    """Re-compute ``func`` in the backward pass instead of storing intermediates.
 
     Wraps ``jax.checkpoint``, ``tf.recompute_grad`` or ``torch.utils.checkpoint``. Returns
-    ``func`` unchanged on other backends.
+    ``func`` unchanged on other backends. Use if backprop doesn't fit in VRAM.
     """
     backend = keras.backend.backend()
     if backend == "jax" and jax_mod is not None:

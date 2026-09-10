@@ -1,8 +1,12 @@
 """Frequency domain ultrasound simulator.
 
 The simulator works in the frequency domain and simulates RF data as a superposition of scatterer
-responses. Every scatterer has a location and a magnitude. Backscatter coefficient and sound speed
-are set globally.
+responses. Every scatterer has a location and a magnitude, and optionally its own backscatter
+coefficient: ``scatter_exponent`` is one value shared by the medium, or a vector of one exponent
+per scatterer. Warning: the exponent is an amplitude exponent, not an intensity one. That means
+Rayleigh scattering is 2, not 4.
+
+Sound speed is set globally.
 
 To use it, you can call :func:`simulate_rf` with the desired transmit scheme parameters and
 scatterers directly, but the recommended path is to use :class:`zea.ops.Simulate`, which wraps the
@@ -110,6 +114,7 @@ def simulate_rf(
     lens_attenuation_coef=0.0,
     band_db=-100.0,
     n_fft=None,
+    scatter_exponent_range=None,
 ):
     """Simulates RF data for a given set of scatterers.
 
@@ -119,7 +124,7 @@ def simulate_rf(
     .. code-block:: text
 
         incident[f, t, s] = sum_e W[f, t, e] R_tx[f, s, e]    W = apod_te exp(-2 pi i f shift_te)
-        rf[f, t, e]       = sum_s S[f, t, s] R_rx[f, s, e]    S = incident * mag_s * gain(f)
+        rf[f, t, e]       = sum_s S[f, t, s] R_rx[f, s, e]    S = incident * mag_s * gain_s(f)
 
     The one-way responses ``R_tx`` and ``R_rx`` (directivity, spreading, attenuation and the
     travel phase) do not depend on the transmit, so they are generated once per frequency block
@@ -172,9 +177,11 @@ def simulate_rf(
         noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
             noiseless RF maximum. Pass a fixed reference to avoid the noise level changing per
             transmit batch. See :func:`apply_receive_chain`.
-        scatter_exponent (float): Weigh the scattered field by
+        scatter_exponent (float | array-like): Weigh the scattered field amplitude by
             ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
-            myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
+            myocardium is approximately 1.5, soft tissue 0.6-0.8. A float sets a global value, an
+            array of shape (n_scat,) gives each its own coefficient. If gradients are needed to
+            the exponent(s), either pass ``scatter_exponent_range=(min, max)`` or ``band_db=None``.
         rigid_baffle (bool): Element mounted in a rigid baffle (sinc directivity only). False
             models a soft baffle, which adds the obliquity factor cos(angle to the element
             normal), on transmit and on receive. Must be static under jit.
@@ -214,18 +221,28 @@ def simulate_rf(
             the aperture where the lens is thick and lowers the centre frequency.
         band_db (float, optional): Bins where the pulse spectrum, the transducer transfer
             function and the scattering gain together are below this many dB of their peak are
-            not synthesised. None keeps every bin. -100 matches the SIMUS default.
+            not synthesised. None disables filtering. With per-scatterer exponents, the band is the
+            derived from the union of the smallest and the largest exponent. With traced
+            ``scatter_exponent``, either set ``band_db`` to None or provide an explicit
+            ``scatter_exponent_range``.
         n_fft (int, optional): FFT length. Derived when None from ``n_ax``, the aperture and
             the transmit shifts (and the scatterer positions when concrete) so that no echo
             wraps into the record, see :func:`fft_length`. Must be given when the geometry, the
             delays or the sound speed are traced, e.g. under ``jax.jit`` without closing over
             them; :class:`zea.ops.Simulate` and :attr:`zea.Parameters.n_fft` derive it.
             ``center_frequency`` and ``sampling_frequency`` must be static.
+        scatter_exponent_range (tuple, optional): ``(min, max)`` exponent spanned by
+            ``scatter_exponent``, used to pick the band instead of reading the exponents.
+            Only needed when ``scatter_exponent`` is traced and ``band_db`` is set; for one
+            traced shared exponent it is ``(p, p)``, or the range swept over if the compiled
+            kernel is reused. :func:`scatter_exponent_bounds` derives it from a concrete
+            exponent, and :class:`zea.ops.Simulate` does so before the jitted call. A range
+            that does not cover the exponents in play truncates their band. Must be static
+            under jit.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
     """
-    _validate_scatter_exponent(scatter_exponent)
     _validate_two_dimensional(two_dimensional, elevation_focus, probe_geometry)
     fc, fs = float(center_frequency), float(sampling_frequency)
     n_ax = int(n_ax)
@@ -253,6 +270,8 @@ def simulate_rf(
     positions = ops.cast(scatterer_positions, "float32")
     magnitudes = ops.cast(scatterer_magnitudes, "float32")
     geometry = ops.cast(probe_geometry, "float32")
+    _validate_scatter_exponent(scatter_exponent, int(ops.shape(positions)[0]))
+    scatter_exponent = _resolve_scatter_exponent(scatter_exponent)
     if two_dimensional:
         positions = _snap_elevation(positions, geometry)
 
@@ -304,6 +323,7 @@ def simulate_rf(
         bandwidth_percent,
         probe_center_frequency,
         chirp_sweep,
+        scatter_exponent_range=scatter_exponent_range,
     )
 
     # Forward of one block per bin: the complex responses and the two matrix product outputs.
@@ -340,7 +360,7 @@ def simulate_rf(
             lens_thickness=_as_f32(lens_thickness),
             lens_sound_speed=_as_f32(lens_sound_speed),
             gate_time=_record_gate_time(n_ax, fs, fc, n_period),
-            scatter_exponent=float(scatter_exponent),
+            scatter_exponent=scatter_exponent,
             apply_lens_correction=bool(apply_lens_correction),
             two_dimensional=bool(two_dimensional),
             rigid_baffle=bool(rigid_baffle),
@@ -421,19 +441,20 @@ def _rf_block(
         lens_attenuation_coef,
         frequency_first=True,
     )
-    if scatter_exponent:
-        gain = (freqs / center_frequency) ** scatter_exponent
-    else:
-        gain = ops.ones_like(freqs)
     keep = _record_keep(dist, sound_speed, ops.min(shift), gate_time)
     weight = ops.where(keep, magnitudes, 0.0)
+    if scatter_exponent is not None:
+        # [f, 1] for one shared exponent, [f, s] for one exponent per scatterer.
+        weight = weight[None] * (freqs[:, None] / center_frequency) ** scatter_exponent
+    else:
+        weight = weight[None]
     f3 = freqs[:, None, None]
     tx_weights = _to_complex(tx_apodizations[None]) * ops.exp(
         ops.array(-2j * np.pi, "complex64") * _to_complex(shift[None] * f3)
     )
     with highest_matmul_precision():
         incident = ops.einsum("fte,fse->fts", tx_weights, tx_response)
-        scattered = incident * _to_complex(weight[None, None, :] * gain[:, None, None])
+        scattered = incident * _to_complex(weight)[:, None, :]
         return ops.einsum("fts,fse->fte", scattered, rx_response)
 
 
@@ -476,7 +497,7 @@ def pressure_field(
     the transmit pulse. The transducer transfer function enters once (its square root, as the
     ``bandwidth_percent`` band is pulse-echo), so a unit scatterer at a grid point returns this
     field through the receive response. In 2D the grid is moved into the imaging plane, as the
-    simulator moves its scatterers. The zea counterpart of SIMUS ``pfield``.
+    simulator moves its scatterers.
 
     Takes the arguments of :func:`simulate_rf` with the same meaning, except that
     ``attenuation_coef``, ``apply_lens_correction`` and the lens have defaults, plus:
@@ -1084,8 +1105,8 @@ def _element_angles(relative, frame):
     """Lateral and elevation angles and cos of the angle to the element normal.
 
     The sines of theta and phi are the direction cosines lateral / r and elevation / r, as in
-    the Fraunhofer pattern of a rectangular aperture (and SIMUS). Projected angles
-    arctan2(lateral, axial) would narrow the elevation pattern for laterally offset scatterers.
+    the Fraunhofer pattern of a rectangular aperture. Projected angles arctan2(lateral, axial) would
+    narrow the elevation pattern for laterally offset scatterers.
 
     Args:
         relative (array-like): Scatterer positions relative to the elements, (n_scat, n_el, 3).
@@ -1372,11 +1393,13 @@ def band_bins(
     probe_center_frequency=None,
     chirp_sweep=None,
     one_way=False,
+    scatter_exponent_range=None,
 ):
-    """Contiguous bin range that carries the band.
+    """Contiguous fft bin range that is not discarded.
 
     The pulse spectrum, the transducer transfer function and the scattering gain together
-    exceed ``band_db`` there.
+    exceed ``band_db`` there. If ``scatter_exponent`` is a vector of per-scatterer exponents, 
+    the band is calculated from the union of the min and max exponents.
     """
     freqs = _rfft_freqs(n_fft, sampling_frequency)
     if band_db is None:
@@ -1393,9 +1416,13 @@ def band_bins(
             one_way,
         )
     )
-    w = w * (freqs / center_frequency) ** scatter_exponent
-    keep = np.flatnonzero(w > w.max() * 10 ** (band_db / 20))
-    return int(keep[0]), int(keep[-1]) + 1
+    lo, hi = _exponent_range(scatter_exponent, scatter_exponent_range)
+    k0, k1 = len(freqs), 0
+    for exponent in (lo,) if lo == hi else (lo, hi):
+        band = w * (freqs / center_frequency) ** exponent
+        keep = np.flatnonzero(band > band.max() * 10 ** (band_db / 20))
+        k0, k1 = min(k0, int(keep[0])), max(k1, int(keep[-1]) + 1)
+    return k0, k1
 
 
 def _round_up_to_power_of_two(x):
@@ -1479,6 +1506,12 @@ def _concrete(x):
         return None
 
 
+def _ndim(x):
+    """Rank of ``x`` without converting it, so a traced array is not forced to numpy."""
+    shape = getattr(x, "shape", None)
+    return 0 if shape is None else len(shape)
+
+
 def _as_f32(x):
     return ops.cast(0.0 if x is None else x, "float32")
 
@@ -1492,15 +1525,83 @@ def _transmit_shift(t0_delays, initial_times, t_peak):
     )
 
 
-def _validate_scatter_exponent(scatter_exponent):
-    """Reject exponents that make the weighting non-finite: the DC bin is zero, so a
-    negative exponent gives infinite gain there, and the NaN spreads over the whole frame."""
-    if not np.isfinite(scatter_exponent) or scatter_exponent < 0:
+def _validate_scatter_exponent(scatter_exponent, n_scat=None):
+    """Reject invalid exponents (must be scalar or [n_scat], and finite nonnegative)."""
+    ndim = _ndim(scatter_exponent)
+    if ndim > 1:
         raise ValueError(
-            f"scatter_exponent ({scatter_exponent}) must be finite and non-negative. "
+            "scatter_exponent must be a scalar or a vector of one exponent per scatterer, "
+            f"got {ndim} dimensions."
+        )
+    if ndim == 1 and n_scat is not None:
+        n_given = int(ops.shape(scatter_exponent)[0])
+        if n_given != n_scat:
+            raise ValueError(
+                f"A per-scatterer scatter_exponent needs one value per scatterer: got "
+                f"{n_given} exponents for {n_scat} scatterers."
+            )
+    values = _concrete(scatter_exponent)
+    if values is None:
+        return
+    if not np.all(np.isfinite(values)) or np.any(values < 0):
+        shown = values if values.ndim == 0 else np.array2string(values, threshold=8)
+        raise ValueError(
+            f"scatter_exponent ({shown}) must be finite and non-negative. "
             "2 is Rayleigh scattering (e.g. blood), myocardium is approximately 1.5, "
             "soft tissue 0.6-0.8."
         )
+
+
+def _resolve_scatter_exponent(scatter_exponent):
+    """None when the weighting is the identity, a Python float for a concrete exponent shared
+    by every scatterer, else a float32 tensor.
+
+    The rank says whether the exponent is shared or per-scatterer and the gain broadcasts either
+    way, so only a concrete scalar is folded into a Python float; a traced one stays a tensor.
+    """
+    if _ndim(scatter_exponent) == 0:
+        value = _concrete(scatter_exponent)
+        if value is not None:
+            return float(value) or None
+    return ops.cast(scatter_exponent, "float32")
+
+
+def scatter_exponent_bounds(scatter_exponent):
+    """Smallest and largest exponent, or None when ``scatter_exponent`` is traced.
+
+    Both edges of the bound move monotonically with the exponent, so the union of the bands of the
+    min/max exponents covers every scatterer. ``simulate_rf`` derives them from a concrete exponent;
+    input shape is static, so a caller that traces the exponent should pass the pair as
+    ``scatter_exponent_range``.
+    """
+    if scatter_exponent is None:
+        return 0.0, 0.0
+    values = _concrete(scatter_exponent)
+    if values is None:
+        return None
+    if values.size == 0:
+        return 0.0, 0.0
+    return float(values.min()), float(values.max())
+
+
+def _exponent_range(scatter_exponent, given=None):
+    """``given`` when it is, else the range spanned by ``scatter_exponent`` itself."""
+    if given is not None:
+        lo, hi = (float(v) for v in given)
+        if not np.isfinite([lo, hi]).all() or lo < 0 or hi < lo:
+            raise ValueError(
+                f"scatter_exponent_range ({lo}, {hi}) must be a finite, non-negative, "
+                "increasing pair."
+            )
+        return lo, hi
+    bounds = scatter_exponent_bounds(scatter_exponent)
+    if bounds is None:
+        raise ValueError(
+            "band_db needs the range of scatter_exponent to pick the band, and a traced "
+            "exponent does not give it. Pass scatter_exponent_range=(min, max) (see "
+            "scatter_exponent_bounds), or band_db=None to keep every bin."
+        )
+    return bounds
 
 
 def _validate_two_dimensional(two_dimensional, elevation_focus, probe_geometry, tol=1e-6):
@@ -1594,9 +1695,8 @@ def _resolve_sub_elements(
 ):
     """Sub-elements per element as (n_lateral, n_elevation).
 
-    "auto" is the SIMUS rule ceil(size / lambda_min), lambda_min at the top of the transducer
-    band. None and an int keep one elevation sub-element unless there is an elevation focus,
-    which needs the elevation subdivision to act at all. 2D has no elevation to subdivide.
+    "auto" splits an element into patches of ceil(size / lambda_min), i.e. at most one wavelength,
+    to make sure that the far-field assumption is valid.
     """
     if isinstance(n_sub_elements, (tuple, list)):
         n_lateral, n_elevation = (int(n) for n in n_sub_elements)
