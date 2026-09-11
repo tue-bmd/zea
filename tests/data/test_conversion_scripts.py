@@ -581,6 +581,54 @@ def create_us4us_test_data(src):
     return ["--mapping", "0:image", "1:beamformed_data"]
 
 
+@pytest.mark.heavy
+@pytest.mark.parametrize("pass_metadata_explicitly", [False, True])
+def test_us4us_conversion_with_separate_metadata(tmp_path, pass_metadata_explicitly):
+    """A real us4us recording whose ARRUS metadata is a separate pickle converts.
+
+    Some us4us setups pickle the frames on their own -- a bare list of per-frame tuples
+    with no ``metadata`` key -- and write the ARRUS metadata next to it. The fixture is
+    two frames of pipeline output 0 taken verbatim from a 1.75 GB chicken-breast
+    recording, kept small enough for CI; its metadata is the sidecar of that recording.
+
+    Both routes to the metadata are covered: found automatically in the Hugging Face
+    repo, and named explicitly the way ``--metadata`` does.
+    """
+    from zea.data.convert.us4us import convert_us4us_file
+
+    src = "hf://zeahub/pytest/us4us/zea_us4us_separate_metadata_test_data.pkl"
+    metadata_path = (
+        "hf://zeahub/pytest/us4us/data_2024-03-01_17-27-07_metadata.pkl"
+        if pass_metadata_explicitly
+        else None
+    )
+
+    dst = convert_us4us_file(
+        src, tmp_path / "separate_metadata.hdf5", ["0:image"], metadata_path=metadata_path
+    )
+
+    with File(dst, "r") as f:
+        f.validate()
+        image = f.tracks[0].data.image
+        assert image.values.shape == (2, 450, 468)
+        # The metadata describes this recording, so its grid matches the image and the
+        # per-pixel coordinates are kept rather than dropped.
+        assert image.coordinates.shape == (450, 468, 3)
+        # ARRUS marks pixels outside the scan-converted region with NaN, which the
+        # converter stores as -inf on the dB scale.
+        values = image.values[:]
+        assert np.isneginf(values).any(), "the out-of-region pixels should be -inf"
+        assert values[np.isfinite(values)].max() <= 0, "float zea images are in dB, max 0"
+
+        scan = f.tracks[0].scan
+        assert scan.t0_delays.shape == (64, 192)
+        assert np.isclose(scan.sound_speed, 1483)
+        # Scan parameters come from the pipeline output with the highest sampling
+        # frequency -- here the raw-data entry at the 65 MHz ADC rate, not the 16.25 MHz
+        # of the image itself.
+        assert np.isclose(scan.sampling_frequency, 65e6)
+
+
 def verify_converted_echonet_test_data(dst):
     """
     Verify that the converted EchoNet test dataset has the correct structure with hdf5 files

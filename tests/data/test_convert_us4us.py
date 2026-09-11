@@ -864,7 +864,7 @@ def test_recording_from_an_older_arrus_is_rejected_with_a_hint(tmp_path):
     context = payload["metadata"][0]._context
     context.raw_sequence = _arrus("arrus.ops.us4r", "TxRxSequence", ops=[])
     src = write_pickle(tmp_path / "old.pkl", payload)
-    with pytest.raises(Us4usConversionError, match="older than 0.12.0"):
+    with pytest.raises(Us4usConversionError, match="did not store it before 0.12.0"):
         convert_us4us_file(src, tmp_path / "out.hdf5")
 
 

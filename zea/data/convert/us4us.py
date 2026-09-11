@@ -777,8 +777,8 @@ def _validate_metadata_entry(metadata_entry, *, source=None) -> None:
     if not ops:
         raise Us4usConversionError(
             f"Invalid ARRUS metadata{where}: context.raw_sequence.ops is missing or empty, so "
-            "the TX/RX sequence cannot be converted. ARRUS releases older than 0.12.0 did not "
-            "store it." + note
+            "the TX/RX sequence cannot be converted. ARRUS did not store it before 0.12.0, and "
+            "a later release may have moved or renamed it." + note
         )
     for attribute in ("tx", "rx"):
         if getattr(ops[0], attribute, None) is None:
