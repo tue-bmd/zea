@@ -1502,7 +1502,9 @@ def transducer_transfer(
     if bandwidth_percent is None:
         return xp.ones_like(f)
     bandwidth = _concrete(bandwidth_percent)
-    if bandwidth is not None and float(bandwidth) <= 0:
+    if bandwidth is not None and (
+        not np.isfinite(float(bandwidth)) or float(bandwidth) <= 0
+    ):
         raise ValueError(f"bandwidth_percent must be positive, got {float(bandwidth)}.")
     if probe_center_frequency is None:
         probe_center_frequency = center_frequency
