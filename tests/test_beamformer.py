@@ -27,6 +27,9 @@ N_EL = 8  # number of transducer elements
 SOUND_SPEED = 1540.0  # m/s
 SAMPLING_FREQ = 40e6  # Hz
 DEMOD_FREQ = 5e6  # Hz
+# Record length for tof_correction inputs; round-trip delays on the test grids reach ~1550
+# samples (convex probe), and shorter records would leave the output entirely zero.
+N_AX = 1600
 
 
 @pytest.fixture
@@ -75,7 +78,7 @@ def _make_calculate_delays_inputs(probe_geometry, flatgrid, n_tx=3):
     )
 
 
-def _make_tof_inputs(probe_geometry, flatgrid, n_tx=3, n_ax=64, n_ch=1):
+def _make_tof_inputs(probe_geometry, flatgrid, n_tx=3, n_ax=N_AX, n_ch=1):
     """Build the full set of inputs required by ``tof_correction``."""
     n_el = probe_geometry.shape[0]
     data = np.random.randn(n_tx, n_ax, n_el, n_ch).astype(np.float32)
@@ -106,7 +109,7 @@ def _make_tof_inputs(probe_geometry, flatgrid, n_tx=3, n_ax=64, n_ch=1):
     )
 
 
-def _make_multistatic_inputs(probe_geometry, flatgrid, n_ax=128):
+def _make_multistatic_inputs(probe_geometry, flatgrid, n_ax=N_AX):
     """Build inputs for a multistatic dataset (n_tx == n_el)."""
     n_el = probe_geometry.shape[0]
     n_tx = n_el  # multistatic requirement
@@ -722,42 +725,43 @@ def test_calculate_delays_in_samples(probe_geometry, flatgrid):
 
 
 # tof_correction
+# Delays reach ~1500 samples, so per-backend float32 round-off in them is ~1e-4 samples;
+# interpolating white-noise data amplifies that to ~6e-4 in the output, hence decimal=3.
 
 
-@backend_equality_check()
+@backend_equality_check(decimal=3)
 def test_tof_correction_output_shape_rf(probe_geometry, flatgrid):
     """Output should be (n_tx, n_pix, n_el, n_ch)."""
-    n_tx, n_ax, n_ch = 3, 64, 1
-    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=n_tx, n_ax=n_ax, n_ch=n_ch)
+    n_tx, n_ch = 3, 1
+    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=n_tx, n_ch=n_ch)
     result = tof_correction(**inputs)
     n_pix = flatgrid.shape[0]
     assert result.shape == (n_tx, n_pix, N_EL, n_ch)
     return result
 
 
-@backend_equality_check()
+@backend_equality_check(decimal=3)
 def test_tof_correction_output_shape_iq(probe_geometry, flatgrid):
     """IQ data (n_ch=2) should also work and trigger phase rotation."""
-    n_tx, n_ax, n_ch = 2, 64, 2
-    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=n_tx, n_ax=n_ax, n_ch=n_ch)
+    n_tx, n_ch = 2, 2
+    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=n_tx, n_ch=n_ch)
     result = tof_correction(**inputs)
     n_pix = flatgrid.shape[0]
     assert result.shape == (n_tx, n_pix, N_EL, n_ch)
     return result
 
 
-@backend_equality_check()
+@backend_equality_check(decimal=3)
 def test_tof_correction_with_fnumber(probe_geometry, flatgrid):
     """Using a nonzero f-number should produce masked (zero-valued) regions."""
-    n_tx, n_ax = 1, 64
-    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=n_tx, n_ax=n_ax)
+    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=1)
     inputs["f_number"] = 1.0
     result = keras.ops.convert_to_numpy(tof_correction(**inputs))
     assert np.any(result == 0.0), "Expected some masked-out values with f_number > 0"
     return result
 
 
-@backend_equality_check()
+@backend_equality_check(decimal=3)
 def test_tof_correction_convex_probe_fnumber(flatgrid):
     """A curved (convex) probe runs end-to-end with per-element-normal masking.
 
@@ -771,7 +775,7 @@ def test_tof_correction_convex_probe_fnumber(flatgrid):
         [radius * np.sin(phi), np.zeros_like(phi), radius * (np.cos(phi) - 1.0)], axis=-1
     ).astype(np.float32)
 
-    inputs = _make_tof_inputs(convex_geometry, flatgrid, n_tx=2, n_ax=64)
+    inputs = _make_tof_inputs(convex_geometry, flatgrid, n_tx=2)
     inputs["f_number"] = 1.0
     result = keras.ops.convert_to_numpy(tof_correction(**inputs))
 
@@ -784,8 +788,7 @@ def test_tof_correction_convex_probe_fnumber(flatgrid):
 @backend_equality_check()
 def test_tof_correction_zero_data(probe_geometry, flatgrid):
     """Zero input data should produce zero output regardless of delays."""
-    n_tx, n_ax = 2, 64
-    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=n_tx, n_ax=n_ax)
+    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=2)
     inputs["data"] = np.zeros_like(inputs["data"])
     result = keras.ops.convert_to_numpy(tof_correction(**inputs))
     np.testing.assert_allclose(result, 0.0, atol=1e-7)
@@ -795,7 +798,8 @@ def test_tof_correction_zero_data(probe_geometry, flatgrid):
 # tof_correction with sos_grid
 
 
-@backend_equality_check(backends=["tensorflow", "jax"])
+# Ray-integrated delays add more round-off (see flat_sos_grid test below).
+@backend_equality_check(decimal=2, backends=["tensorflow", "jax"])
 def test_tof_correction_sos_grid_output_shape(probe_geometry, flatgrid):
     """Output shape should be (n_tx, n_pix, n_el, n_ch)."""
     inputs = _make_multistatic_inputs(probe_geometry, flatgrid)
@@ -816,12 +820,12 @@ def test_tof_correction_sos_grid_zero_data(probe_geometry, flatgrid):
     return result
 
 
-# The ray-integrated delays (~650 samples) carry float32 round-off that differs per
-# backend (~7e-4 samples); interpolating white-noise data amplifies that to ~3e-3.
+# The ray-integrated delays carry float32 round-off that differs per backend (up to
+# ~7e-4 samples); interpolating white-noise data amplifies that to ~2e-3.
 @backend_equality_check(decimal=2, backends=["tensorflow", "jax"])
 def test_tof_correction_flat_sos_grid_matches_homogeneous(probe_geometry, flatgrid):
     """A constant sos map must reproduce the analytical constant-sound-speed delays."""
-    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_ax=1400)
+    inputs = _make_tof_inputs(probe_geometry, flatgrid)
     homogeneous = keras.ops.convert_to_numpy(tof_correction(**inputs))
 
     nx_sos, nz_sos = 16, 16
