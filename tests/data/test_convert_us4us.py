@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from zea.data.convert import us4us
 from zea.data.convert.us4us import (
     Us4usConversionError,
     _arrus_stub_for,
@@ -579,6 +580,95 @@ def test_directory_without_recordings_raises(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# hf:// sources (the download itself is faked; the real one is covered by
+# test_conversion_scripts.py)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def fake_hub(monkeypatch, tmp_path):
+    """Serve a ``zeahub/pytest`` repo out of ``tmp_path`` instead of the Hub."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def resolve(hf_path, **_):
+        """Local stand-in for the download: map hf://zeahub/pytest/<sub> onto the repo."""
+        _, subpath = us4us._hf_parse_path(hf_path)
+        target = repo / subpath
+        if not target.exists():
+            raise FileNotFoundError(f"{subpath} not found in zeahub/pytest")
+        return target
+
+    monkeypatch.setattr(us4us, "_hf_resolve_path", resolve)
+    monkeypatch.setattr(
+        us4us,
+        "_hf_list_files",
+        lambda repo_id, **_: [str(f.relative_to(repo)) for f in repo.rglob("*") if f.is_file()],
+    )
+    return repo
+
+
+def test_hf_source_is_downloaded_before_conversion(fake_hub, tmp_path):
+    """``hf://`` survives argument parsing and is resolved, not treated as a local path.
+
+    ``Path("hf://...")`` collapses the double slash to ``hf:/``, so the CLI has to keep
+    the source as a string all the way to the converter.
+    """
+    payload, _ = make_recording()
+    write_pickle(fake_hub / "us4us_recording.pkl", payload)
+
+    convert_us4us(
+        SimpleNamespace(
+            src="hf://zeahub/pytest/us4us_recording.pkl",
+            dst=tmp_path / "out.hdf5",
+            mapping=["0:image"],
+        )
+    )
+
+    with File(tmp_path / "out.hdf5", "r") as file:
+        file.validate()
+
+
+def test_hf_source_that_does_not_exist_names_the_repo_and_file(fake_hub, tmp_path):
+    """A missing hf:// source is reported against the repo, not as a mangled local path.
+
+    ``Path("hf://zeahub/pytest/nope.pkl")`` used to reach the existence check as
+    ``hf:/zeahub/pytest/nope.pkl``, which said nothing about the Hub.
+    """
+    with pytest.raises(FileNotFoundError, match="nope.pkl not found in zeahub/pytest"):
+        convert_us4us(SimpleNamespace(src="hf://zeahub/pytest/nope.pkl", dst=tmp_path / "out.hdf5"))
+
+
+def test_hf_sidecar_metadata_is_found_in_the_repo(fake_hub, tmp_path):
+    """Resolving an hf:// file downloads only that file, so the sidecar comes from the repo."""
+    payload, _ = make_recording()
+    (fake_hub / "us4us").mkdir()
+    write_pickle(fake_hub / "us4us" / "recording.pkl", payload["data"])
+    write_pickle(fake_hub / "us4us" / "recording_metadata.pkl", {"metadata": payload["metadata"]})
+
+    convert_us4us_file("hf://zeahub/pytest/us4us/recording.pkl", tmp_path / "out.hdf5", ["0:image"])
+
+    with File(tmp_path / "out.hdf5", "r") as file:
+        assert file.tracks[0].data.image.values.shape == (N_FRAMES, N_Z, N_X)
+
+
+def test_hf_metadata_argument_is_resolved(fake_hub, tmp_path):
+    """--metadata takes an hf:// path too, and need not sit next to the recording."""
+    payload, _ = make_recording()
+    write_pickle(fake_hub / "data.pkl", payload["data"])
+    write_pickle(fake_hub / "elsewhere.pkl", {"metadata": payload["metadata"]})
+
+    convert_us4us(
+        SimpleNamespace(
+            src="hf://zeahub/pytest/data.pkl",
+            dst=tmp_path / "out.hdf5",
+            mapping=["0:image"],
+            metadata="hf://zeahub/pytest/elsewhere.pkl",
+        )
+    )
+
+    assert (tmp_path / "out.hdf5").exists()
+
+
+# ---------------------------------------------------------------------------
 # ARRUS metadata the converter has to cope with
 # ---------------------------------------------------------------------------
 def test_speed_of_sound_falls_back_to_a_default(tmp_path, caplog):
@@ -896,7 +986,51 @@ def test_an_untested_arrus_version_warns_but_converts(tmp_path, caplog):
 
     convert_us4us_file(src, tmp_path / "out.hdf5", ["0:image"])
 
-    assert "outside the tested range" in caplog.text
+    assert "outside the tested releases" in caplog.text
+
+
+def test_an_untested_arrus_version_is_named_in_conversion_errors(tmp_path):
+    """A failure on a newer ARRUS says the version is unsupported, not just what is missing.
+
+    The attribute that happens to be missing is the symptom; the ARRUS release that
+    moved it is the cause, and that is what the user has to act on.
+    """
+    payload, _ = make_recording()
+    for entry in payload["metadata"]:
+        entry.version = "0.15.0"
+        entry._context.device.probe[0].model.element_pos_x = None
+    src = write_pickle(tmp_path / "newer_broken.pkl", payload)
+
+    with pytest.raises(Us4usConversionError, match=r"ARRUS 0\.15\.0, which this converter"):
+        convert_us4us_file(src, tmp_path / "out.hdf5", ["0:image"])
+
+
+def test_missing_optional_arrus_metadata_is_reported_together(tmp_path, caplog):
+    """Fields that silently fall back are named in one warning, with the ARRUS version.
+
+    Each of these has a default, so the conversion succeeds either way; the warning is
+    the only sign that an ARRUS release moved something the converter reads.
+    """
+    payload, _ = make_recording()
+    for entry in payload["metadata"]:
+        entry._context.raw_sequence.ops[0].pri = None
+        entry._context.device.probe[0].model.pitch = None
+    src = write_pickle(tmp_path / "sparse_metadata.pkl", payload)
+
+    convert_us4us_file(src, tmp_path / "out.hdf5", ["0:image"])
+
+    assert "ops[0].pri (falls back for scan.time_to_next_transmit)" in caplog.text
+    assert "probe.model.pitch (falls back for probe.element_width)" in caplog.text
+    assert "reports ARRUS 0.13.0, which this converter supports" in caplog.text
+
+
+def test_complete_arrus_metadata_reports_no_divergence(recording, tmp_path, caplog):
+    """The healthy recording must not warn, or the warning means nothing when it fires."""
+    src, _ = recording
+
+    convert_us4us_file(src, tmp_path / "out.hdf5", ["0:image"])
+
+    assert "does not carry every field" not in caplog.text
 
 
 def test_grid_spacing_with_too_few_axes_is_left_out(tmp_path):

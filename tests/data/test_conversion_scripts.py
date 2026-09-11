@@ -576,7 +576,7 @@ def create_us4us_test_data(src):
     The two-entry mapping converts both pipeline outputs of that recording, so
     the test covers writing several data types side by side in one track.
     """
-    pkl_file = _hf_resolve_path("hf://zeahub/pytest/zea_us4us_converter_test_data.pkl")
+    pkl_file = _hf_resolve_path("hf://zeahub/pytest/us4us/zea_us4us_converter_test_data.pkl")
     shutil.copy(pkl_file, src / pkl_file.name)
     return ["--mapping", "0:image", "1:beamformed_data"]
 

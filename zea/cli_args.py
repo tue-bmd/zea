@@ -805,8 +805,9 @@ class _EchoXFlow:
 class _Us4us:
     """Convert us4us (ARRUS + gui4us) recordings to zea format."""
 
-    src: tyro.conf.Positional[Path]
-    """Source path: a single .pkl recording, or a directory holding one or more .pkl files."""
+    src: tyro.conf.Positional[str]
+    """Source path: a single .pkl recording, or a directory holding one or more .pkl files.
+    An hf:// path is downloaded first (e.g. hf://zeahub/pytest/us4us/recording.pkl)."""
     dst: tyro.conf.Positional[Path]
     """Destination path: a .hdf5 file when src is a file, or a directory when src is a
     directory (each <name>.pkl is written as <dst>/<name>.hdf5)."""
@@ -814,9 +815,10 @@ class _Us4us:
     """Which pipeline output becomes which zea data type, as '<index>:<data type>' entries
     (e.g. --mapping 0:image 1:beamformed_data). A JSON object is also accepted. Supported
     data types: raw_data, beamformed_data, envelope_data, image."""
-    metadata: Path | None = None
+    metadata: str | None = None
     """Pickle holding the ARRUS metadata, for recordings that store data and metadata
-    separately. A sibling '<name>_metadata.pkl' is picked up automatically."""
+    separately (local or hf://). A sibling '<name>_metadata.pkl' is picked up
+    automatically, from the same repo for an hf:// recording."""
     separate_tracks: bool = False
     """Write every mapped output to its own zea track instead of storing them side by side
     in a single track."""

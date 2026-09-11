@@ -35,9 +35,25 @@ Usage
     # Whole directory: every <name>.pkl becomes <dst>/<name>.hdf5
     zea convert us4us ./recordings ./converted --mapping 0:image
 
+    # Straight from the Hub: an hf:// file or folder is downloaded first
+    zea convert us4us hf://zeahub/pytest/us4us/recording.pkl recording.hdf5
+
+    # Frames and ARRUS metadata pickled separately
+    zea convert us4us recording.pkl recording.hdf5 --metadata recording_metadata.pkl
+
+``<src>`` and ``<dst>`` are either single files (``.pkl`` and ``.hdf5``) or
+directories, in which case every recording in ``<src>`` is converted. Both a
+file and a directory may be given as an ``hf://`` path, which is downloaded
+first.
+
 ``--mapping`` entries are ``<pipeline output index>:<zea data type>`` pairs;
 a JSON object (``--mapping '{"0": "image", "1": "raw_data"}'``) is accepted as
 well. Supported zea data types are listed in :data:`SUPPORTED_DATA_TYPES`.
+
+Some us4us setups pickle the frames and the ARRUS metadata separately. Pass the
+metadata with ``--metadata <file.pkl>``; a sibling ``<name>_metadata.pkl`` (in
+the same directory, or in the same Hugging Face repo for an ``hf://``
+recording) is picked up automatically.
 
 ARRUS metadata used
 -------------------
@@ -68,10 +84,16 @@ transmit) and ``model`` for ``context.device.probe[0].model``:
 - ``context.medium.speed_of_sound`` -> ``scan.sound_speed``
 
 .. note::
-    Tested against ARRUS 0.12.x – 0.14.x recordings (gui4us 0.3.x). Files
-    written by other versions are converted on a best-effort basis: the
-    converter validates the structures it needs and reports precisely which one
-    is missing rather than guessing.
+    Tested against the ARRUS releases listed in :data:`TESTED_ARRUS_VERSIONS`
+    (gui4us 0.3.x). Files written by other versions are converted on a
+    best-effort basis. A diverged ARRUS release is the usual reason a genuine
+    recording fails to convert, so the converter is built to say so rather than
+    to guess: it validates the structures it needs and names the one that is
+    missing together with the ARRUS version the recording reports, and it warns
+    when any of the optional metadata in ``_OPTIONAL_ARRUS_FIELDS`` is absent,
+    since those fall back to a default instead of failing. When a new ARRUS
+    release lands, converting a recording made with it and reading those
+    warnings is the intended way to find out what moved.
 
 .. warning::
     **Limitations.** This converter targets *basic, standard* us4us
@@ -105,19 +127,21 @@ transmit) and ``model`` for ``context.device.probe[0].model``:
 
 import json
 import pickle
-import re
 from collections.abc import Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from typing import Any
 
 import numpy as np
 
 from zea import log
 from zea.data.file import File
 from zea.data.spec import DEFAULT_COMPRESSION
+from zea.internal.preset_utils import HF_PREFIX, _hf_list_files, _hf_parse_path, _hf_resolve_path
 
 __all__ = [
     "SUPPORTED_DATA_TYPES",
     "DEFAULT_MAPPING",
+    "TESTED_ARRUS_VERSIONS",
     "Us4usConversionError",
     "convert_us4us",
     "convert_us4us_file",
@@ -139,9 +163,36 @@ DEFAULT_MAPPING = {0: "image"}
 #: report one.
 DEFAULT_SOUND_SPEED = 1540.0
 
-# ARRUS releases this converter was developed and tested against. Recordings that
-# report another version are still converted, but with a warning.
-_TESTED_ARRUS_VERSION_RE = re.compile(r"^0\.(12|13|14)\.")
+#: ARRUS releases this converter was developed and tested against, as ``major.minor``
+#: prefixes. A recording from another release is still converted, but every error and
+#: warning says which version it reports and which ones are supported: an ARRUS release
+#: that moves or renames metadata is by far the most likely reason for a conversion of a
+#: genuine us4us recording to fail or to come out lossy.
+TESTED_ARRUS_VERSIONS = ("0.12", "0.13", "0.14")
+
+#: ARRUS metadata the converter reads but can do without, as ``(path, what is lost)``
+#: pairs, where ``ops[0]`` is the first transmit of ``context.raw_sequence`` and
+#: ``probe`` the single probe of ``context.device``. Alternatives are separated by
+#: ``|``. Unlike the fields :func:`_validate_metadata_entry` requires, these fall back
+#: to a default when absent, so an ARRUS release that moved or renamed one would quietly
+#: produce a lossier file. They are probed together and reported in one warning, which
+#: is what makes such a divergence visible -- keep this list in step with what
+#: :func:`_extract_probe_dict` and :func:`_extract_scan_dict` actually read.
+#:
+#: ``probe.model.lens`` and ``ops[0].tx.apodization`` are deliberately absent: probes
+#: without a lens and sequences with uniform apodization are ordinary, and ARRUS omits
+#: both, so their absence says nothing about the ARRUS version.
+_OPTIONAL_ARRUS_FIELDS = (
+    ("medium.speed_of_sound", "scan.sound_speed"),
+    ("probe.model.pitch", "probe.element_width"),
+    ("probe.model.curvature_radius", "probe.type"),
+    ("probe.model.model_id.name", "probe.name"),
+    ("ops[0].tx.excitation.center_frequency", "scan.center_frequency"),
+    ("ops[0].rx.sample_range|ops[0].rx.time_range", "scan.initial_times"),
+    ("ops[0].pri", "scan.time_to_next_transmit"),
+    ("sequence.tx_focus|ops[0].tx.focus", "scan.focus_distances"),
+    ("sequence.angles|ops[0].tx.angle", "scan.polar_angles"),
+)
 
 _METADATA_SUFFIXES = ("_metadata.pkl", ".metadata.pkl", "_meta.pkl")
 
@@ -175,6 +226,10 @@ def parse_mapping(mapping) -> dict:
     if mapping is None:
         return dict(DEFAULT_MAPPING)
 
+    # Entries out of a dict or a JSON object carry values of any type, which is exactly
+    # what the int()/str() checks below are here to reject, so keep the element type open
+    # rather than narrowing it to what only the token branch produces.
+    raw_items: list[tuple[Any, Any]]
     if isinstance(mapping, Mapping):
         raw_items = list(mapping.items())
     else:
@@ -303,11 +358,12 @@ class _ArrusStub:
     arrus_class = "arrus"
 
     def __init__(self, *args, **kwargs):
-        """Accept any constructor arguments an ARRUS class would have taken."""
-        # Enum-like classes are reconstructed by calling the class; keep the
-        # arguments around so diagnostics can show them.
-        self._stub_args = args
-        self._stub_kwargs = kwargs
+        """Accept and discard any constructor arguments an ARRUS class would have taken.
+
+        Enum-like ARRUS classes are reconstructed by calling the class rather than
+        through ``__setstate__``; every attribute the converter reads comes from the
+        pickled state, so the constructor arguments are not kept.
+        """
 
     def __setstate__(self, state):
         """Restore the pickled attributes, from ``__dict__`` and any ``__slots__``."""
@@ -443,14 +499,148 @@ def _get_data_description(metadata_entry):
     )
 
 
+def _arrus_version(metadata_entry) -> "str | None":
+    """ARRUS version a metadata entry reports, or ``None``.
+
+    Most recordings report none: ``ConstMetadata._version`` is only populated by some
+    gui4us versions, so an absent version is normal and not in itself a problem.
+    """
+    version = getattr(metadata_entry, "version", None) or getattr(metadata_entry, "_version", None)
+    return str(version) if version else None
+
+
+def _is_tested_arrus_version(version) -> bool:
+    """True when ``version`` is one this converter was tested against (or is unknown)."""
+    return version is None or version.startswith(tuple(f"{v}." for v in TESTED_ARRUS_VERSIONS))
+
+
+def _version_note(metadata_entry) -> str:
+    """Sentence naming the ARRUS version at hand and the ones this converter supports.
+
+    Appended to every error about missing or unexpected ARRUS metadata, so that a
+    recording from a diverged ARRUS release says so rather than only naming the
+    attribute that happened to be missing.
+    """
+    version = _arrus_version(metadata_entry)
+    tested = ", ".join(f"{prefix}.x" for prefix in TESTED_ARRUS_VERSIONS)
+    if version is None:
+        return (
+            f" The recording does not report an ARRUS version. This converter supports ARRUS "
+            f"{tested}; an ARRUS release that moved or renamed this metadata is the most "
+            "likely cause."
+        )
+    if _is_tested_arrus_version(version):
+        return f" The recording reports ARRUS {version}, which this converter supports."
+    return (
+        f" The recording reports ARRUS {version}, which this converter does not support yet "
+        f"(supported: {tested}) -- that is the most likely cause."
+    )
+
+
+def _resolve_arrus_path(context, path: str):
+    """Follow one :data:`_OPTIONAL_ARRUS_FIELDS` path from an acquisition context.
+
+    Returns ``None`` as soon as a step is missing, so a renamed or moved attribute is
+    indistinguishable from an absent one -- which is exactly what the caller reports.
+    """
+    value = context
+    for part in path.split("."):
+        if part == "ops[0]":
+            ops = getattr(getattr(context, "raw_sequence", None), "ops", None)
+            value = ops[0] if ops else None
+        elif part == "probe":
+            value = _get_probes(context)[0]
+        else:
+            value = getattr(value, part, None)
+        if value is None:
+            return None
+    return value
+
+
+def _report_arrus_divergence(context, metadata_entry, *, source=None) -> list:
+    """Warn about optional ARRUS metadata the converter reads but did not find.
+
+    Every field in :data:`_OPTIONAL_ARRUS_FIELDS` has a fallback, so the conversion
+    succeeds either way. The warning is what turns an ARRUS release that moved or
+    renamed metadata into a visible signal instead of a quietly lossier zea file.
+
+    Returns:
+        list: The ``(path, what is lost)`` pairs that could not be resolved.
+    """
+    missing = [
+        (path, lost)
+        for path, lost in _OPTIONAL_ARRUS_FIELDS
+        if all(_resolve_arrus_path(context, alternative) is None for alternative in path.split("|"))
+    ]
+    if missing:
+        where = f" in {source}" if source else ""
+        details = "; ".join(f"{path} (falls back for {lost})" for path, lost in missing)
+        log.warning(
+            f"ARRUS metadata{where} does not carry every field this converter reads: {details}."
+            + _version_note(metadata_entry)
+        )
+    return missing
+
+
+def _is_metadata_name(name: str) -> bool:
+    """True for a file name that holds ARRUS metadata rather than a recording."""
+    return name == "metadata.pkl" or name.endswith(_METADATA_SUFFIXES)
+
+
+def _sidecar_names(name: str) -> list:
+    """Candidate metadata file names for a recording called ``name``, in priority order."""
+    stem = PurePosixPath(name).stem
+    return [stem + suffix for suffix in _METADATA_SUFFIXES] + ["metadata.pkl"]
+
+
 def _find_sidecar_metadata(src: Path):
     """Return a sibling ``*_metadata.pkl`` file for ``src``, if one exists."""
-    candidates = [src.with_name(src.stem + suffix) for suffix in _METADATA_SUFFIXES]
-    candidates.append(src.parent / "metadata.pkl")
-    for candidate in candidates:
+    for name in _sidecar_names(src.name):
+        candidate = src.with_name(name)
         if candidate.exists() and candidate != src:
             return candidate
     return None
+
+
+def _find_hf_sidecar_metadata(hf_path: str):
+    """Return the ``hf://`` sidecar metadata file for ``hf_path``, if the repo holds one.
+
+    The local lookup in :func:`_find_sidecar_metadata` cannot see it: resolving an
+    ``hf://`` path to a single file downloads only that file, so the sibling has to be
+    found in the repo listing (which is memoized, so this costs no extra request).
+    """
+    repo_id, subpath = _hf_parse_path(hf_path)
+    parent = PurePosixPath(subpath).parent
+    available = set(_hf_list_files(repo_id))
+    for name in _sidecar_names(PurePosixPath(subpath).name):
+        candidate = str(parent / name)
+        if candidate in available and candidate != subpath:
+            return f"{HF_PREFIX}{repo_id}/{candidate}"
+    return None
+
+
+def _sidecar_metadata(src_spec, src: Path):
+    """Find the metadata pickle stored next to a recording, on the Hub or on disk.
+
+    ``src_spec`` is the path as the caller gave it, so an ``hf://`` recording is looked
+    up in its repo rather than in whatever else happens to sit in the local HF cache.
+    """
+    if str(src_spec).startswith(HF_PREFIX):
+        return _find_hf_sidecar_metadata(str(src_spec))
+    return _find_sidecar_metadata(src)
+
+
+def _resolve_source(path):
+    """Resolve a source path, downloading it first when it is an ``hf://`` path.
+
+    Local paths pass through untouched, so every entry point takes local files,
+    directories and ``hf://`` paths alike -- see :func:`zea.datapaths.format_data_path`
+    for the same convention on the data side.
+    """
+    text = str(path)
+    if text.startswith(HF_PREFIX):
+        return Path(_hf_resolve_path(text))
+    return Path(text)
 
 
 def normalize_us4us_payload(payload, metadata=None, *, source=None):
@@ -561,19 +751,25 @@ def _validate_metadata_entry(metadata_entry, *, source=None) -> None:
             the conversion relies on is missing.
     """
     where = f" in {source}" if source else ""
+    # Every failure below means an attribute this converter reads was not where it was
+    # expected, and a diverged ARRUS release is the usual reason, so each one says which
+    # ARRUS version the recording reports and which ones are supported.
+    note = _version_note(metadata_entry)
+
     context = _get_context(metadata_entry)
     if context is None:
         raise Us4usConversionError(
             f"Invalid ARRUS metadata{where}: {_describe(metadata_entry)} has no acquisition "
             "context. Expected an arrus.metadata.ConstMetadata with a 'context' attribute "
-            "(ARRUS 0.12.0 or newer)."
+            "(ARRUS 0.12.0 or newer)." + note
         )
 
-    version = getattr(metadata_entry, "version", None) or getattr(metadata_entry, "_version", None)
-    if isinstance(version, str) and not _TESTED_ARRUS_VERSION_RE.match(version):
+    version = _arrus_version(metadata_entry)
+    if not _is_tested_arrus_version(version):
         log.warning(
-            f"us4us recording reports ARRUS version {version}, outside the tested range "
-            "0.12.x - 0.14.x. Conversion continues, but please double-check the result."
+            f"us4us recording reports ARRUS {version}, outside the tested releases "
+            f"{', '.join(f'{prefix}.x' for prefix in TESTED_ARRUS_VERSIONS)}. Conversion "
+            "continues, but please double-check the result."
         )
 
     raw_sequence = getattr(context, "raw_sequence", None)
@@ -581,14 +777,14 @@ def _validate_metadata_entry(metadata_entry, *, source=None) -> None:
     if not ops:
         raise Us4usConversionError(
             f"Invalid ARRUS metadata{where}: context.raw_sequence.ops is missing or empty, so "
-            "the TX/RX sequence cannot be converted. This usually means the recording was "
-            "made with an ARRUS version older than 0.12.0."
+            "the TX/RX sequence cannot be converted. ARRUS releases older than 0.12.0 did not "
+            "store it." + note
         )
     for attribute in ("tx", "rx"):
         if getattr(ops[0], attribute, None) is None:
             raise Us4usConversionError(
                 f"Invalid ARRUS metadata{where}: context.raw_sequence.ops[0] has no "
-                f"'{attribute}' operation ({_describe(ops[0])})."
+                f"'{attribute}' operation ({_describe(ops[0])})." + note
             )
 
     probes = _get_probes(context, source=source)
@@ -596,13 +792,13 @@ def _validate_metadata_entry(metadata_entry, *, source=None) -> None:
     if model is None:
         raise Us4usConversionError(
             f"Invalid ARRUS metadata{where}: context.device.probe[0] has no probe model "
-            f"({_describe(probes[0])})."
+            f"({_describe(probes[0])})." + note
         )
     for attribute in ("element_pos_x", "element_pos_z", "n_elements"):
         if getattr(model, attribute, None) is None:
             raise Us4usConversionError(
                 f"Invalid ARRUS metadata{where}: probe model {_describe(model)} has no "
-                f"'{attribute}', so the probe geometry cannot be reconstructed."
+                f"'{attribute}', so the probe geometry cannot be reconstructed." + note
             )
 
 
@@ -1039,13 +1235,14 @@ def convert_us4us_file(
     """Convert a single us4us ``.pkl`` recording to a zea HDF5 file.
 
     Args:
-        src: Source ``.pkl`` file.
+        src: Source ``.pkl`` file, local or an ``hf://`` path.
         dst: Destination ``.hdf5`` file.
         mapping: Pipeline output index to zea data type, in any form accepted by
             :func:`parse_mapping`. Defaults to :data:`DEFAULT_MAPPING`.
         metadata_path: Optional pickle holding the ARRUS metadata, for
-            recordings that store data and metadata separately. When omitted, a
-            sibling ``<name>_metadata.pkl`` is used if present.
+            recordings that store data and metadata separately (local or
+            ``hf://``). When omitted, a sibling ``<name>_metadata.pkl`` is used
+            if present, in the same repo for an ``hf://`` recording.
         overwrite: Replace ``dst`` if it already exists.
         separate_tracks: Write every mapped output to its own zea track instead
             of storing them side by side in a single track.
@@ -1057,16 +1254,18 @@ def convert_us4us_file(
         Us4usConversionError: If the pickle is not a us4us recording, or uses a
             layout this converter does not support.
     """
-    src, dst = Path(src), Path(dst)
+    src_spec, dst = str(src), Path(dst)
+    src = _resolve_source(src_spec)
     mapping = parse_mapping(mapping)
 
     log.info(f"Loading us4us pickle: {log.yellow(src)}")
     payload = load_us4us_pickle(src)
 
     if metadata_path is None:
-        metadata_path = _find_sidecar_metadata(src)
+        metadata_path = _sidecar_metadata(src_spec, src)
         if metadata_path is not None:
             log.info(f"Found metadata file next to the recording: {log.yellow(metadata_path)}")
+    metadata_path = _resolve_source(metadata_path) if metadata_path is not None else None
     metadata_payload = load_us4us_pickle(metadata_path) if metadata_path is not None else None
     if isinstance(metadata_payload, Mapping):
         metadata_payload = metadata_payload.get("metadata", metadata_payload)
@@ -1085,6 +1284,7 @@ def convert_us4us_file(
     scan_metadata = _pick_scan_metadata(metadata, mapping)
     _validate_metadata_entry(scan_metadata, source=src)
     context = _get_context(scan_metadata)
+    _report_arrus_divergence(context, scan_metadata, source=src)
 
     probe_dict = _extract_probe_dict(context)
     scan_dict = _extract_scan_dict(context, _get_data_description(scan_metadata), n_frames)
@@ -1135,13 +1335,15 @@ def convert_us4us(args) -> None:
         args: Object with the attributes:
 
             - ``src``: Source ``.pkl`` file, or a directory holding ``*.pkl`` files.
+              Either may also be an ``hf://`` path.
             - ``dst``: Destination ``.hdf5`` file when ``src`` is a file, or the
               destination directory when ``src`` is a directory (each
               ``<name>.pkl`` becomes ``<dst>/<name>.hdf5``).
             - ``mapping`` (optional): Pipeline output index to zea data type, in
               any form accepted by :func:`parse_mapping`.
             - ``metadata`` (optional): Pickle holding the ARRUS metadata for
-              recordings that store data and metadata separately.
+              recordings that store data and metadata separately (local or
+              ``hf://``).
             - ``overwrite`` (optional): Replace existing destination files.
             - ``separate_tracks`` (optional): Write each mapped output to its own
               zea track.
@@ -1151,22 +1353,21 @@ def convert_us4us(args) -> None:
             any ``.pkl`` files.
         Us4usConversionError: If a recording cannot be interpreted.
     """
-    src = Path(args.src)
+    src_spec = str(args.src)
     dst = Path(args.dst)
     mapping = parse_mapping(getattr(args, "mapping", None))
     metadata_path = getattr(args, "metadata", None)
     overwrite = bool(getattr(args, "overwrite", False))
     separate_tracks = bool(getattr(args, "separate_tracks", False))
 
+    # An hf:// source is downloaded here rather than in convert_us4us_file, so that a
+    # repo folder can be listed for .pkl files the same way a local folder is.
+    src = _resolve_source(src_spec)
     if not src.exists():
-        raise FileNotFoundError(f"Source path not found: {src}")
+        raise FileNotFoundError(f"Source path not found: {src_spec}")
 
     if src.is_dir():
-        pkl_files = sorted(
-            path
-            for path in src.glob("*.pkl")
-            if not any(path.name.endswith(suffix) for suffix in _METADATA_SUFFIXES)
-        )
+        pkl_files = sorted(path for path in src.glob("*.pkl") if not _is_metadata_name(path.name))
         if not pkl_files:
             raise FileNotFoundError(f"No .pkl files found in directory: {src}")
         if metadata_path is not None and len(pkl_files) > 1:
@@ -1178,7 +1379,8 @@ def convert_us4us(args) -> None:
         file_pairs = [(path, dst / f"{path.stem}.hdf5") for path in pkl_files]
     else:
         dst_file = dst / f"{src.stem}.hdf5" if dst.is_dir() else dst
-        file_pairs = [(src, dst_file)]
+        # Pass the path as given: convert_us4us_file needs it to find an hf:// sidecar.
+        file_pairs = [(src_spec, dst_file)]
 
     for src_pkl, dst_hdf5 in file_pairs:
         convert_us4us_file(
