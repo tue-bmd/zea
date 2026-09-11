@@ -816,7 +816,9 @@ def test_tof_correction_sos_grid_zero_data(probe_geometry, flatgrid):
     return result
 
 
-@backend_equality_check(backends=["tensorflow", "jax"])
+# The ray-integrated delays (~650 samples) carry float32 round-off that differs per
+# backend (~7e-4 samples); interpolating white-noise data amplifies that to ~3e-3.
+@backend_equality_check(decimal=2, backends=["tensorflow", "jax"])
 def test_tof_correction_flat_sos_grid_matches_homogeneous(probe_geometry, flatgrid):
     """A constant sos map must reproduce the analytical constant-sound-speed delays."""
     inputs = _make_tof_inputs(probe_geometry, flatgrid, n_ax=1400)
@@ -835,7 +837,8 @@ def test_tof_correction_flat_sos_grid_matches_homogeneous(probe_geometry, flatgr
     return heterogeneous
 
 
-@backend_equality_check(backends=["tensorflow", "jax"])
+# Delays reach ~650 samples; float32 round-off across backends is up to ~7e-4 samples.
+@backend_equality_check(decimal=3, backends=["tensorflow", "jax"])
 def test_heterogeneous_delays_multistatic_matches_general_path(probe_geometry, flatgrid):
     """One-hot transmits must give the same delays through both code paths."""
     n_el = probe_geometry.shape[0]
