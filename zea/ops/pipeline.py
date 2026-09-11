@@ -981,6 +981,8 @@ class Pipeline:
                 params_dict = parameters.to_tensor(
                     include=list(needs_keys), keep_as_is=self.static_params
                 )
+            # Strip None parameters so the caller can still pass them directly to the pipeline
+            params_dict = {k: v for k, v in params_dict.items() if v is not None}
 
         # Convert all overrides to tensors
         with backend.device(_device):

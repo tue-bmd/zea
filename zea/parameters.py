@@ -119,6 +119,7 @@ from zea.func.ultrasound import compute_time_to_peak_stack
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated
 from zea.probes import Probe, fit_curved_probe_radius
+from zea.simulator import fft_length
 
 
 class Parameters(BaseParameters):
@@ -320,6 +321,7 @@ class Parameters(BaseParameters):
         "n_el": {"dtype": np.int32},
         "n_tx": {"dtype": np.int32},
         "n_ax": {"dtype": int},  # native dtype on purpose
+        "n_fft": {"dtype": int},  # native dtype on purpose
         "n_ch": {"dtype": np.int32},
         "attenuation_coef": {"dtype": np.float32, "default": 0.0},
         "f_number": {"dtype": float, "default": 1.0},  # native dtype on purpose
@@ -330,6 +332,11 @@ class Parameters(BaseParameters):
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
         "distance_to_apex": {"dtype": (np.float32, type(None)), "default": None},
+        # Sound speed map of zea.simulator.simulate_rf: (Nz, Nx), or (Nz, Nx, Ny) with sos_grid_y.
+        "sos_map": {"dtype": (np.float32, type(None)), "default": None},
+        "sos_grid_x": {"dtype": (np.float32, type(None)), "default": None},
+        "sos_grid_y": {"dtype": (np.float32, type(None)), "default": None},
+        "sos_grid_z": {"dtype": (np.float32, type(None)), "default": None},
         "element_normals": {"dtype": (type(None), np.ndarray), "default": None},
     }
 
@@ -1031,6 +1038,39 @@ class Parameters(BaseParameters):
                 t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
 
         return t_peak[self.selected_transmits]
+
+    @cache_with_dependencies(
+        "n_ax",
+        "sampling_frequency",
+        "center_frequency",
+        "sound_speed",
+        "probe_geometry",
+        "t0_delays",
+        "initial_times",
+        "t_peak",
+        "sos_map",
+    )
+    def n_fft(self):
+        """FFT length of :func:`zea.simulator.simulate_rf` for this scan.
+
+        Sized with :func:`zea.simulator.fft_length` so that no echo of a scatterer in the record
+        wraps into it, for any cloud and up to twice the default pulse length, through the
+        sound speed map ``sos_map`` when there is one. Set it explicitly to override.
+        """
+        n_fft = self._params.get("n_fft")
+        if n_fft is not None:
+            return n_fft
+        shift = self.t0_delays - self.initial_times[:, None] + self.t_peak[:, None]
+        return fft_length(
+            self.n_ax,
+            self.sampling_frequency,
+            self.center_frequency,
+            self.sound_speed,
+            self.probe_geometry,
+            shift.min(),
+            shift.max(),
+            sos_map=self.sos_map,
+        )
 
     @cache_with_dependencies("selected_transmits")
     def time_to_next_transmit(self):

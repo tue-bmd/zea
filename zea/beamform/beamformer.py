@@ -145,12 +145,9 @@ def tof_correction(
       to compute delays analytically via :func:`calculate_delays`.
     * **Heterogeneous medium** — a spatially-varying speed-of-sound map
       (``sos_map``) is provided and delays are computed numerically via
-      :func:`calculate_delays_heterogeneous_medium`.
-
-    .. important::
-
-       The heterogeneous mode currently requires **multistatic** acquisitions
-       (``n_tx == n_el``).
+      :func:`calculate_delays_heterogeneous_medium`, by integrating the
+      slowness along straight element-to-pixel rays. Any transmit scheme is
+      supported; the wavefront model is the same as in the homogeneous case.
 
     After delay computation the data is interpolated to the requested pixel
     positions, masked with the receive f-number aperture, and — for IQ data —
@@ -196,8 +193,7 @@ def tof_correction(
             Defaults to :func:`fnum_window_fn_rect`.
         sos_map (Tensor, optional): 2-D speed-of-sound map of shape
             ``(Nz, Nx)`` in m/s.  When provided, delays are computed
-            numerically (heterogeneous mode, multistatic only).
-            Defaults to ``None``.
+            numerically (heterogeneous mode). Defaults to ``None``.
         sos_grid_x (Tensor, optional): x-coordinates of ``sos_map`` columns.
         sos_grid_z (Tensor, optional): z-coordinates of ``sos_map`` rows.
         focal_region_length (float, optional): Full length in meters of the
@@ -271,6 +267,11 @@ def tof_correction(
             initial_times,
             sampling_frequency,
             t_peak,
+            tx_apodizations=tx_apodizations,
+            focus_distances=focus_distances,
+            polar_angles=polar_angles,
+            transmit_origins=transmit_origins,
+            focal_region_length=focal_region_length,
         )
         # calculate_delays_heterogeneous_medium returns txdel (n_tx, n_pix), rxdel (n_el, n_pix)
         # Transpose both to the shared convention.
@@ -346,8 +347,11 @@ def tof_correction(
         return vmap(_correct_single_tx)(data, txdel)
 
     # Heterogeneous path: apply transmit f-number mask and use gradient
-    # checkpointing to limit memory consumption.
-    mask_tx = ops.moveaxis(mask, 1, 0)
+    # checkpointing to limit memory consumption. A pixel is lit by a transmit when at
+    # least one of its firing elements sees it inside the f-number cone.
+    active = ops.cast(ops.not_equal(tx_apodizations, 0.0), mask.dtype)  # (n_tx, n_el)
+    mask_tx = ops.max(mask[None, :, :, 0] * active[:, None, :], axis=-1)  # (n_tx, n_pix)
+    mask_tx = mask_tx[..., None]
     _correct_single_tx_ckpt = keras.remat(_correct_single_tx)
     return vmap(_correct_single_tx_ckpt)(data, txdel, mask_tx)
 
@@ -901,6 +905,11 @@ def calculate_delays_heterogeneous_medium(
     initial_times,
     sampling_frequency,
     t_peak,
+    tx_apodizations=None,
+    focus_distances=None,
+    polar_angles=None,
+    transmit_origins=None,
+    focal_region_length=None,
     n_ray_points=100,
 ):
     """Compute delays using a spatially-varying speed-of-sound map.
@@ -913,9 +922,12 @@ def calculate_delays_heterogeneous_medium(
     :func:`calculate_delays`. If you do not have a SOS map, it is
     recommended to use :func:`calculate_delays`.
 
-    .. important::
-
-       Only valid for **multistatic** acquisitions (``n_tx == n_el``).
+    The receive travel times are the ray integrals themselves. The transmit
+    delay of an arbitrary transmit scheme is the wavefront arrival built from those same ray
+    times by :func:`transmit_delays`, exactly as in the homogeneous case.
+    Leaving ``tx_apodizations`` at ``None`` selects the older **multistatic**
+    (``n_tx == n_el``) path, where the transmit leg is the ray of the single
+    firing element, taken from the diagonal of ``t0_delays``.
 
     .. note::
 
@@ -926,6 +938,9 @@ def calculate_delays_heterogeneous_medium(
     .. note::
 
         This function is not compatible with the torch backend.
+
+    TODO: merge the ray integral with :func:`zea.func.ultrasound.straight_ray_slowness`, which the
+    simulator uses (adds 3D maps and drops the torch restriction).
 
     Args:
         grid (Tensor): Pixel coordinates of shape ``(n_pix, 3)``.
@@ -938,6 +953,19 @@ def calculate_delays_heterogeneous_medium(
         initial_times (Tensor): Per-transmit time offsets of shape ``(n_tx,)``.
         sampling_frequency (float): Sampling frequency in Hz.
         t_peak (Tensor): Waveform peak times of shape ``(n_tx,)``.
+        tx_apodizations (Tensor, optional): Transmit apodization weights of
+            shape ``(n_tx, n_el)``. When given (together with
+            ``focus_distances``, ``polar_angles`` and ``transmit_origins``) the
+            transmit delays are computed with :func:`transmit_delays` for any
+            transmit scheme. ``None`` falls back to the multistatic path.
+        focus_distances (Tensor, optional): Focus distances of shape
+            ``(n_tx,)``. Use ``0`` or ``np.inf`` for plane waves.
+        polar_angles (Tensor, optional): Polar steering angles in radians of
+            shape ``(n_tx,)``.
+        transmit_origins (Tensor, optional): Origin of each transmit beam of
+            shape ``(n_tx, 3)``.
+        focal_region_length (float, optional): Full length in meters of the
+            focal-plane blending region, see :func:`transmit_delays`.
         n_ray_points (int, optional): Number of integration points along
             each element-to-pixel ray.  Higher values improve accuracy at
             the cost of computation time.  Defaults to ``100``.
@@ -956,11 +984,27 @@ def calculate_delays_heterogeneous_medium(
             "implemented for the torch backend."
         )
 
-    assert n_tx == n_el, (
-        "Computing delays with heterogeneous medium (a sos grid was provided) "
-        "requires a multistatic dataset (n_tx == n_el), "
-        f"got n_tx={n_tx}, n_el={n_el}."
-    )
+    general_transmits = tx_apodizations is not None
+    if general_transmits:
+        missing = [
+            name
+            for name, value in (
+                ("focus_distances", focus_distances),
+                ("polar_angles", polar_angles),
+                ("transmit_origins", transmit_origins),
+            )
+            if value is None
+        ]
+        assert not missing, (
+            "Computing delays for a general transmit scheme through a sos map needs "
+            f"{', '.join(missing)} alongside tx_apodizations."
+        )
+    else:
+        assert n_tx == n_el, (
+            "Computing delays with heterogeneous medium (a sos grid was provided) "
+            "without tx_apodizations requires a multistatic dataset (n_tx == n_el), "
+            f"got n_tx={n_tx}, n_el={n_el}."
+        )
 
     ray_parameters = ops.linspace(1, 0, n_ray_points, endpoint=False)[::-1]
     slowness_map = 1 / sos_map
@@ -1009,8 +1053,31 @@ def calculate_delays_heterogeneous_medium(
         f"Expected t_peak to have shape (n_tx,)=({n_tx},), got {t_peak.shape}."
     )
 
-    tof = mean_slowness * ray_lengths
+    tof = mean_slowness * ray_lengths  # (n_el, n_pix)
     rx_delays = tof * sampling_frequency
+
+    if general_transmits:
+        # Same wavefront model as the regular path, but using ray-integrated travel times
+        # instead of distance / sound_speed
+        tx_delays = vmap(
+            transmit_delays,
+            in_axes=(None, 0, 0, None, 0, 0, 0, None, 0, None),
+            out_axes=1,
+        )(
+            grid,
+            t0_delays,
+            tx_apodizations,
+            ops.moveaxis(tof, 0, 1),  # (n_pix, n_el)
+            focus_distances,
+            polar_angles,
+            initial_times,
+            None,
+            transmit_origins,
+            focal_region_length,
+        )  # (n_pix, n_tx)
+        tx_delays = ops.moveaxis(tx_delays + t_peak[None], 1, 0) * sampling_frequency
+        return tx_delays, rx_delays
+
     tx_delays = (
         tof
         # The diagonal of t0_delays selects the appropriate transmit delay
