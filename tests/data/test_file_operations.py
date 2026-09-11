@@ -772,8 +772,14 @@ def test_decode_hadamard_file_operation(tmp_path):
         decoded = f.data.raw_data[:]
         tx_apodizations = f.scan.tx_apodizations[:]
 
+    # decode_hadamard runs a matmul on the active Keras backend, and on an NVIDIA GPU
+    # that defaults to TF32 (10 mantissa bits, so ~1e-3 relative error) rather than full
+    # float32. CI pins CUDA_VISIBLE_DEVICES="" and therefore never sees it, but a
+    # developer machine with a GPU does. The tolerance covers that reduced precision and
+    # is still two orders of magnitude tighter than any genuine decoding error, which
+    # would be O(1) on data of this scale.
     np.testing.assert_allclose(
-        decoded, synthetic_aperture_data * hadamard_size, rtol=1e-4, atol=1e-4
+        decoded, synthetic_aperture_data * hadamard_size, rtol=1e-2, atol=1e-2
     )
     # Each decoded transmit activates a single participating channel, so the decoded
     # apodizations form an identity over the participating (first ``hadamard_size``) channels.
