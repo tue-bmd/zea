@@ -284,6 +284,7 @@ class Pipeline:
                 - "coherence_factor"
                 - "generalized_coherence_factor"
                 - "minimum_variance"
+                - "able" (available once :mod:`zea.models.able` is imported)
                 Defaults to "delay_and_sum".
             num_patches (int, optional): Number of patches for the PatchedGrid operation.
                 Mutually exclusive with ``patch_size``, which is preferred.
@@ -1513,7 +1514,9 @@ class Beamform(Pipeline):
             params["enable_aligned_apodization"] = self.enable_aligned_apodization
         if not compact or self.enable_receive_apodization:
             params["enable_receive_apodization"] = self.enable_receive_apodization
-        params.update(self.beamformer_kwargs)
+        # Beamformer keywords that are objects rather than plain values (such as the
+        # trained model of the "able" beamformer) cannot be written to a config.
+        params.update({k: v for k, v in self.beamformer_kwargs.items() if not callable(v)})
 
         # Merge in the pipeline-level params from super().
         params.update(config.get("params", {}))

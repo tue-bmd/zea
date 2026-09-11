@@ -6,6 +6,7 @@ See the following dropdown for a list of available models:
 
 .. dropdown:: **Available models**
 
+    - :class:`zea.models.able.ABLE`: An adaptive beamformer that learns per-pixel apodization weights.
     - :class:`zea.models.echonet.EchoNetDynamic`: A model for left ventricle segmentation.
     - :class:`zea.models.carotid_segmenter.CarotidSegmenter`: A model for carotid artery segmentation.
     - :class:`zea.models.echonetlvh.EchoNetLVH`: A model for left ventricle hypertrophy segmentation.
@@ -77,6 +78,7 @@ An example of how to use the :class:`zea.models.diffusion.DiffusionModel` is sho
 """
 
 from . import (
+    able,
     carotid_segmenter,
     deeplabv3,
     dense,
