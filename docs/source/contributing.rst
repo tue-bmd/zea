@@ -258,6 +258,29 @@ The documentation uses `Sphinx <https://www.sphinx-doc.org/>`_ and generally is 
             raise ValueError("param1 must be non-negative")
          return True
 
+.. _citing-papers:
+
+**Citing papers.** If your contribution implements a method, model, algorithm or
+dataset from a paper, attribute the authors with the ``.. citation::`` directive
+instead of writing the reference out by hand:
+
+1. Add the paper to `docs/source/references.bib
+   <https://github.com/tue-bmd/zea/blob/main/docs/source/references.bib>`_, using a
+   ``<surname><year><first title word>`` key (``paper/paper.bib`` is only for
+   ``zea``'s own citation and the papers-using-``zea`` list).
+2. Cite it from the docstring:
+
+   .. code-block:: rst
+
+      .. citation:: luijten2020adaptive
+
+   Pass several keys at once with ``.. citation:: key1, key2``, and add a note --
+   a link to the reference implementation, say -- as an indented block below.
+3. Build the docs; an unknown key is reported as a warning.
+
+Keep any "this is a ``zea`` implementation" remark in its own ``.. important::``
+block, so the citation block holds nothing but the reference.
+
 The overall structure of the documentation is manually designed, but the API documentation is auto-generated based on the docstrings in the code. To generate the docs locally you can run:
 
 .. code-block:: shell

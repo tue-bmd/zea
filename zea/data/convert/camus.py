@@ -22,15 +22,7 @@ Dataset splits:
    The CAMUS dataset is available free of charge strictly for non-commercial
    scientific research purposes only.
 
-.. admonition:: Reference
-
-   S\\. Leclerc, E. Smistad, J. Pedrosa, A. Ostvik, F. Cervenansky, F. Espinosa,
-   T. Espeland, E. A. R. Berg, P.-M. Jodoin, T. Grenier, C. Lartizien,
-   J. D'hooge, L. Lovstakken and O. Bernard.
-   *Deep Learning for Segmentation Using an Open Large-Scale Dataset in
-   2D Echocardiography.*
-   IEEE Transactions on Medical Imaging, vol. 38, no. 9, pp. 2198-2210, 2019.
-   `DOI: 10.1109/TMI.2019.2900516 <https://doi.org/10.1109/TMI.2019.2900516>`_
+.. citation:: leclerc2019deep
 
 .. rubric:: Links
 
