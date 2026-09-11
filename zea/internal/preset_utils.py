@@ -9,11 +9,7 @@ repository listings, downloads and streaming — so the two sides cannot drift a
 See https://huggingface.co/zeahub/
 """
 
-import atexit
-import errno
 import os
-import shutil
-import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -40,41 +36,6 @@ for _cache_dir in (HF_DATASETS_DIR, HF_MODELS_DIR):
 # Default local cache directory per huggingface_hub ``repo_type``, so a model download
 # never lands in the dataset cache (and vice versa) when no ``cache_dir`` is given.
 _HF_CACHE_DIRS = {"dataset": HF_DATASETS_DIR, "model": HF_MODELS_DIR}
-
-# :mod:`zea.internal.cache` falls back to a temporary directory when ``ZEA_CACHE_DIR``
-# itself cannot be created or written to. A cache can also become unwritable *below* its
-# root: huggingface_hub keeps its blobs, snapshots and download locks in per-repo
-# subdirectories, and on a cache shared between users (a CI runner's persistent volume, a
-# group-writable /cache) those belong to whoever downloaded a given repo first. Since a
-# cache hit never writes, this only surfaces when a file actually has to be downloaded, so
-# it is handled where the download happens rather than at import time.
-_UNWRITABLE_CACHE_ERRNOS = frozenset({errno.EACCES, errno.EPERM, errno.EROFS})
-
-_FALLBACK_CACHE_LOCK = threading.Lock()
-_FALLBACK_CACHE_DIRS: dict = {}
-
-
-def _hf_fallback_cache_dir(repo_type: str, cache_dir, error: OSError) -> Path:
-    """Return a writable stand-in for an unusable default cache.
-
-    Created once per ``repo_type`` per process (and removed at exit), so a run that
-    cannot use the shared cache still downloads each file only once. Caching between
-    runs is lost, which the warning says how to restore.
-    """
-    with _FALLBACK_CACHE_LOCK:
-        fallback = _FALLBACK_CACHE_DIRS.get(repo_type)
-        if fallback is None:
-            fallback = Path(tempfile.mkdtemp(prefix=f"zea_hf_{repo_type}_"))
-            atexit.register(shutil.rmtree, fallback, ignore_errors=True)
-            _FALLBACK_CACHE_DIRS[repo_type] = fallback
-            log.warning(
-                f"Cannot write to the Hugging Face cache at {cache_dir}: {error}. "
-                f"Downloading to {fallback} instead, so nothing is cached between runs. "
-                "Point ZEA_CACHE_DIR at a writable directory, or fix the permissions of "
-                "the existing cache, to cache downloads again."
-            )
-    return fallback
-
 
 # Maps huggingface_hub ``repo_type`` values to the path prefix used by both
 # :class:`~huggingface_hub.HfFileSystem` and the ``resolve`` download URLs.
@@ -258,39 +219,24 @@ def _hf_download(repo_id, filename, cache_dir=None, repo_type="dataset", **kwarg
         repo_id (str): The ``{org}/{repo}`` identifier.
         filename (str): Path of the file inside the repository.
         cache_dir (str or Path, optional): Local cache directory. Defaults to the zea
-            cache for ``repo_type``; when that default turns out not to be writable, the
-            download falls back to a temporary directory (see
-            :func:`_hf_fallback_cache_dir`). A ``cache_dir`` passed in explicitly is
-            never redirected.
+            cache for ``repo_type``.
         repo_type (str, optional): One of ``"dataset"``, ``"model"`` or ``"space"``.
         **kwargs: Forwarded to :func:`~huggingface_hub.hf_hub_download`.
     """
-    is_default_cache = cache_dir is None
     if cache_dir is None:
         cache_dir = _HF_CACHE_DIRS.get(repo_type, HF_DATASETS_DIR)
 
-    def _download_to(target_dir):
-        """Download the file into ``target_dir`` and return its local path."""
+    def _download():
+        """Download the file into the cache and return its local path."""
         return _hf_call(
             hf_hub_download,
             retry_on=_HF_DOWNLOAD_RETRY_ERRORS,
             repo_id=repo_id,
             filename=filename,
-            cache_dir=target_dir,
+            cache_dir=cache_dir,
             repo_type=repo_type,
             **kwargs,
         )
-
-    def _download():
-        """Download into the requested cache, falling back if it is unwritable."""
-        try:
-            return _download_to(cache_dir)
-        except OSError as exc:
-            # An explicitly requested cache_dir is the caller's choice: report it rather
-            # than silently downloading somewhere else.
-            if not is_default_cache or exc.errno not in _UNWRITABLE_CACHE_ERRNOS:
-                raise
-            return _download_to(_hf_fallback_cache_dir(repo_type, cache_dir, exc))
 
     if kwargs.get("force_download"):
         # An explicit re-download is exactly what a memoized path would skip.
