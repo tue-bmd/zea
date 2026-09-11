@@ -68,16 +68,14 @@ def test_able_custom_latent_dim():
 
 
 def test_able_latent_layers_override():
-    """Explicit latent_layers list overrides latent_dim and n_latent_layers."""
+    """Explicit latent_layers overrides latent_dim for the hidden layers."""
     from zea.models.able import ABLE
 
-    n_tx, n_pix, n_el = 2, 8, 4
-    x = np.random.randn(n_tx, n_pix, n_el).astype(np.float32)
+    n_el = 4
+    model = ABLE(latent_dim=8, n_latent_layers=2, latent_layers=[12, 16])
+    model.build((2, 8, n_el))
 
-    m = ABLE(n_latent_layers=2, latent_layers=[12, 12])
-    m(x)
-    # layer_dims: [n_el, 12, 12, n_el] -> 4 Conv2D layers
-    assert len(m._able_layers) == 4
+    assert [layer.filters for layer in model._able_layers] == [n_el, 12, 16, n_el]
 
 
 def test_able_invalid_kernel_size():
