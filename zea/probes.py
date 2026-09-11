@@ -29,6 +29,7 @@ A probe is described by the fields below (all optional — record what you have;
 - ``element_width`` -- width of a single element (m), along the array (azimuthal)
   direction.
 - ``element_height`` -- elevation aperture of a single element (m).
+- ``elevation_focus`` -- focal distance of the fixed elevation lens (m).
 - ``lens_sound_speed`` / ``lens_thickness`` -- acoustic-lens speed of sound (m/s)
   and thickness (m), used to correct receive travel times for the lens.
 
@@ -202,6 +203,36 @@ def create_curved_probe_geometry(n_el, pitch, radius):
         axis=1,
     ).astype(np.float32)
     return probe_geometry
+
+
+def curved_probe_normals(probe_geometry, radius=None):
+    """Outward element normals of a convex array in zea's curved-probe frame.
+
+    The normals point from the centre of curvature ``(0, 0, -radius)`` through the elements.
+    Pass them to the simulator as ``element_normals``.
+
+    Args:
+        probe_geometry (np.ndarray): Element positions in metres, shape (n_el, 3).
+        radius (float, optional): Radius of curvature in metres. Fitted with
+            :func:`fit_curved_probe_radius` when None.
+
+    Returns:
+        np.ndarray: Unit normals of shape (n_el, 3).
+
+    Raises:
+        ValueError: If ``radius`` is given but is not a finite, strictly positive number.
+    """
+    geometry = np.asarray(probe_geometry, np.float64)
+    if radius is None:
+        radius = fit_curved_probe_radius(geometry)
+    elif not (np.isfinite(radius) and radius > 0):
+        raise ValueError(
+            "Cannot compute curved probe normals: radius must be finite and strictly "
+            f"positive, got {radius}"
+        )
+    normals = geometry - np.array([0.0, 0.0, -radius])
+    normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+    return normals.astype(np.float32)
 
 
 def fit_curved_probe_radius(probe_geometry, tol: float = 0.5) -> float:

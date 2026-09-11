@@ -49,7 +49,10 @@ import numpy as np
 from keras import ops
 
 from zea import log
-from zea.beamform.lens_correction import compute_lens_corrected_travel_times
+from zea.beamform.lens_correction import (
+    compute_lens_corrected_travel_times,
+    compute_lens_path_lengths,
+)
 from zea.func.ultrasound import directivity
 
 
@@ -70,7 +73,7 @@ def simulate_rf(
     attenuation_coef,
     tx_apodizations,
     t_peak,
-    elevation_lens=False,
+    elevation_slab_2d=False,
     element_height=None,
     max_chunk_gb=10.0,
     noise_level_db=None,
@@ -78,6 +81,15 @@ def simulate_rf(
     noise_seed=0,
     noise_reference=None,
     scatter_exponent=2.0,
+    rigid_baffle=True,
+    bandwidth_percent=None,
+    probe_center_frequency=None,
+    element_normals=None,
+    chirp_sweep=None,
+    n_period=4.0,
+    n_sub_elements=None,
+    elevation_focus=None,
+    lens_attenuation_coef=0.0,
 ):
     """
     Simulates RF data for a given set of scatterers.
@@ -86,8 +98,16 @@ def simulate_rf(
         scatterer_positions (array-like): The positions of the scatterers [m] of shape (n_scat, 3).
         scatterer_magnitudes (array-like): The magnitudes of the scatterers of shape (n_scat,).
         probe_geometry (array-like): The geometry of the probe [m] of shape (n_el, 3).
-        apply_lens_correction (bool): Whether to apply lens correction.
-        lens_thickness (float): The thickness of the lens [m].
+        apply_lens_correction (bool): Model the acoustic lens as a layer of ``lens_sound_speed``
+            in front of the elements. Every sub-element's path refracts through it (Fermat), so
+            the lens delay depends on the direction to the scatterer, and the lens attenuates
+            with ``lens_attenuation_coef``. With ``elevation_focus`` the layer is a cylindrical
+            lens: ``lens_thickness`` at the element centre, thinned (``lens_sound_speed`` below
+            ``sound_speed``) or thickened towards the elevation edges so that the normal-incidence
+            delay focuses at ``elevation_focus``. The lens face is taken locally flat under each
+            sub-element, for the delay and for the spreading of the refracted wave, and the sinc
+            directivity uses the geometric angle to the scatterer.
+        lens_thickness (float): The thickness of the lens [m] at the element centre.
         lens_sound_speed (float): The speed of sound in the lens [m/s].
         sound_speed (float): The speed of sound in the medium [m/s].
         n_ax (int): The number of samples in the RF data.
@@ -99,10 +119,13 @@ def simulate_rf(
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
         tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el).
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
-        elevation_lens (bool): Whether the probe has an elevation lens: drop scatterers outside
-            the elevation slab, and focus transmit energy directly downwards (i.e. cylindrical
-            instead of spherical spread). For efficient pruning scatterers outside the slab,
-            use :class:`zea.ops.Simulate` rather than calling `simulate_rf` directly.
+        elevation_slab_2d (bool): Reduce the elevation dimension to a 2D slab: drop the
+            scatterers outside it, and spread the transmit cylindrically rather than
+            spherically, as an ideal elevation lens focusing to that slab would. This is a
+            cheap approximation, not a modelled lens; for the physical lens in 3D use
+            ``elevation_focus``, which is exclusive with it. For efficient pruning of the
+            scatterers outside the slab, use :class:`zea.ops.Simulate` rather than calling
+            `simulate_rf` directly.
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity and the elevation slab. If None, defaults to element_width.
         max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
@@ -119,6 +142,44 @@ def simulate_rf(
         scatter_exponent (float): Weigh the scattered field by
             ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
             myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
+        rigid_baffle (bool): Element mounted in a rigid baffle (sinc directivity only). False
+            models a soft baffle, which adds the obliquity factor cos(angle to the element
+            normal), on transmit and on receive. Must be static under jit.
+        bandwidth_percent (float, optional): Pulse-echo -6 dB fractional bandwidth of the
+            transducer in percent of ``probe_center_frequency``. Applies the Gaussian transfer
+            function of :func:`transducer_transfer` to the received spectrum. None is a flat
+            transducer response. Must be static under jit.
+        probe_center_frequency (float, optional): Centre of the transducer band [Hz]. Defaults
+            to ``center_frequency``. Must be static under jit.
+        element_normals (array-like, optional): Outward normal of each element of shape
+            (n_el, 3), for curved or tilted arrays. The directivity and the obliquity are
+            evaluated in each element's own frame: the elevation axis is the projection of
+            +y onto the element plane, so a normal must not be parallel to +y. None is every
+            element facing +z. See :func:`zea.probes.curved_probe_normals`. The lens correction
+            keeps assuming a flat lens.
+        chirp_sweep (float, optional): Linear frequency sweep of the transmit pulse [Hz]. The
+            instantaneous frequency runs from ``center_frequency - chirp_sweep / 2`` to
+            ``center_frequency + chirp_sweep / 2`` over the Hann-windowed pulse (see
+            :func:`chirp_spectrum`). None or 0 is the plain windowed tone. Must be static
+            under jit.
+        n_period (float): Periods of ``center_frequency`` under the Hann window of the transmit
+            pulse. Must be static under jit.
+        n_sub_elements (optional): Sub-elements per element, summed coherently with their own
+            distance and sinc directivity so the response holds in the near field. A pair
+            (n_lateral, n_elevation), an int for the lateral count, or ``"auto"`` for the SIMUS
+            rule ceil(size / lambda_min) in both directions, with lambda_min at the top of the
+            transducer band. None is a single sub-element, except in elevation when
+            ``elevation_focus`` is set, which then follows the auto rule. Must be static under
+            jit.
+        elevation_focus (float, optional): Focal distance [m] of a fixed elevation lens, modelled
+            on transmit and on receive through the elevation sub-elements: an ideal focusing
+            advance per sub-element, or with ``apply_lens_correction`` the refracted path through
+            the lens thickness profile. Exclusive with ``elevation_slab_2d``, the cheap 2D
+            approximation of an elevation lens. Must be static under
+            jit.
+        lens_attenuation_coef (float): Attenuation in the lens [dB/cm/MHz], applied over each
+            sub-element's path inside the lens when ``apply_lens_correction`` is set. Apodizes
+            the aperture where the lens is thick and lowers the centre frequency.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -126,6 +187,7 @@ def simulate_rf(
     """
 
     _validate_scatter_exponent(scatter_exponent)
+    _validate_elevation(elevation_slab_2d, elevation_focus)
 
     n_tx = t0_delays.shape[0]
 
@@ -133,9 +195,26 @@ def simulate_rf(
 
     if element_height is None:
         element_height = element_width
+    _validate_lens(
+        apply_lens_correction,
+        lens_thickness,
+        lens_sound_speed,
+        sound_speed,
+        elevation_focus,
+        element_height,
+    )
+    n_sub_elements = _resolve_sub_elements(
+        n_sub_elements,
+        elevation_focus,
+        element_width,
+        element_height,
+        sound_speed,
+        center_frequency,
+        bandwidth_percent,
+    )
 
     magnitudes = scatterer_magnitudes
-    if elevation_lens:
+    if elevation_slab_2d:
         _warn_if_elevation_extent(probe_geometry)
         scatterer_positions, magnitudes = _apply_elevation_slab(
             scatterer_positions, magnitudes, probe_geometry, element_height
@@ -157,61 +236,60 @@ def simulate_rf(
     magnitudes = ops.cast(magnitudes, "float32")
 
     pulse_spectrum_fn = get_pulse_spectrum_fn(
-        center_frequency, n_period=4, sampling_frequency=sampling_frequency
+        center_frequency, n_period=n_period, sampling_frequency=sampling_frequency
     )
 
-    if not apply_lens_correction:
-        dist = ops.linalg.norm(probe_geometry[None] - scatterer_positions[:, None], axis=-1)
-    else:
-        dist = (
-            compute_lens_corrected_travel_times(
-                probe_geometry,
-                scatterer_positions,
-                lens_thickness=lens_thickness,
-                c_lens=lens_sound_speed,
-                c_medium=sound_speed,
-                n_iter=3,
-            )
-            * sound_speed
-        )
-
-    n_ax_rounded = float(_round_up_to_power_of_two(int(n_ax)))
+    # Room for a whole pulse, so record_length below never gates the end of the record away.
+    # Traced frequencies give no static pulse length; the record then keeps its old short tail.
+    fc_np, fs_np = _concrete(center_frequency), _concrete(sampling_frequency)
+    n_pulse = 0 if fc_np is None or fs_np is None else int(np.ceil(n_period / fc_np * fs_np))
+    n_ax_rounded = float(_round_up_to_power_of_two(int(n_ax) + n_pulse))
 
     freqs = ops.arange(n_ax_rounded // 2 + 1, dtype="float32") / n_ax_rounded * sampling_frequency
 
-    waveform_spectrum = pulse_spectrum_fn(freqs)
+    if chirp_sweep:
+        waveform_spectrum = chirp_spectrum(
+            n_ax_rounded, center_frequency, sampling_frequency, n_period, chirp_sweep
+        )
+    else:
+        waveform_spectrum = pulse_spectrum_fn(freqs)
+    if bandwidth_percent is not None:
+        transfer = transducer_transfer(
+            freqs, probe_center_frequency, bandwidth_percent, center_frequency
+        )
+        waveform_spectrum = waveform_spectrum * ops.cast(transfer, "complex64")
 
     if scatter_exponent:
         scatter_gain = (freqs / center_frequency) ** scatter_exponent
     else:
         scatter_gain = ops.ones_like(freqs)
 
-    scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
-    theta = ops.arctan2(scat_pos_relative_to_probe[..., 0], scat_pos_relative_to_probe[..., 2])
-    phi = ops.arctan2(scat_pos_relative_to_probe[..., 1], scat_pos_relative_to_probe[..., 2])
-
     # [n_scat, n_el, n_freq]
-    directivity_x = directivity(freqs[None, None], theta[..., None], element_width, sound_speed)
-    directivity_y = directivity(freqs[None, None], phi[..., None], element_height, sound_speed)
-    element_directivity = directivity_x * directivity_y
-    attenuation = attenuate(freqs[None, None], attenuation_coef, dist[..., None])
-    one_way_phase = delay2(
-        freqs[None, None],
-        dist[..., None] / sound_speed,
-        n_ax_rounded,
-        sampling_frequency,
+    tx_response, rx_response, dist = _element_responses(
+        scatterer_positions,
+        probe_geometry,
+        freqs,
+        sound_speed,
+        element_width,
+        element_height,
+        attenuation_coef,
+        lens_thickness,
+        lens_sound_speed,
+        apply_lens_correction,
+        elevation_slab_2d,
+        rigid_baffle,
+        element_normals,
+        n_sub_elements,
+        elevation_focus,
+        lens_attenuation_coef,
     )
-    shared_response = ops.cast(element_directivity * attenuation, "complex64") * one_way_phase
-
-    if elevation_lens:
-        tx_response = shared_response * ops.cast(spread(dist[..., None], 0.5), "complex64")
-        rx_response = shared_response * ops.cast(spread(dist[..., None], 1.0), "complex64")
-    else:
-        tx_response = shared_response * ops.cast(spread(dist[..., None], 1.0), "complex64")
-        rx_response = tx_response
+    # One-way delays past the FFT length are gated, as delay2 does for the transmit shifts.
+    in_fft = ops.cast(dist / sound_speed < n_ax_rounded / sampling_frequency, "complex64")
+    tx_response = tx_response * in_fft[..., None]
+    rx_response = rx_response * in_fft[..., None]
 
     # Leave room for the pulse tail
-    record_length = n_ax_rounded / sampling_frequency - 2 / center_frequency
+    record_length = n_ax_rounded / sampling_frequency - 0.5 * n_period / center_frequency
     travel_time = dist / sound_speed
     parts = []
     for tx in range(n_tx):
@@ -297,6 +375,75 @@ def _validate_scatter_exponent(scatter_exponent):
         )
 
 
+def _validate_elevation(elevation_slab_2d, elevation_focus):
+    if elevation_slab_2d and elevation_focus is not None:
+        raise ValueError(
+            "elevation_slab_2d is the cheap 2D approximation (slab pruning and cylindrical "
+            "spread); elevation_focus models the lens in 3D through the elevation "
+            "sub-elements. Pick one."
+        )
+
+
+def _lens_sag(v, elevation_focus, sound_speed, lens_sound_speed):
+    """Thickness removed from the lens at elevation offset ``v`` to focus at ``elevation_focus``.
+
+    A slower lens is thickest at the centre, a faster one thinnest (negative sag).
+    """
+    focus = ops.cast(elevation_focus, v.dtype)
+    path = ops.sqrt(focus**2 + v**2) - focus
+    return path * lens_sound_speed / (sound_speed - lens_sound_speed)
+
+
+def _lens_spread_distance(lens_len, medium_len, thickness, sound_speed, lens_sound_speed):
+    """Distance whose 1/r spreading is the ray-tube divergence of the path refracted at the face.
+
+    The phase path scales the lens leg by c / c_lens, but the wave leaves the face as if from a
+    source lens_len * c_lens / c below it (apparent depth). The refracted wavefront is
+    astigmatic: that radius holds across the plane of incidence, and within it the radius is
+    scaled by cos^2 of the medium angle over cos^2 of the lens angle.
+    """
+    ratio = lens_sound_speed / sound_speed
+    lens_len = ops.maximum(lens_len, 1e-9)
+    cos_lens_sq = ops.clip((thickness / lens_len) ** 2, 1e-6, 1.0)
+    cos_medium_sq = ops.maximum(1.0 - (1.0 - cos_lens_sq) / ratio**2, 1e-6)
+    r_across = lens_len * ratio
+    r_within = r_across * cos_medium_sq / cos_lens_sq
+    return lens_len * ops.sqrt(
+        (r_across + medium_len) * (r_within + medium_len) / (r_across * r_within)
+    )
+
+
+def _validate_lens(
+    apply_lens_correction,
+    lens_thickness,
+    lens_sound_speed,
+    sound_speed,
+    elevation_focus,
+    element_height,
+):
+    """Static checks of a focusing lens: distinct speeds, and a face above the elements."""
+    if not apply_lens_correction:
+        return
+    if lens_sound_speed is None:
+        raise ValueError("apply_lens_correction=True requires lens_sound_speed.")
+    if elevation_focus is None:
+        return
+    values = [_concrete(x) for x in (lens_thickness, lens_sound_speed, sound_speed, element_height)]
+    if any(v is None for v in values):
+        return
+    thickness, c_lens, c, height = (float(v) for v in values)
+    if c_lens == c:
+        raise ValueError("A lens at the medium's sound speed cannot focus; set lens_sound_speed.")
+    sag = (np.sqrt(float(elevation_focus) ** 2 + (height / 2) ** 2) - float(elevation_focus)) * (
+        c_lens / (c - c_lens)
+    )
+    if thickness - sag <= 0:
+        raise ValueError(
+            f"lens_thickness {thickness:.2e} m is too thin to focus at {elevation_focus} m: the "
+            f"lens needs at least {sag:.2e} m at the centre."
+        )
+
+
 def _resolve_element_width(probe_geometry, element_width):
     """Return the element width, inferring it from the probe pitch when not given."""
     if element_width is not None:
@@ -322,6 +469,209 @@ def _resolve_element_width(probe_geometry, element_width):
             f"Details: {exc}"
         ) from exc
     return pitch * 0.9  # 90% of the pitch
+
+
+def _element_frame(element_normals, dtype="float32"):
+    """Lateral, elevation and normal unit vectors of the elements, each (n_el, 3) or (1, 3).
+
+    The elevation axis is +y projected onto the element plane, lateral completes the frame.
+    """
+    if element_normals is None:
+        eye = ops.cast(ops.convert_to_tensor(np.eye(3, dtype=np.float32)), dtype)
+        return eye[0:1], eye[1:2], eye[2:3]
+    normal = ops.cast(element_normals, dtype)
+    normal = normal / ops.linalg.norm(normal, axis=-1, keepdims=True)
+    y = ops.cast(ops.convert_to_tensor(np.array([0.0, 1.0, 0.0], np.float32)), dtype)
+    elevation_axis = y - normal[:, 1:2] * normal
+    elevation_axis = elevation_axis / ops.linalg.norm(elevation_axis, axis=-1, keepdims=True)
+    lateral_axis = ops.cross(elevation_axis, normal)
+    return lateral_axis, elevation_axis, normal
+
+
+def _element_angles(relative, frame):
+    """Lateral and elevation angles and cos of the angle to the element normal.
+
+    The sines of theta and phi are the direction cosines lateral / r and elevation / r, as in
+    the Fraunhofer pattern of a rectangular aperture (and SIMUS). Projected angles
+    arctan2(lateral, axial) would narrow the elevation pattern for laterally offset scatterers.
+
+    Args:
+        relative (array-like): Scatterer positions relative to the elements, (n_scat, n_el, 3).
+        frame (tuple): Element axes from :func:`_element_frame`.
+
+    Returns:
+        theta, phi, obliquity: arrays of shape (n_scat, n_el).
+    """
+    lateral_axis, elevation_axis, normal = frame
+    lateral = ops.sum(relative * lateral_axis[None], axis=-1)
+    elevation = ops.sum(relative * elevation_axis[None], axis=-1)
+    axial = ops.sum(relative * normal[None], axis=-1)
+    dist = ops.maximum(ops.linalg.norm(relative, axis=-1), 1e-12)
+    theta = ops.arcsin(ops.clip(lateral / dist, -1.0, 1.0))
+    phi = ops.arcsin(ops.clip(elevation / dist, -1.0, 1.0))
+    obliquity = axial / dist
+    return theta, phi, obliquity
+
+
+def _resolve_sub_elements(
+    n_sub_elements,
+    elevation_focus,
+    element_width,
+    element_height,
+    sound_speed,
+    center_frequency,
+    bandwidth_percent,
+):
+    """Sub-elements per element as (n_lateral, n_elevation).
+
+    "auto" is the SIMUS rule ceil(size / lambda_min), lambda_min at the top of the transducer
+    band. None and an int keep one elevation sub-element unless there is an elevation focus,
+    which needs the elevation subdivision to act at all.
+    """
+    if isinstance(n_sub_elements, (tuple, list)):
+        n_lateral, n_elevation = (int(n) for n in n_sub_elements)
+        return max(n_lateral, 1), max(n_elevation, 1)
+    focused = elevation_focus is not None
+    if n_sub_elements != "auto" and not focused:
+        return (1 if n_sub_elements is None else max(int(n_sub_elements), 1)), 1
+    values = [_concrete(x) for x in (sound_speed, center_frequency, element_width, element_height)]
+    if any(v is None for v in values):
+        raise ValueError(
+            "The sub-element count cannot be derived from a traced sound speed, frequency or "
+            "element size; pass n_sub_elements=(n_lateral, n_elevation) explicitly."
+        )
+    c, fc, width, height = (float(v) for v in values)
+    lambda_min = c / (fc * (1 + (bandwidth_percent or 0.0) / 200))
+    n_elevation = max(int(np.ceil(height / lambda_min)), 1)
+    if n_sub_elements == "auto":
+        return max(int(np.ceil(width / lambda_min)), 1), n_elevation
+    return (1 if n_sub_elements is None else max(int(n_sub_elements), 1)), n_elevation
+
+
+def _sub_element_offsets(n_lateral, n_elevation, element_width, element_height):
+    """Centroid offsets (u, v) of the sub-elements in the element frame, each (n_sub,)."""
+    u = (ops.arange(n_lateral, dtype="float32") - (n_lateral - 1) / 2) * (
+        ops.cast(element_width, "float32") / n_lateral
+    )
+    v = (ops.arange(n_elevation, dtype="float32") - (n_elevation - 1) / 2) * (
+        ops.cast(element_height, "float32") / n_elevation
+    )
+    return ops.reshape(ops.tile(u[:, None], (1, n_elevation)), (-1,)), ops.tile(v, (n_lateral,))
+
+
+def _element_responses(
+    positions,
+    geometry,
+    freqs,
+    sound_speed,
+    element_width,
+    element_height,
+    attenuation_coef,
+    lens_thickness,
+    lens_sound_speed,
+    apply_lens_correction,
+    elevation_slab_2d,
+    rigid_baffle,
+    element_normals,
+    n_sub_elements=(1, 1),
+    elevation_focus=None,
+    lens_attenuation_coef=0.0,
+):
+    """Transmit and receive one-way responses [s, e, f] and the one-way path length [s, e].
+
+    Each element is the mean of ``n_sub_elements`` (lateral, elevation) sub-elements with their
+    own distance, phase and sinc directivity, so the response holds in the near field too. An
+    elevation focus is the ideal focusing advance of each elevation sub-element, or with the lens
+    the refracted (Fermat) path through the local lens thickness, which the focus thins towards
+    the edges. The lens path is expressed as the medium distance with the same travel time for the
+    phase, and spreads as the refracted ray tube (:func:`_lens_spread_distance`); the lens leg is
+    attenuated with ``lens_attenuation_coef``. The returned path length is the element centre's.
+    """
+    n_lateral, n_elevation = n_sub_elements
+    n_sub = n_lateral * n_elevation
+    relative_center = positions[:, None] - geometry[None]
+    dtype = relative_center.dtype
+    lateral_axis, elevation_axis, _ = frame = _element_frame(element_normals, dtype)
+    dist_center = ops.linalg.norm(relative_center, axis=-1)
+    if apply_lens_correction:
+        dist = (
+            compute_lens_corrected_travel_times(
+                geometry,
+                positions,
+                lens_thickness=lens_thickness,
+                c_lens=lens_sound_speed,
+                c_medium=sound_speed,
+                n_iter=3,
+            )
+            * sound_speed
+        )
+    else:
+        dist = dist_center
+    u, v = _sub_element_offsets(n_lateral, n_elevation, element_width, element_height)
+    u, v = ops.cast(u, dtype), ops.cast(v, dtype)
+    if elevation_focus is None or apply_lens_correction:
+        advance = ops.zeros_like(v)
+    else:
+        focus = ops.cast(elevation_focus, dtype)
+        advance = (ops.sqrt(focus**2 + v**2) - focus) / sound_speed
+    if apply_lens_correction and elevation_focus is not None:
+        thickness = lens_thickness - _lens_sag(v, elevation_focus, sound_speed, lens_sound_speed)
+    else:
+        thickness = ops.full_like(v, lens_thickness)
+    sub_width = element_width / n_lateral
+    sub_height = element_height / n_elevation
+    f3 = freqs[None, None, :]
+
+    def response(j):
+        offset = u[j] * lateral_axis + v[j] * elevation_axis
+        relative = relative_center - offset[None]
+        theta, phi, obliquity = _element_angles(relative, frame)
+        amplitude = directivity(f3, theta[..., None], sub_width, sound_speed) * directivity(
+            f3, phi[..., None], sub_height, sound_speed
+        )
+        if apply_lens_correction:
+            lens_len, medium_len = compute_lens_path_lengths(
+                geometry + offset,
+                positions,
+                lens_thickness=thickness[j],
+                c_lens=lens_sound_speed,
+                c_medium=sound_speed,
+                n_iter=3,
+            )
+            sub_dist = lens_len * (sound_speed / lens_sound_speed) + medium_len
+            spread_dist = _lens_spread_distance(
+                lens_len, medium_len, thickness[j], sound_speed, lens_sound_speed
+            )
+            amplitude = amplitude * attenuate(f3, lens_attenuation_coef, lens_len[..., None])
+        else:
+            medium_len = sub_dist = spread_dist = ops.linalg.norm(relative, axis=-1)
+        amplitude = amplitude * attenuate(f3, attenuation_coef, medium_len[..., None])
+        if not rigid_baffle:
+            amplitude = amplitude * obliquity[..., None]
+        phase = ops.exp(
+            ops.array(-2j * np.pi, "complex64")
+            * ops.cast((sub_dist[..., None] / sound_speed - advance[j]) * f3, "complex64")
+        )
+        rx = ops.cast(amplitude * spread(spread_dist[..., None], 1.0), "complex64") * phase
+        if elevation_slab_2d:
+            # An elevation lens focuses the transmit to a slab: cylindrical spread on the way out.
+            tx = ops.cast(amplitude * spread(spread_dist[..., None], 0.5), "complex64") * phase
+        else:
+            tx = rx
+        return tx, rx
+
+    if n_sub == 1:
+        tx, rx = response(0)
+        return tx, rx, dist
+
+    def body(j, carry):
+        tx, rx = response(j)
+        return carry[0] + tx, carry[1] + rx
+
+    zeros = ops.zeros(ops.shape(response(0)[0]), "complex64")
+    tx, rx = ops.fori_loop(0, n_sub, body, (zeros, zeros))
+    scale = ops.array(1.0 / n_sub, "complex64")
+    return tx * scale, rx * scale, dist
 
 
 def delay2(f, tau, n_fft, sampling_frequency):
@@ -384,7 +734,7 @@ def elevation_slab_mask(scatterer_positions, probe_geometry, element_height):
         array-like: 1 inside the slab and 0 outside, of shape (n_scat,).
     """
     if element_height is None:
-        raise ValueError("elevation_lens=True requires element_height to be provided.")
+        raise ValueError("elevation_slab_2d=True requires element_height to be provided.")
     elevation_center = ops.mean(probe_geometry[:, 1])
     offset = ops.abs(scatterer_positions[:, 1] - elevation_center)
     return ops.cast(offset <= element_height / 2, "float32")
@@ -411,7 +761,7 @@ def elevation_slab_bucket(
     scatterer_magnitudes=None,
     probe_geometry=None,
     element_height=None,
-    elevation_lens=False,
+    elevation_slab_2d=False,
     bucket_growth=2.0,
     **kwargs,
 ):
@@ -423,7 +773,7 @@ def elevation_slab_bucket(
         dict: pruned scatterers, or ``{}`` if the input is traced or pruning is disabled.
     """
     del kwargs
-    if not elevation_lens or element_height is None:
+    if not elevation_slab_2d or element_height is None:
         return {}
     if scatterer_positions is None or scatterer_magnitudes is None or probe_geometry is None:
         return {}
@@ -473,8 +823,9 @@ def _warn_if_elevation_extent(probe_geometry, tol=1e-6):
         return  # traced, cannot inspect
     if elevation.max() - elevation.min() > tol:
         log.warning(
-            "elevation_lens=True models a 1D probe with a cylindrical lens, but the probe is not "
-            f"1D (element elevation min, max: {elevation.min()}, {elevation.max()}) "
+            "elevation_slab_2d=True models a 1D probe with a simplified cylindrical elevation lens,"
+            " but the probe is not 1D "
+            f"(element elevation min, max: {elevation.min()}, {elevation.max()}) "
             "This is probably a mistake."
         )
 
@@ -568,6 +919,84 @@ def get_transducer_bandwidth_fn(probe_center_frequency, bandwidth):
     return bandwidth_fn
 
 
+def chirp_spectrum(n_fft, center_frequency, sampling_frequency, n_period, chirp_sweep, xp=ops):
+    """Spectrum of a Hann-windowed linear chirp centred at t=0, on the rfft grid of ``n_fft``.
+
+    The window spans ``n_period`` periods of ``center_frequency``, over which the instantaneous
+    frequency sweeps linearly from ``center_frequency - chirp_sweep / 2`` to
+    ``center_frequency + chirp_sweep / 2``. Scaled like :func:`get_pulse_spectrum_fn`: the
+    waveform recovered with ``irfft`` has a unit peak. The waveform is even, so the spectrum is
+    real, and with ``chirp_sweep=0`` it is the sampled counterpart of the windowed tone.
+
+    Args:
+        n_fft (int): FFT length; the waveform is sampled on its wrapped time grid.
+        center_frequency (float): Centre frequency [Hz].
+        sampling_frequency (float): Sampling frequency [Hz].
+        n_period (float): Periods of ``center_frequency`` under the Hann window.
+        chirp_sweep (float): Total frequency sweep [Hz].
+        xp: Array module, ``keras.ops`` or ``numpy``.
+
+    Returns:
+        array-like: Complex spectrum of shape (n_fft // 2 + 1,).
+    """
+    n_fft = int(n_fft)
+    k = xp.arange(n_fft, dtype="float32")
+    t = xp.where(k < n_fft // 2, k, k - n_fft) / sampling_frequency
+    width = n_period / center_frequency
+    window = xp.where(xp.abs(t) < width / 2, xp.cos(np.pi * t / width) ** 2, 0.0)
+    phase = 2 * np.pi * (center_frequency * t + chirp_sweep / (2 * width) * t**2)
+    waveform = window * xp.cos(phase)
+    if xp is np:
+        return np.fft.rfft(waveform).astype(np.complex64)
+    real, imag = ops.rfft(waveform)
+    return ops.cast(real, "complex64") + ops.array(1j, "complex64") * ops.cast(imag, "complex64")
+
+
+def transducer_transfer(
+    f, probe_center_frequency, bandwidth_percent, center_frequency=None, xp=ops
+):
+    """Gaussian pulse-echo transfer function of the transducer.
+
+    Unit gain at ``probe_center_frequency`` and -6 dB at the edges of the fractional bandwidth,
+    ``probe_center_frequency * (1 +/- bandwidth_percent / 200)``.
+
+    Args:
+        f (array-like): Frequencies [Hz].
+        probe_center_frequency (float, optional): Centre of the band [Hz]. ``center_frequency``
+            when None.
+        bandwidth_percent (float, optional): -6 dB fractional bandwidth in percent. None is a
+            flat response.
+        center_frequency (float, optional): Fallback band centre [Hz].
+        xp: Array module, ``keras.ops`` or ``numpy``.
+
+    Returns:
+        array-like: The transfer function at ``f``.
+    """
+    if bandwidth_percent is None:
+        return xp.ones_like(f)
+    bandwidth = _concrete(bandwidth_percent)
+    if bandwidth is not None and (
+        not np.isfinite(float(bandwidth)) or float(bandwidth) <= 0
+    ):
+        raise ValueError(f"bandwidth_percent must be positive, got {float(bandwidth)}.")
+    if probe_center_frequency is None:
+        probe_center_frequency = center_frequency
+    if probe_center_frequency is None:
+        raise ValueError("transducer_transfer needs probe_center_frequency or center_frequency.")
+    half_width = 0.5 * bandwidth_percent / 100 * probe_center_frequency
+    return xp.exp(-np.log(2) * ((xp.abs(f) - probe_center_frequency) / half_width) ** 2)
+
+
 def _round_up_to_power_of_two(x):
     """Rounds up to the next power of two."""
     return 2 ** np.ceil(np.log2(x))
+
+
+def _concrete(x):
+    """numpy view of ``x``, or None when it is traced."""
+    if x is None:
+        return None
+    try:
+        return ops.convert_to_numpy(x)
+    except (RuntimeError, ValueError, TypeError, NotImplementedError):
+        return None
