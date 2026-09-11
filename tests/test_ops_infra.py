@@ -540,6 +540,15 @@ def test_prepare_parameters_rejects_non_parameters():
         pipeline.prepare_parameters({"not": "parameters"})
 
 
+def test_prepare_parameters_leaves_unset_parameters_to_the_caller():
+    """A None parameter (e.g. no sos_map) is not prepared, so it can still be passed to the call."""
+    pipeline = ops.Pipeline([ops.TOFCorrection()], jit_options=None)
+    parameters = get_parameters(get_probe(), grid_size_x=4, grid_size_z=4)
+    inputs = pipeline.prepare_parameters(parameters)
+    assert "sos_map" not in inputs and "sos_grid_x" not in inputs
+    assert "sos_map" in pipeline.prepare_parameters(parameters, sos_map=None)
+
+
 def test_make_operation_chain_passthrough_and_bad_type():
     """make_operation_chain keeps pre-built instances as-is and rejects unsupported types."""
     from zea.ops.pipeline import make_operation_chain
