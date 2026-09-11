@@ -801,6 +801,36 @@ class _EchoXFlow:
         convert_echoxflow(self)
 
 
+@dataclass
+class _Us4us:
+    """Convert us4us (ARRUS + gui4us) recordings to zea format."""
+
+    src: tyro.conf.Positional[str]
+    """Source path: a single .pkl recording, or a directory holding one or more .pkl files.
+    An hf:// path is downloaded first (e.g. hf://zeahub/pytest/us4us/recording.pkl)."""
+    dst: tyro.conf.Positional[Path]
+    """Destination path: a .hdf5 file when src is a file, or a directory when src is a
+    directory (each <name>.pkl is written as <dst>/<name>.hdf5)."""
+    mapping: list[str] = field(default_factory=lambda: ["0:image"])
+    """Which pipeline output becomes which zea data type, as '<index>:<data type>' entries
+    (e.g. --mapping 0:image 1:beamformed_data). A JSON object is also accepted. Supported
+    data types: raw_data, beamformed_data, envelope_data, image."""
+    metadata: str | None = None
+    """Pickle holding the ARRUS metadata, for recordings that store data and metadata
+    separately (local or hf://). A sibling '<name>_metadata.pkl' is picked up
+    automatically, from the same repo for an hf:// recording."""
+    separate_tracks: bool = False
+    """Write every mapped output to its own zea track instead of storing them side by side
+    in a single track."""
+    overwrite: bool = False
+    """Overwrite existing destination .hdf5 files."""
+
+    def run(self):
+        from zea.data.convert.us4us import convert_us4us
+
+        convert_us4us(self)
+
+
 ConvertDataset = Union[
     Annotated[_Echonet, tyro.conf.subcommand("echonet")],
     Annotated[_EchonetLVH, tyro.conf.subcommand("echonetlvh")],
@@ -809,6 +839,7 @@ ConvertDataset = Union[
     Annotated[_Picmus, tyro.conf.subcommand("picmus")],
     Annotated[_Verasonics, tyro.conf.subcommand("verasonics")],
     Annotated[_EchoXFlow, tyro.conf.subcommand("echoxflow")],
+    Annotated[_Us4us, tyro.conf.subcommand("us4us")],
 ]
 
 

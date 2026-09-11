@@ -227,6 +227,7 @@ def _hf_download(repo_id, filename, cache_dir=None, repo_type="dataset", **kwarg
         cache_dir = _HF_CACHE_DIRS.get(repo_type, HF_DATASETS_DIR)
 
     def _download():
+        """Download the file into the cache and return its local path."""
         return _hf_call(
             hf_hub_download,
             retry_on=_HF_DOWNLOAD_RETRY_ERRORS,
