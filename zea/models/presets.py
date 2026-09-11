@@ -262,3 +262,18 @@ hvae_presets = {
         "hf_handle": "hf://zeahub/hvae",
     },
 }
+
+inversionnet_presets = {
+    "inversionnet-openpros": {
+        "metadata": {
+            "description": (
+                "InversionNet baseline for the OpenPros limited-view prostate USCT "
+                "benchmark, mapping waveform data to a speed-of-sound map. "
+                "Original paper and code: https://arxiv.org/abs/2505.12261"
+            ),
+            "params": 20_447_515,
+            "path": "inversionnet",
+        },
+        "hf_handle": "hf://zeahub/openpros-inversion-net",
+    },
+}
