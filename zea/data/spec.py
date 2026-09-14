@@ -19,7 +19,7 @@ from zea.internal.typing import Scalar
 from zea.internal.utils import atomic_write
 
 # Named dimensions whose sizes must agree wherever they appear.
-CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch", "n_spatial_ch"}
+CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_rx", "n_ch", "n_spatial_ch"}
 
 # Subset that must only agree within a single spec, not across sibling data
 # products: channel counts are independent between products (e.g. RF raw_data
@@ -1033,7 +1033,7 @@ class AlignedData(Spec):
     """Time-of-flight corrected data.
 
     Args:
-        values: The aligned data of shape ``(n_frames, n_tx, n_ax, n_el, n_ch)``
+        values: The aligned data of shape ``(n_frames, n_tx, n_ax, n_rx, n_ch)``
             and type float32 or int16. n_ch is 1 for RF data or 2 for IQ data.
         labels: The labels for the channel dimension, e.g. ``["RF"]`` or ``["I", "Q"]``.
             Auto-generated from n_ch if not provided.
@@ -1045,7 +1045,7 @@ class AlignedData(Spec):
     SCHEMA = {
         "values": {
             "dtype": (np.float32, np.int16),
-            "shape": ("n_frames", "n_tx", "n_ax", "n_el", "n_ch"),
+            "shape": ("n_frames", "n_tx", "n_ax", "n_rx", "n_ch"),
         },
         "labels": {"dtype": np.str_, "shape": ("n_ch",)},
     }
@@ -1332,8 +1332,13 @@ class DataSpec(Spec):
     """Data group containing raw channels, derived pipeline products, and optional spatial maps.
 
     Plain-array data products:
-        raw_data: Raw channel data of shape (n_frames, n_tx, n_ax, n_el, n_ch)
-            and type float32 or int16.
+        raw_data: Raw channel data of shape (n_frames, n_tx, n_ax, n_rx, n_ch).
+            ``n_rx`` is the number of *receive* channels, which equals ``n_el`` only
+            when every element receives on every transmit. Systems with a receive
+            sub-aperture (a sliding window, or a multiplexed front-end with fewer
+            channels than elements) have ``n_rx < n_el``; use
+            :attr:`ScanSpec.rx_aperture_indices` to record which element each
+            receive channel corresponds to. Type float32 or int16.
 
     Grouped data products (values + optional metadata):
         - aligned_data: Time-of-flight corrected data and optional labels.
@@ -1371,7 +1376,7 @@ class DataSpec(Spec):
         # Plain-array data products
         "raw_data": {
             "dtype": (np.float32, np.int16),
-            "shape": ("n_frames", "n_tx", "n_ax", "n_el", "n_ch"),
+            "shape": ("n_frames", "n_tx", "n_ax", "n_rx", "n_ch"),
         },
         # Grouped data products
         "aligned_data": {"spec": AlignedData},
@@ -1533,6 +1538,14 @@ class ScanSpec(Spec):
             Shape is either (n_frames, n_tx) or flat (n_frames * n_tx - 1,).
         azimuth_angles: The azimuthal angles in radians of the transmit beams of
             shape (n_tx,).
+        rx_aperture_indices: Which probe element each receive channel of
+            ``raw_data`` corresponds to, of shape (n_tx, n_rx) and integer
+            dtype. Only needed when the receive aperture is a subset of the
+            probe (``n_rx < n_el``), e.g. a sliding window or a multiplexed
+            front-end; without it the element-to-channel mapping cannot be
+            recovered from the file. Omit it when every element receives on
+            every transmit (``n_rx == n_el``), where the mapping is the
+            identity.
         sound_speed: The speed of sound in meters per second.
         tgc_gain_curve: The time-gain-compensation that was applied to every
             sample in the raw_data of shape (n_ax,). Divide by this curve to
@@ -1556,6 +1569,7 @@ class ScanSpec(Spec):
     polar_angles: np.ndarray
     time_to_next_transmit: np.ndarray | None = None
     azimuth_angles: np.ndarray | None = None
+    rx_aperture_indices: np.ndarray | None = None
     sound_speed: np.ndarray | float | None = None
     tgc_gain_curve: np.ndarray | None = None
     waveforms_one_way: np.ndarray | None = None
@@ -1576,6 +1590,10 @@ class ScanSpec(Spec):
             "shape": (("n_frames", "n_tx"), ("n_timing_intervals",)),
         },
         "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
+        "rx_aperture_indices": {
+            "dtype": (np.int16, np.int32, np.int64),
+            "shape": ("n_tx", "n_rx"),
+        },
         "sound_speed": {"dtype": np.float32, "shape": ()},
         "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
         "waveforms_one_way": {
@@ -1616,6 +1634,16 @@ class ScanSpec(Spec):
         "polar_angles": {"unit": "rad", "description": "Polar angles of transmit beams."},
         "time_to_next_transmit": {"unit": "s", "description": "Time between transmit events."},
         "azimuth_angles": {"unit": "rad", "description": "Azimuthal angles of transmit beams."},
+        "rx_aperture_indices": {
+            "unit": "–",
+            "description": (
+                "Probe element index for each receive channel of raw_data, shape "
+                "(n_tx, n_rx). Required to interpret the channel axis when the "
+                "receive aperture is a subset of the probe (n_rx < n_el); omit "
+                "when every element receives (the mapping is then the identity)."
+            ),
+            "rare": True,
+        },
         "sound_speed": {"unit": "m/s", "description": "Speed of sound."},
         "tgc_gain_curve": {
             "unit": "–",
@@ -2406,6 +2434,51 @@ class TrackSpec(Spec):
             raise TypeError(f"'label' must be a str, got {type(self.label)}")
         if self.label is not None and not self.label.strip():
             raise ValueError("'label' must not be an empty or whitespace-only string.")
+
+        self._check_receive_aperture()
+
+    def _check_receive_aperture(self) -> None:
+        """Cross-check the receive channel count against the transmit element count.
+
+        ``n_rx`` and ``n_el`` are separate dimensions because a receive sub-aperture
+        (a sliding window, or a multiplexed front-end with fewer channels than
+        elements) makes them legitimately differ. They still relate: there can be no
+        more receive channels than elements, and when they differ the
+        element-to-channel mapping has to be recorded or the channel axis cannot be
+        interpreted.
+        """
+        scan, data = self.scan, self.data
+        if not isinstance(scan, ScanSpec) or not isinstance(data, DataSpec):
+            return
+        if data.raw_data is None:
+            return
+
+        n_rx = value_shape(data.raw_data)[3]
+        n_el = scan.n_el
+        indices = scan.rx_aperture_indices
+
+        if n_rx > n_el:
+            raise ValueError(
+                f"raw_data has {n_rx} receive channels but the transmit aperture has "
+                f"{n_el} elements (from scan.t0_delays); there cannot be more receive "
+                f"channels than probe elements."
+            )
+
+        if indices is not None:
+            lo, hi = int(np.min(indices)), int(np.max(indices))
+            if lo < 0 or hi >= n_el:
+                raise ValueError(
+                    f"scan.rx_aperture_indices must index the {n_el} probe elements, "
+                    f"but values range from {lo} to {hi}."
+                )
+        elif n_rx != n_el:
+            log.warning(
+                f"raw_data has {log.yellow(str(n_rx))} receive channels while the probe has "
+                f"{log.yellow(str(n_el))} elements, so the receive aperture is a subset of "
+                "the probe. Set 'scan.rx_aperture_indices' (shape (n_tx, n_rx)) to record "
+                "which element each receive channel corresponds to — without it the mapping "
+                "cannot be recovered from the file."
+            )
 
     def store_in_group(
         self,
