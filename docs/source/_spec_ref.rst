@@ -912,6 +912,12 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - rad
            - Azimuthal angles of transmit beams.
            - |badge-opt|
+         * - ``rx_aperture_indices``
+           - ``int16`` | ``int32`` | ``int64``
+           - (n_tx, n_rx)
+           - –
+           - Probe element index for each receive channel of the channel data, shape (n_tx, n_rx). Required to interpret the channel axis when the receive aperture is a subset of the probe. Omit it when every element receives, where the mapping is the identity.
+           - |badge-opt|
          * - ``sound_speed``
            - ``float32``
            - scalar

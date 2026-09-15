@@ -634,11 +634,28 @@ class Track:
 
     @property
     def n_el(self) -> int:
-        """Number of elements."""
+        """Number of probe elements."""
+        n_el = _n_el_from_scan_group(self._group)
+        if n_el is not None:
+            return n_el
         return _shape_from_data_group(
             self._group["data"],
             index=3,
             name="n_el",
+            requires_raw=True,
+        )
+
+    @property
+    def n_rx(self) -> int:
+        """Number of receive channels in the channel data.
+
+        Equal to :attr:`n_el` unless the acquisition used a receive sub-aperture, in
+        which case ``scan.rx_aperture_indices`` maps these channels onto elements.
+        """
+        return _shape_from_data_group(
+            self._group["data"],
+            index=3,
+            name="n_rx",
             requires_raw=True,
         )
 
@@ -781,6 +798,18 @@ def _shape_from_data_group(
             f"Cannot determine `{name}`, no recognized data arrays found in the data group."
         ) from None
     return shape[index]
+
+
+def _n_el_from_scan_group(track_group: "h5py.Group") -> "int | None":
+    """Number of probe elements recorded in a track's scan metadata, if present.
+
+    Preferred over the channel axis of the data, which counts receive channels and is
+    smaller than the element count when the acquisition uses a receive sub-aperture.
+    """
+    t0_delays = track_group.get("scan/t0_delays")
+    if t0_delays is None or t0_delays.ndim != 2:
+        return None
+    return int(t0_delays.shape[1])
 
 
 def _compute_all_track_timestamps(
@@ -1875,13 +1904,28 @@ class File(h5py.File):
 
     @property
     def n_el(self) -> int:
-        """Number of elements."""
+        """Number of probe elements."""
         if self._n_tracks > 1:
             raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_el.")
+        data_group = self._get_single_track_data_group()
+        n_el = _n_el_from_scan_group(data_group.parent)
+        if n_el is not None:
+            return n_el
+        return _shape_from_data_group(data_group, index=3, name="n_el", requires_raw=True)
+
+    @property
+    def n_rx(self) -> int:
+        """Number of receive channels in the channel data.
+
+        Equal to :attr:`n_el` unless the acquisition used a receive sub-aperture, in
+        which case ``scan.rx_aperture_indices`` maps these channels onto elements.
+        """
+        if self._n_tracks > 1:
+            raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_rx.")
         return _shape_from_data_group(
             self._get_single_track_data_group(),
             index=3,
-            name="n_el",
+            name="n_rx",
             requires_raw=True,
         )
 
