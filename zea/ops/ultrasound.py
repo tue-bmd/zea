@@ -28,12 +28,12 @@ from zea.func.ultrasound import (
 from zea.internal.core import (
     DEFAULT_DYNAMIC_RANGE,
     DataTypes,
+    python_constant,
 )
 from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
 from zea.simulator import (
-    _concrete,
     apply_receive_chain,
     elevation_slab_bucket,
     simulate_rf,
@@ -49,16 +49,6 @@ simulator_settings: dict[str, Callable] = {
 }
 
 
-def _python_scalar(x):
-    """0-d numeric arrays as Python scalars; anything else unchanged."""
-    if isinstance(x, (bool, int, float, str, type(None))):
-        return x
-    value = _concrete(x)
-    if value is None or np.ndim(value) != 0:
-        return x
-    return value.item()
-
-
 @ops_registry("simulate_rf")
 class Simulate(Operation):
     """Simulate RF data.
@@ -68,10 +58,11 @@ class Simulate(Operation):
     speed for accuracy or accuracy for speed will use these two paths respectively.
     ``"time_approximation"`` solves in the time domain. Its geometry-dependent factors are
     evaluated at the center frequency, making it less accurate than the others but much faster in
-    some settings. The transducer and element options (``rigid_baffle``, ``bandwidth_percent``,
-    ``probe_center_frequency``, ``element_normals``, ``chirp_sweep``, ``n_period``,
+    some settings. The element options (``rigid_baffle``, ``element_normals``,
     ``n_sub_elements``, ``elevation_focus``, ``lens_attenuation_coef``) reach the
-    frequency-domain methods only; ``"time_approximation"`` does not model them.
+    frequency-domain methods only; ``"time_approximation"`` does not model them. The transmit
+    pulse is ``waveforms_two_way`` (the one of a :class:`zea.Parameters` or zea file, or built
+    with :func:`zea.simulator.transmit_pulse`), and the default pulse of that function without.
     """
 
     # Define operation-specific static parameters
@@ -85,13 +76,11 @@ class Simulate(Operation):
         "sampling_frequency",
         "scatter_exponent",
         "rigid_baffle",
-        "bandwidth_percent",
-        "probe_center_frequency",
-        "chirp_sweep",
+        "waveforms_two_way",
+        "waveform_sampling_frequency",
         "noise_level_db",
         "tgc_max_db",
         "noise_seed",
-        "n_period",
         "n_sub_elements",
         "elevation_focus",
     ]
@@ -115,7 +104,7 @@ class Simulate(Operation):
             # Static scalars as Python numbers: tf.function would otherwise trace them as
             # tensors, and the simulators size the FFT from the concrete pulse length.
             merged.update(
-                {key: _python_scalar(merged[key]) for key in self.static_params if key in merged}
+                {key: python_constant(merged[key]) for key in self.static_params if key in merged}
             )
         # Drop out-of-slab scatterers here, because `call` is traced.
         pruned = {} if self._inside_outer_jit else elevation_slab_bucket(**merged)
@@ -150,11 +139,9 @@ class Simulate(Operation):
         noise_reference=None,
         scatter_exponent=2.0,
         rigid_baffle=True,
-        bandwidth_percent=None,
-        probe_center_frequency=None,
         element_normals=None,
-        chirp_sweep=None,
-        n_period=4.0,
+        waveforms_two_way=None,
+        waveform_sampling_frequency=250e6,
         n_sub_elements=None,
         elevation_focus=None,
         lens_attenuation_coef=0.0,
@@ -167,16 +154,14 @@ class Simulate(Operation):
             simulate = functools.partial(
                 simulate,
                 rigid_baffle=rigid_baffle,
-                bandwidth_percent=bandwidth_percent,
-                probe_center_frequency=probe_center_frequency,
                 element_normals=element_normals,
-                chirp_sweep=chirp_sweep,
-                n_period=n_period,
                 n_sub_elements=n_sub_elements,
                 elevation_focus=elevation_focus,
                 lens_attenuation_coef=lens_attenuation_coef,
             )
         simulate_kwargs = {
+            "waveforms_two_way": waveforms_two_way,
+            "waveform_sampling_frequency": waveform_sampling_frequency,
             "probe_geometry": probe_geometry,
             "apply_lens_correction": apply_lens_correction,
             "lens_thickness": lens_thickness,

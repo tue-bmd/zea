@@ -3,12 +3,9 @@
 Both simulators get the same scene. Time origin: sample n is at ``t = n / fs`` and the transmit
 pulse is centred at ``t = 0`` plus the element delay (zea: ``initial_times = t_peak = 0``).
 Settings that have no counterpart are pinned to the SIMUS convention: ``scatter_exponent=0``,
-1/r spreading both ways, no lens correction, frequency dependent directivity.
-
-The transmit pulses differ by design (zea: Hann windowed cosine times a Gaussian transfer,
-SIMUS: rectangular windowed sine times a generalized-normal transfer). Each record is convolved
-with the other simulator's pulse, so both become field times both pulses and only the
-propagation physics is compared.
+1/r spreading both ways, no lens correction, frequency dependent directivity, and the
+``"simus"`` pulse model (MUST's rectangular windowed sine times its generalized-normal
+transducer response), so the records are compared directly.
 """
 
 from dataclasses import dataclass, replace
@@ -16,16 +13,10 @@ from dataclasses import dataclass, replace
 import numpy as np
 import pytest
 from keras import ops
-from scipy.signal import fftconvolve
 from scipy.special import fresnel
 
 from zea.beamform.phantoms import fish
-from zea.simulator import (
-    chirp_spectrum,
-    get_pulse_spectrum_fn,
-    simulate_rf,
-    transducer_transfer,
-)
+from zea.simulator import measured_pulse, simulate_rf, transmit_pulse
 
 pymust = pytest.importorskip("pymust")
 
@@ -105,7 +96,9 @@ def fish_2d_allinplane():
 
 
 def fish_2d_45degrot_outofplane():
-    """Fish rotated 45 deg about z (y up to 12 mm), auto splitting in both simulators."""
+    """Fish rotated 45 deg about z (y up to 12 mm), auto splitting: SIMUS's own rule in SIMUS,
+    the same counts in zea (zea's "auto" takes lambda_min from the pulse band instead of the
+    transducer band, one elevation sub-element fewer here)."""
     return linear_scene(
         fish_scatterers(rot_deg=45),
         plane_waves(linear_probe(), [(-10, 0), (10, 0)]),
@@ -133,18 +126,17 @@ def fish_2d_attenuation():
 
 
 def fish_2d_chirp():
-    """Linear chirp, 1.5 MHz sweep over 6 periods. zea sweeps up, SIMUS down, so only the
-    equalized metrics are comparable."""
+    """Linear chirp, 1.5 MHz sweep down (SIMUS's direction) over 6 periods."""
     return linear_scene(
         fish_scatterers(),
         plane_waves(linear_probe(), [(0, 0)]),
-        chirp_sweep=1.5e6,
+        chirp_sweep=-1.5e6,
         n_period=6.0,
     )
 
 
 def fish_2d_bandwidth50():
-    """50% bandwidth: a Gaussian (zea) against a generalized normal (SIMUS) transfer."""
+    """50% bandwidth, a narrower generalized normal transfer."""
     return linear_scene(
         fish_scatterers(), plane_waves(linear_probe(), [(0, 0)]), bandwidth_percent=50.0
     )
@@ -216,8 +208,35 @@ def record_samples(s):
     return int(np.ceil(t_end * FS)) + 16
 
 
+def zea_pulse(s):
+    """SIMUS's pulse as a waveform, with the t_peak that puts its window centre (SIMUS's time
+    origin) at the travel time; the simulator places the envelope peak there, which differs
+    from the centre for a chirp."""
+    pulse = transmit_pulse(
+        FC,
+        pulse_model="simus",
+        n_period=s.n_period,
+        chirp_sweep=s.chirp_sweep,
+        bandwidth_percent=s.bandwidth_percent,
+        probe_center_frequency=FC,
+    )
+    waveform = pulse.waveform()
+    centre = (len(waveform) // 2) / pulse.sampling_frequency
+    t_peak = measured_pulse(waveform, FS, pulse.sampling_frequency).time_to_peak - centre
+    return waveform, pulse.sampling_frequency, t_peak
+
+
+def simus_sub_elements(s):
+    """SIMUS's ceil(size / lambda_min) with lambda_min at the top of the transducer band."""
+    if s.n_sub_elements != "auto":
+        return s.n_sub_elements
+    lambda_min = C / (FC * (1 + s.bandwidth_percent / 200))
+    return tuple(int(np.ceil(size / lambda_min)) for size in (s.element_width, s.element_height))
+
+
 def run_zea(s):
     n_tx = len(s.t0_delays)
+    waveform, waveform_fs, t_peak = zea_pulse(s)
     rf = simulate_rf(
         scatterer_positions=s.positions.astype(np.float32),
         scatterer_magnitudes=np.ones(len(s.positions), np.float32),
@@ -234,29 +253,15 @@ def run_zea(s):
         element_width=s.element_width,
         attenuation_coef=s.attenuation_coef,
         tx_apodizations=s.apodizations.astype(np.float32),
-        t_peak=np.zeros(n_tx, np.float32),
+        t_peak=np.full(n_tx, t_peak, np.float32),
         element_height=s.element_height,
         scatter_exponent=0.0,
         rigid_baffle=s.rigid_baffle,
-        bandwidth_percent=s.bandwidth_percent,
-        probe_center_frequency=FC,
-        chirp_sweep=s.chirp_sweep,
-        n_period=s.n_period,
-        n_sub_elements=s.n_sub_elements,
+        waveforms_two_way=waveform,
+        waveform_sampling_frequency=waveform_fs,
+        n_sub_elements=simus_sub_elements(s),
     )
     return np.asarray(ops.convert_to_numpy(rf))[..., 0]  # (n_tx, n_t, n_el)
-
-
-def zea_pulse(s, n=4096):
-    """The transmit pulse of ``simulate_rf``, sampled on the rfft grid of ``n``."""
-    freqs = ops.arange(n // 2 + 1, dtype="float32") / n * FS
-    if s.chirp_sweep:
-        spectrum = chirp_spectrum(n, FC, FS, s.n_period, s.chirp_sweep)
-    else:
-        spectrum = get_pulse_spectrum_fn(FC, n_period=s.n_period, sampling_frequency=FS)(freqs)
-    transfer = transducer_transfer(freqs, FC, s.bandwidth_percent, FC)
-    spectrum = spectrum * ops.cast(transfer, "complex64")
-    return centred(np.fft.irfft(np.asarray(ops.convert_to_numpy(spectrum)), n))
 
 
 def simus_param(s):
@@ -299,27 +304,6 @@ def run_simus(s):
     return np.stack([r[:n] for r in out])
 
 
-def simus_pulse(s, n=4096):
-    p = simus_param(s)
-    w = 2 * np.pi * np.arange(n // 2 + 1) / n * FS
-    spectrum = p.getPulseSpectrumFunction(p.TXfreqsweep if s.chirp_sweep else None)(w)
-    spectrum = spectrum * p.getProbeFunction()(w) ** 2
-    return centred(np.fft.irfft(np.conj(spectrum), n))  # simus3 inverts conj(spectrum) too
-
-
-def centred(x):
-    """Pulse centred on the middle sample of an odd-length array."""
-    x = np.fft.fftshift(x)
-    c = len(x) // 2
-    keep = np.nonzero(np.abs(x) > 1e-4 * np.abs(x).max())[0]
-    half = max(c - keep[0], keep[-1] - c) + 1
-    return x[c - half : c + half + 1]
-
-
-def equalize(rf, pulse):
-    return fftconvolve(rf, pulse[None, :, None], mode="same", axes=1)
-
-
 def metrics(a, b):
     """a: zea, b: reference, scaled onto a in the least-squares sense."""
     b = b * (a * b).sum() / (b * b).sum()
@@ -339,9 +323,7 @@ def test_simulate_rf_matches_simus3(name):
     rf_zea, rf_ref = run_zea(scene), run_simus(scene)
     # SIMUS returns fewer samples than n_ax for some scenes; compare the common part.
     n = min(rf_zea.shape[1], rf_ref.shape[1])
-    equalized = equalize(rf_zea[:, :n], simus_pulse(scene))
-    reference = equalize(rf_ref[:, :n], zea_pulse(scene))
-    m = metrics(equalized, reference)
+    m = metrics(rf_zea[:, :n], rf_ref[:, :n])
     assert m["lag"] == 0
     assert m["rel"] < 1e-3
     assert m["corr"] > 0.9999

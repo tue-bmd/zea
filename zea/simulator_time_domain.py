@@ -36,7 +36,6 @@ Example usage
 
 """
 
-import numpy as np
 from keras import ops
 
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
@@ -47,9 +46,9 @@ from zea.simulator import (
     _validate_scatter_exponent,
     _warn_if_elevation_extent,
     attenuate,
-    hann_unnormalized,
     spread,
     apply_receive_chain,
+    transmit_pulses,
 )
 
 
@@ -78,6 +77,8 @@ def simulate_rf_td(
     noise_seed=0,
     noise_reference=None,
     scatter_exponent=2.0,
+    waveforms_two_way=None,
+    waveform_sampling_frequency=250e6,
 ):
     """Time-domain (splat-and-convolve) RF simulator.
 
@@ -133,6 +134,11 @@ def simulate_rf_td(
         scatter_exponent (float): Weigh the scattered waveform spectrum by
             ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
             myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
+        waveforms_two_way (array-like, optional): Two-way transmit waveforms of shape
+            (n_tx, n_samples) or (n_samples,), as in :func:`zea.simulator.simulate_rf`; None is
+            the default pulse of :func:`zea.simulator.transmit_pulse`. Must be static under jit.
+        waveform_sampling_frequency (float): Sampling frequency [Hz] of ``waveforms_two_way``.
+            Must be static under jit.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -145,9 +151,14 @@ def simulate_rf_td(
     n_el = probe_geometry.shape[0]
     n_scat = scatterer_positions.shape[0]
 
-    pulse = get_pulse_waveform(
-        center_frequency, sampling_frequency, scatter_exponent=scatter_exponent
+    _validate_scatter_exponent(scatter_exponent)
+    pulses = transmit_pulses(
+        n_tx, center_frequency, sampling_frequency, waveforms_two_way, waveform_sampling_frequency
     )
+    waveforms = {}
+    for pulse in pulses:
+        if pulse not in waveforms:
+            waveforms[pulse] = _scattered_waveform(pulse, center_frequency, scatter_exponent)
 
     # Chunk so the (n_scat, n_el, n_el) tensors never materialize at once. The factor is
     # approximate memory use after jit fusion, not a count of intermediate tensors.
@@ -184,7 +195,10 @@ def simulate_rf_td(
                 n_el,
             )
 
-    parts = [_convolve_pulse_over_channels(spike_map, pulse) for spike_map in spike_maps]
+    parts = [
+        _convolve_pulse_over_channels(spike_map, waveforms[pulse])
+        for spike_map, pulse in zip(spike_maps, pulses)
+    ]
     rf_data = ops.stack(parts, axis=0)
     rf_data = rf_data[..., None]
     return apply_receive_chain(rf_data, noise_level_db, tgc_max_db, noise_seed, noise_reference)
@@ -370,47 +384,16 @@ def _multiply_spectra(signals, kernel, n_full):
     return ops.irfft((product_real, product_imag), fft_length=n_full)
 
 
-def get_pulse_waveform(
-    center_frequency, sampling_frequency, n_period=4, n_samples=129, scatter_exponent=0.0
-):
-    """Generate a real, Hann-windowed sinusoidal transmit pulse in the time domain.
-
-    This is the time-domain counterpart of :func:`zea.simulator.get_pulse_spectrum_fn`: an even,
-    zero-centered pulse whose spectrum matches the windowed sine used by
-    :func:`zea.simulator.simulate_rf`. The pulse length ``n_samples`` is a fixed (static) sample
-    count so the pulse has a compile-time-known shape; the Hann window zeros any
-    samples beyond the ``n_period``-period support, so ``n_samples`` only needs to
-    be large enough (and odd, to keep the pulse symmetric and delay-aligned) to
-    contain that support.
-
-    Args:
-        center_frequency (float): The center frequency of the pulse [Hz].
-        sampling_frequency (float): The sampling frequency [Hz].
-        n_period (float): The number of periods spanned by the Hann window.
-        n_samples (int): The (odd) number of samples in the pulse.
-        scatter_exponent (float): Exponent applied to the pulse spectrum relative to
-            ``center_frequency``.
-
-    Returns:
-        array-like: The pulse waveform of shape (n_samples,).
-    """
-    _validate_scatter_exponent(scatter_exponent)
-    width = n_period / center_frequency
-    support_samples = width * sampling_frequency
-    if support_samples > n_samples:
-        raise ValueError(
-            f"Hann window support ({support_samples:.1f} samples) exceeds n_samples "
-            f"({n_samples}); the pulse would be truncated. Increase n_samples or "
-            "reduce sampling_frequency / n_period."
-        )
-    times = (ops.arange(n_samples, dtype="float32") - n_samples // 2) / sampling_frequency
-    window = hann_unnormalized(times, width)
-    pulse = window * ops.cos(2 * np.pi * center_frequency * times)
+def _scattered_waveform(pulse, center_frequency, scatter_exponent):
+    """The pulse sampled at the RF rate with an odd (static) length and its peak on the middle
+    sample, so a spike at the two-way delay convolves to the same record as the frequency-domain
+    simulator, weighted by ``(f / center_frequency)**scatter_exponent``."""
+    waveform = ops.convert_to_tensor(pulse.waveform())
     if not scatter_exponent:
-        return pulse
+        return waveform
 
-    n_freq = n_samples // 2 + 1
-    freqs = ops.arange(n_freq, dtype="float32") / n_samples * sampling_frequency
+    n_samples = pulse.n_samples
+    freqs = ops.arange(n_samples // 2 + 1, dtype="float32") / n_samples * pulse.sampling_frequency
     scatter_gain = (freqs / center_frequency) ** scatter_exponent
-    pulse_real, pulse_imag = ops.rfft(pulse)
+    pulse_real, pulse_imag = ops.rfft(waveform)
     return ops.irfft((pulse_real * scatter_gain, pulse_imag * scatter_gain), fft_length=n_samples)

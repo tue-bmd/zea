@@ -999,6 +999,16 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
+    @cache_with_dependencies("selected_transmits")
+    def waveforms_two_way(self):
+        """Two-way transmit waveforms of shape (n_tx, n_samples_two_way), sampled at 250 MHz,
+        or None. Sliced by ``selected_transmits`` when there is one per transmit."""
+        value = self._params.get("waveforms_two_way")
+        if value is None or value.shape[0] != self.n_tx_total:
+            return value
+
+        return value[self.selected_transmits]
+
     @cache_with_dependencies("waveforms_one_way", "waveforms_two_way")
     def n_waveforms(self):
         """The number of unique transmit waveforms."""

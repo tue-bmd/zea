@@ -558,6 +558,19 @@ def test_t_peak_default_and_waveform_derived():
     assert np.allclose(parameters.t_peak, 1 / center_frequency)
 
 
+def test_waveforms_two_way_follow_selected_transmits():
+    """One waveform per transmit is sliced like t_peak; other shapes are returned as stored."""
+    waveforms = np.arange(3)[:, None] * np.ones((3, 8))
+    parameters = Parameters(n_tx=3, center_frequency=5e6, waveforms_two_way=waveforms)
+    parameters.selected_transmits = [2, 0]
+    assert np.array_equal(parameters.waveforms_two_way, waveforms[[2, 0]])
+    assert np.allclose(parameters.t_peak, 0.0)
+    parameters = Parameters(n_tx=3, center_frequency=5e6, waveforms_two_way=waveforms[:2])
+    parameters.selected_transmits = [2, 0]
+    assert np.array_equal(parameters.waveforms_two_way, waveforms[:2])
+    assert Parameters(n_tx=3, center_frequency=5e6).waveforms_two_way is None
+
+
 def test_missing_transmit_defaults_warn_once_on_access(monkeypatch, reset_warning_once):
     local_scan_args = scan_args.copy()
     local_scan_args.pop("azimuth_angles", None)

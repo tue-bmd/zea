@@ -1538,11 +1538,16 @@ class ScanSpec(Spec):
             sample in the raw_data of shape (n_ax,). Divide by this curve to
             undo the TGC.
         waveforms_one_way: One-way waveforms of shape (n_tx, .) as simulated
-            by the Verasonics system. This is the waveform after being filtered
-            by the transducer bandwidth once.
+            by the Verasonics system (``TW.Wvfm1Wy``, sampled at 250 MHz): the
+            tri-state pulser burst (with its equalisation pulses) through a
+            2nd-order Butterworth band-pass with -3 dB edges at the transducer
+            bandwidth. Not normalised; sample 0 is the transmit trigger.
         waveforms_two_way: Two-way waveforms of shape (n_tx, .) as simulated
-            by the Verasonics system. This is the waveform after being filtered
-            by the transducer bandwidth twice.
+            by the Verasonics system (``TW.Wvfm2Wy``): the one-way waveform
+            through the same band-pass again, so -6 dB two-way at the edges of
+            the transducer bandwidth. No radiation factor is applied. See
+            :func:`zea.simulator.measured_pulse`, which uses it as the
+            transmit pulse of the simulators.
     """
 
     sampling_frequency: np.ndarray | float

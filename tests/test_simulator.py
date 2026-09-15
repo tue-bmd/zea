@@ -16,11 +16,12 @@ from zea.simulator import (
     elevation_slab_bucket,
     select_elevation_slab,
     simulate_rf,
+    transmit_pulse,
 )
 from zea.ops import Simulate
 from zea.ops.ultrasound import simulator_settings
 from zea.probes import create_curved_probe_geometry, create_probe_geometry, curved_probe_normals
-from zea.simulator_time_domain import get_pulse_waveform, simulate_rf_td
+from zea.simulator_time_domain import _scattered_waveform, simulate_rf_td
 
 N_EL = 80
 APERTURE = 32e-3
@@ -34,23 +35,12 @@ DYNAMIC_RANGE = (-50.0, 0.0)
 
 def test_time_domain_scatter_exponent_weights_pulse_spectrum():
     """The time-domain approximation applies scatter frequency dependence to its pulse."""
-    n_samples = 129
-    unweighted = np.asarray(
-        keras.ops.convert_to_numpy(
-            get_pulse_waveform(CENTER_FREQUENCY, CENTER_FREQUENCY * 4, n_samples=n_samples)
-        )
+    pulse = transmit_pulse(CENTER_FREQUENCY, CENTER_FREQUENCY * 4)
+    unweighted, weighted = (
+        np.asarray(keras.ops.convert_to_numpy(_scattered_waveform(pulse, CENTER_FREQUENCY, e)))
+        for e in (0.0, 2.0)
     )
-    weighted = np.asarray(
-        keras.ops.convert_to_numpy(
-            get_pulse_waveform(
-                CENTER_FREQUENCY,
-                CENTER_FREQUENCY * 4,
-                n_samples=n_samples,
-                scatter_exponent=2.0,
-            )
-        )
-    )
-    frequencies = np.fft.rfftfreq(n_samples, 1 / (CENTER_FREQUENCY * 4))
+    frequencies = np.fft.rfftfreq(len(unweighted), 1 / (CENTER_FREQUENCY * 4))
     expected = np.fft.rfft(unweighted) * (frequencies / CENTER_FREQUENCY) ** 2
     np.testing.assert_allclose(np.fft.rfft(weighted), expected, rtol=2e-5, atol=2e-5)
 
