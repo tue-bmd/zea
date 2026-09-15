@@ -512,6 +512,16 @@ def test_channel_data_with_an_unexpected_shape_is_rejected(tmp_path):
         convert_us4us_file(src, tmp_path / "out.hdf5", ["0:raw_data"])
 
 
+def test_per_transmit_beamformed_output_is_rejected(tmp_path):
+    """An ARRUS LRI stack has a transmit axis that no zea map data type can hold."""
+    lri = np.zeros((1, N_TX, N_X, N_Z), dtype=np.float32)
+    payload = make_single_output_recording(lri)
+    src = write_pickle(tmp_path / "lri.pkl", payload)
+
+    with pytest.raises(Us4usConversionError, match="one image per transmit"):
+        convert_us4us_file(src, tmp_path / "out.hdf5", ["0:beamformed_data"])
+
+
 def test_convert_directory_of_recordings(tmp_path):
     """A source directory converts every recording into ``<dst>/<name>.hdf5``."""
     src, dst = tmp_path / "src", tmp_path / "dst"
@@ -533,6 +543,29 @@ def test_single_recording_into_an_existing_directory(recording, tmp_path):
     convert_us4us(SimpleNamespace(src=src, dst=dst, mapping=["0:image"]))
 
     assert (dst / f"{src.stem}.hdf5").exists()
+
+
+def test_directory_conversion_skips_gui4us_metadata_pickles(tmp_path):
+    """gui4us names its metadata after its own timestamp, so only the prefix marks it."""
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    payload, _ = make_recording()
+    write_pickle(src / "data_2024-03-01_17-26-18.pkl", payload)
+    write_pickle(src / "metadata_2024-03-01_17-15-48.pkl", {"metadata": payload["metadata"]})
+
+    convert_us4us(SimpleNamespace(src=src, dst=dst, mapping=["0:image"]))
+
+    assert sorted(path.name for path in dst.glob("*.hdf5")) == ["data_2024-03-01_17-26-18.hdf5"]
+
+
+def test_missing_metadata_error_names_the_metadata_pickles_lying_next_to_it(tmp_path):
+    """A gui4us capture has no embedded metadata; the error points at what is available."""
+    payload, _ = make_recording()
+    src = write_pickle(tmp_path / "data_2024-03-01_17-26-18.pkl", payload["data"])
+    write_pickle(tmp_path / "metadata_2024-03-01_17-15-48.pkl", {"metadata": payload["metadata"]})
+
+    with pytest.raises(Us4usConversionError, match="metadata_2024-03-01_17-15-48.pkl"):
+        convert_us4us_file(src, tmp_path / "out.hdf5", ["0:image"])
 
 
 def test_metadata_option_is_rejected_for_a_directory_of_recordings(tmp_path):
@@ -637,8 +670,8 @@ def test_hf_source_that_does_not_exist_names_the_repo_and_file(fake_hub, tmp_pat
         convert_us4us(SimpleNamespace(src="hf://zeahub/pytest/nope.pkl", dst=tmp_path / "out.hdf5"))
 
 
-def test_hf_sidecar_metadata_is_found_in_the_repo(fake_hub, tmp_path):
-    """Resolving an hf:// file downloads only that file, so the sidecar comes from the repo."""
+def test_hf_metadata_beside_is_found_in_the_repo(fake_hub, tmp_path):
+    """Resolving an hf:// file downloads only that file, so the metadata comes from the repo."""
     payload, _ = make_recording()
     (fake_hub / "us4us").mkdir()
     write_pickle(fake_hub / "us4us" / "recording.pkl", payload["data"])
@@ -731,6 +764,50 @@ def test_initial_times_fall_back_to_the_receive_time_range(tmp_path):
 
     with File(dst, "r") as file:
         np.testing.assert_allclose(file.tracks[0].scan.initial_times[:], 3e-6, rtol=1e-5)
+
+
+def test_initial_times_absorb_the_transmit_delay_shift(tmp_path):
+    """ARRUS counts the receive window from the transmit event, zea from t0_delays = 0.
+
+    Shifting ``t0_delays`` onto the first element firing without moving
+    ``initial_times`` with it delays each transmit by its own offset.
+    """
+    ops = make_ops()
+    offsets = np.linspace(0.0, 4e-6, len(ops))
+    for op, offset in zip(ops, offsets):
+        op.tx.delays = np.asarray(op.tx.delays) + offset
+        op.rx.sample_range = (128, N_AX_RAW)
+    payload, _ = make_recording(context=make_context(ops=ops))
+    src = write_pickle(tmp_path / "steered.pkl", payload)
+
+    dst = convert_us4us_file(src, tmp_path / "out.hdf5", ["2:raw_data"])
+
+    with File(dst, "r") as file:
+        scan = file.tracks[0].scan
+        initial_times = scan.initial_times[:]
+        t0_delays = scan.t0_delays[:]
+    expected = 128 / SAMPLING_FREQUENCY - offsets
+    np.testing.assert_allclose(initial_times, expected, atol=1e-12)
+    for i, op in enumerate(ops):
+        active = np.asarray(op.tx.aperture, dtype=bool)
+        assert np.isclose(t0_delays[i][active].min(), 0.0, atol=1e-12)
+
+
+def test_initial_times_go_negative_when_sampling_starts_before_the_first_element(tmp_path):
+    """A transmit whose first element fires after the A/D converter starts is not clipped."""
+    ops = make_ops()
+    for op in ops:
+        op.tx.delays = np.asarray(op.tx.delays) + 8e-6
+        op.rx.sample_range = (128, N_AX_RAW)
+    payload, _ = make_recording(context=make_context(ops=ops))
+    src = write_pickle(tmp_path / "late_transmit.pkl", payload)
+
+    dst = convert_us4us_file(src, tmp_path / "out.hdf5", ["2:raw_data"])
+
+    with File(dst, "r") as file:
+        initial_times = file.tracks[0].scan.initial_times[:]
+    np.testing.assert_allclose(initial_times, 128 / SAMPLING_FREQUENCY - 8e-6, atol=1e-12)
+    assert np.all(initial_times < 0)
 
 
 def test_focus_and_angles_come_from_each_transmit(tmp_path):
@@ -831,19 +908,19 @@ def test_recording_without_metadata_points_at_the_metadata_option(tmp_path):
         convert_us4us_file(src, tmp_path / "out.hdf5")
 
 
-@pytest.mark.parametrize("sidecar", [True, False])
-def test_metadata_from_a_separate_file(tmp_path, sidecar):
+@pytest.mark.parametrize("beside_recording", [True, False])
+def test_metadata_from_a_separate_file(tmp_path, beside_recording):
     """Data-only recordings convert when the metadata pickle is supplied."""
     payload, _ = make_recording()
     src = write_pickle(tmp_path / "data.pkl", payload["data"])
-    metadata_name = "data_metadata.pkl" if sidecar else "elsewhere.pkl"
+    metadata_name = "data_metadata.pkl" if beside_recording else "elsewhere.pkl"
     metadata_path = write_pickle(tmp_path / metadata_name, {"metadata": payload["metadata"]})
 
     dst = convert_us4us_file(
         src,
         tmp_path / "out.hdf5",
         ["0:image"],
-        metadata_path=None if sidecar else metadata_path,
+        metadata_path=None if beside_recording else metadata_path,
     )
     with File(dst, "r") as file:
         file.validate()

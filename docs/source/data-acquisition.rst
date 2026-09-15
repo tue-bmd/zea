@@ -612,6 +612,17 @@ Record data with us4us software (ARRUS + gui4us), save the capture to ``.pkl``, 
     zea convert us4us <src> <dst> --mapping 0:image 1:beamformed_data
 
 ``--mapping`` selects which pipeline output of the recording becomes which zea data type.
+A real recording to try it on, a needle in chicken breast acquired with a 64-angle
+plane-wave sequence, is on the Hub:
+
+.. code-block:: shell
+
+    zea convert us4us \
+        hf://zeahub/us4us/datasets/chicken_breast_needle/RAW/data_2024-03-01_17-27-07.pkl \
+        chicken_breast_needle.hdf5 --mapping 0:image 1:raw_data
+
+That writes both the B-mode gui4us reconstructed and the channel data it came from, so a
+zea reconstruction can be compared against the one the system produced.
 
 See :mod:`zea.data.convert.us4us` for all options, the ARRUS metadata that is used, and the
 limitations of the converter.

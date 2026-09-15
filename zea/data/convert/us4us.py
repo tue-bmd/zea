@@ -73,7 +73,8 @@ transmit) and ``model`` for ``context.device.probe[0].model``:
   the first active element of each transmit fires at ``t = 0``
 - ``ops[i].tx.aperture`` -> ``scan.tx_apodizations`` and, through the element
   positions, ``scan.transmit_origins`` (the centre of the active aperture)
-- ``ops[i].rx.sample_range`` (or ``rx.time_range``) -> ``scan.initial_times``
+- ``ops[i].rx.sample_range`` (or ``rx.time_range``) -> ``scan.initial_times``, shifted
+  onto the same ``t = 0`` as ``t0_delays``
 - ``ops[i].pri`` -> ``scan.time_to_next_transmit``
 - ``context.sequence.tx_focus``, or ``ops[i].tx.focus`` for a bare ``TxRxSequence``
   -> ``scan.focus_distances``
@@ -113,6 +114,10 @@ transmit) and ``model`` for ``context.device.probe[0].model``:
       :data:`SUPPORTED_DATA_TYPES` are understood; anything else (Doppler,
       segmentation, elastography, …) has no us4us layout convention and must be
       converted with a bespoke script using :meth:`zea.File.create`.
+    - **Per-transmit (LRI) map outputs.** A gui4us pipeline that saves
+      ``ReconstructLri`` before the ``Mean`` step emits one image per transmit,
+      which zea's map data types cannot hold: they have no transmit axis. Such an
+      output is rejected rather than reshaped into something unreadable.
     - **Image dynamic range.** ARRUS B-mode images are log-compressed but not
       normalized, while zea expects float images in dB with a maximum of 0, so
       float images are shifted by their global maximum (``uint8`` images are
@@ -583,51 +588,75 @@ def _report_arrus_divergence(context, metadata_entry, *, source=None) -> list:
 
 
 def _is_metadata_name(name: str) -> bool:
-    """True for a file name that holds ARRUS metadata rather than a recording."""
-    return name == "metadata.pkl" or name.endswith(_METADATA_SUFFIXES)
+    """True for a file name that holds ARRUS metadata rather than a recording.
+
+    Covers both ``<name>_metadata.pkl`` and the ``metadata_<timestamp>.pkl`` that
+    gui4us writes next to each capture.
+    """
+    stem = PurePosixPath(name).stem
+    return stem == "metadata" or stem.startswith("metadata_") or name.endswith(_METADATA_SUFFIXES)
 
 
-def _sidecar_names(name: str) -> list:
+def _metadata_names_for(name: str) -> list:
     """Candidate metadata file names for a recording called ``name``, in priority order."""
     stem = PurePosixPath(name).stem
     return [stem + suffix for suffix in _METADATA_SUFFIXES] + ["metadata.pkl"]
 
 
-def _find_sidecar_metadata(src: Path):
+def _find_metadata_beside(src: Path):
     """Return a sibling ``*_metadata.pkl`` file for ``src``, if one exists."""
-    for name in _sidecar_names(src.name):
+    for name in _metadata_names_for(src.name):
         candidate = src.with_name(name)
         if candidate.exists() and candidate != src:
             return candidate
     return None
 
 
-def _find_hf_sidecar_metadata(hf_path: str):
-    """Return the ``hf://`` sidecar metadata file for ``hf_path``, if the repo holds one.
+def _find_hf_metadata_beside(hf_path: str):
+    """Return the ``hf://`` metadata file stored beside ``hf_path``, if the repo holds one.
 
-    The local lookup in :func:`_find_sidecar_metadata` cannot see it: resolving an
+    The local lookup in :func:`_find_metadata_beside` cannot see it: resolving an
     ``hf://`` path to a single file downloads only that file, so the sibling has to be
     found in the repo listing (which is memoized, so this costs no extra request).
     """
     repo_id, subpath = _hf_parse_path(hf_path)
     parent = PurePosixPath(subpath).parent
     available = set(_hf_list_files(repo_id))
-    for name in _sidecar_names(PurePosixPath(subpath).name):
+    for name in _metadata_names_for(PurePosixPath(subpath).name):
         candidate = str(parent / name)
         if candidate in available and candidate != subpath:
             return f"{HF_PREFIX}{repo_id}/{candidate}"
     return None
 
 
-def _sidecar_metadata(src_spec, src: Path):
+def _metadata_candidates_hint(source) -> str:
+    """Name the metadata pickles sitting next to ``source``, for the 'no metadata' error.
+
+    gui4us timestamps a capture and its metadata separately, so they cannot be paired
+    by name; listing them tells the user what to pass to ``--metadata``.
+    """
+    if source is None:
+        return ""
+    try:
+        candidates = sorted(
+            path.name for path in Path(source).parent.glob("*.pkl") if _is_metadata_name(path.name)
+        )
+    except OSError:
+        return ""
+    if not candidates:
+        return ""
+    return f" Metadata pickles found next to the recording: {', '.join(candidates)}."
+
+
+def _metadata_beside(src_spec, src: Path):
     """Find the metadata pickle stored next to a recording, on the Hub or on disk.
 
     ``src_spec`` is the path as the caller gave it, so an ``hf://`` recording is looked
     up in its repo rather than in whatever else happens to sit in the local HF cache.
     """
     if str(src_spec).startswith(HF_PREFIX):
-        return _find_hf_sidecar_metadata(str(src_spec))
-    return _find_sidecar_metadata(src)
+        return _find_hf_metadata_beside(str(src_spec))
+    return _find_metadata_beside(src)
 
 
 def _resolve_source(path):
@@ -714,7 +743,7 @@ def normalize_us4us_payload(payload, metadata=None, *, source=None):
             f"No ARRUS metadata found{where}. Some us4us setups store the frame data and "
             "the metadata as two separate pickles; pass the metadata file with "
             "--metadata <file.pkl> (a sibling '<name>_metadata.pkl' is picked up "
-            "automatically)."
+            "automatically)." + _metadata_candidates_hint(source)
         )
 
     if _is_metadata(metadata):  # a single ConstMetadata rather than one per output
@@ -922,7 +951,16 @@ def _per_transmit(value, n_tx: int) -> "np.ndarray | None":
 
 
 def _extract_scan_dict(context, data_description, n_frames: int) -> dict:
-    """Build a :class:`~zea.data.spec.ScanSpec`-compatible dict from an ARRUS context."""
+    """Build a :class:`~zea.data.spec.ScanSpec`-compatible dict from an ARRUS context.
+
+    ARRUS measures both the transmit delays and the receive window from the start of
+    the transmit event, and centers the delay profile on the aperture, so the first
+    element of a steered transmit fires long after that origin. zea measures both from
+    the first element firing, so ``t0_shifts`` moves the whole transmit onto that
+    origin: off ``t0_delays``, and off ``initial_times`` with it. Skipping the second
+    half delays every transmit by its own offset (up to 7.8 us, some 6 mm, for a +/-30
+    degree plane-wave sweep), which smears the compounded image.
+    """
     ops = context.raw_sequence.ops
     sequence = getattr(context, "sequence", None)
     n_tx = len(ops)
@@ -938,6 +976,7 @@ def _extract_scan_dict(context, data_description, n_frames: int) -> dict:
     # t0_delays and tx_apodizations, both (n_tx, n_el)
     t0_delays = np.zeros((n_tx, n_el), dtype=np.float64)
     tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
+    t0_shifts = np.zeros(n_tx, dtype=np.float64)
     for i, op in enumerate(ops):
         aperture = np.asarray(op.tx.aperture, dtype=bool)
         if aperture.size != n_el:
@@ -952,13 +991,12 @@ def _extract_scan_dict(context, data_description, n_frames: int) -> dict:
             tx_apodizations[i, aperture] = 1.0
         else:
             tx_apodizations[i, aperture] = np.asarray(apodization, dtype=np.float32).ravel()
-        # Shift each transmit so its first active element fires at t = 0, then clip
-        # to suppress floating-point underflow below zero (zea forbids negative delays).
         if np.any(aperture):
-            t0_delays[i] -= t0_delays[i, aperture].min()
+            t0_shifts[i] = t0_delays[i, aperture].min()
+            t0_delays[i] -= t0_shifts[i]
+    # Clipped because zea forbids negative delays; only underflow lands below zero here.
     t0_delays = np.clip(t0_delays, 0.0, None).astype(np.float32)
 
-    # initial_times (n_tx,): time between the first element firing and the first sample.
     initial_times = np.zeros(n_tx, dtype=np.float32)
     for i, op in enumerate(ops):
         sample_range = getattr(op.rx, "sample_range", None)
@@ -967,6 +1005,8 @@ def _extract_scan_dict(context, data_description, n_frames: int) -> dict:
             initial_times[i] = np.float32(sample_range[0] / float(sampling_frequency))
         elif time_range is not None:
             initial_times[i] = np.float32(time_range[0])
+    # Negative for transmits that fire after the A/D converter opens, which is correct.
+    initial_times -= t0_shifts.astype(np.float32)
 
     # focus_distances (n_tx,): a SimpleTxRxSequence (Lin/Pwi/Sta) carries `tx_focus` on
     # the sequence, a bare TxRxSequence stores `focus` per op (None when raw delays were
@@ -1174,6 +1214,16 @@ def _prepare_output(frames, output_idx: int, data_type: str, metadata_entry, con
     spatial = stacked.shape[1:]
     coordinates = _grid_coordinates(data_description, spatial)
     n_tx = len(context.raw_sequence.ops)
+    if len(spatial) == 3 and spatial[0] == n_tx:
+        raise Us4usConversionError(
+            f"Pipeline output {output_idx} has shape {tuple(spatial)} per frame, one image "
+            f"per transmit (ARRUS ReconstructLri, with {n_tx} transmits). zea's "
+            f"'{data_type}' holds one compounded image per frame and has no transmit axis. "
+            "Compound the output in the gui4us pipeline (add the Mean step over the "
+            "transmit axis) and convert that, map the recording's channel data to "
+            "'raw_data' and beamform it with zea instead, or write this output with a "
+            "bespoke script using zea.File.create."
+        )
     # A beamformed/envelope output that is not on a grid is organized one column
     # per transmit: (n_tx, n_ax) per frame. Transpose it to (n_ax, n_tx) = (z, x)
     # and derive coordinates from the transmit origins.
@@ -1262,7 +1312,7 @@ def convert_us4us_file(
     payload = load_us4us_pickle(src)
 
     if metadata_path is None:
-        metadata_path = _sidecar_metadata(src_spec, src)
+        metadata_path = _metadata_beside(src_spec, src)
         if metadata_path is not None:
             log.info(f"Found metadata file next to the recording: {log.yellow(metadata_path)}")
     metadata_path = _resolve_source(metadata_path) if metadata_path is not None else None
@@ -1379,7 +1429,7 @@ def convert_us4us(args) -> None:
         file_pairs = [(path, dst / f"{path.stem}.hdf5") for path in pkl_files]
     else:
         dst_file = dst / f"{src.stem}.hdf5" if dst.is_dir() else dst
-        # Pass the path as given: convert_us4us_file needs it to find an hf:// sidecar.
+        # Pass the path as given: convert_us4us_file needs it to search the hf:// repo.
         file_pairs = [(src_spec, dst_file)]
 
     for src_pkl, dst_hdf5 in file_pairs:
