@@ -2557,3 +2557,43 @@ class TestCustomElements:
 
         with File(path) as f:
             assert getattr(f.data, "My Overlay") is not None
+
+
+def test_n_rx_reads_aligned_data_when_raw_data_is_absent(tmp_path):
+    """n_rx works for any track with channel data, which includes aligned-only tracks."""
+    n_tx, n_el, n_ax, n_rx = 2, 8, 6, 4
+    path = tmp_path / "aligned_only.hdf5"
+    FileSpec(
+        tracks=[
+            {
+                "scan": _scan_minimal(n_frames=1, n_tx=n_tx, n_el=n_el),
+                "data": {
+                    "aligned_data": {"values": np.zeros((1, n_tx, n_ax, n_rx, 1), dtype=np.float32)}
+                },
+            }
+        ],
+        probe=_probe_minimal(n_el=n_el),
+    ).save(str(path), warn_missing_optional_fields=False)
+
+    with File(str(path)) as f:
+        assert f.n_rx == n_rx
+        assert f.n_el == n_el
+        assert f.tracks[0].n_rx == n_rx
+
+
+def test_n_rx_requires_channel_data(tmp_path):
+    """A track with only an image has no receive axis to report."""
+    path = tmp_path / "image_only.hdf5"
+    FileSpec(
+        tracks=[
+            {
+                "scan": _scan_minimal(n_frames=1, n_tx=2, n_el=8),
+                "data": {"image": {"values": np.zeros((1, 16, 16), dtype=np.float32)}},
+            }
+        ],
+        probe=_probe_minimal(n_el=8),
+    ).save(str(path), warn_missing_optional_fields=False)
+
+    with File(str(path)) as f:
+        with pytest.raises(TypeError, match="only available if the file contains channel data"):
+            _ = f.n_rx

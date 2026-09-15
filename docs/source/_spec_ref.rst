@@ -52,6 +52,12 @@ See the :ref:`group reference <group-reference>` for a full description of each 
            └── <name>                any dtype  (nested CustomElement)
 
 
+Shapes are written with named dimensions, which agree wherever they appear.
+The one exception is the receive axis of ``raw_data`` and ``aligned_data``:
+an acquisition using a receive sub-aperture carries fewer channels than the
+probe has elements, and ``scan.rx_aperture_indices`` then records which
+element each receive channel corresponds to.
+
 Root attributes
 ~~~~~~~~~~~~~~~
 
