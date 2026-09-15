@@ -13,7 +13,14 @@ from keras import ops
 
 import zea
 from zea.ops import Pipeline, Simulate
-from zea.simulator import fft_length, in_record, pressure_field, record_reach, simulate_rf
+from zea.simulator import (
+    fft_length,
+    in_record,
+    pressure_field,
+    record_reach,
+    simulate_rf,
+    transmit_pulse,
+)
 
 SOUND_SPEED = 1540.0
 CENTER_FREQUENCY = 3e6
@@ -118,10 +125,16 @@ def _rel(reference, result):
 
 
 def _pulse(t):
-    """Unit-peak Hann-windowed tone of ``simulate_rf``, centred at t = 0."""
+    """Unit-peak Hann-windowed tone of ``N_PERIOD`` periods, centred at t = 0."""
     width = N_PERIOD / CENTER_FREQUENCY
     window = np.where(np.abs(t) < width / 2, np.cos(np.pi * t / width) ** 2, 0.0)
     return window * np.cos(2 * np.pi * CENTER_FREQUENCY * t)
+
+
+# The same tone as the simulator takes it: its two-way waveform, sampled at 250 MHz.
+HANN_WAVEFORM = transmit_pulse(
+    CENTER_FREQUENCY, pulse_model="hann", n_period=N_PERIOD, bandwidth_percent=None
+).waveform()
 
 
 def _echo_time(trace):
@@ -159,6 +172,7 @@ def _point_echo(position, trio, geometry=None, transmit=0, **overrides):
         attenuation_coef=0.0,
         scatter_exponent=0.0,
         n_ax=N_AX,
+        waveforms_two_way=HANN_WAVEFORM,
         **trio,
         **overrides,
     )

@@ -434,11 +434,13 @@ def test_simulate_op_passes_the_waveforms():
     direct = simulate_rf(**scene, **kwargs)
     op = Simulate(with_batch_dim=False)
     via_op = op(**scene, **kwargs)[op.output_key]
-    assert _rel_err(direct, via_op) < 1e-5
+    # The op sizes the FFT without the scatterer positions, so the lengths (and the float32
+    # rounding) differ.
+    assert _rel_err(direct, via_op) < 1e-4
     # A pulse built with transmit_pulse goes in the same way, at its 250 MHz default rate.
     equalized = _waveform("realistic", equalize=True)
     direct = simulate_rf(**scene, **equalized)
-    assert _rel_err(direct, op(**scene, **equalized)[op.output_key]) < 1e-5
+    assert _rel_err(direct, op(**scene, **equalized)[op.output_key]) < 1e-4
     assert _rel_err(direct, simulate_rf(**scene)) > 0.1
     with pytest.raises(ValueError, match="waveforms_two_way"):
         op(**scene, waveforms_two_way=np.zeros((3, 64)))

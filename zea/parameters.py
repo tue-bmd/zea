@@ -1059,14 +1059,16 @@ class Parameters(BaseParameters):
         "t0_delays",
         "initial_times",
         "t_peak",
+        "waveforms_two_way",
         "sos_map",
     )
     def n_fft(self):
         """FFT length of :func:`zea.simulator.simulate_rf` for this scan.
 
         Sized with :func:`zea.simulator.fft_length` so that no echo of a scatterer in the record
-        wraps into it, for any cloud and up to twice the default pulse length, through the
-        sound speed map ``sos_map`` when there is one. Set it explicitly to override.
+        wraps into it, for any cloud and up to twice the length of the transmit pulse (the
+        ``waveforms_two_way`` of the scan, or the simulator's default pulse), through the sound
+        speed map ``sos_map`` when there is one. Set it explicitly to override.
         """
         n_fft = self._params.get("n_fft")
         if n_fft is not None:
@@ -1080,6 +1082,7 @@ class Parameters(BaseParameters):
             self.probe_geometry,
             shift.min(),
             shift.max(),
+            waveforms_two_way=self.waveforms_two_way,
             sos_map=self.sos_map,
         )
 

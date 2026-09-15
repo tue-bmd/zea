@@ -109,12 +109,10 @@ def simulate_rf(
     noise_seed=0,
     noise_reference=None,
     scatter_exponent=2.0,
-    rigid_baffle=True,
-    bandwidth_percent=None,
-    probe_center_frequency=None,
+    baffle_impedance_ratio=0.0,
     element_normals=None,
-    chirp_sweep=None,
-    n_period=4.0,
+    waveforms_two_way=None,
+    waveform_sampling_frequency=250e6,
     n_sub_elements=None,
     elevation_focus=None,
     lens_attenuation_coef=0.0,
@@ -137,13 +135,17 @@ def simulate_rf(
         incident[f, t, s] = sum_e W[f, t, e] R_tx[f, s, e]    W = apod_te exp(-2 pi i f shift_te)
         rf[f, t, e]       = sum_s S[f, t, s] R_rx[f, s, e]    S = incident * mag_s * gain_s(f)
 
-    The one-way responses ``R_tx`` and ``R_rx`` (directivity, spreading, attenuation and the
-    travel phase) do not depend on the transmit, so they are generated once per frequency block
-    and shared across all transmits through the two matrix products. Only the bins where the
-    pulse spectrum, the transducer transfer function and the scattering gain together exceed
-    ``band_db`` are computed. A scatterer is kept when its earliest echo still has pulse
-    support inside the record, and the FFT length is sized so that no kept echo wraps into the
-    record; echoes that run past the record are truncated.
+    The one-way responses ``R_tx`` and ``R_rx`` (directivity, obliquity, spreading, attenuation
+    and the travel phase) do not depend on the transmit, so they are generated once per
+    frequency block and shared across all transmits through the two matrix products. The
+    two-way (pulse-echo) transmit pulse ``waveforms_two_way`` multiplies the spectrum of each
+    transmit: the waveform of a zea file (the Verasonics ``TW.Wvfm2Wy``), a measured one, or
+    one built with :func:`transmit_pulse`, which has the parametric models. Without it the
+    default pulse of :func:`transmit_pulse` is used: a one-cycle burst at ``center_frequency``
+    through a 70 % Butterworth transducer. Only the bins where the pulse spectrum and the
+    scattering gain together exceed ``band_db`` are computed. A scatterer is kept when its
+    earliest echo still has pulse support inside the record, and the FFT length is sized so
+    that no kept echo wraps into the record; echoes that run past the record are truncated.
 
     Args:
         scatterer_positions (array-like): The positions of the scatterers [m] of shape (n_scat, 3).
@@ -170,6 +172,8 @@ def simulate_rf(
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
         tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el).
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
+            The pulse is simulated with its envelope peak at the two-way travel time plus
+            ``t_peak``; a real system's is :attr:`Pulse.time_to_peak` of :func:`transmit_pulse`.
         two_dimensional (bool): Simulate in the imaging plane, as a 1D probe behind an ideal
             elevation lens: the scatterers are moved to the probe's elevation center, there is
             no elevation directivity, and the transmit spreads cylindrically rather than
@@ -194,35 +198,40 @@ def simulate_rf(
             myocardium is approximately 1.5, soft tissue 0.6-0.8. A float sets a global value, an
             array of shape (n_scat,) gives each its own coefficient. If gradients are needed to
             the exponent(s), either pass ``scatter_exponent_range=(min, max)`` or ``band_db=None``.
-        rigid_baffle (bool): Element mounted in a rigid baffle (sinc directivity only). False
-            models a soft baffle, which adds the obliquity factor cos(angle to the element
-            normal), on transmit and on receive. Must be static under jit.
-        bandwidth_percent (float, optional): Pulse-echo -6 dB fractional bandwidth of the
-            transducer in percent of ``probe_center_frequency``. Applies the Gaussian transfer
-            function of :func:`transducer_transfer` to the received spectrum. None is a flat
-            transducer response. Must be static under jit.
-        probe_center_frequency (float, optional): center of the transducer band [Hz]. Defaults
-            to ``center_frequency``. Must be static under jit.
+            The Verasonics simulator applies no frequency dependence at all: 0 here, with
+            ``attenuation_coef=0`` (its attenuation is evaluated at the centre frequency only)
+            and ``baffle_impedance_ratio=inf`` (its default element sensitivity is cos times
+            sinc), reproduces its spectrum. It also applies no geometric spreading, which zea
+            always does.
+        baffle_impedance_ratio (float): Impedance of the medium over that of the baffle the
+            elements are mounted in, which sets the obliquity factor applied on transmit and on
+            receive next to the sinc directivity: 1 for a rigid baffle (0, the default),
+            cos(angle to the element normal) for a soft one (``inf``), and in general
+            cos / (cos + ratio) (Selfridge et al. 1980, as in SIMUS; 0.57 for epoxy against
+            soft tissue). Scatterers behind the element plane get no obliquity factor. Must be
+            static under jit.
         element_normals (array-like, optional): Outward normal of each element of shape
             (n_el, 3), for curved or tilted arrays. The directivity and the obliquity are
             evaluated in each element's own frame: the elevation axis is the projection of
             +y onto the element plane, so a normal must not be parallel to +y. None is every
             element facing +z. See :func:`zea.probes.curved_probe_normals`. The lens correction
             keeps assuming a flat lens.
-        chirp_sweep (float, optional): Linear frequency sweep of the transmit pulse [Hz]. The
-            instantaneous frequency runs from ``center_frequency - chirp_sweep / 2`` to
-            ``center_frequency + chirp_sweep / 2`` over the Hann-windowed pulse (see
-            :func:`chirp_spectrum`). None or 0 is the plain windowed tone. Must be static
-            under jit.
-        n_period (float): Periods of ``center_frequency`` under the Hann window of the transmit
-            pulse. Must be static under jit.
+        waveforms_two_way (array-like, optional): Two-way (pulse-echo) transmit waveforms of
+            shape (n_tx, n_samples), or (n_samples,) for one waveform for every transmit,
+            sampled at ``waveform_sampling_frequency``. The envelope peak of the waveform is
+            placed at the two-way travel time plus ``t_peak``, wherever it is in the waveform;
+            see :func:`measured_pulse`. None is the default pulse of :func:`transmit_pulse`.
+            Must be static under jit.
+        waveform_sampling_frequency (float): Sampling frequency [Hz] of ``waveforms_two_way``,
+            250 MHz in zea files and in :meth:`Pulse.waveform`. Must be static under jit.
         n_sub_elements (optional): Sub-elements per element, summed coherently with their own
             distance and sinc directivity so the response holds in the near field. A pair
             (n_lateral, n_elevation), an int for the lateral count, or ``"auto"`` for the SIMUS
             rule ceil(size / lambda_min) in both directions, with lambda_min at the top of the
-            transducer band. None is a single sub-element, except in elevation when
-            ``elevation_focus`` is set, which then follows the auto rule. Must be static under
-            jit.
+            -6 dB band of the transmit pulse (SIMUS takes the transducer band, which is a
+            little wider than that of a one-cycle burst through it). None is a single
+            sub-element, except in elevation when ``elevation_focus`` is set, which then
+            follows the auto rule. Must be static under jit.
         elevation_focus (float, optional): Focal distance [m] of a fixed elevation lens, modelled
             on transmit and on receive through the elevation sub-elements: an ideal focusing
             advance per sub-element, or with ``apply_lens_correction`` the refracted path through
@@ -231,18 +240,18 @@ def simulate_rf(
         lens_attenuation_coef (float): Attenuation in the lens [dB/cm/MHz], applied over each
             sub-element's path inside the lens when ``apply_lens_correction`` is set. Apodizes
             the aperture where the lens is thick and lowers the center frequency.
-        band_db (float, optional): Bins where the pulse spectrum, the transducer transfer
-            function and the scattering gain together are below this many dB of their peak are
-            not synthesised. None disables filtering. With per-scatterer exponents, the band is the
-            derived from the union of the smallest and the largest exponent. With traced
-            ``scatter_exponent``, either set ``band_db`` to None or provide an explicit
-            ``scatter_exponent_range``.
-        n_fft (int, optional): FFT length. Derived when None from ``n_ax``, the aperture and
-            the transmit shifts (and the scatterer positions when concrete) so that no echo
-            wraps into the record, see :func:`fft_length`. Must be given when the geometry, the
-            delays or the sound speed are traced, e.g. under ``jax.jit`` without closing over
-            them; :class:`zea.ops.Simulate` and :attr:`zea.Parameters.n_fft` derive it.
-            ``center_frequency`` and ``sampling_frequency`` must be static.
+        band_db (float, optional): Bins where the pulse spectrum and the scattering gain
+            together are below this many dB of their peak are not synthesised. None disables
+            filtering. With per-transmit waveforms the band is the union over the pulses, and
+            with per-scatterer exponents the union of the smallest and the largest exponent.
+            With traced ``scatter_exponent``, either set ``band_db`` to None or provide an
+            explicit ``scatter_exponent_range``.
+        n_fft (int, optional): FFT length. Derived when None from ``n_ax``, the aperture, the
+            transmit shifts and the pulse (and the scatterer positions when concrete) so that
+            no echo wraps into the record, see :func:`fft_length`. Must be given when the
+            geometry, the delays or the sound speed are traced, e.g. under ``jax.jit`` without
+            closing over them; :class:`zea.ops.Simulate` and :attr:`zea.Parameters.n_fft`
+            derive it. ``center_frequency`` and ``sampling_frequency`` must be static.
         scatter_exponent_range (tuple, optional): ``(min, max)`` exponent spanned by
             ``scatter_exponent``, used to pick the band instead of reading the exponents.
             Only needed when ``scatter_exponent`` is traced and ``band_db`` is set; for one
@@ -272,8 +281,11 @@ def simulate_rf(
     """
     _validate_two_dimensional(two_dimensional, elevation_focus, probe_geometry)
     _validate_sos_map(sos_map, sos_grid_x, sos_grid_z, sos_grid_y)
+    _validate_baffle(baffle_impedance_ratio)
     fc, fs = float(center_frequency), float(sampling_frequency)
     n_ax = int(n_ax)
+    n_tx, n_el = (int(d) for d in ops.shape(t0_delays))
+    pulses = transmit_pulses(n_tx, fc, fs, waveforms_two_way, waveform_sampling_frequency)
     element_width = _resolve_element_width(probe_geometry, element_width)
     element_height = _resolve_element_height(probe_geometry, element_width, element_height)
     _validate_lens(
@@ -290,8 +302,7 @@ def simulate_rf(
         element_width,
         element_height,
         sound_speed,
-        fc,
-        bandwidth_percent,
+        max(pulse.band[1] for pulse in pulses),
         two_dimensional,
     )
     positions = ops.cast(scatterer_positions, "float32")
@@ -314,12 +325,11 @@ def simulate_rf(
         return _fft_bound(
             n_ax,
             fs,
-            fc,
             float(c_np),
             geom_np,
             shift_np.min(),
             shift_np.max(),
-            n_period,
+            pulses,
             _concrete(positions),
             map_np,
         )
@@ -339,7 +349,6 @@ def simulate_rf(
             "needs to keep every echo from wrapping into the record; see fft_length."
         )
     n_fft = int(n_fft)
-    n_tx, n_el = (int(d) for d in ops.shape(t0_delays))
 
     def finish(rf):
         return apply_receive_chain(
@@ -350,23 +359,7 @@ def simulate_rf(
         return finish(ops.zeros((n_tx, n_ax, n_el), "float32"))
 
     shift = _transmit_shift(t0_delays, initial_times, t_peak)
-    if bandwidth_percent is not None:
-        bandwidth_percent = float(bandwidth_percent)
-    if probe_center_frequency is not None:
-        probe_center_frequency = float(probe_center_frequency)
-    chirp_sweep = float(chirp_sweep) if chirp_sweep else None
-    k0, k1 = band_bins(
-        n_fft,
-        fc,
-        fs,
-        n_period,
-        scatter_exponent,
-        band_db,
-        bandwidth_percent,
-        probe_center_frequency,
-        chirp_sweep,
-        scatter_exponent_range=scatter_exponent_range,
-    )
+    k0, k1 = band_bins(n_fft, fs, pulses, fc, scatter_exponent, band_db, scatter_exponent_range)
 
     # Forward of one block per bin: the complex responses and the two matrix product outputs.
     n_scat = int(ops.shape(positions)[0])
@@ -381,9 +374,7 @@ def simulate_rf(
     freqs_all = _rfft_freqs(n_fft, fs)
     freqs = np.full(n_band, freqs_all[k1 - 1], np.float32)
     freqs[: k1 - k0] = freqs_all[k0:k1]
-    wave = _transmit_spectrum_np(
-        n_fft, fc, fs, n_period, bandwidth_percent, probe_center_frequency, chirp_sweep
-    )[k0:k1]
+    wave = _pulse_spectra(pulses, freqs_all[k0:k1])
     freqs = ops.convert_to_tensor(freqs)
 
     # The straight-ray slowness of every path, once for all frequency blocks.
@@ -417,15 +408,16 @@ def simulate_rf(
             attenuation_coef=_as_f32(attenuation_coef),
             lens_thickness=_as_f32(lens_thickness),
             lens_sound_speed=_as_f32(lens_sound_speed),
-            gate_time=_record_gate_time(n_ax, fs, fc, n_period),
+            gate_time=_record_gate_time(n_ax, fs, _pulse_tail(pulses)),
             scatter_exponent=scatter_exponent,
             apply_lens_correction=bool(apply_lens_correction),
             two_dimensional=bool(two_dimensional),
-            rigid_baffle=bool(rigid_baffle),
+            baffle_impedance_ratio=float(baffle_impedance_ratio),
             element_normals=None if element_normals is None else _as_f32(element_normals),
             n_sub_elements=n_sub_elements,
             elevation_focus=None if elevation_focus is None else float(elevation_focus),
             lens_attenuation_coef=_as_f32(lens_attenuation_coef),
+            min_dist=min_distance(_as_f32(sound_speed), fc),
         )
     )
 
@@ -436,7 +428,7 @@ def simulate_rf(
 
     spectrum = ops.zeros((n_band, n_tx, n_el), "complex64")
     spectrum = ops.fori_loop(0, n_blocks, body, spectrum)
-    spectrum = spectrum[: k1 - k0] * ops.convert_to_tensor(wave)[:, None, None]
+    spectrum = spectrum[: k1 - k0] * ops.convert_to_tensor(wave)[:, :, None]
 
     # Transmits in groups, so a long record over many transmits does not allocate at once.
     group = min(32, n_tx)
@@ -469,11 +461,12 @@ def _rf_block(
     scatter_exponent,
     apply_lens_correction,
     two_dimensional,
-    rigid_baffle,
+    baffle_impedance_ratio,
     element_normals,
     n_sub_elements,
     elevation_focus,
     lens_attenuation_coef,
+    min_dist,
 ):
     """Band spectrum [f, t, e] of one frequency block over all scatterers.
 
@@ -494,11 +487,12 @@ def _rf_block(
         lens_sound_speed,
         apply_lens_correction,
         two_dimensional,
-        0.0 if rigid_baffle else float("inf"),
+        baffle_impedance_ratio,
         element_normals,
         n_sub_elements,
         elevation_focus,
         lens_attenuation_coef,
+        min_dist,
         frequency_first=True,
         slowness=slowness,
     )
@@ -536,12 +530,10 @@ def pressure_field(
     lens_sound_speed=None,
     two_dimensional=False,
     element_height=None,
-    rigid_baffle=True,
-    bandwidth_percent=None,
-    probe_center_frequency=None,
+    baffle_impedance_ratio=0.0,
     element_normals=None,
-    chirp_sweep=None,
-    n_period=4.0,
+    waveforms_two_way=None,
+    waveform_sampling_frequency=250e6,
     n_sub_elements=None,
     elevation_focus=None,
     band_db=-100.0,
@@ -560,9 +552,9 @@ def pressure_field(
 
     The incident field the simulator scatters, evaluated at the grid points instead of at
     scatterers: the same directivity, obliquity, attenuation, spread and transmit weights, times
-    the transmit pulse. The transducer transfer function enters once (its square root, as the
-    ``bandwidth_percent`` band is pulse-echo), so a unit scatterer at a grid point returns this
-    field through the receive response. In 2D the grid is moved into the imaging plane, as the
+    the two-way transmit pulse ``waveforms_two_way``. The pulse (which carries the transducer
+    response) enters once, here, so a unit scatterer at a grid point returns exactly this field
+    through the receive response. In 2D the grid is moved into the imaging plane, as the
     simulator moves its scatterers.
 
     Takes the arguments of :func:`simulate_rf` with the same meaning, except that
@@ -592,8 +584,10 @@ def pressure_field(
         raise ValueError(f"output must be 'rms' or 'time', got {output!r}.")
     _validate_two_dimensional(two_dimensional, elevation_focus, probe_geometry)
     _validate_sos_map(sos_map, sos_grid_x, sos_grid_z, sos_grid_y)
+    _validate_baffle(baffle_impedance_ratio)
     fc, fs = float(center_frequency), float(sampling_frequency)
-    n_period = float(n_period)
+    n_tx, n_el = (int(d) for d in ops.shape(t0_delays))
+    pulses = transmit_pulses(n_tx, fc, fs, waveforms_two_way, waveform_sampling_frequency)
     grid_shape = tuple(int(d) for d in ops.shape(grid)[:-1])
     positions = ops.reshape(ops.cast(grid, "float32"), (-1, 3))
     geometry = ops.cast(probe_geometry, "float32")
@@ -615,11 +609,9 @@ def pressure_field(
         element_width,
         element_height,
         sound_speed,
-        fc,
-        bandwidth_percent,
+        max(pulse.band[1] for pulse in pulses),
         two_dimensional,
     )
-    n_tx, n_el = (int(d) for d in ops.shape(t0_delays))
     n_points = int(ops.shape(positions)[0])
     shift = _transmit_shift(t0_delays, initial_times, t_peak)
 
@@ -637,35 +629,17 @@ def pressure_field(
         )
         # The slowest speed in play bounds the arrival through the map.
         arrival = (dist_np / bounds[0])[None] + shift_np[:, None, :]
-        extent = int(np.ceil((arrival.max() + n_period / fc) * fs))
+        extent = int(np.ceil((arrival.max() + _pulse_tail(pulses)) * fs))
         if n_ax is None:
             n_ax = extent
         if n_fft is None:
             n_fft = smooth_size(max(int(n_ax), extent))
     n_ax, n_fft = int(n_ax), int(n_fft)
 
-    if bandwidth_percent is not None:
-        bandwidth_percent = float(bandwidth_percent)
-    if probe_center_frequency is not None:
-        probe_center_frequency = float(probe_center_frequency)
-    chirp_sweep = float(chirp_sweep) if chirp_sweep else None
-    k0, k1 = band_bins(
-        n_fft,
-        fc,
-        fs,
-        n_period,
-        0.0,
-        band_db,
-        bandwidth_percent,
-        probe_center_frequency,
-        chirp_sweep,
-        one_way=True,
-    )
+    k0, k1 = band_bins(n_fft, fs, pulses, fc, 0.0, band_db)
     n_kept = k1 - k0
     freqs_all = _rfft_freqs(n_fft, fs)
-    wave_all = _transmit_spectrum_np(
-        n_fft, fc, fs, n_period, bandwidth_percent, probe_center_frequency, chirp_sweep, True
-    )
+    wave_kept = _pulse_spectra(pulses, freqs_all[k0:k1])
 
     # workaround for tensorflow. tf.recompute_grad converts every argument to a tensor, crashing
     # when no sound speed map is available (i.e. None).
@@ -681,11 +655,12 @@ def pressure_field(
         lens_sound_speed=_as_f32(lens_sound_speed),
         apply_lens_correction=bool(apply_lens_correction),
         two_dimensional=bool(two_dimensional),
-        rigid_baffle=bool(rigid_baffle),
+        baffle_impedance_ratio=float(baffle_impedance_ratio),
         element_normals=None if element_normals is None else _as_f32(element_normals),
         n_sub_elements=n_sub_elements,
         elevation_focus=None if elevation_focus is None else float(elevation_focus),
         lens_attenuation_coef=_as_f32(lens_attenuation_coef),
+        min_dist=min_distance(_as_f32(sound_speed), fc),
     )
 
     slowness = _ray_slowness(
@@ -715,8 +690,8 @@ def pressure_field(
         n_band = n_blocks * f_block
         freqs = np.full(n_band, freqs_all[k1 - 1], np.float32)
         freqs[:n_kept] = freqs_all[k0:k1]
-        wave = np.zeros(n_band, np.complex64)
-        wave[:n_kept] = wave_all[k0:k1]
+        wave = np.zeros((n_band, n_tx), np.complex64)
+        wave[:n_kept] = wave_kept
         freqs_t = ops.convert_to_tensor(freqs)
         wave_t = ops.convert_to_tensor(wave)
 
@@ -730,7 +705,7 @@ def pressure_field(
             spectrum = ops.fori_loop(
                 0, n_blocks, body, ops.zeros((n_band, n_tx, n_pts), "complex64")
             )
-            return spectrum[:n_kept] * wave_t[:n_kept, None, None]
+            return spectrum[:n_kept] * wave_t[:n_kept, :, None]
 
         # sum_n p[n]^2 = (1/N) sum_k w_k |P_k|^2 with w = 2 except at DC and, for an even
         # transform, at Nyquist.
@@ -739,12 +714,12 @@ def pressure_field(
             parseval[0] = 1.0
         if k1 == n_fft // 2 + 1 and n_fft % 2 == 0:
             parseval[n_kept - 1] = 1.0
-        weight = ops.convert_to_tensor(parseval * np.abs(wave) ** 2)
+        weight = ops.convert_to_tensor(parseval[:, None] * np.abs(wave) ** 2)
 
         def body(i, energy):
             start = i * f_block
             part = block(ops.slice(freqs_t, [start], [f_block]))
-            w = ops.slice(weight, [start], [f_block])[:, None, None]
+            w = ops.slice(weight, [start, 0], [f_block, n_tx])[:, :, None]
             return energy + ops.sum(w * (ops.real(part) ** 2 + ops.imag(part) ** 2), axis=0)
 
         return ops.fori_loop(0, n_blocks, body, ops.zeros((n_tx, n_pts), "float32"))
@@ -785,11 +760,12 @@ def _pressure_block(
     lens_sound_speed,
     apply_lens_correction,
     two_dimensional,
-    rigid_baffle,
+    baffle_impedance_ratio,
     element_normals,
     n_sub_elements,
     elevation_focus,
     lens_attenuation_coef,
+    min_dist,
 ):
     """Incident field spectrum [f, t, p] of one frequency block, without the pulse."""
     tx_response, _, _ = _element_responses(
@@ -804,11 +780,12 @@ def _pressure_block(
         lens_sound_speed,
         apply_lens_correction,
         two_dimensional,
-        0.0 if rigid_baffle else float("inf"),
+        baffle_impedance_ratio,
         element_normals,
         n_sub_elements,
         elevation_focus,
         lens_attenuation_coef,
+        min_dist,
         frequency_first=True,
         slowness=slowness,
     )
@@ -870,9 +847,10 @@ def apply_receive_chain(
 # ---------------------------------------------------------------------------------------------
 
 
-def _record_gate_time(n_ax, sampling_frequency, center_frequency, n_period):
-    """Latest arrival [s] of an echo peak with pulse support inside the record."""
-    return n_ax / sampling_frequency + 0.5 * n_period / center_frequency
+def _record_gate_time(n_ax, sampling_frequency, pulse_tail):
+    """Latest arrival [s] of an echo peak with pulse support inside the record, for a pulse
+    with ``pulse_tail`` [s] of support after its peak (:func:`_pulse_tail`)."""
+    return n_ax / sampling_frequency + pulse_tail
 
 
 def _record_keep(tau, shift_min, gate_time):
@@ -892,7 +870,8 @@ def record_reach(
     t0_delays,
     initial_times,
     t_peak,
-    n_period=4.0,
+    waveforms_two_way=None,
+    waveform_sampling_frequency=250e6,
     apply_lens_correction=False,
     lens_thickness=0.0,
     lens_sound_speed=None,
@@ -920,7 +899,10 @@ def record_reach(
         t0_delays (array-like): Transmit delays [s] of shape (n_tx, n_el).
         initial_times (array-like): Record start times [s] of shape (n_tx,).
         t_peak (array-like): Pulse peak times [s] of shape (n_tx,).
-        n_period (float): Number of periods in the pulse.
+        waveforms_two_way (array-like, optional): The transmit waveforms of
+            :func:`simulate_rf`; None is its default pulse. The pulse support after the peak
+            sets how far past the record an echo peak may arrive and still be simulated.
+        waveform_sampling_frequency (float): Sampling frequency [Hz] of ``waveforms_two_way``.
         apply_lens_correction (bool): Whether the simulation models the lens.
         lens_thickness (float): Lens thickness [m].
         lens_sound_speed (float, optional): Speed of sound in the lens [m/s].
@@ -943,7 +925,9 @@ def record_reach(
     c_max = minmax[1]
     t0_np, t_init_np, t_peak_np = (np.asarray(x, np.float64) for x in raw)
     shift = t0_np - t_init_np[:, None] + t_peak_np[:, None]
-    time = (_record_gate_time(int(n_ax), fs, fc, float(n_period)) - float(shift.min())) / 2
+    pulses = _scan_pulses(fc, fs, waveforms_two_way, waveform_sampling_frequency)
+    gate_time = _record_gate_time(int(n_ax), fs, _pulse_tail(pulses))
+    time = (gate_time - float(shift.min())) / 2
     if not apply_lens_correction or lens_sound_speed is None:
         return c_max * time
     thickness, c_lens = float(lens_thickness), float(lens_sound_speed)
@@ -959,7 +943,8 @@ def record_bounds(
     t0_delays,
     initial_times,
     t_peak,
-    n_period=4.0,
+    waveforms_two_way=None,
+    waveform_sampling_frequency=250e6,
     apply_lens_correction=False,
     lens_thickness=0.0,
     lens_sound_speed=None,
@@ -989,7 +974,8 @@ def record_bounds(
         t0_delays,
         initial_times,
         t_peak,
-        n_period,
+        waveforms_two_way,
+        waveform_sampling_frequency,
         apply_lens_correction,
         lens_thickness,
         lens_sound_speed,
@@ -1017,7 +1003,8 @@ def in_record(
     t0_delays,
     initial_times,
     t_peak,
-    n_period=4.0,
+    waveforms_two_way=None,
+    waveform_sampling_frequency=250e6,
     apply_lens_correction=False,
     lens_thickness=0.0,
     lens_sound_speed=None,
@@ -1072,9 +1059,13 @@ def in_record(
         _as_f32(sound_speed),
         slowness,
     )
-    gate_time = _record_gate_time(
-        int(n_ax), float(sampling_frequency), float(center_frequency), float(n_period)
+    pulses = _scan_pulses(
+        float(center_frequency),
+        float(sampling_frequency),
+        waveforms_two_way,
+        waveform_sampling_frequency,
     )
+    gate_time = _record_gate_time(int(n_ax), float(sampling_frequency), _pulse_tail(pulses))
     return _record_keep(tau, ops.min(shift), gate_time)
 
 
@@ -1411,135 +1402,43 @@ def spread(dist, exponent=1.0, mindist=1e-3, reference=1e-3):
 
 # ---------------------------------------------------------------------------------------------
 # Spectra
-# Pulse, chirp and transducer spectra, the band they occupy and the FFT length that holds the
-# record without wrapping.
+# The transmit pulses on the record's frequency grid, the band they occupy and the FFT length
+# that holds the record without wrapping.
 # ---------------------------------------------------------------------------------------------
 
 
-def hann_fd(f, width):
-    """The fourier transform of a hann window in the time domain with given width."""
-    denom = 1.0 - (f * width) ** 2
-    num = 0.5 * ops.sinc(f * width)
-    # denom == 0 at f * width == +/-1 is a removable singularity where the Hann
-    # window transform equals 0.25. Divide only away from it (using a dummy 1.0
-    # at the singular points) and fill the limit in explicitly, so no 0/0 occurs.
-    singular = denom == 0
-    result = ops.where(singular, 0.25, num / ops.where(singular, 1.0, denom))
-    result = ops.where(ops.abs(result) > 1.1, 0.25, result)
-    return ops.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.25)
+def _unique_pulses(pulses):
+    """The distinct :class:`Pulse` objects among ``pulses``, in order of first use."""
+    return list(dict.fromkeys(pulses))
 
 
-def get_pulse_spectrum_fn(center_frequency, n_period=3.0, sampling_frequency=None):
-    """Computes the spectrum of a sine that is windowed with a Hann window.
-
-    Args:
-        center_frequency (float): The center frequency of the transmit pulse.
-        n_period (float): The number of periods to include in the pulse.
-        sampling_frequency (float): Frequency used for scaling the spectrum such that a waveform
-            recovered with ``ops.irfft`` has a unit peak (as ``ops.irfft`` divides the waveform
-            by the sampling frequency).
-
-    Returns:
-        spectrum_fn (callable): A function that computes the spectrum of the pulse
-        for the input frequencies in Hz.
-    """
-    period = n_period / center_frequency
-    scale = 0.5 if sampling_frequency is None else 0.5 * sampling_frequency * period
-
-    def spectrum_fn(f):
-        return ops.array(scale, "complex64") * ops.cast(
-            (hann_fd(f - center_frequency, period) + hann_fd(f + center_frequency, period)),
-            "complex64",
-        )
-
-    return spectrum_fn
+def _pulse_spectra(pulses, freqs):
+    """Spectrum of the pulse of every transmit at ``freqs`` [Hz], as complex64 of shape
+    (n_freq, n_tx). Each distinct pulse is evaluated once."""
+    spectra = {pulse: pulse.spectrum(freqs) for pulse in _unique_pulses(pulses)}
+    return np.stack([spectra[pulse] for pulse in pulses], axis=1)
 
 
-def chirp_spectrum(n_fft, center_frequency, sampling_frequency, n_period, chirp_sweep, xp=ops):
-    """Spectrum of a Hann-windowed linear chirp centerd at t=0, on the rfft grid of ``n_fft``.
-
-    The window spans ``n_period`` periods of ``center_frequency``, over which the instantaneous
-    frequency sweeps linearly from ``center_frequency - chirp_sweep / 2`` to
-    ``center_frequency + chirp_sweep / 2``. Scaled like :func:`get_pulse_spectrum_fn`: the
-    waveform recovered with ``irfft`` has a unit peak. The waveform is even, so the spectrum is
-    real, and with ``chirp_sweep=0`` it is the sampled counterpart of the windowed tone.
-
-    Args:
-        n_fft (int): FFT length; the waveform is sampled on its wrapped time grid.
-        center_frequency (float): center frequency [Hz].
-        sampling_frequency (float): Sampling frequency [Hz].
-        n_period (float): Periods of ``center_frequency`` under the Hann window.
-        chirp_sweep (float): Total frequency sweep [Hz].
-        xp: Array module, ``keras.ops`` or ``numpy``.
-
-    Returns:
-        array-like: Complex spectrum of shape (n_fft // 2 + 1,).
-    """
-    n_fft = int(n_fft)
-    k = xp.arange(n_fft, dtype="float32")
-    t = xp.where(k < n_fft // 2, k, k - n_fft) / sampling_frequency
-    width = n_period / center_frequency
-    window = xp.where(xp.abs(t) < width / 2, xp.cos(np.pi * t / width) ** 2, 0.0)
-    phase = 2 * np.pi * (center_frequency * t + chirp_sweep / (2 * width) * t**2)
-    waveform = window * xp.cos(phase)
-    if xp is np:
-        return np.fft.rfft(waveform).astype(np.complex64)
-    real, imag = ops.rfft(waveform)
-    return ops.cast(real, "complex64") + ops.array(1j, "complex64") * ops.cast(imag, "complex64")
+def _pulse_tail(pulses):
+    """Longest support after the envelope peak [s] over the pulses."""
+    return max(pulse.n_after for pulse in pulses) / pulses[0].sampling_frequency
 
 
-def transducer_transfer(
-    f, probe_center_frequency, bandwidth_percent, center_frequency=None, xp=ops
+def _pulse_span(pulses):
+    """Support [s] that holds every pulse, from the earliest start to the latest end."""
+    before, after = (max(getattr(p, k) for p in pulses) for k in ("n_before", "n_after"))
+    return (before + after) / pulses[0].sampling_frequency
+
+
+def _scan_pulses(
+    center_frequency, sampling_frequency, waveforms_two_way=None, waveform_sampling_frequency=250e6
 ):
-    """Gaussian pulse-echo transfer function of the transducer.
-
-    Unit gain at ``probe_center_frequency`` and -6 dB at the edges of the fractional bandwidth,
-    ``probe_center_frequency * (1 +/- bandwidth_percent / 200)``.
-
-    Args:
-        f (array-like): Frequencies [Hz].
-        probe_center_frequency (float, optional): center of the band [Hz]. ``center_frequency``
-            when None.
-        bandwidth_percent (float, optional): -6 dB fractional bandwidth in percent. None is a
-            flat response.
-        center_frequency (float, optional): Fallback band center [Hz].
-        xp: Array module, ``keras.ops`` or ``numpy``.
-
-    Returns:
-        array-like: The transfer function at ``f``.
-    """
-    if bandwidth_percent is None:
-        return xp.ones_like(f)
-    bandwidth = _concrete(bandwidth_percent)
-    if bandwidth is not None and (not np.isfinite(float(bandwidth)) or float(bandwidth) <= 0):
-        raise ValueError(f"bandwidth_percent must be positive, got {float(bandwidth)}.")
-    if probe_center_frequency is None:
-        probe_center_frequency = center_frequency
-    if probe_center_frequency is None:
-        raise ValueError("bandwidth_percent needs probe_center_frequency or center_frequency.")
-    half_width = 0.5 * bandwidth_percent / 100 * probe_center_frequency
-    return xp.exp(-np.log(2) * ((xp.abs(f) - probe_center_frequency) / half_width) ** 2)
-
-
-def _hann_fd_np(f, width):
-    """:func:`hann_fd` in numpy, for static band selection under an outer jit."""
-    denom = 1.0 - (f * width) ** 2
-    num = 0.5 * np.sinc(f * width)
-    singular = denom == 0
-    result = np.where(singular, 0.25, num / np.where(singular, 1.0, denom))
-    result = np.where(np.abs(result) > 1.1, 0.25, result)
-    return np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.25)
-
-
-def pulse_spectrum_np(freqs, center_frequency, sampling_frequency, n_period):
-    """Pulse spectrum of :func:`get_pulse_spectrum_fn` as a numpy array."""
-    period = n_period / center_frequency
-    f = np.asarray(freqs, np.float32)
-    scale = 0.5 * sampling_frequency * period
-    return (
-        scale
-        * (_hann_fd_np(f - center_frequency, period) + _hann_fd_np(f + center_frequency, period))
-    ).astype(np.complex64)
+    """The pulses of :func:`transmit_pulses` for helpers that are not told the transmit count:
+    one per row of ``waveforms_two_way``, or the single default pulse."""
+    n_tx = 1 if waveforms_two_way is None else len(np.atleast_2d(waveforms_two_way))
+    return transmit_pulses(
+        n_tx, center_frequency, sampling_frequency, waveforms_two_way, waveform_sampling_frequency
+    )
 
 
 def _rfft_freqs(n_fft, sampling_frequency):
@@ -1547,71 +1446,25 @@ def _rfft_freqs(n_fft, sampling_frequency):
     return np.arange(n_fft // 2 + 1) / n_fft * sampling_frequency
 
 
-def _transmit_spectrum_np(
-    n_fft,
-    center_frequency,
-    sampling_frequency,
-    n_period,
-    bandwidth_percent,
-    probe_center_frequency,
-    chirp_sweep=None,
-    one_way=False,
-):
-    """Transmit pulse times transducer transfer function on the full rfft grid, in numpy.
-
-    ``one_way`` takes the square root of the pulse-echo transfer function, for a transmit field.
-    """
-    freqs = _rfft_freqs(n_fft, sampling_frequency)
-    if chirp_sweep:
-        wave = chirp_spectrum(
-            n_fft, center_frequency, sampling_frequency, n_period, chirp_sweep, xp=np
-        )
-    else:
-        wave = pulse_spectrum_np(freqs, center_frequency, sampling_frequency, n_period)
-    if bandwidth_percent is not None:
-        transfer = transducer_transfer(
-            freqs, probe_center_frequency, bandwidth_percent, center_frequency, xp=np
-        )
-        if one_way:
-            transfer = np.sqrt(transfer)
-        wave = (wave * transfer).astype(np.complex64)
-    return wave
-
-
 def band_bins(
     n_fft,
-    center_frequency,
     sampling_frequency,
-    n_period,
+    pulses,
+    center_frequency,
     scatter_exponent,
     band_db,
-    bandwidth_percent=None,
-    probe_center_frequency=None,
-    chirp_sweep=None,
-    one_way=False,
     scatter_exponent_range=None,
 ):
     """Contiguous fft bin range that is not discarded.
 
-    The pulse spectrum, the transducer transfer function and the scattering gain together
-    exceed ``band_db`` there. If ``scatter_exponent`` is a vector of per-scatterer exponents,
-    the band is calculated from the union of the min and max exponents.
+    The pulse spectrum (the largest over the transmits) and the scattering gain together exceed
+    ``band_db`` there. If ``scatter_exponent`` is a vector of per-scatterer exponents, the band
+    is calculated from the union of the min and max exponents.
     """
     freqs = _rfft_freqs(n_fft, sampling_frequency)
     if band_db is None:
         return 0, len(freqs)
-    w = np.abs(
-        _transmit_spectrum_np(
-            n_fft,
-            center_frequency,
-            sampling_frequency,
-            n_period,
-            bandwidth_percent,
-            probe_center_frequency,
-            chirp_sweep,
-            one_way,
-        )
-    )
+    w = np.max([np.abs(pulse.spectrum(freqs)) for pulse in _unique_pulses(pulses)], axis=0)
     lo, hi = _exponent_range(scatter_exponent, scatter_exponent_range)
     k0, k1 = len(freqs), 0
     for exponent in (lo,) if lo == hi else (lo, hi):
@@ -1650,7 +1503,8 @@ def fft_length(
     probe_geometry,
     shift_min,
     shift_max,
-    n_period=4.0,
+    waveforms_two_way=None,
+    waveform_sampling_frequency=250e6,
     scatterer_positions=None,
     sos_map=None,
 ):
@@ -1669,23 +1523,30 @@ def fft_length(
         probe_geometry (array-like): Element positions of shape (n_el, 3).
         shift_min (float): Smallest transmit shift (``t0_delays - initial_times + t_peak``).
         shift_max (float): Largest transmit shift.
-        n_period (float): Number of periods in the pulse.
+        waveforms_two_way (array-like, optional): The transmit waveforms of
+            :func:`simulate_rf`; None is its default pulse.
+        waveform_sampling_frequency (float): Sampling frequency [Hz] of ``waveforms_two_way``.
         scatterer_positions (array-like, optional): Concrete positions of shape (n_scat, 3).
         sos_map (array-like, optional): Concrete sound speed map [m/s] of :func:`simulate_rf`.
 
     Returns:
         int: FFT length, a product of powers of 2, 3 and 5.
     """
+    pulses = _scan_pulses(
+        float(center_frequency),
+        float(sampling_frequency),
+        waveforms_two_way,
+        waveform_sampling_frequency,
+    )
     return smooth_size(
         _fft_bound(
             n_ax,
             sampling_frequency,
-            center_frequency,
             sound_speed,
             probe_geometry,
             shift_min,
             shift_max,
-            n_period,
+            pulses,
             scatterer_positions,
             sos_map,
         )
@@ -1695,25 +1556,24 @@ def fft_length(
 def _fft_bound(
     n_ax,
     sampling_frequency,
-    center_frequency,
     sound_speed,
     probe_geometry,
     shift_min,
     shift_max,
-    n_period=4.0,
+    pulses,
     scatterer_positions=None,
     sos_map=None,
 ):
     """Samples that hold every kept echo, before rounding: see :func:`fft_length`."""
-    n_ax, fs, fc = int(n_ax), float(sampling_frequency), float(center_frequency)
-    n_period, shift_min, shift_max = float(n_period), float(shift_min), float(shift_max)
+    n_ax, fs = int(n_ax), float(sampling_frequency)
+    shift_min, shift_max = float(shift_min), float(shift_max)
     c_min, c_max = _sound_speed_minmax(sound_speed, sos_map)
     geometry = np.asarray(probe_geometry, np.float64)
-    pulse = 2 * n_period / fc
+    pulse = 2 * _pulse_span(pulses)
     aperture = 2 * np.linalg.norm(geometry - geometry.mean(0), axis=1).max()
     # A kept scatterer is within c_max * (gate - shift_min) / 2 of its nearest element, and
     # that path may run at c_max while its farthest runs at c_min.
-    gate = _record_gate_time(n_ax, fs, fc, n_period)
+    gate = _record_gate_time(n_ax, fs, _pulse_tail(pulses))
     spread = (c_max / c_min - 1) * max(gate - shift_min, 0.0)
     n = n_ax + int(np.ceil((2 * aperture / c_min + spread + shift_max - shift_min + pulse) * fs))
     if scatterer_positions is not None and len(scatterer_positions):
@@ -1991,14 +1851,15 @@ def _resolve_sub_elements(
     element_width,
     element_height,
     sound_speed,
-    center_frequency,
-    bandwidth_percent,
+    max_frequency,
     two_dimensional=False,
 ):
     """Sub-elements per element as (n_lateral, n_elevation).
 
-    "auto" splits an element into patches of ceil(size / lambda_min), i.e. at most one wavelength,
-    to make sure that the far-field assumption is valid.
+    "auto" is the SIMUS rule ceil(size / lambda_min), lambda_min at ``max_frequency`` [Hz], the
+    top of the band, so that the far-field assumption holds per sub-element. None and an int
+    keep one elevation sub-element unless there is an elevation focus, which needs the elevation
+    subdivision to act at all. In 2D there is a single elevation sub-element.
     """
     if isinstance(n_sub_elements, (tuple, list)):
         n_lateral, n_elevation = (int(n) for n in n_sub_elements)
@@ -2006,14 +1867,14 @@ def _resolve_sub_elements(
     focused = elevation_focus is not None
     if n_sub_elements != "auto" and not focused:
         return (1 if n_sub_elements is None else max(int(n_sub_elements), 1)), 1
-    values = [_concrete(x) for x in (sound_speed, center_frequency, element_width, element_height)]
+    values = [_concrete(x) for x in (sound_speed, element_width, element_height)]
     if any(v is None for v in values):
         raise ValueError(
-            "The sub-element count cannot be derived from a traced sound speed, frequency or "
-            "element size; pass n_sub_elements=(n_lateral, n_elevation) explicitly."
+            "The sub-element count cannot be derived from a traced sound speed or element "
+            "size; pass n_sub_elements=(n_lateral, n_elevation) explicitly."
         )
-    c, fc, width, height = (float(v) for v in values)
-    lambda_min = c / (fc * (1 + (bandwidth_percent or 0.0) / 200))
+    c, width, height = (float(v) for v in values)
+    lambda_min = c / float(max_frequency)
     n_elevation = 1 if two_dimensional else max(int(np.ceil(height / lambda_min)), 1)
     if n_sub_elements == "auto":
         return max(int(np.ceil(width / lambda_min)), 1), n_elevation
@@ -2362,17 +2223,42 @@ def sampled_spectrum(f, samples, times):
 
 
 def hann_burst_spectrum(f, fc, n_period, sweep=0.0):
-    """Spectrum of a Hann-windowed tone or linear chirp centred at t = 0.
+    """Spectrum of a Hann-windowed tone or linear chirp centred at t = 0, in closed form.
 
     The window spans ``n_period`` periods of ``fc``, over which the instantaneous frequency
-    runs linearly from ``fc - sweep / 2`` to ``fc + sweep / 2``. Evaluated from samples at 64
-    per period, so aliasing is far below the 1/f**3 tails of the window.
+    runs linearly from ``fc - sweep / 2`` to ``fc + sweep / 2``. The Hann window is a constant
+    and two complex exponentials at ``+-1 / width``, so the spectrum is the rectangular-window
+    spectrum of :func:`rect_chirp_spectrum` at ``f`` and shifted by ``+-1 / width``.
     """
     width = n_period / fc
-    times = np.linspace(-width / 2, width / 2, int(np.ceil(64 * n_period)) + 1)
-    window = np.cos(np.pi * times / width) ** 2
-    phase = 2 * np.pi * (fc * times + sweep / (2 * width) * times**2)
-    return sampled_spectrum(f, window * np.cos(phase), times)
+    f = np.asarray(f, np.float64)
+    rect = rect_chirp_spectrum
+    return (
+        rect(f, fc, width, sweep) / 2
+        + rect(f - 1 / width, fc, width, sweep) / 4
+        + rect(f + 1 / width, fc, width, sweep) / 4
+    )
+
+
+def rect_chirp_spectrum(f, fc, width, sweep=0.0):
+    """Spectrum of ``cos(phi(t))`` on ``|t| < width / 2`` and zero outside, centred at t = 0,
+    whose instantaneous frequency runs linearly from ``fc - sweep / 2`` to ``fc + sweep / 2``
+    (a tone when ``sweep`` is 0). In closed form: a sinc for the tone, and Fresnel integrals
+    for the chirp, as a cosine is half the sum of the two complex chirps."""
+    f = np.asarray(f, np.float64)
+    if not sweep or abs(sweep) * width < 1e-6:  # a tone, before the Fresnel form loses digits
+        return width / 2 * (np.sinc(width * (f - fc)) + np.sinc(width * (f + fc)))
+
+    def complex_chirp(f):
+        # Integral over the window of exp(i (a t^2 + b t)), a the chirp rate [rad/s^2].
+        a, b = np.pi * sweep / width, 2 * np.pi * (fc - f)
+        scale = np.sqrt(2 * abs(a) / np.pi)
+        v1, v2 = (scale * (t + b / (2 * a)) for t in (-width / 2, width / 2))
+        (s1, c1), (s2, c2) = fresnel(v1), fresnel(v2)
+        integral = (c2 - c1) + 1j * np.sign(a) * (s2 - s1)
+        return np.exp(-1j * b**2 / (4 * a)) * np.sqrt(np.pi / (2 * abs(a))) * integral
+
+    return (complex_chirp(f) + np.conj(complex_chirp(-f))) / 2
 
 
 def rect_burst_spectrum(f, fc, n_period, sweep=0.0):

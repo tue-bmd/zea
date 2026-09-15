@@ -5,13 +5,21 @@ import numpy as np
 import pytest
 from keras import ops
 
-from zea.simulator import pressure_field, simulate_rf, transducer_transfer
+from zea.simulator import pressure_field, simulate_rf, transmit_pulse
 
 SOUND_SPEED = 1540.0
 CENTER_FREQUENCY = 3e6
 SAMPLING_FREQUENCY = 12e6
 N_AX = 512
 ELEMENT_WIDTH = 0.27e-3
+
+
+def _hann(**kwargs):
+    """A Hann-windowed tone (or chirp) with a Gaussian transducer response when
+    ``bandwidth_percent`` is given, as a :class:`zea.simulator.Pulse`."""
+    kwargs.setdefault("bandwidth_percent", None)
+    kwargs.setdefault("n_period", 4.0)
+    return transmit_pulse(CENTER_FREQUENCY, pulse_model="hann", **kwargs)
 
 
 def _np(x):
@@ -128,30 +136,30 @@ def test_soft_baffle_scales_by_cos_of_angle():
     angle = np.deg2rad(35.0)
     point = 0.02 * np.array([[np.sin(angle), 0.0, np.cos(angle)]])
     transmit = _transmit(np.zeros((1, 3)))
-    rigid = _np(pressure_field(point, **transmit, rigid_baffle=True))
-    soft = _np(pressure_field(point, **transmit, rigid_baffle=False))
+    rigid = _np(pressure_field(point, **transmit, baffle_impedance_ratio=0.0))
+    soft = _np(pressure_field(point, **transmit, baffle_impedance_ratio=float("inf")))
     # Obliquity once: the field is one way.
     assert _rel_err(np.cos(angle) * rigid, soft) < 1e-4
 
 
-def test_transducer_bandwidth_enters_one_way():
+def test_the_waveform_enters_the_field_once():
+    """The two-way pulse is the field's pulse: a unit scatterer echoes it through the flat
+    receive response, so the field spectra of two waveforms are in the ratio of the pulses."""
     transmit = _transmit(np.zeros((1, 3)))
     point = np.array([[0.0, 0.0, 0.02]])
-    flat = _np(pressure_field(point, **transmit, n_ax=N_AX, output="time"))[0, :, 0]
-    banded = _np(
-        pressure_field(
-            point,
-            **transmit,
-            n_ax=N_AX,
-            output="time",
-            bandwidth_percent=60.0,
-            probe_center_frequency=2.5e6,
-        )
-    )[0, :, 0]
-    ratio, keep = _spectrum_ratio(banded, flat)
+    flat, banded = _hann(), _hann(bandwidth_percent=60.0, probe_center_frequency=2.5e6)
+    fields = [
+        _np(
+            pressure_field(
+                point, **transmit, n_ax=N_AX, output="time", waveforms_two_way=pulse.waveform()
+            )
+        )[0, :, 0]
+        for pulse in (flat, banded)
+    ]
+    ratio, keep = _spectrum_ratio(fields[1], fields[0])
     freqs = np.fft.rfftfreq(N_AX, 1 / SAMPLING_FREQUENCY)[keep]
-    transfer = _np(transducer_transfer(freqs, 2.5e6, 60.0, CENTER_FREQUENCY))
-    assert np.allclose(ratio, np.sqrt(transfer), atol=2e-3)
+    expected = np.abs(banded.spectrum(freqs)) / np.abs(flat.spectrum(freqs))
+    assert np.allclose(ratio, expected, atol=2e-3)
 
 
 def test_two_dimensional_spreads_cylindrically_in_the_imaging_plane():
@@ -210,13 +218,14 @@ def test_element_normals_make_the_field_rotation_invariant():
         [[np.cos(angle), 0.0, np.sin(angle)], [0.0, 1.0, 0.0], [-np.sin(angle), 0.0, np.cos(angle)]]
     )
     normals = np.tile(rotation @ np.array([0.0, 0.0, 1.0]), (n_el, 1))
-    reference = pressure_field(points, **_transmit(geometry), n_ax=N_AX, rigid_baffle=False)
+    soft = {"baffle_impedance_ratio": float("inf")}
+    reference = pressure_field(points, **_transmit(geometry), n_ax=N_AX, **soft)
     rotated = pressure_field(
         points @ rotation.T,
         **_transmit(geometry @ rotation.T),
         n_ax=N_AX,
-        rigid_baffle=False,
         element_normals=normals,
+        **soft,
     )
     assert _rel_err(reference, rotated) < 1e-4
 
@@ -224,9 +233,14 @@ def test_element_normals_make_the_field_rotation_invariant():
 def test_chirp_field_correlates_with_the_chirp_and_rejects_bad_output():
     transmit = _transmit(np.zeros((1, 3)))
     point = np.array([[0.0, 0.0, 0.01]])
-    tone = _np(pressure_field(point, **transmit, n_ax=N_AX, output="time", n_period=16.0))
+    kwargs = dict(transmit, n_ax=N_AX, output="time")
+    tone = _np(pressure_field(point, **kwargs, waveforms_two_way=_hann(n_period=16.0).waveform()))
     chirp = _np(
-        pressure_field(point, **transmit, n_ax=N_AX, output="time", n_period=16.0, chirp_sweep=2e6)
+        pressure_field(
+            point,
+            **kwargs,
+            waveforms_two_way=_hann(n_period=16.0, chirp_sweep=2e6).waveform(),
+        )
     )
     tone, chirp = tone[0, :, 0], chirp[0, :, 0]
     correlation = np.abs(np.dot(tone, chirp)) / np.linalg.norm(tone) / np.linalg.norm(chirp)

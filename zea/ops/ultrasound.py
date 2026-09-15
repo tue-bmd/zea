@@ -35,11 +35,13 @@ from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
 from zea.simulator import (
     _concrete,
+    _fft_bound,
     _ndim,
     apply_receive_chain,
-    fft_length,
     scatter_exponent_bounds,
     simulate_rf,
+    smooth_size,
+    transmit_pulses,
 )
 from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
@@ -77,16 +79,26 @@ def _derived_fft_length(kwargs):
             return None
     t0, t_init, t_peak, geometry, sound_speed = raw
     shift = t0 - t_init[:, None] + t_peak[:, None]
-    return fft_length(
-        int(kwargs["n_ax"]),
-        float(kwargs["sampling_frequency"]),
+    # The pulses of the transmits, as the simulator builds them: :func:`fft_length` with the
+    # waveforms, but checked against the transmit count.
+    pulses = transmit_pulses(
+        int(t0.shape[0]),
         float(kwargs["center_frequency"]),
-        float(sound_speed),
-        geometry,
-        shift.min(),
-        shift.max(),
-        float(kwargs.get("n_period", 4.0)),
-        sos_map=sos_map,
+        float(kwargs["sampling_frequency"]),
+        kwargs.get("waveforms_two_way"),
+        kwargs.get("waveform_sampling_frequency", 250e6),
+    )
+    return smooth_size(
+        _fft_bound(
+            int(kwargs["n_ax"]),
+            float(kwargs["sampling_frequency"]),
+            float(sound_speed),
+            geometry,
+            shift.min(),
+            shift.max(),
+            pulses,
+            sos_map=sos_map,
+        )
     )
 
 
@@ -99,17 +111,17 @@ class Simulate(Operation):
     :func:`zea.simulator_time_domain.simulate_rf_td`, which evaluates the geometry-dependent
     factors at the center frequency: less accurate, faster in some settings. The element
     options (``baffle_impedance_ratio``, ``element_normals``, ``n_sub_elements``,
-    ``elevation_focus``, ``lens_attenuation_coef``, ``band_db``, ``n_fft``, ``scatter_exponent_range``) reach the
-    frequency-domain simulator only. The transmit pulse is ``waveforms_two_way`` (the one of a
+    ``elevation_focus``, ``lens_attenuation_coef``, ``band_db``, ``n_fft`` and
+    ``scatter_exponent_range``) reach the frequency-domain simulator only. The transmit pulse
+    is ``waveforms_two_way`` (the one of a
     :class:`zea.Parameters` or zea file, or built with :func:`zea.simulator.transmit_pulse`),
     and the default pulse of that function without. The old names ``"exact"``,
     ``"frequency_approximation"`` and ``"time_approximation"`` are deprecated aliases.
 
     Frequency-domain only arguments:
 
-    - Transducer and element model: ``rigid_baffle``, ``bandwidth_percent``,
-      ``probe_center_frequency``, ``element_normals``, ``chirp_sweep``, ``n_period``,
-      ``n_sub_elements``, ``elevation_focus``, ``lens_attenuation_coef``, ``band_db``.
+    - Element model: ``baffle_impedance_ratio``, ``element_normals``, ``n_sub_elements``,
+      ``elevation_focus``, ``lens_attenuation_coef``, ``band_db``.
     - Sound speed map: ``sos_map`` with ``sos_grid_x`` and ``sos_grid_z`` (2D, extruded along
       y), plus ``sos_grid_y`` for a 3D map. Each element-scatterer path is timed along its
       straight ray with ``n_sos_ray_samples`` samples, at ``sound_speed`` outside the map.
@@ -182,8 +194,8 @@ class Simulate(Operation):
         if "elevation_lens" in merged:
             # `call` takes **kwargs, so the removed keyword would otherwise be silently ignored.
             raise TypeError(
-                "`elevation_lens` was removed. Use `elevation_slab_2d` for the old 2D slab "
-                "approximation, or `elevation_focus` for a physical cylindrical elevation lens."
+                "`elevation_lens` was removed. Use `two_dimensional` for a 2D simulation, or "
+                "`elevation_focus` for a physical cylindrical elevation lens."
             )
         self._track_scatter_exponent(merged.get("scatter_exponent", 2.0))
         if not self._inside_outer_jit:

@@ -21,6 +21,8 @@ from zea.simulator import (
     record_reach,
     simulate_rf,
     smooth_size,
+    transmit_pulse,
+    transmit_pulses,
 )
 from zea.simulator_time_domain import simulate_rf_td
 
@@ -29,6 +31,23 @@ CENTER_FREQUENCY = 3e6
 SAMPLING_FREQUENCY = 12e6
 N_AX = 512
 N_PERIOD = 4.0
+# Support of the default pulse after its peak [s]: how far past the record an echo peak may be.
+PULSE_TAIL = transmit_pulse(CENTER_FREQUENCY, SAMPLING_FREQUENCY).n_after / SAMPLING_FREQUENCY
+
+
+def _waveform(n_period=N_PERIOD, **kwargs):
+    """A Hann-windowed tone (or chirp) as the simulator takes it: its two-way waveform at
+    250 MHz. Without ``bandwidth_percent`` it is the bare window."""
+    kwargs.setdefault("bandwidth_percent", None)
+    return transmit_pulse(
+        CENTER_FREQUENCY, pulse_model="hann", n_period=n_period, **kwargs
+    ).waveform()
+
+
+def _stack_padded(*waveforms):
+    """Waveforms of different lengths as one (n_tx, n_samples) array, zero-padded at the end."""
+    n = max(len(w) for w in waveforms)
+    return np.stack([np.pad(w, (0, n - len(w))) for w in waveforms])
 
 
 def _linear_probe(n_el=16, pitch=0.3e-3):
@@ -133,22 +152,39 @@ CASES = {
     "linear": _case(_linear_probe()),
     "matrix": _case(_matrix_probe()),
     "scatter_exponent_0": _case(_matrix_probe(), scatter_exponent=0.0),
-    "soft_baffle": _case(_matrix_probe(), rigid_baffle=False),
+    "soft_baffle": _case(_matrix_probe(), baffle_impedance_ratio=float("inf")),
     "transducer_bandwidth": _case(
-        _linear_probe(), bandwidth_percent=60.0, probe_center_frequency=2.5e6
+        _linear_probe(),
+        waveforms_two_way=_waveform(bandwidth_percent=60.0, probe_center_frequency=2.5e6),
     ),
-    "transducer_bandwidth_at_pulse_frequency": _case(_linear_probe(), bandwidth_percent=80.0),
-    "chirp": _case(_linear_probe(), chirp_sweep=1.5e6, n_period=10.0),
-    "chirp_with_bandwidth": _case(_matrix_probe(), chirp_sweep=1e6, bandwidth_percent=70.0),
+    "transducer_bandwidth_at_pulse_frequency": _case(
+        _linear_probe(), waveforms_two_way=_waveform(bandwidth_percent=80.0)
+    ),
+    "chirp": _case(_linear_probe(), waveforms_two_way=_waveform(10.0, chirp_sweep=1.5e6)),
+    "chirp_with_bandwidth": _case(
+        _matrix_probe(), waveforms_two_way=_waveform(chirp_sweep=1e6, bandwidth_percent=70.0)
+    ),
+    "per_transmit_waveforms": _case(
+        _linear_probe(),
+        waveforms_two_way=_stack_padded(
+            _waveform(),
+            _waveform(2.0),
+            _waveform(6.0, chirp_sweep=1e6),
+            transmit_pulse(CENTER_FREQUENCY).waveform(),
+        ),
+    ),
     "convex_element_normals": _case(
         create_curved_probe_geometry(16, 0.3e-3, 15e-3),
         element_normals=curved_probe_normals(create_curved_probe_geometry(16, 0.3e-3, 15e-3)),
-        rigid_baffle=False,
+        baffle_impedance_ratio=float("inf"),
     ),
     "element_height": _case(_matrix_probe(), element_height=0.6e-3),
     "sub_elements": _case(_linear_probe(), n_sub_elements=(2, 3), element_height=2e-3),
     "auto_sub_elements_with_bandwidth": _case(
-        _linear_probe(), n_sub_elements="auto", element_height=2e-3, bandwidth_percent=80.0
+        _linear_probe(),
+        n_sub_elements="auto",
+        element_height=2e-3,
+        waveforms_two_way=_waveform(bandwidth_percent=80.0),
     ),
     "elevation_focus": _case(
         _linear_probe(), element_height=4e-3, elevation_focus=20e-3, apply_lens_correction=True
@@ -246,7 +282,7 @@ def test_record_prefix_does_not_depend_on_the_record_length():
     """Scatterers whose echo starts past a short record leave nothing in it, and those inside
     are not cut by the FFT length sized for that record."""
     kwargs = _tensors(CASES["lens_correction"])
-    reach = (256 / SAMPLING_FREQUENCY + 0.5 * N_PERIOD / CENTER_FREQUENCY) * SOUND_SPEED / 2
+    reach = (256 / SAMPLING_FREQUENCY + PULSE_TAIL) * SOUND_SPEED / 2
     depths = np.linalg.norm(_np(kwargs["scatterer_positions"]), axis=1)
     assert depths.min() < reach < depths.max()
     long = _np(simulate_rf(**{**kwargs, "n_ax": 1024}))[:, :256]
@@ -264,6 +300,8 @@ def _record_args(kwargs):
         "t0_delays",
         "initial_times",
         "t_peak",
+        "waveforms_two_way",
+        "waveform_sampling_frequency",
         "apply_lens_correction",
         "lens_thickness",
         "lens_sound_speed",
@@ -272,25 +310,29 @@ def _record_args(kwargs):
 
 
 def test_gate_keeps_a_scatterer_inside_the_record_and_drops_one_past_it():
-    kwargs = _single_element()
+    reach = record_reach(**_record_args(_single_element()))
+    assert abs(reach / ((N_AX / SAMPLING_FREQUENCY + PULSE_TAIL) * SOUND_SPEED / 2) - 1) < 1e-12
+    # A Hann tone has a compact support, so the reach puts its peak just inside the record.
+    waveform = _waveform()
+    tail = transmit_pulses(1, CENTER_FREQUENCY, SAMPLING_FREQUENCY, waveform)[0].n_after
+    kwargs = _single_element(waveforms_two_way=waveform)
     reach = record_reach(**_record_args(kwargs))
-    assert (
-        abs(
-            reach
-            / ((N_AX / SAMPLING_FREQUENCY + 0.5 * N_PERIOD / CENTER_FREQUENCY) * SOUND_SPEED / 2)
-            - 1
-        )
-        < 1e-12
+    expected = (N_AX / SAMPLING_FREQUENCY + tail / SAMPLING_FREQUENCY) * SOUND_SPEED / 2
+    assert abs(reach / expected - 1) < 1e-12
+    # An echo peaking a few samples before the end of the record straddles it: energy in the
+    # last samples only.
+    kwargs["scatterer_positions"] = np.array(
+        [[0.0, 0.0, (N_AX - 4) / SAMPLING_FREQUENCY * SOUND_SPEED / 2]], np.float32
     )
-    kwargs["scatterer_positions"] = np.array([[0.0, 0.0, 0.98 * reach]], np.float32)
     inside = _np(simulate_rf(**_tensors(kwargs)))
-    kwargs["scatterer_positions"] = np.array([[0.0, 0.0, 1.02 * reach]], np.float32)
-    outside = _np(simulate_rf(**_tensors(kwargs)))
     peak = np.abs(inside).max()
     assert peak > 0
-    # The pulse straddles the end of the record: energy in the last samples only.
     assert np.abs(inside[0, : N_AX // 2]).max() < 1e-4 * peak
-    assert not outside.any()
+    # The gate: kept up to the reach, where only the foot of the pulse is left, dropped past it.
+    kwargs["scatterer_positions"] = np.array([[0.0, 0.0, 0.99 * reach]], np.float32)
+    assert _np(simulate_rf(**_tensors(kwargs))).any()
+    kwargs["scatterer_positions"] = np.array([[0.0, 0.0, 1.01 * reach]], np.float32)
+    assert not _np(simulate_rf(**_tensors(kwargs))).any()
 
 
 def test_record_helpers_agree_with_the_gate():
@@ -338,7 +380,7 @@ def test_record_helpers_agree_with_the_gate():
 
 def test_single_element_echo_is_the_delayed_and_spread_pulse():
     r = 0.6 * N_AX / SAMPLING_FREQUENCY * SOUND_SPEED / 2
-    kwargs = _single_element()
+    kwargs = _single_element(waveforms_two_way=_waveform())
     kwargs["scatterer_positions"] = np.array([[0.0, 0.0, r]], np.float32)
     rf = _np(simulate_rf(**_tensors(kwargs)))[0, :, 0, 0]
     t = np.arange(N_AX) / SAMPLING_FREQUENCY
@@ -360,7 +402,7 @@ def test_t_peak_and_initial_times_shift_the_echo():
 
 
 def test_chirp_is_sampled_on_an_odd_fft_grid():
-    # smooth_size lands on an odd length for some records; the chirp follows the same grid.
+    # smooth_size lands on an odd length for some records; the pulse follows the same grid.
     assert smooth_size(1082) == 1125
     kwargs = _tensors(CASES["chirp"])
     _assert_close(simulate_rf(**kwargs, n_fft=1024), simulate_rf(**kwargs, n_fft=1125))
@@ -375,12 +417,19 @@ def test_empty_phantom_gives_zeros():
     assert not result.any()
 
 
-def test_n_period_changes_the_pulse():
+def test_waveforms_change_the_pulse():
     kwargs = _tensors(CASES["linear"])
-    short = simulate_rf(**kwargs, n_period=2.0)
+    short = simulate_rf(**kwargs, waveforms_two_way=_waveform(2.0))
     default = simulate_rf(**kwargs)
     assert short.shape == default.shape
     assert _correlation(short, default) < 0.99
+    # The rows of a (n_tx, n_samples) array are the pulses of the transmits, in order.
+    stacked = _stack_padded(_waveform(2.0), _waveform(), _waveform(2.0), _waveform())
+    mixed = _np(simulate_rf(**kwargs, waveforms_two_way=stacked))
+    _assert_close(_np(short)[0], mixed[0], 1e-4)
+    _assert_close(_np(simulate_rf(**kwargs, waveforms_two_way=_waveform()))[1], mixed[1], 1e-4)
+    with pytest.raises(ValueError, match="waveforms_two_way must have shape"):
+        simulate_rf(**kwargs, waveforms_two_way=stacked[:3])
 
 
 @pytest.mark.skipif(keras.backend.backend() != "jax", reason="jax tracing semantics")
@@ -701,7 +750,26 @@ def test_smooth_size_and_fft_length():
     near = np.array([[0.0, 0.0, 5e-3]])
     assert (
         fft_length(
-            N_AX, SAMPLING_FREQUENCY, CENTER_FREQUENCY, SOUND_SPEED, geometry, 0, 0, 4.0, near
+            N_AX,
+            SAMPLING_FREQUENCY,
+            CENTER_FREQUENCY,
+            SOUND_SPEED,
+            geometry,
+            0,
+            0,
+            scatterer_positions=near,
         )
         <= n_fft
     )
+    # A longer pulse needs a longer FFT.
+    longer = fft_length(
+        N_AX,
+        SAMPLING_FREQUENCY,
+        CENTER_FREQUENCY,
+        SOUND_SPEED,
+        geometry,
+        0,
+        0,
+        waveforms_two_way=_waveform(32.0),
+    )
+    assert longer > n_fft
