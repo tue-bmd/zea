@@ -40,9 +40,10 @@ class Scene:
     n_period: float = 2.0
     bandwidth_percent: float = 75.0
     attenuation_coef: float = 0.0
-    rigid_baffle: bool = True
+    baffle: float = 0.0  # medium over baffle impedance: 0 rigid, inf soft
     chirp_sweep: float | None = None
     n_sub_elements: tuple | str | None = (1, 1)
+    rel_tol: float = 1e-3
 
 
 def linear_probe(n_el=64, pitch=0.5e-3):
@@ -114,8 +115,26 @@ def fish_2d_45degrot_nosplit():
 def fish_2d_soft_baffle():
     """Soft baffle (cos theta obliquity) with steep plane waves."""
     return linear_scene(
-        fish_scatterers(), plane_waves(linear_probe(), [(-25, 0), (25, 0)]), rigid_baffle=False
+        fish_scatterers(), plane_waves(linear_probe(), [(-25, 0), (25, 0)]), baffle=float("inf")
     )
+
+
+def fish_2d_epoxy_baffle():
+    """Baffle of finite impedance, MUST's epoxy example: obliquity cos / (cos + 0.57)."""
+    return replace(fish_2d_soft_baffle(), baffle=0.57)
+
+
+def points_2d_near_field():
+    """Points within a wavelength of the element faces, on and between elements, where SIMUS
+    clamps the distance at lambda / 2 for the phase and the spreading. SIMUS regularises its
+    angle sines and cosines with the float32 epsilon, which perturbs the directivity of the
+    elements within a fraction of a wavelength by a few 1e-3 (its response of a point between
+    two elements is not mirror-symmetric); hence the looser tolerance."""
+    wavelength = C / FC
+    z = np.array([0.05, 0.2, 0.5, 1.0, 2.0]) * wavelength
+    positions = np.stack([np.repeat([0.0, 0.25e-3, 1.1e-3], len(z)), np.zeros(3 * len(z))], 1)
+    positions = np.concatenate([positions, np.tile(z, 3)[:, None]], 1)
+    return linear_scene(positions, plane_waves(linear_probe(), [(0, 0)]), rel_tol=3e-3)
 
 
 def fish_2d_attenuation():
@@ -179,7 +198,7 @@ def fish_3d_focused_split():
 
 def fish_3d_soft_attenuated():
     """3D, soft baffle and 0.5 dB/cm/MHz together."""
-    return replace(fish_3d_tilted(), rigid_baffle=False, attenuation_coef=0.5)
+    return replace(fish_3d_tilted(), baffle=float("inf"), attenuation_coef=0.5)
 
 
 SCENES = {
@@ -190,6 +209,8 @@ SCENES = {
         fish_2d_45degrot_nosplit,
         fish_2d_45degrot_outofplane,
         fish_2d_soft_baffle,
+        fish_2d_epoxy_baffle,
+        points_2d_near_field,
         fish_2d_attenuation,
         fish_2d_chirp,
         fish_2d_bandwidth50,
@@ -256,7 +277,7 @@ def run_zea(s):
         t_peak=np.full(n_tx, t_peak, np.float32),
         element_height=s.element_height,
         scatter_exponent=0.0,
-        rigid_baffle=s.rigid_baffle,
+        baffle_impedance_ratio=s.baffle,
         waveforms_two_way=waveform,
         waveform_sampling_frequency=waveform_fs,
         n_sub_elements=simus_sub_elements(s),
@@ -269,7 +290,7 @@ def simus_param(s):
     p.fc, p.fs, p.c = FC, FS, C
     p.width, p.height = s.element_width, s.element_height
     p.bandwidth = s.bandwidth_percent
-    p.baffle = "rigid" if s.rigid_baffle else "soft"
+    p.baffle = {0.0: "rigid", float("inf"): "soft"}.get(s.baffle, s.baffle)
     p.attenuation = s.attenuation_coef
     p.TXnow = s.n_period
     if s.chirp_sweep:
@@ -325,6 +346,6 @@ def test_simulate_rf_matches_simus3(name):
     n = min(rf_zea.shape[1], rf_ref.shape[1])
     m = metrics(rf_zea[:, :n], rf_ref[:, :n])
     assert m["lag"] == 0
-    assert m["rel"] < 1e-3
+    assert m["rel"] < scene.rel_tol
     assert m["corr"] > 0.9999
-    assert m["profile"] < 1e-3
+    assert m["profile"] < scene.rel_tol

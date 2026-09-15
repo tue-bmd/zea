@@ -15,6 +15,7 @@ from zea.simulator import (
     gaussian_transfer,
     generalized_normal_transfer,
     measured_pulse,
+    obliquity_factor,
     simulate_rf,
     square_burst_pulses,
     square_burst_spectrum,
@@ -80,15 +81,49 @@ def _rel_err(reference, result):
     return np.linalg.norm(reference - result) / np.linalg.norm(reference)
 
 
-def test_soft_baffle_scales_by_cos_of_angle():
+@pytest.mark.parametrize("ratio", [float("inf"), 0.57])
+def test_baffle_obliquity_scales_by_cos_of_angle(ratio):
     angle = np.deg2rad(35.0)
     scatterer = 0.02 * np.array([np.sin(angle), 0.0, np.cos(angle)])
     scene = _scene(np.zeros((1, 3)), scatterer)
-    rigid = simulate_rf(**scene, rigid_baffle=True)
-    soft = simulate_rf(**scene, rigid_baffle=False)
-    assert _rel_err(rigid, soft) > 0.1
-    # Obliquity on transmit and on receive.
-    assert _rel_err(np.cos(angle) ** 2 * _np(rigid), soft) < 1e-3
+    rigid = simulate_rf(**scene)
+    baffled = simulate_rf(**scene, baffle_impedance_ratio=ratio)
+    assert _rel_err(rigid, baffled) > 0.1
+    # Obliquity on transmit and on receive: cos in a soft baffle, cos / (cos + ratio) in general.
+    cos = np.cos(angle)
+    factor = cos if ratio == float("inf") else cos / (cos + ratio)
+    assert _rel_err(factor**2 * _np(rigid), baffled) < 1e-3
+    with pytest.raises(ValueError, match="baffle_impedance_ratio"):
+        simulate_rf(**scene, baffle_impedance_ratio=-1.0)
+
+
+def test_obliquity_is_zero_behind_the_element():
+    cos_angle = np.array([[0.3, 0.0, -0.5]])
+    for ratio in (float("inf"), 0.57):
+        factor = np.asarray(obliquity_factor(cos_angle, ratio))
+        assert factor[0, 0] > 0.0
+        assert factor[0, 1] == 0.0
+        assert factor[0, 2] == 0.0
+    assert np.all(np.asarray(obliquity_factor(cos_angle, 0.0)) == 1.0)
+
+
+def test_distances_are_clamped_at_half_a_wavelength():
+    # A scatterer on an element: SIMUS replaces distances below lambda / 2 by lambda / 2 for the
+    # phase and the 1 / r, so the record is that of a scatterer at lambda / 2, and beyond it the
+    # two-way amplitude falls as 1 / r^2 (on axis, so the directivity is 1).
+    half_wavelength = SOUND_SPEED / (2 * CENTER_FREQUENCY)
+    depths = [0.1 * half_wavelength, half_wavelength, 4 * half_wavelength]
+    scene = _scene(
+        np.zeros((1, 3)), [[0.0, 0.0, z] for z in depths], t_peak=np.full(1, 1e-6, np.float32)
+    )
+    for simulate in (simulate_rf, simulate_rf_td):
+        records = []
+        for k in range(len(depths)):
+            one = {**scene, "scatterer_magnitudes": np.eye(len(depths), dtype=np.float32)[k]}
+            records.append(_np(simulate(**one))[0, :, 0, 0])
+        assert _rel_err(records[1], records[0]) < 1e-5
+        ratio = _envelope_peak(records[2]) / _envelope_peak(records[1])
+        assert np.isclose(ratio, 1 / 16, rtol=0.03)
 
 
 def test_transducer_bandwidth_shapes_the_spectrum():
@@ -138,8 +173,8 @@ def _rotation_about_y(angle):
     return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
 
 
-@pytest.mark.parametrize("rigid_baffle", [True, False])
-def test_element_normals_make_the_scene_rotation_invariant(rigid_baffle):
+@pytest.mark.parametrize("baffle", [0.0, float("inf")])
+def test_element_normals_make_the_scene_rotation_invariant(baffle):
     n_el = 8
     geometry = np.stack([(np.arange(n_el) - 3.5) * 0.3e-3, np.zeros(n_el), np.zeros(n_el)], -1)
     rng = np.random.default_rng(0)
@@ -149,8 +184,8 @@ def test_element_normals_make_the_scene_rotation_invariant(rigid_baffle):
     rotation = _rotation_about_y(np.deg2rad(30.0))
     normals = np.tile(rotation[:, 2], (n_el, 1))
 
-    reference = simulate_rf(**_scene(geometry, positions, rigid_baffle=rigid_baffle))
-    rotated = _scene(geometry @ rotation.T, positions @ rotation.T, rigid_baffle=rigid_baffle)
+    reference = simulate_rf(**_scene(geometry, positions, baffle_impedance_ratio=baffle))
+    rotated = _scene(geometry @ rotation.T, positions @ rotation.T, baffle_impedance_ratio=baffle)
     assert _rel_err(reference, simulate_rf(**rotated)) > 0.05
     assert _rel_err(reference, simulate_rf(**rotated, element_normals=normals)) < 1e-3
 

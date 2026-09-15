@@ -48,6 +48,7 @@ from zea.simulator import (
     attenuate,
     spread,
     apply_receive_chain,
+    min_distance,
     transmit_pulses,
 )
 
@@ -264,6 +265,9 @@ def _precompute_scatterer_response(
         lens_sound_speed,
         sound_speed,
     )
+    # Half a wavelength at least for the travel time and the spreading, as in simulate_rf.
+    min_dist = min_distance(sound_speed, center_frequency)
+    one_way_distance = ops.maximum(one_way_distance, min_dist)
     travel_time = one_way_distance / sound_speed
     two_way_distance = one_way_distance[:, :, None] + one_way_distance[:, None, :]
 
@@ -277,8 +281,8 @@ def _precompute_scatterer_response(
     )
     directivity_pair = element_directivity[:, :, None] * element_directivity[:, None, :]
     spread_attenuation = (
-        spread(one_way_distance[:, :, None], 0.5 if elevation_slab_2d else 1.0)
-        * spread(one_way_distance[:, None, :], 1.0)
+        spread(one_way_distance[:, :, None], 0.5 if elevation_slab_2d else 1.0, min_dist)
+        * spread(one_way_distance[:, None, :], 1.0, min_dist)
         * attenuate(center_frequency, attenuation_coef, two_way_distance)
     )
 

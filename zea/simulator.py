@@ -86,7 +86,7 @@ def simulate_rf(
     noise_seed=0,
     noise_reference=None,
     scatter_exponent=2.0,
-    rigid_baffle=True,
+    baffle_impedance_ratio=0.0,
     element_normals=None,
     waveforms_two_way=None,
     waveform_sampling_frequency=250e6,
@@ -154,12 +154,16 @@ def simulate_rf(
             myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
             The Verasonics simulator applies no frequency dependence at all: 0 here, with
             ``attenuation_coef=0`` (its attenuation is evaluated at the centre frequency only)
-            and ``rigid_baffle=False`` (its default element sensitivity is cos times sinc),
-            reproduces its spectrum. It also applies no geometric spreading, which zea always
-            does.
-        rigid_baffle (bool): Element mounted in a rigid baffle (sinc directivity only). False
-            models a soft baffle, which adds the obliquity factor cos(angle to the element
-            normal), on transmit and on receive. Must be static under jit.
+            and ``baffle_impedance_ratio=inf`` (its default element sensitivity is cos times
+            sinc), reproduces its spectrum. It also applies no geometric spreading, which zea
+            always does.
+        baffle_impedance_ratio (float): Impedance of the medium over that of the baffle the
+            elements are mounted in, which sets the obliquity factor applied on transmit and on
+            receive next to the sinc directivity: 1 for a rigid baffle (0, the default),
+            cos(angle to the element normal) for a soft one (``inf``), and in general
+            cos / (cos + ratio) (Selfridge et al. 1980, as in SIMUS; 0.57 for epoxy against
+            soft tissue). Scatterers behind the element plane get no obliquity factor. Must be
+            static under jit.
         element_normals (array-like, optional): Outward normal of each element of shape
             (n_el, 3), for curved or tilted arrays. The directivity and the obliquity are
             evaluated in each element's own frame: the elevation axis is the projection of
@@ -199,6 +203,7 @@ def simulate_rf(
     """
 
     _validate_scatter_exponent(scatter_exponent)
+    _validate_baffle(baffle_impedance_ratio)
     _validate_elevation(elevation_slab_2d, elevation_focus)
 
     n_tx = t0_delays.shape[0]
@@ -277,11 +282,12 @@ def simulate_rf(
         lens_sound_speed,
         apply_lens_correction,
         elevation_slab_2d,
-        rigid_baffle,
+        baffle_impedance_ratio,
         element_normals,
         n_sub_elements,
         elevation_focus,
         lens_attenuation_coef,
+        min_distance(sound_speed, center_frequency),
     )
     # One-way delays past the FFT length are gated, as delay2 does for the transmit shifts.
     in_fft = ops.cast(dist / sound_speed < n_ax_rounded / sampling_frequency, "complex64")
@@ -374,6 +380,36 @@ def _validate_scatter_exponent(scatter_exponent):
             "2 is Rayleigh scattering (e.g. blood), myocardium is approximately 1.5, "
             "soft tissue 0.6-0.8."
         )
+
+
+def _validate_baffle(baffle_impedance_ratio):
+    if not baffle_impedance_ratio >= 0:
+        raise ValueError(
+            f"baffle_impedance_ratio ({baffle_impedance_ratio}) must be non-negative: 0 for a "
+            "rigid baffle, inf for a soft one."
+        )
+
+
+def obliquity_factor(cos_angle, baffle_impedance_ratio):
+    """Obliquity factor of an element in a baffle of finite impedance, at the cosine of the
+    angle to its normal: 1 in a rigid baffle (ratio 0), the cosine in a soft one (``inf``), and
+    cos / (cos + ratio) in between, with the ratio the medium impedance over the baffle's
+    (Selfridge et al. 1980, as in SIMUS). With a non-rigid baffle, directions behind the
+    element get 0, not a pole.
+    """
+    if baffle_impedance_ratio == 0:
+        return ops.ones_like(cos_angle)
+    cos_angle = ops.maximum(cos_angle, 0.0)
+    if baffle_impedance_ratio == float("inf"):
+        return cos_angle
+    return cos_angle / (cos_angle + baffle_impedance_ratio)
+
+
+def min_distance(sound_speed, center_frequency):
+    """Half a wavelength: the distance the simulators clamp the element-scatterer distance to
+    for the phase and the spreading, as SIMUS does, so that the 1 / r of a scatterer on an
+    element stays finite. The angles keep the true geometry."""
+    return sound_speed / (2.0 * center_frequency)
 
 
 def _validate_elevation(elevation_slab_2d, elevation_focus):
@@ -571,16 +607,19 @@ def _element_responses(
     lens_sound_speed,
     apply_lens_correction,
     elevation_slab_2d,
-    rigid_baffle,
+    baffle_impedance_ratio,
     element_normals,
     n_sub_elements=(1, 1),
     elevation_focus=None,
     lens_attenuation_coef=0.0,
+    min_dist=0.0,
 ):
     """Transmit and receive one-way responses [s, e, f] and the one-way path length [s, e].
 
     Each element is the mean of ``n_sub_elements`` (lateral, elevation) sub-elements with their
-    own distance, phase and sinc directivity, so the response holds in the near field too. An
+    own distance, phase and sinc directivity, so the response holds in the near field too. The
+    sub-element distance is clamped at ``min_dist`` for the phase and the spreading (see
+    :func:`min_distance`), not for the angles. An
     elevation focus is the ideal focusing advance of each elevation sub-element, or with the lens
     the refracted (Fermat) path through the local lens thickness, which the focus thins towards
     the edges. The lens path is expressed as the medium distance with the same travel time for the
@@ -645,17 +684,20 @@ def _element_responses(
             amplitude = amplitude * attenuate(f3, lens_attenuation_coef, lens_len[..., None])
         else:
             medium_len = sub_dist = spread_dist = ops.linalg.norm(relative, axis=-1)
+        sub_dist = ops.maximum(sub_dist, min_dist)
+        spread_dist = ops.maximum(spread_dist, min_dist)
         amplitude = amplitude * attenuate(f3, attenuation_coef, medium_len[..., None])
-        if not rigid_baffle:
-            amplitude = amplitude * obliquity[..., None]
+        amplitude = amplitude * obliquity_factor(obliquity, baffle_impedance_ratio)[..., None]
         phase = ops.exp(
             ops.array(-2j * np.pi, "complex64")
             * ops.cast((sub_dist[..., None] / sound_speed - advance[j]) * f3, "complex64")
         )
-        rx = ops.cast(amplitude * spread(spread_dist[..., None], 1.0), "complex64") * phase
+        rx = ops.cast(amplitude * spread(spread_dist[..., None], 1.0, min_dist), "complex64")
+        rx = rx * phase
         if elevation_slab_2d:
             # An elevation lens focuses the transmit to a slab: cylindrical spread on the way out.
-            tx = ops.cast(amplitude * spread(spread_dist[..., None], 0.5), "complex64") * phase
+            tx = ops.cast(amplitude * spread(spread_dist[..., None], 0.5, min_dist), "complex64")
+            tx = tx * phase
         else:
             tx = rx
         return tx, rx
@@ -710,7 +752,7 @@ def attenuate(f, attenuation_coef, dist):
     return ops.exp(-ops.log(10) * attenuation_coef / 20 * dist * 100 * ops.abs(f) * 1e-6)
 
 
-def spread(dist, exponent=1.0, mindist=1e-3):
+def spread(dist, exponent=1.0, mindist=1e-3, reference=1e-3):
     """Geometric spreading of the wavefront.
 
     Args:
@@ -718,13 +760,15 @@ def spread(dist, exponent=1.0, mindist=1e-3):
         exponent (float): 1 for spherical, 0.5 for cylindrical. An elevation lens focuses the
             transmitted energy to a slab, resulting in a cylindrical transmit and a spherical
             receive path.
-        mindist (float): Distance that corresponds with unit gain.
+        mindist (float): Distances below it are clamped to it. The simulators pass half a
+            wavelength, :func:`min_distance`.
+        reference (float): Distance of unit gain.
 
     Returns:
         array-like: An amplitude factor in the shape of `dist`.
     """
-    dist = ops.clip(dist, mindist, float("inf"))
-    return (mindist / dist) ** exponent
+    dist = ops.maximum(dist, mindist)
+    return (reference / dist) ** exponent
 
 
 def elevation_slab_mask(scatterer_positions, probe_geometry, element_height):

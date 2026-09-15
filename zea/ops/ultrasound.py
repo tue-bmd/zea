@@ -58,7 +58,7 @@ class Simulate(Operation):
     speed for accuracy or accuracy for speed will use these two paths respectively.
     ``"time_approximation"`` solves in the time domain. Its geometry-dependent factors are
     evaluated at the center frequency, making it less accurate than the others but much faster in
-    some settings. The element options (``rigid_baffle``, ``element_normals``,
+    some settings. The element options (``baffle_impedance_ratio``, ``element_normals``,
     ``n_sub_elements``, ``elevation_focus``, ``lens_attenuation_coef``) reach the
     frequency-domain methods only; ``"time_approximation"`` does not model them. The transmit
     pulse is ``waveforms_two_way`` (the one of a :class:`zea.Parameters` or zea file, or built
@@ -75,7 +75,7 @@ class Simulate(Operation):
         "center_frequency",
         "sampling_frequency",
         "scatter_exponent",
-        "rigid_baffle",
+        "baffle_impedance_ratio",
         "waveforms_two_way",
         "waveform_sampling_frequency",
         "noise_level_db",
@@ -138,7 +138,7 @@ class Simulate(Operation):
         noise_seed=0,
         noise_reference=None,
         scatter_exponent=2.0,
-        rigid_baffle=True,
+        baffle_impedance_ratio=0.0,
         element_normals=None,
         waveforms_two_way=None,
         waveform_sampling_frequency=250e6,
@@ -153,7 +153,7 @@ class Simulate(Operation):
         if method in ("exact", "frequency_approximation"):
             simulate = functools.partial(
                 simulate,
-                rigid_baffle=rigid_baffle,
+                baffle_impedance_ratio=baffle_impedance_ratio,
                 element_normals=element_normals,
                 n_sub_elements=n_sub_elements,
                 elevation_focus=elevation_focus,
