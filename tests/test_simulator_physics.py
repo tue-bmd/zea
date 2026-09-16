@@ -11,6 +11,7 @@ from zea.probes import create_curved_probe_geometry, curved_probe_normals
 from zea.simulator import (
     _element_model,
     _element_responses,
+    _resolve_element_height,
     _resolve_sub_elements,
     butterworth_transfer,
     gaussian_transfer,
@@ -31,6 +32,8 @@ from .simulator_helpers import (
     SAMPLING_FREQUENCY,
     SOUND_SPEED,
     correlation,
+    linear_probe,
+    matrix_probe,
     rel_err,
     stack_padded,
     to_np,
@@ -478,6 +481,39 @@ def test_auto_sub_elements_follow_the_simus_rule():
     focused = _resolve_sub_elements(None, 0.02, 1e-3, 5e-3, SOUND_SPEED, band_top)
     assert focused == (1, int(np.ceil(5e-3 / lambda_min)))
     assert _resolve_sub_elements((2, 3), 0.02, 1e-3, 5e-3, SOUND_SPEED, band_top) == (2, 3)
+
+
+def test_default_element_height_is_an_eighth_of_the_aperture_of_a_1d_probe():
+    # A single element or a matrix probe fall back to the width. Note: default element height
+    # is an educated guess. This test is allowed to break in the future if a better metric
+    # is conciously chosen (test is mostly here to satisfy the coverage check).
+    height = _resolve_element_height(linear_probe(128), 0.27e-3, None)
+    assert height == pytest.approx(128 * 0.3e-3 / 8)
+    assert _resolve_element_height(linear_probe(4), 0.27e-3, None) == pytest.approx(0.27e-3)
+    assert _resolve_element_height(np.zeros((1, 3)), 1e-3, None) == 1e-3
+    assert _resolve_element_height(matrix_probe(), 0.27e-3, None) == pytest.approx(0.27e-3)
+    assert _resolve_element_height(linear_probe(128), 0.27e-3, 2e-3) == 2e-3
+    curved = create_curved_probe_geometry(128, 0.508e-3, 49.57e-3)  # C5-2v, chord 60.4 mm
+    assert _resolve_element_height(curved, 0.46e-3, None) == pytest.approx(7.6e-3, abs=1e-4)
+    model = _element_model(
+        linear_probe(128),
+        SOUND_SPEED,
+        CENTER_FREQUENCY,
+        [transmit_pulse(CENTER_FREQUENCY)],
+        element_width=0.27e-3,
+        element_height=None,
+        attenuation_coef=0.0,
+        apply_lens_correction=False,
+        lens_thickness=1e-3,
+        lens_sound_speed=1000.0,
+        two_dimensional=False,
+        baffle_impedance_ratio=0.0,
+        element_normals=None,
+        n_sub_elements=None,
+        elevation_focus=None,
+        lens_attenuation_coef=0.0,
+    )
+    assert float(model.element_height) == pytest.approx(height)
 
 
 def _rayleigh_pattern(directions, width, height, wavelength, distance, n=(21, 201)):
