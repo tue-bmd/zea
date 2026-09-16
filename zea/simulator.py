@@ -137,7 +137,8 @@ def simulate_rf(
             scatterers outside the slab, use :class:`zea.ops.Simulate` rather than calling
             `simulate_rf` directly.
         element_height (float): The elevation height of the elements [m], used for the
-            elevation directivity and the elevation slab. If None, defaults to element_width.
+            elevation directivity and the elevation slab. If None, an eighth of the width of a
+            1D probe (at least ``element_width``), or ``element_width`` for a 2D probe.
         max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
             :func:`zea.simulator_time_domain.simulate_rf_td` share a call signature.
         noise_level_db (float): Electronic noise level in dB relative to the noiseless RF
@@ -209,9 +210,7 @@ def simulate_rf(
     n_tx = t0_delays.shape[0]
 
     element_width = _resolve_element_width(probe_geometry, element_width)
-
-    if element_height is None:
-        element_height = element_width
+    element_height = _resolve_element_height(probe_geometry, element_width, element_height)
     _validate_lens(
         apply_lens_correction,
         lens_thickness,
@@ -506,6 +505,25 @@ def _resolve_element_width(probe_geometry, element_width):
             f"Details: {exc}"
         ) from exc
     return pitch * 0.9  # 90% of the pitch
+
+
+def _resolve_element_height(probe_geometry, element_width, element_height, tol=1e-6):
+    """Return the element height, inferring it when not given: an eighth of the width of a 1D
+    probe (elements without elevation extent; n_el times the pitch), at least the element
+    width, and the element width for a 2D probe or a single element. Works on a traced
+    geometry, as a traced height; a Python float otherwise."""
+    if element_height is not None:
+        return element_height
+    n_el = int(probe_geometry.shape[0])
+    if n_el < 2:
+        return element_width
+    geometry = ops.cast(probe_geometry, "float32")
+    x, y = geometry[:, 0], geometry[:, 1]
+    probe_width = (ops.max(x) - ops.min(x)) * (n_el / (n_el - 1))
+    one_dimensional = ops.max(y) - ops.min(y) <= tol
+    height = ops.where(one_dimensional, ops.maximum(probe_width / 8, element_width), element_width)
+    concrete = _concrete(height)
+    return height if concrete is None else float(concrete)
 
 
 def _element_frame(element_normals, dtype="float32"):

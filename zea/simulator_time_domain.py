@@ -42,6 +42,7 @@ from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.ultrasound import directivity
 from zea.simulator import (
     _apply_elevation_slab,
+    _resolve_element_height,
     _resolve_element_width,
     _validate_scatter_exponent,
     _warn_if_elevation_extent,
@@ -118,7 +119,8 @@ def simulate_rf_td(
             scatterers outside the slab, use :class:`zea.ops.Simulate` rather than calling
             `simulate_rf_td` directly.
         element_height (float): The elevation height of the elements [m], used for the
-            elevation directivity and the elevation slab. If None, defaults to element_width.
+            elevation directivity and the elevation slab. If None, an eighth of the width of a
+            1D probe (at least ``element_width``), or ``element_width`` for a 2D probe.
         max_chunk_gb (float): Approximate memory budget [GB] for the (chunk, n_el, n_el)
             tensors held at once while iterating over scatterers. Scatterers are processed
             in chunks sized to this budget, so peak memory no longer scales with the total
@@ -145,8 +147,7 @@ def simulate_rf_td(
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
     """
     element_width = _resolve_element_width(probe_geometry, element_width)
-    if element_height is None:
-        element_height = element_width
+    element_height = _resolve_element_height(probe_geometry, element_width, element_height)
     n_ax = int(n_ax)
     n_tx = t0_delays.shape[0]
     n_el = probe_geometry.shape[0]

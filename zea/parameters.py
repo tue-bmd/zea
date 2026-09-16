@@ -174,7 +174,8 @@ class Parameters(BaseParameters):
     """Width of each transducer element [m]."""
 
     element_height: float
-    """Height (elevation) of each transducer element [m]."""
+    """Height (elevation) of each transducer element [m]. The simulators default it to an
+    eighth of the width of a 1D probe."""
 
     elevation_focus: float
     """Focal distance of the fixed elevation lens [m]."""

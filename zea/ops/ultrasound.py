@@ -63,6 +63,7 @@ class Simulate(Operation):
     frequency-domain methods only; ``"time_approximation"`` does not model them. The transmit
     pulse is ``waveforms_two_way`` (the one of a :class:`zea.Parameters` or zea file, or built
     with :func:`zea.simulator.transmit_pulse`), and the default pulse of that function without.
+    ``element_height`` (all methods) defaults to an eighth of the width of a 1D probe.
     """
 
     # Define operation-specific static parameters
