@@ -9,8 +9,8 @@ from scipy.special import jv
 from zea.ops import Simulate
 from zea.probes import create_curved_probe_geometry, curved_probe_normals
 from zea.simulator import (
+    _element_model,
     _element_responses,
-    _ElementModel,
     _resolve_sub_elements,
     butterworth_transfer,
     gaussian_transfer,
@@ -25,14 +25,16 @@ from zea.simulator import (
 )
 from zea.simulator_time_domain import simulate_rf_td
 
-SOUND_SPEED = 1540.0
-CENTER_FREQUENCY = 3e6
-SAMPLING_FREQUENCY = 12e6
-N_AX = 512
-
-
-def _np(x):
-    return np.asarray(ops.convert_to_numpy(x))
+from .simulator_helpers import (
+    CENTER_FREQUENCY,
+    N_AX,
+    SAMPLING_FREQUENCY,
+    SOUND_SPEED,
+    correlation,
+    rel_err,
+    stack_padded,
+    to_np,
+)
 
 
 def _scene(geometry, positions, magnitudes=None, n_tx=1, **overrides):
@@ -77,11 +79,6 @@ def _envelope_peak(rf):
     return np.abs(hilbert(rf, axis=0)).max()
 
 
-def _rel_err(reference, result):
-    reference, result = _np(reference), _np(result)
-    return np.linalg.norm(reference - result) / np.linalg.norm(reference)
-
-
 @pytest.mark.parametrize("ratio", [float("inf"), 0.57])
 def test_baffle_obliquity_scales_by_cos_of_angle(ratio):
     angle = np.deg2rad(35.0)
@@ -89,11 +86,11 @@ def test_baffle_obliquity_scales_by_cos_of_angle(ratio):
     scene = _scene(np.zeros((1, 3)), scatterer)
     rigid = simulate_rf(**scene)
     baffled = simulate_rf(**scene, baffle_impedance_ratio=ratio)
-    assert _rel_err(rigid, baffled) > 0.1
+    assert rel_err(rigid, baffled) > 0.1
     # Obliquity on transmit and on receive: cos in a soft baffle, cos / (cos + ratio) in general.
     cos = np.cos(angle)
     factor = cos if ratio == float("inf") else cos / (cos + ratio)
-    assert _rel_err(factor**2 * _np(rigid), baffled) < 1e-3
+    assert rel_err(factor**2 * to_np(rigid), baffled) < 1e-3
     with pytest.raises(ValueError, match="baffle_impedance_ratio"):
         simulate_rf(**scene, baffle_impedance_ratio=-1.0)
 
@@ -121,17 +118,17 @@ def test_distances_are_clamped_at_half_a_wavelength():
         records = []
         for k in range(len(depths)):
             one = {**scene, "scatterer_magnitudes": np.eye(len(depths), dtype=np.float32)[k]}
-            records.append(_np(simulate(**one))[0, :, 0, 0])
-        assert _rel_err(records[1], records[0]) < 1e-5
+            records.append(to_np(simulate(**one))[0, :, 0, 0])
+        assert rel_err(records[1], records[0]) < 1e-5
         ratio = _envelope_peak(records[2]) / _envelope_peak(records[1])
         assert np.isclose(ratio, 1 / 16, rtol=0.03)
 
 
 def test_transducer_bandwidth_shapes_the_spectrum():
     scene = _scene(np.zeros((1, 3)), [0.0, 0.0, 0.02])
-    flat = _np(simulate_rf(**scene, **_waveform("hann", bandwidth_percent=None)))[0, :, 0, 0]
+    flat = to_np(simulate_rf(**scene, **_waveform("hann", bandwidth_percent=None)))[0, :, 0, 0]
     shaped = _waveform("hann", bandwidth_percent=50.0, probe_center_frequency=2.6e6)
-    shaped = _np(simulate_rf(**scene, **shaped))[0, :, 0, 0]
+    shaped = to_np(simulate_rf(**scene, **shaped))[0, :, 0, 0]
     freqs = np.fft.rfftfreq(N_AX, 1 / SAMPLING_FREQUENCY)
     spectrum_flat, spectrum_shaped = np.fft.rfft(flat), np.fft.rfft(shaped)
     expected = gaussian_transfer(freqs, 2.6e6, 50.0)
@@ -187,8 +184,8 @@ def test_element_normals_make_the_scene_rotation_invariant(baffle):
 
     reference = simulate_rf(**_scene(geometry, positions, baffle_impedance_ratio=baffle))
     rotated = _scene(geometry @ rotation.T, positions @ rotation.T, baffle_impedance_ratio=baffle)
-    assert _rel_err(reference, simulate_rf(**rotated)) > 0.05
-    assert _rel_err(reference, simulate_rf(**rotated, element_normals=normals)) < 1e-3
+    assert rel_err(reference, simulate_rf(**rotated)) > 0.05
+    assert rel_err(reference, simulate_rf(**rotated, element_normals=normals)) < 1e-3
 
 
 def test_curved_probe_normals_point_along_the_arc():
@@ -200,11 +197,6 @@ def test_curved_probe_normals_point_along_the_arc():
     np.testing.assert_allclose(curved_probe_normals(geometry, radius=40e-3), expected, atol=1e-6)
 
 
-def _correlation(a, b):
-    a, b = np.ravel(a), np.ravel(b)
-    return a @ b / np.sqrt((a @ a) * (b @ b))
-
-
 def _half_max_width(rf):
     spectrum = np.abs(np.fft.rfft(rf))
     return np.count_nonzero(spectrum > 0.5 * spectrum.max())
@@ -214,9 +206,9 @@ def test_chirp_excitation():
     depth, sweep, n_period = 0.02, 2e6, 16
     scene = _scene(np.zeros((1, 3)), [0.0, 0.0, depth])
     kwargs = dict(n_period=n_period, bandwidth_percent=None)
-    tone = _np(simulate_rf(**scene, **_waveform("hann", **kwargs)))[0, :, 0, 0]
+    tone = to_np(simulate_rf(**scene, **_waveform("hann", **kwargs)))[0, :, 0, 0]
     chirp = _waveform("hann", chirp_sweep=sweep, **kwargs)
-    chirp = _np(simulate_rf(**scene, **chirp))[0, :, 0, 0]
+    chirp = to_np(simulate_rf(**scene, **chirp))[0, :, 0, 0]
 
     # The echo is the chirp waveform delayed by the round trip.
     n_fft = 2048
@@ -226,8 +218,8 @@ def test_chirp_excitation():
         CENTER_FREQUENCY, SAMPLING_FREQUENCY, "hann", n_period, sweep, bandwidth_percent=None
     )
     expected = np.fft.irfft(pulse.spectrum(freqs) * delay, n_fft)[:N_AX]
-    assert _correlation(chirp, expected) > 0.999
-    assert _correlation(tone, expected) < 0.8
+    assert correlation(chirp, expected) > 0.999
+    assert correlation(tone, expected) < 0.8
     assert _half_max_width(chirp) > 2 * _half_max_width(tone)
 
 
@@ -253,7 +245,7 @@ def test_negative_chirp_sweep_runs_down(pulse_model):
 def test_n_period_sets_the_pulse_length():
     scene = _scene(np.zeros((1, 3)), [0.0, 0.0, 0.02])
     short, long = (
-        _np(simulate_rf(**scene, **_waveform("hann", n_period=n, bandwidth_percent=None)))[
+        to_np(simulate_rf(**scene, **_waveform("hann", n_period=n, bandwidth_percent=None)))[
             0, :, 0, 0
         ]
         for n in (4, 12)
@@ -346,7 +338,7 @@ def test_measured_pulse_reproduces_its_source():
     measured = measured_pulse(fine.waveform(), SAMPLING_FREQUENCY, 250e6)
     freqs = np.fft.rfftfreq(2048, 1 / SAMPLING_FREQUENCY)
     source, copy = (np.fft.irfft(p.spectrum(freqs), 2048) for p in (_pulse("realistic"), measured))
-    assert _rel_err(source, copy) < 5e-3
+    assert rel_err(source, copy) < 5e-3
     # The peak of the supplied waveform is on its middle sample.
     assert np.isclose(measured.time_to_peak, (fine.n_samples // 2) / 250e6, atol=1 / 250e6)
     with pytest.raises(ValueError, match="waveform_two_way"):
@@ -355,14 +347,8 @@ def test_measured_pulse_reproduces_its_source():
         _pulse("gaussian")
 
 
-def _stack_padded(*waveforms):
-    """Waveforms of different lengths as one (n_tx, n_samples) array, zero-padded at the end."""
-    n = max(len(w) for w in waveforms)
-    return np.stack([np.pad(w, (0, n - len(w))) for w in waveforms])
-
-
 def test_transmit_pulses_take_one_waveform_per_transmit():
-    waveforms = _stack_padded(_pulse("realistic").waveform(), _pulse("hann").waveform())
+    waveforms = stack_padded(_pulse("realistic").waveform(), _pulse("hann").waveform())
     # Without waveforms every transmit gets the default pulse of transmit_pulse.
     default = transmit_pulses(2, CENTER_FREQUENCY, SAMPLING_FREQUENCY)
     assert default[0] is default[1]
@@ -393,11 +379,11 @@ def test_pulse_peak_arrives_at_the_travel_time(pulse_model):
         # the frequency- and time-domain simulators differ slightly.
         kwargs = _waveform(pulse_model, bandwidth_percent=75.0, n_period=2.0)
     scene = _scene(np.zeros((1, 3)), [0.0, 0.0, depth], n_tx=2, **kwargs)
-    rf = _np(simulate_rf(**scene))[0, :, 0, 0]
+    rf = to_np(simulate_rf(**scene))[0, :, 0, 0]
     peak = np.argmax(np.abs(hilbert(rf)))
     assert abs(peak - 2 * depth / SOUND_SPEED * SAMPLING_FREQUENCY) <= 1
-    fast = _np(simulate_rf_td(**scene))[0, :, 0, 0]
-    assert _correlation(rf, fast) > 0.99
+    fast = to_np(simulate_rf_td(**scene))[0, :, 0, 0]
+    assert correlation(rf, fast) > 0.99
 
 
 def test_waveforms_are_placed_by_their_envelope_peak():
@@ -415,35 +401,35 @@ def test_waveforms_are_placed_by_their_envelope_peak():
     onset = np.flatnonzero(np.abs(waveform) > 1e-2 * np.abs(waveform).max())[0] / 250e6
     expected_onset = (2 * depth / SOUND_SPEED + onset) * SAMPLING_FREQUENCY
     for simulate in (simulate_rf, simulate_rf_td):
-        rf = _np(simulate(**scene, waveforms_two_way=waveforms))[:, :, 0, 0]
+        rf = to_np(simulate(**scene, waveforms_two_way=waveforms))[:, :, 0, 0]
         onsets = [np.flatnonzero(np.abs(r) > 1e-2 * np.abs(r).max())[0] for r in rf]
         assert abs(onsets[0] - expected_onset) <= 1.5
         assert abs(onsets[1] - onsets[0] - 100 / 250e6 * SAMPLING_FREQUENCY) <= 1
         # The waveform sets the spectrum: hann at 60 % here, not the default pulse.
         spectrum = np.abs(np.fft.rfft(rf[0], 4096))
         freqs = np.fft.rfftfreq(4096, 1 / SAMPLING_FREQUENCY)
-        assert _correlation(spectrum, np.abs(pulse.spectrum(freqs))) > 0.99
+        assert correlation(spectrum, np.abs(pulse.spectrum(freqs))) > 0.99
     supplied = simulate_rf(**scene, waveforms_two_way=waveforms)
-    assert _rel_err(simulate_rf(**scene), supplied) > 0.1
+    assert rel_err(simulate_rf(**scene), supplied) > 0.1
 
 
 def test_simulate_op_passes_the_waveforms():
     scene = _scene(np.zeros((1, 3)), [0.0, 0.0, 0.02], n_tx=2)
-    waveforms = _stack_padded(_pulse("realistic").waveform(), _pulse("hann").waveform())
+    waveforms = stack_padded(_pulse("realistic").waveform(), _pulse("hann").waveform())
     kwargs = dict(waveforms_two_way=waveforms, waveform_sampling_frequency=SAMPLING_FREQUENCY)
     direct = simulate_rf(**scene, **kwargs)
     op = Simulate(with_batch_dim=False)
     via_op = op(**scene, **kwargs)[op.output_key]
     # The op sizes the FFT without the scatterer positions, so the lengths (and the float32
     # rounding) differ.
-    assert _rel_err(direct, via_op) < 1e-4
+    assert rel_err(direct, via_op) < 1e-4
     # A pulse built with transmit_pulse goes in the same way, at its 250 MHz default rate.
     equalized = _waveform("realistic", equalize=True)
     direct = simulate_rf(**scene, **equalized)
-    assert _rel_err(direct, op(**scene, **equalized)[op.output_key]) < 1e-4
-    assert _rel_err(direct, simulate_rf(**scene)) > 0.1
+    assert rel_err(direct, op(**scene, **equalized)[op.output_key]) < 1e-4
+    assert rel_err(direct, simulate_rf(**scene)) > 0.1
     with pytest.raises(ValueError, match="waveforms_two_way"):
-        op(**scene, waveforms_two_way=np.zeros((3, 64)))
+        op(**scene, waveforms_two_way=np.ones((3, 64)))
 
 
 def test_sub_elements_reproduce_the_sinc_in_the_far_field():
@@ -456,9 +442,9 @@ def test_sub_elements_reproduce_the_sinc_in_the_far_field():
     def amplitude_error(r, n_sub):
         scatterer = r * np.array([np.sin(angle), 0.0, np.cos(angle)])
         scene = _scene(np.zeros((1, 3)), scatterer, element_width=2e-3, n_ax=2048)
-        whole = np.abs(np.fft.rfft(_np(simulate_rf(**scene))[0, :, 0, 0]))
-        divided = np.abs(np.fft.rfft(_np(simulate_rf(**scene, n_sub_elements=n_sub))[0, :, 0, 0]))
-        return _rel_err(whole, divided)
+        whole = np.abs(np.fft.rfft(to_np(simulate_rf(**scene))[0, :, 0, 0]))
+        divided = np.abs(np.fft.rfft(to_np(simulate_rf(**scene, n_sub_elements=n_sub))[0, :, 0, 0]))
+        return rel_err(whole, divided)
 
     near, far = amplitude_error(0.02, 8), amplitude_error(0.08, 8)
     assert near > 1e-2
@@ -471,8 +457,8 @@ def test_sub_elements_converge_in_the_near_field():
     # sub-element sum converges as the count doubles.
     scene = _scene(np.zeros((1, 3)), [0.0, 2e-3, 8e-3], element_height=5e-3)
     counts = (1, 4, 8, 16, 32)
-    results = [_np(simulate_rf(**scene, n_sub_elements=(1, n))) for n in counts]
-    steps = [_rel_err(results[i + 1], results[i]) for i in range(len(counts) - 1)]
+    results = [to_np(simulate_rf(**scene, n_sub_elements=(1, n))) for n in counts]
+    steps = [rel_err(results[i + 1], results[i]) for i in range(len(counts) - 1)]
     assert steps[0] > 0.1
     assert steps[1] > steps[2] > steps[3]
     assert steps[3] < 1e-2
@@ -542,21 +528,21 @@ def test_whole_element_directivity_uses_direction_cosines(lateral_deg):
         n_ax=4096,
         tx_apodizations=apodization,
     )
-    rf = _np(simulate_rf(**scene))[0, :, :, 0]
+    rf = to_np(simulate_rf(**scene))[0, :, :, 0]
     spectrum = np.abs(np.fft.rfft(rf, axis=0))
     simulated = spectrum[int(round(CENTER_FREQUENCY / SAMPLING_FREQUENCY * rf.shape[0]))]
     reference = _rayleigh_pattern(
         directions, width, height, SOUND_SPEED / CENTER_FREQUENCY, distance
     )
-    assert _rel_err(reference / reference[on_axis], simulated / simulated[on_axis]) < 0.05
+    assert rel_err(reference / reference[on_axis], simulated / simulated[on_axis]) < 0.05
 
 
 def test_elevation_focus_adds_the_elevation_sub_elements_in_phase():
     # At the focus every elevation sub-element arrives together, so the echo of a scatterer
     # there is stronger than without the lens.
     scene = _scene(np.zeros((1, 3)), [0.0, 0.0, 15e-3], element_height=5e-3)
-    unfocused = _np(simulate_rf(**scene, n_sub_elements=(1, 12)))
-    focused = _np(simulate_rf(**scene, n_sub_elements=(1, 12), elevation_focus=15e-3))
+    unfocused = to_np(simulate_rf(**scene, n_sub_elements=(1, 12)))
+    focused = to_np(simulate_rf(**scene, n_sub_elements=(1, 12), elevation_focus=15e-3))
     assert np.abs(focused).max() > 1.5 * np.abs(unfocused).max()
     with pytest.raises(ValueError):
         simulate_rf(**scene, two_dimensional=True, elevation_focus=15e-3)
@@ -576,31 +562,32 @@ def test_two_dimensional_spreads_the_transmit_cylindrically():
                     np.eye(2, dtype=np.float32)[scatterer]
                 ),
             }
-            rf = _np(simulate_rf(**single, two_dimensional=two_dimensional))[0, :, 0, 0]
+            rf = to_np(simulate_rf(**single, two_dimensional=two_dimensional))[0, :, 0, 0]
             peaks.append(_envelope_peak(rf[:, None]))
         assert abs(peaks[0] / peaks[1] - expected) < 1e-2 * expected
 
 
-def test_two_dimensional_moves_scatterers_into_the_imaging_plane():
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+def test_two_dimensional_moves_scatterers_into_the_imaging_plane(simulator):
     # Off the plane a scatterer echoes as its projection; in 3D it is delayed and less directive.
     geometry = np.stack([np.linspace(-2e-3, 2e-3, 8), np.zeros(8), np.zeros(8)], -1)
     in_plane = _scene(geometry, [1e-3, 0.0, 20e-3], element_height=3e-3)
     off_plane = _scene(geometry, [1e-3, 6e-3, 20e-3], element_height=3e-3)
-    reference = _np(simulate_rf(**in_plane, two_dimensional=True))
+    reference = to_np(simulator(**in_plane, two_dimensional=True))
     assert np.abs(reference).max() > 0
-    assert _rel_err(reference, simulate_rf(**off_plane, two_dimensional=True)) < 1e-6
-    assert _rel_err(reference, simulate_rf(**off_plane)) > 0.1
+    assert rel_err(reference, simulator(**off_plane, two_dimensional=True)) < 1e-6
+    assert rel_err(reference, simulator(**off_plane)) > 0.1
     matrix = np.stack([geometry, geometry + [0.0, 1e-3, 0.0]]).reshape(-1, 3)
     with pytest.raises(ValueError, match="1D probe"):
-        simulate_rf(**_scene(matrix, [0.0, 0.0, 20e-3]), two_dimensional=True)
+        simulator(**_scene(matrix, [0.0, 0.0, 20e-3]), two_dimensional=True)
 
 
 def test_lens_layer_delays_the_echo_by_its_travel_time():
     # A uniform lens of 1 mm at 1000 m/s adds 2 d (1 / c_lens - 1 / c) to the round trip of an
     # on-axis scatterer, 8.4 samples here.
     scene = _scene(np.zeros((1, 3)), [0.0, 0.0, 20e-3], lens_sound_speed=1000.0)
-    plain = _np(simulate_rf(**scene))[0, :, 0, 0]
-    lensed = _np(simulate_rf(**{**scene, "apply_lens_correction": True}))[0, :, 0, 0]
+    plain = to_np(simulate_rf(**scene))[0, :, 0, 0]
+    lensed = to_np(simulate_rf(**{**scene, "apply_lens_correction": True}))[0, :, 0, 0]
     xcorr = np.correlate(lensed, plain, "full")
     lag = np.argmax(xcorr) - (len(plain) - 1)
     expected = 2 * 1e-3 * (1 / 1000.0 - 1 / SOUND_SPEED) * SAMPLING_FREQUENCY
@@ -642,29 +629,30 @@ def test_lens_spreading_matches_the_sommerfeld_slab():
     y = np.concatenate([np.linspace(-6e-3, 6e-3, 13), np.zeros(4)])
     z = np.concatenate([np.full(13, 20e-3), [5e-3, 10e-3, 30e-3, 40e-3]])
     positions = np.stack([np.zeros_like(y), y, z], -1).astype(np.float32)
-    model = _ElementModel(
-        geometry=ops.convert_to_tensor(np.zeros((1, 3), np.float32)),
-        sound_speed=SOUND_SPEED,
+    model = _element_model(
+        np.zeros((1, 3), np.float32),
+        SOUND_SPEED,
+        CENTER_FREQUENCY,
+        [transmit_pulse(CENTER_FREQUENCY)],
         element_width=0.1e-3,
         element_height=height,
         attenuation_coef=0.0,
+        apply_lens_correction=True,
         lens_thickness=thickness,
         lens_sound_speed=c_lens,
-        apply_lens_correction=True,
         two_dimensional=False,
         baffle_impedance_ratio=1.0,
         element_normals=None,
         n_sub_elements=(1, n_sub),
         elevation_focus=None,
         lens_attenuation_coef=0.0,
-        min_dist=0.0,
     )
     _, rx, _ = _element_responses(
         ops.convert_to_tensor(positions),
         model,
         ops.convert_to_tensor(np.array([CENTER_FREQUENCY], np.float32)),
     )
-    simulated = np.abs(_np(rx)[:, 0, 0])
+    simulated = np.abs(to_np(rx)[0, :, 0])
     offsets = (np.arange(n_sub) - (n_sub - 1) / 2) * height / n_sub
     reference = np.abs(
         sum(
@@ -672,7 +660,7 @@ def test_lens_spreading_matches_the_sommerfeld_slab():
             for v in offsets
         )
     )
-    assert _rel_err(reference / reference.max(), simulated / simulated.max()) < 0.02
+    assert rel_err(reference / reference.max(), simulated / simulated.max()) < 0.02
 
 
 def test_lens_thickness_profile_focuses_like_the_ideal_advance():
@@ -688,7 +676,7 @@ def test_lens_thickness_profile_focuses_like_the_ideal_advance():
         lens_sound_speed=1000.0,
         n_sub_elements=(1, 16),
     )
-    peak = lambda **kwargs: _envelope_peak(_np(simulate_rf(**kwargs))[0, :, :, 0])  # noqa: E731
+    peak = lambda **kwargs: _envelope_peak(to_np(simulate_rf(**kwargs))[0, :, :, 0])  # noqa: E731
     ideal_gain = peak(**scene, elevation_focus=focus) / peak(**scene)
     lens = {**scene, "apply_lens_correction": True}
     physical, uniform = peak(**lens, elevation_focus=focus), peak(**lens)
@@ -705,8 +693,8 @@ def test_lens_attenuation_apodizes_and_lowers_the_centre_frequency():
         lens_sound_speed=1000.0,
         apply_lens_correction=True,
     )
-    lossless = _np(simulate_rf(**scene))[0, :, 0, 0]
-    lossy = _np(simulate_rf(**scene, lens_attenuation_coef=5.0))[0, :, 0, 0]
+    lossless = to_np(simulate_rf(**scene))[0, :, 0, 0]
+    lossy = to_np(simulate_rf(**scene, lens_attenuation_coef=5.0))[0, :, 0, 0]
     energy_db = 10 * np.log10(np.sum(lossy**2) / np.sum(lossless**2))
     assert -4.0 < energy_db < -2.0
 

@@ -7,10 +7,15 @@ from keras import ops
 
 from zea.simulator import pressure_field, simulate_rf, transmit_pulse
 
-SOUND_SPEED = 1540.0
-CENTER_FREQUENCY = 3e6
-SAMPLING_FREQUENCY = 12e6
-N_AX = 512
+from .simulator_helpers import (
+    CENTER_FREQUENCY,
+    N_AX,
+    SAMPLING_FREQUENCY,
+    SOUND_SPEED,
+    rel_err,
+    to_np,
+)
+
 ELEMENT_WIDTH = 0.27e-3
 
 
@@ -20,10 +25,6 @@ def _hann(**kwargs):
     kwargs.setdefault("bandwidth_percent", None)
     kwargs.setdefault("n_period", 4.0)
     return transmit_pulse(CENTER_FREQUENCY, pulse_model="hann", **kwargs)
-
-
-def _np(x):
-    return np.asarray(ops.convert_to_numpy(x))
 
 
 def _transmit(geometry, n_tx=1, t0_delays=None, **overrides):
@@ -65,13 +66,8 @@ def _scene(transmit, positions, **overrides):
     }
 
 
-def _rel_err(reference, result):
-    reference, result = _np(reference), _np(result)
-    return np.linalg.norm(reference - result) / np.linalg.norm(reference)
-
-
 def _spectrum_ratio(numerator, denominator, floor=0.05):
-    num, den = np.fft.rfft(_np(numerator)), np.fft.rfft(_np(denominator))
+    num, den = np.fft.rfft(to_np(numerator)), np.fft.rfft(to_np(denominator))
     keep = np.abs(den) > floor * np.abs(den).max()
     return np.abs(num[keep] / den[keep]), keep
 
@@ -82,13 +78,13 @@ def test_single_element_echo_is_the_pressure_delayed_by_the_return_trip():
     samples = 64
     r = samples * SOUND_SPEED / SAMPLING_FREQUENCY
     transmit = _transmit(np.zeros((1, 3)))
-    rf = _np(simulate_rf(**_scene(transmit, [0.0, 0.0, r])))[0, :, 0, 0]
-    pressure = _np(pressure_field(np.array([[0.0, 0.0, r]]), **transmit, n_ax=N_AX, output="time"))
-    pressure = pressure[0, :, 0]
+    rf = to_np(simulate_rf(**_scene(transmit, [0.0, 0.0, r])))[0, :, 0, 0]
+    point = np.array([[0.0, 0.0, r]])
+    pressure = to_np(pressure_field(point, **transmit, n_ax=N_AX, output="time"))[0, :, 0]
     expected = np.zeros_like(rf)
     expected[samples:] = pressure[:-samples] * 1e-3 / r
     assert np.abs(pressure).max() > 0
-    assert _rel_err(expected, rf) < 1e-3
+    assert rel_err(expected, rf) < 1e-3
 
 
 def test_rms_matches_the_time_waveforms_and_follows_the_grid_shape():
@@ -97,11 +93,11 @@ def test_rms_matches_the_time_waveforms_and_follows_the_grid_shape():
     transmit = _transmit(geometry)
     x, z = np.meshgrid(np.linspace(-5e-3, 5e-3, 5), np.linspace(5e-3, 30e-3, 4))
     grid = np.stack([x, np.zeros_like(x), z], -1)
-    waveforms = _np(pressure_field(grid, **transmit, output="time"))
-    rms = _np(pressure_field(grid, **transmit, n_ax=waveforms.shape[1]))
+    waveforms = to_np(pressure_field(grid, **transmit, output="time"))
+    rms = to_np(pressure_field(grid, **transmit, n_ax=waveforms.shape[1]))
     assert rms.shape == (1, 4, 5)
     assert waveforms.shape[0] == 1 and waveforms.shape[2:] == (4, 5)
-    assert _rel_err(np.sqrt(np.mean(waveforms**2, axis=1)), rms) < 1e-5
+    assert rel_err(np.sqrt(np.mean(waveforms**2, axis=1)), rms) < 1e-5
 
 
 def test_chunking_does_not_change_the_result():
@@ -112,7 +108,7 @@ def test_chunking_does_not_change_the_result():
     for output in ("rms", "time"):
         whole = pressure_field(grid, **transmit, n_ax=N_AX, output=output)
         chunked = pressure_field(grid, **transmit, n_ax=N_AX, output=output, max_chunk_gb=2e-4)
-        assert _rel_err(whole, chunked) < 1e-5
+        assert rel_err(whole, chunked) < 1e-5
 
 
 def test_focused_transmit_adds_coherently_at_the_focus():
@@ -123,12 +119,12 @@ def test_focused_transmit_adds_coherently_at_the_focus():
     delays = (distances.max() - distances) / SOUND_SPEED
     focused = _transmit(geometry, n_tx=1, t0_delays=delays[None])
     points = np.stack([focus, focus + [3e-3, 0.0, 0.0]])
-    rms = _np(pressure_field(points, **focused, n_ax=N_AX))[0]
+    rms = to_np(pressure_field(points, **focused, n_ax=N_AX))[0]
     assert rms[0] > 3 * rms[1]
 
     single = _transmit(geometry, n_tx=n_el, t0_delays=np.tile(delays, (n_el, 1)))
     single["tx_apodizations"] = ops.convert_to_tensor(np.eye(n_el, dtype=np.float32))
-    per_element = _np(pressure_field(focus[None], **single, n_ax=N_AX))[:, 0]
+    per_element = to_np(pressure_field(focus[None], **single, n_ax=N_AX))[:, 0]
     assert abs(per_element.sum() - rms[0]) / rms[0] < 1e-2
 
 
@@ -136,10 +132,10 @@ def test_soft_baffle_scales_by_cos_of_angle():
     angle = np.deg2rad(35.0)
     point = 0.02 * np.array([[np.sin(angle), 0.0, np.cos(angle)]])
     transmit = _transmit(np.zeros((1, 3)))
-    rigid = _np(pressure_field(point, **transmit, baffle_impedance_ratio=0.0))
-    soft = _np(pressure_field(point, **transmit, baffle_impedance_ratio=float("inf")))
+    rigid = to_np(pressure_field(point, **transmit, baffle_impedance_ratio=0.0))
+    soft = to_np(pressure_field(point, **transmit, baffle_impedance_ratio=float("inf")))
     # Obliquity once: the field is one way.
-    assert _rel_err(np.cos(angle) * rigid, soft) < 1e-4
+    assert rel_err(np.cos(angle) * rigid, soft) < 1e-4
 
 
 def test_the_waveform_enters_the_field_once():
@@ -149,7 +145,7 @@ def test_the_waveform_enters_the_field_once():
     point = np.array([[0.0, 0.0, 0.02]])
     flat, banded = _hann(), _hann(bandwidth_percent=60.0, probe_center_frequency=2.5e6)
     fields = [
-        _np(
+        to_np(
             pressure_field(
                 point, **transmit, n_ax=N_AX, output="time", waveforms_two_way=pulse.waveform()
             )
@@ -165,11 +161,11 @@ def test_the_waveform_enters_the_field_once():
 def test_two_dimensional_spreads_cylindrically_in_the_imaging_plane():
     transmit = _transmit(np.zeros((1, 3)), element_height=4e-3)
     points = np.array([[0.0, 0.0, 0.01], [0.0, 0.0, 0.02], [0.0, 3e-3, 0.01]])
-    rms = _np(pressure_field(points, **transmit, two_dimensional=True))[0]
+    rms = to_np(pressure_field(points, **transmit, two_dimensional=True))[0]
     assert abs(rms[0] / rms[1] - np.sqrt(2.0)) < 1e-3
     # Off the plane a point sees the field of its projection onto it.
     assert abs(rms[2] / rms[0] - 1.0) < 1e-6
-    spherical = _np(pressure_field(points[:2], **transmit))[0]
+    spherical = to_np(pressure_field(points[:2], **transmit))[0]
     assert abs(spherical[0] / spherical[1] - 2.0) < 1e-3
 
 
@@ -177,8 +173,8 @@ def test_lens_spreads_the_field_as_a_ray_tube_and_needs_its_sound_speed():
     thickness, c_lens, z = 1e-3, 1000.0, 0.02
     point = np.array([[0.0, 0.0, z]])
     transmit = _transmit(np.zeros((1, 3)))
-    plain = _np(pressure_field(point, **transmit, n_ax=N_AX))[0, 0]
-    lensed = _np(
+    plain = to_np(pressure_field(point, **transmit, n_ax=N_AX))[0, 0]
+    lensed = to_np(
         pressure_field(
             point,
             **transmit,
@@ -206,7 +202,7 @@ def test_under_jit_needs_n_ax_and_n_fft():
     with pytest.raises(ValueError, match="n_fft"):
         jitted(point, **transmit)
     reference = pressure_field(point, **transmit, n_ax=N_AX, n_fft=1024)
-    assert _rel_err(reference, jitted(point, **transmit, n_ax=N_AX, n_fft=1024)) < 1e-6
+    assert rel_err(reference, jitted(point, **transmit, n_ax=N_AX, n_fft=1024)) < 1e-6
 
 
 def test_element_normals_make_the_field_rotation_invariant():
@@ -227,15 +223,15 @@ def test_element_normals_make_the_field_rotation_invariant():
         element_normals=normals,
         **soft,
     )
-    assert _rel_err(reference, rotated) < 1e-4
+    assert rel_err(reference, rotated) < 1e-4
 
 
 def test_chirp_field_correlates_with_the_chirp_and_rejects_bad_output():
     transmit = _transmit(np.zeros((1, 3)))
     point = np.array([[0.0, 0.0, 0.01]])
     kwargs = dict(transmit, n_ax=N_AX, output="time")
-    tone = _np(pressure_field(point, **kwargs, waveforms_two_way=_hann(n_period=16.0).waveform()))
-    chirp = _np(
+    tone = to_np(pressure_field(point, **kwargs, waveforms_two_way=_hann(n_period=16.0).waveform()))
+    chirp = to_np(
         pressure_field(
             point,
             **kwargs,

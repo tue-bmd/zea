@@ -9,76 +9,27 @@ gate, the gradients, the op and :class:`zea.Parameters` follow the map too.
 import keras
 import numpy as np
 import pytest
-from keras import ops
 
 import zea
 from zea.ops import Pipeline, Simulate
-from zea.simulator import (
-    fft_length,
-    in_record,
-    pressure_field,
-    record_reach,
-    simulate_rf,
-    transmit_pulse,
+from zea.simulator import fft_length, in_record, pressure_field, record_reach, simulate_rf
+
+from . import simulator_helpers
+from .simulator_helpers import (
+    CENTER_FREQUENCY,
+    N_AX,
+    SAMPLING_FREQUENCY,
+    SOUND_SPEED,
+    assert_close,
+    hann_tone,
+    hann_waveform,
+    linear_probe,
+    matrix_probe,
+    rel_err,
+    scan,
+    tensors,
+    to_np,
 )
-
-SOUND_SPEED = 1540.0
-CENTER_FREQUENCY = 3e6
-SAMPLING_FREQUENCY = 12e6
-N_AX = 512
-N_PERIOD = 4.0
-
-
-def _linear_probe(n_el=16, pitch=0.3e-3):
-    x = (np.arange(n_el) - (n_el - 1) / 2) * pitch
-    return np.stack([x, np.zeros(n_el), np.zeros(n_el)], -1).astype(np.float32)
-
-
-def _matrix_probe(n_side=4, pitch=0.3e-3):
-    x = (np.arange(n_side) - (n_side - 1) / 2) * pitch
-    gx, gy = np.meshgrid(x, x, indexing="ij")
-    return np.stack([gx.ravel(), gy.ravel(), np.zeros(n_side**2)], -1).astype(np.float32)
-
-
-def _phantom(n=24, seed=0):
-    rng = np.random.default_rng(seed)
-    z = rng.uniform(0.01, 0.028, n)
-    pos = np.stack([z * rng.uniform(-0.5, 0.5, n), rng.uniform(-1e-3, 1e-3, n), z], -1)
-    return pos.astype(np.float32), rng.uniform(0.5, 1.0, n).astype(np.float32)
-
-
-def _scan(geometry, n_tx=2):
-    rng = np.random.default_rng(1)
-    focus = np.array([[0.0, 0.0, 0.02], [0.005, 0.0, 0.025]])[:n_tx]
-    dist = np.linalg.norm(focus[:, None] - geometry[None], axis=-1)
-    t0 = ((dist.max(1, keepdims=True) - dist) / SOUND_SPEED).astype(np.float32)
-    return {
-        "probe_geometry": geometry,
-        "apply_lens_correction": False,
-        "lens_thickness": 1e-3,
-        "lens_sound_speed": 1000.0,
-        "sound_speed": SOUND_SPEED,
-        "n_ax": N_AX,
-        "center_frequency": CENTER_FREQUENCY,
-        "sampling_frequency": SAMPLING_FREQUENCY,
-        "t0_delays": t0,
-        "initial_times": np.zeros(n_tx, np.float32),
-        "element_width": 0.27e-3,
-        "attenuation_coef": 0.5,
-        "tx_apodizations": rng.uniform(0.5, 1.0, (n_tx, len(geometry))).astype(np.float32),
-        "t_peak": np.zeros(n_tx, np.float32),
-        "scatter_exponent": 1.5,
-    }
-
-
-def _case(geometry, **overrides):
-    positions, magnitudes = _phantom()
-    return {
-        "scatterer_positions": positions,
-        "scatterer_magnitudes": magnitudes,
-        **_scan(geometry),
-        **overrides,
-    }
 
 
 def _map(speed, x=(-0.02, 0.02), z=(-0.005, 0.04), nx=41, nz=46, y=None, ny=None):
@@ -102,46 +53,20 @@ def _layered_map(c_top, c_bottom, z_interface, **kwargs):
     return trio
 
 
-def _tensors(kwargs):
-    return {
-        k: ops.convert_to_tensor(v) if isinstance(v, np.ndarray) else v for k, v in kwargs.items()
-    }
-
-
-def _np(x):
-    return np.asarray(ops.convert_to_numpy(x))
-
-
-def _assert_close(reference, result, rel_tol=1e-3):
-    reference, result = _np(reference), _np(result)
-    assert result.shape == reference.shape
-    rel = np.linalg.norm(reference - result) / np.linalg.norm(reference)
-    assert rel < rel_tol, rel
-
-
-def _rel(reference, result):
-    reference, result = _np(reference), _np(result)
-    return np.linalg.norm(reference - result) / np.linalg.norm(reference)
-
-
-def _pulse(t):
-    """Unit-peak Hann-windowed tone of ``N_PERIOD`` periods, centred at t = 0."""
-    width = N_PERIOD / CENTER_FREQUENCY
-    window = np.where(np.abs(t) < width / 2, np.cos(np.pi * t / width) ** 2, 0.0)
-    return window * np.cos(2 * np.pi * CENTER_FREQUENCY * t)
-
-
 # The same tone as the simulator takes it: its two-way waveform, sampled at 250 MHz.
-HANN_WAVEFORM = transmit_pulse(
-    CENTER_FREQUENCY, pulse_model="hann", n_period=N_PERIOD, bandwidth_percent=None
-).waveform()
+HANN_WAVEFORM = hann_waveform()
+
+
+def case(geometry, n_tx=2, **overrides):
+    """The shared phantom in the shared scan, with two transmits by default."""
+    return simulator_helpers.case(geometry, n_tx, **overrides)
 
 
 def _echo_time(trace):
     """Arrival time of the one pulse in ``trace``: the peak of the envelope of its matched
     filter, to a fraction of a sample by a parabolic fit."""
     t = np.arange(N_AX) / SAMPLING_FREQUENCY
-    pulse = _pulse(t - t[N_AX // 2])
+    pulse = hann_tone(t - t[N_AX // 2])
     score = np.fft.fft(np.fft.ifft(np.fft.fft(trace) * np.conj(np.fft.fft(pulse))).real)
     score[N_AX // 2 + 1 :] = 0.0
     score[1 : N_AX // 2] *= 2.0
@@ -159,10 +84,10 @@ def _point_echo(position, trio, geometry=None, transmit=0, **overrides):
     """One transmit from element ``transmit``, one unit scatterer, elements without
     directivity, attenuation or scattering gain: the echo of every element is one clean pulse
     whose arrival time is the tx path plus the rx path."""
-    geometry = _linear_probe() if geometry is None else geometry
+    geometry = linear_probe() if geometry is None else geometry
     apod = np.zeros((1, len(geometry)), np.float32)
     apod[0, transmit] = 1.0
-    kwargs = _case(geometry, **_scan(geometry, n_tx=1))
+    kwargs = case(geometry, n_tx=1)
     kwargs.update(
         scatterer_positions=np.asarray([position], np.float32),
         scatterer_magnitudes=np.ones(1, np.float32),
@@ -176,17 +101,17 @@ def _point_echo(position, trio, geometry=None, transmit=0, **overrides):
         **trio,
         **overrides,
     )
-    return _np(simulate_rf(**_tensors(kwargs)))[0, :, :, 0]
+    return to_np(simulate_rf(**tensors(kwargs)))[0, :, :, 0]
 
 
 UNIFORM_CASES = {
-    "matrix": _case(_matrix_probe()),
-    "two_dimensional": _case(_linear_probe(), two_dimensional=True),
-    "sub_elements": _case(_linear_probe(), n_sub_elements=(3, 2)),
-    "lens": _case(_linear_probe(), apply_lens_correction=True),
-    "matrix_3d_map": _case(_matrix_probe(), **_map(SOUND_SPEED, y=(-0.003, 0.003), ny=7)),
-    "lens_3d_map": _case(
-        _linear_probe(), apply_lens_correction=True, **_map(SOUND_SPEED, y=(-0.003, 0.003), ny=7)
+    "matrix": case(matrix_probe()),
+    "two_dimensional": case(linear_probe(), two_dimensional=True),
+    "sub_elements": case(linear_probe(), n_sub_elements=(3, 2)),
+    "lens": case(linear_probe(), apply_lens_correction=True),
+    "matrix_3d_map": case(matrix_probe(), **_map(SOUND_SPEED, y=(-0.003, 0.003), ny=7)),
+    "lens_3d_map": case(
+        linear_probe(), apply_lens_correction=True, **_map(SOUND_SPEED, y=(-0.003, 0.003), ny=7)
     ),
 }
 
@@ -197,9 +122,9 @@ def test_uniform_map_is_the_homogeneous_medium(name):
     if "sos_map" not in kwargs:
         kwargs.update(_map(SOUND_SPEED))
     homogeneous = {k: v for k, v in kwargs.items() if not k.startswith("sos_")}
-    reference = simulate_rf(**_tensors(homogeneous))
-    assert _np(reference).any()
-    _assert_close(reference, simulate_rf(**_tensors(kwargs)))
+    reference = simulate_rf(**tensors(homogeneous))
+    assert to_np(reference).any()
+    assert_close(reference, simulate_rf(**tensors(kwargs)))
 
 
 def test_map_at_another_speed_is_the_homogeneous_medium_at_that_speed():
@@ -207,14 +132,14 @@ def test_map_at_another_speed_is_the_homogeneous_medium_at_that_speed():
     covering every path is the homogeneous medium at ``c2``; a map that covers no path is the
     homogeneous medium at ``sound_speed``."""
     c2 = 1450.0
-    kwargs = _case(_matrix_probe(), element_width=1e-6, n_fft=2048)
-    reference = simulate_rf(**_tensors({**kwargs, "sound_speed": c2}))
-    mapped = simulate_rf(**_tensors({**kwargs, **_map(c2)}))
-    _assert_close(reference, mapped)
-    assert _rel(simulate_rf(**_tensors(kwargs)), mapped) > 0.5
+    kwargs = case(matrix_probe(), element_width=1e-6, n_fft=2048)
+    reference = simulate_rf(**tensors({**kwargs, "sound_speed": c2}))
+    mapped = simulate_rf(**tensors({**kwargs, **_map(c2)}))
+    assert_close(reference, mapped)
+    assert rel_err(simulate_rf(**tensors(kwargs)), mapped) > 0.5
 
     aside = _map(c2, x=(0.1, 0.2))
-    _assert_close(simulate_rf(**_tensors(kwargs)), simulate_rf(**_tensors({**kwargs, **aside})))
+    assert_close(simulate_rf(**tensors(kwargs)), simulate_rf(**tensors({**kwargs, **aside})))
 
 
 def test_layered_map_delays_each_echo_by_its_straight_ray_time():
@@ -223,7 +148,7 @@ def test_layered_map_delays_each_echo_by_its_straight_ray_time():
     assert z_interface in trio["sos_grid_z"]
     interface = z_interface - 0.5e-3  # the map ramps over the 1 mm row above
     position = np.array([0.002, 0.0, 0.025])
-    geometry = _linear_probe()
+    geometry = linear_probe()
     rf = _point_echo(position, trio, geometry, transmit=3, n_sos_ray_samples=1024)
     plain = _point_echo(position, {}, geometry, transmit=3)
 
@@ -243,16 +168,16 @@ def test_layered_map_delays_each_echo_by_its_straight_ray_time():
 
 
 def test_3d_map_extruded_from_a_2d_one_gives_the_same_rf():
-    kwargs = _case(_matrix_probe())
+    kwargs = case(matrix_probe())
     planar = _layered_map(1540.0, 1450.0, 0.015)
     solid = {
         **planar,
         "sos_grid_y": np.linspace(-0.004, 0.004, 9).astype(np.float32),
         "sos_map": np.repeat(planar["sos_map"][..., None], 9, axis=-1),
     }
-    reference = simulate_rf(**_tensors({**kwargs, **planar}))
-    assert _rel(simulate_rf(**_tensors(kwargs)), reference) > 0.5
-    _assert_close(reference, simulate_rf(**_tensors({**kwargs, **solid})))
+    reference = simulate_rf(**tensors({**kwargs, **planar}))
+    assert rel_err(simulate_rf(**tensors(kwargs)), reference) > 0.5
+    assert_close(reference, simulate_rf(**tensors({**kwargs, **solid})))
 
 
 def test_3d_map_varying_along_y_times_the_rays_in_elevation():
@@ -263,7 +188,7 @@ def test_3d_map_varying_along_y_times_the_rays_in_elevation():
     trio["sos_map"][..., trio["sos_grid_y"] >= y_interface] = c_far
     interface = y_interface - 0.5e-3  # the map ramps over the 1 mm column before
     position = np.array([0.001, 0.01, 0.02])
-    geometry = _linear_probe()
+    geometry = linear_probe()
     rf = _point_echo(position, trio, geometry, transmit=5, n_sos_ray_samples=1024)
     plain = _point_echo(position, {}, geometry, transmit=5)
 
@@ -282,16 +207,16 @@ def test_3d_map_varying_along_y_times_the_rays_in_elevation():
     planar = {k: v for k, v in trio.items() if k != "sos_grid_y"}
     planar["sos_map"] = trio["sos_map"][..., 0]
     flat = _point_echo(position, planar, geometry, transmit=5)
-    _assert_close(plain, flat)
+    assert_close(plain, flat)
 
 
 def test_map_and_grids_are_validated():
-    kwargs = _case(_linear_probe())
+    kwargs = case(linear_probe())
     trio = _map(SOUND_SPEED)
     solid = _map(SOUND_SPEED, y=(-0.003, 0.003), ny=7)
 
     def run(**overrides):
-        return simulate_rf(**_tensors({**kwargs, **overrides}))
+        return simulate_rf(**tensors({**kwargs, **overrides}))
 
     with pytest.raises(ValueError, match="without sos_map"):
         run(sos_grid_x=trio["sos_grid_x"], sos_grid_z=trio["sos_grid_z"])
@@ -313,18 +238,18 @@ def test_map_and_grids_are_validated():
         run(**{**trio, "sos_map": -trio["sos_map"]})
     # Other float types are cast.
     reference = run(**trio)
-    _assert_close(reference, run(**{k: v.astype(np.float64) for k, v in trio.items()}))
-    _assert_close(reference, run(**{k: v.astype(np.float64) for k, v in solid.items()}))
+    assert_close(reference, run(**{k: v.astype(np.float64) for k, v in trio.items()}))
+    assert_close(reference, run(**{k: v.astype(np.float64) for k, v in solid.items()}))
 
 
 def _slab_scene(n_el=48, speed=1400.0):
     """A wide probe over a slow slab, with scatterers right up to the record's reach, where
     the slow paths of the far elements stretch furthest past the record."""
-    geometry = _linear_probe(n_el)
-    scan = _scan(geometry, n_tx=1)
+    geometry = linear_probe(n_el)
+    transmit = scan(geometry, n_tx=1)
     trio = _map(speed, x=(-0.06, 0.06), z=(-0.005, 0.06), nx=121, nz=66)
     args = {
-        k: scan[k]
+        k: transmit[k]
         for k in (
             "sound_speed",
             "n_ax",
@@ -342,7 +267,7 @@ def _slab_scene(n_el=48, speed=1400.0):
     z = rng.uniform(0.6, 1.0, 200) * reach
     positions = np.stack([x, np.zeros(200), z], -1).astype(np.float32)
     kwargs = {
-        **scan,
+        **transmit,
         **trio,
         "scatterer_positions": positions,
         "scatterer_magnitudes": rng.uniform(0.5, 1.0, 200).astype(np.float32),
@@ -360,7 +285,7 @@ def test_fft_length_grows_with_the_map_and_keeps_the_echoes_from_wrapping():
     x = rng.uniform(0.02, 0.05, 2000) * rng.choice([-1.0, 1.0], 2000)
     candidates = np.stack([x, np.zeros(2000), rng.uniform(0.002, 0.03, 2000)], -1)
     candidates = candidates.astype(np.float32)
-    kept = _np(in_record(candidates, **args, **trio))
+    kept = to_np(in_record(candidates, **args, **trio))
     positions = candidates[kept][:200]
     kwargs.update(
         scatterer_positions=positions, scatterer_magnitudes=np.ones(len(positions), np.float32)
@@ -375,10 +300,10 @@ def test_fft_length_grows_with_the_map_and_keeps_the_echoes_from_wrapping():
 
     # The derived length holds every echo, up to the faint tail of the synthesis that a longer
     # record also shows for a homogeneous medium; the homogeneous bound wraps the late echoes.
-    derived = simulate_rf(**_tensors(kwargs))
-    reference = simulate_rf(**_tensors({**kwargs, "n_fft": 4 * mapped}))
-    _assert_close(reference, derived, rel_tol=5e-4)
-    assert _rel(reference, simulate_rf(**_tensors({**kwargs, "n_fft": homogeneous}))) > 5e-3
+    derived = simulate_rf(**tensors(kwargs))
+    reference = simulate_rf(**tensors({**kwargs, "n_fft": 4 * mapped}))
+    assert_close(reference, derived, rel_tol=5e-4)
+    assert rel_err(reference, simulate_rf(**tensors({**kwargs, "n_fft": homogeneous}))) > 5e-3
 
 
 def test_short_explicit_fft_length_warns_with_a_map(caplog):
@@ -386,7 +311,7 @@ def test_short_explicit_fft_length_warns_with_a_map(caplog):
     import logging
 
     with caplog.at_level(logging.WARNING, logger="zea"):
-        simulate_rf(**_tensors({**kwargs, "n_fft": N_AX}))
+        simulate_rf(**tensors({**kwargs, "n_fft": N_AX}))
     assert any("wrapping" in record.getMessage() for record in caplog.records)
 
 
@@ -434,7 +359,7 @@ def test_parameters_derive_n_fft_from_the_map():
         scatterer_magnitudes=kwargs["scatterer_magnitudes"],
         scatter_exponent=0.0,
     )
-    _assert_close(simulate_rf(**_tensors(kwargs)), outputs["data"])
+    assert_close(simulate_rf(**tensors(kwargs)), outputs["data"])
 
 
 def test_record_helpers_gate_through_the_map():
@@ -449,12 +374,12 @@ def test_record_helpers_gate_through_the_map():
     ).astype(np.float32)
     magnitudes = rng.uniform(0.5, 1.0, 300).astype(np.float32)
     kwargs.update(scatterer_positions=positions, scatterer_magnitudes=magnitudes)
-    mask = _np(in_record(positions, **args, **trio))
-    homogeneous = _np(in_record(positions, **args))
+    mask = to_np(in_record(positions, **args, **trio))
+    homogeneous = to_np(in_record(positions, **args))
     assert 0 < mask.sum() < homogeneous.sum()
     assert (positions[mask, 2] <= reach).all()
 
-    reference = simulate_rf(**_tensors(kwargs))
+    reference = simulate_rf(**tensors(kwargs))
     kept = {
         **kwargs,
         "scatterer_positions": positions[mask],
@@ -465,12 +390,12 @@ def test_record_helpers_gate_through_the_map():
         "scatterer_positions": positions[~mask],
         "scatterer_magnitudes": magnitudes[~mask],
     }
-    _assert_close(reference, simulate_rf(**_tensors(kept)), rel_tol=1e-4)
-    assert not _np(simulate_rf(**_tensors(dropped))).any()
+    assert_close(reference, simulate_rf(**tensors(kept)), rel_tol=1e-4)
+    assert not to_np(simulate_rf(**tensors(dropped))).any()
 
 
 def test_pressure_field_follows_the_map():
-    kwargs = _case(_linear_probe())
+    kwargs = case(linear_probe())
     names = (
         "probe_geometry",
         "sound_speed",
@@ -482,15 +407,15 @@ def test_pressure_field_follows_the_map():
         "tx_apodizations",
         "t_peak",
     )
-    transmit = _tensors({k: kwargs[k] for k in names})
+    transmit = tensors({k: kwargs[k] for k in names})
     x, z = np.meshgrid(np.linspace(-0.01, 0.01, 11), np.linspace(0.005, 0.03, 12), indexing="ij")
     grid = np.stack([x, np.zeros_like(x), z], -1).astype(np.float32)
     reference = pressure_field(grid, **transmit, n_ax=N_AX)
-    uniform = pressure_field(grid, **transmit, n_ax=N_AX, **_tensors(_map(SOUND_SPEED)))
-    _assert_close(reference, uniform)
+    uniform = pressure_field(grid, **transmit, n_ax=N_AX, **tensors(_map(SOUND_SPEED)))
+    assert_close(reference, uniform)
     layered = _layered_map(1540.0, 1450.0, 0.015)
-    field = pressure_field(grid, **transmit, n_ax=N_AX, output="time", **_tensors(layered))
-    assert _rel(pressure_field(grid, **transmit, n_ax=N_AX, output="time"), field) > 0.1
+    field = pressure_field(grid, **transmit, n_ax=N_AX, output="time", **tensors(layered))
+    assert rel_err(pressure_field(grid, **transmit, n_ax=N_AX, output="time"), field) > 0.1
 
 
 @pytest.mark.skipif(keras.backend.backend() != "jax", reason="jax gradients")
@@ -498,7 +423,7 @@ def test_gradients_with_respect_to_the_map_and_the_positions():
     import jax
     import jax.numpy as jnp
 
-    kwargs = _case(_linear_probe(n_el=8), n_fft=1024)
+    kwargs = case(linear_probe(n_el=8), n_fft=1024)
     trio = _layered_map(1540.0, 1480.0, 0.015, nx=21, nz=23)
     positions = jnp.asarray(kwargs.pop("scatterer_positions"))
     sos_map = jnp.asarray(trio.pop("sos_map"))
@@ -509,7 +434,7 @@ def test_gradients_with_respect_to_the_map_and_the_positions():
         return jnp.sum(w * simulate_rf(scatterer_positions=p, sos_map=m, **kwargs))
 
     grads = jax.grad(loss, argnums=(0, 1))(positions, sos_map)
-    assert np.isfinite(_np(grads[1])).all() and _np(grads[1]).any()
+    assert np.isfinite(to_np(grads[1])).all() and to_np(grads[1]).any()
 
     # Pixels the rays cross. A 4 m/s step is exact in float32, moves the phases well clear of
     # their float32 round-off, and is small against the curvature.
@@ -529,30 +454,30 @@ def test_gradients_with_respect_to_the_map_and_the_positions():
 def test_a_traced_map_needs_n_fft():
     import jax
 
-    kwargs = _tensors(_case(_linear_probe()))
+    kwargs = tensors(case(linear_probe()))
     trio = _map(SOUND_SPEED)
     sos_map = trio.pop("sos_map")
-    kwargs.update(_tensors(trio))
+    kwargs.update(tensors(trio))
     with pytest.raises(ValueError, match="n_fft"):
         jax.jit(lambda m: simulate_rf(sos_map=m, **kwargs))(sos_map)
     reference = simulate_rf(sos_map=sos_map, **kwargs)
     jitted = jax.jit(
-        lambda m: simulate_rf(sos_map=m, n_fft=int(_np(reference).shape[1]) * 2, **kwargs)
+        lambda m: simulate_rf(sos_map=m, n_fft=int(to_np(reference).shape[1]) * 2, **kwargs)
     )
-    _assert_close(reference, jitted(sos_map))
+    assert_close(reference, jitted(sos_map))
 
 
 def test_simulate_op_takes_a_map():
-    kwargs = _case(_matrix_probe())
+    kwargs = case(matrix_probe())
     planar = _layered_map(1540.0, 1450.0, 0.015)
     solid = _map(1480.0, y=(-0.003, 0.003), ny=7)
     op = Simulate(jit_compile=True, with_batch_dim=False)
     for trio in (planar, solid):
-        reference = simulate_rf(**_tensors({**kwargs, **trio}))
-        _assert_close(reference, op(**_tensors({**kwargs, **trio}))[op.output_key])
+        reference = simulate_rf(**tensors({**kwargs, **trio}))
+        assert_close(reference, op(**tensors({**kwargs, **trio}))[op.output_key])
     # The same op without the map is the homogeneous medium again.
-    _assert_close(simulate_rf(**_tensors(kwargs)), op(**_tensors(kwargs))[op.output_key])
-    assert _rel(simulate_rf(**_tensors(kwargs)), reference) > 0.1
+    assert_close(simulate_rf(**tensors(kwargs)), op(**tensors(kwargs))[op.output_key])
+    assert rel_err(simulate_rf(**tensors(kwargs)), reference) > 0.1
 
     # Batched clouds, the second one straddling the footprint edge.
     batched = dict(kwargs)
@@ -560,20 +485,20 @@ def test_simulate_op_takes_a_map():
     batched["scatterer_positions"] = np.stack([kwargs["scatterer_positions"], shifted])
     batched["scatterer_magnitudes"] = np.stack([kwargs["scatterer_magnitudes"]] * 2)
     op = Simulate(jit_compile=True, with_batch_dim=True)
-    result = _np(op(**_tensors({**batched, **planar}))[op.output_key])
+    result = to_np(op(**tensors({**batched, **planar}))[op.output_key])
     for i, positions in enumerate(batched["scatterer_positions"]):
-        expected = simulate_rf(**_tensors({**kwargs, **planar, "scatterer_positions": positions}))
-        _assert_close(expected, result[i])
+        expected = simulate_rf(**tensors({**kwargs, **planar, "scatterer_positions": positions}))
+        assert_close(expected, result[i])
 
     op = Simulate(jit_compile=False, with_batch_dim=False)
     with pytest.raises(ValueError, match="frequency-domain"):
-        op(**_tensors({**kwargs, **planar}), method="time_domain")
+        op(**tensors({**kwargs, **planar}), method="time_domain")
 
 
 def test_n_sos_ray_samples_converges():
-    kwargs = _case(_linear_probe(), **_layered_map(1540.0, 1450.0, 0.015), n_fft=2048)
-    fine = simulate_rf(**_tensors({**kwargs, "n_sos_ray_samples": 512}))
-    coarse = _rel(fine, simulate_rf(**_tensors({**kwargs, "n_sos_ray_samples": 4})))
-    default = _rel(fine, simulate_rf(**_tensors(kwargs)))
+    kwargs = case(linear_probe(), **_layered_map(1540.0, 1450.0, 0.015), n_fft=2048)
+    fine = simulate_rf(**tensors({**kwargs, "n_sos_ray_samples": 512}))
+    coarse = rel_err(fine, simulate_rf(**tensors({**kwargs, "n_sos_ray_samples": 4})))
+    default = rel_err(fine, simulate_rf(**tensors(kwargs)))
     assert default < coarse
     assert default < 0.05

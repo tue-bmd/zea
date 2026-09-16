@@ -9,7 +9,6 @@ linearity, gradients, and the ``n_fft`` plumbing of the op and of :class:`zea.Pa
 import keras
 import numpy as np
 import pytest
-from keras import ops
 
 import zea
 from zea.ops import Pipeline, Simulate
@@ -26,118 +25,32 @@ from zea.simulator import (
 )
 from zea.simulator_time_domain import simulate_rf_td
 
-SOUND_SPEED = 1540.0
-CENTER_FREQUENCY = 3e6
-SAMPLING_FREQUENCY = 12e6
-N_AX = 512
-N_PERIOD = 4.0
+from .simulator_helpers import (
+    CENTER_FREQUENCY,
+    N_AX,
+    SAMPLING_FREQUENCY,
+    SOUND_SPEED,
+    assert_close,
+    case,
+    correlation,
+    hann_tone,
+    hann_waveform,
+    linear_probe,
+    matrix_probe,
+    phantom,
+    scan,
+    stack_padded,
+    tensors,
+    to_np,
+)
+
 # Support of the default pulse after its peak [s]: how far past the record an echo peak may be.
 PULSE_TAIL = transmit_pulse(CENTER_FREQUENCY, SAMPLING_FREQUENCY).n_after / SAMPLING_FREQUENCY
 
 
-def _waveform(n_period=N_PERIOD, **kwargs):
-    """A Hann-windowed tone (or chirp) as the simulator takes it: its two-way waveform at
-    250 MHz. Without ``bandwidth_percent`` it is the bare window."""
-    kwargs.setdefault("bandwidth_percent", None)
-    return transmit_pulse(
-        CENTER_FREQUENCY, pulse_model="hann", n_period=n_period, **kwargs
-    ).waveform()
-
-
-def _stack_padded(*waveforms):
-    """Waveforms of different lengths as one (n_tx, n_samples) array, zero-padded at the end."""
-    n = max(len(w) for w in waveforms)
-    return np.stack([np.pad(w, (0, n - len(w))) for w in waveforms])
-
-
-def _linear_probe(n_el=16, pitch=0.3e-3):
-    x = (np.arange(n_el) - (n_el - 1) / 2) * pitch
-    return np.stack([x, np.zeros(n_el), np.zeros(n_el)], -1).astype(np.float32)
-
-
-def _matrix_probe(n_side=4, pitch=0.3e-3):
-    x = (np.arange(n_side) - (n_side - 1) / 2) * pitch
-    gx, gy = np.meshgrid(x, x, indexing="ij")
-    return np.stack([gx.ravel(), gy.ravel(), np.zeros(n_side**2)], -1).astype(np.float32)
-
-
-def _phantom(n=24, seed=0):
-    rng = np.random.default_rng(seed)
-    z = rng.uniform(0.01, 0.028, n)
-    pos = np.stack([z * rng.uniform(-0.5, 0.5, n), rng.uniform(-1e-3, 1e-3, n), z], -1)
-    return pos.astype(np.float32), rng.uniform(0.5, 1.0, n).astype(np.float32)
-
-
-def _scan(geometry, n_tx=4):
-    rng = np.random.default_rng(1)
-    focus = np.array(
-        [[0.0, 0.0, 0.02], [0.005, 0.0, 0.025], [-0.004, 0.002, 0.03], [0.002, -0.003, 0.018]]
-    )[:n_tx]
-    dist = np.linalg.norm(focus[:, None] - geometry[None], axis=-1)
-    t0 = ((dist.max(1, keepdims=True) - dist) / SOUND_SPEED).astype(np.float32)
-    apod = rng.uniform(0.5, 1.0, (n_tx, len(geometry))).astype(np.float32)
-    return {
-        "probe_geometry": geometry,
-        "apply_lens_correction": False,
-        "lens_thickness": 1e-3,
-        "lens_sound_speed": 1000.0,
-        "sound_speed": SOUND_SPEED,
-        "n_ax": N_AX,
-        "center_frequency": CENTER_FREQUENCY,
-        "sampling_frequency": SAMPLING_FREQUENCY,
-        "t0_delays": t0,
-        "initial_times": np.zeros(n_tx, np.float32),
-        "element_width": 0.27e-3,
-        "attenuation_coef": 0.5,
-        "tx_apodizations": apod,
-        "t_peak": np.zeros(n_tx, np.float32),
-        "scatter_exponent": 1.5,
-    }
-
-
-def _case(geometry, **overrides):
-    positions, magnitudes = _phantom()
-    return {
-        "scatterer_positions": positions,
-        "scatterer_magnitudes": magnitudes,
-        **_scan(geometry),
-        **overrides,
-    }
-
-
-def _tensors(kwargs):
-    """Array arguments as backend tensors; ``simulate_rf`` mixes them with numpy otherwise."""
-    return {
-        k: ops.convert_to_tensor(v) if isinstance(v, np.ndarray) else v for k, v in kwargs.items()
-    }
-
-
-def _np(x):
-    return np.asarray(ops.convert_to_numpy(x))
-
-
-def _assert_close(reference, result, rel_tol=1e-3):
-    reference, result = _np(reference), _np(result)
-    assert result.shape == reference.shape
-    rel = np.linalg.norm(reference - result) / np.linalg.norm(reference)
-    assert rel < rel_tol, rel
-
-
-def _correlation(a, b):
-    a, b = _np(a).ravel(), _np(b).ravel()
-    return a @ b / np.sqrt((a @ a) * (b @ b))
-
-
-def _pulse(t):
-    """Unit-peak Hann-windowed tone of ``simulate_rf``, centred at t = 0."""
-    width = N_PERIOD / CENTER_FREQUENCY
-    window = np.where(np.abs(t) < width / 2, np.cos(np.pi * t / width) ** 2, 0.0)
-    return window * np.cos(2 * np.pi * CENTER_FREQUENCY * t)
-
-
 def _single_element(**overrides):
     """One element at the origin, one unit scatterer, no attenuation or scattering gain."""
-    kwargs = _case(np.zeros((1, 3), np.float32), **_scan(np.zeros((1, 3), np.float32), n_tx=1))
+    kwargs = case(np.zeros((1, 3), np.float32), **scan(np.zeros((1, 3), np.float32), n_tx=1))
     kwargs.update(
         scatterer_magnitudes=np.ones(1, np.float32),
         attenuation_coef=0.0,
@@ -149,62 +62,62 @@ def _single_element(**overrides):
 
 
 CASES = {
-    "linear": _case(_linear_probe()),
-    "matrix": _case(_matrix_probe()),
-    "scatter_exponent_0": _case(_matrix_probe(), scatter_exponent=0.0),
-    "soft_baffle": _case(_matrix_probe(), baffle_impedance_ratio=float("inf")),
-    "transducer_bandwidth": _case(
-        _linear_probe(),
-        waveforms_two_way=_waveform(bandwidth_percent=60.0, probe_center_frequency=2.5e6),
+    "linear": case(linear_probe()),
+    "matrix": case(matrix_probe()),
+    "scatter_exponent_0": case(matrix_probe(), scatter_exponent=0.0),
+    "soft_baffle": case(matrix_probe(), baffle_impedance_ratio=float("inf")),
+    "transducer_bandwidth": case(
+        linear_probe(),
+        waveforms_two_way=hann_waveform(bandwidth_percent=60.0, probe_center_frequency=2.5e6),
     ),
-    "transducer_bandwidth_at_pulse_frequency": _case(
-        _linear_probe(), waveforms_two_way=_waveform(bandwidth_percent=80.0)
+    "transducer_bandwidth_at_pulse_frequency": case(
+        linear_probe(), waveforms_two_way=hann_waveform(bandwidth_percent=80.0)
     ),
-    "chirp": _case(_linear_probe(), waveforms_two_way=_waveform(10.0, chirp_sweep=1.5e6)),
-    "chirp_with_bandwidth": _case(
-        _matrix_probe(), waveforms_two_way=_waveform(chirp_sweep=1e6, bandwidth_percent=70.0)
+    "chirp": case(linear_probe(), waveforms_two_way=hann_waveform(10.0, chirp_sweep=1.5e6)),
+    "chirp_with_bandwidth": case(
+        matrix_probe(), waveforms_two_way=hann_waveform(chirp_sweep=1e6, bandwidth_percent=70.0)
     ),
-    "per_transmit_waveforms": _case(
-        _linear_probe(),
-        waveforms_two_way=_stack_padded(
-            _waveform(),
-            _waveform(2.0),
-            _waveform(6.0, chirp_sweep=1e6),
+    "per_transmit_waveforms": case(
+        linear_probe(),
+        waveforms_two_way=stack_padded(
+            hann_waveform(),
+            hann_waveform(2.0),
+            hann_waveform(6.0, chirp_sweep=1e6),
             transmit_pulse(CENTER_FREQUENCY).waveform(),
         ),
     ),
-    "convex_element_normals": _case(
+    "convex_element_normals": case(
         create_curved_probe_geometry(16, 0.3e-3, 15e-3),
         element_normals=curved_probe_normals(create_curved_probe_geometry(16, 0.3e-3, 15e-3)),
         baffle_impedance_ratio=float("inf"),
     ),
-    "element_height": _case(_matrix_probe(), element_height=0.6e-3),
-    "sub_elements": _case(_linear_probe(), n_sub_elements=(2, 3), element_height=2e-3),
-    "auto_sub_elements_with_bandwidth": _case(
-        _linear_probe(),
+    "element_height": case(matrix_probe(), element_height=0.6e-3),
+    "sub_elements": case(linear_probe(), n_sub_elements=(2, 3), element_height=2e-3),
+    "auto_sub_elements_with_bandwidth": case(
+        linear_probe(),
         n_sub_elements="auto",
         element_height=2e-3,
-        waveforms_two_way=_waveform(bandwidth_percent=80.0),
+        waveforms_two_way=hann_waveform(bandwidth_percent=80.0),
     ),
-    "elevation_focus": _case(
-        _linear_probe(), element_height=4e-3, elevation_focus=20e-3, apply_lens_correction=True
+    "elevation_focus": case(
+        linear_probe(), element_height=4e-3, elevation_focus=20e-3, apply_lens_correction=True
     ),
-    "elevation_focus_convex": _case(
+    "elevation_focus_convex": case(
         create_curved_probe_geometry(16, 0.3e-3, 15e-3),
         element_normals=curved_probe_normals(create_curved_probe_geometry(16, 0.3e-3, 15e-3)),
         element_height=4e-3,
         elevation_focus=25e-3,
     ),
-    "element_width_from_pitch": _case(_linear_probe(), element_width=None),
-    "initial_times_and_t_peak": _case(
-        _linear_probe(),
+    "element_width_from_pitch": case(linear_probe(), element_width=None),
+    "initial_times_and_t_peak": case(
+        linear_probe(),
         initial_times=np.array([2e-6, -1e-6, 0.0, 1e-6], np.float32),
         t_peak=np.array([1, 2, 0.5, 1.5], np.float32) / CENTER_FREQUENCY,
     ),
-    "lens_correction": _case(_linear_probe(), apply_lens_correction=True),
-    "two_dimensional": _case(_linear_probe(), two_dimensional=True, element_height=1e-3),
-    "noise_and_tgc": _case(
-        _linear_probe(), noise_level_db=-40.0, tgc_max_db=20.0, noise_seed=3, noise_reference=1.0
+    "lens_correction": case(linear_probe(), apply_lens_correction=True),
+    "two_dimensional": case(linear_probe(), two_dimensional=True, element_height=1e-3),
+    "noise_and_tgc": case(
+        linear_probe(), noise_level_db=-40.0, tgc_max_db=20.0, noise_seed=3, noise_reference=1.0
     ),
 }
 
@@ -213,29 +126,29 @@ CASES = {
 def test_every_feature_is_invariant_to_fft_length_and_frequency_blocks(name):
     """The FFT length and the block size are bookkeeping: any large enough length and any
     number of blocks give the same record."""
-    kwargs = _tensors(CASES[name])
+    kwargs = tensors(CASES[name])
     reference = simulate_rf(**kwargs)
-    assert np.isfinite(_np(reference)).all() and np.abs(_np(reference)).max() > 0
-    _assert_close(reference, simulate_rf(**kwargs, n_fft=2048, max_chunk_gb=1e-4), rel_tol=1e-4)
+    assert np.isfinite(to_np(reference)).all() and np.abs(to_np(reference)).max() > 0
+    assert_close(reference, simulate_rf(**kwargs, n_fft=2048, max_chunk_gb=1e-4), rel_tol=1e-4)
 
 
 def test_band_limit_drops_only_the_spectral_floor():
-    kwargs = _tensors(CASES["transducer_bandwidth"])
+    kwargs = tensors(CASES["transducer_bandwidth"])
     full = simulate_rf(**kwargs, band_db=None)
-    _assert_close(full, simulate_rf(**kwargs), rel_tol=1e-4)
-    assert _correlation(full, simulate_rf(**kwargs, band_db=-40.0)) > 0.999
+    assert_close(full, simulate_rf(**kwargs), rel_tol=1e-4)
+    assert correlation(full, simulate_rf(**kwargs, band_db=-40.0)) > 0.999
 
 
 def test_transmit_groups_and_subsets_give_the_same_rows():
     """More transmits than one irfft group; a subset of transmits is a subset of the rows."""
     n_tx, n_el, picks = 35, 8, [0, 32, 34]
     rng = np.random.default_rng(4)
-    positions, magnitudes = _phantom(8, seed=5)
+    positions, magnitudes = phantom(8, seed=5)
     kwargs = dict(CASES["linear"])
     kwargs.update(
         scatterer_positions=positions,
         scatterer_magnitudes=magnitudes,
-        probe_geometry=_linear_probe(n_el),
+        probe_geometry=linear_probe(n_el),
         t0_delays=rng.uniform(0, 2e-6, (n_tx, n_el)).astype(np.float32),
         initial_times=np.zeros(n_tx, np.float32),
         tx_apodizations=rng.uniform(0.5, 1.0, (n_tx, n_el)).astype(np.float32),
@@ -243,50 +156,50 @@ def test_transmit_groups_and_subsets_give_the_same_rows():
     )
     per_tx = ("t0_delays", "tx_apodizations", "initial_times", "t_peak")
     subset = {**kwargs, **{key: kwargs[key][picks] for key in per_tx}}
-    whole = simulate_rf(**_tensors(kwargs), n_fft=1024)
-    assert _np(whole).shape[0] == n_tx
-    _assert_close(simulate_rf(**_tensors(subset), n_fft=1024), _np(whole)[picks], rel_tol=1e-5)
+    whole = simulate_rf(**tensors(kwargs), n_fft=1024)
+    assert to_np(whole).shape[0] == n_tx
+    assert_close(simulate_rf(**tensors(subset), n_fft=1024), to_np(whole)[picks], rel_tol=1e-5)
 
 
 def test_rf_is_a_superposition_of_the_scatterer_echoes():
     kwargs = dict(CASES["matrix"])
     positions, magnitudes = kwargs.pop("scatterer_positions"), kwargs.pop("scatterer_magnitudes")
-    kwargs = _tensors(kwargs)
+    kwargs = tensors(kwargs)
     half = len(positions) // 2
 
     def rf(pos, mag):
-        return _np(simulate_rf(pos, mag, **kwargs, n_fft=1024))
+        return to_np(simulate_rf(pos, mag, **kwargs, n_fft=1024))
 
     whole = rf(positions, magnitudes)
-    _assert_close(
+    assert_close(
         whole,
         rf(positions[:half], magnitudes[:half]) + rf(positions[half:], magnitudes[half:]),
         1e-5,
     )
-    _assert_close(2 * whole, rf(positions, 2 * magnitudes), 1e-6)
+    assert_close(2 * whole, rf(positions, 2 * magnitudes), 1e-6)
 
 
 def test_rf_is_linear_in_the_transmit_apodization():
     kwargs = dict(CASES["linear"])
     apod = kwargs.pop("tx_apodizations")
     other = np.random.default_rng(6).uniform(-1, 1, apod.shape).astype(np.float32)
-    kwargs = _tensors(kwargs)
+    kwargs = tensors(kwargs)
 
     def rf(a):
-        return _np(simulate_rf(**kwargs, tx_apodizations=a, n_fft=1024))
+        return to_np(simulate_rf(**kwargs, tx_apodizations=a, n_fft=1024))
 
-    _assert_close(rf(apod) + rf(other), rf(apod + other), 1e-5)
+    assert_close(rf(apod) + rf(other), rf(apod + other), 1e-5)
 
 
 def test_record_prefix_does_not_depend_on_the_record_length():
     """Scatterers whose echo starts past a short record leave nothing in it, and those inside
     are not cut by the FFT length sized for that record."""
-    kwargs = _tensors(CASES["lens_correction"])
+    kwargs = tensors(CASES["lens_correction"])
     reach = (256 / SAMPLING_FREQUENCY + PULSE_TAIL) * SOUND_SPEED / 2
-    depths = np.linalg.norm(_np(kwargs["scatterer_positions"]), axis=1)
+    depths = np.linalg.norm(to_np(kwargs["scatterer_positions"]), axis=1)
     assert depths.min() < reach < depths.max()
-    long = _np(simulate_rf(**{**kwargs, "n_ax": 1024}))[:, :256]
-    _assert_close(long, simulate_rf(**{**kwargs, "n_ax": 256}))
+    long = to_np(simulate_rf(**{**kwargs, "n_ax": 1024}))[:, :256]
+    assert_close(long, simulate_rf(**{**kwargs, "n_ax": 256}))
 
 
 def _record_args(kwargs, geometry=True):
@@ -314,7 +227,7 @@ def test_gate_keeps_a_scatterer_inside_the_record_and_drops_one_past_it():
     reach = record_reach(**_record_args(_single_element(), geometry=False))
     assert abs(reach / ((N_AX / SAMPLING_FREQUENCY + PULSE_TAIL) * SOUND_SPEED / 2) - 1) < 1e-12
     # A Hann tone has a compact support, so the reach puts its peak just inside the record.
-    waveform = _waveform()
+    waveform = hann_waveform()
     tail = transmit_pulses(1, CENTER_FREQUENCY, SAMPLING_FREQUENCY, waveform)[0].n_after
     kwargs = _single_element(waveforms_two_way=waveform)
     reach = record_reach(**_record_args(kwargs, geometry=False))
@@ -325,15 +238,15 @@ def test_gate_keeps_a_scatterer_inside_the_record_and_drops_one_past_it():
     kwargs["scatterer_positions"] = np.array(
         [[0.0, 0.0, (N_AX - 4) / SAMPLING_FREQUENCY * SOUND_SPEED / 2]], np.float32
     )
-    inside = _np(simulate_rf(**_tensors(kwargs)))
+    inside = to_np(simulate_rf(**tensors(kwargs)))
     peak = np.abs(inside).max()
     assert peak > 0
     assert np.abs(inside[0, : N_AX // 2]).max() < 1e-4 * peak
     # The gate: kept up to the reach, where only the foot of the pulse is left, dropped past it.
     kwargs["scatterer_positions"] = np.array([[0.0, 0.0, 0.99 * reach]], np.float32)
-    assert _np(simulate_rf(**_tensors(kwargs))).any()
+    assert to_np(simulate_rf(**tensors(kwargs))).any()
     kwargs["scatterer_positions"] = np.array([[0.0, 0.0, 1.01 * reach]], np.float32)
-    assert not _np(simulate_rf(**_tensors(kwargs))).any()
+    assert not to_np(simulate_rf(**tensors(kwargs))).any()
 
 
 def test_record_helpers_agree_with_the_gate():
@@ -341,15 +254,15 @@ def test_record_helpers_agree_with_the_gate():
     dropped ones give zeros. ``record_bounds`` holds every kept scatterer, and the reach is a
     scatterer's distance from its nearest element."""
     rng = np.random.default_rng(2)
-    kwargs = _case(_linear_probe(), lens_sound_speed=1000.0, apply_lens_correction=True)
+    kwargs = case(linear_probe(), lens_sound_speed=1000.0, apply_lens_correction=True)
     positions = rng.uniform([-0.05, -0.01, 0.0], [0.05, 0.01, 0.06], (300, 3)).astype(np.float32)
     magnitudes = rng.uniform(0.5, 1.0, len(positions)).astype(np.float32)
     kwargs.update(scatterer_positions=positions, scatterer_magnitudes=magnitudes)
     args = _record_args(kwargs)
-    mask = _np(in_record(positions, **args))
+    mask = to_np(in_record(positions, **args))
     assert 0 < mask.sum() < len(mask)
 
-    reference = simulate_rf(**_tensors(kwargs))
+    reference = simulate_rf(**tensors(kwargs))
     kept = {
         **kwargs,
         "scatterer_positions": positions[mask],
@@ -360,8 +273,8 @@ def test_record_helpers_agree_with_the_gate():
         "scatterer_positions": positions[~mask],
         "scatterer_magnitudes": magnitudes[~mask],
     }
-    _assert_close(reference, simulate_rf(**_tensors(kept)), rel_tol=1e-4)
-    assert not _np(simulate_rf(**_tensors(dropped))).any()
+    assert_close(reference, simulate_rf(**tensors(kept)), rel_tol=1e-4)
+    assert not to_np(simulate_rf(**tensors(dropped))).any()
 
     low, high = record_bounds(**args)
     assert (positions[mask] >= low).all() and (positions[mask] <= high).all()
@@ -369,25 +282,25 @@ def test_record_helpers_agree_with_the_gate():
     reach = record_reach(**_record_args(kwargs, geometry=False))
     probe = [kwargs["probe_geometry"][3]]
     on_axis = np.array([probe[0] + [0.0, 0.0, 0.99 * reach], probe[0] + [0.0, 0.0, 1.01 * reach]])
-    assert _np(in_record(on_axis.astype(np.float32), **args)).tolist() == [True, False]
+    assert to_np(in_record(on_axis.astype(np.float32), **args)).tolist() == [True, False]
 
     # 2D collapses the box onto the plane and gates the projected scatterers.
     low_2d, high_2d = record_bounds(**args, two_dimensional=True)
     assert low_2d[1] == high_2d[1] == 0.0
     projected = positions * [1.0, 0.0, 1.0]
-    mask_2d = _np(in_record(positions, **args, two_dimensional=True))
-    assert (mask_2d == _np(in_record(projected, **args))).all()
+    mask_2d = to_np(in_record(positions, **args, two_dimensional=True))
+    assert (mask_2d == to_np(in_record(projected, **args))).all()
 
 
-def test_single_element_echo_is_the_delayed_and_spread_pulse():
+def test_single_element_echo_is_the_delayed_and_spreadhann_tone():
     r = 0.6 * N_AX / SAMPLING_FREQUENCY * SOUND_SPEED / 2
-    kwargs = _single_element(waveforms_two_way=_waveform())
+    kwargs = _single_element(waveforms_two_way=hann_waveform())
     kwargs["scatterer_positions"] = np.array([[0.0, 0.0, r]], np.float32)
-    rf = _np(simulate_rf(**_tensors(kwargs)))[0, :, 0, 0]
+    rf = to_np(simulate_rf(**tensors(kwargs)))[0, :, 0, 0]
     t = np.arange(N_AX) / SAMPLING_FREQUENCY
-    expected = _pulse(t - 2 * r / SOUND_SPEED) * (1e-3 / r) ** 2
+    expected = hann_tone(t - 2 * r / SOUND_SPEED) * (1e-3 / r) ** 2
     # The synthesis is band limited to the rfft grid, the analytic pulse is not.
-    _assert_close(expected, rf, rel_tol=5e-3)
+    assert_close(expected, rf, rel_tol=5e-3)
 
 
 def test_t_peak_and_initial_times_shift_the_echo():
@@ -395,40 +308,42 @@ def test_t_peak_and_initial_times_shift_the_echo():
     shift = 40 / SAMPLING_FREQUENCY
     kwargs = _single_element()
     kwargs["scatterer_positions"] = np.array([[0.0, 0.0, r]], np.float32)
-    plain = _np(simulate_rf(**_tensors(kwargs)))[0, :, 0, 0]
-    late = _np(simulate_rf(**_tensors({**kwargs, "t_peak": np.full(1, shift, np.float32)})))
-    early = _np(simulate_rf(**_tensors({**kwargs, "initial_times": np.full(1, shift, np.float32)})))
-    _assert_close(plain[:-40], late[0, 40:, 0, 0])
-    _assert_close(plain[40:], early[0, :-40, 0, 0])
+    plain = to_np(simulate_rf(**tensors(kwargs)))[0, :, 0, 0]
+    late = to_np(simulate_rf(**tensors({**kwargs, "t_peak": np.full(1, shift, np.float32)})))
+    early = to_np(
+        simulate_rf(**tensors({**kwargs, "initial_times": np.full(1, shift, np.float32)}))
+    )
+    assert_close(plain[:-40], late[0, 40:, 0, 0])
+    assert_close(plain[40:], early[0, :-40, 0, 0])
 
 
 def test_chirp_is_sampled_on_an_odd_fft_grid():
     # smooth_size lands on an odd length for some records; the pulse follows the same grid.
     assert smooth_size(1082) == 1125
-    kwargs = _tensors(CASES["chirp"])
-    _assert_close(simulate_rf(**kwargs, n_fft=1024), simulate_rf(**kwargs, n_fft=1125))
+    kwargs = tensors(CASES["chirp"])
+    assert_close(simulate_rf(**kwargs, n_fft=1024), simulate_rf(**kwargs, n_fft=1125))
 
 
 def test_empty_phantom_gives_zeros():
     kwargs = dict(CASES["linear"])
     kwargs["scatterer_positions"] = np.zeros((0, 3), np.float32)
     kwargs["scatterer_magnitudes"] = np.zeros(0, np.float32)
-    result = _np(simulate_rf(**_tensors(kwargs)))
+    result = to_np(simulate_rf(**tensors(kwargs)))
     assert result.shape == (4, N_AX, 16, 1)
     assert not result.any()
 
 
-def test_waveforms_change_the_pulse():
-    kwargs = _tensors(CASES["linear"])
-    short = simulate_rf(**kwargs, waveforms_two_way=_waveform(2.0))
+def test_waveforms_change_thehann_tone():
+    kwargs = tensors(CASES["linear"])
+    short = simulate_rf(**kwargs, waveforms_two_way=hann_waveform(2.0))
     default = simulate_rf(**kwargs)
     assert short.shape == default.shape
-    assert _correlation(short, default) < 0.99
+    assert correlation(short, default) < 0.99
     # The rows of a (n_tx, n_samples) array are the pulses of the transmits, in order.
-    stacked = _stack_padded(_waveform(2.0), _waveform(), _waveform(2.0), _waveform())
-    mixed = _np(simulate_rf(**kwargs, waveforms_two_way=stacked))
-    _assert_close(_np(short)[0], mixed[0], 1e-4)
-    _assert_close(_np(simulate_rf(**kwargs, waveforms_two_way=_waveform()))[1], mixed[1], 1e-4)
+    stacked = stack_padded(hann_waveform(2.0), hann_waveform(), hann_waveform(2.0), hann_waveform())
+    mixed = to_np(simulate_rf(**kwargs, waveforms_two_way=stacked))
+    assert_close(to_np(short)[0], mixed[0], 1e-4)
+    assert_close(to_np(simulate_rf(**kwargs, waveforms_two_way=hann_waveform()))[1], mixed[1], 1e-4)
     with pytest.raises(ValueError, match="waveforms_two_way must have shape"):
         simulate_rf(**kwargs, waveforms_two_way=stacked[:3])
 
@@ -449,7 +364,7 @@ def test_under_jit_with_traced_geometry_needs_n_fft():
     jitted = jax.jit(simulate_rf, static_argnames=static)
     with pytest.raises(ValueError, match="n_fft"):
         jitted(**kwargs)
-    _assert_close(simulate_rf(**kwargs), jitted(**kwargs, n_fft=1024), rel_tol=1e-4)
+    assert_close(simulate_rf(**kwargs), jitted(**kwargs, n_fft=1024), rel_tol=1e-4)
 
 
 @pytest.mark.skipif(keras.backend.backend() != "jax", reason="jax tracing semantics")
@@ -461,7 +376,7 @@ def test_under_jit_closed_over_geometry_derives_n_fft():
     magnitudes = kwargs.pop("scatterer_magnitudes")
     reference = simulate_rf(positions, magnitudes, **kwargs)
     result = jax.jit(lambda p, m: simulate_rf(p, m, **kwargs))(positions, magnitudes)
-    _assert_close(reference, result, rel_tol=1e-4)
+    assert_close(reference, result, rel_tol=1e-4)
 
 
 @pytest.mark.skipif(keras.backend.backend() != "jax", reason="uses jax.grad")
@@ -500,26 +415,26 @@ def test_gradients_match_finite_differences():
 
 
 def test_simulate_op_derives_n_fft_for_its_jitted_call():
-    kwargs = _tensors(CASES["linear"])
+    kwargs = tensors(CASES["linear"])
     reference = simulate_rf(**kwargs)
     op = Simulate(jit_compile=True, with_batch_dim=False)
-    _assert_close(reference, op(**kwargs)[op.output_key], rel_tol=1e-3)
+    assert_close(reference, op(**kwargs)[op.output_key], rel_tol=1e-3)
 
     batched = dict(CASES["linear"])
     for key in ("scatterer_positions", "scatterer_magnitudes"):
         batched[key] = np.stack([batched[key], batched[key][::-1]])
     op = Simulate(jit_compile=True, with_batch_dim=True)
-    result = _np(op(**_tensors(batched))[op.output_key])
-    _assert_close(reference, result[0], rel_tol=1e-3)
-    _assert_close(reference, result[1], rel_tol=1e-3)
+    result = to_np(op(**tensors(batched))[op.output_key])
+    assert_close(reference, result[0], rel_tol=1e-3)
+    assert_close(reference, result[1], rel_tol=1e-3)
 
 
 def test_simulate_op_methods():
     """``time_domain`` reaches the time-domain simulator, and an unknown name is rejected.
     The default ``frequency_domain`` is checked against its function above."""
-    kwargs = _tensors(CASES["linear"])
+    kwargs = tensors(CASES["linear"])
     op = Simulate(jit_compile=False, with_batch_dim=False)
-    _assert_close(
+    assert_close(
         simulate_rf_td(**kwargs), op(**kwargs, method="time_domain")[op.output_key], rel_tol=1e-4
     )
     with pytest.raises(ValueError, match="method"):
@@ -529,18 +444,18 @@ def test_simulate_op_methods():
 def test_parameters_derive_n_fft_for_a_jitted_pipeline():
     """A whole-pipeline jit skips the op's eager derivation, so ``n_fft`` comes from the
     parameters."""
-    scan = _scan(_linear_probe())
+    transmit = scan(linear_probe())
     parameters = zea.Parameters(
         n_tx=4,
         n_el=16,
         n_ax=N_AX,
         center_frequency=CENTER_FREQUENCY,
         sampling_frequency=SAMPLING_FREQUENCY,
-        probe_geometry=scan["probe_geometry"],
-        t0_delays=scan["t0_delays"],
-        initial_times=scan["initial_times"],
-        t_peak=scan["t_peak"],
-        tx_apodizations=scan["tx_apodizations"],
+        probe_geometry=transmit["probe_geometry"],
+        t0_delays=transmit["t0_delays"],
+        initial_times=transmit["initial_times"],
+        t_peak=transmit["t_peak"],
+        tx_apodizations=transmit["tx_apodizations"],
         sound_speed=SOUND_SPEED,
         selected_transmits="all",
         apply_lens_correction=False,
@@ -549,13 +464,13 @@ def test_parameters_derive_n_fft_for_a_jitted_pipeline():
         element_width=0.27e-3,
         attenuation_coef=0.5,
     )
-    shift = scan["t0_delays"]
+    shift = transmit["t0_delays"]
     expected = fft_length(
         N_AX,
         SAMPLING_FREQUENCY,
         CENTER_FREQUENCY,
         SOUND_SPEED,
-        scan["probe_geometry"],
+        transmit["probe_geometry"],
         shift.min(),
         shift.max(),
     )
@@ -567,16 +482,16 @@ def test_parameters_derive_n_fft_for_a_jitted_pipeline():
     pipeline = Pipeline([Simulate()], with_batch_dim=False, jit_options="pipeline")
     inputs = pipeline.prepare_parameters(parameters)
     assert inputs["n_fft"] == expected
-    positions, magnitudes = _phantom()
+    positions, magnitudes = phantom()
     outputs = pipeline(
         **inputs,
         scatterer_positions=positions,
         scatterer_magnitudes=magnitudes,
         scatter_exponent=1.5,
     )
-    kwargs = _tensors(CASES["linear"])
+    kwargs = tensors(CASES["linear"])
     # Tensorflow on GPU rounds to TF32 once torch is imported, as the test workers do.
-    _assert_close(simulate_rf(**kwargs), outputs["data"], rel_tol=1e-3)
+    assert_close(simulate_rf(**kwargs), outputs["data"], rel_tol=1e-3)
 
 
 def test_per_scatterer_scatter_exponent_matches_the_shared_one():
@@ -584,7 +499,7 @@ def test_per_scatterer_scatter_exponent_matches_the_shared_one():
     kwargs = CASES["matrix"]
     n_scat = kwargs["scatterer_positions"].shape[0]
     vector = np.full(n_scat, kwargs["scatter_exponent"], np.float32)
-    _assert_close(simulate_rf(**kwargs), simulate_rf(**{**kwargs, "scatter_exponent": vector}))
+    assert_close(simulate_rf(**kwargs), simulate_rf(**{**kwargs, "scatter_exponent": vector}))
 
 
 def test_per_scatterer_scatter_exponent_superposes():
@@ -604,7 +519,7 @@ def test_per_scatterer_scatter_exponent_superposes():
         )
         for exponent, half in ((0.0, first_half), (2.0, ~first_half))
     ]
-    _assert_close(mixed, parts[0] + parts[1], rel_tol=1e-4)
+    assert_close(mixed, parts[0] + parts[1], rel_tol=1e-4)
 
 
 def test_band_covers_both_scatter_exponent_extremes():
@@ -613,7 +528,7 @@ def test_band_covers_both_scatter_exponent_extremes():
     kwargs = {**CASES["matrix"], "scatter_exponent": None}
     n_scat = kwargs["scatterer_positions"].shape[0]
     kwargs["scatter_exponent"] = np.where(np.arange(n_scat) % 2, 0.0, 2.0).astype(np.float32)
-    _assert_close(simulate_rf(**{**kwargs, "band_db": None}), simulate_rf(**kwargs))
+    assert_close(simulate_rf(**{**kwargs, "band_db": None}), simulate_rf(**kwargs))
 
 
 def test_invalid_per_scatterer_scatter_exponent_raises():
@@ -634,15 +549,11 @@ def test_time_domain_rejects_per_scatterer_scatter_exponent():
         simulate_rf_td(**kwargs, scatter_exponent=np.full(n_scat, 1.5, np.float32))
 
 
-@pytest.mark.skipif(keras.backend.backend() != "jax", reason="jax tracing semantics")
-def test_traced_per_scatterer_scatter_exponent_needs_a_band():
-    """The band is a static shape, so a traced exponent has to declare its range."""
+def _jitted_simulate_rf():
+    """``simulate_rf`` under ``jax.jit`` with its static arguments declared, so that the
+    scatterers, the delays and the scatter exponent are traced."""
     import jax
 
-    kwargs = {**CASES["matrix"], "n_fft": 1024}
-    exponent = kwargs.pop("scatter_exponent")
-    n_scat = kwargs["scatterer_positions"].shape[0]
-    vector = np.full(n_scat, exponent, np.float32)
     static = (
         "n_ax",
         "center_frequency",
@@ -650,15 +561,24 @@ def test_traced_per_scatterer_scatter_exponent_needs_a_band():
         "n_fft",
         "band_db",
         "apply_lens_correction",
+        "scatter_exponent_range",
     )
-    jitted = jax.jit(
-        lambda **kw: simulate_rf(**kw), static_argnames=static + ("scatter_exponent_range",)
-    )
+    return jax.jit(lambda **kw: simulate_rf(**kw), static_argnames=static)
+
+
+@pytest.mark.skipif(keras.backend.backend() != "jax", reason="jax tracing semantics")
+def test_traced_per_scatterer_scatter_exponent_needs_a_band():
+    """The band is a static shape, so a traced exponent has to declare its range."""
+    kwargs = {**CASES["matrix"], "n_fft": 1024}
+    exponent = kwargs.pop("scatter_exponent")
+    n_scat = kwargs["scatterer_positions"].shape[0]
+    vector = np.full(n_scat, exponent, np.float32)
+    jitted = _jitted_simulate_rf()
     with pytest.raises(ValueError, match="scatter_exponent_range"):
         jitted(**kwargs, scatter_exponent=vector)
     reference = simulate_rf(**kwargs, scatter_exponent=exponent)
-    _assert_close(reference, jitted(**kwargs, scatter_exponent=vector, band_db=None))
-    _assert_close(
+    assert_close(reference, jitted(**kwargs, scatter_exponent=vector, band_db=None))
+    assert_close(
         reference,
         jitted(**kwargs, scatter_exponent=vector, scatter_exponent_range=(exponent, exponent)),
     )
@@ -676,28 +596,19 @@ def test_traced_shared_scatter_exponent():
 
     kwargs = {**CASES["matrix"], "n_fft": 1024}
     exponent = kwargs.pop("scatter_exponent")
-    static = (
-        "n_ax",
-        "center_frequency",
-        "sampling_frequency",
-        "n_fft",
-        "band_db",
-        "apply_lens_correction",
-        "scatter_exponent_range",
-    )
-    jitted = jax.jit(lambda **kw: simulate_rf(**kw), static_argnames=static)
+    jitted = _jitted_simulate_rf()
     traced = jnp.float32(exponent)
     with pytest.raises(ValueError, match="scatter_exponent_range"):
         jitted(**kwargs, scatter_exponent=traced)
     reference = simulate_rf(**kwargs, scatter_exponent=exponent)
-    _assert_close(reference, jitted(**kwargs, scatter_exponent=traced, band_db=None))
-    _assert_close(
+    assert_close(reference, jitted(**kwargs, scatter_exponent=traced, band_db=None))
+    assert_close(
         reference,
         jitted(**kwargs, scatter_exponent=traced, scatter_exponent_range=(exponent, exponent)),
     )
     # One band covering a range serves every exponent in it without recompiling.
     for value in (0.5, exponent, 2.0):
-        _assert_close(
+        assert_close(
             simulate_rf(**kwargs, scatter_exponent=value),
             jitted(
                 **kwargs, scatter_exponent=jnp.float32(value), scatter_exponent_range=(0.5, 2.0)
@@ -726,7 +637,7 @@ def test_op_traces_a_shared_scatter_exponent():
         return op(**kwargs, scatter_exponent=p, scatter_exponent_range=(exponent, exponent))["data"]
 
     reference = simulate_rf(**kwargs, scatter_exponent=exponent)
-    _assert_close(reference, jax.jit(run)(jnp.float32(exponent)))
+    assert_close(reference, jax.jit(run)(jnp.float32(exponent)))
 
 
 def test_op_traces_a_per_scatterer_scatter_exponent():
@@ -736,14 +647,14 @@ def test_op_traces_a_per_scatterer_scatter_exponent():
     op = Simulate(with_batch_dim=False)
     reference = op(**kwargs)["data"]
     vector = np.full(n_scat, kwargs["scatter_exponent"], np.float32)
-    _assert_close(reference, op(**{**kwargs, "scatter_exponent": vector})["data"])
+    assert_close(reference, op(**{**kwargs, "scatter_exponent": vector})["data"])
     # And back to a scalar, which moves the argument between static and traced again.
-    _assert_close(reference, op(**kwargs)["data"])
+    assert_close(reference, op(**kwargs)["data"])
 
 
 def test_smooth_size_and_fft_length():
     assert [smooth_size(n) for n in (1, 7, 100, 601, 1025)] == [1, 8, 100, 625, 1080]
-    geometry = _linear_probe()
+    geometry = linear_probe()
     n_fft = fft_length(N_AX, SAMPLING_FREQUENCY, CENTER_FREQUENCY, SOUND_SPEED, geometry, 0, 0)
     assert n_fft >= N_AX
     assert n_fft == smooth_size(n_fft)
@@ -771,6 +682,6 @@ def test_smooth_size_and_fft_length():
         geometry,
         0,
         0,
-        waveforms_two_way=_waveform(32.0),
+        waveforms_two_way=hann_waveform(32.0),
     )
     assert longer > n_fft
