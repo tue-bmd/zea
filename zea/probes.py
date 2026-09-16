@@ -510,6 +510,7 @@ class Verasonics_c5_2v(Probe):
             probe_bandwidth_percent=probe_bandwidth_percent,
             probe_geometry=probe_geometry,
             element_width=0.46e-3,
+            elevation_focus=60e-3,
         )
 
 
