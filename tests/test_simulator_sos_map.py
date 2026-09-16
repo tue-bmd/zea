@@ -374,6 +374,28 @@ def test_parameters_accept_the_old_grid_names():
     assert not hasattr(parameters, "sos_grid_x")
 
 
+def test_parameters_warn_when_an_old_and_a_new_grid_name_are_both_given(caplog):
+    """The value under the new name is used whatever the order, and a warning says so."""
+    import logging
+
+    _, _, trio = _slab_scene(n_el=16)
+    new, old = trio["map_grid_x"], trio["map_grid_x"] + 1e-3
+    for order in ({"sos_grid_x": old, "map_grid_x": new}, {"map_grid_x": new, "sos_grid_x": old}):
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="zea"):
+            parameters = zea.Parameters(sos_map=trio["sos_map"], **order)
+        assert np.array_equal(parameters.map_grid_x, new)
+        messages = [record.getMessage() for record in caplog.records]
+        assert any(
+            "Both sos_grid_x and map_grid_x" in m and "map_grid_x is used" in m for m in messages
+        )
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="zea"):
+        parameters.update(sos_grid_x=old, map_grid_x=new + 1e-3)
+    assert np.array_equal(parameters.map_grid_x, new + 1e-3)
+    assert any("Both sos_grid_x and map_grid_x" in r.getMessage() for r in caplog.records)
+
+
 def test_record_helpers_gate_through_the_map():
     """The gate of a slow slab keeps fewer scatterers than the homogeneous one, and it is the
     simulator's: kept scatterers give the record, dropped ones give zeros."""

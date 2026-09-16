@@ -221,7 +221,7 @@ def simulate_rf(
         element_normals (array-like, optional): Outward normal of each element of shape
             (n_el, 3), for curved or tilted arrays. The directivity and the obliquity are
             evaluated in each element's own frame: the elevation axis is the projection of
-            +y onto the element plane, so a normal must not be parallel to +y. None is every
+            +y onto the element plane, so a normal must not point along the y axis. None is every
             element facing +z. See :func:`zea.probes.curved_probe_normals`. The lens correction
             keeps assuming a flat lens.
         waveforms_two_way (array-like, optional): Two-way (pulse-echo) transmit waveforms of
@@ -1061,6 +1061,7 @@ def _element_model(
     width, and the sub-element counts from the top of the band of ``pulses``."""
     _validate_two_dimensional(two_dimensional, elevation_focus, probe_geometry)
     _validate_baffle(baffle_impedance_ratio)
+    _validate_element_normals(element_normals, int(probe_geometry.shape[0]))
     element_width = _resolve_element_width(probe_geometry, element_width)
     element_height = _resolve_element_height(probe_geometry, element_width, element_height)
     _validate_lens(
@@ -1333,6 +1334,8 @@ def _element_frame(element_normals, dtype="float32"):
     """Lateral, elevation and normal unit vectors of the elements, each (n_el, 3) or (1, 3).
 
     The elevation axis is +y projected onto the element plane, lateral completes the frame.
+    Normals along y, where that projection vanishes, are rejected by
+    :func:`_validate_element_normals`.
     """
     if element_normals is None:
         eye = ops.cast(ops.convert_to_tensor(np.eye(3, dtype=np.float32)), dtype)
@@ -1643,9 +1646,10 @@ def _concrete(x):
 
 
 def _ndim(x):
-    """Rank of ``x`` without converting it, so a traced array is not forced to numpy."""
+    """Rank of ``x`` without converting it, so a traced array is not forced to numpy. A list or
+    tuple counts as the array it converts to."""
     shape = getattr(x, "shape", None)
-    return 0 if shape is None else len(shape)
+    return np.ndim(x) if shape is None else len(shape)
 
 
 def _as_f32(x):
@@ -1670,7 +1674,7 @@ def _validate_scatter_exponent(scatter_exponent, n_scat=None):
             f"got {ndim} dimensions."
         )
     if ndim == 1 and n_scat is not None:
-        n_given = int(ops.shape(scatter_exponent)[0])
+        n_given = int(np.shape(scatter_exponent)[0])
         if n_given != n_scat:
             raise ValueError(
                 f"A per-scatterer scatter_exponent needs one value per scatterer: got "
@@ -1929,6 +1933,32 @@ def _resolve_sub_elements(
     if n_sub_elements == "auto":
         return max(int(np.ceil(width / lambda_min)), 1), n_elevation
     return (1 if n_sub_elements is None else max(int(n_sub_elements), 1)), n_elevation
+
+
+def _validate_element_normals(element_normals, n_el, tol=1e-6):
+    """Reject normals of the wrong shape, of zero length, or along the y axis: the element frame
+    projects +y onto the element plane, which is undefined there (a probe converted with its y
+    and z columns swapped does this). Traced normals are only checked for shape."""
+    if element_normals is None:
+        return
+    shape = tuple(int(n) for n in element_normals.shape)
+    if len(shape) != 2 or shape[1] != 3 or shape[0] not in (1, n_el):
+        raise ValueError(f"element_normals must have shape ({n_el}, 3), got {shape}.")
+    normals = _concrete(element_normals)
+    if normals is None:
+        return
+    length = np.linalg.norm(normals.astype(np.float64), axis=-1)
+    if np.any(length <= tol):
+        raise ValueError(
+            f"element_normals of elements {np.flatnonzero(length <= tol)[:8]} have zero length."
+        )
+    along_y = np.abs(normals[:, 1]) / length >= 1 - tol
+    if np.any(along_y):
+        raise ValueError(
+            f"element_normals of elements {np.flatnonzero(along_y)[:8]} point along the y "
+            "(elevation) axis, where the element frame is undefined. Elements face +z by default; "
+            "were the y and z columns swapped?"
+        )
 
 
 def _validate_baffle(baffle_impedance_ratio):

@@ -52,11 +52,50 @@ simulator_settings: dict[str, Callable] = {
 }
 
 
+# The method names from before the simulators were renamed, still accepted with a warning.
+_deprecated_methods = {
+    "exact": "frequency_domain",
+    "frequency_approximation": "frequency_domain",
+    "time_approximation": "time_domain",
+}
+
+# Element options of the frequency-domain simulator, with the value the time-domain one behaves as.
+_frequency_domain_only = {
+    "baffle_impedance_ratio": 0.0,
+    "n_sub_elements": None,
+    "elevation_focus": None,
+    "lens_attenuation_coef": 0.0,
+}
+
+
 def _resolve_method(method):
-    """The simulator method name, checked against the ones that exist."""
+    """The simulator method name, checked against the ones that exist. An old name maps to its
+    current one, with a deprecation warning."""
+    renamed = _deprecated_methods.get(method)
+    if renamed is not None:
+        log.warning_once(
+            f"Simulate method '{method}' is deprecated and was renamed to '{renamed}'.", key=method
+        )
+        return renamed
     if method not in simulator_settings:
         raise ValueError(f"method ({method}) must be one of {tuple(simulator_settings)}")
     return method
+
+
+def _ignored_by_time_domain(kwargs):
+    """The frequency-domain-only element options that ``kwargs`` set to something the time-domain
+    simulator cannot honor, element normals other than +z included. Traced values are skipped."""
+    ignored = []
+    for name, default in _frequency_domain_only.items():
+        value = kwargs.get(name)
+        value = None if value is None else _concrete(value)
+        if value is not None and (default is None or not np.all(value == default)):
+            ignored.append(name)
+    normals = kwargs.get("element_normals")
+    normals = None if normals is None else _concrete(normals)
+    if normals is not None and not np.allclose(normals, [0.0, 0.0, 1.0], atol=1e-6):
+        ignored.append("element_normals")
+    return ignored
 
 
 def _derived_fft_length(kwargs):
@@ -101,11 +140,13 @@ class Simulate(Operation):
     factors at the center frequency: less accurate, faster in some settings. The element
     options (``baffle_impedance_ratio``, ``element_normals``, ``n_sub_elements``,
     ``elevation_focus``, ``lens_attenuation_coef``, ``band_db``, ``n_fft`` and
-    ``scatter_exponent_range``) reach the frequency-domain simulator only. The transmit pulse
-    is ``waveforms_two_way`` (the one of a
+    ``scatter_exponent_range``) reach the frequency-domain simulator only; the time-domain
+    simulator warns once when one of them is set to something it cannot honor. The transmit
+    pulse is ``waveforms_two_way`` (the one of a
     :class:`zea.Parameters` or zea file, or built with :func:`zea.simulator.transmit_pulse`),
     and the default pulse of that function without. The old names ``"exact"``,
-    ``"frequency_approximation"`` and ``"time_approximation"`` are deprecated aliases.
+    ``"frequency_approximation"`` and ``"time_approximation"`` are deprecated aliases, accepted
+    with a warning.
 
     Frequency-domain only arguments:
 
@@ -207,6 +248,13 @@ class Simulate(Operation):
                             f"{name} is only supported by the frequency-domain simulator "
                             "(method='frequency_domain')."
                         )
+                ignored = _ignored_by_time_domain(merged)
+                if ignored:
+                    log.warning_once(
+                        f"The time-domain simulator ignores {', '.join(ignored)}: only the "
+                        "frequency-domain simulator (method='frequency_domain') models them.",
+                        key=tuple(ignored),
+                    )
             if method == "frequency_domain" and merged.get("n_fft") is None:
                 merged["n_fft"] = _derived_fft_length(merged)
             if method == "frequency_domain" and merged.get("scatter_exponent_range") is None:

@@ -1302,12 +1302,12 @@ class Parameters(BaseParameters):
         }
 
     def __init__(self, **kwargs):
-        super().__init__(**{self._renamed(k): v for k, v in kwargs.items()})
+        super().__init__(**self._renamed_items(kwargs))
 
     def update(self, params=None, *, force=False, **kwargs):
         merged = dict(params) if params else {}
         merged.update(kwargs)
-        return super().update({self._renamed(k): v for k, v in merged.items()}, force=force)
+        return super().update(self._renamed_items(merged), force=force)
 
     @classmethod
     def _renamed(cls, name):
@@ -1316,6 +1316,22 @@ class Parameters(BaseParameters):
             return name
         log.warning_once(f"Parameter {name} was renamed to {new}.", key=name)
         return new
+
+    @classmethod
+    def _renamed_items(cls, items):
+        """``items`` under their current names. An old name given next to its new one is dropped,
+        whatever the order: the value under the new name is used, and a warning says so."""
+        renamed = {}
+        for name, value in items.items():
+            new = cls._renamed(name)
+            if new != name and new in items:
+                log.warning(
+                    f"Both {name} and {new} were given: {name} is the old name of {new}, "
+                    f"so the value of {new} is used and the one of {name} is ignored."
+                )
+                continue
+            renamed[new] = value
+        return renamed
 
     def __setattr__(self, name: str, value):
         name = self._renamed(name)

@@ -6,6 +6,8 @@ the record gate, the FFT length, the band limit, the blocking over frequencies a
 linearity, gradients, and the ``n_fft`` plumbing of the op and of :class:`zea.Parameters`.
 """
 
+import logging
+
 import keras
 import numpy as np
 import pytest
@@ -439,6 +441,75 @@ def test_simulate_op_methods():
     )
     with pytest.raises(ValueError, match="method"):
         op(**kwargs, method="exact_slab")
+
+
+def test_simulate_op_accepts_the_old_method_names(caplog, reset_warning_once):
+    """The names from before the rename still select their simulator, with a deprecation
+    warning naming the new one."""
+    kwargs = tensors(CASES["linear"])
+    op = Simulate(jit_compile=False, with_batch_dim=False)
+    frequency_domain = op(**kwargs)[op.output_key]
+    time_domain = op(**kwargs, method="time_domain")[op.output_key]
+    aliases = {
+        "exact": ("frequency_domain", frequency_domain),
+        "frequency_approximation": ("frequency_domain", frequency_domain),
+        "time_approximation": ("time_domain", time_domain),
+    }
+    for old, (new, reference) in aliases.items():
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="zea"):
+            assert_close(reference, op(**kwargs, method=old)[op.output_key], rel_tol=1e-6)
+        messages = [record.getMessage() for record in caplog.records]
+        assert any(old in m and new in m and "deprecated" in m for m in messages), messages
+
+
+def test_simulate_op_warns_about_options_the_time_domain_simulator_ignores(
+    caplog, reset_warning_once
+):
+    """Element options that only the frequency-domain simulator models are named in a warning
+    on the time-domain path; the +z normals of a flat probe and the defaults are not."""
+    kwargs = tensors(CASES["linear"])
+    n_el = kwargs["probe_geometry"].shape[0]
+    op = Simulate(jit_compile=False, with_batch_dim=False)
+    tilted = np.tile(np.array([0.5, 0.0, np.sqrt(0.75)], np.float32), (n_el, 1))
+    with caplog.at_level(logging.WARNING, logger="zea"):
+        op(**kwargs, method="time_domain", element_normals=tilted, elevation_focus=30e-3)
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("element_normals" in m and "elevation_focus" in m for m in messages), messages
+
+    caplog.clear()
+    flat = np.tile(np.array([0.0, 0.0, 1.0], np.float32), (n_el, 1))
+    with caplog.at_level(logging.WARNING, logger="zea"):
+        op(**kwargs, method="time_domain", element_normals=flat, baffle_impedance_ratio=0.0)
+    assert not any("ignores" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.parametrize("sign", [1.0, -1.0], ids=["+y", "-y"])
+def test_element_normals_along_the_elevation_axis_are_rejected(sign):
+    """The element frame projects +y onto the element plane, which vanishes for a normal along
+    either direction of y (a probe with swapped y and z columns): an error, not NaN RF."""
+    kwargs = tensors(CASES["linear"])
+    n_el = kwargs["probe_geometry"].shape[0]
+    normals = np.tile(np.array([0.0, 0.0, 1.0], np.float32), (n_el, 1))
+    normals[3] = [0.0, sign, 0.0]
+    with pytest.raises(ValueError, match=r"element_normals of elements \[3\]"):
+        simulate_rf(**kwargs, element_normals=normals)
+    with pytest.raises(ValueError, match="zero length"):
+        simulate_rf(**kwargs, element_normals=np.zeros((n_el, 3), np.float32))
+    with pytest.raises(ValueError, match="shape"):
+        simulate_rf(**kwargs, element_normals=normals[:, :2])
+
+
+def test_scatter_exponent_accepts_a_python_list():
+    """A list of one exponent per scatterer is the vector it converts to, so it takes the
+    per-scatterer path and its length is checked, instead of failing as a float."""
+    kwargs = tensors(CASES["linear"])
+    n_scat = kwargs["scatterer_positions"].shape[0]
+    exponent = kwargs.pop("scatter_exponent")
+    reference = simulate_rf(**kwargs, scatter_exponent=np.full(n_scat, exponent, np.float32))
+    assert_close(reference, simulate_rf(**kwargs, scatter_exponent=[exponent] * n_scat))
+    with pytest.raises(ValueError, match="per scatterer"):
+        simulate_rf(**kwargs, scatter_exponent=[exponent] * (n_scat + 1))
 
 
 def test_parameters_derive_n_fft_for_a_jitted_pipeline():
