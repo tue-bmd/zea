@@ -35,13 +35,11 @@ from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
 from zea.simulator import (
     _concrete,
-    _fft_bound,
     _ndim,
     apply_receive_chain,
+    fft_length,
     scatter_exponent_bounds,
     simulate_rf,
-    smooth_size,
-    transmit_pulses,
 )
 from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
@@ -79,26 +77,17 @@ def _derived_fft_length(kwargs):
             return None
     t0, t_init, t_peak, geometry, sound_speed = raw
     shift = t0 - t_init[:, None] + t_peak[:, None]
-    # The pulses of the transmits, as the simulator builds them: :func:`fft_length` with the
-    # waveforms, but checked against the transmit count.
-    pulses = transmit_pulses(
-        int(t0.shape[0]),
-        float(kwargs["center_frequency"]),
+    return fft_length(
+        int(kwargs["n_ax"]),
         float(kwargs["sampling_frequency"]),
+        float(kwargs["center_frequency"]),
+        float(sound_speed),
+        geometry,
+        shift.min(),
+        shift.max(),
         kwargs.get("waveforms_two_way"),
         kwargs.get("waveform_sampling_frequency", 250e6),
-    )
-    return smooth_size(
-        _fft_bound(
-            int(kwargs["n_ax"]),
-            float(kwargs["sampling_frequency"]),
-            float(sound_speed),
-            geometry,
-            shift.min(),
-            shift.max(),
-            pulses,
-            sos_map=sos_map,
-        )
+        sos_map=sos_map,
     )
 
 

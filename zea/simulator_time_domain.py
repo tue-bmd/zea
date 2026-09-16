@@ -41,6 +41,8 @@ from keras import ops
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.ultrasound import directivity
 from zea.simulator import (
+    _element_angles,
+    _element_frame,
     _resolve_element_height,
     _resolve_element_width,
     _snap_elevation,
@@ -323,13 +325,14 @@ def _element_directivity(
     frequency,
     two_dimensional=False,
 ):
-    """Directivity from each element to each scatterer; no elevation term in 2D."""
+    """Directivity from each element to each scatterer, at the direction cosines of the
+    frequency-domain simulator (:func:`zea.simulator._element_angles`); no elevation term in
+    2D."""
     relative = scatterer_positions[:, None] - probe_geometry[None]
-    theta = ops.arctan2(relative[..., 0], relative[..., 2])
+    theta, phi, _ = _element_angles(relative, _element_frame(None, relative.dtype))
     lateral = directivity(frequency, theta, element_width, sound_speed)
     if two_dimensional:
         return lateral
-    phi = ops.arctan2(relative[..., 1], relative[..., 2])
     return lateral * directivity(frequency, phi, element_height, sound_speed)
 
 

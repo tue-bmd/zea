@@ -25,7 +25,6 @@ scenes with varying scatterer numbers, consider padding your scatterer clouds to
 power of two, so jit only triggers once or twice.
 
 ``two_dimensional`` simulates in the imaging plane, as a 1D probe behind an ideal elevation lens.
-:mod:`zea.simulator_time_domain` holds a faster, less accurate time-domain variant.
 
 :func:`pressure_field` evaluates the transmit field of the simulator on a grid of points. Should
 be a more accurate version of the pfield code used in the beamformer. It will likely be integrated
@@ -71,6 +70,7 @@ more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_e
 import functools
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import keras
 import numpy as np
@@ -357,21 +357,11 @@ def simulate_rf(
 
     shift = _transmit_shift(t0_delays, initial_times, t_peak)
     k0, k1 = band_bins(n_fft, fs, pulses, fc, scatter_exponent, band_db, scatter_exponent_range)
+    wave = _pulse_spectra(pulses, np.fft.rfftfreq(n_fft, 1 / fs)[k0:k1])
 
     # Forward of one block per bin: the complex responses and the two matrix product outputs.
     per_bin = 8 * ((2 if two_dimensional else 1) * n_scat * n_el + n_tx * n_scat + n_tx * n_el)
-    f_block = int(max(1, min(k1 - k0, max_chunk_gb * 2**30 // per_bin)))
-    n_blocks = -(-(k1 - k0) // f_block)
-    # Spread the band evenly, so the last block is padded by less than a whole block.
-    f_block = -(-(k1 - k0) // n_blocks)
-    n_band = n_blocks * f_block
-
-    # Band padded to whole blocks; the pad repeats the last bin and is dropped after the loop.
-    freqs_all = np.fft.rfftfreq(n_fft, 1 / fs)
-    freqs = np.full(n_band, freqs_all[k1 - 1], np.float32)
-    freqs[: k1 - k0] = freqs_all[k0:k1]
-    wave = _pulse_spectra(pulses, freqs_all[k0:k1])
-    freqs = ops.convert_to_tensor(freqs)
+    blocks = _band_blocks(n_fft, fs, k0, k1, per_bin, max_chunk_gb * 2**30)
 
     # The straight-ray slowness of every path, once for all frequency blocks.
     slowness = _ray_slowness(
@@ -388,42 +378,92 @@ def simulate_rf(
         model.element_normals,
     )
 
-    # The partial keeps everything but the frequencies out of the checkpoint's arguments:
-    # tf.recompute_grad converts every argument to a tensor, which None (no map) cannot be.
-    block = checkpoint(
-        functools.partial(
-            _rf_block,
-            positions=positions,
-            magnitudes=magnitudes,
-            model=model,
-            slowness=slowness,
-            shift=shift,
-            tx_apodizations=ops.cast(tx_apodizations, "float32"),
-            center_frequency=fc,
-            gate_time=_record_gate_time(n_ax, fs, _pulse_tail(pulses)),
-            scatter_exponent=scatter_exponent,
-        )
+    block = _checkpointed_block(
+        _rf_block,
+        positions=positions,
+        magnitudes=magnitudes,
+        model=model,
+        slowness=slowness,
+        shift=shift,
+        tx_apodizations=ops.cast(tx_apodizations, "float32"),
+        center_frequency=fc,
+        gate_time=_record_gate_time(n_ax, fs, _pulse_tail(pulses)),
+        scatter_exponent=scatter_exponent,
     )
-
-    def body(i, spectrum):
-        start = i * f_block
-        block_freqs = ops.slice(freqs, [start], [f_block])
-        return ops.slice_update(spectrum, [start, 0, 0], block(block_freqs))
-
-    spectrum = ops.zeros((n_band, n_tx, n_el), "complex64")
-    spectrum = ops.fori_loop(0, n_blocks, body, spectrum)
-    spectrum = spectrum[: k1 - k0] * ops.convert_to_tensor(wave)[:, :, None]
+    spectrum = _band_spectrum(block, blocks, (n_tx, n_el)) * ops.convert_to_tensor(wave)[:, :, None]
 
     # Transmits in groups, so a long record over many transmits does not allocate at once.
     group = min(32, n_tx)
-    parts = []
-    for start in range(0, n_tx, group):
-        band = ops.transpose(spectrum[:, start : start + group], (1, 2, 0))
-        pad = ((0, 0), (0, 0), (k0, n_fft // 2 + 1 - k1))
-        full = (ops.pad(ops.real(band), pad), ops.pad(ops.imag(band), pad))
-        parts.append(ops.irfft(full, fft_length=n_fft)[..., :n_ax])
+    parts = [
+        _band_to_time(spectrum[:, start : start + group], k0, k1, n_fft, n_ax)
+        for start in range(0, n_tx, group)
+    ]
     rf = ops.transpose(ops.concatenate(parts, axis=0), (0, 2, 1))
     return finish(rf)
+
+
+@dataclass(frozen=True)
+class _BandBlocks:
+    """The kept band [k0, k1) of the FFT grid padded to whole frequency blocks, for a
+    :func:`_band_spectrum` loop. ``freqs`` is the padded band [Hz] as a float32 tensor; the pad
+    repeats the last bin and is dropped after the loop."""
+
+    freqs: Any
+    f_block: int
+    n_blocks: int
+    n_kept: int
+
+    @property
+    def n_band(self):
+        return self.n_blocks * self.f_block
+
+    def slice(self, i):
+        """Frequencies of block ``i`` (traced), and where it starts in the band."""
+        start = i * self.f_block
+        return ops.slice(self.freqs, [start], [self.f_block]), start
+
+
+def _band_blocks(n_fft, sampling_frequency, k0, k1, per_bin, budget):
+    """Split the band [k0, k1) into blocks of ``budget`` bytes at ``per_bin`` bytes per bin,
+    spread evenly so the last block is padded by less than a whole block."""
+    n_kept = k1 - k0
+    f_block = int(max(1, min(n_kept, budget // per_bin)))
+    n_blocks = -(-n_kept // f_block)
+    f_block = -(-n_kept // n_blocks)
+    freqs_all = np.fft.rfftfreq(n_fft, 1 / sampling_frequency)
+    freqs = np.full(n_blocks * f_block, freqs_all[k1 - 1], np.float32)
+    freqs[:n_kept] = freqs_all[k0:k1]
+    return _BandBlocks(ops.convert_to_tensor(freqs), f_block, n_blocks, n_kept)
+
+
+def _checkpointed_block(kernel, **kwargs):
+    """``kernel`` with everything but the frequencies bound, under gradient checkpointing.
+
+    The partial keeps the bound arguments out of the checkpoint's: tf.recompute_grad converts
+    every argument to a tensor, which None (no map) cannot be.
+    """
+    return checkpoint(functools.partial(kernel, **kwargs))
+
+
+def _band_spectrum(block, blocks, shape):
+    """Band spectrum [f, *shape] over the kept bins: ``block(freqs)`` of every block of
+    ``blocks`` (a :class:`_BandBlocks`) written into place, with the pad dropped."""
+
+    def body(i, spectrum):
+        freqs, start = blocks.slice(i)
+        return ops.slice_update(spectrum, [start] + [0] * len(shape), block(freqs))
+
+    spectrum = ops.zeros((blocks.n_band, *shape), "complex64")
+    return ops.fori_loop(0, blocks.n_blocks, body, spectrum)[: blocks.n_kept]
+
+
+def _band_to_time(spectrum, k0, k1, n_fft, n_ax):
+    """Time records [..., n_ax] of a band spectrum [f, ...] over the bins [k0, k1) of an
+    ``n_fft``-point real FFT."""
+    band = ops.moveaxis(spectrum, 0, -1)
+    pad = [(0, 0)] * (len(ops.shape(spectrum)) - 1) + [(k0, n_fft // 2 + 1 - k1)]
+    full = (ops.pad(ops.real(band), pad), ops.pad(ops.imag(band), pad))
+    return ops.irfft(full, fft_length=n_fft)[..., :n_ax]
 
 
 def _rf_block(
@@ -445,9 +485,7 @@ def _rf_block(
     dropped, so a long path never wraps into the record. ``slowness`` is the mean slowness
     [s, e] of the straight rays through a sound speed map, or None for a homogeneous medium.
     """
-    tx_response, rx_response, tau = _element_responses(
-        positions, model, freqs, frequency_first=True, slowness=slowness
-    )
+    tx_response, rx_response, tau = _element_responses(positions, model, freqs, slowness=slowness)
     keep = _record_keep(tau, ops.min(shift), gate_time)
     weight = ops.where(keep, magnitudes, 0.0)
     if scatter_exponent is not None:
@@ -589,8 +627,7 @@ def pressure_field(
 
     k0, k1 = band_bins(n_fft, fs, pulses, fc, 0.0, band_db)
     n_kept = k1 - k0
-    freqs_all = np.fft.rfftfreq(n_fft, 1 / fs)
-    wave_kept = _pulse_spectra(pulses, freqs_all[k0:k1])
+    wave = _pulse_spectra(pulses, np.fft.rfftfreq(n_fft, 1 / fs)[k0:k1])
     tx_apodizations = ops.cast(tx_apodizations, "float32")
     slowness = _ray_slowness(
         positions,
@@ -608,59 +645,40 @@ def pressure_field(
 
     def blocked(points, slow, budget):
         """Band spectrum [f, t, p] or its Parseval energy [t, p] over ``points``."""
-        # The partial keeps everything but the frequencies out of the checkpoint's arguments,
-        # as in simulate_rf.
-        block = checkpoint(
-            functools.partial(
-                _pressure_block,
-                positions=points,
-                slowness=slow,
-                model=model,
-                shift=shift,
-                tx_apodizations=tx_apodizations,
-            )
+        block = _checkpointed_block(
+            _pressure_block,
+            positions=points,
+            slowness=slow,
+            model=model,
+            shift=shift,
+            tx_apodizations=tx_apodizations,
         )
         n_pts = int(ops.shape(points)[0])
         per_bin = 8 * ((2 if two_dimensional else 1) * n_pts * n_el + n_tx * n_pts)
-        f_block = int(max(1, min(n_kept, budget // per_bin)))
-        n_blocks = -(-n_kept // f_block)
-        f_block = -(-n_kept // n_blocks)
-        n_band = n_blocks * f_block
-        freqs = np.full(n_band, freqs_all[k1 - 1], np.float32)
-        freqs[:n_kept] = freqs_all[k0:k1]
-        wave = np.zeros((n_band, n_tx), np.complex64)
-        wave[:n_kept] = wave_kept
-        freqs_t = ops.convert_to_tensor(freqs)
-        wave_t = ops.convert_to_tensor(wave)
+        blocks = _band_blocks(n_fft, fs, k0, k1, per_bin, budget)
 
         if output == "time":
-
-            def body(i, spectrum):
-                start = i * f_block
-                part = block(ops.slice(freqs_t, [start], [f_block]))
-                return ops.slice_update(spectrum, [start, 0, 0], part)
-
-            spectrum = ops.fori_loop(
-                0, n_blocks, body, ops.zeros((n_band, n_tx, n_pts), "complex64")
-            )
-            return spectrum[:n_kept] * wave_t[:n_kept, :, None]
+            spectrum = _band_spectrum(block, blocks, (n_tx, n_pts))
+            return spectrum * ops.convert_to_tensor(wave)[:, :, None]
 
         # sum_n p[n]^2 = (1/N) sum_k w_k |P_k|^2 with w = 2 except at DC and, for an even
-        # transform, at Nyquist.
-        parseval = np.full(n_band, 2.0, np.float32)
+        # transform, at Nyquist. The pad of the band gets no weight.
+        parseval = np.full(n_kept, 2.0, np.float32)
         if k0 == 0:
             parseval[0] = 1.0
         if k1 == n_fft // 2 + 1 and n_fft % 2 == 0:
-            parseval[n_kept - 1] = 1.0
-        weight = ops.convert_to_tensor(parseval[:, None] * np.abs(wave) ** 2)
+            parseval[-1] = 1.0
+        weight = np.zeros((blocks.n_band, n_tx), np.float32)
+        weight[:n_kept] = parseval[:, None] * np.abs(wave) ** 2
+        weight = ops.convert_to_tensor(weight)
 
         def body(i, energy):
-            start = i * f_block
-            part = block(ops.slice(freqs_t, [start], [f_block]))
-            w = ops.slice(weight, [start, 0], [f_block, n_tx])[:, :, None]
+            freqs, start = blocks.slice(i)
+            part = block(freqs)
+            w = ops.slice(weight, [start, 0], [blocks.f_block, n_tx])[:, :, None]
             return energy + ops.sum(w * (ops.real(part) ** 2 + ops.imag(part) ** 2), axis=0)
 
-        return ops.fori_loop(0, n_blocks, body, ops.zeros((n_tx, n_pts), "float32"))
+        return ops.fori_loop(0, blocks.n_blocks, body, ops.zeros((n_tx, n_pts), "float32"))
 
     budget = max_chunk_gb * 2**30
     if output == "rms":
@@ -673,10 +691,7 @@ def pressure_field(
         for start in range(0, n_points, chunk):
             slow = None if slowness is None else slowness[start : start + chunk]
             spectrum = blocked(positions[start : start + chunk], slow, budget // 2)
-            band = ops.transpose(spectrum, (1, 2, 0))
-            pad = ((0, 0), (0, 0), (k0, n_fft // 2 + 1 - k1))
-            full = (ops.pad(ops.real(band), pad), ops.pad(ops.imag(band), pad))
-            parts.append(ops.irfft(full, fft_length=n_fft)[..., :n_ax])
+            parts.append(_band_to_time(spectrum, k0, k1, n_fft, n_ax))
         field = ops.transpose(ops.concatenate(parts, axis=1), (0, 2, 1))
 
     lead = (n_tx,) if output == "rms" else (n_tx, n_ax)
@@ -685,9 +700,7 @@ def pressure_field(
 
 def _pressure_block(freqs, positions, slowness, model, shift, tx_apodizations):
     """Incident field spectrum [f, t, p] of one frequency block, without the pulse."""
-    tx_response, _, _ = _element_responses(
-        positions, model, freqs, frequency_first=True, slowness=slowness
-    )
+    tx_response, _, _ = _element_responses(positions, model, freqs, slowness=slowness)
     tx_weights = _transmit_weights(freqs, shift, tx_apodizations)
     with highest_matmul_precision():
         return ops.einsum("fte,fpe->ftp", tx_weights, tx_response)
@@ -859,12 +872,12 @@ def record_bounds(
         t0_delays,
         initial_times,
         t_peak,
-        waveforms_two_way,
-        waveform_sampling_frequency,
-        apply_lens_correction,
-        lens_thickness,
-        lens_sound_speed,
-        sos_map,
+        waveforms_two_way=waveforms_two_way,
+        waveform_sampling_frequency=waveform_sampling_frequency,
+        apply_lens_correction=apply_lens_correction,
+        lens_thickness=lens_thickness,
+        lens_sound_speed=lens_sound_speed,
+        sos_map=sos_map,
     )
     geometry = _concrete(probe_geometry)
     if geometry is None:
@@ -984,21 +997,21 @@ class _ElementModel:
         elevation_focus: Static focal distance [m], or None.
     """
 
-    geometry: object
-    sound_speed: object
-    element_width: object
-    element_height: object
-    attenuation_coef: object
-    lens_thickness: object
-    lens_sound_speed: object
+    geometry: Any
+    sound_speed: Any
+    element_width: Any
+    element_height: Any
+    attenuation_coef: Any
+    lens_thickness: Any
+    lens_sound_speed: Any
     apply_lens_correction: bool
     two_dimensional: bool
     baffle_impedance_ratio: float
-    element_normals: object
+    element_normals: Any
     n_sub_elements: tuple
     elevation_focus: float | None
-    lens_attenuation_coef: object
-    min_dist: object
+    lens_attenuation_coef: Any
+    min_dist: Any
 
 
 def _element_model(
@@ -1071,18 +1084,17 @@ def _scene_positions(positions, model):
     return positions
 
 
-def _element_responses(positions, model, freqs, frequency_first=False, slowness=None):
-    """Transmit and receive one-way responses and the one-way travel time [s, e].
+def _element_responses(positions, model, freqs, slowness=None):
+    """Transmit and receive one-way responses [f, s, e] and the one-way travel time [s, e].
 
-    The responses are [s, e, f], or [f, s, e] when ``frequency_first`` is True. ``model`` is
-    the :class:`_ElementModel`. Each element is the mean of its ``n_sub_elements`` (lateral,
-    elevation) sub-elements with their own distance, phase and sinc directivity, so the response
-    holds in the near field too. The sub-element distance is clamped at ``min_dist`` for the
-    phase and the spreading (see :func:`min_distance`), not for the angles. An elevation focus
-    is the ideal focusing advance of each elevation sub-element, or with the lens the refracted
-    (Fermat) path through the local lens thickness, which the focus thins towards the edges. The
-    lens path is expressed as the medium distance with the same travel time for the phase, and
-    spreads as the refracted ray tube (:func:`_lens_spread_distance`); the lens part is
+    ``model`` is the :class:`_ElementModel`. Each element is the mean of its ``n_sub_elements``
+    (lateral, elevation) sub-elements with their own distance, phase and sinc directivity, so the
+    response holds in the near field too. The sub-element distance is clamped at ``min_dist``
+    for the phase and the spreading (see :func:`min_distance`), not for the angles. An elevation
+    focus is the ideal focusing advance of each elevation sub-element, or with the lens the
+    refracted (Fermat) path through the local lens thickness, which the focus thins towards the
+    edges. The lens path is expressed as the medium distance with the same travel time for the
+    phase, and spreads as the refracted ray tube (:func:`_lens_spread_distance`); the lens part is
     attenuated with ``lens_attenuation_coef``. The returned travel time is the element center's.
 
     ``slowness`` is the mean slowness [s, e] of the straight rays through a sound speed map
@@ -1125,11 +1137,11 @@ def _element_responses(positions, model, freqs, frequency_first=False, slowness=
         thickness = ops.full_like(v, lens_thickness)
     sub_width = model.element_width / n_lateral
     sub_height = model.element_height / n_elevation
-    f3 = freqs[:, None, None] if frequency_first else freqs[None, None, :]
+    f3 = freqs[:, None, None]
 
     def fx(x):
-        """Puts the frequency axis of a [s, e] array where ``frequency_first`` wants it."""
-        return x[None] if frequency_first else x[..., None]
+        """A [s, e] array broadcast against the frequency axis, [1, s, e]."""
+        return x[None]
 
     def medium_time(length):
         """Travel time [s, e] over a medium leg: at the ray's slowness, or at ``1 / c``."""
@@ -1181,8 +1193,7 @@ def _element_responses(positions, model, freqs, frequency_first=False, slowness=
 
     n_pos, n_el = ops.shape(relative_center)[:2]
     n_freq = ops.shape(freqs)[0]
-    shape = (n_freq, n_pos, n_el) if frequency_first else (n_pos, n_el, n_freq)
-    zeros = ops.zeros(shape, "complex64")
+    zeros = ops.zeros((n_freq, n_pos, n_el), "complex64")
     scale = ops.array(1.0 / n_sub, "complex64")
     if two_dimensional:
 
