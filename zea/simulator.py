@@ -75,6 +75,7 @@ from dataclasses import dataclass
 import keras
 import numpy as np
 from keras import ops
+from scipy.ndimage import maximum_filter1d
 from scipy.signal import hilbert
 from scipy.special import fresnel
 
@@ -2137,26 +2138,42 @@ def _calibrate(
 ):
     """Shift the envelope peak to t = 0, scale to a unit peak and measure the support, on a grid
     ``oversample`` times finer than ``sampling_frequency`` so that none of it depends on it.
-    ``trigger`` is the time [s] of the transmit trigger in the frame of ``spectrum_fn``."""
+    ``trigger`` is the time [s] of the transmit trigger in the frame of ``spectrum_fn``.
+
+    The support is where the running maximum of the waveform magnitude over one period of the
+    band centre is above ``threshold_db``. The Hilbert envelope would not do: for a pulse with
+    a DC component, such as a one-period Hann tone through a flat transducer, it decays as 1/t
+    and reaches -80 dB only after hundreds of periods.
+    """
     fs = oversample * sampling_frequency
     n = int(_round_up_to_power_of_two(max(4 * duration * fs, 256)))
     while True:
         freqs = np.fft.rfftfreq(n, 1 / fs)
+        magnitude = np.abs(spectrum_fn(freqs))
+        in_band = np.flatnonzero(magnitude >= 0.5 * magnitude.max())
+        band = (float(freqs[in_band[0]]), float(freqs[in_band[-1]]))
         waveform = np.fft.irfft(spectrum_fn(freqs), n)
-        envelope = np.abs(hilbert(waveform))
         shift = 0.0
         if shift_peak:
+            envelope = np.abs(hilbert(waveform))
             k = int(np.argmax(envelope))
             before, at, after = envelope[k - 1], envelope[k], envelope[(k + 1) % n]
             fraction = 0.5 * (before - after) / (before - 2 * at + after)  # sub-sample peak
             shift = ((k if k < n // 2 else k - n) + fraction) / fs
             waveform = np.fft.irfft(spectrum_fn(freqs) * np.exp(2j * np.pi * freqs * shift), n)
-            envelope = np.abs(hilbert(waveform))
+        period = int(np.ceil(2 * fs / (band[0] + band[1])))
+        envelope = maximum_filter1d(np.abs(waveform), period, mode="wrap")
         support = np.flatnonzero(envelope > 10 ** (threshold_db / 20) * envelope.max())
         positive, negative = support[support < n // 2], support[support >= n // 2]
         after = int(positive.max()) if len(positive) else 0
         before = int(n - negative.min()) if len(negative) else 0
-        if before + after < n // 4 or n >= 2**22:
+        if before + after < n // 4:
+            break
+        if n >= 2**22:
+            log.warning(
+                f"The transmit pulse does not decay to {threshold_db} dB within "
+                f"{n / fs * 1e6:.0f} us; its support is truncated."
+            )
             break
         n *= 2  # the pulse wraps around the grid
     scale = 1.0 / (oversample * np.abs(waveform).max())  # unit peak on the coarse grid
@@ -2164,9 +2181,6 @@ def _calibrate(
     def shifted(f):
         return scale * spectrum_fn(f) * np.exp(2j * np.pi * f * shift)
 
-    magnitude = np.abs(spectrum_fn(freqs))
-    in_band = np.flatnonzero(magnitude >= 0.5 * magnitude.max())
-    band = (float(freqs[in_band[0]]), float(freqs[in_band[-1]]))
     n_before, n_after = (int(np.ceil(k / oversample)) for k in (before, after))
     return Pulse(shifted, sampling_frequency, n_before, n_after, shift - trigger, band)
 
