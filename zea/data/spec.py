@@ -410,13 +410,54 @@ class Spec:
         ]
         return f"Dimension '{dim_name}' has inconsistent sizes:\n" + "\n".join(lines)
 
+    RECEIVE_CHANNEL_FIELDS: ClassVar[tuple[str, ...]] = ("raw_data", "aligned_data.values")
+
+    @classmethod
+    def _is_receive_channel_field(cls, field_path: str) -> bool:
+        """Whether ``field_path`` holds channel data.
+
+        These are the only fields whose ``n_el`` axis counts receive channels instead
+        of probe elements, and so the only ones that may hold a receive sub-aperture.
+        Field paths are prefixed per spec level, so the name is matched against the
+        tail of ``field_path`` (``"tracks[0].data.raw_data"``).
+        """
+        return any(
+            field_path == name or field_path.endswith(f".{name}")
+            for name in cls.RECEIVE_CHANNEL_FIELDS
+        )
+
+    @classmethod
+    def _is_receive_subaperture(cls, dim_name: str, field_sizes: dict[str, int]) -> bool:
+        """Whether an ``n_el`` disagreement is a legal receive sub-aperture.
+
+        Channel data counts receive channels on its ``n_el`` axis, which is a subset of
+        the probe on systems with a sliding receive window or a multiplexed front-end.
+        Such a file is self-consistent, so it is accepted when every other field agrees
+        on a single element count and no channel-data field claims more receivers than
+        there are elements. All other dimensions still have to agree exactly.
+        """
+        if dim_name != "n_el":
+            return False
+
+        receive_sizes = {
+            size for path, size in field_sizes.items() if cls._is_receive_channel_field(path)
+        }
+        element_sizes = {
+            size for path, size in field_sizes.items() if not cls._is_receive_channel_field(path)
+        }
+        if not receive_sizes or len(element_sizes) != 1:
+            return False
+        return max(receive_sizes) <= element_sizes.pop()
+
     @classmethod
     def _raise_if_inconsistent_dimensions(
         cls,
         dim_to_field_sizes: defaultdict[str, dict[str, int]],
     ) -> None:
         for dim_name, field_sizes in dim_to_field_sizes.items():
-            if len(set(field_sizes.values())) > 1:
+            if len(set(field_sizes.values())) > 1 and not cls._is_receive_subaperture(
+                dim_name, field_sizes
+            ):
                 raise ValueError(cls._format_inconsistent_dimension(dim_name, field_sizes))
 
     def _collect_dimension_info(self, prefix: str = "") -> defaultdict[str, dict[str, int]]:
@@ -1333,7 +1374,12 @@ class DataSpec(Spec):
 
     Plain-array data products:
         raw_data: Raw channel data of shape (n_frames, n_tx, n_ax, n_el, n_ch)
-            and type float32 or int16.
+            and type float32 or int16. The fourth axis counts receive channels, which
+            normally means every probe element. Acquisitions using a receive
+            sub-aperture (a sliding receive window, or a multiplexed front-end with
+            fewer channels than elements) may carry fewer, in which case
+            :attr:`ScanSpec.rx_aperture_indices` records which element each channel
+            corresponds to.
 
     Grouped data products (values + optional metadata):
         - aligned_data: Time-of-flight corrected data and optional labels.
@@ -1533,6 +1579,12 @@ class ScanSpec(Spec):
             Shape is either (n_frames, n_tx) or flat (n_frames * n_tx - 1,).
         azimuth_angles: The azimuthal angles in radians of the transmit beams of
             shape (n_tx,).
+        rx_aperture_indices: Which probe element each receive channel of the channel
+            data corresponds to, of shape (n_tx, n_rx) and integer dtype. Needed only
+            when the receive aperture is a subset of the probe, such as a sliding
+            window or a multiplexed front-end, since the mapping is otherwise not
+            recoverable from the file. Omit it when every element receives on every
+            transmit, where the mapping is the identity.
         sound_speed: The speed of sound in meters per second.
         tgc_gain_curve: The time-gain-compensation that was applied to every
             sample in the raw_data of shape (n_ax,). Divide by this curve to
@@ -1561,6 +1613,7 @@ class ScanSpec(Spec):
     polar_angles: np.ndarray
     time_to_next_transmit: np.ndarray | None = None
     azimuth_angles: np.ndarray | None = None
+    rx_aperture_indices: np.ndarray | None = None
     sound_speed: np.ndarray | float | None = None
     tgc_gain_curve: np.ndarray | None = None
     waveforms_one_way: np.ndarray | None = None
@@ -1581,6 +1634,10 @@ class ScanSpec(Spec):
             "shape": (("n_frames", "n_tx"), ("n_timing_intervals",)),
         },
         "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
+        "rx_aperture_indices": {
+            "dtype": (np.int16, np.int32, np.int64),
+            "shape": ("n_tx", "n_rx"),
+        },
         "sound_speed": {"dtype": np.float32, "shape": ()},
         "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
         "waveforms_one_way": {
@@ -1621,6 +1678,16 @@ class ScanSpec(Spec):
         "polar_angles": {"unit": "rad", "description": "Polar angles of transmit beams."},
         "time_to_next_transmit": {"unit": "s", "description": "Time between transmit events."},
         "azimuth_angles": {"unit": "rad", "description": "Azimuthal angles of transmit beams."},
+        "rx_aperture_indices": {
+            "unit": "–",
+            "description": (
+                "Probe element index for each receive channel of the channel data, "
+                "shape (n_tx, n_rx). Required to interpret the channel axis when the "
+                "receive aperture is a subset of the probe. Omit it when every element "
+                "receives, where the mapping is the identity."
+            ),
+            "rare": True,
+        },
         "sound_speed": {"unit": "m/s", "description": "Speed of sound."},
         "tgc_gain_curve": {
             "unit": "–",
@@ -2423,6 +2490,77 @@ class TrackSpec(Spec):
             raise TypeError(f"'label' must be a str, got {type(self.label)}")
         if self.label is not None and not self.label.strip():
             raise ValueError("'label' must not be an empty or whitespace-only string.")
+
+        self._check_receive_aperture()
+
+    def _receive_channel_counts(self) -> dict[str, int]:
+        """Receive-channel count of each channel-data field present in this track."""
+        data = self.data
+        if not isinstance(data, DataSpec):
+            return {}
+
+        counts = {}
+        if data.raw_data is not None:
+            counts["raw_data"] = value_shape(data.raw_data)[3]
+        aligned = data.aligned_data
+        if aligned is not None and getattr(aligned, "values", None) is not None:
+            counts["aligned_data.values"] = value_shape(aligned.values)[3]
+        return counts
+
+    def _check_receive_aperture(self) -> None:
+        """Cross-check receive-channel counts against the probe's element count.
+
+        A receive sub-aperture is legal but still bounded by the probe: there can be no
+        more receive channels than elements, and when the two differ the channel axis
+        can only be interpreted if ``scan.rx_aperture_indices`` records the mapping.
+        """
+        scan = self.scan
+        if not isinstance(scan, ScanSpec):
+            return
+
+        counts = self._receive_channel_counts()
+        if not counts:
+            return
+
+        n_el = scan.n_el
+        indices = scan.rx_aperture_indices
+
+        for field_name, n_rx in counts.items():
+            if n_rx > n_el:
+                raise ValueError(
+                    f"{field_name} has {n_rx} receive channels but the probe has {n_el} "
+                    f"elements (from scan.t0_delays); there cannot be more receive "
+                    f"channels than probe elements."
+                )
+
+        if indices is None:
+            subaperture = {name: n for name, n in counts.items() if n != n_el}
+            if subaperture:
+                fields = ", ".join(f"{name} ({n})" for name, n in sorted(subaperture.items()))
+                log.warning(
+                    f"{fields} has fewer receive channels than the probe has elements "
+                    f"({log.yellow(str(n_el))}), so the receive aperture is a subset of the "
+                    "probe. Set 'scan.rx_aperture_indices' (shape (n_tx, n_rx)) to record "
+                    "which element each receive channel corresponds to, which is "
+                    "otherwise not recoverable from the file."
+                )
+            return
+
+        lo, hi = int(np.min(indices)), int(np.max(indices))
+        if lo < 0 or hi >= n_el:
+            raise ValueError(
+                f"scan.rx_aperture_indices must index the {n_el} probe elements, "
+                f"but values range from {lo} to {hi}."
+            )
+
+        n_rx_mapping = value_shape(indices)[1]
+        mismatched = {name: n for name, n in counts.items() if n != n_rx_mapping}
+        if mismatched:
+            fields = ", ".join(f"{name} has {n}" for name, n in sorted(mismatched.items()))
+            raise ValueError(
+                f"scan.rx_aperture_indices maps {n_rx_mapping} receive channels per "
+                f"transmit, but {fields}."
+            )
 
     def store_in_group(
         self,
