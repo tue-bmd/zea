@@ -1882,17 +1882,24 @@ def _resolve_element_width(probe_geometry, element_width):
 
 def _resolve_element_height(probe_geometry, element_width, element_height, tol=1e-6):
     """Return the element height, inferring it when not given: an eighth of the width of a 1D
-    probe (elements without elevation extent; n_el times the pitch), at least the element
-    width, and the element width for a 2D probe or a single element. Works on a traced
-    geometry, as a traced height; a Python float otherwise."""
+    probe (elements without elevation extent; n_el times the pitch, measured along the probe
+    whatever its tilt in the imaging plane), at least the element width, and the element width
+    for a 2D probe or a single element. Works on a traced geometry, as a traced height; a
+    Python float otherwise."""
     if element_height is not None:
         return element_height
     n_el = int(probe_geometry.shape[0])
     if n_el < 2:
         return element_width
     geometry = ops.cast(probe_geometry, "float32")
-    x, y = geometry[:, 0], geometry[:, 1]
-    probe_width = (ops.max(x) - ops.min(x)) * (n_el / (n_el - 1))
+    x, y, z = geometry[:, 0], geometry[:, 1], geometry[:, 2]
+    # The extent along the principal axis of the elements in the (x, z) plane: the length of a
+    # linear probe at any tilt (tilted elements come with element normals), the chord of a curved
+    # one. The tilt is the principal direction of the 2x2 covariance, in closed form.
+    dx, dz = x - ops.mean(x), z - ops.mean(z)
+    tilt = 0.5 * ops.arctan2(2 * ops.sum(dx * dz), ops.sum(dx * dx) - ops.sum(dz * dz))
+    lateral = x * ops.cos(tilt) + z * ops.sin(tilt)
+    probe_width = (ops.max(lateral) - ops.min(lateral)) * (n_el / (n_el - 1))
     one_dimensional = ops.max(y) - ops.min(y) <= tol
     height = ops.where(one_dimensional, ops.maximum(probe_width / 8, element_width), element_width)
     concrete = _concrete(height)

@@ -493,6 +493,12 @@ def test_default_element_height_is_an_eighth_of_the_aperture_of_a_1d_probe():
     assert _resolve_element_height(np.zeros((1, 3)), 1e-3, None) == 1e-3
     assert _resolve_element_height(matrix_probe(), 0.27e-3, None) == pytest.approx(0.27e-3)
     assert _resolve_element_height(linear_probe(128), 0.27e-3, 2e-3) == 2e-3
+    tilt = np.deg2rad(30.0)
+    rotation = np.array(
+        [[np.cos(tilt), 0.0, np.sin(tilt)], [0.0, 1.0, 0.0], [-np.sin(tilt), 0.0, np.cos(tilt)]]
+    )
+    tilted = _resolve_element_height(linear_probe(128) @ rotation.T, 0.27e-3, None)
+    assert tilted == pytest.approx(height, rel=1e-5)
     curved = create_curved_probe_geometry(128, 0.508e-3, 49.57e-3)  # C5-2v, chord 60.4 mm
     assert _resolve_element_height(curved, 0.46e-3, None) == pytest.approx(7.6e-3, abs=1e-4)
     model = _element_model(
