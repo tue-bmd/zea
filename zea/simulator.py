@@ -173,11 +173,14 @@ def simulate_rf(
         n_ax (int): The number of samples in the RF data.
         center_frequency (float): The center frequency of the transmit pulse [Hz].
         sampling_frequency (float): The sampling frequency of the RF data [Hz].
-        t0_delays (array-like): The transmit delays [s] of shape (n_tx, n_el).
+        t0_delays (array-like): The transmit delays [s] of shape (n_tx, n_el), or
+            (n_tx, n_mpt, n_el) for multi-plane transmits: the delay sets of a transmit fire
+            together, so its field is the sum of theirs (SIMUS's MPT).
         initial_times (array-like): The initial times [s] of shape (n_tx,).
         element_width (float): The width of the elements [m].
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
-        tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el).
+        tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el), or
+            (n_tx, n_mpt, n_el) to apodize each delay set of a multi-plane transmit.
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
             The pulse is simulated with its envelope peak at the two-way travel time plus
             ``t_peak``; a real system's is :attr:`Pulse.time_to_peak` of :func:`transmit_pulse`.
@@ -302,7 +305,7 @@ def simulate_rf(
     _validate_maps(sos_map, attenuation_map, map_grid_x, map_grid_z, map_grid_y)
     fc, fs = float(center_frequency), float(sampling_frequency)
     n_ax = int(n_ax)
-    n_tx, n_el = (int(d) for d in ops.shape(t0_delays))
+    n_tx, n_el = (int(ops.shape(t0_delays)[i]) for i in (0, -1))
     pulses = transmit_pulses(n_tx, fc, fs, waveforms_two_way, waveform_sampling_frequency)
     model = _element_model(
         probe_geometry,
@@ -337,7 +340,7 @@ def simulate_rf(
     def bound():
         """Samples that hold every echo (see :func:`fft_length`), from the concrete inputs."""
         t0_np, t_init_np, t_peak_np, geom_np, c_np = raw
-        shift_np = t0_np - t_init_np[:, None] + t_peak_np[:, None]
+        shift_np = _shift_np(t0_np, t_init_np, t_peak_np)
         return _fft_bound(
             n_ax,
             fs,
@@ -522,11 +525,15 @@ def _rf_block(
 
 
 def _transmit_weights(freqs, shift, tx_apodizations):
-    """Apodization and delay phasor of every transmit and element, [f, t, e] complex64."""
-    f3 = freqs[:, None, None]
-    return _to_complex(tx_apodizations[None]) * ops.exp(
-        ops.array(-2j * np.pi, "complex64") * _to_complex(shift[None] * f3)
+    """Apodization and delay phasor of every transmit and element, [f, t, e] complex64, summed
+    over the delay sets of a multi-plane transmit."""
+    n_tx, n_el = ops.shape(shift)[0], ops.shape(shift)[-1]
+    shift = ops.reshape(shift, (n_tx, -1, n_el))
+    apod = ops.reshape(tx_apodizations, (n_tx, -1, n_el))
+    phasor = ops.exp(
+        ops.array(-2j * np.pi, "complex64") * _to_complex(shift[None] * freqs[:, None, None, None])
     )
+    return ops.sum(_to_complex(apod[None]) * phasor, axis=2)
 
 
 def pressure_field(
@@ -602,7 +609,7 @@ def pressure_field(
         raise ValueError(f"output must be 'rms' or 'time', got {output!r}.")
     _validate_maps(sos_map, attenuation_map, map_grid_x, map_grid_z, map_grid_y)
     fc, fs = float(center_frequency), float(sampling_frequency)
-    n_tx, n_el = (int(d) for d in ops.shape(t0_delays))
+    n_tx, n_el = (int(ops.shape(t0_delays)[i]) for i in (0, -1))
     pulses = transmit_pulses(n_tx, fc, fs, waveforms_two_way, waveform_sampling_frequency)
     model = _element_model(
         probe_geometry,
@@ -641,7 +648,7 @@ def pressure_field(
             pos_np[:, None].astype(np.float64) - geom_np[None].astype(np.float64), axis=-1
         )
         # The slowest speed in play bounds the arrival through the map.
-        arrival = (dist_np / bounds[0])[None] + shift_np[:, None, :]
+        arrival = (dist_np / bounds[0])[None] + shift_np.reshape(n_tx, -1, n_el).max(1)[:, None]
         extent = int(np.ceil((arrival.max() + _pulse_tail(pulses)) * fs))
         if n_ax is None:
             n_ax = extent
@@ -822,7 +829,7 @@ def record_reach(
         n_ax (int): Number of axial samples in the record.
         sampling_frequency (float): Sampling frequency [Hz].
         center_frequency (float): Pulse center frequency [Hz].
-        t0_delays (array-like): Transmit delays [s] of shape (n_tx, n_el).
+        t0_delays (array-like): Transmit delays [s] of shape (n_tx, n_el) or (n_tx, n_mpt, n_el).
         initial_times (array-like): Record start times [s] of shape (n_tx,).
         t_peak (array-like): Pulse peak times [s] of shape (n_tx,).
         waveforms_two_way (array-like, optional): The transmit waveforms of
@@ -846,8 +853,7 @@ def record_reach(
             "record_reach needs concrete delays, sound speed and map; under jit use in_record."
         )
     c_max = minmax[1]
-    t0_np, t_init_np, t_peak_np = (np.asarray(x, np.float64) for x in raw)
-    shift = t0_np - t_init_np[:, None] + t_peak_np[:, None]
+    shift = _shift_np(*raw)
     pulses = transmit_pulses(None, fc, fs, waveforms_two_way, waveform_sampling_frequency)
     gate_time = _record_gate_time(int(n_ax), fs, _pulse_tail(pulses))
     time = (gate_time - float(shift.min())) / 2
@@ -1657,12 +1663,17 @@ def _as_f32(x):
 
 
 def _transmit_shift(t0_delays, initial_times, t_peak):
-    """Transmit shift [s] per element beyond the travel time, of shape (n_tx, n_el)."""
-    return (
-        ops.cast(t0_delays, "float32")
-        - ops.cast(initial_times, "float32")[:, None]
-        + ops.cast(t_peak, "float32")[:, None]
-    )
+    """Transmit shift [s] per element beyond the travel time, shaped like ``t0_delays``."""
+    t0 = ops.cast(t0_delays, "float32")
+    per_tx = ops.cast(t_peak, "float32") - ops.cast(initial_times, "float32")
+    return t0 + ops.reshape(per_tx, (-1,) + (1,) * (len(ops.shape(t0)) - 1))
+
+
+def _shift_np(t0_delays, initial_times, t_peak):
+    """:func:`_transmit_shift` on concrete inputs, in float64."""
+    t0 = np.asarray(t0_delays, np.float64)
+    per_tx = np.asarray(t_peak, np.float64) - np.asarray(initial_times, np.float64)
+    return t0 + per_tx.reshape((-1,) + (1,) * (t0.ndim - 1))
 
 
 def _validate_scatter_exponent(scatter_exponent, n_scat=None):

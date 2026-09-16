@@ -125,6 +125,14 @@ def _np(x):
     return np.asarray(keras.ops.convert_to_numpy(x))
 
 
+def test_multi_plane_transmit_is_the_sum_of_its_delay_sets(fish_scan):
+    _, args, _ = fish_scan
+    separate = _np(simulate_rf(**args))
+    together = {k: args[k][:1] for k in ("tx_apodizations", "initial_times", "t_peak")}
+    mpt = _np(simulate_rf(**{**args, **together, "t0_delays": args["t0_delays"][None]}))
+    np.testing.assert_allclose(mpt[0], separate.sum(0), atol=1e-4 * np.abs(separate).max())
+
+
 def _dot_brightness(image, positions):
     z = np.linspace(ZLIMS[0], ZLIMS[1], image.shape[0])
     x = np.linspace(XLIMS[0], XLIMS[1], image.shape[1])

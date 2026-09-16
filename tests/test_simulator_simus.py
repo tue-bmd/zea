@@ -35,7 +35,7 @@ class Scene:
     element_width: float
     element_height: float
     positions: np.ndarray  # (n_scat, 3)
-    t0_delays: np.ndarray  # (n_tx, n_el)
+    t0_delays: np.ndarray  # (n_tx, n_el), or (n_tx, n_mpt, n_el) for multi-plane transmits
     apodizations: np.ndarray  # (n_tx, n_el)
     n_period: float = 2.0
     bandwidth_percent: float = 75.0
@@ -201,6 +201,15 @@ def fish_3d_soft_attenuated():
     return replace(fish_3d_tilted(), baffle=float("inf"), attenuation_coef=0.5)
 
 
+def fish_3d_mpt():
+    """The two plane waves of fish_3d_tilted fired together as one multi-plane transmit. SIMUS
+    sums the phasors of the delay sets (pfield3's DELAPOD); PyMUST 0.1.9's simus3 wrapper
+    cannot take the matrix (its frequency-step line flattens it against RXdelay), so the
+    reference is the sum of its single-set records."""
+    scene = fish_3d_tilted()
+    return replace(scene, t0_delays=scene.t0_delays[None], apodizations=scene.apodizations[:1])
+
+
 SCENES = {
     fn.__name__: fn
     for fn in (
@@ -218,6 +227,7 @@ SCENES = {
         fish_3d_tilted,
         fish_3d_focused_split,
         fish_3d_soft_attenuated,
+        fish_3d_mpt,
     )
 }
 
@@ -316,11 +326,14 @@ def run_simus(s):
     rc = np.ones_like(x)
     out = []
     for tx in range(len(s.t0_delays)):
-        p = simus_param(s)  # simus3 mutates param and options, so rebuild them per transmit
-        p.TXapodization = s.apodizations[tx].astype(np.float64)[None]
-        delays = s.t0_delays[tx].astype(np.float64)[None]
-        rf, _ = pymust.simus3(x, y, z, rc, delays, p, simus_options(s))
-        out.append(np.asarray(rf))
+        records = []
+        for delays in np.atleast_2d(s.t0_delays[tx].astype(np.float64)):
+            p = simus_param(s)  # simus3 mutates param and options, so rebuild them per call
+            p.TXapodization = s.apodizations[tx].astype(np.float64)[None]
+            rf, _ = pymust.simus3(x, y, z, rc, delays[None], p, simus_options(s))
+            records.append(np.asarray(rf))
+        n = min(len(r) for r in records)
+        out.append(sum(r[:n] for r in records))
     n = min(len(r) for r in out)
     return np.stack([r[:n] for r in out])
 
