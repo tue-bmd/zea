@@ -1087,16 +1087,17 @@ class Parameters(BaseParameters):
         it defaults to ``1 / center_frequency``.
         """
         t_peak = self._params.get("t_peak")
-        if t_peak is None:
-            waveforms = self._params.get("waveforms_two_way")
-            if waveforms is not None:
-                t_peak = ops.convert_to_numpy(
-                    compute_time_to_peak_stack(waveforms, self.center_frequency)
-                )
-            else:
-                t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
+        if t_peak is not None:
+            return t_peak[self.selected_transmits]
 
-        return t_peak[self.selected_transmits]
+        # Already sliced by selected_transmits when there is one waveform per transmit.
+        waveforms = self.waveforms_two_way
+        if waveforms is None:
+            return np.full(self.n_tx, 1 / self.center_frequency)
+        t_peak = ops.convert_to_numpy(compute_time_to_peak_stack(waveforms, self.center_frequency))
+        if t_peak.shape[0] == 1:
+            t_peak = np.repeat(t_peak, self.n_tx)
+        return t_peak
 
     @cache_with_dependencies(
         "n_ax",
