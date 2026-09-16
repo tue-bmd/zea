@@ -6,11 +6,14 @@ coefficient: ``scatter_exponent`` is one value shared by the medium, or a vector
 per scatterer. Warning: the exponent is an amplitude exponent, not an intensity one. That means
 Rayleigh scattering is 2, not 4.
 
-Sound speed is one value for the medium, or a map: ``sos_map`` with its grid ``sos_grid_x``,
-``sos_grid_z`` (and ``sos_grid_y`` for a 3D map) makes every element-scatterer path run at the mean
+Sound speed is one value for the medium, or a map: ``sos_map`` with its grid ``map_grid_x``,
+``map_grid_z`` (and ``map_grid_y`` for a 3D map) makes every element-scatterer path run at the mean
 slowness along the straight ray between them (:func:`zea.func.ultrasound.straight_ray_slowness`),
-with ``sound_speed`` outside the map. Straight rays keep the geometry, so the directivity, the
-spreading and the attenuation are those of the homogeneous medium; only the travel times change.
+with ``sound_speed`` outside the map. Straight rays keep the geometry, so the directivity and the
+spreading are those of the homogeneous medium; only the travel times change. Attenuation likewise
+is one coefficient, or ``attenuation_map`` on the same grid: each path is then attenuated by the
+mean coefficient along its straight ray (:func:`zea.func.ultrasound.straight_ray_mean`), with
+``attenuation_coef`` outside the map. Either map can be given on its own.
 
 To use it, you can call :func:`simulate_rf` with the desired transmit scheme parameters and
 scatterers directly, but the recommended path is to use :class:`zea.ops.Simulate`, which wraps the
@@ -82,7 +85,7 @@ from scipy.special import fresnel
 from zea.backend import checkpoint, highest_matmul_precision
 from zea.beamform.lens_correction import compute_lens_path_lengths
 from zea import log
-from zea.func.ultrasound import directivity, straight_ray_slowness
+from zea.func.ultrasound import directivity, straight_ray_mean, straight_ray_slowness
 
 
 def simulate_rf(
@@ -121,10 +124,11 @@ def simulate_rf(
     n_fft=None,
     scatter_exponent_range=None,
     sos_map=None,
-    sos_grid_x=None,
-    sos_grid_z=None,
-    sos_grid_y=None,
+    map_grid_x=None,
+    map_grid_z=None,
+    map_grid_y=None,
     n_sos_ray_samples=64,
+    attenuation_map=None,
 ):
     """Simulates RF data for a given set of scatterers.
 
@@ -263,25 +267,31 @@ def simulate_rf(
             that does not cover the exponents in play truncates their band. Must be static
             under jit.
         sos_map (array-like, optional): Sound speed map [m/s] of shape (Nz, Nx) in the x-z
-            plane, extruded along y, or (Nz, Nx, Ny) with ``sos_grid_y``. Every path from an
+            plane, extruded along y, or (Nz, Nx, Ny) with ``map_grid_y``. Every path from an
             element to a scatterer then runs at the mean slowness along the straight ray between
             them (:func:`zea.func.ultrasound.straight_ray_slowness`), sampled at
             ``n_sos_ray_samples`` points with ``sound_speed`` outside the map; the
             sub-elements of an element share its center ray. The lens, the directivity, the
             spreading and the attenuation keep the geometry of the homogeneous medium at
             ``sound_speed``. None is a homogeneous medium. Differentiable on jax.
-        sos_grid_x (array-like, optional): Uniform, ascending x coordinates [m] of the map,
+        map_grid_x (array-like, optional): Uniform, ascending x coordinates [m] of the maps,
             shape (Nx,).
-        sos_grid_z (array-like, optional): Uniform, ascending z coordinates [m] of the map,
+        map_grid_z (array-like, optional): Uniform, ascending z coordinates [m] of the maps,
             shape (Nz,).
-        sos_grid_y (array-like, optional): Uniform, ascending y coordinates [m] of a 3D map,
-            shape (Ny,). None for a 2D map.
-        n_sos_ray_samples (int): Samples of the map along each ray. Must be static under jit.
+        map_grid_y (array-like, optional): Uniform, ascending y coordinates [m] of 3D maps,
+            shape (Ny,). None for 2D maps.
+        n_sos_ray_samples (int): Samples of the maps along each ray. Must be static under jit.
+        attenuation_map (array-like, optional): Attenuation map [dB/cm/MHz] on the grid of
+            ``sos_map`` (the same ``map_grid_*`` arguments, with or without a ``sos_map``).
+            The medium leg of every path is then attenuated by the mean coefficient along its
+            straight ray (:func:`zea.func.ultrasound.straight_ray_mean`), with
+            ``attenuation_coef`` outside the map. The lens leg keeps ``lens_attenuation_coef``.
+            None attenuates every path with ``attenuation_coef``. Differentiable on jax.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
     """
-    _validate_sos_map(sos_map, sos_grid_x, sos_grid_z, sos_grid_y)
+    _validate_maps(sos_map, attenuation_map, map_grid_x, map_grid_z, map_grid_y)
     fc, fs = float(center_frequency), float(sampling_frequency)
     n_ax = int(n_ax)
     n_tx, n_el = (int(d) for d in ops.shape(t0_delays))
@@ -363,19 +373,16 @@ def simulate_rf(
     per_bin = 8 * ((2 if two_dimensional else 1) * n_scat * n_el + n_tx * n_scat + n_tx * n_el)
     blocks = _band_blocks(n_fft, fs, k0, k1, per_bin, max_chunk_gb * 2**30)
 
-    # The straight-ray slowness of every path, once for all frequency blocks.
-    slowness = _ray_slowness(
+    # The straight-ray slowness and attenuation of every path, once for all frequency blocks.
+    slowness, attenuation = _ray_means(
         positions,
-        model.geometry,
-        model.sound_speed,
+        model,
         sos_map,
-        sos_grid_x,
-        sos_grid_z,
-        sos_grid_y,
+        attenuation_map,
+        map_grid_x,
+        map_grid_z,
+        map_grid_y,
         n_sos_ray_samples,
-        model.apply_lens_correction,
-        model.lens_thickness,
-        model.element_normals,
     )
 
     block = _checkpointed_block(
@@ -384,6 +391,7 @@ def simulate_rf(
         magnitudes=magnitudes,
         model=model,
         slowness=slowness,
+        attenuation=attenuation,
         shift=shift,
         tx_apodizations=ops.cast(tx_apodizations, "float32"),
         center_frequency=fc,
@@ -472,6 +480,7 @@ def _rf_block(
     magnitudes,
     model,
     slowness,
+    attenuation,
     shift,
     tx_apodizations,
     center_frequency,
@@ -482,10 +491,13 @@ def _rf_block(
 
     Frequency leads every array so the einsums are plain batched matrix products. Scatterers
     whose earliest echo has no support before ``gate_time`` cannot reach the output and are
-    dropped, so a long path never wraps into the record. ``slowness`` is the mean slowness
-    [s, e] of the straight rays through a sound speed map, or None for a homogeneous medium.
+    dropped, so a long path never wraps into the record. ``slowness`` and ``attenuation`` are
+    the mean slowness and attenuation coefficient [s, e] of the straight rays through the maps,
+    or None for a homogeneous medium (see :func:`_ray_means`).
     """
-    tx_response, rx_response, tau = _element_responses(positions, model, freqs, slowness=slowness)
+    tx_response, rx_response, tau = _element_responses(
+        positions, model, freqs, slowness=slowness, attenuation=attenuation
+    )
     keep = _record_keep(tau, ops.min(shift), gate_time)
     weight = ops.where(keep, magnitudes, 0.0)
     if scatter_exponent is not None:
@@ -538,10 +550,11 @@ def pressure_field(
     max_chunk_gb=4.0,
     lens_attenuation_coef=0.0,
     sos_map=None,
-    sos_grid_x=None,
-    sos_grid_z=None,
-    sos_grid_y=None,
+    map_grid_x=None,
+    map_grid_z=None,
+    map_grid_y=None,
     n_sos_ray_samples=64,
+    attenuation_map=None,
 ):
     """Transmit pressure field of :func:`simulate_rf` on a grid.
 
@@ -577,7 +590,7 @@ def pressure_field(
     """
     if output not in ("rms", "time"):
         raise ValueError(f"output must be 'rms' or 'time', got {output!r}.")
-    _validate_sos_map(sos_map, sos_grid_x, sos_grid_z, sos_grid_y)
+    _validate_maps(sos_map, attenuation_map, map_grid_x, map_grid_z, map_grid_y)
     fc, fs = float(center_frequency), float(sampling_frequency)
     n_tx, n_el = (int(d) for d in ops.shape(t0_delays))
     pulses = transmit_pulses(n_tx, fc, fs, waveforms_two_way, waveform_sampling_frequency)
@@ -629,26 +642,24 @@ def pressure_field(
     n_kept = k1 - k0
     wave = _pulse_spectra(pulses, np.fft.rfftfreq(n_fft, 1 / fs)[k0:k1])
     tx_apodizations = ops.cast(tx_apodizations, "float32")
-    slowness = _ray_slowness(
+    rays = _ray_means(
         positions,
-        model.geometry,
-        model.sound_speed,
+        model,
         sos_map,
-        sos_grid_x,
-        sos_grid_z,
-        sos_grid_y,
+        attenuation_map,
+        map_grid_x,
+        map_grid_z,
+        map_grid_y,
         n_sos_ray_samples,
-        model.apply_lens_correction,
-        model.lens_thickness,
-        model.element_normals,
     )
 
-    def blocked(points, slow, budget):
+    def blocked(points, rays, budget):
         """Band spectrum [f, t, p] or its Parseval energy [t, p] over ``points``."""
         block = _checkpointed_block(
             _pressure_block,
             positions=points,
-            slowness=slow,
+            slowness=rays[0],
+            attenuation=rays[1],
             model=model,
             shift=shift,
             tx_apodizations=tx_apodizations,
@@ -682,15 +693,15 @@ def pressure_field(
 
     budget = max_chunk_gb * 2**30
     if output == "rms":
-        energy = blocked(positions, slowness, budget)
+        energy = blocked(positions, rays, budget)
         field = ops.sqrt(energy / (n_fft * n_ax))
     else:
         # The band spectrum of a chunk takes half the budget, the blocks the other half.
         chunk = int(max(1, min(n_points, budget // 2 // (8 * n_kept * n_tx))))
         parts = []
         for start in range(0, n_points, chunk):
-            slow = None if slowness is None else slowness[start : start + chunk]
-            spectrum = blocked(positions[start : start + chunk], slow, budget // 2)
+            part = tuple(None if r is None else r[start : start + chunk] for r in rays)
+            spectrum = blocked(positions[start : start + chunk], part, budget // 2)
             parts.append(_band_to_time(spectrum, k0, k1, n_fft, n_ax))
         field = ops.transpose(ops.concatenate(parts, axis=1), (0, 2, 1))
 
@@ -698,9 +709,11 @@ def pressure_field(
     return ops.reshape(field, lead + grid_shape)
 
 
-def _pressure_block(freqs, positions, slowness, model, shift, tx_apodizations):
+def _pressure_block(freqs, positions, slowness, attenuation, model, shift, tx_apodizations):
     """Incident field spectrum [f, t, p] of one frequency block, without the pulse."""
-    tx_response, _, _ = _element_responses(positions, model, freqs, slowness=slowness)
+    tx_response, _, _ = _element_responses(
+        positions, model, freqs, slowness=slowness, attenuation=attenuation
+    )
     tx_weights = _transmit_weights(freqs, shift, tx_apodizations)
     with highest_matmul_precision():
         return ops.einsum("fte,fpe->ftp", tx_weights, tx_response)
@@ -907,9 +920,9 @@ def in_record(
     lens_sound_speed=None,
     two_dimensional=False,
     sos_map=None,
-    sos_grid_x=None,
-    sos_grid_z=None,
-    sos_grid_y=None,
+    map_grid_x=None,
+    map_grid_z=None,
+    map_grid_y=None,
     n_sos_ray_samples=64,
     element_normals=None,
 ):
@@ -925,7 +938,7 @@ def in_record(
         points (array-like): Positions [m] of shape (n_points, 3).
         probe_geometry (array-like): Element positions [m] of shape (n_el, 3).
         two_dimensional (bool): Gate the points projected onto the imaging plane.
-        sos_map, sos_grid_x, sos_grid_z, sos_grid_y, n_sos_ray_samples: The sound speed map
+        sos_map, map_grid_x, map_grid_z, map_grid_y, n_sos_ray_samples: The sound speed map
             of :func:`simulate_rf` with its grids and ray sampling.
         element_normals (array-like, optional): Element normals of :func:`simulate_rf`, used
             only with a lens and a sound speed map to start the rays at the lens face.
@@ -933,7 +946,7 @@ def in_record(
     Returns:
         array-like: Boolean mask of shape (n_points,).
     """
-    _validate_sos_map(sos_map, sos_grid_x, sos_grid_z, sos_grid_y)
+    _validate_maps(sos_map, None, map_grid_x, map_grid_z, map_grid_y)
     positions = ops.cast(points, "float32")
     geometry = ops.cast(probe_geometry, "float32")
     if two_dimensional:
@@ -941,16 +954,13 @@ def in_record(
     shift = _transmit_shift(t0_delays, initial_times, t_peak)
     slowness = _ray_slowness(
         positions,
-        geometry,
+        _ray_starts(geometry, bool(apply_lens_correction), lens_thickness, element_normals),
         _as_f32(sound_speed),
         sos_map,
-        sos_grid_x,
-        sos_grid_z,
-        sos_grid_y,
+        map_grid_x,
+        map_grid_z,
+        map_grid_y,
         n_sos_ray_samples,
-        bool(apply_lens_correction),
-        _as_f32(lens_thickness),
-        element_normals,
     )
     tau = _one_way_time(
         positions,
@@ -1084,7 +1094,7 @@ def _scene_positions(positions, model):
     return positions
 
 
-def _element_responses(positions, model, freqs, slowness=None):
+def _element_responses(positions, model, freqs, slowness=None, attenuation=None):
     """Transmit and receive one-way responses [f, s, e] and the one-way travel time [s, e].
 
     ``model`` is the :class:`_ElementModel`. Each element is the mean of its ``n_sub_elements``
@@ -1101,7 +1111,9 @@ def _element_responses(positions, model, freqs, slowness=None):
     (:func:`_ray_slowness`), or None for ``1 / sound_speed``. It times the medium leg of every
     sub-element's path (the sub-elements are within an element width of the center ray, so they
     share its slowness to first order); the lens leg, the directivity, the spreading and the
-    attenuation keep the homogeneous geometry.
+    attenuation keep the homogeneous geometry. ``attenuation`` likewise is the mean attenuation
+    coefficient [s, e] of the rays through an attenuation map, or None for
+    ``model.attenuation_coef``; it attenuates the medium leg over its homogeneous length.
 
     In 2D the positions are expected in the imaging plane (:func:`_snap_elevation`): there is no
     elevation directivity, and the transmit spreads cylindrically, as behind an ideal lens.
@@ -1137,6 +1149,7 @@ def _element_responses(positions, model, freqs, slowness=None):
         thickness = ops.full_like(v, lens_thickness)
     sub_width = model.element_width / n_lateral
     sub_height = model.element_height / n_elevation
+    attenuation_coef = model.attenuation_coef if attenuation is None else attenuation[None]
     f3 = freqs[:, None, None]
 
     def fx(x):
@@ -1173,7 +1186,7 @@ def _element_responses(positions, model, freqs, slowness=None):
             sub_time = medium_time(medium_len)
         # The distance is clamped for the phase here and for the spreading in spread().
         sub_time = ops.maximum(sub_time, min_dist / sound_speed)
-        amplitude = amplitude * attenuate(f3, model.attenuation_coef, fx(medium_len))
+        amplitude = amplitude * attenuate(f3, attenuation_coef, fx(medium_len))
         amplitude = amplitude * fx(obliquity_factor(obliquity, model.baffle_impedance_ratio))
         phase = ops.exp(
             ops.array(-2j * np.pi, "complex64")
@@ -1241,41 +1254,62 @@ def _one_way_time(
     return lens_len / lens_sound_speed + medium_time
 
 
-def _ray_slowness(
+def _ray_means(
     positions,
-    geometry,
-    sound_speed,
+    model,
     sos_map,
-    sos_grid_x,
-    sos_grid_z,
-    sos_grid_y,
+    attenuation_map,
+    map_grid_x,
+    map_grid_z,
+    map_grid_y,
     n_samples,
-    apply_lens_correction=False,
-    lens_thickness=0.0,
-    element_normals=None,
 ):
-    """Mean slowness [s, e] of the straight rays from the elements to the positions, or None
-    without a map.
+    """Mean slowness and mean attenuation coefficient [s, e] of the straight rays from the
+    elements of ``model`` to the positions, each None without its map."""
+    start = _ray_starts(
+        model.geometry, model.apply_lens_correction, model.lens_thickness, model.element_normals
+    )
+    grids = (map_grid_x, map_grid_z, map_grid_y)
+    slowness = _ray_slowness(positions, start, model.sound_speed, sos_map, *grids, n_samples)
+    if attenuation_map is None:
+        return slowness, None
+    attenuation = straight_ray_mean(
+        positions,
+        start,
+        attenuation_map,
+        map_grid_x,
+        map_grid_z,
+        model.attenuation_coef,
+        grid_y=map_grid_y,
+        n_samples=int(n_samples),
+    )
+    return slowness, attenuation
 
-    Through a lens the rays start at the lens face, ``lens_thickness`` along the element normal,
-    as the lens part is timed separately (:func:`_one_way_time`).
-    """
+
+def _ray_slowness(positions, start, sound_speed, sos_map, grid_x, grid_z, grid_y, n_samples):
+    """Mean slowness [s, e] of the straight rays from ``start`` to the positions, or None
+    without a map."""
     if sos_map is None:
         return None
-    start = geometry
-    if apply_lens_correction:
-        normal = _element_frame(element_normals, geometry.dtype)[2]
-        start = geometry + ops.cast(lens_thickness, geometry.dtype) * normal
     return straight_ray_slowness(
         positions,
         start,
         sos_map,
-        sos_grid_x,
-        sos_grid_z,
+        grid_x,
+        grid_z,
         sound_speed,
-        sos_grid_y=sos_grid_y,
+        map_grid_y=grid_y,
         n_samples=int(n_samples),
     )
+
+
+def _ray_starts(geometry, apply_lens_correction, lens_thickness, element_normals):
+    """Start points of the rays through the maps: the elements, or the lens face with a lens
+    (the lens leg is timed and attenuated separately)."""
+    if not apply_lens_correction:
+        return geometry
+    normal = _element_frame(element_normals, geometry.dtype)[2]
+    return geometry + ops.cast(lens_thickness, geometry.dtype) * normal
 
 
 def _element_frame(element_normals, dtype="float32"):
@@ -1706,27 +1740,32 @@ def _validate_two_dimensional(two_dimensional, elevation_focus, probe_geometry, 
         )
 
 
-def _validate_sos_map(sos_map, sos_grid_x, sos_grid_z, sos_grid_y=None):
-    """Static checks of a sound speed map: a map with its x and z grid, y for a 3D map, of
-    matching shapes and, when concrete, uniform ascending grids and positive speeds."""
-    grids = (("sos_grid_x", sos_grid_x), ("sos_grid_z", sos_grid_z), ("sos_grid_y", sos_grid_y))
-    if sos_map is None:
-        given = [name for name, grid in grids if grid is not None]
-        if given:
-            raise ValueError(f"{', '.join(given)} given without sos_map.")
+def _validate_maps(sos_map, attenuation_map, map_grid_x, map_grid_z, map_grid_y=None):
+    """Static checks of the maps: x and z grids given (y for a 3D map) with matching shapes and,
+    when concrete, uniform ascending grids, positive speeds and non-negative attenuation."""
+    grids = (("map_grid_x", map_grid_x), ("map_grid_z", map_grid_z), ("map_grid_y", map_grid_y))
+    maps = (("sos_map", sos_map), ("attenuation_map", attenuation_map))
+    given = [name for name, m in maps if m is not None]
+    if not given:
+        grids_given = [name for name, grid in grids if grid is not None]
+        if grids_given:
+            raise ValueError(f"{', '.join(grids_given)} given without sos_map or attenuation_map.")
         return
-    if sos_grid_x is None or sos_grid_z is None:
-        raise ValueError("sos_map needs its coordinates sos_grid_x and sos_grid_z.")
-    grids = [("sos_grid_z", sos_grid_z), ("sos_grid_x", sos_grid_x)]
-    if sos_grid_y is not None:
-        grids.append(("sos_grid_y", sos_grid_y))
-    shape = tuple(int(d) for d in ops.shape(sos_map))
+    if map_grid_x is None or map_grid_z is None:
+        raise ValueError(f"{' and '.join(given)} needs the coordinates map_grid_x and map_grid_z.")
+    grids = [("map_grid_z", map_grid_z), ("map_grid_x", map_grid_x)]
+    if map_grid_y is not None:
+        grids.append(("map_grid_y", map_grid_y))
     expected = tuple(int(ops.shape(grid)[0]) for _, grid in grids)
-    if shape != expected:
-        raise ValueError(
-            f"sos_map of shape {shape} does not match its grids: expected (Nz, Nx) for a 2D "
-            f"map or (Nz, Nx, Ny) with sos_grid_y for a 3D map, here {expected}."
-        )
+    for name, m in maps:
+        if m is None:
+            continue
+        shape = tuple(int(d) for d in ops.shape(m))
+        if shape != expected:
+            raise ValueError(
+                f"{name} of shape {shape} does not match its grids: expected (Nz, Nx) for a "
+                f"2D map or (Nz, Nx, Ny) with map_grid_y for a 3D map, here {expected}."
+            )
     for name, grid in grids:
         values = _concrete(grid)
         if values is None:
@@ -1739,6 +1778,9 @@ def _validate_sos_map(sos_map, sos_grid_x, sos_grid_z, sos_grid_y=None):
     values = _concrete(sos_map)
     if values is not None and (not np.all(np.isfinite(values)) or np.any(values <= 0)):
         raise ValueError("sos_map must hold finite, positive sound speeds.")
+    values = _concrete(attenuation_map)
+    if values is not None and (not np.all(np.isfinite(values)) or np.any(values < 0)):
+        raise ValueError("attenuation_map must hold finite, non-negative coefficients.")
 
 
 def _sound_speed_minmax(sound_speed, sos_map=None):

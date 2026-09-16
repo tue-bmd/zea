@@ -118,8 +118,8 @@ def usct_reflectivity_das(
     interpolation="linear",
     compounding="coherent",
     sos_map=None,
-    sos_grid_x=None,
-    sos_grid_z=None,
+    map_grid_x=None,
+    map_grid_z=None,
     n_sos_ray_samples=16,
 ):
     """Round-trip TOF DAS reflectivity for a single Ultrasound Computed Tomography frame.
@@ -157,7 +157,7 @@ def usct_reflectivity_das(
             some resolution for robustness to phase decorrelation between
             transmits caused by sound-speed mismatch or calibration error,
             which grows with the size of the aperture spanned by a full ring.
-        sos_map, sos_grid_x, sos_grid_z: optional SoS map and its in-plane axes,
+        sos_map, map_grid_x, map_grid_z: optional SoS map and its in-plane axes,
             enabling straight-ray SoS-corrected delays.
         n_sos_ray_samples: ray samples for the SoS integral.
 
@@ -175,10 +175,10 @@ def usct_reflectivity_das(
     fs = sampling_frequency
     per_tx_rx = len(receive_positions.shape) == 3
 
-    sos_args = (sos_map, sos_grid_x, sos_grid_z)
+    sos_args = (sos_map, map_grid_x, map_grid_z)
     if any(a is not None for a in sos_args) and not all(a is not None for a in sos_args):
         raise ValueError(
-            "sos_map, sos_grid_x, and sos_grid_z must all be provided together, or all omitted."
+            "sos_map, map_grid_x, and map_grid_z must all be provided together, or all omitted."
         )
     use_sos = sos_map is not None
     px = ops.convert_to_tensor(pixels)
@@ -192,8 +192,8 @@ def usct_reflectivity_das(
                 receive_positions,
                 px,
                 sos_map,
-                sos_grid_x,
-                sos_grid_z,
+                map_grid_x,
+                map_grid_z,
                 sound_speed,
                 n_sos_ray_samples,
             )
@@ -216,8 +216,8 @@ def usct_reflectivity_das(
                 tx_pos,
                 px,
                 sos_map,
-                sos_grid_x,
-                sos_grid_z,
+                map_grid_x,
+                map_grid_z,
                 sound_speed,
                 n_sos_ray_samples,
             )
@@ -232,7 +232,7 @@ def usct_reflectivity_das(
             def _rx_time_one(rx_one):
                 if use_sos:
                     return straight_ray_times(
-                        rx_one, px, sos_map, sos_grid_x, sos_grid_z, sound_speed, n_sos_ray_samples
+                        rx_one, px, sos_map, map_grid_x, map_grid_z, sound_speed, n_sos_ray_samples
                     )
                 rd, _ = distance_and_unit(rx_one, px)
                 return rd / sound_speed
@@ -250,8 +250,8 @@ def usct_reflectivity_das(
                         tx_one[None],
                         rx_one,
                         sos_map,
-                        sos_grid_x,
-                        sos_grid_z,
+                        map_grid_x,
+                        map_grid_z,
                         sound_speed,
                         n_sos_ray_samples,
                     )[0]
@@ -270,8 +270,8 @@ def usct_reflectivity_das(
                     tx_pos,
                     receive_positions,
                     sos_map,
-                    sos_grid_x,
-                    sos_grid_z,
+                    map_grid_x,
+                    map_grid_z,
                     sound_speed,
                     n_sos_ray_samples,
                 )[:, :, None]

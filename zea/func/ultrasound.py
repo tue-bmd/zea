@@ -616,10 +616,10 @@ def straight_ray_slowness(
     positions,
     element_positions,
     sos_map,
-    sos_grid_x,
-    sos_grid_z,
+    map_grid_x,
+    map_grid_z,
     background_c,
-    sos_grid_y=None,
+    map_grid_y=None,
     n_samples=64,
 ):
     """Mean slowness [s/m] along the straight ray from each element to each position.
@@ -633,23 +633,73 @@ def straight_ray_slowness(
         element_positions (array-like): Ray start points [m] of shape (n_el, 3).
         sos_map (array-like): Sound speed [m/s] of shape (Nz, Nx) for a 2D map in the x-z plane,
             extruded along y, or (Nz, Nx, Ny) for a 3D map.
-        sos_grid_x (array-like): Uniform, ascending x coordinates [m] of the map, shape (Nx,).
-        sos_grid_z (array-like): Uniform, ascending z coordinates [m] of the map, shape (Nz,).
+        map_grid_x (array-like): Uniform, ascending x coordinates [m] of the map, shape (Nx,).
+        map_grid_z (array-like): Uniform, ascending z coordinates [m] of the map, shape (Nz,).
         background_c (float): Sound speed [m/s] outside the map footprint.
-        sos_grid_y (array-like, optional): Uniform, ascending y coordinates [m] of a 3D map,
+        map_grid_y (array-like, optional): Uniform, ascending y coordinates [m] of a 3D map,
             shape (Ny,). None for a 2D map.
         n_samples (int): Midpoint samples per ray. Must be static under jit.
 
     Returns:
         array-like: Mean slowness [s/m] of shape (n_pos, n_el).
     """
+    background = 1.0 / ops.cast(background_c, "float32")
+    return _straight_ray_mean(
+        positions,
+        element_positions,
+        sos_map,
+        map_grid_x,
+        map_grid_z,
+        map_grid_y,
+        n_samples,
+        lambda c, inside: ops.where(inside, 1.0 / c, background),
+    )
+
+
+def straight_ray_mean(
+    positions,
+    element_positions,
+    values,
+    grid_x,
+    grid_z,
+    background,
+    grid_y=None,
+    n_samples=64,
+):
+    """Mean of a map along the straight ray from each element to each position.
+
+    The counterpart of :func:`straight_ray_slowness` for a map that is averaged as it is, such
+    as an attenuation coefficient: ``n_samples`` samples of ``values`` (linear interpolation),
+    with ``background`` outside the map. Same grids and shapes as
+    :func:`straight_ray_slowness`; differentiable to the map on jax.
+
+    Returns:
+        array-like: Mean of the map of shape (n_pos, n_el).
+    """
+    background = ops.cast(background, "float32")
+    return _straight_ray_mean(
+        positions,
+        element_positions,
+        values,
+        grid_x,
+        grid_z,
+        grid_y,
+        n_samples,
+        lambda v, inside: ops.where(inside, v, background),
+    )
+
+
+def _straight_ray_mean(
+    positions, element_positions, values, grid_x, grid_z, grid_y, n_samples, sample
+):
+    """Mean over ``n_samples`` midpoints of each straight ray of ``sample(value, inside)``, where
+    ``value`` is the map interpolated at the midpoint and ``inside`` whether it lies in the map."""
     positions = ops.cast(positions, "float32")
     start = ops.cast(element_positions, "float32")[None]
-    sos_map = ops.cast(sos_map, "float32")
-    background = 1.0 / ops.cast(background_c, "float32")
-    axes = [(2, ops.cast(sos_grid_z, "float32")), (0, ops.cast(sos_grid_x, "float32"))]
-    if sos_grid_y is not None:
-        axes.append((1, ops.cast(sos_grid_y, "float32")))
+    values = ops.cast(values, "float32")
+    axes = [(2, ops.cast(grid_z, "float32")), (0, ops.cast(grid_x, "float32"))]
+    if grid_y is not None:
+        axes.append((1, ops.cast(grid_y, "float32")))
     segment = positions[:, None] - start
     n_samples = int(n_samples)
 
@@ -662,10 +712,10 @@ def straight_ray_slowness(
             coords.append((q - axis[0]) / (axis[1] - axis[0]))
             hit = ops.logical_and(q >= axis[0], q <= axis[-1])
             inside = hit if inside is None else ops.logical_and(inside, hit)
-        c = ops.image.map_coordinates(
-            sos_map, ops.stack(coords, axis=0), order=1, fill_mode="nearest"
+        value = ops.image.map_coordinates(
+            values, ops.stack(coords, axis=0), order=1, fill_mode="nearest"
         )
-        return total + ops.where(inside, 1.0 / c, background)
+        return total + sample(value, inside)
 
     shape = (int(ops.shape(positions)[0]), int(ops.shape(start)[1]))
     total = ops.fori_loop(0, n_samples, body, ops.zeros(shape, "float32"))

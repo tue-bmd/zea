@@ -35,12 +35,12 @@ from .simulator_helpers import (
 def _map(speed, x=(-0.02, 0.02), z=(-0.005, 0.04), nx=41, nz=46, y=None, ny=None):
     """A uniform map with its grids; a 3D one when a ``y`` range is given."""
     grids = {
-        "sos_grid_x": np.linspace(*x, nx).astype(np.float32),
-        "sos_grid_z": np.linspace(*z, nz).astype(np.float32),
+        "map_grid_x": np.linspace(*x, nx).astype(np.float32),
+        "map_grid_z": np.linspace(*z, nz).astype(np.float32),
     }
     shape = (nz, nx)
     if y is not None:
-        grids["sos_grid_y"] = np.linspace(*y, ny).astype(np.float32)
+        grids["map_grid_y"] = np.linspace(*y, ny).astype(np.float32)
         shape = (nz, nx, ny)
     return {"sos_map": np.full(shape, speed, np.float32), **grids}
 
@@ -49,7 +49,7 @@ def _layered_map(c_top, c_bottom, z_interface, **kwargs):
     """Two horizontal layers: ``c_bottom`` from the map row at ``z_interface`` on. The bilinear
     map ramps over the row above it, so the interface is effectively half a row higher."""
     trio = _map(c_top, **kwargs)
-    trio["sos_map"][trio["sos_grid_z"] >= z_interface] = c_bottom
+    trio["sos_map"][trio["map_grid_z"] >= z_interface] = c_bottom
     return trio
 
 
@@ -121,7 +121,7 @@ def test_uniform_map_is_the_homogeneous_medium(name):
     kwargs = dict(UNIFORM_CASES[name])
     if "sos_map" not in kwargs:
         kwargs.update(_map(SOUND_SPEED))
-    homogeneous = {k: v for k, v in kwargs.items() if not k.startswith("sos_")}
+    homogeneous = {k: v for k, v in kwargs.items() if not k.startswith(("sos_", "map_grid_"))}
     reference = simulate_rf(**tensors(homogeneous))
     assert to_np(reference).any()
     assert_close(reference, simulate_rf(**tensors(kwargs)))
@@ -145,7 +145,7 @@ def test_map_at_another_speed_is_the_homogeneous_medium_at_that_speed():
 def test_layered_map_delays_each_echo_by_its_straight_ray_time():
     c_top, c_bottom, z_interface = 1540.0, 1400.0, 0.012
     trio = _layered_map(c_top, c_bottom, z_interface, z=(-0.004, 0.04), nz=45)
-    assert z_interface in trio["sos_grid_z"]
+    assert z_interface in trio["map_grid_z"]
     interface = z_interface - 0.5e-3  # the map ramps over the 1 mm row above
     position = np.array([0.002, 0.0, 0.025])
     geometry = linear_probe()
@@ -172,7 +172,7 @@ def test_3d_map_extruded_from_a_2d_one_gives_the_same_rf():
     planar = _layered_map(1540.0, 1450.0, 0.015)
     solid = {
         **planar,
-        "sos_grid_y": np.linspace(-0.004, 0.004, 9).astype(np.float32),
+        "map_grid_y": np.linspace(-0.004, 0.004, 9).astype(np.float32),
         "sos_map": np.repeat(planar["sos_map"][..., None], 9, axis=-1),
     }
     reference = simulate_rf(**tensors({**kwargs, **planar}))
@@ -184,8 +184,8 @@ def test_3d_map_varying_along_y_times_the_rays_in_elevation():
     """Layers in y are invisible to a 2D map; a 3D map times the ray through them."""
     c_near, c_far, y_interface = 1540.0, 1400.0, 0.004
     trio = _map(c_near, y=(-0.002, 0.012), ny=15)
-    assert y_interface in trio["sos_grid_y"]
-    trio["sos_map"][..., trio["sos_grid_y"] >= y_interface] = c_far
+    assert y_interface in trio["map_grid_y"]
+    trio["sos_map"][..., trio["map_grid_y"] >= y_interface] = c_far
     interface = y_interface - 0.5e-3  # the map ramps over the 1 mm column before
     position = np.array([0.001, 0.01, 0.02])
     geometry = linear_probe()
@@ -204,7 +204,7 @@ def test_3d_map_varying_along_y_times_the_rays_in_elevation():
     delay = _echo_times(rf) - _echo_times(plain)
     assert np.abs(delay - (expected - homogeneous)).max() < 0.1 / SAMPLING_FREQUENCY
     # The same map without its y axis is a uniform map at c_near.
-    planar = {k: v for k, v in trio.items() if k != "sos_grid_y"}
+    planar = {k: v for k, v in trio.items() if k != "map_grid_y"}
     planar["sos_map"] = trio["sos_map"][..., 0]
     flat = _point_echo(position, planar, geometry, transmit=5)
     assert_close(plain, flat)
@@ -219,21 +219,21 @@ def test_map_and_grids_are_validated():
         return simulate_rf(**tensors({**kwargs, **overrides}))
 
     with pytest.raises(ValueError, match="without sos_map"):
-        run(sos_grid_x=trio["sos_grid_x"], sos_grid_z=trio["sos_grid_z"])
-    with pytest.raises(ValueError, match="sos_grid_x and sos_grid_z"):
-        run(sos_map=trio["sos_map"], sos_grid_x=trio["sos_grid_x"])
+        run(map_grid_x=trio["map_grid_x"], map_grid_z=trio["map_grid_z"])
+    with pytest.raises(ValueError, match="map_grid_x and map_grid_z"):
+        run(sos_map=trio["sos_map"], map_grid_x=trio["map_grid_x"])
     with pytest.raises(ValueError, match="does not match its grids"):
-        run(**trio, sos_grid_y=solid["sos_grid_y"])
+        run(**trio, map_grid_y=solid["map_grid_y"])
     with pytest.raises(ValueError, match="does not match its grids"):
-        run(**{**solid, "sos_grid_y": None})
+        run(**{**solid, "map_grid_y": None})
     with pytest.raises(ValueError, match="does not match its grids"):
         run(**{**trio, "sos_map": trio["sos_map"].T})
     with pytest.raises(ValueError, match="at least two points"):
         run(**_map(SOUND_SPEED, x=(0.0, 0.0), nx=1))
     with pytest.raises(ValueError, match="uniformly spaced"):
-        run(**{**trio, "sos_grid_x": trio["sos_grid_x"] ** 3})
+        run(**{**trio, "map_grid_x": trio["map_grid_x"] ** 3})
     with pytest.raises(ValueError, match="ascending"):
-        run(**{**trio, "sos_grid_z": trio["sos_grid_z"][::-1].copy()})
+        run(**{**trio, "map_grid_z": trio["map_grid_z"][::-1].copy()})
     with pytest.raises(ValueError, match="positive"):
         run(**{**trio, "sos_map": -trio["sos_map"]})
     # Other float types are cast.
@@ -343,12 +343,12 @@ def test_parameters_derive_n_fft_from_the_map():
     assert parameters.n_fft == expected
     assert expected > fft_length(*common, shift.min(), shift.max())
     parameters.sos_map = None
-    parameters.sos_grid_x = None
-    parameters.sos_grid_z = None
+    parameters.map_grid_x = None
+    parameters.map_grid_z = None
     assert parameters.n_fft == fft_length(*common, shift.min(), shift.max())
     parameters.sos_map = trio["sos_map"]
-    parameters.sos_grid_x = trio["sos_grid_x"]
-    parameters.sos_grid_z = trio["sos_grid_z"]
+    parameters.map_grid_x = trio["map_grid_x"]
+    parameters.map_grid_z = trio["map_grid_z"]
 
     pipeline = Pipeline([Simulate()], with_batch_dim=False, jit_options="pipeline")
     inputs = pipeline.prepare_parameters(parameters)
@@ -360,6 +360,18 @@ def test_parameters_derive_n_fft_from_the_map():
         scatter_exponent=0.0,
     )
     assert_close(simulate_rf(**tensors(kwargs)), outputs["data"])
+
+
+def test_parameters_accept_the_old_grid_names():
+    _, _, trio = _slab_scene(n_el=16)
+    old = {"sos_grid_x": trio["map_grid_x"], "sos_grid_z": trio["map_grid_z"]}
+    parameters = zea.Parameters(sos_map=trio["sos_map"], **old)
+    assert np.array_equal(parameters.map_grid_x, trio["map_grid_x"])
+    parameters.update(sos_grid_z=trio["map_grid_z"] + 1e-3)
+    assert np.array_equal(parameters.map_grid_z, trio["map_grid_z"] + 1e-3)
+    parameters.sos_grid_x = None
+    assert parameters.map_grid_x is None
+    assert not hasattr(parameters, "sos_grid_x")
 
 
 def test_record_helpers_gate_through_the_map():

@@ -75,7 +75,7 @@ class USCTReflectivityDAS(Operation):
       spanned by a full ring, where transmit/receive pairs can be far apart and
       see very different propagation paths.
     - Optionally, a spatial **speed-of-sound map** can be supplied
-      (``sos_map``/``sos_grid_x``/``sos_grid_z``) to replace the constant-``c`` delays
+      (``sos_map``/``map_grid_x``/``map_grid_z``) to replace the constant-``c`` delays
       with a straight-ray integral of the local slowness — useful when a ground-truth
       or estimated SoS map is available and the medium has large sound-speed contrast.
 
@@ -133,8 +133,8 @@ class USCTReflectivityDAS(Operation):
         initial_times=None,
         sound_speed=None,
         sos_map=None,
-        sos_grid_x=None,
-        sos_grid_z=None,
+        map_grid_x=None,
+        map_grid_z=None,
         **kwargs,
     ):
         data = kwargs[self.key]
@@ -154,8 +154,8 @@ class USCTReflectivityDAS(Operation):
             interpolation=self.interpolation,
             compounding=self.compounding,
             sos_map=sos_map,
-            sos_grid_x=sos_grid_x,
-            sos_grid_z=sos_grid_z,
+            map_grid_x=map_grid_x,
+            map_grid_z=map_grid_z,
             n_sos_ray_samples=self.n_sos_ray_samples,
         )
 

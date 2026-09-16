@@ -333,15 +333,23 @@ class Parameters(BaseParameters):
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
         "distance_to_apex": {"dtype": (np.float32, type(None)), "default": None},
-        # Sound speed map of zea.simulator.simulate_rf: (Nz, Nx), or (Nz, Nx, Ny) with sos_grid_y.
+        # Sound speed map of zea.simulator.simulate_rf: (Nz, Nx), or (Nz, Nx, Ny) with map_grid_y.
         "sos_map": {"dtype": (np.float32, type(None)), "default": None},
-        "sos_grid_x": {"dtype": (np.float32, type(None)), "default": None},
-        "sos_grid_y": {"dtype": (np.float32, type(None)), "default": None},
-        "sos_grid_z": {"dtype": (np.float32, type(None)), "default": None},
+        "map_grid_x": {"dtype": (np.float32, type(None)), "default": None},
+        "map_grid_y": {"dtype": (np.float32, type(None)), "default": None},
+        "map_grid_z": {"dtype": (np.float32, type(None)), "default": None},
+        # Attenuation map [dB/cm/MHz] of zea.simulator.simulate_rf, on the grid of sos_map.
+        "attenuation_map": {"dtype": (np.float32, type(None)), "default": None},
         "element_normals": {"dtype": (type(None), np.ndarray), "default": None},
     }
 
     # Add some defaults that are not stored in a file
+    _RENAMED_PARAMS: ClassVar[dict[str, str]] = {
+        "sos_grid_x": "map_grid_x",
+        "sos_grid_y": "map_grid_y",
+        "sos_grid_z": "map_grid_z",
+    }
+
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
     VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
     # Give these a default of None (rather than leaving them unset) so that they can be
@@ -1288,7 +1296,24 @@ class Parameters(BaseParameters):
             if field in self._params and self._params[field] is not None
         }
 
+    def __init__(self, **kwargs):
+        super().__init__(**{self._renamed(k): v for k, v in kwargs.items()})
+
+    def update(self, params=None, *, force=False, **kwargs):
+        merged = dict(params) if params else {}
+        merged.update(kwargs)
+        return super().update({self._renamed(k): v for k, v in merged.items()}, force=force)
+
+    @classmethod
+    def _renamed(cls, name):
+        new = cls._RENAMED_PARAMS.get(name)
+        if new is None:
+            return name
+        log.warning_once(f"Parameter {name} was renamed to {new}.", key=name)
+        return new
+
     def __setattr__(self, name: str, value):
+        name = self._renamed(name)
         if name == "selected_transmits":
             # If setting selected_transmits, call set_transmits to handle logic
             self.set_transmits(value)

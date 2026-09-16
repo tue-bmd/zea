@@ -131,8 +131,8 @@ def tof_correction(
     lens_sound_speed=1000,
     fnum_window_fn=fnum_window_fn_rect,
     sos_map=None,
-    sos_grid_x=None,
-    sos_grid_z=None,
+    map_grid_x=None,
+    map_grid_z=None,
     focal_region_length=None,
 ):
     """Time-of-flight (TOF) correction for ultrasound data on a flat pixel grid.
@@ -194,8 +194,8 @@ def tof_correction(
         sos_map (Tensor, optional): 2-D speed-of-sound map of shape
             ``(Nz, Nx)`` in m/s.  When provided, delays are computed
             numerically (heterogeneous mode). Defaults to ``None``.
-        sos_grid_x (Tensor, optional): x-coordinates of ``sos_map`` columns.
-        sos_grid_z (Tensor, optional): z-coordinates of ``sos_map`` rows.
+        map_grid_x (Tensor, optional): x-coordinates of ``sos_map`` columns.
+        map_grid_z (Tensor, optional): z-coordinates of ``sos_map`` rows.
         focal_region_length (float, optional): Full length in meters of the
             region around the focal plane of focused transmits where
             first-arrival and last-arrival delays are linearly blended. This
@@ -260,8 +260,8 @@ def tof_correction(
         txdel, rxdel = calculate_delays_heterogeneous_medium(
             flatgrid,
             sos_map,
-            sos_grid_x,
-            sos_grid_z,
+            map_grid_x,
+            map_grid_z,
             t0_delays,
             probe_geometry,
             initial_times,
@@ -898,8 +898,8 @@ def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn, element_nor
 def calculate_delays_heterogeneous_medium(
     grid,
     sos_map,
-    sos_grid_x,
-    sos_grid_z,
+    map_grid_x,
+    map_grid_z,
     t0_delays,
     probe_geometry,
     initial_times,
@@ -945,8 +945,8 @@ def calculate_delays_heterogeneous_medium(
     Args:
         grid (Tensor): Pixel coordinates of shape ``(n_pix, 3)``.
         sos_map (Tensor): Speed-of-sound map of shape ``(Nz, Nx)`` in m/s.
-        sos_grid_x (Tensor): x-coordinates of ``sos_map`` columns.
-        sos_grid_z (Tensor): z-coordinates of ``sos_map`` rows.
+        map_grid_x (Tensor): x-coordinates of ``sos_map`` columns.
+        map_grid_z (Tensor): z-coordinates of ``sos_map`` rows.
         t0_delays (Tensor): Transmit delays of shape ``(n_tx, n_el)``,
             shifted so that the smallest delay is 0.
         probe_geometry (Tensor): Element positions of shape ``(n_el, 3)``.
@@ -1019,11 +1019,11 @@ def calculate_delays_heterogeneous_medium(
         xp = p * (grid_x - el_x) + el_x
         zp = p * (grid_z - el_z) + el_z
 
-        dx_sos = sos_grid_x[1] - sos_grid_x[0]
-        dz_sos = sos_grid_z[1] - sos_grid_z[0]
+        dx_sos = map_grid_x[1] - map_grid_x[0]
+        dz_sos = map_grid_z[1] - map_grid_z[0]
 
-        xit = (xp - sos_grid_x[0]) / dx_sos
-        zit = (zp - sos_grid_z[0]) / dz_sos
+        xit = (xp - map_grid_x[0]) / dx_sos
+        zit = (zp - map_grid_z[0]) / dz_sos
 
         coords = ops.stack([zit, xit], axis=0)
 

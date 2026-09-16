@@ -126,8 +126,8 @@ def _make_multistatic_inputs(probe_geometry, flatgrid, n_ax=N_AX):
     transmit_origins = np.zeros((n_tx, 3), dtype=np.float32)
 
     nx_sos, nz_sos = 16, 16
-    sos_grid_x = np.linspace(-10e-3, 10e-3, nx_sos).astype(np.float32)
-    sos_grid_z = np.linspace(0e-3, 25e-3, nz_sos).astype(np.float32)
+    map_grid_x = np.linspace(-10e-3, 10e-3, nx_sos).astype(np.float32)
+    map_grid_z = np.linspace(0e-3, 25e-3, nz_sos).astype(np.float32)
     sos_map = np.full((nz_sos, nx_sos), SOUND_SPEED, dtype=np.float32)
 
     return dict(
@@ -146,8 +146,8 @@ def _make_multistatic_inputs(probe_geometry, flatgrid, n_ax=N_AX):
         t_peak=t_peak,
         transmit_origins=transmit_origins,
         sos_map=sos_map,
-        sos_grid_x=sos_grid_x,
-        sos_grid_z=sos_grid_z,
+        map_grid_x=map_grid_x,
+        map_grid_z=map_grid_z,
     )
 
 
@@ -800,7 +800,7 @@ def test_tof_correction_zero_data(probe_geometry, flatgrid):
 
 # Ray-integrated delays add more round-off (see flat_sos_grid test below).
 @backend_equality_check(decimal=2, backends=["tensorflow", "jax"])
-def test_tof_correction_sos_grid_output_shape(probe_geometry, flatgrid):
+def test_tof_correction_map_grid_output_shape(probe_geometry, flatgrid):
     """Output shape should be (n_tx, n_pix, n_el, n_ch)."""
     inputs = _make_multistatic_inputs(probe_geometry, flatgrid)
     result = tof_correction(**inputs)
@@ -811,7 +811,7 @@ def test_tof_correction_sos_grid_output_shape(probe_geometry, flatgrid):
 
 
 @backend_equality_check(backends=["tensorflow", "jax"])
-def test_tof_correction_sos_grid_zero_data(probe_geometry, flatgrid):
+def test_tof_correction_map_grid_zero_data(probe_geometry, flatgrid):
     """Zero input data must produce zero output."""
     inputs = _make_multistatic_inputs(probe_geometry, flatgrid)
     inputs["data"] = np.zeros_like(inputs["data"])
@@ -823,7 +823,7 @@ def test_tof_correction_sos_grid_zero_data(probe_geometry, flatgrid):
 # The ray-integrated delays carry float32 round-off that differs per backend (up to
 # ~7e-4 samples); interpolating white-noise data amplifies that to ~2e-3.
 @backend_equality_check(decimal=2, backends=["tensorflow", "jax"])
-def test_tof_correction_flat_sos_grid_matches_homogeneous(probe_geometry, flatgrid):
+def test_tof_correction_flat_map_grid_matches_homogeneous(probe_geometry, flatgrid):
     """A constant sos map must reproduce the analytical constant-sound-speed delays."""
     inputs = _make_tof_inputs(probe_geometry, flatgrid)
     homogeneous = keras.ops.convert_to_numpy(tof_correction(**inputs))
@@ -833,8 +833,8 @@ def test_tof_correction_flat_sos_grid_matches_homogeneous(probe_geometry, flatgr
         tof_correction(
             **inputs,
             sos_map=np.full((nz_sos, nx_sos), SOUND_SPEED, dtype=np.float32),
-            sos_grid_x=np.linspace(-12e-3, 12e-3, nx_sos).astype(np.float32),
-            sos_grid_z=np.linspace(0.0, 25e-3, nz_sos).astype(np.float32),
+            map_grid_x=np.linspace(-12e-3, 12e-3, nx_sos).astype(np.float32),
+            map_grid_z=np.linspace(0.0, 25e-3, nz_sos).astype(np.float32),
         )
     )
     assert np.mean(np.abs(homogeneous - heterogeneous)) < 1e-2 * np.mean(np.abs(homogeneous))
@@ -847,9 +847,9 @@ def test_heterogeneous_delays_multistatic_matches_general_path(probe_geometry, f
     """One-hot transmits must give the same delays through both code paths."""
     n_el = probe_geometry.shape[0]
     nx_sos, nz_sos = 24, 30
-    sos_grid_x = np.linspace(-12e-3, 12e-3, nx_sos).astype(np.float32)
-    sos_grid_z = np.linspace(0.0, 25e-3, nz_sos).astype(np.float32)
-    grid_x, grid_z = np.meshgrid(sos_grid_x, sos_grid_z)
+    map_grid_x = np.linspace(-12e-3, 12e-3, nx_sos).astype(np.float32)
+    map_grid_z = np.linspace(0.0, 25e-3, nz_sos).astype(np.float32)
+    grid_x, grid_z = np.meshgrid(map_grid_x, map_grid_z)
     sos_map = np.where(grid_x**2 + (grid_z - 12e-3) ** 2 < (6e-3) ** 2, 1400.0, SOUND_SPEED).astype(
         np.float32
     )
@@ -857,8 +857,8 @@ def test_heterogeneous_delays_multistatic_matches_general_path(probe_geometry, f
     common = (
         flatgrid,
         sos_map,
-        sos_grid_x,
-        sos_grid_z,
+        map_grid_x,
+        map_grid_z,
         np.zeros((n_el, n_el), dtype=np.float32),
         probe_geometry,
         np.ones(n_el, dtype=np.float32) * 1e-6,

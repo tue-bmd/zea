@@ -335,7 +335,7 @@ def test_straight_ray_slowness_is_the_same_on_every_backend():
         x_axis,
         z_axis,
         1500.0,
-        sos_grid_y=y_axis,
+        map_grid_y=y_axis,
         n_samples=32,
     )
     slowness = np.asarray(ops.convert_to_numpy(slowness))
@@ -382,8 +382,8 @@ def test_usct_das_sos_map_matches_constant_speed_when_uniform():
         c,
         **common,
         sos_map=sos_map,
-        sos_grid_x=x_axis,
-        sos_grid_z=z_axis,
+        map_grid_x=x_axis,
+        map_grid_z=z_axis,
         n_sos_ray_samples=32,
     )
     no_sos = np.asarray(ops.convert_to_numpy(no_sos))
