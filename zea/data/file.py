@@ -605,42 +605,34 @@ class Track:
     @property
     def n_frames(self) -> int:
         """Number of frames."""
-        return _shape_from_data_group(
-            self._group["data"],
-            index=0,
-            name="n_frames",
-            requires_raw=False,
-        )
+        return _shape_from_data_group(self._group["data"], index=0, name="n_frames")
 
     @property
     def n_tx(self) -> int:
         """Number of transmit events."""
-        return _shape_from_data_group(
-            self._group["data"],
-            index=1,
-            name="n_tx",
-            requires_raw=True,
-        )
+        return _channel_data_dim(self._group["data"], index=1, name="n_tx")
 
     @property
     def n_ax(self) -> int:
         """Number of axial samples."""
-        return _shape_from_data_group(
-            self._group["data"],
-            index=2,
-            name="n_ax",
-            requires_raw=True,
-        )
+        return _channel_data_dim(self._group["data"], index=2, name="n_ax")
 
     @property
     def n_el(self) -> int:
-        """Number of elements."""
-        return _shape_from_data_group(
-            self._group["data"],
-            index=3,
-            name="n_el",
-            requires_raw=True,
-        )
+        """Number of probe elements."""
+        n_el = _n_el_from_scan_group(self._group)
+        if n_el is not None:
+            return n_el
+        return _channel_data_dim(self._group["data"], index=3, name="n_el")
+
+    @property
+    def n_rx(self) -> int:
+        """Number of receive channels in the channel data.
+
+        Equal to :attr:`n_el` unless the acquisition used a receive sub-aperture, in
+        which case ``scan.rx_aperture_indices`` maps these channels onto elements.
+        """
+        return _channel_data_dim(self._group["data"], index=3, name="n_rx")
 
     def load_parameters(self, **overrides) -> "Parameters":
         """Load this track's parameters (merged probe + scan) as :class:`~zea.Parameters`.
@@ -769,18 +761,60 @@ def _get_data_array_shape(data_group: "h5py.Group") -> "tuple[tuple | None, bool
     return None, has_raw_data
 
 
-def _shape_from_data_group(
-    data_group: "h5py.Group", index: int, name: str = "", requires_raw: bool = False
-) -> int:
-    shape, has_raw_data = _get_data_array_shape(data_group)
-    if requires_raw and not has_raw_data:
-        raise TypeError(f"`{name}` is only available if the file contains a `raw_data` dataset")
-
+def _shape_from_data_group(data_group: "h5py.Group", index: int, name: str = "") -> int:
+    shape, _ = _get_data_array_shape(data_group)
     if shape is None:
         raise TypeError(
             f"Cannot determine `{name}`, no recognized data arrays found in the data group."
         ) from None
     return shape[index]
+
+
+def _channel_data_shape(data_group: "h5py.Group") -> "tuple | None":
+    """Shape of a data group's channel data, from ``raw_data`` or ``aligned_data``.
+
+    These are the only data products with a receive axis, both laid out as
+    ``(n_frames, n_tx, n_ax, n_rx, n_ch)``. Returns ``None`` when the group holds
+    neither.
+    """
+    raw_data = data_group.get("raw_data")
+    if isinstance(raw_data, h5py.Dataset):
+        return raw_data.shape
+
+    aligned_data = data_group.get("aligned_data")
+    if isinstance(aligned_data, h5py.Group):
+        values = aligned_data.get("values")
+        if isinstance(values, h5py.Dataset):
+            return values.shape
+    return None
+
+
+def _channel_data_dim(data_group: "h5py.Group", index: int, name: str) -> int:
+    """Size of one axis of a data group's channel data.
+
+    ``n_tx``, ``n_ax`` and ``n_rx`` are only defined for channel data, which is laid
+    out as ``(n_frames, n_tx, n_ax, n_rx, n_ch)``. Other data products, an image for
+    instance, have no such axes.
+    """
+    shape = _channel_data_shape(data_group)
+    if shape is None:
+        raise TypeError(
+            f"`{name}` is only available if the file contains channel data "
+            "(a `raw_data` or `aligned_data` dataset)"
+        )
+    return shape[index]
+
+
+def _n_el_from_scan_group(track_group: "h5py.Group") -> "int | None":
+    """Number of probe elements recorded in a track's scan metadata, if present.
+
+    Preferred over the channel axis of the data, which counts receive channels and is
+    smaller than the element count when the acquisition uses a receive sub-aperture.
+    """
+    t0_delays = track_group.get("scan/t0_delays")
+    if t0_delays is None or t0_delays.ndim != 2:
+        return None
+    return int(t0_delays.shape[1])
 
 
 def _compute_all_track_timestamps(
@@ -1842,48 +1876,43 @@ class File(h5py.File):
             raise AttributeError(
                 f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_frames."
             )
-        return _shape_from_data_group(
-            self._get_single_track_data_group(),
-            index=0,
-            name="n_frames",
-            requires_raw=False,
-        )
+        return _shape_from_data_group(self._get_single_track_data_group(), index=0, name="n_frames")
 
     @property
     def n_tx(self) -> int:
         """Number of transmit events."""
         if self._n_tracks > 1:
             raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_tx.")
-        return _shape_from_data_group(
-            self._get_single_track_data_group(),
-            index=1,
-            name="n_tx",
-            requires_raw=True,
-        )
+        return _channel_data_dim(self._get_single_track_data_group(), index=1, name="n_tx")
 
     @property
     def n_ax(self) -> int:
         """Number of axial samples."""
         if self._n_tracks > 1:
             raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_ax.")
-        return _shape_from_data_group(
-            self._get_single_track_data_group(),
-            index=2,
-            name="n_ax",
-            requires_raw=True,
-        )
+        return _channel_data_dim(self._get_single_track_data_group(), index=2, name="n_ax")
 
     @property
     def n_el(self) -> int:
-        """Number of elements."""
+        """Number of probe elements."""
         if self._n_tracks > 1:
             raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_el.")
-        return _shape_from_data_group(
-            self._get_single_track_data_group(),
-            index=3,
-            name="n_el",
-            requires_raw=True,
-        )
+        data_group = self._get_single_track_data_group()
+        n_el = _n_el_from_scan_group(data_group.parent)
+        if n_el is not None:
+            return n_el
+        return _channel_data_dim(data_group, index=3, name="n_el")
+
+    @property
+    def n_rx(self) -> int:
+        """Number of receive channels in the channel data.
+
+        Equal to :attr:`n_el` unless the acquisition used a receive sub-aperture, in
+        which case ``scan.rx_aperture_indices`` maps these channels onto elements.
+        """
+        if self._n_tracks > 1:
+            raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_rx.")
+        return _channel_data_dim(self._get_single_track_data_group(), index=3, name="n_rx")
 
     def shape(self, key) -> tuple:
         """Return shape of some key."""
