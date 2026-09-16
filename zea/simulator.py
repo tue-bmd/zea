@@ -13,7 +13,8 @@ with ``sound_speed`` outside the map. Straight rays keep the geometry, so the di
 spreading are those of the homogeneous medium; only the travel times change. Attenuation likewise
 is one coefficient, or ``attenuation_map`` on the same grid: each path is then attenuated by the
 mean coefficient along its straight ray (:func:`zea.func.ultrasound.straight_ray_mean`), with
-``attenuation_coef`` outside the map. Either map can be given on its own.
+``attenuation_coef`` outside the map. Either map can be given on its own. The attenuation grows
+as ``f**attenuation_power``, linearly by default.
 
 To use it, you can call :func:`simulate_rf` with the desired transmit scheme parameters and
 scatterers directly, but the recommended path is to use :class:`zea.ops.Simulate`, which wraps the
@@ -129,6 +130,7 @@ def simulate_rf(
     map_grid_y=None,
     n_sos_ray_samples=64,
     attenuation_map=None,
+    attenuation_power=1.0,
 ):
     """Simulates RF data for a given set of scatterers.
 
@@ -283,10 +285,16 @@ def simulate_rf(
         n_sos_ray_samples (int): Samples of the maps along each ray. Must be static under jit.
         attenuation_map (array-like, optional): Attenuation map [dB/cm/MHz] on the grid of
             ``sos_map`` (the same ``map_grid_*`` arguments, with or without a ``sos_map``).
-            The medium leg of every path is then attenuated by the mean coefficient along its
+            The medium part of every path is then attenuated by the mean coefficient along its
             straight ray (:func:`zea.func.ultrasound.straight_ray_mean`), with
-            ``attenuation_coef`` outside the map. The lens leg keeps ``lens_attenuation_coef``.
+            ``attenuation_coef`` outside the map. The lens part keeps ``lens_attenuation_coef``.
             None attenuates every path with ``attenuation_coef``. Differentiable on jax.
+        attenuation_power (float): Exponent ``y`` of the power-law attenuation
+            ``attenuation_coef * f**y`` dB/cm, with ``f`` in MHz, of the medium and of
+            ``attenuation_map`` (their coefficients are then in dB/cm/MHz^y, as k-Wave's
+            ``alpha_coeff`` with ``alpha_power``). Soft tissue is 1 to 1.5. The default 1 is
+            linear in frequency. The dispersion that a power law implies is not modelled: the
+            sound speed does not depend on frequency. The lens stays linear.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
@@ -313,6 +321,7 @@ def simulate_rf(
         n_sub_elements=n_sub_elements,
         elevation_focus=elevation_focus,
         lens_attenuation_coef=lens_attenuation_coef,
+        attenuation_power=attenuation_power,
     )
     positions = _scene_positions(scatterer_positions, model)
     magnitudes = ops.cast(scatterer_magnitudes, "float32")
@@ -555,6 +564,7 @@ def pressure_field(
     map_grid_y=None,
     n_sos_ray_samples=64,
     attenuation_map=None,
+    attenuation_power=1.0,
 ):
     """Transmit pressure field of :func:`simulate_rf` on a grid.
 
@@ -611,6 +621,7 @@ def pressure_field(
         n_sub_elements=n_sub_elements,
         elevation_focus=elevation_focus,
         lens_attenuation_coef=lens_attenuation_coef,
+        attenuation_power=attenuation_power,
     )
     grid_shape = tuple(int(d) for d in ops.shape(grid)[:-1])
     positions = _scene_positions(ops.reshape(grid, (-1, 3)), model)
@@ -997,9 +1008,9 @@ class _ElementModel:
 
     Attributes:
         geometry: Element positions [m], (n_el, 3) float32.
-        sound_speed, element_width, element_height, attenuation_coef, lens_thickness,
-        lens_sound_speed, lens_attenuation_coef, min_dist: The scalars of :func:`simulate_rf`
-            as float32 (a lens speed of None is 0, unused without the lens).
+        sound_speed, element_width, element_height, attenuation_coef, attenuation_power,
+        lens_thickness, lens_sound_speed, lens_attenuation_coef, min_dist: The scalars of
+            :func:`simulate_rf` as float32 (a lens speed of None is 0, unused without the lens).
         apply_lens_correction, two_dimensional: Static switches.
         baffle_impedance_ratio: Static float, see :func:`obliquity_factor`.
         element_normals: Unit normals (n_el, 3) float32, or None for +z.
@@ -1012,6 +1023,7 @@ class _ElementModel:
     element_width: Any
     element_height: Any
     attenuation_coef: Any
+    attenuation_power: Any
     lens_thickness: Any
     lens_sound_speed: Any
     apply_lens_correction: bool
@@ -1042,6 +1054,7 @@ def _element_model(
     n_sub_elements,
     elevation_focus,
     lens_attenuation_coef,
+    attenuation_power=1.0,
 ):
     """The :class:`_ElementModel` of the element arguments of :func:`simulate_rf`, validated
     and with the defaults resolved: the element width from the pitch, the height from the
@@ -1073,6 +1086,7 @@ def _element_model(
         element_width=_as_f32(element_width),
         element_height=_as_f32(element_height),
         attenuation_coef=_as_f32(attenuation_coef),
+        attenuation_power=_as_f32(attenuation_power),
         lens_thickness=_as_f32(lens_thickness),
         lens_sound_speed=_as_f32(lens_sound_speed),
         apply_lens_correction=bool(apply_lens_correction),
@@ -1108,12 +1122,13 @@ def _element_responses(positions, model, freqs, slowness=None, attenuation=None)
     attenuated with ``lens_attenuation_coef``. The returned travel time is the element center's.
 
     ``slowness`` is the mean slowness [s, e] of the straight rays through a sound speed map
-    (:func:`_ray_slowness`), or None for ``1 / sound_speed``. It times the medium leg of every
+    (:func:`_ray_slowness`), or None for ``1 / sound_speed``. It times the medium part of every
     sub-element's path (the sub-elements are within an element width of the center ray, so they
-    share its slowness to first order); the lens leg, the directivity, the spreading and the
+    share its slowness to first order); the lens part, the directivity, the spreading and the
     attenuation keep the homogeneous geometry. ``attenuation`` likewise is the mean attenuation
     coefficient [s, e] of the rays through an attenuation map, or None for
-    ``model.attenuation_coef``; it attenuates the medium leg over its homogeneous length.
+    ``model.attenuation_coef``; it attenuates the medium part over its homogeneous length with
+    the frequency power ``model.attenuation_power``. The lens part stays linear in frequency.
 
     In 2D the positions are expected in the imaging plane (:func:`_snap_elevation`): there is no
     elevation directivity, and the transmit spreads cylindrically, as behind an ideal lens.
@@ -1157,7 +1172,7 @@ def _element_responses(positions, model, freqs, slowness=None, attenuation=None)
         return x[None]
 
     def medium_time(length):
-        """Travel time [s, e] over a medium leg: at the ray's slowness, or at ``1 / c``."""
+        """Travel time [s, e] over a medium part: at the ray's slowness, or at ``1 / c``."""
         return length / sound_speed if slowness is None else length * slowness
 
     def response(j):
@@ -1186,7 +1201,9 @@ def _element_responses(positions, model, freqs, slowness=None, attenuation=None)
             sub_time = medium_time(medium_len)
         # The distance is clamped for the phase here and for the spreading in spread().
         sub_time = ops.maximum(sub_time, min_dist / sound_speed)
-        amplitude = amplitude * attenuate(f3, attenuation_coef, fx(medium_len))
+        amplitude = amplitude * attenuate(
+            f3, attenuation_coef, fx(medium_len), model.attenuation_power
+        )
         amplitude = amplitude * fx(obliquity_factor(obliquity, model.baffle_impedance_ratio))
         phase = ops.exp(
             ops.array(-2j * np.pi, "complex64")
@@ -1305,7 +1322,7 @@ def _ray_slowness(positions, start, sound_speed, sos_map, grid_x, grid_z, grid_y
 
 def _ray_starts(geometry, apply_lens_correction, lens_thickness, element_normals):
     """Start points of the rays through the maps: the elements, or the lens face with a lens
-    (the lens leg is timed and attenuated separately)."""
+    (the lens part is timed and attenuated separately)."""
     if not apply_lens_correction:
         return geometry
     normal = _element_frame(element_normals, geometry.dtype)[2]
@@ -1402,19 +1419,23 @@ def _snap_elevation(positions, geometry):
     )
 
 
-def attenuate(f, attenuation_coef, dist):
+def attenuate(f, attenuation_coef, dist, power=1.0):
     """
     Applies attenuation to the signal in the frequency domain.
 
     Args:
         f (array-like): The input frequencies.
-        attenuation_coef (float): The attenuation coefficient in dB/cm/MHz.
+        attenuation_coef (float): The attenuation coefficient in dB/cm/MHz^power.
         dist (float): The distance the signal has traveled.
+        power (float): Exponent of the frequency dependence: ``attenuation_coef * f**power``
+            dB/cm with ``f`` in MHz.
 
     Returns:
         array-like: The spectrum of the attenuation.
     """
-    return ops.exp(-ops.log(10) * attenuation_coef / 20 * dist * 100 * ops.abs(f) * 1e-6)
+    # The floor keeps f**power finite in the gradient at the zero bin.
+    f_mhz = ops.maximum(ops.abs(f) * 1e-6, 1e-12) ** power
+    return ops.exp(-ops.log(10) * attenuation_coef / 20 * dist * 100 * f_mhz)
 
 
 def spread(dist, exponent=1.0, mindist=1e-3, reference=1e-3):

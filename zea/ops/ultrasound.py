@@ -116,7 +116,8 @@ class Simulate(Operation):
       straight ray with ``n_sos_ray_samples`` samples, at ``sound_speed`` outside the map.
     - Attenuation map: ``attenuation_map`` [dB/cm/MHz] on the same grid, with or without a
       ``sos_map``; each path is attenuated with the mean coefficient along its straight ray,
-      at ``attenuation_coef`` outside the map.
+      at ``attenuation_coef`` outside the map. ``attenuation_power`` sets the frequency power
+      of both (1, linear, by default).
     - Per-scatterer ``scatter_exponent``: a vector of shape (n_scat,) instead of one shared
       value. Pass ``scatter_exponent_range`` (or ``band_db=None``) when the exponent is
       traced, for example inside an outer jit.
@@ -257,6 +258,7 @@ class Simulate(Operation):
         map_grid_y=None,
         n_sos_ray_samples=64,
         attenuation_map=None,
+        attenuation_power=1.0,
         **kwargs,
     ):
         method = _resolve_method(method)
@@ -273,6 +275,7 @@ class Simulate(Operation):
                 map_grid_y=map_grid_y,
                 n_sos_ray_samples=n_sos_ray_samples,
                 attenuation_map=attenuation_map,
+                attenuation_power=attenuation_power,
                 element_normals=element_normals,
                 n_sub_elements=n_sub_elements,
                 elevation_focus=elevation_focus,

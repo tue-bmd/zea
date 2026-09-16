@@ -707,6 +707,27 @@ def test_lens_attenuation_apodizes_and_lowers_the_centre_frequency():
     assert centroid(lossy) < centroid(lossless) - 2e4
 
 
+def test_power_law_attenuation_reshapes_the_spectrum():
+    # One element, one scatterer at 20 mm, 0.5 dB/cm/MHz^y: over the two-way 4 cm the ratio of
+    # the spectra at y = 1.5 and y = 1 is 10**(-0.5 * 4 * (f**1.5 - f) / 20), f in MHz.
+    depth = 20e-3
+    scene = _scene(np.zeros((1, 3)), [0.0, 0.0, depth], attenuation_coef=0.5)
+    linear = to_np(simulate_rf(**scene))[0, :, 0, 0]
+    assert np.array_equal(linear, to_np(simulate_rf(**scene, attenuation_power=1.0))[0, :, 0, 0])
+    power = to_np(simulate_rf(**scene, attenuation_power=1.5))[0, :, 0, 0]
+
+    freqs = np.fft.rfftfreq(len(linear), 1 / SAMPLING_FREQUENCY) * 1e-6
+    spectrum_linear, spectrum_power = np.fft.rfft(linear), np.fft.rfft(power)
+    band = np.abs(spectrum_linear) > 0.1 * np.abs(spectrum_linear).max()
+    expected = 10 ** (-0.5 * 2 * depth * 100 * (freqs[band] ** 1.5 - freqs[band]) / 20)
+    ratio = np.abs(spectrum_power[band]) / np.abs(spectrum_linear[band])
+    assert np.allclose(ratio, expected, rtol=0.02)
+
+    op = Simulate(with_batch_dim=False)
+    via_op = to_np(op(**scene, attenuation_power=1.5)[op.output_key])[0, :, 0, 0]
+    assert rel_err(power, via_op) < 1e-4
+
+
 def test_focusing_lens_must_stay_thicker_than_its_sag():
     scene = _scene(
         np.zeros((1, 3)),

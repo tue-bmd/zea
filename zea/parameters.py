@@ -226,6 +226,10 @@ class Parameters(BaseParameters):
     attenuation_coef: float
     """Attenuation coefficient [dB/(MHz*cm)]. Defaults to 0.0."""
 
+    attenuation_power: float
+    """Frequency power of the attenuation in :func:`zea.simulator.simulate_rf`, which then
+    grows as ``attenuation_coef * f**attenuation_power``. Defaults to 1.0 (linear)."""
+
     apply_lens_correction: bool
     """Whether to apply lens correction to the transmit delays. Defaults to False."""
 
@@ -325,6 +329,7 @@ class Parameters(BaseParameters):
         "n_fft": {"dtype": int},  # native dtype on purpose
         "n_ch": {"dtype": np.int32},
         "attenuation_coef": {"dtype": np.float32, "default": 0.0},
+        "attenuation_power": {"dtype": np.float32, "default": 1.0},
         "f_number": {"dtype": float, "default": 1.0},  # native dtype on purpose
         "t_peak": {"dtype": np.float32},
         "theta_range": {"dtype": np.float32, "shape": (2,)},

@@ -152,8 +152,8 @@ def test_map_at_another_coefficient_is_the_medium_at_that_coefficient():
 )
 def test_layered_map_attenuates_each_echo_by_its_line_integral(axis, position, transmit, grid):
     """Behind a layer of higher attenuation every echo loses, in dB, the extra coefficient
-    times the ray length in the layer times the frequency, once per leg. A layer in y needs a
-    3D map."""
+    times the ray length in the layer times the frequency, on transmit and on receive. A layer
+    in y needs a 3D map."""
     coef_near, coef_far, interface = COEF, 1.5, 0.012 if axis == "z" else 0.004
     duo = _layered_map(coef_near, coef_far, interface, axis=axis, **grid)
     geometry = linear_probe()
@@ -166,7 +166,7 @@ def test_layered_map_attenuates_each_echo_by_its_line_integral(axis, position, t
     far = 1 - edge / position[column]  # fraction of every ray beyond the interface
     dist = np.linalg.norm(position - geometry, axis=1)
     per_cm_mhz = (coef_far - coef_near) * 100 * CENTER_FREQUENCY * 1e-6
-    expected = per_cm_mhz * far * (dist[transmit] + dist)  # dB at fc, tx leg plus rx leg
+    expected = per_cm_mhz * far * (dist[transmit] + dist)  # dB at fc, transmit plus receive
     assert expected.min() > 3
     for e, (f, ratio) in enumerate(_spectral_ratio_db(mapped, plain)):
         assert len(f) > 50
