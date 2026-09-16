@@ -920,23 +920,21 @@ class Pulse:
     continuous-time spectrum, scaled so
     that ``irfft`` of its samples on an rfft grid of ``sampling_frequency`` recovers the waveform
     with a unit peak. The support is where the envelope is above -80 dB.
-
-    Attributes:
-        spectrum_fn (callable): Complex spectrum (numpy) at frequencies [Hz].
-        sampling_frequency (float): Sampling frequency [Hz] of :meth:`waveform`.
-        n_before (int): Support before the peak, in samples.
-        n_after (int): Support after the peak, in samples.
-        time_to_peak (float): Time [s] from the transmit trigger (the start of the excitation,
-            or of a measured waveform) to the envelope peak: the ``t_peak`` of a real system.
-        band (tuple): The -6 dB band [Hz] of the pulse, (low, high).
     """
 
     spectrum_fn: Callable
+    """Complex spectrum (numpy) at frequencies [Hz]."""
     sampling_frequency: float
+    """Sampling frequency [Hz] of :meth:`waveform`."""
     n_before: int
+    """Support before the peak, in samples."""
     n_after: int
+    """Support after the peak, in samples."""
     time_to_peak: float
+    """Time [s] from the transmit trigger (the start of the excitation, or of a measured
+    waveform) to the envelope peak: the ``t_peak`` of a real system."""
     band: tuple
+    """The -6 dB band [Hz] of the pulse, (low, high)."""
 
     @property
     def n_samples(self):
