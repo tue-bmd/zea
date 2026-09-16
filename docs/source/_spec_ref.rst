@@ -52,6 +52,12 @@ See the :ref:`group reference <group-reference>` for a full description of each 
            └── <name>                any dtype  (nested CustomElement)
 
 
+Shapes are written with named dimensions, which agree wherever they appear.
+The one exception is the receive axis of ``raw_data`` and ``aligned_data``:
+an acquisition using a receive sub-aperture carries fewer channels than the
+probe has elements, and ``scan.rx_aperture_indices`` then records which
+element each receive channel corresponds to.
+
 Root attributes
 ~~~~~~~~~~~~~~~
 
@@ -911,6 +917,12 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - (n_tx)
            - rad
            - Azimuthal angles of transmit beams.
+           - |badge-opt|
+         * - ``rx_aperture_indices``
+           - ``int16`` | ``int32`` | ``int64``
+           - (n_tx, n_rx)
+           - –
+           - Probe element index for each receive channel of the channel data, shape (n_tx, n_rx). Required to interpret the channel axis when the receive aperture is a subset of the probe. Omit it when every element receives, where the mapping is the identity.
            - |badge-opt|
          * - ``sound_speed``
            - ``float32``

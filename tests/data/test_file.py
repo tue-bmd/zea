@@ -2557,3 +2557,50 @@ class TestCustomElements:
 
         with File(path) as f:
             assert getattr(f.data, "My Overlay") is not None
+
+
+def test_channel_dims_read_aligned_data_when_raw_data_is_absent(tmp_path):
+    """Channel-data axes come from raw_data or aligned_data, whichever the track has."""
+    n_tx, n_el, n_ax, n_rx = 2, 8, 6, 4
+    path = tmp_path / "aligned_only.hdf5"
+    FileSpec(
+        tracks=[
+            {
+                "scan": _scan_minimal(n_frames=1, n_tx=n_tx, n_el=n_el),
+                "data": {
+                    "aligned_data": {"values": np.zeros((1, n_tx, n_ax, n_rx, 1), dtype=np.float32)}
+                },
+            }
+        ],
+        probe=_probe_minimal(n_el=n_el),
+    ).save(str(path), warn_missing_optional_fields=False)
+
+    with File(str(path)) as f:
+        assert f.n_frames == 1
+        assert f.n_tx == n_tx
+        assert f.n_ax == n_ax
+        assert f.n_el == n_el
+        assert f.n_rx == n_rx
+        assert (f.tracks[0].n_tx, f.tracks[0].n_ax, f.tracks[0].n_rx) == (n_tx, n_ax, n_rx)
+
+
+def test_channel_dims_require_channel_data(tmp_path):
+    """A track holding only an image has no transmit, axial or receive axis."""
+    path = tmp_path / "image_only.hdf5"
+    FileSpec(
+        tracks=[
+            {
+                "scan": _scan_minimal(n_frames=1, n_tx=2, n_el=8),
+                "data": {"image": {"values": np.zeros((1, 16, 16), dtype=np.float32)}},
+            }
+        ],
+        probe=_probe_minimal(n_el=8),
+    ).save(str(path), warn_missing_optional_fields=False)
+
+    with File(str(path)) as f:
+        for attr in ("n_tx", "n_ax", "n_rx"):
+            with pytest.raises(TypeError, match="only available if the file contains channel data"):
+                getattr(f, attr)
+        # n_frames and n_el do not need channel data.
+        assert f.n_frames == 1
+        assert f.n_el == 8

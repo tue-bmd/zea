@@ -422,6 +422,36 @@ def test_selected_transmits_affects_shape(attr, expected_shape):
     assert val.shape[0] == val_tensor.shape[0] == 3
 
 
+def test_rx_aperture_indices_absent_by_default():
+    """Without a receive sub-aperture there is no mapping, and n_rx is n_el."""
+    parameters = Parameters(**scan_args)
+    assert parameters.rx_aperture_indices is None
+    assert parameters.n_rx == parameters.n_el == scan_args["n_el"]
+
+
+def test_rx_aperture_indices_follows_transmit_selection():
+    """The mapping is stored over the full transmit axis, so a selection slices it."""
+    n_tx, n_el, n_rx = scan_args["n_tx"], scan_args["n_el"], 4
+    # A sliding receive window: transmit i receives on elements i .. i + n_rx - 1.
+    indices = (np.arange(n_rx)[None] + np.arange(n_tx)[:, None]) % n_el
+    indices = indices.astype(np.int32)
+
+    parameters = Parameters(**scan_args, rx_aperture_indices=indices)
+    np.testing.assert_array_equal(parameters.rx_aperture_indices, indices)
+    assert parameters.n_rx == n_rx
+    assert parameters.n_el == n_el
+
+    selection = [1, 3]
+    parameters.set_transmits(selection)
+    np.testing.assert_array_equal(parameters.rx_aperture_indices, indices[selection])
+    # The mapping stays aligned with the other per-transmit parameters.
+    assert parameters.rx_aperture_indices.shape == (parameters.n_tx, parameters.n_rx)
+    assert parameters.t0_delays.shape[0] == parameters.rx_aperture_indices.shape[0]
+
+    parameters.set_transmits("all")
+    np.testing.assert_array_equal(parameters.rx_aperture_indices, indices)
+
+
 def test_flat_aligned_apodization_derived():
     """Derived: None, unless scanline mode, where it is the one-hot transmit mask."""
     assert Parameters(**scan_args).flat_aligned_apodization is None
