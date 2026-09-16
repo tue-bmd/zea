@@ -1902,9 +1902,12 @@ class ProbeSpec(Spec):
             raise ValueError(
                 f"ProbeSpec: element_height must be positive, got {self.element_height}"
             )
-        if self.elevation_focus is not None and self.elevation_focus <= 0:
+        if self.elevation_focus is not None and not (
+            np.isfinite(self.elevation_focus) and self.elevation_focus > 0
+        ):
             raise ValueError(
-                f"ProbeSpec: elevation_focus must be positive, got {self.elevation_focus}"
+                "ProbeSpec: elevation_focus must be finite and positive, "
+                f"got {self.elevation_focus}"
             )
         if self.lens_sound_speed is not None and self.lens_sound_speed <= 0:
             raise ValueError(

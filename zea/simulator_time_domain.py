@@ -258,7 +258,7 @@ def _precompute_scatterer_response(
     scatterer_positions = ops.cast(scatterer_positions, "float32")
     magnitudes = ops.cast(magnitudes, "float32")
 
-    one_way_distance = _one_way_distances(
+    physical_distance = _one_way_distances(
         probe_geometry,
         scatterer_positions,
         apply_lens_correction,
@@ -267,10 +267,11 @@ def _precompute_scatterer_response(
         sound_speed,
     )
     # Half a wavelength at least for the travel time and the spreading, as in simulate_rf.
+    # The attenuation keeps the physical path length, as there.
     min_dist = min_distance(sound_speed, center_frequency)
-    one_way_distance = ops.maximum(one_way_distance, min_dist)
+    one_way_distance = ops.maximum(physical_distance, min_dist)
     travel_time = one_way_distance / sound_speed
-    two_way_distance = one_way_distance[:, :, None] + one_way_distance[:, None, :]
+    two_way_distance = physical_distance[:, :, None] + physical_distance[:, None, :]
 
     element_directivity = _element_directivity(
         scatterer_positions,

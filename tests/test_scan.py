@@ -601,6 +601,24 @@ def test_waveforms_two_way_follow_selected_transmits():
     assert Parameters(n_tx=3, center_frequency=5e6).waveforms_two_way is None
 
 
+def test_t_peak_from_shared_waveform_follows_selected_transmits():
+    """One waveform shared by all transmits gives one t_peak per selected transmit."""
+    center_frequency = 5e6
+    t = np.arange(512) / 250e6
+    pulse = np.exp(-((t - 1.5e-6) ** 2) / (2 * (0.2e-6) ** 2)) * np.cos(
+        2 * np.pi * center_frequency * (t - 1.5e-6)
+    )
+    parameters = Parameters(
+        n_tx=3, center_frequency=center_frequency, waveforms_two_way=pulse[None]
+    )
+    parameters.selected_transmits = "all"
+    assert parameters.t_peak.shape == (3,)
+    assert np.allclose(parameters.t_peak, 1.5e-6, atol=1e-8)
+    parameters.selected_transmits = [2, 0]
+    assert parameters.t_peak.shape == (2,)
+    assert np.allclose(parameters.t_peak, 1.5e-6, atol=1e-8)
+
+
 def test_missing_transmit_defaults_warn_once_on_access(monkeypatch, reset_warning_once):
     local_scan_args = scan_args.copy()
     local_scan_args.pop("azimuth_angles", None)
